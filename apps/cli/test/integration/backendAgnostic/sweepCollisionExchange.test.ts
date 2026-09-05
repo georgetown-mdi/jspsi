@@ -150,24 +150,21 @@ async function runSequentialPair(options: PairOptions): Promise<PairOutcome> {
   });
 
   const start = (party: "a" | "b"): Promise<unknown> =>
-    runProtocol(
-      connection(),
-      {
+    runProtocol({
+      connection: connection(),
+      auth: {
         sharedSecret: loadKeyFile(keyFiles[party])!.sharedSecret,
         keyFilePath: keyFiles[party],
       },
-      preparedFor(
+      prepared: preparedFor(
         party === "a" ? "Party A" : "Party B",
         party === "a" ? ROWS_A : ROWS_B,
       ),
-      outputs[party],
-      -1,
-      `${tag}-${party}`,
-      undefined,
-      undefined,
-      undefined,
-      { sweepExchangeFiles: sweep[party] },
-    );
+      output: outputs[party],
+      verbosity: -1,
+      loggerName: `${tag}-${party}`,
+      fileSyncRuntime: { sweepExchangeFiles: sweep[party] },
+    });
 
   const settle = async (
     party: "a" | "b",

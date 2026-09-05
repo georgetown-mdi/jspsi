@@ -80,6 +80,7 @@ import { FileSyncConnection } from "@psilink/core";
 import { withCapturedLogs } from "@psilink/core/testing";
 
 import { runProtocol } from "../../src/protocol";
+import type { RunProtocolOptions } from "../../src/protocol";
 
 // runExchange/buildOutputTable are never reached on these failure paths, so the
 // prepared value is unused.
@@ -92,9 +93,9 @@ const minimalPrepared = {} as unknown as PreparedExchange;
 // failure-path rejection propagates unchanged (withCapturedLogs rethrows), so
 // callers still assert `.rejects`.
 function runProtocolCapturingConnLogs(
-  ...args: Parameters<typeof runProtocol>
+  options: RunProtocolOptions,
 ): Promise<void> {
-  return withCapturedLogs(() => runProtocol(...args)).then(() => {});
+  return withCapturedLogs(() => runProtocol(options)).then(() => {});
 }
 
 function sftpConfig(host: string) {
@@ -129,14 +130,13 @@ test("routes a partner-controlled SFTP host through sanitizeForDisplay before lo
   const hostileHost = "\x1b[31mevil.example\u202ecom";
 
   await expect(
-    runProtocolCapturingConnLogs(
-      sftpConfig(hostileHost),
-      null,
-      minimalPrepared,
-      undefined,
-      -1,
-      "t",
-    ),
+    runProtocolCapturingConnLogs({
+      connection: sftpConfig(hostileHost),
+      auth: null,
+      prepared: minimalPrepared,
+      verbosity: -1,
+      loggerName: "t",
+    }),
   ).rejects.toThrow();
 
   const hostLine = mockState.infos.find((m) =>
@@ -155,14 +155,13 @@ test("leaves an ordinary printable SFTP host unchanged", async () => {
   };
 
   await expect(
-    runProtocolCapturingConnLogs(
-      sftpConfig("sftp.example.com"),
-      null,
-      minimalPrepared,
-      undefined,
-      -1,
-      "t",
-    ),
+    runProtocolCapturingConnLogs({
+      connection: sftpConfig("sftp.example.com"),
+      auth: null,
+      prepared: minimalPrepared,
+      verbosity: -1,
+      loggerName: "t",
+    }),
   ).rejects.toThrow();
 
   expect(
@@ -182,18 +181,17 @@ test("routes a partner-seeded filedrop path through sanitizeForDisplay before lo
   const hostilePath = "/srv/\x1b[31mevil\u202edrop-does-not-exist";
 
   await expect(
-    runProtocol(
-      {
+    runProtocol({
+      connection: {
         channel: "filedrop",
         path: hostilePath,
         options: { pollIntervalMs: 1, peerTimeoutMs: 300 },
       },
-      null,
-      minimalPrepared,
-      undefined,
-      -1,
-      "t",
-    ),
+      auth: null,
+      prepared: minimalPrepared,
+      verbosity: -1,
+      loggerName: "t",
+    }),
   ).rejects.toThrow();
 
   const pathLine = mockState.infos.find((m) =>
@@ -227,14 +225,13 @@ test("renders a hostile close error through sanitizeErrorForDisplay in the clean
 
   try {
     await expect(
-      runProtocolCapturingConnLogs(
-        sftpConfig("sftp.example.com"),
-        null,
-        minimalPrepared,
-        undefined,
-        -1,
-        "t",
-      ),
+      runProtocolCapturingConnLogs({
+        connection: sftpConfig("sftp.example.com"),
+        auth: null,
+        prepared: minimalPrepared,
+        verbosity: -1,
+        loggerName: "t",
+      }),
     ).rejects.toThrow();
 
     const escaped = "ENOENT: open '/srv/\\x1b[31mEVIL\\x0d\\x0a\\u202eFAKE'";
@@ -267,14 +264,13 @@ test("leaves an ordinary close error message intact (only control bytes are esca
 
   try {
     await expect(
-      runProtocolCapturingConnLogs(
-        sftpConfig("sftp.example.com"),
-        null,
-        minimalPrepared,
-        undefined,
-        -1,
-        "t",
-      ),
+      runProtocolCapturingConnLogs({
+        connection: sftpConfig("sftp.example.com"),
+        auth: null,
+        prepared: minimalPrepared,
+        verbosity: -1,
+        loggerName: "t",
+      }),
     ).rejects.toThrow();
 
     expect(
@@ -300,14 +296,13 @@ test("renders a hostile close error through sanitizeErrorForDisplay in the opene
 
   try {
     await expect(
-      runProtocolCapturingConnLogs(
-        sftpConfig("sftp.example.com"),
-        null,
-        minimalPrepared,
-        undefined,
-        -1,
-        "t",
-      ),
+      runProtocolCapturingConnLogs({
+        connection: sftpConfig("sftp.example.com"),
+        auth: null,
+        prepared: minimalPrepared,
+        verbosity: -1,
+        loggerName: "t",
+      }),
     ).rejects.toThrow();
 
     const escaped = "teardown failed: /srv/\\x1b[31mX\\u202eY";

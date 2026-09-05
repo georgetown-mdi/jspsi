@@ -17,19 +17,16 @@ import type { SigningIdentity } from "@psilink/core";
 
 import { DEFAULT_CONFIG_PATH } from "../config";
 import { expandTilde, FileExistsError, writeFileAtomic } from "../fileUtils";
+import { addLoggingOptions } from "../optionDefinitions";
 import { parseSensitiveYaml } from "../sensitiveFile";
 import { warnOnIdentityDivergence } from "../signingIdentityDivergence";
 import {
   loadSigningIdentity,
   saveSigningIdentity,
 } from "../signingIdentityFile";
-import {
-  configureLogging,
-  exitWithError,
-  logLevelFlag,
-  parseOrExit,
-  singleValue,
-} from "../util/cli";
+import { exitCodeForError, exitWithError } from "../util/exit";
+import { parseOrExit, singleValue } from "../util/flags";
+import { configureLogging, logLevelFlag } from "../util/logging";
 
 // `psilink fingerprint` is the front door to the signing identity: generation
 // is lazy and anchored here, not at exchange time, since a party must display
@@ -65,7 +62,7 @@ const NO_IDENTITY_PATH_REFUSAL =
   "before your receipts verify again.";
 
 export function builder(cmd: Argv): Argv {
-  return cmd
+  const beforeLogging = cmd
     .usage("Usage: $0 fingerprint [options]")
     .option("identity", {
       type: "string",
@@ -99,17 +96,8 @@ export function builder(cmd: Argv): Argv {
       describe:
         "also write this party's public certificate (no private key) to the " +
         "given path, for sharing with a partner",
-    })
-    .option("log-level", {
-      type: "string",
-      describe: "silent | error | warn | info | debug | trace; default=info",
-    })
-    .option("log-file", {
-      type: "string",
-      describe:
-        "append all log output to this file instead of the terminal; the " +
-        "parent directory must already exist",
     });
+  return addLoggingOptions(beforeLogging);
 }
 
 interface ConfigHints {
@@ -470,7 +458,7 @@ export async function handler(argv: Arguments): Promise<void> {
 
     report(log, action, identityPath, identity, fingerprint);
   } catch (err) {
-    exitWithError(log, err, err instanceof UsageError ? 64 : 69);
+    exitWithError(log, err, exitCodeForError(err));
   } finally {
     // Restore the loglevel factory (and close the log-file descriptor, for the
     // file sink) on the normal exit path. Writes are synchronous and already

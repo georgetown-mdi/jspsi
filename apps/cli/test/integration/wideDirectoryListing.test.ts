@@ -1,7 +1,7 @@
 import fsp from "node:fs/promises";
 import path from "node:path";
 
-import { expect, test } from "vitest";
+import { expect } from "vitest";
 import {
   DirectoryListingBoundsError,
   TransportOperationStalledError,
@@ -17,10 +17,10 @@ import {
 import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
 import {
   READDIR_BATCH_BUDGET_BYTES,
-  selectedBackend,
   startInProcessSftpServer,
 } from "../sftpServer";
 import { serverAuth } from "../sftpServer/testContext";
+import { inProcessOnly } from "../sftpBackendGate";
 
 // A directory filled to the enforced listing bound is the widest one the adapter
 // accepts, so it is the width the test backend has to be able to SERVE before a
@@ -43,7 +43,6 @@ import { serverAuth } from "../sftpServer/testContext";
 // Only the in-process backend exposes the batch knob and the server-side request
 // meter these read (see test/sftpServer/types.ts), so these run there and stand
 // up their own instance.
-const inProcessOnly = test.skipIf(selectedBackend() !== "in-process");
 
 const TEST_TIMEOUT_MS = 300_000;
 

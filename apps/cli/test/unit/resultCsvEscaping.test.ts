@@ -22,7 +22,7 @@ import type {
   PartnerPayload,
 } from "@psilink/core";
 
-import { writeOutput } from "../../src/util/cli";
+import { writeOutput } from "../../src/util/dataIo";
 
 // The result CSV's RFC 4180 round trip. Partner payloads and identifier columns
 // carry ordinary real-world values, so a comma, a double quote, and a newline all

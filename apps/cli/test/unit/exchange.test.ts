@@ -18,7 +18,11 @@ import type {
   LinkageTerms,
   PreparedExchange,
 } from "@psilink/core";
-import { loadKeyFile, saveKeyFile } from "../../src/keyFile";
+import {
+  loadKeyFile,
+  provisionKeyFileFromInvitation,
+  saveKeyFile,
+} from "../../src/keyFile";
 import {
   loadSigningIdentity,
   saveSigningIdentity,
@@ -41,6 +45,8 @@ import {
 } from "../../src/commands/exchange";
 import { PLACEHOLDER_IDENTITY } from "../../src/partyIdentity";
 import { ttyStream, withStdin } from "../stdinStream";
+import { captureProcessExit } from "../exitCapture";
+import { ERROR_CLASS_EXIT_CODES } from "../exitCodeCases";
 
 const mockState = vi.hoisted(() => ({
   warnings: [] as string[],
@@ -104,6 +110,19 @@ vi.mock("../../src/protocol", () => ({ runProtocol: vi.fn() }));
 // drives; stub it so that test reaches the runProtocol hand-off without probing
 // sftp.example.org (hostKeyTrust.test.ts covers the real flow).
 vi.mock("../../src/hostKeyTrust", () => ({ establishHostKeyTrust: vi.fn() }));
+
+// The invitation provisioning step is spy-WRAPPED so the exit-boundary tests can
+// plant an error at it; every other key-file export, and provisioning itself
+// wherever nothing is planted, stays real.
+vi.mock("../../src/keyFile", async (importActual) => {
+  const actual = await importActual<typeof import("../../src/keyFile")>();
+  return {
+    ...actual,
+    provisionKeyFileFromInvitation: vi.fn(
+      actual.provisionKeyFileFromInvitation,
+    ),
+  };
+});
 
 // The signing-identity load is spy-WRAPPED for the same reason: the ordering
 // test below needs to observe when the handler reaches it, while every test that
@@ -1111,11 +1130,7 @@ test("handler: a repeated single-value flag exits 64 naming the flag", async () 
   // on stderr and maps to exit 64, rather than letting the array reach the
   // connection overrides as if it were a scalar port.
   const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
-    code?: number,
-  ) => {
-    throw new Error(`exit:${code ?? 0}`);
-  }) as never);
+  const exitSpy = captureProcessExit();
   try {
     await expect(
       handler({
@@ -1140,11 +1155,7 @@ test("handler: `-` input at an interactive terminal exits 64 (usage), not 69", a
   // prepareDataset, where the `-` is resolved.
   fs.writeFileSync(configFile, YAML.stringify(minimalFiledropConfig));
   saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
-  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
-    code?: number,
-  ) => {
-    throw new Error(`exit:${code ?? 0}`);
-  }) as never);
+  const exitSpy = captureProcessExit();
   try {
     await withStdin(ttyStream(), () =>
       expect(
@@ -1188,11 +1199,7 @@ test("handler warns when an expiring-soon token is not refreshed by a failed exc
 
   vi.mocked(runProtocol).mockReset();
   vi.mocked(runProtocol).mockRejectedValueOnce(new Error("exchange failed"));
-  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
-    code?: number,
-  ) => {
-    throw new Error(`exit:${code ?? 0}`);
-  }) as never);
+  const exitSpy = captureProcessExit();
   try {
     await expect(
       handler({
@@ -1232,11 +1239,7 @@ test("handler: a result file the exchange could not write exits 73, not 69", asy
       exitCode: PERSISTENCE_LOSS_EXIT_CODE,
     }),
   );
-  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
-    code?: number,
-  ) => {
-    throw new Error(`exit:${code ?? 0}`);
-  }) as never);
+  const exitSpy = captureProcessExit();
   try {
     await expect(
       handler({
@@ -1278,11 +1281,7 @@ test("handler suppresses the advisory when a successful exchange refreshes the t
     });
     return {};
   });
-  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
-    code?: number,
-  ) => {
-    throw new Error(`exit:${code ?? 0}`);
-  }) as never);
+  const exitSpy = captureProcessExit();
   try {
     await handler({
       _: [],
@@ -1343,11 +1342,7 @@ test("handler exits 64 on a divergent signing identity, before runProtocol", asy
   // sink as a usage error (exit 64) rather than a transport failure.
   const argv = await signedExchangeRun("Someone Else");
   vi.mocked(runProtocol).mockReset();
-  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
-    code?: number,
-  ) => {
-    throw new Error(`exit:${code ?? 0}`);
-  }) as never);
+  const exitSpy = captureProcessExit();
   try {
     await expect(handler(argv)).rejects.toThrow("exit:64");
     expect(vi.mocked(runProtocol)).not.toHaveBeenCalled();
@@ -1377,11 +1372,7 @@ test("handler compares the signing identity against --identity when it is given"
   // one a certificate matching the CONFIG's label now diverges from.
   const argv = await signedExchangeRun("Test Party");
   vi.mocked(runProtocol).mockReset();
-  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
-    code?: number,
-  ) => {
-    throw new Error(`exit:${code ?? 0}`);
-  }) as never);
+  const exitSpy = captureProcessExit();
   try {
     await expect(
       handler({ ...argv, identity: "Overridden Party" } as Arguments),
@@ -1456,11 +1447,7 @@ test("handler exits 64 on an --identity still carrying the init placeholder", as
   const input = path.join(dir, "in.csv");
   fs.writeFileSync(input, "ssn\n123456789\n");
   vi.mocked(runProtocol).mockReset();
-  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
-    code?: number,
-  ) => {
-    throw new Error(`exit:${code ?? 0}`);
-  }) as never);
+  const exitSpy = captureProcessExit();
   try {
     await expect(
       handler({
@@ -1565,11 +1552,7 @@ test("handler: --invitation provisions the key file when none exists and the exc
 
   vi.mocked(runProtocol).mockReset();
   vi.mocked(runProtocol).mockResolvedValueOnce({});
-  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
-    code?: number,
-  ) => {
-    throw new Error(`exit:${code ?? 0}`);
-  }) as never);
+  const exitSpy = captureProcessExit();
   try {
     await handler({
       _: [],
@@ -1602,11 +1585,7 @@ test("handler: --invitation errors (exit 64) when a key file already exists and 
   fs.writeFileSync(input, "ssn\n123456789\n");
 
   vi.mocked(runProtocol).mockReset();
-  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
-    code?: number,
-  ) => {
-    throw new Error(`exit:${code ?? 0}`);
-  }) as never);
+  const exitSpy = captureProcessExit();
   try {
     await expect(
       handler({
@@ -1633,11 +1612,7 @@ test("handler: --invitation with a malformed code fails closed (exit 64), writin
   fs.writeFileSync(input, "ssn\n123456789\n");
 
   vi.mocked(runProtocol).mockReset();
-  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
-    code?: number,
-  ) => {
-    throw new Error(`exit:${code ?? 0}`);
-  }) as never);
+  const exitSpy = captureProcessExit();
   try {
     await expect(
       handler({
@@ -1657,6 +1632,91 @@ test("handler: --invitation with a malformed code fails closed (exit 64), writin
   }
 });
 
+// --- handler: the exit code each error boundary reports ----------------------
+// Each boundary below routes its caught error through the one exitCodeForError
+// (src/util/exit.ts): one error per class it distinguishes, planted at the
+// module call the boundary wraps, against the code docs/CLI.md's exit-code table
+// states. The other commands' boundaries: exitBoundaryMapping.test.ts. These say
+// what a boundary reports for an error that reaches it, and nothing about which
+// classes can reach it.
+
+/** Run the handler, asserting it exits with `code` and never reaches the
+ * exchange. */
+async function expectExchangeExit(
+  argv: Arguments,
+  code: number,
+): Promise<void> {
+  vi.mocked(runProtocol).mockReset();
+  const exitSpy = captureProcessExit();
+  try {
+    await expect(handler(argv)).rejects.toThrow(`exit:${code}`);
+    expect(exitSpy).toHaveBeenCalledExactlyOnceWith(code);
+    expect(vi.mocked(runProtocol)).not.toHaveBeenCalled();
+  } finally {
+    exitSpy.mockRestore();
+  }
+}
+
+/** Seed a filedrop config, a live key file, and an input file, and return the
+ * argv a run of them takes. */
+function filedropRun(): Arguments {
+  fs.writeFileSync(configFile, YAML.stringify(minimalFiledropConfig));
+  saveKeyFile(keyFile, {
+    sharedSecret: TOKEN_A,
+    expires: new Date(Date.now() + 365 * 86_400_000).toISOString(),
+  });
+  const input = path.join(dir, "in.csv");
+  fs.writeFileSync(input, "ssn\n123456789\n");
+  return {
+    _: [],
+    $0: "psilink",
+    input,
+    "config-file": configFile,
+    "key-file": keyFile,
+    "log-level": "silent",
+  } as unknown as Arguments;
+}
+
+test.each(ERROR_CLASS_EXIT_CODES)(
+  "handler: --invitation provisioning exits $code on $planted",
+  async ({ plant, code }) => {
+    fs.writeFileSync(configFile, YAML.stringify(minimalFiledropConfig));
+    const input = path.join(dir, "in.csv");
+    fs.writeFileSync(input, "ssn\n123456789\n");
+    vi.mocked(provisionKeyFileFromInvitation).mockRejectedValueOnce(plant());
+    await expectExchangeExit(
+      {
+        _: [],
+        $0: "psilink",
+        input,
+        "config-file": configFile,
+        "key-file": keyFile,
+        invitation: await encodeInvitation(inviteToken()),
+        "log-level": "silent",
+      } as unknown as Arguments,
+      code,
+    );
+  },
+);
+
+test.each(ERROR_CLASS_EXIT_CODES)(
+  "handler: the signing-identity load exits $code on $planted",
+  async ({ plant, code }) => {
+    const argv = await signedExchangeRun("Test Party");
+    vi.mocked(loadSigningIdentity).mockRejectedValueOnce(plant());
+    await expectExchangeExit(argv, code);
+  },
+);
+
+test.each(ERROR_CLASS_EXIT_CODES)(
+  "handler: the host-key trust step exits $code on $planted",
+  async ({ plant, code }) => {
+    const argv = filedropRun();
+    vi.mocked(establishHostKeyTrust).mockRejectedValueOnce(plant());
+    await expectExchangeExit(argv, code);
+  },
+);
+
 // --- handler: prepare-time guards precede the credential-bearing connect -----
 
 test("handler: the prepare-time guard completes before runProtocol on an sftp config", async () => {
@@ -1675,11 +1735,7 @@ test("handler: the prepare-time guard completes before runProtocol on an sftp co
   vi.mocked(establishHostKeyTrust).mockClear();
   vi.mocked(runProtocol).mockReset();
   vi.mocked(runProtocol).mockResolvedValueOnce({});
-  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
-    code?: number,
-  ) => {
-    throw new Error(`exit:${code ?? 0}`);
-  }) as never);
+  const exitSpy = captureProcessExit();
   try {
     await handler({
       _: [],
@@ -1738,11 +1794,7 @@ test("handler: certificate mode with no partner pin exits 64 before runProtocol"
 
   vi.mocked(prepareForExchange).mockImplementationOnce(core.prepareForExchange);
   vi.mocked(runProtocol).mockReset();
-  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
-    code?: number,
-  ) => {
-    throw new Error(`exit:${code ?? 0}`);
-  }) as never);
+  const exitSpy = captureProcessExit();
   try {
     await expect(
       handler({
@@ -1793,11 +1845,7 @@ test("handler: certificate mode with an unnamed party exits 64 before runProtoco
 
   vi.mocked(prepareForExchange).mockImplementationOnce(core.prepareForExchange);
   vi.mocked(runProtocol).mockReset();
-  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
-    code?: number,
-  ) => {
-    throw new Error(`exit:${code ?? 0}`);
-  }) as never);
+  const exitSpy = captureProcessExit();
   try {
     await expect(
       handler({
@@ -1836,11 +1884,7 @@ test("handler: an unnamed party that signs nothing runs unchanged", async () => 
   vi.mocked(prepareForExchange).mockImplementationOnce(core.prepareForExchange);
   vi.mocked(runProtocol).mockReset();
   vi.mocked(runProtocol).mockResolvedValueOnce({});
-  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
-    code?: number,
-  ) => {
-    throw new Error(`exit:${code ?? 0}`);
-  }) as never);
+  const exitSpy = captureProcessExit();
   try {
     await handler({
       _: [],
@@ -1896,11 +1940,7 @@ test("handler: the outbound-consent surface runs before host-key trust", async (
   });
   vi.mocked(runProtocol).mockReset();
   vi.mocked(runProtocol).mockResolvedValueOnce({});
-  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
-    code?: number,
-  ) => {
-    throw new Error(`exit:${code ?? 0}`);
-  }) as never);
+  const exitSpy = captureProcessExit();
   try {
     await handler({
       _: [],
@@ -1930,11 +1970,7 @@ test("handler: an input that cannot satisfy the agreed terms exits 64 with no ho
 
   vi.mocked(establishHostKeyTrust).mockClear();
   vi.mocked(runProtocol).mockReset();
-  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
-    code?: number,
-  ) => {
-    throw new Error(`exit:${code ?? 0}`);
-  }) as never);
+  const exitSpy = captureProcessExit();
   try {
     await expect(
       handler({
@@ -1982,11 +2018,7 @@ test("handler: certificate mode naming no identity file is refused before either
   vi.mocked(confirmOutboundPayloadConsent).mockClear();
   vi.mocked(establishHostKeyTrust).mockClear();
   vi.mocked(runProtocol).mockReset();
-  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
-    code?: number,
-  ) => {
-    throw new Error(`exit:${code ?? 0}`);
-  }) as never);
+  const exitSpy = captureProcessExit();
   try {
     await expect(
       handler({
@@ -2047,11 +2079,7 @@ test("handler: the signing identity resolves before host-key trust", async () =>
   vi.mocked(establishHostKeyTrust).mockClear();
   vi.mocked(runProtocol).mockReset();
   vi.mocked(runProtocol).mockResolvedValueOnce({});
-  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
-    code?: number,
-  ) => {
-    throw new Error(`exit:${code ?? 0}`);
-  }) as never);
+  const exitSpy = captureProcessExit();
   try {
     await handler({
       _: [],
@@ -2089,11 +2117,7 @@ test("handler: a signing identity missing from its configured path exits 64 with
 
   vi.mocked(establishHostKeyTrust).mockClear();
   vi.mocked(runProtocol).mockReset();
-  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
-    code?: number,
-  ) => {
-    throw new Error(`exit:${code ?? 0}`);
-  }) as never);
+  const exitSpy = captureProcessExit();
   try {
     await expect(
       handler({

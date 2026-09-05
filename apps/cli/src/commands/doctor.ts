@@ -1,7 +1,7 @@
 import type { Argv, Arguments } from "yargs";
 import logLibrary from "loglevel";
 
-import { UsageError, redactAndSanitizeForDisplay } from "@psilink/core";
+import { redactAndSanitizeForDisplay } from "@psilink/core";
 
 import { runMountChecks } from "../doctor/mount";
 import { runProbe } from "../doctor/probe";
@@ -13,13 +13,10 @@ import {
   verdictJson,
   verdictLines,
 } from "../doctor/verdict";
-import {
-  configureLogging,
-  exitWithError,
-  logLevelFlag,
-  parseOrExit,
-  singleValue,
-} from "../util/cli";
+import { addLoggingOptions } from "../optionDefinitions";
+import { exitCodeForError, exitWithError } from "../util/exit";
+import { parseOrExit, singleValue } from "../util/flags";
+import { configureLogging, logLevelFlag } from "../util/logging";
 
 // `psilink doctor` answers "why did the file drop not work" before an exchange
 // is attempted: `doctor probe` checks over the network as smbclient sees it,
@@ -29,24 +26,15 @@ import {
 // "Checking a network file drop", and docs/spec/CLI_DOCTOR.md.
 
 function commonOptions(cmd: Argv): Argv {
-  return cmd
-    .option("json", {
+  return addLoggingOptions(
+    cmd.option("json", {
       type: "boolean",
       default: false,
       describe:
         "print the machine-readable verdict on stdout instead of the " +
         "human-readable check lines",
-    })
-    .option("log-level", {
-      type: "string",
-      describe: "silent | error | warn | info | debug | trace; default=info",
-    })
-    .option("log-file", {
-      type: "string",
-      describe:
-        "append all log output to this file instead of the terminal; the " +
-        "parent directory must already exist",
-    });
+    }),
+  );
 }
 
 /** Handler for `psilink doctor probe`. */
@@ -120,10 +108,11 @@ async function runDoctor(
     // not in use.
     process.exitCode = DOCTOR_EXIT_CODE[overallOf(report)];
   } catch (err) {
-    // A malformed input is a usage error (64); anything else escaping the
-    // checks -- they classify a tool failure rather than throwing -- is an
-    // availability failure (69), the same mapping the other commands apply.
-    exitWithError(log, err, err instanceof UsageError ? 64 : 69);
+    // Reached by the operator-input faults readSmbProbeInput and
+    // readSmbMountInput raise (doctor/smbEnvironment), and by anything the
+    // checks did not turn into a verdict -- a failing tool becomes a verdict
+    // rather than a throw. exitCodeForError classifies whichever arrives.
+    exitWithError(log, err, exitCodeForError(err));
   } finally {
     closeLogging();
   }

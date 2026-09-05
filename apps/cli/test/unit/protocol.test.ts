@@ -283,7 +283,7 @@ import {
 } from "../../src/eventStream";
 import { keysPathFor, type RecordOutput } from "../../src/recordFile";
 import { openEventStreamWithFdWired } from "../eventStreamTestSupport";
-import { exitCodeForError, runOrExit } from "../../src/util/cli";
+import { exitCodeForError, runOrExit } from "../../src/util/exit";
 import { loadKeyFile, saveKeyFile } from "../../src/keyFile";
 import { LocalFSClient } from "../../src/connection/localFSClient";
 
@@ -481,17 +481,16 @@ test("PEER_SILENCE_GUIDANCE names likely receiver-side causes without overclaimi
 
 test("rejects before opening a connection when keyFilePath is whitespace-only", async () => {
   await expect(
-    runProtocol(
-      {
+    runProtocol({
+      connection: {
         channel: "filedrop",
         path: dropDir,
       },
-      { sharedSecret: TOKEN_A, keyFilePath: "   " },
-      minimalPrepared,
-      undefined,
-      -1,
-      "test",
-    ),
+      auth: { sharedSecret: TOKEN_A, keyFilePath: "   " },
+      prepared: minimalPrepared,
+      verbosity: -1,
+      loggerName: "test",
+    }),
   ).rejects.toThrow("non-empty keyFilePath");
 });
 
@@ -502,22 +501,20 @@ test("rejects before opening a connection when saveIntent is passed on an authen
   // (and before the keyFilePath pre-flight), so a stray save field never rides
   // the authenticated channel.
   await expect(
-    runProtocol(
-      {
+    runProtocol({
+      connection: {
         channel: "filedrop",
         path: dropDir,
       },
-      {
+      auth: {
         sharedSecret: TOKEN_A,
         keyFilePath: path.join(tmpDir, "k.key"),
       },
-      minimalPrepared,
-      undefined,
-      -1,
-      "test",
-      undefined,
-      true,
-    ),
+      prepared: minimalPrepared,
+      verbosity: -1,
+      loggerName: "test",
+      saveIntent: true,
+    }),
   ).rejects.toThrow("only valid on an unauthenticated");
 });
 
@@ -527,22 +524,19 @@ test("rejects before opening a connection when onAuthenticated is passed on an u
   // Passing it with `authentication: null` is a misuse: the guard must reject it
   // up front rather than silently dropping the hook so the write never runs.
   await expect(
-    runProtocol(
-      {
+    runProtocol({
+      connection: {
         channel: "filedrop",
         path: dropDir,
       },
-      null,
-      minimalPrepared,
-      undefined,
-      -1,
-      "test",
-      undefined,
-      undefined,
-      () => {
+      auth: null,
+      prepared: minimalPrepared,
+      verbosity: -1,
+      loggerName: "test",
+      onAuthenticated: () => {
         /* never invoked: the guard rejects before the hook would fire */
       },
-    ),
+    }),
   ).rejects.toThrow("only valid on an authenticated exchange");
 });
 
@@ -557,20 +551,19 @@ test.skipIf(process.getuid?.() === 0)(
     fs.chmodSync(readOnlyDir, 0o555);
     try {
       await expect(
-        runProtocol(
-          {
+        runProtocol({
+          connection: {
             channel: "filedrop",
             path: dropDir,
           },
-          {
+          auth: {
             sharedSecret: TOKEN_A,
             keyFilePath: path.join(readOnlyDir, "key.json"),
           },
-          minimalPrepared,
-          undefined,
-          -1,
-          "test",
-        ),
+          prepared: minimalPrepared,
+          verbosity: -1,
+          loggerName: "test",
+        }),
       ).rejects.toThrow("not writable");
     } finally {
       // Restore mode so afterEach can rm -rf the tmp dir.
@@ -586,20 +579,19 @@ test("rejects before opening a connection when keyFilePath parent exists but is 
   const fileParent = path.join(tmpDir, "not-a-dir");
   fs.writeFileSync(fileParent, "");
   await expect(
-    runProtocol(
-      {
+    runProtocol({
+      connection: {
         channel: "filedrop",
         path: dropDir,
       },
-      {
+      auth: {
         sharedSecret: TOKEN_A,
         keyFilePath: path.join(fileParent, "key.json"),
       },
-      minimalPrepared,
-      undefined,
-      -1,
-      "test",
-    ),
+      prepared: minimalPrepared,
+      verbosity: -1,
+      loggerName: "test",
+    }),
   ).rejects.toThrow("exists but is not a directory");
 });
 
@@ -614,20 +606,19 @@ test("creates the keyFilePath parent directory when it does not yet exist", asyn
   // still abort before the full exchange, point dropDir at a path that
   // localFSClient cannot open so runProtocol throws after the probe runs.
   await expect(
-    runProtocol(
-      {
+    runProtocol({
+      connection: {
         channel: "filedrop",
         path: "/nonexistent-path-that-cannot-exist-psilink-test",
       },
-      {
+      auth: {
         sharedSecret: TOKEN_A,
         keyFilePath: path.join(createdParent, "key.json"),
       },
-      minimalPrepared,
-      undefined,
-      -1,
-      "test",
-    ),
+      prepared: minimalPrepared,
+      verbosity: -1,
+      loggerName: "test",
+    }),
   ).rejects.toThrow();
   // The probe succeeded only if the parent was created.
   expect(fs.existsSync(createdParent)).toBe(true);
@@ -640,20 +631,19 @@ test("rejects before opening a connection when keyFilePath itself is a directory
   const keyDirAsFile = path.join(tmpDir, "key-as-directory");
   fs.mkdirSync(keyDirAsFile);
   await expect(
-    runProtocol(
-      {
+    runProtocol({
+      connection: {
         channel: "filedrop",
         path: dropDir,
       },
-      {
+      auth: {
         sharedSecret: TOKEN_A,
         keyFilePath: keyDirAsFile,
       },
-      minimalPrepared,
-      undefined,
-      -1,
-      "test",
-    ),
+      prepared: minimalPrepared,
+      verbosity: -1,
+      loggerName: "test",
+    }),
   ).rejects.toThrow("not a regular file");
 });
 
@@ -672,17 +662,16 @@ test("does not mutate the caller-supplied auth object when trimming whitespace f
   // a non-existent path; the pre-flight write probe must succeed (which
   // requires the trimmed path to be usable) for the test to be meaningful.
   await expect(
-    runProtocol(
-      {
+    runProtocol({
+      connection: {
         channel: "filedrop",
         path: "/nonexistent-path-that-cannot-exist-psilink-test",
       },
       auth,
-      minimalPrepared,
-      undefined,
-      -1,
-      "test",
-    ),
+      prepared: minimalPrepared,
+      verbosity: -1,
+      loggerName: "test",
+    }),
   ).rejects.toThrow();
   expect(auth.keyFilePath).toBe(originalPath);
 }, 20_000);
@@ -698,20 +687,19 @@ test.skipIf(process.platform === "win32")(
     const link = path.join(tmpDir, "dangling-link");
     fs.symlinkSync(target, link);
     await expect(
-      runProtocol(
-        {
+      runProtocol({
+        connection: {
           channel: "filedrop",
           path: dropDir,
         },
-        {
+        auth: {
           sharedSecret: TOKEN_A,
           keyFilePath: path.join(link, "key.json"),
         },
-        minimalPrepared,
-        undefined,
-        -1,
-        "test",
-      ),
+        prepared: minimalPrepared,
+        verbosity: -1,
+        loggerName: "test",
+      }),
     ).rejects.toThrow("dangling");
   },
 );
@@ -722,17 +710,16 @@ test("rejects and cleans up when conn.open() itself throws (opened=false cleanup
   // the doCleanup branch where close() runs idempotently on a connection that
   // was never opened (no teardown to perform).
   await expect(
-    runProtocol(
-      {
+    runProtocol({
+      connection: {
         channel: "filedrop",
         path: "/nonexistent-path-that-cannot-exist-psilink-test",
       },
-      null,
-      minimalPrepared,
-      undefined,
-      -1,
-      "test",
-    ),
+      auth: null,
+      prepared: minimalPrepared,
+      verbosity: -1,
+      loggerName: "test",
+    }),
   ).rejects.toThrow();
 }, 20_000);
 
@@ -744,30 +731,28 @@ test("authentication=null runs the exchange without authentication and without e
   // rather than a temp file whose parent may be deleted before the stream
   // flushes.
   await Promise.all([
-    runProtocol(
-      {
+    runProtocol({
+      connection: {
         channel: "filedrop",
         path: dropDir,
         options: TWO_PARTY_OPTIONS,
       },
-      null,
-      minimalPrepared,
-      undefined,
-      -1,
-      "test-a",
-    ),
-    runProtocol(
-      {
+      auth: null,
+      prepared: minimalPrepared,
+      verbosity: -1,
+      loggerName: "test-a",
+    }),
+    runProtocol({
+      connection: {
         channel: "filedrop",
         path: dropDir,
         options: TWO_PARTY_OPTIONS,
       },
-      null,
-      minimalPrepared,
-      undefined,
-      -1,
-      "test-b",
-    ),
+      auth: null,
+      prepared: minimalPrepared,
+      verbosity: -1,
+      loggerName: "test-b",
+    }),
   ]);
   // No assertion on key files: no rotation occurs when auth is null.
 }, 20_000);
@@ -826,26 +811,29 @@ test("names a deduplicating cardinality and warns on an over-bound projection", 
   mockFd3Open();
   try {
     await Promise.all([
-      runProtocol(
-        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-        null,
-        minimalPrepared,
-        undefined,
-        -1,
-        "test-a",
-        undefined,
-        undefined,
-        undefined,
-        { eventStream: true },
-      ),
-      runProtocol(
-        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-        null,
-        minimalPrepared,
-        undefined,
-        -1,
-        "test-b",
-      ),
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        verbosity: -1,
+        loggerName: "test-a",
+        fileSyncRuntime: { eventStream: true },
+      }),
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        verbosity: -1,
+        loggerName: "test-b",
+      }),
     ]);
   } finally {
     vi.mocked(fs.fstatSync).mockRestore();
@@ -885,22 +873,28 @@ test("leaves the pre-round seam silent on a one-to-one run", async () => {
     }) as never,
   );
   await Promise.all([
-    runProtocol(
-      { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-      null,
-      minimalPrepared,
-      undefined,
-      -1,
-      "test-a",
-    ),
-    runProtocol(
-      { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-      null,
-      minimalPrepared,
-      undefined,
-      -1,
-      "test-b",
-    ),
+    runProtocol({
+      connection: {
+        channel: "filedrop",
+        path: dropDir,
+        options: TWO_PARTY_OPTIONS,
+      },
+      auth: null,
+      prepared: minimalPrepared,
+      verbosity: -1,
+      loggerName: "test-a",
+    }),
+    runProtocol({
+      connection: {
+        channel: "filedrop",
+        path: dropDir,
+        options: TWO_PARTY_OPTIONS,
+      },
+      auth: null,
+      prepared: minimalPrepared,
+      verbosity: -1,
+      loggerName: "test-b",
+    }),
   ]);
 
   expect(mockState.warnings).toStrictEqual([]);
@@ -996,32 +990,30 @@ test("writes the self-attested record and verification keys when runExchange ret
   const keysB = path.join(tmpDir, "rec-b.keys.json");
 
   await Promise.all([
-    runProtocol(
-      {
+    runProtocol({
+      connection: {
         channel: "filedrop",
         path: dropDir,
         options: TWO_PARTY_OPTIONS,
       },
-      null,
-      minimalPrepared,
-      undefined,
-      -1,
-      "test-a",
-      { recordFile: recordA },
-    ),
-    runProtocol(
-      {
+      auth: null,
+      prepared: minimalPrepared,
+      verbosity: -1,
+      loggerName: "test-a",
+      recordOutput: { recordFile: recordA },
+    }),
+    runProtocol({
+      connection: {
         channel: "filedrop",
         path: dropDir,
         options: TWO_PARTY_OPTIONS,
       },
-      null,
-      minimalPrepared,
-      undefined,
-      -1,
-      "test-b",
-      { recordFile: recordB },
-    ),
+      auth: null,
+      prepared: minimalPrepared,
+      verbosity: -1,
+      loggerName: "test-b",
+      recordOutput: { recordFile: recordB },
+    }),
   ]);
 
   for (const [rec, keyPath] of [
@@ -1054,27 +1046,31 @@ test("a record the run was asked for and could not write warns on fd 3 and exits
   mockFd3Open();
   try {
     await Promise.all([
-      runProtocol(
-        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-        null,
-        minimalPrepared,
-        undefined,
-        -1,
-        "test-a",
-        { recordFile: path.join(blocker, "rec-a.json") },
-        undefined,
-        undefined,
-        { eventStream: true },
-      ),
-      runProtocol(
-        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-        null,
-        minimalPrepared,
-        undefined,
-        -1,
-        "test-b",
-        { recordFile: path.join(tmpDir, "rec-b.json") },
-      ),
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        verbosity: -1,
+        loggerName: "test-a",
+        recordOutput: { recordFile: path.join(blocker, "rec-a.json") },
+        fileSyncRuntime: { eventStream: true },
+      }),
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        verbosity: -1,
+        loggerName: "test-b",
+        recordOutput: { recordFile: path.join(tmpDir, "rec-b.json") },
+      }),
     ]);
     expect(process.exitCode).toBe(73);
   } finally {
@@ -1117,34 +1113,30 @@ test(
     mockFd3Open();
     try {
       await Promise.all([
-        runProtocol(
-          {
+        runProtocol({
+          connection: {
             channel: "filedrop",
             path: dropDir,
             options: TWO_PARTY_OPTIONS,
           },
-          null,
-          minimalPrepared,
-          undefined,
-          -1,
-          "test-a",
-          { recordFile: recordA },
-          undefined,
-          undefined,
-          { eventStream: true },
-        ),
-        runProtocol(
-          {
+          auth: null,
+          prepared: minimalPrepared,
+          verbosity: -1,
+          loggerName: "test-a",
+          recordOutput: { recordFile: recordA },
+          fileSyncRuntime: { eventStream: true },
+        }),
+        runProtocol({
+          connection: {
             channel: "filedrop",
             path: dropDir,
             options: TWO_PARTY_OPTIONS,
           },
-          null,
-          minimalPrepared,
-          undefined,
-          -1,
-          "test-b",
-        ),
+          auth: null,
+          prepared: minimalPrepared,
+          verbosity: -1,
+          loggerName: "test-b",
+        }),
       ]);
       expect(process.exitCode).toBe(73);
     } finally {
@@ -1179,26 +1171,30 @@ test("a result file that could not be written fails with the persistence-loss ex
   let outcome: PromiseSettledResult<unknown>;
   try {
     [outcome] = await Promise.allSettled([
-      runProtocol(
-        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-        null,
-        minimalPrepared,
-        path.join(blocker, "out.csv"),
-        -1,
-        "test-a",
-        undefined,
-        undefined,
-        undefined,
-        { eventStream: true },
-      ),
-      runProtocol(
-        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-        null,
-        minimalPrepared,
-        undefined,
-        -1,
-        "test-b",
-      ),
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        output: path.join(blocker, "out.csv"),
+        verbosity: -1,
+        loggerName: "test-a",
+        fileSyncRuntime: { eventStream: true },
+      }),
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        verbosity: -1,
+        loggerName: "test-b",
+      }),
     ]);
   } finally {
     vi.mocked(fs.fstatSync).mockRestore();
@@ -1249,26 +1245,29 @@ test("a partner-shaped output-phase fault exits 69, not the local write-loss cod
   let outcome: PromiseSettledResult<unknown>;
   try {
     [outcome] = await Promise.allSettled([
-      runProtocol(
-        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-        null,
-        minimalPrepared,
-        undefined,
-        -1,
-        "test-a",
-        undefined,
-        undefined,
-        undefined,
-        { eventStream: true },
-      ),
-      runProtocol(
-        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-        null,
-        minimalPrepared,
-        undefined,
-        -1,
-        "test-b",
-      ),
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        verbosity: -1,
+        loggerName: "test-a",
+        fileSyncRuntime: { eventStream: true },
+      }),
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        verbosity: -1,
+        loggerName: "test-b",
+      }),
     ]);
   } finally {
     vi.mocked(fs.fstatSync).mockRestore();
@@ -1317,22 +1316,30 @@ test("writes no result file for a non-receiving party when the exchange withhold
   const outputB = path.join(tmpDir, "out-b.csv");
 
   await Promise.all([
-    runProtocol(
-      { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-      null,
-      minimalPrepared,
-      outputA,
-      -1,
-      "test-a",
-    ),
-    runProtocol(
-      { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-      null,
-      minimalPrepared,
-      outputB,
-      -1,
-      "test-b",
-    ),
+    runProtocol({
+      connection: {
+        channel: "filedrop",
+        path: dropDir,
+        options: TWO_PARTY_OPTIONS,
+      },
+      auth: null,
+      prepared: minimalPrepared,
+      output: outputA,
+      verbosity: -1,
+      loggerName: "test-a",
+    }),
+    runProtocol({
+      connection: {
+        channel: "filedrop",
+        path: dropDir,
+        options: TWO_PARTY_OPTIONS,
+      },
+      auth: null,
+      prepared: minimalPrepared,
+      output: outputB,
+      verbosity: -1,
+      loggerName: "test-b",
+    }),
   ]);
 
   // No result file is written for either non-receiving party...
@@ -1362,22 +1369,30 @@ function mockCountOnlyRun(resolvedRole: "receiver" | "sender") {
 // Drive both halves of a filedrop run, writing this party's result to `output`.
 function runBothHalves(output: string) {
   return Promise.all([
-    runProtocol(
-      { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-      null,
-      minimalPrepared,
+    runProtocol({
+      connection: {
+        channel: "filedrop",
+        path: dropDir,
+        options: TWO_PARTY_OPTIONS,
+      },
+      auth: null,
+      prepared: minimalPrepared,
       output,
-      -1,
-      "test-a",
-    ),
-    runProtocol(
-      { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-      null,
-      minimalPrepared,
-      `${output}.partner`,
-      -1,
-      "test-b",
-    ),
+      verbosity: -1,
+      loggerName: "test-a",
+    }),
+    runProtocol({
+      connection: {
+        channel: "filedrop",
+        path: dropDir,
+        options: TWO_PARTY_OPTIONS,
+      },
+      auth: null,
+      prepared: minimalPrepared,
+      output: `${output}.partner`,
+      verbosity: -1,
+      loggerName: "test-b",
+    }),
   ]);
 }
 
@@ -1453,38 +1468,36 @@ test("runProtocol rejects an expired token without rotating, and the tagged reco
     expires: "2000-01-01T00:00:00.000Z",
   });
 
-  const pA = runProtocol(
-    {
+  const pA = runProtocol({
+    connection: {
       channel: "filedrop",
       path: dropDir,
       options: TWO_PARTY_OPTIONS,
     },
-    {
+    auth: {
       sharedSecret: TOKEN_A,
       expires: "2000-01-01T00:00:00.000Z",
       keyFilePath: keyFileA,
     },
-    minimalPrepared,
-    undefined,
-    -1,
-    "test-a",
-  );
-  const pB = runProtocol(
-    {
+    prepared: minimalPrepared,
+    verbosity: -1,
+    loggerName: "test-a",
+  });
+  const pB = runProtocol({
+    connection: {
       channel: "filedrop",
       path: dropDir,
       options: TWO_PARTY_OPTIONS,
     },
-    {
+    auth: {
       sharedSecret: TOKEN_A,
       expires: "2000-01-01T00:00:00.000Z",
       keyFilePath: keyFileB,
     },
-    minimalPrepared,
-    undefined,
-    -1,
-    "test-b",
-  );
+    prepared: minimalPrepared,
+    verbosity: -1,
+    loggerName: "test-b",
+  });
 
   const [resultA, resultB] = await Promise.allSettled([pA, pB]);
   expect(resultA.status).toBe("rejected");
@@ -1526,8 +1539,8 @@ test("runProtocol rejects an already-expired token before opening any connection
   });
 
   await expect(
-    runProtocol(
-      {
+    runProtocol({
+      connection: {
         channel: "filedrop",
         path: dropDir,
         options: {
@@ -1535,16 +1548,15 @@ test("runProtocol rejects an already-expired token before opening any connection
           peerTimeoutMs: LONE_PARTY_PEER_BUDGET_MS,
         },
       },
-      {
+      auth: {
         sharedSecret: TOKEN_A,
         expires: "2000-01-01T00:00:00.000Z",
         keyFilePath: keyFile,
       },
-      minimalPrepared,
-      undefined,
-      -1,
-      "test-lone",
-    ),
+      prepared: minimalPrepared,
+      verbosity: -1,
+      loggerName: "test-lone",
+    }),
   ).rejects.toThrow("expired");
 
   // The rendezvous was never entered: nothing was written to the drop directory.
@@ -1570,8 +1582,8 @@ test("runProtocol writes no key when the partner never arrives (accept-timeout)"
   // timeout and must persist nothing: the key file is never created.
   const keyFile = path.join(tmpDir, "a.key");
   await expect(
-    runProtocol(
-      {
+    runProtocol({
+      connection: {
         channel: "filedrop",
         path: dropDir,
         options: {
@@ -1579,12 +1591,11 @@ test("runProtocol writes no key when the partner never arrives (accept-timeout)"
           peerTimeoutMs: LONE_PARTY_PEER_BUDGET_MS,
         },
       },
-      { sharedSecret: TOKEN_A, keyFilePath: keyFile },
-      minimalPrepared,
-      undefined,
-      -1,
-      "test-a",
-    ),
+      auth: { sharedSecret: TOKEN_A, keyFilePath: keyFile },
+      prepared: minimalPrepared,
+      verbosity: -1,
+      loggerName: "test-a",
+    }),
   ).rejects.toThrow(/timed out/i);
   expect(fs.existsSync(keyFile)).toBe(false);
 });
@@ -1598,18 +1609,17 @@ test("runProtocol writes no key when SIGINT cancels before the handshake complet
   const keyFile = path.join(tmpDir, "a.key");
   // peerTimeoutMs is generous so the wait does not time out on its own before the
   // signal arrives; the SIGINT is what ends the run.
-  const p = runProtocol(
-    {
+  const p = runProtocol({
+    connection: {
       channel: "filedrop",
       path: dropDir,
       options: { pollIntervalMs: 1, peerTimeoutMs: 5_000 },
     },
-    { sharedSecret: TOKEN_A, keyFilePath: keyFile },
-    minimalPrepared,
-    undefined,
-    -1,
-    "test-a",
-  );
+    auth: { sharedSecret: TOKEN_A, keyFilePath: keyFile },
+    prepared: minimalPrepared,
+    verbosity: -1,
+    loggerName: "test-a",
+  });
   try {
     // Wait until the inviter has published its rendezvous file (it is now waiting
     // for a peer in synchronize()), then cancel. A lone party has no peer whose
@@ -1649,8 +1659,8 @@ async function runIntoLeftoverPeerHello(
     JSON.stringify({ locklessRendezvous: false, retainFiles: false }),
   );
   const [result] = await Promise.allSettled([
-    runProtocol(
-      {
+    runProtocol({
+      connection: {
         channel: "filedrop",
         path: dropDir,
         options: {
@@ -1658,12 +1668,11 @@ async function runIntoLeftoverPeerHello(
           peerTimeoutMs: LONE_PARTY_PEER_BUDGET_MS,
         },
       },
-      { sharedSecret: TOKEN_A, keyFilePath: path.join(tmpDir, "a.key") },
-      minimalPrepared,
-      undefined,
-      -1,
-      "test-a",
-    ),
+      auth: { sharedSecret: TOKEN_A, keyFilePath: path.join(tmpDir, "a.key") },
+      prepared: minimalPrepared,
+      verbosity: -1,
+      loggerName: "test-a",
+    }),
   ]);
   expect(result.status).toBe("rejected");
   return (result as PromiseRejectedResult).reason;
@@ -1772,8 +1781,8 @@ async function runLonePartyWithNoPartner(
   fileSyncRuntime: { sweepExchangeFiles?: boolean } = {},
 ): Promise<unknown> {
   const [result] = await Promise.allSettled([
-    runProtocol(
-      {
+    runProtocol({
+      connection: {
         channel: "filedrop",
         path: dropDir,
         options: {
@@ -1781,16 +1790,12 @@ async function runLonePartyWithNoPartner(
           peerTimeoutMs: LONE_PARTY_PEER_BUDGET_MS,
         },
       },
-      { sharedSecret: TOKEN_A, keyFilePath: path.join(tmpDir, "a.key") },
-      minimalPrepared,
-      undefined,
-      -1,
-      "test-a",
-      undefined,
-      undefined,
-      undefined,
+      auth: { sharedSecret: TOKEN_A, keyFilePath: path.join(tmpDir, "a.key") },
+      prepared: minimalPrepared,
+      verbosity: -1,
+      loggerName: "test-a",
       fileSyncRuntime,
-    ),
+    }),
   ]);
   expect(result.status).toBe("rejected");
   return (result as PromiseRejectedResult).reason;
@@ -1814,8 +1819,8 @@ async function runPartyToKeyExchangeTimeout(
     locklessRendezvous?: boolean;
   } = {},
 ): Promise<unknown> {
-  const surviving = runProtocol(
-    {
+  const surviving = runProtocol({
+    connection: {
       channel: "filedrop",
       path: dropDir,
       options: {
@@ -1827,16 +1832,12 @@ async function runPartyToKeyExchangeTimeout(
         ...connectionOptions,
       },
     },
-    { sharedSecret: TOKEN_A, keyFilePath: path.join(tmpDir, "a.key") },
-    minimalPrepared,
-    undefined,
-    -1,
-    "test-a",
-    undefined,
-    undefined,
-    undefined,
+    auth: { sharedSecret: TOKEN_A, keyFilePath: path.join(tmpDir, "a.key") },
+    prepared: minimalPrepared,
+    verbosity: -1,
+    loggerName: "test-a",
     fileSyncRuntime,
-  );
+  });
   await vi.waitFor(
     () => expect(fs.readdirSync(dropDir).length).toBeGreaterThan(0),
     { timeout: 5_000 },
@@ -1953,30 +1954,30 @@ test("both key files hold the same rotated token after a successful exchange", a
   const outputB = path.join(tmpDir, "out-b.csv");
 
   await Promise.all([
-    runProtocol(
-      {
+    runProtocol({
+      connection: {
         channel: "filedrop",
         path: dropDir,
         options: TWO_PARTY_OPTIONS,
       },
-      { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
-      minimalPrepared,
-      outputA,
-      -1,
-      "test-a",
-    ),
-    runProtocol(
-      {
+      auth: { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
+      prepared: minimalPrepared,
+      output: outputA,
+      verbosity: -1,
+      loggerName: "test-a",
+    }),
+    runProtocol({
+      connection: {
         channel: "filedrop",
         path: dropDir,
         options: TWO_PARTY_OPTIONS,
       },
-      { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
-      minimalPrepared,
-      outputB,
-      -1,
-      "test-b",
-    ),
+      auth: { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
+      prepared: minimalPrepared,
+      output: outputB,
+      verbosity: -1,
+      loggerName: "test-b",
+    }),
   ]);
 
   const loadedA = loadKeyFile(keyFileA);
@@ -2008,22 +2009,38 @@ test("a token_max_age_days policy stamps expires onto both rotated key files", a
 
   const before = Date.now();
   await Promise.all([
-    runProtocol(
-      { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-      { sharedSecret: TOKEN_A, keyFilePath: keyFileA, tokenMaxAgeDays: 30 },
-      minimalPrepared,
-      outputA,
-      -1,
-      "test-a",
-    ),
-    runProtocol(
-      { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-      { sharedSecret: TOKEN_A, keyFilePath: keyFileB, tokenMaxAgeDays: 30 },
-      minimalPrepared,
-      outputB,
-      -1,
-      "test-b",
-    ),
+    runProtocol({
+      connection: {
+        channel: "filedrop",
+        path: dropDir,
+        options: TWO_PARTY_OPTIONS,
+      },
+      auth: {
+        sharedSecret: TOKEN_A,
+        keyFilePath: keyFileA,
+        tokenMaxAgeDays: 30,
+      },
+      prepared: minimalPrepared,
+      output: outputA,
+      verbosity: -1,
+      loggerName: "test-a",
+    }),
+    runProtocol({
+      connection: {
+        channel: "filedrop",
+        path: dropDir,
+        options: TWO_PARTY_OPTIONS,
+      },
+      auth: {
+        sharedSecret: TOKEN_A,
+        keyFilePath: keyFileB,
+        tokenMaxAgeDays: 30,
+      },
+      prepared: minimalPrepared,
+      output: outputB,
+      verbosity: -1,
+      loggerName: "test-b",
+    }),
   ]);
   const after = Date.now();
 
@@ -2078,8 +2095,8 @@ async function awaitBothArmed(): Promise<void> {
 }
 
 function runAbortParty(keyFilePath: string, name: string): Promise<unknown> {
-  return runProtocol(
-    {
+  return runProtocol({
+    connection: {
       channel: "filedrop",
       path: dropDir,
       // Bound peerTimeoutMs: when a party fails it tears down without consuming a
@@ -2093,12 +2110,11 @@ function runAbortParty(keyFilePath: string, name: string): Promise<unknown> {
       // reported as the runExchangeEntries assertion below.
       options: { pollIntervalMs: 1, peerTimeoutMs: 2_000 },
     },
-    { sharedSecret: TOKEN_A, keyFilePath },
-    minimalPrepared,
-    undefined,
-    -1,
-    name,
-  ) as unknown as Promise<unknown>;
+    auth: { sharedSecret: TOKEN_A, keyFilePath },
+    prepared: minimalPrepared,
+    verbosity: -1,
+    loggerName: name,
+  }) as unknown as Promise<unknown>;
 }
 
 test(
@@ -2205,23 +2221,20 @@ function runSigningParty(
   recordOutput?: RecordOutput,
   machineInterface: { eventStream?: boolean } = {},
 ): Promise<unknown> {
-  return runProtocol(
-    {
+  return runProtocol({
+    connection: {
       channel: "filedrop",
       path: dropDir,
       options: TWO_PARTY_OPTIONS,
     },
-    { sharedSecret: TOKEN_A, keyFilePath },
-    minimalPrepared,
-    undefined,
-    -1,
-    name,
+    auth: { sharedSecret: TOKEN_A, keyFilePath },
+    prepared: minimalPrepared,
+    verbosity: -1,
+    loggerName: name,
     recordOutput,
-    undefined,
-    undefined,
-    machineInterface,
-    signingPersistFixture(receiptFile),
-  ) as unknown as Promise<unknown>;
+    fileSyncRuntime: machineInterface,
+    signing: signingPersistFixture(receiptFile),
+  }) as unknown as Promise<unknown>;
 }
 
 test("a completed signed run does not warn about a non-signing partner", async () => {
@@ -2654,19 +2667,16 @@ function runThroughWarnGate(
   recordOutput?: { recordFile?: string },
   eventStream?: boolean,
 ): Promise<unknown> {
-  return runProtocol(
-    { channel: "filedrop", path: dropDir },
-    { sharedSecret: TOKEN_A, keyFilePath: "" },
-    minimalPrepared,
-    undefined,
-    -1,
-    "test",
+  return runProtocol({
+    connection: { channel: "filedrop", path: dropDir },
+    auth: { sharedSecret: TOKEN_A, keyFilePath: "" },
+    prepared: minimalPrepared,
+    verbosity: -1,
+    loggerName: "test",
     recordOutput,
-    undefined,
-    undefined,
-    { eventStream },
+    fileSyncRuntime: { eventStream },
     signing,
-  ) as unknown as Promise<unknown>;
+  }) as unknown as Promise<unknown>;
 }
 
 test("signing with records off warns on both the log and the event stream", async () => {
@@ -2773,30 +2783,28 @@ test("runProtocol suppresses the generic advisory when a tagged error is wrapped
     .mockImplementationOnce(waitForRotationThenThrowWrapped)
     .mockImplementationOnce(waitForRotationThenThrowWrapped);
 
-  const pA = runProtocol(
-    {
+  const pA = runProtocol({
+    connection: {
       channel: "filedrop",
       path: dropDir,
       options: TWO_PARTY_OPTIONS,
     },
-    { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
-    minimalPrepared,
-    undefined,
-    -1,
-    "test-a",
-  );
-  const pB = runProtocol(
-    {
+    auth: { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
+    prepared: minimalPrepared,
+    verbosity: -1,
+    loggerName: "test-a",
+  });
+  const pB = runProtocol({
+    connection: {
       channel: "filedrop",
       path: dropDir,
       options: TWO_PARTY_OPTIONS,
     },
-    { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
-    minimalPrepared,
-    undefined,
-    -1,
-    "test-b",
-  );
+    auth: { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
+    prepared: minimalPrepared,
+    verbosity: -1,
+    loggerName: "test-b",
+  });
 
   const [resultA, resultB] = await Promise.allSettled([pA, pB]);
   expect(resultA.status).toBe("rejected");
@@ -2828,22 +2836,28 @@ test("runProtocol suppresses the generic advisory for a terminal FrameSizeExceed
     .mockImplementationOnce(waitForRotationThenThrowFrameSize)
     .mockImplementationOnce(waitForRotationThenThrowFrameSize);
 
-  const pA = runProtocol(
-    { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-    { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
-    minimalPrepared,
-    undefined,
-    -1,
-    "test-a",
-  );
-  const pB = runProtocol(
-    { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-    { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
-    minimalPrepared,
-    undefined,
-    -1,
-    "test-b",
-  );
+  const pA = runProtocol({
+    connection: {
+      channel: "filedrop",
+      path: dropDir,
+      options: TWO_PARTY_OPTIONS,
+    },
+    auth: { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
+    prepared: minimalPrepared,
+    verbosity: -1,
+    loggerName: "test-a",
+  });
+  const pB = runProtocol({
+    connection: {
+      channel: "filedrop",
+      path: dropDir,
+      options: TWO_PARTY_OPTIONS,
+    },
+    auth: { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
+    prepared: minimalPrepared,
+    verbosity: -1,
+    loggerName: "test-b",
+  });
 
   const [resultA, resultB] = await Promise.allSettled([pA, pB]);
   expect(resultA.status).toBe("rejected");
@@ -2878,22 +2892,28 @@ test("runProtocol suppresses the generic advisory for the reply-cap internal fau
     .mockImplementationOnce(waitForRotationThenThrowInternalFault)
     .mockImplementationOnce(waitForRotationThenThrowInternalFault);
 
-  const pA = runProtocol(
-    { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-    { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
-    minimalPrepared,
-    undefined,
-    -1,
-    "test-a",
-  );
-  const pB = runProtocol(
-    { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-    { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
-    minimalPrepared,
-    undefined,
-    -1,
-    "test-b",
-  );
+  const pA = runProtocol({
+    connection: {
+      channel: "filedrop",
+      path: dropDir,
+      options: TWO_PARTY_OPTIONS,
+    },
+    auth: { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
+    prepared: minimalPrepared,
+    verbosity: -1,
+    loggerName: "test-a",
+  });
+  const pB = runProtocol({
+    connection: {
+      channel: "filedrop",
+      path: dropDir,
+      options: TWO_PARTY_OPTIONS,
+    },
+    auth: { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
+    prepared: minimalPrepared,
+    verbosity: -1,
+    loggerName: "test-b",
+  });
 
   const [resultA, resultB] = await Promise.allSettled([pA, pB]);
   expect(resultA.status).toBe("rejected");
@@ -2930,22 +2950,28 @@ test("runProtocol suppresses the generic advisory for the invitation-term diverg
     .mockImplementationOnce(waitForRotationThenThrowDivergence)
     .mockImplementationOnce(waitForRotationThenThrowDivergence);
 
-  const pA = runProtocol(
-    { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-    { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
-    minimalPrepared,
-    undefined,
-    -1,
-    "test-a",
-  );
-  const pB = runProtocol(
-    { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-    { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
-    minimalPrepared,
-    undefined,
-    -1,
-    "test-b",
-  );
+  const pA = runProtocol({
+    connection: {
+      channel: "filedrop",
+      path: dropDir,
+      options: TWO_PARTY_OPTIONS,
+    },
+    auth: { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
+    prepared: minimalPrepared,
+    verbosity: -1,
+    loggerName: "test-a",
+  });
+  const pB = runProtocol({
+    connection: {
+      channel: "filedrop",
+      path: dropDir,
+      options: TWO_PARTY_OPTIONS,
+    },
+    auth: { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
+    prepared: minimalPrepared,
+    verbosity: -1,
+    loggerName: "test-b",
+  });
 
   const [resultA, resultB] = await Promise.allSettled([pA, pB]);
   expect(resultA.status).toBe("rejected");
@@ -2975,30 +3001,28 @@ test("runProtocol logs recovery message when an error occurs after tokenRotated=
     .mockImplementationOnce(waitForRotationThenThrow)
     .mockImplementationOnce(waitForRotationThenThrow);
 
-  const pA = runProtocol(
-    {
+  const pA = runProtocol({
+    connection: {
       channel: "filedrop",
       path: dropDir,
       options: TWO_PARTY_OPTIONS,
     },
-    { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
-    minimalPrepared,
-    undefined,
-    -1,
-    "test-a",
-  );
-  const pB = runProtocol(
-    {
+    auth: { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
+    prepared: minimalPrepared,
+    verbosity: -1,
+    loggerName: "test-a",
+  });
+  const pB = runProtocol({
+    connection: {
       channel: "filedrop",
       path: dropDir,
       options: TWO_PARTY_OPTIONS,
     },
-    { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
-    minimalPrepared,
-    undefined,
-    -1,
-    "test-b",
-  );
+    auth: { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
+    prepared: minimalPrepared,
+    verbosity: -1,
+    loggerName: "test-b",
+  });
 
   const [resultA, resultB] = await Promise.allSettled([pA, pB]);
   expect(resultA.status).toBe("rejected");
@@ -3054,30 +3078,28 @@ test.skipIf(process.platform === "win32")(
 
     // B starts first (becomes responder) so that B's saveKeyFile failure
     // happens after the key exchange completes but before B's runExchange is reached.
-    const bPromise = runProtocol(
-      {
+    const bPromise = runProtocol({
+      connection: {
         ...dropConfig,
       },
-      { sharedSecret: TOKEN_A, keyFilePath: bogusKeyFile },
-      minimalPrepared,
-      undefined,
-      -1,
-      "test-b",
-    );
+      auth: { sharedSecret: TOKEN_A, keyFilePath: bogusKeyFile },
+      prepared: minimalPrepared,
+      verbosity: -1,
+      loggerName: "test-b",
+    });
 
     // Wait for B to register its hello file so role assignment is deterministic.
     await backdateDropDirRendezvousFile(dropDir);
 
-    const aPromise = runProtocol(
-      {
+    const aPromise = runProtocol({
+      connection: {
         ...dropConfig,
       },
-      { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
-      minimalPrepared,
-      undefined,
-      -1,
-      "test-a",
-    );
+      auth: { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
+      prepared: minimalPrepared,
+      verbosity: -1,
+      loggerName: "test-a",
+    });
 
     const [, resultB] = await Promise.allSettled([aPromise, bPromise]);
     expect(resultB.status).toBe("rejected");
@@ -3118,30 +3140,28 @@ test("runProtocol logs an 'error in flight when SIGINT arrived' error when inter
         }),
     );
 
-  const pA = runProtocol(
-    {
+  const pA = runProtocol({
+    connection: {
       channel: "filedrop",
       path: dropDir,
       options: TWO_PARTY_OPTIONS,
     },
-    null,
-    minimalPrepared,
-    undefined,
-    -1,
-    "test-a",
-  );
-  const pB = runProtocol(
-    {
+    auth: null,
+    prepared: minimalPrepared,
+    verbosity: -1,
+    loggerName: "test-a",
+  });
+  const pB = runProtocol({
+    connection: {
       channel: "filedrop",
       path: dropDir,
       options: TWO_PARTY_OPTIONS,
     },
-    null,
-    minimalPrepared,
-    undefined,
-    -1,
-    "test-b",
-  );
+    auth: null,
+    prepared: minimalPrepared,
+    verbosity: -1,
+    loggerName: "test-b",
+  });
 
   try {
     await vi.waitFor(
@@ -3198,22 +3218,28 @@ test("runProtocol sanitizes a hostile cause chain in the signal in-flight log", 
         }),
     );
 
-  const pA = runProtocol(
-    { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-    null,
-    minimalPrepared,
-    undefined,
-    -1,
-    "test-a",
-  );
-  const pB = runProtocol(
-    { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-    null,
-    minimalPrepared,
-    undefined,
-    -1,
-    "test-b",
-  );
+  const pA = runProtocol({
+    connection: {
+      channel: "filedrop",
+      path: dropDir,
+      options: TWO_PARTY_OPTIONS,
+    },
+    auth: null,
+    prepared: minimalPrepared,
+    verbosity: -1,
+    loggerName: "test-a",
+  });
+  const pB = runProtocol({
+    connection: {
+      channel: "filedrop",
+      path: dropDir,
+      options: TWO_PARTY_OPTIONS,
+    },
+    auth: null,
+    prepared: minimalPrepared,
+    verbosity: -1,
+    loggerName: "test-b",
+  });
 
   try {
     await vi.waitFor(
@@ -3275,30 +3301,28 @@ test("SIGINT logs recovery message when tokenRotated=true", async () => {
         }),
     );
 
-  const pA = runProtocol(
-    {
+  const pA = runProtocol({
+    connection: {
       channel: "filedrop",
       path: dropDir,
       options: TWO_PARTY_OPTIONS,
     },
-    { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
-    minimalPrepared,
-    undefined,
-    -1,
-    "test-a",
-  );
-  const pB = runProtocol(
-    {
+    auth: { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
+    prepared: minimalPrepared,
+    verbosity: -1,
+    loggerName: "test-a",
+  });
+  const pB = runProtocol({
+    connection: {
       channel: "filedrop",
       path: dropDir,
       options: TWO_PARTY_OPTIONS,
     },
-    { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
-    minimalPrepared,
-    undefined,
-    -1,
-    "test-b",
-  );
+    auth: { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
+    prepared: minimalPrepared,
+    verbosity: -1,
+    loggerName: "test-b",
+  });
 
   try {
     await vi.waitFor(
@@ -3349,18 +3373,17 @@ test("SIGINT mid-synchronize exits with 130 and cleans up the hello file (starte
     return undefined as never;
   });
 
-  const pA = runProtocol(
-    {
+  const pA = runProtocol({
+    connection: {
       channel: "filedrop",
       path: dropDir,
       options: { pollIntervalMs: 1 },
     },
-    null,
-    minimalPrepared,
-    undefined,
-    -1,
-    "test-a",
-  );
+    auth: null,
+    prepared: minimalPrepared,
+    verbosity: -1,
+    loggerName: "test-a",
+  });
 
   try {
     // Hello file present in dropDir confirms synchronize() reached waitForPeer.
@@ -3415,30 +3438,28 @@ test("SIGTERM logs recovery message when tokenRotated=true", async () => {
         }),
     );
 
-  const pA = runProtocol(
-    {
+  const pA = runProtocol({
+    connection: {
       channel: "filedrop",
       path: dropDir,
       options: TWO_PARTY_OPTIONS,
     },
-    { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
-    minimalPrepared,
-    undefined,
-    -1,
-    "test-a",
-  );
-  const pB = runProtocol(
-    {
+    auth: { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
+    prepared: minimalPrepared,
+    verbosity: -1,
+    loggerName: "test-a",
+  });
+  const pB = runProtocol({
+    connection: {
       channel: "filedrop",
       path: dropDir,
       options: TWO_PARTY_OPTIONS,
     },
-    { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
-    minimalPrepared,
-    undefined,
-    -1,
-    "test-b",
-  );
+    auth: { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
+    prepared: minimalPrepared,
+    verbosity: -1,
+    loggerName: "test-b",
+  });
 
   try {
     await vi.waitFor(
@@ -3495,30 +3516,28 @@ test("runProtocol resolves (does not reject) when interrupted by SIGINT mid-runE
         }),
     );
 
-  const pA = runProtocol(
-    {
+  const pA = runProtocol({
+    connection: {
       channel: "filedrop",
       path: dropDir,
       options: TWO_PARTY_OPTIONS,
     },
-    null,
-    minimalPrepared,
-    undefined,
-    -1,
-    "test-a",
-  );
-  const pB = runProtocol(
-    {
+    auth: null,
+    prepared: minimalPrepared,
+    verbosity: -1,
+    loggerName: "test-a",
+  });
+  const pB = runProtocol({
+    connection: {
       channel: "filedrop",
       path: dropDir,
       options: TWO_PARTY_OPTIONS,
     },
-    null,
-    minimalPrepared,
-    undefined,
-    -1,
-    "test-b",
-  );
+    auth: null,
+    prepared: minimalPrepared,
+    verbosity: -1,
+    loggerName: "test-b",
+  });
 
   try {
     await vi.waitFor(
@@ -3569,30 +3588,28 @@ test("runProtocol resolves (does not reject) when interrupted by SIGTERM mid-run
         }),
     );
 
-  const pA = runProtocol(
-    {
+  const pA = runProtocol({
+    connection: {
       channel: "filedrop",
       path: dropDir,
       options: TWO_PARTY_OPTIONS,
     },
-    null,
-    minimalPrepared,
-    undefined,
-    -1,
-    "test-a",
-  );
-  const pB = runProtocol(
-    {
+    auth: null,
+    prepared: minimalPrepared,
+    verbosity: -1,
+    loggerName: "test-a",
+  });
+  const pB = runProtocol({
+    connection: {
       channel: "filedrop",
       path: dropDir,
       options: TWO_PARTY_OPTIONS,
     },
-    null,
-    minimalPrepared,
-    undefined,
-    -1,
-    "test-b",
-  );
+    auth: null,
+    prepared: minimalPrepared,
+    verbosity: -1,
+    loggerName: "test-b",
+  });
 
   try {
     await vi.waitFor(
@@ -3677,30 +3694,28 @@ test("authenticated exchange runs through EncryptedMessageConnection: wire bytes
 
   try {
     await Promise.all([
-      runProtocol(
-        {
+      runProtocol({
+        connection: {
           channel: "filedrop",
           path: dropDir,
           options: TWO_PARTY_OPTIONS,
         },
-        { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
-        minimalPrepared,
-        undefined,
-        -1,
-        "test-a",
-      ),
-      runProtocol(
-        {
+        auth: { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
+        prepared: minimalPrepared,
+        verbosity: -1,
+        loggerName: "test-a",
+      }),
+      runProtocol({
+        connection: {
           channel: "filedrop",
           path: dropDir,
           options: TWO_PARTY_OPTIONS,
         },
-        { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
-        minimalPrepared,
-        undefined,
-        -1,
-        "test-b",
-      ),
+        auth: { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
+        prepared: minimalPrepared,
+        verbosity: -1,
+        loggerName: "test-b",
+      }),
     ]);
 
     // 1. The peer decrypted the frame back to the exact object that was sent:
@@ -3798,33 +3813,29 @@ test("runProtocol invokes onAuthenticated after the rotated key is saved and bef
   };
 
   const [resultA] = await Promise.all([
-    runProtocol(
-      {
+    runProtocol({
+      connection: {
         channel: "filedrop",
         path: dropDir,
         options: TWO_PARTY_OPTIONS,
       },
-      { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
-      preparedA,
-      undefined,
-      -1,
-      "test-a",
-      undefined,
-      undefined,
-      onAuthenticatedA,
-    ),
-    runProtocol(
-      {
+      auth: { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
+      prepared: preparedA,
+      verbosity: -1,
+      loggerName: "test-a",
+      onAuthenticated: onAuthenticatedA,
+    }),
+    runProtocol({
+      connection: {
         channel: "filedrop",
         path: dropDir,
         options: TWO_PARTY_OPTIONS,
       },
-      { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
-      preparedB,
-      undefined,
-      -1,
-      "test-b",
-    ),
+      auth: { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
+      prepared: preparedB,
+      verbosity: -1,
+      loggerName: "test-b",
+    }),
   ]);
 
   // Fired after the key save: the hook saw a rotated (non-original) token.
@@ -3856,36 +3867,30 @@ test("runProtocol persists the onAuthenticated side effect even when the data ex
     .mockImplementationOnce(waitForRotationThenThrow)
     .mockImplementationOnce(waitForRotationThenThrow);
 
-  const pA = runProtocol(
-    {
+  const pA = runProtocol({
+    connection: {
       channel: "filedrop",
       path: dropDir,
       options: TWO_PARTY_OPTIONS,
     },
-    { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
-    minimalPrepared,
-    undefined,
-    -1,
-    "test-a",
-    undefined,
-    undefined,
-    () => fs.writeFileSync(markerA, "config-a"),
-  );
-  const pB = runProtocol(
-    {
+    auth: { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
+    prepared: minimalPrepared,
+    verbosity: -1,
+    loggerName: "test-a",
+    onAuthenticated: () => fs.writeFileSync(markerA, "config-a"),
+  });
+  const pB = runProtocol({
+    connection: {
       channel: "filedrop",
       path: dropDir,
       options: TWO_PARTY_OPTIONS,
     },
-    { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
-    minimalPrepared,
-    undefined,
-    -1,
-    "test-b",
-    undefined,
-    undefined,
-    () => fs.writeFileSync(markerB, "config-b"),
-  );
+    auth: { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
+    prepared: minimalPrepared,
+    verbosity: -1,
+    loggerName: "test-b",
+    onAuthenticated: () => fs.writeFileSync(markerB, "config-b"),
+  });
 
   const [resultA, resultB] = await Promise.allSettled([pA, pB]);
   expect(resultA.status).toBe("rejected");
@@ -3924,36 +3929,30 @@ test("runProtocol's recovery hint does not promise a clean retry when the post-h
     throw new Error("simulated config-write failure");
   };
 
-  const pA = runProtocol(
-    {
+  const pA = runProtocol({
+    connection: {
       channel: "filedrop",
       path: dropDir,
       options: TWO_PARTY_OPTIONS,
     },
-    { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
-    minimalPrepared,
-    undefined,
-    -1,
-    "test-a",
-    undefined,
-    undefined,
-    failingHook,
-  );
-  const pB = runProtocol(
-    {
+    auth: { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
+    prepared: minimalPrepared,
+    verbosity: -1,
+    loggerName: "test-a",
+    onAuthenticated: failingHook,
+  });
+  const pB = runProtocol({
+    connection: {
       channel: "filedrop",
       path: dropDir,
       options: TWO_PARTY_OPTIONS,
     },
-    { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
-    minimalPrepared,
-    undefined,
-    -1,
-    "test-b",
-    undefined,
-    undefined,
-    failingHook,
-  );
+    auth: { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
+    prepared: minimalPrepared,
+    verbosity: -1,
+    loggerName: "test-b",
+    onAuthenticated: failingHook,
+  });
 
   const [resultA, resultB] = await Promise.allSettled([pA, pB]);
   expect(resultA.status).toBe("rejected");
@@ -3985,44 +3984,38 @@ test("runProtocol does not invoke onAuthenticated when the handshake fails", asy
   const markerA = path.join(tmpDir, "config-a.marker");
   const markerB = path.join(tmpDir, "config-b.marker");
 
-  const pA = runProtocol(
-    {
+  const pA = runProtocol({
+    connection: {
       channel: "filedrop",
       path: dropDir,
       options: TWO_PARTY_OPTIONS,
     },
-    {
+    auth: {
       sharedSecret: TOKEN_A,
       expires: expired,
       keyFilePath: keyFileA,
     },
-    minimalPrepared,
-    undefined,
-    -1,
-    "test-a",
-    undefined,
-    undefined,
-    () => fs.writeFileSync(markerA, "config-a"),
-  );
-  const pB = runProtocol(
-    {
+    prepared: minimalPrepared,
+    verbosity: -1,
+    loggerName: "test-a",
+    onAuthenticated: () => fs.writeFileSync(markerA, "config-a"),
+  });
+  const pB = runProtocol({
+    connection: {
       channel: "filedrop",
       path: dropDir,
       options: TWO_PARTY_OPTIONS,
     },
-    {
+    auth: {
       sharedSecret: TOKEN_A,
       expires: expired,
       keyFilePath: keyFileB,
     },
-    minimalPrepared,
-    undefined,
-    -1,
-    "test-b",
-    undefined,
-    undefined,
-    () => fs.writeFileSync(markerB, "config-b"),
-  );
+    prepared: minimalPrepared,
+    verbosity: -1,
+    loggerName: "test-b",
+    onAuthenticated: () => fs.writeFileSync(markerB, "config-b"),
+  });
 
   const [resultA, resultB] = await Promise.allSettled([pA, pB]);
   expect(resultA.status).toBe("rejected");
@@ -4050,33 +4043,29 @@ test("a throw from onAuthenticated is non-fatal: the exchange still runs and the
   };
 
   const [resultA, resultB] = await Promise.allSettled([
-    runProtocol(
-      {
+    runProtocol({
+      connection: {
         channel: "filedrop",
         path: dropDir,
         options: TWO_PARTY_OPTIONS,
       },
-      { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
-      minimalPrepared,
-      undefined,
-      -1,
-      "test-a",
-      undefined,
-      undefined,
-      throwingHook,
-    ),
-    runProtocol(
-      {
+      auth: { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
+      prepared: minimalPrepared,
+      verbosity: -1,
+      loggerName: "test-a",
+      onAuthenticated: throwingHook,
+    }),
+    runProtocol({
+      connection: {
         channel: "filedrop",
         path: dropDir,
         options: TWO_PARTY_OPTIONS,
       },
-      { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
-      minimalPrepared,
-      undefined,
-      -1,
-      "test-b",
-    ),
+      auth: { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
+      prepared: minimalPrepared,
+      verbosity: -1,
+      loggerName: "test-b",
+    }),
   ]);
 
   // The exchange completed on both sides despite A's hook throwing.
@@ -4114,28 +4103,32 @@ test("a failed post-authentication hook warns on fd 3 and exits 73 with a result
   mockFd3Open();
   try {
     const [resultA, resultB] = await Promise.all([
-      runProtocol(
-        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-        { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
-        minimalPrepared,
-        undefined,
-        -1,
-        "test-a",
-        undefined,
-        undefined,
-        () => {
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
+        prepared: minimalPrepared,
+        verbosity: -1,
+        loggerName: "test-a",
+        onAuthenticated: () => {
           throw new Error("simulated config write failure");
         },
-        { eventStream: true },
-      ),
-      runProtocol(
-        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-        { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
-        minimalPrepared,
-        undefined,
-        -1,
-        "test-b",
-      ),
+        fileSyncRuntime: { eventStream: true },
+      }),
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
+        prepared: minimalPrepared,
+        verbosity: -1,
+        loggerName: "test-b",
+      }),
     ]);
     // The exchange itself completed on both sides; only the hook was lost.
     expect(resultA.onAuthenticatedError).toBeInstanceOf(Error);
@@ -4178,33 +4171,29 @@ test("an async onAuthenticated that rejects is non-fatal: the exchange still run
   };
 
   const [resultA, resultB] = await Promise.allSettled([
-    runProtocol(
-      {
+    runProtocol({
+      connection: {
         channel: "filedrop",
         path: dropDir,
         options: TWO_PARTY_OPTIONS,
       },
-      { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
-      minimalPrepared,
-      undefined,
-      -1,
-      "test-a",
-      undefined,
-      undefined,
-      rejectingHook,
-    ),
-    runProtocol(
-      {
+      auth: { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
+      prepared: minimalPrepared,
+      verbosity: -1,
+      loggerName: "test-a",
+      onAuthenticated: rejectingHook,
+    }),
+    runProtocol({
+      connection: {
         channel: "filedrop",
         path: dropDir,
         options: TWO_PARTY_OPTIONS,
       },
-      { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
-      minimalPrepared,
-      undefined,
-      -1,
-      "test-b",
-    ),
+      auth: { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
+      prepared: minimalPrepared,
+      verbosity: -1,
+      loggerName: "test-b",
+    }),
   ]);
 
   // The exchange completed despite A's async hook rejecting.
@@ -4245,33 +4234,29 @@ test("a hook that throws a falsy value still reports a defined onAuthenticatedEr
   };
 
   const [resultA, resultB] = await Promise.allSettled([
-    runProtocol(
-      {
+    runProtocol({
+      connection: {
         channel: "filedrop",
         path: dropDir,
         options: TWO_PARTY_OPTIONS,
       },
-      { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
-      minimalPrepared,
-      undefined,
-      -1,
-      "test-a",
-      undefined,
-      undefined,
-      throwFalsyHook,
-    ),
-    runProtocol(
-      {
+      auth: { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
+      prepared: minimalPrepared,
+      verbosity: -1,
+      loggerName: "test-a",
+      onAuthenticated: throwFalsyHook,
+    }),
+    runProtocol({
+      connection: {
         channel: "filedrop",
         path: dropDir,
         options: TWO_PARTY_OPTIONS,
       },
-      { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
-      minimalPrepared,
-      undefined,
-      -1,
-      "test-b",
-    ),
+      auth: { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
+      prepared: minimalPrepared,
+      verbosity: -1,
+      loggerName: "test-b",
+    }),
   ]);
 
   expect(resultA.status).toBe("fulfilled");
@@ -4293,30 +4278,28 @@ test("runProtocol without onAuthenticated runs a normal authenticated exchange (
   saveKeyFile(keyFileB, { sharedSecret: TOKEN_A });
 
   await Promise.all([
-    runProtocol(
-      {
+    runProtocol({
+      connection: {
         channel: "filedrop",
         path: dropDir,
         options: TWO_PARTY_OPTIONS,
       },
-      { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
-      minimalPrepared,
-      undefined,
-      -1,
-      "test-a",
-    ),
-    runProtocol(
-      {
+      auth: { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
+      prepared: minimalPrepared,
+      verbosity: -1,
+      loggerName: "test-a",
+    }),
+    runProtocol({
+      connection: {
         channel: "filedrop",
         path: dropDir,
         options: TWO_PARTY_OPTIONS,
       },
-      { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
-      minimalPrepared,
-      undefined,
-      -1,
-      "test-b",
-    ),
+      auth: { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
+      prepared: minimalPrepared,
+      verbosity: -1,
+      loggerName: "test-b",
+    }),
   ]);
 
   const a = loadKeyFile(keyFileA)?.sharedSecret;
@@ -4369,22 +4352,18 @@ test("an expired shared secret under --event-stream emits exactly one terminal e
   mockFd3Open();
   try {
     await expect(
-      runProtocol(
-        { channel: "filedrop", path: dropDir },
-        {
+      runProtocol({
+        connection: { channel: "filedrop", path: dropDir },
+        auth: {
           sharedSecret: TOKEN_A,
           expires: "2000-01-01T00:00:00.000Z",
           keyFilePath: path.join(tmpDir, "expired.key"),
         },
-        minimalPrepared,
-        undefined,
-        -1,
-        "test",
-        undefined,
-        undefined,
-        undefined,
-        { eventStream: true },
-      ),
+        prepared: minimalPrepared,
+        verbosity: -1,
+        loggerName: "test",
+        fileSyncRuntime: { eventStream: true },
+      }),
     ).rejects.toThrow(/expired/);
   } finally {
     vi.mocked(fs.fstatSync).mockRestore();
@@ -4410,21 +4389,17 @@ test("a main-try failure under --event-stream emits exactly one terminal error e
   mockFd3Open();
   try {
     await expect(
-      runProtocol(
-        {
+      runProtocol({
+        connection: {
           channel: "filedrop",
           path: "/nonexistent-path-that-cannot-exist-psilink-test",
         },
-        null,
-        minimalPrepared,
-        undefined,
-        -1,
-        "test",
-        undefined,
-        undefined,
-        undefined,
-        { eventStream: true },
-      ),
+        auth: null,
+        prepared: minimalPrepared,
+        verbosity: -1,
+        loggerName: "test",
+        fileSyncRuntime: { eventStream: true },
+      }),
     ).rejects.toThrow();
   } finally {
     vi.mocked(fs.fstatSync).mockRestore();
@@ -4448,26 +4423,30 @@ test("a count-only run's terminal event carries the count beside resultWritten:f
   mockFd3Open();
   try {
     await Promise.all([
-      runProtocol(
-        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-        null,
-        minimalPrepared,
-        path.join(tmpDir, "count-only-stream.csv"),
-        -1,
-        "test-a",
-        undefined,
-        undefined,
-        undefined,
-        { eventStream: true },
-      ),
-      runProtocol(
-        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-        null,
-        minimalPrepared,
-        undefined,
-        -1,
-        "test-b",
-      ),
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        output: path.join(tmpDir, "count-only-stream.csv"),
+        verbosity: -1,
+        loggerName: "test-a",
+        fileSyncRuntime: { eventStream: true },
+      }),
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        verbosity: -1,
+        loggerName: "test-b",
+      }),
     ]);
   } finally {
     vi.mocked(fs.fstatSync).mockRestore();
@@ -4497,26 +4476,30 @@ test("a receiver seat's count-only event reports the count as computed here", as
   mockFd3Open();
   try {
     await Promise.all([
-      runProtocol(
-        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-        null,
-        minimalPrepared,
-        path.join(tmpDir, "count-only-receiver-stream.csv"),
-        -1,
-        "test-a",
-        undefined,
-        undefined,
-        undefined,
-        { eventStream: true },
-      ),
-      runProtocol(
-        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-        null,
-        minimalPrepared,
-        undefined,
-        -1,
-        "test-b",
-      ),
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        output: path.join(tmpDir, "count-only-receiver-stream.csv"),
+        verbosity: -1,
+        loggerName: "test-a",
+        fileSyncRuntime: { eventStream: true },
+      }),
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        verbosity: -1,
+        loggerName: "test-b",
+      }),
     ]);
   } finally {
     vi.mocked(fs.fstatSync).mockRestore();
@@ -4544,26 +4527,30 @@ test("a withheld result's terminal event carries no count at all", async () => {
   mockFd3Open();
   try {
     await Promise.all([
-      runProtocol(
-        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-        null,
-        minimalPrepared,
-        path.join(tmpDir, "withheld-stream.csv"),
-        -1,
-        "test-a",
-        undefined,
-        undefined,
-        undefined,
-        { eventStream: true },
-      ),
-      runProtocol(
-        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-        null,
-        minimalPrepared,
-        undefined,
-        -1,
-        "test-b",
-      ),
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        output: path.join(tmpDir, "withheld-stream.csv"),
+        verbosity: -1,
+        loggerName: "test-a",
+        fileSyncRuntime: { eventStream: true },
+      }),
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        verbosity: -1,
+        loggerName: "test-b",
+      }),
     ]);
   } finally {
     vi.mocked(fs.fstatSync).mockRestore();
@@ -4606,26 +4593,29 @@ test("an emitter passed instead of the flag carries every event, and no second s
   const fd3 = mockFd3Open();
   try {
     await Promise.all([
-      runProtocol(
-        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-        null,
-        minimalPrepared,
-        undefined,
-        -1,
-        "test-a",
-        undefined,
-        undefined,
-        undefined,
-        { eventStream: emitter },
-      ),
-      runProtocol(
-        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-        null,
-        minimalPrepared,
-        undefined,
-        -1,
-        "test-b",
-      ),
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        verbosity: -1,
+        loggerName: "test-a",
+        fileSyncRuntime: { eventStream: emitter },
+      }),
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        verbosity: -1,
+        loggerName: "test-b",
+      }),
     ]);
   } finally {
     vi.mocked(fs.fstatSync).mockRestore();
@@ -4672,32 +4662,35 @@ test("a loss reported from the pre-terminal hook precedes the metrics and termin
   let seen: string[] | undefined;
   try {
     await Promise.all([
-      runProtocol(
-        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-        null,
-        minimalPrepared,
-        undefined,
-        -1,
-        "test-a",
-        undefined,
-        undefined,
-        undefined,
-        {
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        verbosity: -1,
+        loggerName: "test-a",
+        fileSyncRuntime: {
           eventStream: emitter,
           onOutputComplete: ({ observedReceivedPayloadColumns }) => {
             seen = observedReceivedPayloadColumns;
             reportPersistenceLoss("the lock-in was not recorded", emitter);
           },
         },
-      ),
-      runProtocol(
-        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-        null,
-        minimalPrepared,
-        undefined,
-        -1,
-        "test-b",
-      ),
+      }),
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        verbosity: -1,
+        loggerName: "test-b",
+      }),
     ]);
     // Reported on the exit code too, from inside the hook rather than after it.
     expect(process.exitCode).toBe(73);
@@ -4724,32 +4717,35 @@ test("a throw from the pre-terminal hook does not fail the completed exchange", 
   let seen: string[] | undefined;
   try {
     await Promise.all([
-      runProtocol(
-        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-        null,
-        minimalPrepared,
-        undefined,
-        -1,
-        "test-a",
-        undefined,
-        undefined,
-        undefined,
-        {
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        verbosity: -1,
+        loggerName: "test-a",
+        fileSyncRuntime: {
           eventStream: emitter,
           onOutputComplete: ({ observedReceivedPayloadColumns }) => {
             seen = observedReceivedPayloadColumns;
             throw new Error("the hook let one escape");
           },
         },
-      ),
-      runProtocol(
-        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-        null,
-        minimalPrepared,
-        undefined,
-        -1,
-        "test-b",
-      ),
+      }),
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        verbosity: -1,
+        loggerName: "test-b",
+      }),
     ]);
     // The run resolved: the exchange completed and its observation reached the
     // hook, which is the only route it takes out of runProtocol.
@@ -4797,22 +4793,28 @@ test("a hostile stage label and terms warning reach the human log neutralized", 
   }) as never);
 
   await Promise.all([
-    runProtocol(
-      { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-      null,
-      minimalPrepared,
-      undefined,
-      -1,
-      "test-a",
-    ),
-    runProtocol(
-      { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-      null,
-      minimalPrepared,
-      undefined,
-      -1,
-      "test-b",
-    ),
+    runProtocol({
+      connection: {
+        channel: "filedrop",
+        path: dropDir,
+        options: TWO_PARTY_OPTIONS,
+      },
+      auth: null,
+      prepared: minimalPrepared,
+      verbosity: -1,
+      loggerName: "test-a",
+    }),
+    runProtocol({
+      connection: {
+        channel: "filedrop",
+        path: dropDir,
+        options: TWO_PARTY_OPTIONS,
+      },
+      auth: null,
+      prepared: minimalPrepared,
+      verbosity: -1,
+      loggerName: "test-b",
+    }),
   ]);
 
   const stageLine = mockState.infos.find((m) => m.includes("EVIL stage"));
@@ -4838,8 +4840,8 @@ test("a hostile stage label and terms warning reach the human log neutralized", 
 // already run and recorded its options.
 
 test("runProtocol threads connection_per_poll into the adapter's ephemeralSessions", async () => {
-  await runProtocol(
-    {
+  await runProtocol({
+    connection: {
       channel: "sftp",
       server: {
         host: "sftp.example.org",
@@ -4847,30 +4849,28 @@ test("runProtocol threads connection_per_poll into the adapter's ephemeralSessio
       },
       options: { connectionPerPoll: true },
     },
-    null,
-    minimalPrepared,
-    undefined,
-    -1,
-    "test",
-  ).catch(() => undefined);
+    auth: null,
+    prepared: minimalPrepared,
+    verbosity: -1,
+    loggerName: "test",
+  }).catch(() => undefined);
   expect(mockState.lastSftpAdapterOptions?.["ephemeralSessions"]).toBe(true);
 });
 
 test("runProtocol leaves ephemeralSessions unset when connection_per_poll is absent", async () => {
-  await runProtocol(
-    {
+  await runProtocol({
+    connection: {
       channel: "sftp",
       server: {
         host: "sftp.example.org",
         hostKeyFingerprint: "SHA256:" + "A".repeat(43),
       },
     },
-    null,
-    minimalPrepared,
-    undefined,
-    -1,
-    "test",
-  ).catch(() => undefined);
+    auth: null,
+    prepared: minimalPrepared,
+    verbosity: -1,
+    loggerName: "test",
+  }).catch(() => undefined);
   expect(
     mockState.lastSftpAdapterOptions?.["ephemeralSessions"],
   ).toBeUndefined();
@@ -4915,18 +4915,18 @@ test("a mismatched shared secret under --event-stream emits category security an
   let resA: PromiseSettledResult<unknown>;
   try {
     [resA] = await Promise.allSettled([
-      runProtocol(
-        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-        { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
-        minimalPrepared,
-        undefined,
-        -1,
-        "test-a",
-        undefined,
-        undefined,
-        undefined,
-        { eventStream: true },
-      ),
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
+        prepared: minimalPrepared,
+        verbosity: -1,
+        loggerName: "test-a",
+        fileSyncRuntime: { eventStream: true },
+      }),
       partyB,
     ]);
   } finally {
@@ -4971,24 +4971,20 @@ test("an SFTP host-key mismatch under --event-stream emits category security and
   mockFd3Open();
   let err: unknown;
   try {
-    err = await runProtocol(
-      {
+    err = await runProtocol({
+      connection: {
         channel: "sftp",
         server: {
           host: "sftp.example.org",
           hostKeyFingerprint: "SHA256:" + "A".repeat(43),
         },
       },
-      null,
-      minimalPrepared,
-      undefined,
-      -1,
-      "test",
-      undefined,
-      undefined,
-      undefined,
-      { eventStream: true },
-    ).then(
+      auth: null,
+      prepared: minimalPrepared,
+      verbosity: -1,
+      loggerName: "test",
+      fileSyncRuntime: { eventStream: true },
+    }).then(
       () => {
         throw new Error("expected the host-key mismatch to reject");
       },
@@ -5043,26 +5039,29 @@ test("a host-key divergence under --event-stream emits a warning event and still
     // runExchange fires the divergence callback for both parties, so the
     // emission is exercised regardless of which party reaches it first.
     await Promise.all([
-      runProtocol(
-        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-        null,
-        minimalPrepared,
-        undefined,
-        -1,
-        "test-a",
-        undefined,
-        undefined,
-        undefined,
-        { eventStream: true },
-      ),
-      runProtocol(
-        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-        null,
-        minimalPrepared,
-        undefined,
-        -1,
-        "test-b",
-      ),
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        verbosity: -1,
+        loggerName: "test-a",
+        fileSyncRuntime: { eventStream: true },
+      }),
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        verbosity: -1,
+        loggerName: "test-b",
+      }),
     ]);
   } finally {
     vi.mocked(fs.fstatSync).mockRestore();
@@ -5107,26 +5106,29 @@ test("a terms-exchange warning under --event-stream reaches the fd-3 warning eve
   try {
     // Party A runs flag-on, party B flag-off, so every captured fd-3 line is A's.
     await Promise.all([
-      runProtocol(
-        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-        null,
-        minimalPrepared,
-        undefined,
-        -1,
-        "test-a",
-        undefined,
-        undefined,
-        undefined,
-        { eventStream: true },
-      ),
-      runProtocol(
-        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-        null,
-        minimalPrepared,
-        undefined,
-        -1,
-        "test-b",
-      ),
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        verbosity: -1,
+        loggerName: "test-a",
+        fileSyncRuntime: { eventStream: true },
+      }),
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        verbosity: -1,
+        loggerName: "test-b",
+      }),
     ]);
   } finally {
     vi.mocked(fs.fstatSync).mockRestore();
@@ -5180,26 +5182,29 @@ test("a terms-exchange warning past the per-value cap reaches stderr as whole as
   try {
     // Party A runs flag-on, party B flag-off, so every captured fd-3 line is A's.
     await Promise.all([
-      runProtocol(
-        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-        null,
-        minimalPrepared,
-        undefined,
-        -1,
-        "test-a",
-        undefined,
-        undefined,
-        undefined,
-        { eventStream: true },
-      ),
-      runProtocol(
-        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-        null,
-        minimalPrepared,
-        undefined,
-        -1,
-        "test-b",
-      ),
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        verbosity: -1,
+        loggerName: "test-a",
+        fileSyncRuntime: { eventStream: true },
+      }),
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        verbosity: -1,
+        loggerName: "test-b",
+      }),
     ]);
   } finally {
     vi.mocked(fs.fstatSync).mockRestore();
@@ -5234,28 +5239,32 @@ test("a failed onAuthenticated hook under --event-stream emits a warning event b
     // Party A runs flag-on and carries the throwing hook; party B flag-off and
     // hookless, so every captured fd-3 line is A's.
     await Promise.all([
-      runProtocol(
-        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-        { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
-        minimalPrepared,
-        undefined,
-        -1,
-        "test-a",
-        undefined,
-        undefined,
-        () => {
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: { sharedSecret: TOKEN_A, keyFilePath: keyFileA },
+        prepared: minimalPrepared,
+        verbosity: -1,
+        loggerName: "test-a",
+        onAuthenticated: () => {
           throw new Error("simulated config write failure");
         },
-        { eventStream: true },
-      ),
-      runProtocol(
-        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-        { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
-        minimalPrepared,
-        undefined,
-        -1,
-        "test-b",
-      ),
+        fileSyncRuntime: { eventStream: true },
+      }),
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: { sharedSecret: TOKEN_A, keyFilePath: keyFileB },
+        prepared: minimalPrepared,
+        verbosity: -1,
+        loggerName: "test-b",
+      }),
     ]);
   } finally {
     vi.mocked(fs.fstatSync).mockRestore();
@@ -5299,26 +5308,29 @@ test("a successful run under --event-stream reports stage timing and counters", 
   try {
     // Party A runs flag-on; party B flag-off, so every captured fd-3 line is A's.
     await Promise.all([
-      runProtocol(
-        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-        null,
-        preparedWithRows,
-        undefined,
-        -1,
-        "test-a",
-        undefined,
-        undefined,
-        undefined,
-        { eventStream: true },
-      ),
-      runProtocol(
-        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-        null,
-        preparedWithRows,
-        undefined,
-        -1,
-        "test-b",
-      ),
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: preparedWithRows,
+        verbosity: -1,
+        loggerName: "test-a",
+        fileSyncRuntime: { eventStream: true },
+      }),
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: preparedWithRows,
+        verbosity: -1,
+        loggerName: "test-b",
+      }),
     ]);
   } finally {
     vi.mocked(fs.fstatSync).mockRestore();
@@ -5364,22 +5376,28 @@ test("summarizes the reconnect count at normal verbosity when the session was re
     .mockReturnValue(3);
   try {
     await Promise.all([
-      runProtocol(
-        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-        null,
-        minimalPrepared,
-        undefined,
-        -1,
-        "test-a",
-      ),
-      runProtocol(
-        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-        null,
-        minimalPrepared,
-        undefined,
-        -1,
-        "test-b",
-      ),
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        verbosity: -1,
+        loggerName: "test-a",
+      }),
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        verbosity: -1,
+        loggerName: "test-b",
+      }),
     ]);
   } finally {
     reconnectSpy.mockRestore();
@@ -5415,22 +5433,28 @@ test("summary reports the mid-exchange sub-count apart from the total", async ()
     .mockReturnValue(3);
   try {
     await Promise.all([
-      runProtocol(
-        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-        null,
-        minimalPrepared,
-        undefined,
-        -1,
-        "test-a",
-      ),
-      runProtocol(
-        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-        null,
-        minimalPrepared,
-        undefined,
-        -1,
-        "test-b",
-      ),
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        verbosity: -1,
+        loggerName: "test-a",
+      }),
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        verbosity: -1,
+        loggerName: "test-b",
+      }),
     ]);
   } finally {
     reconnectSpy.mockRestore();
@@ -5459,22 +5483,28 @@ test("summarizes the forced idle-boundary releases apart from the reconnects", a
     .mockReturnValue(7);
   try {
     await Promise.all([
-      runProtocol(
-        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-        null,
-        minimalPrepared,
-        undefined,
-        -1,
-        "test-a",
-      ),
-      runProtocol(
-        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-        null,
-        minimalPrepared,
-        undefined,
-        -1,
-        "test-b",
-      ),
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        verbosity: -1,
+        loggerName: "test-a",
+      }),
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        verbosity: -1,
+        loggerName: "test-b",
+      }),
     ]);
   } finally {
     forcedSpy.mockRestore();
@@ -5514,22 +5544,28 @@ test("summarizes the declined idle releases as a line apart from the forced ones
     .mockReturnValue(5);
   try {
     await Promise.all([
-      runProtocol(
-        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-        null,
-        minimalPrepared,
-        undefined,
-        -1,
-        "test-a",
-      ),
-      runProtocol(
-        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-        null,
-        minimalPrepared,
-        undefined,
-        -1,
-        "test-b",
-      ),
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        verbosity: -1,
+        loggerName: "test-a",
+      }),
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        verbosity: -1,
+        loggerName: "test-b",
+      }),
     ]);
   } finally {
     forcedSpy.mockRestore();
@@ -5576,22 +5612,28 @@ test("summarizes the boundaries the partner closed on request as the forced tota
     .mockReturnValue(3);
   try {
     await Promise.all([
-      runProtocol(
-        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-        null,
-        minimalPrepared,
-        undefined,
-        -1,
-        "test-a",
-      ),
-      runProtocol(
-        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-        null,
-        minimalPrepared,
-        undefined,
-        -1,
-        "test-b",
-      ),
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        verbosity: -1,
+        loggerName: "test-a",
+      }),
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        verbosity: -1,
+        loggerName: "test-b",
+      }),
     ]);
   } finally {
     releasedSpy.mockRestore();
@@ -5631,22 +5673,28 @@ test("summarizes the poll cycles a declined cycle-start re-dial skipped", async 
     .mockReturnValue(6);
   try {
     await Promise.all([
-      runProtocol(
-        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-        null,
-        minimalPrepared,
-        undefined,
-        -1,
-        "test-a",
-      ),
-      runProtocol(
-        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-        null,
-        minimalPrepared,
-        undefined,
-        -1,
-        "test-b",
-      ),
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        verbosity: -1,
+        loggerName: "test-a",
+      }),
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        verbosity: -1,
+        loggerName: "test-b",
+      }),
     ]);
   } finally {
     skippedSpy.mockRestore();
@@ -5693,22 +5741,28 @@ test("summarizes the held idle boundaries as a line apart from the forced and de
     .mockReturnValue(9);
   try {
     await Promise.all([
-      runProtocol(
-        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-        null,
-        minimalPrepared,
-        undefined,
-        -1,
-        "test-a",
-      ),
-      runProtocol(
-        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-        null,
-        minimalPrepared,
-        undefined,
-        -1,
-        "test-b",
-      ),
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        verbosity: -1,
+        loggerName: "test-a",
+      }),
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        verbosity: -1,
+        loggerName: "test-b",
+      }),
     ]);
   } finally {
     forcedSpy.mockRestore();
@@ -5767,22 +5821,28 @@ test("held boundaries exceeding their stretches state the stretch count", async 
     .mockReturnValue(2);
   try {
     await Promise.all([
-      runProtocol(
-        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-        null,
-        minimalPrepared,
-        undefined,
-        -1,
-        "test-a",
-      ),
-      runProtocol(
-        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-        null,
-        minimalPrepared,
-        undefined,
-        -1,
-        "test-b",
-      ),
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        verbosity: -1,
+        loggerName: "test-a",
+      }),
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        verbosity: -1,
+        loggerName: "test-b",
+      }),
     ]);
   } finally {
     heldSpy.mockRestore();
@@ -5807,22 +5867,28 @@ test("held boundaries equal to their stretches omit the stretch sub-clause", asy
     .mockReturnValue(6);
   try {
     await Promise.all([
-      runProtocol(
-        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-        null,
-        minimalPrepared,
-        undefined,
-        -1,
-        "test-a",
-      ),
-      runProtocol(
-        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-        null,
-        minimalPrepared,
-        undefined,
-        -1,
-        "test-b",
-      ),
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        verbosity: -1,
+        loggerName: "test-a",
+      }),
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        verbosity: -1,
+        loggerName: "test-b",
+      }),
     ]);
   } finally {
     heldSpy.mockRestore();
@@ -5851,26 +5917,29 @@ test("a held boundary with no session drop leaves the reconnect total and the me
   try {
     // Party A runs flag-on; party B flag-off, so every captured fd-3 line is A's.
     await Promise.all([
-      runProtocol(
-        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-        null,
-        minimalPrepared,
-        undefined,
-        -1,
-        "test-a",
-        undefined,
-        undefined,
-        undefined,
-        { eventStream: true },
-      ),
-      runProtocol(
-        { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-        null,
-        minimalPrepared,
-        undefined,
-        -1,
-        "test-b",
-      ),
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        verbosity: -1,
+        loggerName: "test-a",
+        fileSyncRuntime: { eventStream: true },
+      }),
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        verbosity: -1,
+        loggerName: "test-b",
+      }),
     ]);
   } finally {
     heldSpy.mockRestore();
@@ -5903,22 +5972,28 @@ test("logs no reconnect or per-cycle boundary summary of any kind on a clean run
   // The teardown summary is guarded on a non-zero count, so a normal exchange
   // stays quiet.
   await Promise.all([
-    runProtocol(
-      { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-      null,
-      minimalPrepared,
-      undefined,
-      -1,
-      "test-a",
-    ),
-    runProtocol(
-      { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-      null,
-      minimalPrepared,
-      undefined,
-      -1,
-      "test-b",
-    ),
+    runProtocol({
+      connection: {
+        channel: "filedrop",
+        path: dropDir,
+        options: TWO_PARTY_OPTIONS,
+      },
+      auth: null,
+      prepared: minimalPrepared,
+      verbosity: -1,
+      loggerName: "test-a",
+    }),
+    runProtocol({
+      connection: {
+        channel: "filedrop",
+        path: dropDir,
+        options: TWO_PARTY_OPTIONS,
+      },
+      auth: null,
+      prepared: minimalPrepared,
+      verbosity: -1,
+      loggerName: "test-b",
+    }),
   ]);
 
   expect(mockState.infos.some((line) => line.includes("re-established"))).toBe(
@@ -5972,26 +6047,29 @@ test(
     let resA: PromiseSettledResult<unknown>;
     try {
       [resA] = await Promise.allSettled([
-        runProtocol(
-          { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-          null,
-          preparedWithRows,
-          undefined,
-          -1,
-          "test-a",
-          undefined,
-          undefined,
-          undefined,
-          { eventStream: true },
-        ),
-        runProtocol(
-          { channel: "filedrop", path: dropDir, options: TWO_PARTY_OPTIONS },
-          null,
-          preparedWithRows,
-          undefined,
-          -1,
-          "test-b",
-        ),
+        runProtocol({
+          connection: {
+            channel: "filedrop",
+            path: dropDir,
+            options: TWO_PARTY_OPTIONS,
+          },
+          auth: null,
+          prepared: preparedWithRows,
+          verbosity: -1,
+          loggerName: "test-a",
+          fileSyncRuntime: { eventStream: true },
+        }),
+        runProtocol({
+          connection: {
+            channel: "filedrop",
+            path: dropDir,
+            options: TWO_PARTY_OPTIONS,
+          },
+          auth: null,
+          prepared: preparedWithRows,
+          verbosity: -1,
+          loggerName: "test-b",
+        }),
       ]);
     } finally {
       vi.mocked(fs.fstatSync).mockRestore();

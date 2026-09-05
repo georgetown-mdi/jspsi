@@ -49,12 +49,10 @@ import {
   renderDialedBroker,
   type ConsentSurfaceSink,
 } from "../invitationDisplay";
-import {
-  assertNoUnknownOptions,
-  configureLogging,
-  promptConfirm,
-  runOrExit,
-} from "../util/cli";
+import { runOrExit } from "../util/exit";
+import { assertNoUnknownOptions } from "../util/flags";
+import { configureLogging } from "../util/logging";
+import { promptConfirm } from "../util/prompt";
 import { resolveRecordOutput } from "../recordFile";
 import {
   checkLinkageSatisfiability,

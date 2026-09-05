@@ -12,7 +12,9 @@ import { withCapturedLogs } from "@psilink/core/testing";
 
 import { EVENT_STREAM_FD, type ErrorEvent } from "../../src/eventStream";
 import { openEventStreamWithFdWired } from "../eventStreamTestSupport";
-import { exitWithError, parseOrExit, runOrExit } from "../../src/util/cli";
+import { exitWithError, runOrExit } from "../../src/util/exit";
+import { parseOrExit } from "../../src/util/flags";
+import { captureProcessExit } from "../exitCapture";
 
 // src/index.ts is a module-top-level side effect -- buildCli(...).parseAsync()
 // with the last-resort catch attached to it -- so its own catch runs only when
@@ -84,9 +86,7 @@ test("the driven error carries its recovery step only on a cause link", () => {
 
 /** Replace `process.exit` with a throw, so the exit is observable and the test keeps control. */
 function exitThrows(): void {
-  vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
-    throw new Error(`exit:${code ?? 0}`);
-  }) as never);
+  captureProcessExit();
 }
 
 /** Collect what a sink writes to `console.error`, and keep it off the suite's output. */
@@ -114,7 +114,7 @@ interface SinkProbe {
 // throw and the output, not the renderer.
 const SINK_PROBES: SinkProbe[] = [
   {
-    name: "parseOrExit (apps/cli/src/util/cli.ts)",
+    name: "parseOrExit (apps/cli/src/util/flags.ts)",
     drive: (error) => {
       const written = captureConsoleError();
       exitThrows();
@@ -127,7 +127,7 @@ const SINK_PROBES: SinkProbe[] = [
     },
   },
   {
-    name: "exitWithError (apps/cli/src/util/cli.ts)",
+    name: "exitWithError (apps/cli/src/util/exit.ts)",
     drive: (error) => {
       const written: string[] = [];
       exitThrows();
@@ -146,7 +146,7 @@ const SINK_PROBES: SinkProbe[] = [
     },
   },
   {
-    name: "runOrExit (apps/cli/src/util/cli.ts)",
+    name: "runOrExit (apps/cli/src/util/exit.ts)",
     drive: async (error) => {
       // runOrExit builds its logger inside the catch, so the getLogger call
       // happens within the callback below -- after withCapturedLogs has

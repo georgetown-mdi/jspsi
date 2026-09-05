@@ -1,7 +1,7 @@
 import fsp from "node:fs/promises";
 import path from "node:path";
 
-import { expect, test } from "vitest";
+import { expect } from "vitest";
 import {
   FileSyncConnection,
   TransportOperationStalledError,
@@ -10,9 +10,10 @@ import {
 import { withCapturedLogs } from "@psilink/core/testing";
 
 import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
-import { selectedBackend, startInProcessSftpServer } from "../sftpServer";
+import { startInProcessSftpServer } from "../sftpServer";
 import { serverAuth } from "../sftpServer/testContext";
 import type { InProcessSftpServer } from "../sftpServer/types";
+import { inProcessOnly } from "../sftpBackendGate";
 
 // A partner-side drop tears every operation the adapter has on the wire, not just
 // the one whose recovery re-dial runs. The adapter issues concurrent operations of
@@ -39,7 +40,6 @@ import type { InProcessSftpServer } from "../sftpServer/types";
 // session property SET is heldSessionWithheldClose.test.ts; the party scaffolding
 // below is deliberately this file's own, as dialDeferral's is, because each file
 // needs a different slice of the session controls.
-const inProcessOnly = test.skipIf(selectedBackend() !== "in-process");
 
 const TEST_TIMEOUT_MS = 120_000;
 

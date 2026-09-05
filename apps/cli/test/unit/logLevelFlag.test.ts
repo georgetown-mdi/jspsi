@@ -6,7 +6,7 @@ import logLibrary from "loglevel";
 import type { Arguments } from "yargs";
 import { UsageError } from "@psilink/core";
 
-import { logLevelFlag } from "../../src/util/cli";
+import { logLevelFlag } from "../../src/util/logging";
 import {
   argv,
   captureStdio,
@@ -22,6 +22,7 @@ import { handler as inviteHandler } from "../../src/commands/invite";
 import { handler as probeHostKeyHandler } from "../../src/commands/probeHostKey";
 import { handler as verifyReceiptHandler } from "../../src/commands/verifyReceipt";
 import { handler as zeroSetupHandler } from "../../src/commands/zeroSetup";
+import { captureProcessExit } from "../exitCapture";
 
 // logLevelFlag is the single --log-level resolve every command reads through, but
 // it stops at the UsageError: each command maps that to an exit through its own
@@ -133,11 +134,7 @@ test.each(
   // The runOrExit-based commands report through a logger onto the diagnostic
   // sink rather than console.error, so both descriptors are captured too.
   const { restore } = captureStdio();
-  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
-    code?: number,
-  ) => {
-    throw new Error(`exit:${code ?? 0}`);
-  }) as never);
+  const exitSpy = captureProcessExit();
   try {
     // Every command resolves the log level before it reads any other option or
     // touches the filesystem, so the rejection lands with no more argv than the

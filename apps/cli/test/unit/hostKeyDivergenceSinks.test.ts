@@ -9,7 +9,10 @@ import type { PresentedHostKey } from "@psilink/core";
 
 import { EVENT_STREAM_FD, type WarningEvent } from "../../src/eventStream";
 import { openEventStreamWithFdWired } from "../eventStreamTestSupport";
-import { configureLogFile, configureStderrLogging } from "../../src/util/cli";
+import {
+  configureLogFile,
+  configureStderrLogging,
+} from "../../src/util/logging";
 import {
   captureStdio,
   snapshotDiagnosticSinkAndLevel,

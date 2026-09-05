@@ -48,7 +48,8 @@ import {
   readConnectionCredentials,
 } from "./util/atSignRefs";
 import { establishHostKeyTrust, type HostKeyPersistence } from "./hostKeyTrust";
-import { openInputSource, singleValue } from "./util/cli";
+import { openInputSource } from "./util/dataIo";
+import { singleValue } from "./util/flags";
 import {
   runProtocol,
   type AuthPersist,
@@ -846,17 +847,14 @@ export async function runOnlineBootstrap(params: {
   // fail-closed fd-3 preflight still lands at the same point of the run.
   const eventStream = openEventStream(params.eventStream);
   try {
-    const runResult = await runProtocol(
-      liveConnection,
+    const runResult = await runProtocol({
+      connection: liveConnection,
       auth,
-      params.prepared,
-      params.output,
-      params.verbosity,
-      params.loggerName,
-      params.recordOutput,
-      // saveIntent: the zero-setup `--save` bootstrap is meaningful only on the
-      // unauthenticated path; this is an authenticated exchange, so leave it unset.
-      undefined,
+      prepared: params.prepared,
+      output: params.output,
+      verbosity: params.verbosity,
+      loggerName: params.loggerName,
+      recordOutput: params.recordOutput,
       // Persist the configuration exactly at acceptance: runProtocol invokes this
       // once, after the rotated token is saved to the key file and before the
       // data exchange begins. Writing here (rather than after runProtocol
@@ -871,7 +869,7 @@ export async function runOnlineBootstrap(params: {
       // unawaited async saveConfig would set `configWritten` before the write
       // settles, so a rejected write would resolve cleanly and masquerade as a
       // success.
-      () => {
+      onAuthenticated: () => {
         // Reaching the hook means runProtocol already saved the rotated key
         // (it does so immediately before this call). Record that before the
         // reuse early-return so the recovery message below is gated on the key
@@ -1021,12 +1019,11 @@ export async function runOnlineBootstrap(params: {
         });
         configWritten = true;
       },
-      // The online invite/accept run no file-sync entry-sweep (the sweep flags are
-      // exchange/zero-setup only), so the trailing runtime object holds the
-      // machine stream this bootstrap opened above (undefined when the flag is
-      // off, which is runProtocol's own "no stream" state) and this bootstrap's
-      // own last write.
-      {
+      // The online invite/accept run no file-sync entry-sweep (the sweep flags
+      // are exchange/zero-setup only), so this holds the machine stream opened
+      // above (undefined when the flag is off, which is runProtocol's own
+      // "no stream" state) and this bootstrap's own last write.
+      fileSyncRuntime: {
         eventStream,
         // Crystallize the OBSERVED received-payload set into the freshly-written
         // config so a later recurring `psilink exchange` fails closed on a
@@ -1096,7 +1093,7 @@ export async function runOnlineBootstrap(params: {
           }
         },
       },
-    );
+    });
 
     // onAuthenticatedError is the config-write failure, if any: the acceptance
     // hook is just the saveConfig call above, so report it under a name the

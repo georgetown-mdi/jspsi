@@ -26,6 +26,7 @@ import {
   decodeOfferedKexAlgorithms,
 } from "./kexOfferWire";
 import type { KexPrimitive } from "../../src/connection/sftpKexCapability";
+import { inProcessOnly } from "../sftpBackendGate";
 
 // What the SFTP client actually OFFERS, read off the wire from the client's own
 // SSH_MSG_KEXINIT, with the platform-capability verdict forced to "this process
@@ -81,7 +82,6 @@ const SSH_DISCONNECT_PROTOCOL_ERROR = 2;
 
 // Only the in-process backend can be told to cut a session mid-operation (see
 // test/sftpServer/types.ts), which is what the recovery re-dial needs.
-const inProcessOnly = test.skipIf(selectedBackend() !== "in-process");
 
 // The native harness's restricted-crypto profile accepts only curve25519 key
 // exchanges (test/sftpServer/nativeSshdServer.ts), so under the forced verdict

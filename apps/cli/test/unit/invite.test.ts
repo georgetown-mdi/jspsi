@@ -72,7 +72,7 @@ import {
   DEFAULT_CHANNEL_OPEN_TIMEOUT_MS,
   DEFAULT_RENDEZVOUS_TIMEOUT_MS,
 } from "../../src/connection/webrtc/weriftPeer";
-import { MAX_TIMEOUT_SECONDS } from "../../src/util/cli";
+import { MAX_TIMEOUT_SECONDS } from "../../src/util/flags";
 import {
   connectionFromEndpoint,
   runOnlineBootstrap,

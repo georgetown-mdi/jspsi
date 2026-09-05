@@ -2,13 +2,14 @@ import { spawn } from "node:child_process";
 import fsp from "node:fs/promises";
 import path from "node:path";
 
-import { expect, test } from "vitest";
+import { expect } from "vitest";
 import { FileSyncConnection } from "@psilink/core";
 import { withCapturedLogs } from "@psilink/core/testing";
 
 import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
-import { selectedBackend, startInProcessSftpServer } from "../sftpServer";
+import { startInProcessSftpServer } from "../sftpServer";
 import { serverAuth } from "../sftpServer/testContext";
+import { inProcessOnly } from "../sftpBackendGate";
 
 // The unattended failures the bounded session-transition wait exists for, driven
 // against the real stack rather than a mock: a teardown, an idle release and a
@@ -25,7 +26,6 @@ import { serverAuth } from "../sftpServer/testContext";
 // cannot), so this runs there and stands up its own server to reach the session
 // controls -- the shared globalSetup server hands the workers only its connection
 // details.
-const inProcessOnly = test.skipIf(selectedBackend() !== "in-process");
 
 // The adapter's acquire bound is 10 s. Each wait is asserted to land between these:
 // above the floor because the waiter did wait the bound out rather than declining on

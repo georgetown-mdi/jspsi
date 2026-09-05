@@ -44,7 +44,7 @@ import type {
 } from "@psilink/core";
 
 import { writeExchangeRecord } from "../../src/recordFile";
-import { writeOutput } from "../../src/util/cli";
+import { writeOutput } from "../../src/util/dataIo";
 
 // The CLI's own artifacts for the both-sided deduplicating cardinality: the
 // result file it writes and the exchange record it persists beside it. The

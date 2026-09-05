@@ -1,12 +1,13 @@
 import fsp from "node:fs/promises";
 import path from "node:path";
 
-import { expect, test } from "vitest";
+import { expect } from "vitest";
 import { FileSyncConnection } from "@psilink/core";
 
 import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
-import { selectedBackend, startInProcessSftpServer } from "../sftpServer";
+import { startInProcessSftpServer } from "../sftpServer";
 import { serverAuth } from "../sftpServer/testContext";
+import { inProcessOnly } from "../sftpBackendGate";
 
 // A cycle-boundary signal (the poll loop's cycle-start reconnect, the idle
 // release) issued once teardown has been latched takes the session-transition
@@ -20,7 +21,6 @@ import { serverAuth } from "../sftpServer/testContext";
 // accepts the disconnect and never closes the connection. Only the in-process
 // backend can be made to withhold its close, so this runs there and stands up its
 // own server to reach the session controls.
-const inProcessOnly = test.skipIf(selectedBackend() !== "in-process");
 
 // The teardown's close spends CLIENT_CLOSE_TIMEOUT_MS (5 s) against this partner
 // before forcing the socket closed, and the wait under test is that close.

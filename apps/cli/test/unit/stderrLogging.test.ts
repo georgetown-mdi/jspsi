@@ -7,7 +7,7 @@ import {
   type DiagnosticSink,
 } from "@psilink/core";
 
-import { configureStderrLogging } from "../../src/util/cli";
+import { configureStderrLogging } from "../../src/util/logging";
 
 // configureStderrLogging installs core's process-wide diagnostic sink, which core
 // resolves at each log call (not when a logger is built). These tests snapshot and

@@ -43,13 +43,9 @@ import { loadSigningIdentity } from "../signingIdentityFile";
 import { confirmOutboundPayloadConsent } from "../outboundPayloadConsent";
 import { parseSensitiveYaml } from "../sensitiveFile";
 import { resolveAtSignRefs, resolveExchangeSpecRefs } from "../util/atSignRefs";
-import {
-  configureLogging,
-  exitCodeForError,
-  exitWithError,
-  parseOrExit,
-  singleValue,
-} from "../util/cli";
+import { exitCodeForError, exitWithError } from "../util/exit";
+import { parseOrExit, singleValue } from "../util/flags";
+import { configureLogging } from "../util/logging";
 import { loadInputRows } from "../onlineBootstrap";
 import {
   addCommonBootstrapOptions,
@@ -940,7 +936,7 @@ export async function handler(argv: Arguments): Promise<void> {
       try {
         await provisionKeyFileFromInvitation(invitation, options.keyFile);
       } catch (err) {
-        exitWithError(log, err, err instanceof UsageError ? 64 : 69);
+        exitWithError(log, err, exitCodeForError(err));
       }
     }
 
@@ -1058,7 +1054,7 @@ export async function handler(argv: Arguments): Promise<void> {
         termsIdentity,
       );
     } catch (err) {
-      exitWithError(log, err, err instanceof UsageError ? 64 : 69);
+      exitWithError(log, err, exitCodeForError(err));
     }
 
     // Establish SSH host-key trust: on an unpinned sftp config this prompts and
@@ -1070,8 +1066,6 @@ export async function handler(argv: Arguments): Promise<void> {
     // input cannot satisfy, an unconfirmed outbound payload, a signing identity
     // that is missing or bound to another party -- is decided from local inputs
     // alone; deciding those first is what keeps a refused run from connecting.
-    // A UsageError (non-TTY, or a declined prompt) maps to exit 64, a probe
-    // transport failure to 69.
     try {
       await establishHostKeyTrust(connection, {
         verbosity,
@@ -1081,7 +1075,7 @@ export async function handler(argv: Arguments): Promise<void> {
         persistence: { mode: "write-now", configPath: options.configFile },
       });
     } catch (err) {
-      exitWithError(log, err, err instanceof UsageError ? 64 : 69);
+      exitWithError(log, err, exitCodeForError(err));
     }
 
     const recordOutput = resolveRecordOutput({
@@ -1091,22 +1085,17 @@ export async function handler(argv: Arguments): Promise<void> {
 
     let exchangeError: unknown;
     try {
-      await runProtocol(
+      await runProtocol({
         connection,
-        authentication,
+        auth: authentication,
         prepared,
         output,
         verbosity,
-        "exchange",
+        loggerName: "exchange",
         recordOutput,
-        // saveIntent and onAuthenticated are both undefined on the authenticated
-        // exchange path; the trailing object holds the CLI-only sweep controls
-        // and the --event-stream toggle, then the signed-receipt inputs.
-        undefined,
-        undefined,
-        { sweepExchangeFiles, forceRetainSweep, eventStream },
+        fileSyncRuntime: { sweepExchangeFiles, forceRetainSweep, eventStream },
         signing,
-      );
+      });
     } catch (err) {
       // Capture rather than exit here so the expiry advisory below can run on the
       // failure path too (the criterion is "expiring soon AND rotation did not

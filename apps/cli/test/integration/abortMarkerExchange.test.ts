@@ -214,22 +214,22 @@ async function runAbortScenario(
   const [settled, capturedLogs] = await withCapturedLogs(
     () =>
       Promise.allSettled([
-        runProtocol(
-          makeConfig(),
-          { sharedSecret: secretA, keyFilePath: keyA },
-          preparedFor(IDENTITY_A, ROWS_A),
-          outputs.a,
-          -1,
-          `${tag}abort-a`,
-        ),
-        runProtocol(
-          makeConfig(),
-          { sharedSecret: secretB, keyFilePath: keyB },
-          preparedFor(IDENTITY_B, ROWS_B),
-          outputs.b,
-          -1,
-          `${tag}abort-b`,
-        ),
+        runProtocol({
+          connection: makeConfig(),
+          auth: { sharedSecret: secretA, keyFilePath: keyA },
+          prepared: preparedFor(IDENTITY_A, ROWS_A),
+          output: outputs.a,
+          verbosity: -1,
+          loggerName: `${tag}abort-a`,
+        }),
+        runProtocol({
+          connection: makeConfig(),
+          auth: { sharedSecret: secretB, keyFilePath: keyB },
+          prepared: preparedFor(IDENTITY_B, ROWS_B),
+          output: outputs.b,
+          verbosity: -1,
+          loggerName: `${tag}abort-b`,
+        }),
       ]),
     (level) => level === "WARN" || level === "ERROR",
   );

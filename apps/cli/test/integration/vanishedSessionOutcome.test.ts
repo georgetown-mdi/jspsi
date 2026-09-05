@@ -3,7 +3,7 @@ import fsp from "node:fs/promises";
 import net from "node:net";
 import path from "node:path";
 
-import { expect, test } from "vitest";
+import { expect } from "vitest";
 import {
   DEFAULT_MAX_RECONNECT_ATTEMPTS,
   TransportOperationStalledError,
@@ -13,8 +13,9 @@ import { withCapturedLogs } from "@psilink/core/testing";
 
 import { SFTP_HEARTBEAT_INTERVAL_MS } from "../../src/connection/sftpHeartbeat";
 import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
-import { selectedBackend, startInProcessSftpServer } from "../sftpServer";
+import { startInProcessSftpServer } from "../sftpServer";
 import { serverAuth } from "../sftpServer/testContext";
+import { inProcessOnly } from "../sftpBackendGate";
 
 // What the adapter does with a partner server that goes SILENT rather than
 // failing: nothing closes, nothing resets, and no further byte arrives, so the
@@ -38,7 +39,6 @@ import { serverAuth } from "../sftpServer/testContext";
 // and a materially different case (it fires only in answer to the client's own
 // disconnect, and it ends the transport), is heldSessionWithheldClose.test.ts and
 // ephemeralSessionExchange.test.ts.
-const inProcessOnly = test.skipIf(selectedBackend() !== "in-process");
 
 // The per-operation liveness deadline, lowered through the adapter's @internal
 // test seam. Neither a vanished session nor a withheld reply ever answers, so

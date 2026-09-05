@@ -31,12 +31,9 @@ import {
   readConnectionCredentials,
 } from "../util/atSignRefs";
 import { establishHostKeyTrust } from "../hostKeyTrust";
-import {
-  configureLogging,
-  exitCodeForError,
-  exitWithError,
-  parseOrExit,
-} from "../util/cli";
+import { exitCodeForError, exitWithError } from "../util/exit";
+import { parseOrExit } from "../util/flags";
+import { configureLogging } from "../util/logging";
 import { channelFromURL, connectionFromURL } from "../connectionFromUrl";
 import {
   addCommonBootstrapOptions,
@@ -668,14 +665,14 @@ export async function handler(argv: Arguments): Promise<void> {
       // channels at runtime.
       // auth: null is the explicit opt-out that tells runProtocol to proceed
       // without authentication and without a warning.
-      await runProtocol(
-        liveConnection as unknown as ProtocolConnectionConfig,
-        null,
+      await runProtocol({
+        connection: liveConnection as unknown as ProtocolConnectionConfig,
+        auth: null,
         prepared,
         output,
         verbosity,
-        "psilink",
-        resolveRecordOutput({
+        loggerName: "psilink",
+        recordOutput: resolveRecordOutput({
           enabled: options.record,
           recordFile: options.recordFile,
         }),
@@ -686,12 +683,8 @@ export async function handler(argv: Arguments): Promise<void> {
         // finalizeBootstrap can emit the "your partner wanted to save" notice --
         // collapsing false to undefined would silently swallow it. The wire is
         // unaffected either way (see exchangeTerms).
-        options.save,
-        // onAuthenticated is undefined on the unauthenticated zero-setup path; the
-        // trailing object holds the CLI-only sweep controls, the stream opened
-        // above, and this command's own post-exchange persistence.
-        undefined,
-        {
+        saveIntent: options.save,
+        fileSyncRuntime: {
           sweepExchangeFiles,
           forceRetainSweep,
           eventStream: eventStreamEmitter,
@@ -747,7 +740,7 @@ export async function handler(argv: Arguments): Promise<void> {
             }
           },
         },
-      );
+      });
     } catch (err) {
       exitWithError(log, err, exitCodeForError(err));
     }

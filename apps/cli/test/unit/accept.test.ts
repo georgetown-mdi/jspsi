@@ -58,16 +58,16 @@ import type {
   TransformStep,
 } from "@psilink/core";
 
-// Mock only the two terminal reads; every other cli.ts export (openInputSource,
-// which the `-` stdin tests exercise for real, configureLogFile, etc.) is the
-// genuine implementation. This lets the handler tests assert whether the
-// confirmation prompt and the identity question ran without driving a real
-// readline over the test runner's stdin.
-vi.mock("../../src/util/cli", async () => {
-  const actual =
-    await vi.importActual<typeof import("../../src/util/cli")>(
-      "../../src/util/cli",
-    );
+// Mock only the two terminal reads; the rest of util/prompt, and every other
+// util module (util/dataIo's openInputSource, which the `-` stdin tests exercise
+// for real, util/logging's configureLogFile, etc.) is the genuine
+// implementation. This lets the handler tests assert whether the confirmation
+// prompt and the identity question ran without driving a real readline over the
+// test runner's stdin.
+vi.mock("../../src/util/prompt", async () => {
+  const actual = await vi.importActual<typeof import("../../src/util/prompt")>(
+    "../../src/util/prompt",
+  );
   return { ...actual, promptConfirm: vi.fn(), promptFreeText: vi.fn() };
 });
 
@@ -107,11 +107,8 @@ import {
   PLACEHOLDER_IDENTITY,
 } from "../../src/partyIdentity";
 import { saveConfig } from "../../src/config";
-import {
-  exitCodeForError,
-  promptConfirm,
-  promptFreeText,
-} from "../../src/util/cli";
+import { exitCodeForError } from "../../src/util/exit";
+import { promptConfirm, promptFreeText } from "../../src/util/prompt";
 import { captureStdio } from "../loggingTestSupport";
 import { ttyStream } from "../stdinStream";
 

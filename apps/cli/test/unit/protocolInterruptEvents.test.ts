@@ -127,22 +127,18 @@ test("a SIGINT interrupt under --event-stream emits no terminal event", async ()
     SIGTERM: process.listenerCount("SIGTERM"),
   };
   const keyFile = path.join(tmpDir, "interrupted.key");
-  const run = runProtocol(
-    {
+  const run = runProtocol({
+    connection: {
       channel: "filedrop",
       path: dropDir,
       options: { pollIntervalMs: 1, peerTimeoutMs: 5_000 },
     },
-    { sharedSecret: TOKEN_A, keyFilePath: keyFile },
-    minimalPrepared,
-    undefined,
-    -1,
-    "test-a",
-    undefined,
-    undefined,
-    undefined,
-    { eventStream: true },
-  );
+    auth: { sharedSecret: TOKEN_A, keyFilePath: keyFile },
+    prepared: minimalPrepared,
+    verbosity: -1,
+    loggerName: "test-a",
+    fileSyncRuntime: { eventStream: true },
+  });
   // Observe the outcome from the moment the run exists. The interrupt settles it
   // at a moment of its own choosing, which can fall between the polls of the
   // waitFor below, and an outcome nothing is watching for is an unhandled

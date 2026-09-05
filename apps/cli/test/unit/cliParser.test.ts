@@ -4,6 +4,7 @@ import * as path from "node:path";
 import { afterEach, expect, test, vi } from "vitest";
 
 import { buildCli } from "../../src/cliParser";
+import { captureProcessExit } from "../exitCapture";
 
 afterEach(() => {
   vi.restoreAllMocks();
@@ -28,9 +29,7 @@ async function parse(
     stdout.push(args.map(String).join(" "));
   });
   vi.spyOn(process.stdout, "write").mockImplementation((() => true) as never);
-  vi.spyOn(process, "exit").mockImplementation(((code?: number) => {
-    throw new Error(`exit:${code ?? 0}`);
-  }) as never);
+  captureProcessExit();
   let exit = "";
   try {
     await buildCli(argv).parseAsync();

@@ -98,22 +98,22 @@ test("a result-write failure after a completed exchange writes no abort marker",
   const [settled, capturedLogs] = await withCapturedLogs(
     () =>
       Promise.allSettled([
-        runProtocol(
-          makeConfig(),
-          { sharedSecret: INITIAL_SECRET, keyFilePath: keyA },
-          preparedFor("Party A"),
-          path.join(work, "missing-parent", "a-out.csv"),
-          -1,
-          "noabort-a",
-        ),
-        runProtocol(
-          makeConfig(),
-          { sharedSecret: INITIAL_SECRET, keyFilePath: keyB },
-          preparedFor("Party B"),
-          path.join(work, "b-out.csv"),
-          -1,
-          "noabort-b",
-        ),
+        runProtocol({
+          connection: makeConfig(),
+          auth: { sharedSecret: INITIAL_SECRET, keyFilePath: keyA },
+          prepared: preparedFor("Party A"),
+          output: path.join(work, "missing-parent", "a-out.csv"),
+          verbosity: -1,
+          loggerName: "noabort-a",
+        }),
+        runProtocol({
+          connection: makeConfig(),
+          auth: { sharedSecret: INITIAL_SECRET, keyFilePath: keyB },
+          prepared: preparedFor("Party B"),
+          output: path.join(work, "b-out.csv"),
+          verbosity: -1,
+          loggerName: "noabort-b",
+        }),
       ]),
     (level) => level === "WARN" || level === "ERROR",
   );

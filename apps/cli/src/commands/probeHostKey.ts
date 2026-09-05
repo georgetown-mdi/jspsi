@@ -16,15 +16,11 @@ import {
   decodeUrlComponent,
   redactUrlCredentials,
 } from "../util/connectionUrl";
-import {
-  configureLogging,
-  durationFlagSeconds,
-  exitWithError,
-  logLevelFlag,
-  parseOrExit,
-  singleValue,
-} from "../util/cli";
+import { exitCodeForError, exitWithError } from "../util/exit";
+import { durationFlagSeconds, parseOrExit, singleValue } from "../util/flags";
+import { configureLogging, logLevelFlag } from "../util/logging";
 import { asciiSafeJsonLine } from "../util/jsonLine";
+import { addLoggingOptions } from "../optionDefinitions";
 
 // `psilink probe-host-key` is the ssh-keyscan analogue: it connects only far
 // enough to read the SFTP server's presented host key, then refuses before any
@@ -58,7 +54,7 @@ const REAL_DEPS: ProbeHostKeyDeps = {
 };
 
 export function builder(cmd: Argv): Argv {
-  return cmd
+  const beforeLogging = cmd
     .usage("Usage: $0 probe-host-key SFTP_URL [options]")
     .positional("sftp-url", {
       type: "string",
@@ -81,24 +77,14 @@ export function builder(cmd: Argv): Argv {
         "other than an SSH server answered the port prints a diagnosis line " +
         '({"diagnosis":"non_ssh"|"closed_unanswered", ...}) on stdout before ' +
         "exiting 69, so a caller that discards stderr still gets the cause",
-    })
-    .option("log-level", {
-      type: "string",
-      describe: "silent | error | warn | info | debug | trace; default=info",
-    })
-    .option("log-file", {
-      type: "string",
-      describe:
-        "append all log output to this file instead of the terminal; the " +
-        "parent directory must already exist",
-    })
-    .option("verbose", {
-      alias: "v",
-      type: "count",
-      describe:
-        "generate additional logging information for sub-libraries at all " +
-        "logging levels",
     });
+  return addLoggingOptions(beforeLogging).option("verbose", {
+    alias: "v",
+    type: "count",
+    describe:
+      "generate additional logging information for sub-libraries at all " +
+      "logging levels",
+  });
 }
 
 /**
@@ -304,12 +290,7 @@ export async function handler(argv: Arguments): Promise<void> {
     // human path keeps reading it off the rendered cause chain below.
     const diagnosis = json ? peerIdentificationDiagnosisOf(err) : undefined;
     if (diagnosis !== undefined) console.log(probeDiagnosisJsonLine(diagnosis));
-    // A UsageError (bad URL/scheme, malformed flag) is exit 64; anything else --
-    // a transport failure, or a non-canonical fingerprint -- is exit 69, matching
-    // the exchange command's mapping (probeHostKey.test.ts, "exit mapping: a
-    // non-sftp URL rejects UsageError (64)" and "exit mapping: a transport
-    // failure rejects a plain Error (69)").
-    exitWithError(log, err, err instanceof UsageError ? 64 : 69);
+    exitWithError(log, err, exitCodeForError(err));
   } finally {
     closeLogging();
   }

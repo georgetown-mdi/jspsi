@@ -37,14 +37,14 @@ import { detectFileConflicts } from "../fileUtils";
 import { resolveIdentity, resolveInvitationIdentity } from "../partyIdentity";
 import { resolveRecordOutput } from "../recordFile";
 import { DURATION_VALUE_HELP, parseDuration } from "../util/duration";
+import { runOrExit } from "../util/exit";
 import {
   assertNoUnknownOptions,
-  configureLogging,
   durationFlagSeconds,
   MAX_TIMEOUT_SECONDS,
-  runOrExit,
   singleValue,
-} from "../util/cli";
+} from "../util/flags";
+import { configureLogging } from "../util/logging";
 import { redactUrlCredentials } from "../util/connectionUrl";
 import {
   checkLinkageSatisfiability,

@@ -3,17 +3,18 @@ import net from "node:net";
 import path from "node:path";
 
 import ssh2 from "ssh2";
-import { afterEach, expect, test, vi } from "vitest";
+import { afterEach, expect, vi } from "vitest";
 import {
   FileSyncConnection,
   TransportOperationStalledError,
 } from "@psilink/core";
 import { withCapturedLogs } from "@psilink/core/testing";
 
-import { selectedBackend, startInProcessSftpServer } from "../sftpServer";
+import { startInProcessSftpServer } from "../sftpServer";
 import { serverAuth } from "../sftpServer/testContext";
 import { APPENDED_MARKERS, createKexinitRecordingRelay } from "./kexOfferWire";
 import type { KexPrimitive } from "../../src/connection/sftpKexCapability";
+import { inProcessOnly } from "../sftpBackendGate";
 
 // A live connection-per-poll exchange whose partner's SFTP endpoint changes its
 // key-exchange policy underneath it: it accepts the handshake the exchange opens
@@ -82,7 +83,6 @@ afterEach(() => {
 // is not driven in that mode, and the one native profile with a key-exchange
 // policy of its own -- restricted-crypto -- accepts only what the forced verdict
 // withholds, so no dial of this exchange could complete against it.
-const inProcessOnly = test.skipIf(selectedBackend() !== "in-process");
 
 const FLIP_TEST_TIMEOUT_MS = 120_000;
 

@@ -16,11 +16,11 @@ import { DEFAULT_KEY_PATH } from "./keyFile";
 import {
   durationFlagMs,
   durationFlagSeconds,
-  logLevelFlag,
   MAX_TIMEOUT_SECONDS,
   nonNegativeIntFlag,
   singleValue,
-} from "./util/cli";
+} from "./util/flags";
+import { logLevelFlag } from "./util/logging";
 import { DURATION_VALUE_HELP, FINE_DURATION_VALUE_HELP } from "./util/duration";
 import { resolveHostKeyFingerprintRef } from "./util/atSignRefs";
 
@@ -72,6 +72,26 @@ export function hostKeyFingerprintFlag(argv: Arguments): string | undefined {
 }
 
 /**
+ * Add the `--log-level` / `--log-file` options, which every psilink command
+ * accepts with the same meaning. Declared once here and called from each
+ * command's builder so the two flags keep one name, type, and description
+ * across the whole CLI; {@link logLevelFlag} reads the first of them back.
+ */
+export function addLoggingOptions(cmd: Argv): Argv {
+  return cmd
+    .option("log-level", {
+      type: "string",
+      describe: "silent | error | warn | info | debug | trace; default=info",
+    })
+    .option("log-file", {
+      type: "string",
+      describe:
+        "append all log output to this file instead of the terminal; the " +
+        "parent directory must already exist",
+    });
+}
+
+/**
  * Per-command overrides for the descriptions of the common bootstrap options
  * whose accurate wording is command-specific -- chiefly whether the config/key
  * files are written or read, and whether the `server-*` (and `peer-id`)
@@ -114,7 +134,7 @@ export function addCommonBootstrapOptions(
   cmd: Argv,
   describe: CommonBootstrapDescribeOverrides = {},
 ): Argv {
-  return cmd
+  const beforeLogging = cmd
     .option("config-file", {
       type: "string",
       describe:
@@ -220,17 +240,8 @@ export function addCommonBootstrapOptions(
         "caps mid-exchange reconnections in the default held-session mode: " +
         "past that many session drops the exchange fails, and " +
         "--connection-per-poll is not charged against it.",
-    })
-    .option("log-level", {
-      type: "string",
-      describe: "silent | error | warn | info | debug | trace; default=info",
-    })
-    .option("log-file", {
-      type: "string",
-      describe:
-        "append all log output to this file instead of the terminal; the " +
-        "parent directory must already exist",
-    })
+    });
+  return addLoggingOptions(beforeLogging)
     .option("record", {
       type: "boolean",
       default: true,

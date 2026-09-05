@@ -36,9 +36,11 @@ import { resolveConnectionCredentials } from "../../src/util/atSignRefs";
 import { redactUrlCredentials } from "../../src/util/connectionUrl";
 import { PLACEHOLDER_IDENTITY } from "../../src/partyIdentity";
 import { runProtocol } from "../../src/protocol";
+import type { RunProtocolOptions } from "../../src/protocol";
 import { PERSISTENCE_LOSS_EXIT_CODE } from "../../src/eventStream";
 import { captureFd3 } from "../eventStreamTestSupport";
 import { establishHostKeyTrust } from "../../src/hostKeyTrust";
+import { captureProcessExit } from "../exitCapture";
 
 // The handler hands the resolved connection to runProtocol; mock it so the happy
 // path can be driven to that hand-off without opening a transport. Hoisted above
@@ -77,9 +79,12 @@ afterEach(() => {
   existsSyncSpy.mockRestore();
 });
 
-/** Locate the trailing FileSyncRuntimeOptions among runProtocol's call arguments
- *  by the key under test rather than by position, and assert it is the only
- *  argument carrying one. */
+/** The options object a mocked runProtocol call received. */
+function optionsArg(callArgs: unknown[]): RunProtocolOptions {
+  return callArgs[0] as RunProtocolOptions;
+}
+
+/** runProtocol's FileSyncRuntimeOptions, which zero-setup always supplies. */
 function runtimeOptionsArg(callArgs: unknown[]): {
   eventStream?: unknown;
   onOutputComplete?: (context: {
@@ -87,12 +92,15 @@ function runtimeOptionsArg(callArgs: unknown[]): {
     bootstrap?: ExchangeBootstrapResult;
   }) => void | Promise<void>;
 } {
-  const runtimeArgs = callArgs.filter(
-    (a): a is Record<string, unknown> =>
-      typeof a === "object" && a !== null && "eventStream" in a,
-  );
-  expect(runtimeArgs).toHaveLength(1);
-  return runtimeArgs[0];
+  const runtime = optionsArg(callArgs).fileSyncRuntime;
+  expect(runtime).toBeDefined();
+  return runtime as {
+    eventStream?: unknown;
+    onOutputComplete?: (context: {
+      observedReceivedPayloadColumns: string[];
+      bootstrap?: ExchangeBootstrapResult;
+    }) => void | Promise<void>;
+  };
 }
 
 /** Drive the completed-exchange half of runProtocol's contract from the mock:
@@ -417,11 +425,7 @@ test("handler: a repeated single-value flag exits 64 naming the flag", async () 
   // on stderr and maps to exit 64, rather than letting the array reach the
   // connection overrides as if it were a scalar port.
   const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
-    code?: number,
-  ) => {
-    throw new Error(`exit:${code ?? 0}`);
-  }) as never);
+  const exitSpy = captureProcessExit();
   try {
     await expect(
       handler({
@@ -452,7 +456,7 @@ async function termsFromZeroSetupRun(
   );
   let prepared: PreparedExchange | undefined;
   vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
-    prepared = callArgs[2] as PreparedExchange;
+    prepared = optionsArg(callArgs).prepared;
     return driveCompletedExchange(callArgs, { partnerSaveIntent: false });
   }) as never);
 
@@ -477,11 +481,7 @@ test("handler: no --identity asks nothing and sends no identity", async () => {
   // not the account psilink runs as, not an empty string -- so a partner reads
   // this party as one that named itself none.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zeroidentity-"));
-  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
-    code?: number,
-  ) => {
-    throw new Error(`exit:${code ?? 0}`);
-  }) as never);
+  const exitSpy = captureProcessExit();
   try {
     for (const blank of [undefined, "", "   "]) {
       const terms = await termsFromZeroSetupRun(dir, blank);
@@ -500,11 +500,7 @@ test("handler: an --identity still carrying the init placeholder exits 64", asyn
   // would silently unname a run whose operator typed a value believing it named
   // them. It stops before the connection is opened.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zeroidentity-"));
-  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
-    code?: number,
-  ) => {
-    throw new Error(`exit:${code ?? 0}`);
-  }) as never);
+  const exitSpy = captureProcessExit();
   vi.mocked(runProtocol).mockClear();
   try {
     await expect(
@@ -519,11 +515,7 @@ test("handler: an --identity still carrying the init placeholder exits 64", asyn
 
 test("handler: a supplied --identity rides into the terms, trimmed", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zeroidentity-"));
-  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
-    code?: number,
-  ) => {
-    throw new Error(`exit:${code ?? 0}`);
-  }) as never);
+  const exitSpy = captureProcessExit();
   try {
     const terms = await termsFromZeroSetupRun(dir, "  Jane Smith, Agency A  ");
     expect(terms.identity).toBe("Jane Smith, Agency A");
@@ -542,11 +534,7 @@ test("handler hands the resolved credential to the exchange while persisting not
   // capture the connection it receives; process.exit is trapped so an unexpected
   // failure surfaces as a thrown test error rather than killing the run.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zerohandler-"));
-  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
-    code?: number,
-  ) => {
-    throw new Error(`exit:${code ?? 0}`);
-  }) as never);
+  const exitSpy = captureProcessExit();
   try {
     const pwFile = path.join(dir, "pw");
     fs.writeFileSync(pwFile, "s3cret\n");
@@ -560,7 +548,8 @@ test("handler hands the resolved credential to the exchange while persisting not
     vi.mocked(runProtocol).mockImplementation((async (
       ...callArgs: unknown[]
     ) => {
-      connToRunProtocol = callArgs[0] as SFTPConnectionConfig;
+      connToRunProtocol = optionsArg(callArgs)
+        .connection as SFTPConnectionConfig;
       // bootstrap present but no secret and no partner intent: finalizeBootstrap
       // (save === false) only logs the recurring-exchange hint, writing nothing.
       return driveCompletedExchange(callArgs, { partnerSaveIntent: false });
@@ -601,11 +590,7 @@ test("handler: a result file the exchange could not write exits 73, not 69", asy
   // drives the real stamp); measured here is what the COMMAND reports. A boundary
   // mapping every non-usage error to 69 fails only this.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zeroexit-"));
-  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
-    code?: number,
-  ) => {
-    throw new Error(`exit:${code ?? 0}`);
-  }) as never);
+  const exitSpy = captureProcessExit();
   try {
     const input = path.join(dir, "input.csv");
     fs.writeFileSync(
@@ -647,11 +632,7 @@ test("handler with --save carries the first-use pin into the written config", as
   // run.
   const FP = "SHA256:" + "C".repeat(43);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zerosave-"));
-  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
-    code?: number,
-  ) => {
-    throw new Error(`exit:${code ?? 0}`);
-  }) as never);
+  const exitSpy = captureProcessExit();
   try {
     const input = path.join(dir, "input.csv");
     fs.writeFileSync(
@@ -710,11 +691,7 @@ test("handler with --save carries the first-use pin into the written config", as
 
 test("handler: the dataset is prepared before host-key trust", async () => {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zeroprepare-"));
-  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
-    code?: number,
-  ) => {
-    throw new Error(`exit:${code ?? 0}`);
-  }) as never);
+  const exitSpy = captureProcessExit();
   try {
     const input = path.join(dir, "input.csv");
     fs.writeFileSync(
@@ -769,11 +746,7 @@ test("handler: an input the prepare refuses exits 64 with no host-key probe", as
     stderrChunks.push(String(chunk));
     return true;
   }) as never);
-  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
-    code?: number,
-  ) => {
-    throw new Error(`exit:${code ?? 0}`);
-  }) as never);
+  const exitSpy = captureProcessExit();
   try {
     const overlong = "z".repeat(300);
     const input = path.join(dir, "input.csv");
@@ -821,11 +794,7 @@ test("handler: a credential @path naming a missing file exits 64 with no host-ke
     stderrChunks.push(String(chunk));
     return true;
   }) as never);
-  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
-    code?: number,
-  ) => {
-    throw new Error(`exit:${code ?? 0}`);
-  }) as never);
+  const exitSpy = captureProcessExit();
   try {
     const input = path.join(dir, "input.csv");
     fs.writeFileSync(
@@ -866,11 +835,7 @@ test("handler: the first-use pin reaches the connection the exchange dials", asy
   // unverified server -- so the run driven here supplies both.
   const FP = "SHA256:" + "D".repeat(43);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zeropin-"));
-  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
-    code?: number,
-  ) => {
-    throw new Error(`exit:${code ?? 0}`);
-  }) as never);
+  const exitSpy = captureProcessExit();
   try {
     const pwFile = path.join(dir, "pw");
     fs.writeFileSync(pwFile, "s3cret\n");
@@ -889,7 +854,8 @@ test("handler: the first-use pin reaches the connection the exchange dials", asy
     vi.mocked(runProtocol).mockImplementationOnce((async (
       ...callArgs: unknown[]
     ) => {
-      connToRunProtocol = callArgs[0] as SFTPConnectionConfig;
+      connToRunProtocol = optionsArg(callArgs)
+        .connection as SFTPConnectionConfig;
       return driveCompletedExchange(callArgs, { partnerSaveIntent: false });
     }) as never);
 
@@ -920,11 +886,7 @@ test("handler: an unrecognized --linkage-strategy exits 64, naming the valid val
   // exists, so an unknown value is a clean usage error (exit 64) reported on
   // stderr, the same classification invite gives it.
   const errSpy = vi.spyOn(console, "error").mockImplementation(() => {});
-  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
-    code?: number,
-  ) => {
-    throw new Error(`exit:${code ?? 0}`);
-  }) as never);
+  const exitSpy = captureProcessExit();
   try {
     await expect(
       handler({
@@ -948,11 +910,7 @@ test("handler --save: the selected strategy flows into the saved config (single-
   // into the --save spec; omitting it leaves the cascade default. Drive the
   // handler to completion with runProtocol mocked and read the written config.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zerostrategy-"));
-  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
-    code?: number,
-  ) => {
-    throw new Error(`exit:${code ?? 0}`);
-  }) as never);
+  const exitSpy = captureProcessExit();
   vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) =>
     driveCompletedExchange(callArgs, { partnerSaveIntent: false })) as never);
   try {
@@ -1008,11 +966,7 @@ test("handler: zero-setup surfaces the single-pass disclosure note at selection"
     stderrChunks.push(String(chunk));
     return true;
   }) as typeof process.stderr.write);
-  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
-    code?: number,
-  ) => {
-    throw new Error(`exit:${code ?? 0}`);
-  }) as never);
+  const exitSpy = captureProcessExit();
   getLogger("psilink").setLevel("info");
   vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) =>
     driveCompletedExchange(callArgs, { partnerSaveIntent: false })) as never);
@@ -1057,15 +1011,11 @@ test("handler: a zero-setup retain run states no consent fact about the retained
     stderrChunks.push(String(chunk));
     return true;
   }) as typeof process.stderr.write);
-  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
-    code?: number,
-  ) => {
-    throw new Error(`exit:${code ?? 0}`);
-  }) as never);
+  const exitSpy = captureProcessExit();
   getLogger("psilink").setLevel("info");
   let ran: FileDropConnectionConfig | undefined;
   vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
-    ran = callArgs[0] as FileDropConnectionConfig;
+    ran = optionsArg(callArgs).connection as FileDropConnectionConfig;
     return driveCompletedExchange(callArgs, { partnerSaveIntent: false });
   }) as never);
   try {
@@ -1121,11 +1071,7 @@ test("handler refuses a webrtc URL by naming the missing rendezvous secret", asy
     stderrChunks.push(String(chunk));
     return true;
   }) as never);
-  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
-    code?: number,
-  ) => {
-    throw new Error(`exit:${code ?? 0}`);
-  }) as never);
+  const exitSpy = captureProcessExit();
   try {
     const input = path.join(dir, "input.csv");
     fs.writeFileSync(
@@ -1197,11 +1143,7 @@ function saveFailureFixture(): {
     stderrChunks.push(String(chunk));
     return true;
   }) as typeof process.stderr.write);
-  const exitSpy = vi.spyOn(process, "exit").mockImplementation(((
-    code?: number,
-  ) => {
-    throw new Error(`exit:${code ?? 0}`);
-  }) as never);
+  const exitSpy = captureProcessExit();
   const previousExitCode = process.exitCode;
   process.exitCode = undefined;
   vi.mocked(runProtocol).mockClear();

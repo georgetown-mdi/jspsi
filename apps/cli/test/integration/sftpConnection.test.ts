@@ -15,7 +15,6 @@ import type { SFTPConnectionConfig } from "@psilink/core";
 import Ssh2SftpClient from "ssh2-sftp-client";
 
 import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
-import { selectedBackend } from "../sftpServer";
 import {
   ensureNamespace,
   localPath,
@@ -26,6 +25,7 @@ import {
 } from "../sftpServer/testContext";
 
 import log from "loglevel";
+import { inProcessOnly } from "../sftpBackendGate";
 
 log.setLevel(log.levels.DEBUG);
 
@@ -68,7 +68,6 @@ let pairPath: string;
 // in-process backend's real ssh2 wrapper and a synthetic fatal emit; the native
 // sshd backend validates the real-server happy path and auth instead, so they
 // are tagged to run only in-process.
-const inProcessOnly = test.skipIf(selectedBackend() !== "in-process");
 
 async function cleanServer() {
   for (const file of await fs.readdir(SFTP_LOCAL_DIRECTORY)) {

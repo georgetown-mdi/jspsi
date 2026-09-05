@@ -1,6 +1,6 @@
 import { UsageError } from "@psilink/core";
 
-import { promptFreeText, writePromptLine } from "./util/cli";
+import { promptFreeText, writePromptLine } from "./util/prompt";
 
 /** How every refusal here tells the operator to supply the label. */
 const IDENTITY_FLAG_HELP = '--identity "name, org, contact"';

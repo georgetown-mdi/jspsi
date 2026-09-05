@@ -1,13 +1,14 @@
 import fsp from "node:fs/promises";
 import path from "node:path";
 
-import { expect, test } from "vitest";
+import { expect } from "vitest";
 import { FileSyncConnection } from "@psilink/core";
 import { withCapturedLogs } from "@psilink/core/testing";
 
 import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
-import { selectedBackend, startInProcessSftpServer } from "../sftpServer";
+import { startInProcessSftpServer } from "../sftpServer";
 import { serverAuth } from "../sftpServer/testContext";
+import { inProcessOnly } from "../sftpBackendGate";
 
 // ssh2 DEFERS a Client.connect() issued on a socket it still considers WRITABLE:
 // the attempt is registered behind once('close', ...) and no readyTimeout is armed
@@ -28,7 +29,6 @@ import { serverAuth } from "../sftpServer/testContext";
 // cannot), and that partner class is the one that can leave a transport in a state
 // a dial might defer behind, so this runs there and stands up its own server to
 // reach the session controls.
-const inProcessOnly = test.skipIf(selectedBackend() !== "in-process");
 
 // A dial on a destroyed or merely ended socket completes in around 220 ms on the
 // pinned versions. This separates "settled" from "deferred", which does not settle
