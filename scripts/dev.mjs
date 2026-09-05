@@ -10,6 +10,11 @@
 // core's rollup watcher alongside the web dev server so every later edit
 // rebuilds, and takes the whole loop down as soon as either side exits.
 //
+// Teardown holds for every signal in TEARDOWN_SIGNALS, whether it reaches the
+// whole process group (a terminal Ctrl-C) or this process alone (`pkill -f
+// scripts/dev.mjs`), and scripts/dev.test.mjs fails on a child that outlives the
+// signal. SIGKILL runs no handler, so it orphans whatever was running.
+//
 // Bringing dist up to date BEFORE the dev server starts is the part that
 // matters: rollup's watcher rebuilds asynchronously, so a dev server racing it
 // would resolve whatever dist happened to be on disk at startup -- the stale
@@ -33,13 +38,30 @@ export const CORE_WORKSPACE = "packages/core";
 /** The app script run when none is named. */
 export const DEFAULT_APP_SCRIPT = "dev";
 
+/**
+ * The signals this loop forwards to its children. SIGHUP is here because the
+ * children run in sessions of their own: a closed terminal reaches this process
+ * and nothing under it.
+ */
+export const TEARDOWN_SIGNALS = ["SIGINT", "SIGTERM", "SIGHUP"];
+
 const ON_WINDOWS = process.platform === "win32";
 const NPM = ON_WINDOWS ? "npm.cmd" : "npm";
 
 // Node refuses to spawn a .cmd without a shell, so the Windows npm shim needs
 // one. Every argument below is a literal except the app script name, which
 // parseAppScript has already matched against the app's own declared scripts.
-const SPAWN_OPTIONS = { cwd: repoRoot, stdio: "inherit", shell: ON_WINDOWS };
+//
+// `detached` puts each child in a process group of its own, which is what makes
+// the teardown below reach the tool: npm runs a workspace script through a
+// shell, and a signal delivered to npm alone kills npm and that shell while
+// rollup and vite go on running, reparented to init.
+const SPAWN_OPTIONS = {
+  cwd: repoRoot,
+  stdio: "inherit",
+  shell: ON_WINDOWS,
+  detached: !ON_WINDOWS,
+};
 
 /**
  * The app script named by `argv`, defaulting to DEFAULT_APP_SCRIPT. Validated
@@ -158,15 +180,25 @@ function exitCodeOf(child) {
   });
 }
 
-function runToCompletion(args) {
-  return exitCodeOf(spawn(NPM, args, SPAWN_OPTIONS));
-}
-
-function startWatcher(args) {
+/**
+ * Starts one npm invocation and returns a handle that signals its whole process
+ * group, so the tool npm launched through a shell goes down with it. Windows
+ * gets no process group of its own, so there the signal reaches npm alone.
+ *
+ * @internal
+ */
+export function startProcess(args) {
   const child = spawn(NPM, args, SPAWN_OPTIONS);
   return {
     kill: (signal) => {
-      if (child.exitCode === null && child.signalCode === null) {
+      if (child.exitCode !== null || child.signalCode !== null) return;
+      if (!SPAWN_OPTIONS.detached) {
+        child.kill(signal);
+        return;
+      }
+      try {
+        process.kill(-child.pid, signal);
+      } catch {
         child.kill(signal);
       }
     },
@@ -184,25 +216,26 @@ async function main() {
   }
 
   const live = new Set();
-  // A terminal Ctrl-C reaches the children through the shared process group, but
-  // a SIGTERM addressed to this process alone would orphan them: rollup's watcher
-  // and the dev server would keep the port and the file watches.
-  for (const signal of ["SIGINT", "SIGTERM"]) {
+  const track = (handle) => {
+    live.add(handle);
+    void handle.exited.then(() => live.delete(handle));
+    return handle;
+  };
+
+  // Every child this loop starts is forwarded these signals, the core build
+  // included: a signal addressed to this process alone otherwise leaves rollup
+  // and the dev server holding the port and the file watches.
+  for (const signal of TEARDOWN_SIGNALS) {
     process.on(signal, () => {
-      for (const watcher of live) watcher.kill(signal);
+      for (const handle of live) handle.kill(signal);
     });
   }
 
   const code = await runDevLoop({
     appScript,
     isCoreBuildCurrent: () => coreBuildIsCurrent(),
-    runToCompletion,
-    startWatcher: (args) => {
-      const watcher = startWatcher(args);
-      live.add(watcher);
-      void watcher.exited.then(() => live.delete(watcher));
-      return watcher;
-    },
+    runToCompletion: (args) => track(startProcess(args)).exited,
+    startWatcher: (args) => track(startProcess(args)),
   });
   process.exit(code);
 }

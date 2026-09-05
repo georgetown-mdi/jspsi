@@ -1,15 +1,24 @@
-import { mkdtempSync, mkdirSync, utimesSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import {
   APP_WORKSPACE,
   CORE_WORKSPACE,
   DEFAULT_APP_SCRIPT,
+  TEARDOWN_SIGNALS,
   appScriptNames,
   coreBuildIsCurrent,
   parseAppScript,
   runDevLoop,
+  startProcess,
 } from "./dev.mjs";
 
 // Coverage of the root dev loop's two critical properties, neither of which
@@ -185,6 +194,89 @@ describe("core's build currency", () => {
   it("reads the checked-out tree without throwing", () => {
     expect(typeof coreBuildIsCurrent()).toBe("boolean");
   });
+});
+
+// A workspace whose one script runs a node process that records its own pid and
+// then stays up, reproducing the shape the dev loop tears down: npm, the shell
+// npm runs the script through, and the tool underneath.
+function leafWorkspace() {
+  const root = mkdtempSync(join(tmpdir(), "psilink-dev-leaf-"));
+  writeFileSync(
+    join(root, "package.json"),
+    JSON.stringify({
+      name: "leaf-probe",
+      version: "0.0.0",
+      private: true,
+      scripts: { leaf: "node leaf.mjs" },
+    }),
+  );
+  writeFileSync(
+    join(root, "leaf.mjs"),
+    [
+      'import { writeFileSync } from "node:fs";',
+      'import { join } from "node:path";',
+      'writeFileSync(join(import.meta.dirname, "leaf.pid"), String(process.pid));',
+      "setInterval(() => {}, 1000);",
+      "",
+    ].join("\n"),
+  );
+  return root;
+}
+
+function isAlive(pid) {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/** Resolves once `ready` holds, or rejects after `timeoutMs`. */
+async function until(ready, timeoutMs, what) {
+  const deadline = Date.now() + timeoutMs;
+  while (!ready()) {
+    if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
+    await new Promise((resume) => setTimeout(resume, 50));
+  }
+}
+
+const ON_WINDOWS = process.platform === "win32";
+
+// The claim the header makes, held as a check rather than as prose: nothing the
+// loop started outlives the signal. npm does not forward a signal to the tool it
+// runs through a shell, so a startProcess that signals its immediate child
+// leaves the leaf running, reparented to init, holding whatever port and file
+// watches it had.
+describe.skipIf(ON_WINDOWS)("a child of the dev loop", () => {
+  const leaves = [];
+
+  // A failing leg is the leaked-process case itself, so the leaf goes down here
+  // rather than outliving the run that reported it.
+  afterEach(() => {
+    for (const leaf of leaves.splice(0)) {
+      if (isAlive(leaf)) process.kill(leaf, "SIGKILL");
+    }
+  });
+
+  it.each(TEARDOWN_SIGNALS)(
+    "does not outlive %s",
+    async (signal) => {
+      const root = leafWorkspace();
+      const pidFile = join(root, "leaf.pid");
+      const started = startProcess(["--prefix", root, "run", "leaf"]);
+
+      await until(() => existsSync(pidFile), 60_000, "the leaf to start");
+      const leaf = Number(readFileSync(pidFile, "utf8"));
+      leaves.push(leaf);
+      expect(isAlive(leaf)).toBe(true);
+
+      started.kill(signal);
+      await started.exited;
+      await until(() => !isAlive(leaf), 15_000, `pid ${leaf} to exit`);
+    },
+    90_000,
+  );
 });
 
 describe("the dev loop's app-script argument", () => {
