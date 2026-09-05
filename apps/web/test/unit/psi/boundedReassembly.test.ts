@@ -1,6 +1,7 @@
 import { describe, expect, test, vi } from "vitest";
 
-import { ConnectionError, WEBRTC_VALUE_WEIGHTS } from "@psilink/core";
+import { ConnectionError } from "@psilink/core";
+import { WEBRTC_VALUE_WEIGHTS } from "@psilink/core/testing";
 
 import {
   boundChunkReassembly,

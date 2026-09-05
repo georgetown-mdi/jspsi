@@ -4,7 +4,6 @@ import path from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
 
 import {
-  CAUSE_DEPTH_ELISION_MARKER,
   COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
   DEFAULT_MAX_DISPLAY_LENGTH,
   DISPLAY_TRUNCATION_MARKER,
@@ -13,6 +12,7 @@ import {
   joinErrorCauseChain,
   sanitizeErrorForDisplay,
 } from "@psilink/core";
+import { CAUSE_DEPTH_ELISION_MARKER } from "@psilink/core/testing";
 
 import {
   EMPTY_CHAIN_LINK,

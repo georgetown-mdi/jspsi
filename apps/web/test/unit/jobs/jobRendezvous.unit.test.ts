@@ -7,11 +7,11 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   DEFAULT_MAX_DISPLAY_LENGTH,
   DISPLAY_TRUNCATION_MARKER,
-  MAX_ENDPOINT_PATH_LENGTH,
   WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
   renderedDisplayCost,
   sanitizeForDisplay,
 } from "@psilink/core";
+import { MAX_ENDPOINT_PATH_LENGTH } from "@psilink/core/testing";
 
 import { MAX_INPUT_NAME_LENGTH } from "@jobs/workInputName";
 import { SWEEP_CONTROL_LABEL } from "@psi/runDiagnosticsModel";

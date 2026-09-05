@@ -6,9 +6,9 @@ import {
   MAX_WEBRTC_FRAME_BYTES,
   MAX_WEBRTC_FRAME_STRUCTURE_BYTES,
   MAX_WEBRTC_STRING_BYTES,
-  WEBRTC_VALUE_WEIGHTS,
   scanFrameStructure,
 } from "@psilink/core";
+import { WEBRTC_VALUE_WEIGHTS } from "@psilink/core/testing";
 
 import { normalizeBinary } from "@psilink/testkit/webrtcInboundFrames";
 

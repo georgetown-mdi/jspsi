@@ -1,6 +1,5 @@
 import { expect, test } from "vitest";
 import {
-  CAUSE_DEPTH_ELISION_MARKER,
   COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
   inferMetadata,
   LinkageTermsUnsatisfiableError,
@@ -9,6 +8,7 @@ import {
   sanitizeErrorForDisplay,
   UsageError,
 } from "@psilink/core";
+import { CAUSE_DEPTH_ELISION_MARKER } from "@psilink/core/testing";
 import type { getLogger, LinkageTerms } from "@psilink/core";
 
 import {
