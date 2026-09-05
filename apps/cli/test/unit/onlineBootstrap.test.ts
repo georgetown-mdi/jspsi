@@ -6,7 +6,6 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import type { Arguments } from "yargs";
 import YAML from "yaml";
 import {
-  CSV_LINE_BYTE_CEILING,
   CsvRowParseError,
   getDefaultLinkageTerms,
   getLogger,
@@ -20,6 +19,7 @@ import {
   SHARED_SECRET_REGEX,
   UsageError,
 } from "@psilink/core";
+import { CSV_LINE_BYTE_CEILING } from "@psilink/core/testing";
 import type {
   ConnectionConfig,
   ConnectionEndpoint,

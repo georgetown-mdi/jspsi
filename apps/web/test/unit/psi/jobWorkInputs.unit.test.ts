@@ -6,12 +6,12 @@ import path from "node:path";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import {
-  CSV_LINE_BYTE_CEILING,
   MAX_TRANSFORM_PATTERN_LENGTH,
   columnValues,
   inferDateFormat,
   loadCSVFile,
 } from "@psilink/core";
+import { CSV_LINE_BYTE_CEILING } from "@psilink/core/testing";
 
 import {
   JobInputCoverageAbortedError,

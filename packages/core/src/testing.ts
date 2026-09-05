@@ -25,6 +25,12 @@ export {
 // callers conduct a handshake with runKex, never by composing the schedule.
 export { computeKexKeys } from "./kex.js";
 
+// The cross-party host-key fingerprint comparison, so each app's test tree can
+// hold the warning it composes to that app's own display budget. It stays out
+// of the main entry point: runExchange calls it and hands the result to the
+// caller, who never composes the notice.
+export { reconcileHostKeyFingerprints } from "./hostKeyReconciliation.js";
+
 // The wire pieces the known-answer vector generators under test/vectors build
 // their documents from. Those generators are plain Node scripts, so they read
 // the built package rather than this source tree, and each of these encodes or
@@ -48,6 +54,38 @@ export {
   exchangeTerms,
   sendAbort,
 } from "./protocolSetup.js";
+
+// The framing bytes of the file-sync message envelope, the AEAD envelope's
+// version marker, and the terminal-frame drain budget, so a suite can build a
+// frame byte for byte and drive a foreign version through the reader. They stay
+// out of the main entry point: a caller sends a message and the connection
+// frames it.
+export {
+  MESSAGE_ENVELOPE_VERSION,
+  MESSAGE_HEADER_BYTES,
+  MESSAGE_TYPE_BINARY,
+  TERMINAL_FRAME_DRAIN_TIMEOUT_MS,
+} from "./connection/fileSyncConnection.js";
+export { AEAD_ENVELOPE_VERSION } from "./connection/encryptedMessageConnection.js";
+
+// The input bounds a suite drives at their edge: the invitation decode's host,
+// path, and whole-token limits, the WebRTC frame pre-scan's per-kind weights,
+// and the CSV line ceiling. They stay out of the main entry point: core's own
+// parse enforces each, and a caller meets the refusal rather than the number.
+export { WEBRTC_VALUE_WEIGHTS } from "./connection/binaryPackBounds.js";
+export {
+  MAX_ENDPOINT_HOST_LENGTH,
+  MAX_ENDPOINT_PATH_LENGTH,
+  MAX_RAW_INVITATION_LENGTH,
+} from "./config/invitation.js";
+export { CSV_LINE_BYTE_CEILING } from "./file.js";
+
+// The marker a control character is replaced by, and the one the error-chain
+// walk appends where the depth bound cut. They stay out of the main entry
+// point: sanitizeForDisplay and sanitizeErrorForDisplay write both, and a
+// caller reads the rendered text.
+export { CAUSE_DEPTH_ELISION_MARKER } from "./utils/sanitizeErrorForDisplay.js";
+export { controlCharacterMarker } from "./utils/sanitizeForDisplay.js";
 
 // The lever that stands a listed fan-out producer in for an unlisted one. Both
 // published entry points build as one bundle with a shared chunk, so the listing

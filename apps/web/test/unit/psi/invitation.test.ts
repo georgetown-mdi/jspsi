@@ -7,7 +7,6 @@ import {
   INVITATION_LIFETIME_SECONDS,
   MAX_INVITATION_LIFETIME_SECONDS,
   MAX_NAME_LENGTH,
-  MAX_RAW_INVITATION_LENGTH,
   assertPayloadSendDisclosed,
   decodeInvitation,
   disclosedColumnNames,
@@ -16,6 +15,7 @@ import {
   summarizeInvitation,
   validateCompatibility,
 } from "@psilink/core";
+import { MAX_RAW_INVITATION_LENGTH } from "@psilink/core/testing";
 
 import {
   ACCEPT_ROUTE_PATH,

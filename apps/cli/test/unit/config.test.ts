@@ -6,7 +6,6 @@ import YAML from "yaml";
 import {
   bareTermsValue,
   COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
-  controlCharacterMarker,
   DEFAULT_LINKAGE_RULE_SET,
   DISPLAY_TRUNCATION_MARKER,
   getDefaultLinkageTerms,
@@ -23,6 +22,7 @@ import {
   UsageError,
   validateCompatibility,
 } from "@psilink/core";
+import { controlCharacterMarker } from "@psilink/core/testing";
 import {
   applyConnectionOverrides,
   assertRetainSweepGuard,

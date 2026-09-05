@@ -9,12 +9,12 @@ import {
   DISPLAY_TRUNCATION_MARKER,
   getDiagnosticSink,
   keyTypeFromBlob,
-  MAX_ENDPOINT_HOST_LENGTH,
   MAX_ERROR_CAUSE_DEPTH,
   sanitizeErrorForDisplay,
   setDiagnosticSink,
   UsageError,
 } from "@psilink/core";
+import { MAX_ENDPOINT_HOST_LENGTH } from "@psilink/core/testing";
 import type { ConnectionConfig, PresentedHostKey } from "@psilink/core";
 
 import {

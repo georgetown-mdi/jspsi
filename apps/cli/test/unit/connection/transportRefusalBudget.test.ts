@@ -5,11 +5,11 @@ import {
   DirectoryListingBoundsError,
   DISPLAY_TRUNCATION_MARKER,
   FrameSizeExceededError,
-  MAX_ENDPOINT_PATH_LENGTH,
   MAX_ERROR_CAUSE_DEPTH,
   sanitizeErrorForDisplay,
   TransportOperationStalledError,
 } from "@psilink/core";
+import { MAX_ENDPOINT_PATH_LENGTH } from "@psilink/core/testing";
 
 import { frameSizeExceededError } from "../../../src/connection/frameSizeGuard";
 import {

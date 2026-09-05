@@ -1,3 +1,15 @@
+// The supported entry point of @psilink/core: the names a consumer of the
+// published package may import from "@psilink/core". They are listed one at a
+// time rather than re-exported by module, so publishing a name is a decision
+// made here rather than a side effect of exporting it somewhere under src/.
+//
+// A name belongs here when production code outside packages/core calls it, or
+// when a comment beside it states why the package publishes it anyway.
+// Anything else stays module-internal, and product code exposed only so a test
+// outside packages/core can drive it goes on the ./testing subpath
+// (src/testing.ts). Which channel shared test material takes: docs/TESTING.md,
+// Shared test material.
+
 export {
   DirectoryListingBoundsError,
   FrameSizeExceededError,
@@ -40,10 +52,6 @@ export {
   DEFAULT_PEER_TIMEOUT_MS,
   DEFAULT_POLLING_FREQUENCY_MS,
   FileSyncConnection,
-  MESSAGE_ENVELOPE_VERSION,
-  MESSAGE_HEADER_BYTES,
-  MESSAGE_TYPE_BINARY,
-  TERMINAL_FRAME_DRAIN_TIMEOUT_MS,
   normalizeFiledropPath,
 } from "./connection/fileSyncConnection";
 export type {
@@ -72,10 +80,7 @@ export type {
   ConnectionErrorKind,
   MessageConnection,
 } from "./connection/messageConnection";
-export {
-  EncryptedMessageConnection,
-  AEAD_ENVELOPE_VERSION,
-} from "./connection/encryptedMessageConnection";
+export { EncryptedMessageConnection } from "./connection/encryptedMessageConnection";
 // The transport-agnostic half of the WebRTC data-channel inbound bound. Barrelled
 // because the enforcement point is per-transport and lives outside this package
 // (the web app's PeerJS reassembly wrapper), while the constants and the
@@ -88,7 +93,6 @@ export {
   MAX_WEBRTC_REASSEMBLY_DEPTH,
   MAX_WEBRTC_STRING_BYTES,
   MIN_CHUNK_RESIDENT_BYTES,
-  WEBRTC_VALUE_WEIGHTS,
   describeFrameStructureRefusal,
   scanFrameStructure,
 } from "./connection/binaryPackBounds";
@@ -146,7 +150,6 @@ export {
   displayText,
   renderedDisplayCost,
   clipToRenderedCost,
-  controlCharacterMarker,
   replaceControlCharactersForDisplay,
   trimPartialControlCharacterMarker,
   DISPLAY_TRUNCATION_MARKER,
@@ -162,7 +165,6 @@ export {
   redactPrivateKeyMaterial,
   redactAndSanitizeForDisplay,
   MAX_ERROR_CAUSE_DEPTH,
-  CAUSE_DEPTH_ELISION_MARKER,
 } from "./utils/sanitizeErrorForDisplay";
 // The delimiting grammar for a linkage-terms value named in an operator-facing
 // diagnostic. Exported because the CLI's reconcile refusal and citation-drift
@@ -178,7 +180,6 @@ export {
   ruleSetCitation,
 } from "./config/compatibilityMessage";
 export type { CompatibilityMessageFragment } from "./config/compatibilityMessage";
-export { reconcileHostKeyFingerprints } from "./hostKeyReconciliation";
 export { describeDecodeError } from "./utils/describeDecodeError";
 
 export { StandardizationSchema } from "./config/standardizationSchema";
@@ -271,10 +272,7 @@ export type {
 } from "./config/linkageTermsSchema";
 export {
   INVITATION_LIFETIME_SECONDS,
-  MAX_ENDPOINT_HOST_LENGTH,
-  MAX_ENDPOINT_PATH_LENGTH,
   MAX_INVITATION_LIFETIME_SECONDS,
-  MAX_RAW_INVITATION_LENGTH,
   decodeInvitation,
   encodeInvitation,
   endpointRequiresRetainedFiles,
@@ -420,7 +418,6 @@ export {
   loadCSVFile,
   streamCSVRows,
   readRowColumn,
-  CSV_LINE_BYTE_CEILING,
   CsvLineByteCeilingError,
   CsvRowParseError,
 } from "./file";

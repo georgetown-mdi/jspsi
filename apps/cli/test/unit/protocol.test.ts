@@ -240,10 +240,6 @@ import {
   OperatorConfigError,
   ReceiptVerificationError,
   isPeerWaitTimeout,
-  MESSAGE_ENVELOPE_VERSION,
-  MESSAGE_TYPE_BINARY,
-  MESSAGE_HEADER_BYTES,
-  AEAD_ENVELOPE_VERSION,
   sanitizeErrorForDisplay,
   sanitizeForDisplay,
   describeResolvedRunShape,
@@ -251,6 +247,12 @@ import {
   DISPLAY_TRUNCATION_MARKER,
   WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
 } from "@psilink/core";
+import {
+  AEAD_ENVELOPE_VERSION,
+  MESSAGE_ENVELOPE_VERSION,
+  MESSAGE_HEADER_BYTES,
+  MESSAGE_TYPE_BINARY,
+} from "@psilink/core/testing";
 import type {
   AssociationTable,
   DualSignedRecord,

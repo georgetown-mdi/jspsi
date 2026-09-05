@@ -8,10 +8,12 @@ import {
   DEFAULT_MAX_RECONNECT_ATTEMPTS,
   FileSyncConnection,
   PeerAbortError,
-  TERMINAL_FRAME_DRAIN_TIMEOUT_MS,
   UsageError,
 } from "@psilink/core";
-import { withCapturedLogs } from "@psilink/core/testing";
+import {
+  TERMINAL_FRAME_DRAIN_TIMEOUT_MS,
+  withCapturedLogs,
+} from "@psilink/core/testing";
 
 import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
 import {
