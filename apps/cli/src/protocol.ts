@@ -1192,16 +1192,12 @@ function logTransportCounters(
   client: LocalFSClient | SSH2SFTPClientAdapter | undefined,
   log: ReturnType<typeof getLogger>,
 ): void {
-  // Show both reconnect counts at normal verbosity so the operator sees a
-  // server that repeatedly dropped and was re-dialed even without
-  // --event-stream (which reports their sum as a machine metric). The
-  // per-drop WARN in the SFTP adapter already flags each recovery burst;
-  // this is the one end-of-run summary. Each count gets its own line rather
-  // than one merged total: a dial retried until it gave up establishes no
-  // connection, so reporting it as a re-establishment would read to the
-  // operator as a flaky link where the truth is a server or directory that
-  // was never reachable. Both are zero on a clean run, so the guards stay
-  // quiet.
+  // The end-of-run summary at normal verbosity: --event-stream reports the
+  // two counts only as one machine metric, and the SFTP adapter's per-drop
+  // WARN flags each recovery burst, not the run. Two lines rather than one
+  // total because a dial retried until it gave up never connected, and
+  // reporting it as a re-establishment would read as a flaky link where the
+  // server or directory was never reachable. Both are zero on a clean run.
   const midExchangeLosses = client?.midExchangeReconnectCount ?? 0;
   const connectRetries = client?.connectRetryCount ?? 0;
   if (midExchangeLosses > 0)
