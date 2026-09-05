@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 
 import { describe, expect, test } from "vitest";
 
-import { FAN_OUT_CANDIDATES_PER_ELEMENT } from "../src/fanOutFunctions";
+import { FAN_OUT_CANDIDATES_PER_ELEMENT } from "../../src/fanOutFunctions";
 import {
   decodeFixedWidthIndexTable,
   decodeInt32LE,
@@ -11,9 +11,9 @@ import {
   encodeInt32LE,
   encodeSinglePassReply,
   getSortedDistinctValueIndices,
-} from "../src/psi/link";
+} from "../../src/psi/link";
 
-import type { KeyCells, LocalKeyColumn } from "../src/psi/link";
+import type { KeyCells, LocalKeyColumn } from "../../src/psi/link";
 
 /**
  * Conformance replay of test/vectors/index-table-vectors.json: the wire
@@ -80,7 +80,7 @@ interface IndexTableVectors {
 
 const vectors: IndexTableVectors = JSON.parse(
   readFileSync(
-    new URL("./vectors/index-table-vectors.json", import.meta.url),
+    new URL("../vectors/index-table-vectors.json", import.meta.url),
     "utf-8",
   ),
 );

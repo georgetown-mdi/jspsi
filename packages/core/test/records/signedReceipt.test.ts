@@ -12,27 +12,27 @@ import {
   serializeDualSignedRecord,
   signReceiptContent,
   verifyReceiptSignature,
-} from "../src/records/signedReceipt";
-import { fromBase64Url, hkdfDerive, toBase64Url } from "../src/utils/crypto";
+} from "../../src/records/signedReceipt";
+import { fromBase64Url, hkdfDerive, toBase64Url } from "../../src/utils/crypto";
 import {
   computeCertificateFingerprint,
   generateSigningIdentity,
-} from "../src/records/signingIdentity";
+} from "../../src/records/signingIdentity";
 import {
   ConnectionError,
   createMessagePipe,
-} from "../src/connection/messageConnection";
+} from "../../src/connection/messageConnection";
 
 import type {
   DualSignedRecord,
   ReceiptContent,
   SignedReceiptExchangeInputs,
-} from "../src/records/signedReceipt";
-import type { CommittedPayload } from "../src/records/exchangeRecord";
+} from "../../src/records/signedReceipt";
+import type { CommittedPayload } from "../../src/records/exchangeRecord";
 import type {
   P256PrivateJwk,
   SigningIdentity,
-} from "../src/records/signingIdentity";
+} from "../../src/records/signingIdentity";
 
 // --- Fixtures ----------------------------------------------------------------
 
@@ -748,7 +748,7 @@ describe("serialize / parse dual-signed record", () => {
 // also checked below, since sign and verify share the byte construction.
 describe("cross-implementation vectors", () => {
   const vectorsPath = new URL(
-    "./vectors/signed-receipt-vectors.json",
+    "../vectors/signed-receipt-vectors.json",
     import.meta.url,
   );
   const { vectors } = JSON.parse(readFileSync(vectorsPath, "utf8")) as {

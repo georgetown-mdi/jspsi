@@ -2,20 +2,20 @@ import { expect, test } from "vitest";
 
 import PSI from "@openmined/psi.js";
 
-import { PSIParticipant } from "../src/psi/participant";
-import { linkViaPSI } from "../src/psi/link";
+import { PSIParticipant } from "../../src/psi/participant";
+import { linkViaPSI } from "../../src/psi/link";
 import {
   createMessagePipe,
   ConnectionError,
   type MessageConnection,
-} from "../src/connection/messageConnection";
-import { entityClusters } from "../src/psi/entityClosure";
-import { matchedPairCount } from "../src/exchange";
-import { buildOutputTable, preparePayload } from "../src/payloadExchange";
-import type { Metadata } from "../src/config/metadata";
-import type { CSVRow } from "../src/file";
-import type { AssociationTable } from "../src/types";
-import { UNBOUNDED_PSI_ELEMENTS } from "./utils/psiElementBounds";
+} from "../../src/connection/messageConnection";
+import { entityClusters } from "../../src/psi/entityClosure";
+import { matchedPairCount } from "../../src/exchange";
+import { buildOutputTable, preparePayload } from "../../src/payloadExchange";
+import type { Metadata } from "../../src/config/metadata";
+import type { CSVRow } from "../../src/file";
+import type { AssociationTable } from "../../src/types";
+import { UNBOUNDED_PSI_ELEMENTS } from "../utils/psiElementBounds";
 
 // Both-sided deduplicating matching at the cascade boundary: each party keeps a
 // value several of its own records hold, contributes it once, and attributes a

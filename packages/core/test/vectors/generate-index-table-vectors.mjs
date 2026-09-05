@@ -27,7 +27,7 @@
 // them assert the guards that REFUSE a malformed table (singlePassFanOut.test.ts
 // enumerates every ragged refusal) and that a whole exchange resolves; none pinned
 // the conforming bytes. This file is those bytes, and
-// packages/core/test/indexTableVectors.test.ts replays them.
+// packages/core/test/psi/indexTableVectors.test.ts replays them.
 //
 // Not here, by design: the refusal corpus. A refused frame is not a wire format,
 // and singlePassFanOut.test.ts already drives each ragged guard from its own
@@ -273,7 +273,7 @@ const vectors = {
     "response bytes: those two parts are the PSI engine's own serialization, " +
     "pinned for bytes by psi-engine-wire-vectors.json, and what is pinned here " +
     "is where they sit in the frame and how their lengths are carried. Replayed " +
-    "by packages/core/test/indexTableVectors.test.ts; regenerate with " +
+    "by packages/core/test/psi/indexTableVectors.test.ts; regenerate with " +
     "generate-index-table-vectors.mjs in this directory.",
   wordEncoding:
     "Every word is a little-endian two's-complement int32, so the fixed-width " +

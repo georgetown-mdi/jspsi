@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 
 import PSI from "@openmined/psi.js";
 
-import { PSIParticipant } from "../src/psi/participant";
+import { PSIParticipant } from "../../src/psi/participant";
 import {
   linkViaPSI,
   linkViaSinglePassPSI,
@@ -13,13 +13,13 @@ import {
   encodeSinglePassReply,
   decodeSinglePassReply,
   type LinkageCardinality,
-} from "../src/psi/link";
-import { MAX_WEBRTC_FRAME_BYTES } from "../src/connection/binaryPackBounds";
+} from "../../src/psi/link";
+import { MAX_WEBRTC_FRAME_BYTES } from "../../src/connection/binaryPackBounds";
 import {
   FAN_OUT_CANDIDATES_PER_ELEMENT,
   MAX_KEY_CANDIDATE_WIDTH,
-} from "../src/fanOutFunctions";
-import { MAX_LINKAGE_ENTRIES } from "../src/config/linkageTermsSchema";
+} from "../../src/fanOutFunctions";
+import { MAX_LINKAGE_ENTRIES } from "../../src/config/linkageTermsSchema";
 import {
   MAX_FRAME_SIZE_BYTES,
   MAX_SINGLE_PASS_CELLS,
@@ -28,7 +28,7 @@ import {
   singlePassDatasetExceedsCap,
   singlePassExchangeExceedsCap,
   singlePassReplyByteCap,
-} from "../src/connection/frameSize";
+} from "../../src/connection/frameSize";
 
 import {
   createMessagePipe,
@@ -36,12 +36,12 @@ import {
   parseOrProtocolError,
   ConnectionError,
   type MessageConnection,
-} from "../src/connection/messageConnection";
-import type { AssociationTable } from "../src/types";
-import { InternalConsistencyError, UsageError } from "../src/errors";
-import { sortAssociationTable } from "../src/testing";
-import { UNBOUNDED_PSI_ELEMENTS } from "./utils/psiElementBounds";
-import { fanOutFreeBounds } from "./utils/singlePassBounds";
+} from "../../src/connection/messageConnection";
+import type { AssociationTable } from "../../src/types";
+import { InternalConsistencyError, UsageError } from "../../src/errors";
+import { sortAssociationTable } from "../../src/testing";
+import { UNBOUNDED_PSI_ELEMENTS } from "../utils/psiElementBounds";
+import { fanOutFreeBounds } from "../utils/singlePassBounds";
 
 const psiLibrary = await PSI();
 

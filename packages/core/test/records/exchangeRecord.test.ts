@@ -15,27 +15,31 @@ import {
   serializeVerificationKeys,
   verifyCommitmentOpening,
   verifyRecordCommitments,
-} from "../src/records/exchangeRecord";
-import { fromBase64Url, randomBytes, toBase64Url } from "../src/utils/crypto";
+} from "../../src/records/exchangeRecord";
+import {
+  fromBase64Url,
+  randomBytes,
+  toBase64Url,
+} from "../../src/utils/crypto";
 
 import type {
   CommittedPayload,
   ExchangeRecordInputs,
   ExchangeRecordRandomness,
-} from "../src/records/exchangeRecord";
-import type { CanonicalValue } from "../src/utils/canonical";
-import type { LinkageTerms } from "../src/config/linkageTermsSchema";
+} from "../../src/records/exchangeRecord";
+import type { CanonicalValue } from "../../src/utils/canonical";
+import type { LinkageTerms } from "../../src/config/linkageTermsSchema";
 import {
   MAX_LINKAGE_ENTRIES,
   MAX_NAME_LENGTH,
   MAX_PAYLOAD_ENTRIES,
   MAX_TEXT_LENGTH,
-} from "../src/config/linkageTermsSchema";
-import { deriveAcceptedLinkageTerms } from "../src/linkageTermsNegotiation";
+} from "../../src/config/linkageTermsSchema";
+import { deriveAcceptedLinkageTerms } from "../../src/linkageTermsNegotiation";
 import {
   DEFAULT_LINKAGE_RULE_SET,
   getDefaultLinkageTerms,
-} from "../src/defaults/builtInLinkageTerms";
+} from "../../src/defaults/builtInLinkageTerms";
 
 // --- Fixtures ----------------------------------------------------------------
 
@@ -1250,7 +1254,7 @@ interface RecordVector {
 
 const { vectors } = JSON.parse(
   readFileSync(
-    new URL("./vectors/exchange-record-vectors.json", import.meta.url),
+    new URL("../vectors/exchange-record-vectors.json", import.meta.url),
     { encoding: "utf8" },
   ),
 ) as { vectors: RecordVector[] };

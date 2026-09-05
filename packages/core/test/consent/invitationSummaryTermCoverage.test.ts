@@ -1,9 +1,9 @@
 import { describe, expect, test } from "vitest";
 
-import { consentRepresentationProbes } from "../src/consent/linkageTermConsentCoverage.js";
-import { summarizeInvitation } from "../src/consent/invitationSummary.js";
+import { consentRepresentationProbes } from "../../src/consent/linkageTermConsentCoverage.js";
+import { summarizeInvitation } from "../../src/consent/invitationSummary.js";
 
-import type { LinkageTerms } from "../src/config/linkageTermsSchema.js";
+import type { LinkageTerms } from "../../src/config/linkageTermsSchema.js";
 
 /**
  * The consent summary built from a set of linkage terms, as a comparable string.

@@ -8,15 +8,15 @@ import {
   RLO,
   hostileSource,
   hostileVariants,
-} from "../src/consent/displayEscapingFixtures.js";
-import { summarizeInvitation } from "../src/consent/invitationSummary.js";
-import { sanitizeForDisplay } from "../src/utils/sanitizeForDisplay.js";
-import { declaredPositions } from "./utils/declaredPositions.js";
+} from "../../src/consent/displayEscapingFixtures.js";
+import { summarizeInvitation } from "../../src/consent/invitationSummary.js";
+import { sanitizeForDisplay } from "../../src/utils/sanitizeForDisplay.js";
+import { declaredPositions } from "../utils/declaredPositions.js";
 
 import type {
   InvitationLegalAgreementSummary,
   InvitationSummary,
-} from "../src/consent/invitationSummary.js";
+} from "../../src/consent/invitationSummary.js";
 
 /**
  * A linkage key's `id` holds the raw partner key name verbatim: it is the

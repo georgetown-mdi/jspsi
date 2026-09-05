@@ -2,20 +2,20 @@ import { expect, test } from "vitest";
 
 import PSI from "@openmined/psi.js";
 
-import { prepareForExchange, runExchange } from "../src/exchange";
-import { verifyCommitmentOpening } from "../src/records/exchangeRecord";
-import { toCommittedPayload } from "../src/payloadExchange";
+import { prepareForExchange, runExchange } from "../../src/exchange";
+import { verifyCommitmentOpening } from "../../src/records/exchangeRecord";
+import { toCommittedPayload } from "../../src/payloadExchange";
 import {
   ConnectionError,
   createMessagePipe,
-} from "../src/connection/messageConnection";
-import { LinkageTermsUnsatisfiableError, UsageError } from "../src/errors";
-import { sanitizeErrorForDisplay } from "../src/utils/sanitizeErrorForDisplay";
+} from "../../src/connection/messageConnection";
+import { LinkageTermsUnsatisfiableError, UsageError } from "../../src/errors";
+import { sanitizeErrorForDisplay } from "../../src/utils/sanitizeErrorForDisplay";
 
-import type { Algorithm } from "../src/types";
-import type { BuiltExchangeRecord } from "../src/records/exchangeRecord";
-import type { Output } from "../src/config/linkageTermsSchema";
-import type { ExchangeResult } from "../src/exchange";
+import type { Algorithm } from "../../src/types";
+import type { BuiltExchangeRecord } from "../../src/records/exchangeRecord";
+import type { Output } from "../../src/config/linkageTermsSchema";
+import type { ExchangeResult } from "../../src/exchange";
 
 // End-to-end coverage of the record boundary in runExchange: two parties run
 // a full exchange over an in-memory pipe (real PSI), and we assert the

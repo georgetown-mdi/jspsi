@@ -4,11 +4,15 @@ import {
   displayPartyIdentity,
   redactAndDisplayPartyIdentity,
   UNNAMED_PARTY_LABEL,
-} from "../src/records/partyIdentityDisplay";
-import { summarizeInvitation } from "../src/consent/invitationSummary";
-import { ESC, hostileTerms, RLO } from "../src/consent/displayEscapingFixtures";
+} from "../../src/records/partyIdentityDisplay";
+import { summarizeInvitation } from "../../src/consent/invitationSummary";
+import {
+  ESC,
+  hostileTerms,
+  RLO,
+} from "../../src/consent/displayEscapingFixtures";
 
-import type { LinkageTerms } from "../src/config/linkageTermsSchema";
+import type { LinkageTerms } from "../../src/config/linkageTermsSchema";
 
 /**
  * `linkage_terms.identity` is optional, so every surface that shows a

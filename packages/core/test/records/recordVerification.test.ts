@@ -2,33 +2,33 @@ import { Readable } from "node:stream";
 
 import { describe, expect, test } from "vitest";
 
-import { buildExchangeRecord } from "../src/records/exchangeRecord";
-import { buildOutputTable, preparePayload } from "../src/payloadExchange";
-import { loadCSVFile } from "../src/file";
+import { buildExchangeRecord } from "../../src/records/exchangeRecord";
+import { buildOutputTable, preparePayload } from "../../src/payloadExchange";
+import { loadCSVFile } from "../../src/file";
 import {
   reconstructCommittedData,
   recordAlterationIsTheOnlyExplanation,
   reproductionMismatchCauses,
   toRetainedResult,
   verifyExchangeRecord,
-} from "../src/records/recordVerification";
+} from "../../src/records/recordVerification";
 
 import type {
   CommitmentName,
   CommittedPayload,
   ExchangeRecordInputs,
-} from "../src/records/exchangeRecord";
-import type { LinkageTerms } from "../src/config/linkageTermsSchema";
-import type { Metadata } from "../src/config/metadata";
-import type { PartnerPayload } from "../src/payloadExchange";
+} from "../../src/records/exchangeRecord";
+import type { LinkageTerms } from "../../src/config/linkageTermsSchema";
+import type { Metadata } from "../../src/config/metadata";
+import type { PartnerPayload } from "../../src/payloadExchange";
 import type {
   CommitmentStatus,
   RecordVerificationReport,
   RetainedResult,
-} from "../src/records/recordVerification";
-import type { CanonicalValue } from "../src/utils/canonical";
-import type { AssociationTable } from "../src/types";
-import type { CSVRow } from "../src/file";
+} from "../../src/records/recordVerification";
+import type { CanonicalValue } from "../../src/utils/canonical";
+import type { AssociationTable } from "../../src/types";
+import type { CSVRow } from "../../src/file";
 
 // --- Fixtures ----------------------------------------------------------------
 

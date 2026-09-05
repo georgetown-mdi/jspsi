@@ -8,31 +8,31 @@ import {
   buildExchangeRecord,
   parseExchangeRecord,
   serializeExchangeRecord,
-} from "../src/records/exchangeRecord";
+} from "../../src/records/exchangeRecord";
 import {
   matchedPairCount,
   prepareForExchange,
   runExchange,
-} from "../src/exchange";
-import { loadCSVFile } from "../src/file";
+} from "../../src/exchange";
+import { loadCSVFile } from "../../src/file";
 import {
   buildOutputTable,
   preparePayload,
   toCommittedPayload,
-} from "../src/payloadExchange";
+} from "../../src/payloadExchange";
 import {
   reconstructCommittedData,
   toRetainedResult,
   verifyExchangeRecord,
-} from "../src/records/recordVerification";
-import { createMessagePipe } from "../src/connection/messageConnection";
+} from "../../src/records/recordVerification";
+import { createMessagePipe } from "../../src/connection/messageConnection";
 
-import type { LinkageTerms, Output } from "../src/config/linkageTermsSchema";
-import type { Metadata } from "../src/config/metadata";
-import type { PartnerPayload } from "../src/payloadExchange";
-import type { RetainedResult } from "../src/records/recordVerification";
-import type { AssociationTable } from "../src/types";
-import type { CSVRow } from "../src/file";
+import type { LinkageTerms, Output } from "../../src/config/linkageTermsSchema";
+import type { Metadata } from "../../src/config/metadata";
+import type { PartnerPayload } from "../../src/payloadExchange";
+import type { RetainedResult } from "../../src/records/recordVerification";
+import type { AssociationTable } from "../../src/types";
+import type { CSVRow } from "../../src/file";
 
 const psiLibrary = await PSI();
 

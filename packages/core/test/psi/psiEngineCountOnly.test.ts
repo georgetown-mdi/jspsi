@@ -3,21 +3,21 @@ import { describe, expect, test } from "vitest";
 import PSI from "@openmined/psi.js";
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 
-import { removeDuplicatesAndUndefineds } from "../src/psi/link";
+import { removeDuplicatesAndUndefineds } from "../../src/psi/link";
 import {
   InProcessPsiEngine,
   valuesContributedExactlyOnce,
   type PsiEngine,
   type PsiEngineMode,
-} from "../src/psi/psiEngine";
+} from "../../src/psi/psiEngine";
 import {
   WorkerPsiEngine,
   servePsiWorker,
   type PsiWorkerHandle,
   type PsiWorkerResponse,
-} from "../src/psi/psiWorkerEngine";
-import type { Config } from "../src/types";
-import { loadNativeAddonOrSkip } from "./utils/nativeAddon";
+} from "../../src/psi/psiWorkerEngine";
+import type { Config } from "../../src/types";
+import { loadNativeAddonOrSkip } from "../utils/nativeAddon";
 
 // The count-only (psi-c) construction at the PsiEngine boundary: a round
 // resolving to the intersection cardinality and nothing that names a match.

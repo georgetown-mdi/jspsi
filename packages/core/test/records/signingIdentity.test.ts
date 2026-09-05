@@ -18,19 +18,19 @@ import {
   serializeSigningIdentity,
   verifyCertificateSelfSignature,
   verifyPresentedCertificate,
-} from "../src/records/signingIdentity";
+} from "../../src/records/signingIdentity";
 import {
   assertPrivateKeyMatchesPublic,
   ECDSA_P256_SIGNATURE_BYTES,
   importPrivateSigningKey,
-} from "../src/records/signingKeys";
-import { fromBase64Url, toBase64Url } from "../src/utils/crypto";
+} from "../../src/records/signingKeys";
+import { fromBase64Url, toBase64Url } from "../../src/utils/crypto";
 
 import type {
   P256PrivateJwk,
   SigningCertificate,
   SigningIdentity,
-} from "../src/records/signingIdentity";
+} from "../../src/records/signingIdentity";
 
 const IDENTITY = "Jane Smith, Agency A\njsmith@agency-a.gov";
 
@@ -595,7 +595,7 @@ interface SigningVector {
 function readVectors(): { vectors: SigningVector[] } {
   return JSON.parse(
     readFileSync(
-      new URL("./vectors/signing-cert-vectors.json", import.meta.url),
+      new URL("../vectors/signing-cert-vectors.json", import.meta.url),
       "utf8",
     ),
   ) as { vectors: SigningVector[] };

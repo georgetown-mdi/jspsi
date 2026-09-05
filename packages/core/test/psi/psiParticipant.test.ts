@@ -6,18 +6,18 @@ import {
   PSIParticipant,
   associationTableMessage,
   numberArrayMessage,
-} from "../src/psi/participant";
-import { InProcessPsiEngine } from "../src/psi/psiEngine";
+} from "../../src/psi/participant";
+import { InProcessPsiEngine } from "../../src/psi/psiEngine";
 
 import {
   createMessagePipe,
   receiveParsed,
   parseOrProtocolError,
   ConnectionError,
-} from "../src/connection/messageConnection";
-import type { MessageConnection } from "../src/connection/messageConnection";
-import { sortAssociationTable } from "../src/testing";
-import { UNBOUNDED_PSI_ELEMENTS } from "./utils/psiElementBounds";
+} from "../../src/connection/messageConnection";
+import type { MessageConnection } from "../../src/connection/messageConnection";
+import { sortAssociationTable } from "../../src/testing";
+import { UNBOUNDED_PSI_ELEMENTS } from "../utils/psiElementBounds";
 
 const psiLibrary = await PSI();
 

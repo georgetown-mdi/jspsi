@@ -3,9 +3,9 @@ import { describe, expect, test } from "vitest";
 import {
   assertBlockDiagonalClosure,
   entityClusters,
-} from "../src/psi/entityClosure";
-import { InternalConsistencyError } from "../src/errors";
-import type { AssociationTable } from "../src/types";
+} from "../../src/psi/entityClosure";
+import { InternalConsistencyError } from "../../src/errors";
+import type { AssociationTable } from "../../src/types";
 
 // The closure step a party runs locally over the table the cascade left
 // it, and the check that holds its result to the shape the both-sided

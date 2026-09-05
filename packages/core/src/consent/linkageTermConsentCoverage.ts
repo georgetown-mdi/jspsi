@@ -9,7 +9,7 @@
 // The classification below is a table rather than the enumeration itself:
 // the field paths it is keyed by are DERIVED from the `LinkageTerms`
 // declaration with the compiler API
-// (test/linkageTermConsentCoverage.test.ts), and the two are asserted to
+// (test/consent/linkageTermConsentCoverage.test.ts), and the two are asserted to
 // agree in both directions. A hand-kept list cannot notice a field added
 // to core; a derivation cannot judge whether a field bears on consent.
 // Each half covers what the other cannot.

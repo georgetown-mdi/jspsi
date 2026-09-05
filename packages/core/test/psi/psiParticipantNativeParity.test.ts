@@ -3,11 +3,11 @@ import { describe, expect, test } from "vitest";
 import PSI from "@openmined/psi.js";
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 
-import { PSIParticipant } from "../src/psi/participant";
-import { createMessagePipe } from "../src/connection/messageConnection";
-import { sortAssociationTable } from "../src/testing";
-import { loadNativeAddonOrSkip } from "./utils/nativeAddon";
-import { UNBOUNDED_PSI_ELEMENTS } from "./utils/psiElementBounds";
+import { PSIParticipant } from "../../src/psi/participant";
+import { createMessagePipe } from "../../src/connection/messageConnection";
+import { sortAssociationTable } from "../../src/testing";
+import { loadNativeAddonOrSkip } from "../utils/nativeAddon";
+import { UNBOUNDED_PSI_ELEMENTS } from "../utils/psiElementBounds";
 
 // Cross-backend parity: a party running the native N-API addon and a
 // party running the WASM engine must complete a full identify-

@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 
 import PSI from "@openmined/psi.js";
 
-import { PSIParticipant } from "../src/psi/participant";
+import { PSIParticipant } from "../../src/psi/participant";
 import {
   associationAndIterationArray,
   attributableRoundMatches,
@@ -12,17 +12,17 @@ import {
   linkViaSinglePassPSI,
   removeDuplicatesAndUndefineds,
   type LinkageCardinality,
-} from "../src/psi/link";
+} from "../../src/psi/link";
 import {
   createMessagePipe,
   receiveParsed,
   ConnectionError,
   type MessageConnection,
-} from "../src/connection/messageConnection";
-import type { AssociationTable } from "../src/types";
-import { singlePassReplyByteCap } from "../src/connection/frameSize";
-import { UNBOUNDED_PSI_ELEMENTS } from "./utils/psiElementBounds";
-import { fanOutFreeBounds } from "./utils/singlePassBounds";
+} from "../../src/connection/messageConnection";
+import type { AssociationTable } from "../../src/types";
+import { singlePassReplyByteCap } from "../../src/connection/frameSize";
+import { UNBOUNDED_PSI_ELEMENTS } from "../utils/psiElementBounds";
+import { fanOutFreeBounds } from "../utils/singlePassBounds";
 
 // Deduplicating matching: a "many" party keeps a value several of its records
 // hold, contributes it once to the round, and attributes a match on it to every

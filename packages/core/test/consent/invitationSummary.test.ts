@@ -1,21 +1,24 @@
 import { describe, expect, test } from "vitest";
 
-import { getDefaultLinkageTerms } from "../src/defaults/builtInLinkageTerms.js";
+import { getDefaultLinkageTerms } from "../../src/defaults/builtInLinkageTerms.js";
 import {
   summarizeInvitation,
   TRANSFORM_FUNCTION_GLOSSARY,
-} from "../src/consent/invitationSummary.js";
-import { disclosedColumnNames, inferMetadata } from "../src/config/metadata.js";
+} from "../../src/consent/invitationSummary.js";
+import {
+  disclosedColumnNames,
+  inferMetadata,
+} from "../../src/config/metadata.js";
 import {
   assertDeduplicateImplemented,
   DEDUPLICATE_IMPLEMENTED_BY_STRATEGY,
-} from "../src/linkageTermsPolicy.js";
+} from "../../src/linkageTermsPolicy.js";
 
-import type { ConnectionEndpoint } from "../src/config/invitation.js";
+import type { ConnectionEndpoint } from "../../src/config/invitation.js";
 import type {
   LinkageStrategy,
   TransformStep,
-} from "../src/config/linkageTermsSchema.js";
+} from "../../src/config/linkageTermsSchema.js";
 
 // A linkable column set (ssn + names + dob give satisfiable keys) that ALSO
 // includes columns the inferred metadata discloses: `notes` infers as an

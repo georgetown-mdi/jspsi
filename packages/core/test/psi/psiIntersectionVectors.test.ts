@@ -4,12 +4,12 @@ import { expect, test } from "vitest";
 
 import PSI from "@openmined/psi.js";
 
-import { PSIParticipant } from "../src/psi/participant";
-import { linkViaPSI } from "../src/psi/link";
-import { createMessagePipe } from "../src/connection/messageConnection";
-import type { AssociationTable } from "../src/types";
-import { sortAssociationTable } from "../src/testing";
-import { UNBOUNDED_PSI_ELEMENTS } from "./utils/psiElementBounds";
+import { PSIParticipant } from "../../src/psi/participant";
+import { linkViaPSI } from "../../src/psi/link";
+import { createMessagePipe } from "../../src/connection/messageConnection";
+import type { AssociationTable } from "../../src/types";
+import { sortAssociationTable } from "../../src/testing";
+import { UNBOUNDED_PSI_ELEMENTS } from "../utils/psiElementBounds";
 
 // Resolved intersection-and-association known-answer anchor for the vendored
 // @openmined/psi.js engine: replays every scenario in psi-intersection-vectors.json
@@ -69,7 +69,7 @@ interface IntersectionVectors {
 
 const { vectors }: IntersectionVectors = JSON.parse(
   readFileSync(
-    new URL("./vectors/psi-intersection-vectors.json", import.meta.url),
+    new URL("../vectors/psi-intersection-vectors.json", import.meta.url),
     "utf-8",
   ),
 );

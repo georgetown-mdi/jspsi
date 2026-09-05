@@ -6,32 +6,32 @@ import {
   SIGNED_RECEIPT_VERSION,
   parseDualSignedRecord,
   signReceiptContent,
-} from "../src/records/signedReceipt";
+} from "../../src/records/signedReceipt";
 import {
   decideSignedReceiptVerdict,
   verifyDualSignedRecord,
-} from "../src/records/signedReceiptVerification";
+} from "../../src/records/signedReceiptVerification";
 import {
   computeCertificateFingerprint,
   generateSigningIdentity,
-} from "../src/records/signingIdentity";
+} from "../../src/records/signingIdentity";
 
 import type {
   DualSignedRecord,
   ReceiptContent,
   SignedReceiptParty,
-} from "../src/records/signedReceipt";
+} from "../../src/records/signedReceipt";
 import type {
   CertificateAnchorStatus,
   DualSignedRecordVerificationReport,
   SignedReceiptPartyReport,
   SignedReceiptVerdict,
-} from "../src/records/signedReceiptVerification";
+} from "../../src/records/signedReceiptVerification";
 import type {
   P256PrivateJwk,
   SigningIdentity,
-} from "../src/records/signingIdentity";
-import type { HandshakeRole } from "../src/types";
+} from "../../src/records/signingIdentity";
+import type { HandshakeRole } from "../../src/types";
 
 // The verification consumer for the dual-signed record: what a party (or an
 // auditor) can establish from the stored artifact alone, and what it cannot. The
@@ -1020,7 +1020,7 @@ function handBuiltReport(
 describe("cross-implementation bundle", () => {
   const { bundle } = JSON.parse(
     readFileSync(
-      new URL("./vectors/signed-receipt-vectors.json", import.meta.url),
+      new URL("../vectors/signed-receipt-vectors.json", import.meta.url),
       "utf8",
     ),
   ) as {
