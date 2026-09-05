@@ -10,15 +10,20 @@ import {
   withoutTypeAwareLayer,
 } from "./eslint-strip-type-aware-layer.mjs";
 
-// Coverage of the web app's layer-direction ban (productDirectoryBans in
-// apps/web/eslint.config.js): src/psi and src/components sit below the three
-// product directories and may not import from them. A specifier pattern that
-// stops matching fails silently -- it keeps reporting zero problems, which is
-// indistinguishable from clean source -- and the ban is folded into two eslint
-// blocks that also re-carry the cross-workspace groups and the two path bans,
-// because flat config replaces rather than merges a rule's options: a block that
-// grows its own no-restricted-imports options can drop the direction groups with
-// no other tell.
+// Coverage of the web app's layer-direction ban (productDirectorySpecifierBan and
+// productDirectoryBans in apps/web/eslint.config.js): src/psi and src/components
+// sit below the three product directories and may not import from them. A
+// specifier pattern that stops matching fails silently -- it keeps reporting zero
+// problems, which is indistinguishable from clean source -- and the ban is folded
+// into eslint blocks that also re-carry the cross-workspace groups and the two
+// path bans, because flat config replaces rather than merges a rule's options: a
+// block that grows its own options can drop the direction groups or the direction
+// selector with no other tell.
+//
+// The reach has more spellings than an import in the app is written with, so most
+// cases here are spellings nothing writes: the tsconfig `@*` catch-all
+// (`@/exchange/Lobby`), a climb with a "./" step in it, and the climb that goes
+// past src/ and back down. Each names a real module in a real vite build.
 //
 // Each case is linted through the real repo config, which embeds apps/web's
 // blocks scoped under apps/web/, with one transform: the type-aware layer is
@@ -35,9 +40,9 @@ const eslint = new ESLint({
   baseConfig: withoutTypeAwareLayer(repoConfig),
 });
 
-// The ban is two rules: no-restricted-imports for the static declarations, and
-// one no-restricted-syntax selector for the dynamic import() the import rule
-// does not read. A case is refused when either reports.
+// The ban is two rules: one no-restricted-syntax selector over every import and
+// export form, and the coarser no-restricted-imports groups beside it. A case is
+// refused when either reports.
 /** Direction-ban messages reported for `source` linted as `filePath`. */
 async function directionHits(filePath, source) {
   const [result] = await eslint.lintText(source, { filePath });
@@ -78,6 +83,18 @@ const PSI_NESTED = resolve(
   "apps/web/src/psi/transport/boundedReassembly.ts",
 );
 
+// The two modules the app already loads with a dynamic import, linted with the
+// specifier each one really writes: the arm of the ban that reads an
+// ImportExpression has to leave them alone.
+const RUNNER = resolve(
+  repoRoot,
+  "apps/web/src/components/ScheduledExchangeRunner.tsx",
+);
+const CSV_PARSE_CONTROLLER = resolve(
+  repoRoot,
+  "apps/web/src/psi/workers/csvParseController.ts",
+);
+
 const BELOW = [
   ["src/psi", PSI],
   ["src/components", COMPONENTS],
@@ -98,7 +115,35 @@ const CLIMB_SPECIFIERS = [
   "../recurring/SavedExchanges",
 ];
 
-const REFUSED_SPECIFIERS = [...ALIAS_SPECIFIERS, ...CLIMB_SPECIFIERS];
+// The tsconfig `@*` -> `./src/*` catch-all spells every alias a second way, and a
+// real vite build resolves it: `@/exchange/Lobby` names the module
+// `@exchange/Lobby` names. Nothing in the app writes an import this way, which is
+// exactly why a ban stated over the `@exchange` spelling alone stays green while
+// the reach is open.
+const CATCH_ALL_ALIAS_SPECIFIERS = [
+  "@/console/mountListing",
+  "@/exchange/Lobby",
+  "@/recurring/SavedExchanges",
+];
+
+// A climb with a "./" step in it, which leaves no ".." immediately before the
+// product directory and no "src/" segment to match instead. Written from a file
+// one level below src/.
+const STEPPED_CLIMB_SPECIFIERS = [
+  ".././console/mountListing",
+  ".././exchange/Lobby",
+  ".././recurring/SavedExchanges",
+  "./../console/mountListing",
+  "./../exchange/Lobby",
+  "./../recurring/SavedExchanges",
+];
+
+const REFUSED_SPECIFIERS = [
+  ...ALIAS_SPECIFIERS,
+  ...CATCH_ALL_ALIAS_SPECIFIERS,
+  ...CLIMB_SPECIFIERS,
+  ...STEPPED_CLIMB_SPECIFIERS,
+];
 
 // The same relative climb, one directory deeper, as written from a nested src/psi
 // subdirectory.
@@ -106,6 +151,25 @@ const NESTED_REFUSED_SPECIFIERS = [
   "../../console/mountListing",
   "../../exchange/Lobby",
   "../../recurring/SavedExchanges",
+];
+
+// The stepped climb from one directory deeper.
+const NESTED_STEPPED_CLIMB_SPECIFIERS = [
+  "../.././console/mountListing",
+  "../.././exchange/Lobby",
+  "../.././recurring/SavedExchanges",
+  "./../../console/mountListing",
+  "./../../exchange/Lobby",
+  "./../../recurring/SavedExchanges",
+];
+
+// Every spelling a nested src/psi file could reach a product with, alias
+// spellings included: the alias does not change with depth.
+const NESTED_ALL_REFUSED_SPECIFIERS = [
+  ...ALIAS_SPECIFIERS,
+  ...CATCH_ALL_ALIAS_SPECIFIERS,
+  ...NESTED_REFUSED_SPECIFIERS,
+  ...NESTED_STEPPED_CLIMB_SPECIFIERS,
 ];
 
 // A third spelling of the same reach: climbing PAST src/ and back down through
@@ -133,6 +197,15 @@ const ACCEPTED = [
   ["src/components", COMPONENTS, "@psi/authoring/advancedInvite"],
   ["src/exchange", PRODUCT, "@console/mountListing"],
   ["src/exchange", PRODUCT, "@recurring/SavedExchanges"],
+  // Specifiers whose segment merely BEGINS with a product directory's name: what
+  // a pattern reaching one character past the segment boundary would refuse.
+  ["src/psi", PSI, "@components/exchangeRecord"],
+  ["src/psi", PSI, "../utils/consoleLogger"],
+  ["src/components", COMPONENTS, "../psi/exchangeState"],
+  ["src/components", COMPONENTS, "@psi/managed/managedScheduleRuntime"],
+  // The two dynamic imports the app ships, each from its own file.
+  ["a shipped lazy load", RUNNER, "@psi/managed/managedScheduleRuntime"],
+  ["a shipped lazy load", CSV_PARSE_CONTROLLER, "./csvParseWorkerClient"],
 ];
 
 // Loading the flat config and the typescript-eslint parser for the first time is
@@ -148,6 +221,8 @@ describe("the web app's layer-direction ban", { timeout: 60_000 }, () => {
       PRODUCT,
       PSI_FIRST_PARSE,
       PSI_NESTED,
+      RUNNER,
+      CSV_PARSE_CONTROLLER,
     ]) {
       expect(existsSync(path), `${path} no longer exists`).toBe(true);
     }
@@ -182,6 +257,12 @@ describe("the web app's layer-direction ban", { timeout: 60_000 }, () => {
           "@console/*",
           "@exchange/*",
           "@recurring/*",
+          "@/console",
+          "@/console/*",
+          "@/exchange",
+          "@/exchange/*",
+          "@/recurring",
+          "@/recurring/*",
           "**/../console",
           "**/../console/**",
           "**/../exchange",
@@ -196,6 +277,13 @@ describe("the web app's layer-direction ban", { timeout: 60_000 }, () => {
           "**/src/recurring/**",
         ]),
       );
+      const [, ...syntax] = config.rules["no-restricted-syntax"] ?? [];
+      expect(
+        syntax
+          .map((option) => option.selector)
+          .filter((selector) => /console\|exchange\|recurring/.test(selector)),
+        `${layer}: the direction selector is not among the no-restricted-syntax options at ${filePath}, and it is the half that reads every import form`,
+      ).toHaveLength(1);
     }
   });
 
@@ -237,7 +325,7 @@ describe("the web app's layer-direction ban", { timeout: 60_000 }, () => {
   // A pattern scoped to one ".." catches the climb from src/psi's own files but
   // not from a nested subdirectory one level further down; each case here plants
   // the deeper climb to pin that the pattern covers it too.
-  for (const specifier of NESTED_REFUSED_SPECIFIERS) {
+  for (const specifier of NESTED_ALL_REFUSED_SPECIFIERS) {
     it(`refuses '${specifier}' from a nested src/psi subdirectory`, async () => {
       expect(
         await directionHits(PSI_NESTED, `import "${specifier}";\n`),
@@ -280,8 +368,7 @@ describe("the web app's layer-direction ban", { timeout: 60_000 }, () => {
   }
 
   for (const specifier of [
-    ...ALIAS_SPECIFIERS,
-    ...NESTED_REFUSED_SPECIFIERS,
+    ...NESTED_ALL_REFUSED_SPECIFIERS,
     ...NESTED_PAST_SRC_SPECIFIERS,
   ]) {
     it(`refuses a dynamic import of '${specifier}' from a nested src/psi subdirectory`, async () => {

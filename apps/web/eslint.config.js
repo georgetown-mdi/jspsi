@@ -112,12 +112,17 @@ const productDirectoryBanMessage = (target) =>
   `src/psi and src/components sit below the product directories; neither may import from ${target}. ` +
   "Move what both layers need into src/psi (React-free) or src/components (React), and import it from there.";
 
+// A second, coarser statement of the same ban, kept beside the selector below.
 // The `../` groups need a climb immediately before the directory; the src-rooted
 // groups beside them close the climb that goes one level further and comes back
-// down through src (`../../../src/exchange/Lobby` is the same module).
+// down through src (`../../../src/exchange/Lobby` is the same module), and the
+// `@/` groups close the tsconfig `@*` -> `./src/*` catch-all, under which
+// `@/exchange/Lobby` names the same module as `@exchange/Lobby`.
 const productDirectoryBans = productDirectories.map((dir) => ({
   group: [
     `@${dir}/*`,
+    `@/${dir}`,
+    `@/${dir}/*`,
     `**/../${dir}`,
     `**/../${dir}/**`,
     `**/src/${dir}`,
@@ -126,14 +131,22 @@ const productDirectoryBans = productDirectories.map((dir) => ({
   message: productDirectoryBanMessage(`src/${dir}`),
 }));
 
-// no-restricted-imports reads static import and export declarations only, so
-// `await import("@exchange/Lobby")` reaches a product directory past the groups
-// above -- and the app already loads modules that way (ScheduledExchangeRunner,
-// csvParseController). This matches the same spellings on a dynamic import's
-// literal source: the alias, and a relative climb (through a `src/` segment or
-// not) landing on one of the three directories.
-const productDirectoryDynamicImportBan = {
-  selector: `ImportExpression[source.value=/^(@(${productDirectories.join("|")})\\/|(\\.\\.\\/)+(src\\/)?(${productDirectories.join("|")})(\\/|$))/]`,
+// The enforcing half of the ban. One regex over the whole specifier decides every
+// import and export form, so no two forms can disagree about a spelling: a path
+// segment exactly a product directory, either as the alias (`@exchange`) or after
+// any `/`. That covers the tsconfig `@*` -> `./src/*` catch-all (`@/exchange/Lobby`
+// names the same module), every climb spelling including one with a `./` step in it
+// (`.././exchange/Lobby`), and the climb past `src/` and back down. A segment that
+// merely BEGINS with a product name (`@components/exchangeRecord`) has no `/` or end
+// after it and is not matched. The ImportExpression arm is required rather than
+// hypothetical: no-restricted-imports reads static declarations only, and the app
+// loads modules dynamically (ScheduledExchangeRunner, csvParseController).
+const productDirectoryBanPattern = `(^@|\\/)(${productDirectories.join("|")})(\\/|$)`;
+
+const productDirectorySpecifierBan = {
+  selector:
+    ":matches(ImportDeclaration, ExportNamedDeclaration, ExportAllDeclaration, ImportExpression)" +
+    ` > Literal.source[value=/${productDirectoryBanPattern}/]`,
   message: productDirectoryBanMessage(
     "src/console, src/exchange or src/recurring",
   ),
@@ -330,14 +343,14 @@ export default [
     files: ["src/psi/**/*.{ts,tsx}", "src/components/**/*.{ts,tsx}"],
     ignores: ["src/psi/linkageComparison.ts"],
     rules: {
-      // The dynamic-import half of the ban, re-carrying the three selectors the
-      // src/ block sets for these files.
+      // The specifier ban, re-carrying the three selectors the src/ block sets
+      // for these files.
       "no-restricted-syntax": [
         "error",
         sensitiveYamlParseBan,
         rawRowsAccessBan,
         seatWarningSinkBan,
-        productDirectoryDynamicImportBan,
+        productDirectorySpecifierBan,
       ],
       "no-restricted-imports": [
         "error",
@@ -349,8 +362,8 @@ export default [
     },
   },
   {
-    // The rawRows consumers that sit below the products take the dynamic-import
-    // ban while keeping their rawRows exemption: the block above re-carries
+    // The rawRows consumers that sit below the products take the specifier ban
+    // while keeping their rawRows exemption: the block above re-carries
     // rawRowsAccessBan, and would otherwise replace their options and restore it.
     // Their import ban comes from that block, which this one leaves alone.
     files: rawRowsConsumers.filter(
@@ -362,7 +375,7 @@ export default [
         "error",
         sensitiveYamlParseBan,
         seatWarningSinkBan,
-        productDirectoryDynamicImportBan,
+        productDirectorySpecifierBan,
       ],
     },
   },
@@ -377,7 +390,7 @@ export default [
         sensitiveYamlParseBan,
         rawRowsAccessBan,
         seatWarningSinkBan,
-        productDirectoryDynamicImportBan,
+        productDirectorySpecifierBan,
       ],
       "no-restricted-imports": [
         "error",
