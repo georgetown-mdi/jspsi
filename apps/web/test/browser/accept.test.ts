@@ -35,7 +35,7 @@ import styles from "@styles/app.module.css";
 // Assertions below derive their expected string from this function, so they pin
 // that a string sink has the same form the panel does, not what that form is;
 // the literal FSI/PDI/marker expectations live in
-// apps/web/test/unit/columnNameDisplay.test.ts, which is critical for all of
+// apps/web/test/unit/components/columnNameDisplay.test.ts, which is critical for all of
 // them.
 import { isolatedColumnName } from "@components/ColumnName";
 

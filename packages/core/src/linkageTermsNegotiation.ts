@@ -198,7 +198,7 @@ interface CompatibilityResult {
  * partner chooses can close a delimiter or spell a second clause of
  * psilink's own prose. Enforced by type: the two accumulators hold
  * `CompatibilityMessageFragment`, so a message composed any other way does
- * not compile. `test/compatibilityMessage.test.ts` drives adversarial value
+ * not compile. `test/config/compatibilityMessage.test.ts` drives adversarial value
  * shapes through each message and asserts the clause structure holds.
  */
 export function validateCompatibility(

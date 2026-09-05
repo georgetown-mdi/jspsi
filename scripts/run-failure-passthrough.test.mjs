@@ -23,7 +23,7 @@ import {
 // message, reading a member off it to render alone -- would reopen exactly that.
 //
 // The unit pins in apps/web/test/unit/jobRunDiagnostics.unit.test.ts and
-// apps/web/test/unit/reattachOnBusy.test.ts measure `failureFor` itself, which
+// apps/web/test/unit/exchange/reattachOnBusy.test.ts measure `failureFor` itself, which
 // is where the composition happens; a decorating call site would redden neither,
 // since the unit project is node-only and renders no seat. Those pins state that
 // limit in prose, and prose asserting a code fact rots silently; this is the

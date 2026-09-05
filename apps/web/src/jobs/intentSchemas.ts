@@ -57,8 +57,8 @@ export const MAX_IDENTITY_LENGTH = 1024;
  * packages/core/src/config/linkageTermsSchema.ts) draws the same ranges over
  * the four free-text fields of a linkage-terms document, the party `identity`
  * among them, which a label accepted here becomes; the two patterns are held
- * equal by test/unit/identityLabelParity.test.ts. This contract is stricter: it
- * also refuses a leading `-`.
+ * equal by test/unit/jobs/identityLabelParity.test.ts. This contract is
+ * stricter: it also refuses a leading `-`.
  */
 export const IDENTITY_CONTROL_CHAR_PATTERN =
   // eslint-disable-next-line no-control-regex

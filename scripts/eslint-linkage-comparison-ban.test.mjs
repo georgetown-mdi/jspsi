@@ -67,7 +67,7 @@ const WEB_SRC = resolve(
 );
 const WEB_TEST = resolve(
   repoRoot,
-  "apps/web/test/unit/guidedOptInKeys.test.ts",
+  "apps/web/test/unit/psi/guidedOptInKeys.test.ts",
 );
 
 /** The core predicates the wrappers in linkageComparison.ts stand in front of. */

@@ -48,7 +48,7 @@ vi.mock("@tanstack/react-router", async () => ({
 // implementation (set in beforeEach) runs the sink -- the development /
 // diagnostics-on case the suite otherwise assumes -- and the gated-off test
 // overrides it to a no-op to prove the boundary delegates its console decision to
-// the gate. The gate's own env/flag logic is covered by test/unit/diagnostics.test.ts.
+// the gate. The gate's own env/flag logic is covered by test/unit/utils/diagnostics.test.ts.
 vi.mock("@utils/diagnostics", () => ({ whenDiagnostic: vi.fn() }));
 
 const app = createAppMount();

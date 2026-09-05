@@ -13,7 +13,7 @@ import { getLogger, sanitizeErrorForDisplay } from "@psilink/core";
  * later root-level changes, so the suppression holds regardless of a
  * suite's log level; the error message is escaped through
  * {@link sanitizeErrorForDisplay} first. Covered by
- * `test/unit/rawSftpClient.test.ts`.
+ * `test/unit/connection/rawSftpClient.test.ts`.
  */
 const log = getLogger("raw-sftp-test-client");
 

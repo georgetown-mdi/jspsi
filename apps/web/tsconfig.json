@@ -10,7 +10,7 @@
        the parser at this project); `checkJs` stays off, since the app's DOM lib
        types `self` as a Window rather than a ServiceWorkerGlobalScope and would
        reject the worker's own globals. Its behavior is covered by
-       test/unit/serviceWorker.test.ts, which drives the real handlers. */
+       test/unit/utils/serviceWorker.test.ts, which drives the real handlers. */
     "public/serviceWorker.js"
   ],
   "exclude": ["node_modules"],

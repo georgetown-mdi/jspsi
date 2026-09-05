@@ -76,7 +76,7 @@ export const MAX_TEXT_LENGTH = 1024;
  *
  * The web console applies these same ranges to an operator's `--identity`
  * label (`IDENTITY_CONTROL_CHAR_PATTERN`, apps/web/src/jobs/intentSchemas.ts,
- * held equal by apps/web/test/unit/identityLabelParity.test.ts) and is
+ * held equal by apps/web/test/unit/jobs/identityLabelParity.test.ts) and is
  * stricter, also refusing a leading `-`.
  */
 export const TEXT_CONTROL_CHAR_PATTERN = /[\u0000-\u001f\u007f-\u009f]/;

@@ -84,7 +84,7 @@ function stdoutIsRedirectedFile(): boolean {
  * or LF and doubles that cell's embedded quotes. Both branches join the
  * fields with commas and escape nothing themselves -- a second pass here
  * would double-escape and break the verify path's re-supply. Pinned by the
- * write-then-read round trip in `test/unit/resultCsvEscaping.test.ts`.
+ * write-then-read round trip in `test/unit/util/resultCsvEscaping.test.ts`.
  *
  * The file path is owned end to end: the returned promise resolves on the
  * stream's `'close'` (all rows flushed AND the descriptor closed) and rejects

@@ -67,7 +67,7 @@ export interface CompiledLinearRegex {
    * emitted literally here, where JavaScript resolves the first to group 1
    * and substitutes empty for the second. Normative in docs/spec/PROTOCOL.md
    * (Transform regular-expression dialect); both divergences are checks in
-   * test/linearRegex.test.ts.
+   * test/utils/linearRegex.test.ts.
    */
   replaceAll(input: string, replacement: string): string;
   /**

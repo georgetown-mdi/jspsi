@@ -15,7 +15,7 @@
 // A partner reads that envelope by field name, so adding, renaming, dropping, or
 // re-ordering one is a wire-format delta. Nothing pinned it: the suites around it
 // assert what a field MEANS, never the whole set a frame holds. This file is
-// that set, per frame slot, and packages/core/test/termsEnvelopeVectors.test.ts
+// that set, per frame slot, and packages/core/test/connection/termsEnvelopeVectors.test.ts
 // replays each scenario through the real exchangeTerms and holds the frames to it.
 //
 // The frames are CAPTURED, not authored: each scenario drives a genuine two-party
@@ -333,7 +333,7 @@ const vectors = {
     "ADMITS, read off the schemas; the frames below are what each slot EMITS, " +
     "and the consuming suite holds their union to it so a field added to a " +
     "schema cannot ride the wire with no frame pinning it. Replayed by " +
-    "packages/core/test/termsEnvelopeVectors.test.ts; regenerate with " +
+    "packages/core/test/connection/termsEnvelopeVectors.test.ts; regenerate with " +
     "generate-terms-envelope-vectors.mjs in this directory.",
   protocolVersion: PROTOCOL_VERSION,
   envelopeFields: TERMS_ENVELOPE_FIELDS,

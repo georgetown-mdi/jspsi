@@ -36,7 +36,7 @@ import type { WebRTCExchangeLocator } from "@psilink/core";
 // under contention, the no-steal property, the strict-durability field-scoped
 // rotation write, the refusal of a copy a hand-off spent, and the
 // persist-before-success wiring end to end. The pure ordering and decision logic is
-// unit-tested in Node without either platform in test/unit/managedRunRotate.test.ts.
+// unit-tested in Node without either platform in test/unit/psi/managedRunRotate.test.ts.
 
 const linkageTerms = getDefaultLinkageTerms("County Health Dept");
 

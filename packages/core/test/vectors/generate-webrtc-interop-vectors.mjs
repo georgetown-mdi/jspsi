@@ -6,8 +6,8 @@
 // to key-exchange handshake role and request-encryption flag. Nothing else
 // verifies that a CLI peer and a browser peer agree on those, so each app's own
 // construction is driven against this one file from that app's test surface
-// (packages/core/test/webrtcInterop.test.ts, apps/cli/test/unit/webrtcInterop.test.ts,
-// apps/cli/test/unit/webrtcDispatch.test.ts, apps/web/test/unit/webrtcInterop.test.ts).
+// (packages/core/test/config/webrtcInterop.test.ts, apps/cli/test/unit/connection/webrtcInterop.test.ts,
+// apps/cli/test/unit/connection/webrtcDispatch.test.ts, apps/web/test/unit/psi/webrtcInterop.test.ts).
 //
 // Independence: the derivations below are written against Node's OpenSSL-backed
 // `node:crypto` (hkdfSync, createHash) while the modules under test run them

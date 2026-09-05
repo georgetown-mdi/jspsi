@@ -56,7 +56,10 @@ async function parseHits(filePath, source) {
 // fixtures of its own and is not a trust boundary.
 const WEB_SRC = resolve(repoRoot, "apps/web/src/jobs/routeSupport.ts");
 const WEB_SERVER = resolve(repoRoot, "apps/web/server/upgradeHardening.ts");
-const WEB_TEST = resolve(repoRoot, "apps/web/test/unit/jobRoutes.unit.test.ts");
+const WEB_TEST = resolve(
+  repoRoot,
+  "apps/web/test/unit/routes/jobRoutes.unit.test.ts",
+);
 
 /** The apps/web block whose rules carry a property ban matching `matches`. */
 function propertyBanBlock(matches) {

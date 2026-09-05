@@ -180,7 +180,7 @@ describe("rule 1 fires on a version move and on nothing else", () => {
     expect(message).toContain("accounting of disclosures");
     expect(message).toContain("RECORD_VERSION_PIN");
     expect(message).toContain(
-      "apps/web/test/unit/disclosureAccounting.test.ts",
+      "apps/web/test/unit/psi/disclosureAccounting.test.ts",
     );
   });
 });

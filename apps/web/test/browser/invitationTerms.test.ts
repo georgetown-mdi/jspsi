@@ -106,7 +106,7 @@ const terms: LinkageTerms = {
 // acceptor could act on -- treating an exchange as safe to run because only a count
 // is revealed -- so an edit here must be made on this surface too, not merely
 // followed. The CLI accept prompt pins it against the same terms document
-// (apps/cli/test/unit/accept.test.ts), so a copy edit on one surface forces the
+// (apps/cli/test/unit/commands/accept.test.ts), so a copy edit on one surface forces the
 // same change on the other, rather than a silent divergence.
 const COUNT_ONLY_HEADLINE =
   "Only the number of records you have in common is revealed, not which " +
@@ -1522,7 +1522,7 @@ describe("InvitationTerms: the acceptor's outbound send is gated on the inviting
   // forward-reference does not stand in (the file it points at cannot change the
   // answer), and the empty-set confirmation gives way to the reason that holds
   // however the operator's file changes. That is the precedence the CLI accept
-  // prompt applies (apps/cli/test/unit/accept.test.ts pins it there), so the pair
+  // prompt applies (apps/cli/test/unit/commands/accept.test.ts pins it there), so the pair
   // resolves an overlapping case one way rather than two.
   const oneSided: LinkageTerms = {
     ...terms,

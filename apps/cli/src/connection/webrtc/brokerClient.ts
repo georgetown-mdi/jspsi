@@ -33,10 +33,11 @@ import { ConnectionError, parseBoundedJson, UsageError } from "@psilink/core";
  *
  * Peer-id hygiene: the ids this client registers and dials are derived from the
  * invitation secret, so they correlate exchanges. The web app redacts them out
- * of PeerJS's own output after the fact; this client instead never puts one into
- * a message, an error or a log line in the first place -- including the socket
- * URL, which holds the id in its query string. test/unit/webrtcBrokerClient.test.ts
- * holds that as a check rather than leaving it to prose.
+ * of PeerJS's own output after the fact; this client instead never puts one
+ * into a message, an error or a log line in the first place -- including the
+ * socket URL, which holds the id in its query string.
+ * test/unit/connection/webrtcBrokerClient.test.ts holds that as a check rather
+ * than leaving it to prose.
  */
 
 /** The `version` the client reports, matching the pinned browser `peerjs`. */
@@ -278,11 +279,12 @@ export interface DialedBrokerHostAndPort {
  * for the reason above.
  *
  * The two are returned apart rather than joined so a display sink escapes the
- * host ALONE and appends the port outside that escape. An invitation may include
- * a host as long as the escape's own display cap admits, so a joined value spends
- * that whole budget on the host and truncates away the port this resolves --
- * driven at the longest admissible host in test/unit/accept.test.ts, which holds
- * it as a check rather than leaving it to prose.
+ * host ALONE and appends the port outside that escape. An invitation may
+ * include a host as long as the escape's own display cap admits, so a joined
+ * value spends that whole budget on the host and truncates away the port this
+ * resolves -- driven at the longest admissible host in
+ * test/unit/commands/accept.test.ts, which holds it as a check rather than
+ * leaving it to prose.
  *
  * @throws {UsageError} if `host` is not a bare authority, naming the invitation
  *   as the locator's source ({@link INVITATION_BROKER_ADDRESS_REFUSED}).

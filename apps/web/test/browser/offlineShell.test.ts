@@ -31,7 +31,7 @@ import type { NewManagedExchange } from "@psi/managed/managedExchangeRecord";
 // Chromium is where this belongs because the surfaces read real IndexedDB and the
 // File System Access API, and because `navigator.onLine` and its events are the
 // platform signal under test. The service worker that supplies the shell document
-// itself is driven directly in test/unit/serviceWorker.test.ts.
+// itself is driven directly in test/unit/utils/serviceWorker.test.ts.
 
 vi.mock("@tanstack/react-router", async () =>
   (await import("./moduleMocks")).reactRouterMock(),

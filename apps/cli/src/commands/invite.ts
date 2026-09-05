@@ -1208,9 +1208,9 @@ export function offlineAbandonNotice(keyPath: string): string {
  * stands beside `<INPUT_FILE>`, a placeholder for the same reason of shape: the
  * template is a recipe to fill in, not a line to paste unchanged.
  *
- * {@link ../../test/unit/invite.test.ts} holds the runtime check: the invite
- * command's diagnostic output must contain no substring of the invitation it
- * prints.
+ * {@link ../../test/unit/commands/invite.test.ts} holds the runtime check: the
+ * invite command's diagnostic output must contain no substring of the
+ * invitation it prints.
  */
 const INVITATION_PLACEHOLDER = "<INVITATION>";
 

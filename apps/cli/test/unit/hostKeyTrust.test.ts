@@ -754,7 +754,7 @@ test("a control-laden host is escaped at the boundary and cannot forge a link", 
 // planted in a chooser's fragment is what would consume first-party text sharing
 // that link, and each chooser's fragment is delivered one -- alone and with text
 // around it -- and measured at the rendered boundary. Core pins its own refusals
-// on the same deliveries (packages/core/test/sftpSession.test.ts).
+// on the same deliveries (packages/core/test/connection/sftpSession.test.ts).
 const PEM_MARKER = "-----BEGIN OPENSSH PRIVATE KEY-----";
 const KEY_BODY = "b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAAB";
 const REDACTED = "[redacted private key]";

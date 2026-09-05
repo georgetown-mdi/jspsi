@@ -1032,7 +1032,7 @@ test("the single-pass sender refuses a built reply above the derived cap", async
   );
   const error = await run.catch((e: unknown) => e);
   // The class the message's remedy implies: an internal fault to report, which
-  // the CLI boundary maps to exit 70 (pinned in apps/cli/test/unit/cli.test.ts).
+  // the CLI boundary maps to exit 70 (pinned in apps/cli/test/unit/util/cli.test.ts).
   // Not a UsageError, whose exit 64 would send the operator to an input the
   // ceiling gate has already cleared.
   expect(error).toBeInstanceOf(InternalConsistencyError);

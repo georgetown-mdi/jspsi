@@ -1,0 +1,713 @@
+import { describe, expect, test } from "vitest";
+
+import {
+  FAN_OUT_FUNCTION_NAMES,
+  MAX_TRANSFORM_PATTERN_LENGTH,
+  STANDARDIZATION_FUNCTION_DESCRIPTORS,
+  getDefaultStandardization,
+  prepareForExchange,
+  runPipeline,
+  stepCanEmptyRealizedValue,
+} from "@psilink/core";
+
+import {
+  INERT_COALESCE_ADVICE,
+  OFFERED_EXPERT_FUNCTION_GROUPS,
+  STANDARDIZATION_EXPERT_FUNCTION_GROUPS,
+  STANDARDIZATION_FUNCTION_GROUPS,
+  applyInputOverrides,
+  applyStepOverrides,
+  authorableFunctionNames,
+  describeParamFields,
+  descriptorFor,
+  expertFunctionNames,
+  functionDisplay,
+  inertCoalesceCause,
+  isStepValid,
+  pipelineHasInertCoalesce,
+  validateParamValue,
+} from "../../../src/psi/standardizationAuthoring.js";
+
+import type {
+  ColumnMetadata,
+  LinkageTerms,
+  Standardization,
+} from "@psilink/core";
+
+import type { FieldStepOverride } from "../../../src/psi/standardizationAuthoring.js";
+
+describe("function grouping parity with the descriptor table", () => {
+  // The grouping is the add menu's source of truth; pin it to core's descriptor
+  // table in both directions so a standard-tier function added to core cannot ship
+  // without a group, and a regex-tier (deferred expert tier) function cannot leak
+  // into the menu.
+  const standardTierNames = Object.values(STANDARDIZATION_FUNCTION_DESCRIPTORS)
+    .filter((d) => d.tier === "standard")
+    .map((d) => d.name);
+
+  test("offers exactly the standard-tier functions", () => {
+    expect([...authorableFunctionNames].sort()).toEqual(
+      [...standardTierNames].sort(),
+    );
+  });
+
+  test("the standard menu excludes every regex-tier function (those are gated to the expert menu)", () => {
+    const regexTier = Object.values(STANDARDIZATION_FUNCTION_DESCRIPTORS)
+      .filter((d) => d.tier === "regex")
+      .map((d) => d.name);
+    expect(regexTier.length).toBeGreaterThan(0);
+    for (const name of regexTier)
+      expect(authorableFunctionNames.has(name)).toBe(false);
+  });
+
+  test("lists each function in exactly one group", () => {
+    const flat = STANDARDIZATION_FUNCTION_GROUPS.flatMap(
+      (g) => g.functionNames,
+    );
+    expect(flat.length).toBe(new Set(flat).size);
+  });
+
+  test("coalesce's editor copy states core's condition, in plain language", () => {
+    const display = functionDisplay("coalesce");
+    const descriptor = STANDARDIZATION_FUNCTION_DESCRIPTORS["coalesce"];
+    // The description IS core's, not a paraphrase of it, so a later correction
+    // there cannot leave this surface asserting a behavior coalesce does not have.
+    expect(display.blurb).toBe(descriptor.blurb);
+    // The label stays plain language rather than the SQL term the descriptor
+    // has, and states the condition core's does: a value an earlier rule of
+    // the same pipeline emptied -- not an absent or empty input, which never
+    // reaches the step.
+    expect(display.label).not.toBe(descriptor.label);
+    expect(display.label.toLowerCase()).toContain("rule emptied the value");
+  });
+
+  test("every other function's label and blurb are the descriptor's own", () => {
+    // coalesce is the single label override; nothing else restates core's copy,
+    // so a correction in the descriptor table reaches the menu unaided.
+    for (const name of authorableFunctionNames) {
+      if (name === "coalesce") continue;
+      const descriptor = STANDARDIZATION_FUNCTION_DESCRIPTORS[name];
+      expect(functionDisplay(name)).toEqual({
+        label: descriptor.label,
+        blurb: descriptor.blurb,
+      });
+    }
+  });
+
+  test("an unrecognized (imported) function name is sanitized for display", () => {
+    // The add-step menu only offers descriptor-backed functions, but an imported
+    // linkage-terms document has a free-text transform `function`. An
+    // unrecognized name falls back to the raw name as its label -- which the editor
+    // renders as text and into aria-labels -- so it must be sanitized: a bidi /
+    // control / homoglyph payload must not survive into the DOM to spoof a benign
+    // function name.
+    // Construct the payload from code points so the test source stays ASCII.
+    const rlo = String.fromCharCode(0x202e); // right-to-left override (bidi)
+    const bel = String.fromCharCode(0x07); // a C0 control char
+    const hostile = `to_upper_case${rlo}evomer${bel}`;
+    const display = functionDisplay(hostile);
+    // The raw bidi-override and control code points must not survive the render.
+    expect(display.label).not.toContain(rlo);
+    expect(display.label).not.toContain(bel);
+    // The printable ASCII prefix is preserved; the dangerous bytes are escaped.
+    expect(display.label).toContain("to_upper_case");
+  });
+});
+
+describe("expert (regex-tier) function grouping parity with the descriptor table", () => {
+  // The gated expert menu is the raw-pattern add-step source of truth; pin it to
+  // core's regex tier in both directions so a regex-tier function added to core
+  // cannot ship without an expert group, and a standard-tier function cannot leak
+  // into the expert menu.
+  const regexTierNames = Object.values(STANDARDIZATION_FUNCTION_DESCRIPTORS)
+    .filter((d) => d.tier === "regex")
+    .map((d) => d.name);
+
+  test("offers exactly the regex-tier functions", () => {
+    expect([...expertFunctionNames].sort()).toEqual([...regexTierNames].sort());
+  });
+
+  test("is disjoint from the standard menu", () => {
+    for (const name of expertFunctionNames)
+      expect(authorableFunctionNames.has(name)).toBe(false);
+  });
+
+  test("lists each expert function in exactly one group", () => {
+    const flat = STANDARDIZATION_EXPERT_FUNCTION_GROUPS.flatMap(
+      (g) => g.functionNames,
+    );
+    expect(flat.length).toBe(new Set(flat).size);
+  });
+});
+
+describe("the fan-out family is withheld from the add menu", () => {
+  const offered = OFFERED_EXPERT_FUNCTION_GROUPS.flatMap(
+    (g) => g.functionNames,
+  );
+
+  test("offers no function core classes as fan-out", () => {
+    // Core refuses an exchange declaring one, so authoring it would only be
+    // discovered at the run. The family is read from core's own list, not a second
+    // web-side one, so this follows core rather than restating it.
+    expect(FAN_OUT_FUNCTION_NAMES.length).toBeGreaterThan(0);
+    for (const name of FAN_OUT_FUNCTION_NAMES)
+      expect(offered).not.toContain(name);
+  });
+
+  test("withholds nothing else from the expert menu", () => {
+    // The withholding is exactly the fan-out family: every other raw-pattern
+    // function is still offered, so the gate cannot quietly widen.
+    expect(offered.sort()).toEqual(
+      [...expertFunctionNames]
+        .filter((name) => !FAN_OUT_FUNCTION_NAMES.includes(name))
+        .sort(),
+    );
+  });
+
+  test("keeps the withheld function descriptor-backed for a read-only row", () => {
+    // An imported document can still have a fan-out step; it renders from its
+    // descriptor (label, blurb, typed params) rather than as a raw name, so the
+    // operator can see and remove what blocks generation.
+    for (const name of FAN_OUT_FUNCTION_NAMES) {
+      expect(descriptorFor(name)).toBeDefined();
+      expect(functionDisplay(name).label).not.toBe(name);
+    }
+  });
+});
+
+describe("descriptor-driven typed param fields", () => {
+  test("classifies each param into its widget kind from the Zod type", () => {
+    const fields = (name: string) =>
+      describeParamFields(STANDARDIZATION_FUNCTION_DESCRIPTORS[name]);
+
+    // substring: two numeric inputs.
+    const substring = fields("substring");
+    expect(substring.map((f) => [f.key, f.kind])).toEqual([
+      ["start", "number"],
+      ["length", "number"],
+    ]);
+
+    // phonetic: a single enum, defaulted to soundex.
+    const [algorithm] = fields("phonetic");
+    expect(algorithm.kind).toBe("enum");
+    expect(algorithm.enumOptions).toEqual(["soundex"]);
+    expect(algorithm.defaultValue).toBe("soundex");
+
+    // parse_date: two strings, each holding its declared default.
+    const parseDate = fields("parse_date");
+    expect(parseDate.map((f) => f.kind)).toEqual(["string", "string"]);
+    expect(parseDate.find((f) => f.key === "inputFormat")?.defaultValue).toBe(
+      "MM/DD/YYYY",
+    );
+
+    // null_if: an optional string and an optional string-array.
+    const nullIf = fields("null_if");
+    expect(nullIf.find((f) => f.key === "value")).toMatchObject({
+      kind: "string",
+      optional: true,
+    });
+    expect(nullIf.find((f) => f.key === "values")).toMatchObject({
+      kind: "stringArray",
+      optional: true,
+    });
+  });
+
+  test("a no-param function yields no fields", () => {
+    expect(
+      describeParamFields(
+        STANDARDIZATION_FUNCTION_DESCRIPTORS["squash_spaces"],
+      ),
+    ).toEqual([]);
+  });
+
+  test("every param field has a non-empty plain-language label (standard and expert tiers)", () => {
+    for (const name of [...authorableFunctionNames, ...expertFunctionNames])
+      for (const field of describeParamFields(
+        STANDARDIZATION_FUNCTION_DESCRIPTORS[name],
+      )) {
+        expect(field.label.length).toBeGreaterThan(0);
+        // A camelCase key (the raw snake-free runtime key) must be relabeled, not
+        // shown verbatim -- e.g. split_on's includeOriginal.
+        if (/[A-Z]/.test(field.key)) expect(field.label).not.toBe(field.key);
+      }
+  });
+
+  test("classifies every authorable descriptor's params into a known widget kind, resolving the deepest wrapper chains", () => {
+    // The earlier test samples four descriptors; this proves the Zod unwrapping
+    // holds for ALL standard-tier descriptors, so a Zod-internals change cannot
+    // silently mis-render a descriptor the sample misses.
+    for (const name of authorableFunctionNames)
+      for (const field of describeParamFields(
+        STANDARDIZATION_FUNCTION_DESCRIPTORS[name],
+      )) {
+        expect(["number", "string", "enum", "stringArray"]).toContain(
+          field.kind,
+        );
+        if (field.kind === "enum")
+          expect((field.enumOptions ?? []).length).toBeGreaterThan(0);
+      }
+    // The two deepest wrapper chains: `pad_left.char` is a refine folded under a
+    // default (must show the "0" default as a string), and `coalesce.default` is
+    // an optional string (must show as optional, not required).
+    const padChar = describeParamFields(
+      STANDARDIZATION_FUNCTION_DESCRIPTORS["pad_left"],
+    ).find((f) => f.key === "char");
+    expect(padChar).toMatchObject({ kind: "string", defaultValue: "0" });
+    const coalesceDefault = describeParamFields(
+      STANDARDIZATION_FUNCTION_DESCRIPTORS["coalesce"],
+    ).find((f) => f.key === "default");
+    expect(coalesceDefault).toMatchObject({ kind: "string", optional: true });
+  });
+
+  test("classifies the regex-tier params: a pattern as a string, includeOriginal as a boolean switch", () => {
+    const splitOn = describeParamFields(
+      STANDARDIZATION_FUNCTION_DESCRIPTORS["split_on"],
+    );
+    // The pattern/delimiter render as a text input (validated against the dialect
+    // schema); the new boolean kind drives includeOriginal's switch.
+    expect(splitOn.find((f) => f.key === "delimiter")?.kind).toBe("string");
+    expect(splitOn.find((f) => f.key === "includeOriginal")).toMatchObject({
+      kind: "boolean",
+      defaultValue: false,
+    });
+    // Every expert (regex-tier) descriptor's params resolve to a known widget kind,
+    // including the boolean kind, so the editor renders a typed control for each
+    // rather than a raw text box.
+    for (const name of expertFunctionNames)
+      for (const field of describeParamFields(
+        STANDARDIZATION_FUNCTION_DESCRIPTORS[name],
+      ))
+        expect([
+          "number",
+          "string",
+          "enum",
+          "stringArray",
+          "boolean",
+        ]).toContain(field.kind);
+  });
+});
+
+describe("every reachable pipeline function is descriptor-backed", () => {
+  // `isStepValid` treats a step whose function has no descriptor as valid (it is
+  // not authored through this surface). That is only safe because no descriptor-
+  // less function can reach the gate: the add menu offers only standard-tier
+  // descriptors (parity-tested above) and the recommended default pipelines use
+  // only catalogued functions. Pin the second half so a future default step that
+  // referenced an uncatalogued function (which would slip the gate and throw at
+  // compile) is caught here instead.
+  test("every function a default standardization emits has a descriptor", () => {
+    const fieldTypes = [
+      "first_name",
+      "last_name",
+      "date_of_birth",
+      "ssn",
+      "ssn4",
+      "phone_number",
+      "email_address",
+    ] as const;
+    const metadata: Array<ColumnMetadata> = fieldTypes.map((type, i) => ({
+      name: `c${i}`,
+      type,
+      role: "linkage",
+      isPayload: false,
+    }));
+    const terms: LinkageTerms = {
+      version: "1.0.0",
+      identity: "x",
+      date: "2026-01-01",
+      algorithm: "psi",
+      linkageStrategy: "cascade",
+      output: { expectsOutput: true, shareWithPartner: true },
+      deduplicate: false,
+      linkageFields: fieldTypes.map((type, i) => ({ name: `f${i}`, type })),
+      linkageKeys: fieldTypes.map((_, i) => ({
+        name: `k${i}`,
+        elements: [{ field: `f${i}` }],
+      })),
+    };
+    const functions = new Set(
+      getDefaultStandardization(metadata, terms).flatMap((t) =>
+        (t.steps ?? []).map((s) => s.function),
+      ),
+    );
+    expect(functions.size).toBeGreaterThan(0);
+    for (const name of functions) expect(descriptorFor(name)).toBeDefined();
+  });
+});
+
+describe("param value validation per the descriptor's declared type", () => {
+  const substring = STANDARDIZATION_FUNCTION_DESCRIPTORS["substring"];
+  const padLeft = STANDARDIZATION_FUNCTION_DESCRIPTORS["pad_left"];
+
+  test("accepts a value matching the param type", () => {
+    expect(validateParamValue(substring, "start", 3).ok).toBe(true);
+    expect(validateParamValue(substring, "length", 4).ok).toBe(true);
+    expect(validateParamValue(padLeft, "char", "0").ok).toBe(true);
+  });
+
+  test("rejects a value the descriptor's type forbids", () => {
+    // A fractional start, a zero start (positions are 1-indexed), a non-positive
+    // length, and a multi-character fill all fail -- exactly as core's factory would.
+    expect(validateParamValue(substring, "start", 2.5).ok).toBe(false);
+    expect(validateParamValue(substring, "start", 0).ok).toBe(false);
+    expect(validateParamValue(substring, "length", 0).ok).toBe(false);
+    expect(validateParamValue(padLeft, "char", "ab").ok).toBe(false);
+  });
+
+  test("rejects an unknown parameter key", () => {
+    expect(validateParamValue(substring, "nope", 1).ok).toBe(false);
+  });
+
+  test("rejects an integer beyond the safe range (canonical-encoding hazard)", () => {
+    // A transform param is embedded in the cross-party token and canonically
+    // encoded; an integer at or beyond 2^53 cannot round-trip reproducibly
+    // (canonicalString throws on a non-safe integer), so the descriptor's
+    // z.number().int() must reject it before it can be authored. This pins the
+    // boundary against a future zod change that could regress it.
+    expect(validateParamValue(substring, "start", 2 ** 53).ok).toBe(false);
+    expect(validateParamValue(substring, "length", 2 ** 53).ok).toBe(false);
+    expect(validateParamValue(padLeft, "length", 2 ** 53).ok).toBe(false);
+    // The largest safe integer is still within range, so the bound sits exactly
+    // at the safe-integer edge, not below any legitimate value.
+    expect(
+      validateParamValue(substring, "start", Number.MAX_SAFE_INTEGER).ok,
+    ).toBe(true);
+  });
+});
+
+describe("raw-pattern (regex-tier) param validation through the editor's path", () => {
+  const filterRegex = STANDARDIZATION_FUNCTION_DESCRIPTORS["filter_regex"];
+  const splitOn = STANDARDIZATION_FUNCTION_DESCRIPTORS["split_on"];
+
+  test("accepts an in-dialect pattern", () => {
+    expect(validateParamValue(filterRegex, "pattern", "^\\d{9}$").ok).toBe(
+      true,
+    );
+    expect(validateParamValue(splitOn, "delimiter", "[ ,]").ok).toBe(true);
+  });
+
+  test("rejects an out-of-dialect pattern (lookaround / backreference)", () => {
+    // Exactly what the linear-time engine cannot compile and the runtime gate
+    // rejects -- so the editor refuses a pattern an exchange would refuse.
+    expect(validateParamValue(filterRegex, "pattern", "a(?=b)").ok).toBe(false);
+  });
+
+  test("rejects an over-length pattern (the editor compile-cost guard)", () => {
+    const overLimit = "a".repeat(MAX_TRANSFORM_PATTERN_LENGTH + 1);
+    expect(validateParamValue(filterRegex, "pattern", overLimit).ok).toBe(
+      false,
+    );
+  });
+});
+
+describe("raw-pattern authoring is bounded by the linear-time engine", () => {
+  test("a pathological RE2-conformant pattern terminates rather than hanging the preview", () => {
+    const pattern = "(a+)+$";
+    // (a+)+$ is the classic catastrophic-backtracking pattern: on a backtracking
+    // engine it hangs on a long non-matching input, freezing the tab the live
+    // preview runs on. It is in-dialect (no backreference/lookaround), so the editor
+    // accepts it...
+    expect(
+      validateParamValue(
+        STANDARDIZATION_FUNCTION_DESCRIPTORS["filter_regex"],
+        "pattern",
+        pattern,
+      ).ok,
+    ).toBe(true);
+    // ...and core compiles it under the linear-time engine, so runPipeline -- the
+    // exact function StandardizationPreview runs over the operator's sample --
+    // returns in linear time. The test completing well under the default timeout IS
+    // the bound; a backtracking engine would not return here.
+    const hostile = "a".repeat(50000) + "!";
+    expect(
+      runPipeline(hostile, [{ function: "filter_regex", params: { pattern } }]),
+    ).toBeNull();
+  });
+});
+
+describe("isStepValid (the launch gate's basis)", () => {
+  test("a fully-specified or no-param step is valid", () => {
+    expect(
+      isStepValid({ function: "substring", params: { start: 1, length: 3 } }),
+    ).toBe(true);
+    expect(isStepValid({ function: "to_upper_case" })).toBe(true);
+    // null_if's value/values are both optional, so an empty step is valid.
+    expect(isStepValid({ function: "null_if" })).toBe(true);
+  });
+
+  test("a step missing or clearing a required param is invalid", () => {
+    // start is required and absent.
+    expect(isStepValid({ function: "substring", params: { length: 3 } })).toBe(
+      false,
+    );
+    // start cleared in the NumberInput stores undefined; an empty string is also
+    // rejected (defends the runtime even if a "" ever reaches here).
+    expect(
+      isStepValid({ function: "substring", params: { start: "", length: 3 } }),
+    ).toBe(false);
+    // pad_left needs a length; a fresh step (char defaulted, no length) is invalid.
+    expect(isStepValid({ function: "pad_left", params: { char: "0" } })).toBe(
+      false,
+    );
+  });
+
+  test("a regex-tier step with valid params is valid (default pipelines and authored expert steps alike)", () => {
+    expect(
+      isStepValid({
+        function: "replace_regex",
+        params: { pattern: "[^0-9]", replacement: "" },
+      }),
+    ).toBe(true);
+    expect(
+      isStepValid({
+        function: "filter_regex",
+        params: { pattern: "^\\d{9}$" },
+      }),
+    ).toBe(true);
+  });
+
+  test("gates a regex step on its pattern: a missing pattern is invalid", () => {
+    expect(
+      isStepValid({ function: "filter_regex", params: { pattern: "^A" } }),
+    ).toBe(true);
+    expect(isStepValid({ function: "filter_regex" })).toBe(false);
+  });
+
+  test("a function core does not recognize is treated as valid", () => {
+    expect(isStepValid({ function: "totally_unknown" })).toBe(true);
+  });
+});
+
+describe("a coalesce that substitutes nothing where it sits", () => {
+  const withDefault = { function: "coalesce", params: { default: "Z" } };
+
+  test("a coalesce in first position substitutes nothing", () => {
+    // A pipeline starts from a non-null string, so a coalesce reached with a
+    // value still in hand returns it untouched; a record whose field is absent
+    // never enters the pipeline at all. Nothing ahead of the step can have
+    // emptied anything, so the fault is its position, not its default.
+    expect(inertCoalesceCause(withDefault, [])).toBe("no-emptying-rule");
+    expect(pipelineHasInertCoalesce([withDefault])).toBe(true);
+  });
+
+  test("a coalesce preceded only by value-preserving steps substitutes nothing", () => {
+    // Every step ahead of it returns a value for every value it is handed, so
+    // the substituting branch is never reached. Adding the default does not fix
+    // it, which is why the position is the cause reported.
+    const preceding = [
+      { function: "trim_whitespace" },
+      { function: "to_upper_case" },
+      { function: "pad_left", params: { length: 9, char: "0" } },
+    ];
+    expect(inertCoalesceCause(withDefault, preceding)).toBe("no-emptying-rule");
+    expect(pipelineHasInertCoalesce([...preceding, withDefault])).toBe(true);
+  });
+
+  test("a coalesce after a step that can empty a value substitutes, and raises nothing", () => {
+    const preceding = [
+      { function: "trim_whitespace" },
+      { function: "null_if", params: { values: ["X"] } },
+    ];
+    expect(inertCoalesceCause(withDefault, preceding)).toBeUndefined();
+    expect(pipelineHasInertCoalesce([...preceding, withDefault])).toBe(false);
+  });
+
+  test("moving an emptying step ahead of the coalesce clears the advisory", () => {
+    // The editor re-derives the verdict per position on every render, so a
+    // reorder is what clears it -- the same flip the runtime makes.
+    const nullIf = { function: "null_if", params: { values: ["X"] } };
+    expect(pipelineHasInertCoalesce([withDefault, nullIf])).toBe(true);
+    expect(pipelineHasInertCoalesce([nullIf, withDefault])).toBe(false);
+  });
+
+  test("a default that is absent or not text substitutes nothing either", () => {
+    // The editor's own `default` control is a text input, so these arrive on an
+    // imported document, whose transform params are `z.unknown()`. Core runs
+    // every non-string default as a pass-through, so the surface must not claim
+    // a substitution. Reported against the default rather than the position,
+    // because an emptying rule already precedes it.
+    const preceding = [{ function: "null_if", params: { values: ["X"] } }];
+    expect(inertCoalesceCause({ function: "coalesce" }, preceding)).toBe(
+      "no-text-default",
+    );
+    expect(
+      inertCoalesceCause(
+        { function: "coalesce", params: { default: 0 } },
+        preceding,
+      ),
+    ).toBe("no-text-default");
+    expect(
+      inertCoalesceCause(
+        { function: "coalesce", params: { default: null } },
+        preceding,
+      ),
+    ).toBe("no-text-default");
+  });
+
+  test("the position half is core's own classification, not a second list here", () => {
+    // Every function core classes as value-preserving leaves a coalesce after it
+    // inert, and every other one rescues it. Driven over the whole descriptor
+    // table so a function added to core is covered here with no edit -- the web
+    // surface reads the verdict and restates no rule of its own.
+    for (const name of Object.keys(STANDARDIZATION_FUNCTION_DESCRIPTORS)) {
+      const canEmpty = stepCanEmptyRealizedValue({ function: name });
+      expect(
+        pipelineHasInertCoalesce([{ function: name }, withDefault]),
+        name,
+      ).toBe(!canEmpty);
+    }
+  });
+
+  test("no other function raises the advisory", () => {
+    for (const name of Object.keys(STANDARDIZATION_FUNCTION_DESCRIPTORS)) {
+      if (name === "coalesce") continue;
+      expect(inertCoalesceCause({ function: name }, []), name).toBeUndefined();
+    }
+    expect(
+      inertCoalesceCause({ function: "totally_unknown" }, []),
+    ).toBeUndefined();
+  });
+
+  test("each cause has advice naming the remedy that reaches it", () => {
+    expect(INERT_COALESCE_ADVICE["no-emptying-rule"]).toContain(
+      "Move this step",
+    );
+    expect(INERT_COALESCE_ADVICE["no-text-default"]).toContain("text default");
+  });
+});
+
+describe("applyStepOverrides (per-field override layer)", () => {
+  const base: Standardization = [
+    { output: "fn", input: "fname", steps: [{ function: "to_upper_case" }] },
+    { output: "ln", input: "lname", steps: [{ function: "to_upper_case" }] },
+  ];
+
+  test("applies an override while its input column still matches the binding", () => {
+    const overrides = new Map<string, FieldStepOverride>([
+      ["fn", { input: "fname", steps: [{ function: "trim_whitespace" }] }],
+    ]);
+    const result = applyStepOverrides(base, overrides);
+    expect(result.find((t) => t.output === "fn")?.steps).toEqual([
+      { function: "trim_whitespace" },
+    ]);
+    // An unrelated field is untouched.
+    expect(result.find((t) => t.output === "ln")?.steps).toEqual([
+      { function: "to_upper_case" },
+    ]);
+  });
+
+  test("drops a stale override after the field re-binds to a different column", () => {
+    // The field now binds to `notes`, but the override was authored against `fname`.
+    const rebased: Standardization = [
+      { output: "fn", input: "notes", steps: [{ function: "to_upper_case" }] },
+    ];
+    const overrides = new Map<string, FieldStepOverride>([
+      ["fn", { input: "fname", steps: [{ function: "trim_whitespace" }] }],
+    ]);
+    // Falls back to the re-derived recommended steps, not the stale override -- so
+    // steps authored to clean `fname` never silently drive `notes`.
+    expect(applyStepOverrides(rebased, overrides)[0].steps).toEqual([
+      { function: "to_upper_case" },
+    ]);
+  });
+
+  test("no override leaves the base unchanged", () => {
+    expect(applyStepOverrides(base, new Map())).toEqual(base);
+  });
+});
+
+describe("applyInputOverrides (per-field input-column rebind)", () => {
+  const base: Standardization = [
+    { output: "maiden_name", input: "name_col", steps: [] },
+    { output: "current_name", input: "name_col", steps: [] },
+  ];
+
+  test("rebinds a field to its chosen column, leaving steps and other fields alone", () => {
+    const result = applyInputOverrides(
+      base,
+      new Map([["current_name", "other_col"]]),
+    );
+    expect(result.map((t) => [t.output, t.input])).toEqual([
+      ["maiden_name", "name_col"],
+      ["current_name", "other_col"],
+    ]);
+  });
+
+  test("a no-op override (same column) and an absent override leave the base unchanged", () => {
+    expect(
+      applyInputOverrides(base, new Map([["maiden_name", "name_col"]])),
+    ).toEqual(base);
+    expect(applyInputOverrides(base, new Map())).toEqual(base);
+  });
+});
+
+describe("acceptor per-field column binding (multiple fields of one type)", () => {
+  // Two linkage fields of one semantic type -- the maiden + current name case. The
+  // adopted terms declare both (an inviter authored them); the acceptor must bind
+  // each to a DISTINCT column of its own file.
+  const terms: LinkageTerms = {
+    version: "1.0.0",
+    identity: "acceptor",
+    date: "2026-01-01",
+    algorithm: "psi",
+    linkageStrategy: "cascade",
+    output: { expectsOutput: true, shareWithPartner: true },
+    deduplicate: false,
+    linkageFields: [
+      { name: "maiden_name", type: "first_name" },
+      { name: "current_name", type: "first_name" },
+    ],
+    linkageKeys: [
+      { name: "maiden", elements: [{ field: "maiden_name" }] },
+      { name: "current", elements: [{ field: "current_name" }] },
+    ],
+  };
+  const metadata: Array<ColumnMetadata> = [
+    {
+      name: "maiden_col",
+      type: "first_name",
+      role: "linkage",
+      isPayload: false,
+    },
+    {
+      name: "current_col",
+      type: "first_name",
+      role: "linkage",
+      isPayload: false,
+    },
+  ];
+  const rawRows = [{ maiden_col: "Smith", current_col: "Jones" }];
+
+  test("the default type fallback collapses both same-typed fields onto the first column", () => {
+    const base = getDefaultStandardization(metadata, terms);
+    expect(base.map((t) => [t.output, t.input])).toEqual([
+      ["maiden_name", "maiden_col"],
+      ["current_name", "maiden_col"],
+    ]);
+  });
+
+  test("an input override gives the second field its own column and round-trips through prepareForExchange to distinct values", () => {
+    const standardization = applyInputOverrides(
+      getDefaultStandardization(metadata, terms),
+      new Map([["current_name", "current_col"]]),
+    );
+    expect(standardization.map((t) => [t.output, t.input])).toEqual([
+      ["maiden_name", "maiden_col"],
+      ["current_name", "current_col"],
+    ]);
+    // The same { metadata, standardization } the editor hands onLaunch, run through
+    // the exchange's own preparation: each field now reads its own column, so a row
+    // whose two name columns differ produces two distinct cleaned values (NAME_STEPS
+    // uppercases) rather than the collapsed identical pair the default would give.
+    const prepared = prepareForExchange(
+      { linkageTerms: terms, metadata, standardization },
+      "acceptor",
+      rawRows,
+      ["maiden_col", "current_col"],
+    );
+    expect(prepared.dataset.getField("maiden_name")?.get(0)).toEqual(["SMITH"]);
+    expect(prepared.dataset.getField("current_name")?.get(0)).toEqual([
+      "JONES",
+    ]);
+  });
+});

@@ -413,7 +413,7 @@ afterEach(async () => {
 // inactivity timeout, so it shows guidance about likely receiver-side causes.
 // runProtocol threads this text to fromEventConnection's inactivityHint, which
 // the core layer appends to the peer-silence error (the append mechanism is
-// pinned in packages/core/test/messageConnection.test.ts). This pins the wording
+// pinned in packages/core/test/connection/messageConnection.test.ts). This pins the wording
 // itself.
 test("PEER_SILENCE_GUIDANCE names likely receiver-side causes without overclaiming", () => {
   // Names the two probable receiver-side faults.

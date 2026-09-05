@@ -35,7 +35,7 @@ import { parseFile, parseSource } from "./lib/typeScriptSources.mjs";
 // right one: a change that moved both to the same new number passes here. The
 // value itself is pinned against the exit-code contract by each side's own suite
 // (apps/cli/test/unit/protocol.test.ts and
-// apps/web/test/unit/jobDriver.unit.test.ts).
+// apps/web/test/unit/jobs/jobDriver.unit.test.ts).
 //
 // It reaches only this constant. The server module has one other
 // cross-workspace mirror, the CLI's fd-3 event vocabulary, which is a type

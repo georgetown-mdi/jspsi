@@ -35,7 +35,7 @@ const defaultPeerFactory: PeerFactory = (id, options) => new Peer(id, options);
  * unexported file, so a minor version bump could silently change it. The
  * signaling server's "unconfirmed" reap window (`unconfirmed_timeout` in the
  * vendored peerjs-server reaper) is a multiple of this cadence, enforced by
- * `test/unit/signalingReaping.test.ts`.
+ * `test/unit/psi/signalingReaping.test.ts`.
  */
 export const PEER_PING_INTERVAL_MS = 5_000;
 

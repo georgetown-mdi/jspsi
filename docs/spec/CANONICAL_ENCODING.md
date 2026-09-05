@@ -292,7 +292,7 @@ JSON `value`. Verify it from a `-0` literal in your own language; the Node suite
 does so directly.
 
 The PSI-Link test suite runs these vectors in both Node.js
-([`packages/core/test/canonical.test.ts`](../../packages/core/test/canonical.test.ts))
+([`packages/core/test/utils/canonical.test.ts`](../../packages/core/test/utils/canonical.test.ts))
 and a real browser
 ([`apps/web/test/browser/canonical.test.ts`](../../apps/web/test/browser/canonical.test.ts)),
 asserting byte-identical output on both platforms.
