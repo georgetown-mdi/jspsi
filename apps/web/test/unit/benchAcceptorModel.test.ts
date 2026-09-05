@@ -34,14 +34,14 @@ import type {
   WebRTCEndpoint,
 } from "@psilink/core";
 
-/** The "How it runs" label the ledger tests pass through; the acceptor bench
+/** The "How it runs" label the ledger tests pass through; the acceptor's console
  * computes it from the endpoint and consults the ledger with it. */
 const HOW_IT_RUNS = "Browser";
 
 // A self-contained set of linkage terms with two keys, a payload, and a legal
-// agreement, so a single ledger render exercises every row. The identity carries
+// agreement, so a single ledger render exercises every row. The identity has
 // injection characters JSX escaping does not neutralize, built from escapes
-// so the source carries no raw control bytes: an ESC that drives ANSI and a
+// so the source has no raw control bytes: an ESC that drives ANSI and a
 // right-to-left override.
 const ESC = "\u001b";
 const RLO = "\u202e";
@@ -103,7 +103,7 @@ function makeToken(
 
 // Acceptor-side metadata as the confirm-columns editor holds it. A linkage key
 // column (never disclosed) plus one payload column that transmits. The extra
-// payload column's name carries the same injection characters the identity does,
+// payload column's name has the same injection characters the identity does,
 // so the send row's per-name sanitization is exercised on an operator-file string.
 const EVIL_COLUMN = `enroll${ESC}[31m${RLO}_date`;
 const DISCLOSING_METADATA: Metadata = [
@@ -192,7 +192,7 @@ describe("acceptor ledger rows", () => {
 
   test("an inviter that named itself none is tagged as unnamed", () => {
     // `linkage_terms.identity` is optional, so an invitation can name nobody. The
-    // ledger tag reads "Proposed by ..." -- left blank it would read as a bug,
+    // ledger tag reads "Proposed by ..." -- left blank it would be treated as a bug,
     // and filled in it would assert a party the invitation never named.
     const { identity: _unnamed, ...withoutIdentity } = baseTerms;
     const token = makeToken();
@@ -259,7 +259,7 @@ describe("acceptor ledger rows", () => {
   });
 
   test("a metadata that discloses nothing reads no additional columns", () => {
-    // Once a file exists but its metadata transmits nothing, the honest reading is
+    // Once a file exists but its metadata transmits nothing, the accurate reading is
     // "No additional columns" -- the empty disclosed set, not the forward-reference.
     const rows = acceptorLedgerRows(
       makeToken(),
@@ -427,7 +427,7 @@ describe("acceptor completion ledger", () => {
     );
   });
 
-  test("a zero-count result reads as zero matched rows", () => {
+  test("a zero-count result displays as zero matched rows", () => {
     const rows = acceptorDoneLedgerRows(
       makeToken({ payload: { send: [], receive: [] } }),
       { kind: "matched", matchedRecordCount: 0 },
@@ -454,10 +454,10 @@ describe("acceptor completion ledger", () => {
 });
 
 describe("acceptor consent gate", () => {
-  // A board acceptance criterion: the gate blocks until BOTH the checkbox and a
-  // non-empty trimmed name are supplied. Pinned explicitly here, and re-asserted
-  // through acceptorConsentReady (the submit-disabled predicate) so the disabled
-  // state and the handler re-check cannot diverge.
+  // The gate blocks until BOTH the checkbox and a non-empty trimmed name are
+  // supplied. Pinned here, and re-asserted through acceptorConsentReady (the
+  // submit-disabled predicate) so the disabled state and the handler re-check
+  // cannot diverge.
   test("blocks with neither input", () => {
     expect(acceptorConsentName({ consented: false, name: "" })).toBeUndefined();
     expect(acceptorConsentReady({ consented: false, name: "" })).toBe(false);
@@ -490,9 +490,9 @@ describe("acceptor consent gate", () => {
 describe("acceptor name shape", () => {
   // The name the acceptance commits becomes this party's terms `identity`, which
   // core refuses for a control character (deriveAcceptedLinkageTerms). The field
-  // reports that at the field, so a pasted label carrying one is fixed before the
+  // reports that at the field, so a pasted label with one is fixed before the
   // run rather than failing the launch. The characters are built from escapes so
-  // this source carries no raw control bytes.
+  // this source has no raw control bytes.
   const DEL = "\u007f";
   const C1_NEXT_LINE = "\u0085";
 
@@ -540,10 +540,10 @@ describe("acceptor legal-agreement display", () => {
 
   test("neutralizes hostile agreement values and flags the alteration", () => {
     // The agreement strings are partner-controlled free text; a reference or
-    // purpose carrying ANSI-escape and bidi-override bytes must reach the
+    // purpose with ANSI-escape and bidi-override bytes must reach the
     // consent step neutralized -- the summarizeInvitation boundary, never the
     // raw token values. The escaping changes how the values read, so the
-    // display carries alteredForDisplay for the consent step's caveat line.
+    // display includes alteredForDisplay for the consent step's caveat line.
     const display = acceptorLegalAgreementDisplay(
       makeToken({
         legalAgreement: {
@@ -566,7 +566,7 @@ describe("acceptor legal-agreement display", () => {
 
   test("a long value truncated by sanitization also flags the alteration", () => {
     // sanitizeForDisplay caps output length as well as escaping; a legitimate
-    // very long purpose cannot read exactly as authored, so the caveat flag
+    // very long purpose cannot display exactly as authored, so the caveat flag
     // must cover truncation, not only escaping.
     const display = acceptorLegalAgreementDisplay(
       makeToken({
@@ -622,29 +622,29 @@ const SPLIT_SFTP: SFTPEndpoint = {
   outboundPath: "/out",
 };
 
-/** The appliance's provisioning as the accept gate reads it: no mount, one shared
+/** The console's provisioning as the accept gate reads it: no mount, one shared
  * mount, or the split pair. */
 const NO_MOUNT = { configured: false };
 const SHARED_MOUNT = { configured: true };
 const SPLIT_MOUNT = { configured: true, split: true };
 
 describe("acceptUnsupported (runnability by endpoint shape)", () => {
-  test("a WebRTC endpoint is out of scope on the appliance, pointing at the web app", () => {
+  test("a WebRTC endpoint is out of scope on the console, pointing at the web app", () => {
     const unsupported = acceptUnsupported(WEBRTC_ENDPOINT, SHARED_MOUNT);
     expect(unsupported?.message).toContain("out of scope");
     expect(unsupported?.message).toContain("web app");
   });
 
-  test("a split-directory filedrop endpoint runs on a split-provisioned appliance", () => {
+  test("a split-directory filedrop endpoint runs on a split-provisioned console", () => {
     expect(acceptUnsupported(SPLIT_FILEDROP, SPLIT_MOUNT)).toBeUndefined();
   });
 
-  test("a split-directory filedrop on a single-mount appliance names the second mount", () => {
+  test("a split-directory filedrop on a single-mount console names the second mount", () => {
     const unsupported = acceptUnsupported(SPLIT_FILEDROP, SHARED_MOUNT);
     expect(unsupported?.message).toContain("JOB_RENDEZVOUS_OUTBOUND_DIR");
   });
 
-  test("a single-directory filedrop on a split appliance says it has no folder to meet in", () => {
+  test("a single-directory filedrop on a split console says it has no folder to meet in", () => {
     const unsupported = acceptUnsupported(SINGLE_DIR_FILEDROP, SPLIT_MOUNT);
     expect(unsupported?.message).toContain("no single");
   });
@@ -654,7 +654,7 @@ describe("acceptUnsupported (runnability by endpoint shape)", () => {
     expect(unsupported?.message).toContain("JOB_RENDEZVOUS_DIR");
   });
 
-  test("a filedrop accept relays the appliance's own reason for an unusable pair", () => {
+  test("a filedrop accept relays the console's own reason for an unusable pair", () => {
     // An incoherent pair reports itself unconfigured with a reason; relaying it is
     // what keeps an operator who already mounted two folders from being told to
     // mount a first one.
@@ -674,10 +674,10 @@ describe("acceptUnsupported (runnability by endpoint shape)", () => {
   });
 
   test("a filedrop endpoint naming no directory runs against a single mount", () => {
-    // Decided, not incidental: a console filedrop accept runs over the appliance's
-    // own mounts and never over the locator the endpoint carries, so the locator
+    // Decided, not incidental: a console filedrop accept runs over the console's
+    // own mounts and never over the locator the endpoint has, so the locator
     // decides only which SHAPE the two sides agreed on -- and no named pair is the
-    // single shared folder. It matches a one-mount appliance and mismatches a split
+    // single shared folder. It matches a one-mount console and mismatches a split
     // one, exactly as an endpoint that names a shared path does.
     expect(acceptUnsupported(PATHLESS_FILEDROP, SHARED_MOUNT)).toBeUndefined();
     expect(
@@ -699,7 +699,7 @@ describe("acceptUnsupported (runnability by endpoint shape)", () => {
 
   test("an SFTP host that is not a bare address is refused at review", () => {
     // The partner authored the host and the accept form shows it read-only, so a
-    // host carrying a URL, a path, or whitespace could never be corrected there;
+    // host with a URL, a path, or whitespace could never be corrected there;
     // it is refused up front rather than silently no-opping a Save later.
     for (const host of [
       "user@evil.example",
@@ -758,7 +758,7 @@ describe("acceptorTransportNote", () => {
 });
 
 describe("acceptorRunsAsServerJob", () => {
-  test("a console file-drop or SFTP accept runs as a server job on the appliance", () => {
+  test("a console file-drop or SFTP accept runs as a server job on the console", () => {
     expect(acceptorRunsAsServerJob(SINGLE_DIR_FILEDROP, true)).toBe(true);
     expect(acceptorRunsAsServerJob(SINGLE_DIR_SFTP, true)).toBe(true);
   });
@@ -772,7 +772,7 @@ describe("acceptorRunsAsServerJob", () => {
 
 describe("acceptorDoneLedgerFooter", () => {
   test("a server-job (console file-drop) accept drops the this-browser claim", () => {
-    // The CLI reads the mounted CSV on the appliance, never the browser, so the
+    // The CLI reads the mounted CSV on the console, never the browser, so the
     // "never left this browser" claim would be false and must be omitted.
     const footer = acceptorDoneLedgerFooter(true);
     expect(footer).not.toContain("this browser");

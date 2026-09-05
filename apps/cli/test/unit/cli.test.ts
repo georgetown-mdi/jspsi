@@ -315,7 +315,7 @@ test("nonNegativeIntFlag: a value at or below the ceiling passes through", () =>
 });
 
 test("nonNegativeIntFlag: a value above the ceiling is a flag-named usage error stating the maximum", () => {
-  // The footgun this closes: a fat-fingered count near MAX_SAFE_INTEGER would
+  // The hazard this closes: a fat-fingered count near MAX_SAFE_INTEGER would
   // otherwise be accepted and turn into a linear self-inflicted connect hang. One
   // past the ceiling is rejected at parse (exit 64) with the flag named, the bare
   // count maximum stated (no time unit), and the offending value echoed.
@@ -347,13 +347,12 @@ test("nonNegativeIntFlag: an absent flag is undefined", () => {
 });
 
 test("nonNegativeIntFlag: a negative, a fraction, NaN, or an unsafe magnitude are flag-named usage errors", () => {
-  // yargs type:"number" coerces a non-numeric token to NaN and applies no
-  // integer, sign, or range constraint; each of these reaches here as a number
-  // z.int().nonnegative() would reject, so the flag-named UsageError catches it
-  // at the CLI boundary (exit 64) rather than deep in connection setup (exit 69).
-  // MAX_SAFE_INTEGER + 1 is the boundary z.int() rejects: the CLI guard must
-  // reject it too (Number.isSafeInteger, not isInteger) to stay aligned rather
-  // than defer the rejection to the raw, un-flag-named schema error.
+  // yargs type:"number" coerces a non-numeric token to NaN with no integer, sign,
+  // or range constraint; each of these reaches here as a number
+  // z.int().nonnegative() would reject, so the flag-named UsageError catches it at
+  // the CLI boundary (exit 64) rather than deep in connection setup (exit 69).
+  // MAX_SAFE_INTEGER + 1 is the boundary z.int() rejects, so the guard uses
+  // Number.isSafeInteger, not isInteger, to match it.
   for (const bad of [-1, 2.5, Number.NaN, Number.MAX_SAFE_INTEGER + 1]) {
     expect(() =>
       nonNegativeIntFlag(
@@ -451,8 +450,8 @@ test("exitCodeForError: a core UsageError is EX_USAGE, a bare Error is not", () 
 });
 
 test("exitCodeForError: a core InternalConsistencyError is EX_SOFTWARE", () => {
-  // The class the single-pass send-time reply-cap backstop raises (that it is the
-  // class a triggered backstop actually throws is pinned in core's
+  // The class the single-pass send-time reply-cap safety check raises (that it
+  // is the class a triggered safety check actually throws is pinned in core's
   // psiLink.test.ts). Its exit code is neither of its neighbours: 64 would name an
   // operator input the run has already found within budget, and 69 would invite a
   // supervisor to retry a deterministic internal fault -- another whole exchange,
@@ -468,11 +467,9 @@ test("exitCodeForError: a core InternalConsistencyError is EX_SOFTWARE", () => {
 test("exitCodeForError: a ConnectionError is classified by its kind", () => {
   // ConnectionError is the one class whose taxonomy is a field rather than a
   // subclass, so the boundary reads that field. The table is keyed by
-  // ConnectionErrorKind, which makes it exhaustive by construction: a kind added
-  // to core's union fails this file's typecheck until it is classified here,
-  // rather than silently taking the 69 default. Pinning every kind -- not only
-  // the one that changed -- means a later re-typing is a failure here rather than
-  // a silent change in what an unattended supervisor is told.
+  // ConnectionErrorKind, exhaustive by construction: a kind added to core's
+  // union fails this file's typecheck until it is classified here, not only the
+  // kind that changed.
   const expected: Record<ConnectionErrorKind, number> = {
     transport: 69,
     security: 69,
@@ -487,7 +484,7 @@ test("exitCodeForError: a ConnectionError is classified by its kind", () => {
 });
 
 test("exitCodeForError: a ConnectionError subclass follows its own kind", () => {
-  // The kind is read off the instance, so a subclass carries whatever its
+  // The kind is read off the instance, so a subclass holds whatever its
   // constructor fixed. PeerAbortError fixes `transport` and its class doc rests on
   // reaching 69: the peer died, which is not the operator's to fix.
   expect(exitCodeForError(new PeerAbortError())).toBe(69);
@@ -587,7 +584,7 @@ test("openInputSource: `-` returns process.stdin when stdin is allowed (non-inte
 
 test("openInputSource: `-` at an interactive terminal (nothing piped) is rejected as a usage error", async () => {
   // An interactive stdin (isTTY === true) with `-` would block on an EOF that
-  // never comes; reject up front naming both escape hatches rather than hang.
+  // never comes; reject up front naming both alternatives rather than hang.
   await withStdin(ttyStream(), () => {
     let caught: unknown;
     try {
@@ -727,7 +724,7 @@ test.skipIf(process.platform === "win32")(
   "writeOutput: a mid-write stream error rejects rather than crashing",
   async () => {
     // A write that fails after the stream opens (here a Writable whose first write
-    // errors) must surface as a rejected promise the caller's error boundary can
+    // errors) must become a rejected promise the caller's error boundary can
     // map to an exit code -- not an unhandled 'error' event that crashes the
     // process. Asserting the rejection is itself the proof it was handled: an
     // unguarded 'error' would tear the worker down instead.
@@ -765,13 +762,10 @@ test.skipIf(process.platform === "win32")(
   "writeOutput: a close-time failure rejects rather than reporting success",
   async () => {
     // A networked or userspace filesystem (NFS/CIFS/FUSE) and a full disk both
-    // defer their error to the close(2) after the last flushed write -- after
-    // 'finish', which every row having been handed to the stream fires regardless.
-    // Resolving there would report a truncated result CSV as written, and the
-    // attested resultSize is computed in memory, so nothing downstream would catch
-    // it. The substitute models exactly that: writes succeed, the destroy that
-    // follows end() fails, so 'finish' fires and then 'error'. The rejection is
-    // the proof the promise waits for the close.
+    // defer their error to the close(2) after the last flushed write, after
+    // 'finish' fires. The substitute models that: writes succeed, the destroy
+    // that follows end() fails, so 'finish' fires and then 'error'. The
+    // rejection is the proof the promise waits for the close.
     const dir = fs.mkdtempSync(
       path.join(os.tmpdir(), "psilink-writeoutput-close-"),
     );
@@ -817,9 +811,8 @@ test.skipIf(process.platform === "win32")(
 // models a real fstat verdict: a `> file` redirect is the only regular file; a pipe
 // is a FIFO; a TTY -- and the `> /dev/null` whose fstat shape is indistinguishable
 // from it -- is a character device. `stdoutIsRedirectedFile` keys solely on
-// isFile(), so only `regular-file` should fire -- but building each Stats with its
-// own true predicate (not just isFile() flipped) keeps the fixtures honest models
-// of the real fd shapes rather than copies of one stub.
+// isFile(), so only `regular-file` should fire. Each Stats below sets its own true
+// predicate rather than flipping one flag, keeping the fixtures accurate.
 const STDOUT_KINDS = {
   "regular-file": { isFile: true },
   pipe: { isFIFO: true },
@@ -896,12 +889,10 @@ test("writeOutput: a redirected regular-file stdout warns at error level about u
 
 test("writeOutput: a pipe or a TTY stdout does not warn", async () => {
   // Every non-file stdout (`| cat`, an interactive terminal, `> /dev/null`)
-  // reports isFile() false and leaves no under-permissioned file behind, so none
-  // fire -- including the pipe and TTY a bare `process.stdout.isTTY` check could
-  // not distinguish from a `> file` redirect. Each kind is a distinct fstat shape
-  // (a FIFO, a character device) rather than the same stub, so the assertion is
-  // that isFile()-false is what suppresses the notice regardless of the concrete
-  // non-file kind.
+  // reports isFile() false, so none of them fire -- including the pipe and TTY a
+  // bare `process.stdout.isTTY` check could not distinguish from a `> file`
+  // redirect. Each kind here is a distinct fstat shape (a FIFO, a character
+  // device), not the same stub.
   for (const kind of ["pipe", "tty"] as const) {
     const { stdout, errors, warns } = await runStdoutBranch(kind);
     expect(errors, kind).toHaveLength(0);
@@ -996,7 +987,7 @@ test("promptFreeText then promptConfirm: two questions, one open stdin", async (
 });
 
 test("promptFreeText: the question goes to stderr, never stdout", async () => {
-  // stdout carries a command's result data (the result CSV, an invitation
+  // stdout sends a command's result data (the result CSV, an invitation
   // token), so a question written there would corrupt a redirected run -- the
   // reason promptConfirm asks on stderr too.
   const { stdoutWrites, stderrWrites, restore } = captureStdio();

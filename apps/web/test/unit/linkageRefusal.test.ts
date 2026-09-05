@@ -35,7 +35,7 @@ function termsNamed(keyName: string, fieldName: string): LinkageTerms {
 }
 
 describe("linkageRefusalFor", () => {
-  test("a satisfied verdict carries no refusal, so a seat with none does not block", () => {
+  test("a satisfied verdict has no refusal, so a seat with none does not block", () => {
     const columns = ["first_name"];
     const verdict = decideLinkageTermsVerdict(
       columns,
@@ -47,10 +47,10 @@ describe("linkageRefusalFor", () => {
     ).toBeUndefined();
   });
 
-  test("terms narrowed to no key are the no-linkable-key shape, carrying the passed fields", () => {
+  test("terms narrowed to no key are the no-linkable-key shape, holding the passed fields", () => {
     // The direct spine and the quick mint narrow the built-in set to the keys their
     // columns support; narrowed to none, the field types a conforming file would
-    // carry come from the UNNARROWED set rather than the verdict's own (empty) one.
+    // contain come from the UNNARROWED set rather than the verdict's own (empty) one.
     const columns = ["notes"];
     const narrowed = getDefaultLinkageTerms("x", inferMetadata(columns));
     expect(narrowed.linkageKeys).toEqual([]);

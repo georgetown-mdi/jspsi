@@ -75,7 +75,7 @@ describe("unavailableKexPrimitives", () => {
   test("the X25519 pattern matches every algorithm name built on it", () => {
     const pattern = KEX_PRIMITIVES[0]!.matchesAlgorithm;
     // The two RFC 8731 spellings ssh2 offers today, plus the hybrids a later
-    // version can add -- the reason the entry carries a pattern and not a list.
+    // version can add -- the reason the entry holds a pattern and not a list.
     for (const name of [
       "curve25519-sha256",
       "curve25519-sha256@libssh.org",
@@ -97,7 +97,7 @@ describe("unavailableKexPrimitives", () => {
       expect(pattern.test(name)).toBe(false);
   });
 
-  test("no pattern carries the global flag, which would make matching stateful", () => {
+  test("no pattern has the global flag, which would make matching stateful", () => {
     // A `g` pattern advances `lastIndex` on every `test`, so the same name would
     // match and then not match -- here, and inside ssh2, which is handed these
     // very objects as its `remove` filters.
@@ -193,9 +193,9 @@ describe("constrainKexToPlatformCapabilities with X25519 unavailable", () => {
   });
 
   test("refuses rather than forwarding an operator list filtered to empty", () => {
-    // An empty list is NOT an empty offer to ssh2: it reads as "unspecified" and
-    // falls back to the very defaults the filter rejected, so the refusal is what
-    // keeps an unperformable algorithm off the wire.
+    // An empty list is NOT an empty offer to ssh2: it is treated as "unspecified"
+    // and falls back to the very defaults the filter rejected, so the refusal is
+    // what keeps an unperformable algorithm off the wire.
     let thrown: unknown;
     try {
       constrainKexToPlatformCapabilities(
@@ -343,7 +343,7 @@ describe("constrainKexToPlatformCapabilities with X25519 unavailable", () => {
 });
 
 describe("explainKexNegotiationFailure", () => {
-  // The message ssh2-sftp-client surfaces when the two ends share no key-exchange
+  // The message ssh2-sftp-client shows when the two ends share no key-exchange
   // algorithm, measured against the pinned versions.
   const negotiationFailure = new Error(
     "getConnection: Handshake failed: no matching key exchange algorithm",
@@ -402,7 +402,7 @@ describe("isUnperformableKexNegotiationFailure", () => {
     ).toBe(true);
   });
 
-  test("recognizes the diagnostic raised for it, whose message no longer carries the fragment", () => {
+  test("recognizes the diagnostic raised for it, whose message no longer has the fragment", () => {
     expect((explained as Error).message).not.toContain(
       "no matching key exchange algorithm",
     );
@@ -412,7 +412,7 @@ describe("isUnperformableKexNegotiationFailure", () => {
   });
 
   test("answers no for either shape once every primitive is available", () => {
-    // The verdict carries the whole weight: the fragment is written by whoever
+    // The verdict holds the whole weight: the fragment is written by whoever
     // sends the SSH_MSG_DISCONNECT description, and a disconnect precedes host-key
     // verification. On a host that can perform everything ssh2 offers, a written
     // fragment decides nothing at all.
@@ -439,8 +439,8 @@ describe("isUnperformableKexNegotiationFailure", () => {
 // written past that cap loses its tail, which is where the remedy sits -- so the
 // cap is asserted against the real sink rather than trusted to a reading.
 describe("what the operator actually reads", () => {
-  // The TOP link is the one that must survive whole: it carries the remedy. The
-  // cause link deliberately may not -- it carries the operator's own algorithm
+  // The TOP link is the one that must survive whole: it holds the remedy. By
+  // design, the cause link may not -- it holds the operator's own algorithm
   // list, which is unbounded, and splitting it off is what keeps the remedy out
   // of its way. Asserting over every link would therefore assert something
   // input-dependent rather than the property being held.

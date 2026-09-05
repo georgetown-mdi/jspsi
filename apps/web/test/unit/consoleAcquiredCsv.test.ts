@@ -11,7 +11,7 @@ describe("consoleAcquiredCsv", () => {
     dateInputFormat: "YYYY-MM-DD",
   };
 
-  test("carries the profiled facts an authoring session needs, without the rows", () => {
+  test("holds the profiled facts an authoring session needs, without the rows", () => {
     const acquired = consoleAcquiredCsv(profile);
     expect(acquired.fileName).toBe("clients.csv");
     expect(acquired.sizeBytes).toBe(4096);
@@ -22,9 +22,9 @@ describe("consoleAcquiredCsv", () => {
 
   test("a stray rawRows read throws in dev/test rather than reading empty", () => {
     const acquired = consoleAcquiredCsv(profile);
-    // The throwing getter is the runtime half of the backstop: a consumer that has
-    // not been moved onto the profile fails loud here instead of silently rendering
-    // an empty preview or zero coverage.
+    // The throwing getter is the runtime half of the safety check: a consumer that
+    // has not been moved onto the profile fails loud here instead of silently
+    // rendering an empty preview or zero coverage.
     expect(() => acquired.rawRows).toThrow(/rawRows/);
   });
 
@@ -32,7 +32,7 @@ describe("consoleAcquiredCsv", () => {
     const acquired = consoleAcquiredCsv(profile);
     // React's dev-mode render logging enumerates prop values; a non-enumerable getter
     // is skipped by Object.keys/spreads/that reflection yet still throws on an explicit
-    // read, so the backstop catches real consumers without firing on introspection.
+    // read, so the safety check catches real consumers without firing on introspection.
     expect(Object.keys(acquired)).not.toContain("rawRows");
     expect(
       Object.prototype.propertyIsEnumerable.call(acquired, "rawRows"),

@@ -8,13 +8,12 @@ import {
 } from "@psilink/core";
 
 /**
- * Register beforeEach/afterEach hooks that snapshot core's process-wide
- * diagnostic sink and every logger's level before each test and restore them
- * after, so a test that installs a sink or changes the level never bleeds into
- * the next. The per-logger snapshot covers the whole loglevel registry, not just
- * the root level: `configureLogging` applies the level across the loggers that
- * already exist (core's `setLogLevel`), so restoring the root alone would leave a
- * `silent` case's level on the named loggers for the rest of the file.
+ * Register beforeEach/afterEach hooks that snapshot core's diagnostic sink
+ * and every logger's level, then restore them after each test. The snapshot
+ * covers the whole loglevel registry, not just the root level, because
+ * `configureLogging` sets each already-existing logger directly
+ * (`setLogLevel`), so restoring only the root would leave a `silent` case's
+ * level on named loggers for the rest of the file.
  * @internal test-only
  */
 export function snapshotDiagnosticSinkAndLevel(): void {

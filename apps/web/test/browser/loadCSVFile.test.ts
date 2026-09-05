@@ -6,14 +6,12 @@ import Papa from "papaparse";
 
 import { loadCSVFile } from "@psilink/core";
 
-// Pin the no-silent-truncation invariant directly. loadCSVFile parses inline (NOT
-// `worker: true` -- the bundled-worker corruption that fix avoids; see file.ts),
-// and PapaParse streams a local File in LocalChunkSize chunks even inline, handing
-// `complete` `undefined` once a `chunk` callback is present -- so the rows live
-// only in what our `chunk` handler accumulates. Before that accumulation a file
-// spanning more than one chunk parsed to a silently truncated subset with no
-// error, which in a record-linkage tool is a wrong intersection. This builds a CSV
-// deliberately larger than one chunk and asserts EVERY row survives.
+// Pin the no-silent-truncation invariant directly. loadCSVFile parses inline
+// (not `worker: true`; see file.ts), but PapaParse still streams a local File in
+// LocalChunkSize chunks, handing `complete` `undefined` once a `chunk` callback
+// is present -- so the rows live only in what the `chunk` handler accumulates.
+// Before that, a file spanning more than one chunk parsed to a silently
+// truncated subset: a wrong intersection in a record-linkage tool.
 describe("loadCSVFile multi-chunk parsing", () => {
   afterEach(() => {
     vi.restoreAllMocks();
@@ -38,14 +36,14 @@ describe("loadCSVFile multi-chunk parsing", () => {
     const csv = lines.join("\n") + "\n";
 
     const file = new File([csv], "multichunk.csv", { type: "text/csv" });
-    // Guard the premise: the ASCII payload is one byte per character, so the file
+    // Guard the assumption: the ASCII payload is one byte per character, so the file
     // really does exceed a single chunk. A truncating parse would still pass row
     // assertions if the input fit in one chunk, so fail loudly if it does not.
     expect(file.size).toBeGreaterThan(Papa.LocalChunkSize);
 
     // Count how many times PapaParse actually fires the per-chunk callback, by
-    // wrapping the chunk handler the wrapped config carries. This makes the
-    // multi-chunk premise executable: if a future PapaParse delivered this file
+    // wrapping the chunk handler the wrapped config holds. This makes the
+    // multi-chunk assumption executable: if a future PapaParse delivered this file
     // inline in a single chunk, the accumulation would no longer be exercised and
     // the row assertions below could pass vacuously -- so assert more than one
     // chunk was seen.
@@ -94,7 +92,7 @@ describe("loadCSVFile rejects a malformed header", () => {
     // The shape the bundled PapaParse worker produced: the header row and the first
     // data row both land in meta.fields, so a field is an array, not a string. The
     // guard rejects loudly here; without it the non-string field flowed into
-    // inferMetadata and surfaced as an opaque `e.toLowerCase is not a function`,
+    // inferMetadata and was exposed as an opaque `e.toLowerCase is not a function`,
     // which the inviter saw only as "invitation generation failed: TypeError". Drive
     // it directly by having Papa.parse hand back that malformed meta.
     // Hand loadCSVFile the malformed result through its own callbacks. Typed against

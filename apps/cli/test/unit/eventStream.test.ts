@@ -53,7 +53,7 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 /** True when `event` is a well-formed {@link StreamEvent} of its declared type. */
 function validateEvent(event: unknown): event is StreamEvent {
   if (!isRecord(event)) return false;
-  // Every line carries a positive-integer version field, observable on its own.
+  // Every line has a positive-integer version field, observable on its own.
   if (typeof event.v !== "number" || !Number.isInteger(event.v) || event.v < 1)
     return false;
   switch (event.type) {
@@ -118,7 +118,7 @@ const RLO_INJECTION = "user\u202eEVIL";
 
 // --- Schema conformance: every event type validates, version present ---------
 
-test("every event type validates against the schema and carries a version", () => {
+test("every event type validates against the schema and has a version", () => {
   const events: StreamEvent[] = [
     buildStagesEvent([
       { id: "confirming protocol", label: "Confirming protocol" },
@@ -141,7 +141,7 @@ test("every event type validates against the schema and carries a version", () =
 
 // --- Stage timing and operational counters -----------------------------------
 
-test("a metrics event carries the operational counters verbatim", () => {
+test("a metrics event has the operational counters verbatim", () => {
   const event = buildMetricsEvent(4200, 3, 2);
   expect(validateEvent(event)).toBe(true);
   expect(event.recordsProcessed).toBe(4200);
@@ -166,7 +166,7 @@ test("metrics counters and stage durations are clamped to non-negative integers"
 
 // --- The terminal result event's count-only field ----------------------------
 
-test("the result event carries a count-only run's count, and omits the field otherwise", () => {
+test("the result event has a count-only run's count, and omits the field otherwise", () => {
   // The field's PRESENCE is the discriminant between the two resultWritten:false
   // outcomes, so a zero count must be emitted as a present zero rather than
   // collapsing into the withheld shape a missing field means.
@@ -245,7 +245,7 @@ test("classifies a PREPARE-phase OperatorConfigError as config", () => {
 
 test("classifies a mid-RUN OperatorConfigError as config, agreeing with its exit code", () => {
   // The class contract is that a member's message is composed solely of this
-  // party's own content, whatever phase raises it, so the type alone carries the
+  // party's own content, whatever phase raises it, so the type alone states the
   // rule. What the category has to agree with is the exit code: core's local
   // certificate/terms refusal is raised from the run phase and exits 64, the
   // do-not-retry code, so reporting it under the retryable `exchange` bucket
@@ -317,12 +317,12 @@ test("classifies every other failure as exchange", () => {
 });
 
 test("classifies a run-phase InternalConsistencyError as exchange", () => {
-  // The class the single-pass send-time reply-cap backstop raises (pinned as what
-  // a triggered backstop throws in core's psiLink.test.ts). The four categories
-  // have no internal-fault member, so it lands in the default bucket beside the
-  // retryable transport faults; the exit code (70, pinned in cli.test.ts) is where
-  // a supervisor sees the difference -- the mirror of a `security` failure, which
-  // only the category shows.
+  // The class the single-pass send-time reply-cap safety check raises (pinned
+  // as what a triggered safety check throws in core's psiLink.test.ts). The
+  // four categories have no internal-fault member, so it lands in the default
+  // bucket beside the retryable transport faults; the exit code (70, pinned in
+  // cli.test.ts) is where a supervisor sees the difference -- the mirror of a
+  // `security` failure, which only the category shows.
   const backstop = new InternalConsistencyError(
     "single-pass built a reply of 10 byte(s), above the 8 byte(s) both parties " +
       "derive from their declared sizes",
@@ -353,12 +353,12 @@ test("sanitizes a hostile warning message", () => {
   expect(event.message).toContain("\\u202e");
 });
 
-test("redacts private-key material carried in a warning message", () => {
+test("redacts private-key material held in a warning message", () => {
   // The fd-3 stream is a persisted machine sink like --log-file, and its error
   // event is already redacted, so the warning is the one text field that would
-  // otherwise carry key material in the clear. Driven with a raw block rather
+  // otherwise hold key material in the clear. Driven with a raw block rather
   // than a live warning source, since both live sources redact per fragment
-  // where they compose -- this pins the backstop, not their composition.
+  // where they compose -- this pins the safety check, not their composition.
   const body = "b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAAB";
   const event = buildWarningEvent(
     `key file rejected: -----BEGIN OPENSSH PRIVATE KEY-----\n${body}\n` +
@@ -375,7 +375,7 @@ test("sanitizes hostile error text through the display boundary", () => {
 });
 
 test("no raw ESC or newline survives serialization of a hostile event", () => {
-  // A serialized line must not carry a raw control byte or an embedded newline
+  // A serialized line must not contain a raw control byte or an embedded newline
   // (which would spoof a second NDJSON line). The escaped forms may appear.
   const line = JSON.stringify(buildWarningEvent("a\x1b[31m\nb"));
   expect(line).not.toContain("\x1b");
@@ -387,11 +387,10 @@ test("no raw ESC or newline survives serialization of a hostile event", () => {
 test("every event serializes to a printable-ASCII line", () => {
   // This stream is the machine-readable line the printable-ASCII encoder behind
   // the --json stdout lines (apps/cli/src/util/jsonLine.ts) names as what it
-  // excludes: its text is display-escaped where each event is composed instead,
-  // and bare JSON.stringify passes DEL, the C1 range and U+2028 through, so the
-  // composition pass is the whole of what keeps those bytes off the descriptor.
-  // Held here, over the fields this stream carries, rather than in the encoder's
-  // header prose.
+  // excludes: its text is display-escaped where each event is composed, and
+  // bare JSON.stringify passes DEL, the C1 range, and U+2028 through, so that
+  // composition pass is what keeps those bytes off the descriptor. Held here,
+  // over the fields this stream has, rather than in the encoder's header prose.
   const PRINTABLE_ASCII_ONLY = /^[\x20-\x7e]*$/;
   const hostile =
     `${ESC_INJECTION}\n${RLO_INJECTION}` +
@@ -459,8 +458,8 @@ test("openEventStream takes the fail-closed preflight before it hands back an em
 test("reportPersistenceLoss warns on the stream and sets the persistence-loss exit code", () => {
   // Both machine channels at once: a supervisor reading fd 3 gets the warning, a
   // supervisor reading only exit status gets 73 (EX_CANTCREAT) -- the literal the
-  // exit-code contract in docs/CLI.md publishes, and deliberately not the 69 that
-  // says the exchange did not happen and may be retried.
+  // exit-code contract in docs/CLI.md publishes, and not the 69 that says the
+  // exchange did not happen and may be retried.
   const cap = captureFd3Writes();
   const exitCodeBefore = process.exitCode;
   try {

@@ -31,13 +31,10 @@ import type { PreflightId } from "@psilink/testkit/preflightInventory";
 import type { SftpConnectionFormValues } from "@bench/sftpConnectionForm";
 
 // This is the console half of the preflight parity inventory
-// (`@psilink/testkit/preflightInventory`, whose header carries the whole
-// argument). The CLI half is apps/cli/test/unit/preflightInventoryParity.test.ts,
-// which binds each row to the code that enforces it there and fails when a
-// preflight is added to the CLI without a row. What this leg adds is the other
-// direction: a row the CLI anchored has to be dispositioned here, and a row
-// claiming the console states it at a control has to name the control, which has
-// to exist.
+// (`@psilink/testkit/preflightInventory`); the CLI half is
+// apps/cli/test/unit/preflightInventoryParity.test.ts. A row claiming the
+// console states it at a control has to name the control, and the control
+// has to exist.
 
 /** What the console has for a row: the module it is stated in and the symbol
  * that states it, or `null` for a row whose disposition says the console states
@@ -118,9 +115,9 @@ describe("every row is dispositioned in the console", () => {
   });
 
   test("a row the console has no surface for says why in its own words", () => {
-    // The two exits from "the console states it at a control" are the honest
+    // The two exits from "the console states it at a control" are the accurate
     // ones -- the state cannot be composed, or the gap is known and unbuilt --
-    // and each has to carry its reason. A row cannot leave the question open.
+    // and each has to state its reason. A row cannot leave the question open.
     for (const id of preflightIds()) {
       const disposition = PREFLIGHT_INVENTORY[id].console;
       if (disposition.kind === "authored") continue;
@@ -148,9 +145,9 @@ describe("every row is dispositioned in the console", () => {
     }
   });
 
-  test("the deferred seams are recorded as pending, not as covered", () => {
-    // The rows that are deliberately gaps. Each is written down rather than
-    // dropped so that building the seam is a change to this list, not a
+  test("the deferred boundaries are recorded as pending, not as covered", () => {
+    // The rows that are gaps by design. Each is written down rather than
+    // dropped so that building the boundary is a change to this list, not a
     // rediscovery, and each names no console surface -- a pending row that still
     // pointed at a symbol would read as covered.
     for (const id of ["jobAdmission", "identityDivergence"] as const) {

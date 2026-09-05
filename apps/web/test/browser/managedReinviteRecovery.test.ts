@@ -27,7 +27,7 @@ import type { WebRTCExchangeLocator } from "@psilink/core";
 // stored secret, drops the consumed failure bookkeeping, clears the restore markers,
 // and hands back the rotated record -- so a post-re-invite run derives the rendezvous
 // from the fresh secret, and neither the stale benign tier nor a false unexplained tier
-// can surface after the operator has recovered.
+// can show after the operator has recovered.
 
 const linkageTerms = getDefaultLinkageTerms("County Health Dept");
 
@@ -64,7 +64,7 @@ afterEach(async () => {
 describe("persistManagedExchangeReinvite drops the consumed failure", () => {
   test("rotating clears lastRun and the import marker in one transaction", async () => {
     const record = await createManagedExchange(newExchange());
-    // The record carries a failed auth run and a standing import marker (a restore).
+    // The record has a failed auth run and a standing import marker (a restore).
     await recordManagedExchangeLastRun(
       record.id,
       failedRun(Date.now(), "failed", "auth"),
@@ -77,7 +77,7 @@ describe("persistManagedExchangeReinvite drops the consumed failure", () => {
     });
 
     // The failure is consumed and the import marker cleared: the next read tiers as
-    // "no failure to surface", not the stale benign tier and not a false unexplained.
+    // "no failure to show", not the stale benign tier and not a false unexplained.
     expect(rotated.lastRun).toBeUndefined();
     const stored = await getManagedExchange(record.id);
     expect(stored?.lastRun).toBeUndefined();
@@ -88,7 +88,7 @@ describe("persistManagedExchangeReinvite drops the consumed failure", () => {
     ).toBeUndefined();
   });
 
-  test("a stale auth failure does not resurrect as unexplained after re-invite", async () => {
+  test("a stale auth failure does not reappear as unexplained after re-invite", async () => {
     // Without clearing lastRun, this record -- an auth failure whose import marker the
     // rotation cleared -- would re-derive as the attack (unexplained) tier. It must not.
     const record = await createManagedExchange(newExchange());
@@ -116,7 +116,7 @@ describe("reinviteManagedExchange rotates the stored secret and returns it", () 
 
     const result = await reinviteManagedExchange(record);
 
-    // The returned record carries the fresh secret -- the caller adopts it so any
+    // The returned record has the fresh secret -- the caller adopts it so any
     // subsequent run derives the rendezvous from the rotated secret, matching the
     // fresh invitation the partner now holds.
     expect(result.record.sharedSecret).not.toBe(stale);

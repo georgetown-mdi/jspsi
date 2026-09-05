@@ -44,7 +44,7 @@ export function sleep(ms: number): Promise<void> {
  * with the shared globalSetup dev server (or anything else). There is a small,
  * accepted TOCTOU window between closing this probe and the spawned server's own
  * bind; nothing here contends for ephemeral ports (the dev server uses a fixed
- * port), so a collision is improbable, and waitForRoot surfaces it promptly as an
+ * port), so a collision is improbable, and waitForRoot reports it promptly as an
  * early-exit error rather than a confusing readiness timeout. */
 export function getFreePort(): Promise<number> {
   return new Promise((resolvePort, reject) => {
@@ -89,10 +89,10 @@ export async function waitForRoot(
 ): Promise<void> {
   const deadline = Date.now() + READY_TIMEOUT_MS;
   for (;;) {
-    // Surface an early exit (a port collision, a missing/broken build) with its
+    // Report an early exit (a port collision, a missing/broken build) with its
     // real cause, instead of polling a server that is never coming up until the
     // readiness deadline and then reporting a misleading timeout. A spawn/exec
-    // failure that surfaces as a child `error` event (rather than an exit) leaves
+    // failure that shows as a child `error` event (rather than an exit) leaves
     // exitCode/signalCode null, so also re-throw a captured launch error here.
     const launchError = getLaunchError();
     if (launchError) throw launchError;
@@ -110,7 +110,7 @@ export async function waitForRoot(
 
 /** A spawned production server: the child process and a live view of any launch
  * error captured off its `error` event (persistent for the child's whole life,
- * so a post-launch spawn/exec failure surfaces and a stray error cannot crash the
+ * so a post-launch spawn/exec failure is exposed and a stray error cannot crash the
  * worker as an unhandled EventEmitter `error`). */
 export interface ProdServer {
   child: ChildProcess;
@@ -119,7 +119,7 @@ export interface ProdServer {
 
 /** Spawn `node prodEntry` on `port`, bound to loopback, as its own process group
  * so teardown can signal the whole tree. Yields one tick so a spawn failure (e.g.
- * a missing node) surfaces before returning. NITRO_HOST pins the loopback bind;
+ * a missing node) is reported before returning. NITRO_HOST pins the loopback bind;
  * PORT pins the free port (the nitro entry reads it straight from process.env, no
  * dotenv override). `extraEnv` merges over the inherited environment, for suites
  * that enable a feature-gated surface (e.g. the job API) at boot. */

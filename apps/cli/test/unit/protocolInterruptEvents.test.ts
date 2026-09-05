@@ -5,15 +5,11 @@ import path from "node:path";
 import { vi, test, expect, beforeEach, afterEach } from "vitest";
 import type { PreparedExchange } from "@psilink/core";
 
-// The interrupt half of the machine-interface event stream, in a file of its
-// own. Driving it costs two process-global effects: process.exit is mocked to a
-// no-op, so the run keeps executing past the point a real process would have
-// died, and a real process.emit("SIGINT") is delivered while a live filedrop
-// exchange is polling. A vitest file is one process shared by every test in it,
-// and protocol.test.ts holds two-party tests whose rendezvous is bounded in the
-// low hundreds of milliseconds, so this test is kept where a mocked exit, a
-// stray signal listener, or an exchange still winding down can reach nothing
-// but itself.
+// This test lives in its own file because it mocks process.exit to a no-op
+// and delivers a real process.emit("SIGINT") while a live filedrop exchange
+// polls -- both process-global effects a shared vitest process would
+// otherwise leak into other tests, including protocol.test.ts's two-party
+// rendezvous (bounded in the low hundreds of milliseconds).
 
 // runProtocol pulls in PSI at module load; the factory is never invoked here
 // (the interrupt lands before the exchange begins) but stub it so the WASM
@@ -23,9 +19,9 @@ vi.mock("@openmined/psi.js", () => ({
 }));
 
 // Keep @psilink/core real -- FileSyncConnection and the rendezvous especially,
-// since the interrupt has to land on a genuinely live exchange -- and replace
-// only the operator logger, which nothing here asserts on, and runExchange,
-// which nothing here should reach.
+// since the interrupt has to land on a live exchange -- and replace only the
+// operator logger, which nothing here asserts on, and runExchange, which
+// nothing here should reach.
 vi.mock("@psilink/core", async (importActual) => {
   const actual = await importActual<typeof import("@psilink/core")>();
   return {
@@ -114,12 +110,11 @@ afterEach(() => {
 
 test("a SIGINT interrupt under --event-stream emits no terminal event", async () => {
   // The contract a supervisor reads an interrupt by (docs/spec/CLI_EVENTS.md):
-  // no terminal event, plus exit 130. The web job manager synthesizes a terminal
-  // state for a non-interrupt exit that produced none, so a terminal line here
-  // would report a cancellation as an outcome. process.exit is mocked, which is
-  // the harder case: the signal handler returns instead of terminating, so the
-  // interrupt propagates into the main catch and the check covers the
-  // in-flight-error subpath rather than only the bypass a real exit gives.
+  // no terminal event, plus exit 130 -- otherwise the web job manager
+  // synthesizes a terminal state and reports the cancellation as an outcome.
+  // process.exit is mocked, the harder case: the signal handler returns
+  // instead of terminating, so the interrupt hits the main catch's
+  // in-flight-error path rather than the bypass a real exit gives.
   mockFd3Open();
   const exitSpy = vi.spyOn(process, "exit").mockReturnValue(undefined as never);
   const signalListenersBefore = {
@@ -151,9 +146,9 @@ test("a SIGINT interrupt under --event-stream emits no terminal event", async ()
       () => expect(fs.readdirSync(dropDir).length).toBeGreaterThan(0),
       { timeout: 5_000 },
     );
-    // A synthetic emit with no listener registered is a silent no-op, so hold
-    // the premise the emit below rests on: the run's own handler is installed
-    // and is what receives the signal.
+    // A synthetic emit with no listener registered is a silent no-op, so
+    // confirm the assumption the emit below rests on: the run's own handler
+    // is installed and is what receives the signal.
     expect(process.listenerCount("SIGINT")).toBe(
       signalListenersBefore.SIGINT + 1,
     );

@@ -35,7 +35,7 @@ describe("the superseded refusal", () => {
   });
 
   test("sends the migration operator through the screen they are actually on", () => {
-    // The migration confirmation is a full screen that replaces the one carrying
+    // The migration confirmation is a full screen that replaces the one holding
     // "Move to another device", so the download control is not reachable from it:
     // the way to a fresh copy is out of this screen first.
     const reason = supersededHandoffReason("migration");
@@ -53,7 +53,7 @@ describe("the record-gone refusal", () => {
   test("points at no download, because there is no record left to download", () => {
     // The refusal a hand-off meets when the exchange was deleted or its storage
     // cleared while the confirmation stood. The superseded copy's remedy is the
-    // one sentence this case must not carry.
+    // one sentence this case must not include.
     expect(RECORD_GONE_HANDOFF_REASON).not.toMatch(/download .*again/i);
     expect(RECORD_GONE_HANDOFF_REASON).toMatch(/no longer in this browser/);
     expect(RECORD_GONE_HANDOFF_REASON).toMatch(/nothing was written/);
@@ -79,7 +79,7 @@ describe("the reasons around them", () => {
   test("the run-in-flight reason invites the retry rather than only asking to wait", () => {
     // The confirm control stays enabled through this refusal (the click-time
     // recheck is the control, not the disabled prop), so the copy must say the
-    // retry is the way out rather than reading as a dead end.
+    // retry is the way out rather than displaying as a dead end.
     expect(RUN_IN_FLIGHT_HANDOFF_REASON).toMatch(/hand off again/i);
   });
 

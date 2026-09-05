@@ -17,7 +17,7 @@ import { createAppMount } from "./renderApp";
 
 import type { KeyVerdict } from "@bench/inviterModel";
 
-// A file carrying every default linkage column, so the seed keeps the full key set
+// A file holding every default linkage column, so the seed keeps the full key set
 // -- several collapsed key cards, each its own disclosure.
 const ALL_COLUMNS = ["ssn", "ssn4", "first_name", "last_name", "dob"];
 
@@ -25,7 +25,7 @@ const ALL_COLUMNS = ["ssn", "ssn4", "first_name", "last_name", "dob"];
 // toggle's aria-controls points at an always-mounted `<div id="key-body-...">`
 // wrapper, not the Mantine Collapse panel, so the reference resolves in every state
 // however Mantine mounts the closed panel under a reduced-motion preference (the
-// same hardening DisclosureSection and InvitationTerms carry). This pins that
+// same hardening DisclosureSection and InvitationTerms have). This pins that
 // invariant against the accessibility tree once respectReducedMotion is on.
 
 const app = createAppMount();
@@ -50,7 +50,7 @@ function render() {
 
 // The per-key disclosure toggles: their aria-controls ids are the only ones prefixed
 // "key-body-", so this selector excludes the comboboxes inside each (collapsed) key
-// body, which carry their own aria-controls.
+// body, which have their own aria-controls.
 function keyToggleIds(): Array<string> {
   return Array.from(
     app.container.querySelectorAll<HTMLElement>('[aria-controls^="key-body-"]'),

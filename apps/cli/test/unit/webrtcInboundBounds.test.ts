@@ -78,7 +78,7 @@ test("a chunked frame is pending until its last slice, then delivered", () => {
   expect(bounds.retainedBytes()).toBe(0);
 });
 
-test("a reassembled frame carries the bytes the sender packed", () => {
+test("a reassembled frame has the bytes the sender packed", () => {
   const bounds = new BoundedInboundFrames();
   const body = new Uint8Array(PEERJS_CHUNK_MTU * 2 + 7);
   for (let i = 0; i < body.length; i += 1) body[i] = i % 251;
@@ -219,7 +219,7 @@ test("chunks that reassemble into another envelope are refused", () => {
   ).toContain("another envelope");
 });
 
-test("a refusal carries the limit and no peer-supplied bytes", () => {
+test("a refusal has the limit and no peer-supplied bytes", () => {
   const marker = "PEER-CHOSEN-MARKER";
   const bounds = new BoundedInboundFrames({ maxFrameBytes: 8 });
   expect(

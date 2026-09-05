@@ -197,7 +197,7 @@ describe("redactErrorIds", () => {
     expect(err.stack ?? "").not.toContain(SAMPLE_ID);
   });
 
-  test("preserves a control discriminant the error carries", () => {
+  test("preserves a control discriminant the error holds", () => {
     const err = Object.assign(new Error(`from peer:${SAMPLE_ID}`), {
       type: "peer-unavailable",
     });

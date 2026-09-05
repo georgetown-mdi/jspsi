@@ -12,16 +12,14 @@ import { sortAssociationTable } from "../src/testing";
 import { UNBOUNDED_PSI_ELEMENTS } from "./utils/psiElementBounds";
 
 // Resolved intersection-and-association known-answer anchor for the vendored
-// @openmined/psi.js engine. psi-intersection-vectors.json holds every scenario
-// the matching cascade has to get right -- the empty-round and empty-key cases
-// live here alone; psiParticipant.test.ts, psiLink.test.ts, and
-// psiLinkForLinkageKeys.test.ts exercise the rest from the API side. This test
-// replays each scenario against the vendored engine and pins both the
-// intersection membership and the association/permutation mapping back to
-// original input rows, so a fork re-roll or an engine swap that silently
-// corrupts the mapping fails here. This is the CORRECTNESS anchor; the
-// byte-for-byte anchor lives in psiEngineWireVectors.test.ts. Regenerate the
-// fixture with generate-psi-intersection-vectors.mjs in the vectors directory.
+// @openmined/psi.js engine: replays every scenario in psi-intersection-vectors.json
+// and pins both the intersection membership and the association/permutation mapping
+// back to original input rows, so a fork re-roll or an engine swap that silently
+// corrupts the mapping fails here. The empty-round and empty-key cases live only
+// here; psiParticipant.test.ts, psiLink.test.ts, and psiLinkForLinkageKeys.test.ts
+// exercise the rest from the API side. This is the CORRECTNESS anchor -- the
+// byte-for-byte anchor lives in psiEngineWireVectors.test.ts. Regenerate the fixture
+// with generate-psi-intersection-vectors.mjs.
 //
 // This gate runs against the default WASM engine only. A native-backend
 // replay is omitted: the projection is data-defined, so any correct engine

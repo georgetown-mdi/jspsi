@@ -7,17 +7,12 @@ import { selectedBackend, selectedNativeProfile } from "../sftpServer";
 import { remotePath, sftpServer } from "../sftpServer/testContext";
 
 // Profile-specific coverage for the native sshd `allowlist` profile, which
-// narrows AllowUsers to an explicit user@host matrix. It runs only on that
-// profile (a true skip elsewhere, like the in-process-only tags in the
-// conformance files) and asserts the credential-separation property: a
-// connection presenting a VALID authorized key but a username other than the
-// one served user is rejected, so possessing an authorized key does not by
-// itself let a client authenticate as an arbitrary principal. This closes the
-// parent item's open credential-separation question while preserving the
-// two-user-shared-directory behavior -- the two legitimate parties still
-// authenticate as the one allowed OS user. (The rejection is overdetermined:
-// AllowUsers does not list the name AND the name is not a real OS account; the
-// assertion is the security property, not which sshd stage enforces it.)
+// narrows AllowUsers to an explicit user@host matrix; runs only on that
+// profile. Asserts the credential-separation property: a connection
+// presenting a valid authorized key under a username other than the served
+// user is rejected, so possessing an authorized key does not by itself let a
+// client authenticate as an arbitrary principal, regardless of which sshd
+// stage enforces it.
 const allowlistOnly = test.skipIf(
   !(selectedBackend() === "native" && selectedNativeProfile() === "allowlist"),
 );
@@ -44,7 +39,7 @@ allowlistOnly(
       verbose: -1,
       pollingFrequency: 10,
     });
-    // A failed connect surfaces from open()'s rejection; swallow any connection
+    // A failed connect shows up as open()'s rejection; swallow any connection
     // 'error' event so it does not crash the worker as an unhandled emit.
     conn.on("error", () => {});
 
@@ -108,14 +103,11 @@ restrictedCryptoOnly(
   "rejects a client offering only a key exchange the policy excludes",
   async () => {
     // The restricted-crypto profile pins KexAlgorithms to curve25519 only. A
-    // client offering ONLY ecdh-sha2-nistp256 shares no kex with the server, so
-    // the handshake must fail. ecdh-sha2-nistp256 is deliberate: it is a kex
-    // OpenSSH advertises BY DEFAULT but this profile excludes, so the rejection
-    // is attributable to the profile's restriction -- if the KexAlgorithms line
-    // were dropped, the server's default set would include ecdh-sha2-nistp256,
-    // the handshake would succeed, and this test would fail red. (A legacy kex
-    // like diffie-hellman-group14-sha1 would not catch that regression, since a
-    // modern OpenSSH default already excludes it.)
+    // client offering only ecdh-sha2-nistp256 shares no kex with the server, so
+    // the handshake must fail. ecdh-sha2-nistp256 is chosen by design: it is a
+    // kex OpenSSH advertises by default but this profile excludes, so the
+    // rejection is attributable to the profile's restriction rather than to an
+    // unsupported algorithm.
     //
     // A raw client (not the adapter) so the forced handshake failure is exercised
     // directly; the connection reset its teardown emits is routed off the console

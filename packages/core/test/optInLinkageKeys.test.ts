@@ -94,7 +94,7 @@ describe("optInLinkageKeys", () => {
     ).toEqual(offered);
   });
 
-  test("offers a type only once, however many columns carry it", () => {
+  test("offers a type only once, however many columns hold it", () => {
     expect(
       optInLinkageKeys([
         ...BACKBONE,
@@ -160,7 +160,7 @@ describe("optInLinkageKeys", () => {
         expect(declared.has(element.field)).toBe(true);
   });
 
-  test("each offered key carries its own type once, over built-in fields", () => {
+  test("each offered key holds its own type once, over built-in fields", () => {
     const fieldByName = new Map(
       authoredLinkageFields(EVERY_TYPE).map((field) => [
         field.name,
@@ -185,7 +185,7 @@ describe("optInLinkageKeys", () => {
     }
   });
 
-  test("no element carries a transform the standardization has not already run", () => {
+  test("no element holds a transform the standardization has not already run", () => {
     // The offered shapes are the standardized fields themselves -- a five-digit
     // ZIP, a ten-digit phone -- so an element transform here would be a rule of
     // its own rather than the shape the evidence measured.

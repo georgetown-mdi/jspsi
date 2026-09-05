@@ -8,24 +8,16 @@ import { stopChild } from "../stopChild";
 import type { Readable } from "node:stream";
 
 /**
- * Starts the repository's vendored PeerJS broker as a child PROCESS, so the
+ * Starts the repository's vendored PeerJS broker as a child process, so the
  * CLI's hand-written signaling client can be driven against the real wire
- * instead of a stand-in.
+ * instead of a stand-in. A deployed broker is a service of its own, and
+ * this exercises the same wiring a provisioned broker runs -- which is also
+ * why .github/workflows/cli_build_and_test.yaml filters on that workspace:
+ * a change there must re-run this suite.
  *
- * Why a process and not an import: a deployed broker is a service of its own,
- * and the CLI's WebRTC transport hand-writes a broker client
- * (src/connection/webrtc/brokerClient.ts) against what that service does on the
- * wire. Spawning `@psilink/peerjs-broker`'s standalone entry point exercises the
- * same wiring a provisioned broker runs, rather than a subset assembled in this
- * process. It is also why .github/workflows/cli_build_and_test.yaml filters on
- * that workspace: a change there must re-run this suite.
- *
- * Why `tsx` and not plain `node`: the vendored broker uses TypeScript parameter
- * properties, which Node 26's strip-only type support refuses outright
- * (`ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX`), so it needs a transforming loader.
- * `tsx` is already an apps/cli devDependency and is resolved through the module
- * resolver rather than a guessed `node_modules/.bin` path, so a hoisting change
- * cannot silently break the spawn.
+ * Runs through `tsx`, not plain `node`: the vendored broker uses TypeScript
+ * parameter properties, which Node 26's strip-only type support refuses
+ * outright, so it needs a transforming loader.
  */
 
 /** What the runner prints once it is listening, and the whole of what its stdout
@@ -40,15 +32,16 @@ const START_TIMEOUT_MS = 30_000;
 const STDOUT_EXCERPT_MAX_LENGTH = 512;
 
 /**
- * Whether everything the child has written to stdout so far is still the ready
- * line -- complete, or a leading part of it that a chunk boundary split.
+ * Whether everything the child has written to stdout so far is still the
+ * ready line -- complete, or a leading part of it that a chunk boundary
+ * split.
  *
- * The runner's stdout carries one thing, the port this harness reads off it with
- * a single match, and its diagnostics belong on stderr: one that reached the
- * wrong stream would break that read and put peer-controlled text on a stream a
- * parent parses. The check lives beside this harness rather than in the web unit
- * suite because vitest intercepts `console` above the streams, which would leave
- * an assertion there vacuous; a spawned process writes real file descriptors.
+ * The runner's stdout holds one thing, the port this harness reads off it
+ * with a single match; diagnostics belong on stderr, since one that reached
+ * the wrong stream would put peer-controlled text on a stream a parent
+ * parses. Checked here rather than in the web unit suite because vitest
+ * intercepts `console` above the streams, which would leave an assertion
+ * there vacuous.
  */
 function stdoutIsWithinProtocol(stdout: string): boolean {
   if (READY_LINE.test(stdout)) return true;
@@ -157,9 +150,9 @@ export function startBrokerProcess(): Promise<BrokerProcess> {
       settle(() => {
         stopChild(child);
         // The child's stderr is the only diagnosis a failed start leaves. It can
-        // carry peer-derived text (a parse failure quotes the peer's opening
+        // hold peer-derived text (a parse failure quotes the peer's opening
         // bytes), but the diagnostics sink escapes it at a 256-character cap and
-        // rate-limits it before it reaches stderr, so surfacing it verbatim here
+        // rate-limits it before it reaches stderr, so showing it verbatim here
         // is still safe.
         reject(
           new Error(
@@ -188,7 +181,7 @@ export function startBrokerProcess(): Promise<BrokerProcess> {
       if (!stdoutIsWithinProtocol(stdout)) {
         offProtocolStdout ??= stdout;
         // Before the ready line this fails the start, which is the only way to
-        // surface it; after it, `stop()` carries the same verdict to the suite.
+        // report it; after it, `stop()` delivers the same verdict to the suite.
         fail(offProtocolStdoutReason(stdout));
         return;
       }

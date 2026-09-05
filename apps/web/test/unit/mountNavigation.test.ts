@@ -18,7 +18,7 @@ describe("mount navigation", () => {
     expect(fileSubPath([], "partner-password")).toEqual(["partner-password"]);
   });
 
-  test("breadcrumbTrail carries the cumulative subPath for each crumb", () => {
+  test("breadcrumbTrail holds the cumulative subPath for each crumb", () => {
     expect(breadcrumbTrail("secrets", ["a", "b"])).toEqual([
       { label: "secrets", subPath: [] },
       { label: "a", subPath: ["a"] },

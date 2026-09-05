@@ -19,20 +19,12 @@ import {
   writeFileOwnerOnly,
 } from "../../src/fileUtils";
 
-// The extended-ACL strip shells out to `/bin/chmod`, so which filesystem entry
-// a writer aims its strip at lives in the command line and nowhere else. This
-// records every `execFileSync` argument vector; while `stubbed` is set it also
-// answers the call instead of running it, so the symlink-posture assertions
-// hold on a host whose `chmod` rejects the macOS flags. With `failure` set it
-// throws that value instead of running the strip, which is how a test puts a
-// specific failure -- captured from the runtime, never hand-built -- in front of
-// the writers on a host that cannot produce it. That throw is scoped to the
-// strip's own command line, so a test arming it still gets real answers from
-// every other command this file runs (`whoami`, `icacls`, `ls -le`, and the
-// captures themselves). Unstubbed and unarmed -- every other test in this file
-// -- it runs the real command, so nothing else changes. A `vi.spyOn` cannot do
-// this: a builtin module's ESM namespace is not configurable, which is why the
-// module is mocked rather than patched.
+// Captures every execFileSync argument vector the extended-ACL strip
+// (`/bin/chmod`) makes. `stubbed` answers without running it, for a host
+// whose `chmod` rejects the macOS flags. `failure` throws that value only for
+// the strip's own command line, so other commands (`whoami`, `icacls`,
+// `ls -le`) still get real answers. Mocked rather than spied: a builtin
+// module's ESM namespace is not configurable.
 const execFile = vi.hoisted(() => ({
   commands: [] as string[][],
   stubbed: false,
@@ -95,13 +87,11 @@ function plantSymlinkInCreateWindow(tmp: string, target: string): void {
     .mockImplementation((p) => realUnlink(p));
 }
 
-// Spy on openSync/fsyncSync and both commit steps (rename and link), recording
-// the order of the durability fsyncs relative to the commit. Each fsync is
-// mapped back to the path its fd was opened on: the path is stored when the fd
-// is opened and looked up at fsync time, so a reused fd number -- the temp fd is
-// closed before the directory is opened, so the OS may hand the directory the
-// same number -- still resolves to its real target (the second open overwrites
-// the map entry). Returns the event log the caller asserts on; spies are
+// Spies on openSync/fsyncSync and the two commit steps (rename, link),
+// recording the order of the durability fsyncs relative to the commit. Each
+// fsync is mapped back to the path its fd was opened on, looked up at fsync
+// time, so a fd number reused for the directory (the temp fd closes first)
+// still resolves to its own target. Returns the event log; spies are
 // restored in afterEach.
 function recordDurabilitySyncs(): string[] {
   const fdPaths = new Map<number, string>();
@@ -407,8 +397,8 @@ describe("createOwnerOnlyWriteStream", () => {
     async () => {
       const p = path.join(dir, "stale.csv");
       fs.writeFileSync(p, "stale,data\n");
-      // writeFileSync's mode is umask-masked; force 0644 so the test starts from a
-      // genuinely over-permissive file the writer must tighten.
+      // writeFileSync's mode is umask-masked; force 0644 so the test starts from an
+      // over-permissive file the writer must tighten.
       fs.chmodSync(p, 0o644);
       expect(fs.statSync(p).mode & 0o777).toBe(0o644);
 
@@ -475,7 +465,7 @@ describe("createOwnerOnlyWriteStream", () => {
 
 // The extended-ACL entries `ls -le` prints under a file's mode line, each
 // numbered ("0: group:everyone allow read"). An empty array means the file
-// carries no extended ACL at all, which is what the writers must produce.
+// has no extended ACL at all, which is what the writers must produce.
 function readExtendedAcl(filePath: string): string[] {
   const output = childProcess.execFileSync("/bin/ls", ["-le", filePath], {
     encoding: "utf8",
@@ -560,7 +550,7 @@ describe.skipIf(process.platform !== "darwin")("macOS extended ACL", () => {
 
   test("the streaming writer clears the ACE on a symlinked destination's target", async () => {
     // An operator-supplied output path may be a symlink, and the stream follows
-    // it deliberately (no O_NOFOLLOW, fchmod on the descriptor), so the rows
+    // it by design (no O_NOFOLLOW, fchmod on the descriptor), so the rows
     // land in the link's target and the ACE that has to go is the target's --
     // the strip acting on the link node instead would report success while the
     // real file stayed readable by the inherited principal.
@@ -603,14 +593,12 @@ function withPlatform<T>(platform: string, body: () => T): T {
   }
 }
 
-// These tests reach the darwin branch on another POSIX host, where the strip
-// command cannot succeed: GNU `chmod` rejects `-N`, and a host without
-// `/bin/chmod` fails to spawn it. Either way the writer sees a failed strip,
-// which is exactly the fail-closed contract under test -- the darwin tests
-// above cover the succeeding strip. Skipped on a real darwin host, where the
-// strip would succeed and there would be no failure to observe, and on Windows,
-// whose writers take the icacls branch and whose `fs.constants` carries no
-// `O_NOFOLLOW` for the POSIX branch the stub would otherwise force them into.
+// This flag is true only where the darwin strip branch can be exercised as a
+// failure: GNU `chmod` rejects `-N`, or a host without `/bin/chmod` fails to
+// spawn it -- either way a failed strip, the fail-closed contract under test.
+// Skipped on a real darwin host (the strip would succeed) and on Windows
+// (writers take the icacls branch; `fs.constants` has no `O_NOFOLLOW` for the
+// POSIX branch the stub would otherwise force them into).
 const stripFailsHere =
   process.platform !== "darwin" && process.platform !== "win32";
 
@@ -620,13 +608,13 @@ const stripFailureOnly = test.skipIf(!stripFailsHere);
 // how its `chmod` fails: GNU `chmod` runs and exits nonzero on `-N`, which is
 // the ACL-remedy message, while a host with no `/bin/chmod` fails the spawn and
 // gets the could-not-run one. The tests below are about what each writer leaves
-// on disk, not about which refusal it carries -- that split is pinned, against
+// on disk, not about which refusal it throws -- that split is pinned, against
 // failures captured from the runtime, in the reporting suite further down.
 const STRIP_REFUSAL =
   /Could not (clear extended ACLs|run the extended-ACL strip) on /;
 
 // Run `body` and hand back whatever it threw. `expect(...).toThrow` matches only
-// the message, so a test that asserts on the `cause` a refusal carries needs the
+// the message, so a test that asserts on the `cause` a refusal holds needs the
 // thrown value itself.
 function catchThrown(body: () => unknown): unknown {
   try {
@@ -767,13 +755,10 @@ describe("extended-ACL strip failure", () => {
   test.skipIf(process.platform === "win32")(
     "createOwnerOnlyWriteStream leaves a destination it created empty and owner-only",
     () => {
-      // The other half of the case above: the open creates the destination before
-      // the strip runs, so a refusal cannot leave it untouched -- it leaves it
-      // there. The writer does not delete a path the operator named, mirroring the
-      // Windows branch's placeholder, and the mode is already secured, so what
-      // stays behind is an empty owner-only file rather than a readable one.
-      // Driven from a captured failure rather than the host's own `chmod` so the
-      // shape is pinned on macOS too, where a real strip would succeed.
+      // The open creates the destination before the strip runs, so a refusal
+      // leaves it in place rather than deleting it -- an empty, already owner-only
+      // file, mirroring the Windows placeholder. Driven from a captured failure so
+      // the shape is testable on macOS too, where a real strip would succeed.
       const p = path.join(dir, "new-result.csv");
       failAclStripWith(capturedChmodRefusal());
       withPlatform("darwin", () => {
@@ -809,16 +794,14 @@ describe("extended-ACL strip failure", () => {
 
 // --- extended-ACL strip: failure reporting -----------------------------------
 
-// A refusal has to say which of two things went wrong, because only one of them
-// has the operator holding the remedy: a `chmod` that was spawned may have
-// started clearing the ACL, which is what `ls -le` and `chmod -N` address, while
-// a strip that never ran -- no `/bin/chmod`, an exec the OS refused, a working
-// directory removed underfoot -- would send them after an ACL that was never in
-// the way. Every failure below is captured from the runtime, so what these
-// assertions classify is the shape Node produces rather than a model of it.
+// A refusal must say which of two things went wrong: a spawned `chmod` that
+// may have started clearing the ACL (the case `ls -le` and `chmod -N`
+// address), or a strip that never ran at all -- no `/bin/chmod`, a refused
+// exec, a removed working directory -- where that remedy does not apply.
+// Every failure below is captured from the runtime, not modeled.
 describe("extended-ACL strip failure reporting", () => {
   test.skipIf(process.platform === "win32")(
-    "a chmod that ran and refused keeps the ACL remedy and carries its cause",
+    "a chmod that ran and refused keeps the ACL remedy and holds its cause",
     () => {
       const refused = capturedChmodRefusal();
       // The discriminant: a child that ran to completion reports its exit status.
@@ -884,14 +867,12 @@ describe("extended-ACL strip failure reporting", () => {
   test.skipIf(process.platform === "win32")(
     "both timeout shapes keep the ACL remedy and leave the write refused",
     () => {
-      // The 5 s timeout kills a child that was spawned: `chmod -N` may already
-      // have altered an existing destination's ACL when the kill lands, so this is
-      // the case where the operator most wants `ls -le` and `chmod -N`. Node
-      // reports that kill in two shapes and the refusal has to read both as a
-      // `chmod` that ran: a child that dies on the signal carries the termination
-      // signal and no exit status, while one that ignores `SIGTERM` outlives the
-      // kill and carries the status it exits with -- `0` among them -- and no
-      // signal. A strip that never ran is what carries neither field.
+      // The 5 s timeout kills a spawned child; `chmod -N` may already have altered
+      // an existing destination's ACL, so this is the case the operator most wants
+      // `ls -le` and `chmod -N` for. Node reports the kill in two shapes, both read
+      // as a `chmod` that ran: one dies on the signal (a termination signal, no
+      // exit status); one ignores `SIGTERM` and exits normally (a status, even `0`,
+      // and no signal). A strip that never ran has neither field.
       const shapes = {
         "died on the signal": {
           binary: "/bin/sleep",
@@ -961,13 +942,12 @@ describe("extended-ACL strip failure reporting", () => {
   test.skipIf(process.platform === "win32")(
     "a working directory removed underfoot refuses rather than raising a bare errno",
     () => {
-      // Building the operand is itself a step that can fail: `process.cwd()`
-      // throws once the working directory is gone. Node caches that value and only
-      // reaches the OS again after a `chdir` invalidates the cache, so the removal
-      // has to land after the chdir and before the strip -- which is where the
-      // stream writer's fchmod sits. The `uv_cwd` assertion is what proves the
-      // window was hit: had the cache still been warm, the strip would have run
-      // and the cause would be a `chmod` failure instead.
+      // `process.cwd()` throws once the working directory is gone, but only after
+      // a `chdir` invalidates Node's cached value -- so the removal has to land
+      // after the chdir and before the strip, where the stream writer's fchmod
+      // sits. The `uv_cwd` assertion proves that window was hit; a still-warm cache
+      // would have let the strip run and the cause would be a `chmod` failure
+      // instead.
       const gone = path.join(dir, "gone");
       fs.mkdirSync(gone);
       const realFchmod = fs.fchmodSync.bind(fs);
@@ -1001,7 +981,7 @@ describe("extended-ACL strip failure reporting", () => {
   test.skipIf(process.platform === "win32")(
     "the rendered refusal shows the failed command line, temp path included",
     () => {
-      // What the operator actually reads: the refusal, then the failure it carries
+      // What the operator actually reads: the refusal, then the failure it holds
       // as its `cause` rendered as the display sink's own chain link. That second
       // line is `execFileSync`'s command line, so it discloses the temp path the
       // writer strips -- the destination plus this process's pid -- which is the
@@ -1179,8 +1159,8 @@ describe("extended-ACL strip symlink posture", () => {
       // `out/link` is a symlink to a sibling directory, so `out/link/../x` names
       // dir/x to the kernel and dir/out/x to any lexical collapse of the `..`.
       // Each writer's own open takes the kernel's answer, so its strip has to aim
-      // at the same file: the operand carries the `link/..` segment through
-      // verbatim rather than being normalized or realpath'd on the way to chmod.
+      // at the same file: the operand holds the `link/..` segment verbatim rather
+      // than being normalized or realpath'd on the way to chmod.
       const commands = recordAclStripCommands();
       fs.mkdirSync(path.join(dir, "out"));
       fs.mkdirSync(path.join(dir, "elsewhere"));
@@ -1221,7 +1201,7 @@ describe("extended-ACL strip symlink posture", () => {
 // --- Windows owner-only ACL --------------------------------------------------
 
 // The current user's domain-qualified name (DOMAIN\user), the principal the
-// writers grant Modify and the only non-inherited ACE a narrowed file may carry.
+// writers grant Modify and the only non-inherited ACE a narrowed file may have.
 function currentWindowsUser(): string {
   return childProcess.execFileSync("whoami", [], { encoding: "utf8" }).trim();
 }
@@ -1288,7 +1268,7 @@ describe.skipIf(process.platform !== "win32")("Windows owner-only ACL", () => {
     const owner = currentWindowsUser();
     const p = path.join(dir, "result.csv");
 
-    // Seed a pre-existing file carrying a foreign principal's explicit
+    // Seed a pre-existing file holding a foreign principal's explicit
     // (non-inherited) grant, the ACE an in-place narrow would miss.
     fs.writeFileSync(p, "stale\n");
     childProcess.execFileSync("icacls", [p, "/grant", "Guests:(R)"], {

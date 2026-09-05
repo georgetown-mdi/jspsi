@@ -16,14 +16,11 @@ import {
 import { saveKeyFile } from "../../../src/keyFile";
 
 // A clean authenticated exchange completes for both parties; then one party's
-// result-CSV write fails (its output path has a missing parent directory) AFTER
-// runExchange has returned. runProtocol seals the cross-party abort decision the
-// moment the exchange completes, before that purely-local output stage, so the
-// failing party writes NO abort marker -- a local, post-exchange I/O fault must
-// not tell the peer (whose exchange succeeded) to fail fast. Without the seal the
-// failing party's catch would still be armed and would drop an <id>-abort.json
-// into the shared directory, at worst converting the peer's success into a
-// PeerAbortError while its results sit readable on disk.
+// result-CSV write fails (missing parent directory) AFTER runExchange has
+// returned. runProtocol seals the cross-party abort decision the moment the
+// exchange completes, before that local output stage, so the failing party
+// writes NO abort marker: a local, post-exchange I/O fault must not tell the
+// peer (whose exchange succeeded) to fail fast.
 //
 // This is the complement of ../abortMarkerExchange.test.ts: there a genuine
 // mid-exchange transport fault DOES write a marker (the peer is still waiting on
@@ -90,11 +87,10 @@ test("a result-write failure after a completed exchange writes no abort marker",
 
   // Party A's output path has a missing parent directory, so its writeOutput
   // throws ENOENT after the exchange completes; Party B's path is valid. Party
-  // A's token rotated before that local failure, so runProtocol emits a recovery
-  // advisory at ERROR; run both parties under withCapturedLogs so that intended
-  // line is captured for assertion below rather than leaked to the suite
-  // console (the per-party loggers are created by name inside this wrapped call,
-  // so they bind to the capture's interceptor).
+  // A's token rotated before that local failure, so runProtocol emits a
+  // recovery advisory at ERROR; run both parties under withCapturedLogs so
+  // that intended line is captured below rather than leaked to the suite
+  // console.
   const [settled, capturedLogs] = await withCapturedLogs(
     () =>
       Promise.allSettled([

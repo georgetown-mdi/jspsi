@@ -32,7 +32,7 @@ describe("SftpHeartbeat", () => {
   test("interval and TCP-keepalive constants hold their documented values", () => {
     // The interval must stay at half of Azure Blob SFTP's fixed 2-minute idle
     // timeout so a delayed beat still lands with a full interval of margin; the
-    // TCP-keepalive delay must stay below it as the transport-layer backstop.
+    // TCP-keepalive delay must stay below it as the transport-layer safety check.
     expect(SFTP_HEARTBEAT_INTERVAL_MS).toBe(60_000);
     expect(SFTP_TCP_KEEPALIVE_DELAY_MS).toBe(30_000);
     expect(SFTP_TCP_KEEPALIVE_DELAY_MS).toBeLessThan(

@@ -23,10 +23,10 @@ import { createAppMount } from "./renderApp";
 
 import type { NewManagedExchange } from "@psi/managedExchangeRecord";
 
-// What the app does with no network, against real Chromium: the shell's honest
+// What the app does with no network, against real Chromium: the shell's accurate
 // statement that it is offline, the recurring-exchange list rendering from the
-// browser's own store with nothing fetched, and the one action that genuinely
-// needs a connection saying so instead of failing opaquely when pressed.
+// browser's own store with nothing fetched, and the one action that needs a
+// connection saying so instead of failing opaquely when pressed.
 //
 // Chromium is where this belongs because the surfaces read real IndexedDB and the
 // File System Access API, and because `navigator.onLine` and its events are the

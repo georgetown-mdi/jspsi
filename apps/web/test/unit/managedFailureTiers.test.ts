@@ -32,8 +32,8 @@ import type { ManagedLocalState } from "@psi/managedLocalState";
 // The desync-versus-attack tier derivation, tested in Node: each recorded benign state
 // resolves to its own tier from the record's OWN structured bookkeeping, and only a
 // failed-closed handshake with no benign explanation reaches the unexplained tier. The
-// evidence is the record's, never a live error, so an unattended run surfaces through
-// the same tier at the next visit as an attended one.
+// evidence is the record's, never a live error, so an unattended run shows the same
+// tier at the next visit as an attended one.
 
 const NOW = Date.parse("2026-07-14T12:00:00.000Z");
 const RUN_AT = "2026-07-14T09:00:00.000Z";

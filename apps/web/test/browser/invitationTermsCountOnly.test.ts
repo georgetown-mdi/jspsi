@@ -44,7 +44,7 @@ const REFUSAL_TESTID = "count-only-render-refusal";
 /**
  * An error boundary that renders a caught render error's message, standing in for
  * the route-level catch boundary the app mounts these terms under. It is what lets
- * the count-only slot's fail-closed check be read as a message rather than as an
+ * the count-only slot's fail-closed check be treated as a message rather than as an
  * unhandled error, on the surface whose impossible-state idiom is a render throw.
  */
 class CaughtRenderError extends Component<
@@ -194,15 +194,14 @@ describe("InvitationTerms: the count-only tier a psi-c invitation renders", () =
   });
 
   test("refuses a viewer's non-empty outbound set rather than state no columns are sent over it", async () => {
-    // The slot states a precondition of the algorithm -- psi-c refuses payload in
-    // either direction when the terms are authored, at the local prepare step, and
-    // at the agreed-terms run boundary -- rather than a set this component read. A
-    // viewer's set carrying a column means none of those refusals held, and "no data
-    // columns in either direction" rendered over it would take the operator's
-    // consent to a disclosure that happens. Driven with a column in the set on each
-    // of the two viewers, so the check is measured firing rather than assumed.
+    // The slot states a precondition of the algorithm (psi-c refuses payload in
+    // either direction) rather than reading a literal set. A viewer's set containing
+    // a column means that precondition failed to hold, and "no data columns in
+    // either direction" rendered over it would falsely reassure the operator that no
+    // disclosure occurs. Driven on both viewers, so the check is measured firing,
+    // not assumed.
     //
-    // React logs a caught render error to console.error; silence it so a deliberate
+    // React logs a caught render error to console.error; silence it so an expected
     // throw does not spam the run (it is caught here, never window-unhandled).
     const consoleError = vi
       .spyOn(console, "error")
@@ -235,13 +234,11 @@ describe("InvitationTerms: the count-only tier a psi-c invitation renders", () =
 
   test("refuses terms that declare a payload column rather than state the tier's guarantee beside them", async () => {
     // The invitation is partner-controlled, and a psi-c document declaring a send or
-    // a receive is one the spec refuses (docs/spec/PROTOCOL.md, PSI-C). Rendered, it
-    // puts "A count-only exchange carries no data columns in either direction"
-    // directly beside this screen's own "You will receive 1 data column from your
-    // partner" / "Your partner requests 1 data column from you" -- a guarantee stated
-    // over the declaration contradicting it. Driven on each direction, so the check
-    // is measured firing rather than assumed; the conforming document below is the
-    // positive control.
+    // a receive is one the spec refuses. Rendered, it would put "A count-only
+    // exchange sends no data columns in either direction" directly beside "You
+    // will receive 1 data column from your partner" / "Your partner requests 1 data
+    // column from you" -- a guarantee stated over the declaration that contradicts
+    // it; the conforming document below is the positive control.
     const consoleError = vi
       .spyOn(console, "error")
       .mockImplementation(() => {});

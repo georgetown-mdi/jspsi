@@ -13,7 +13,7 @@ import {
 
 import type { ManagedExchangeRecord } from "@psi/managedExchangeRecord";
 
-// The Tier-2 out-of-band confirmation, tested in Node: the forwardable message carries
+// The Tier-2 out-of-band confirmation, tested in Node: the forwardable message includes
 // the doc's three asks and interpolates only this record's OWN local fields, and the
 // two-outcome gate routes a confirmed partner-side failure to re-invite and anything
 // else to the compromise response.
@@ -81,7 +81,7 @@ describe("composeConfirmationMessage", () => {
 });
 
 describe("composeManagedFailureConfirmation", () => {
-  test("carries the message and the two labeled gate options", () => {
+  test("has the message and the two labeled gate options", () => {
     const confirmation = composeManagedFailureConfirmation(record());
     expect(confirmation.message).toBe(composeConfirmationMessage(record()));
     expect(confirmation.confirmedOption).toMatch(/confirmed/i);

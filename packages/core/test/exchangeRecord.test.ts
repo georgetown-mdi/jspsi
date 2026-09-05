@@ -327,7 +327,7 @@ describe("result size", () => {
 // --- Records exposed (this party's own input row count) ----------------------
 
 describe("records exposed", () => {
-  test("carries this party's own input row count", async () => {
+  test("holds this party's own input row count", async () => {
     const { record } = await buildExchangeRecord(
       { ...baseInputs, recordsExposed: 7 },
       fixedRandomness,
@@ -387,7 +387,7 @@ describe("retention/disposition pointer", () => {
   const note =
     "Result filed in Agency A association table links.prod; held 6 years.";
 
-  test("is carried verbatim into the record when supplied", async () => {
+  test("is included verbatim in the record when supplied", async () => {
     const { record } = await buildExchangeRecord(
       { ...baseInputs, retentionDisposition: note },
       fixedRandomness,
@@ -499,7 +499,7 @@ describe("association-table commitment", () => {
 // --- Governance metadata -----------------------------------------------------
 
 describe("governance metadata", () => {
-  test("is populated from terms that carry a legal agreement", async () => {
+  test("is populated from terms that hold a legal agreement", async () => {
     const { record } = await buildExchangeRecord(
       { ...baseInputs, localTerms: termsWithGovernance },
       fixedRandomness,
@@ -805,7 +805,7 @@ describe("binding nonce", () => {
 describe("receipt binder", () => {
   const BINDER = toBase64Url(salt(9));
 
-  test("is carried verbatim when the run produced a receipt", async () => {
+  test("is held verbatim when the run produced a receipt", async () => {
     const { record } = await buildExchangeRecord(
       { ...baseInputs, receiptBinder: BINDER },
       fixedRandomness,
@@ -918,7 +918,7 @@ describe("serialize / parse", () => {
     expect(parsed.version).toBe(EXCHANGE_RECORD_VERSION);
   });
 
-  test("a record carrying a legal-agreement purpose round-trips intact", async () => {
+  test("a record holding a legal-agreement purpose round-trips intact", async () => {
     // baseInputs.localTerms (termsA) has no legalAgreement, so the round-trip
     // above never exercises the parser against a record with a purpose. Build
     // from the governance-bearing terms so parseExchangeRecord validates the
@@ -946,7 +946,7 @@ describe("serialize / parse", () => {
     expect(parsed.version).toBe(EXCHANGE_KEYS_VERSION);
   });
 
-  test("the verification keys carry only salts -- no committed data snapshot", async () => {
+  test("the verification keys hold only salts -- no committed data snapshot", async () => {
     // The core privacy property of this format: the keys hold per-commitment
     // salts and nothing else, so the matched data is never persisted here. Guard
     // it both structurally (only a version and a salts map) and by asserting no
@@ -1009,7 +1009,7 @@ describe("serialize / parse", () => {
     expect(completed.record.outcome).toBe("completed");
   });
 
-  test("buildExchangeRecord refuses an outcome the format does not carry", async () => {
+  test("buildExchangeRecord refuses an outcome the format does not hold", async () => {
     await expect(
       buildExchangeRecord(
         {
@@ -1052,7 +1052,7 @@ describe("serialize / parse", () => {
     expect(() => parseExchangeRecord(v3)).toThrow();
   });
 
-  test("a record carries the agreed terms' rule-set citation, and omits it when the terms cite none", async () => {
+  test("a record holds the agreed terms' rule-set citation, and omits it when the terms cite none", async () => {
     const cited = await buildExchangeRecord(
       {
         ...baseInputs,

@@ -49,7 +49,7 @@ function sheet(endpoint: AcceptKitEndpoint, version = "1.4.2"): string {
   });
 }
 
-/** The sheet for an exchange the inviter turned retain mode on for, carrying
+/** The sheet for an exchange the inviter turned retain mode on for, holding
  * the lockless rendezvous retain mode implies -- what the mint resolves. */
 function retainSheet(endpoint: AcceptKitEndpoint, version = "1.4.2"): string {
   return buildAcceptKit({
@@ -102,7 +102,7 @@ function plainExchangeCommand(endpoint: AcceptKitEndpoint): string {
         "results.csv";
 }
 
-/** The lines `variant` carries that `base` does not: one setting's whole
+/** The lines `variant` has that `base` does not: one setting's whole
  * contribution to the sheet, blank lines excluded because both sheets have
  * them. */
 function addedLines(base: string, variant: string): Array<string> {
@@ -122,7 +122,7 @@ describe("accept kit, per-channel shape", () => {
   });
 
   test("the folder cross-check is a check, not a claim that the names match", () => {
-    // The same folder can carry a different name on each side -- a share root
+    // The same folder can have a different name on each side -- a share root
     // mapped to a drive letter is the ordinary case -- so the sheet must not tell
     // the partner their own name for it will be this one.
     const text = sheet(FILEDROP);
@@ -144,7 +144,7 @@ describe("accept kit, per-channel shape", () => {
   });
 
   test("the folder step names no partner name where the sheet has none", () => {
-    // The token always carries a locator, so accepting writes SOMETHING; on this
+    // The token always has a locator, so accepting writes SOMETHING; on this
     // branch it is the console's own mount point. The step that replaces it must
     // not tell the partner it is their partner's name for the folder.
     const text = sheet({ channel: "filedrop" });
@@ -272,8 +272,8 @@ describe("accept kit, the account the container runs as", () => {
   test("the identity is scoped to the accept command, not the exchange run", () => {
     // The exchange steps take the label from the psilink.yaml the accept step
     // wrote, so an instruction to add the flag to every command on the sheet
-    // would send the reader to type one where it is not needed -- and read as a
-    // refusal the exchange run does not make.
+    // would send the reader to type one where it is not needed -- and be treated
+    // as a refusal the exchange run does not make.
     for (const endpoint of [FILEDROP, SFTP]) {
       const section = sheet(endpoint)
         .split("THE NAME YOUR PARTNER SEES")[1]
@@ -285,7 +285,7 @@ describe("accept kit, the account the container runs as", () => {
     }
   });
 
-  test("no copy-pasteable command carries a pre-filled identity", () => {
+  test("no copy-pasteable command has a pre-filled identity", () => {
     // An unreplaced placeholder inside a command the reader pastes whole would
     // ship as this party's name. The flag travels as its own line instead, and
     // the value is shouted so an unreplaced one is unmistakable on both sides.
@@ -295,7 +295,7 @@ describe("accept kit, the account the container runs as", () => {
   });
 
   test("the flag's scope names the second folder each channel mounts", () => {
-    // Every command carries two mounts, and the chown fallback reaches only
+    // Every command has two mounts, and the chown fallback reaches only
     // the first: the flag is what covers the shared folder (/sync) and the
     // credential folder (/run/secrets) as well as the CSV folder (/work).
     const scope = (endpoint: AcceptKitEndpoint): string =>
@@ -364,7 +364,7 @@ describe("accept kit, sftp configuration section", () => {
       `docker run --rm -it -v "$PWD":/work docker.io/vdorie/psi-link:1.4.2 ` +
         `accept ${INVITATION_PLACEHOLDER} your-file.csv`,
     );
-    // The exchange command carries the read-only secrets mount, and the
+    // The exchange command has the read-only secrets mount, and the
     // credential fill-in section precedes it: the sheet is read top to bottom.
     expect(text).toContain(
       'docker run --rm -it -v "$PWD":/work -v "/your/secrets":/run/secrets:ro ' +
@@ -402,10 +402,10 @@ describe("accept kit, release version", () => {
     return text.match(/docker\.io\/vdorie\/psi-link\S*/g) ?? [];
   }
 
-  test("a build carrying a version names it in every image reference", () => {
+  test("a build with a version names it in every image reference", () => {
     for (const endpoint of [FILEDROP, SFTP]) {
       const text = sheet(endpoint, "0.9.1");
-      // Every reference carries the version; none is left bare or floating.
+      // Every reference has the version; none is left bare or floating.
       const references = imageReferences(text);
       expect(references.length).toBeGreaterThan(0);
       for (const reference of references)
@@ -413,7 +413,7 @@ describe("accept kit, release version", () => {
     }
   });
 
-  test("a build carrying no version names the floating tag", () => {
+  test("a build with no version names the floating tag", () => {
     for (const endpoint of [FILEDROP, SFTP]) {
       const references = imageReferences(
         buildAcceptKit({
@@ -452,7 +452,7 @@ describe("accept kit, release version", () => {
 
   test("the release link follows the same value the tag does", () => {
     // The launcher branch sends the partner to a release page: this build's own
-    // release when it carries a version, so the launchers they download match
+    // release when it has a version, so the launchers they download match
     // the image the sheet names, and the index otherwise.
     expect(sheet(FILEDROP, "0.9.1")).toContain(`${RELEASES_URL}/tag/v0.9.1\n`);
     const unversioned = buildAcceptKit({
@@ -467,7 +467,7 @@ describe("accept kit, release version", () => {
 });
 
 describe("accept kit, printable-ASCII enforcement", () => {
-  test("a locator carrying control and non-ASCII bytes renders as printable ASCII", () => {
+  test("a locator with control and non-ASCII bytes renders as printable ASCII", () => {
     // The invariant is enforced at the interpolation point, not assumed of
     // the console's inputs: the only free-text fields the sheet interpolates
     // are the operator-authored host and path.
@@ -479,7 +479,7 @@ describe("accept kit, printable-ASCII enforcement", () => {
     expect(text).toContain("SFTP server:    h?llo?example.gov");
     expect(text).toContain("Directory:      /drops?/psi?link");
     // The build's version is the other representable input; it is interpolated
-    // only in the release shape, so a value carrying non-ASCII bytes reaches
+    // only in the release shape, so a value with non-ASCII bytes reaches
     // neither the image reference nor the release link, and the sheet it
     // produces is printable ASCII like any other.
     const hostileVersion = sheet(
@@ -543,7 +543,7 @@ describe("accept kit, a split filedrop rendezvous", () => {
     expect(text).toContain('-v "/path/to/the/folder/you/read":/sync-in');
     expect(text).toContain('-v "/path/to/the/folder/you/write":/sync-out');
     // The PowerShell launchers provision one rendezvous folder, so route A is
-    // honest about not serving this exchange rather than sending the reader to a
+    // accurate about not serving this exchange rather than sending the reader to a
     // console that cannot run it.
     expect(text).toContain("cover a single shared");
     expect(text).toContain("cannot start this one");
@@ -584,7 +584,7 @@ describe("accept kit, retain mode", () => {
   const RETAIN_HEADING = "THIS EXCHANGE KEEPS ITS FILES";
   const RETAIN_FLAG = "--retain-files";
 
-  /** The lines the retain-on sheet carries that the retain-off sheet does
+  /** The lines the retain-on sheet has that the retain-off sheet does
    * not: the whole retain contribution. */
   function retainDelta(
     endpoint: AcceptKitEndpoint,
@@ -649,7 +649,7 @@ describe("accept kit, retain mode", () => {
       expect(text).toContain("that an exchange");
       expect(text).toContain("the name each side ran under");
       expect(text).toContain("the settings each side\nannounced");
-      // And the reassurance that bounds it, so the disclosure is not read as
+      // And the reassurance that bounds it, so the disclosure is not treated as
       // the input file being left behind.
       expect(text).toContain("Nothing there is your CSV file");
     }
@@ -663,7 +663,7 @@ describe("accept kit, retain mode", () => {
     }
   });
 
-  test("carries the flag on the exchange command, never on accept", () => {
+  test("has the flag on the exchange command, never on accept", () => {
     for (const endpoint of ENDPOINTS) {
       const text = retainSheet(endpoint);
       // One flag, not three: the CLI resolves what retain mode implies, so the
@@ -739,7 +739,7 @@ describe("accept kit, retain mode", () => {
       lines.filter((line) => !line.includes("docker.io/vdorie/psi-link"));
     expect(withoutImage(other)).toEqual(withoutImage(benign));
     expect(benign.filter((line) => line.includes("1.4.2"))).toHaveLength(1);
-    // And nothing the delta adds carries either dynamic value.
+    // And nothing the delta adds has either dynamic value.
     for (const line of withoutImage(benign)) {
       expect(line).not.toContain("sftp.example.gov");
       expect(line).not.toContain("/drops/psilink");
@@ -759,7 +759,7 @@ describe("accept kit, retain mode", () => {
 describe("accept kit, lockless rendezvous", () => {
   const LOCKLESS_FLAG = "--lockless-rendezvous";
 
-  /** The lines the lockless sheet carries that the default sheet does not:
+  /** The lines the lockless sheet has that the default sheet does not:
    * the whole contribution of the setting. */
   function locklessDelta(
     endpoint: AcceptKitEndpoint,
@@ -771,7 +771,7 @@ describe("accept kit, lockless rendezvous", () => {
     );
   }
 
-  test("carries the flag on the exchange command, never on accept", () => {
+  test("has the flag on the exchange command, never on accept", () => {
     for (const endpoint of ENDPOINTS) {
       const text = locklessSheet(endpoint);
       expect(text).toContain(`exchange ${LOCKLESS_FLAG} your-file.csv`);
@@ -805,7 +805,7 @@ describe("accept kit, lockless rendezvous", () => {
     expect(locklessSheet(SFTP)).not.toContain("Lockless rendezvous");
   });
 
-  test("retain mode carries it, so the flag never doubles up", () => {
+  test("retain mode includes it, so the flag never doubles up", () => {
     // Retain mode implies the lockless rendezvous and the CLI resolves that
     // implication: the sheet states the one operator-visible flag, and a retain
     // sheet is byte-identical however the rendezvous setting resolved.
@@ -891,9 +891,9 @@ describe("accept kit invariants", () => {
   const CSV =
     "ssn,ssn4,first_name,last_name,dob\n123456789,6789,Alice,Smith,1990-01-02\n";
 
-  test("carries the paste placeholder and no invitation token or secret", async () => {
+  test("has the paste placeholder and no invitation token or secret", async () => {
     // Mint through the real invitation flow, then build the kit from the same
-    // locator that mint carried, exactly as the bench does.
+    // locator that mint held, exactly as the console does.
     const endpoint = { channel: "filedrop" as const, path: "psilink" };
     const minted = await generateInvitation({
       inviterName: "County Health Dept",
@@ -916,7 +916,7 @@ describe("accept kit invariants", () => {
     expect(text).not.toContain("County Health Dept");
   });
 
-  test("carries the shared folder's name, never the appliance path behind it", () => {
+  test("has the shared folder's name, never the console path behind it", () => {
     // The name the console minted into the token, standing for the mount
     // /data/exchanges/agency-a-agency-b behind it.
     const text = sheet({ channel: "filedrop", path: "agency-a-agency-b" });
@@ -925,7 +925,7 @@ describe("accept kit invariants", () => {
     expect(text).not.toContain("/data/exchanges");
   });
 
-  test("carries no container path from the inviter's appliance", () => {
+  test("has no container path from the inviter's console", () => {
     // The only container paths the sheet names are the partner's own future
     // mount points in the commands it gives them.
     for (const endpoint of [FILEDROP, SFTP]) {

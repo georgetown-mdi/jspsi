@@ -242,7 +242,7 @@ describe("setupSftpCredentialScratchDir containment", () => {
 
   test("refuses to boot when the scratch basename starts with .. inside the data root", () => {
     // A genuine child whose basename starts with ".." (relative "..creds") must
-    // read as WITHIN the data root, not misclassified as an outside sibling.
+    // be treated as WITHIN the data root, not misclassified as an outside sibling.
     const base = sandbox("scratch-dotdot-child");
     const dataRoot = path.join(base, "data-root");
     fs.mkdirSync(dataRoot, { recursive: true });
@@ -260,7 +260,7 @@ describe("setupSftpCredentialScratchDir containment", () => {
 
 describe("setupSftpCredentialScratchDir refusal", () => {
   test("names the override, the path and the errno when the create fails", () => {
-    // The shape an appliance boots into when it runs as an account other than
+    // The shape a console boots into when it runs as an account other than
     // the one the image built the default directory for: the default sits under
     // root-owned /run and cannot be created, every operator mount is excluded,
     // and the path and errno alone leave the operator with nowhere to point it.
@@ -432,7 +432,7 @@ describe("bootSftpCredentialScratchDir", () => {
 
   test("resolves the rendezvous mounts through the memoized entry", () => {
     // Each leg's real path is read where the provisioning is resolved, so a boot
-    // that resolved it a second time would walk a split appliance's mounts twice.
+    // that resolved it a second time would walk a split console's mounts twice.
     // The memo the boot leaves is what the warning log and the manager then read.
     const base = sandbox("boot-memo");
     const scratch = path.join(base, "scratch");

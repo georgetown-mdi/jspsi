@@ -89,7 +89,7 @@ describe("fetchJobReceiptOffer", () => {
   test("an ask that fails or is refused is unanswered, not a run without a receipt", async () => {
     // None of these said this run has no receipt, and `none` renders as no
     // control at all, so folding them into it would hide a receipt the
-    // appliance holds behind one failed request.
+    // console holds behind one failed request.
     const notFound: typeof fetch = () =>
       Promise.resolve(new Response(null, { status: 404 }));
     await expect(fetchJobReceiptOffer("job-1", notFound)).resolves.toEqual({
@@ -111,7 +111,7 @@ describe("fetchJobReceiptOffer", () => {
 
   test("the stamp comes from an available record only", async () => {
     // The record downloads are offered all-or-nothing off the same pair, so a
-    // body carrying a createdAt without availability is not a record this run
+    // body holding a createdAt without availability is not a record this run
     // can be named after.
     await expect(
       offerFor({
@@ -125,8 +125,8 @@ describe("fetchJobReceiptOffer", () => {
   });
 });
 
-describe("the receipt ask's bound on an appliance that stops answering", () => {
-  /** The appliance's own status body for a run that asked for a receipt. */
+describe("the receipt ask's bound on a console that stops answering", () => {
+  /** The console's own status body for a run that asked for a receipt. */
   const answered =
     (receiptAvailable: boolean, receiptRequested = true) =>
     () =>
@@ -140,8 +140,8 @@ describe("the receipt ask's bound on an appliance that stops answering", () => {
         { status: 200, headers: { "Content-Type": "application/json" } },
       );
 
-  /** An ask that carries no answer about the receipt: the route erroring, which
-   * is also how a job the appliance forgot across a restart reads. */
+  /** An ask that has no answer about the receipt: the route erroring, which
+   * is also how a job the console forgot across a restart reads. */
   const unanswerable = () => new Response("", { status: 503 });
 
   /** A status endpoint answering each successive ask with the next entry of the
@@ -170,7 +170,7 @@ describe("the receipt ask's bound on an appliance that stops answering", () => {
 
   const noWait = () => Promise.resolve();
 
-  test("a hiccup at settlement does not hide the receipt the appliance holds", async () => {
+  test("a hiccup at settlement does not hide the receipt the console holds", async () => {
     // The run settles once, and the seat asks once when it does: a single
     // failure there would otherwise withhold the download for the life of the
     // seat, and withhold it silently.
@@ -189,14 +189,14 @@ describe("the receipt ask's bound on an appliance that stops answering", () => {
     });
 
     expect(asks()).toBe(2);
-    // A real gap between the asks: one with none would burst at an appliance
+    // A real gap between the asks: one with none would burst at a console
     // that has just stopped answering.
     expect(waits).toHaveLength(1);
     expect(waits.every((ms) => ms > 0)).toBe(true);
   });
 
   test("a route that never answers ends in the state the seat can show", async () => {
-    // An appliance that restarted and forgot the job answers this way for as
+    // A console that restarted and forgot the job answers this way for as
     // long as the seat is open, so an unbounded ask would ask until the operator
     // closed the tab and tell them nothing while it did.
     const { fetchImpl, asks } = scriptedFetch([unanswerable]);
@@ -218,7 +218,7 @@ describe("the receipt ask's bound on an appliance that stops answering", () => {
 
   test("a run that signed nothing is answered once, with no re-asks at all", async () => {
     // The common run answers `none` on the first ask and its answer cannot
-    // change, so re-asking it would spend the appliance's status route to be
+    // change, so re-asking it would spend the console's status route to be
     // told the same thing.
     const { fetchImpl, asks } = scriptedFetch([answered(false, false)]);
     const waits: Array<number> = [];
@@ -234,7 +234,7 @@ describe("the receipt ask's bound on an appliance that stops answering", () => {
     expect(waits).toEqual([]);
   });
 
-  test("a receipt the appliance says it does not hold is not re-asked either", async () => {
+  test("a receipt the console says it does not hold is not re-asked either", async () => {
     // The seat asks a settled run, so `missing` is final: the file appears at
     // the signature swap or never.
     const { fetchImpl, asks } = scriptedFetch([answered(false)]);

@@ -154,12 +154,11 @@ test("a deduplicating cardinality leaves an unmatched duplicate group's table un
 });
 
 // many-to-many applies the "many" side's rules to both parties, so a matched value
-// stands for a group on each side and contributes the two groups' product. The
-// cascade pairs that; single-pass reconstruction holds the resolved table to a
-// length taken from the half that keeps its distinctness, and neither half does
-// here, so it refuses -- the one label at which the two strategies part
-// company. psiLinkManyToMany.test.ts holds the cascade's own behavior at
-// length.
+// stands for a group on each side and contributes the two groups' product. The cascade
+// pairs that; single-pass reconstruction holds the resolved table to a length taken
+// from the half that keeps its distinctness, and neither half does here, so it refuses
+// -- the one label at which the two strategies part company. psiLinkManyToMany.test.ts
+// holds the cascade's own behavior at length.
 test("many-to-many pairs in the cascade and is refused by single-pass", async () => {
   const bothSided = [["E1", "E1"]];
   const [starterConn, joinerConn] = createMessagePipe();
@@ -686,14 +685,13 @@ test("single-pass withholding does not leak the match count by frame presence or
 });
 
 // --- associationAndIterationArray: pathological-count bound -------------------
-// The mapped-elements frame exchanged in exchangeMappedElements is partner-
-// controlled and rides the ~512 MiB exchange frame; its matched-record count is
-// legitimately in the millions. A flat array of ~4M invalid elements made Zod
-// throw `RangeError: Invalid string length` building its error string from one
-// issue per element (a ~4.5s CPU burn). The single-issue validator caps that at
-// one clean issue. The frame is read two ways -- via receiveParsed (sendFirst)
-// and via a direct `parseOrProtocolError` (the !sendFirst send-before-parse
-// path) -- and both must raise a clean ConnectionError("protocol").
+// The mapped-elements frame exchanged in exchangeMappedElements is partner-controlled;
+// its matched-record count is legitimately in the millions. A flat array of ~4M
+// invalid elements made Zod throw `RangeError: Invalid string length` building its
+// error string from one issue per element (a ~4.5s CPU burn); the single-issue
+// validator caps that at one clean issue. The frame is read two ways -- via
+// receiveParsed (sendFirst) and via a direct `parseOrProtocolError` (the !sendFirst
+// send-before-parse path) -- and both must raise a clean ConnectionError("protocol").
 const pathologicalPairs = () => Array.from({ length: 4_000_000 }, () => 1);
 
 test("receiveParsed: a pathological-count mapped-elements frame fails cleanly", async () => {
@@ -988,22 +986,20 @@ test("the single-pass receiver read gate is bounded to the derived reply cap", a
 });
 
 test("the single-pass sender refuses a built reply above the derived cap", async () => {
-  // The sender-side half of the same cap: before sending, it measures the reply it
-  // built against singlePassReplyByteCap -- the same bound the receiver tightens
-  // its read gate to -- so an over-cap frame never reaches a partner that would
-  // reject it. The diagnosis is the builder-versus-derivation one, not the
-  // over-ceiling guidance: the ceiling gate has already passed, so no dataset
-  // either operator controls is what stopped the send and the dataset remedies are
-  // withheld.
+  // The sender-side half of the same cap: before sending, it measures the reply it built
+  // against singlePassReplyByteCap -- the same bound the receiver tightens its read gate
+  // to -- so an over-cap frame never reaches a partner that would reject it. The
+  // diagnosis is the builder-versus-derivation one, not the over-ceiling guidance: the
+  // ceiling gate has already passed, so no dataset either operator controls stopped the
+  // send, and the dataset remedies are withheld.
   //
-  // Driven by a client request over far more values than the partner's declared
-  // size accounts for: the response the sender doubly-encrypts grows with the
-  // request, so the built reply outgrows a cap derived from the declared sizes.
-  // Production reaches this safety check only on such an inconsistency between
-  // the reply builder and the shared derivation -- a real PsiElementBounds
-  // refuses an over-wide request at the deserialize boundary first (pinned in
-  // psiParticipant.test.ts), and the inert test bounds are what leave the
-  // safety check reachable here.
+  // Driven by a client request over far more values than the partner's declared size
+  // accounts for: the response the sender doubly-encrypts grows with the request, so the
+  // built reply outgrows a cap derived from the declared sizes. Production reaches this
+  // safety check only on such an inconsistency between the reply builder and the shared
+  // derivation -- a real PsiElementBounds refuses an over-wide request at the
+  // deserialize boundary first (pinned in psiParticipant.test.ts), and the inert test
+  // bounds leave the safety check reachable here.
   const keyCount = 1;
   const localRows = 1;
   const partnerRows = 1;
@@ -1195,14 +1191,13 @@ test("single-pass aborts symmetrically when the exchange exceeds the ceiling", a
 });
 
 test("single-pass aborts symmetrically from the starter side too", async () => {
-  // Mirror of the joiner case, proving the verdict is role-symmetric. The
-  // over-ceiling gate runs before the role branch, so the starter (PSI sender)
-  // reaches it from the same exchanged counts. The same large partnerRecordCount
-  // lands in receiverRecordCount for a starter (vs senderRecordCount for a
-  // joiner), yet both compute the identical over-cap verdict and abort before any
-  // frame moves -- the starter throws before it ever reads the request. The
-  // attribution is a function of which party declared the over-ceiling size, not
-  // of which PSI role it drew, so this side names the partner too.
+  // Mirror of the joiner case, proving the verdict is role-symmetric. The over-ceiling
+  // gate runs before the role branch, so the starter (PSI sender) reaches it from the
+  // same exchanged counts. The same large partnerRecordCount lands in
+  // receiverRecordCount for a starter (vs senderRecordCount for a joiner), yet both
+  // compute the identical over-cap verdict and abort before any frame moves. The
+  // attribution is a function of which party declared the over-ceiling size, not of
+  // which PSI role it drew, so this side names the partner too.
   const [conn, peer] = createMessagePipe();
   const sender = new PSIParticipant(
     "server",
@@ -1304,7 +1299,7 @@ test("an exchange over the ceiling on both sides names both declarations", async
     { cardinality: "one-to-one" },
     receiver,
     conn,
-    // Two records, and a declared width that carries them over the budget on
+    // Two records, and a declared width that puts them over the budget on
     // their own: the fixture stays small while the arithmetic the gate reads is
     // the one being asserted.
     [["a", "b"]],

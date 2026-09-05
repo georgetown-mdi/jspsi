@@ -113,7 +113,7 @@ describe("createJobEventStream keepalive", () => {
     ]);
   });
 
-  test("a keepalive frame carries no event: it is an SSE comment", () => {
+  test("a keepalive frame has no event: it is an SSE comment", () => {
     // A `data:`-less frame is ignored by an EventSource and dropped by the
     // console's own parser, so a keepalive can never be mistaken for an event.
     const lines = SSE_KEEPALIVE_FRAME.split("\n");

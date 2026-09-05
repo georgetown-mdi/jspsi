@@ -1,13 +1,11 @@
 import WebSocket from "ws";
 
 // A cold dial of the PeerJS signaling WebSocket: it connects the upgrade
-// directly, exactly as the real client does (which uses an explicit, pre-derived
-// id and so never makes the GET /api/peerjs/id that would lazily load the route
-// module). A WebSocket upgrade does NOT run that route handler, so this probe
-// never warms the server -- it only observes whether signaling was already warmed
-// at startup. That is what lets it stand in for the masked-by-an-HTTP-warm gap:
-// the server must warm signaling itself (the dev-server-snagger in vite.config,
-// or the nitro entry's localFetch in production) for this to ever answer OPEN.
+// directly, exactly as the real client does (an explicit, pre-derived id
+// skips the GET /api/peerjs/id that would lazily load the route module). A
+// WebSocket upgrade does not run that route handler, so this probe only
+// observes whether signaling was already warmed at startup (by the
+// dev-server-snagger in vite.config, or the nitro entry's localFetch).
 
 // Process-wide so every attempt registers under a distinct broker id: a retry
 // that lands before the server has reaped a prior probe's socket would otherwise
@@ -83,13 +81,12 @@ export async function waitForColdSignaling(
   }
 }
 
-/** Dial a websocket upgrade at a NON-signaling path. On the production server the
- * PeerJS listener is the only `upgrade` listener, so a non-matching upgrade must
- * be closed -- otherwise the socket is left open with no timeout to reap it (an
- * unauthenticated FD/socket-exhaustion vector). Resolves true if the server
- * closes/rejects the connection within `timeoutMs` (the wanted behavior), false
- * if it is instead left hanging -- no close, no error -- which is the leak, or if
- * the server unexpectedly completes the handshake on a non-signaling path. */
+/** Dial a websocket upgrade at a NON-signaling path. On the production
+ * server the PeerJS listener is the only `upgrade` listener, so a
+ * non-matching upgrade must be closed -- otherwise the socket is left open
+ * with no timeout to reap it (an unauthenticated FD/socket-exhaustion
+ * vector). Resolves true if the server closes/rejects within `timeoutMs`,
+ * false if left hanging or if it unexpectedly completes the handshake. */
 export function probeUnmatchedUpgrade(
   port: number,
   timeoutMs: number,
@@ -110,8 +107,8 @@ export function probeUnmatchedUpgrade(
     };
     const timer = setTimeout(() => finish(false), timeoutMs);
     // A non-signaling path must never 101; treat an unexpected open as a failure
-    // to reject. A server-side destroy surfaces as error and/or close -- both mean
-    // the upgrade was rejected rather than leaked.
+    // to reject. A server-side destroy shows up as error and/or close -- both
+    // mean the upgrade was rejected rather than leaked.
     ws.on("open", () => finish(false));
     ws.on("close", () => finish(true));
     ws.on("error", () => finish(true));

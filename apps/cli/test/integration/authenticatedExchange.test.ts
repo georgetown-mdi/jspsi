@@ -25,14 +25,13 @@ import {
 } from "../sftpServer/testContext";
 
 // Net-new coverage: the full authenticated CLI path -- X25519 handshake +
-// per-direction AEAD -- driven end to end over both real transports. The other
-// integration tests exercise only the file-sync transport; this one drives
-// runProtocol (authenticateConnection -> runKex -> EncryptedMessageConnection ->
-// runExchange) with real PSI. The load-bearing assertion is that an
+// per-direction AEAD -- driven end to end over both real transports, via
+// runProtocol (authenticateConnection -> runKex -> EncryptedMessageConnection
+// -> runExchange) with real PSI. The critical assertion is that an
 // authenticated exchange yields byte-for-byte the SAME PSI result as an
-// unauthenticated one over identical data, proving the AEAD layer is transparent
-// to the linkage outcome; plus that the shared secret rotates and the rotated
-// value drives the next ("recurring") exchange.
+// unauthenticated one over identical data, proving AEAD is transparent to the
+// linkage outcome; plus that the shared secret rotates and drives the next
+// ("recurring") exchange.
 
 const srv = sftpServer();
 
@@ -242,14 +241,12 @@ test("filedrop: authenticated recurring exchange matches the unauthenticated PSI
 describe("sftp", () => {
   // Both parties are SFTP clients of the same served path -- the realistic
   // recurring-exchange topology. Each phase (baseline -> run1 -> run2) runs in
-  // its own subdir under this root, derived from its run tag, so the hello/lock
-  // rendezvous namespace is never shared across phases: both parties within a
-  // phase share a subdir (so they rendezvous), and distinct phases get distinct
-  // subdirs (so they cannot cross-contaminate). Isolation is therefore
-  // structural and does not depend on deleting files between phases. The root is
-  // the test server's `authexchange` namespace, kept distinct from the sibling
-  // integration files' namespaces (sftpConnection -> sftp, mixedConnection ->
-  // mixed).
+  // its own subdir under this root, derived from its run tag: both parties in
+  // a phase share a subdir (so they rendezvous) and distinct phases get
+  // distinct subdirs (so they cannot cross-contaminate), independent of
+  // deleting files between phases. The root is the test server's
+  // `authexchange` namespace, distinct from the sibling integration files'
+  // (sftp, mixed).
   const SFTP_LOCAL_ROOT = localPath(srv, "authexchange");
   const SFTP_PATH_ROOT = remotePath(srv, "authexchange");
 

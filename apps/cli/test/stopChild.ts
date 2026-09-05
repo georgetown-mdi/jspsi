@@ -2,7 +2,7 @@ import type { ChildProcess } from "node:child_process";
 
 /**
  * Terminate `child` and resolve once it has exited (or is already gone).
- * SIGKILL is the backstop, unref'd so it cannot itself hold a teardown open,
+ * SIGKILL is the fallback, unref'd so it cannot itself hold a teardown open,
  * for a child that does not exit on SIGTERM alone within its own grace window
  * (a broker holding a live WebSocket is one such child).
  * @internal test-only

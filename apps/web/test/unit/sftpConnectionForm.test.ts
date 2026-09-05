@@ -97,7 +97,7 @@ describe("sftpFormError", () => {
     expect(formError(validForm({ username: "" }))?.field).toBe("username");
   });
 
-  test("rejects a host carrying a URL, userinfo, a path, or whitespace", () => {
+  test("rejects a host holding a URL, userinfo, a path, or whitespace", () => {
     for (const host of [
       "sftp://user:pw@host",
       "user:pw@host",
@@ -200,7 +200,7 @@ describe("sftpFormError (credential combination, core's rules)", () => {
 
   /** All eight of them. Core owns which are coherent; what this pins is that
    * each incoherent one is REFUSED on the control that resolves it rather than
-   * carried and dropped. */
+   * passed through and discarded. */
   const COMBINATIONS: ReadonlyArray<Combination> = [
     ["password", false, false, undefined],
     ["password", false, true, undefined],
@@ -382,7 +382,7 @@ describe("buildAuthoringRequest", () => {
     });
   });
 
-  test("builds a typed ref credential and carries a passphrase reference", () => {
+  test("builds a typed ref credential and includes a passphrase reference", () => {
     const body = authoringRequest(
       validForm({
         method: "private_key",
@@ -398,7 +398,7 @@ describe("buildAuthoringRequest", () => {
     expect(body?.privateKeyPassphrase).toBe("@/run/secrets/id.pass");
   });
 
-  test("carries an armed keyboard-interactive toggle", () => {
+  test("includes an armed keyboard-interactive toggle", () => {
     const body = authoringRequest(validForm({ keyboardInteractive: true }));
     expect(body?.keyboardInteractive).toBe(true);
     expect(body?.credential).toEqual({
@@ -512,7 +512,7 @@ describe("sftpFormFromLocator (accept-side pre-fill)", () => {
   });
 
   test("a form built from the locator alone is unsubmittable", () => {
-    // The partner locator carries no credential or fingerprint, so an authoring
+    // The partner locator has no credential or fingerprint, so an authoring
     // request cannot be built from it: the accept guard rejects a launch until the
     // operator adds their own credential and fingerprint.
     const seeded = sftpFormFromLocator({ host: "sftp.partner.example" });

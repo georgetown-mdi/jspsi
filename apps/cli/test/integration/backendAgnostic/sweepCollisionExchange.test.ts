@@ -18,38 +18,36 @@ import { loadKeyFile, saveKeyFile } from "../../../src/keyFile";
 // What `--sweep-exchange-files` does when both operators reach for it, and
 // whether what each of them is then told works.
 //
-// The entry guard names the flag to whoever hits it, so both operators tend to
-// pass it; the second sweep then deletes the first party's live rendezvous
-// files. protocol.test.ts pins the CLI gate's emit/withhold decision at its unit
-// seam. What only two real parties over a real directory can settle is the
-// runtime claim the shipped guidance and the operator documentation both make:
-// that one side sweeping is enough, that both sides sweeping breaks the
-// exchange on both sides, and that the directory it leaves is one a plain
-// re-run can use.
+// The entry guard names the flag to whoever hits it, so both operators tend
+// to pass it; the second sweep then deletes the first party's live
+// rendezvous files. protocol.test.ts pins the CLI gate's emit/withhold
+// decision at its unit boundary. What only two real parties over a real
+// directory can settle is the runtime claim the shipped guidance makes: one
+// side sweeping is enough, both sides sweeping breaks the exchange on both
+// sides, and the directory it leaves is one a plain re-run can use.
 //
-// The CONCURRENT double sweep is deliberately not driven here. Its outcome is
+// The CONCURRENT double sweep is not driven here by design. Its outcome is
 // racy at the margin -- the sweep's own "may be partially swept" failure is a
 // legitimate landing for it -- so pinning a single result would be flaky by
 // construction. The SEQUENTIAL collision below is the deterministic arm.
 //
 // Filedrop only. The collision is transport-independent: the second sweep
 // deletes a live hello through the same client interface whichever transport
-// carries it, so an SFTP arm would re-measure the same property at several
+// sends it, so an SFTP arm would re-measure the same property at several
 // times the runtime.
 
 // 32 zero bytes as base64url: the shared secret both parties are provisioned
 // with. Each party is started from whatever its key file holds at that moment,
-// so an attempt that completes carries its rotated token into the next one --
-// which is what "run the exchange again, without re-inviting" means.
+// so a completed attempt's rotated token becomes the next one's starting
+// secret -- which is what "run the exchange again, without re-inviting" means.
 const INITIAL_SECRET = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
-// The budget for the arms that must TIME OUT. It is the test's runtime floor:
-// the second party learns nothing is coming only when its peer-wait budget
-// expires, and the first party's handshake receive is bounded by the same
-// value. Sized against what the arm actually needs -- the first party has only
-// to publish its hello and see the second party's, both local file operations,
-// before its own rendezvous budget runs out -- rather than against a production
-// wait.
+// The budget for the arms that must TIME OUT. It is the test's runtime
+// floor: the second party learns nothing is coming only when its peer-wait
+// budget expires, and the first party's handshake receive is bounded by the
+// same value. Sized against what the arm actually needs -- publishing its
+// hello and seeing the second party's, both local file operations -- rather
+// than a production wait.
 const TIMEOUT_PEER_TIMEOUT_MS = 5_000;
 
 // The budget for the arms that must COMPLETE. A real PSI exchange runs between
@@ -249,7 +247,7 @@ test("a sequential both-sides sweep fails both parties, and a plain re-run then 
     "synchronization has timed out",
   );
   // The guidance reaches BOTH operators, asserted where runProtocol produces
-  // it rather than at the gate's unit seam: recovering needs no contact
+  // it rather than at the gate's unit boundary: recovering needs no contact
   // between the two and no agreement on who goes first, which only holds if
   // each is told the same thing.
   expect(guidanceFor(collision, "collide-a")).toHaveLength(1);
@@ -275,7 +273,7 @@ test("a sequential both-sides sweep fails both parties, and a plain re-run then 
 
 test("a sequential one-sided sweep clears the residue and completes the exchange", async () => {
   // The arm the one-party recovery rests on. The residue is what makes the
-  // sweep load-bearing rather than a no-op over an empty directory: a leftover
+  // sweep critical rather than a no-op over an empty directory: a leftover
   // lock is a protocol file the unflagged entry guard refuses (core's
   // fileSyncRendezvous.test.ts pins that refusal), so this exchange completes
   // only because the first party cleared it -- and the second party, entering

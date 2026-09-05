@@ -33,9 +33,9 @@ export function ttyStream(): Readable {
 }
 
 /**
- * A stdin stub that reports as an interactive terminal AND answers a prompt with
- * `answer`, modelling someone typing it and pressing return. Deliberately never
- * ends: a readline interface reads the line only while its input is still open,
+ * A stdin stub that reports as an interactive terminal and answers a prompt with
+ * `answer`, modelling someone typing it and pressing return. Never ends: a
+ * readline interface reads the line only while its input is still open,
  * because a stream that reaches EOF closes the interface first and the prompt
  * readers resolve to "nothing answered" (see {@link streamOf}, and promptConfirm
  * / promptFreeText in src/util/prompt.ts). A terminal stays open, which is why a

@@ -96,7 +96,7 @@ const SHARED_SECRET = "test-shared-secret";
  * to authenticateExchange alongside the secret. */
 const EXPIRES = "2999-01-01T00:00:00.000Z";
 
-/** The agreed terms every stand-in below carries. The lifecycle forwards terms
+/** The agreed terms every stand-in below holds. The lifecycle forwards terms
  * without reading them. */
 const STUB_LINKAGE_TERMS = getDefaultLinkageTerms("Stand-in Party");
 
@@ -112,7 +112,7 @@ const STUB_PREPARED = {
 
 /** What a mocked runExchange resolves with. The withheld-table shape (no
  * association table, no count) is the inert one: the lifecycle hands the result
- * to the `generateOutput` seam, which every test here replaces. */
+ * to `generateOutput`, which every test here replaces. */
 const STUB_EXCHANGE_RESULT = {
   associationTable: undefined,
   intersectionCount: undefined,
@@ -177,7 +177,7 @@ function makeResources(overrides?: { peer?: FakePeer; conn?: FakeConn }) {
   return { acquired, peer, conn };
 }
 
-// The per-test option bundle that does not vary: the React seams plus the
+// The per-test option bundle that does not vary: the React callbacks plus the
 // invitation secret and its expiry. Spread into every runExchangeLifecycle call
 // alongside the per-test acquire/exchangeRole/signal.
 function seams() {
@@ -254,13 +254,9 @@ describe("runExchangeLifecycle", () => {
   ] as const)(
     "words a close that ended on %s for the operator",
     async (outcome, expected) => {
-      // The transport reports only how its wait ended, so this is where an exit
-      // that carried no delivery signal becomes something an operator reads --
-      // and the run has already reported success by then, making it the only
-      // sign the partner may never have taken the final frame. The peer's own
-      // close IS that signal, so it alone stays silent; the other two say
-      // different things (a partner who never confirmed within the wait, versus
-      // a link that went before they could) and must not share one sentence.
+      // The peer's own close is the delivery signal, so it alone raises no
+      // notice; the other two describe different states of the partner's copy
+      // and must not share one sentence.
       const { mc } = makeFakeMc();
       mockedOpen.mockResolvedValue(mc);
       const { acquired, conn } = makeResources();
@@ -357,8 +353,8 @@ describe("runExchangeLifecycle", () => {
     "drops a %s notice raised once the run has aborted",
     async (outcome) => {
       // The close's wait can end long after an unmount aborts the run, and the
-      // seam it would set state through is gone by then -- the same live gate
-      // every other seam takes.
+      // callback it would set state through is gone by then -- the same live
+      // gate every other callback takes.
       const { mc } = makeFakeMc();
       mockedOpen.mockResolvedValue(mc);
       const { acquired } = makeResources();
@@ -401,7 +397,7 @@ describe("runExchangeLifecycle", () => {
   test("a prepare-time StandardizationTermsError is category 'config', not 'exchange'", async () => {
     // prepareForExchange fails closed with a StandardizationTermsError inside
     // acquire, before any peer connection: an authored standardization that
-    // contradicts the terms. It must surface as an actionable config problem, not
+    // contradicts the terms. It must show up as an actionable config problem, not
     // the generic retryable transport failure.
     const acquire: Acquire = () =>
       Promise.reject(
@@ -426,7 +422,7 @@ describe("runExchangeLifecycle", () => {
 
   test("'config' is keyed on the OperatorConfigError base, not one subclass", async () => {
     // The category is the base type, so any future local-config check (e.g. the
-    // disclosure-commitment drift a recurring web exchange reaches) is surfaced by
+    // disclosure-commitment drift a recurring web exchange reaches) is exposed by
     // extending OperatorConfigError at its throw site -- no change to this
     // classifier. Pin that contract directly with the base type, not a subclass.
     const acquire: Acquire = () =>
@@ -453,7 +449,7 @@ describe("runExchangeLifecycle", () => {
     // supply every linkage key the agreed terms declare. The same file refuses
     // identically on every attempt, so it must not land in the retryable generic
     // alert; it joins `config` for that affordance, and the alert builder gives it
-    // fixed copy of its own rather than surfacing its message (its names are the
+    // fixed copy of its own rather than showing its message (its names are the
     // agreed terms', partner-authored on every accept path).
     const acquire: Acquire = () =>
       Promise.reject(
@@ -483,7 +479,7 @@ describe("runExchangeLifecycle", () => {
     // UsageError. The payload-send disclosure guard also throws a plain UsageError
     // during prepare, but on the accept side its column names are adopted from the
     // partner's invitation, so it must stay in the generic (message-swallowing)
-    // 'exchange' alert rather than have its text surfaced by the actionable 'config'
+    // 'exchange' alert rather than have its text shown by the actionable 'config'
     // one.
     const acquire: Acquire = () =>
       Promise.reject(new UsageError("payload.send does not match metadata"));
@@ -528,7 +524,7 @@ describe("runExchangeLifecycle", () => {
 
   test("a mid-run StandardizationTermsError is NOT classified 'config' (phase-scoped)", async () => {
     // The config category is scoped to the prepare phase. Even the config-typed
-    // StandardizationTermsError, were it to surface from the run half (none does
+    // StandardizationTermsError, were it to show up from the run half (none does
     // today), must stay the generic 'exchange', never the actionable 'config'
     // meant for a pre-connection data problem -- a structural guarantee, so a
     // future core change that threw one mid-run cannot silently mislabel it.
@@ -555,7 +551,7 @@ describe("runExchangeLifecycle", () => {
     expect(s.onResult).not.toHaveBeenCalled();
   });
 
-  test("authenticates the peer at the mc seam before runExchange", async () => {
+  test("authenticates the peer over mc before runExchange", async () => {
     const { mc } = makeFakeMc();
     mockedOpen.mockResolvedValue(mc);
     const { acquired } = makeResources();
@@ -904,11 +900,11 @@ describe("runExchangeLifecycle", () => {
     expect(s.onResult).not.toHaveBeenCalled();
   });
 
-  // --- The resolved run shape, named at the pre-round seam -------------------
+  // --- The resolved run shape, named at the pre-round callback ---------------
 
-  /** Drive core's pre-round seam with one resolved shape, then end the run the
-   * way `outcome` says. The shape is what `runExchange` hands a front end after
-   * the terms exchange and before the first round. */
+  /** Drive core's pre-round callback with one resolved shape, then end the run
+   * the way `outcome` says. The shape is what `runExchange` hands a front end
+   * after the terms exchange and before the first round. */
   function runExchangeConfirming(
     runShape: ResolvedRunShape,
     outcome: "resolve" | "reject" = "resolve",
@@ -937,9 +933,9 @@ describe("runExchangeLifecycle", () => {
 
   test("raises the run's resolved-shape notices ahead of its own terminal", async () => {
     // The operator has to be able to read what the terms resolved to while the
-    // run is still going, so these arrive at the seam that produced them rather
-    // than with the result. Core composes both strings; this seat only routes
-    // them to the notice slot its transport warnings already take.
+    // run is still going, so these arrive at the callback that produced them
+    // rather than with the result. Core composes both strings; this seat only
+    // routes them to the notice slot its transport warnings already take.
     const { mc } = makeFakeMc();
     mockedOpen.mockResolvedValue(mc);
     const { acquired } = makeResources();
@@ -967,7 +963,7 @@ describe("runExchangeLifecycle", () => {
   test("raises the pre-round notices on a run that then fails", async () => {
     // The success gate on the teardown notice must not reach these: a run whose
     // shape the operator has to read is exactly as likely to be the one that
-    // fails, and the seam fired long before the failure.
+    // fails, and the callback fired long before the failure.
     const { mc } = makeFakeMc();
     mockedOpen.mockResolvedValue(mc);
     const { acquired } = makeResources();

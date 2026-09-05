@@ -37,7 +37,7 @@ describe("signaling-server inbound frame bound", () => {
       ws.on("close", (code: number) => resolve(code));
       ws.on("error", () => {
         // The peer may also see the socket reset as it is torn down; the close
-        // event carries the verdict. Swallow so it is not an unhandled error.
+        // event holds the verdict. Swallow so it is not an unhandled error.
       });
       ws.send(Buffer.alloc(MAX_SIGNALING_PAYLOAD_BYTES + 1));
     });

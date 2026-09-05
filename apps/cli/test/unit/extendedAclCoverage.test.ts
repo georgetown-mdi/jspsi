@@ -28,23 +28,20 @@ const plainPosixOnly = test.skipIf(
 );
 
 // The owner-only artifacts written outside `fileUtils`' shared writers: the
-// `--log-file` descriptor, opened append and stripped in place, and the doctor's
-// smbclient credentials file, routed through `writeFileOwnerOnly` into a
-// `mkdtemp` work directory the doctor strips itself at creation. The writers'
-// own coverage is in fileUtils.test.ts; what these tests hold is that each of
-// these sites reaches the strip, aims it at the entry its own write reached, and
-// refuses rather than putting a log line or a password into a file, or under a
-// directory, whose extended ACL it could not clear.
+// `--log-file` descriptor, opened append and stripped in place, and the
+// doctor's smbclient credentials file, routed through `writeFileOwnerOnly`
+// into a `mkdtemp` work directory the doctor strips itself at creation. Each
+// site here must reach the strip and refuse rather than leave a log line or a
+// password under an extended ACL it could not clear.
 
 // The strip shells out to `/bin/chmod`, so which entry a site aims it at lives
 // in the command line and nowhere else. This records every `execFileSync`
-// argument vector; while `stubbed` is set it answers the call instead of running
-// it, so a command-line assertion holds on a host whose `chmod` rejects the macOS
-// flags. With `failure` set it throws that value instead of running the strip,
-// which is how a test puts a failure -- captured from the runtime, never
-// hand-built -- in front of a site on any host, and `failOperand` narrows that
-// throw to one of the strips a single run makes. The throw is scoped to the
-// strip's own command line, so every other command still runs for real.
+// argument vector; while `stubbed` is set it answers the call instead of
+// running it, so a command-line assertion holds on a host whose `chmod`
+// rejects the macOS flags. With `failure` set it throws that value instead of
+// running the strip, and `failOperand` narrows the throw to one of the strips
+// a single run makes -- scoped to that strip's own command line, so every
+// other command still runs for real.
 const execFile = vi.hoisted(() => ({
   commands: [] as string[][],
   stubbed: false,
@@ -108,7 +105,7 @@ afterEach(() => {
 });
 
 // The extended-ACL entries `ls -lde` prints under a mode line, each numbered
-// ("0: group:everyone allow read"). An empty array means the entry carries no
+// ("0: group:everyone allow read"). An empty array means the entry has no
 // extended ACL at all, which is what each site must produce. `-d` keeps a
 // directory operand listed as itself rather than by its contents, and changes
 // nothing for a file.
@@ -124,7 +121,7 @@ function readExtendedAcl(targetPath: string): string[] {
 
 // A directory whose inheritable `everyone allow read` ACE every file created
 // inside it picks up -- the configuration that leaves a 0600 artifact readable
-// by another principal on macOS. `directory_inherit` carries the ACE down to a
+// by another principal on macOS. `directory_inherit` passes the ACE down to a
 // subdirectory too, which is what a `mkdtemp` directory under the operator's
 // TMPDIR is.
 function makeAclInheritingDir(name: string): string {
@@ -173,7 +170,7 @@ async function withPlatformAsync<T>(
 // A real run of the strip's own command line that fails by exiting nonzero, so
 // the failure a site is put in front of is the shape Node produces rather than
 // this file's model of it. The operand is absent, which no chmod build can act
-// on. `args` carries the flags of the site under test, so the command line an
+// on. `args` has the flags of the site under test, so the command line an
 // operator reads off the rendered cause is that site's own.
 function capturedChmodRefusal(args: string[]): NodeJS.ErrnoException {
   try {
@@ -205,7 +202,7 @@ function recordAclStripCommands(): string[][] {
 }
 
 // Run `body` and hand back whatever it threw: `expect(...).toThrow` matches only
-// the message, and these tests assert on the cause chain a refusal carries.
+// the message, and these tests assert on the cause chain a refusal has.
 function catchThrown(body: () => unknown): unknown {
   try {
     body();
@@ -217,7 +214,7 @@ function catchThrown(body: () => unknown): unknown {
 
 /**
  * A doctor run whose `smbclient` answers come from a stub. `onAuthFile` is
- * called with the credentials path on every invocation that carries one, while
+ * called with the credentials path on every invocation that has one, while
  * the file is still on disk -- the run removes it before returning, so that is
  * the only window it can be inspected from.
  */
@@ -241,31 +238,26 @@ function probeDeps(onAuthFile?: (authFile: string) => void): ProbeDeps {
 }
 
 describe("the log file's extended ACL", () => {
-  macOnly(
-    "a log file created under an inheriting directory carries no ACE",
-    () => {
-      const aclDir = makeAclInheritingDir("log-dir");
+  macOnly("a log file created under an inheriting directory has no ACE", () => {
+    const aclDir = makeAclInheritingDir("log-dir");
 
-      // Pin the gap the strip closes: a plain 0600 create in this directory
-      // inherits the ACE, so the assertion below is about the strip and not about
-      // a directory that failed to hand its ACE down.
-      const control = path.join(aclDir, "control.log");
-      fs.closeSync(fs.openSync(control, "a", 0o600));
-      expect(readExtendedAcl(control)).not.toEqual([]);
+    // Pin the gap the strip closes: a plain 0600 create in this directory
+    // inherits the ACE, so the assertion below is about the strip and not about
+    // a directory that failed to hand its ACE down.
+    const control = path.join(aclDir, "control.log");
+    fs.closeSync(fs.openSync(control, "a", 0o600));
+    expect(readExtendedAcl(control)).not.toEqual([]);
 
-      const logPath = path.join(aclDir, "run.log");
-      const sink = configureLogFile(logPath);
-      logLibrary.setDefaultLevel(logLibrary.levels.INFO);
-      getLogger("acl-sites-created").info("partner identity line");
-      sink.close();
+    const logPath = path.join(aclDir, "run.log");
+    const sink = configureLogFile(logPath);
+    logLibrary.setDefaultLevel(logLibrary.levels.INFO);
+    getLogger("acl-sites-created").info("partner identity line");
+    sink.close();
 
-      expect(readExtendedAcl(logPath)).toEqual([]);
-      expect(fs.statSync(logPath).mode & 0o777).toBe(0o600);
-      expect(fs.readFileSync(logPath, "utf8")).toContain(
-        "partner identity line",
-      );
-    },
-  );
+    expect(readExtendedAcl(logPath)).toEqual([]);
+    expect(fs.statSync(logPath).mode & 0o777).toBe(0o600);
+    expect(fs.readFileSync(logPath, "utf8")).toContain("partner identity line");
+  });
 
   macOnly(
     "an ACE already on an existing log file is cleared before a line is appended",
@@ -423,7 +415,7 @@ function recordDoctorWorkDir(): { path?: string } {
 
 describe("the doctor credentials directory's and file's extended ACL", () => {
   macOnly(
-    "nothing under an inheriting TMPDIR carries an ACE: not the work directory, the credentials file, or a file created beside it",
+    "nothing under an inheriting TMPDIR has an ACE: not the work directory, the credentials file, or a file created beside it",
     async () => {
       // The credentials directory is `mkdtemp`'d under the operator's TMPDIR, so
       // an inheritable ACE there sits on the directory itself and reaches the
@@ -431,7 +423,7 @@ describe("the doctor credentials directory's and file's extended ACL", () => {
       const tmpRoot = makeAclInheritingDir("doctor-tmp");
       // Pin both inheritances the strip has to close, so the assertions below
       // are about the strip and not about a TMPDIR that failed to hand its ACE
-      // down: a directory created under this root carries the ACE, and so does a
+      // down: a directory created under this root has the ACE, and so does a
       // file created inside that directory.
       const controlDir = path.join(tmpRoot, "control-dir");
       fs.mkdirSync(controlDir);
@@ -481,7 +473,7 @@ describe("the doctor credentials directory's and file's extended ACL", () => {
       // Two strips in the order the run makes them: the directory at `mkdtemp`,
       // before anything is created in it, and then the writer's own on psilink's
       // temp path, before the password is written -- the writer strips between its
-      // fchmod and its write. Both carry -h: each entry is one psilink created
+      // fchmod and its write. Both have -h: each entry is one psilink created
       // itself, so a symlink at it is a plant, and following it would clear an
       // unrelated ACL while the password landed under one that still stood.
       const commands = recordAclStripCommands();

@@ -139,7 +139,7 @@ describe("listJobInputs", () => {
   test("lists a symlink to a regular file (statSync follows the link)", () => {
     // The listing stats through symlinks, so an operator who symlinks a PII CSV into
     // the mounted directory rather than copying it sees the linked file listed. This
-    // is the deliberate design: no lstat exclusion enforces a confinement the mount
+    // is by design: no lstat exclusion enforces a confinement the mount
     // model disclaims.
     const dir = tempDir("input");
     const target = tempDir("target");
@@ -206,7 +206,7 @@ describe("profileJobInput", () => {
     ]);
     const byColumn = (name: string) =>
       profile.columnSamples.find((sample) => sample.column === name)?.values;
-    // constructor/prototype carry ordinary own-property values; __proto__ is a
+    // constructor/prototype have ordinary own-property values; __proto__ is a
     // prototype accessor the CSV parser cannot represent as a cell, so it profiles as
     // an empty (but present) sample rather than being dropped or crashing.
     expect(Array.isArray(byColumn("__proto__"))).toBe(true);
@@ -265,7 +265,7 @@ describe("profileJobInput", () => {
 
   test("classifies a mid-read fault as parse_failed without leaking the error", async () => {
     // Simulate a read fault whose message embeds the mounted path and cell bytes; the
-    // classified error must carry only the code, never that message.
+    // classified error must contain only the code, never that message.
     const dir = tempDir("input");
     writeFixture(dir);
     const stream = new Readable({ read() {} });
@@ -274,7 +274,7 @@ describe("profileJobInput", () => {
     );
     const promise = profileJobInput(dir, "input.csv");
     // Let the parser attach its stream listeners before the read faults, so the error
-    // flows through the parser rather than surfacing as an uncaught 'error'.
+    // flows through the parser rather than showing up as an uncaught 'error'.
     await new Promise((resolve) => setImmediate(resolve));
     const leak = `${dir}/input.csv: EIO 111223333`;
     stream.destroy(new Error(leak));

@@ -18,12 +18,11 @@ import ts from "typescript";
  * not a restatement of it.
  *
  * The fabricated CacheStorage models the two behaviors the worker's correctness
- * rests on: a `match` hands back a fresh `Response` each time (a real cache does,
- * which is why one cached shell can answer more than one navigation), and
- * `keys()` enumerates in insertion order (which is what makes the trim drop the
- * oldest entries). It also refuses on demand ({@link HarnessStorageFailures}),
- * which is how the worker is driven against a browser whose storage is full or
- * switched off. Everything else about it is a plain map.
+ * rests on: `match` hands back a fresh `Response` each time, as a real cache does,
+ * and `keys()` enumerates in insertion order, which is what lets the trim drop
+ * the oldest entries. It also refuses on demand ({@link HarnessStorageFailures}),
+ * modeling a browser whose storage is full or switched off. Everything else about
+ * it is a plain map.
  *
  * Requests are plain `{ url, method, mode }` objects rather than `Request`s
  * because `new Request(url, { mode: "navigate" })` is required to throw, so a
@@ -216,7 +215,7 @@ function isCachesOpen(node: ts.Node): boolean {
  * reaches the cache from prose that mentions it, and a listener body reaching it
  * inline from the constants that name it. That is a question about the worker's
  * syntax, so it is answered by parsing the shipped file rather than scanning its
- * text: comments carry no identifiers into a parse, and a function's extent is
+ * text: a parse sees no identifiers in a comment, and a function's extent is
  * its declaration rather than whatever its formatting suggests.
  *
  * A reference here is a name the worker's code resolves in scope -- a
@@ -330,13 +329,11 @@ export type RouteHandler = () => Response;
  * The CacheStorage failures a test switches on, so the worker can be driven
  * against a browser whose storage refuses.
  *
- * Every one of these is a documented Cache API failure rather than an invented
- * one: `open` rejects where storage is disabled or the bucket is gone, `put`
- * rejects with QuotaExceededError, and `match`/`keys` reject on a cache the
- * browser has torn down under the worker. What they establish is one property --
- * a served response never depends on whether the cache worked -- so each is
- * switchable mid-test: the interesting cases are a worker that cached
- * successfully and then meets a failing storage.
+ * Every one of these is a documented Cache API failure, not an invented one:
+ * `open` rejects where storage is disabled or the bucket is gone, `put` rejects
+ * with QuotaExceededError, and `match`/`keys` reject on a cache the browser has
+ * torn down under the worker. Each is switchable mid-test, so a worker that
+ * cached successfully can then meet a failing storage.
  */
 export interface HarnessStorageFailures {
   /** Reject every `caches.open`. */
@@ -396,7 +393,7 @@ export interface ServiceWorkerHarness {
   cachedUrls: (name: string) => Array<string>;
   /** Every event type the worker registered a listener for at evaluation, in
    * registration order. A guard over what the worker can be woken FOR reads it:
-   * a background-wakeup registration the worker must not carry is an event type
+   * a background-wakeup registration the worker must not have is an event type
    * that would appear here. */
   readonly registeredEventTypes: ReadonlyArray<string>;
   /** How many times `skipWaiting()` was called. */

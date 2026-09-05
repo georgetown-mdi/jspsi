@@ -41,7 +41,7 @@ import { StandardizedKeyIterable, linkViaPSI } from "../../dist/testing.esm.js";
 
 // PSI element-count bounds that never reject; mirrors
 // test/utils/psiElementBounds.ts. These tests exercise PSI correctness, not the
-// decode-seam amplification guard, so an inert bound keeps them focused.
+// decode-boundary amplification guard, so an inert bound keeps them focused.
 const UNBOUNDED_PSI_ELEMENTS = {
   setup: Number.POSITIVE_INFINITY,
   request: Number.POSITIVE_INFINITY,

@@ -16,7 +16,7 @@ import type { ReactNode } from "react";
  */
 
 /**
- * Knobs a suite layers onto {@link reactRouterMock}.
+ * Settings a suite layers onto {@link reactRouterMock}.
  */
 export interface ReactRouterMockOptions {
   /**
@@ -28,18 +28,13 @@ export interface ReactRouterMockOptions {
 }
 
 /**
- * Stubs `@tanstack/react-router` down to the seam the component suites touch:
- * `Link` as a plain anchor surfacing `to` as its `href`, and `useNavigate` as a
+ * Stubs `@tanstack/react-router` down to the boundary the component suites touch:
+ * `Link` as a plain anchor exposing `to` as its `href`, and `useNavigate` as a
  * function returning a navigate that does nothing beyond `onNavigate`.
  *
- * Mounting a component tree under a real `RouterProvider` trips a duplicate-React
- * dispatcher error in the browser runner, so the router is stubbed rather than
- * driven. Nothing is lost: TanStack's own `to` -> `href` resolution is its
- * concern, and what these suites assert -- that a link renders as a link, wears
- * the forwarded props, and points where the component says -- survives the
- * substitution. The remaining props are forwarded so a Link styled through them
- * (Mantine sets `className` plus `data-*` attributes on its polymorphic
- * components) renders faithfully rather than stripped.
+ * A real `RouterProvider` trips a duplicate-React dispatcher error in the browser
+ * runner, so the router is stubbed, forwarding remaining props so a styled Link
+ * (Mantine's `className`, `data-*`) still renders right.
  */
 export function reactRouterMock(options: ReactRouterMockOptions = {}) {
   return {

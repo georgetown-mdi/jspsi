@@ -11,7 +11,7 @@ declare module "vitest" {
   }
 }
 
-/** The running test SFTP server, surfaced by the globalSetup over `provide`. */
+/** The running test SFTP server, exposed by the globalSetup over `provide`. */
 export function sftpServer(): SftpServerHandle {
   return inject("sftpServer");
 }
@@ -37,7 +37,7 @@ export async function ensureNamespace(
 }
 
 /**
- * Auth fields for a party, spread into a connection's `server` block. Carries the
+ * Auth fields for a party, spread into a connection's `server` block. Holds the
  * server's host-key fingerprint so the connection is pinned -- with the no-pin
  * default fail-closed, an unpinned conformance connection would be refused.
  */
@@ -67,7 +67,7 @@ export function serverAuth(cred: SftpPartyCredentials): ServerAuth {
 /**
  * Explicit public-key connection auth for a party. Used by the dedicated
  * public-key leg, which is tagged in-process only; the in-process backend
- * surfaces a private key for both parties. Includes the server's host-key pin.
+ * exposes a private key for both parties. Includes the server's host-key pin.
  */
 export function publicKeyAuth(cred: SftpPartyCredentials): {
   username: string;

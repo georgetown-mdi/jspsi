@@ -56,11 +56,11 @@ import type {
 // The intent schema is the ONLY channel from the client into a CLI invocation.
 // These pin its injection-closure: unknown/injection-shaped values are rejected,
 // only the credential-free filedrop channel is admitted, and the composed config
-// never carries a client-chosen path, host, or credential.
+// never holds a client-chosen path, host, or credential.
 
 // The operator's authored per-party data-prep edits. `secret` is roled `ignored`;
 // left to metadata inference an unrecognized column defaults to disclosed payload,
-// so carrying this metadata is what keeps it off the wire.
+// so including this metadata is what keeps it off the wire.
 const editedMetadata: Metadata = [
   { name: "ssn", type: "ssn", role: "linkage", isPayload: false },
   { name: "last_name", type: "last_name", role: "linkage", isPayload: false },
@@ -82,7 +82,7 @@ const editedStandardization: Standardization = [
 ];
 
 describe("jobExchangeIntentSchema validates metadata and standardization", () => {
-  test("accepts an intent carrying valid metadata and standardization", () => {
+  test("accepts an intent holding valid metadata and standardization", () => {
     const intent = validIntent({
       metadata: editedMetadata,
       standardization: editedStandardization,
@@ -143,7 +143,7 @@ describe("jobExchangeIntentSchema validates metadata and standardization", () =>
 
   test("rejects a non-boolean expectedPartnerDeduplicate", () => {
     // A string reaching the composed config would be refused by core's schema at
-    // config-parse time on the appliance, after the job was created; refusing it
+    // config-parse time on the console, after the job was created; refusing it
     // at this boundary keeps it a create-time error instead.
     const intent = { ...validIntent(), expectedPartnerDeduplicate: "false" };
     expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(false);
@@ -152,8 +152,8 @@ describe("jobExchangeIntentSchema validates metadata and standardization", () =>
 
 // The size caps live on the shared common fields, so both arms inherit them.
 // Each case is exercised against the filedrop and the sftp builder. Overrides are
-// loosely typed (some carry deliberately over-cap or malformed shapes the schema
-// must reject), so they are spread over a valid base as `unknown`.
+// loosely typed (some hold over-cap or malformed shapes the schema must reject),
+// so they are spread over a valid base as `unknown`.
 const intentArms: Array<{
   name: string;
   build: (overrides: Record<string, unknown>) => unknown;
@@ -181,12 +181,12 @@ describe("jobExchangeIntentSchema enforces exactly-one-of inputCsv/inputFile", (
     ).toBe(true);
   });
 
-  test("rejects an intent carrying BOTH inputCsv and inputFile", () => {
+  test("rejects an intent holding BOTH inputCsv and inputFile", () => {
     const both = { ...validIntent(), inputFile: SAMPLE_INPUT_FILE_REF };
     expect(jobExchangeIntentSchema.safeParse(both).success).toBe(false);
   });
 
-  test("rejects an intent carrying NEITHER inputCsv nor inputFile", () => {
+  test("rejects an intent holding NEITHER inputCsv nor inputFile", () => {
     const neither: Record<string, unknown> = { ...validInputFileIntent() };
     delete neither.inputFile;
     expect(jobExchangeIntentSchema.safeParse(neither).success).toBe(false);
@@ -208,7 +208,7 @@ describe("jobExchangeIntentSchema enforces exactly-one-of inputCsv/inputFile", (
     }
   });
 
-  test("rejects an inputFile carrying an unknown field (strict)", () => {
+  test("rejects an inputFile holding an unknown field (strict)", () => {
     const intent = validInputFileIntent();
     const smuggled = {
       ...intent,
@@ -350,7 +350,7 @@ describe("jobExchangeIntentSchema bounds the intent's sizes", () => {
   }
 });
 
-describe("composeConfigDocument carries the operator's data-prep edits", () => {
+describe("composeConfigDocument forwards the operator's data-prep edits", () => {
   test("forwards edited metadata and standardization into the composed config", () => {
     const intent = validIntent({
       metadata: editedMetadata,
@@ -372,7 +372,7 @@ describe("composeConfigDocument carries the operator's data-prep edits", () => {
   });
 
   test("the operator-ignored column is NOT disclosed in the composed metadata", () => {
-    // Without carried metadata the CLI infers `secret` as an unrecognized column
+    // Without forwarded metadata the CLI infers `secret` as an unrecognized column
     // and defaults it to disclosed payload. The forwarded metadata roles it
     // `ignored`, so disclosedColumnNames -- the single source of truth for what
     // leaves the machine -- excludes it.
@@ -393,7 +393,7 @@ describe("composeConfigDocument carries the operator's data-prep edits", () => {
   });
 });
 
-describe("composeConfigDocument carries the received-payload lock-in", () => {
+describe("composeConfigDocument forwards the received-payload commitment", () => {
   // The acceptor's expectedPayloadColumns must reach the config as
   // expected_payload_columns so the CLI enforces the received set explicitly
   // rather than falling back (fail open) to linkageTerms.payload.receive.
@@ -420,8 +420,8 @@ describe("composeConfigDocument carries the received-payload lock-in", () => {
   });
 });
 
-describe("the composers carry the terms-side lock-in", () => {
-  // The appliance runs `psilink exchange` from this document at a separate
+describe("the composers forward the terms-side commitment", () => {
+  // The console runs `psilink exchange` from this document at a separate
   // invocation, so an acceptance's declaration binds the run only if it reaches
   // the YAML. Both composers, because an sftp job assembles its spec directly
   // rather than through mintExchangeFile.
@@ -447,7 +447,7 @@ describe("the composers carry the terms-side lock-in", () => {
     }
   });
 
-  test("omits it when the intent carries no declaration (the two-config case)", () => {
+  test("omits it when the intent holds no declaration (the two-config case)", () => {
     const doc = parseYaml(
       composeConfigDocument(validIntent(), "/srv/jobs/abc/exchange"),
     ) as Record<string, unknown>;
@@ -455,7 +455,7 @@ describe("the composers carry the terms-side lock-in", () => {
   });
 });
 
-// The send-side counterpart of the lock-in above. An acceptance's own outbound
+// The send-side counterpart of the commitment above. An acceptance's own outbound
 // set is authored by nobody -- the invitation authors the inviter's, the mirror
 // leaves the acceptor's absent -- so without a recorded consent the CLI's
 // pre-connect gate reads "no record" and no later unattended run is ever held to
@@ -553,11 +553,11 @@ describe("composeConfigDocument records the acceptance's outbound consent", () =
 
 describe("a composed acceptance config satisfies the later run's consent gate", () => {
   /** The verdict a later `psilink exchange` reaches on a composed config: the
-   * record the config carries, assessed against the set that run would actually
+   * record the config holds, assessed against the set that run would actually
    * transmit -- the exact reading `confirmOutboundPayloadConsent` performs before
    * any credential, terms, or data are sent. `runMetadata` is what the run
    * resolves for itself (the config's own metadata, or an inferred one where the
-   * config carries none). */
+   * config holds none). */
   function gateVerdictFor(
     overrides: Parameters<typeof validIntent>[0],
     runMetadata: Metadata,
@@ -589,7 +589,7 @@ describe("a composed acceptance config satisfies the later run's consent gate", 
   });
 
   test("a pending record makes the gate ASK rather than silently pass", () => {
-    // The acceptance resolved no set, so the config carries `pending`. The first
+    // The acceptance resolved no set, so the config holds `pending`. The first
     // run that CAN resolve one -- here from its own input file -- shows and
     // confirms it; an unattended one refuses instead of transmitting it.
     expect(gateVerdictFor({ side: "acceptor" }, editedMetadata)).toMatchObject({
@@ -615,7 +615,7 @@ describe("jobExchangeIntentSchema rejects injection-shaped intents", () => {
   });
 
   test("accepts an sftp intent with no connection field", () => {
-    // The sftp arm carries no `remote`: a filedrop intent's shared fields with
+    // The sftp arm holds no `remote`: a filedrop intent's shared fields with
     // the channel flipped to sftp is a well-formed sftp intent.
     const intent = { ...validIntent(), channel: "sftp" };
     expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(true);
@@ -651,8 +651,8 @@ describe("jobExchangeIntentSchema rejects injection-shaped intents", () => {
   test("rejects an unknown key inside options", () => {
     const intent = {
       ...validIntent(),
-      // A path-valued file-sync option core carries but this boundary never
-      // surfaces: the server owns every directory.
+      // A path-valued file-sync option core holds but this boundary never
+      // exposes: the server owns every directory.
       options: { outboundPath: "/srv/out", pollIntervalMs: 1000 },
     };
     expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(false);
@@ -679,9 +679,9 @@ describe("jobExchangeIntentSchema rejects injection-shaped intents", () => {
     expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(false);
   });
 
-  test("accepts linkage terms carrying no identity at all", () => {
+  test("accepts linkage terms holding no identity at all", () => {
     // The other side of the same rule: a party that supplied no name omits the
-    // field, and the console composes a configuration that sends none rather
+    // field, and the console composes a configuration that states none rather
     // than one naming a party nobody named.
     const { identity: _unnamed, ...withoutIdentity } = validLinkageTerms();
     const intent = { ...validIntent(), linkageTerms: withoutIdentity };
@@ -707,7 +707,7 @@ describe("composeConfigDocument is injection-closed", () => {
     expect(doc.authentication).toBeUndefined();
   });
 
-  test("carries no host or credential field for a filedrop config", () => {
+  test("holds no host or credential field for a filedrop config", () => {
     const yaml = composeConfigDocument(validIntent(), "/srv/jobs/abc/exchange");
     expect(yaml).not.toContain("host");
     expect(yaml).not.toContain("password");
@@ -748,7 +748,7 @@ describe("the sftp intent arm", () => {
   });
 
   test("the sftp arm rejects a sent remote field as an unknown key", () => {
-    // The appliance provisions the one server, so a client that sends a `remote`
+    // The console provisions the one server, so a client that sends a `remote`
     // is rejected by the strict parse.
     const intent = { ...validSftpIntent(), remote: TEST_SFTP_REMOTE_NAME };
     expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(false);
@@ -812,10 +812,10 @@ describe("the sftp intent arm", () => {
   });
 });
 
-// Each tuning knob authored on the console must survive to the config the CLI
+// Each tuning setting authored on the console must survive to the config the CLI
 // loads, under the snake_case name core's schema reads.
-describe("the connection-tuning knobs reach the composed config", () => {
-  test("every knob round-trips into a filedrop config", () => {
+describe("the connection-tuning settings reach the composed config", () => {
+  test("every setting round-trips into a filedrop config", () => {
     const yaml = composeConfigDocument(
       validIntent({
         options: {
@@ -956,7 +956,7 @@ describe("the options peer_id and its cross-field rules", () => {
     ).toBe(true);
   });
 
-  test("accepts the retain trio, and carries it into the composed config", () => {
+  test("accepts the retain trio, and forwards it into the composed config", () => {
     const options = {
       retainFiles: true,
       locklessRendezvous: true,
@@ -1023,7 +1023,7 @@ describe("zeroSetupOptionsArgv", () => {
     ).toEqual([]);
   });
 
-  test("carries the party name as a single =value token", () => {
+  test("holds the party name as a single =value token", () => {
     const argv = zeroSetupOptionsArgv({
       timestampInFilename: true,
       peerId: "clinic-a",
@@ -1036,7 +1036,7 @@ describe("zeroSetupOptionsArgv", () => {
     expect(zeroSetupOptionsArgv({ unexpectedFiles: "warn" })).toEqual([]);
   });
 
-  test("emits each tuning knob in the unit its own flag takes", () => {
+  test("emits each tuning setting in the unit its own flag takes", () => {
     expect(
       zeroSetupOptionsArgv({
         pollIntervalMs: 250,
@@ -1099,7 +1099,7 @@ describe("composeSftpConfigDocument", () => {
     expect(yaml).not.toContain("keyboardInteractive");
   });
 
-  test("carries no client connection field (server block is the entry alone)", () => {
+  test("holds no client connection field (server block is the entry alone)", () => {
     const yaml = composeSftpConfigDocument(
       validSftpIntent(),
       testSftpServerEntry(),
@@ -1219,7 +1219,7 @@ describe("JOB_FILE_NAMES record/keys pairing", () => {
 });
 
 // The zero-setup intent is the ONLY channel from the client into a zero-setup CLI
-// invocation. These pin its injection-closure: it carries no secret/terms/
+// invocation. These pin its injection-closure: it holds no secret/terms/
 // connection material, only a bounded input source and closed-vocabulary tuning.
 describe("jobZeroSetupIntentSchema accepts the allowed fields", () => {
   test("accepts a well-formed filedrop zero-setup intent", () => {
@@ -1267,7 +1267,7 @@ describe("jobZeroSetupIntentSchema accepts the allowed fields", () => {
 // Every option a zero-setup arm admits has a flag on the argv this mode builds,
 // so nothing an operator authors is accepted and then dropped. What has no flag
 // -- or no faithful flag form -- is refused here instead.
-describe("the zero-setup arms admit only what their argv can carry", () => {
+describe("the zero-setup arms admit only what their argv can hold", () => {
   test("refuses unexpectedFiles, which has no CLI flag at all", () => {
     for (const intent of [
       validZeroSetupIntent({ options: { unexpectedFiles: "warn" } }),
@@ -1288,7 +1288,7 @@ describe("the zero-setup arms admit only what their argv can carry", () => {
   });
 
   test("refuses a timeout past the seven-day ceiling its flag is capped at", () => {
-    // Accepting one would create a job -- occupying the appliance's single run
+    // Accepting one would create a job -- occupying the console's single run
     // slot -- whose spawned CLI refuses the argv it was created to run.
     const overCeilingMs = (MAX_TIMEOUT_SECONDS + 1) * 1000;
     for (const options of [
@@ -1316,7 +1316,7 @@ describe("the zero-setup arms admit only what their argv can carry", () => {
     ).toBe(true);
   });
 
-  test("accepts a whole-second timeout and every other tuning knob", () => {
+  test("accepts a whole-second timeout and every other tuning setting", () => {
     expect(
       jobZeroSetupIntentSchema.safeParse(
         validZeroSetupSftpIntent({
@@ -1355,7 +1355,7 @@ describe("jobZeroSetupIntentSchema is injection-closed and strict", () => {
     }
   });
 
-  test("rejects linkageTerms, metadata, standardization, the two lock-ins, side", () => {
+  test("rejects linkageTerms, metadata, standardization, the two commitments, side", () => {
     for (const smuggled of [
       { linkageTerms: validLinkageTerms() },
       { metadata: editedMetadata },
@@ -1411,7 +1411,7 @@ describe("jobZeroSetupIntentSchema is injection-closed and strict", () => {
     ).toBe(true);
   });
 
-  test("rejects an identity label carrying a control character", () => {
+  test("rejects an identity label holding a control character", () => {
     // The label rides the run into this party's own disclosure record, so a NUL or
     // an ESC in it is refused at the boundary rather than caught incidentally where
     // the child is spawned. Single-line, so the whitespace controls the retention
@@ -1429,7 +1429,7 @@ describe("jobZeroSetupIntentSchema is injection-closed and strict", () => {
   test("accepts an identity label written in the operator's own script", () => {
     // The rule bounds control characters, not the operator's alphabet: a label
     // that cannot be spelled in ASCII is a legitimate party name, and the value
-    // reaches the CLI as one argv token whatever letters it carries.
+    // reaches the CLI as one argv token whatever letters it holds.
     for (const identity of [
       "Agencia Española de Protección de Datos",
       "北京市统计局",
@@ -1487,7 +1487,7 @@ describe("jobCreateIntentSchema discriminates on mode", () => {
     if (parsed.success) expect(parsed.data.mode).toBe("zeroSetup");
   });
 
-  test("a zeroSetup body carrying a sharedSecret fails the strict parse", () => {
+  test("a zeroSetup body holding a sharedSecret fails the strict parse", () => {
     const intent = { ...validZeroSetupIntent(), sharedSecret: "A".repeat(43) };
     expect(jobCreateIntentSchema.safeParse(intent).success).toBe(false);
   });
@@ -1612,7 +1612,7 @@ describe("zeroSetupSftpArgv maps the effective connection to argv", () => {
     );
   });
 
-  test("carries no secret byte and no config/key/save token on argv", () => {
+  test("holds no secret byte and no config/key/save token on argv", () => {
     const argv = zeroSetupSftpArgv(testSftpServerEntry());
     const joined = argv.join(" ");
     expect(joined).not.toContain("--config-file");
@@ -1655,7 +1655,7 @@ describe("zeroSetupSftpArgv maps the effective connection to argv", () => {
     ).toThrow(/single-valued/);
   });
 
-  test("omits --server-username when the entry carries none", () => {
+  test("omits --server-username when the entry holds none", () => {
     const argv = zeroSetupSftpArgv({
       host: "sftp.example.org",
       password: "@/etc/psilink/pw",
@@ -1677,8 +1677,8 @@ function composedFiledropConnection(yaml: string): Record<string, unknown> {
   return connection;
 }
 
-describe("composeConfigDocument on a split-provisioned appliance", () => {
-  test("carries the inbound/outbound pair and never a shared path beside it", () => {
+describe("composeConfigDocument on a split-provisioned console", () => {
+  test("forwards the inbound/outbound pair and never a shared path beside it", () => {
     const connection = composedFiledropConnection(
       composeConfigDocument(
         validIntent({
@@ -1730,12 +1730,12 @@ describe("zeroSetupFiledropArgv builds the file:// locator", () => {
     expect(argv).toEqual(["file:///srv/jobs/abc/rendezvous"]);
   });
 
-  test("carries no host or credential (filedrop has neither)", () => {
+  test("holds no host or credential (filedrop has neither)", () => {
     const argv = zeroSetupFiledropArgv("/srv/jobs/abc/rendezvous");
     expect(argv.join(" ")).not.toContain("--server-");
   });
 
-  test("a split appliance carries the outbound leg on --outbound-path", () => {
+  test("a split console forwards the outbound leg on --outbound-path", () => {
     // The positional is the inbound leg (the CLI maps it to inbound_path); the
     // flag takes the plain absolute directory, not a file:// URL, because the CLI
     // copies it straight into outbound_path where core requires an absolute path.

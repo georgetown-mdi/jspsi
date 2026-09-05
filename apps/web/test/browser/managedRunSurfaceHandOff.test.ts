@@ -25,9 +25,9 @@ import type { NewManagedExchange } from "@psi/managedExchangeRecord";
 // The run surface's hand-off confirm, rendered against real Chromium (the record
 // and its sibling stores are the real IndexedDB ones). What is pinned here is the
 // custody the confirm states before this device gives up its copy: the artifact
-// carries the secret, and it does NOT carry the accounting of disclosures, which
+// holds the secret, and it does NOT hold the accounting of disclosures, which
 // stays behind with the device -- so the operator is told to export it first, the
-// same warning the delete confirm carries.
+// same warning the delete confirm states.
 
 vi.mock("@tanstack/react-router", async () =>
   (await import("./moduleMocks")).reactRouterMock(),
@@ -142,12 +142,12 @@ describe("the hand-off confirm states what does not travel", () => {
 });
 
 describe("a run pressed after the hand-off landed", () => {
-  test("the refusal settles the surface on the spent state, with no reload", async () => {
+  test("the refusal fixes the surface on the spent state, with no reload", async () => {
     // The surface reads the spent state when it loads, and this operator's
     // surface loaded before the hand-off was confirmed in another tab -- so the
     // Run button in front of them is live over a copy that is no longer theirs.
     // The run path itself is what refuses; what is pinned here is that the
-    // surface settles into the state that refusal left rather than standing on
+    // surface fixes on the state that refusal left rather than standing on
     // its run controls until something reloads it.
     const created = await createManagedExchange(
       newExchange({ inputFileHandle: await inputHandle() }),

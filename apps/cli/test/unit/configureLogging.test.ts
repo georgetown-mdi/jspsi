@@ -11,14 +11,11 @@ import {
   snapshotDiagnosticSinkAndLevel,
 } from "../loggingTestSupport";
 
-// configureLogging is the one logging bootstrap all six command handlers share:
+// configureLogging is the shared logging setup for all six command handlers:
 // it picks the file-or-stderr sink, applies the level, and builds the named
-// logger, returning that logger plus a single closer. These tests exercise both
-// sink branches and the closer's sink-restore directly, so a regression in the
-// shared seam surfaces here rather than through six per-command handler tests.
-// They snapshot and restore core's process-wide diagnostic sink -- and the level
-// -- around each case, and name each logger uniquely so state never bleeds across
-// tests.
+// logger, returning it with a single closer. These tests snapshot and restore
+// core's process-wide diagnostic sink and level around each case, and give
+// each logger a unique name so state does not bleed across tests.
 
 let tmpDir: string;
 
@@ -46,7 +43,7 @@ test("configureLogging: with a logFile, routes the named logger's output to the 
   } finally {
     close();
   }
-  // The logger carries the requested name and the file captures its output with
+  // The logger has the requested name and the file captures its output with
   // the standard [LEVEL] [CONTEXT] prefix -- so the helper installed the file sink
   // and built the logger under it, in that order.
   const contents = fs.readFileSync(logPath, "utf8");
@@ -143,18 +140,14 @@ test("configureLogging: writePlainLine reaches stderr, never stdout, with no pre
   expect(stdoutWrites.join("")).toBe("");
 });
 
-// --- an unopenable --log-file surfaces as a UsageError -----------------------
+// --- an unopenable --log-file shows up as a UsageError -----------------------
 
 test("configureLogging: an unopenable logFile throws UsageError and installs no sink", () => {
-  // The helper is the single seam all six handlers route through, so its
-  // --log-file failure contract is load-bearing: configureLogFile opens the file
-  // synchronously and throws a UsageError on a missing parent directory, and
-  // configureLogging must let that propagate (not swallow or reshape it) so each
-  // handler's parseOrExit/runOrExit maps it to exit 64. The sink open runs before
-  // setDefaultLevel/getLogger, so a failed open must also leave the diagnostic
-  // sink untouched -- pin both, so a regression that catches the throw, or installs
-  // the sink before opening, is caught here rather than silently breaking
-  // --log-file for every command at once.
+  // configureLogFile opens the file synchronously and throws UsageError on a
+  // missing parent directory; configureLogging must propagate that (not
+  // swallow or reshape it) so each handler's parseOrExit/runOrExit maps it to
+  // exit 64. The sink open runs before setDefaultLevel/getLogger, so a failed
+  // open must also leave the diagnostic sink untouched.
   const before = getDiagnosticSink();
   const logPath = path.join(tmpDir, "does-not-exist", "run.log");
   expect(() =>

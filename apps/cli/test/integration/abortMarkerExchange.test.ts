@@ -15,44 +15,36 @@ import {
 } from "vitest";
 
 // Inject a synthetic mid-exchange transport fault at the FIRST send, delegating
-// everything else -- the real handshake, arming, transport, and runExchange --
-// to the actual implementation. This is not the unit tests' wholesale
-// runExchange throw: the real runExchange runs, and the fault surfaces from the
-// connection's send (the transport layer) partway through, with the directory
-// still writable (a synthetic throw does not kill the SFTP session) -- exactly
-// the condition the abort marker exists for.
+// everything else -- handshake, arming, transport, and runExchange -- to the
+// real implementation, not the unit tests' wholesale runExchange throw: the
+// connection's send (the transport layer) exposes the fault partway through
+// runExchange, with the directory still writable (a synthetic throw does not
+// kill the SFTP session) -- exactly the condition the abort marker exists for.
 //
-// Determinism comes from the protocol's lockstep, not from timing. The terms
-// exchange is asymmetric (protocolSetup.ts: the initiator's first op is a send,
-// the responder's first op is a receive), so with both parties patched
-// identically the initiator throws on message 1's send -- it is already armed
-// (armAbort runs before runExchange) -- and its catch writes
-// <initiator>-abort.json over the real transport. The responder, blocked in its
-// first receive, never reaches its own first send; its poll loop reads that
-// marker over the real transport and fast-fails with PeerAbortError instead of
-// riding out the full peer-inactivity timeout. Which physical party wins the
-// rendezvous (and so becomes the initiator) does not matter: the assertions are
-// party-agnostic (exactly one PeerAbortError, exactly one synthetic fault, one
-// marker).
+// Determinism comes from the protocol's lockstep, not timing. The terms
+// exchange is asymmetric (protocolSetup.ts: the initiator sends first, the
+// responder receives first), so with both parties patched identically, the
+// already-armed initiator throws on message 1's send and its catch writes
+// <initiator>-abort.json; the responder, blocked in its own first receive,
+// reads that marker and fast-fails with PeerAbortError instead of riding out
+// the peer-inactivity timeout. Which party wins the rendezvous does not
+// matter: the assertions are party-agnostic.
 //
-// `fault` scopes the injection so a RETRY can be expressed against the same
-// directory: `inject` off makes runExchange wholly real, and `targetIdentity`
-// selects the party that tears by its linkage-terms identity rather than letting
-// the rendezvous race decide which physical party carries the fault. A patched
+// `fault` scopes the injection so a RETRY can target the same directory:
+// `inject` off makes runExchange wholly real, and `targetIdentity` selects
+// the party that tears by its linkage-terms identity rather than letting the
+// rendezvous race decide which physical party holds the fault. A patched
 // party that ends up the responder throws on its own first send once it has
-// received the peer's terms, so targeting fixes WHO faults without depending on
-// the role either party draws.
+// received the peer's terms, so targeting fixes WHO faults regardless of role.
 //
-// The override is a plain rejection rather than a faithful terminal-state
-// transition (it does not drive the connection's own fail()/close path): that is
-// sufficient because the fault fires on the faulting party's FIRST operation, so
-// no later send/receive runs on that party whose behavior on a half-closed
-// connection could diverge, and the marker write the test actually guards is
-// issued by runProtocol's catch on the underlying FileSyncConnection -- which
-// this MessageConnection-level send override never touches -- so it runs for real
-// over the live transport. The connection's own teardown-window race
-// (fail()-driven close racing the marker write) is covered separately and
-// deterministically in core's fileSyncAbortMarker.test.ts.
+// The override is a plain rejection, not a faithful terminal-state transition
+// (it never drives the connection's own fail()/close path): sufficient because
+// the fault fires on the faulting party's FIRST operation, so no later
+// send/receive on that party can diverge on a half-closed connection, and the
+// marker write this test guards is issued by runProtocol's catch on the
+// underlying FileSyncConnection, which this send override never touches. The
+// connection's own teardown-window race is covered separately in core's
+// fileSyncAbortMarker.test.ts.
 const fault = vi.hoisted(() => ({
   inject: true,
   targetIdentity: undefined as string | undefined,
@@ -174,7 +166,7 @@ interface AbortScenarioOptions {
   tag?: string;
   /**
    * Runs against the key files exactly as the previous attempt left them --
-   * carrying forward the token it rotated, which is what "retry without
+   * still holding the token it rotated, which is what "retry without
    * re-inviting" means. A first attempt provisions the pair from
    * INITIAL_SECRET instead.
    */
@@ -254,13 +246,13 @@ async function runAbortScenario(
 // The shared assertions. Each side is identified positively by error TYPE: the
 // waiting peer fast-fails with a PeerAbortError (only producible by reading the
 // marker -- which is what distinguishes the fast path from a peer-inactivity
-// timeout, since a timeout would surface a transport ConnectionError instead),
+// timeout, since a timeout would raise a transport ConnectionError instead),
 // and the faulting party rejects with the injected synthetic ConnectionError.
 // Any other failure (e.g. a genuine SFTP transport error) matches neither bucket
 // and trips the total-count check with a clear wrong-error signal rather than a
 // confusing message mismatch.
 function expectFastPeerAbort(outcome: AbortScenarioOutcome): void {
-  // The attempt fails on both sides, so every settlement carries a reason.
+  // The attempt fails on both sides, so every settlement holds a reason.
   expect(outcome.reasons).toHaveLength(outcome.settled.length);
   const peerAborts = outcome.reasons.filter((r) => r instanceof PeerAbortError);
   const injected = outcome.reasons.filter(
@@ -291,7 +283,7 @@ function expectFastPeerAbort(outcome: AbortScenarioOutcome): void {
 }
 
 // Measures the recovery the faulting party's advisory prescribes: a plain retry
-// in the same directory, no re-invite, both parties carrying the token the
+// in the same directory, no re-invite, both parties holding the token the
 // failed attempt rotated. Both parties draw fresh ids on the retry, so the
 // marker the failure left is named by neither of them and by neither hello; the
 // entry sweep clears it and the exchange runs to completion.

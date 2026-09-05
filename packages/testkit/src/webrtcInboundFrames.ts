@@ -39,7 +39,7 @@ import {
 import type { FrameStructureRefusal } from "@psilink/core";
 import type { Unpackable } from "peerjs-js-binarypack";
 
-/** The three limits `scanFrameStructure` measures a frame against. A fixture carries
+/** The three limits `scanFrameStructure` measures a frame against. A fixture has
  * its own, and every side is driven with those same three numbers, so a divergence
  * can only be the enforcement and never the setup. */
 export interface FrameScanLimits {
@@ -75,7 +75,7 @@ const PRODUCTION_LIMITS: FrameScanLimits = {
 
 /** The reduced structure budget the retained-byte pair is measured against. It has to
  * sit above what a chunk envelope itself costs, or a reassembly leg would refuse an
- * envelope instead of the frame it carries and pass while testing nothing; each
+ * envelope instead of the frame it holds and pass while testing nothing; each
  * transport's pending-until-the-last-datagram test holds that, failing on any
  * envelope the scan refuses. */
 const REDUCED_STRUCTURE_BYTES = 4096;
@@ -334,7 +334,7 @@ export function preScanVerdict(fixture: WebrtcFrameFixture): FrameVerdict {
 /** Rewrite every `ArrayBuffer`/typed array in a decoded value to a plain number
  * array, so a binary payload -- the PSI engine frame and the AEAD envelope are exactly
  * that shape -- is compared by its bytes however it was decoded. Two measurements make
- * this load-bearing rather than decoration: a deep-equality assertion compares a typed
+ * this critical rather than decoration: a deep-equality assertion compares a typed
  * array's contents but treats two distinct `ArrayBuffer`s as equal whatever their
  * bytes, and the real unpacker's decode of a `bin` mirrors the type it was handed --
  * an `ArrayBuffer` argument decodes to an `ArrayBuffer`, a view to a view. A transport

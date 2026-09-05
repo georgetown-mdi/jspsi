@@ -22,12 +22,11 @@ import type { ManagedScheduleTickSeams } from "../../src/psi/managedScheduleRunn
 
 /**
  * The browser half of the unattended runner: what it hands the run driver, what
- * it does with the notices the driver raises, and the host loop that wakes the
- * tick. The driver itself is mocked -- the run it performs is
- * managedRunDriver's own suite -- so what is asserted here is the wiring's
- * choices, which are the ones that make a scheduled run the SAME run an attended
- * one is: the same entry point, the same fail-fast single-writer lock, and the
- * unattended read of the persisted handle.
+ * it does with notices the driver raises, and the host loop that wakes the tick.
+ * The driver itself is mocked (its own suite is managedRunDriver's), so this
+ * asserts only the wiring choices that make a scheduled run the SAME run an
+ * attended one is: the same entry point, the same fail-fast single-writer lock,
+ * and the unattended read of the persisted handle.
  */
 
 // The real module is kept for its notice constant (the sink's whole decision is
@@ -179,14 +178,13 @@ describe("the notices an unattended run can raise", () => {
     warn.mockRestore();
   });
 
-  test("carry the run's resolved shape, both notices, to the diagnostic log", async () => {
+  test("both notices holding the run's resolved shape reach the diagnostic log", async () => {
     // The unattended seat is the one where a widening of the match goes
     // unnoticed: nobody is watching, and the terms it resolves from are a
-    // standing record rather than something authored this morning. So the
-    // pre-round notices must leave a line behind rather than being swallowed by
-    // the drop policy above -- which they are not named into, dropping being a
-    // positive match. Asked with the strings core actually composes, since the
-    // sink's whole decision is which notice it was handed.
+    // standing record, not something authored this morning. The pre-round
+    // notices must leave a line behind rather than being swallowed by the drop
+    // policy above, which does not name them. Asserted with the strings core
+    // actually composes, since the sink's whole decision is which notice it was handed.
     const warn = vi.spyOn(log, "warn").mockImplementation(() => undefined);
     const { cardinalityNotice, pairTableAdvisory } = describeResolvedRunShape({
       cardinality: "many-to-many",
@@ -303,7 +301,7 @@ describe("the host that wakes the tick", () => {
     // meanwhile is picked up at the next wake rather than after the occupancy
     // ends.
     expect(tick).toHaveBeenCalledTimes(6);
-    // One registry, handed to every wake: that identity is what carries the
+    // One registry, handed to every wake: that identity is what holds the
     // per-record guard across them.
     expect(new Set(registries).size).toBe(1);
     expect([...registries[registries.length - 1]]).toEqual([OCCUPIED]);

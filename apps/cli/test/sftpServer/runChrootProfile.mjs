@@ -9,7 +9,7 @@
 // The capability check is duplicated here (kept trivially in sync with
 // chrootCapability() in nativeSshdServer.ts) so the skip happens before vitest
 // and the native backend are ever loaded; the backend keeps its own check as a
-// backstop for a direct PSILINK_SFTP_NATIVE_PROFILE=chroot invocation.
+// fallback for a direct PSILINK_SFTP_NATIVE_PROFILE=chroot invocation.
 import { spawn } from "node:child_process";
 
 function chrootCapability() {

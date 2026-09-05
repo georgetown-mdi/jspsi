@@ -52,21 +52,17 @@ import { inProcessOnly } from "../sftpBackendGate";
 // -- here driven through the live runOnlineBootstrap chain rather than a direct
 // call.
 //
-// The stub DECLINES by default and the first-use test opts into confirming only
-// for its own run (restoring the decline default afterward). That default matters
-// because the stub is file-scoped: besides the host-key trust prompt (reached only
-// when unpinned AND interactive, which the first-use test alone arranges),
-// accept.ts also calls promptConfirm for the invitation-acceptance prompt with no
-// isTTY guard. No current test exercises that accept.ts handler path (they drive
-// validateAccept -> runOnlineBootstrap directly), so none reach it -- but an
-// always-true default would silently auto-confirm it for a future test that did.
-// Declining by default makes such a forgotten stub abort loudly instead.
+// The stub declines by default; the first-use test alone opts into confirming,
+// restoring the decline afterward. accept.ts also calls promptConfirm for the
+// invitation-acceptance prompt with no isTTY guard, and no current test reaches
+// that path -- declining by default means a test that started exercising it
+// unnoticed would abort loudly instead of auto-confirming unseen.
 vi.mock("../../src/util/prompt", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../../src/util/prompt")>();
   return { ...actual, promptConfirm: vi.fn(async () => false) };
 });
 
-// Why this seam and not the yargs handlers: invite/accept's handlers wrap their
+// Why validate* -> runOnlineBootstrap and not the yargs handlers: invite/accept's handlers wrap their
 // whole body in runOrExit (which calls process.exit on any thrown error) and
 // accept blocks on a stdin confirmation prompt -- both make running the two
 // parties concurrently in one process unworkable. validate* -> runOnlineBootstrap
@@ -90,17 +86,17 @@ afterEach(() => {
 
 // Validation-phase logger: the warnings validateInvite/validateAccept emit are
 // not under test here, so keep them quiet. runOnlineBootstrap creates its own
-// loggers by name (as in production), so protocol diagnostics still surface.
+// loggers by name (as in production), so protocol diagnostics are still reported.
 const log = getLogger("online-integ-test");
 log.setLevel("silent");
 
 // Bound each side's transport wait -- the inviter via acceptTimeout, the acceptor
 // via options.peerTimeout -- well under the per-test vitest timeouts below, so a
 // genuine stall fails fast with a clean peer-timeout error instead of racing the
-// framework's kill. This matters because core's default peer timeout is one hour
-// (DEFAULT_PEER_TIMEOUT_MS), which would otherwise leave a hung acceptor waiting
-// far past the test timeout. Both the happy path and the mismatch handshake
-// resolve in a few seconds, so the value is pure safety margin, not a tuning knob.
+// framework's kill. core's default peer timeout is one hour
+// (DEFAULT_PEER_TIMEOUT_MS); both the happy path and the mismatch handshake
+// resolve in a few seconds, so the value is pure safety margin, not a tuning
+// setting.
 const PEER_TIMEOUT_SECONDS = 30;
 
 // Minimal options with config/key/record at fresh paths under the work dir, so
@@ -163,10 +159,10 @@ async function readStableOutput(
 }
 
 // The de-symmetrized inputs the happy-path round trip uses on both transports.
-// Each side carries a non-matching row -- the inviter's Dave (row 2), the
+// Each side includes a non-matching row -- the inviter's Dave (row 2), the
 // acceptor's Zoe (row 0) -- so the output proves the PSI filters on both sides
-// rather than echoing every record. The two non-matchers sit at deliberately
-// different positions so the shared records land at different local indices on
+// rather than echoing every record. The two non-matchers sit at different
+// positions by design, so the shared records land at different local indices on
 // each side (Bob at invite row 0 / accept row 1; Carol at invite row 1 / accept
 // row 2). That makes the association table asymmetric, so the assertions below
 // pin the actual local->partner mapping, not merely which rows matched: a bug
@@ -204,7 +200,7 @@ async function runOnlineRoundTrip(params: {
   assertPersistedConnection: (spec: ExchangeSpec) => void;
   // The server's host-key fingerprint, supplied for the sftp transport so the
   // built connection is pinned -- the no-pin default is fail-closed, and an
-  // sftp:// URL cannot carry the pin. Omitted for filedrop (no host key).
+  // sftp:// URL cannot hold the pin. Omitted for filedrop (no host key).
   hostKeyFingerprint?: string;
 }): Promise<void> {
   const { url, assertPersistedConnection } = params;
@@ -235,7 +231,7 @@ async function runOnlineRoundTrip(params: {
   expect(inviteReady.mode).toBe("online");
   if (inviteReady.mode !== "online") return;
   // Pre-pin the host key on the built sftp connection, standing in for an
-  // operator who pinned it out-of-band (the sftp:// URL cannot carry it). With a
+  // operator who pinned it out-of-band (the sftp:// URL cannot hold it). With a
   // pin present, runOnlineBootstrap's first-use establishHostKeyTrust is a no-op
   // and the connection proceeds; the pin lands in the persisted config too, since
   // runOnlineBootstrap saves this same connection. The unpinned first-use path is
@@ -312,8 +308,8 @@ async function runOnlineRoundTrip(params: {
     }),
   ]);
 
-  // The post-handshake config write succeeded on both sides (a failure surfaces
-  // here as configWriteError without aborting the exchange).
+  // The post-handshake config write succeeded on both sides (a failure is
+  // reported here as configWriteError without aborting the exchange).
   expect(inviteResult.configWriteError).toBeUndefined();
   expect(acceptResult.configWriteError).toBeUndefined();
 
@@ -331,7 +327,7 @@ async function runOnlineRoundTrip(params: {
   expect(inviteKey!.sharedSecret).not.toBe(inviteReady.sharedSecret);
 
   // -- The PSI intersection is found; both sides learn it (expectsOutput). --
-  // The inputs carry only linkage fields (no payload/identifier column), so each
+  // The inputs contain only linkage fields (no payload/identifier column), so each
   // side's output is the association table -- "row_id,their_row_id" -- pairing the
   // local matched row index to the partner's. The two matched records (Bob row 0,
   // Carol row 1) appear on both sides; the inviter's extra Dave (row 2) does not.
@@ -361,7 +357,7 @@ async function runOnlineRoundTrip(params: {
   expect(acceptMatched.pairs).toEqual(new Set(["1,0", "2,1"]));
 
   // -- Both config files are written after the exchange (saveConfig-after-
-  //    runProtocol), carrying the connection but never the shared secret. --
+  //    runProtocol), holding the connection but never the shared secret. --
   for (const cfg of [inviteOptions.configFile, acceptOptions.configFile]) {
     expect(fs.existsSync(cfg)).toBe(true);
     const spec = parseExchangeSpec(YAML.parse(fs.readFileSync(cfg, "utf8")));
@@ -742,7 +738,7 @@ describe("sftp", () => {
   const srv = sftpServer();
   // This leg threads inline user:password credentials through an sftp:// URL,
   // which the password-authenticating in-process backend supports; the native
-  // sshd backend authenticates by public key (a URL cannot carry a key), so it
+  // sshd backend authenticates by public key (a URL cannot hold a key), so it
   // runs in-process only.
 
   // Both parties are SFTP clients of the same served path -- the realistic
@@ -785,7 +781,7 @@ describe("sftp", () => {
           const server = (spec.connection as SFTPConnectionConfig).server;
           // The first-use pin is persisted into the saved config.
           expect(server.hostKeyFingerprint).toBe(srv.hostKeyFingerprint);
-          // host/port/path/credentials were all carried from the URL through
+          // host/port/path/credentials were all threaded from the URL through
           // connectionFromURL into the persisted config (saveConfig keeps inline
           // connection credentials, protected at 0600, and strips only the shared
           // secret).
@@ -803,23 +799,21 @@ describe("sftp", () => {
   inProcessOnly(
     "sftp: a first-use online invite + accept over an unpinned server prompts, confirms, and persists the live host key into both saved configs",
     async () => {
-      // The seam this guards. With no pin on the built connection (an sftp:// URL
-      // cannot carry a host_key_fingerprint), runOnlineBootstrap's first-use
-      // establishHostKeyTrust fires: it probes the live server for its real host
-      // key, the operator confirms, and the captured fingerprint -- mutated into
-      // the ORIGINAL connection, which runOnlineBootstrap then clones for the live
-      // connect -- must flow through the post-handshake saveConfig and land on
-      // disk as connection.server.host_key_fingerprint. The sibling round-trip
-      // pre-pins out-of-band so establishHostKeyTrust no-ops there; this drives the
-      // composed prompt-to-saved-config chain that one deliberately skips, so a
-      // regression breaking the pin-reaches-saveConfig wiring (but not the
-      // credential, which the round-trip already threads) cannot pass CI green.
+      // What this test covers: with no pin on the built connection (an sftp:// URL
+      // cannot hold a host_key_fingerprint), runOnlineBootstrap's first-use
+      // establishHostKeyTrust fires: it probes the live server, the operator
+      // confirms, and the captured fingerprint is mutated into the original
+      // connection before runOnlineBootstrap clones it for the live connect, so
+      // the fingerprint must still flow through the post-handshake saveConfig and
+      // land on disk as connection.server.host_key_fingerprint. The sibling
+      // round-trip pre-pins out-of-band, so establishHostKeyTrust no-ops there and
+      // never drives this prompt-to-saved-config chain.
       const tag = "firstuse";
       // Create the served host directory before either party connects (the
       // connection does not create remote dirs), mirroring the round-trip above.
       await fsp.mkdir(path.join(SFTP_LOCAL_ROOT, tag), { recursive: true });
       const serverPath = `${SFTP_PATH_ROOT}/${tag}`;
-      // The sftp:// URL carries the inline credentials and the server path but no
+      // The sftp:// URL holds the inline credentials and the server path but no
       // host key -- exactly the realistic first-use input.
       const url = `sftp://${srv.usera.username}:${srv.usera.password}@${srv.host}:${srv.port}${serverPath}`;
 
@@ -833,7 +827,7 @@ describe("sftp", () => {
       const acceptOut = path.join(work, "fu-accept-out.csv");
 
       // Validate builds each side's connection from the URL (the no-network half);
-      // neither carries a pin.
+      // neither holds a pin.
       const inviteReady = await validateInvite({
         resolved: resolveInvitePositionals([url, inviteInput, inviteOut]),
         options: inviteOptions,
@@ -879,7 +873,7 @@ describe("sftp", () => {
       // finally. Everything else -- the probe that reads the server's real key, the
       // in-place mutation, the clone for the live connect, the handshake, and the
       // post-handshake saveConfig -- runs live. Each side emits one "authenticity
-      // of host ... cannot be established" WARN carrying the presented fingerprint;
+      // of host ... cannot be established" WARN containing the presented fingerprint;
       // capture WARNs so they are asserted rather than leaked to the suite console
       // (capture binds regardless of when these loggers were first materialized,
       // because the integration setup installs the interceptor eagerly). The isTTY
@@ -923,7 +917,7 @@ describe("sftp", () => {
             (level) => level === "WARN",
           );
 
-        // saveConfig fired on both sides (a write failure surfaces here as
+        // saveConfig fired on both sides (a write failure is reported here as
         // configWriteError rather than aborting the completed exchange).
         expect(inviteResult.configWriteError).toBeUndefined();
         expect(acceptResult.configWriteError).toBeUndefined();
@@ -933,7 +927,7 @@ describe("sftp", () => {
         // prove the composed chain ran rather than no-opping on a present pin.
         expect(vi.mocked(promptConfirm)).toHaveBeenCalledTimes(2);
 
-        // Two first-use authenticity notices, one per side, each carrying the live
+        // Two first-use authenticity notices, one per side, each containing the live
         // server's real fingerprint -- the captured pin observed before it reaches
         // disk. Filter to the notices rather than asserting the total captured
         // count: withCapturedLogs intercepts every WARN process-wide for the
@@ -966,7 +960,7 @@ describe("sftp", () => {
         }
 
         // Every secret-bearing artifact this first-use run wrote is owner-only
-        // (0600): the saved configs carry the inline SFTP password threaded
+        // (0600): the saved configs hold the inline SFTP password threaded
         // through the URL (alongside the just-pinned fingerprint), and the key
         // files hold the rotated shared secret. They are written via
         // writeFileOwnerOnly / saveKeyFile precisely so group/other cannot read
@@ -1004,7 +998,7 @@ describe("sftp", () => {
       const acceptOptions = testOptions("fc-accept");
 
       // Mint an invitation and build the acceptor's connection (the no-network
-      // validate half); the acceptor's connection carries NO host_key_fingerprint.
+      // validate half); the acceptor's connection holds no host_key_fingerprint.
       const inviteReady = await validateInvite({
         resolved: resolveInvitePositionals([
           url,

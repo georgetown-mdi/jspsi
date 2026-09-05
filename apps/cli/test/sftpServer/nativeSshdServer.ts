@@ -75,7 +75,7 @@ export interface NativeSshdOptions {
   profile?: NativeProfile;
 }
 
-// A modern, deliberately narrow crypto policy. Every entry intersects what the
+// A modern, narrow crypto policy. Every entry intersects what the
 // pure-JS ssh2 client offers by default on Node 26 (curve25519 kex, an ed25519
 // host key, AEAD ciphers, ETM MACs, ed25519 user keys), so the positive
 // handshake stays green while the server advertises only a locked-down set. The
@@ -89,14 +89,13 @@ const RESTRICTED_CRYPTO_DIRECTIVES = [
   "PubkeyAcceptedAlgorithms ssh-ed25519",
 ];
 
-// Realistic connection/auth rate limits, kept loose enough that a slow CI run --
-// the heavy-exchange tests run ~13x slower on this backend on CI -- cannot trip
-// them and turn a perf issue into a flaky failure. LoginGraceTime bounds the
-// per-connection auth window (auth completes in well under a second normally);
-// MaxStartups governs concurrent UNAUTHENTICATED connections (the suite opens a
-// couple at a time); MaxSessions caps sessions per connection (the adapter uses
-// one). PerSourcePenalties is appended separately, gated on sshd support, since
-// it is unknown on OpenSSH older than the CI/runner version.
+// Realistic connection/auth rate limits, kept loose enough that a slow CI
+// run -- the heavy-exchange tests run ~13x slower on this backend on CI --
+// cannot trip them into a flaky failure. LoginGraceTime bounds the
+// per-connection auth window; MaxStartups governs concurrent unauthenticated
+// connections; MaxSessions caps sessions per connection. PerSourcePenalties
+// is appended separately, gated on sshd support (unknown on OpenSSH older
+// than the CI/runner version).
 const RATE_LIMITED_DIRECTIVES = [
   "MaxAuthTries 4",
   "LoginGraceTime 30",
@@ -135,14 +134,14 @@ async function resolveSshd(): Promise<string> {
 }
 
 /**
- * Whether the chroot profile can run here. ChrootDirectory requires sshd to call
- * chroot(2) (root only) over a jail whose every path component is root-owned and
- * not group/world-writable, so the unprivileged child sshd this backend normally
- * runs cannot do it. The leg therefore needs the whole test process to run as
- * root on Linux; the reason string is surfaced to the operator when it cannot.
- * The backstop in startNativeSshdServer calls this; the chroot runner
- * (runChrootProfile.mjs) re-implements the same check in plain JS, since it must
- * decide to skip before this module -- and vitest -- is ever loaded.
+ * Whether the chroot profile can run here. ChrootDirectory requires sshd to
+ * call chroot(2) (root only) over a jail whose every path component is
+ * root-owned and not group/world-writable, so the unprivileged child sshd
+ * this backend normally runs cannot do it. The reason string is shown to
+ * the operator when it cannot. The safety check in startNativeSshdServer
+ * calls this; the chroot runner (runChrootProfile.mjs) re-implements the
+ * same check in plain JS, since it must decide to skip before this module
+ * -- and vitest -- is ever loaded.
  *
  * @internal exported for testing
  */
@@ -262,14 +261,12 @@ async function validateConfig(
 }
 
 // Whether the locally resolved sshd accepts PerSourcePenalties -- the one
-// rate-limit directive that cannot be validated as part of the served config,
-// because an sshd too old to know it (before OpenSSH 9.8) would reject the whole
-// rate-limited config at the validation step, turning a soft capability gap into
-// a hard test failure. So it is probed in isolation with a minimal config. The
-// probe mirrors the served config's `StrictModes no` so the host key under the
-// world-readable temp workDir is judged on the directive's validity, not
-// key-file permission strictness (which would false-negative and silently drop a
-// supported directive); the probe file is removed in the finally.
+// rate-limit directive that cannot be validated as part of the served
+// config, since an sshd too old to know it (before OpenSSH 9.8) would
+// reject the whole config, turning a soft capability gap into a hard test
+// failure. Probed in isolation instead, mirroring the served config's
+// `StrictModes no` so a world-readable temp workDir does not itself cause a
+// false negative.
 async function sshdSupportsPerSourcePenalties(
   sshd: string,
   hostKeyPath: string,
@@ -301,20 +298,16 @@ interface NativeAttempt {
 }
 
 /**
- * Spawn a native OpenSSH sshd as a child running internal-sftp, in one of the
- * hardened profiles (see NativeProfile). The `baseline` default is the Phase-1
- * config: an unprivileged child serving a real temp-dir path without a chroot.
- * It authenticates two distinct client keys -- both mapped to the current OS
- * user, since an unprivileged sshd cannot authenticate users that do not exist
- * in the OS -- over a single shared served directory, which is the
- * served-directory fidelity the rendezvous protocol needs. Password auth as the
- * current user is the fiddliest path (PAM/shadow), so this backend authenticates
- * by public key; the bulk password-auth coverage runs against the in-process
- * backend.
+ * Spawn a native OpenSSH sshd as a child running internal-sftp, in one of
+ * the hardened profiles (see NativeProfile). The `baseline` default is the
+ * unprivileged Phase-1 config: two distinct client keys, both mapped to the
+ * current OS user (an unprivileged sshd cannot authenticate a user that
+ * does not exist), share one served directory. Authenticates by public key
+ * rather than password, since password auth as the current user needs
+ * PAM/shadow; the in-process backend covers password auth instead.
  *
- * The hardened profiles layer additional sshd directives (and, for `chroot`, a
- * root-owned jail and a root sshd) onto that same backend, each run against the
- * unchanged conformance suite.
+ * The hardened profiles layer additional sshd directives onto that same
+ * backend, each run against the unchanged conformance suite.
  *
  * @internal exported for testing
  */
@@ -326,7 +319,7 @@ export async function startNativeSshdServer(
   if (isChroot) {
     const cap = chrootCapability();
     if (!cap.ok) {
-      // Backstop for a direct `PSILINK_SFTP_NATIVE_PROFILE=chroot` run that
+      // Safety check for a direct `PSILINK_SFTP_NATIVE_PROFILE=chroot` run that
       // bypasses the runChrootProfile.mjs runner (which skips cleanly instead);
       // fail with the actionable reason rather than a confusing chroot error.
       throw new Error(
@@ -397,22 +390,20 @@ export async function startNativeSshdServer(
 
     const authorizedKeysPath = path.join(workDir, "authorized_keys");
     // One key per line with an explicit separator, rather than relying on
-    // ssh-keygen's .pub files always carrying a trailing newline.
+    // ssh-keygen's .pub files always including a trailing newline.
     await fsp.writeFile(
       authorizedKeysPath,
       `${useraPub.trimEnd()}\n${userbPub.trimEnd()}\n`,
       { mode: 0o600 },
     );
 
-    // The base config is the unchanged baseline: StrictModes off so sshd accepts
-    // key files under a world-readable temp dir; internal-sftp serves backingDir.
-    // The non-chroot profiles serve it at its real absolute path (root-owned
-    // chroot components are unattainable unprivileged); the chroot profile adds
-    // ChrootDirectory below. The adapter only ever opens the SFTP subsystem;
+    // The base config is the unchanged baseline: StrictModes off so sshd
+    // accepts key files under a world-readable temp dir; internal-sftp
+    // serves backingDir (the chroot profile adds ChrootDirectory below).
     // ForceCommand pins every session to internal-sftp so an authenticated
-    // connection cannot open a shell or run an arbitrary command as the OS user.
-    // The allowlist profile narrows AllowUsers to an explicit user@host matrix;
-    // every other profile keeps the plain baseline allowlist.
+    // connection cannot open a shell or run an arbitrary command as the OS
+    // user. The allowlist profile narrows AllowUsers to an explicit
+    // user@host matrix; every other profile keeps the baseline allowlist.
     const allowUsers =
       profile === "allowlist"
         ? `AllowUsers ${osUser}@127.0.0.1`
@@ -454,7 +445,7 @@ export async function startNativeSshdServer(
     const configBody = `${directives.join("\n")}\n`;
 
     // Validate before spending start attempts so an unsupported directive on
-    // this host's sshd surfaces as a clear error, not a readiness timeout.
+    // this host's sshd shows up as a clear error, not a readiness timeout.
     const validationConfigPath = path.join(workDir, "sshd_config_validate");
     await fsp.writeFile(
       validationConfigPath,
@@ -468,7 +459,7 @@ export async function startNativeSshdServer(
       );
     } else if (validation.stderr) {
       // sshd -t accepted the config but emitted a warning (e.g. a deprecated
-      // directive). Surface it instead of dropping it, so a notice of a future
+      // directive). Report it instead of dropping it, so a notice of a future
       // breakage is visible in the test log rather than silent.
       console.warn(
         `[sftp-test-server] sshd -t warning for the "${profile}" profile:\n` +

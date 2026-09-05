@@ -180,7 +180,7 @@ describe("sanitizeErrorForDisplay", () => {
     );
   });
 
-  test("passes a message carrying the elision marker's text through as content", () => {
+  test("passes a message holding the elision marker's text through as content", () => {
     // The marker is plain printable ASCII, so a partner-controlled message that
     // holds its text meets the escape and the cap as any other content does:
     // nothing about the text is privileged, and nothing marks it as the
@@ -325,17 +325,12 @@ describe("sanitizeErrorForDisplay", () => {
     ).toBe("outer\ncaused by: [object Object]");
   });
 
-  // The guarantee the sink holds ALONE. Composition sites interpolate partner
-  // and server bytes raw, so nothing between the wire and here escapes anything:
-  // if this renderer let a byte through, it would reach the operator's terminal
-  // as that byte. Stated as a property over every position a hostile value can
-  // occupy in a cause chain rather than as a case per position, because the
-  // property is what the composition sites are allowed to rely on.
-  //
-  // The one control character permitted is the newline this module itself emits
-  // between links (CAUSE_SEPARATOR); every other byte outside printable ASCII is
-  // a leak. The CLI integration console sentinel enforces the same predicate on
-  // what actually reaches the console at runtime.
+  // The sink's whole guarantee, checked over every position a hostile value
+  // can occupy in a chain: composition sites interpolate partner and server
+  // bytes raw, so any byte this renderer lets through reaches the operator's
+  // terminal unescaped. Only this module's own CAUSE_SEPARATOR newline is a
+  // permitted control character; every other non-printable-ASCII byte is a
+  // leak. The CLI console sentinel enforces the same predicate at runtime.
   test("renders only printable ASCII plus its own framing newline", () => {
     const hostile = [
       "\x1b[2J\x1b[31mANSI",
@@ -367,7 +362,7 @@ describe("sanitizeErrorForDisplay", () => {
     }
   });
 
-  describe("private-key redaction backstop", () => {
+  describe("private-key redaction safety check", () => {
     const KEY_BODY = "MIIByteslookingsecret0123456789ABCDEFabcdef+/wEHEHE";
 
     test("redacts a PEM private-key block embedded in a message", () => {
@@ -414,7 +409,7 @@ describe("sanitizeErrorForDisplay", () => {
       expect(out).not.toContain(KEY_BODY);
     });
 
-    test("redacts a private key carried on a cause-chain link", () => {
+    test("redacts a private key held on a cause-chain link", () => {
       const inner = new Error(
         `-----BEGIN PRIVATE KEY-----\n${KEY_BODY}\n-----END PRIVATE KEY-----`,
       );
@@ -593,7 +588,7 @@ describe("sanitizeErrorChainLinks", () => {
     );
   });
 
-  test("carries an arriving elision marker rather than re-cutting it away", () => {
+  test("keeps an arriving elision marker rather than re-cutting it away", () => {
     // The renderer appends the marker PAST the last link's cap, so a link that
     // spent its whole budget arrives over it. Re-escaping the link whole would
     // charge the marker's own characters to that budget and truncate them off,
@@ -685,7 +680,7 @@ describe("redactAndSanitizeForDisplay", () => {
     );
   });
 
-  test("leaves text carrying no key material exactly as the escape alone would", () => {
+  test("leaves text holding no key material exactly as the escape alone would", () => {
     for (const fragment of ["", "ssh-ed25519", "SHA256:abc/def+ghi="]) {
       expect(redactAndSanitizeForDisplay(fragment)).toBe(
         sanitizeForDisplay(fragment),

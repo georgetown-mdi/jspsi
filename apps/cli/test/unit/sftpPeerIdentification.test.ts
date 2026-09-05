@@ -23,13 +23,11 @@ import {
 import type { PeerAnswer } from "../../src/connection/sftpPeerIdentification";
 
 // The diagnosis of a dial that died before the peer identified itself as an SSH
-// server. The five peers the acceptance case names are DRIVEN rather than
-// stubbed -- a real listener answering a real socket -- because what is being
-// asserted is what arrives on a socket, which a stub would only restate: an HTTP
+// server. The five peers the acceptance case names are driven rather than
+// stubbed, since what is asserted is what arrives on a real socket: an HTTP
 // error page, a TLS alert record, an accept-then-clean-close, an
-// accept-then-reset, and a valid SSH identification string. The control against
-// a real SSH server, whose banner these listeners only imitate, is the
-// integration suite's probe against the SFTP test server.
+// accept-then-reset, and a valid SSH identification string. The real-server
+// control is the integration suite's probe against the SFTP test server.
 
 const listeners: net.Server[] = [];
 const sockets: net.Socket[] = [];
@@ -88,7 +86,7 @@ const BUDGET_MS = 2_000;
 const rendered = (error: unknown): string => sanitizeErrorForDisplay(error);
 
 describe("observePeerAnswer reads what answered the port", () => {
-  test("names an HTTP response and carries its first bytes", async () => {
+  test("names an HTTP response and includes its first bytes", async () => {
     const endpoint = await peerAnswering((socket) =>
       socket.end(HTTP_ERROR_PAGE),
     );
@@ -175,7 +173,7 @@ describe("observePeerAnswer reads what answered the port", () => {
     // The FAILING side of the bound above, driven because the copy is written
     // around it: a real SSH server whose banner outruns the read lands in the
     // non-SSH classification, so the operator's message states what the first
-    // bytes carried rather than what the peer is.
+    // bytes held rather than what the peer is.
     const preamble = "authorized use only\r\n".repeat(32);
     expect(preamble.length).toBeGreaterThan(PEER_ANSWER_READ_MAX_BYTES);
     const endpoint = await peerAnswering((socket) => {
@@ -194,7 +192,7 @@ describe("observePeerAnswer reads what answered the port", () => {
     // was read by then.
     const endpoint = await peerAnswering((socket) => {
       socket.write("authorized use only\r\n");
-      // Unref'd: the case settles on the deadline, and nothing here should hold
+      // Unref'd: the case is decided on the deadline, and nothing here should hold
       // the loop open waiting for a write whose whole point is arriving late.
       setTimeout(() => socket.end("SSH-2.0-OpenSSH_9.6p1\r\n"), 400).unref();
     });
@@ -238,7 +236,7 @@ describe("observePeerAnswer reads what answered the port", () => {
 // A peer answering the port with PEM-shaped bytes. The strip runs over the whole
 // retained read and the excerpt bound is applied to what it leaves, so every
 // consumer is handed the same treated bytes rather than each remembering the
-// call. The clip is what makes that order load-bearing -- a marker it cut in half
+// call. The clip is what makes that order critical -- a marker it cut in half
 // matches neither redaction rule -- so the marker's three placements relative to
 // the bound are driven separately, over real sockets like the reads above.
 describe("the excerpt is redacted before it is clipped", () => {
@@ -303,7 +301,7 @@ describe("the excerpt is redacted before it is clipped", () => {
     expect(excerpt).toBe("X".repeat(PEER_EXCERPT_MAX_BYTES));
   });
 
-  test("the composed chain carries the stripped excerpt as it stands", async () => {
+  test("the composed chain includes the stripped excerpt as it stands", async () => {
     const excerpt = await excerptOf(
       `${HTTP_HEAD}${BEGIN_MARKER}\r\n${KEY_BODY}`,
     );
@@ -465,7 +463,7 @@ describe("explainPeerIdentificationFailure partitions the peer's bytes", () => {
       ).split("\ncaused by: ");
       const summary = links[0];
       expect(summary).toContain("did not identify itself");
-      // What the peer's first bytes carried, which is what was read -- not a
+      // What the peer's first bytes held, which is what was read -- not a
       // verdict on what the peer is, which the bounded read cannot establish.
       expect(summary).toContain("the first bytes the peer");
       expect(summary).toContain("not an SSH identification string");
@@ -520,11 +518,11 @@ describe("explainPeerIdentificationFailure partitions the peer's bytes", () => {
 // The composed sentence is one consumer of the read; a machine consumer -- the
 // console's host-key probe, which discards the child's stderr -- is the other, and
 // it reads the classification off the raised error rather than out of the prose.
-describe("the raised diagnostic carries the diagnosis structurally", () => {
+describe("the raised diagnostic holds the diagnosis structurally", () => {
   const endpoint = { host: "sftp.example.test", port: 2222 };
   const dialRejection = new Error("Connection lost before handshake");
 
-  test("a non-SSH answer carries its shape and the peer's own bytes", () => {
+  test("a non-SSH answer includes its shape and the peer's own bytes", () => {
     const explained = explainPeerIdentificationFailure(
       dialRejection,
       { kind: "non-ssh", shape: "http", excerpt: "HTTP/1.1 403 Forbidden" },
@@ -537,7 +535,7 @@ describe("the raised diagnostic carries the diagnosis structurally", () => {
     });
   });
 
-  test("a peer that closed having sent nothing carries that alone", () => {
+  test("a peer that closed having sent nothing holds that alone", () => {
     const explained = explainPeerIdentificationFailure(
       dialRejection,
       { kind: "closed-unanswered" },
@@ -562,7 +560,7 @@ describe("the raised diagnostic carries the diagnosis structurally", () => {
     });
   });
 
-  test("a failure this module never diagnosed carries none", () => {
+  test("a failure this module never diagnosed holds none", () => {
     expect(peerIdentificationDiagnosisOf(dialRejection)).toBeUndefined();
     expect(
       peerIdentificationDiagnosisOf(
@@ -580,10 +578,10 @@ describe("peerProbeTargetFromConnectOptions follows the dial it diagnoses", () =
   // Every dial enters the dial sequence with ssh2's connect options and never
   // with the config behind them, so this is the one derivation of the endpoint.
   // The port a portless dial reaches is not written here: it is whatever the
-  // pinned stack dials, and the integration premise reads that off a portless
-  // dial's own rejection and holds this to it, where a number written here would
-  // be a second premise nothing checks.
-  test("reads the endpoint the connect options carry", () => {
+  // pinned stack dials, and the integration assumption reads that off a
+  // portless dial's own rejection and holds this to it, where a number written
+  // here would be a second assumption nothing checks.
+  test("reads the endpoint the connect options hold", () => {
     expect(
       peerProbeTargetFromConnectOptions({
         host: "sftp.example.test",

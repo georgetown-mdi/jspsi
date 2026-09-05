@@ -20,12 +20,12 @@
  * It also gates the BYTES of every recorded line, allowlisted or not: operator-
  * facing text is escaped at its display sink, and an escaped line is printable
  * ASCII plus the newline `sanitizeErrorForDisplay` frames a cause chain with, so
- * anything else is a sink that was reached unescaped. That check is deliberately
- * independent of the allowlist -- a matcher accepts a line by its intended text,
- * which says nothing about the bytes an interpolated partner value smuggled into
- * it. It is the runtime half of the lint ban on rendering a raw error at a sink
+ * anything else is a sink that was reached unescaped. That check is independent
+ * of the allowlist -- a matcher accepts a line by its intended text, which says
+ * nothing about the bytes an interpolated partner value smuggled into it. It is
+ * the runtime half of the lint ban on rendering a raw error at a sink
  * (`eslint.config.mjs`), which sees call shapes in first-party source and cannot
- * see what a value carries at runtime.
+ * see what a value holds at runtime.
  *
  * Known limitations (accepted): it gates the three `console` methods, not raw
  * `process.stdout`/`process.stderr.write`, so a library that writes a file
@@ -90,27 +90,21 @@ const MAX_REPORTED_VIOLATIONS = 20;
 const UNESCAPED_DISPLAY_BYTE = /[^\x20-\x7e]/;
 
 // The one control sequence the display boundary itself emits: the separator
-// sanitizeErrorForDisplay joins a cause chain with. It is removed before the
-// byte test rather than exempted from it, because exempting the bare newline
-// would let a forged log line -- printable ASCII plus LF, one of the threats
-// this gate exists to catch -- pass unnoticed.
+// sanitizeErrorForDisplay joins a cause chain with. Removed before the byte
+// test, not exempted from it, so a forged line of printable ASCII plus a bare
+// LF cannot pass unnoticed.
 //
-// Stated limit: the removal is literal and carries no notion of who emitted the
-// sequence, so a line whose UNESCAPED payload itself contains `\ncaused by: `
-// survives the strip and passes the byte test. Distinguishing the renderer's
-// own framing from a payload that imitates it needs provenance this sees
-// nothing of -- it receives a flat joined line.
+// Stated limit: this strip is literal, so a line whose unescaped payload
+// itself contains `\ncaused by: ` survives it and passes the byte test.
 const RENDERER_FRAMING = /\ncaused by: /g;
 
-// Join console arguments into one matchable line. Strings pass through verbatim
-// (so a matcher reads the literal logged text); a non-string is inspected rather
-// than `String()`-coerced, so an object records as `{ key: 'value' }` instead of
-// the useless `[object Object]` a matcher could never usefully match.
-// `breakLength: Infinity` keeps each argument on one line. `inspect` can throw on
-// a hostile arg (e.g. a custom `util.inspect.custom` hook that throws), so it is
-// guarded: this runs inside the wrapped console call, and a throw here would turn
-// a benign log into a thrown exception that fails an unrelated test and skips the
-// pass-through. A formatting failure must never do that, so fall back.
+// Join console arguments into one matchable line. A non-string is inspected
+// (not `String()`-coerced) with `breakLength: Infinity`, so a matcher sees
+// `{ key: 'value' }` on one line instead of `[object Object]`.
+//
+// `inspect` can throw on a hostile arg (a custom `util.inspect.custom` hook
+// that throws); guarded here so a formatting failure never turns a benign log
+// into a thrown exception that fails an unrelated test.
 function formatArgs(args: unknown[]): string {
   return args
     .map((arg) => {
@@ -163,7 +157,7 @@ export class ConsoleSentinel {
       // written as `id\n` and read back by splitting on `\n` and trimming each
       // line. Any id the round-trip would alter -- an embedded newline (splits
       // into phantom ids) or surrounding whitespace including a trailing `\r`
-      // (the trim strips it, so the entry always reads as dead) -- would corrupt
+      // (the trim strips it, so the entry is always treated as dead) -- would corrupt
       // the aggregation silently, so reject it at the source.
       if (entry.id.includes("\n") || entry.id.trim() !== entry.id) {
         throw new Error(
@@ -174,7 +168,7 @@ export class ConsoleSentinel {
       }
       // A stateful regex (g/y) advances lastIndex across .test() calls, so the
       // same matcher could accept a line on one evaluation and reject it on the
-      // next. Make the documented footgun a hard guarantee.
+      // next. Turn the documented hazard into a hard guarantee.
       if (
         entry.match instanceof RegExp &&
         (entry.match.global || entry.match.sticky)
@@ -190,7 +184,7 @@ export class ConsoleSentinel {
   }
 
   /** Wraps `target` (the global `console` by default). Pass-through is preserved
-   * so output still surfaces -- the sentinel adds a failure, it never silences. */
+   * so output still shows -- the sentinel adds a failure, it never silences. */
   install(target: ConsoleLike = console): void {
     if (this.target) throw new Error("ConsoleSentinel is already installed");
     this.target = target;
@@ -259,7 +253,7 @@ export class ConsoleSentinel {
   }
 
   /**
-   * Recorded lines carrying a byte no escaped display text can hold (see
+   * Recorded lines containing a byte no escaped display text can hold (see
    * {@link UNESCAPED_DISPLAY_BYTE}). Evaluated over every recorded line,
    * allowlisted or not.
    */
@@ -283,7 +277,7 @@ export class ConsoleSentinel {
   }
 
   /**
-   * Throws if any recorded line carries an unescaped byte, or if any is
+   * Throws if any recorded line holds an unescaped byte, or if any is
    * un-allowlisted; no-op otherwise. The byte check runs first because an
    * allowlisted line can still fail it, and because it is the one that means a
    * display sink was reached unescaped rather than merely noisily.
@@ -310,12 +304,11 @@ export class ConsoleSentinel {
   }
 
   // Escape each line at this display boundary: a recorded line is whatever
-  // reached the console, which can carry a server- or partner-controlled string
-  // (ssh2 surfaces an SSH_MSG_DISCONNECT description on err.message, for one).
-  // Rendering it raw into the thrown error -- which lands in the CI log -- would
+  // reached the console, which can contain a server- or partner-controlled
+  // string (ssh2 exposes an SSH_MSG_DISCONNECT description on err.message).
+  // Rendering it raw into the thrown error, which lands in the CI log, would
   // let control bytes (ANSI/bidi/newline) ride in as log injection. The raw
-  // message stays untouched for matching (sanitize only at display, never the
-  // compared value). This mirrors the production sinks' sanitizeErrorForDisplay.
+  // message stays untouched for matching; sanitize only at display.
   private report(offenders: RecordedConsoleLine[]): string {
     const shown = offenders.slice(0, MAX_REPORTED_VIOLATIONS);
     const lines = shown.map(
@@ -330,23 +323,16 @@ export class ConsoleSentinel {
 
 /**
  * Lets pending async console output settle before an assertion. The
- * ssh2-sftp-client "Global ... listener" lines fire on connection-teardown
- * events emitted asynchronously, so a teardown triggered by one test lands a
- * tick or two later -- in the NEXT test's window, or after the last test. A
- * file-level `afterAll` that waits a timer macrotask and then a check-phase
- * callback (`setImmediate`) -- with the microtask queue draining automatically
- * between them -- attributes such a late line to this file rather than
- * misattributing it to the following test (or leaking it into the next file).
+ * ssh2-sftp-client "Global ... listener" lines fire asynchronously on
+ * connection teardown, so a late line can land in the next test's window
+ * unless this file-level `afterAll` step attributes it here first: wait a
+ * timer macrotask, then a check-phase callback (`setImmediate`), draining
+ * the microtask queue between them. Node-only (`setImmediate` is absent
+ * from the DOM lib).
  *
- * This is one drain step, not a guarantee: output that lands more than `timerMs`
- * after the last drain still escapes -- a finite afterAll cannot wait
- * unboundedly. The setup file calls this in a settle loop (drain until the
- * recorded count stops growing, up to a cap) so a teardown that emits in waves
- * is caught; a lone line arriving past the budget is the residual gap. The
- * sentinel's firm guarantee is for synchronous output and output within the
- * settle budget.
- *
- * Node-only: relies on `setImmediate`, which is not in the DOM lib.
+ * One drain step, not a guarantee: output past `timerMs` after the last drain
+ * still escapes. The setup file loops this (drain until the recorded count
+ * stops growing, up to a cap) to catch a teardown that emits in waves.
  */
 export async function flushPendingConsole(timerMs = 25): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, timerMs));
@@ -356,11 +342,10 @@ export async function flushPendingConsole(timerMs = 25): Promise<void> {
 /**
  * Given the raw contents of the cross-file matched-id sink (one matched id per
  * line, appended by each worker) and the allowlist, returns the entries no
- * worker matched -- the dead-entry candidates the suite teardown reports. Parses
- * defensively: blank lines are dropped and each line is trimmed, so a torn or
- * empty append cannot be mistaken for an id (it also matches the constructor's
- * id guard, which forbids the newline/whitespace that parsing would mangle).
- * Pure, so it is unit-tested directly; the teardown supplies the file contents.
+ * worker matched -- the dead-entry candidates the suite teardown reports.
+ * Blank lines are dropped and each line trimmed, matching the constructor's id
+ * guard so a torn or empty append is never mistaken for an id. Pure, so it is
+ * unit-tested directly; the teardown supplies the file contents.
  */
 export function deadAllowlistEntries(
   sinkContents: string,

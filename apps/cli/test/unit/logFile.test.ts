@@ -13,8 +13,8 @@ import {
   snapshotDiagnosticSinkAndLevel,
 } from "../loggingTestSupport";
 
-// configureLogFile installs core's process-wide diagnostic sink (the seam every
-// prefixed logger consults at emit time). These tests snapshot and restore that
+// configureLogFile installs core's process-wide diagnostic sink (the call site
+// every prefixed logger consults at emit time). These tests snapshot and restore that
 // sink -- and the level -- around each case, and give every test a uniquely named
 // logger so state from one test never bleeds into another.
 
@@ -143,9 +143,7 @@ test("configureLogFile: after close(), logging detaches from the file and does n
   // close() restores the prior sink and then closes the fd. Because core resolves
   // the diagnostic sink per log call, a log emitted after close() routes to the
   // restored sink (the default console routing here), never to the closed
-  // descriptor -- so it neither throws nor appends to the file. This is the
-  // guarantee that replaces the old creation-time hazard, where a logger bound to
-  // the fd could write into it after close().
+  // descriptor -- so it neither throws nor appends to the file.
   const logPath = path.join(tmpDir, "closed.log");
   const sink = configureLogFile(logPath);
   logLibrary.setDefaultLevel(logLibrary.levels.INFO);
@@ -161,11 +159,10 @@ test("configureLogFile: after close(), logging detaches from the file and does n
 });
 
 test("configureLogFile: diagnostics go to the file, never stdout", () => {
-  // The file sink is a distinct branch from the stderr sink, so pin its stdout
-  // purity directly: a regression that wrote the file sink's line to stdout would
-  // corrupt a piped result exactly as the original interleaving bug did, yet every
-  // other test here only reads the file. Spy stdout, log every level to the file,
-  // and assert stdout stays clean while the file captures the lines.
+  // The file sink is a distinct branch from the stderr sink; pin that a log
+  // written to the file never also reaches stdout, which would corrupt a piped
+  // result. Spy stdout, log every level to the file, and assert stdout stays
+  // clean while the file captures the lines.
   const logPath = path.join(tmpDir, "purity.log");
   const { stdoutWrites, restore } = captureStdio();
   const sink = configureLogFile(logPath);
@@ -196,7 +193,7 @@ test("configureLogFile: reroutes a logger created BEFORE the sink was installed"
   // the sink is installed, so --log-file captures them.
   const logPath = path.join(tmpDir, "precreated.log");
   logLibrary.setDefaultLevel(logLibrary.levels.INFO);
-  const log = getLogger("logfile-test-precreated"); // created before the sink
+  const log = getLogger("logfile-test-precreated");
   const sink = configureLogFile(logPath);
   try {
     log.info("late-routed to file");

@@ -9,7 +9,7 @@ import { validateAuthoredSftpServer } from "@jobs/sftpServer";
 import { TEST_HOST_KEY_FINGERPRINT, tempDataRoot } from "../utils/jobFixtures";
 
 // validateAuthoredSftpServer is the gate between an operator's in-console
-// authoring request and the connection block the appliance later composes into
+// authoring request and the connection block the console later composes into
 // CLI configs. These pin its strictness: only the allowlisted fields, an @path
 // credential that resolves, only literal canonical fingerprints, core's
 // cross-field refines.
@@ -112,7 +112,7 @@ describe("validateAuthoredSftpServer (request-sourced authoring path)", () => {
     );
   });
 
-  test("a host carrying userinfo, a scheme/path, or whitespace is rejected", () => {
+  test("a host with userinfo, a scheme/path, or whitespace is rejected", () => {
     const dir = scratchDir();
     const secretPath = writeSecretFile(dir);
     const dataRoot = path.join(dir, "data-root");
@@ -393,7 +393,7 @@ describe("validateAuthoredSftpServer (request-sourced authoring path)", () => {
 
   test("the split's retain precondition is NOT applied at authoring time", () => {
     // Retain mode is a rule over the exchange's tuning options, which the
-    // connection does not carry and this endpoint cannot know. Enforcing it here
+    // connection does not have and this endpoint cannot know. Enforcing it here
     // would make every split connection unauthorable; it is enforced where the
     // two meet (the console's form, the config compose, the CLI's own guard).
     const dir = scratchDir();
@@ -601,7 +601,7 @@ describe("validateAuthoredSftpServer mountRef credential path", () => {
   test("a resolved mountRef under the data root warns", () => {
     // The secrets mount is (mis)configured INSIDE the data root: the resolved
     // @path lands under the data root, so the containment check warns -- the picker
-    // path is held to the same warn-not-block posture as a typed ref.
+    // path is held to the same advisory posture as a typed ref.
     const dir = scratchDir();
     const dataRoot = path.join(dir, "data-root");
     const secretsDir = path.join(dataRoot, "secrets");
@@ -651,7 +651,7 @@ describe("validateAuthoredSftpServer raw (pasted) credential path", () => {
     const materialized = result.materializedCredentialPath!;
     expect(materialized).toBeDefined();
     expect(path.dirname(materialized)).toBe(scratch);
-    // The entry carries the @path, never the value.
+    // The entry has the @path, never the value.
     expect(result.entry.password).toBe(`@${materialized}`);
     expect(result.entry.password).not.toContain("s3cret");
     expect(fs.statSync(materialized).mode & 0o777).toBe(0o600);

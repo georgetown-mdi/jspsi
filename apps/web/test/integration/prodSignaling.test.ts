@@ -15,25 +15,22 @@ import {
 
 import type { ChildProcess } from "node:child_process";
 
-// Regression guard for the "create an invitation -> Lost connection to server"
-// bug on the DEPLOYED app. The PeerJS signaling server attaches its WebSocket
-// `upgrade` handler only when its /api/peerjs route first runs usePeerServer(),
-// and the real client dials that WebSocket with an explicit, pre-derived id --
-// it never makes the GET /api/peerjs/id that would load the route. So the server
-// must warm signaling itself at startup; the nitro production entry
-// (server/custom-entry.ts) does this via nitroApp.localFetch. This spawns the
-// real built server and connects the upgrade COLD (never an HTTP request to
-// /api/peerjs/*), so it only passes if that startup warm attached the handler.
+// Regression guard for the "create an invitation -> Lost connection to
+// server" bug: PeerJS attaches its WebSocket `upgrade` handler only once
+// /api/peerjs first runs usePeerServer(), but the real client dials that
+// WebSocket directly and never triggers the route -- so the server warms
+// signaling itself at startup (server/custom-entry.ts). This connects the
+// upgrade COLD, so it only passes if that startup warm attached the handler.
 //
-// Verified to fail (assertion, exit 1) when the custom-entry warm is removed and
-// the server rebuilt, so this is a real guard rather than a no-op.
+// Verified to fail (assertion, exit 1) when the custom-entry warm is removed
+// and the server rebuilt.
 //
-// This runs against whatever `.output` currently holds: if you change the startup
-// warm and re-run without rebuilding, an OLD build still on disk makes it pass
-// green against stale code. To validate a warm change locally, rebuild first
-// (`npm run build -w apps/web`); CI always rebuilds before this suite, so it is
-// unaffected. A run with no build at all is failed by requireProdBuild unless the
-// opt-out is set, in which case the skip below takes effect.
+// This runs against whatever `.output` currently holds: re-running without a
+// rebuild after changing the startup warm makes an old build pass green
+// against stale code. Rebuild (`npm run build -w apps/web`) to validate a
+// change locally; CI always rebuilds before this suite. A run with no build
+// at all is failed by requireProdBuild unless the opt-out is set, in which
+// case the skip below takes effect.
 
 const READY_TIMEOUT_MS = 30_000;
 const COLD_PROBE_DEADLINE_MS = 20_000;
@@ -50,8 +47,8 @@ describe.skipIf(!hasBuild)(
       const { child: proc, getLaunchError } = await spawnProdServer(port);
       child = proc;
 
-      // Readiness is the ROOT route only -- deliberately not /api/peerjs/*, which
-      // would warm signaling and defeat the test.
+      // Readiness is the ROOT route only, not /api/peerjs/*, which would warm
+      // signaling and defeat the test.
       await waitForRoot(`http://127.0.0.1:${port}/`, proc, getLaunchError);
     }, READY_TIMEOUT_MS + 10_000);
 

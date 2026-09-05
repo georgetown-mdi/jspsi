@@ -9,17 +9,15 @@ import {
 } from "../src/eventStream";
 
 /**
- * Acquire the machine-interface emitter the way every caller does -- through
- * {@link openEventStream}, which fuses the fail-closed fd-3 preflight to the
- * construction -- with fd 3 mocked as wired so the preflight passes in a test
- * process that does not own the descriptor. The emitter factory and its writer
- * are module-private, so this is the only route to one; a test that wants the
- * writer's behavior drives it through the emitter's methods.
+ * Acquire the machine-interface emitter the way every caller does, through
+ * {@link openEventStream}, with fd 3 mocked as wired so its fail-closed
+ * preflight passes in a test process that does not own the descriptor. The
+ * emitter factory and its writer are module-private, so this is the only
+ * route to one.
  *
- * Only fd 3 is answered from the mock: every other descriptor passes through to
- * the real `fstatSync`, so a test that stats a real file alongside this still
- * gets the truth. The caller restores the spy (`vi.restoreAllMocks` in an
- * `afterEach`, or the mock's own `mockRestore`).
+ * Only fd 3 is answered from the mock; every other descriptor passes through
+ * to the real `fstatSync`. The caller restores the spy (`vi.restoreAllMocks`
+ * in an `afterEach`, or the mock's own `mockRestore`).
  * @internal test-only
  */
 export function openEventStreamWithFdWired(): EventStreamEmitter {

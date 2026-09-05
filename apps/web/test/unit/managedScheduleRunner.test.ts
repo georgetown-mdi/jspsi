@@ -45,16 +45,12 @@ import type {
 } from "@psi/managedScheduleRunner";
 import type { ManagedLocalState } from "@psi/managedLocalStateShape";
 
-// The unattended runner's tick in Node, with the clock, the store, the delay and
-// the run all injected. Every instant here is pinned: the fake clock advances
-// only where real time would -- inside an attempt that spends its peer wait, and
-// inside the pacing delay -- so a window's occupancy is exact rather than
-// approximate, and the assertions can name the instant the last attempt ended.
-//
-// The store fake applies the REAL conditioned write
-// (`applyManagedExchangeScheduleAdvance`), so a test that advances the plan is
-// held to the same cadence-and-plan match the store enforces rather than to a
-// permissive stand-in.
+// The unattended runner's tick in Node, with the clock, the store, the delay
+// and the run all injected. The fake clock advances only where real time would
+// -- inside an attempt's peer wait and inside the pacing delay -- so a
+// window's occupancy is exact and the assertions can name the instant the
+// last attempt ended. The store fake applies the REAL conditioned write
+// (`applyManagedExchangeScheduleAdvance`), so a test is held to the store's own cadence-and-plan match.
 
 /** Anchor 2026-01-06T14:00Z, weekly, a three-hour window: window n opens
  * `2026-01-06 + 7n` at 14:00Z and closes at 17:00Z. */
@@ -283,7 +279,7 @@ describe("a due window in the open runtime", () => {
       nextWindow: "2026-01-13T14:00:00.000Z",
       consecutiveMisses: 0,
     });
-    // The run recorded its own `lastRun`; the advance carries none, so a window
+    // The run recorded its own `lastRun`; the advance holds none, so a window
     // produces one bookkeeping entry rather than two writers of it.
     expect(runner.advances[0].advance.lastRun).toBeUndefined();
   });
@@ -418,7 +414,7 @@ describe("a due window in the open runtime", () => {
     expect(entry.disposition).toBe("failed");
     // The window says nothing about the partner: no miss counted, and the run
     // that refused recorded its own `handed-off` bookkeeping, so the advance
-    // carries none.
+    // holds none.
     expect(runner.advances[0].advance.schedule.consecutiveMisses).toBe(0);
     expect(runner.advances[0].advance.lastRun).toBeUndefined();
   });
@@ -544,7 +540,7 @@ describe("a window whose attempts do not agree", () => {
 
   test("leaves the window failed when a drop past the data exchange trails the no-show waits", async () => {
     // Past that phase boundary the run had a partner to send payload to, which
-    // settles the question the miss count asks whatever the earlier waits found.
+    // decides the question the miss count asks whatever the earlier waits found.
     const runner = harness({
       records: [recordWith()],
       startAt: "2026-01-06T14:00:00.000Z",
@@ -771,7 +767,7 @@ describe("a wake while an earlier one is still occupying a window", () => {
       startAt: "2026-01-06T14:30:00.000Z",
       script: [{ kind: "hang" }, { kind: "succeed" }],
     });
-    // The registry the runtime carries across its wakes; the guard is what it
+    // The registry the runtime passes across its wakes; the guard is what it
     // holds, not the wake.
     const inFlight = new Set<string>();
 
@@ -843,7 +839,7 @@ describe("catch-up on wake", () => {
         consecutiveMisses: 1,
       },
     });
-    // An artifact carries no input handle (it is a device-local platform
+    // An artifact holds no input handle (it is a device-local platform
     // object), so the restored record is given one: what is under test is that
     // the stale plan catches up before the attempt, not the re-selection path.
     const restored = parseManagedExchangeRecord({

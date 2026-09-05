@@ -31,7 +31,7 @@ import {
 //
 // The peers are real listeners rather than stubs because what is asserted is
 // what arrives on a socket. The cycle-start case additionally needs a peer that
-// STOPS being an SSH server between two of its dials -- the reported case, an
+// stops being an SSH server between two of its dials -- the reported case, an
 // unattended scheduled run behind a proxy that intercepts the port -- so the
 // listener forwards to the real server until it is flipped.
 
@@ -100,13 +100,11 @@ function interceptableEndpoint(upstream: {
         },
         stop: async () => {
           // Retire each connection with a FIN and give it time to go, rather
-          // than destroying it outright: a dial this endpoint interfered with
-          // can leave a socket open here that the client has stopped reading,
-          // and destroying one resets it -- which the ssh2 Client reports as an
-          // error of its own, landing after the test that provoked it. The
-          // destroy is the backstop for anything the FIN did not retire, and it
-          // has to happen before close(), which waits on every connection this
-          // endpoint still holds.
+          // than destroying it outright: destroying a socket the client has
+          // stopped reading resets it, which the ssh2 Client reports as an
+          // error landing after the test that provoked it. The destroy is the
+          // safety check for anything the FIN did not retire, and runs before
+          // close(), which waits on every connection this endpoint still holds.
           const deadline = Date.now() + SOCKET_RETIREMENT_BUDGET_MS;
           while (open.some((socket) => !socket.destroyed)) {
             for (const socket of open) if (!socket.destroyed) socket.end();
@@ -142,10 +140,9 @@ const configFor = (
  * Retire a connection and the endpoint it ran over. Both halves draw
  * diagnostics of their own once a peer has been interfered with -- a teardown
  * re-dial over a transport the interception left behind, and the reset the
- * endpoint's own close sends whatever the client still holds -- which belong to
- * the interference rather than to what is under test; capture them rather than
- * silencing the logger, which is what the suite's console sentinel asks for.
- * Forwarding is restored first so the teardown's own dial reaches the server the
+ * endpoint's close sends the client -- which belong to the interference rather
+ * than to what is under test, so capture them instead of silencing the logger.
+ * Forwarding is restored first so the teardown's dial reaches the server the
  * connection was opened against.
  */
 const retireQuietly = (

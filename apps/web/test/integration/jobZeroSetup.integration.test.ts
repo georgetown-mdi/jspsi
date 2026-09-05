@@ -15,16 +15,12 @@ import {
 
 import type { ChildProcess } from "node:child_process";
 
-// The zero-setup (Direct exchange) drive path, demonstrated against the REAL built
-// server: a `mode: "zeroSetup"` intent creates a job the server drives with the CLI's
-// literal positional `$0` form -- no shared secret, no linkage terms, no composed
-// config or key file. The job API runs only in a console build, so the server env
-// sets VITE_DEPLOYMENT_PROFILE=console alongside the data root, and a filedrop
-// zero-setup composes its connection against the configured rendezvous mount, so
-// JOB_RENDEZVOUS_DIR is set. The CLI is stubbed with a binary that emulates a terms
-// mismatch (an error fd-3 event and a non-zero exit), so the run surfaces as a failed
-// job -- the failure the two parties see when their inferred terms disagree -- with no
-// real exchange or built CLI required.
+// The zero-setup (Direct exchange) drive path, against the real built server:
+// a `mode: "zeroSetup"` intent creates a job the server drives with the CLI's
+// literal positional `$0` form -- no shared secret, no linkage terms, no
+// composed config or key file. The job API runs only in a console build, so
+// the server sets VITE_DEPLOYMENT_PROFILE=console and JOB_RENDEZVOUS_DIR. The
+// CLI is stubbed to emit a terms mismatch, so the job fails.
 const termsMismatchStub = resolve(
   webRoot,
   "test/utils/zeroSetupTermsMismatchStub.mjs",
@@ -94,7 +90,7 @@ describe.skipIf(!hasBuild)(
       if (scratchDir) rmSync(scratchDir, { recursive: true, force: true });
     });
 
-    test("POST mode:zeroSetup runs, skips config/key, and surfaces a terms mismatch", async () => {
+    test("POST mode:zeroSetup runs, skips config/key, and reports a terms mismatch", async () => {
       if (dataRoot === undefined) throw new Error("fixtures not initialized");
       const intent = {
         mode: "zeroSetup",
@@ -116,7 +112,7 @@ describe.skipIf(!hasBuild)(
       expect(existsSync(join(dataRoot, id, ".psilink.key"))).toBe(false);
       expect(existsSync(join(dataRoot, id, "input.csv"))).toBe(true);
 
-      // The terms mismatch surfaces as a failed job, and its error event replays
+      // The terms mismatch shows as a failed job, and its error event replays
       // on the SSE stream (which closes after the terminal event).
       const status = await waitForJobStatus(port, id);
       expect(status).toBe("failed");

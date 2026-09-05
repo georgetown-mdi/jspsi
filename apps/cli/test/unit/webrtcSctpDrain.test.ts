@@ -14,7 +14,7 @@ function fakePeer(sctp: unknown): RTCPeerConnection {
 
 // --- queues present ----------------------------------------------------------
 
-test("outbound and sent both empty reads as acknowledged and transmitted", () => {
+test("outbound and sent both empty is treated as acknowledged and transmitted", () => {
   const peer = fakePeer({ sctp: { outboundQueue: [], sentQueue: [] } });
   expect(sctpOutboundAcknowledged(peer)).toBe(true);
   expect(sctpOutboundTransmitted(peer)).toBe(true);
@@ -38,19 +38,19 @@ test("a chunk sent but not yet acknowledged is transmitted but not acknowledged"
 // open; past that point the fallback below is what a torn-down association's
 // caller relies on, so it is pinned directly here rather than left as prose.
 
-test("a missing sctp association reads as fully acknowledged and transmitted", () => {
+test("a missing sctp association is treated as fully acknowledged and transmitted", () => {
   const peer = fakePeer(undefined);
   expect(sctpOutboundAcknowledged(peer)).toBe(true);
   expect(sctpOutboundTransmitted(peer)).toBe(true);
 });
 
-test("a missing inner sctp association reads as fully acknowledged and transmitted", () => {
+test("a missing inner sctp association is treated as fully acknowledged and transmitted", () => {
   const peer = fakePeer({ sctp: undefined });
   expect(sctpOutboundAcknowledged(peer)).toBe(true);
   expect(sctpOutboundTransmitted(peer)).toBe(true);
 });
 
-test("a queue field reshaped away from an array reads as fully acknowledged and transmitted", () => {
+test("a queue field reshaped away from an array is treated as fully acknowledged and transmitted", () => {
   const peer = fakePeer({
     sctp: { outboundQueue: "not an array", sentQueue: [] },
   });

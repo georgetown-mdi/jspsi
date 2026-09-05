@@ -283,7 +283,7 @@ test("single-pass sender accepts a resolved table whose partner half descends", 
   // The order is a property of the LOCAL half alone: the partner half's entries
   // follow their pairing, not their own order, so requiring it there would refuse
   // an honest table. The fixture's own halves happen to ascend together, so this
-  // is what keeps the rule from being read as covering both.
+  // is what keeps the rule from being treated as covering both.
   const err = await singlePassWithDeviation(
     onIndexTable((table) => [table[0], [...table[1]].reverse()]),
   );

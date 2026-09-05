@@ -91,7 +91,7 @@ describe("openPeerMessageConnection", () => {
   });
 
   test("rejects an over-cap delivered binary frame as a terminal protocol error", async () => {
-    // The delivered-frame backstop: an over-cap Uint8Array arriving on the data
+    // The delivered-frame safety check: an over-cap Uint8Array arriving on the data
     // event fails the exchange rather than being handed to receive(). A tiny cap
     // keeps the test cheap (the production cap is a fixed 256 MiB).
     const { fake, conn } = makeConn();
@@ -128,14 +128,14 @@ describe("openPeerMessageConnection", () => {
   });
 
   test("fails to install the inbound bound on a connection lacking PeerJS internals", async () => {
-    // The dependency-premise check: a connection without _handleChunk/_chunkedData
+    // The dependency-assumption check: a connection without _handleChunk/_chunkedData
     // (a future peerjs that renamed them) fails loud rather than running unbounded.
     const fake = new EventEmitter();
     await expect(
       openPeerMessageConnection(fake as unknown as DataConnection),
     ).rejects.toThrow(/reassembly\/unpack internals/);
-    // The premise is checked before any listener is attached, so a broken premise
-    // strands nothing: no data/open/error/close listener is left on the channel.
+    // The assumption is checked before any listener is attached, so a broken
+    // assumption strands nothing: no data/open/error/close listener is left on the channel.
     expect(fake.eventNames()).toHaveLength(0);
   });
 
@@ -191,7 +191,7 @@ describe("openPeerMessageConnection", () => {
     expect((err as ConnectionError).cause).toBe(cause);
   });
 
-  test("redacts the derived peer id from a remote error before it surfaces", async () => {
+  test("redacts the derived peer id from a remote error before it is shown", async () => {
     const id = "0123456789abcdef0123456789abcdef";
     const { fake, conn } = makeConn();
     fake.peer = id;
@@ -230,7 +230,7 @@ describe("openPeerMessageConnection", () => {
   test("a remote error drains a buffered frame before failing (abnormal tail)", async () => {
     // The abnormal-tail rule generalized to a fail() drop: a frame already
     // queued when an ICE/transport error fires is still drained by receive()
-    // before the transport error surfaces, matching the clean-close ordering.
+    // before the transport error reaches the caller, matching the clean-close ordering.
     const { fake, conn } = makeConn();
     const mc = await openPeerMessageConnection(conn);
 
@@ -324,7 +324,7 @@ describe("openPeerMessageConnection", () => {
 
   test("tags an open-handshake failure as a transport ConnectionError", async () => {
     // F5: waitForConnectionOpen rejects with a bare Error, but the boundary must
-    // surface a kind-tagged ConnectionError so a consumer can classify it.
+    // expose a kind-tagged ConnectionError so a consumer can classify it.
     const { fake, conn } = makeConn(false);
     const promise = openPeerMessageConnection(conn);
 
@@ -534,8 +534,8 @@ describe("openPeerMessageConnection", () => {
 
   test("a flushing close over a channel already out of open reports that exit", async () => {
     // PeerJS's `open` flag is its own bookkeeping rather than the channel's
-    // state, so the flush branch can run over a channel that can carry neither
-    // the sentinel nor the frames behind it. It carries no delivery signal
+    // state, so the flush branch can run over a channel that can hold neither
+    // the sentinel nor the frames behind it. It holds no delivery signal
     // either, and is reported as its own exit rather than folded into the
     // ceiling: the caller distinguishes a wait that ran out from a link that
     // was not there.

@@ -37,7 +37,7 @@ describe("outputForDirection / directionForOutput", () => {
   test("the forbidden 'neither receives' pair maps to the safe 'both' default", () => {
     // safeParseLinkageTerms accepts any two output booleans -- the "neither party
     // expects output" check runs later at exchange time -- so an imported set can
-    // carry {false, false}. It has no OutputDirection, so directionForOutput must
+    // hold {false, false}. It has no OutputDirection, so directionForOutput must
     // not throw or silently load a forbidden state; it resolves to the reviewable
     // "both" default.
     const neither: Output = { expectsOutput: false, shareWithPartner: false };

@@ -290,11 +290,10 @@ describe("dialAsAcceptor", () => {
     stubWindow();
     const fake = new FakePeer();
     const cap = captureFactory(fake);
-    // A backoff wider than the whole budget, so the loop provably cannot fit
-    // another attempt once the first is answered peer-unavailable -- the branch is
-    // taken on the budget, not on a wall-clock race.
-    // The rejection handler is attached before the dial is driven: the budget
-    // expires on a timer of its own, so a handler attached afterwards would race it.
+    // The backoff (10s) is wider than the total budget (50ms): only the first
+    // attempt fits, so the no-show branch is reached on the budget, not a race.
+    // The rejection handler is attached before the dial runs, since the budget
+    // timer could otherwise expire first.
     const rejection = dialAsAcceptor(generateSharedSecret(), endpoint, {
       peerFactory: cap.factory,
       retryDelayMs: 10_000,
@@ -328,9 +327,8 @@ describe("dialAsAcceptor", () => {
       expect(fake.listenerCount("open")).toBeGreaterThan(0),
     );
     fake.emit("open", "acceptor");
-    // The dial is answered -- no peer-unavailable -- so the inviter IS registered
-    // and present; the channel simply never opens. The partner showed up, so this
-    // must not be recorded as their no-show.
+    // The dial is answered -- no peer-unavailable -- so the inviter is present
+    // and the channel simply never opens; that is not the partner's no-show.
     await vi.waitFor(() => expect(fake.connect).toHaveBeenCalledTimes(1));
 
     const settled = await rejection;

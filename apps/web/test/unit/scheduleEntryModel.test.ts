@@ -43,7 +43,7 @@ function entry(
   };
 }
 
-describe("what an entry has to carry", () => {
+describe("what an entry has to hold", () => {
   test("a complete cadence has nothing wrong with it", () => {
     expect(scheduleEntryErrors(entry())).toEqual({});
     expect(scheduleEntryUsable(entry())).toBe(true);
@@ -162,7 +162,7 @@ describe("resolving a local cadence to its stored anchor", () => {
     expect(eastern.anchor).not.toBe(utc.anchor);
   });
 
-  test("a stored anchor reads back as the wall clock it was entered on", () => {
+  test("a stored anchor displays as the wall clock it was entered on", () => {
     withTimeZone("America/New_York", () => {
       const schedule = buildScheduleFromEntry(entry(), NOW);
       expect(scheduleEntryFieldsFrom(schedule)).toEqual(entry());
@@ -270,14 +270,14 @@ describe("the window an entered cadence plans first", () => {
 
   test("an edited cadence starts its miss count over", () => {
     // The stored count spoke for windows on the old lattice; nothing about it
-    // carries to a cadence with a different anchor or period.
+    // applies to a cadence with a different anchor or period.
     const schedule = buildScheduleFromEntry(entry({ intervalDays: 14 }), NOW);
     expect(schedule.consecutiveMisses).toBe(0);
   });
 });
 
 describe("a save that did not touch the cadence", () => {
-  test("reads as unchanged, so the stored schedule is carried rather than rebuilt", () => {
+  test("is treated as unchanged, so the stored schedule is kept rather than rebuilt", () => {
     // What rests on this: rebuilding would reset the planned window and the miss
     // count, which are the runner's bookkeeping, on a save of the label alone.
     withTimeZone("America/New_York", () => {
@@ -292,7 +292,7 @@ describe("a save that did not touch the cadence", () => {
     });
   });
 
-  test("any edited field reads as changed", () => {
+  test("any edited field is treated as changed", () => {
     withTimeZone("America/New_York", () => {
       const stored = buildScheduleFromEntry(entry(), NOW);
       const fields = scheduleEntryFieldsFrom(stored);
@@ -318,7 +318,7 @@ describe("a cadence weighed against the max-token-age bound", () => {
     expect(cadenceAgainstTokenBound(7, 30)).toBeUndefined();
   });
 
-  test("a cadence that outruns the bound is surfaced, in the bound's own terms", () => {
+  test("a cadence that outruns the bound is reported, in the bound's own terms", () => {
     const problem = cadenceAgainstTokenBound(30, 7);
     expect(problem).toMatch(/must run or be renewed within 7 days/i);
     expect(problem).toMatch(/every 30 days/);
@@ -328,7 +328,7 @@ describe("a cadence weighed against the max-token-age bound", () => {
     expect(problem).toMatch(/shorten the cadence/i);
   });
 
-  test("a cadence exactly at the bound is surfaced too", () => {
+  test("a cadence exactly at the bound is reported too", () => {
     // The window opens exactly when the secret lapses, which is not a margin.
     expect(cadenceAgainstTokenBound(30, 30)).toBeDefined();
   });
@@ -343,7 +343,7 @@ describe("a cadence weighed against the max-token-age bound", () => {
 });
 
 describe("a stored schedule the entry form did not write", () => {
-  /** An imported or hand-edited record carrying a 90-minute window and an anchor
+  /** An imported or hand-edited record holding a 90-minute window and an anchor
    * with seconds on it: two values the entry fields hold at a coarser resolution
    * than the record does. */
   function finerThanTheFields() {
@@ -356,7 +356,7 @@ describe("a stored schedule the entry form did not write", () => {
     });
   }
 
-  /** An imported or hand-edited record carrying a one-minute window: a width the
+  /** An imported or hand-edited record holding a one-minute window: a width the
    * schema admits and entry's own floor does not. */
   function belowTheEntryFloor() {
     return scheduleSchema.parse({
@@ -368,8 +368,8 @@ describe("a stored schedule the entry form did not write", () => {
     });
   }
 
-  test("a width below the entry floor reads back as itself, not silently rewritten", () => {
-    // An imported record can carry a width the schema admits and entry does not.
+  test("a width below the entry floor displays as itself, not silently rewritten", () => {
+    // An imported record can hold a width the schema admits and entry does not.
     // Showing it is what lets the operator see it; rewriting it would change what
     // their partner agreed without telling them.
     const stored = belowTheEntryFloor();
@@ -408,7 +408,7 @@ describe("a stored schedule the entry form did not write", () => {
     }
   });
 
-  test("a width the hour field cannot express reads back exactly, never rounded", () => {
+  test("a width the hour field cannot express displays exactly, never rounded", () => {
     // The rounded reading is the silent rewrite this guards: shown as 2, a save
     // of any other field writes 7200 seconds over the 5400 the partnership
     // agreed.
@@ -417,12 +417,12 @@ describe("a stored schedule the entry form did not write", () => {
     expect(fields.windowHours).toBe(1.5);
     expect(Number(fields.windowHours) * 3600).toBe(stored.windowSeconds);
     // It stands as it is rather than being flagged: it is inside entry's bounds,
-    // and the operator has nothing to correct while the save carries it through.
+    // and the operator has nothing to correct while the save passes it through.
     expect(scheduleEntryErrors(fields, stored)).toEqual({});
     expect(scheduleEntryUsable(fields, stored)).toBe(true);
   });
 
-  test("editing one field carries every untouched value through verbatim", () => {
+  test("editing one field passes every untouched value through verbatim", () => {
     withTimeZone("America/New_York", () => {
       const stored = finerThanTheFields();
       const edited = {
@@ -431,7 +431,7 @@ describe("a stored schedule the entry form did not write", () => {
       };
       const rebuilt = buildScheduleFromEntry(edited, NOW, stored);
       // Neither the seconds on the width nor the sub-minute part of the anchor
-      // survives a round trip through the display fields, so both are carried
+      // survives a round trip through the display fields, so both are kept
       // rather than re-derived.
       expect(rebuilt.windowSeconds).toBe(5400);
       expect(rebuilt.anchor).toBe(stored.anchor);
@@ -459,9 +459,9 @@ describe("a stored schedule the entry form did not write", () => {
     expect(widened.windowSeconds).toBe(7200);
   });
 
-  test("editing the date re-resolves the anchor rather than carrying the stored one", () => {
-    // The carry-through is per field: it must not hold an instant the operator
-    // moved. Date and time resolve together, so touching either re-resolves.
+  test("editing the date re-resolves the anchor rather than keeping the stored one", () => {
+    // Retention is per field: none may hold an instant the operator moved.
+    // Date and time resolve together, so touching either re-resolves.
     withTimeZone("America/New_York", () => {
       const stored = finerThanTheFields();
       const fields = scheduleEntryFieldsFrom(stored);
@@ -474,21 +474,21 @@ describe("a stored schedule the entry form did not write", () => {
       expect(moved.anchor).toBe(
         new Date(2026, 6, 21, 5, 0, 0, 0).toISOString(),
       );
-      // The width it did not touch is still carried.
+      // The width it did not touch is still kept.
       expect(moved.windowSeconds).toBe(5400);
     });
   });
 
-  test("a width with no stored schedule to carry it is refused, not written fractional", () => {
+  test("a width with no stored schedule to hold it is refused, not written fractional", () => {
     // The record stores whole seconds, so a width that resolves to a fraction of
     // one has nowhere to be written; refusing here is what keeps it from
-    // surfacing as a validation failure at the store write.
+    // showing up as a validation failure at the store write.
     expect(() =>
       buildScheduleFromEntry(entry({ windowHours: 1.5000001 }), NOW),
     ).toThrow(RangeError);
   });
 
-  test("the widest stored window reads back as the ceiling entry offers", () => {
+  test("the widest stored window displays as the ceiling entry offers", () => {
     const fields = scheduleEntryFieldsFrom(
       scheduleSchema.parse({
         anchor: "2026-07-14T09:00:00.000Z",

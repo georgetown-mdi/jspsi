@@ -23,24 +23,16 @@ import type {
 import type Peer from "peerjs";
 
 /**
- * The web half of the CLI<->web WebRTC interop conformance check.
+ * The web half of the CLI<->web WebRTC interop conformance check: the web app
+ * and the CLI build the same rendezvous and key-exchange parts independently
+ * from a shared core, and this file drives only the web app's own
+ * constructions against the known-answer vectors in
+ * packages/core/test/vectors/webrtc-interop-vectors.json.
  *
- * The web app and the CLI drive the same rendezvous and authenticated key
- * exchange from a shared core, independently, and nothing else verifies that a
- * browser peer and a CLI peer agree on the parts each app constructs for itself:
- * the signaling locator it mints, the peer id it registers under and the one it
- * dials, the handshake role it feeds the key exchange, and the
- * request-encryption flag it puts on the wire, and the location it resolves from
- * a locator the CLI minted. A test that ran both "sides" through one code path
- * would prove nothing, so this file drives only the WEB app's own constructions
- * and checks them against the shared known-answer vectors in
- * packages/core/test/vectors/webrtc-interop-vectors.json. The CLI's
- * constructions are driven against the same file from apps/cli's suite, and the
- * constructions core alone owns are pinned in packages/core/test/webrtcInterop.test.ts.
- *
- * Two companions carry the rest of the web app's half: webrtcInteropHooks.test.ts
- * and managedRunDriver.test.ts drive each flow that reads the side-to-role table
- * through its own entry point, and test/browser/webrtcInterop.test.ts re-runs the
+ * The CLI drives the same file from its own suite; the constructions core
+ * alone owns are pinned in packages/core/test/webrtcInterop.test.ts.
+ * webrtcInteropHooks.test.ts and managedRunDriver.test.ts cover the rest of
+ * the web app's half, and test/browser/webrtcInterop.test.ts re-runs the
  * crypto.subtle-borne derivations in real Chromium.
  */
 

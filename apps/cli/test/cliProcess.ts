@@ -6,25 +6,15 @@ import { fileURLToPath } from "node:url";
 import { stopChild } from "./stopChild";
 
 /**
- * Runs `psilink` as a CHILD PROCESS -- the command line an operator types, from
- * its own argv to its own exit code -- so a leg can drive a whole invocation
- * rather than the seam behind it.
+ * Runs `psilink` as a child process -- the command line an operator types, from
+ * its own argv to its own exit code -- rather than calling the exported handler
+ * directly: only a real process exposes `process.exit`'s exit code, the
+ * `accept` confirmation prompt on stdin, and startup environment such as the
+ * loopback TLS certificate (`NODE_EXTRA_CA_CERTS`).
  *
- * Why a process and not the exported handler: a handler-level run has to stand
- * in for the parts of an invocation that belong to the process. `accept` reads
- * its confirmation from stdin, so driving it in-process means stubbing the one
- * human checkpoint a leg about the acceptance exists to exercise; the exit code
- * the CLI sets through `process.exit` cannot be observed at all; and a child
- * takes environment at startup, which is how a party trusts a throwaway loopback
- * certificate (`NODE_EXTRA_CA_CERTS`) without weakening TLS verification in the
- * test process.
- *
- * Why `tsx` and not plain `node`: this suite runs from `src/`, and Node's
- * strip-only TypeScript support refuses syntax the CLI's dependencies use, so
- * the entry needs a transforming loader -- the same reason, resolved the same
- * way, as `test/signaling/brokerProcess.ts`. Both resolve `tsx` through the
- * module resolver rather than a guessed `node_modules/.bin` path, so a hoisting
- * change cannot silently break the spawn.
+ * Runs through `tsx`, resolved via the module resolver rather than a guessed
+ * `node_modules/.bin` path, because this suite runs from `src/` and Node's
+ * strip-only TypeScript support rejects syntax the CLI's dependencies use.
  */
 
 const require = createRequire(import.meta.url);
@@ -56,16 +46,13 @@ export interface RunningCli {
 }
 
 /**
- * Spawn one `psilink` invocation.
+ * Spawn one `psilink` invocation. `timeoutMs` kills a run that outlives it and
+ * reports `timedOut`, so a stalled party fails its leg with a stated cause.
  *
- * `timeoutMs` is a hard deadline: a run that outlives it is killed and reported
- * with `timedOut`, so a party that stalls fails its leg with a stated cause
- * instead of running until the test framework kills the worker under it.
- *
- * `stdin`, when given, is written to the child and the pipe is LEFT OPEN. A
+ * `stdin`, when given, is written to the child and the pipe is left open: a
  * confirmation prompt resolves to "no" on end-of-input (`promptConfirm` races
- * the readline close), so closing the pipe behind the answer would make an
- * answered prompt a race between the line and the EOF.
+ * the readline close), so closing the pipe behind the answer would race the
+ * line against the EOF.
  */
 export function startCli(params: {
   args: string[];
@@ -183,7 +170,7 @@ export function startCli(params: {
 }
 
 /**
- * How a finished run ended, for the message an assertion about it carries: the
+ * How a finished run ended, for the message an assertion about it holds: the
  * exit status plus the tail of what it wrote to stderr, which is where the CLI
  * puts every diagnostic.
  */
@@ -200,8 +187,8 @@ export function describeCliRun(label: string, run: FinishedCli): string {
 }
 
 /**
- * How much of a failed run's stderr an assertion message carries. The CLI
- * reports a failure on its last lines, so a short tail carries the cause; the
+ * How much of a failed run's stderr an assertion message holds. The CLI
+ * reports a failure on its last lines, so a short tail states the cause; the
  * whole stream is on the run for a caller that wants more.
  */
 const STDERR_TAIL_LINES = 15;

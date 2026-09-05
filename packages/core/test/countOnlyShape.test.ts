@@ -19,14 +19,12 @@ import { decodeInvitation, encodeInvitation } from "../src/config/invitation";
 import { assertAlgorithmImplemented } from "../src/exchange";
 import { UsageError } from "../src/errors";
 
-// The count-only shape refusals (docs/spec/PROTOCOL.md, PSI-C), at the two
-// enforcement points core owns: every PARSE path, so a partner's invitation is
-// refused as it is read, and the ACCEPT path, so terms built or mutated without a
-// parse are refused before the mirror is derived. Each rule is exercised at both.
-//
-// These rules are the whole of what holds an out-of-shape count-only document
-// back: the algorithm gate answers only whether a run path exists and admits
-// `psi-c` regardless of shape -- pinned by the last block below.
+// The count-only shape refusals (docs/spec/PROTOCOL.md, PSI-C) are enforced
+// at two points core owns -- every PARSE path (a partner's invitation is
+// refused as read) and the ACCEPT path (terms built or mutated without a
+// parse are refused before the mirror is derived) -- each rule exercised at
+// both. The algorithm gate is separate: it admits `psi-c` whatever the
+// shape, so shape enforcement is these rules' job alone (last block below).
 
 /** A count-only document in exactly the shape the specification admits: one
  * linkage key, cascade, no deduplication, and no payload in either direction. */

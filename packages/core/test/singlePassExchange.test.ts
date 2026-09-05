@@ -145,7 +145,7 @@ test("single-pass dispatch: a full runExchange yields the correct matched table 
 const LARGE_DATASET_HANG_BACKSTOP_MS = 60_000;
 
 test(
-  "single-pass carries a larger dataset to completion under the derived cap",
+  "single-pass completes a larger dataset under the derived cap",
   { timeout: LARGE_DATASET_HANG_BACKSTOP_MS },
   async () => {
     // A dataset far above the toy examples above, well within the

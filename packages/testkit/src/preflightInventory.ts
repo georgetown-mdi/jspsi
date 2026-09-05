@@ -17,7 +17,7 @@
 // neither may import the other, and it holds only the row declarations: an anchor
 // is an app's own symbol, and `packages/` cannot import `apps/`.
 //
-// Stated limits, since a backstop is not a guarantee: the CLI leg's closure test
+// Stated limits, since a safety check is not a guarantee: the CLI leg's closure test
 // enumerates the modules whose whole purpose is preflight plus the `warn`-prefixed
 // exports of the CLI's option surface. A check written inline in a command module,
 // rather than as an export of one of those, is outside what it can see -- three
@@ -25,7 +25,7 @@
 // leg binds each `authored` row to a symbol and verifies the symbol exists; only
 // the three credential and retain rows are additionally driven through behaviour,
 // so a row's `how` prose describes the bound surface without the binding proving
-// it -- read a row as "this symbol carries the concern", not as a verified
+// it -- read a row as "this symbol holds the concern", not as a verified
 // transcript of what it does.
 
 /** One row of the inventory. Adding a member here fails BOTH legs to compile
@@ -58,7 +58,7 @@ export type PreflightWeight = "refuses" | "warns" | "asks";
  * - `runWarning`: the console has no authoring-time surface; what reaches the
  *   operator is the CLI child's own warning, folded into the run's warnings.
  * - `unreachable`: the console cannot compose the state the check guards against.
- * - `pending`: a known gap, deliberately not built.
+ * - `pending`: a known gap, not built by design.
  */
 export type ConsoleDisposition =
   | { readonly kind: "authored"; readonly how: string }
@@ -281,7 +281,7 @@ export function authoredPreflightIds(): Array<PreflightId> {
   );
 }
 
-/** The prose a row's disposition carries, whichever kind it is: what the console
+/** The prose a row's disposition holds, whichever kind it is: what the console
  * does, or why it does nothing. Empty prose is what the contract test refuses. */
 export function dispositionReason(id: PreflightId): string {
   const disposition = PREFLIGHT_INVENTORY[id].console;

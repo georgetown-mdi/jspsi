@@ -12,14 +12,12 @@ import type { MessageConnection } from "../src/connection/messageConnection";
 import type { PreparedExchange } from "../src/exchange";
 import type { Output } from "../src/config/linkageTerms";
 
-// A payload frame's rows are positional against the columns it names, and
-// the exchange record commits the column names and row values together
-// while its readable governance list holds the names alone. A frame whose
-// rows are not one value per named column would commit values the
-// record's readable form cannot account for. These drive a full `psi`
-// run so the refusal is shown to land before the run reaches its output
-// or record stage, on the lazy receive path where reconciliation is not
-// what refuses. Parse-level cases are in payloadExchange.test.ts.
+// A payload row must supply exactly one value per named column, or the
+// record's readable governance list and its committed values fall out of
+// sync. These tests drive a full `psi` run so the refusal is shown landing
+// before the output or record stage, on the lazy receive path, where
+// reconciliation itself does not refuse. Parse-level cases are in
+// payloadExchange.test.ts.
 
 const psiLibrary = await PSI();
 
@@ -128,7 +126,7 @@ test("a run receiving an honest payload frame records the columns whose values i
   ).toEqual(["diagnosis"]);
 });
 
-test("a run receiving a columnless frame that carries rows is refused before its output or record stage", async () => {
+test("a run receiving a columnless frame that holds rows is refused before its output or record stage", async () => {
   const [connReceiver, connSenderRaw] = createMessagePipe();
   // One value per matched record, against no column at all. Accepting it would
   // commit those values while the record's readable received-column list read

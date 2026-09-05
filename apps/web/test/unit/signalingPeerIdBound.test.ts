@@ -58,7 +58,7 @@ function connectExpectRejection(
       }
     });
     // The peer may see the socket reset as the server tears it down; the close
-    // event carries the verdict. Swallow so it is not an unhandled error.
+    // event holds the verdict. Swallow so it is not an unhandled error.
     ws.on("error", () => {});
     ws.on("close", () => resolve(errorMsg));
   });
@@ -136,7 +136,7 @@ describe("signaling-server handshake parameter length bound", () => {
     const msg = await connectExpectRejection(port, { key: longKey });
 
     // The length check runs ahead of the `key !== config.key` comparison, so an
-    // over-length key surfaces as TOO_LONG rather than INVALID_KEY.
+    // over-length key is reported as TOO_LONG rather than INVALID_KEY.
     expect(msg).toBe(Errors.WS_PARAMETER_TOO_LONG);
   });
 });

@@ -1,4 +1,4 @@
-/** Opt-out for a deliberate run where a prerequisite is knowingly absent. */
+/** Opt-out for a run where a prerequisite is knowingly absent. */
 export const ALLOW_MISSING_PREREQUISITES_ENV =
   "PSILINK_ALLOW_MISSING_TEST_PREREQUISITES";
 

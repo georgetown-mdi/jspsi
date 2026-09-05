@@ -27,18 +27,16 @@ import { createAppMount } from "./renderApp";
 import type { LinkageTerms } from "@psilink/core";
 import type { ProfiledJobInput } from "@psi/workInputClient";
 
-// What starts an exchange with no network, and what only looks like it does. The
-// block sits on the control that begins a live run -- the inviter's create, the
-// acceptor's launch, the console's direct run -- each held with the one named
-// reason while the browser reports offline and live again once it does not. The
-// lobby's entries navigate and read, so they stay open under an advisory instead
-// of being held; a create that only saves a file to hand to the command-line tool
-// stays open for the same reason. The managed re-run's own gate -- the pattern
-// these follow -- is covered in offlineShell.test.ts.
+// The block sits on the control that begins a live run -- the inviter's create,
+// the acceptor's launch, the console's direct run -- each held with the same
+// named reason while offline, and live again once the browser is not. The
+// lobby's entries only navigate or read, and a create that only saves a file
+// connects to nothing, so both stay open under an advisory instead. The managed
+// re-run's own gate, the pattern these follow, is covered in offlineShell.test.ts.
 //
-// Chromium is where this belongs because `navigator.onLine` and its events are
-// the platform signal under test, and because a disabled state is a rendering
-// fact rather than a model one.
+// Chromium is where this belongs: `navigator.onLine` and its events are the
+// platform signal under test, and a disabled state is a rendering fact rather
+// than a model one.
 
 vi.mock("@tanstack/react-router", async () =>
   (await import("./moduleMocks")).reactRouterMock(),
@@ -147,7 +145,7 @@ function mountAcceptorColumnsStep() {
   );
 }
 
-// A mounted file the appliance already profiled, whose columns infer a linkable
+// A mounted file the console already profiled, whose columns infer a linkable
 // set of terms, so connectivity is the only thing that can close the direct run.
 const directProfile: ProfiledJobInput = {
   name: "clients.csv",

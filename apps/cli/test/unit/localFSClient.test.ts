@@ -77,7 +77,7 @@ test("connect rejects when directory does not exist", async () => {
   ).rejects.toThrow("cannot read/write filedrop directory");
 });
 
-test("connect counts a transient reconnect and surfaces the count", async () => {
+test("connect counts a transient reconnect and reports the count", async () => {
   // A clean connect never re-dials, so its reconnect counter starts at zero.
   expect(client.reconnectCount).toBe(0);
   expect(client.transportRetryCount).toBe(0);
@@ -283,7 +283,7 @@ test("get refuses a file larger than maxBytes without allocating it", async () =
   }
 });
 
-test("get surfaces FrameSizeExceededError even when handle.close rejects", async () => {
+test("get throws FrameSizeExceededError even when handle.close rejects", async () => {
   const filePath = path.join(dir, "oversize-closefail.bin");
   await fs.writeFile(filePath, Buffer.alloc(64));
   // A failing close() in the finally block must not mask the typed terminal
@@ -390,14 +390,11 @@ test("put with a chunk list and flags: 'a' appends the joined parts", async () =
 });
 
 test("a short writev is completed rather than published truncated", async () => {
-  // writev is not obliged to take every byte offered. What it leaves behind is
-  // the tail of a protocol frame, and the send path treats the put as complete,
-  // so the truncated frame publishes as a finished message: the peer never sees
-  // the byte count its filename promises and waits out its whole budget before
-  // blaming the partner. The remainder must be re-offered until it lands. The
-  // first call here takes 3 bytes of a 7-byte list -- a boundary INSIDE the
-  // first chunk, the 4-byte header, so the continuation must resume mid-chunk,
-  // not re-send it.
+  // writev may take fewer bytes than offered; the remainder must be re-offered
+  // until it lands, or a short write silently publishes a truncated frame as
+  // complete. The first call here takes 3 of the 7 bytes -- a boundary INSIDE
+  // the first (4-byte) header chunk, so the continuation must resume
+  // mid-chunk, not re-send it.
   const dest = path.join(dir, "short-writev.bin");
   const handle = await fs.open(dest, "w");
   const realWritev = handle.writev.bind(handle);
@@ -463,7 +460,7 @@ test("a short writev past a whole chunk drops that chunk from the rest", async (
   );
 });
 
-test("a writev that stops making progress is surfaced, not looped on", async () => {
+test("a writev that stops making progress is reported, not looped on", async () => {
   // The re-offer loop above is what a short write costs; a handle that takes
   // NOTHING while bytes remain is what it must not pay forever. Zero bytes
   // written is not a short write to complete -- re-offering the identical list
@@ -494,7 +491,7 @@ test("a writev that stops making progress is surfaced, not looped on", async () 
   expect(calls).toBe(1);
 });
 
-test("chunk-list put surfaces the writev error even when close also fails", async () => {
+test("chunk-list put throws the writev error even when close also fails", async () => {
   // On the chunk-list path a failing close() must not replace (mask) the writev
   // failure: the caller should see WHY the write failed, not an incidental close
   // error, so a best-effort close is swallowed on the already-failed path.
@@ -604,14 +601,11 @@ test("exists returns false for a missing file", async () => {
 
 describe("symlink refusal in the rendezvous directory", () => {
   // The rendezvous directory is partner-writable, so the peer could plant a
-  // symlink in it. On the read path list() is the load-bearing control: it
-  // enumerates via opendir and keeps only Dirent.isFile() names, so a symlink is
-  // filtered out before get() is handed the name, and openNoFollow (O_NOFOLLOW)
-  // is the backstop for a symlink swapped in after the listing (a TOCTOU race).
-  // On the write path put()/createExclusive() destinations come from protocol
-  // state, never from list(), so O_NOFOLLOW is the primary defense against a
-  // pre-planted symlink there. Both the filter and the per-primitive refusal are
-  // asserted here so the invariant is locked rather than incidental.
+  // symlink in it. On the read path, list() filters symlinks out via
+  // Dirent.isFile() before get() sees the name; openNoFollow (O_NOFOLLOW) is
+  // the safety check for one swapped in after the listing (a TOCTOU race). On
+  // the write path, put()/createExclusive() destinations come from protocol
+  // state, never from list(), so O_NOFOLLOW is the primary defense there.
   //
   // POSIX-only: O_NOFOLLOW is absent on Windows and symlink creation there needs
   // privilege, so the primitive-level assertions are skipped on win32.
@@ -814,7 +808,7 @@ describe("connect retry and timeout", () => {
         connectTimeoutMs: 5_000,
       });
       // A TimeoutError (not a plain Error) is what the retry predicate keys on
-      // to stop, so assert the concrete type the production path now surfaces.
+      // to stop, so assert the concrete type the production path now throws.
       const assertion = expect(p).rejects.toBeInstanceOf(TimeoutError);
       // Advance past the first timeout AND well past several 1s retry-delay
       // windows: a terminal timeout must schedule no further attempt.

@@ -85,7 +85,7 @@ const associationTable: AssociationTable = [
 ];
 
 // The run binder the record fixture and the dual-signed record fixture below both
-// carry, so the two artifacts pair as one run. One constant, so a fixture cannot
+// hold, so the two artifacts pair as one run. One constant, so a fixture cannot
 // drift into an accidental cross-run pair.
 const RECEIPT_BINDER = "YmluZGVy";
 
@@ -159,7 +159,7 @@ describe("parseRecordDocument", () => {
   });
 
   test("an unrecognized version is its own named outcome", async () => {
-    // The version a record written before the run binder carries: refused as its
+    // The version a record written before the run binder holds: refused as its
     // own outcome, naming the version this build recognizes, rather than read as a
     // record whose absent binder leaves a receipt unpaired.
     const { record } = await fixtures();
@@ -186,8 +186,8 @@ describe("parseRecordDocument", () => {
   });
 
   test("an error-bearing malformed input never echoes control bytes", () => {
-    // A crafted syntax error carrying an ANSI/control sequence must be
-    // neutralized at the display boundary, not surfaced raw.
+    // A crafted syntax error holding an ANSI/control sequence must be
+    // neutralized at the display boundary, not shown raw.
     const esc = String.fromCharCode(0x1b);
     const bel = String.fromCharCode(0x07);
     const parsed = parseRecordDocument(`{"x": ${esc}[31m${bel}`);
@@ -225,7 +225,7 @@ describe("parseKeysDocument", () => {
 });
 
 describe("verdictViewModel: verified", () => {
-  test("a record, keys, data, and both terms verify with the honest verified headline", async () => {
+  test("a record, keys, data, and both terms verify with the verified headline", async () => {
     const { record, keys } = await fixtures();
     const reconstructed = reconstructForFixture(record);
     const report = await verifyExchangeRecord(record, keys, {
@@ -243,7 +243,7 @@ describe("verdictViewModel: verified", () => {
   });
 });
 
-describe("verdictViewModel: tampered record (honest ambiguity)", () => {
+describe("verdictViewModel: tampered record (ambiguity)", () => {
   test("an altered commitment fails with the altered-or-wrong-file headline, never tamper alone", async () => {
     const { record, keys } = await fixtures();
     const reconstructed = reconstructForFixture(record);
@@ -309,7 +309,7 @@ describe("verdictViewModel: wrong keys (missing salt is distinct from tamper)", 
 });
 
 describe("verdictViewModel: no re-supply", () => {
-  test("without data or terms, the honest incomplete with per-row supply-your-files copy", async () => {
+  test("without data or terms, the incomplete with per-row supply-your-files copy", async () => {
     const { record, keys } = await fixtures();
     const report = await verifyExchangeRecord(record, keys, {});
     expect(report.outcome).toBe("incomplete");
@@ -510,8 +510,8 @@ describe("verdictViewModel: the recorded result size", () => {
 // --- The signed leg ----------------------------------------------------------
 
 // A dual-signed record over the same exchange the fixtures above describe: the
-// receipt content carries that record's agreed-terms hash and each certificate
-// carries the identity the record names, so a run supplying the record reaches
+// receipt content holds that record's agreed-terms hash and each certificate
+// holds the identity the record names, so a run supplying the record reaches
 // every check rather than stalling on an expectation it cannot state. Keys are
 // generated per fixture: nothing asserted here turns on a particular key.
 async function signedFixture(record: ExchangeRecord): Promise<{
@@ -624,7 +624,7 @@ describe("parseCertificateDocument", () => {
 
   test("private key material in a supplied document does not survive the parse", async () => {
     // The certificate schema keeps only the public coordinates, so a document
-    // carrying a private scalar beside them yields a certificate that does not:
+    // holding a private scalar beside them yields a certificate that does not:
     // the model-level half of "no private key is used here", pinned as a check
     // rather than asserted in prose.
     const identity = await generateSigningIdentity("Party A");
@@ -728,7 +728,7 @@ describe("verifySignedRecord: both certificates anchored", () => {
     expect(view.termsHash.status).toBe(
       "Matches the terms this exchange agreed",
     );
-    // The record loaded beside the receipt carries the same run's binder, so the
+    // The record loaded beside the receipt holds the same run's binder, so the
     // pairing is part of what this verdict rests on.
     expect(view.runBinding.status).toBe(
       "This receipt and this record are the same run",
@@ -794,7 +794,7 @@ describe("verifySignedRecord: both certificates anchored", () => {
     // beside this receipt, so the verdict earns the stamp advice.
     expect(view.runBinding.explanation).toContain("pair them by that stamp");
     // Distinguishable from the other failure classes: every signature, identity,
-    // and anchor row still reads as verified.
+    // and anchor row still shows as verified.
     for (const party of view.parties)
       for (const row of party.rows) expect(row.tone).toBe("verified");
     expect(view.termsHash.tone).toBe("verified");
@@ -1000,12 +1000,11 @@ describe("verifySignedRecord: what the record cannot attest to itself", () => {
 
   test("a pair naming only one party leaves BOTH identity checks unperformed", async () => {
     // `linkage_terms.identity` is optional, and this screen takes whatever files
-    // the operator loads -- an exchange record from an unnamed run, or a terms
-    // document with the field left out. A half-supplied pair is the shape that
-    // must not half-check: expected identities are unordered and matched onto the
-    // two certificates as a bijection, so anchoring one name would leave the
+    // the operator loads -- an unnamed run's record, or terms with the field left
+    // out. A half-supplied pair must not half-check: identities are matched onto
+    // the two certificates as a bijection, so anchoring one name would leave the
     // other's check reading as performed against a name nobody supplied. Neither
-    // source may reach a verdict on identity at all.
+    // source reaches a verdict on identity at all.
     const { identity: _unnamedTerms, ...unnamedPartnerTerms } = PARTNER_TERMS;
     // Built over the half-named pair, so the record, its terms hash, and the
     // terms below all agree: identity is then the only thing left unchecked.
@@ -1144,7 +1143,7 @@ describe("signedVerdictViewModel: over a report built by hand", () => {
     ).toThrow(/unanchored/);
   });
 
-  test("the identity a certificate carries is escaped at this display sink", () => {
+  test("the identity a certificate holds is escaped at this display sink", () => {
     const esc = String.fromCharCode(0x1b);
     const view = signedVerdictViewModel(
       signedReport({

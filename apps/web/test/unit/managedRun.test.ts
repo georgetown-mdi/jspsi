@@ -37,16 +37,10 @@ import type { ManagedExchangeRecord } from "@psi/managedExchangeRecord";
 
 // The pure orchestration of a re-run, tested in Node for the parts that do NOT
 // touch the platform (the pre-connection expiry short-circuit, which never reaches
-// the lock, and the benign-outcome classification). The full launch-from-record
-// path through the single-writer lock and the strict-durability store is exercised
-// against real Chromium in test/browser/managedRun.test.ts.
-//
-// One ordering claim does need the run driven end to end: the phase boundary this
-// module reports to its caller, which the caller's failure classification reads to
-// decide whether a state whose copy says nothing left this device can be shown. It
-// is driven here against a stub of the two platform pieces -- the Web Locks
-// acquisition and the store's rotation/bookkeeping writes -- since neither bears on
-// the ordering under test.
+// the lock, and the benign-outcome classification); the full launch-from-record path
+// is exercised against real Chromium in test/browser/managedRun.test.ts. One ordering
+// claim -- the phase boundary reported to the caller's failure classification --
+// needs the run driven end to end here, against stubbed Web Locks and store writes.
 
 vi.mock("@psi/managedExchangeStore", async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
@@ -138,7 +132,7 @@ const unreachableSeams = {
 };
 
 describe("runManagedRerun: pre-connection expiry", () => {
-  test("a lapsed record rejects with the expiry error before any seam runs", async () => {
+  test("a lapsed record rejects with the expiry error before any platform call runs", async () => {
     const now = Date.parse("2026-07-14T12:00:00.000Z");
     const lapsed = record({ expires: "2026-07-01T00:00:00.000Z" });
 
@@ -147,7 +141,7 @@ describe("runManagedRerun: pre-connection expiry", () => {
     ).rejects.toBeInstanceOf(ManagedExchangeExpiredError);
   });
 
-  test("the expiry error carries the record's lapsed instant", async () => {
+  test("the expiry error has the record's lapsed instant", async () => {
     const now = Date.parse("2026-07-14T12:00:00.000Z");
     const lapsed = record({ expires: "2026-07-01T00:00:00.000Z" });
     const error = await runManagedRerun(lapsed, unreachableSeams, {
@@ -213,7 +207,7 @@ describe("runManagedRerun: the phase boundary reported to the caller", () => {
 
   test("a failure before the data exchange leaves the boundary unreported", async () => {
     // The phase every state whose copy says nothing left this device rests on: a
-    // run that never reached the data exchange must not read as one that did.
+    // run that never reached the data exchange must not be treated as one that did.
     stubGrantingWebLocks();
     let boundaryReported = false;
 
@@ -273,7 +267,7 @@ describe("runManagedRerun: a copy an export handed off", () => {
 
   test("records the handed-off outcome for whoever is not there to see it", async () => {
     // The scheduled case: nobody is present to answer, so the refusal is what the
-    // record carries afterwards rather than a line in a log nobody reads.
+    // record holds afterwards rather than a line in a log nobody reads.
     stubGrantingWebLocks();
     handedOff.state = { spent: { spentAt: "2026-07-13T09:00:00.000Z" } };
     const at = Date.parse("2026-07-14T12:00:00.000Z");
@@ -310,12 +304,10 @@ describe("runManagedRerun: a copy an export handed off", () => {
 
   test("an unreadable sibling entry refuses the run under its own kind", async () => {
     // A run that cannot read its custody does not proceed on the assumption the
-    // copy is still this device's. What the record then carries is the
-    // custody-unreadable kind: the entry is unchanged at the next attempt, so the
-    // retryable transport fault an unclassified failure falls through to would
-    // offer the operator a retry for a permanent local problem -- and the storage
-    // kind beside it would report a rotation that did not save, which this run
-    // never reached.
+    // copy is still this device's. The record then holds the custody-unreadable
+    // kind rather than the retryable transport fault an unclassified failure would
+    // offer for a permanent local problem, or the storage kind, which would report
+    // a rotation that did not save -- and this run never reached the rotation.
     stubGrantingWebLocks();
     handedOff.unreadable = unreadableSiblingEntry();
     const at = Date.parse("2026-07-14T12:00:00.000Z");
@@ -405,7 +397,7 @@ describe("benignRerunOutcome", () => {
 
   test("an unreadable custody entry past the data-exchange boundary is not a benign outcome", () => {
     // The refusal is raised inside the lock before the input guard, exactly as
-    // the hand-off one is, so it carries the same guard rather than resting on
+    // the hand-off one is, so it follows the same guard rather than resting on
     // where it is raised: past the boundary its copy's claim that nothing left
     // this device cannot be made.
     expect(
@@ -433,13 +425,12 @@ describe("benignRerunOutcome", () => {
   });
 
   test("a no-show past the data-exchange boundary is not a benign outcome", () => {
-    // The classification carries the phase guard its bookkeeping counterpart does
-    // (rerunFailureLastRun records "transport" for this same shape), so the two
-    // cannot disagree about a disclosure. The rendezvous raises the no-show only
-    // from a wait that never opened a channel, and this is the check that holds
-    // that rather than a comment asserting it: a no-show delivered once payload
-    // could have flowed is no longer the state whose copy says nothing left this
-    // device, so it falls through to the caller's generic transport path.
+    // This classification follows the same phase guard as its bookkeeping
+    // counterpart (rerunFailureLastRun records "transport" for this same shape), so
+    // the two cannot disagree about a disclosure. The rendezvous raises the no-show
+    // only from a wait that never opened a channel; past the boundary it is no
+    // longer the state whose copy says nothing left this device, so it falls
+    // through to the caller's generic transport path.
     expect(
       benignRerunOutcome(new PartnerNoShowError("nobody came"), true),
     ).toBeUndefined();
@@ -447,10 +438,9 @@ describe("benignRerunOutcome", () => {
 
   test("an input rejection past the data-exchange boundary is not a benign outcome", () => {
     // The input guard's own column grading raises the same non-disclosure outcome
-    // core's refusal does, so it carries the same boundary guard rather than
+    // core's refusal does, so it follows the same boundary guard rather than
     // reaching the surface's "nothing left this device" copy on the strength of
-    // the error's type. The guard runs before any connection, and this is the
-    // check that holds that rather than a docstring asserting it.
+    // the error's type. The guard runs before any connection.
     expect(
       benignRerunOutcome(
         new ManagedInputError({
@@ -496,7 +486,7 @@ describe("rerunFailureLastRun: the runner's failure bookkeeping", () => {
 
   test("a security-kind failure before the data exchange records an auth-kind failed run", () => {
     // The handshake failing closed provably precedes any payload, so the disclosure
-    // copy can honestly say nothing was disclosed.
+    // copy can accurately say nothing was disclosed.
     const lastRun = rerunFailureLastRun(
       new ConnectionError("key exchange authentication failed", "security"),
       AT,
@@ -622,7 +612,7 @@ describe("rerunFailureLastRun: the runner's failure bookkeeping", () => {
 
   test("a no-show past the data-exchange boundary records transport, not missed", () => {
     // The "missed" outcome is what the disclosure copy reads to say nothing left
-    // this device, so it carries the same phase guard as the auth and consent
+    // this device, so it follows the same phase guard as the auth and consent
     // tiers: past the boundary it cannot make that claim.
     expect(
       rerunFailureLastRun(
@@ -650,7 +640,7 @@ describe("rerunFailureLastRun: the runner's failure bookkeeping", () => {
     expect(lastRun?.failureKind).toBe("cancelled");
   });
 
-  test("failures whose bookkeeping is owned elsewhere or deliberately absent record nothing", () => {
+  test("failures whose bookkeeping is owned elsewhere or absent by design record nothing", () => {
     // Input and storage: recorded best-effort inside the critical section.
     expect(
       rerunFailureLastRun(
@@ -668,7 +658,7 @@ describe("rerunFailureLastRun: the runner's failure bookkeeping", () => {
         false,
       ),
     ).toBeUndefined();
-    // Expiry and lock-unavailable: no run began; a lapse is carried by `expires`.
+    // Expiry and lock-unavailable: no run began; a lapse is held by `expires`.
     expect(
       rerunFailureLastRun(
         new ManagedExchangeExpiredError("2026-07-01T00:00:00.000Z"),
@@ -712,7 +702,7 @@ describe("rerunFailureLastRun: the runner's failure bookkeeping", () => {
 describe("remapLapsedRunFailure: a bound that lapses mid-run", () => {
   const NOW = Date.parse("2026-07-14T12:00:00.000Z");
 
-  /** Core's expiry errors carry the recovery-hint tag (preserved across the
+  /** Core's expiry errors have the recovery-hint tag (preserved across the
    * security re-wrap). */
   function taggedExpiryError(): Error {
     return Object.assign(
@@ -753,7 +743,7 @@ describe("remapLapsedRunFailure: a bound that lapses mid-run", () => {
 
   test("an internal fault on a lapsed record is not re-mapped to the expiry", () => {
     // Core tags InternalConsistencyError on the class, and raises it from the
-    // single-pass reply-cap backstop mid-data-exchange -- so a bound that lapses
+    // single-pass reply-cap safety check mid-data-exchange -- so a bound that lapses
     // during a long run satisfies the tag and the lapse alike, unlike the
     // handshake-time expiry the re-map exists for. Re-mapping it would report a
     // defect in psilink as a benign expiry and offer a fresh invitation, which

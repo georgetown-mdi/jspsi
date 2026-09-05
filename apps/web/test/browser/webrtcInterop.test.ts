@@ -20,22 +20,12 @@ import type {
 } from "@psilink/core";
 
 /**
- * The browser companion to apps/web/test/unit/webrtcInterop.test.ts: the
- * checked-in CLI-to-web interop vectors, run through the browser build of
- * @psilink/core and of the app's accept path in real Chromium.
- *
- * The rendezvous peer id and the invitation's checksum are both computed on
- * crypto.subtle, a different implementation on each platform (Node's OpenSSL,
- * Chromium's BoringSSL), and Chromium is where the CLI's partner actually runs.
- * A Node-only assertion of these therefore leaves the platform half of the
- * contract unmeasured -- the same reason the key-exchange vectors are asserted
- * from both platforms (test/browser/kex.test.ts) rather than one. The vectors
- * are read the way that suite reads its own, through Vite's `?raw`.
- *
- * The app's own rendezvous module cannot be imported in the browser runner (its
- * top-level config load reads `process`; see test/browser/moduleMocks.ts), so
- * which id each flow registers and dials stays the unit suite's subject. What
- * is platform-dependent is the derivation itself, and that is here.
+ * The browser companion to apps/web/test/unit/webrtcInterop.test.ts: it runs
+ * the same checked-in CLI-to-web interop vectors through the browser build
+ * of @psilink/core and the app's accept path in real Chromium, since the
+ * rendezvous peer id and invitation checksum are computed on crypto.subtle,
+ * a platform-specific implementation this file is the one to check. Which id
+ * each flow registers and dials stays the unit suite's subject.
  */
 
 interface InteropVectors {

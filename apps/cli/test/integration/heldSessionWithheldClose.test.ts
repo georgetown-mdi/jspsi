@@ -27,7 +27,7 @@ import { inProcessOnly } from "../sftpBackendGate";
 // path issues is dialDeferral.test.ts.
 
 // The per-operation liveness deadline, lowered through the adapter's @internal
-// test seam. The torn operation is never answered, so that deadline is what ends
+// `stallDeadlineMs` option. The torn operation is never answered, so that deadline is what ends
 // it and nothing else here depends on its value; at the production 60 s this
 // exercise would simply wait a minute longer for the same rejection.
 const STALL_DEADLINE_MS = 3_000;
@@ -94,7 +94,7 @@ inProcessOnly(
           const message = new Promise((resolve, reject) => {
             receiver.once("data", resolve);
             // A drop this mode cannot recover from ends the exchange with no
-            // `data` event at all, so surface that error here rather than leaving
+            // `data` event at all, so raise that error here rather than leaving
             // the case to time out on it.
             receiver.once("error", reject);
           });

@@ -51,14 +51,13 @@ function peerOpened(peer: Peer): Promise<void> {
  * on its derived id; the acceptor (PSI initiator) dials it. Resolves once both
  * `DataConnection`s are open.
  *
- * Hermetic ICE: both peers run in one browser on one machine, so a loopback host
- * candidate is all they need. Configure no STUN/TURN, so the exchange contacts no
- * external server (PeerJS's default config would otherwise reach public Google
- * STUN). This makes the loopback host candidate the only one available, which is
- * exactly why the browser project disables Chromium's mDNS host-candidate
- * obfuscation (see vite.config.ts); without that the candidate is an unresolvable
- * `.local` name and the connection cannot open. Production configures real STUN
- * for cross-network peers (src/psi/rendezvous.ts).
+ * Hermetic ICE: both peers run in one browser on one machine, so a loopback
+ * host candidate is all they need. No STUN/TURN configured, so the exchange
+ * reaches no external server (PeerJS's default would otherwise reach public
+ * Google STUN) -- which is why the browser project also disables Chromium's
+ * mDNS host-candidate obfuscation (vite.config.ts), since a `.local` name
+ * cannot otherwise resolve. Production configures real STUN for cross-network
+ * peers (src/psi/rendezvous.ts).
  */
 export async function connectRendezvousPair(
   sharedSecret: string,

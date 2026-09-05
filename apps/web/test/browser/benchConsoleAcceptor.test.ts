@@ -41,17 +41,15 @@ import type {
 } from "@psilink/core";
 import type { JobHandoff } from "@jobs/handoff";
 
-// This suite exercises the CONSOLE acceptor seat: the honest unsupported-shape
+// This suite exercises the CONSOLE acceptor seat: the accurate unsupported-shape
 // gate, the shared-folder confirmation, and the server-job run surface (the
-// keep-open callout through a stubbed filedrop accept). For the gate, the dev
-// server has no rendezvous mount configured, so `/api/jobs/rendezvous` reports
-// unavailable: a WebRTC accept is out of scope on the appliance, and a
-// single-directory file-drop accept needs JOB_RENDEZVOUS_DIR. Both are stopped at the
-// review step -- before consent or intake -- with an honest state naming where the
-// operator CAN run the exchange. The hosted acceptor journey stays pinned by
-// acceptJourney.test.ts, which runs on the real default profile.
+// keep-open callout through a stubbed filedrop accept). The dev server has no
+// rendezvous mount configured, so a WebRTC accept is out of scope on the console,
+// and a single-directory file-drop accept needs JOB_RENDEZVOUS_DIR; both stop at
+// review with an accurate state naming where the operator CAN run the exchange.
+// The hosted acceptor journey stays pinned by acceptJourney.test.ts.
 
-// The bench and its recovery links touch the router seam.
+// The bench and its recovery links touch the router boundary.
 vi.mock("@tanstack/react-router", async () =>
   (await import("./moduleMocks")).reactRouterMock(),
 );
@@ -66,8 +64,8 @@ vi.mock("@psi/rendezvous", async () =>
   (await import("./moduleMocks")).rendezvousMock(),
 );
 
-// The inviter-perspective terms the accepted invitation carries. The terms render at
-// the review step for transparency even though the appliance cannot run the exchange.
+// The inviter-perspective terms the accepted invitation holds. The terms render at
+// the review step for transparency even though the console cannot run the exchange.
 const inviterTerms: LinkageTerms = {
   version: "1.0.0",
   identity: "County Health Department",
@@ -105,8 +103,8 @@ async function encodeToken(endpoint: ConnectionEndpoint): Promise<string> {
   return encodeInvitation(token);
 }
 
-// A file-drop endpoint carrying a real external locator -- the shipped shape of a
-// CLI-minted shared-directory invitation. The appliance ignores this path and polls
+// A file-drop endpoint holding a real external locator -- the shipped shape of a
+// CLI-minted shared-directory invitation. The console ignores this path and polls
 // its own private per-job directory, so the run could never rendezvous; the gate must
 // refuse it rather than assert a (mock-only) successful run.
 const FILEDROP_ENDPOINT: ConnectionEndpoint = {
@@ -114,8 +112,8 @@ const FILEDROP_ENDPOINT: ConnectionEndpoint = {
   path: "/drops/psilink",
 };
 // The split shape of the same invitation: the inviting party's inbound and outbound
-// folders. An accept runs over the mounts on THIS appliance rather than these paths,
-// so a split accept needs the appliance mounted the same shape -- and the pair here
+// folders. An accept runs over the mounts on THIS console rather than these paths,
+// so a split accept needs the console mounted the same shape -- and the pair here
 // is stated from the inviter's side, which is why neither path is shown to this seat.
 const SPLIT_FILEDROP_ENDPOINT: ConnectionEndpoint = {
   channel: "filedrop",
@@ -147,7 +145,7 @@ describe("console acceptor unsupported-shape gate", () => {
     window.location.hash = await encodeToken(FILEDROP_ENDPOINT);
     app.render(createElement(AcceptorBench));
 
-    // The terms still render (transparency), but with no rendezvous mount the honest
+    // The terms still render (transparency), but with no rendezvous mount the accurate
     // block replaces the Continue action and names the env var to set.
     await expect
       .element(page.getByText("Invitation from County Health Department"))
@@ -169,7 +167,7 @@ describe("console acceptor unsupported-shape gate", () => {
     ).toBeNull();
   });
 
-  test("a webrtc invitation is out of scope on the appliance, pointing at the web app", async () => {
+  test("a webrtc invitation is out of scope on the console, pointing at the web app", async () => {
     window.location.hash = await encodeToken(WEBRTC_ENDPOINT);
     app.render(createElement(AcceptorBench));
 
@@ -219,15 +217,15 @@ describe("console acceptor never renders the recurring-save offer", () => {
   });
 });
 
-// The name THIS appliance's own rendezvous report gives the mounted directory --
+// The name THIS console's own rendezvous report gives the mounted directory --
 // the only value the console may show as the shared folder's name.
 const APPLIANCE_FOLDER_NAME = "county-exchange";
-// The two names a split-provisioned appliance reports for its own mounts: the
+// The two names a split-provisioned console reports for its own mounts: the
 // inbound leg the partner writes into, and the outbound one this seat writes.
 const APPLIANCE_INBOUND_NAME = "from-partner";
 const APPLIANCE_OUTBOUND_NAME = "to-partner";
 
-/** The split pair this appliance reports, named or (with `named` false) carrying
+/** The split pair this console reports, named or (with `named` false) holding
  * locators only -- the launcher-chosen mount points the console cannot name. */
 function splitRendezvousBody(named = true): Record<string, unknown> {
   return {
@@ -244,7 +242,7 @@ function splitRendezvousBody(named = true): Record<string, unknown> {
   };
 }
 
-/** Serve the appliance's own rendezvous report (`body`) and an empty work directory,
+/** Serve the console's own rendezvous report (`body`) and an empty work directory,
  * which is all the review and consent steps read. Every other job URL 404s; anything
  * off the job API falls through to the real fetch. */
 function stubRendezvousReport(body: unknown): void {
@@ -269,7 +267,7 @@ function stubRendezvousReport(body: unknown): void {
   );
 }
 
-// The appliance HERE reports a configured rendezvous mount, so a single-directory
+// The console HERE reports a configured rendezvous mount, so a single-directory
 // filedrop accept is runnable and reaches the consent step. `folderName` is reported
 // only when this console can name its own mount, which is the branch the confirm
 // alert turns on.
@@ -282,7 +280,7 @@ function stubRendezvousMounted(folderName?: string): void {
 }
 
 describe("console acceptor shared-folder confirmation", () => {
-  test("names this appliance's own mounted folder, never the invitation's locator", async () => {
+  test("names this console's own mounted folder, never the invitation's locator", async () => {
     stubRendezvousMounted(APPLIANCE_FOLDER_NAME);
     window.location.hash = await encodeToken(FILEDROP_ENDPOINT);
     app.render(createElement(AcceptorBench));
@@ -384,7 +382,7 @@ describe("console acceptor shared-folder confirmation", () => {
 
 // A profiled mounted file whose columns satisfy the invitation's linkage fields
 // (first_name/last_name), so the confirm-columns verdict clears and the accept can
-// launch on the appliance.
+// launch on the console.
 const ACCEPT_FILE = {
   name: "cohort.csv",
   sizeBytes: 4096,
@@ -403,7 +401,7 @@ const ACCEPT_PROFILE = {
 };
 
 interface AcceptStubOptions {
-  /** When set, `POST /api/jobs` returns a busy (409) carrying this id (the slot is
+  /** When set, `POST /api/jobs` returns a busy (409) holding this id (the slot is
    * occupied), and the id's status/events routes are served so the accept can
    * re-attach to it. `holdProbe` withholds the FIRST status GET (the liveness
    * probe) until `resolveProbe()` is called, so a test can observe the reconnecting
@@ -412,7 +410,7 @@ interface AcceptStubOptions {
   /** The body `GET /api/jobs/:id/handoff` serves (the recurring-run hand-off); a
    * 404 when unset, so the panel renders nothing. */
   handoff?: unknown;
-  /** The appliance's rendezvous report; a single named mount when unset. A split
+  /** The console's rendezvous report; a single named mount when unset. A split
    * pair here is the provisioning a split filedrop accept runs over. */
   rendezvous?: unknown;
   /** The run status the job's status route reports. A discard cancels and polls a
@@ -423,14 +421,14 @@ interface AcceptStubOptions {
    * availability under `recordUnavailable` below. */
   record?: { createdAt: string; outcome: string };
   /** Why the status route says it is withholding the record pair, for a body that
-   * denies availability. The default is the appliance's definitive denial, which
+   * denies availability. The default is the console's definitive denial, which
    * is what a run that owes no record answers. */
   recordUnavailable?: string;
 }
 
 // The full same-origin job API a console server-job accept drives: a mounted
 // rendezvous and work directory, the file profile, the coverage sweep, and the job
-// POST plus event stream the appliance run reads. With `conflict` the POST returns a
+// POST plus event stream the console run reads. With `conflict` the POST returns a
 // busy (409) so the accept re-attaches to the occupying exchange instead. Unmatched
 // URLs fall through to the real fetch so the runner's own traffic is untouched.
 function stubServerJobAccept(options: AcceptStubOptions = {}): {
@@ -571,7 +569,7 @@ async function reachAcceptColumns() {
     .toBeInTheDocument();
 }
 
-// The same walk, through the launch: "Start the exchange" fires the appliance job
+// The same walk, through the launch: "Start the exchange" fires the console job
 // create.
 async function reachAcceptStart() {
   await reachAcceptColumns();
@@ -580,21 +578,21 @@ async function reachAcceptStart() {
 
 describe("console acceptor file-handling gate", () => {
   /** Reach the confirm-columns step of a runnable console accept and open the
-   * file-handling card the appliance run carries. */
+   * file-handling card the console run holds. */
   async function openExchangeFiles() {
     await reachAcceptColumns();
-    // The disclosure's accessible name carries its collapsed summary, so match on
+    // The disclosure's accessible name holds its collapsed summary, so match on
     // the label rather than the whole name.
     await page.getByRole("button", { name: /How files are handled/ }).click();
   }
 
-  test("offers the whole card, including what only a composed config carries", async () => {
+  test("offers the whole card, including what only a composed config holds", async () => {
     stubServerJobAccept();
     window.location.hash = await encodeToken(FILEDROP_ENDPOINT);
     app.render(createElement(AcceptorBench));
     await openExchangeFiles();
 
-    // An accept the appliance conducts composes a configuration document, so the
+    // An accept the console conducts composes a configuration document, so the
     // foreign-file policy -- a configuration-only key -- is offered here.
     await expect
       .element(page.getByLabelText("If an unrecognised file appears"))
@@ -668,9 +666,9 @@ describe("console acceptor file-handling gate", () => {
     app.render(createElement(AcceptorBench));
     await reachAcceptColumns();
 
-    // Every filedrop exchange on a split appliance carries the inbound/outbound
+    // Every filedrop exchange on a split console holds the inbound/outbound
     // pair, which core refuses without retain mode: the operator meets the control
-    // to turn on here rather than a job the appliance refuses at composition.
+    // to turn on here rather than a job the console refuses at composition.
     await expect
       .element(page.getByRole("button", { name: "Start the exchange" }))
       .toBeDisabled();
@@ -687,7 +685,7 @@ describe("console acceptor file-handling gate", () => {
 });
 
 describe("console acceptor server-job keep-open callout", () => {
-  test("holds the callout while the appliance runs the accept, then clears it once the run settles", async () => {
+  test("holds the callout while the console runs the accept, then clears it once the run settles", async () => {
     const api = stubServerJobAccept();
     window.location.hash = await encodeToken(FILEDROP_ENDPOINT);
     app.render(createElement(AcceptorBench));
@@ -703,13 +701,13 @@ describe("console acceptor server-job keep-open callout", () => {
     await page.getByRole("button", { name: "Accept and continue" }).click();
 
     // Confirm columns -> start: the mounted file's columns satisfy the terms, so the
-    // accept launches on the appliance.
+    // accept launches on the console.
     await expect
       .element(page.getByRole("heading", { name: "Confirm your columns" }))
       .toBeInTheDocument();
     await page.getByRole("button", { name: "Start the exchange" }).click();
 
-    // The appliance is running the accept: the keep-open callout names the run the tab
+    // The console is running the accept: the keep-open callout names the run the tab
     // is holding, the same copy the inviter's server-job run shows.
     await expect
       .element(page.getByRole("heading", { level: 1 }))
@@ -718,7 +716,7 @@ describe("console acceptor server-job keep-open callout", () => {
       .element(page.getByText(SERVER_JOB_KEEP_OPEN_BODY))
       .toBeInTheDocument();
 
-    // Settle the run from the appliance's event stream; the callout drops once results
+    // Settle the run from the console's event stream; the callout drops once results
     // exist -- there is no longer a live run for the tab to hold open.
     await vi.waitFor(() => expect(api.hasEventStream()).toBe(true));
     api.emitEvent({ v: 1, type: "result", resultWritten: true });
@@ -744,7 +742,7 @@ describe("console acceptor re-attaches on a busy create", () => {
   } satisfies JobHandoff;
 
   test("a 409 at accept re-attaches with recovery copy and shows completion affordances", async () => {
-    // The slot is occupied: the accept's create 409s carrying the live occupant's id.
+    // The slot is occupied: the accept's create 409s holding the live occupant's id.
     const api = stubServerJobAccept({
       conflict: { jobId: "job-live", status: "running" },
       handoff: REATTACH_HANDOFF,
@@ -858,7 +856,7 @@ describe("console acceptor re-attaches on a busy create", () => {
   });
 });
 
-// The two messages the appliance's rendezvous preflight raises, in order, when the
+// The two messages the console's rendezvous preflight raises, in order, when the
 // mount is not empty. The listing names entries the PARTNER chose: the partner syncs
 // its own files into the rendezvous directory, which is exactly why the accepting
 // seat -- the one launching into a mount the partner has been syncing into -- has to
@@ -867,13 +865,13 @@ const NOT_EMPTY_LEAD =
   "the rendezvous directory /mnt/rendezvous is not empty; an exchange refuses " +
   "to start on an earlier run's files. Turn on \"Clear leftover exchange " +
   'files" and re-run. Your own input and results are not what it refuses over.';
-// A partner-chosen entry name carrying a literal backslash and a non-ASCII code
-// point, composed RAW by the appliance for the console sink's single escape.
+// A partner-chosen entry name holding a literal backslash and a non-ASCII code
+// point, composed RAW by the console for the console sink's single escape.
 const PARTNER_ENTRY = "q1\\cohorté.csv";
 const PARTNER_ENTRY_ESCAPED = "q1\\\\cohort\\xe9.csv";
 
 describe("console acceptor run warnings", () => {
-  test("puts the appliance's preflight warnings in front of the accepting operator", async () => {
+  test("puts the console's preflight warnings in front of the accepting operator", async () => {
     const api = stubServerJobAccept();
     window.location.hash = await encodeToken(FILEDROP_ENDPOINT);
     app.render(createElement(AcceptorBench));
@@ -943,7 +941,7 @@ describe("console acceptor run warnings", () => {
 });
 
 // The acceptor seat's own recoveries, each of which DELETEs the run's folder on
-// the appliance. The record ask that decides whether they confirm is this seat's
+// the console. The record ask that decides whether they confirm is this seat's
 // own -- a different call site from the inviter's, with its own enabling gate --
 // so its states are driven here rather than taken on trust from the inviter's.
 describe("console acceptor recoveries against the run's exchange record", () => {
@@ -952,7 +950,7 @@ describe("console acceptor recoveries against the run's exchange record", () => 
 
   /** Accept, reach the running run, then end it in a retryable transport
    * terminal -- the failure whose recovery is Try again, which discards the run's
-   * folder on the appliance. */
+   * folder on the console. */
   async function acceptToExchangeFailure(
     api: ReturnType<typeof stubServerJobAccept>,
   ): Promise<void> {
@@ -972,7 +970,7 @@ describe("console acceptor recoveries against the run's exchange record", () => 
       .toBeInTheDocument();
   }
 
-  test("offers the record the appliance holds and confirms before destroying it", async () => {
+  test("offers the record the console holds and confirms before destroying it", async () => {
     const api = stubServerJobAccept({
       jobStatus: "failed",
       record: { createdAt: CREATED_AT, outcome: "receipt-swap-terminated" },
@@ -1001,7 +999,7 @@ describe("console acceptor recoveries against the run's exchange record", () => 
     expect(api.captured.some((r) => r.method === "DELETE")).toBe(false);
   });
 
-  test("a record the appliance cannot read confirms, and links no download", async () => {
+  test("a record the console cannot read confirms, and links no download", async () => {
     const api = stubServerJobAccept({
       jobStatus: "failed",
       recordUnavailable: "undescribable-record",
@@ -1029,7 +1027,7 @@ describe("console acceptor recoveries against the run's exchange record", () => 
     expect(api.captured.some((r) => r.method === "DELETE")).toBe(false);
   });
 
-  test("the appliance's own no-record answer retries straight through", async () => {
+  test("the console's own no-record answer retries straight through", async () => {
     const api = stubServerJobAccept({ jobStatus: "failed" });
     await acceptToExchangeFailure(api);
 

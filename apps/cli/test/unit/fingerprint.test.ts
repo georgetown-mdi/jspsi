@@ -327,7 +327,7 @@ test("falls back to the config identity when --identity is absent", async () => 
 // --- the label bound into the certificate ------------------------------------
 
 /** A control character by code point, so the fixtures below stay printable
- * ASCII in the source while carrying the byte under test. */
+ * ASCII in the source while holding the byte under test. */
 const control = (code: number): string => String.fromCharCode(code);
 
 test.each([
@@ -337,7 +337,7 @@ test.each([
   ["a DEL", `Party${control(0x7f)}A`],
   ["a C1 byte", `Party${control(0x9b)}A`],
 ])(
-  "refuses to bind an identity carrying %s, and writes no file",
+  "refuses to bind an identity holding %s, and writes no file",
   async (_label, identityArg) => {
     // The label is bound into a long-lived certificate the partner pins and
     // DISPLAYS long after this run, and it reaches this command without passing
@@ -415,9 +415,9 @@ test("a control-character label from the config is refused too", async () => {
   expect(fs.existsSync(idPath)).toBe(false);
 });
 
-test("a --force re-key carrying a bad label forward is refused", async () => {
+test("a --force re-key passing a bad label forward is refused", async () => {
   // A re-key binds the EXISTING label into a new certificate, so the check is
-  // about what that certificate would carry rather than about how the value
+  // about what that certificate would hold rather than about how the value
   // arrived; the remedy is a clean --identity, and the old file survives until
   // one is given.
   const idPath = path.join(dir, "id.json");
@@ -469,16 +469,13 @@ test("warns when the bound identity diverges from the config identity", async ()
 });
 
 test("a control-character label is escaped where the warning is logged", async () => {
-  // The warning's values never become an Error on this path, so this log sink is
-  // their single escape (CONTRIBUTING.md, Operator-facing escaping) and the
-  // shared party-identity helper is what performs it. Both identities are
-  // locally authored, so this is display hygiene rather than an injection
-  // boundary -- but a label carrying a terminal escape must still not reach the
-  // operator's terminal as one.
-  //
-  // Reached over an identity ALREADY on disk: a new binding carrying a control
-  // character is refused outright (below), while the certificate schema admits
-  // an existing one, so a loaded file is where such a label still reaches a sink.
+  // This log sink is where these values get their one escape pass
+  // (CONTRIBUTING.md, Operator-facing escaping), via the shared party-identity
+  // helper; a label holding a terminal escape must not reach the operator's
+  // terminal as one. Reached over an identity ALREADY on disk: a new binding
+  // holding a control character is refused outright (below), but the
+  // certificate schema admits an existing one, so a loaded file is how such a
+  // label still reaches this sink.
   const idPath = path.join(dir, "id.json");
   const warn = vi.fn();
   const esc = String.fromCharCode(0x1b);
@@ -512,7 +509,7 @@ test("is silent when the bound identity matches the config identity", async () =
   expect(warn).not.toHaveBeenCalled();
 });
 
-test("is silent when the config carries no linkage_terms.identity", async () => {
+test("is silent when the config has no linkage_terms.identity", async () => {
   const idPath = path.join(dir, "id.json");
   const warn = vi.fn();
   await resolveSigningIdentity({
@@ -545,7 +542,7 @@ test("a --force re-key that keeps a divergent bound identity warns", async () =>
     force: false,
     log: noopLog,
   });
-  // No --identity, so the re-key carries the existing binding forward; it is
+  // No --identity, so the re-key passes the existing binding forward; it is
   // still the identity the new certificate is bound to.
   const warn = vi.fn();
   const { action } = await resolveSigningIdentity({
@@ -585,7 +582,7 @@ test("loading an existing divergent identity warns on every run", async () => {
   expect(message).toContain("linkage_terms.identity");
   expect(message).toContain("reject");
 
-  // Deliberate nagging: the second run repeats it rather than remembering that
+  // Nagging by design: the second run repeats it rather than remembering that
   // the first one warned.
   const warnAgain = vi.fn();
   await resolveSigningIdentity({
@@ -700,7 +697,7 @@ test("handler puts the divergence warning on stderr, leaving stdout the bare val
   const stored = await loadSigningIdentity(idPath);
   if (stored === undefined) throw new Error("the identity was not persisted");
   const fingerprint = await computeCertificateFingerprint(stored.certificate);
-  // stdout carries the value and nothing else, so `FP=$(psilink fingerprint)`
+  // stdout holds the value and nothing else, so `FP=$(psilink fingerprint)`
   // captures a clean fingerprint even when the warning fires.
   expect(stdoutWrites.join("")).toBe(`${fingerprint}\n`);
   expect(stderrWrites.join("")).toContain("linkage_terms.identity");
@@ -790,7 +787,7 @@ async function runFingerprint(options: Record<string, unknown>): Promise<{
 test("handler refuses with nothing on stdout when no identity path is named", async () => {
   // `FP=$(psilink fingerprint)` must capture an EMPTY value and a nonzero
   // status, never a fingerprint minted at a location the operator did not
-  // choose. Stdout carries the command's one result, so the refusal has to leave
+  // choose. Stdout holds the command's one result, so the refusal has to leave
   // it empty rather than explain itself there.
   const { stdout, stderr, thrown } = await runFingerprint({
     identity: "Party A",
@@ -800,8 +797,8 @@ test("handler refuses with nothing on stdout when no identity path is named", as
   expect(stderr).toContain("no signing identity path is configured");
 });
 
-test("the refusal carries the whole remedy, unrendered by the display sanitizer", async () => {
-  // The guidance is load-bearing rather than cosmetic: a bare "name a path"
+test("the refusal holds the whole remedy, unrendered by the display sanitizer", async () => {
+  // The guidance is critical rather than cosmetic: a bare "name a path"
   // invites a throwaway location whose loss forces a re-key coordinated with
   // every partner. It renders through sanitizeErrorForDisplay, which truncates a
   // long message, so each part is asserted where the operator actually reads it.
@@ -1055,7 +1052,7 @@ test("readConfigHints throws when an explicit config file is missing", () => {
 });
 
 // A YAML parse failure embeds a snippet of the offending source in its message,
-// which can carry an inline credential; the path-only guard must close both a
+// which can hold an inline credential; the path-only guard must close both a
 // syntax error (a YAMLParseError reproducing the malformed line) and an
 // unresolved alias (a plain ReferenceError echoing the alias name). Mirrors the
 // exchange-side guard (exchange.test.ts).

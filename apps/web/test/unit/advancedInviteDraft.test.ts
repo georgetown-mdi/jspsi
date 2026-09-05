@@ -74,7 +74,7 @@ describe("setDraftMetadataKeepingKeys", () => {
 
 describe("draftWithFieldAdded", () => {
   // Two columns of one opt-in type, so the type's FIRST field and its second are
-  // both reachable, and a guided draft carries cleaning for neither (the offers
+  // both reachable, and a guided draft has cleaning for neither (the offers
   // arrive off).
   const ZIP_COLUMNS = ["first_name", "last_name", "dob", "zip", "zipcode"];
   const ZIP_ROWS: Array<CSVRow> = [
@@ -95,9 +95,9 @@ describe("draftWithFieldAdded", () => {
 
     const added = draftWithFieldAdded(draft, "zip_code");
     const first = added.standardization.at(-1);
-    // The bare type name, not `zip_code_2`: a first field named for a second reads
-    // as one of a pair whose other half does not exist, and is the name no key
-    // picker offers a field under.
+    // The bare type name, not `zip_code_2`: a first field named for a second is
+    // treated as one of a pair whose other half does not exist, and is the name no
+    // key picker offers a field under.
     expect(first?.output).toBe("zip_code");
     expect(first?.input).toBe("zip");
     // With the recommended pipeline, so keying it matches what the accepting party

@@ -16,7 +16,7 @@ import type {
 } from "@psilink/core";
 
 // Untrusted, inviter-crafted control characters JSX escaping does not
-// neutralize, built from escapes so the source carries no raw control bytes: an
+// neutralize, built from escapes so the source contains no raw control bytes: an
 // ESC that drives ANSI, a right-to-left override, and a BEL.
 const ESC = "\u001b";
 const RLO = "\u202e";
@@ -167,7 +167,7 @@ describe("summarizeInvitation", () => {
     expect(summary.payload).toBeUndefined();
   });
 
-  test("surfaces the deduplicate setting", () => {
+  test("shows the deduplicate setting", () => {
     expect(summarizeInvitation(makeToken()).deduplicate).toBe(false);
     expect(
       summarizeInvitation(makeToken({ deduplicate: true })).deduplicate,
@@ -192,10 +192,10 @@ describe("summarizeInvitation", () => {
 
   test("sanitizes the legal-agreement reference and purpose", () => {
     // reference and purpose are partner-controlled free text now promoted into the
-    // always-visible consent core, so the sanitization boundary is load-bearing
+    // always-visible consent core, so the sanitization boundary is critical
     // here: raw control/bidi bytes must be neutralized in the summary the renderer
     // consumes, since none of the promoted fields reach the DOM except through it.
-    // expirationDate is a schema-validated ISO date that cannot carry these bytes,
+    // expirationDate is a schema-validated ISO date that cannot hold these bytes,
     // so it is not exercised.
     const summary = summarizeInvitation(
       makeToken({
@@ -244,8 +244,8 @@ describe("summarizeInvitation", () => {
     );
     // A transform function name, its parameters, and a constraint's
     // allowedCharacters are all partner-controlled, so each is neutralized
-    // before it reaches the summary. The allowedCharacters class is carried apart
-    // from the plain-language constraint phrases (surfaced as its own bounded
+    // before it reaches the summary. The allowedCharacters class is kept apart
+    // from the plain-language constraint phrases (shown as its own bounded
     // element), so it is asserted on that field rather than in `constraints`.
     const transform = summary.linkageKeys[0].elements[0].transforms[0];
     expect(transform.function).not.toContain(BEL);
@@ -287,7 +287,7 @@ describe("summarizeInvitation", () => {
       }),
     );
     // No linkageField is named "mystery...", so the element's field cannot
-    // resolve to a semantic-type label; the raw identifier is surfaced as the
+    // resolve to a semantic-type label; the raw identifier is shown as the
     // most transparent fallback, but sanitized first.
     const label = summary.linkageKeys[0].elements[0].fieldLabel;
     expect(label).toContain("mystery");
@@ -295,7 +295,7 @@ describe("summarizeInvitation", () => {
     expect(label).toContain("\\x07");
   });
 
-  test("surfaces a transform, swap, and fuzzy expansion on the affected elements", () => {
+  test("shows a transform, swap, and fuzzy expansion on the affected elements", () => {
     const summary = summarizeInvitation(
       makeToken({
         linkageFields: [
@@ -335,7 +335,7 @@ describe("summarizeInvitation", () => {
 
     const [plain, transformed, swapped, fuzzy] = summary.linkageKeys;
 
-    // A plain key carries no rule.
+    // A plain key has no rule.
     expect(plain.swap).toBeUndefined();
     expect(
       plain.elements.every(
@@ -371,7 +371,7 @@ describe("summarizeInvitation", () => {
           {
             // Two elements of the same type, distinguished only by alias: the
             // schema permits this, but both resolve to "First name", so naming
-            // them would read as "First name and First name".
+            // them would display as "First name and First name".
             name: "alias swap",
             elements: [
               { field: "first_name", name: "given" },
@@ -392,7 +392,7 @@ describe("summarizeInvitation", () => {
     );
 
     for (const key of summary.linkageKeys) {
-      // The swap is still surfaced so it is never silently consented to ...
+      // The swap is still shown so it is never silently consented to ...
       expect(key.hasSwap).toBe(true);
       // ... but the specific labels are withheld, so the renderer falls back to
       // a generic note rather than a duplicated or raw-identifier one.
@@ -425,7 +425,7 @@ describe("summarizeInvitation", () => {
 
     // The two unconstrained "First name" entries collapse to one; the
     // constraint-bearing one and the date field stay distinct. The allowedCharacters
-    // class is carried apart (its own field), not folded into a constraint phrase,
+    // class is kept apart (its own field), not folded into a constraint phrase,
     // and it participates in the dedupe key so the constrained field stays distinct.
     expect(summary.linkageFields).toEqual([
       { label: "First name", constraints: [] },
@@ -438,7 +438,7 @@ describe("summarizeInvitation", () => {
     ]);
   });
 
-  test("surfaces each field's declared constraints, summarizing the denylist", () => {
+  test("shows each field's declared constraints, summarizing the denylist", () => {
     const summary = summarizeInvitation(
       makeToken({
         linkageFields: [
@@ -468,7 +468,7 @@ describe("summarizeInvitation", () => {
       "2 excluded values",
     ]);
     // The plain-language constraint phrases; the partner-authored allowedCharacters
-    // class is carried apart (its own field), not folded into a phrase here.
+    // class is kept apart (its own field), not folded into a phrase here.
     expect(firstName.constraints).toEqual(["honorifics and suffixes removed"]);
     expect(firstName.allowedCharacters).toBe("A-Z ");
     // A field with no constraints contributes nothing.
@@ -476,14 +476,13 @@ describe("summarizeInvitation", () => {
     expect(dob.allowedCharacters).toBeUndefined();
   });
 
-  test("surfaces a partner-authored allowedCharacters class as its raw value apart from the constraint phrases", () => {
-    // A leading `^` reads to a non-regex-literate operator as "allow caret and
-    // A-Z" but is class negation (admits everything EXCEPT A-Z). The summary
-    // surfaces the raw class ALONE -- not folded into a "limited to <class>"
-    // phrase, and not among the plain-language constraint phrases -- so the
-    // renderer can bind it in its own bounded element under a fixed, unverified
-    // system label. The raw class is preserved verbatim (sanitized) so a
-    // regex-literate reviewer can inspect the actual pattern.
+  test("shows a partner-authored allowedCharacters class as its raw value apart from the constraint phrases", () => {
+    // A leading `^` displays to a non-regex-literate operator as "allow caret and A-Z"
+    // but is class negation (admits everything EXCEPT A-Z). The summary shows the
+    // raw class ALONE -- not folded into a "limited to <class>" phrase, nor among
+    // the plain-language constraint phrases -- so the renderer can bind it in its
+    // own bounded element under a fixed, unverified system label, preserved verbatim
+    // (sanitized) for a regex-literate reviewer to inspect.
     const summary = summarizeInvitation(
       makeToken({
         linkageFields: [
@@ -527,7 +526,7 @@ describe("summarizeInvitation", () => {
     expect(fuzzyLabelFor("adjacent_years")).toBe("adjacent years");
   });
 
-  // The per-step detail summaries an element carrying `transform` produces, in
+  // The per-step detail summaries an element with `transform` produces, in
   // declaration order. The field is an SSN, so no step earns the name-field
   // literal slice phrase and every one is described by its own copy.
   const transformsFor = (transform: LinkageKeyElement["transform"]) =>
@@ -543,12 +542,12 @@ describe("summarizeInvitation", () => {
       }),
     ).linkageKeys[0].elements[0].transforms;
 
-  // The summary surfaced for a lone transform declaring `fn`.
+  // The summary shown for a lone transform declaring `fn`.
   const transformFor = (fn: string) => transformsFor([{ function: fn }])[0];
 
   test("the transform glossary stays in sync with core's function set", () => {
     // Two-directional: every function core recognizes has a description, and the
-    // glossary carries no entry for a function core does not (a stale key). A new
+    // glossary has no entry for a function core does not (a stale key). A new
     // core function therefore cannot ship without a consent-screen description,
     // and a removed one cannot leave dead copy behind.
     expect(Object.keys(TRANSFORM_FUNCTION_GLOSSARY).sort()).toEqual(
@@ -570,7 +569,7 @@ describe("summarizeInvitation", () => {
     expect(coalesce.description).toBe(TRANSFORM_FUNCTION_GLOSSARY["coalesce"]);
     expect(coalesce.description).toMatch(/matches that would not otherwise/i);
 
-    // A normalizing function is described too, so every step carries context.
+    // A normalizing function is described too, so every step has context.
     expect(transformFor("to_upper_case").description).toMatch(/case/i);
   });
 
@@ -592,7 +591,7 @@ describe("summarizeInvitation", () => {
     expect(nonStringDefault).toBe(firstPosition);
     expect(nonStringDefault).toMatch(/substitutes nothing/i);
     expect(nonStringDefault).not.toMatch(/matches that would not otherwise/i);
-    // The header agrees on both: neither element carries the collapse marker, and
+    // The header agrees on both: neither element has the collapse marker, and
     // the second shows what its slice does instead.
     expect(headerFor([{ function: "coalesce", params: { default: 7 } }])).toBe(
       "last name",
@@ -651,7 +650,7 @@ describe("summarizeInvitation", () => {
     ]);
   });
 
-  test("surfaces a transform with no declared parameters as an empty list", () => {
+  test("shows a transform with no declared parameters as an empty list", () => {
     const summary = summarizeInvitation(
       makeToken({
         linkageFields: [{ name: "ssn", type: "ssn" }],
@@ -684,7 +683,7 @@ describe("summarizeInvitation", () => {
 
   test("annotates a coerced parameter with the value the function actually runs", () => {
     // The headline case: replace_regex replacement: null executes as the empty
-    // string. The param line stays verbatim and the executed value is surfaced
+    // string. The param line stays verbatim and the executed value is shown
     // as a separate coercion note (not folded into the partner-controlled line).
     const transform = transformWith("replace_regex", {
       pattern: "x",
@@ -728,7 +727,7 @@ describe("summarizeInvitation", () => {
     expect(transform.coercions).toBeUndefined();
   });
 
-  test("surfaces a note for each coerced parameter of a step", () => {
+  test("shows a note for each coerced parameter of a step", () => {
     // parse_date defaults both formats; declaring both null yields two notes, in
     // the function's parameter order.
     const transform = transformWith("parse_date", {
@@ -788,8 +787,8 @@ describe("summarizeInvitation", () => {
     const summary = summarizeInvitation(
       makeToken({
         // Neither swapped element resolves to a known field, so each falls back
-        // to its sanitized raw identifier -- which must not carry the raw byte
-        // into the swap note.
+        // to its sanitized raw identifier, keeping the raw byte out of the swap
+        // note.
         linkageFields: [{ name: "ssn", type: "ssn" }],
         linkageKeys: [
           {
@@ -843,14 +842,14 @@ describe("summarizeInvitation", () => {
       { function: "to_upper_case" },
     ];
 
-    // Both swapped elements carry a transform: on the receiver side each keeps
+    // Both swapped elements have a transform: on the receiver side each keeps
     // its transforms but reads the other's field value, so the interchange is
     // depicted, named in terms of the two resolved field labels.
     const both = keyFor(upper, upper);
     expect(both.swap).toEqual(["First name", "Last name"]);
     expect(both.swapTransformInterchange).toBe(true);
 
-    // Only one side (or neither) carries a transform: nothing cross-applies both
+    // Only one side (or neither) has a transform: nothing cross-applies both
     // ways, so the generic swap note stands and the interchange is not depicted.
     expect(keyFor(upper, undefined).swapTransformInterchange).toBe(false);
     expect(keyFor(undefined, undefined).swapTransformInterchange).toBe(false);
@@ -859,7 +858,7 @@ describe("summarizeInvitation", () => {
   test("withholds the interchange when both swapped elements share a field label", () => {
     // Two firstName fields resolve to the same "First name" label, so the note
     // could not name the two sides distinctly. The interchange is suppressed even
-    // though both elements carry a transform -- the distinct-label gate wins over
+    // though both elements have a transform -- the distinct-label gate wins over
     // the both-transform gate, falling back to the generic swap note.
     const key = summarizeInvitation(
       makeToken({
@@ -936,12 +935,12 @@ describe("summarizeInvitation", () => {
     expect(single.swapTransformDonor).toEqual(["First name", "Last name"]);
 
     // Symmetric: a transform on the second element re-points to the first, and the
-    // donor note names the transform-carrier (last name) first.
+    // donor note names the element with the transform (last name) first.
     const singleB = swapKey({}, { transform: partial });
     expect(singleB.headerFields).toEqual(["first name (partial)", "last name"]);
     expect(singleB.swapTransformDonor).toEqual(["Last name", "First name"]);
 
-    // Both sides carry transforms with DIFFERENT markers: each marker moves to the
+    // Both sides have transforms with DIFFERENT markers: each marker moves to the
     // partner's field (substring truncates last name's value -> "partial" on last
     // name; phonetic recodes first name's value -> "sound-alike" on first name),
     // and the bidirectional interchange note fires. Leaving the markers on their
@@ -954,7 +953,7 @@ describe("summarizeInvitation", () => {
     expect(bothDiff.swapTransformInterchange).toBe(true);
     expect(bothDiff.swapTransformDonor).toBeUndefined();
 
-    // Both carry the SAME marker: the swap is a visual no-op, interchange still
+    // Both have the SAME marker: the swap is a visual no-op, interchange still
     // fires (the cross-apply is real even when the markers coincide).
     const bothSame = swapKey({ transform: partial }, { transform: partial });
     expect(bothSame.headerFields).toEqual([
@@ -963,7 +962,7 @@ describe("summarizeInvitation", () => {
     ]);
     expect(bothSame.swapTransformInterchange).toBe(true);
 
-    // Neither carries a transform: bare labels, no interchange, no donor note.
+    // Neither has a transform: bare labels, no interchange, no donor note.
     const neither = swapKey({}, {});
     expect(neither.headerFields).toEqual(["first name", "last name"]);
     expect(neither.swapTransformInterchange).toBe(false);
@@ -971,12 +970,12 @@ describe("summarizeInvitation", () => {
   });
 
   test("swaps a header marker to the partner's field whatever its source", () => {
-    // A transform on one side, a fuzzy comparison on the other: each marker lands
-    // on the field the receiver applies it to. The substring truncates last name's
-    // value ("partial" -> last name); the fuzzy rides along with its element, which
-    // reads first name's value, so it expands first name ("fuzzy" -> first name).
-    // The applied transform is anchored by the donor note; the fuzzy axis carries
-    // its own not-applied caveat in the detail.
+    // A transform on one side, a fuzzy comparison on the other: each marker lands on
+    // the field the receiver applies it to. The substring truncates last name's value
+    // ("partial" -> last name); the fuzzy moves with its element, which reads first
+    // name's value, so it expands first name ("fuzzy" -> first name). The applied
+    // transform is anchored by the donor note; the fuzzy axis has its own
+    // not-applied caveat in the detail.
     const txAndFuzzy = swapKey(
       { transform: partial },
       { generateFuzzyComparisons: "edit_distances" },
@@ -1004,7 +1003,7 @@ describe("summarizeInvitation", () => {
   test("keeps a refused rule on the element that declares it, across a swap", () => {
     // "not supported" is not a breadth the receiver applies to a field; it names a
     // step the operator has to find and remove, and that step sits in the element
-    // that declares it. Re-attributing it would put it on a field carrying no such
+    // that declares it. Re-attributing it would put it on a field with no such
     // step, so the pair keeps its own markers -- the refused key has no run whose
     // per-field effect the swap could describe. The interchange note still fires:
     // the terms do interchange the two elements' rules.
@@ -1242,9 +1241,9 @@ describe("summarizeInvitation", () => {
         ],
       }),
     );
-    // The fuzzy expansion is surfaced (the term as proposed) but flagged as not
+    // The fuzzy expansion is shown (the term as proposed) but flagged as not
     // run by today's exchange, so the renderer marks it rather than state a
-    // behavior that does not occur. Deduplication IS run, so it carries no such
+    // behavior that does not occur. Deduplication IS run, so it has no such
     // flag and the renderer states what it discloses instead.
     expect(summary.deduplicateApplied).toBe(true);
     expect(summary.linkageKeys[0].elements[0].fuzzyComparisonApplied).toBe(
@@ -1252,9 +1251,9 @@ describe("summarizeInvitation", () => {
     );
   });
 
-  test("surfaces psi-c with no applied qualifier, since the run honors it", () => {
+  test("shows psi-c with no applied qualifier, since the run honors it", () => {
     // The algorithm is what a surface reads to decide whether the count-only tier
-    // renders; the summary carries no second flag that could hold it back while the
+    // renders; the summary has no second flag that could hold it back while the
     // exchange conducts the run.
     const summary = summarizeInvitation(
       makeToken({
@@ -1329,10 +1328,10 @@ describe("summarizeInvitation", () => {
   });
 
   test("does not render a positional slice for a reformatted field", () => {
-    // A date is canonicalized by a standardization the token does not carry, so a
+    // A date is canonicalized by a standardization the token does not hold, so a
     // positional phrase ("the first 6 characters") would be unverifiable; the
     // element falls back to the glossary description, with the "(partial)" header
-    // marker still carrying the breadth.
+    // marker still showing the breadth.
     const summary = summarizeInvitation(
       makeToken({
         linkageFields: [{ name: "dob", type: "date_of_birth" }],
@@ -1485,7 +1484,7 @@ describe("summarizeInvitation", () => {
   });
 
   test("does not mark a pure normalizer in the header", () => {
-    // Case-folding does not change which distinct values match, so it carries no
+    // Case-folding does not change which distinct values match, so it has no
     // breadth marker.
     const summary = summarizeInvitation(
       makeToken({
@@ -1538,7 +1537,7 @@ describe("summarizeInvitation", () => {
     ).toBe("last name");
 
     // Rule named directly where a partner pattern/value list makes the direction
-    // indeterminate -- including the narrowing ones, which are surfaced too.
+    // indeterminate -- including the narrowing ones, which are shown too.
     expect(
       headerFor([
         {
@@ -1560,7 +1559,7 @@ describe("summarizeInvitation", () => {
     // parse_date is routine canonicalization when it reformats between full
     // layouts, but narrows matching when its output drops a date component. A
     // year-only output keeps a token yet collapses every date within a year, so
-    // it matches on only part of the date ("partial"); a tokenless output carries
+    // it matches on only part of the date ("partial"); a tokenless output has
     // no date token at all and collapses every date to one constant value -- the
     // maximal breadth, marked distinctly ("any date").
     expect(
@@ -1590,7 +1589,7 @@ describe("summarizeInvitation", () => {
 
     // A two-digit-year input (MM/DD/YY) to a four-digit-year output is not a drop:
     // in the INPUT context both YY and YYYY are the year component, so the input
-    // carries year/month/day and the output keeps all three -- routine
+    // has year/month/day and the output keeps all three -- routine
     // canonicalization, unflagged. This pins that the year-token collapse recovers
     // core's greedy tokenization rather than substring-counting a YY inside YYYY.
     expect(
@@ -1636,9 +1635,9 @@ describe("summarizeInvitation", () => {
 
   test("ranks the tokenless parse_date collapse above every other marker", () => {
     // The "(any date)" collapse presupposes the date is actually parsed: a
-    // tokenless OUTPUT whose INPUT also carries no date token drops every record at
+    // tokenless OUTPUT whose INPUT also has no date token drops every record at
     // the input stage -- the element matches NOTHING, not everything -- so it earns
-    // no broadening marker (the dead-key advisory, a narrowing concern, surfaces it
+    // no broadening marker (the dead-key advisory, a narrowing concern, reports it
     // instead). See the dedicated input-drop test below.
     expect(
       headerFor([
@@ -1697,7 +1696,7 @@ describe("summarizeInvitation", () => {
     ).toBe("last name (any date)");
   });
 
-  test("reads a slice of the date layout's literal region as the collapse it is", () => {
+  test("treats a slice of the date layout's literal region as the collapse it is", () => {
     // The output format is inviter-authored text with only YYYY/MM/DD substituted,
     // so its literal characters are the same for every record. A window landing
     // wholly inside one leaves every date on one constant -- the maximal breadth,
@@ -1724,7 +1723,7 @@ describe("summarizeInvitation", () => {
       ]),
     ).toBe("last name (any date)");
     // A window straddling the literal and the token reads part of the date, so
-    // the truncation is the honest word and the collapse is not claimed.
+    // the truncation is the accurate word and the collapse is not claimed.
     expect(
       headerFor([
         literalRegion,
@@ -1733,7 +1732,7 @@ describe("summarizeInvitation", () => {
     ).toBe("last name (partial)");
     // A plain layout has no literal region to land in, so every verdict there is
     // the one it already earned: a slice of a reformatting parse_date truncates
-    // the canonical date, and the parse_date's own component drop still reads
+    // the canonical date, and the parse_date's own component drop still displays
     // "(partial)" with no slice at all.
     expect(
       headerFor([
@@ -1819,7 +1818,7 @@ describe("summarizeInvitation", () => {
       ]),
     ).toBe("last name (any date)");
     // The same step over a window it DOES shift: removing the format's own dash
-    // pulls the year's first digit into a five-character window, so the honest
+    // pulls the year's first digit into a five-character window, so the accurate
     // word there is the truncation. One function, opposite verdicts -- which is
     // why the header cannot read this off a step's name.
     expect(
@@ -1869,7 +1868,7 @@ describe("summarizeInvitation", () => {
   test("shows no breadth marker for a parse_date whose input drops every record", () => {
     // A parse_date whose input format omits a component core requires (here no
     // year) returns null for EVERY record -- the key matches nothing, a narrowing
-    // the separate dead-key advisory surfaces -- so the breadth marker, which
+    // the separate dead-key advisory reports -- so the breadth marker, which
     // signals BROADENING, stays silent rather than misreporting the drop as a
     // widening (it showed "(partial)"/"(any date)" before this was fixed).
     expect(
@@ -1936,7 +1935,7 @@ describe("summarizeInvitation", () => {
 
     // A later `coalesce` with a string default RESCUES every dropped value to that
     // constant, so the element is NOT dead -- it matches every record as the
-    // fallback constant. That is a real broadening, honestly marked "(fallback)".
+    // fallback constant. That is a real broadening, accurately marked "(fallback)".
     expect(
       headerFor([dead, { function: "coalesce", params: { default: "X" } }]),
     ).toBe("last name (fallback)");
@@ -1967,7 +1966,7 @@ describe("summarizeInvitation", () => {
   });
 
   test("shows a single most-salient marker, effect-named before directly-named", () => {
-    // An element carrying more than one rule shows just the most salient: an
+    // An element with more than one rule shows just the most salient: an
     // effect-named rule wins over a directly-named one ...
     expect(
       headerFor([
@@ -2041,7 +2040,7 @@ describe("summarizeInvitation", () => {
     expect(headerFor([inertCoalesce])).toBe("last name");
     expect(headerFor([nonStringCoalesce])).toBe("last name");
     // A fuzzy expansion coarsens whatever value it is handed, so the collapse
-    // outranks it too -- and where the coalesce cannot fire, "fuzzy" is the honest
+    // outranks it too -- and where the coalesce cannot fire, "fuzzy" is the accurate
     // marker the element keeps.
     const withFuzzy = (transform: LinkageKeyElement["transform"]) =>
       summarizeInvitation(
@@ -2130,12 +2129,11 @@ describe("summarizeInvitation", () => {
       "last name (sound-alike)",
     );
     // The stated limit of that rank, pinned rather than left to the prose: an
-    // effect-named marker MASKS the padded slice, and the masking word can be the
-    // milder one. Each of these collapses every short record onto one constant
-    // through a window landing in the fill, and each renders the coarsening word.
-    // Both are expert-authored shapes, unreachable from the built-in key sets (see
-    // elementBreadthMarker's ranking doc); the ranking is deliberately not re-cut
-    // for them, so this pin records the understatement rather than blessing it.
+    // effect-named marker MASKS the padded slice, and the masking word can be the milder
+    // one. Each of these collapses every short record onto one constant through a window
+    // landing in the fill, and each renders the coarsening word. Both are expert-authored
+    // edge cases (see elementBreadthMarker's ranking doc) the ranking is not re-cut
+    // for by design, so this pin records the understatement rather than blessing it.
     expect(
       headerFor([
         pad,
@@ -2157,7 +2155,7 @@ describe("summarizeInvitation", () => {
   test("does not mark a phonetic-then-substring element as a literal truncation", () => {
     // The bug: a substring after a value-recoding phonetic step slices the
     // sound-alike code, not the literal name, so "partial" (a literal truncation)
-    // would misdescribe the match -- "sound-alike" is the dominant honest effect.
+    // would misdescribe the match -- "sound-alike" is the dominant accurate effect.
     expect(
       headerFor([
         { function: "phonetic" },
@@ -2189,8 +2187,8 @@ describe("summarizeInvitation", () => {
       "last name (sound-alike)",
     );
     // remove_affixes earns no marker: it is a broadening canonicalizer (like
-    // accent/case folding), not a record-dropping narrower, so it is deliberately
-    // routine despite stripping characters (see elementBreadthMarker's doc).
+    // accent/case folding), not a record-dropping narrower, so it is routine by
+    // design despite stripping characters (see elementBreadthMarker's doc).
     expect(headerFor([{ function: "remove_affixes" }])).toBe("last name");
   });
 
@@ -2267,7 +2265,7 @@ describe("summarizeInvitation", () => {
     ).toBe("last name (partial)");
 
     // coalesce substitutes only where an earlier rule emptied the value, so a
-    // record that still carries an identifier is truncated literally and the
+    // record that still has an identifier is truncated literally and the
     // truncation rule is not suppressed. Reached FIRST it substitutes nothing --
     // the value is still in hand -- so the slice's own "partial" is what the
     // element shows. The reverse order is a real collapse, which outranks the
@@ -2315,7 +2313,7 @@ describe("summarizeInvitation", () => {
     ).toBe("last name (partial)");
 
     // Each of these steps standing alone still earns its own marker, so the
-    // compound rule above reaches no element carrying a single transform --
+    // compound rule above reaches no element with a single transform --
     // except pad_left, whose standalone padding stays routine, which is why the
     // compound needs a marker of its own, and coalesce, which as the only step is
     // reached with the value in hand and substitutes nothing.
@@ -2343,7 +2341,7 @@ describe("summarizeInvitation", () => {
     // The suppression rule is order-sensitive and hand-maintained, and the JSDoc
     // enumeration behind it is prose, so pin its verdict for every function core
     // admits: the marker keeps "(partial)" where the acceptor's identifier still
-    // composes the sliced value, and names another honest rule where a window can
+    // composes the sliced value, and names another accurate rule where a window can
     // read text the value did not supply. The reverse order and the standalone
     // baselines have their own cases above.
     const slice = { function: "substring", params: { start: 1, length: 3 } };
@@ -2387,7 +2385,7 @@ describe("summarizeInvitation", () => {
       parse_date: "partial",
       coalesce: "partial",
       // These three derive a value the identifier need not compose, so the
-      // slice is not a truncation of it and each falls through to the honest
+      // slice is not a truncation of it and each falls through to the accurate
       // marker for what the element actually does.
       phonetic: "sound-alike",
       replace_regex: "pattern replacement",
@@ -2412,7 +2410,7 @@ describe("summarizeInvitation", () => {
   test("classifies every core standardization function as marked or routine", () => {
     // The header marker is a hand-maintained classification; pin it against core's
     // full function set in both directions, so a new core function cannot ship
-    // without a deliberate marked/routine decision here (the glossary sync test
+    // without an explicit marked/routine decision here (the glossary sync test
     // guards the one-expand-down description, not this always-visible marker).
     // Param-dependent edges (parse_date drops, substring positions) have their own
     // tests; here each function is shown with the params that yield its baseline.

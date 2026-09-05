@@ -120,7 +120,7 @@ const COMMAND_ENTRY_POINTS: CommandEntryPoint[] = [
 ];
 
 // Two shapes of unrecognized value: a plain typo, and a name Object.prototype
-// carries. The second exits 64 only because the resolve rejects it -- a table
+// holds. The second exits 64 only because the resolve rejects it -- a table
 // that answered it would send a function into loglevel's setLevel, whose throw is
 // not a UsageError and so escapes every command's usage boundary.
 const REJECTED_VALUES = ["bogus", "constructor"];
@@ -138,7 +138,7 @@ test.each(
   try {
     // Every command resolves the log level before it reads any other option or
     // touches the filesystem, so the rejection lands with no more argv than the
-    // bad flag; `input` is carried for the commands whose option parse reads it
+    // bad flag; `input` is included for the commands whose option parse reads it
     // on the way to the resolve.
     await expect(
       run(argv({ input: "x.csv", "log-level": value })),

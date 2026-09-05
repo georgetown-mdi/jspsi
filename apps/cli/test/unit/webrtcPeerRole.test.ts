@@ -27,7 +27,7 @@ const filedropConnection: FileDropConnectionConfig = {
 test("the inviting side's stamp is the label its rendezvous id derives from", () => {
   const stamped = withWebRTCPeerRole(webrtcConnection, "inviter");
   expect(stamped.role).toBe("inviter");
-  // Everything else the connection locates the partner by is carried through.
+  // Everything else the connection locates the partner by stays unchanged.
   expect(stamped.server).toEqual(webrtcConnection.server);
   expect(stamped.stun).toEqual(webrtcConnection.stun);
 });

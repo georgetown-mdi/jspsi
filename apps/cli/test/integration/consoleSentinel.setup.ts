@@ -37,7 +37,7 @@ sentinel.install();
 // per-test assertion would misattribute them. The `forks` pool already isolates
 // files cross-process, so file scope is sufficient.
 afterAll(async () => {
-  // Settle trailing async output in waves: drain, and if the drain surfaced new
+  // Settle trailing async output in waves: drain, and if the drain exposed new
   // lines, drain again, until the recorded count stops growing or the cap is
   // reached. A single fixed drain can miss the ssh2-sftp-client teardown cascade,
   // which lands after the last test on async events.

@@ -129,7 +129,7 @@ test("pollIntervalMs override applies on the filedrop channel too", () => {
 
 test("pollIntervalMs override is dropped on webrtc (a FileSyncOptions-only field)", () => {
   // pollIntervalMs is a FileSyncOptions field, so the file-sync-gated block skips
-  // it on webrtc rather than writing an option the webrtc schema does not carry.
+  // it on webrtc rather than writing an option the webrtc schema does not include.
   // webrtc's options type is SharedOptions (no pollIntervalMs), so read it through
   // a record cast to assert the field is absent.
   const result = applyConnectionOverrides(baseWebRTC, {
@@ -254,7 +254,7 @@ test("a non-positive timeout override is rejected on webrtc too", () => {
 });
 
 test("the two override blocks agree on a non-positive peerTimeoutMs floor", () => {
-  // A pre-existing options block carrying an invalid (non-positive) peerTimeoutMs
+  // A pre-existing options block with an invalid (non-positive) peerTimeoutMs
   // is rejected whether re-validation is reached via a FileSync-field override
   // or via the timeout block -- both routes parse through the same schema.
   const withBadPeerTimeout: ConnectionConfig = {
@@ -324,7 +324,7 @@ test("hostKeyFingerprint overrides an unpinned connection", () => {
 
 test("hostKeyFingerprint overwrites a fingerprint already pinned in the base config", () => {
   // An explicit CLI pin is the operator's current word on the server's
-  // identity, so it supersedes whatever the loaded config already carried
+  // identity, so it supersedes whatever the loaded config already had
   // rather than being ignored or merged alongside it.
   const other = "SHA256:" + "B".repeat(42) + "A";
   const base: ConnectionConfig = {
@@ -365,7 +365,7 @@ test("an absent hostKeyFingerprint override leaves an existing pin untouched", (
 test("hostKeyFingerprint override is dropped (not an error) off the sftp channel", () => {
   // Like the sibling credential overrides, a fingerprint override is meaningless
   // on webrtc (no SFTP host key to pin) and is silently ignored rather than
-  // rejected -- webrtc carries its own connection-security surface (TURN/ICE),
+  // rejected -- webrtc has its own connection-security surface (TURN/ICE),
   // not an SSH host key.
   const result = applyConnectionOverrides(baseWebRTC, {
     server: { hostKeyFingerprint: FP },
@@ -395,14 +395,14 @@ test("serverPrivateKeyPassphrase applies alongside a private-key override", () =
   });
   if (result.channel !== "sftp") return;
   expect(result.server.privateKey).toBe("@key.pem");
-  // The literal @path is carried through verbatim (resolved later, at live use),
+  // The literal @path is passed through verbatim (resolved later, at live use),
   // just like the sibling credential overrides.
   expect(result.server.privateKeyPassphrase).toBe("@pass.txt");
 });
 
 test("serverPrivateKeyPassphrase applies when the private key is already in the base config", () => {
   // The exchange path: the passphrase unlocks a private_key the loaded config
-  // already carries, so --server-private-key need not be re-passed to satisfy
+  // already has, so --server-private-key need not be re-passed to satisfy
   // the requires-private-key precondition.
   const base: ConnectionConfig = {
     channel: "sftp",
@@ -436,7 +436,7 @@ test("a passphrase override with no private key is rejected with a UsageError", 
 
 test("a passphrase override is ignored (not an error) off the sftp channel", () => {
   // The requires-private-key check is sftp-scoped; like the sibling credential
-  // overrides, a passphrase is silently dropped on a channel that carries no
+  // overrides, a passphrase is silently dropped on a channel that has no
   // server credentials (filedrop) rather than triggering the check.
   const base: ConnectionConfig = { channel: "filedrop", path: "/mnt/share" };
   const result = applyConnectionOverrides(base, {
@@ -495,7 +495,7 @@ test("a keyboard-interactive override is ignored (not an error) off the sftp cha
 test("a keyboard-interactive: false override turns it off over a config that had it on", () => {
   // The negated CLI form (--no-server-keyboard-interactive) arrives as `false`;
   // it must override a config's `true`, and (being false, not true) it does not
-  // trip the requires-password guard even though this config carries no password.
+  // trip the requires-password guard even though this config has no password.
   const base: ConnectionConfig = {
     channel: "sftp",
     server: {
@@ -767,7 +767,7 @@ test("saveConfig emits snake_case keys and round-trips through parseExchangeSpec
   expect(raw).toContain("linkage_keys:");
   expect(raw).toContain("expects_output:");
   expect(raw).toContain("share_with_partner:");
-  // The rule-set citation the default terms carry, so the saved config names the
+  // The rule-set citation the default terms have, so the saved config names the
   // set the exchange it configures will run.
   expect(raw).toContain("linkage_rule_set:");
   expect(raw).toContain("field_set:");
@@ -795,7 +795,7 @@ test.skipIf(process.platform === "win32")(
     // Windows uses a restricted ACL, not POSIX mode bits; fs.statSync reports a
     // synthetic mode there, so this assertion is Unix-only.
     const configPath = path.join(dir, "psilink.yaml");
-    // A spec carrying an inline SFTP credential is exactly why the config must
+    // A spec with an inline SFTP credential is exactly why the config must
     // be owner-only: the 0600 mode is what keeps the password from other users.
     const spec: ExchangeSpec = {
       connection: {
@@ -914,15 +914,11 @@ test("persistHostKeyFingerprint throws (not silently) on a malformed config", ()
 });
 
 // The two source-bearing leak channels an in-place config edit can hit, each with
-// an inline credential on the offending line. A syntax error is collected in
-// doc.errors before the edit, its message embedding a snippet of the source; an
-// unresolved alias leaves doc.errors empty and setIn succeeds, so the failure
-// surfaces only when doc.toString() materializes the document, echoing the alias
-// token. Both are guarded inside the one sensitive-file chokepoint that every
-// persist* routes its parse/edit/serialize through, so the battery runs once over
-// its inputs here rather than once per caller; each other caller's own
-// malformed-config test pins that it still routes through that chokepoint, whose
-// path-only UsageError a raw parseDocument would never produce.
+// an inline credential on the offending line: a syntax error collected in
+// doc.errors before the edit, and an unresolved alias, which leaves doc.errors
+// empty and setIn succeeding, so the failure only shows at doc.toString(), echoing
+// the alias token. Both route through the shared sensitive-file chokepoint, so
+// this test covers them once rather than in each caller.
 const CREDENTIAL_LEAK_CHANNELS = [
   {
     channel: "a syntax error collected before the edit",
@@ -953,7 +949,7 @@ test.each(CREDENTIAL_LEAK_CHANNELS)(
     }
     expect(caught).toBeInstanceOf(UsageError);
     expect((caught as Error).message).toContain(expected);
-    // The credential must not appear anywhere in the surfaced (and logged) error.
+    // The credential must not appear anywhere in the shown (and logged) error.
     expect((caught as Error).message).not.toContain(SECRET);
     // The operator's file is left byte-for-byte intact (the throw precedes the
     // write), so a failed persist neither leaks the credential nor mangles it.
@@ -964,7 +960,7 @@ test.each(CREDENTIAL_LEAK_CHANNELS)(
 test("persistHostKeyFingerprint raises a UsageError when connection.server is not a mapping", () => {
   // A sftp config that PARSES (so it clears the channel guard) but whose
   // connection.server is a scalar (not a mapping) makes YAML's setIn throw a raw
-  // library error; the function must surface it as the actionable UsageError its
+  // library error; the function must report it as the actionable UsageError its
   // contract promises, not an opaque stack trace, and must leave the original
   // file untouched (the throw precedes the write).
   const configPath = path.join(dir, "psilink.yaml");
@@ -1028,7 +1024,7 @@ test("persistHostKeyFingerprint rejects a non-sftp config and leaves the file un
 
 test("persistHostKeyFingerprint sanitizes the echoed channel for display", () => {
   // The rejected channel is echoed so the operator sees what was wrong, but it
-  // is operator-authored config text that can carry control bytes -- an ESC that
+  // is operator-authored config text that can contain control bytes -- an ESC that
   // drives an ANSI sequence, or a newline usable for log-line spoofing. The
   // error is display-bound (it reaches a terminal/log), so the channel reaches
   // the operator escaped, never raw -- asserted at the rendered boundary, the
@@ -1200,7 +1196,7 @@ test("persistDisclosedPayloadColumns adds the field and preserves comments and o
 });
 
 test("persistDisclosedPayloadColumns refreshes a stale value (the re-invite fix)", () => {
-  // A config carrying an OLD commitment, re-minted over changed metadata: the
+  // A config with an OLD commitment, re-minted over changed metadata: the
   // field must be overwritten to the new set, never left stale (else the next
   // exchange false-fires against a promise the partner no longer holds).
   const configPath = path.join(dir, "psilink.yaml");
@@ -1320,7 +1316,7 @@ test("persistExpectedPayloadColumns adds the field and preserves comments and ot
 });
 
 test("persistExpectedPayloadColumns refreshes a stale value (the accept-reuse fix)", () => {
-  // A config carrying an OLD consented set, re-accepted over a changed disclosed
+  // A config with an OLD consented set, re-accepted over a changed disclosed
   // subset: the field must be overwritten to the newly-consented set, never left
   // stale (else the next recurring exchange false-aborts against a set the partner
   // no longer discloses).
@@ -1345,8 +1341,8 @@ test("persistExpectedPayloadColumns refreshes a stale value (the accept-reuse fi
 });
 
 test("persistExpectedPayloadColumns removes the field when the consented set is undefined", () => {
-  // A re-accept whose invitation carried no disclosed subset records no consented
-  // set, so a previously-recorded lock-in must be cleared, not retained stale --
+  // A re-accept whose invitation had no disclosed subset records no consented
+  // set, so a previously-recorded commitment must be cleared, not retained stale --
   // the exchange then reconciles lazily.
   const configPath = path.join(dir, "psilink.yaml");
   fs.writeFileSync(
@@ -1445,7 +1441,7 @@ test("persistExpectedPartnerDeduplicate writes a boolean the spec schema reads b
 });
 
 test("persistExpectedPartnerDeduplicate refreshes a stale declaration", () => {
-  // A config carrying a PRIOR acceptance's declaration, re-accepted over an
+  // A config with a PRIOR acceptance's declaration, re-accepted over an
   // invitation declaring the other value: the field is overwritten to what the
   // operator has just consented to, never left stale (a stale `true` would refuse
   // an honest partner now presenting `false`).
@@ -1566,7 +1562,7 @@ test("diffLinkageTerms: an algorithm mismatch is a conflict naming the field", (
   expect(conflicts).toHaveLength(1);
   expect(conflicts[0].field).toBe("algorithm");
   // Delimited, like every other value a conflict line names: the enum has no
-  // digit, so the seam's checked bare form declines it and it takes the quoted
+  // digit, so bareTermsValue's checked bare form declines it and it takes the quoted
   // one, which costs the reading nothing.
   expect(conflicts[0].existing).toBe('"psi-c"');
   expect(conflicts[0].incoming).toBe('"psi"');
@@ -1716,7 +1712,7 @@ test("diffLinkageTerms: two citations differing only under NFC are a conflict", 
   // validateCompatibility applies to it: core holds two citations to byte-exact
   // equality, so this pair aborts the exchange mid-run. Folding the two names
   // together here would report the reuse clean and let the run reach that abort;
-  // the conflict at accept is the honest pre-emption of it.
+  // the conflict at accept is the correct pre-emption of it.
   const composed = "acc\u00e9s";
   const decomposed = "acce\u0301s";
   expect(composed).not.toBe(decomposed);
@@ -1754,8 +1750,8 @@ test("diffLinkageTerms: a set name cannot forge the citation clause's own struct
   // them -- name, version, " over ", name, version -- which is printable ASCII
   // throughout, so nothing at the display boundary rewrites it. The two
   // citations are genuinely different and a plain quote would render them
-  // identically; the seam's doubling grammar is what keeps each name inside one
-  // run, so the pair stays distinguishable and neither name reads as structure.
+  // identically; quoteTermsValue's doubling grammar is what keeps each name inside one
+  // run, so the pair stays distinguishable and neither name displays as structure.
   const existing = cloneTerms(getDefaultLinkageTerms("Org"));
   const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
   existing.linkageRuleSet = {
@@ -1770,7 +1766,7 @@ test("diffLinkageTerms: a set name cannot forge the citation clause's own struct
   expect(conflicts).toHaveLength(1);
   expect(conflicts[0].existing).not.toBe(conflicts[0].incoming);
   // Each embedded delimiter is doubled, so the run it sits in cannot close on
-  // it, and the clause still carries exactly one " over " per side.
+  // it, and the clause still has exactly one " over " per side.
   expect(conflicts[0].existing).toBe(
     '"k" 1.0.0 over "a"" 1.0.0 over ""b" 1.0.0',
   );
@@ -1790,7 +1786,7 @@ test("diffLinkageTerms: a set name cannot forge the citation clause's own struct
 
 test("diffLinkageTerms: the structural-list fallback treats the JSON it falls back to", () => {
   // A sub-field difference under matching key names falls to the full JSON, and
-  // that JSON carries the same chosen bytes the name-only rendering withheld --
+  // that JSON contains the same chosen bytes the name-only rendering withheld --
   // a key element's transform params here -- so it takes the same treatment: a
   // marker planted inside the structure is replaced, and the whole is one
   // delimited run rather than loose text spelling the line's own clause.
@@ -1820,12 +1816,12 @@ test("diffLinkageTerms: the structural-list fallback treats the JSON it falls ba
 
 test("diffLinkageTerms: a private-key marker in a citation cannot truncate the accept error", () => {
   // The display boundary's private-key rule is fail-closed past a BEGIN marker
-  // carrying no END: it replaces to the end of the link it appears in. The
+  // with no END: it replaces to the end of the link it appears in. The
   // partner picks the invitation's set names, so a citation interpolated raw
   // would let one of them consume every conflict line and the recovery step
   // composed behind it -- the operator would see an abort with no diff and no
   // way forward. Redacting the halves where they are interpolated bounds the
-  // rule to the fragment that carried the marker.
+  // rule to the fragment that had the marker.
   const existing = cloneTerms(getDefaultLinkageTerms("Org"));
   const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
   existing.linkageRuleSet = {
@@ -1836,7 +1832,7 @@ test("diffLinkageTerms: a private-key marker in a citation cannot truncate the a
     fieldSet: { name: "-----BEGIN OPENSSH PRIVATE KEY-----", version: "1.0.0" },
     keySet: { name: "hmis-keys", version: "1.0.0" },
   };
-  // A second conflict, so the message carries a diff line AFTER the citation's.
+  // A second conflict, so the message has a diff line AFTER the citation's.
   incoming.legalAgreement = {
     reference: "MOU-2025-0042",
     purpose: "Audit and evaluation of the State tutoring program",
@@ -1900,7 +1896,7 @@ test("diffLinkageTerms: citation values at the schema's length cannot truncate t
       const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
       existing.linkageRuleSet = citation(vector);
       incoming.linkageRuleSet = citation(differing(vector));
-      // A second conflict, so the message carries a diff line AFTER the
+      // A second conflict, so the message has a diff line AFTER the
       // citation's, and the legal agreement is what an operator reads next.
       incoming.legalAgreement = {
         reference: "MOU-2025-0042",
@@ -2019,10 +2015,10 @@ test("diffLinkageTerms: a legal-agreement reference at the schema's length keeps
 
 test("diffLinkageTerms: a citation both sides redact away is reported as withheld", () => {
   // Reaching this takes a marker on BOTH sides, so the config the operator holds
-  // carries one too. The two names redact to the same replacement, the clause
+  // has one too. The two names redact to the same replacement, the clause
   // forms match, and the full-detail fallback -- built from those same redacted
   // values -- matches as well: every byte that differs is a byte the display
-  // will not show. Saying so is the only honest reading left.
+  // will not show. Saying so is the only accurate reading left.
   const existing = cloneTerms(getDefaultLinkageTerms("Org"));
   const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
   existing.linkageRuleSet = {
@@ -2139,7 +2135,7 @@ test("the worst-case fixture's values are the widest the schema admits", () => {
 });
 
 // Two linkage-terms documents that disagree on EVERY field the reconcile
-// compares, each disagreement carrying values at the widest the schema admits,
+// compares, each disagreement with values at the widest the schema admits,
 // plus the shapes that are hostile rather than merely wide: a name shaped like
 // the display boundary's private-key marker, a name spelling the conflict line's
 // own clause, and a payload description at the free-text bound.
@@ -2174,7 +2170,7 @@ function maximallyConflictingTerms(): {
 
   // Both names AND both versions at the schema's bound: a version's own shape
   // caps how wide it can render, but nothing holds it to the five characters a
-  // released rule set carries, so the citation's four values are driven at what
+  // released rule set has, so the citation's four values are driven at what
   // each of them can actually claim on the slot.
   existing.linkageRuleSet = {
     fieldSet: {
@@ -2319,12 +2315,12 @@ test("the reconcile refusal shows values whenever the field count leaves room fo
     COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
   );
   expect(rendered).toContain("then retry with the same URL and invitation.");
-  // Both lines carry values rather than the field name alone, and the values
+  // Both lines have values rather than the field name alone, and the values
   // that fit are shown rather than dropped.
   expect(rendered).toContain("linkage_rule_set: existing ");
   expect(rendered).toContain("legal_agreement: existing ");
   expect(rendered).toContain(DISPLAY_TRUNCATION_MARKER);
-  // Each side still reads as its whole clause: the citation's two halves around
+  // Each side still displays as its whole clause: the citation's two halves around
   // the connective, and the legal agreement's expiry after its reference.
   for (const side of conflictValues(rendered, "linkage_rule_set"))
     expect(side.split(" over ")).toHaveLength(2);
@@ -2349,7 +2345,7 @@ function reconcileBlockRoom(sources: {
 // Every field the reconcile compares, disagreeing at the ordinary width of its
 // own field: what a kept config from a DIFFERENT exchange raises. Nothing here
 // is wide, so nothing here needs constraining -- which is what the block has to
-// see rather than counting the lines that carry it.
+// see rather than counting the lines that contain it.
 function ordinarilyConflictingTerms(): {
   existing: LinkageTerms;
   incoming: LinkageTerms;
@@ -2396,7 +2392,7 @@ function ordinarilyConflictingTerms(): {
   return { existing, incoming };
 }
 
-test("eight ordinary disagreements each carry both of their values", () => {
+test("eight ordinary disagreements each have both of their values", () => {
   // The count of disagreeing fields is not what decides whether their values
   // fit: these eight ask for so little between them that every one of them is
   // shown whole, and the block says nothing about withholding anything.
@@ -2664,7 +2660,7 @@ test("an ordinary reconcile refusal is delivered whole, with nothing truncated",
   // The residual under the arithmetic above: each first-party span fits its
   // budget by measurement, not by construction, so copy that grew past the cap
   // would put the cap back on the operator's text. Driven at the sizes a real
-  // run carries, no part of this message is cut at all -- so growing the copy,
+  // run has, no part of this message is cut at all -- so growing the copy,
   // or a fragment's ordinary width, fails here rather than silently deleting
   // the next step.
   const existing = cloneTerms(getDefaultLinkageTerms("Org"));
@@ -2703,7 +2699,7 @@ test("an ordinary reconcile refusal is delivered whole, with nothing truncated",
 
 test("a linkage field name shaped like a private-key marker cannot swallow the refusal", () => {
   // The display boundary's private-key rule is fail-closed past a BEGIN marker
-  // carrying no END: it replaces from the marker to the end of the link, and
+  // with no END: it replaces from the marker to the end of the link, and
   // this whole refusal is one link. A marker in a name the partner chose would
   // otherwise take every conflict line composed behind it.
   const existing = cloneTerms(getDefaultLinkageTerms("Org"));
@@ -2763,7 +2759,7 @@ test("a partner-chosen value cannot forge a conflict line's own structure", () =
   // then `existing X vs required Y` -- and a value spelling that clause is
   // printable ASCII throughout, so nothing at the display boundary rewrites it.
   // Delimiting is what answers it, and the doubling grammar is what makes the
-  // delimiting hold: a value carrying a delimiter of its own cannot close the
+  // delimiting hold: a value with a delimiter of its own cannot close the
   // run it sits in.
   const existing = cloneTerms(getDefaultLinkageTerms("Org"));
   const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
@@ -2776,7 +2772,7 @@ test("a partner-chosen value cannot forge a conflict line's own structure", () =
   const fields = conflicts.find((d) => d.field === "linkage_fields");
   expect(fields).toBeDefined();
   // The forged clause is not reproduced: its delimiter is doubled, so the run
-  // carries it as content.
+  // contains it as content.
   expect(fields?.incoming).not.toContain('ssn" vs required "nothing');
   expect(fields?.incoming).toContain('ssn"" vs required ""nothing');
   // One entry named `a, b` renders as one run, not as the two the list
@@ -2788,18 +2784,12 @@ test("a partner-chosen value cannot forge a conflict line's own structure", () =
   expect(rendered).toContain("then retry with the same invitation.");
 });
 
-// One line's CLAUSE SKELETON under the grammar `quoteTermsValue` emits: outside
-// a run every character stands for itself, inside one a doubled delimiter is a
-// literal and a single delimiter closes the run, and each run collapses to one
-// placeholder. Two renderings that differ only in the bytes inside their runs
-// therefore have the same skeleton, which is the precise statement that no value
-// was shown to the operator as structure psilink wrote.
-//
-// The same walk core reads its own seam's messages back through
-// (`packages/core/test/utils/compatibilityMessageReader.ts`), restated here
-// because apps/cli's tsconfig cannot reach another workspace's test tree. What
-// keeps the two walking the same grammar is that the grammar itself is pinned
-// against the constructor below, in each suite that walks it.
+// One line's CLAUSE SKELETON under the `quoteTermsValue` grammar: outside a
+// run each character stands for itself; inside one, a doubled delimiter is a
+// literal and a single delimiter closes the run, so each run collapses to one
+// placeholder. Two renderings differing only in run bytes get the same
+// skeleton -- proof no value was shown to the operator as structure. Mirrors
+// core's own reader (`packages/core/test/utils/compatibilityMessageReader.ts`).
 function clauseSkeleton(line: string): string {
   let skeleton = "";
   let index = 0;
@@ -2836,33 +2826,32 @@ function blockSkeleton(block: string, lineBreak: string): string {
   return block.split(lineBreak).map(clauseSkeleton).join(lineBreak);
 }
 
-// What a value costs the block when it is rendered as one delimited run: the
-// seam doubles a delimiter inside a value, so a raw character is not a rendered
-// one and the widths the block allocates by have to be measured through it.
+// What a value costs the block when it is rendered as one delimited run:
+// quoteTermsValue doubles a delimiter inside a value, so a raw character is
+// not a rendered one and the widths the block allocates by have to be
+// measured through it.
 const quotedCost = (raw: string): number =>
   renderedDisplayCost(quoteTermsValue(raw));
 
-// The spans a conflict line is composed OF, each carried beside a delimiter of
+// The spans a conflict line is composed OF, each held beside a delimiter of
 // the value's own: the field's `: existing `, the two sides' ` vs required `,
 // the citation clause's ` over ` and a version-shaped token to stand before it,
 // the legal agreement's `(expires ` and the date it closes on, and the name
 // list's separator and brackets.
 //
-// Three of them carry the block's structure ONE LEVEL UP, which is a control
-// character rather than a printable span: the line break between lines, the one
-// a notice is introduced by, and a bare carriage return, each followed by the
+// Three of them hold the block's structure one level up: a control character
+// rather than a printable span -- the line break between lines, the one a
+// notice is introduced by, and a bare carriage return, each followed by the
 // copy the block puts after its own. The whole refusal is escaped as one link,
-// so a value's control character and the block's own reach the operator through
-// the same boundary, and a unit that spells a line is what makes the sweep's
-// skeleton comparison measure that.
+// so a value's control character and the block's own reach the operator
+// through the same boundary, which is what the sweep's skeleton comparison measures.
 //
-// The first is an adjacent run of the SHAPES the seam's markers are cut back to,
-// spelled in the value's own printable bytes: a cut anywhere in it lands beside
-// one, which is what a back-off walked over a run rather than over the cut's own
-// marker would erase. It leads the units so every value carries it, at the
-// offsets the narrowest budgets cut. Its shape is a prefix of a marker the block
-// never places here -- no unit carries a U+007F -- so the fragment check below
-// stays a statement about markers the treatment put in the value.
+// The first unit is an adjacent run of the SHAPES a marker is cut back to,
+// spelled in the value's own printable bytes, so a cut anywhere in it lands
+// beside one -- what a back-off over a plain run would miss. It leads the
+// units so every value contains it at the narrowest cut offsets. Its shape is
+// a prefix of a marker the block never places here -- no unit contains a
+// U+007F -- so the fragment check below is only about markers the treatment added.
 const FORGED_LINE_UNITS = [
   '"<7<7<7"',
   '": existing "',
@@ -2876,13 +2865,12 @@ const FORGED_LINE_UNITS = [
   '"\r  - forged_field"',
 ];
 
-// A value of exactly `cost` rendered characters, opening on `lead`. Built out of
-// the units above, so the value both carries the seam's delimiter throughout --
-// a cut anywhere inside it lands at or beside a doubled pair -- and spells the
-// connectives and punctuation of the line it is placed in, which is what a
-// partner sizing a value to place the cut has to work with. Units are laid down
-// while any of them still fits, so the padding that lands the exact width is
-// shorter than the shortest of them.
+// A value of exactly `cost` rendered characters, opening on `lead`, built from
+// the units above so it contains the quoting delimiter throughout -- a cut
+// anywhere inside it lands at or beside a doubled pair -- and spells the line's
+// own connectives and punctuation, which is what a partner sizing a value to
+// place the cut has to work with. Units are laid down while any still fit, so
+// the padding that lands the exact width is shorter than the shortest unit.
 const delimiterCarryingValue = (cost: number, lead: string): string => {
   let raw = lead;
   let index = 0;
@@ -2924,11 +2912,11 @@ const markerShapedValue = (cost: number, lead: string): string => {
   return raw;
 };
 
-// A fragment of the seam's marker left standing where a cut fell, read off the
-// markers the units above are treated into rather than restated: the marker is
-// four printable characters put where a value's control character was, so a cut
-// inside one shows the operator neither the character it names nor the value's
-// own bytes.
+// A fragment of a control-character marker left standing where a cut fell, read
+// off the markers the units above are treated into rather than restated: the
+// marker is four printable characters put where a value's control character was,
+// so a cut inside one shows the operator neither the character it names nor the
+// value's own bytes.
 const MARKER_FRAGMENTS = ["\n", "\r"].flatMap((character) => {
   const marker = controlCharacterMarker(character.codePointAt(0)!);
   return Array.from({ length: marker.length - 1 }, (_unused, index) =>
@@ -2997,15 +2985,11 @@ function parityTerms(
 }
 
 test("a fitted conflict line's runs are the runs the block composed, at every budget", () => {
-  // The seam's guarantee has to survive the FIT, which is where a value the
-  // partner sized decides where the cut falls. Read back as a clause skeleton: a
-  // rendering whose values carry the line's connectives and the seam's delimiter
-  // must give the same skeleton as one whose values carry nothing at all, and no
-  // run may be left open for what follows it on the line to be read inside.
-  //
-  // The grammar both the fit and that walk assume, pinned here rather than
-  // taken on the constructor's word: one delimiter around a run, doubled inside
-  // it.
+  // The quoting guarantee must survive the FIT, where a partner-sized value
+  // decides where the cut falls. Read back as a clause skeleton, a rendering
+  // whose values hold the line's connectives and the quoting delimiter must
+  // give the same skeleton as one whose values hold nothing at all, and no run
+  // may be left open for what follows it on the line to be read inside.
   expect(quoteTermsValue("a")).toBe('"a"');
   expect(quoteTermsValue('"')).toBe('""""');
 
@@ -3058,8 +3042,8 @@ test("a fitted conflict line's runs are the runs the block composed, at every bu
       expect(blockSkeleton(hostile, "\n"), where).toBe(
         blockSkeleton(benign, "\n"),
       );
-      // The seam's markers are the other unit the cut may not fall inside: what
-      // a fitted line carries of them is whole markers or none.
+      // The control-character markers are the other unit the cut may not fall
+      // inside: what a fitted line contains of them is whole markers or none.
       expect(fragmentsBeforeCuts(hostile), where).toEqual([]);
       // And what that back-off costs is bounded per cut: the hostile block
       // renders what the inert one does, less what each of its cuts pays.
@@ -3103,7 +3087,7 @@ test("a fitted conflict line's runs are the runs the block composed, at every bu
 });
 
 test("a side spelling the marker's shape still renders its own bytes", () => {
-  // A shown side reads as some of the value's own bytes -- that is what the
+  // A shown side displays as some of the value's own bytes -- that is what the
   // floor buys, and what a back-off walked over a RUN of marker shapes takes
   // away: the shapes are the partner's own printable text, so a side spelling
   // them end to end would render as punctuation and a truncation marker at a
@@ -3171,7 +3155,7 @@ test("a value's control characters cannot render as a line of the block's own", 
   // by a `\n` and the whole refusal is escaped as ONE link, so the separator
   // reaches the operator as the escape's token for a line break -- the same
   // token a value's own line break would reach them as, with no delimiter or
-  // doubling between the two readings. What the treatment at the seam buys is
+  // doubling between the two readings. What the escape treatment buys is
   // that the token is the block's alone.
   //
   // Driven at a width the message holds whole, so nothing here rests on a cut.
@@ -3198,7 +3182,7 @@ test("a value's control characters cannot render as a line of the block's own", 
   // rendered refusal is a field the block never named.
   for (const line of hostile.split(separator))
     expect(line.startsWith("  - linkage_keys")).toBe(false);
-  // Non-vacuous: the name reached the message whole, carrying the copy it was
+  // Non-vacuous: the name reached the message whole, with the copy it was
   // built to forge a line out of -- inside the run the block composed for it.
   expect(hostile).toContain("  - linkage_fields: existing ");
   expect(hostile).toContain("connection.server.host");
@@ -3208,7 +3192,7 @@ test("diffLinkageTerms: an un-encodable value does not throw and identical terms
   const existing = cloneTerms(getDefaultLinkageTerms("Org"));
   const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
   // A transform param outside the JSON-safe integer range survives parsing
-  // (params is `z.unknown()`) but canonicalString rejects it. Both sides carry
+  // (params is `z.unknown()`) but canonicalString rejects it. Both sides have
   // the SAME value, so the terms are identical and must reconcile cleanly: the
   // canonical throw must not escape and abort two identical configs.
   existing.linkageKeys[0].elements[0].transform = [
@@ -3230,14 +3214,12 @@ test("diffLinkageTerms: an un-encodable value does not throw and identical terms
 test("diffLinkageTerms: a pathologically deep transform.params is a clean bounded rejection, not a RangeError", () => {
   const existing = cloneTerms(getDefaultLinkageTerms("Org"));
   const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
-  // The reconcile walk's own depth guard, exercised directly. A real invitation's
-  // deep params is rejected earlier, at the decode chokepoint (the camelize fold
-  // bounds it -- see the decode-side test in core's invitation.test.ts), so the
-  // reconcile does not see one in practice. This builds the 3000-deep value
-  // straight into the reconcile input (bypassing decode) to pin that backstop: it
-  // is an independent recursion that must reject a deep value itself rather than
-  // trust its caller to have pre-bounded it. Build it iteratively so the test does
-  // not recurse.
+  // The reconcile walk's own depth guard, exercised directly: a real
+  // invitation's deep params is normally rejected earlier at the decode
+  // chokepoint (see core's invitation.test.ts), so this builds the 3000-deep
+  // value straight into the reconcile input to pin the reconcile's own safety
+  // check as an independent recursion that must reject a deep value itself.
+  // Built iteratively so the test itself does not recurse.
   let deep: Record<string, unknown> = { leaf: "x" };
   for (let i = 0; i < 3000; i++) deep = { a: deep };
   incoming.linkageKeys[0].elements[0].transform = [
@@ -3245,7 +3227,7 @@ test("diffLinkageTerms: a pathologically deep transform.params is a clean bounde
   ];
   // The depth guard fires as a clean NestingDepthExceededError (a UsageError ->
   // CLI exit 64) at depth 256, before the walk overflows the call stack with an
-  // unguarded RangeError that would otherwise surface as a generic exit 69.
+  // unguarded RangeError that would otherwise show up as a generic exit 69.
   expect(() => diffLinkageTerms(existing, incoming)).toThrow(
     NestingDepthExceededError,
   );
@@ -3290,9 +3272,9 @@ test("diffLinkageTerms: a transform.params value difference is a conflict", () =
   expect(conflicts.map((c) => c.field)).toContain("linkage_keys");
 });
 
-test("diffLinkageTerms: each name-carrying field agrees, differs, and refuses a normalization twin", () => {
+test("diffLinkageTerms: each name-holding field agrees, differs, and refuses a normalization twin", () => {
   // One logical name in the two Unicode normalization forms -- NFC "e-acute"
-  // (U+00E9) against the NFD decomposition "e" + U+0301 -- carried through each
+  // (U+00E9) against the NFD decomposition "e" + U+0301 -- run through each
   // agreement-defining field that holds authored text (the rule-set citation,
   // the fifth, has its own pair of tests above). Canonically equivalent and
   // different bytes, which is the whole of the case: core compares each of these
@@ -3356,7 +3338,7 @@ test("diffLinkageTerms: each name-carrying field agrees, differs, and refuses a 
     expect(agreeing.conflicts, vector.field).toEqual([]);
     expect(agreeing.warnings, vector.field).toEqual([]);
     // The shape the vector builds is compatible on its own, so a conflict below
-    // is the value the two sides carry rather than the shape around it.
+    // is the value the two sides have rather than the shape around it.
     expect(
       validateCompatibility(naming(composed), naming(composed)).errors,
       vector.field,
@@ -3420,7 +3402,7 @@ test("diffLinkageTerms: a normalization twin is shown as the code points that di
 
   // The same pair in a payload column's description, where both sides summarize
   // to the same column names and the diff falls back to the full detail: the
-  // fallback carries the twins to that boundary too, rather than collapsing them.
+  // fallback passes the twins to that boundary too, rather than collapsing them.
   const describing = (description: string): LinkageTerms => {
     const terms = cloneTerms(getDefaultLinkageTerms("Org"));
     terms.payload = { send: [{ name: "note", description }] };
@@ -3541,7 +3523,7 @@ test("diffLinkageTerms: linkage fields are sorted under core's own comparator", 
 test("diffLinkageTerms: an explicitly-undefined optional is treated as absent", () => {
   const existing = cloneTerms(getDefaultLinkageTerms("Org"));
   const incoming = cloneTerms(getDefaultLinkageTerms("Org"));
-  // An in-process object (unlike a Zod-parsed one) can carry an explicit
+  // An in-process object (unlike a Zod-parsed one) can have an explicit
   // `undefined` optional. The reconcile walk must drop it rather than feed it to
   // canonicalString (which rejects undefined); it must still compare equal to the
   // side that simply omits `swap`, and reach that verdict as a comparison rather
@@ -3621,9 +3603,9 @@ test("formatReconcileDiffs: neutralizes partner-controlled values against termin
       ),
     ),
   );
-  // Gone from the terminal, and gone in the seam's visible marker rather than in
-  // the escape's `\xHH` -- which is the form THIS block's own line breaks take
-  // once the refusal is escaped, and so a form no value may share.
+  // Gone from the terminal, and gone in controlCharacterMarker's visible marker
+  // rather than in the escape's `\xHH` -- which is the form THIS block's own line
+  // breaks take once the refusal is escaped, and so a form no value may share.
   expect(rendered).not.toContain("\x1b");
   expect(rendered).not.toContain("\\x1b");
   expect(rendered).toContain(controlCharacterMarker(0x1b));
@@ -3766,19 +3748,16 @@ test("readConfigLinkageSource reads retain mode off the connection block", () =>
 
 // Only a literal `true` is a declaration. A connection block the operator has
 // not finished -- no options at all, a non-object where one is expected, a
-// non-boolean value -- reads as no declaration rather than as a claim that the
+// non-boolean value -- is treated as no declaration rather than as a claim that the
 // exchange deletes its files, and none of those shapes is an error here: the
 // block stays unvalidated so an unfinished config can still mint an invitation.
 //
-// The webrtc case is the one that turns on the CHANNEL rather than the value:
-// retain mode is a file-sync setting that channel does not have. Without this
-// function's own channel check, a config carrying `channel: webrtc` and
-// `options: {retain_files: true}` would mint a token stating a mode no run of
-// it could be in -- ConnectionConfigSchema does not catch it either way: a
-// webrtc connection's options parse through SharedOptionsSchema, which has no
-// retainFiles field, so the value is silently dropped rather than refused, and
-// this same pairing loads and runs (in delete mode) through the full config
-// loader too.
+// The webrtc case turns on the CHANNEL rather than the value: retain mode is
+// a file-sync setting webrtc does not have. Without this function's own
+// channel check, a config with `channel: webrtc` and
+// `options: {retain_files: true}` would mint a token for a mode no run of it
+// could be in -- ConnectionConfigSchema does not catch it either, since
+// SharedOptionsSchema has no retainFiles field and silently drops the value.
 test.each([
   ["no options block", "connection:\n  channel: sftp\n"],
   [
@@ -3825,9 +3804,9 @@ test("readConfigLinkageSource still refuses invalid linkage_terms", () => {
 });
 
 // A local config whose linkage_terms trips a camelizeKeys structural bound (here
-// the depth bound, the cheapest to reach) must still surface the file-named
+// the depth bound, the cheapest to reach) must still show the file-named
 // "config file X has invalid linkage_terms: ..." wrap, not the raw bound-error
-// text -- safeParseLinkageTerms is genuinely non-throwing for the bound, so the
+// text -- safeParseLinkageTerms is non-throwing for the bound, so the
 // if(!result.success) branch produces the helpful message rather than the throw
 // skipping straight past it. Still a UsageError (CLI exit 64).
 test("loadConfigLinkageSource file-names a linkage_terms camelize-bound trip", () => {
@@ -3837,7 +3816,7 @@ test("loadConfigLinkageSource file-names a linkage_terms camelize-bound trip", (
   for (let i = 0; i < MAX_NESTING_DEPTH; i++) deepTerms = { nested: deepTerms };
   fs.writeFileSync(configPath, YAML.stringify({ linkage_terms: deepTerms }));
   expect(() => loadConfigLinkageSource(configPath)).toThrow(UsageError);
-  // The file-named wrap, carrying the bound's fixed message (no input bytes),
+  // The file-named wrap, with the bound's fixed message (no input bytes),
   // not the raw NestingDepthExceededError text that the pre-fix throw produced.
   expect(() => loadConfigLinkageSource(configPath)).toThrow(
     `config file ${configPath} has invalid linkage_terms: input nesting ` +
@@ -3846,7 +3825,7 @@ test("loadConfigLinkageSource file-names a linkage_terms camelize-bound trip", (
 });
 
 // The same for the metadata branch: a valid linkage_terms reaches it, then a
-// camelize-bound-tripping metadata block surfaces the file-named "invalid
+// camelize-bound-tripping metadata block shows the file-named "invalid
 // metadata" wrap rather than throwing the raw bound error.
 test("loadConfigLinkageSource file-names a metadata camelize-bound trip", () => {
   const configPath = path.join(dir, "psilink.yaml");
@@ -3867,21 +3846,18 @@ test("loadConfigLinkageSource file-names a metadata camelize-bound trip", () => 
   );
 });
 
-// A camelized issue path names every segment in the spelling the file writes,
-// and it can do that only for a key the camelize pass itself built. The one
-// schema position holding a key it did not -- a transform `params` record key,
-// the schema's only free-form record and the only position whose key schema
-// bounds length, so the only one that can surface a key in a path at all -- is
-// where the path stops instead: `_evil_key` and `EvilKey` on disk both arrive as
-// the camelized `EvilKey`, so naming either spelling names a key one of those
-// files does not contain. The three tests below pin the stop, what survives it,
-// and the absence of over-escaping on the segments that do get named.
+// A camelized issue path names each segment in the spelling the file writes,
+// which works only for keys the camelize pass itself built. The one exception
+// is a transform `params` record key -- the schema's only free-form record,
+// bounded only on length -- so a path there stops at `params` instead:
+// `_evil_key` and `EvilKey` both camelize to `EvilKey`, so naming either
+// would misname a key one of those files does not contain.
 test("loadConfigLinkageSource stops a linkage_terms issue path at the params block", () => {
   const configPath = path.join(dir, "psilink.yaml");
   const terms = cloneTerms(getDefaultLinkageTerms("Agency A"));
   // An ESC-driven ANSI sequence and a right-to-left override (U+202E). The key
   // must exceed MAX_NAME_LENGTH so the record-key schema rejects it and Zod
-  // surfaces the offending key in the issue path.
+  // shows the offending key in the issue path.
   const badKey = "\x1b[31m\u202eevil" + "x".repeat(MAX_NAME_LENGTH + 10);
   terms.linkageKeys[0].elements[0].transform = [
     { function: "noop", params: { [badKey]: 1 } },
@@ -3956,10 +3932,10 @@ test("loadConfigLinkageSource leaves a schema-fixed linkage_terms issue path une
 
 // Validation runs on the camelized shape, so a Zod issue names its field in
 // camelCase while the operator is reading a file that writes those keys in
-// snake_case. These pin the render seam that reconciles the two: a NESTED path
-// (not just a top-level key) is named as the file writes it, and the file the
-// error names is one the CLI's own writer produced, so the key it points at is
-// literally in the bytes on disk.
+// snake_case. These pin describeSchemaIssues, which reconciles the two: a
+// NESTED path (not just a top-level key) is named as the file writes it, and
+// the file the error names is one the CLI's own writer produced, so the key
+// it points at is literally in the bytes on disk.
 test("a nested linkage_terms schema error names its key as the file writes it", () => {
   const configPath = path.join(dir, "psilink.yaml");
   const terms = cloneTerms(getDefaultLinkageTerms("Agency A"));
@@ -4049,21 +4025,11 @@ test("loadConfigLinkageSource rejects malformed YAML", () => {
 });
 
 // The schema-validation error branches (linkage_terms / standardization /
-// metadata) interpolate the Zod issue message, which under Zod v4 names only the
-// expected literals, never the rejected input value. That is what keeps a secret
-// mistakenly placed in one of these blocks out of the error; Zod v3's enum error
-// echoed the received value ("...received '<value>'") and would have leaked it.
-// The sensitive-parse chokepoint sits upstream of this branch and so does not
-// cover it, hence pinning it directly here: embed a secret as an invalid enum
-// value and assert it never reaches the message.
-// A future Zod that re-embeds the rejected value turns this red instead of
-// silently leaking. Both blocks share the one path-only interpolation; the two
-// cases cover the enum fields that would carry an attacker/operator string. The
-// standardization block has no enum/literal field, so it offers no rejected
-// VALUE a message could echo -- a case there would be vacuous, not coverage.
-// Each case also asserts the rejected FIELD path is named, so the test fails
-// loudly (rather than passing while testing nothing) if the secret ever stops
-// being the value the targeted enum rejects.
+// metadata) interpolate the Zod issue message, which under Zod v4 names only
+// the expected literals, never the rejected value (Zod v3's enum error did
+// leak it). The sensitive-parse chokepoint does not cover this branch, so
+// this pins it directly: embedding a secret as an invalid enum value must
+// never reach the message, and a future Zod that re-embeds it turns this red.
 test.each([
   [
     "metadata type enum",
@@ -4158,7 +4124,7 @@ test("assertRetainSweepGuard: --force-retain-sweep alone is a UsageError; other 
 test("persistOutboundPayloadConsent removes the record on undefined, and no-ops when absent", () => {
   // The removal branch is what the accept-reuse and mint paths lean on: a record
   // that should not stand is deleted, never left stale -- and removing from a
-  // config that carries none must not rewrite the operator's file.
+  // config that has none must not rewrite the operator's file.
   const configPath = path.join(dir, "psilink.yaml");
   fs.writeFileSync(
     configPath,
@@ -4262,7 +4228,7 @@ test("narrowing the cited key set draws no citation warning", () => {
   ).toEqual([]);
 });
 
-test("terms carrying no citation draw no warning however their rules read", () => {
+test("terms with no citation draw no warning however their rules read", () => {
   const terms = withReorderedKeys(getDefaultLinkageTerms("Agency A"));
   delete terms.linkageRuleSet;
   expect(citationWarnings(terms)).toEqual([]);
@@ -4313,8 +4279,8 @@ test("a set name in the drift warning cannot forge the clause it is named in", (
   // psilink's own -- `<name> <version> this build ships` -- and the set name is
   // free text whoever authored the config chose. The escape does not reach a
   // forgery made of printable ASCII, so the name is delimited through the same
-  // seam core's own rule-set message uses; the doubling grammar is what keeps a
-  // name carrying a delimiter of its own from closing its run early.
+  // quoteTermsValue call core's own rule-set message uses; the doubling grammar
+  // keeps a name with a delimiter of its own from closing its run early.
   //
   // Driven on the CITED half, which the warning echoes back verbatim: the half
   // it reports drift against is this build's own shipped name.
@@ -4328,7 +4294,7 @@ test("a set name in the drift warning cannot forge the clause it is named in", (
   expect(warnings).toHaveLength(1);
   expect(warnings[0]).not.toContain('"a" 9.9.9 this build ships, and "b"');
   expect(warnings[0]).toContain('"a"" 9.9.9 this build ships, and ""b"');
-  // A version that does not meet the seam's checked bare shape takes the
+  // A version that does not meet bareTermsValue's checked bare shape takes the
   // delimited form too, rather than standing in the sentence undelimited.
   const versionForged = withReorderedKeys(getDefaultLinkageTerms("Agency A"));
   versionForged.linkageRuleSet = {
@@ -4338,7 +4304,7 @@ test("a set name in the drift warning cannot forge the clause it is named in", (
   expect(citationWarnings(versionForged)[0]).toContain('"county-pii" "over"');
 });
 
-test("a set name in the drift warning reaches its sink carrying no control character", () => {
+test("a set name in the drift warning reaches its sink with no control character", () => {
   // The other renderer these values reach. Its route escapes at COMPOSITION and
   // its sink is a `log.warn` that escapes nothing further, so a control
   // character the operator's terminal could act on must be gone by the time the
@@ -4442,7 +4408,7 @@ test("fields the unresolvable half covers do not decide the resolvable half", ()
   ).toEqual([]);
 });
 
-test("a set name carrying control characters is escaped at this sink", () => {
+test("a set name with control characters is escaped at this sink", () => {
   // Only a resolvable half's name is a shipped literal; the half beside it is
   // whatever the file says, and this log.warn is that value's display boundary.
   const terms = withReorderedKeys(getDefaultLinkageTerms("Agency A"));
@@ -4489,7 +4455,7 @@ test("a mint from accepted terms is offered the remedy a mint has", () => {
   expect(warnings[0]).toContain("author fresh terms for this invitation");
   expect(warnings[0]).not.toContain("accept again");
   expect(warnings[0]).not.toContain("decline to reuse these terms");
-  // The clauses before the remedy are one source, so the mint reading carries
+  // The clauses before the remedy are one source, so the mint reading has
   // the same account of why the terms are not the operator's alone.
   expect(warnings[0]).toContain("not yours alone to correct");
   expect(warnings[0]).toContain("its linkage_keys are not drawn from");
@@ -4528,15 +4494,15 @@ test("a config with no drift is silent under either standing", () => {
 
 // --- The vocabulary a bare value must not be able to spell here ---------------
 
-/** Whether a token would render undelimited, asked of core's own seam so this
- *  cannot fall behind a change to the shape it admits. */
+/** Whether a token would render undelimited, asked of bareTermsValue itself so
+ *  this cannot fall behind a change to the shape it admits. */
 const rendersBare = (token: string): boolean => bareTermsValue(token) === token;
 
 test("no token of the reconcile refusal's or the drift warning's copy is bare-shaped", () => {
   // The argument the undelimited form rests on, as a check over the copy THIS
-  // module composes. A bare value carries no space, so it is exactly one token
+  // module composes. A bare value has no space, so it is exactly one token
   // wherever a template drops it; if no token of the first-party copy around it
-  // can be spelled that way, then no bare value reads as structure this module
+  // can be spelled that way, then no bare value displays as structure this module
   // wrote, whatever the party that chose it intended. Core's own check reads the
   // templates in its `validateCompatibility` module, which says nothing about
   // the clauses composed here -- the citation's version and the legal
@@ -4544,7 +4510,7 @@ test("no token of the reconcile refusal's or the drift warning's copy is bare-sh
   // warning, all stand in copy no check there reads.
   //
   // Driven rather than restated: each message below is composed for real over
-  // values carrying no delimiter of their own, so removing its delimited runs
+  // values with no delimiter of their own, so removing its delimited runs
   // removes exactly the values and leaves the copy. What a removal cannot reach
   // is a value rendered undelimited -- which is the whole point of the form --
   // so those are named as the values they are and every other bare-shaped token
@@ -4704,9 +4670,9 @@ test("readConfigLinkageSource reads the terms' standing off the loaded file", ()
 // Both spellings are read, and the record's PRESENCE is what marks an
 // acceptance: a value `psilink accept` would not have written is an operator's
 // edit of a machine-written record, but the record still stands there, so it
-// reads as an acceptance rather than as an error here (the commands that build
+// is treated as an acceptance rather than as an error here (the commands that build
 // an exchange from the file refuse the value through core's schema). A key
-// carrying no value at all is YAML's null, which is no record.
+// with no value at all is YAML's null, which is no record.
 test.each([
   ["a camelCase spelling", "expectedPartnerDeduplicate: true\n", true],
   ["a key with no value", "expected_partner_deduplicate:\n", false],
@@ -4732,7 +4698,7 @@ test.each([
 test("the record persistExpectedPartnerDeduplicate writes marks a reused config", () => {
   // The accept-reuse path leaves the operator's own terms on disk and writes
   // this record beside them, so a config whose terms an acceptance agreed to
-  // reads as accepted even though nothing rewrote the terms themselves.
+  // is treated as accepted even though nothing rewrote the terms themselves.
   const configPath = path.join(dir, "reused.yaml");
   saveConfig(configPath, {
     connection: { channel: "filedrop", path: "/mnt/share" },

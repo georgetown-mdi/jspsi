@@ -40,7 +40,7 @@ import { captureDownloads } from "./captureDownloads";
 import type { CapturedDownload } from "./captureDownloads";
 import type { JobHandoff } from "@jobs/handoff";
 
-// The bench components touch the router seam.
+// The bench components touch the router boundary.
 vi.mock("@tanstack/react-router", async () =>
   (await import("./moduleMocks")).reactRouterMock(),
 );
@@ -93,7 +93,7 @@ interface StubOptions {
   sftp?: unknown;
   rendezvous?: unknown;
   coverageStatus?: number;
-  /** When set, `POST /api/jobs` returns a busy (409) carrying this id (the slot is
+  /** When set, `POST /api/jobs` returns a busy (409) holding this id (the slot is
    * occupied), and the id's status/events routes are served so the client can
    * re-attach to it. `holdProbe` withholds the FIRST status GET (the liveness
    * probe) until `resolveProbe()` is called, so a test can observe the reconnecting
@@ -103,13 +103,13 @@ interface StubOptions {
    * 404 when unset, so the panel renders nothing. */
   handoff?: unknown;
   /** The receipt pair the job's status route reports. Unset, the status body
-   * carries neither field, which is what a run that signed nothing answers. */
+   * holds neither field, which is what a run that signed nothing answers. */
   receipt?: { requested: boolean; available: boolean };
   /** The exchange record the job's status route reports. Unset, the body denies
    * availability under `recordUnavailable` below. */
   record?: { createdAt: string; outcome: string };
   /** Why the status route says it is withholding the record pair, for a body that
-   * denies availability. The default is the appliance's definitive denial, which
+   * denies availability. The default is the console's definitive denial, which
    * is what a run that owes no record answers. */
   recordUnavailable?: string;
   /** When true the job's status route answers 503 to every GET, which is what an
@@ -124,7 +124,7 @@ interface StubOptions {
   holdStatus?: boolean;
 }
 
-/** The same-origin job API, stubbed at the global fetch seam. Unmatched URLs fall
+/** The same-origin job API, stubbed at the global fetch boundary. Unmatched URLs fall
  * through to the real fetch so the runner's own traffic is untouched. */
 function stubJobApi(options: StubOptions = {}): {
   captured: Array<CapturedRequest>;
@@ -309,7 +309,7 @@ function stubJobApi(options: StubOptions = {}): {
 const app = createAppMount();
 
 afterEach(async () => {
-  // The picker and coverage seams are fetch-driven, so a resolution can
+  // The picker and coverage boundaries are fetch-driven, so a resolution can
   // otherwise land exactly at unmount.
   await flushPendingUpdates();
   app.unmount();
@@ -342,7 +342,7 @@ async function reachReviewCreate() {
     .toHaveTextContent("Review & create");
 }
 
-/** Open the file-handling card on Review & create. Its accessible name carries the
+/** Open the file-handling card on Review & create. Its accessible name holds the
  * collapsed summary, so match on the label rather than the whole name. */
 async function openExchangeFiles() {
   await page.getByRole("button", { name: /How files are handled/ }).click();
@@ -351,14 +351,12 @@ async function openExchangeFiles() {
 /**
  * Drive a checkbox on an open card to `on`, from whichever state it is in.
  *
- * The click sits inside the poll rather than ahead of it because a click the
- * browser reports as delivered can leave this control in the state it started in
- * under the CPU contention of the full browser suite -- the split-rendezvous gate
- * below reddened in CI that way while every local run passed. Re-reading before
- * each click is what makes that safe: a change that has already landed ends the
- * poll instead of being toggled back, so only a delivery that did nothing is
- * retried. The intended state is the only exit, so a UI that genuinely refuses
- * the change still fails here.
+ * The click sits inside the poll rather than ahead of it: under CPU contention
+ * in the full browser suite, a click the browser reports delivered can leave the
+ * control in its starting state (seen in CI on the split-rendezvous gate below).
+ * Re-reading before each click retries only a delivery that did nothing, so a
+ * control that already changed is not toggled back, and a UI that genuinely
+ * refuses the change still fails here.
  */
 async function setCheckbox(label: string, on: boolean) {
   const box = page.getByLabelText(label);
@@ -399,7 +397,7 @@ async function turnLocklessRendezvousOn() {
  * Wait until the failure recovery labelled `label` is the straight-through form.
  *
  * A settled failed run's recoveries confirm while their record ask is in flight
- * and advertise the dialog they open, so on an appliance that answers that it
+ * and advertise the dialog they open, so on a console that answers that it
  * holds no record this waits for that answer to land: a press before it would be a
  * press on the confirming form, and would remove nothing.
  */
@@ -523,7 +521,7 @@ describe("console inviter transports and sample data", () => {
     await reachReviewCreate();
     const browser = page.getByLabelText("Live, in this browser");
     await expect.element(browser).toBeDisabled();
-    // The disabled card names its in-tab exchange as out of scope on the appliance
+    // The disabled card names its in-tab exchange as out of scope on the console
     // (this phrasing is unique to the Browser card's description).
     await expect
       .element(page.getByText("the public psilink web app's domain"))
@@ -592,7 +590,7 @@ describe("console inviter file-handling gate", () => {
     path: "/drops/psilink",
   };
 
-  test("offers the whole card, including what only a composed config carries", async () => {
+  test("offers the whole card, including what only a composed config holds", async () => {
     stubJobApi({ sftp: RUN_HERE_SFTP });
     app.render(createElement(InviterBench));
     await reachReviewCreate();
@@ -740,12 +738,12 @@ describe("console inviter split-rendezvous retain gate", () => {
     outboundFolderName: "to-partner",
   };
 
-  test("a split appliance blocks Create until retain mode is on", async () => {
+  test("a split console blocks Create until retain mode is on", async () => {
     stubJobApi({ sftp: { configured: false }, rendezvous: SPLIT_RENDEZVOUS });
     app.render(createElement(InviterBench));
     await reachReviewCreate();
     // The two mounts make filedrop the default transport, and retain mode starts
-    // off -- the state the appliance's provisioning and the operator's own choice
+    // off -- the state the console's provisioning and the operator's own choice
     // disagree in, which the create gate holds.
     await expect
       .element(page.getByLabelText("Over a shared directory, run here"))
@@ -795,7 +793,7 @@ describe("console inviter split-rendezvous retain gate", () => {
 });
 
 describe("console inviter mint and run", () => {
-  test("seeds from the profile and runs a job whose intent carries inputFile, not inputCsv", async () => {
+  test("seeds from the profile and runs a job whose intent holds inputFile, not inputCsv", async () => {
     const api = stubJobApi({
       sftp: {
         configured: true,
@@ -818,7 +816,7 @@ describe("console inviter mint and run", () => {
       .element(page.getByRole("heading", { level: 1 }))
       .toHaveTextContent("Your invitation is ready");
 
-    // A server-job run: the keep-open callout names the appliance running the
+    // A server-job run: the keep-open callout names the console running the
     // exchange and that leaving leaves it running (the console re-attaches), never
     // a browser listener. The whole sentence is asserted -- a substring would also
     // pass a false "leaving abandons the run" claim.
@@ -834,7 +832,7 @@ describe("console inviter mint and run", () => {
       page.getByText("Your browser is listening for your partner").query(),
     ).toBeNull();
 
-    // The minted code carries the authored connection's locator, never inline
+    // The minted code holds the authored connection's locator, never inline
     // content.
     await page.getByRole("button", { name: "Show full code" }).click();
     const encoded = (
@@ -848,8 +846,8 @@ describe("console inviter mint and run", () => {
       path: "/drops/psilink",
     });
 
-    // The run POSTs an intent carrying the mounted-file REFERENCE, not the content,
-    // and no connection field (the appliance provisions the one server).
+    // The run POSTs an intent holding the mounted-file REFERENCE, not the content,
+    // and no connection field (the console provisions the one server).
     await vi.waitFor(() => {
       expect(
         api.captured.some(
@@ -889,7 +887,7 @@ describe("console inviter mint and run", () => {
       .toBeInTheDocument();
 
     // A relay warning (the host-key divergence notice the security review requires
-    // the operator to see) surfaces in the run UI without ending the run.
+    // the operator to see) appears in the run UI without ending the run.
     api.emitEvent({
       v: 1,
       type: "warning",
@@ -899,7 +897,7 @@ describe("console inviter mint and run", () => {
       .element(page.getByText("The exchange reported a warning"))
       .toBeInTheDocument();
 
-    // The result completes the run on the appliance's endpoint.
+    // The result completes the run on the console's endpoint.
     api.emitEvent({ v: 1, type: "result", resultWritten: true });
     api.closeEvents();
     await expect
@@ -907,7 +905,7 @@ describe("console inviter mint and run", () => {
       .toHaveTextContent("Exchange complete");
   });
 
-  test("a filedrop invitation carries the shared folder's name the console reported", async () => {
+  test("a filedrop invitation holds the shared folder's name the console reported", async () => {
     stubJobApi({
       sftp: { configured: false },
       rendezvous: {
@@ -934,7 +932,7 @@ describe("console inviter mint and run", () => {
     ).value;
     const token = await decodeInvitation(encoded);
     // The partner-bound token discloses only the shared folder's name; no path on
-    // the appliance is representable in it -- the mount is never sent to the
+    // the console is representable in it -- the mount is never sent to the
     // browser to begin with.
     expect(token.connectionEndpoint).toEqual({
       channel: "filedrop",
@@ -950,7 +948,7 @@ describe("console inviter mint and run", () => {
     await page.getByRole("button", { name: "Use this file" }).click();
     await expect.element(page.getByText("Selected")).toBeInTheDocument();
 
-    // The bench's coverage provider posts to the appliance sweep with the file's
+    // The bench's coverage provider posts to the console sweep with the file's
     // name (the CLI reads it in place; no freshness pair, no inline content).
     await vi.waitFor(() => {
       expect(
@@ -1023,7 +1021,7 @@ describe("console inviter never renders the recurring-save offer", () => {
 
 describe("console inviter run teardown and abandonment", () => {
   /** Reach a running server-job run: create the invitation (SFTP default), then
-   * advance past the wait so the appliance is conducting the exchange. */
+   * advance past the wait so the console is conducting the exchange. */
   async function reachRunningRun(
     api: ReturnType<typeof stubJobApi>,
   ): Promise<void> {
@@ -1043,7 +1041,7 @@ describe("console inviter run teardown and abandonment", () => {
       .toHaveTextContent("Exchange in progress");
   }
 
-  test("leaving the page does not cancel the appliance run", async () => {
+  test("leaving the page does not cancel the console run", async () => {
     const api = stubJobApi({
       sftp: { configured: true, host: "dr.example.gov", port: 2222 },
     });
@@ -1051,7 +1049,7 @@ describe("console inviter run teardown and abandonment", () => {
     await reachRunningRun(api);
 
     // Unmount stands in for a navigation / reload / tab close. It must NOT POST a
-    // cancel: the appliance keeps running the exchange and the recovery panel is
+    // cancel: the console keeps running the exchange and the recovery panel is
     // the way back. This is the whole point of the strand-recovery change.
     app.unmount();
     await new Promise((resolve) => setTimeout(resolve, 50));
@@ -1068,7 +1066,7 @@ describe("console inviter run teardown and abandonment", () => {
     await reachRunningRun(api);
 
     // A non-retryable (security) failure offers start-over; mark the job terminal
-    // on the appliance so the discard DELETEs it at once.
+    // on the console so the discard DELETEs it at once.
     api.setJobStatus("failed");
     api.emitEvent({
       v: 1,
@@ -1091,7 +1089,7 @@ describe("console inviter run teardown and abandonment", () => {
       .click();
 
     // Start over abandons the failed run: the terminal job is DELETEd (no cancel
-    // needed for an already-terminal job), freeing the appliance's single slot.
+    // needed for an already-terminal job), freeing the console's single slot.
     await vi.waitFor(() =>
       expect(
         api.captured.some(
@@ -1109,7 +1107,7 @@ describe("console inviter run teardown and abandonment", () => {
     await reachRunningRun(api);
 
     // A retryable (exchange) failure offers Try again; mark the job terminal on the
-    // appliance so the discard goes straight to DELETE (no cancel/poll wait).
+    // console so the discard goes straight to DELETE (no cancel/poll wait).
     api.setJobStatus("failed");
     api.emitEvent({
       v: 1,
@@ -1307,7 +1305,7 @@ describe("console inviter re-attaches on a busy create", () => {
   } satisfies JobHandoff;
 
   test("a 409 at create re-attaches with recovery-style copy, not the busy alert", async () => {
-    // The slot is occupied: the create 409s carrying the live occupant's id.
+    // The slot is occupied: the create 409s holding the live occupant's id.
     const api = stubJobApi({
       sftp: { configured: true, host: "dr.example.gov", port: 2222 },
       conflict: { jobId: "job-live", status: "running" },
@@ -1340,8 +1338,8 @@ describe("console inviter re-attaches on a busy create", () => {
         .query(),
     ).toBeNull();
 
-    // The one surface built for leave-and-return carries the keep-open
-    // reassurance -- leaving does not stop the appliance's run.
+    // The one surface built for leave-and-return holds the keep-open
+    // reassurance -- leaving does not stop the console's run.
     await expect
       .element(
         page.getByText("the exchange keeps running here", { exact: false }),
@@ -1463,7 +1461,7 @@ describe("console inviter partner accept kit", () => {
     ) as CapturedDownload;
   }
 
-  test("an sftp share step writes a sheet carrying the locator, no secret, no token", async () => {
+  test("an sftp share step writes a sheet holding the locator, no secret, no token", async () => {
     const downloads = captureDownloads();
     try {
       stubJobApi({
@@ -1487,7 +1485,7 @@ describe("console inviter partner accept kit", () => {
         /^psilink-accept-instructions-\d{4}-\d{2}-\d{2}\.txt$/,
       );
 
-      // The sheet names the same rendezvous the token carries, and the field
+      // The sheet names the same rendezvous the token holds, and the field
       // the partner fills in themselves.
       expect(sheet.text).toContain("SFTP server:    dr.example.gov:2222");
       expect(sheet.text).toContain("Directory:      /drops/psilink");
@@ -1497,7 +1495,7 @@ describe("console inviter partner accept kit", () => {
       expect(sheet.text).not.toContain("THIS EXCHANGE KEEPS ITS FILES");
       expect(sheet.text).not.toContain("--retain-files");
 
-      // What it must never carry: the minted secret or the token itself. The
+      // What it must never hold: the minted secret or the token itself. The
       // partner pastes their own copy over the placeholder.
       await page.getByRole("button", { name: "Show full code" }).click();
       const encoded = (
@@ -1569,7 +1567,7 @@ describe("console inviter partner accept kit", () => {
       await page.getByRole("button", { name: ACCEPT_KIT_BUTTON }).click();
       const sheet = await capturedSheet(downloads);
 
-      // The setting the run carries reaches the command the partner is told to
+      // The setting the run holds reaches the command the partner is told to
       // run, so following the sheet verbatim meets this exchange instead of
       // stopping at rendezvous on a mismatch.
       expect(sheet.text).toContain(
@@ -1611,7 +1609,7 @@ describe("console inviter partner accept kit", () => {
       expect(sheet.text).toContain("B. A folder that syncs on this PC");
       expect(sheet.text).toContain("accept PASTE_YOUR_INVITATION");
 
-      // The appliance's absolute rendezvous path stays off the sheet exactly as
+      // The console's absolute rendezvous path stays off the sheet exactly as
       // it stays off the token: the shared folder's name is the whole locator.
       expect(sheet.text).toContain("Shared folder:  psilink");
       expect(sheet.text).not.toContain("/srv/exchanges");
@@ -1674,7 +1672,7 @@ describe("console inviter recurring hand-off availability", () => {
       .toHaveTextContent("Your invitation is ready");
 
     // Still on the share screen, before any protocol stage: the hand-off the
-    // appliance composed at job creation is already reachable, behind a
+    // console composed at job creation is already reachable, behind a
     // collapsed disclosure so the share step still leads.
     const toggle = page.getByRole("button", {
       name: /run this on a schedule/i,
@@ -1739,7 +1737,7 @@ describe("console inviter receipt on a failed run", () => {
       .toBeInTheDocument();
   }
 
-  test("offers the receipt the appliance holds", async () => {
+  test("offers the receipt the console holds", async () => {
     const api = stubJobApi({
       sftp: { configured: true, host: "dr.example.gov", port: 2222 },
       receipt: { requested: true, available: true },
@@ -1758,7 +1756,7 @@ describe("console inviter receipt on a failed run", () => {
       .toBeInTheDocument();
   });
 
-  test("states a receipt the run asked for and the appliance does not hold", async () => {
+  test("states a receipt the run asked for and the console does not hold", async () => {
     const api = stubJobApi({
       sftp: { configured: true, host: "dr.example.gov", port: 2222 },
       receipt: { requested: true, available: false },
@@ -1777,7 +1775,7 @@ describe("console inviter receipt on a failed run", () => {
 
 // A run that disclosed and then terminated reaches this seat as a FAILURE, where
 // the completion downloads render nothing at all -- so the record of that
-// disclosure is offered only if something asks the appliance for it. These pin the
+// disclosure is offered only if something asks the console for it. These pin the
 // offer against that terminal, and pin the recovery beside it against destroying
 // the record without saying so.
 describe("console inviter exchange record on a terminated run", () => {
@@ -1786,7 +1784,7 @@ describe("console inviter exchange record on a terminated run", () => {
 
   /** Create the invitation, reach the running run, then end it in a retryable
    * transport terminal -- the failure whose recovery is Try again, which discards
-   * the run's folder on the appliance. */
+   * the run's folder on the console. */
   async function runToExchangeFailure(
     api: ReturnType<typeof stubJobApi>,
   ): Promise<void> {
@@ -1811,7 +1809,7 @@ describe("console inviter exchange record on a terminated run", () => {
       .toBeInTheDocument();
   }
 
-  test("offers the record the appliance holds, stamped from its own createdAt", async () => {
+  test("offers the record the console holds, stamped from its own createdAt", async () => {
     const api = stubJobApi({
       sftp: { configured: true, host: "dr.example.gov", port: 2222 },
       record: { createdAt: CREATED_AT, outcome: "receipt-swap-terminated" },
@@ -1829,7 +1827,7 @@ describe("console inviter exchange record on a terminated run", () => {
         }),
       )
       .toBeInTheDocument();
-    // The keys half is offered, and offered honestly: this run wrote no result
+    // The keys half is offered, and offered accurately: this run wrote no result
     // file, so there is nothing for the salts beside the record to open.
     await expect
       .element(
@@ -1873,7 +1871,7 @@ describe("console inviter exchange record on a terminated run", () => {
   });
 
   test("an ask that never answered confirms too, without claiming a record", async () => {
-    // The appliance stopped answering about this run, so the seat cannot say
+    // The console stopped answering about this run, so the seat cannot say
     // whether a record is standing -- and a run that got this far may well have
     // written one. The retry DELETEs the folder either way, so it confirms on
     // the silence, under copy that claims only what the silence supports.
@@ -1909,7 +1907,7 @@ describe("console inviter exchange record on a terminated run", () => {
   test("the retry confirms while the record ask is still in flight", async () => {
     // Between the failure alert appearing and the ask landing, the seat knows no
     // more than an exhausted ask does -- and on the failure this exists for, an
-    // appliance that has stopped answering, that window is the whole of the ask's
+    // console that has stopped answering, that window is the whole of the ask's
     // bound. The retry DELETEs the folder throughout it, so it confirms, saying
     // that the asking is what has not finished.
     const api = stubJobApi({
@@ -1940,9 +1938,9 @@ describe("console inviter exchange record on a terminated run", () => {
     api.releaseStatus();
   });
 
-  test("a record the appliance cannot read confirms, and links no download", async () => {
+  test("a record the console cannot read confirms, and links no download", async () => {
     // A data root a differently-versioned psilink wrote: a record file is in the
-    // run's folder and the appliance cannot describe it, so it withholds both
+    // run's folder and the console cannot describe it, so it withholds both
     // halves of the pair. The seat must not read that denial as the absence of a
     // record -- the retry beside it removes the folder the file sits in.
     const api = stubJobApi({
@@ -1955,7 +1953,7 @@ describe("console inviter exchange record on a terminated run", () => {
     await expect
       .element(page.getByText(UNDESCRIBABLE_RECORD_LEAD))
       .toBeInTheDocument();
-    // The routes answer 404 for a pair the appliance cannot read whole, so the
+    // The routes answer 404 for a pair the console cannot read whole, so the
     // panel that follows the status body links neither half.
     expect(
       page
@@ -2002,7 +2000,7 @@ describe("console inviter exchange record on a terminated run", () => {
       .element(page.getByText(PENDING_RECORD_CONFIRM_BODY))
       .toBeInTheDocument();
 
-    // The appliance answers: no record, which is the state that owes no confirm
+    // The console answers: no record, which is the state that owes no confirm
     // at all on a fresh press.
     api.releaseStatus();
     await expect
@@ -2019,7 +2017,7 @@ describe("console inviter exchange record on a terminated run", () => {
   });
 
   test("a run that failed before disclosing offers nothing and retries straight through", async () => {
-    // No record is owed and none was written, so the appliance reports none: the
+    // No record is owed and none was written, so the console reports none: the
     // panel renders nothing, and the recovery costs the operator nothing it has
     // not already seen, so it does not interrupt them.
     const api = stubJobApi({

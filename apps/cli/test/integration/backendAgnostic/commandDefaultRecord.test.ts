@@ -23,44 +23,37 @@ import { DEFAULT_RECORD_BASENAME, keysPathFor } from "../../../src/recordFile";
 import { captureStdio } from "../../loggingTestSupport";
 
 // Net-new coverage: the per-command-handler wiring that turns the default-on
-// audit record into files on disk. `psilink exchange` and the zero-setup command
-// each default `--record` to true, read that default in their handler, and pass
-// resolveRecordOutput(...) into the shared runProtocol write path. The write
-// mechanism itself is unit-tested (recordFile.test.ts, protocol.test.ts), core's
-// record building is tested (exchangeRecord*.test.ts), and
-// ../onlineInviteAccept.test.ts covers the same default-on assertion for the
-// invite/accept (runOnlineBootstrap) handlers. The remaining gap this file closes
-// is the exchange and zero-setup HANDLERS: that, run with no record-related flags
-// at all, each writes the default record and its private verification-keys file.
+// audit record into files on disk. `psilink exchange` and the zero-setup
+// command each default `--record` to true and pass resolveRecordOutput(...)
+// into the shared runProtocol write path -- already covered elsewhere
+// (recordFile.test.ts, protocol.test.ts, exchangeRecord*.test.ts,
+// ../onlineInviteAccept.test.ts for invite/accept). The gap this file closes
+// is the exchange and zero-setup HANDLERS: run with no record-related flags,
+// each writes the default record and its private verification-keys file.
 //
-// Why drive the real yargs builder + handler (not a post-parse seam like
-// onlineInviteAccept's validate* -> runOnlineBootstrap): the thing under test IS
-// the `--record` default and the handler body that reads it. Reconstructing that
-// call in the test would re-test runProtocol (already covered) rather than the
-// wiring. So each asserted party is run exactly as the CLI runs it -- through the
-// command's builder so yargs applies `record: true`, then its handler -- with NO
-// --record / --no-record / --record-file on the command line. This exercises both
-// the default firing AND the default record path (defaultRecordPath), which is
-// what "default-on" means here. process.exit is trapped (the handlers exit rather
-// than throw on failure), so any handler error surfaces as a clean test rejection
-// instead of killing the worker.
+// Why drive the real yargs builder + handler (not a post-parse boundary like
+// onlineInviteAccept's validate* -> runOnlineBootstrap): the thing under test
+// IS the `--record` default and the handler body that reads it, so each
+// asserted party runs exactly as the CLI runs it -- through the command's
+// builder so yargs applies `record: true`, then its handler -- with NO
+// --record / --no-record / --record-file on the command line, exercising both
+// the default firing and the default record path. process.exit is trapped, so
+// any handler error is reported as a clean test rejection instead of killing
+// the worker.
 //
-// Each exchange needs two parties to complete, but only the ASSERTED party is run
-// with the default record on; its peer is the same command with --no-record, so
-// exactly one default record lands and there is no path collision. The default
-// record path is `./psilink-record-<stamp>.json` relative to the process cwd, so
-// each test runs from its per-test work dir (chdir in beforeEach, restored in
-// afterEach) -- this keeps the artifact inside the work dir that afterEach
-// removes, rather than littering the process cwd, while still passing no
-// --record-file.
+// Each exchange needs two parties to complete, but only the ASSERTED party
+// runs with the default record on; its peer runs the same command with
+// --no-record, so exactly one default record lands with no path collision.
+// The default record path is `./psilink-record-<stamp>.json` relative to
+// process cwd, so each test runs from its per-test work dir (chdir in
+// beforeEach, restored in afterEach) so afterEach cleans up the artifact.
 //
-// filedrop only: the record-write wiring is transport-agnostic (the handler reads
-// the same `--record` default and calls the same runProtocol regardless of
-// channel), so driving a real SFTP server buys nothing here -- the same rationale
-// ../onlineInviteAccept.test.ts gives for its transport-agnostic (failure-path)
-// assertions. That is also why this file sits in the backend-agnostic project,
-// which starts no SFTP server: run it with `npm run
-// test:integration:backend-agnostic -w apps/cli`.
+// filedrop only: the record-write wiring is transport-agnostic (the handler
+// reads the same `--record` default and calls the same runProtocol regardless
+// of channel), so driving a real SFTP server buys nothing here -- the same
+// rationale ../onlineInviteAccept.test.ts gives for its transport-agnostic
+// assertions. That is also why this file sits in the backend-agnostic
+// project, which starts no SFTP server.
 
 // 32 zero bytes as base64url (43 chars): a valid shared secret. Both exchange
 // parties' key files start from it so the authenticated handshake succeeds; each
@@ -116,12 +109,11 @@ beforeEach(() => {
   work = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-cmd-record-"));
   originalCwd = process.cwd();
   // Run from the work dir so the asserted party's default record
-  // (`./psilink-record-*.json`, resolved against cwd) lands here and is cleaned
-  // up with it, while still passing no --record-file. Done here, not inline in
-  // each test, so the chdir is paired one-to-one with its afterEach restore and
-  // not interleaved with the test body. (cwd is process-global, so these tests
-  // are not safe to run concurrently within the file -- which the project's
-  // file-isolated, sequential-within-file runner does not do.)
+  // (`./psilink-record-*.json`, resolved against cwd) lands here and is
+  // cleaned up with it, while still passing no --record-file. Done here, not
+  // inline in each test, so the chdir pairs one-to-one with its afterEach
+  // restore. (cwd is process-global, so these tests are not safe to run
+  // concurrently within the file, which this runner does not do.)
   process.chdir(work);
   // The handlers call process.exit on any failure (bad config, a stalled or
   // mismatched exchange); trap it so such a failure rejects the awaiting
@@ -148,7 +140,7 @@ afterEach(() => {
 
 // Run a single CLI invocation exactly as index.ts wires it: the zero-setup
 // command as the `$0` default and `exchange` as a subcommand, so the same
-// builders apply the same option defaults (notably `record: true`). exitProcess
+// builders apply the same option defaults, `record: true` among them. exitProcess
 // is disabled so a yargs-level parse error rejects rather than exiting; a handler
 // error already rejects via the trapped process.exit above.
 async function runCli(argv: string[]): Promise<void> {
@@ -161,16 +153,12 @@ async function runCli(argv: string[]): Promise<void> {
 }
 
 // Run both parties concurrently and wait for BOTH to settle (allSettled, not
-// Promise.all). On a failure this matters: Promise.all would reject the instant
-// one party threw and let the test body unwind -- and afterEach delete the work
-// dir and restore the exit spy -- while the other handler kept running in the
-// background, racing those teardown steps and turning its eventual process.exit
-// into an unhandled rejection (or, post-restore, a real worker-killing exit).
-// allSettled holds the test until neither handler is still running (each side is
-// bounded by --peer-timeout), then any rejection is rethrown so the test fails
-// with the handler's own error rather than an opaque background warning. When
-// both sides fail the two errors are surfaced together (an AggregateError),
-// since a two-sided breakdown is exactly where the second cause matters.
+// Promise.all): Promise.all would reject the instant one party threw and let
+// the test body unwind -- afterEach deleting the work dir and restoring the
+// exit spy -- while the other handler kept running in the background, racing
+// those teardown steps into an unhandled rejection or a worker-killing exit.
+// allSettled holds the test until both handlers finish, then rethrows; when
+// both sides fail, the two errors are reported together (an AggregateError).
 async function runBoth(argvA: string[], argvB: string[]): Promise<void> {
   const results = await Promise.allSettled([runCli(argvA), runCli(argvB)]);
   const reasons = results
@@ -219,13 +207,13 @@ function expectDefaultRecord(
   const recordFile = findDefaultRecord(dir);
   const keysFile = keysPathFor(recordFile);
   expect(fs.existsSync(keysFile)).toBe(true);
-  // Both files are written through the command handler's default record path and
-  // must be owner-only (0600): the verification keys are private commitment salts
-  // and the record discloses the exchange's participants and terms in cleartext.
-  // Pin it end to end here so a mode-widening regression in that write path is
-  // caught at the command layer, not just in the recordFile unit tests. POSIX
-  // only: writeFileOwnerOnly uses ACLs on Windows, where mode bits do not
-  // reflect it -- the same guard the sibling onlineInviteAccept test uses.
+  // Both files are written through the command handler's default record path
+  // and must be owner-only (0600): the verification keys are private
+  // commitment salts and the record discloses the exchange's participants and
+  // terms in cleartext. Pin it end to end here so a mode-widening regression
+  // is caught at the command layer, not just in the recordFile unit tests.
+  // POSIX only: writeFileOwnerOnly uses ACLs on Windows, where mode bits do
+  // not reflect it.
   if (process.platform !== "win32") {
     expect(fs.statSync(recordFile).mode & 0o077).toBe(0);
     expect(fs.statSync(keysFile).mode & 0o077).toBe(0);
@@ -327,14 +315,12 @@ describe("zero-setup", () => {
     const outA = path.join(work, "a-out.csv");
     const outB = path.join(work, "b-out.csv");
 
-    // Zero-setup needs no config or key: both parties meet at the same file://
-    // URL with terms inferred from their inputs. No --save, so nothing is
-    // provisioned -- the only artifact is the asserted party's default audit
-    // record. The peer runs --no-record so only the asserted party records.
-    // --polling-frequency 100ms keeps the local filedrop round trip fast: unlike
-    // the exchange: sibling above (which sets config pollIntervalMs:1), zero-setup
-    // has no config, so this flag is its only way to override the conservative
-    // 5s default that would otherwise blow the 90s timeout.
+    // Zero-setup needs no config or key: both parties meet at the same
+    // file:// URL with terms inferred from their inputs. No --save, so
+    // nothing is provisioned -- the only artifact is the asserted party's
+    // default audit record; the peer runs --no-record so only it records.
+    // --polling-frequency 100ms keeps the local filedrop round trip fast,
+    // since zero-setup has no config to set pollIntervalMs on directly.
     await runBoth(
       [
         url,
@@ -370,12 +356,12 @@ describe("zero-setup", () => {
 
   test("one party names itself, the other does not, and both sides say so", async () => {
     // The whole shape of the optional identity, driven end to end over a real
-    // two-party exchange: `--identity` rides into the terms when it is given and
+    // two-party exchange: `--identity` rides into the terms when given and
     // nothing rides when it is not. Each side's record states what it holds --
-    // the named party's own label present and its partner's field absent, and the
-    // mirror on the other side -- and each side's terms-agreed line names the
-    // partner it actually got, the unnamed one as an absence rather than as a
-    // label psilink picked.
+    // the named party's own label present and its partner's field absent, and
+    // the mirror on the other side -- and each side's terms-agreed line names
+    // the partner it actually got, the unnamed one as an absence, not a label
+    // psilink picked.
     const dropDir = fs.mkdtempSync(path.join(work, "drop-"));
     const url = pathToFileURL(dropDir).href;
     const inputA = path.join(work, "named-input.csv");
@@ -390,10 +376,9 @@ describe("zero-setup", () => {
     // accounting note's machine-interface parity: intercept fs.writeSync for
     // EVENT_STREAM_FD (every other fd passes through to the real
     // implementation) and make fstatSync succeed for it so the fail-closed
-    // preflight passes without a real pipe -- the same technique
-    // apps/cli/test/unit/protocol.test.ts uses for its fd-3 tests. Each event is
-    // flushed by a single synchronous writeSync call, so the two parties'
-    // concurrent writes to the shared capture never interleave mid-line.
+    // preflight passes without a real pipe. Each event is flushed by a single
+    // synchronous writeSync call, so the two parties' concurrent writes never
+    // interleave mid-line.
     const eventStreamFd = 3;
     const fd3Chunks: Buffer[] = [];
     const realWriteSync = fs.writeSync;
@@ -477,7 +462,7 @@ describe("zero-setup", () => {
       `terms agreed, partner identity: ${UNNAMED_PARTY_LABEL}`,
     );
     // Both runs file a record, so the side that read an unnamed partner is told
-    // what its record will be missing -- the marker on its own reads as benign,
+    // what its record will be missing -- the marker on its own displays as benign,
     // and the operator filing these toward an accounting of disclosures can
     // still re-run named at this point.
     expect(diagnostics).toContain(

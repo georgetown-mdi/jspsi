@@ -67,36 +67,23 @@ const PrimaryActionIcon = ActionIcon as unknown as ComponentType<{
   children?: ReactNode;
 }>;
 
-// Render-level counterpart to test/unit/themeContrast.test.ts. The unit test asserts
-// the palette arithmetic (an idealized model); it cannot prove the browser actually
-// paints those colors, because Mantine resolves several theme colors in JS
-// color-scheme-blind. That blind spot already shipped one regression (a dark button
-// rendered white-on-cyan-6 = 2.79:1 while a unit test that modeled an idealized
-// autoContrast stayed green), so this measures the REAL computed colors the browser
-// paints, in both schemes, against the WCAG 2.1 AA floors.
+// Render-level counterpart to test/unit/themeContrast.test.ts: the unit test
+// checks the palette arithmetic; this file measures the real computed colors
+// the browser paints, in both schemes, against the WCAG 2.1 AA floors, since
+// Mantine resolves several theme colors in JS color-scheme-blind.
 //
 // Two groups:
-//  - Filled-primary surfaces (1.4.3 text, 4.5:1). The Button label, consent Checkbox
-//    checkmark, and copy ActionIcon glyph are rendered as bare Mantine primitives (the
-//    theme's default variant, no color): the app paints these surfaces with a bare
-//    <Button>/<Checkbox>/<ActionIcon> and no wrapping component, so a bare primitive IS
-//    what the app paints -- there is no component to author a regression into, and the
-//    theme's isFilledPrimary scoping (proven by the unit test) is what routes their
-//    contrast color through --ai-color / --button-color / --checkbox-icon-color. The
-//    ActionIcon glyph is checked in both its filled (resting, 4.5:1 text) and its
-//    variant="light" (a non-text glyph judged on 1.4.11's 3:1) states -- the light
-//    variant's colour is Mantine's own, which no override touches. The focus ring /
-//    input border (a plain per-scheme shade) stays in the unit test, which checks it by
-//    arithmetic.
-//  - Resolver-owned tokens (theme.ts cssVariablesResolver): dimmed, placeholder,
-//    error, and the yellow/red/green light-variant status text (the last also as the
-//    green import-success page text). The harness mounts under the app's real
-//    cssVariablesResolver (see mount below), so these are exercised at the render
-//    level. Each case pins the EXACT resolved token colour (proof the resolver
-//    reached the surface) as well as the AA floor (proof it is legible). Pinning the
-//    colour, not just the floor, is necessary: one default the resolver replaces
-//    (red's light-variant, red-9-on-red-1 = 4.51:1) already clears the floor, so a
-//    floor-only check would not notice that token regressing back to its default.
+//  - Filled-primary surfaces (1.4.3 text, 4.5:1): the Button label, consent
+//    Checkbox checkmark, and copy ActionIcon glyph, rendered as bare Mantine
+//    primitives routed through --ai-color / --button-color /
+//    --checkbox-icon-color. The ActionIcon glyph is checked filled (4.5:1
+//    text) and variant="light" (1.4.11's 3:1, an uncustomized Mantine color).
+//    The focus ring and input border stay in the unit test.
+//  - Resolver-owned tokens (theme.ts cssVariablesResolver): dimmed,
+//    placeholder, error, and the yellow/red/green light-variant status text.
+//    Each case pins the exact resolved token color as well as the AA floor,
+//    since a floor-only check would miss a token regressing to a default
+//    that happens to still clear the floor (as red's does).
 
 const app = createAppMount();
 
@@ -126,17 +113,11 @@ async function waitForEl(selector: string): Promise<HTMLElement> {
 }
 
 /** Move the pointer off `el`, then return its resting (non-hover) background.
- *
- * Under full-suite browser load a freshly mounted surface can inherit `:hover`
- * from wherever the previous test left the shared pointer -- over this test's
- * small top-left mount often enough to flake. A filled-primary surface's hover
- * fill is one shade lighter than its resting fill (light cyan-9 -> cyan-8), which
- * drops white-on-fill from 5.59:1 to 4.35:1, just under the AA floor that the
- * resting state (the one AA is judged on) clears with margin. `unhover` ignores
- * its argument and hovers `html > body`, moving the pointer to the body centre --
- * off this test's small top-left mount -- so polling `el` off `:hover` before reading
- * the live background is deterministic and reads what actually renders (a real
- * contrast regression then fails the assertion, not this poll). */
+ * A freshly mounted surface can inherit `:hover` from the shared pointer's
+ * last position, and the hover fill differs from the resting fill enough to
+ * look like a contrast regression. `unhover` moves the pointer to
+ * `html > body`, off this test's mount, so polling `el` off `:hover` first
+ * makes the read deterministic. */
 async function restingBackground(el: HTMLElement): Promise<string> {
   await userEvent.unhover(el);
   await expect.poll(() => el.matches(":hover")).toBe(false);
@@ -171,13 +152,11 @@ function contrast(a: string, b: string): number {
 }
 
 describe("rendered filled-primary contrast (WCAG 2.1 AA)", () => {
-  // Black resolves brighter on cyan-6 (7.53) than white does on cyan-9 (5.59), so a
-  // single >= 4.5 floor covers both schemes; expectedText pins WHICH text colour
-  // renders, the half that regressed before. The background is read through
-  // restingBackground so a stale-pointer hover fill -- in the light scheme one shade
-  // lighter (cyan-9 -> cyan-8), which drops white-on-fill under the floor -- is never
-  // sampled in place of the resting fill. Only light is at risk: the dark scheme's
-  // black-on-fill starts at 7.53:1 resting and clears the floor in either state.
+  // A single >= 4.5 floor covers both schemes; expectedText pins which text
+  // color renders, the half that regressed before. The background is read
+  // through restingBackground so a stale-pointer hover fill is never sampled
+  // in place of the resting fill; only the light scheme's fill is close
+  // enough to the floor to be at risk.
   for (const { scheme, expectedText } of [
     { scheme: "light" as const, expectedText: "rgb(255, 255, 255)" },
     { scheme: "dark" as const, expectedText: "rgb(0, 0, 0)" },
@@ -267,12 +246,10 @@ describe("rendered filled-primary contrast (WCAG 2.1 AA)", () => {
     });
   }
 
-  // Exercises the de-flake mechanism directly, so the guard the cases above rely
-  // on is a tested invariant rather than only the absence of a rare natural flake
-  // (which a finite number of green runs cannot prove). Force the stale-hover
-  // state on the light button -- where the hover fill (cyan-8) genuinely renders
-  // a lower contrast than the resting fill (cyan-9) -- then prove restingBackground
-  // moves the pointer off, clears :hover, and reads a resting fill clearing AA.
+  // Exercises the de-flake mechanism directly: forces the stale-hover state on
+  // the light button, where the hover fill (cyan-8) renders a lower contrast
+  // than the resting fill (cyan-9), then proves restingBackground moves the
+  // pointer off, clears :hover, and reads a resting fill clearing AA.
   test("restingBackground clears a stale hover before measuring", async () => {
     app.render(createElement(FilledButton, null, "Continue"), {
       forceColorScheme: "light",
@@ -298,15 +275,11 @@ describe("rendered filled-primary contrast (WCAG 2.1 AA)", () => {
   });
 
   // A filled-primary Button rendered as an anchor (component={Link} in the
-  // app; component="a" here, see LinkRenderedButton above) inside the bench's
-  // .page wrapper. bench.module.css's `.page a` rule once outranked Mantine's
-  // --button-color on specificity (class+type beats Mantine's single class on
-  // .mantine-Button-root) and repainted the label --bench-accent -- a teal
-  // close enough to the cyan-9 filled background that the label was
-  // unreadable until :hover changed the background. This proves the label and
-  // background are actually distinguishable colors, not just that each
-  // individually clears an arithmetic floor -- the two could still be pinned
-  // to the same value and pass a floor-only check.
+  // app; component="a" here) inside the console's `.page` wrapper.
+  // bench.module.css's `.page a` rule can outrank Mantine's --button-color on
+  // specificity and repaint the label --bench-accent, close enough to the
+  // cyan-9 background to be unreadable. This proves the label and background
+  // are distinguishable colors, not just that each clears its own floor.
   test("a Button rendered as an anchor inside .page keeps its filled label legible", async () => {
     app.render(
       createElement(
@@ -423,14 +396,12 @@ describe("rendered resolver-owned token contrast (WCAG 2.1 AA)", () => {
   });
 
   test("green status token is AA-legible as page text (light)", async () => {
-    // The green status token rendered as plain page text -- the surface
-    // TermsImportExport's import-success message uses, a white/body background
-    // distinct from the Alert case's green tint (a bare c="green" = green-9 is only
-    // 4.37:1 here, under the 1.4.3 floor). This pins the TOKEN on a page surface; it
-    // is deliberately a stand-in, not a render of TermsImportExport, so it does not
-    // catch that component reverting its c prop to "green" -- driving the real
-    // component to its imported state would pull its import-validation deps' mocks
-    // into this shared harness. That call-site is guarded by its own comment instead.
+    // The green status token rendered as plain page text, matching how
+    // TermsImportExport's import-success message uses it on a white/body
+    // background (distinct from the Alert case's green tint; c="green" alone
+    // is only 4.37:1 here, under the floor). This is a stand-in, not a render
+    // of TermsImportExport, so it does not catch that component's own c prop
+    // regressing to "green"; that call site has its own guard comment.
     app.render(
       bodySurface(
         createElement(
@@ -472,7 +443,7 @@ describe("rendered resolver-owned token contrast (WCAG 2.1 AA)", () => {
       );
       const alert = await waitForEl('[role="alert"]');
       // Scope the title lookup to the alert and poll for it, so a Mantine markup
-      // change surfaces as a clear waitForEl timeout rather than a getComputedStyle
+      // change shows as a clear waitForEl timeout rather than a getComputedStyle
       // TypeError on a null cast.
       const title = await waitForEl('[role="alert"] [class*="title"]');
       const titleColor = getComputedStyle(title).color;

@@ -28,8 +28,7 @@ import type { WebRTCExchangeLocator } from "@psilink/core";
 // seams faked (no broker, no WASM): a run launches from the record with NO
 // invitation, the persist-before-success ordering runs and records `lastRun`, and
 // the pre-connection expiry check short-circuits before the lock. The pure
-// decisions and the side dispatch are unit-tested in Node; this pins the launch
-// composed over the real platform seams.
+// decisions are unit-tested in Node; this covers the launch on the real platform.
 
 const webrtcLocator: WebRTCExchangeLocator = {
   channel: "webrtc",
@@ -238,12 +237,12 @@ describe("runManagedRerun: the runner's failure bookkeeping", () => {
     expect(stored?.lastRun?.failureKind).toBe("cancelled");
   });
 
-  test("a bound that lapses mid-run surfaces as the benign expiry state, unrecorded", async () => {
+  test("a bound that lapses mid-run shows as the benign expiry state, unrecorded", async () => {
     // Live at the pre-connection check, lapsed by the time the handshake fails:
     // the clock advances past the bound inside the run, and the handshake throws
     // core's tagged expiry error (as the real handshake would with expires
     // enforced). The orchestration re-maps it to the benign expiry error; no
-    // lastRun is written (the record's own expires carries the lapse).
+    // lastRun is written (the record's own expires holds the lapse).
     const expires = "2026-07-14T12:05:00.000Z";
     const created = await createManagedExchange(newExchange({ expires }));
     let clock = Date.parse("2026-07-14T12:00:00.000Z");

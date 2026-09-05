@@ -243,7 +243,7 @@ async function deleteDatabase(): Promise<void> {
   });
 }
 
-/** Open a raw connection at `version`, deliberately WITHOUT the module's
+/** Open a raw connection at `version`, WITHOUT the module's
  * `onversionchange` self-close, so it models an old tab whose connection never yields
  * to a later upgrade -- the condition that fires `blocked` on the next open. The caller
  * closes it. */
@@ -411,7 +411,7 @@ describe("field-scoped rotation write", () => {
     expect((await getManagedExchange(created.id))?.expires).toBeUndefined();
   });
 
-  test("a rotation cannot carry a stale label over a concurrent local edit", async () => {
+  test("a rotation cannot revert a concurrent label edit", async () => {
     // The store holds a rotation write and a label edit as two field-scoped
     // read-modify-writes, each reading the freshest record inside its own
     // transaction. A rotation applied after a label edit keeps the new label -- the
@@ -675,7 +675,7 @@ describe("deposit persists a managed record of the party's side", () => {
     expect(stored[0].side).toBe("acceptor");
   });
 
-  test("both sides deposit into one list carrying both", async () => {
+  test("both sides deposit into one list holding both", async () => {
     await createManagedExchange(
       buildManagedDeposit(
         {
@@ -717,7 +717,7 @@ describe("reader rejects unknown on a store read", () => {
 });
 
 describe("the unattended read is per entry", () => {
-  /** Seed an entry carrying a period past the schema's ceiling under its own key
+  /** Seed an entry holding a period past the schema's ceiling under its own key
    * -- the shape a pre-ceiling import or a hand-edit leaves in the store, written
    * past the validating path that would refuse it. */
   async function seedOutOfBoundsRecord(
@@ -737,8 +737,7 @@ describe("the unattended read is per entry", () => {
     await seedOutOfBoundsRecord(good);
 
     // The attended read still rejects wholesale: that contract is what routes an
-    // operator to the read-failed recovery surface, and it is deliberately left
-    // as it is.
+    // operator to the read-failed recovery surface, and that stands by design.
     await expect(listManagedExchanges()).rejects.toThrow();
 
     const read = await listReadableManagedExchanges();
@@ -772,7 +771,7 @@ describe("the unattended read is per entry", () => {
     const read = await listReadableManagedExchanges();
     expect(read.unreadableIds).toEqual([]);
     expect(read.records.map((record) => record.id)).toEqual([good.id]);
-    // And the attended read recovers with it: one discard settles both.
+    // And the attended read recovers with it: one discard fixes both.
     expect((await listManagedExchanges()).map((record) => record.id)).toEqual([
       good.id,
     ]);
@@ -808,7 +807,7 @@ describe("one-step delete leaves nothing behind", () => {
     );
     // And file a run's disclosure, so the delete must clear the accounting too --
     // otherwise the delete strands cleartext partner and agreement metadata under
-    // an id nothing surfaces.
+    // an id nothing shows.
     await appendDisclosureRecordToStore(created.id, await disclosureRecord());
     // Everything the browser holds for the exchange -- the record under its key,
     // the sibling local-state entry, and the accounting -- exists before the delete.
@@ -880,7 +879,7 @@ describe("the accounting of disclosures accumulates each run's record", () => {
     const created = await createManagedExchange(newExchange());
     const record = await disclosureRecord();
 
-    // A caller handing the store more than the record format carries: the append
+    // A caller handing the store more than the record format holds: the append
     // validates through the same parser the read path uses, so the extra field
     // never reaches the disk to sit there invisibly.
     await appendDisclosureRecordToStore(created.id, {
@@ -897,20 +896,15 @@ describe("the accounting of disclosures accumulates each run's record", () => {
 });
 
 /**
- * Recovering an accounting this build can no longer read, against real IndexedDB.
- * The staged state is what an app upgrade that moved the exchange-record version
- * leaves behind: entries admissible when they were written, refused by this build.
- *
- * The read classifies that state in ONE round trip, which is what keeps the two
- * readings of an accounting from disagreeing, and what separates a value refused
- * by the parsers from a store that never yielded one -- only the first may reach
- * the destructive arm. The two arms are then tested for what each one alone does
- * NOT do, since that is why the surface offers both: the recovered entries retain
- * the record and leave the store un-appendable, and the reset restores
- * appendability and destroys them.
+ * Recovering an accounting this build can no longer read, against real IndexedDB:
+ * an app upgrade moved the record version, so entries admissible when written are
+ * now refused. The read classifies that state in ONE round trip, so a refused
+ * value -- the only kind eligible for the destructive reset -- is never confused
+ * with a store that never yielded one. Recovery keeps the record but leaves the
+ * store un-appendable; reset restores appendability and destroys the entries.
  */
 describe("an unreadable accounting recovers without deleting the exchange", () => {
-  /** A stored accounting whose entries carry a record version this build does not
+  /** A stored accounting whose entries hold a record version this build does not
    * admit, staged under an exchange that otherwise stands. */
   async function strandedAccounting(): Promise<{
     id: string;
@@ -925,7 +919,7 @@ describe("an unreadable accounting recovers without deleting the exchange", () =
       version: DISCLOSURE_ACCOUNTING_VERSION,
       entries,
     });
-    // The premise of the whole recovery, restated against the real store: the
+    // The assumption behind the whole recovery, restated against the real store: the
     // read refuses to vouch for this, so the exchange is in the stranded state.
     expect((await readDisclosureAccounting(created.id)).kind).toBe(
       "unreadable",
@@ -1061,7 +1055,7 @@ describe("an unreadable accounting recovers without deleting the exchange", () =
  * code it loaded with, so a stale tab can read entries a newer build filed.
  */
 describe("a refused accounting is classified by which side is behind", () => {
-  /** Stage an accounting whose entries carry a record version `offset` ordinals
+  /** Stage an accounting whose entries hold a record version `offset` ordinals
    * from this build's, under an exchange that otherwise stands. */
   async function accountingFromNeighbouringBuild(offset: number): Promise<{
     id: string;
@@ -1079,12 +1073,12 @@ describe("a refused accounting is classified by which side is behind", () => {
     return { id: created.id, entries };
   }
 
-  test("entries from a later record format read as a stale page, not a stranded accounting", async () => {
+  test("entries from a later record format are treated as a stale page, not a stranded accounting", async () => {
     const { id, entries } = await accountingFromNeighbouringBuild(1);
 
     // The reset is the wrong recovery here by construction: these entries are
     // readable by a build that already exists, so clearing them would destroy
-    // records over a tab running older code. The state carries the stored value
+    // records over a tab running older code. The state holds the stored value
     // all the same -- handing back stored bytes claims nothing either way.
     expect(await readDisclosureAccounting(id)).toEqual({
       kind: "stale-page",
@@ -1123,7 +1117,7 @@ describe("clearing the store leaves no accounting behind", () => {
 
     // The raw sibling value is gone, not merely absent through a validating read:
     // a clear that spared the accounting would leave cleartext partner and
-    // agreement metadata under an id no record surfaces any more.
+    // agreement metadata under an id no record shows any more.
     expect(await rawDisclosureStored(created.id)).toBeUndefined();
     expect(await readDisclosureAccounting(created.id)).toEqual({
       kind: "none",
@@ -1133,7 +1127,7 @@ describe("clearing the store leaves no accounting behind", () => {
 });
 
 describe("diagnostic read never rejects wholesale", () => {
-  test("readable entries carry display essentials only, never the secret", async () => {
+  test("readable entries hold display essentials only, never the secret", async () => {
     const created = await createManagedExchange(
       newExchange({ label: "Riverbend quarterly", side: "acceptor" }),
     );
@@ -1156,7 +1150,7 @@ describe("diagnostic read never rejects wholesale", () => {
     expect(JSON.stringify(entries)).not.toContain(created.sharedSecret);
   });
 
-  test("a backup marker present reads as backedUp; the timestamp never surfaces", async () => {
+  test("a backup marker present is treated as backedUp; the timestamp never shows", async () => {
     const created = await createManagedExchange(
       newExchange({ label: "Backed up" }),
     );
@@ -1164,22 +1158,22 @@ describe("diagnostic read never rejects wholesale", () => {
 
     const [entry] = await listManagedExchangesDiagnostic();
     expect(entry.backedUp).toBe(true);
-    // The marker's own instant is never surfaced -- a boolean suffices.
+    // The marker's own instant is never shown -- a boolean suffices.
     expect(JSON.stringify(entry)).not.toContain("2026-07-10T09:00:00.000Z");
   });
 
-  test("an absent sibling entry reads as not backed up", async () => {
+  test("an absent sibling entry is treated as not backed up", async () => {
     await createManagedExchange(newExchange({ label: "Fresh" }));
     const [entry] = await listManagedExchangesDiagnostic();
     expect(entry.backedUp).toBe(false);
   });
 
-  test("an unparseable sibling entry reads as backed up (conservative on doubt)", async () => {
+  test("an unparseable sibling entry is treated as backed up (conservative on doubt)", async () => {
     const created = await createManagedExchange(
       newExchange({ label: "Doubtful" }),
     );
     // Corrupt the sibling entry so its parse fails: a wrongly-shown custody warning
-    // is harmless; a wrongly-suppressed one is not, so doubt reads as backed up.
+    // is harmless; a wrongly-suppressed one is not, so doubt is treated as backed up.
     await rawLocalPut(created.id, { backup: { backedUpAt: "not-an-instant" } });
 
     const [entry] = await listManagedExchangesDiagnostic();
@@ -1211,7 +1205,7 @@ describe("diagnostic read never rejects wholesale", () => {
     });
   });
 
-  test("an unreadable record with a live sibling backup marker still reads as backed up", async () => {
+  test("an unreadable record with a live sibling backup marker is still treated as backed up", async () => {
     const good = await createManagedExchange(newExchange({ label: "Good" }));
     await rawPut({
       ...good,
@@ -1317,16 +1311,12 @@ describe("a blocked open settles instead of hanging", () => {
   });
 
   test("a late success after blocked-rejection closes the connection instead of leaking it", async () => {
-    // The blocked request never aborts: it stays pending, and once `held` closes, this
-    // SAME request's onupgradeneeded/onsuccess fire late -- after the promise already
-    // rejected. A leaked (never-closed) connection here would still self-close on the
-    // VERY NEXT version-change open via its own onversionchange handler, so probing with
-    // a higher-version open cannot distinguish "closed immediately" from "left open
-    // until the next version bump happens to come along" -- both would pass that probe.
-    // The real proof is that `close()` is called on the late connection itself (a THIRD
-    // instance, distinct from `held`); a spy on IDBDatabase.prototype.close, checked by
-    // instance identity, pins exactly that -- with the leak this never happens and the
-    // wait below times out.
+    // The blocked request never aborts: it stays pending, and once `held` closes,
+    // this SAME request's onupgradeneeded/onsuccess fire late, after the promise
+    // already rejected. A probe that reopens the database cannot tell an immediate
+    // close from a leak that only self-closes on the NEXT version-change open, so
+    // the proof here is a spy on IDBDatabase.prototype.close, checked by instance
+    // identity, on the late connection itself (a THIRD instance, distinct from `held`).
     const closeSpy = vi.spyOn(IDBDatabase.prototype, "close");
     try {
       await deleteDatabase();

@@ -20,17 +20,11 @@ import type { RendezvousPair } from "../utils/rendezvousPair.js";
 
 /**
  * The web transport's clean close against the real stack: a real PeerJS pair
- * over the app's own broker, in real Chromium, with the final frame big enough
- * that its delivery takes measurable time.
- *
- * What it pins is the delivery contract in docs/COMMUNICATION.md: a party's
- * last act is a send immediately followed by a close, so a close that returns
- * while the frame is still in the browser's outbound buffer drops it the moment
- * anything ends that page's WebRTC stack. PeerJS's flushing close does exactly
- * that -- it queues its in-band sentinel and returns -- which is why the close
- * waits for the peer to take the frame (waitForPeerClose.ts). The zero-ceiling
- * case below is the same exchange with that wait disabled, so a regression to
- * flush-and-return cannot pass this file by making the ordering vacuous.
+ * over the app's own broker, in real Chromium, with a final frame large
+ * enough that delivery is measurable. This pins the delivery contract in
+ * docs/COMMUNICATION.md: a close must wait for the peer to take the last
+ * frame, since PeerJS's own close can return before it leaves the buffer.
+ * The zero-ceiling case below disables that wait.
  */
 
 const addressInfo = {
@@ -70,7 +64,7 @@ interface ReceivedFrame {
 }
 
 /** Every frame the peer delivers, stamped, up to the close the peer's sentinel
- * surfaces as a terminal receive error. */
+ * shows up as a terminal receive error. */
 async function receiveUntilClosed(
   mc: MessageConnection,
   origin: number,
@@ -138,8 +132,8 @@ async function sendThenClose(options: {
     // outcome whatsoever on either of the link-break tests below.
     options.breakLink?.(pair);
     // The one-shot lifecycle's teardown order (exchangeLifecycle.ts): the
-    // flushing close, then the broker id is freed. `disconnect` deliberately
-    // leaves the data channel standing, which is what lets the managed re-run's
+    // flushing close, then the broker id is freed. `disconnect` leaves the
+    // data channel standing, which is what lets the managed re-run's
     // teardown free the id first instead.
     if (options.freeBrokerIdFirst) acceptorPeer.disconnect();
     const closing = senderMc.close();
@@ -199,7 +193,7 @@ test("a clean close resolves only once the peer has read the final frame", async
 test("a peer whose broker id is already freed still delivers on its close", async (ctx) => {
   if (!(await canReachServer(hostString)))
     return ctx.skip(serverUnreachableNote);
-  // The premise the managed re-run's teardown rests on (managedRunDriver.ts):
+  // The assumption the managed re-run's teardown rests on (managedRunDriver.ts):
   // it frees the broker id before draining, so a failed run's retry can register
   // the record's rendezvous id again while the drain is still standing. Freeing
   // it must cost that drain nothing -- same delivery, same ordering, same
@@ -244,17 +238,12 @@ test("the wait is what orders it: an unwaited close returns with the frame in fl
 test("a link that dies before the peer confirms tells the operator so", async (ctx) => {
   if (!(await canReachServer(hostString)))
     return ctx.skip(serverUnreachableNote);
-  // The link-death exit against the real stack: the peer connection carrying
-  // the final frame is gone when the close's wait looks, so no delivery signal
-  // is coming and the operator hears the wording for a link that went rather
-  // than for a partner who never confirmed.
-  //
-  // The break is this side's own half of the link, which is the half a browser
-  // test can take away: the exit is defined by this peer connection reaching a
-  // dead state, and an in-page teardown of the REMOTE half does not produce one
-  // -- it resets the stream gracefully and arrives here as the peer's close
-  // (pinned by the test below, which is why a rewrite to break the other half
-  // would stop covering this exit).
+  // The link-death exit against the real stack: the peer connection holding
+  // the final frame is gone when the close's wait looks, so the operator
+  // hears the wording for a lost link rather than an unconfirmed partner. The
+  // break is this side's own half -- the half a browser test can take away --
+  // since tearing down the remote half instead resets the stream gracefully
+  // and arrives here as the peer's close (the next test covers that case).
   const { outcomes } = await sendThenClose({
     finalFrameSize: FINAL_FRAME_BYTES,
     breakLink: ({ acceptorConn }) => acceptorConn.peerConnection.close(),
@@ -270,12 +259,10 @@ test("a link torn down under a standing drain is not reported as delivered", asy
   if (!(await canReachServer(hostString)))
     return ctx.skip(serverUnreachableNote);
   // The same teardown as the test above, but on a drain already under way --
-  // the window the wait exists to cover. It closes this side's channel, so the
-  // wait sees the event that normally IS the delivery signal, on an exchange
-  // that delivered nothing: the partner is left with the small frame and none
-  // of the final one. Reading the link at that event is what separates the two,
-  // so this is the case that fails if a stack change (or a rewrite of the
-  // handler) puts the reading back after the close has completed.
+  // the window the wait exists to cover. It closes this side's channel, so
+  // the wait sees the event that normally is the delivery signal, on an
+  // exchange that delivered nothing but the small frame. Reading the link at
+  // that event is what separates the two cases.
   const { received, outcomes } = await sendThenClose({
     finalFrameSize: FINAL_FRAME_BYTES,
     breakLinkDuringDrain: ({ acceptorConn }) =>
@@ -289,16 +276,15 @@ test("a link torn down under a standing drain is not reported as delivered", asy
   );
 }, 120_000);
 
-test("both parties closing a drained exchange read each other's close as the receipt", async (ctx) => {
+test("both parties closing a drained exchange treat each other's close as the receipt", async (ctx) => {
   if (!(await canReachServer(hostString)))
     return ctx.skip(serverUnreachableNote);
   // The shape every real exchange ends in: both parties have what they came
   // for, and both run the flushing close at once. Reading the peer's close
-  // sentinel is what makes PeerJS tear THIS side's peer connection down, so
-  // each side's channel starts closing on a link of its own closing -- the
-  // signature of a teardown, on the one exchange that lost nothing. A wait that
-  // read only the link would tell both operators of every healthy exchange to
-  // go and check that their partner got the final message.
+  // sentinel is what makes PeerJS tear this side's peer connection down, so
+  // each side's channel starts closing on a link of its own closing. A wait
+  // that read only the link would tell both operators of every healthy
+  // exchange to check that their partner got the final message.
   const pair = await connectRendezvousPair(generateSharedSecret(), addressInfo);
   const { inviterPeer, acceptorPeer, inviterConn, acceptorConn } = pair;
   const senderOutcomes: Array<PeerCloseOutcome> = [];
@@ -334,16 +320,16 @@ test("both parties closing a drained exchange read each other's close as the rec
   expect(CLOSE_OUTCOME_WARNINGS[receiverOutcomes[0]]).toBeUndefined();
 }, 120_000);
 
-test("a peer torn down in this page still closes its stream, and reads as delivered", async (ctx) => {
+test("a peer torn down in this page still closes its stream, and is treated as delivered", async (ctx) => {
   if (!(await canReachServer(hostString)))
     return ctx.skip(serverUnreachableNote);
   // What a partner disappearing looks like from here when both peers share a
-  // renderer: Chromium tears the remote peer connection down through a graceful
-  // stream reset, so this side gets the same channel close a peer that read the
-  // sentinel would send, and reports delivery. The limit that leaves -- a close
-  // signal is not proof the partner's application read what was behind it -- is
-  // recorded in docs/spec/WEBRTC_TRANSPORT.md; a stack that stopped resetting
-  // the stream would redden here rather than quietly change what a close means.
+  // renderer: Chromium tears the remote peer connection down through a
+  // graceful stream reset, so this side gets an ordinary peer close and
+  // reports delivery. The limit that leaves -- a close signal is not proof
+  // the partner's application read what was behind it -- is recorded in
+  // docs/spec/WEBRTC_TRANSPORT.md; a stack that stopped resetting the stream
+  // this way would fail here instead of quietly changing what a close means.
   const { outcomes } = await sendThenClose({
     finalFrameSize: FINAL_FRAME_BYTES,
     breakLink: ({ inviterConn }) => inviterConn.peerConnection.close(),

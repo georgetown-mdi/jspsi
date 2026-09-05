@@ -1,21 +1,19 @@
 // Independent generator for test/vectors/kex-vectors.json.
 //
-// This reimplements the psilink-kex-v2 key schedule from scratch using Node's
+// Reimplements the psilink-kex-v2 key schedule from scratch using Node's
 // OpenSSL-backed `crypto` (createHash/createHmac/hkdfSync/createECDH) -- a
 // different code path from the module under test, which uses WebCrypto
-// (crypto.subtle) throughout. The module's kex.test.ts asserts computeKexKeys
-// reproduces the vectors this produces, so agreement is a genuine
-// cross-implementation check of the composition, not a self-test. In particular
-// the Noise chaining HKDF is written here as the literal chain of HMAC calls
-// from the Noise definition, while the module issues it as a single HKDF
-// deriveBits call: the two must agree byte for byte.
+// (crypto.subtle). kex.test.ts asserts computeKexKeys reproduces these
+// vectors. The Noise chaining HKDF is written here as the literal HMAC chain
+// from the Noise definition; the module issues a single HKDF deriveBits
+// call, and the two must agree byte for byte.
 //
 // It also re-checks the external anchors the "handshake core" corresponds to:
 // the P-256 scalar multiplication and ECDH (RFC 6979 section A.2.5's key pair
 // over the SP 800-186 section 3.2.1.3 base point) and RFC 5869 test case 3 (the
 // Noise-style chaining HKDF).
 //
-// The handshake carries a per-party request-encryption flag, bound into the
+// The handshake includes a per-party request-encryption flag, bound into the
 // transcript as a single byte MixHash'd as each message's handshake payload. The
 // vectors below cover all four (initiator, responder) flag combinations so both
 // flag values are pinned at each position; the chaining key and confirmation key

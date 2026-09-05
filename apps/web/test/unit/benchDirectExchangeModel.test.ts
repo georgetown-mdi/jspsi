@@ -71,7 +71,7 @@ describe("previewInferredTerms", () => {
     // machine and must show in the preview.
     expect(preview.disclosedPayloadColumns).toContain("program_code");
     // payload.send is authored from the disclosed set so the terms panel's "columns
-    // sent" display is honest rather than empty (the default terms carry no payload).
+    // sent" display is accurate rather than empty (the default terms hold no payload).
     expect(
       preview.linkageTerms.payload?.send?.map((entry) => entry.name),
     ).toEqual(preview.disclosedPayloadColumns);
@@ -80,7 +80,7 @@ describe("previewInferredTerms", () => {
   test("a sent column name past the ceiling is reported so the confirm screen can refuse the run", () => {
     // This spine has no disclosure control -- every non-linkage column is inferred
     // as sent -- so an oversized header would reach prepareForExchange on the
-    // appliance and be refused there, after the operator pressed Run.
+    // console and be refused there, after the operator pressed Run.
     const past = "a".repeat(MAX_NAME_LENGTH + 1);
     const preview = previewInferredTerms(
       [...LINKABLE_COLUMNS, past],
@@ -91,7 +91,7 @@ describe("previewInferredTerms", () => {
     expect(preview.disclosedPayloadColumns).toContain(past);
   });
 
-  test("a sent column name at the ceiling is carryable and leaves the run gate open", () => {
+  test("a sent column name at the ceiling is valid and leaves the run gate open", () => {
     const atCeiling = "a".repeat(MAX_NAME_LENGTH);
     const preview = previewInferredTerms(
       [...LINKABLE_COLUMNS, atCeiling],
@@ -104,7 +104,7 @@ describe("previewInferredTerms", () => {
 
   test("the ceiling counts UTF-16 code units, as the wire and record bounds do", () => {
     // MAX_NAME_LENGTH astral characters: under the ceiling on a code-point count,
-    // over it on the count every carrying bound uses.
+    // over it on the count every such bound uses.
     const astral = "\u{1D54F}".repeat(MAX_NAME_LENGTH);
     expect([...astral].length).toBe(MAX_NAME_LENGTH);
     const preview = previewInferredTerms(
@@ -132,7 +132,7 @@ describe("previewInferredTerms", () => {
   });
 
   test("the refusal grades the previewed terms, not the unnarrowed default set", () => {
-    // A file carrying only some of the built-in set's field types satisfies the
+    // A file holding only some of the built-in set's field types satisfies the
     // NARROWED terms it would actually run under, so it is not refused -- grading
     // the full set instead would refuse nearly every real file.
     const preview = previewInferredTerms(
@@ -165,7 +165,7 @@ describe("previewInferredTerms", () => {
 });
 
 describe("the direct-exchange linkage strategy", () => {
-  test("the preview carries the selected strategy, not the inferred default", () => {
+  test("the preview has the selected strategy, not the inferred default", () => {
     // The CLI's zero-setup command applies --linkage-strategy over the terms it
     // inferred, so a preview left on the default would show terms the run does
     // not use -- and would withhold the single-pass disclosure the terms panel

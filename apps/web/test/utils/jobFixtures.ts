@@ -69,7 +69,7 @@ export function validInputFileIntent(
 }
 
 /** A would-be remote-name string, used only by the tests that assert a sent
- * `remote` field is rejected as an unknown key (the sftp arm carries none). */
+ * `remote` field is rejected as an unknown key (the sftp arm has none). */
 export const TEST_SFTP_REMOTE_NAME = "prod_east";
 
 /** A canonical-format host-key fingerprint (43 standard base64 chars). */
@@ -169,7 +169,7 @@ export function composedServer(composed: string): Record<string, unknown> {
 }
 
 /** The `connection` block of a composed `psilink.yaml`, for the filedrop channel's
- * assertions (which carry their directories at the top level rather than under a
+ * assertions (which hold their directories at the top level rather than under a
  * `server` block). */
 export function composedConnection(composed: string): Record<string, unknown> {
   const parsed = parseYaml(composed) as {

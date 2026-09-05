@@ -19,19 +19,14 @@ import {
 import type { AddressInfo } from "node:net";
 import type { Duplex } from "node:stream";
 
-// gap 1: a slow or partial upgrade handshake is bounded and closed server-side
-// rather than held open. Most of what the entry installs is driven here as a
-// live-socket timing test on a short clock -- over plain TCP and, below, over
-// real TLS -- against a fake socket only where there is no live path to drive:
-// the timeout values the entry sets, and the `clientError` handler it wires.
-// One path is deliberately not live: the header and request timeouts fire on
-// Node's periodic connections sweep, and under vitest, loading `ws` anywhere in
-// the worker disrupts that path on an unrelated server, which would make such a
-// test flaky. Its end-to-end behavior was verified against plain Node on the
-// supported runtime (Node >= 26): the timeout fires `clientError` with
-// `ERR_HTTP_REQUEST_TIMEOUT` and the handler responds 408 and closes -- the close
-// landing on that sweep, so headersTimeout plus up to one sweep interval, not
-// instantly.
+// gap 1: a slow or partial upgrade handshake is bounded and closed
+// server-side rather than held open, tested live below over plain TCP and
+// TLS; a fake socket stands in only for the timeout values and the
+// `clientError` handler, which have no live path. The header/request
+// timeout path is not tested live here -- loading `ws` under vitest
+// disrupts the periodic connections sweep it fires on -- and was verified
+// by hand against plain Node (>= 26): the sweep fires `clientError` with
+// ERR_HTTP_REQUEST_TIMEOUT, and the handler responds 408 and closes.
 
 // How long after a connection is accepted the server's own end of it closes, or
 // null if it outlives the budget. `event` selects which socket is watched: the
@@ -469,7 +464,7 @@ describe("hardenUpgradeSurface", () => {
   test("adds no per-request socket listener to a reused connection", async () => {
     // The reap subscribes to the socket's `timeout` event for the life of the
     // connection while the request hook fires once per request, so a connection
-    // carrying request after request is where a per-request subscription would
+    // reused for request after request is where a per-request subscription would
     // pile up on one long-lived socket. Counted on the server's own socket, which
     // every request here shares; the idle bound sits far above the run so nothing
     // reaps the connection mid-test.
@@ -504,7 +499,7 @@ describe("hardenUpgradeSurface", () => {
       const listenersAfterFirstRequest = socket.listenerCount("timeout");
       expect(listenersAfterFirstRequest).toBeGreaterThan(0);
       for (let request = 0; request < 4; request += 1) await fetchOnce();
-      // One connection carried all five, so the count is read off the socket the
+      // One connection handled all five, so the count is read off the socket the
       // repeats went over rather than a fresh one.
       expect(acceptedSockets).toHaveLength(1);
       expect(socket.listenerCount("timeout")).toBe(listenersAfterFirstRequest);

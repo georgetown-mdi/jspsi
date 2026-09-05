@@ -11,31 +11,19 @@ import {
 
 import { createWorkerThreadHandle } from "../../src/psiWorkerHost";
 
-// Exercises the CLI PSI crypto offload against the REAL shipping worker: a
-// `worker_threads` worker running the built dist/psiWorker.worker.js, which
-// loads the native-preferred backend, generates its own key, and answers the
-// RPC. The rest of the suite drives the crypto through the in-process fallback
-// (tests run from src, where no compiled worker sits beside psiWorkerHost.ts),
-// so the worker path itself is only manually smoke-tested; this closes that gap
-// end to end -- correctness AND clean teardown.
-//
-// The built bundle is emitted by `npm run build -w apps/cli`. CI's primary CLI
-// job builds it before this suite runs; a local run must build first. When it is
-// absent (the hardened-native CI legs skip the CLI build) these tests skip -- the
-// worker path is unchanged there and the in-process fallback still covers the RPC.
+// Exercises the CLI PSI crypto offload against the real shipping worker
+// (dist/psiWorker.worker.js) rather than the in-process fallback the rest
+// of the suite uses, covering the worker path's correctness and teardown
+// end to end. Needs `npm run build -w apps/cli` first; skips otherwise.
 const workerEntry = fileURLToPath(
   new URL("../../dist/psiWorker.worker.js", import.meta.url),
 );
 const workerBuilt = existsSync(workerEntry);
-// A skipIf on a build artifact is convenient but silent: it can no-op GREEN in the
-// primary CLI leg too if that leg's build step ever regresses, leaving the offload
-// unexercised while the run reports success -- the exact silent-skip a prior round
-// hit. So the primary leg sets PSILINK_REQUIRE_WORKER_BUILD=1, which turns a missing
-// bundle into a hard failure here rather than a skip. This mirrors
-// PSILINK_SFTP_CHROOT_REQUIRED in cli_build_and_test.yaml, which likewise fails rather
-// than skips when its precondition is absent where it must hold. The var is unset in
-// the hardened/native legs (which intentionally do not build the CLI) and in local
-// src-only runs, so the suite still skips cleanly there.
+// A skipIf on a missing build artifact is silent: it could pass green with the
+// worker path unexercised if the build step ever regressed. CI's primary CLI leg
+// sets PSILINK_REQUIRE_WORKER_BUILD=1 so a missing bundle fails here instead of
+// skipping; it is unset in legs that do not build the CLI and in local src-only
+// runs, where the suite still skips cleanly.
 if (process.env.PSILINK_REQUIRE_WORKER_BUILD === "1" && !workerBuilt) {
   throw new Error(
     `PSILINK_REQUIRE_WORKER_BUILD=1 but the CLI worker bundle is absent at ` +
@@ -46,9 +34,9 @@ if (process.env.PSILINK_REQUIRE_WORKER_BUILD === "1" && !workerBuilt) {
 const workerTest = test.skipIf(!workerBuilt);
 
 // Every worker this file spawns, so a test that fails before its own teardown
-// cannot leak a ref'd worker that would hold the vitest process open (the workers
-// are deliberately NOT unref'd, exactly as production keeps the process alive
-// while crypto is in flight).
+// cannot leak a ref'd worker that would hold the vitest process open (the
+// workers are not unref'd, by design: production keeps the process alive while
+// crypto is in flight).
 const spawned: Worker[] = [];
 afterEach(async () => {
   await Promise.all(
@@ -59,19 +47,17 @@ afterEach(async () => {
 interface SpawnedEngine {
   engine: WorkerPsiEngine;
   worker: Worker;
-  // 'error' events the worker emitted during the run (a real fault, distinct from
-  // the deliberate terminate() exit below); expected empty on a healthy exchange.
+  // 'error' events the worker emitted during the run (a real fault, distinct
+  // from the terminate() exit below); expected empty on a healthy exchange.
   errors: unknown[];
 }
 
-// Spawn a real worker on the shipping bundle and wrap it through the SAME
-// createWorkerThreadHandle production uses, so this test exercises the real host-side
-// wiring (including the exit-code handling: a worker terminated before it finishes
-// starting exits 0, a started one exits 1, so a fault is any exit WE did not initiate,
-// not any nonzero code) rather than a hand-rolled mirror that could drift from it. The
-// Worker is returned so a test can drive and observe its teardown directly; a separate
-// 'error' listener records faults for assertions -- an independent observer, not a
-// reimplementation of the handle's own error routing (Node allows many listeners).
+// Spawn a real worker on the shipping bundle and wrap it through the same
+// createWorkerThreadHandle production uses, exercising the real host-side wiring:
+// a worker terminated before it finishes starting exits 0, a started one exits 1,
+// so a fault is any exit this test did not initiate, not any nonzero code. The
+// Worker is returned so a test can drive its teardown directly; a separate 'error'
+// listener records faults for assertions independent of the handle's own routing.
 function spawnEngine(role: "starter" | "joiner", id: string): SpawnedEngine {
   const init: PsiWorkerInit = { role, id, mode: "identifier-revealing" };
   const worker = new Worker(workerEntry, { workerData: init });

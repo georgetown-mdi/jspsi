@@ -23,17 +23,12 @@ import { composeManagedExchangeFile } from "@psi/managedExchangeRecord";
 
 import { createAppMount } from "./renderApp";
 
-// The read-failed behavior, rendered, for both routes. When the store opens but its
-// records cannot be read (a corrupted or app-upgrade-invalidated record), records
-// likely exist, so both the home route at `/` and the always-list route at `/saved`
-// show the read-failed surface -- never the quick path, which would silently hide the
-// loss. The failure is a real read rejection after a successful open, distinct from the
-// unavailable degrade. The load's failure classification is unit-tested; this file
-// proves both routes render the read-failed surface, not the quick path.
-//
-// It is also where the import affordance stands beside records the browser still
-// holds, so it is where an import refused by a hand-off is met: that refusal is
-// rendered here against the real store.
+// A read failure after a successful open (a corrupted or app-upgrade-invalidated
+// record) must render the read-failed surface on both the home route (`/`) and
+// the always-list route (`/saved`), never the quick path. Failure classification
+// is unit-tested elsewhere; this file checks rendering, including the import
+// affordance on this surface and the refusal case for an exchange handed off
+// elsewhere.
 
 vi.mock("@tanstack/react-router", async () =>
   (await import("./moduleMocks")).reactRouterMock(),
@@ -87,11 +82,10 @@ describe("store opens but the read fails", () => {
       .toBeInTheDocument();
   });
 
-  // The read-failed surface is not a dead end: it carries the same
+  // The read-failed surface is not a dead end: it includes the same
   // restore-from-backup import affordance the empty state has. The list read
   // rejects wholesale on any one bad record, so the import cannot mend the list,
-  // but it stores the exchange and routes straight to its run surface -- a way
-  // forward the surface must still offer.
+  // but it still stores the exchange and routes straight to its run surface.
   test("the read-failed surface offers the restore-from-backup import", async () => {
     app.render(createElement(SavedExchanges));
 
@@ -107,7 +101,7 @@ describe("store opens but the read fails", () => {
 describe("importing a backup of an exchange handed off from here", () => {
   // The operator's own older backup of an exchange this browser has since handed to
   // the command line. The file reads fine and the exchange is still here -- it just
-  // runs somewhere else now -- so the refusal must not read as an unreadable file.
+  // runs somewhere else now -- so the refusal must not display as an unreadable file.
 
   beforeEach(async () => {
     await clearManagedExchanges();

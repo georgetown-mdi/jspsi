@@ -5,10 +5,10 @@ import {
   withSecurityHeaders,
 } from "@utils/securityHeaders";
 
-// withSecurityHeaders is the seam the server entry (src/server.ts) wraps every
-// response in. The integration suite proves it reaches the wire on real routes;
-// these cover the helper in isolation, including the cases a same-process mutate
-// would mishandle.
+// withSecurityHeaders is the boundary the server entry (src/server.ts) wraps
+// every response in. The integration suite proves it reaches the wire on real
+// routes; these cover the helper in isolation, including the cases a
+// same-process mutate would mishandle.
 describe("withSecurityHeaders", () => {
   test("sets every declared security header to its value", () => {
     const hardened = withSecurityHeaders(new Response("ok"));
@@ -43,7 +43,7 @@ describe("withSecurityHeaders", () => {
 
   test("applies to an immutable redirect response without throwing", () => {
     // Response.redirect yields a response whose headers are immutable: setting a
-    // header in place throws. The rebuild path must still carry the headers and
+    // header in place throws. The rebuild path must still hold the headers and
     // keep the redirect's status and Location.
     const redirect = Response.redirect("https://example.test/elsewhere", 302);
     const hardened = withSecurityHeaders(redirect);
@@ -58,7 +58,7 @@ describe("withSecurityHeaders", () => {
     // Response.error() has status 0; the Response constructor accepts only
     // 200-599, so the rebuild cannot apply to it. The helper must return it as
     // is rather than throw and turn a response into a 500 -- nothing about a
-    // network-error response is frameable or carries a referrer to suppress.
+    // network-error response is frameable or has a referrer to suppress.
     const errored = Response.error();
     const hardened = withSecurityHeaders(errored);
     expect(hardened).toBe(errored);

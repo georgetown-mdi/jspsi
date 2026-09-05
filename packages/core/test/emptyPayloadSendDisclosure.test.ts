@@ -15,12 +15,11 @@ import type { LinkageTerms } from "../src/config/linkageTerms";
 import type { MessageConnection } from "../src/connection/messageConnection";
 
 // An inviter that declares `payload.receive: []` mirrors to a present, empty
-// `payload.send` on the acceptor. The acceptor's own metadata, meanwhile, may
-// be INFERRED from its CSV header, where every column that is not a linkage
-// or PII alias defaults to isPayload: true with no operator choice involved.
-// These tests assert that no payload column leaves the acceptor's machine
-// before the partner's runtime reconciliation would catch it, which fires
-// only after the values have already arrived.
+// `payload.send` on the acceptor. The acceptor's own metadata may still
+// infer payload columns from its CSV header, with no operator choice.
+// These tests assert that no payload column reaches the wire before the
+// partner's runtime reconciliation would catch it, which fires only after
+// values arrive.
 
 const psiLibrary = await PSI();
 

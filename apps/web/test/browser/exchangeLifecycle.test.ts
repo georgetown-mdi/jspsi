@@ -31,7 +31,7 @@ import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 import type Peer from "peerjs";
 
 // This suite drives the app's own exchange orchestrator, runExchangeLifecycle,
-// over a real WebRTC data channel for BOTH roles -- the seam ExchangeView depends
+// over a real WebRTC data channel for BOTH roles -- the boundary ExchangeView depends
 // on but the UI tests stub out (and invitedPSI bypasses by calling
 // authenticateExchange/runExchange directly). It pins the contract ExchangeView
 // reads back from the lifecycle: the real protocol-stage progression (including
@@ -73,7 +73,7 @@ interface CapturedRun {
   result?: ExchangeResult;
 }
 
-/** The result url a captured `matched` outputs shape carries, and undefined for
+/** The result url a captured `matched` outputs shape holds, and undefined for
  * the shapes that have no result file. */
 function resultsUrlOf(
   outputs: ExchangeOutputs | undefined,

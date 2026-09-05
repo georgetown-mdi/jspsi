@@ -17,17 +17,12 @@ import {
 
 import type { ShellContainer, ShellWorker } from "@utils/appShellUpdate";
 
-// The client half of the app-shell update path: which worker states are an
-// "update is ready" the operator is told about, and what applying one does. It is
-// a state machine over the service-worker container's events, so it is driven
-// here with a fabricated container rather than a real registration -- the
-// worker's own half (install without skipWaiting, activate's cache purge, the
-// skip-waiting message) is test/unit/serviceWorker.test.ts.
-//
-// The apply path is the exception: the waiting worker there is
-// `apps/web/public/serviceWorker.js` itself behind the harness, so whether a
-// reload the operator declined left the update pending is measured as the
-// shipped worker's own `skipWaiting()` rather than as a string in an array.
+// The client half of the app-shell update path -- which worker states count as
+// "update is ready", and what applying one does -- driven with a fabricated
+// container. The worker's own half (install without skipWaiting, activate's
+// cache purge, the skip-waiting message) is test/unit/serviceWorker.test.ts.
+// The apply tests use the shipped `apps/web/public/serviceWorker.js` behind
+// the harness, so a pending update is measured by its own `skipWaiting()` call.
 
 /** A worker whose state a test advances, firing `statechange` as a real one does. */
 function fakeWorker(state = "installing") {
@@ -109,7 +104,7 @@ function shippedWaitingWorker() {
   };
 }
 
-/** The page-unload seam, which is where a test decides the fate of the reload
+/** The page-unload boundary, which is where a test decides the fate of the reload
  * the operator pressed: `unloadPage` is the page going away, and never calling
  * it is the operator declining the browser's confirmation and staying. */
 function fakePageUnloading() {
@@ -188,7 +183,7 @@ describe("a redeployment", () => {
 
 describe("applying an update", () => {
   /** A registered page with the shipped worker waiting behind its banner, and
-   * the seams that decide what pressing Reload comes to. */
+   * the boundaries that decide what pressing Reload comes to. */
   async function readyToApply() {
     const shipped = shippedWaitingWorker();
     const unloading = fakePageUnloading();

@@ -57,7 +57,7 @@ import type { CSVRow, LinkageKey, LinkageTerms, Metadata } from "@psilink/core";
  * terms holds still until the operator turns it on.
  */
 
-// A file carrying the built-in key set's types plus a ZIP and a phone column, so
+// A file holding the built-in key set's types plus a ZIP and a phone column, so
 // the built-in keys seed as they always did AND two of the offered keys appear.
 const COLUMNS = ["ssn", "first_name", "last_name", "dob", "zip", "phone"];
 const ROWS: Array<CSVRow> = [
@@ -109,7 +109,7 @@ describe("the guided key list offers the non-default matchable types", () => {
       ZIP_KEY,
     ]);
     expect(offeredKeys(draft).every((entry) => entry.enabled)).toBe(false);
-    // Each carries its type inside a compound key: a key over one identifier
+    // Each holds its type inside a compound key: a key over one identifier
     // alone would both over-match and answer a membership question.
     for (const entry of offeredKeys(draft))
       expect(entry.key.elements.length).toBeGreaterThanOrEqual(2);
@@ -229,8 +229,8 @@ describe("turning an offer on", () => {
   });
 
   test("costs the terms their citation of the built-in set", () => {
-    // The departure the guidance copy states, made legible in the document
-    // itself: rules carrying a key the set does not declare are not drawn from
+    // The departure the guidance copy states, made clear in the document
+    // itself: rules containing a key the set does not declare are not drawn from
     // it, so they no longer claim it.
     expect(buildAdvancedTerms(enabled()).linkageRuleSet).toBeUndefined();
   });
@@ -287,10 +287,10 @@ describe("turning an offer on", () => {
     expect(stepsFor(committed, "zip_code")).not.toEqual([]);
   });
 
-  test("is surfaced on the acceptor's terms review like any other key", () => {
+  test("shows up on the acceptor's terms review like any other key", () => {
     // The consent surface reads the terms, so an offered key that reached them is
     // disclosed the way a built-in key is: named among the fields matched on, and
-    // listed with the breadth its type carries.
+    // listed with the breadth its type holds.
     const summary = summarizeInvitation({
       linkageTerms: buildAdvancedTerms(enabled()),
       connectionEndpoint: {
@@ -348,7 +348,7 @@ describe("an offer survives a column edit the way a built-in key does", () => {
     expect(positionOf(edited, ZIP_KEY)).toBeLessThan(
       positionOf(edited, "LN + FN + DOB"),
     );
-    // Off, so the retyped column carries no cleaning yet -- the draft holds a
+    // Off, so the retyped column has no cleaning yet -- the draft holds a
     // pipeline for a field only while its terms declare one.
     expect(edited.standardization.some((t) => t.output === "zip_code")).toBe(
       false,
@@ -395,7 +395,7 @@ describe("an offer survives a column edit the way a built-in key does", () => {
 });
 
 describe("a key that only borrows an offer's name is not the offer", () => {
-  test("its enabled flag does not carry onto the offered shape", () => {
+  test("its enabled flag does not transfer onto the offered shape", () => {
     // Reconciliation matches a draft key to an offer through the canonical
     // encoding, the equality the two parties' terms are compared under, not by
     // name. Under name equality this single-element key -- enabled, and named
@@ -459,7 +459,7 @@ describe("a key that only borrows an offer's name is not the offer", () => {
           : entry,
       ),
     };
-    // The premise: this key is genuinely outside the canonical domain, so the
+    // The assumption: this key is outside the canonical domain, so the
     // reconciliation is reaching its incomparable branch rather than agreeing
     // with the offer by accident.
     expect(() =>
@@ -479,7 +479,7 @@ describe("a key that only borrows an offer's name is not the offer", () => {
 });
 
 describe("an offer re-added over a key of its own name arrives off", () => {
-  // The encoding match drops a draft key whose shape no offer carries, and the
+  // The encoding match drops a draft key whose shape no offer holds, and the
   // offer it left unmatched is re-added. A built-in key is offered ON, so a draft
   // holding an older shape under its name -- one stored before the shape changed
   // -- would have that key silently arrive enabled, matching on a rule the
@@ -543,7 +543,7 @@ describe("an offer re-added over a key of its own name arrives off", () => {
       (entry) => entry.key.name === BACKBONE_KEY,
     );
     expect(arrived).toHaveLength(1);
-    // The offer's shape, not the stale one -- the draft key is genuinely dropped.
+    // The offer's shape, not the stale one -- the draft key is dropped.
     expect(arrived[0].key.elements).toEqual(offeredShape(BACKBONE_KEY));
     expect(arrived[0].enabled).toBe(false);
     expect(
@@ -563,7 +563,7 @@ describe("an offer re-added over a key of its own name arrives off", () => {
   });
 
   test("a key the operator had on arrives off as well", () => {
-    // The flag is consent to the key the operator was shown. A shape carrying that
+    // The flag is consent to the key the operator was shown. A shape holding that
     // name is a different matching rule, so the choice does not port onto it --
     // the operator turns the offered rule on themselves.
     const stale = withPermutedKey(guidedDraft(), BACKBONE_KEY, true);
@@ -678,7 +678,7 @@ describe("a key stating its optional properties as undefined is the same key", (
   test("it reconciles as the key without the properties does", () => {
     const on = withKeyEnabled(guidedDraft(), ZIP_KEY);
     const spread = withUndefinedOptionals(on);
-    // The premise: these keys are genuinely outside the canonical domain, so the
+    // The assumption: these keys are outside the canonical domain, so the
     // reconciliation is reaching its incomparable branch rather than agreeing
     // with the offer by accident.
     expect(() => canonicalString(spread.keys[0].key)).toThrow();
@@ -689,7 +689,7 @@ describe("a key stating its optional properties as undefined is the same key", (
       setDraftMetadata(on, metadata, ROWS).keys,
     );
     // The failure this closes: an incomparable key matches no offer, so a draft
-    // whose keys ALL carry the property arrives entirely off -- the built-in set
+    // whose keys ALL have the property arrives entirely off -- the built-in set
     // the operator never touched and the offer they turned on together.
     expect(reconciled.keys.some((entry) => entry.enabled)).toBe(true);
     expect(
@@ -698,8 +698,8 @@ describe("a key stating its optional properties as undefined is the same key", (
   });
 
   test("a defined optional property is still a difference from the offer", () => {
-    // Only the explicit `undefined` is read as the absent property. An element
-    // alias the offer does not carry is a real departure from the offered rule,
+    // Only the explicit `undefined` is treated as the absent property. An element
+    // alias the offer does not hold is a real departure from the offered rule,
     // so the key is still no offer's: it drops and is re-offered off rather than
     // handing the operator's flag to a shape they did not choose.
     const on = withKeyEnabled(guidedDraft(), ZIP_KEY);
@@ -736,7 +736,7 @@ describe("a key stating its optional properties as undefined is the same key", (
     const spread = withUndefinedOptionals(
       withKeyEnabled(guidedDraft(), ZIP_KEY),
     );
-    // The premise: core's compare -- byte equality under the canonical encoding,
+    // The assumption: core's compare -- byte equality under the canonical encoding,
     // which the explicit `undefined` puts the key outside of -- answers `false`
     // for every one of these, so the marker the list renders is the prune's
     // answer rather than one it would have reached anyway.
@@ -812,7 +812,7 @@ describe("a key stating its optional properties as undefined is the same key", (
         throw new Error("unreadable");
       },
     });
-    // The premises: the document cannot be read as a whole, and core's compare
+    // The assumptions: the document cannot be read as a whole, and core's compare
     // answers `false` for its keys, so the citation here is the prune's answer
     // rather than one reached without it.
     expect(() => Object.entries(built)).toThrow();
@@ -830,7 +830,7 @@ describe("a key stating its optional properties as undefined is the same key", (
 
   test("a key the prune cannot read is answered for the document, not thrown on", () => {
     // The other half: the unreadable rule is compared as it stands, and core
-    // answers a document carrying one exactly as it answers rules it cannot
+    // answers a document holding one exactly as it answers rules it cannot
     // encode -- not drawn from the set, entitled to no citation.
     const built = buildAdvancedTerms(withUndefinedOptionals(guidedDraft()));
     Object.defineProperty(built.linkageKeys[0], "swap", {
@@ -850,7 +850,7 @@ describe("turning an offer on and off again", () => {
   test("adds the acceptor's own derivation, then withdraws it", () => {
     const off = guidedDraft();
     // Off, the column supplies nothing: an offer's cleaning is created by turning
-    // its key on, not by the file carrying a column of the type. A draft holding
+    // its key on, not by the file holding a column of the type. A draft holding
     // one while off would clean a field its own terms declare nothing for.
     expect(off.standardization.some((t) => t.output === "zip_code")).toBe(
       false,
@@ -940,7 +940,7 @@ describe("what a mint over an offered column hands the surfaces that keep it", (
     port: "",
   };
 
-  /** The invitation the bench mints for a draft, taken over profiled columns (the
+  /** The invitation the console mints for a draft, taken over profiled columns (the
    * console's mint source) so no CSV file is parsed here. */
   function mintFor(draft: AdvancedInviteDraft) {
     return generateInvitation({
@@ -1009,7 +1009,7 @@ describe("what a mint over an offered column hands the surfaces that keep it", (
     ).not.toThrow();
   });
 
-  test("the console's server-job config carries an undeclared output for nothing", async () => {
+  test("the console's server-job config holds an undeclared output for nothing", async () => {
     const minted = await mintFor(guidedDraft());
     const config = inviterServerJobConfig({
       minted,
@@ -1039,7 +1039,7 @@ describe("a metadata edit on an imported draft grows no cleaning of its own", ()
   }
 
   /** A document declaring one `last_name` field and the one key over it -- nothing
-   * of an offered type, whatever the importing party's own columns carry. */
+   * of an offered type, whatever the importing party's own columns contain. */
   function lastNameDocument(): LinkageTerms {
     const authorMetadata = linkageColumns([["author_surname", "last_name"]]);
     return buildAdvancedTerms({

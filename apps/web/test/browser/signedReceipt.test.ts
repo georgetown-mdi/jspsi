@@ -26,35 +26,11 @@ import type {
 } from "@psilink/core";
 
 // The companion to packages/core/test/signedReceipt.test.ts and
-// signingIdentity.test.ts: it runs the SAME checked-in vectors through the
-// browser build of @psilink/core in real Chromium.
-//
-// ECDSA signing is randomized, so "both builds reproduce the same signature" is
-// no longer available as the cross-implementation guarantee. Three things stand
-// in its place, and each fails here if the browser build and core diverge.
-//
-//   1. The deterministic anchors -- the certificate public coordinates, the
-//      certificate fingerprint, and the per-exchange binder -- are still known
-//      answers, reproduced from a fixed private key. A divergence in the
-//      canonical encoding, the domain labels, or the HKDF breaks them.
-//   2. Each direction of the signature contract, measured rather than argued.
-//      Core -> browser: a signature produced outside this build (by openssl, in
-//      the Node-side generator, over bytes the generator states from the spec)
-//      must verify here. Browser -> core: a signature this build produces must
-//      verify under the SAME fixed key and content that the checked-in one does,
-//      and the Node suite asserts the mirror image of both. Verification is over
-//      the signed bytes, so a build whose byte layout diverged rejects the fixed
-//      signature outright.
-//   3. Key rejection. Part of it is delegated to crypto.subtle.importKey, a
-//      different implementation on each platform (Node's OpenSSL, Chromium's
-//      BoringSSL), so the rejections are re-asserted here through the module's
-//      own entry points. These assert the OUTCOME on this platform without
-//      claiming which layer produced it: the Node suite drives importKey
-//      directly, and is where that split is measured.
-//
-// The step uses only platform-neutral primitives (crypto.subtle, TextEncoder,
-// the pure-JS canonicalizer), so it holds by construction; these tests guard
-// against a regression introducing a platform dependency.
+// signingIdentity.test.ts: it runs the same checked-in vectors through the
+// browser build of @psilink/core in real Chromium. ECDSA signing is
+// randomized, so cross-build verification (not signature reproduction) is
+// what proves the two builds agree on canonical encoding, signed bytes, and
+// key rejection.
 
 type ReceiptContent = Parameters<typeof signReceiptContent>[1];
 
@@ -176,7 +152,7 @@ describe("signing certificates in the browser", () => {
       /is not a valid P-256 point/,
     );
 
-    // A coordinate carrying a 33rd leading zero byte is the same point under a
+    // A coordinate with a 33rd leading zero byte is the same point under a
     // different string, and therefore a second fingerprint for one key. The
     // fixed 32-byte length is the module's pin rather than importKey's, so it
     // must hold here whatever this platform's importKey would have admitted.

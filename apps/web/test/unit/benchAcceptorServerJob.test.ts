@@ -12,7 +12,7 @@ import type {
 } from "@psilink/core";
 import type { AcceptorDataEdits } from "@psi/acceptInvitation";
 
-// The inviter-perspective terms an accepted invitation carries: the inviter is
+// The inviter-perspective terms an accepted invitation holds: the inviter is
 // the identity, it SENDS `program_code` and REQUESTS nothing back, and it shares
 // the result with the acceptor. The acceptor's server-job config must run on the
 // MIRROR of these, not this raw set.
@@ -46,8 +46,8 @@ const token: InvitationToken = {
 
 // The acceptor's OWN authored column metadata (its own CSV namespace). `secret`
 // is roled `ignored`, and `notes` is a plain payload column the operator chose to
-// disclose. This is the operator's data-prep edit the server-job path must carry
-// so the appliance's CLI honors it rather than inferring metadata from the column
+// disclose. This is the operator's data-prep edit the server-job path must hold
+// so the console's CLI honors it rather than inferring metadata from the column
 // names -- inference would default the unrecognized `secret` column to disclosed
 // payload.
 const editedMetadata: Metadata = [
@@ -101,10 +101,10 @@ describe("acceptorServerJobConfig", () => {
     const config = configFor();
 
     // The derive-mirror puts the inviter's disclosed send into the acceptor's
-    // payload.receive -- the SAME set the browser path locks in from
+    // payload.receive -- the SAME set the browser path commits to from
     // disclosedPayloadColumns. On this fixture (payload.send aligned with
     // disclosedPayloadColumns) it also equals the explicit expectedPayloadColumns
-    // lock-in below; the divergence describe exercises the shape where it does not.
+    // commitment below; the divergence describe exercises the shape where it does not.
     expect(config.linkageTerms.payload?.receive).toEqual([
       { name: "program_code" },
     ]);
@@ -113,7 +113,7 @@ describe("acceptorServerJobConfig", () => {
     );
   });
 
-  test("carries the acceptor's inline CSV source and the token's shared secret verbatim", () => {
+  test("has the acceptor's inline CSV source and the token's shared secret verbatim", () => {
     const config = configFor();
 
     expect(config.inputSource).toEqual({ kind: "inline", csv: inputCsv });
@@ -122,8 +122,8 @@ describe("acceptorServerJobConfig", () => {
 
   test("threads a console workFile reference through as the input source verbatim", () => {
     // The console accept sources from the operator-mounted file: the driver config
-    // carries only the reference (name + profiled freshness pair), never content, so
-    // the appliance's create can resolve and freshness-check the mounted file.
+    // has only the reference (name + profiled freshness pair), never content, so
+    // the console's create can resolve and freshness-check the mounted file.
     const workFile = {
       kind: "workFile" as const,
       name: "clients.csv",
@@ -146,7 +146,7 @@ describe("acceptorServerJobConfig", () => {
 
   test("rides the sftp transport for an accepted SFTP endpoint", () => {
     // The console SFTP accept runs the same server job on the sftp intent arm; the
-    // arm carries no connection field (the appliance reads the operator-authored
+    // arm has no connection field (the console reads the operator-authored
     // connection off GET /api/jobs/sftp), so only the channel changes here.
     const config = acceptorServerJobConfig({
       token,
@@ -157,14 +157,14 @@ describe("acceptorServerJobConfig", () => {
     });
     expect(config.transport).toEqual({ channel: "sftp" });
     // Everything below the transport discriminant is channel-independent: the
-    // derived own-perspective terms and the received-payload lock-in are identical.
+    // derived own-perspective terms and the received-payload commitment are identical.
     expect(config.linkageTerms.identity).toBe("Accepting Org");
     expect(config.expectedPayloadColumns).toEqual(
       token.disclosedPayloadColumns,
     );
   });
 
-  test("carries the operator's authored metadata and standardization edits", () => {
+  test("has the operator's authored metadata and standardization edits", () => {
     const config = configFor();
 
     expect(config.metadata).toEqual(editedMetadata);
@@ -172,9 +172,9 @@ describe("acceptorServerJobConfig", () => {
   });
 
   test("an operator-ignored column is NOT disclosed on the server-job path", () => {
-    // The actual disclosure gap this slice closes: without the carried metadata
-    // the appliance's CLI would infer `secret` as an unrecognized column and
-    // default it to disclosed payload. The carried metadata roles it `ignored`, so
+    // The actual disclosure gap this slice closes: without the provided metadata
+    // the console's CLI would infer `secret` as an unrecognized column and
+    // default it to disclosed payload. The provided metadata roles it `ignored`, so
     // isDisclosedToPartner excludes it -- the single source of truth for what
     // leaves the machine. `notes`, a real payload column, is still disclosed.
     const config = configFor();
@@ -183,7 +183,7 @@ describe("acceptorServerJobConfig", () => {
     expect(disclosed).not.toContain("secret");
   });
 
-  test("sets the received-payload lock-in from the disclosed set", () => {
+  test("sets the received-payload commitment from the disclosed set", () => {
     const config = configFor();
     expect(config.expectedPayloadColumns).toEqual(
       token.disclosedPayloadColumns,
@@ -198,13 +198,13 @@ describe("acceptorServerJobConfig", () => {
   });
 });
 
-// The received-payload lock-in the console acceptor must set EXPLICITLY, mirroring
+// The received-payload commitment the console acceptor must set EXPLICITLY, mirroring
 // the browser accept path (acceptorExchange.ts sets prepared.expectedPayloadColumns
 // from disclosedPayloadColumns). Without it the CLI falls back to
 // linkageTerms.payload.receive, which is undefined for a token that discloses
-// columns but carries no payload.send -- a fail-OPEN shape a malicious inviter can
+// columns but has no payload.send -- a fail-OPEN shape a malicious inviter can
 // craft. These cases pin the empty-vs-absent distinction end to end.
-describe("acceptorServerJobConfig received-payload lock-in", () => {
+describe("acceptorServerJobConfig received-payload commitment", () => {
   // The inviter perspective a malicious inviter can craft: it advertises no
   // payload.send at all, yet the token discloses a column. The derive-mirror then
   // produces no payload.receive, so the CLI's fallback would be undefined and
@@ -235,15 +235,15 @@ describe("acceptorServerJobConfig received-payload lock-in", () => {
     });
   }
 
-  test("locks in even when the token omits payload.send (the fail-open shape)", () => {
+  test("the commitment holds even when the token omits payload.send (the fail-open shape)", () => {
     const config = configFrom(["program_code"]);
     // The derive-mirror yields no payload.receive here, so the CLI fallback would be
-    // undefined; the explicit lock-in is what enforces the received set.
+    // undefined; the explicit commitment is what enforces the received set.
     expect(config.linkageTerms.payload?.receive).toBeUndefined();
     expect(config.expectedPayloadColumns).toEqual(["program_code"]);
   });
 
-  test("an empty disclosed set locks in strictly (receive nothing), not lazily", () => {
+  test("an empty disclosed set commits strictly (receive nothing), not lazily", () => {
     const config = configFrom([]);
     // An empty array must SURVIVE as an empty array -- a strict "receive nothing" --
     // not be collapsed to undefined (which would reconcile lazily / fail open).
@@ -251,18 +251,18 @@ describe("acceptorServerJobConfig received-payload lock-in", () => {
     expect(config.expectedPayloadColumns).not.toBeUndefined();
   });
 
-  test("an absent disclosed set leaves the lock-in undefined (lazy)", () => {
+  test("an absent disclosed set leaves the commitment undefined (lazy)", () => {
     const config = configFrom(undefined);
     expect(config.expectedPayloadColumns).toBeUndefined();
   });
 });
 
-// The terms-side lock-in the console acceptor must carry for the same reason as
-// the received-payload one, and more sharply: the appliance runs `psilink
+// The terms-side commitment the console acceptor must hold for the same reason as
+// the received-payload one, and more sharply: the console runs `psilink
 // exchange` at a separate invocation, so a binding the browser held only in
 // memory would bind nothing there. The value is the invitation's declaration for
 // the INVITER's side, never read off the acceptor's derived mirror.
-describe("acceptorServerJobConfig terms-side lock-in", () => {
+describe("acceptorServerJobConfig terms-side commitment", () => {
   function configWithDeclared(declared: boolean) {
     return acceptorServerJobConfig({
       token: {
@@ -276,7 +276,7 @@ describe("acceptorServerJobConfig terms-side lock-in", () => {
     });
   }
 
-  test("carries the invitation's declared deduplicate, not the derived mirror", () => {
+  test("has the invitation's declared deduplicate, not the derived mirror", () => {
     for (const declared of [false, true]) {
       const config = configWithDeclared(declared);
       expect(config.expectedPartnerDeduplicate).toBe(declared);

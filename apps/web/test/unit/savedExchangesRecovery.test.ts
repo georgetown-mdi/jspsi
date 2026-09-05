@@ -8,10 +8,10 @@ import {
 
 import type { ManagedExchangeDiagnosticEntry } from "@psi/managedExchangeStore";
 
-// The read-failed recovery listing's display derivation, tested in Node: a readable
-// entry surfaces its label, side, and last-run date; an unreadable entry surfaces a
-// fixed label and its stored key, and nothing more. Every row carries the key the
-// one-step delete-by-key acts on.
+// The read-failed recovery listing's display derivation, tested in Node: a
+// readable entry shows its label, side, and last-run date; an unreadable
+// entry shows a fixed label and its stored key, and nothing more. Every row
+// has the key the one-step delete-by-key acts on.
 
 function readable(
   overrides: Partial<{
@@ -37,7 +37,7 @@ function readable(
 }
 
 describe("recoveryRow", () => {
-  test("a readable entry surfaces its label, side, and last-run date", () => {
+  test("a readable entry shows its label, side, and last-run date", () => {
     const row = recoveryRow(
       readable({
         id: "one",
@@ -54,7 +54,7 @@ describe("recoveryRow", () => {
     expect(row.unreadable).toBe(false);
   });
 
-  test("an empty label reads as (unnamed exchange) in the row text", () => {
+  test("an empty label displays as (unnamed exchange) in the row text", () => {
     expect(recoveryRow(readable({ label: "" })).label).toBe(
       "(unnamed exchange)",
     );
@@ -67,7 +67,7 @@ describe("recoveryRow", () => {
     expect(recoveryRow(readable({ label: "" })).deleteLabel).toBe("");
   });
 
-  test("a readable entry with no run carries no last-run date", () => {
+  test("a readable entry with no run has no last-run date", () => {
     expect(recoveryRow(readable()).lastRunAt).toBeUndefined();
   });
 
@@ -76,7 +76,7 @@ describe("recoveryRow", () => {
     expect(recoveryRow(readable({ backedUp: false })).backedUp).toBe(false);
   });
 
-  test("an unreadable entry surfaces the fixed label, an empty delete label, and its key", () => {
+  test("an unreadable entry shows the fixed label, an empty delete label, and its key", () => {
     const row = recoveryRow({
       kind: "unreadable",
       id: "bad-key",

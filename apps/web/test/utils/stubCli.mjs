@@ -6,7 +6,7 @@
 // scenarios without a separate script per case.
 //
 // It also emulates the `probe-host-key` and `fingerprint` subcommands the
-// appliance spawns (self-contained branches that never touch the exchange
+// console spawns (self-contained branches that never touch the exchange
 // emulation).
 //
 // Environment variables (all optional):
@@ -30,7 +30,7 @@
 //   STUB_IGNORE_SIGTERM When "1", SIGTERM is ignored (to test SIGKILL).
 //   STUB_READY_FILE   When set, this path is written once the signal handlers
 //                     above are installed, so a signalling test can wait for the
-//                     child to be genuinely ready rather than sleeping.
+//                     child to be ready rather than sleeping.
 //   STUB_ARGV_FILE    When set, the process argv (JSON array) is written to this
 //                     path, so a test can assert exactly how the driver invoked
 //                     the CLI (subcommand, flags, and positional order).
@@ -60,7 +60,7 @@ import fs from "node:fs";
 
 // The default probe line emitted when STUB_PROBE_STDOUT is unset (an all-A
 // canonical fingerprint), so the probe route's round-trip is deterministic even
-// when the driver's sanitized child env cannot carry STUB_PROBE_STDOUT.
+// when the driver's sanitized child env cannot include STUB_PROBE_STDOUT.
 const DEFAULT_PROBE_LINE =
   JSON.stringify({
     fingerprint: "SHA256:" + "A".repeat(43),
@@ -88,7 +88,7 @@ function exitAfterDelay(code) {
   else process.exit(code);
 }
 
-// The probe-host-key subcommand the appliance's host-key probe driver spawns is
+// The probe-host-key subcommand the console's host-key probe driver spawns is
 // self-contained: emit a chosen stdout line and exit, never touching the
 // exchange emulation below. Honors STUB_IGNORE_SIGTERM so the watchdog SIGKILL
 // escalation can be exercised.
@@ -181,7 +181,7 @@ function runExchangeStub() {
   // wait for the disposition it is exercising to actually be in place. Sleeping
   // instead races the child's startup: a signal delivered before registration
   // takes the DEFAULT action, so an ignore-and-escalate case silently becomes a
-  // first-signal kill and the terminal carries the wrong code.
+  // first-signal kill and the terminal holds the wrong code.
   if (process.env.STUB_READY_FILE !== undefined)
     fs.writeFileSync(process.env.STUB_READY_FILE, "ready");
 

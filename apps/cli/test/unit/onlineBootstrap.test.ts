@@ -161,7 +161,7 @@ test("connectionFromURL: file URL maps to a filedrop connection", () => {
 
 test("connectionFromURL: a webrtc (ws) URL is a usage error", () => {
   // The CLI runs a webrtc exchange, but only from a saved connection: a URL
-  // carries neither the role each party registers under nor an endpoint an
+  // has neither the role each party registers under nor an endpoint an
   // invitation could hand the partner. The refusal names the command that does
   // run one rather than reporting the channel as unsupported.
   expect(() => connectionFromURL(new URL("ws://host/path"), {})).toThrow(
@@ -231,13 +231,11 @@ test("connectionFromURL: an encoded slash in the path decodes to a separator", (
 
 test("connectionFromURL: a traversal-shaped path is decoded literally, not rejected here", () => {
   // Encoded dot-dot segments joined by an encoded slash (%2e%2e%2f) survive the
-  // WHATWG parser's double-dot collapsing (which only fires on literal "/") and
-  // decode to a literal "..". The builder decodes faithfully and does NOT
-  // special-case traversal: the path reaches the live SFTP connection exactly as
-  // a hand-authored psilink.yaml with the same path would, keeping the builder,
-  // the on-disk config, and the connection in agreement. Any traversal defense
-  // belongs at the connection layer so it covers every config source, not just
-  // URLs -- deliberately out of scope here. This test pins that decision.
+  // WHATWG parser's double-dot collapsing (only literal "/" triggers it) and
+  // decode to a literal "..". The builder decodes faithfully, with no
+  // traversal special case, matching a hand-authored psilink.yaml with the same
+  // path. Traversal defense belongs at the connection layer instead, which
+  // covers every config source, not just URLs; this test pins that scope.
   const conn = connectionFromURL(new URL("sftp://host/%2e%2e%2fetc"), {});
   expect(conn.channel).toBe("sftp");
   if (conn.channel !== "sftp") return;
@@ -245,7 +243,7 @@ test("connectionFromURL: a traversal-shaped path is decoded literally, not rejec
 });
 
 test("connectionFromURL: a malformed percent-escape is a redacted usage error", () => {
-  // A lone `%` makes decodeURIComponent throw a URIError; it must surface as a
+  // A lone `%` makes decodeURIComponent throw a URIError; it must show up as a
   // UsageError, not an unhandled error.
   expect(() => connectionFromURL(new URL("sftp://host/bad%"), {})).toThrow(
     UsageError,
@@ -264,7 +262,7 @@ test("connectionFromURL: a malformed percent-escape is a redacted usage error", 
 
 test("connectionFromURL and diffConnectionAgainstTarget agree on an encoded URL", () => {
   // A pre-existing config holds decoded values (a hand-authored psilink.yaml, or
-  // a config the decoded builder saved earlier); the accept URL carries the same
+  // a config the decoded builder saved earlier); the accept URL has the same
   // drop percent-encoded. Because the builder decodes, the reconcile compares
   // decoded-vs-decoded and reports a clean match -- no false conflict, and
   // nothing the one-time live exchange (which uses this same target) contradicts.
@@ -434,7 +432,7 @@ test("diffConnectionAgainstTarget: a split config against a shared target names 
   expect(conflicts[0].incoming).toBe('"/mnt/shared"');
 });
 
-// Each server-block override flag, paired with the option field that carries it,
+// Each server-block override flag, paired with the option field that holds it,
 // so the parametrized test below proves every one is named when set offline.
 const OFFLINE_IGNORED_OVERRIDES: ReadonlyArray<{
   flag: string;
@@ -502,7 +500,7 @@ test("warnServerOverridesIgnoredOffline: --no-server-keyboard-interactive (false
 });
 
 // Each connection-OPTIONS override flag, paired with the option field that
-// carries it, so the parametrized test below proves every one is named when set
+// holds it, so the parametrized test below proves every one is named when set
 // offline. Covers both the SharedOptions timeouts/reconnect bound and the
 // FileSyncOptions toggles -- the offline placeholder has no `options` block on
 // any channel, so the warning is not gated by channel.
@@ -558,7 +556,7 @@ test("warnOptionsOverridesIgnoredOffline: stays silent when no override is set",
 
 test("warnOptionsOverridesIgnoredOffline: a negated boolean toggle (--no-*) does not warn", () => {
   // yargs sets the negated form (--no-retain-files etc.) to `false`, the default
-  // a fresh placeholder already carries, so it is not an override that could have
+  // a fresh placeholder already holds, so it is not an override that could have
   // done something: the toggles gate on `=== true`, not presence. Mirrors
   // warnUnsupportedFileSyncFlags's `=== true` gate on the same toggles.
   const warnings: string[] = [];
@@ -741,7 +739,7 @@ test("parseCommonBootstrapArgs: a repeated number flag is a usage error naming t
 
 test("parseCommonBootstrapArgs: a repeated string flag is a usage error naming the flag", () => {
   // A repeated --log-level reaches .toLowerCase(); rejecting the array first
-  // avoids the raw TypeError that would otherwise surface as a confusing exit 69.
+  // avoids the raw TypeError that would otherwise show up as a confusing exit 69.
   expect(() =>
     parseCommonBootstrapArgs({
       _: [],
@@ -825,7 +823,7 @@ test("parseCommonBootstrapArgs: a connection-/peer-timeout above the 7d ceiling 
         $0: "psilink",
         [flag]: justOver,
       } as unknown as Arguments);
-    // Assert the throw first, so a regression that fails to reject surfaces as a
+    // Assert the throw first, so a regression that fails to reject shows up as a
     // clear "did not throw" rather than the message assertions failing on "".
     expect(parse).toThrow(UsageError);
     expect(parse).toThrow(`--${flag}`);
@@ -1080,7 +1078,7 @@ test("warnUnsupportedWebRTCServerFlags: webrtc warns once per flag set", () => {
 });
 
 test("warnUnsupportedWebRTCServerFlags: each remedy points at the connection the caller has", () => {
-  // The two flags carrying a remedy of their own are the two that can point at
+  // The two flags holding a remedy of their own are the two that can point at
   // the wrong thing: a caller running a configuration has no URL to be told its
   // port comes from, and telling it to author a config and run 'psilink
   // exchange' is the command it already is.
@@ -1151,7 +1149,7 @@ test("warnUnsupportedWebRTCServerFlags: every dropped credential flag is reporte
 test("warnUnsupportedWebRTCServerFlags: the credential line claims silence for the flags, not for the channel", () => {
   // What the dropped flag values do is the claim this line can make: they are
   // neither used nor echoed. What the channel does is not -- a connection
-  // carrying a `server.key` sends it to the coordination server as part of the
+  // holding a `server.key` sends it to the coordination server as part of the
   // request it authorizes -- so the line states that rather than a blanket
   // "no credential of any kind is sent", which is false on a keyed connection
   // and is read by a caller running exactly one.
@@ -1208,10 +1206,10 @@ test("runOrExit: a successful body does not exit", async () => {
   exit.mockRestore();
 });
 
-test("runOrExit surfaces a sanitized cause chain in the CLI failure output", async () => {
+test("runOrExit shows a sanitized cause chain in the CLI failure output", async () => {
   // A transport failure wraps the raw fs/ssh2 error as its cause, and the
-  // partner-chosen path in that cause can carry control/ANSI/newline bytes. The
-  // failure output must surface the cause (observability) with those bytes
+  // partner-chosen path in that cause can hold control/ANSI/newline bytes. The
+  // failure output must show the cause (observability) with those bytes
   // neutralized, never reaching the terminal raw.
   // Spy before setLevel: loglevel binds console.error by reference when the
   // logger's methods are (re)built, so the spy must be in place first.
@@ -1264,7 +1262,7 @@ test("connectionFromEndpoint: an sftp endpoint seeds the locator, marks credenti
   expect(connection.server.host).toBe("sftp.example.org");
   expect(connection.server.port).toBe(2222);
   expect(connection.server.path).toBe("/exchanges/drop");
-  // The endpoint never carries credentials; the username is a fill-in marker.
+  // The endpoint never holds credentials; the username is a fill-in marker.
   expect(connection.server.username).toMatch(/REPLACE_WITH/);
   expect(connection.server.password).toBeUndefined();
 });
@@ -1296,7 +1294,7 @@ test("connectionFromEndpoint: a webrtc endpoint seeds the signaling locator", ()
 });
 
 test("connectionFromEndpoint: a split sftp endpoint mirror-swaps the inbound/outbound pair", () => {
-  // The endpoint carries the INVITER's own pair; the acceptor reads where the
+  // The endpoint holds the INVITER's own pair; the acceptor reads where the
   // inviter writes (inviter outbound -> acceptor inbound) and vice versa, so the
   // partners start as mirror images.
   const endpoint: ConnectionEndpoint = {
@@ -1372,7 +1370,7 @@ test("connectionFromEndpoint: throws on a filedrop endpoint naming no directory"
   // The endpoint schema forbids a filedrop endpoint with neither a path nor a
   // split pair, but `path` is optional in the type, so a caller that bypasses
   // decode can construct one. The guard fails clearly at the swap site rather
-  // than letting an undefined path surface as an opaque downstream schema error.
+  // than letting an undefined path show up as an opaque downstream schema error.
   expect(() => connectionFromEndpoint({ channel: "filedrop" })).toThrow(
     /neither a path nor a split/,
   );
@@ -1381,8 +1379,8 @@ test("connectionFromEndpoint: throws on a filedrop endpoint naming no directory"
 // --- applyEndpointSplitDirectories (online accept merge) ---------------------
 
 test("applyEndpointSplitDirectories: grafts a split sftp endpoint onto the URL connection, keeping host/credentials", () => {
-  // The acceptor's URL carries the reachable host + credentials; the endpoint
-  // carries the inviter's split pair. The merged connection reaches the host the
+  // The acceptor's URL holds the reachable host + credentials; the endpoint
+  // holds the inviter's split pair. The merged connection reaches the host the
   // URL names with the URL's credentials, but reads/writes the mirror-swapped
   // directories (inviter outbound -> acceptor inbound) the endpoint conveys.
   const urlConnection = connectionFromURL(
@@ -1437,7 +1435,7 @@ test("applyEndpointSplitDirectories: grafts a split filedrop endpoint onto a fil
 });
 
 test("applyEndpointSplitDirectories: preserves URL-derived options under the retain trio", () => {
-  // A --connection-timeout carried on the URL connection must survive the merge:
+  // A --connection-timeout set on the URL connection must survive the merge:
   // the retain trio is layered over the existing options, not substituted for it.
   const urlConnection = connectionFromURL(new URL("sftp://host/in"), {
     options: { connectionTimeout: 45 },
@@ -1587,7 +1585,7 @@ test("inviterConnectionFromURL: refuses pre-mint every shape the dial would refu
   // The invitation is minted from this connection and printed before anything
   // is dialed, so a shape the dial rejects must fail HERE -- otherwise the run
   // discloses a live token and only then reports the URL unusable. Percent
-  // encoding is what carries these past the userinfo/query/fragment checks: the
+  // encoding is what moves these past the userinfo/query/fragment checks: the
   // parser leaves `%3F` in the path, and decoding it yields a delimiter that
   // could move the signaling socket.
   for (const raw of [
@@ -1638,7 +1636,7 @@ test("inviterConnectionFromURL: a plaintext webrtc URL raises no dial-time advis
   }
 });
 
-test("inviterConnectionFromURL: a webrtc URL carrying anything past the location is refused", () => {
+test("inviterConnectionFromURL: a webrtc URL holding anything past the location is refused", () => {
   // Each of these has no field in the connection this builds, so accepting the
   // URL would drop the operator's own input silently.
   for (const raw of [
@@ -1657,7 +1655,7 @@ test("inviterConnectionFromURL: a webrtc URL carrying anything past the location
 });
 
 test("inviterConnectionFromURL: the parser itself makes a host-less webrtc URL unreachable", () => {
-  // Why the builder carries no empty-host guard where the sftp branch does:
+  // Why the builder has no empty-host guard where the sftp branch does:
   // ws:/wss: are SPECIAL schemes, so the parse either fails outright or takes
   // the first path segment as the host. Asserted against the parser rather than
   // read off its documentation.
@@ -1669,7 +1667,7 @@ test("inviterConnectionFromURL: the parser itself makes a host-less webrtc URL u
 });
 
 test("inviterConnectionFromURL: the parser never hands the builder an empty webrtc pathname", () => {
-  // The mint reads `pathname` unconditionally, on the premise that a special
+  // The mint reads `pathname` unconditionally, on the assumption that a special
   // scheme always yields at least "/". Measured against the parser, not read off
   // it: an empty value would be recorded as a mount point no broker resolves,
   // and would then be refused by the broker-location guard.
@@ -1683,7 +1681,7 @@ test("inviterConnectionFromURL: the parser never hands the builder an empty webr
 });
 
 test("inviterConnectionFromURL: the shared timeouts apply on webrtc, the file-sync options do not", () => {
-  // peer_timeout carries the invite's --accept-timeout onto the rendezvous wait;
+  // peer_timeout maps the invite's --accept-timeout onto the rendezvous wait;
   // the poll interval belongs to a channel that polls, and webrtc does not.
   const conn = inviterConnectionFromURL(
     new URL("wss://peers.example.org/psi"),
@@ -1730,8 +1728,8 @@ test("endpointFromConnection: a bare-host sftp connection emits no path", () => 
 });
 
 test("endpointFromConnection: no credential rides along on the emitted endpoint", () => {
-  // The inviter's connection carries credentials (username/private key/
-  // passphrase); the endpoint must carry only the public locator. This is the
+  // The inviter's connection holds credentials (username/private key/
+  // passphrase); the endpoint must hold only the public locator. This is the
   // producer side of the invitation's no-credentials invariant. password is
   // omitted here since it is mutually exclusive with privateKey.
   const connection = connectionFromURL(new URL("sftp://host:2200/drop"), {
@@ -1779,7 +1777,7 @@ test.each(["sftp", "filedrop"] as const)(
   "endpointFromConnection: a split %s connection emits the inbound/outbound pair VERBATIM",
   (channel) => {
     // --outbound-path splits the URL/positional path (inbound) from a separate
-    // outbound directory; the endpoint carries the inviter's own pair unswapped,
+    // outbound directory; the endpoint holds the inviter's own pair unswapped,
     // since the mirror swap is the acceptor's job (connectionFromEndpoint).
     const url =
       channel === "sftp"
@@ -1826,7 +1824,7 @@ test("endpointFromConnection: a webrtc connection emits the signaling locator", 
 
 test("endpointFromConnection: nothing but the webrtc locator survives the emit", () => {
   // The producer side of the no-credentials invariant on this channel: a
-  // hand-authored connection carrying the broker API key, a TURN relay's
+  // hand-authored connection holding the broker API key, a TURN relay's
   // credential, an ICE provisioning secret, and the plaintext scheme emits the
   // locator alone. `secure` is dropped with them -- the endpoint schema has no
   // field for it -- which is why an acceptor seeded from one resolves TLS.
@@ -1886,7 +1884,7 @@ test("endpointFromConnection: webrtc values the endpoint schema rejects are drop
 test("endpointFromConnection -> connectionFromEndpoint round-trips a webrtc locator", () => {
   // End-to-end producer -> consumer: the acceptor's seeded connection names the
   // inviter's own coordination server rather than any hard-coded default, and
-  // carries no credential field to fill in (this channel authenticates from the
+  // has no credential field to fill in (this channel authenticates from the
   // shared secret).
   const endpoint = endpointFromConnection(
     inviterConnectionFromURL(new URL("wss://peers.example.org:8443/psi"), {}),
@@ -2008,8 +2006,8 @@ test("buildDataSpec: without input rows, the spec is just the supplied terms (ac
 });
 
 test("buildDataSpec: neither terms nor input rows is refused rather than yielding an empty spec", () => {
-  // Neither CLI path can reach this (offline invite always carries input, accept
-  // always carries the invitation's terms), so the guard exists for a direct
+  // Neither CLI path can reach this (offline invite always has input, accept
+  // always has the invitation's terms), so the guard exists for a direct
   // caller: a spec with no linkage terms would otherwise reach the exchange as
   // terms nobody authored.
   expect(() => buildDataSpec({ identity: "Agency A" })).toThrow(
@@ -2131,7 +2129,7 @@ test("runOnlineBootstrap does not write the config when the handshake fails", as
   }
 });
 
-test("runOnlineBootstrap carries a webrtc connection through to the exchange and the saved config", async () => {
+test("runOnlineBootstrap passes a webrtc connection through to the exchange and the saved config", async () => {
   // The inviter's own webrtc connection reaches runProtocol unchanged (role
   // included -- without it the dial refuses) and is what the hook persists, so
   // the recurring `psilink exchange` this bootstrap sets up meets the same
@@ -2176,7 +2174,7 @@ test("runOnlineBootstrap spends a run-only peer budget on the run and writes non
   // The online inviter's --accept-timeout: a window for one operator waiting at
   // a rendezvous, which must bound the run it was typed for and nothing after
   // it. The config this same call writes is what every later unattended
-  // `psilink exchange` reads, so carrying the budget into it would hand those
+  // `psilink exchange` reads, so putting the budget into it would hand those
   // runs a peer timeout nobody chose for them.
   vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
     await onAuthenticatedArg(callArgs)();
@@ -2304,19 +2302,14 @@ test("observedReceivedColumnsForSave drops an over-cap observation (stays loadab
   expect(observedReceivedColumnsForSave(overCap)).toBeUndefined();
 });
 
-// --- runOnlineBootstrap: observe-then-persist received-payload lock-in --------
+// --- runOnlineBootstrap: observe-then-persist received-payload commitment ----
 
 /** Mock runProtocol as a successful exchange, in its real order: invoke the
- *  onAuthenticated hook (so the config is written at acceptance), then run
- *  `betweenStages` for whatever the test needs to happen during the exchange,
- *  then invoke the pre-terminal onOutputComplete hook with the observed
- *  received-payload columns -- where the bootstrap's crystallization runs, and
- *  the only place a mock can reach it. `observed` is also the resolved value, as
- *  the real runProtocol reports both from one observation.
- *
- *  An absent observation stands for a caller that learns nothing by observation;
- *  the real hook is always handed the partner's column array, empty at its
- *  emptiest, so that is what the hook sees here. */
+ *  onAuthenticated hook, run `betweenStages`, then invoke the pre-terminal
+ *  onOutputComplete hook with the observed received-payload columns, and
+ *  resolve with the same observation, as the real runProtocol does. An absent
+ *  `observed` means the caller learns nothing, though the hook still receives
+ *  an empty array, as the real one always does. */
 function mockSuccessfulExchange(
   observed: string[] | undefined,
   betweenStages?: () => void,
@@ -2353,15 +2346,12 @@ test("runOnlineBootstrap crystallizes the observed received set when the inviter
 });
 
 test("runOnlineBootstrap crystallizes from the pre-terminal hook, not after runProtocol returns", async () => {
-  // WHERE the write happens is the contract, not just that it happens. Run after
-  // runProtocol returns, the warning naming a failed crystallization lands behind
-  // the run's terminal event -- which the stream spec forbids and the repo's own
-  // job supervisor discards outright. So the write rides runProtocol's
-  // pre-terminal hook, and a runProtocol that resolves with the observation
-  // without ever invoking that hook must leave the config exactly as the
-  // acceptance write left it. This is the one test the hook's invocation is
-  // visible to: every other crystallization test drives the hook and would pass
-  // just as well with the write back on the post-return path.
+  // WHERE the write happens is the contract, not just that it happens. A write
+  // after runProtocol returns would land behind the run's terminal event --
+  // forbidden by the stream spec and discarded outright by the job supervisor
+  // -- so the write must ride runProtocol's pre-terminal hook. A runProtocol
+  // that resolves with the observation without ever invoking that hook must
+  // leave the config exactly as the acceptance write left it.
   vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
     const onAuthenticated = optionsArg(callArgs).onAuthenticated as
       (() => void | Promise<void>) | undefined;
@@ -2384,7 +2374,7 @@ test("runOnlineBootstrap crystallizes from the pre-terminal hook, not after runP
 
 test("runOnlineBootstrap leaves an empty observation lazy even when the inviter opts in", async () => {
   // An observed-empty payload is an ambiguous zero-match run; persisting [] would
-  // false-abort a later matching exchange, so no lock-in is written.
+  // false-abort a later matching exchange, so no commitment is written.
   mockSuccessfulExchange([]);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
   const configPath = path.join(dir, "psilink.yaml");
@@ -2403,7 +2393,7 @@ test("runOnlineBootstrap leaves an empty observation lazy even when the inviter 
 test("runOnlineBootstrap does not crystallize the observed set without the inviter opt-in", async () => {
   // The online acceptor learns its received set up front from the token and does
   // not pass persistObservedReceivedPayload, so its saved config records no
-  // observed lock-in.
+  // observed commitment.
   mockSuccessfulExchange(["dob", "zip"]);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
   const configPath = path.join(dir, "psilink.yaml");
@@ -2456,7 +2446,7 @@ test("runOnlineBootstrap keeps a failed observed-payload write non-fatal", async
       persistObservedReceivedPayload: true,
     });
     expect(configWriteError).toBeUndefined();
-    // The second write genuinely failed (the swapped-in directory is intact),
+    // The second write failed (the swapped-in directory is intact),
     // proving the non-fatal catch fired rather than the write silently succeeding.
     expect(fs.statSync(configPath).isDirectory()).toBe(true);
   } finally {
@@ -2466,7 +2456,7 @@ test("runOnlineBootstrap keeps a failed observed-payload write non-fatal", async
 
 test("runOnlineBootstrap reports a lost observed-payload write on fd 3 and in the exit code", async () => {
   // The same loss as the test above, seen by an unattended supervisor: the
-  // configuration the run left behind is missing the lock-in a later recurring
+  // configuration the run left behind is missing the commitment a later recurring
   // exchange would have been held to. Nothing about the completed exchange
   // changes -- it is not to be re-run -- so the report is a `warning` on the
   // machine-interface stream plus the persistence-loss exit code (73), never a
@@ -2528,7 +2518,7 @@ test("runOnlineBootstrap hands runProtocol the emitter it opened itself, not the
     // ...and that very object is what runProtocol received.
     const runtime = runtimeOptionsArg(vi.mocked(runProtocol).mock.calls[0]);
     expect(runtime.eventStream).toBe(emitter.value);
-    // A clean run loses no persistence, so the stream carries nothing of the
+    // A clean run loses no persistence, so the stream holds nothing of the
     // bootstrap's own here (runProtocol, which owns the run's events, is mocked).
     expect(lines).toEqual([]);
   } finally {
@@ -2536,7 +2526,7 @@ test("runOnlineBootstrap hands runProtocol the emitter it opened itself, not the
   }
 });
 
-// --- runOnlineBootstrap: up-front token received-payload lock-in (accept) -----
+// --- runOnlineBootstrap: up-front token received-payload commitment (accept) -
 
 test("runOnlineBootstrap persists the acceptor's up-front token received set into the fresh config", async () => {
   // The online ACCEPTOR knows the columns it consented to receive up front from the
@@ -2559,8 +2549,8 @@ test("runOnlineBootstrap persists the acceptor's up-front token received set int
 });
 
 test("runOnlineBootstrap persists the acceptance's declared deduplicate into the fresh config", async () => {
-  // The terms-side twin of the lock-in above, known at the same moment (the
-  // consent surface stated it) and carried on the same first write. Without it a
+  // The terms-side twin of the commitment above, known at the same moment (the
+  // consent surface stated it) and included in the same first write. Without it a
   // config born of an ONLINE acceptance runs its later recurring exchanges with
   // nothing to hold the partner's presented cardinality to.
   for (const declared of [false, true]) {
@@ -2583,7 +2573,7 @@ test("runOnlineBootstrap persists the acceptance's declared deduplicate into the
 });
 
 test("runOnlineBootstrap writes no declaration for a party that accepted none", async () => {
-  // The online INVITER accepted no invitation, so its fresh config carries no
+  // The online INVITER accepted no invitation, so its fresh config has no
   // binding at all -- an absent field, not a `false` that would refuse a partner
   // legitimately running as the "many" side.
   mockSuccessfulExchange(undefined);
@@ -2602,7 +2592,7 @@ test("runOnlineBootstrap writes no declaration for a party that accepted none", 
 });
 
 test("runOnlineBootstrap persists the acceptor's own outbound consent into the fresh config", async () => {
-  // The send-side sibling of the lock-in above, known at the same moment (it is the
+  // The send-side sibling of the commitment above, known at the same moment (it is the
   // set the acceptance displayed), so it rides the same first write. Without it the
   // fresh config would leave the acceptor's own disclosure unrecorded and a later
   // `psilink exchange` would transmit whatever its CSV happened to disclose.
@@ -2739,9 +2729,9 @@ test("runOnlineBootstrap omits the outbound consent when the caller passes none"
   }
 });
 
-test("runOnlineBootstrap persists an empty token set as a strict receive-nothing lock-in", async () => {
+test("runOnlineBootstrap persists an empty token set as a strict receive-nothing commitment", async () => {
   // Unlike the observe path (which drops an ambiguous empty observation), an empty
-  // DISCLOSED subset carried by the token is a real "receive nothing" lock-in the
+  // DISCLOSED subset held by the token is a real "receive nothing" commitment the
   // operator consented to: a later non-empty payload must abort, so the empty set is
   // written rather than left lazy.
   mockSuccessfulExchange(undefined);
@@ -2759,10 +2749,10 @@ test("runOnlineBootstrap persists an empty token set as a strict receive-nothing
   }
 });
 
-test("runOnlineBootstrap omits the received lock-in when the acceptor passes no token set", async () => {
-  // A subset-less invitation (an older or metadata-unknown mint) carries no disclosed
-  // set, so the acceptor passes undefined and the fresh config records no lock-in --
-  // the recurring exchange reconciles lazily, unchanged from before this task.
+test("runOnlineBootstrap omits the received commitment when the acceptor passes no token set", async () => {
+  // A subset-less invitation (an older or metadata-unknown mint) has no disclosed
+  // set, so the acceptor passes undefined and the fresh config records no
+  // commitment -- the recurring exchange reconciles lazily.
   mockSuccessfulExchange(undefined);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
   const configPath = path.join(dir, "psilink.yaml");
@@ -2775,28 +2765,28 @@ test("runOnlineBootstrap omits the received lock-in when the acceptor passes no 
   }
 });
 
-// --- runOnlineBootstrap: reuse-path received-payload lock-in refresh ----------
+// --- runOnlineBootstrap: reuse-path received-payload commitment refresh -------
 
 /** Write the pre-existing config every reuse-refresh test below starts from: a
  *  loadable exchange config (so a recurring run's parseExchangeSpec reload is what
- *  the assertions read), plus a hand-authored comment and the stale lock-in a prior
- *  acceptance recorded. The surgical write must overwrite or remove that lock-in and
- *  leave the operator's comment and every other key alone. */
+ *  the assertions read), plus a hand-authored comment and the stale commitment a
+ *  prior acceptance recorded. The surgical write must overwrite or remove that
+ *  commitment and leave the operator's comment and every other key alone. */
 function writeReusedConfigWithStaleLockIn(configPath: string): void {
   saveConfig(configPath, {
     connection: { channel: "filedrop", path: "/tmp/psilink-drop" },
     linkageTerms: getDefaultLinkageTerms("Acceptor Org"),
   });
-  // The note trails the lock-in rather than heading it: a comment written
-  // immediately above a key is that key's own, and the document model carries it
-  // out with the key when a subset-less acceptance removes the field.
+  // The note trails the commitment rather than heading it: a comment written
+  // immediately above a key is that key's own, and the document model removes it
+  // along with the key when a subset-less acceptance removes the field.
   fs.appendFileSync(
     configPath,
     "expected_payload_columns:\n  - old_col\n# operator note\n",
   );
 }
 
-test("runOnlineBootstrap refreshes a stale received lock-in surgically on a reused config", async () => {
+test("runOnlineBootstrap refreshes a stale received commitment surgically on a reused config", async () => {
   // The reuse path writes no fresh config, but the operator has just consented to
   // THIS acceptance's disclosed set; leaving the prior acceptance's set standing
   // would false-abort the next recurring exchange. The write is surgical: the
@@ -2858,7 +2848,7 @@ test("runOnlineBootstrap refreshes a stale declaration surgically on a reused co
   }
 });
 
-test("the refreshed reuse-path lock-in fixes the false-abort a stale one would have caused", async () => {
+test("the refreshed reuse-path commitment fixes the false-abort a stale one would have caused", async () => {
   // The end-to-end failure this closes. The kept config holds the partner's OLD
   // disclosed set; the partner now discloses a new set, so a recurring exchange's
   // reconcileReceivedPayload would abort an honest exchange. After the online
@@ -2900,9 +2890,9 @@ test("the refreshed reuse-path lock-in fixes the false-abort a stale one would h
   }
 });
 
-test("runOnlineBootstrap removes a reused config's lock-in for a subset-less invitation", async () => {
-  // An acceptance whose invitation carried no disclosed subset (an older or
-  // metadata-unknown mint) consented to no set: the prior lock-in is cleared so the
+test("runOnlineBootstrap removes a reused config's commitment for a subset-less invitation", async () => {
+  // An acceptance whose invitation held no disclosed subset (an older or
+  // metadata-unknown mint) consented to no set: the prior commitment is cleared so the
   // recurring exchange reconciles lazily, rather than enforcing a set this
   // acceptance never showed.
   mockSuccessfulExchange(undefined);
@@ -2961,11 +2951,11 @@ test("runOnlineBootstrap writes an empty reuse-path consented set verbatim", asy
   }
 });
 
-test("runOnlineBootstrap leaves a reused config's lock-in alone for a caller that owns none", async () => {
+test("runOnlineBootstrap leaves a reused config's commitment alone for a caller that owns none", async () => {
   // The wrapper's PRESENCE is what marks the caller that owns this field. A caller
-  // with no lock-in of its own -- the online inviter, whose received set is learned
+  // with no commitment of its own -- the online inviter, whose received set is learned
   // by observation -- must not have its recorded set removed by the reuse refresh,
-  // which would silently reopen the fail-closed enforcement its own config carries.
+  // which would silently reopen the fail-closed enforcement its own config holds.
   mockSuccessfulExchange(["dob", "zip"]);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
   const configPath = path.join(dir, "psilink.yaml");
@@ -2983,14 +2973,12 @@ test("runOnlineBootstrap leaves a reused config's lock-in alone for a caller tha
   }
 });
 
-test("runOnlineBootstrap keeps a failed reuse-path lock-in refresh non-fatal and reported", async () => {
-  // The kept config stands whatever happens to the surgical refresh: here the config
-  // path is a directory, so both refreshes' reads throw. The completed exchange must
-  // not be undone -- nothing rethrows and no configWriteError is reported (that
-  // channel's recovery text is for the fresh-config write) -- and each failure is
-  // reported. Both warns firing is what proves the two writes are caught
-  // independently: a shared catch, or a first failure escaping it, would leave the
-  // sibling refresh unattempted and only one warn behind.
+test("runOnlineBootstrap keeps a failed reuse-path commitment refresh non-fatal and reported", async () => {
+  // The kept config stands whatever happens to the surgical refresh: here the
+  // config path is a directory, so both refreshes' reads throw. The completed
+  // exchange is not undone -- nothing rethrows and no configWriteError is
+  // reported (that channel is for the fresh-config write) -- and each failure
+  // is reported separately, proving the writes are caught independently.
   // getLogger("bootstrap-test") is silenced above, so the warns do not print.
   mockSuccessfulExchange(undefined);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
@@ -3025,7 +3013,7 @@ test("runOnlineBootstrap reports both lost reuse-path refreshes on fd 3 and in t
   // records the operator just consented to are not in it. Each failure puts its
   // own `warning` on the machine-interface stream -- two lines, which is also
   // what proves the two writes stay independently caught once they report -- and
-  // the run carries the persistence-loss exit code rather than a clean 0.
+  // the run has the persistence-loss exit code rather than a clean 0.
   mockSuccessfulExchange(undefined);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
   const configPath = path.join(dir, "psilink.yaml");
@@ -3055,10 +3043,10 @@ test("runOnlineBootstrap reports both lost reuse-path refreshes on fd 3 and in t
   }
 });
 
-test("the persisted empty online-accept lock-in aborts a later non-empty payload", async () => {
+test("the persisted empty online-accept commitment aborts a later non-empty payload", async () => {
   // The write-side test above proves an empty token set survives to disk as []; this
   // closes the loop at ENFORCEMENT time: a recurring exchange reloads that strict
-  // "receive nothing" lock-in and reconcileReceivedPayload aborts if the partner
+  // "receive nothing" commitment and reconcileReceivedPayload aborts if the partner
   // then transmits any column, while an empty received payload still passes.
   mockSuccessfulExchange(undefined);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
@@ -3078,11 +3066,11 @@ test("the persisted empty online-accept lock-in aborts a later non-empty payload
       rowIndices: [],
       rows: [],
     });
-    // Any transmitted column diverges from the strict empty lock-in and aborts.
+    // Any transmitted column diverges from the strict empty commitment and aborts.
     expect(() =>
       reconcileReceivedPayload(received(["diagnosis"]), lockIn),
     ).toThrow(/payload disclosure mismatch/);
-    // An empty received payload matches the empty lock-in and passes.
+    // An empty received payload matches the empty commitment and passes.
     expect(() => reconcileReceivedPayload(received([]), lockIn)).not.toThrow();
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
@@ -3093,7 +3081,7 @@ test("runOnlineBootstrap rejects both received-payload persistence inputs at onc
   // The acceptor's up-front token set and the inviter's observe-on-save flag are
   // mutually exclusive; setting both is a caller error caught fail-fast, before any
   // connection, rather than silently letting the observe write clobber the token
-  // lock-in. runProtocol must never be reached.
+  // commitment. runProtocol must never be reached.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
   const configPath = path.join(dir, "psilink.yaml");
   // Call counts accumulate across this file's tests (no shared reset hook), so clear
@@ -3114,7 +3102,7 @@ test("runOnlineBootstrap rejects both received-payload persistence inputs at onc
   }
 });
 
-test("the persisted online-accept lock-in drives fail-closed recurring enforcement", async () => {
+test("the persisted online-accept commitment drives fail-closed recurring enforcement", async () => {
   // End to end: the online accept writes expected_payload_columns from the token; a
   // later `psilink exchange` reloads that config (parseExchangeSpec) and locks the
   // set into reconcileReceivedPayload, which PASSES on a matching received payload
@@ -3153,7 +3141,7 @@ test("the persisted online-accept lock-in drives fail-closed recurring enforceme
 });
 
 test("runOnlineBootstrap persists an @path credential as the reference while connecting with the resolved value", async () => {
-  // The invite/accept persistence path: the connection carries an @path
+  // The invite/accept persistence path: the connection has an @path
   // server-password. saveConfig (in the hook) must write the @path, never the
   // secret, while runProtocol receives the resolved value to actually connect.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
@@ -3180,7 +3168,7 @@ test("runOnlineBootstrap persists an @path credential as the reference while con
         password: `@${pwFile}`,
         // Pinned (as if established out-of-band or on a prior first-use run), so
         // runOnlineBootstrap's first-use host-key step is a no-op and this test
-        // exercises only the credential-resolution seam.
+        // exercises only credential resolution.
         hostKeyFingerprint: "SHA256:" + "A".repeat(43),
       },
     };
@@ -3205,7 +3193,7 @@ test("runOnlineBootstrap persists an @path credential as the reference while con
 });
 
 test("runOnlineBootstrap persists an @path private-key passphrase as the reference while connecting with the resolved value", async () => {
-  // The encrypted-key end-to-end path: the connection carries an @path private
+  // The encrypted-key end-to-end path: the connection has an @path private
   // key and its @path passphrase. saveConfig (in the hook) must write both @path
   // references, never the resolved secrets, while runProtocol receives the
   // resolved passphrase to actually unlock the key.
@@ -3235,7 +3223,7 @@ test("runOnlineBootstrap persists an @path private-key passphrase as the referen
         privateKey: `@${keyFile}`,
         privateKeyPassphrase: `@${passFile}`,
         // Pinned so runOnlineBootstrap's first-use host-key step is a no-op and
-        // this test exercises only the credential-resolution seam.
+        // this test exercises only credential resolution.
         hostKeyFingerprint: "SHA256:" + "A".repeat(43),
       },
     };
@@ -3266,14 +3254,12 @@ test("runOnlineBootstrap persists an @path private-key passphrase as the referen
 });
 
 test("runOnlineBootstrap refuses a credential @path naming a missing file before the host-key step", async () => {
-  // An invite or accept refused from local inputs alone must not have contacted
-  // the server first, and on the unpinned sftp connection driven here the
-  // first-use host-key step is what would: its probe opens a real transport. A
-  // `--server-password @path` whose file is not there is decided from this
-  // party's own filesystem, so the credential values are read ahead of that step
-  // even though they are applied after it, and the run ends at the refusal --
-  // a UsageError, which the invite/accept boundary maps to exit 64 -- with the
-  // host-key step never entered.
+  // An invite or accept refused from purely local input must not have contacted
+  // the server first -- the first-use host-key step is what would, since its
+  // probe opens a real transport. A `--server-password @path` naming a missing
+  // file is decided from this party's own filesystem, so the credential is read
+  // (though applied later) before that step, and the run ends at the refusal --
+  // a UsageError, mapped to exit 64 -- with the host-key step never entered.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
   const configPath = path.join(dir, "psilink.yaml");
   const connection: SFTPConnectionConfig = {
@@ -3301,7 +3287,7 @@ test("runOnlineBootstrap dials the connection the host-key step pinned", async (
   // The other half of reading the credential files early: the connection handed
   // to runProtocol is still cloned AFTER the host-key step, so the pin that step
   // writes onto the original is what the real open() enforces. A clone taken at
-  // the read instead would carry the resolved credential and no pin, and dial an
+  // the read instead would hold the resolved credential and no pin, and dial an
   // unverified server -- so the run driven here supplies both.
   const FP = "SHA256:" + "D".repeat(43);
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bootstrap-"));
@@ -4044,7 +4030,7 @@ async function inferInitDataSpec(
 }
 
 test("inferDateInputFormatFromSource: the init path infers the same metadata, fields, standardization, and dob format as a full read", async () => {
-  // The divergence guard the issue makes load-bearing: init's lighter read must
+  // The divergence guard the issue makes critical: init's lighter read must
   // author terms byte-identical to what invite/accept derive from a full read of
   // the same file. Pin all four inferred outputs by comparing the two dataSpecs.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-infer-"));
@@ -4158,7 +4144,7 @@ test("inferDateInputFormatFromSource: a `-` CSV from stdin infers the same as th
 });
 
 test("inferDateInputFormatFromSource: a no-newline input fails fast rather than buffering the span", async () => {
-  // init's bounded read carries the byte ceiling end to end: a pathological local
+  // init's bounded read applies the byte ceiling end to end: a pathological local
   // CSV with no row terminator (one giant line) aborts with an operator-readable
   // error instead of consuming memory proportional to the span. Exercised over
   // stdin to match init's allowStdin path, with a span just over the default
@@ -4251,7 +4237,7 @@ test("buildDataSpec: omitting the selection authors cascade (unchanged from toda
 });
 
 test("buildDataSpec: a supplied terms object (accept's path) ignores the selection", () => {
-  // accept derives its terms from the invitation, which already carries the
+  // accept derives its terms from the invitation, which already has the
   // agreed strategy; the selection must not override the partner's choice.
   const terms = {
     ...getDefaultLinkageTerms("inviter"),

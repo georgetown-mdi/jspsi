@@ -47,7 +47,7 @@ function relativeLuminance(color: string): number {
   // (and in Mantine's own luminance(), which drives its autoContrast picks). The
   // mathematically-exact sRGB break is 0.04045; the two differ only for a channel
   // landing in that narrow gap, which none of the tested colours do. Matching the
-  // spec text and Mantine is deliberate -- do not "correct" it to 0.04045.
+  // spec text and Mantine is by design -- do not "correct" it to 0.04045.
   const linearize = (v: number) =>
     v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4;
   const [r, g, b] = srgbChannels(color).map((c) => c / 255);

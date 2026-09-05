@@ -15,14 +15,14 @@ import { serverAuth } from "../sftpServer/testContext";
 import type { InProcessSftpServer } from "../sftpServer/types";
 import { inProcessOnly } from "../sftpBackendGate";
 
-// A partner-side drop tears every operation the adapter has on the wire, not just
-// the one whose recovery re-dial runs. The adapter issues concurrent operations of
-// its own -- a `send()` resuming from the protocol continuation runs alongside the
-// poll cycle, and core's cleanup and rendezvous sweeps fan a delete out with
-// `Promise.all`/`Promise.allSettled` -- so a single cut routinely lands on several.
-// The cases here drive that partner for real and hold the OTHER operations to
-// settling: on their own tear rather than on the per-operation liveness deadline,
-// with their own correct results where the recovery re-issues them.
+// A partner-side drop tears every operation the adapter has on the wire, not
+// just the one whose recovery re-dial runs. The adapter issues concurrent
+// operations of its own -- a `send()` resuming from the protocol
+// continuation runs alongside the poll cycle, and core's cleanup and
+// rendezvous sweeps fan a delete out with `Promise.all`/`Promise.allSettled`
+// -- so a single cut routinely lands on several. The cases here drive that
+// partner for real and hold the OTHER operations to settling on their own
+// tear, with their own correct results where the recovery re-issues them.
 //
 // Which operation enters recovery first is a property of the operation KIND rather
 // than of issue order, because the two routes are torn a full event apart: a
@@ -43,10 +43,11 @@ import { inProcessOnly } from "../sftpBackendGate";
 
 const TEST_TIMEOUT_MS = 120_000;
 
-// The per-operation liveness deadline, lowered through the adapter's @internal
-// test seam. No case here expects an operation to ride it -- riding it is the
-// failure these assert against -- so it is lowered purely so a regression fails in
-// seconds rather than spending the production minute per operation.
+// The per-operation liveness deadline, lowered through the adapter's
+// @internal test boundary. No case here expects an operation to ride it --
+// riding it is the failure these assert against -- so it is lowered purely
+// so a regression fails in seconds rather than spending the production
+// minute per operation.
 const STALL_DEADLINE_MS = 3_000;
 
 // Large enough that the cut lands deep inside the transfer rather than at its
@@ -125,9 +126,9 @@ async function connectParty(options: {
 }): Promise<Party> {
   const srv = await startInProcessSftpServer();
   // Every case calls this outside its own try, so nothing else owns what is
-  // allocated below once the dial throws: unwound here, a failed setup surfaces its
-  // own error; unwound nowhere, it leaves its listening server and its temp
-  // directory alive for the rest of the worker's life.
+  // allocated below once the dial throws: unwound here, a failed setup
+  // reports its own error; unwound nowhere, it leaves its listening server
+  // and its temp directory alive for the rest of the worker's life.
   let allocatedDir: string | undefined;
   let openedConn: FileSyncConnection | undefined;
   try {
@@ -249,9 +250,10 @@ function recoveryWarnings(
     .filter((message) => message.includes("transparently re-dial"));
 }
 
-// What a settled operation is asserted on. The rejection reason is carried as the
-// constructor name plus the message rather than the error, so a case that fails
-// reports which operation took which outcome instead of a bare boolean.
+// What a settled operation is asserted on. The rejection reason is stated as
+// the constructor name plus the message rather than the error, so a case
+// that fails reports which operation took which outcome instead of a bare
+// boolean.
 interface Settlement {
   status: "fulfilled" | "rejected";
   detail: string;
@@ -280,9 +282,10 @@ function describeSettlement(
   };
 }
 
-// The rejection an operation carries when nothing settled it and its own liveness
-// bound expired instead, which is the outcome every case here asserts against:
-// naming the type is what separates it from a tear the operation was settled by.
+// The rejection an operation holds when nothing settled it and its own
+// liveness bound expired instead, which is the outcome every case here
+// asserts against: naming the type is what separates it from a tear the
+// operation was settled by.
 function stalled(outcome: PromiseSettledResult<unknown>): boolean {
   return (
     outcome.status === "rejected" &&
@@ -308,7 +311,7 @@ for (const order of ["list-first", "get-first"] as const)
 
         const [outcomes, logs] = await withCapturedLogs(
           async () => {
-            // Deep enough into the pair that both are genuinely on the wire: the
+            // Deep enough into the pair that both are on the wire: the
             // listing has issued its OPENDIR and a run of READDIRs and the
             // transfer its OPEN and first READs.
             controls.dropActiveAfterOps(24);
@@ -417,7 +420,7 @@ inProcessOnly(
       ).toEqual([]);
       expect(outcomes.elapsedMs).toBeLessThan(2_000);
       // The whole fan cost one tear, not one per torn member: a fan that re-dialed
-      // per member would carry the same results, land inside the same ceiling, and
+      // per member would hold the same results, land inside the same ceiling, and
       // reject no dial, so nothing else here separates the two.
       expect(controls.handshakeCount()).toBe(1);
       expect(party.dials).toHaveLength(1);
@@ -432,12 +435,11 @@ inProcessOnly(
 );
 
 // What the drop COST, against what the operator is told it cost. The dial is
-// coalesced by the transition queue whatever the fan's width -- the case above
-// pins that -- so the server serves one handshake per drop, and the counters, the
-// budget, and the warning stream are held to the same unit here. The server's own
-// handshake tally is the ground truth on the left-hand side of every comparison:
-// the adapter's bookkeeping is the thing under test and cannot also be the
-// reference for it.
+// coalesced by the transition queue whatever the fan's width -- the case
+// above pins that -- so the server serves one handshake per drop, and the
+// counters, the budget, and the warning stream are held to the same unit
+// here. The server's own handshake tally is the ground truth: the adapter's
+// bookkeeping is the thing under test and cannot also be its own reference.
 for (const [shape, width] of [
   ["a single operation", 1],
   ["a fan-out of concurrent operations", FAN_OUT_FILES],
@@ -503,12 +505,12 @@ inProcessOnly(
   "two drops of two successive sessions report two, once each",
   async () => {
     // The other direction from the once-per-loss cases above, and the one an
-    // accounting keyed to a high-water mark gets wrong: two GENUINE losses, of two
-    // different sessions, must report as two. A charge gated on "newer than the
-    // newest loss already accounted for" drops the second wherever an arm carries
-    // a generation the gate has passed, and the failure looks exactly like the
-    // once-per-loss property working. Driven with a fan at each drop, so an arm of
-    // the first drop's fan and an arm of the second's are both in play.
+    // accounting keyed to a high-water mark gets wrong: two GENUINE losses, of
+    // two different sessions, must report as two. A charge gated on "newer than
+    // the newest loss already accounted for" drops the second wherever an arm
+    // holds a generation the gate has passed, looking exactly like the
+    // once-per-loss property working. Driven with a fan at each drop, so an arm
+    // of each drop's fan is in play.
     const party = await connectParty({
       maxReconnectAttempts: 6,
       stallDeadlineMs: STALL_DEADLINE_MS,
@@ -557,7 +559,7 @@ inProcessOnly(
       expect(party.adapter.reconnectCount).toBe(2);
       // One line, not one per torn operation: the second drop falls inside the
       // shared warn cadence (the first, then every tenth) and the run total the
-      // teardown summary carries is what reports it.
+      // teardown summary holds is what reports it.
       expect(recoveryWarnings(logs)).toHaveLength(1);
     } finally {
       await party.stop();
@@ -567,7 +569,7 @@ inProcessOnly(
 );
 
 // The budget of drops the operator configured, spent at a fan-out width well
-// above it. The last drop the budget permits is deliberately the wide fan, so the
+// above it. The last drop the budget permits is the wide fan, by design, so the
 // boundary is reached with a fan-out tearing at it: an accounting that charged per
 // torn operation would refuse the exchange partway through this sequence rather
 // than at its end.
@@ -678,15 +680,13 @@ inProcessOnly(
     "of the budget than the handshakes it served",
   async () => {
     // The other side of the accounting. Every arm of the fan reads the budget
-    // before the first of them has spent any of it, so what stops the fan from
-    // dialing past the cap is not that reading but the coalescing: the arms drain
-    // the transition queue in one microtask cascade behind the one dial, with no
-    // window for a further drop to land between them. Driven against the partner
-    // that would exploit any such window -- a standing cap that drops EVERY session
-    // after its first operation -- so the bound is measured rather than reasoned
-    // about. How many members complete against such a server is not the subject and
-    // is left unasserted; what is asserted is that the budget bought no more
-    // handshakes than it allowed.
+    // before the first of them has spent any of it, so what stops the fan
+    // from dialing past the cap is the coalescing, not that reading: the arms
+    // drain the transition queue in one microtask cascade behind the one
+    // dial, with no window for a further drop to land between them. Driven
+    // against a partner that drops EVERY session after its first operation,
+    // so the bound is measured, not reasoned about. What is asserted is only
+    // that the budget bought no more handshakes than it allowed.
     const budget = 1;
     const party = await connectParty({
       maxReconnectAttempts: budget,
@@ -731,8 +731,8 @@ inProcessOnly(
   "in connection-per-poll mode a torn fan-out counts one re-dial and the drops " +
     "past the budget are still recovered",
   async () => {
-    // The same fan-out in the other mode, where the budget gate is deliberately
-    // not applied at all: the mode's own lifecycle re-dials once per poll cycle,
+    // The same fan-out in the other mode, where the budget gate is not applied
+    // at all by design: the mode's own lifecycle re-dials once per poll cycle,
     // so charging it a cumulative cap would end healthy exchanges. The counters
     // still have to be truthful there -- they are what an operator reads to tell a
     // chronic capper from a healthy run -- and the absence of the refusal is driven
@@ -759,7 +759,7 @@ inProcessOnly(
             counted: party.adapter.midExchangeReconnectCount,
             handshakes: controls.handshakeCount(),
           };
-          // Genuinely separate drops, each tearing one operation, taken past the
+          // Separate drops, each tearing one operation, taken past the
           // point a held-session exchange would have been refused.
           const beyond = await plantDeletables(
             party,
@@ -812,14 +812,13 @@ inProcessOnly(
   async () => {
     // Where this accounting meets the connection-per-poll session lifecycle. Two
     // boundaries in sequence, each meeting a wide fan of deletes:
-    //   - one reached while the fan is outstanding, which keeps its session rather
-    //     than cutting the fan off the wire, so the partner's drop is still the
-    //     only loss and is counted once;
-    //   - one reached with the wire empty, which ends the session itself, after
-    //     which a fresh fan re-establishes through the gate ahead of it -- a
-    //     lifecycle transition rather than a survived drop, counted nowhere.
-    // Driven at the adapter rather than through a poll loop because neither
-    // boundary falls on demand from inside one.
+    //   - one reached while the fan is outstanding, which keeps the session, so
+    //     the partner's drop is still the only loss and is counted once;
+    //   - one reached with the wire empty, which ends the session itself, so a
+    //     fresh fan re-establishes through the gate ahead of it -- a lifecycle
+    //     transition, not a survived drop, counted nowhere.
+    // Driven at the adapter, not through a poll loop, since neither boundary
+    // falls on demand from inside one.
     const party = await connectParty({
       maxReconnectAttempts: 4,
       stallDeadlineMs: STALL_DEADLINE_MS,
@@ -952,7 +951,7 @@ inProcessOnly(
     // The beat as the OTHER operation. Against a partner that drops the SFTP
     // session and withholds its connection close there is no tear at all: the
     // transport stays half-open and both the read and the beat are left on a wire
-    // that can carry nothing. What settles the beat is the read's own recovery
+    // that can send nothing. What settles the beat is the read's own recovery
     // forcing that transport closed -- a close this side drives, needing nothing
     // from the partner -- rather than the beat's per-operation deadline.
     const party = await connectParty({
@@ -1016,13 +1015,12 @@ inProcessOnly(
   "a heartbeat parked on the wire at a clean drop settles on the tear, not on " +
     "its own deadline",
   async () => {
-    // The same beat against the other partner class. A beat only reaches the wire
-    // while the session is idle, and a healthy server answers it in a round trip,
-    // so putting one THERE when a clean cut lands means holding its REALPATH
-    // unanswered -- the server-side withhold this drives. The read issued behind
-    // it is the operation whose recovery re-dial runs; the beat is the concurrent
-    // one, and its own outcome is swallowed by the heartbeat, so what matters is
-    // that it settles at all rather than pinning the session for a full deadline.
+    // The same beat against the other partner class. A beat only reaches the
+    // wire while the session is idle, and a healthy server answers it in a round
+    // trip, so putting one THERE when a clean cut lands means holding its
+    // REALPATH unanswered -- the server-side withhold this drives. The read
+    // issued behind it is the operation whose recovery re-dial runs; the beat is
+    // the concurrent one, so what matters is only that it settles, not its result.
     const party = await connectParty({
       maxReconnectAttempts: 4,
       stallDeadlineMs: STALL_DEADLINE_MS,

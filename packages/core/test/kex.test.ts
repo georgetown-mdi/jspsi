@@ -903,7 +903,7 @@ test("a peer on the superseded protocol-version tag fails the handshake closed",
   // The version tag seeds both h and ck, so a peer on the other tag derives a
   // different transcript from the first step. It reaches the confirmation round
   // with a tag the shipped side rejects, and the two session keys never agree --
-  // the mismatch cannot be papered over into a usable session.
+  // the mismatch cannot be hidden behind a usable session.
   const [connA, connB] = createMessagePipe();
   const initiator = runKex(connA, "initiator", PSK_A, false);
   initiator.catch(() => {});

@@ -26,13 +26,11 @@ import type {
 } from "@psi/managedExchangeRecord";
 
 // The pure model behind the command-line export panel, tested in Node without a
-// store or a download: what the panel gets to render for an exportable record, the
-// two schedule lines that run its invocation unattended, and the composer's own
-// refusal presented rather than re-derived. The fact the panel's copy asserts --
-// that the exported connection names no ICE server, so every scheduled run falls
-// back to the built-in STUN default -- is a check here, so the copy cannot quietly
-// go stale. The schedule snippets themselves are shared with the console hand-off
-// and are covered in scheduleTemplates.test.ts.
+// store or a download: what the panel renders for an exportable record, the two
+// schedule lines that run its invocation unattended, and the composer's own
+// refusal presented rather than re-derived. The panel's claim that the export
+// names no ICE server, falling back to the built-in STUN default, is a check
+// here.
 
 const linkageTerms = getDefaultLinkageTerms("County Health Dept");
 
@@ -68,7 +66,7 @@ function exportableState(record: ManagedExchangeRecord) {
 }
 
 describe("what the panel gets to render", () => {
-  test("the two files carry their CLI names, contents, and media types", () => {
+  test("the two files have their CLI names, contents, and media types", () => {
     const record = managedRecord();
     const { composed } = exportableState(record);
     expect(composed.config.fileName).toBe("psilink.yaml");

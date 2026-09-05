@@ -23,25 +23,12 @@ import { createAppMount, flushPendingUpdates } from "./renderApp";
 
 import type { NewManagedExchange } from "@psi/managedExchangeRecord";
 
-// What a live no-show is read against, driven end to end through the real
-// component and the real store. A one-sided persist failure is what desyncs the
-// two parties, and a desynced pair no-shows every time -- both rendezvous ids
-// derive from the shared secret, so each side waits on an address the other is not
-// using. The run must therefore surface the persist failure and its re-invite
-// recovery, not the benign "not a fault on this device" reading.
-//
-// What only the real component pins is which record the surface hands to which
-// reading of the classification. The run stamps its own `"missed"` outcome before
-// the surface reloads, that write replaces `lastRun` wholesale, and a no-show
-// stamp carries no `failureKind` -- so a surface handing the reload to both
-// readings shows the benign copy while the model itself stays correct and every
-// model test stays green.
-//
-// The second case pins where that reading is taken from. A surface reading its own
-// mounted React state weighs the evidence as of the MOUNT, so a run that fails to
-// persist and a no-show after it -- two runs in one visit, which the run control
-// allows -- would show the benign copy over evidence the first run itself left in
-// the store.
+// A no-show must still show a standing persist failure and its re-invite recovery,
+// not the benign "not a fault on this device" reading: a one-sided persist failure
+// desyncs the two parties' rendezvous ids, so they then no-show every run. Only the
+// real component and store pin which record a reload classifies against -- the run
+// stamps its own "missed" outcome and replaces `lastRun` wholesale before the
+// reload, so a stale mount-time snapshot would show the benign copy instead.
 
 const linkageTerms = getDefaultLinkageTerms("County Health Dept");
 
@@ -115,7 +102,7 @@ async function inputHandle(): Promise<FileSystemFileHandle> {
 
 const app = createAppMount();
 
-/** Save an exchange carrying the standing persist failure an earlier run recorded,
+/** Save an exchange with the standing persist failure an earlier run recorded,
  * mount its run surface, and press Run -- leaving the stubbed run to stamp its
  * no-show and fail into the surface's classification. Returns the record's id. */
 async function runUntilItNoShows(): Promise<string> {
@@ -165,7 +152,7 @@ describe("a live no-show is read against the evidence standing at launch", () =>
     // The stamp really did land and really did erase the kind: without this the
     // assertions above would pass against a run that never wrote its bookkeeping.
     // It is also where the guarantee stops -- the stored record a later visit
-    // reads carries the no-show alone, so the list line and the run history name
+    // reads holds the no-show alone, so the list line and the run history name
     // that rather than the persist failure standing behind it.
     const stored = await getManagedExchange(id);
     expect(stored?.lastRun?.outcome).toBe("missed");

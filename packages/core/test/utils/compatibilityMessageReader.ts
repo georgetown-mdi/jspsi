@@ -1,19 +1,12 @@
 import { TERMS_VALUE_DELIMITER } from "../../src/config/compatibilityMessage";
 
 /**
- * Walks a composed diagnostic under the grammar `quoteTermsValue` emits:
- * outside a run every character stands for itself; inside one, a doubled
- * delimiter is a literal and a single delimiter closes the run.
- *
- * Returns the message's clause skeleton (each run collapsed to one
- * placeholder) and the raw values the runs held. Two runs of the same
- * diagnostic -- one with a benign value, one with an adversarial one --
- * must produce the same skeleton: that is what proves no value can display
- * to the operator as a clause psilink itself wrote.
- *
- * Every message compatibilityMessage.ts composes is read back through this
- * one parser, so the reading compatibilityMessage.test.ts pins against the
- * constructor is the reading every caller's claim rests on.
+ * Walks a composed diagnostic under the grammar `quoteTermsValue` emits: a
+ * doubled delimiter is a literal and a single one closes a value run.
+ * Returns the clause skeleton (each run collapsed to one placeholder) and
+ * the raw values held -- two runs of one diagnostic, one benign and one
+ * adversarial, must yield the same skeleton, proving no value can display
+ * as a clause psilink itself wrote.
  */
 export const readMessage = (
   message: string,

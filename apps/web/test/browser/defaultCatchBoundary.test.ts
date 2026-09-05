@@ -12,7 +12,7 @@ import { whenDiagnostic } from "@utils/diagnostics";
 import { restoreConnectivity, setConnectivity } from "./connectivity";
 import { createAppMount } from "./renderApp";
 
-// The router seams DefaultCatchBoundary touches beyond the shared Link/navigate
+// The router call sites DefaultCatchBoundary touches beyond the shared Link/navigate
 // stub:
 //   - useRouter().invalidate as a spy, so the retry action's call is observable;
 //   - rootRouteId plus a useMatch that runs the component's real `select` over a
@@ -85,7 +85,7 @@ describe("DefaultCatchBoundary", () => {
     mountBoundary(new Error("boom"));
 
     // The boundary now hands ErrorComponent a *sanitized* clone of the error;
-    // "boom" survives sanitizing unchanged, so the mock (which surfaces
+    // "boom" survives sanitizing unchanged, so the mock (which exposes
     // error.message) still shows "boom". Asserting the text -- not just the
     // marker's presence -- proves the message is wired through and would catch a
     // dropped error.
@@ -109,7 +109,7 @@ describe("DefaultCatchBoundary", () => {
   });
 
   test("redacts a leaked private-key block before it reaches the DOM", async () => {
-    // The key-redaction backstop is the second protection sanitizeErrorForDisplay
+    // The key-redaction safety check is the second protection sanitizeErrorForDisplay
     // adds at this sink: an unanticipated path that interpolates key material into
     // an error must not render it. (Live secrets are kept out upstream; this is
     // defense in depth.)

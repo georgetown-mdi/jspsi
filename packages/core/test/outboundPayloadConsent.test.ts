@@ -290,7 +290,7 @@ test("assertOutboundPayloadConsented: a changed set is refused, naming both dire
   expect(err.message).toContain("notes");
 });
 
-test("assertOutboundPayloadConsented: both refusal reasons carry the disclosure-refusal type", () => {
+test("assertOutboundPayloadConsented: both refusal reasons hold the disclosure-refusal type", () => {
   // The distinct type is what lets a caller keeping per-failure bookkeeping tell a
   // local refusal raised before anything is sent from a transport fault, without
   // giving up the `instanceof UsageError` classification the CLI's exit 64 rests on.
@@ -446,7 +446,7 @@ test("resolveExchangeInputs: resolves what prepareForExchange resolves", () => {
   }
 });
 
-test("resolveExchangeInputs: derives default terms for a spec that carries none", () => {
+test("resolveExchangeInputs: derives default terms for a spec that holds none", () => {
   // The zero-setup shape, where the terms themselves come from the header.
   const resolved = resolveExchangeInputs({}, "Acceptor", acceptorColumns);
   expect(resolved.linkageTerms.identity).toBe("Acceptor");

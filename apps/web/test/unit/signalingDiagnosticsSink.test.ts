@@ -53,7 +53,7 @@ const CONTROL_BYTE = /[\u0000-\u001f]/;
 const HOSTILE_FRAME = "\u001b\r\n[forged] not json";
 
 /** The same shape as a SOURCE rather than a frame. `emit` is untyped, so a raise
- * can hand the sink any string at all; one carrying control bytes is what would
+ * can hand the sink any string at all; one holding control bytes is what would
  * drive a terminal sequence or head a line of its own were the source written
  * into the line rather than resolved to a tag this sink knows. */
 const HOSTILE_SOURCE = "\u001b\r\n[forged] not-a-real-source";
@@ -81,7 +81,7 @@ afterEach(async () => {
 });
 
 /** Only the broker's lines: the capture is process-wide, so another core logger
- * emitting during a test must not be read as a broker diagnostic. */
+ * emitting during a test must not be treated as a broker diagnostic. */
 function brokerLines(): Array<string> {
   return capturedLines.filter((line) =>
     line.includes(`[${BROKER_LOG_CONTEXT}]`),
@@ -270,7 +270,7 @@ describe("signaling diagnostics sink", () => {
     await waitFor(() => brokerLines().length > 0);
     const [line] = brokerLines();
     expect(line).toContain("[client-frame]");
-    // Escaped, not carried: no C0 control byte survives to the sink, so the peer
+    // Escaped, not passed through: no C0 control byte survives to the sink, so the peer
     // can neither drive a terminal sequence nor open a log line of its own.
     expect(line).not.toMatch(CONTROL_BYTE);
     expect(line).toContain("\\x1b");
@@ -333,9 +333,9 @@ describe("signaling diagnostics sink", () => {
     const client = await connectRegistered(broker.port, "peer-realdispatch");
 
     // An OFFER addressed to a destination id that is not a string: nobody has
-    // registered it, and `realm.addMessageToQueue` cannot size a frame carrying
+    // registered it, and `realm.addMessageToQueue` cannot size a frame holding
     // it -- `serializeFrame` throws inside it before the frame is ever queued,
-    // so what surfaces here is the shipped wiring's own fault rather than a
+    // so what shows up here is the shipped wiring's own fault rather than a
     // listener this test attached.
     client.send(
       JSON.stringify({
@@ -469,7 +469,7 @@ describe("signaling diagnostics sink", () => {
 
     // A string is exactly as untyped a source as the non-string shape above --
     // one that names nothing this sink knows must render under the same tag,
-    // and a hostile one must not carry its own bytes into the line at all.
+    // and a hostile one must not put its own bytes into the line at all.
     broker.wss.emit(
       "error",
       new Error("raised under an unrecognized string source"),
@@ -531,7 +531,7 @@ describe("signaling diagnostics sink", () => {
     ).not.toThrow();
   });
 
-  test("the shipped instance wiring carries a report to the sink", async () => {
+  test("the shipped instance wiring sends a report to the sink", async () => {
     const broker = await startShippedBroker();
     const client = await connectRegistered(broker.port, "peer-wiring");
     client.send("not json at all");

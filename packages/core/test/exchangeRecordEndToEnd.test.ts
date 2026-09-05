@@ -215,7 +215,7 @@ test("terms exchange: an out-of-shape psi-c document is refused on receipt, reje
   }
 });
 
-test("both-output: both records agree on terms and carry the result size", async () => {
+test("both-output: both records agree on terms and hold the result size", async () => {
   const both: Output = { expectsOutput: true, shareWithPartner: true };
   const [initiator, responder] = await runBoth(both, both);
   const init = built(initiator);
@@ -531,18 +531,18 @@ test("single-output: the no-output helper is sent no payload (one-sided disclosu
   ).toBeDefined();
 });
 
-// --- Acceptor payload lock-in (live) -----------------------------------------
+// --- Acceptor payload enforcement (live) -------------------------------------
 
 // The responder's inferred metadata discloses `note` (role: other -> payload),
 // so for the matched rows it transmits exactly ["note"]. These two tests pin the
-// runtime lock-in end to end: when the initiator has locked in an expected
-// received-column set (a fresh acceptor's disclosedPayloadColumns, or a
-// recurring party's payload.receive, both threaded as prepared.expectedPayload-
+// runtime enforcement end to end: when the initiator has committed to an
+// expected received-column set (a fresh acceptor's disclosedPayloadColumns, or
+// a recurring party's payload.receive, both threaded as prepared.expectedPayload-
 // Columns), runExchange enforces it after the payload exchange.
 
 const bothOut: Output = { expectsOutput: true, shareWithPartner: true };
 
-test("lock-in: a received payload diverging from the consented set aborts the exchange", async () => {
+test("enforcement: a received payload diverging from the consented set aborts the exchange", async () => {
   const initiatorPrepared = prepared("Initiator Co", bothOut, clientRows);
   // The initiator consented to receive a column the responder will never send.
   initiatorPrepared.expectedPayloadColumns = ["a_column_not_sent"];
@@ -556,9 +556,9 @@ test("lock-in: a received payload diverging from the consented set aborts the ex
       { psiLibrary },
     ),
   ]);
-  // The locked-in party aborts as a protocol error; the lazy responder, which
-  // locked in nothing, completes its own half (the abort is local to the receiver
-  // and fires after the payload exchange itself finished).
+  // The committed party aborts as a protocol error; the lazy responder, which
+  // committed to nothing, completes its own half (the abort is local to the
+  // receiver and fires after the payload exchange itself finished).
   expect(initResult.status).toBe("rejected");
   const reason = (initResult as PromiseRejectedResult).reason;
   expect(reason).toBeInstanceOf(ConnectionError);
@@ -566,7 +566,7 @@ test("lock-in: a received payload diverging from the consented set aborts the ex
   expect(respResult.status).toBe("fulfilled");
 });
 
-test("lock-in: a received payload matching the consented set completes", async () => {
+test("enforcement: a received payload matching the consented set completes", async () => {
   const initiatorPrepared = prepared("Initiator Co", bothOut, clientRows);
   // Exactly what the responder's metadata discloses for the matched rows.
   initiatorPrepared.expectedPayloadColumns = ["note"];

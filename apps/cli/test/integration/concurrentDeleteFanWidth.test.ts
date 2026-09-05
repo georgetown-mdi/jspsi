@@ -13,15 +13,13 @@ import { serverAuth } from "../sftpServer/testContext";
 import type { InProcessSftpServer } from "../sftpServer/types";
 import { inProcessOnly } from "../sftpBackendGate";
 
-// Core issues its rendezvous and cleanup deletes as concurrent fans on the ONE
-// SFTP channel a party holds, and none of them carries a width cap of its own.
-// The entry sweep's fan is bounded only by the two directory listings it merges
-// (twice MAX_DIRECTORY_ENTRIES under a split scope); the entry scan's narrower
-// sweeps by one listing each; the connection cleanup's by what a party's own
-// poll listing would have refused. What a fan that wide DOES is driven here
-// rather than argued: the in-process backend serves it, and the in-flight
-// request count is read at the SERVER -- the end this project owns -- rather
-// than out of the client library's request table.
+// Core issues its rendezvous and cleanup deletes as concurrent fans on the
+// ONE SFTP channel a party holds, and none of them holds a width cap of its
+// own: the entry sweep is bounded by the two listings it merges, the entry
+// scan's narrower sweeps by one listing each, and the connection cleanup by
+// what a party's own poll listing would have refused. What a fan that wide
+// DOES is driven here, with the in-flight request count read at the SERVER,
+// not the client library's request table.
 //
 // Each case holds the same four things about the fan it drives: every delete in
 // it reached the server, every one of them was answered there, every target is
@@ -30,12 +28,11 @@ import { inProcessOnly } from "../sftpBackendGate";
 // report is what an operator is left with when a wide sweep partially fails.
 //
 // The ladder drives the delete-fan SHAPE -- one never-reject delete per name,
-// dispatched in a single turn -- which is what all of these issue; the two
-// widths that matter are then driven through the real paths that build them, the
-// entry sweep over a split scope and the connection cleanup. The entry scan's
-// narrower sweeps have no case of their own: each is that same shape over a
-// subset of ONE listing, whose full width the connection-cleanup case drives and
-// the ladder's rungs bracket.
+// dispatched in a single turn -- which is what all of these issue. The two
+// widths that matter are driven through the real paths that build them: the
+// entry sweep over a split scope, and the connection cleanup. The entry
+// scan's narrower sweeps have no case of their own: each is that same shape
+// over a subset of ONE listing, whose full width the cleanup case drives.
 //
 // THE WIDTHS DRIVEN BELOW ARE THIS FILE'S BOUND. They reach the enforced listing
 // bound and the split-scope union of two listings, which is the widest fan these
@@ -66,13 +63,12 @@ const FAN_WIDTHS = [9, 40, 512, 2048, SPLIT_SCOPE_FAN_WIDTH] as const;
 const SERVER_READDIR_BATCH = 100;
 
 // What has to have stood unanswered at the server at once for the fan to have
-// been driven concurrently at all: an eighth of its width, and never fewer than
-// two. Held as a FRACTION so the claim scales with the width, and set far under
-// every peak driven here -- each is several times this -- because what it has to
-// exclude is a one-at-a-time drain rather than a particular pipeline depth. A
-// tighter floor would be read off the wire race instead: the narrowest rung, on
-// a cold first run, can have its earliest replies back before its last requests
-// are written, which is not a serialized drain.
+// been driven concurrently at all: an eighth of its width, never fewer than
+// two. Held as a FRACTION so the claim scales with the width, and set far
+// under every peak driven here, because what it has to exclude is a
+// one-at-a-time drain, not a particular pipeline depth. A tighter floor would
+// be read off the wire race instead: the narrowest rung, on a cold first run,
+// can have its earliest replies back before its last requests are written.
 const CONCURRENT_FRACTION_OF_FAN = 8;
 
 function concurrencyFloor(width: number): number {
@@ -87,7 +83,7 @@ function concurrencyFloor(width: number): number {
 // server refuses to REMOVE.
 const UNDELETABLE_ENTRIES = 5;
 
-// Messages the driven exchange carries before its cleanup fan is measured.
+// Messages the driven exchange holds before its cleanup fan is measured.
 const EXCHANGE_MESSAGES = 20;
 
 // The delete-mode send gate holds the sender to one unconsumed message, and each
@@ -112,8 +108,9 @@ function deletesAnswered(srv: InProcessSftpServer): number {
 /**
  * Everything a driven fan is held to that is read from the server: the fan's
  * whole width arrived, all of it was answered, the pipeline really ran
- * concurrently, and no re-dial carried part of it. Returned as messages rather
- * than a bare boolean so a failure names which of the four broke.
+ * concurrently, and none of it crossed onto a re-dialed session. Returned as
+ * messages rather than a bare boolean so a failure names which of the four
+ * broke.
  *
  * Counted over the fan's own width rather than over every request in flight,
  * because a fan driven through a real entry is followed straight away by the

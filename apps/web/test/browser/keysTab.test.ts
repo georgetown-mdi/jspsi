@@ -17,7 +17,7 @@ import { createAppMount } from "./renderApp";
 
 import type { AcquiredCsv } from "@bench/inviterModel";
 
-// A minimal file carrying a date_of_birth column, so the seeded default keys
+// A minimal file with a date_of_birth column, so the seeded default keys
 // include one built from it (the element the dead-key transform below targets).
 const csv: AcquiredCsv = {
   fileName: "clients.csv",
@@ -84,7 +84,7 @@ function render() {
 afterEach(app.unmount);
 
 describe("KeysTab: the guided-list dead-key badge", () => {
-  test('reads "won\'t match" and carries an explanatory aria-label', async () => {
+  test('reads "won\'t match" and has an explanatory aria-label', async () => {
     render();
 
     await expect
@@ -103,8 +103,8 @@ describe("KeysTab: the dropped-citation notice", () => {
   test("names the cause on the guided tab, with expert authoring off", async () => {
     // An imported document citing the set this build ships over rules that are not
     // it: the citation is not re-emitted, so the operator is told here -- in the
-    // guided tab, since the import that carried the citation is not the only way to
-    // reach the drop and the key list is what costs and restores it.
+    // guided tab, since the import that included the citation is not the only way
+    // to reach the drop and the key list is what costs and restores it.
     const editor = editorFromCsv("Dana Okafor", csv);
     const misdescribed = buildAdvancedTerms(editor.draft);
     expect(misdescribed.linkageRuleSet).toBeDefined();
@@ -137,7 +137,7 @@ describe("KeysTab: the dropped-citation notice", () => {
       }),
     );
 
-    // The visible notice carries the title and the full cause; the persistent live
+    // The visible notice contains the title and the full cause; the persistent live
     // region announces only the short headline (that title), so a screen-reader
     // user is not read the whole body twice -- once live, once in reading order.
     await expect
@@ -170,7 +170,7 @@ describe("KeysTab: the dropped-citation notice", () => {
 });
 
 describe("KeysTab: the keys offered outside the default set", () => {
-  // The same minimal file with a ZIP column, so the guided list carries the one
+  // The same minimal file with a ZIP column, so the guided list includes the one
   // offered key that column supplies alongside the built-in keys.
   const withZip: AcquiredCsv = {
     ...csv,
@@ -203,7 +203,7 @@ describe("KeysTab: the keys offered outside the default set", () => {
     renderFor(withZip);
 
     // Offered through the list's own control, so adding a key is done the way a
-    // default key is turned off -- and it arrives off, carrying its type inside a
+    // default key is turned off -- and it arrives off, holding its type inside a
     // compound key rather than standing alone.
     const offered = page.getByRole("checkbox", {
       name: /LN \+ FN \+ DOB \+ ZIP/,
@@ -248,7 +248,7 @@ describe("KeysTab: expert import/export over a rows-withheld console shape", () 
     // The console acquires a server-side profile, not the rows, so its `rawRows` is
     // a getter that throws in dev/test. KeysTab must feed the import/export the
     // rows-withheld seed ([]), not the getter -- so expert mode renders rather than
-    // crashing the bench.
+    // crashing the console.
     const consoleCsv = consoleAcquiredCsv({
       fileName: "clients.csv",
       sizeBytes: 4096,

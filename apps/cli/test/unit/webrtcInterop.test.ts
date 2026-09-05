@@ -37,7 +37,7 @@ import type {
  * for a CLI acceptor consuming it, and `signaling.cliMintedEndpoints` fixes the
  * locator a CLI inviter emits from a ws/wss URL for a browser acceptor to
  * consume. The web-side halves of both are driven in
- * apps/web/test/unit/webrtcInterop.test.ts. (What the CLI's mint carries BESIDE
+ * apps/web/test/unit/webrtcInterop.test.ts. (What the CLI's mint has BESIDE
  * the locator -- that no credential rides along -- is asserted in
  * invite.test.ts, against the connection it will run.)
  *
@@ -101,7 +101,7 @@ describe("the invitation a CLI acceptor consumes", () => {
     ).toEqual(vectors.invitation.token);
   });
 
-  test("the seeded connection carries the locator the invitation named", async () => {
+  test("the seeded connection has the locator the invitation named", async () => {
     const token = await decodeAndValidateInvitation(vectors.invitation.encoded);
     const { connection, seeded } = connectionFromEndpoint(
       token.connectionEndpoint,
@@ -117,7 +117,7 @@ describe("the invitation a CLI acceptor consumes", () => {
     });
   });
 
-  test("the accept path stamps the acceptor role the invitation cannot carry", async () => {
+  test("the accept path stamps the acceptor role the invitation cannot hold", async () => {
     const token = await decodeAndValidateInvitation(vectors.invitation.encoded);
     const { connection } = connectionFromEndpoint(token.connectionEndpoint);
     expect(withWebRTCPeerRole(connection, "acceptor")).toMatchObject({
@@ -165,7 +165,7 @@ describe("the locator a CLI inviter mints from its URL", () => {
 // --- the dial plan each configured role resolves to ---------------------------
 
 /**
- * The connection an accepted (or hand-authored) webrtc config carries for
+ * The connection an accepted (or hand-authored) webrtc config has for
  * `side`: the invitation's locator plus the role the accept path stamps. The
  * explicit `stun` entry is not part of the seeded shape asserted above; it is
  * here only so driving a rendezvous below does not emit the built-in-default ICE
@@ -315,7 +315,7 @@ async function startRendezvous(side: RendezvousRole): Promise<{
     socketFactory: () => socket as unknown as WebSocket,
   });
   // The rejection is the expected outcome of every test here; keep it handled
-  // from the start so an abort landing before the assertion cannot surface as an
+  // from the start so an abort landing before the assertion cannot show up as an
   // unhandled rejection.
   session.catch(() => {});
   // The rendezvous derives both ids before it opens the socket, so wait for the
@@ -415,14 +415,12 @@ function watchSettlement(
 }
 
 /**
- * Let every job the delivery just queued run to completion. The negotiation
+ * Let every job the delivery just queued run to completion: the negotiation
  * latches a terminal failure synchronously inside the socket's message
- * dispatch, so what stands between that latch and the settlement this test
- * reads is a chain of microtasks and nothing else; `setImmediate` resolves
- * after the queue holding them has drained. Deliberately NOT a wall-clock
- * window: a timed wait would let a slow runner report "still waiting" for a
- * rejection that had merely not arrived yet, which is the vacuous pass this
- * check exists to avoid.
+ * dispatch, so a chain of microtasks is what stands between that latch and the
+ * settlement this test reads; `setImmediate` resolves once it has drained. Not
+ * a wall-clock wait: a timed one would let a slow runner report "still
+ * waiting" for a rejection that had merely not arrived yet.
  */
 function drainPendingWork(): Promise<void> {
   return new Promise<void>((resolve) => setImmediate(resolve));

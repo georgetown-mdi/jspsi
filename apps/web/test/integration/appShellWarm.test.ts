@@ -21,19 +21,12 @@ import {
 
 import type { ChildProcess } from "node:child_process";
 
-// The app-shell worker discovers what to cache by reading `/assets/...` paths out
-// of the documents the server renders (`hashedAssetPathsIn`), rather than from a
-// build-time manifest. That is what makes the precache the graph the deployment
-// actually ships -- and it is also a coupling to how Vite and TanStack Start emit
-// their module preloads, which no unit test can hold: the unit suite feeds the
-// worker documents this repository writes, so an upstream change to the emitted
-// markup would leave every one of them green while the real warm quietly stored
-// nothing and installed apps stopped opening unvisited routes offline.
-//
-// So this drives the real thing: the built server from `npm run build -w
-// apps/web`, the worker's own extraction, and the routes the router declares.
-// It runs against whatever `.output` currently holds -- rebuild before re-running
-// to validate a change; CI always rebuilds first.
+// The app-shell worker discovers what to cache by reading `/assets/...` paths
+// out of the documents the server renders (`hashedAssetPathsIn`), not from a
+// build-time manifest -- a coupling to how Vite and TanStack Start emit module
+// preloads that no unit test can hold. This drives the real built server from
+// `npm run build -w apps/web` against whatever `.output` currently holds --
+// rebuild before re-running to validate a change; CI always rebuilds first.
 
 const READY_TIMEOUT_MS = 30_000;
 

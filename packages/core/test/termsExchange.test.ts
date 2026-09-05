@@ -76,7 +76,7 @@ function resolveBothRoles(
 
 // --- Happy path --------------------------------------------------------------
 
-test("compatible terms resolve for both parties, each carrying the other's identity and no warnings", async () => {
+test("compatible terms resolve for both parties, each holding the other's identity and no warnings", async () => {
   const [a, b] = await runExchange(termsA, termsB);
   if (a.status !== "fulfilled" || b.status !== "fulfilled") throw new Error();
   expect(a.value.partnerTerms.identity).toBe("Party B");
@@ -354,7 +354,7 @@ test("responder fails fast when message 1 advertises no protocol version", async
 
 test("initiator fails fast when message 2 advertises no protocol version", async () => {
   // The mirror, so the refusal is symmetric across the two message paths: a
-  // proceed frame carrying no version is refused by the initiator, which still
+  // proceed frame holding no version is refused by the initiator, which still
   // SENDS its abort (message 3) rather than stranding the responder on its
   // receive timeout. Drive the responder by hand to omit the version.
   const [connA, connB] = makeConnections();
@@ -377,7 +377,7 @@ test("initiator fails fast when message 2 advertises no protocol version", async
   await expect(initiator).rejects.toThrow(PROTOCOL_VERSION_MISMATCH_MESSAGE);
 });
 
-test("the responder's abort frame carries the protocol version", async () => {
+test("the responder's abort frame holds the protocol version", async () => {
   // The abort frame in the responder's message-2 slot advertises the version like
   // its proceed frame does. Without it the initiator -- which reconciles that
   // frame's version before it reads the decision -- would meet a same-version
@@ -431,8 +431,8 @@ test("responder fails fast when message 1 advertises a malformed protocol versio
 
 test("initiator fails fast (and sends an abort) on a malformed message-2 version", async () => {
   // The mirror of the responder case AND a no-hang guard: a garbled version on
-  // message 2 must reconcile to a mismatch and, critically, the initiator must
-  // still SEND an abort (message 3) so the responder fails with the named cause
+  // message 2 must reconcile to a mismatch and the initiator must still SEND
+  // an abort (message 3) so the responder fails with the named cause
   // rather than stranding on its receive timeout. Drive the responder by hand.
   const [connA, connB] = makeConnections();
   const initiator = exchangeTerms(connA, "initiator", termsA, 100);
@@ -471,8 +471,8 @@ test("a malformed sibling field does not bury the version skew (responder path)"
 test("a malformed sibling field does not bury the version skew, and still aborts (initiator path)", async () => {
   // The initiator mirror AND a no-hang guard: on message 2 the version is probed and
   // reconciled BEFORE the strict parse, so a malformed sibling field co-occurring
-  // with a version skew still yields the named diagnosis -- and, critically, the
-  // initiator still SENDS an abort (message 3) rather than throwing a bare parse
+  // with a version skew still yields the named diagnosis, and the initiator
+  // still SENDS an abort (message 3) rather than throwing a bare parse
   // error that would strand the responder on its receive timeout. Drive the
   // responder by hand to inject the frame.
   const [connA, connB] = makeConnections();
@@ -658,10 +658,10 @@ test("initiator: a version skew on an abort frame wins over the peer's abort rea
     linkageTerms: termsB,
     decision: "abort",
     abortReasons: ["responder rejected for its own stated reason"],
-    protocolVersion: PROTOCOL_VERSION + 1, // non-conforming: an abort carrying a version
+    protocolVersion: PROTOCOL_VERSION + 1, // non-conforming: an abort holding a version
   });
   // The initiator diagnoses the skew first and best-effort sends its own abort
-  // (msg 3) carrying the version message -- not a relay of the peer's reason -- so the
+  // (msg 3) holding the version message -- not a relay of the peer's reason -- so the
   // hand-driven responder is not stranded on its receive timeout. Drain and confirm.
   const abort = await connB.receive();
   expect(abort).toMatchObject({
@@ -744,7 +744,7 @@ test("record counts ride the terms messages, not a separate frame", async () => 
 // function of the AGREED terms, which both parties hold once this exchange
 // returns, so neither declares a width to the other and neither reads one.
 
-test("neither terms message carries a width field", async () => {
+test("neither terms message holds a width field", async () => {
   const [connA, connB] = makeConnections();
   const { conn: recordingA, sent: initiatorSent } = recordingConnection(connA);
   const { conn: recordingB, sent: responderSent } = recordingConnection(connB);
@@ -759,10 +759,10 @@ test("neither terms message carries a width field", async () => {
     expect(fields).not.toContain("effectiveKeyCount");
 });
 
-test("a terms frame still carrying the retired width field is ignored", async () => {
+test("a terms frame still holding the retired width field is ignored", async () => {
   // The envelope schemas are non-strict, so a peer that still declares a width
   // has it stripped at the parse and the exchange proceeds on the widths both
-  // parties derive. Deliberate rather than incidental: the field held nothing
+  // parties derive. By design, not incidental: the field held nothing
   // the agreed terms do not, so there is nothing for a refusal to protect.
   const [connA, connB] = makeConnections();
   const responder = exchangeTerms(connB, "responder", termsB, 200);

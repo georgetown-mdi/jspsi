@@ -10,14 +10,13 @@ const USERNAME = "kbduser";
 const PASSWORD = "kbd-secret";
 
 // A minimal SFTP server that accepts ONLY keyboard-interactive authentication:
-// it refuses the direct `password` method and advertises keyboard-interactive as
-// the sole continuation, then prompts for and verifies the password. This is the
-// hardened-server configuration a `password`-only client (and plain `ssh`) is
-// refused by, while a GUI SFTP client -- and the CLI with keyboard_interactive
-// enabled -- authenticates. The session accepts the SFTP subsystem so a client
-// `connect` completes; no file handlers are needed (these tests assert on the
-// handshake outcome, and connect resolving is itself proof of a completed
-// authentication).
+// it refuses the direct `password` method, advertises keyboard-interactive as
+// the sole continuation, then prompts for and verifies the password. This is
+// the hardened-server configuration a `password`-only client (and plain
+// `ssh`) is refused by, while a GUI SFTP client -- and the CLI with
+// keyboard_interactive enabled -- authenticates. The session accepts the SFTP
+// subsystem so `connect` completes; no file handlers are needed, since
+// connect resolving is itself proof of completed authentication.
 async function startKeyboardInteractiveServer(): Promise<{
   host: string;
   port: number;
@@ -28,7 +27,7 @@ async function startKeyboardInteractiveServer(): Promise<{
 
   const server = new Server({ hostKeys: [hostKey.private] }, (client) => {
     clients.add(client);
-    // A peer reset at teardown surfaces as 'error'; without a listener it would
+    // A peer reset at teardown shows as 'error'; without a listener it would
     // crash the test process, and there is nothing to recover here.
     client.on("error", () => {});
     client.on("close", () => clients.delete(client));
@@ -151,7 +150,7 @@ test("without tryKeyboard the same server refuses the password-only client", asy
   // connect fails. This proves the server genuinely refuses `password` and that
   // tryKeyboard is what makes the positive case above succeed (rather than the
   // server accepting the direct password all along). maxReconnectAttempts: 0 so
-  // the auth failure surfaces promptly instead of being retried.
+  // the auth failure is reported promptly instead of being retried.
   const adapter = new SSH2SFTPClientAdapter();
   await expect(
     adapter.connect({

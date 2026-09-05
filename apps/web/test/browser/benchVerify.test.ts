@@ -73,7 +73,7 @@ const associationTable: AssociationTable = [
 const INPUT_CSV = "pid,dose\nP0,10mg\nP1,20mg\n";
 const RESULT_CSV = "pid,their_row_id,clinic\nP0,1,south\nP1,0,north\n";
 
-// The run binder this fixture's record and the dual-signed record below both carry,
+// The run binder this fixture's record and the dual-signed record below both have,
 // so the two artifacts pair as one run. A caller passes another value to stand in
 // for a different run of the same exchange.
 const RECEIPT_BINDER = "YmluZGVy";
@@ -97,7 +97,7 @@ async function buildFixture(receiptBinder = RECEIPT_BINDER): Promise<{
 
 // A dual-signed record over the same exchange the fixture above describes: this
 // party holds the initiator's slot, the partner the responder's, and the receipt
-// content carries that record's agreed-terms hash.
+// content has that record's agreed-terms hash.
 async function buildSignedFixture(record: ExchangeRecord): Promise<{
   signed: DualSignedRecord;
   ourIdentity: SigningIdentity;
@@ -152,20 +152,12 @@ function fileCardRegion(input: Element): Element {
   return region;
 }
 
-// userEvent.upload resolves once the change event is dispatched, but the page
-// parses a dropped JSON document across an await and only then writes its state
-// and bumps the run token a verify reads to decide whether its own inputs still
-// stand. A Verify clicked inside that window captures a token the parse then
-// supersedes, so the run discards the verdicts it computed and the page renders
-// none at all; a record or keys parse landing that late also clears the
-// re-supply and signed-leg inputs loaded after it. The chosen-file card commits
-// in the same pass as the handler's closing bump, so waiting for that card
-// settles the upload -- as long as the card the wait sees is one this upload
-// produced, which the check below is what holds.
-//
-// The input is polled for rather than read once because a disclosure panel's
-// inputs enter the DOM on a commit Mantine's Collapse defers, which the toggle
-// click that opened the panel does not wait for.
+// Wait for the chosen-file card, not the upload event, to know the upload
+// settled: the card commits in the same render pass as the state update a
+// Verify click depends on, and the check below confirms it is this upload's
+// own card. The input itself is polled for, rather than read once, because a
+// disclosure panel's inputs enter the DOM only on a commit Mantine's Collapse
+// defers.
 async function uploadFile(
   findInput: () => Element | null,
   file: File,
@@ -302,7 +294,7 @@ describe("verify receipt bench", () => {
       jsonFile("psilink-record-x.keys.json", serializeVerificationKeys(keys)),
     );
 
-    // A structure-only verify is honestly incomplete (nothing re-supplied).
+    // A structure-only verify is incomplete (nothing re-supplied).
     await userEvent.click(page.getByRole("button", { name: "Verify" }));
     await expect.element(page.getByText("Incomplete")).toBeInTheDocument();
     await expect
@@ -349,7 +341,7 @@ describe("verify receipt bench", () => {
       .toBeInTheDocument();
   });
 
-  test("a tampered record renders the honest altered-or-wrong-file failed state", async () => {
+  test("a tampered record renders the accurate altered-or-wrong-file failed state", async () => {
     const { record, keys } = await buildFixture();
     const original = record.commitments.localPayloadSent;
     const altered = (original[0] === "A" ? "B" : "A") + original.slice(1);
@@ -397,7 +389,7 @@ describe("verify receipt bench", () => {
     // The partner's second value was null when it was committed; the result file
     // writes a null and an empty string the same way, so the re-supply reproduces
     // an empty string and the received-payload commitment cannot open. The reader
-    // gets the reason rather than a bare mismatch that reads as tampering.
+    // gets the reason rather than a bare mismatch that is treated as tampering.
     const { record, keys } = await buildExchangeRecord({
       localTerms: LOCAL_TERMS,
       partnerTerms: PARTNER_TERMS,
@@ -428,7 +420,7 @@ describe("verify receipt bench", () => {
     await uploadAt(
       3,
       // Our row 0 pairs the partner's row 1 -- the null cell -- so the result
-      // carries it as an empty cell.
+      // holds it as an empty cell.
       csvFile("result.csv", "pid,their_row_id,clinic\nP0,1,\nP1,0,north\n"),
     );
     await userEvent.click(
@@ -455,7 +447,7 @@ describe("verify receipt bench", () => {
   test("a mismatch with no empty cells earns no note", async () => {
     // The tampered-record test above reaches a mismatch through an altered
     // commitment; this one reaches the same partnerPayloadReceived mismatch
-    // through an honest re-supply that simply differs from what was committed
+    // through a re-supply that simply differs from what was committed
     // -- no cell involved is ever empty, so the null explanation is impossible
     // and must not appear beside it.
     const { record, keys } = await buildFixture();
@@ -488,7 +480,7 @@ describe("verify receipt bench", () => {
       .toBeInTheDocument();
     // The absence below means nothing unless the mismatch the note would sit
     // beside is the one it explains: a run failing somewhere else entirely would
-    // carry no note either.
+    // have no note either.
     await expect
       .element(page.getByText("The payload you received: Does not match"))
       .toBeInTheDocument();
@@ -977,7 +969,7 @@ describe("verify receipt bench", () => {
 
   // The recurring case: the same two parties run the same exchange again. Both
   // identities and the agreed-terms hash are byte-identical across those runs, so
-  // what separates them is the run binder the two artifacts carry -- which the
+  // what separates them is the run binder the two artifacts have -- which the
   // verdict does compare. This is the UI half of that defense: the previous run's
   // receipt is dropped when this run's record is loaded, rather than left to be
   // verified beside it and reported as a mismatch.

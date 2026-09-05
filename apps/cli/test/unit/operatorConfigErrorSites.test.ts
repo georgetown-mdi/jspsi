@@ -7,7 +7,7 @@ import { describe, expect, test } from "vitest";
 
 // The `config` event category is keyed on the `OperatorConfigError` TYPE alone
 // (classifyTerminalError in src/eventStream.ts), and the category's definition
-// -- docs/spec/CLI_EVENTS.md -- promises an operator that what it carries is
+// -- docs/spec/CLI_EVENTS.md -- promises an operator that what it holds is
 // composed solely of their own configuration. Membership is therefore a
 // standing licence: a check that raises the type inherits the trusted label,
 // whatever its message turns out to quote.
@@ -496,7 +496,7 @@ function importedCandidates(
 
 /**
  * The declaration `name` denotes where `file` writes it. A name the file neither
- * declares nor imports falls back to the scanned declarations carrying it, which
+ * declares nor imports falls back to the scanned declarations holding it, which
  * is where two trees can offer the same name: the resolver records the collision
  * and resolves nothing rather than picking a side.
  */
@@ -745,7 +745,7 @@ const SCAN = scanSources(SOURCES);
 const MEMBERS = memberDeclarations(SCAN, ROOT_MEMBER);
 const FOUND_SITES = foundSites(SCAN, MEMBERS);
 
-// What a member's message may carry, quoted into both failures below so the
+// What a member's message may hold, quoted into both failures below so the
 // verdict is stated where it has to be reached rather than only in the ledger.
 const CONTENT_RULE =
   "The category promises the operator a fault composed solely of their OWN " +

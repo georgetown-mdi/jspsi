@@ -23,7 +23,7 @@ import type { ReceiptsDraft } from "@bench/receiptsModel";
 
 // The console's receipts card against a stubbed signing endpoint. What
 // `receiptsModel` decides is pinned by the unit suite; what this one covers is the
-// card's own behaviour around a request that takes real time -- the appliance
+// card's own behaviour around a request that takes real time -- the console
 // spawns the CLI's `fingerprint` child -- while the operator keeps editing beside
 // it. The draft is REPLACED wholesale by `onChange`, so a resolution that
 // committed the draft it was started with would silently undo an edit made while
@@ -36,7 +36,7 @@ const FINGERPRINT = "B".repeat(42) + "A";
 const IDENTITY_FILE = ".psilink-signing-identity.json";
 const CERTIFICATE_FILE = "psilink-certificate.json";
 
-/** The exchange's `linkage_terms.identity`, the one value the request carries. */
+/** The exchange's `linkage_terms.identity`, the one value the request holds. */
 const IDENTITY = "Dana Okafor, Riverside Health";
 
 const NOTE = "Filed in the association database; purged after six years.";
@@ -81,7 +81,7 @@ function createGate(): { promise: Promise<void>; settle: () => void } {
   return { promise, settle };
 }
 
-/** The appliance's signing endpoint, stubbed at the global fetch seam the card
+/** The console's signing endpoint, stubbed at the global fetch boundary the card
  * reaches through, recording each request body so a test can assert what crossed. */
 function stubSigningApi(options: StubOptions = {}): { bodies: Array<string> } {
   const bodies: Array<string> = [];
@@ -116,7 +116,7 @@ function stubSigningApi(options: StubOptions = {}): { bodies: Array<string> } {
 }
 
 /** The draft the harness last held, so a test can assert on the value a bench
- * would carry into the run intent as well as on what is rendered. */
+ * would include in the run intent as well as on what is rendered. */
 let latestDraft: ReceiptsDraft = RECEIPTS_DEFAULT;
 
 /** The default console layout: one mount, so the rendezvous holds the working
@@ -188,7 +188,7 @@ async function drainSettledResponse(): Promise<void> {
   await flushPendingUpdates();
 }
 
-describe("ReceiptsCard: asking the appliance for this party's fingerprint", () => {
+describe("ReceiptsCard: asking the console for this party's fingerprint", () => {
   test("shows the value to share and names the file it landed in", async () => {
     const stub = stubSigningApi();
     await renderCard();
@@ -204,7 +204,7 @@ describe("ReceiptsCard: asking the appliance for this party's fingerprint", () =
     );
     expect(app.container.textContent).toContain(IDENTITY_FILE);
     expect(latestDraft.ownFingerprint).toBe(FINGERPRINT);
-    // The request carries the label and nothing else while the export is off.
+    // The request holds the label and nothing else while the export is off.
     expect(JSON.parse(stub.bodies[0])).toEqual({ identity: IDENTITY });
     // Create-or-reuse, so the action renames itself once a value is on screen.
     await expect
@@ -227,7 +227,7 @@ describe("ReceiptsCard: asking the appliance for this party's fingerprint", () =
     );
   });
 
-  test("carries the export toggle and names what it wrote", async () => {
+  test("holds the export toggle and names what it wrote", async () => {
     const stub = stubSigningApi({
       responses: [{ body: okBody({ certificateFileName: CERTIFICATE_FILE }) }],
     });
@@ -304,7 +304,7 @@ describe("ReceiptsCard: a request that resolves while the operator edits", () =>
     expect(latestDraft.ownFingerprint).toBeUndefined();
     expect(app.container.textContent).not.toContain(FINGERPRINT);
 
-    // Returning re-asks the appliance rather than showing a value the switch
+    // Returning re-asks the console rather than showing a value the switch
     // discarded, which is what the create-or-show wording means here.
     await userEvent.selectOptions(modeSelect(), "certificate");
     await expect.element(createButton()).toBeInTheDocument();

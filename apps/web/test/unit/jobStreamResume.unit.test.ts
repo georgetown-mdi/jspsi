@@ -15,13 +15,11 @@ import type { AddressInfo } from "node:net";
 import type { BufferedEvent } from "@jobs/jobManager";
 import type { RelayEvent } from "@jobs/cliDriver";
 
-// A dropped job stream is the console operator's whole view of a run going dark
-// mid-exchange: a proxy restart, a network blip, or a tab the browser suspended
-// cuts the response while the appliance's CLI keeps going. This drives an ACTUAL
-// cut -- a real loopback socket destroyed mid-body, in front of the real SSE
-// route over the real job manager -- and fails unless the real browser-side
-// client resumes the same run from where it stopped, delivering the manager's
-// whole history exactly once and never re-creating the job.
+// This drives an ACTUAL cut -- a real loopback socket destroyed mid-body, in
+// front of the real SSE route over the real job manager -- and fails unless
+// the real browser-side client resumes the same run from where it stopped,
+// delivering the manager's whole history exactly once and never re-creating
+// the job.
 
 const roots: Array<string> = [];
 const managers: Array<JobManager> = [];
@@ -199,13 +197,13 @@ describe("a job stream cut mid-response resumes without losing events", () => {
     // keepalive reaches the client as bytes and nothing more.
     expect(received).toEqual(buffered.map((entry) => entry.event));
 
-    // The drop really happened and the resume really was a resume: a second
-    // connection, carrying the last id the first one delivered.
+    // The drop happened and the resume was a resume: a second connection,
+    // holding the last id the first one delivered.
     expect(served).toHaveLength(2);
     expect(served[0].lastEventId).toBeNull();
     expect(served[1].lastEventId).toBe(String(buffered[0].id));
 
-    // Re-attaching is all it did: no second POST /api/jobs, so the appliance's
+    // Re-attaching is all it did: no second POST /api/jobs, so the console's
     // exchange was never restarted.
     expect(
       served.every((connection) => connection.path.endsWith("/events")),

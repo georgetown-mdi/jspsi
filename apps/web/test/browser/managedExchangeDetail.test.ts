@@ -50,7 +50,7 @@ import type { WebRTCExchangeLocator } from "@psilink/core";
 // The managed exchange detail sections, rendered: the read-only configuration with
 // its re-invite affordance (never an edit control over the terms), the editable
 // local fields, and the accounting of disclosures (no signed-receipt claim, and a
-// failed read that never reads as "nothing was disclosed"). The stubbed Link is
+// failed read that is never treated as "nothing was disclosed"). The stubbed Link is
 // what lets the accounting's /verify link render outside a router.
 
 vi.mock("@tanstack/react-router", async () =>
@@ -108,7 +108,7 @@ describe("managed exchange detail configuration", () => {
     await expect
       .element(page.getByText("County Health Dept"))
       .toBeInTheDocument();
-    // The terms carry a fast re-invite affordance (same terms, new secret), not an
+    // The terms have a fast re-invite affordance (same terms, new secret), not an
     // edit control over them, and the button is labeled to what it does.
     await expect
       .element(
@@ -162,8 +162,8 @@ describe("managed exchange detail configuration", () => {
 
   test("a value list renders one entry per item, and a hostile name reaches the DOM escaped", async () => {
     // Two properties of the same surface, driven over one document. A key name may
-    // carry the list separator, so joined text would present one agreed term as
-    // two -- the entries are their own list items instead. And a name may carry a
+    // include the list separator, so joined text would present one agreed term as
+    // two -- the entries are their own list items instead. And a name may include a
     // bidi override, which JSX escaping does not touch: it must arrive as an
     // escape, not as a code point that reorders the term a compliance user is
     // confirming.
@@ -255,7 +255,7 @@ describe("managed exchange detail configuration", () => {
 
     reject(new Error("re-invite rejected"));
 
-    // The failure surfaces beside the button, in the file's existing error voice.
+    // The failure shows beside the button, in the file's existing error voice.
     await expect
       .element(
         page.getByText("Could not create a fresh invitation", {
@@ -356,7 +356,7 @@ describe("managed exchange detail local fields", () => {
 
 describe("managed exchange detail schedule entry", () => {
   /** Render the detail sections over `stored`, collecting the edits each save
-   * carries. */
+   * holds. */
   function renderEntry(stored?: ManagedExchangeSchedule): {
     saved: Array<ManagedExchangeLocalEdits>;
   } {
@@ -446,7 +446,7 @@ describe("managed exchange detail schedule entry", () => {
     expect(saved[0].schedule).toBeNull();
   });
 
-  test("a save with scheduling off on a record that never had one carries no schedule edit", async () => {
+  test("a save with scheduling off on a record that never had one includes no schedule edit", async () => {
     // The toggle is a three-way edit and the untouched-off corner is its quiet
     // one: `null` would be a drop of a schedule that is not there, which the
     // store would apply as a write. Omitting the key leaves the record's
@@ -462,7 +462,7 @@ describe("managed exchange detail schedule entry", () => {
     expect("schedule" in saved[0]).toBe(false);
   });
 
-  test("a save that touched only the label carries no schedule edit at all", async () => {
+  test("a save that touched only the label includes no schedule edit at all", async () => {
     // The planned window and the miss count are the runner's bookkeeping; a label
     // edit must not reset either, must not re-resolve the agreed instant, and must
     // not write the mount-time object back over what the runner has since advanced.
@@ -486,7 +486,7 @@ describe("managed exchange detail schedule entry", () => {
   });
 
   test("a stored width finer than the field's unit is shown and saved as it is", async () => {
-    // An imported or hand-edited record can carry a width and an anchor at a
+    // An imported or hand-edited record can hold a width and an anchor at a
     // finer resolution than the fields hold. Both must survive an edit to some
     // other field, and the width the operator reads has to be the one their
     // partner agreed rather than a round number standing in for it.
@@ -540,7 +540,7 @@ describe("managed exchange detail schedule entry", () => {
     // The widget's own clamp is what this turns off: a NumberInput with bounds
     // rewrites a value outside them when it loses focus, so an operator who
     // merely tabbed through the width field on their way to the label would
-    // carry the floor into the save and change the width their partner agreed.
+    // push the floor into the save and change the width their partner agreed.
     // The bounds are the entry model's, which states them at the field rather
     // than editing the value under the operator.
     const stored: ManagedExchangeSchedule = {
@@ -569,7 +569,7 @@ describe("managed exchange detail schedule entry", () => {
 
     await vi.waitFor(() => expect(saved).toHaveLength(1));
     // No schedule edit at all is the proof the clamp left the width alone: a
-    // rewritten width would read as an operator edit and rebuild the cadence.
+    // rewritten width would be treated as an operator edit and rebuild the cadence.
     expect("schedule" in saved[0]).toBe(false);
   });
 
@@ -590,7 +590,7 @@ describe("managed exchange detail schedule entry", () => {
       .toBeDisabled();
   });
 
-  test("a cadence that outruns the max-age bound is surfaced, not silently accepted", async () => {
+  test("a cadence that outruns the max-age bound is shown, not silently accepted", async () => {
     const { saved } = renderEntry();
 
     await scheduleCheckbox().click();
@@ -615,7 +615,7 @@ describe("managed exchange detail schedule entry", () => {
       )
       .toBeInTheDocument();
 
-    // Surfaced rather than refused: an operator who renews by hand is entitled to
+    // Shown rather than refused: an operator who renews by hand is entitled to
     // this cadence, and the problem stands beside the save rather than blocking
     // it.
     await page.getByRole("button", { name: "Save settings" }).click();
@@ -647,7 +647,7 @@ describe("managed exchange detail schedule entry", () => {
 
 describe("managed exchange detail local fields against the real store", () => {
   // The editor holds the record the page mounted on, while the unattended runner
-  // advances the same record's schedule underneath it. What the save carries has to
+  // advances the same record's schedule underneath it. What the save holds has to
   // be the operator's edit and nothing else, which only a store behind the page can
   // show: the mount-time snapshot is a valid schedule, so a write-back of it is
   // accepted by the store and silently rewinds the runner's own bookkeeping.
@@ -858,7 +858,7 @@ describe("managed exchange detail run schedule", () => {
 
   test("the section promises no run this tab will not make, and points at the editor", async () => {
     // The suite runs in an ordinary browser tab rather than an installed app, so
-    // the honest reading here is the one that promises nothing.
+    // the accurate reading here is the one that promises nothing.
     renderWithSchedule(schedule(-60 * 60 * 1000));
 
     await expect
@@ -879,7 +879,7 @@ describe("managed exchange detail run schedule", () => {
 
   test("a record holding no input handle says nothing can run with nobody present", async () => {
     // A scheduled record and a persisted input handle are independent: this one
-    // carries a cadence and no File System Access handle, which is the state of
+    // has a cadence and no File System Access handle, which is the state of
     // every record on a browser without the API and of every imported one. The
     // note is what the runner's own silent skip of such a record owes the
     // operator.
@@ -966,8 +966,8 @@ describe("managed exchange detail accounting of disclosures", () => {
 
   test("an exchange with no completed run scopes the empty state to this browser's copy, and offers no export", async () => {
     // A device that imported the exchange from a backup file holds no accounting
-    // -- the artifact does not carry one -- so an unqualified "it has disclosed
-    // nothing" would read there as the partnership's whole disclosure history.
+    // -- the artifact does not contain one -- so an unqualified "it has disclosed
+    // nothing" would be treated there as the partnership's whole disclosure history.
     app.render(
       createElement(ManagedExchangeDetail, {
         record: record("inviter"),
@@ -1016,7 +1016,7 @@ describe("managed exchange detail accounting of disclosures", () => {
   test("an accounting emptied beside a completed run states the emptiness, not an absence of runs", async () => {
     // What a recovery reset leaves: the entries destroyed, the record's own run
     // history still holding the run that filed them. An auditor reads this surface,
-    // so the copy must not read a deliberate destruction as "nothing has run".
+    // so the copy must not show a deliberate destruction as "nothing has run".
     app.render(
       createElement(ManagedExchangeDetail, {
         record: record("inviter", {
@@ -1160,9 +1160,9 @@ describe("managed exchange detail accounting of disclosures", () => {
       .element(page.getByText('Fields: "baseline-pii" 1.0.0'))
       .toBeVisible();
     // The citation is the authoring party's own declaration; the screen says so
-    // beside it rather than letting the row read as a checked provenance, and
+    // beside it rather than letting the row display as a checked provenance, and
     // sends a reader after this build's own finding to the record's verdict --
-    // which this surface deliberately does not restate.
+    // which this surface does not restate, by design.
     await expect
       .element(
         page.getByText(RECORDED_LINKAGE_RULE_SET_CAVEAT, { exact: false }),
@@ -1170,11 +1170,11 @@ describe("managed exchange detail accounting of disclosures", () => {
       .toBeVisible();
   });
 
-  test("a crafted set name reads as one run in the opened disclosure, not as a citation of another set", async () => {
+  test("a crafted set name is treated as one run in the opened disclosure, not as a citation of another set", async () => {
     // The names are the authoring party's free text, and this row is the one a
-    // HIPAA or FERPA reader consults, so a name carrying the delimiter and a
+    // HIPAA or FERPA reader consults, so a name holding the delimiter and a
     // version-shaped token must not be able to stand in the rendered line as a
-    // shorter name at a version the record does not carry. Driven through the
+    // shorter name at a version the record does not hold. Driven through the
     // real view rather than the model alone: what a reader is held to is the
     // text the detail renders.
     //
@@ -1369,7 +1369,7 @@ describe("managed exchange detail accounting of disclosures", () => {
       }),
     );
 
-    // The cause an operator can act on, and the two honest limits: nothing to
+    // The cause an operator can act on, and the two accurate limits: nothing to
     // export from this state, and a record file only where one was downloaded --
     // which an unattended run never offered.
     await expect
@@ -1414,16 +1414,12 @@ describe("managed exchange detail accounting of disclosures", () => {
 });
 
 /**
- * The recovery affordance on an accounting this build can no longer read -- the
- * state an app upgrade that moved the exchange-record version leaves an operator
- * in, with the entries still at rest and every later run filing nothing.
- *
- * Two arms in one fixed order, and these tests are written around what each one
- * alone does not do: the export retains the record and leaves the store
- * un-appendable, the reset restores appendability and destroys the record. So the
- * assertions are that the export comes first, that it hands over the stored form
- * rather than a reading of it, and that the reset never fires without an explicit
- * confirm naming what is destroyed and what is kept.
+ * The recovery affordance on an accounting this build can no longer read -- an
+ * app upgrade moved the record version, leaving the entries at rest and every
+ * later run filing nothing. The two arms are tested for what each alone does NOT
+ * do: the export retains the record but leaves the store un-appendable, and the
+ * reset restores appendability but destroys the record. The export must come
+ * first, hand over the stored form verbatim, and the reset must always confirm.
  */
 describe("recovering an accounting this version cannot read", () => {
   /** Entries as an upgrade leaves them at rest: the record's own fields, under a
@@ -1474,7 +1470,7 @@ describe("recovering an accounting this version cannot read", () => {
     await expect
       .element(page.getByText("cannot add to it either", { exact: false }))
       .toBeInTheDocument();
-    // The claim the state carried when it had no way out.
+    // The claim the state held when it had no way out.
     expect(
       page.getByText("no export of it from here", { exact: false }).query(),
     ).toBeNull();
@@ -1704,7 +1700,7 @@ describe("recovering an accounting this version cannot read", () => {
       .click();
     await page.getByRole("button", { name: "Delete these records" }).click();
 
-    // A destructive step that did not take must not read as one that did: the
+    // A destructive step that did not take must not be treated as one that did: the
     // confirm stands, so the operator retries rather than believing it is done.
     await expect
       .element(page.getByText("That accounting could not be reset"))
@@ -1729,7 +1725,7 @@ describe("recovering an accounting this version cannot read", () => {
       }),
     );
 
-    // No download it cannot honor, and the honest reason for its absence.
+    // No download it cannot honor, and the accurate reason for its absence.
     expect(
       page.getByRole("button", { name: /Download the stored records/ }).query(),
     ).toBeNull();
@@ -1746,7 +1742,7 @@ describe("recovering an accounting this version cannot read", () => {
       .toBeInTheDocument();
   });
 
-  test("an accounting this version can read carries no recovery affordance", async () => {
+  test("an accounting this version can read has no recovery affordance", async () => {
     const accounting = appendDisclosureRecord(
       undefined,
       await disclosureRecord(),
@@ -1920,7 +1916,7 @@ describe("an accounting that could not be read at all", () => {
       reinviteFailed: false,
     });
 
-  test("reads as transient, and offers nothing destructive", async () => {
+  test("is treated as transient, and offers nothing destructive", async () => {
     app.render(unavailable(() => undefined));
 
     await expect

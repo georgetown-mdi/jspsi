@@ -46,7 +46,7 @@ describe("gradeAuthoredKeys", () => {
   test("grades only the keys needing an absent column unsatisfiable", () => {
     const { draft } = seedAdvancedInvite("Org", ALL_COLUMNS);
     // The draft still declares an ssn field, but the operator's actual file no
-    // longer carries the ssn column, so every key referencing it collapses -- and
+    // longer has the ssn column, so every key referencing it collapses -- and
     // nothing else does, so the grade is specific to the missing column rather than
     // a blanket failure.
     const columnsMissingSsn = ALL_COLUMNS.filter((name) => name !== "ssn");
@@ -68,18 +68,12 @@ describe("gradeAuthoredKeys", () => {
   });
 });
 
-describe("no draft edit builds terms carrying an explicitly-undefined property", () => {
-  // The canonical encoding the cross-party agreement is hashed in rejects a
-  // property stated as `undefined` where it accepts an absent one, so a draft
-  // carrying that shape builds terms the Generate gate refuses. The rule-set
-  // compares prune it (linkageComparison) because a draft is live JavaScript
-  // objects; the BUILD does not, and this is why it need not: no draft-editing
-  // operation produces one, so the built terms never carry one.
-  //
-  // Reach: the exported draft-editing helpers plus the import, which is where a
-  // rebuild would arrive silently. The expert editor's own key, alias, transform,
-  // and fuzzy handlers pass their own callbacks (each clearing an optional with
-  // `delete`), so they are covered by review and by the encode gate, not here.
+describe("no draft edit builds terms holding an explicitly-undefined property", () => {
+  // The canonical encoding rejects a property stated as `undefined` where it
+  // accepts an absent one, so terms built from such a draft fail the Generate
+  // gate. No draft-editing operation or import produces that shape; the expert
+  // editor's own key, alias, transform, and fuzzy handlers clear optionals with
+  // `delete` and are covered by review and the encode gate, not here.
 
   /** Every path in `value` whose property is present and stated as `undefined`. */
   function explicitUndefinedPaths(value: unknown, at = "$"): Array<string> {

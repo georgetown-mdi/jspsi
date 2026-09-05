@@ -62,7 +62,7 @@ function withFirstElementTransform(
 
 describe("the fan-out gate (the run refuses what the schema admits)", () => {
   // Core refuses an exchange whose standardization or linkage-key transforms
-  // declare a fan-out step, so an invitation carrying one is refused at its own
+  // declare a fan-out step, so an invitation holding one is refused at its own
   // run. These pin the refusal at the moment of authoring instead: the operator
   // learns the capability is missing before minting, not after the partner has
   // the token. The declaring function is read from core's list, so a fan-out
@@ -216,7 +216,7 @@ describe("the deduplicating-pair gate (the run refuses what the schema admits)",
       expect(refused.canGenerate).toBe(false);
       expect(refused.terms).toBeUndefined();
       // Against the key list, in this editor's own words, naming the two controls
-      // that settle it and no strategy -- which one cannot run a deduplicating
+      // that decide it and no strategy -- which one cannot run a deduplicating
       // match is core's verdict rather than this message's.
       expect(refused.errors.keys).toMatch(/cannot run a deduplicating/);
       expect(refused.errors.keys).toMatch(/Choose another Linkage strategy/);
@@ -276,8 +276,8 @@ describe("the strategy gate on a deduplicating term", () => {
 
   test("a draft that deduplicates without receiving results names that obstacle on the output control", () => {
     // The schema's deduplicate-requires-output refine reports against the output
-    // pair, which without its own mapping collapses to the key list and reads as
-    // "Enable at least one linkage key."
+    // pair, which without its own mapping collapses to the key list and displays
+    // as "Enable at least one linkage key."
     const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
     const result = validateAdvancedInvite(
       { ...draft, deduplicate: true, outputDirection: "partner" },
@@ -287,7 +287,7 @@ describe("the strategy gate on a deduplicating term", () => {
     expect(result.canGenerate).toBe(false);
     expect(result.errors.output).toMatch(/needs you to receive the matched/);
     expect(result.errors.output).toMatch(/Who receives the matched results/);
-    // Both halves settle it, and both are live controls, so both are named.
+    // Both halves determine it, and both are live controls, so both are named.
     expect(result.errors.output).toMatch(/Allow several of your records/);
     // Against the output pair alone: the key list is not where this reports.
     expect(result.errors.keys).toBeUndefined();
@@ -297,7 +297,7 @@ describe("the strategy gate on a deduplicating term", () => {
 describe("the canonical-encode gate (the byte form both parties hash)", () => {
   // The terms are hashed into the cross-party agreement in their canonical form,
   // so a value outside that domain has to be refused at authoring rather than at
-  // the exchange. What these pin is which message the refusal carries: the gate
+  // the exchange. What these pin is which message the refusal has: the gate
   // predates them and already blocked, but it named nothing and offered only
   // "reset to defaults" -- discarding the operator's whole draft over one value.
   const now = new Date("2026-01-01T00:00:00Z");
@@ -310,7 +310,7 @@ describe("the canonical-encode gate (the byte form both parties hash)", () => {
     const authored = withFirstElementTransform(draft, [
       { function: "substring", params: { start: 2 ** 53, length: 4 } },
     ]);
-    // The premises: the terms schema admits the value (a transform param is
+    // The assumptions: the terms schema admits the value (a transform param is
     // `z.unknown()` there), and the encoder is what refuses it -- so the message
     // below is this gate's answer rather than one the schema would have given.
     const terms = buildAdvancedTerms(authored);
@@ -382,7 +382,7 @@ describe("the canonical-encode gate (the byte form both parties hash)", () => {
     // explicit `undefined` -- the shape a spread rebuild produces, which the
     // rule-set compares prune (linkageComparison) and the canonical encoding
     // rejects. No control in this editor writes it (each clears an optional with
-    // `delete`) and a parsed document cannot carry it, so it takes the message for
+    // `delete`) and a parsed document cannot hold it, so it takes the message for
     // a fault this editor cannot locate rather than the transform one.
     const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
     const spread: AdvancedInviteDraft = {
@@ -399,7 +399,7 @@ describe("the canonical-encode gate (the byte form both parties hash)", () => {
         },
       })),
     };
-    // The premise: these keys really are outside the canonical domain, so the
+    // The assumption: these keys really are outside the canonical domain, so the
     // refusal below is this shape's and not something else in the draft.
     const terms = buildAdvancedTerms(spread);
     expect(() => canonicalString(terms)).toThrow(CanonicalEncodingError);
@@ -419,7 +419,7 @@ describe("the canonical-encode gate (the byte form both parties hash)", () => {
     // pass-through) encodes, so it keeps generating and is left to the notice
     // that names it. A descriptor-shaped gate would refuse it instead.
     const step = { function: "coalesce", params: { default: 7 } };
-    // The premise: the descriptors DO judge and reject this param, so what the
+    // The assumption: the descriptors DO judge and reject this param, so what the
     // case measures is that the gate does not ask them -- not that there is
     // nothing here for them to say.
     expect(isStepValid(step)).toBe(false);
@@ -479,7 +479,7 @@ describe("the swap pair whose two elements clean differently", () => {
   test("differing steps on the pair are named rather than reported as no keys", () => {
     const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
     const mismatched = withSwappedFirstPair(draft, [trim, undefined]);
-    // The premise: the terms really are refused, so the message below answers
+    // The assumption: the terms really are refused, so the message below answers
     // this rule and not another obstacle in the draft.
     expect(safeParseLinkageTerms(buildAdvancedTerms(mismatched)).success).toBe(
       false,
@@ -501,13 +501,12 @@ describe("the swap pair whose two elements clean differently", () => {
 });
 
 describe("the dead-key gate on a key-element transform that matches nothing", () => {
-  // The stance one describe up -- the encoder is the gate on a key element, not
-  // the descriptors -- covers params core tolerates at runtime. It does not
-  // cover a param the pipeline drops on value-INDEPENDENTLY: a `substring` whose
-  // declared window reads nothing at any value length nulls every row for both
-  // parties, so the key matches nothing while the invitation mints green. Core
-  // grades such an element dead (`pipelineAlwaysDrops`), which is what these
-  // pin -- at both doors, the operator's own controls and an imported document.
+  // The gate one describe up -- the encoder, not the descriptors -- covers a
+  // param core tolerates at runtime, not one the pipeline drops regardless of
+  // the value: a `substring` whose window reads nothing at any length nulls
+  // every row for both parties, so the key matches nothing while the
+  // invitation mints green. Core grades such an element dead
+  // (`pipelineAlwaysDrops`), pinned here at both doors -- authoring and import.
   const now = new Date("2026-01-01T00:00:00Z");
 
   /** The declared windows the factory reads nothing out of, by how an operator
@@ -533,7 +532,7 @@ describe("the dead-key gate on a key-element transform that matches nothing", ()
   test("blocks Generate on an authored element whose window reads nothing", () => {
     for (const [label, params] of DEGENERATE_WINDOWS) {
       const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
-      // The premise the refusal has to be measured against: this draft
+      // The assumption the refusal has to be measured against: this draft
       // generates before the step is added.
       expect([
         label,
@@ -543,7 +542,7 @@ describe("the dead-key gate on a key-element transform that matches nothing", ()
         substringStep(params),
       ]);
       const terms = buildAdvancedTerms(authored);
-      // And the premises that make this the dead-key grading's refusal rather
+      // And the assumptions that make this the dead-key grading's refusal rather
       // than another gate's: the terms schema admits the step, and the value
       // encodes, so neither the schema mapping nor the canonical-encode gate is
       // what closes Generate below.
@@ -567,7 +566,7 @@ describe("the dead-key gate on a key-element transform that matches nothing", ()
     }
   });
 
-  test("an imported document carrying the same window reaches the same verdict", () => {
+  test("an imported document with the same window reaches the same verdict", () => {
     for (const [label, params] of DEGENERATE_WINDOWS) {
       const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
       const document = buildAdvancedTerms(
@@ -582,7 +581,7 @@ describe("the dead-key gate on a key-element transform that matches nothing", ()
       expect([label, parsed.success]).toEqual([label, true]);
       if (!parsed.success) continue;
       const imported = draftFromTerms(parsed.data, seed);
-      // The premise: the import carried the step through rather than
+      // The assumption: the import passed the step through rather than
       // normalizing it away, so what follows is a verdict on this window.
       const rebuilt = buildAdvancedTerms(imported);
       expect([label, rebuilt.linkageKeys[0].elements[0].transform]).toEqual([
@@ -615,16 +614,12 @@ describe("the dead-key gate on a key-element transform that matches nothing", ()
   });
 
   test("every window core grades dead is one the element editor marks inline", () => {
-    // What lets the operator attribute the refusal past the key the badge names,
-    // down to the element and the step: the badge and the blocking message name
-    // the key, and the step editor renders the descriptor's own per-param error
-    // on the offending input (ParamInput drives it from validateParamValue, the
-    // check isStepValid composes; the render half is pinned in
-    // stepListEditor.test.ts). That holds only while every window core
-    // refuses is also one the descriptors reject, which is a claim about two
-    // independently-edited rules -- core's window arithmetic and the substring
-    // descriptor's schema -- so it is swept here rather than asserted in a
-    // comment.
+    // The badge and blocking message name the key; the step editor's own
+    // per-param error (ParamInput -> validateParamValue -> isStepValid) marks
+    // the offending input (render half pinned in stepListEditor.test.ts). That
+    // depends on every window core marks dead also being one the descriptors
+    // reject -- two independently-edited rules -- so it is swept here rather
+    // than asserted in a comment.
     const bounds: Array<number | undefined> = [undefined];
     for (let bound = -8; bound <= 8; bound++) bounds.push(bound);
     let dead = 0;
@@ -666,7 +661,7 @@ describe("the invitation-lifetime gate (validation-only, not a schema rule)", ()
 describe("the inert-coalesce notice (a declared default the run will not substitute)", () => {
   // The failure it names is silent under-matching: the author declares a default
   // expecting blank-ish records to participate, and the step runs as a
-  // pass-through instead. It refuses nothing -- terms carrying this shape are
+  // pass-through instead. It refuses nothing -- terms with this shape are
   // valid, mint, and run -- so the cases below also check Generate stays open.
   const now = new Date("2026-01-01T00:00:00Z");
   const coalesce = { function: "coalesce", params: { default: "UNKNOWN" } };
@@ -737,11 +732,11 @@ describe("the inert-coalesce notice (a declared default the run will not substit
     ).toBeUndefined();
   });
 
-  test("a declared default on a field the built terms do not carry says nothing", () => {
+  test("a declared default on a field the built terms do not hold says nothing", () => {
     // A second column of the same type (`fname` aliases to `first_name`) so
     // draftWithFieldAdded has a free column to bind: the added field
     // (`first_name_2`) is declared in the draft's standardization but no
-    // enabled key references it, so the built terms do not carry it -- the
+    // enabled key references it, so the built terms do not hold it -- the
     // exact split between authoredLinkageFields and terms.linkageFields this
     // notice must read from the latter to get right.
     const { draft } = seedAdvancedInvite("Org", [...ALL_COLUMNS, "fname"]);

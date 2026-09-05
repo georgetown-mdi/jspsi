@@ -202,7 +202,7 @@ describe("the sweep confirmation's lifetime", () => {
 // The argv is captured off a real spawned child rather than compared with a
 // hand-written list, so what is asserted is what the driver actually invoked.
 describe("the argv a diagnostic or sweeping run drives", () => {
-  test("an ordinary exchange run carries no log or sweep token", async () => {
+  test("an ordinary exchange run has no log or sweep token", async () => {
     const dir = scratchDir("diag-plain");
     const argv = await captureExchangeArgv({ workdir: dir, eventStream: true });
     expect(argv.some((token) => token.startsWith("--log-"))).toBe(false);
@@ -238,7 +238,7 @@ describe("the argv a diagnostic or sweeping run drives", () => {
     expect(argv).not.toContain("--force-retain-sweep");
   });
 
-  test("a zero-setup run carries the same controls", async () => {
+  test("a zero-setup run includes the same controls", async () => {
     const dir = scratchDir("diag-zero");
     const logFilePath = path.join(dir, JOB_FILE_NAMES.log);
     const argv = await captureZeroSetupArgv({
@@ -287,13 +287,13 @@ describe("the diagnostic log's path stays inside the job workdir", () => {
   });
 });
 
-// The appliance yields a job id as soon as the CLI child spawns and the child
+// The console yields a job id as soon as the CLI child spawns and the child
 // opens its log after that, so what a seat can offer during a run rests on
-// asking the appliance again rather than on the answer the first ask raced --
+// asking the console again rather than on the answer the first ask raced --
 // and on what it does when those asks stop being answered at all, which is the
 // state the operator watching a stalled run is left in.
 describe("the diagnostic log's availability during a run", () => {
-  /** The appliance's own status body, for a run that asked for a log unless the
+  /** The console's own status body, for a run that asked for a log unless the
    * caller says otherwise. */
   const answered =
     (logAvailable: boolean, logRequested = true) =>
@@ -303,12 +303,12 @@ describe("the diagnostic log's availability during a run", () => {
         { status: 200, headers: { "Content-Type": "application/json" } },
       );
 
-  /** An ask that carries no answer about the log: the route erroring, which is
-   * also how a job the appliance forgot across a restart reads. */
+  /** An ask that returns no answer about the log: the route erroring, which is
+   * also how a job the console forgot across a restart reads. */
   const unanswerable = () => new Response("", { status: 503 });
 
   /** A 200 that is not this endpoint's status body -- a proxy's interstitial, or
-   * an appliance answering for something else -- which says no more about the
+   * a console answering for something else -- which says no more about the
    * log than an error does. */
   const notTheStatusBody = () =>
     new Response(JSON.stringify({ status: "running" }), {
@@ -361,7 +361,7 @@ describe("the diagnostic log's availability during a run", () => {
 
     expect(asks()).toBe(3);
     // One wait between successive asks, and a real one: a watch with no gap
-    // would poll the appliance as fast as it can answer.
+    // would poll the console as fast as it can answer.
     expect(waits).toHaveLength(2);
     expect(waits.every((ms) => ms > 0)).toBe(true);
   });
@@ -386,7 +386,7 @@ describe("the diagnostic log's availability during a run", () => {
 
   test("a run that asked for no log is answered once rather than asked all run", async () => {
     // The ordinary run is the common one and its answer cannot change, so a
-    // watch that kept asking would poll the appliance for the whole exchange to
+    // watch that kept asking would poll the console for the whole exchange to
     // be told the same thing.
     const { fetchImpl, asks } = scriptedFetch([answered(false, false)]);
     const waits: Array<number> = [];
@@ -418,7 +418,7 @@ describe("the diagnostic log's availability during a run", () => {
     expect(asks()).toBe(1);
   });
 
-  test("an ask the appliance could not answer keeps the watch going", async () => {
+  test("an ask the console could not answer keeps the watch going", async () => {
     // A rejected status ask says nothing about what the run requested, so
     // reading it as "no log" would end the watch on a transient failure and
     // leave the panel missing for the rest of the run.
@@ -435,7 +435,7 @@ describe("the diagnostic log's availability during a run", () => {
   });
 
   test("a route that never answers stops the watch instead of asking all run", async () => {
-    // An appliance that restarted and forgot the job answers this way for as
+    // A console that restarted and forgot the job answers this way for as
     // long as the seat is open, so an unbounded watch would ask until the
     // operator closed the tab and tell them nothing while it did.
     const { fetchImpl, asks } = scriptedFetch([unanswerable]);
@@ -482,7 +482,7 @@ describe("the diagnostic log's availability during a run", () => {
     expect(asks()).toBe(LOG_AVAILABILITY_UNANSWERED_LIMIT);
   });
 
-  test("failures the appliance recovers from never accumulate into the bound", async () => {
+  test("failures the console recovers from never accumulate into the bound", async () => {
     // The bound is on asks that fail in a row: a flaky route that keeps coming
     // back is a run the watch should still be watching, however many single
     // failures it has cost by the time the log lands.
@@ -555,12 +555,10 @@ describe("the escalation is stated before the run, not composed from its failure
 // choice changes what a failure says.
 //
 // These pins exercise failureFor, the one composition point all three seats
-// share, and claim nothing about what a seat does with what it composed: a
-// seat hook that decorated the returned failure before setFailure would not
-// redden them, the unit project being node-only, so seat hooks are not
-// renderable here. That half is scripts/bench-failure-passthrough.test.mjs,
-// which walks the bench tree for every call site and fails one that does
-// anything with the result other than hand it to setFailure.
+// share, and say nothing about what a seat does with the result afterward --
+// that half is covered by scripts/bench-failure-passthrough.test.mjs, which
+// walks the bench tree and fails any call site that does something with the
+// result besides handing it to setFailure.
 describe("relayed terminal text never retitles a failure", () => {
   /** The CLI's own refusal wording, planted inside a filename an untrusted party
    * chose -- the shape no text test can tell from the real refusal. */
@@ -574,7 +572,7 @@ describe("relayed terminal text never retitles a failure", () => {
     sweepConfirmed: true,
   };
 
-  test("a run that requested the sweep surfaces what a run that did not surfaces", () => {
+  test("a run that requested the sweep shows what a run that did not shows", () => {
     // The two runs differ in what they asked the CLI to do...
     expect(runDiagnosticsIntentFields(sweepingDraft)).toEqual({
       sweepExchangeFiles: true,

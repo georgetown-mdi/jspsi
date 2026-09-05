@@ -5,7 +5,7 @@ import { cronScheduleLine, taskSchedulerLine } from "@bench/scheduleTemplates";
 // The two schedule snippets both hand-off surfaces show. An operator copies
 // these verbatim into cron or schtasks, so what is checked here is the text they
 // paste: the command runs from the folder the placeholder names, and the Windows
-// registration survives a command that carries quotes of its own.
+// registration survives a command that holds quotes of its own.
 
 const COMMAND = "psilink exchange input.csv results.csv";
 
@@ -24,7 +24,7 @@ test("the Task Scheduler line registers the same run for Windows", () => {
   );
 });
 
-test("a command carrying quotes keeps them inside the /TR argument", () => {
+test("a command holding quotes keeps them inside the /TR argument", () => {
   // Inside /TR "...", an unescaped double quote from the command would end that
   // argument early and register a task that runs a truncated command. schtasks
   // preserves a `\"` for the scheduled cmd to re-read, which is what a Direct

@@ -46,7 +46,6 @@ test("provisionConfigAndKey reports a pre-existing config file and writes nothin
       { configPath, keyPath },
     ),
   ).toThrow(configPath);
-  // The pre-existing config is left untouched and no key file is created.
   expect(fs.readFileSync(configPath, "utf8")).toBe("channel: filedrop\n");
   expect(fs.existsSync(keyPath)).toBe(false);
 });
@@ -164,7 +163,6 @@ test("provisionConfigAndKey rolls back the written config when the key write fai
       { configPath, keyPath },
     ),
   ).toThrow("base64url-encoded 32-byte value");
-  // The config that was written is removed; neither file is left behind.
   expect(fs.existsSync(configPath)).toBe(false);
   expect(fs.existsSync(keyPath)).toBe(false);
 });
@@ -265,9 +263,7 @@ test("provisionConfigAndKey with reuseExistingConfig writes only the key, keepin
     { reuseExistingConfig: true },
   );
   expect(result).toEqual({ configPath, keyPath });
-  // The user's config is left byte-for-byte untouched ...
   expect(fs.readFileSync(configPath, "utf8")).toBe(original);
-  // ... and the key file is written.
   expect(loadKeyFile(keyPath)?.sharedSecret).toBe(TOKEN);
 });
 
@@ -282,7 +278,6 @@ test("provisionConfigAndKey with reuseExistingConfig still rejects a pre-existin
       { reuseExistingConfig: true },
     ),
   ).toThrow(keyPath);
-  // The pre-existing config is never touched on the conflict path.
   expect(fs.readFileSync(configPath, "utf8")).toBe(
     "channel: filedrop\npath: /mnt/share\n",
   );
@@ -319,7 +314,6 @@ test("provisionConfigAndKey with reuseExistingConfig aborts when the config was 
     ),
   ).toThrow(UsageError);
   expect(fs.existsSync(configPath)).toBe(false);
-  // No orphaned key landed.
   expect(fs.existsSync(keyPath)).toBe(false);
 });
 

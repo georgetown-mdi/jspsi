@@ -238,7 +238,7 @@ test("prepareForExchange: accepts an oversized header the metadata does not tran
   ).not.toThrow();
 });
 
-// --- runExchange wiring (the bypass seat) ------------------------------------
+// --- runExchange wiring (the bypass path) ------------------------------------
 
 // The run boundary re-checks the bound, so a PreparedExchange assembled without
 // going through prepareForExchange is refused before anything reaches the
@@ -274,7 +274,7 @@ test("runExchange refuses an oversized disclosed name before it connects", async
   await expect(run).rejects.toThrow(/metadata column 2 /);
 });
 
-test("runExchange reads the output declaration the run carries, not the one prepare gated on", async () => {
+test("runExchange reads the output declaration the run holds, not the one prepare gated on", async () => {
   // The other half of the bypass: an oversized name prepared under terms entitling
   // the partner to no result -- where nothing travels, so prepare passes it --
   // then given sharing terms, which is when the name would travel.

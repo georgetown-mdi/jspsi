@@ -60,7 +60,7 @@ function ssnKeyNames(draft: AdvancedInviteDraft): Array<string> {
     .map((entry) => entry.key.name);
 }
 
-// Columns carrying every default linkage type, and a partial set missing ssn4
+// Columns with every default linkage type, and a partial set missing ssn4
 // (like the bundled fake data): keys referencing ssn4 drop from the seed.
 const ALL_COLUMNS = ["ssn", "ssn4", "first_name", "last_name", "dob"];
 const PARTIAL_COLUMNS = ["ssn", "first_name", "last_name", "dob"];
@@ -196,7 +196,7 @@ function constrainedSeed(): AdvancedInviteSeed {
 }
 
 /** The default document the editor exports for those columns: the same draft shape
- * seedAdvancedInvite builds, so its fields carry exactly the type-default
+ * seedAdvancedInvite builds, so its fields have exactly the type-default
  * constraints a rebuild re-stamps, in the canonical DEFAULT_LINKAGE_FIELDS order.
  * The round-trip-faithful baseline a divergence refusal must NOT trip. */
 function constrainedDefaultExport(): LinkageTerms {
@@ -240,7 +240,7 @@ describe("seedAdvancedInvite + buildAdvancedTerms", () => {
     const { seed } = seedAdvancedInvite("Org", PARTIAL_COLUMNS);
 
     // No ssn4-referencing key survives a file without an ssn4 column, and the set
-    // is genuinely smaller than the all-columns one.
+    // is smaller than the all-columns one.
     expect(
       seed.terms.linkageKeys.some((k) =>
         k.elements.some((e) => e.field === "ssn4"),
@@ -290,7 +290,7 @@ describe("seedAdvancedInvite + buildAdvancedTerms", () => {
       })),
     };
     const terms = buildAdvancedTerms(withoutSsn4Keys);
-    // The emitted terms no longer declare ssn4, yet the draft still carries its
+    // The emitted terms no longer declare ssn4, yet the draft still has its
     // (now inert) transformation -- the inconsistency the fix reconciles.
     expect(terms.linkageFields.some((f) => f.name === "ssn4")).toBe(false);
     expect(
@@ -874,7 +874,7 @@ describe("validateAdvancedInvite", () => {
   });
 
   test("(c) blocks Generate on a malformed cleaning step, against the standardization control", () => {
-    // The launch gate that backstops ungated raw-pattern authoring: a step left
+    // The launch gate that catches ungated raw-pattern authoring: a step left
     // mid-edit (here a filter_regex with no pattern) must block Generate via
     // errors.standardization, so a malformed pattern never reaches the exchange,
     // where core would run it as a silent full-field exclusion or throw at compile.
@@ -970,7 +970,7 @@ describe("controls the editor does not expose stay at their safe defaults", () =
 describe("the linkage-strategy control", () => {
   test("(a) an unedited draft authors cascade, byte-identical to before the control", () => {
     const { draft } = seedAdvancedInvite("Org", ALL_COLUMNS);
-    // The draft seeds from the default terms' strategy, and the build carries it
+    // The draft seeds from the default terms' strategy, and the build passes it
     // through, so a draft no one touched still authors cascade.
     expect(draft.linkageStrategy).toBe("cascade");
     expect(buildAdvancedTerms(draft).linkageStrategy).toBe("cascade");
@@ -996,7 +996,7 @@ describe("the linkage-strategy control", () => {
     });
     // Unlike a gated deduplicate/fuzzyComparisons setting, an imported single-pass
     // document is adopted rather than refused: single-pass is honored end-to-end,
-    // so it carries no gatedActiveSettingMessage. This is the lie-proof encoding of
+    // so it has no gatedActiveSettingMessage. This is the lie-proof encoding of
     // "not gated".
     expect(gatedActiveSettingMessage(exported)).toBeUndefined();
     const imported = draftFromTerms(exported, seed);
@@ -1046,7 +1046,7 @@ describe("the 3-way output direction control", () => {
       expectsOutput: false,
       shareWithPartner: false,
     });
-    // The three are distinct, so the control offers three genuinely different pairs.
+    // The three are distinct, so the control offers three different pairs.
     expect(new Set(pairs.map((p) => JSON.stringify(p))).size).toBe(3);
   });
 
@@ -1133,7 +1133,7 @@ describe("payload authoring", () => {
     ).toBeUndefined();
   });
 
-  test("a schema payload error is surfaced even behind the direction conflict, not masked", () => {
+  test("a schema payload error is reported even behind the direction conflict, not masked", () => {
     // A disclosed (sent) column whose name exceeds the schema's MAX_NAME_LENGTH is a
     // payload-path schema failure; choosing inviter-only output while disclosing
     // columns is the direction conflict. Both attach to the payload control, where a
@@ -1168,11 +1168,11 @@ describe("payload authoring", () => {
     expect(directionMessage.length).toBeGreaterThan(0);
     expect(conflictOnly.canGenerate).toBe(false);
 
-    // The single-problem cases stay clean: neither carries the other's message.
+    // The single-problem cases stay clean: neither has the other's message.
     expect(schemaMessage).not.toContain(directionMessage);
     expect(directionMessage).not.toContain(schemaMessage);
 
-    // (3) Both problems at once: the payload message surfaces BOTH, so the schema
+    // (3) Both problems at once: the payload message reports BOTH, so the schema
     // error is no longer masked by the direction conflict. They are newline-separated
     // (the editor renders them as a stacked list) with the more-persistent schema
     // error leading -- it is the obstacle that remains after the one-click direction
@@ -1242,7 +1242,7 @@ describe("inviter standardization: per-field column binding and multi-field", ()
 
   test("a per-party cleaning edit does not move the cross-party terms (local-only invariant)", () => {
     // Editing a field's cleaning steps or input-column binding changes only this
-    // party's local standardization -- the cross-party LinkageTerms carry the field
+    // party's local standardization -- the cross-party LinkageTerms hold the field
     // name/type/constraints, never the cleaning -- so the agreement (and its hash)
     // is byte-identical. This is the inviter mirror of the acceptor's cross-party
     // hash-invariance test.
@@ -1287,7 +1287,7 @@ describe("inviter standardization: per-field column binding and multi-field", ()
         },
       ],
     };
-    // The file carries maiden_col but not current_col (the second field's column).
+    // The file has maiden_col but not current_col (the second field's column).
     const seed: AdvancedInviteSeed = {
       terms: getDefaultLinkageTerms("Inviter", metadata),
       metadata,
@@ -1387,7 +1387,7 @@ describe("draftFromTerms reconstructs multi-field bindings on import", () => {
 
   test("a two-fields-of-one-type document round-trips: both bindings and both distinct values are reconstructed", () => {
     const exported = buildAdvancedTerms(multiFieldDraft());
-    // The export carries both declared fields (the binding itself is local and does
+    // The export has both declared fields (the binding itself is local and does
     // not travel), so this is the document an operator would re-import.
     expect(
       exported.linkageFields
@@ -1441,13 +1441,12 @@ describe("draftFromTerms reconstructs multi-field bindings on import", () => {
   test("reconstructing the local binding on import does not change the agreement (cross-party-hash invariant)", () => {
     // The import side rebuilds only the LOCAL standardization; the cross-party terms
     // -- field names/types/constraints and keys -- are reproduced byte-for-byte, so
-    // the agreement and its receipt are unchanged. The import mirror of the
-    // local-only invariance test above. Scope: this covers terms the editor itself
-    // produced (default constraints, default field order). An externally-authored
-    // document carrying custom field constraints is refused at the import door (see the
-    // importedConstraintDivergenceMessage tests below); its cross-type field order and
-    // any declared-but-unreferenced field are now preserved on rebuild (see the
-    // "import round-trip preserves field order" tests below), not exercised here.
+    // the agreement and its receipt are unchanged. Scope: this covers terms the
+    // editor itself produced. An externally-authored document with custom field
+    // constraints is refused at the import door (see the
+    // importedConstraintDivergenceMessage tests below); field order and
+    // declared-but-unreferenced fields are preserved on rebuild (see the "import
+    // round-trip preserves field order" tests below), not exercised here.
     const exported = buildAdvancedTerms(multiFieldDraft());
     const seed = seedFor(columns, metadata);
     const imported = draftFromTerms(exported, seed, 3600, rawRows);
@@ -1664,9 +1663,9 @@ describe("draftFromTerms binds an imported field of a type no built-in key uses"
   }
 
   /**
-   * A document whose phone fields carry the author's own names rather than the
+   * A document whose phone fields have the author's own names rather than the
    * bare type. `phoneFields` names one per author-side phone column; a `last_name`
-   * field and key ride along so the document also carries a built-in key.
+   * field and key ride along so the document also has a built-in key.
    */
   function phoneDocument(phoneFields: Array<string>): LinkageTerms {
     const authorMetadata = linkageColumns([
@@ -1957,7 +1956,7 @@ describe("importedConstraintDivergenceMessage refuses a non-representable-constr
     expect(
       importedConstraintDivergenceMessage(imported, seed, rawRows),
     ).toBeDefined();
-    // The refusal is load-bearing, not cosmetic: accepting this import would
+    // The refusal is critical, not cosmetic: accepting this import would
     // regenerate a different cross-party agreement than the document declared.
     expect(
       canonicalString(
@@ -2021,7 +2020,7 @@ describe("importedConstraintDivergenceMessage refuses a non-representable-constr
   test("a type-default import is accepted and rebuilds byte-for-byte (no refusal, agreement unchanged)", () => {
     const seed = seedFor();
     const exported = defaultExport();
-    // The editor's own export carries only type-default constraints, so the refusal
+    // The editor's own export has only type-default constraints, so the refusal
     // does not fire ...
     expect(
       importedConstraintDivergenceMessage(exported, seed, rawRows),
@@ -2036,7 +2035,7 @@ describe("importedConstraintDivergenceMessage refuses a non-representable-constr
 
   test("a multi-field editor export (two same-typed fields) is accepted and round-trips", () => {
     // The editor's own multi-field export: two first_name fields bound to distinct
-    // columns. Both carry the type-default name constraints, so the rebuild reproduces
+    // columns. Both have the type-default name constraints, so the rebuild reproduces
     // them and the guard must NOT refuse a legitimate export it can faithfully rebuild
     // -- the precision counterpart of the refusal tests. Guards against a future
     // change to authoredLinkageFields/buildAdvancedTerms that began refusing real
@@ -2182,7 +2181,7 @@ describe("import round-trip preserves field order and declared-but-unreferenced 
     );
   });
 
-  test("a declared-but-unreferenced field carrying a non-default constraint is preserved, not dropped", () => {
+  test("a declared-but-unreferenced field with a non-default constraint is preserved, not dropped", () => {
     // Append a zip_code field NO key references, with a non-default exclude denylist. The
     // referential-integrity refine forbids only a dangling key->field reference, not a
     // declared-but-unreferenced field, so this is schema-valid.
@@ -2207,7 +2206,7 @@ describe("import round-trip preserves field order and declared-but-unreferenced 
       extra,
     );
     // The field and its constraint survive, and so does every other term -- but not
-    // the citation the export carried: the document cites the built-in set while
+    // the citation the export had: the document cites the built-in set while
     // declaring a field that set does not, and a citation naming the one set this
     // build ships is checked against that set rather than against the rules the
     // document claimed for it.
@@ -2254,7 +2253,7 @@ describe("import round-trip preserves field order and declared-but-unreferenced 
     expect(
       rebuilt.linkageFields.find((f) => f.name === "date_of_birth"),
     ).toHaveProperty("constraints", {});
-    // The built-in citation the export carried does not survive with it: the {} is
+    // The built-in citation the export had does not survive with it: the {} is
     // behaviorally inert but canonically distinct, and the set this build ships
     // declares that field without it, so the document no longer describes the set
     // it names. Everything else round-trips byte for byte.
@@ -2267,7 +2266,7 @@ describe("import round-trip preserves field order and declared-but-unreferenced 
   test("a name/type-confused referenced field with an empty {} stays refused, not preserved", () => {
     // The empty-{} preservation must not become a hole for TYPE confusion: the
     // referential-integrity refine checks a field NAME only, so a schema-valid document
-    // can name a field "date_of_birth" yet type it "ssn" and carry constraints: {} (a
+    // can name a field "date_of_birth" yet type it "ssn" and have constraints: {} (a
     // valid SsnField named date_of_birth). Keyed on name alone, the rebuild would commit
     // that ssn-typed field verbatim -- the inviter binds date_of_birth by name while an
     // acceptor type-falls-back to its ssn column, a cross-party under-match -- and slip
@@ -2335,7 +2334,7 @@ describe("import round-trip preserves field order and declared-but-unreferenced 
   test("an uncited import stays uncited through an edit that keeps the rules drawn from the built-in set", () => {
     // Narrowing keeps the rules drawn from the set, so content alone would cite
     // it. The import's own answer governs instead, for as long as the draft
-    // carries it: the operator adopted a document that claimed no provenance.
+    // has it: the operator adopted a document that claimed no provenance.
     const uncited = structuredClone(defaultExport());
     delete uncited.linkageRuleSet;
     const draft = draftFromTerms(uncited, seedFor(), 3600, rawRows);
@@ -2366,9 +2365,9 @@ describe("import round-trip preserves field order and declared-but-unreferenced 
 
   test("an imported citation is dropped once the draft disables every key", () => {
     // Rules declaring no key and no field are drawn from every set vacuously, so
-    // re-emitting the import's citation here would name rules the document carries
+    // re-emitting the import's citation here would name rules the document has
     // none of. The draft reaches this state as an intermediate, and the terms
-    // export can carry it out of the browser from there.
+    // export can take it out of the browser from there.
     const imported = structuredClone(defaultExport());
     imported.linkageRuleSet = {
       fieldSet: { name: "partner-pii", version: "4.2.0" },
@@ -2401,7 +2400,7 @@ describe("import round-trip preserves field order and declared-but-unreferenced 
     // A keyless draft is not an empty document: the round trip preserves a field
     // no key references, so field declarations outlive the keys that referenced
     // them. The citation asserts where the KEYS came from, so it goes on the keys
-    // alone -- and the terms export carries this state out of the browser without
+    // alone -- and the terms export takes this state out of the browser without
     // passing validation, which is what would otherwise refuse a keyless document.
     const imported = structuredClone(defaultExport());
     imported.linkageRuleSet = {
@@ -2488,7 +2487,7 @@ describe("import round-trip preserves field order and declared-but-unreferenced 
     expect(rebuilt.linkageRuleSet).toBeUndefined();
   });
 
-  test("a half-matched citation honest in both halves keeps it", () => {
+  test("a half-matched citation accurate in both halves keeps it", () => {
     // Per-half resolution is not a refusal of half-matched references: the
     // built-in key half is checked against the keys this build ships and covers
     // them, while the field half names a set this build cannot resolve and is
@@ -2535,7 +2534,7 @@ describe("import round-trip preserves field order and declared-but-unreferenced 
   });
 
   test("a guided draft that edits nothing still cites the built-in set", () => {
-    // The no-op baseline: the editor's own default export carries the citation and
+    // The no-op baseline: the editor's own default export has the citation and
     // rebuilds with it, so the guided path's terms -- and the cross-party hash --
     // are what the quick path would have embedded.
     const exported = defaultExport();
@@ -2544,7 +2543,7 @@ describe("import round-trip preserves field order and declared-but-unreferenced 
   });
 
   test("disabling a key narrows the rules and keeps the citation", () => {
-    // The resolvable citation over the rules it genuinely names: narrowing leaves
+    // The resolvable citation over the rules it names: narrowing leaves
     // the rules drawn from the built-in set, so the set's own content -- what the
     // citation is checked against -- still covers them.
     const exported = defaultExport();
@@ -2624,7 +2623,7 @@ describe("the editor says when an imported citation will not be re-emitted", () 
     return withKeys(draft, [...draft.keys].reverse());
   }
 
-  test("no notice while the rebuild carries the citation the import made", () => {
+  test("no notice while the rebuild has the citation the import made", () => {
     // The unedited round trip, both resolvable and not: the built-in citation over
     // the set's own rules, and a foreign citation over the rules its document
     // claimed. Each survives the rebuild, so there is nothing to tell the operator.
@@ -2751,7 +2750,7 @@ describe("the editor says when an imported citation will not be re-emitted", () 
   });
 
   test("a keyless draft is told the citation goes with the keys", () => {
-    // Turning every key off is an intermediate the terms export can carry out of the
+    // Turning every key off is an intermediate the terms export can take out of the
     // browser, and the citation goes with the keys it asserts provenance for. Its own
     // cause: the remedy is to turn a key back on, not to undo an edit to one.
     const draft = draftFor(citing(FOREIGN_REFERENCE));
@@ -2873,7 +2872,7 @@ describe("draftFromTerms degrades gracefully on an unsupplyable key", () => {
   }
 
   /** A document declaring THREE same-typed (first_name) fields, each referenced by
-   * its own key, plus a date column the keys do not use. The export carries all
+   * its own key, plus a date column the keys do not use. The export has all
    * three field declarations; the binding is local and does not travel. */
   function threeNameDocument(): LinkageTerms {
     const threeNameMetadata: Metadata = [
@@ -3252,10 +3251,8 @@ describe("matchable columns the default keys omit are pickable as linkage fields
 // that reference by last-wins name lookup, so two linkage fields sharing one name
 // would silently rebind a key to whichever field's column happens to win -- a
 // cross-party mismatch with no error. safeParseLinkageTerms' name-uniqueness refine
-// (linkageFields names must be unique) blocks the collision at Generate, but only
-// once the draft already carries the duplicate; these lock the editor mutators that
-// must never PRODUCE one in the first place, across the realistic sequences an
-// operator can actually drive.
+// blocks the collision at Generate, but only once the draft already has the
+// duplicate; these lock the editor mutators that must never produce one.
 describe("no two linkage fields ever share a name (reconcileImportedFields dedup guard)", () => {
   // ssn_col2 and extra_col are free role: linkage columns of types the default keys
   // do not bind by default, letting a retype or an added field pick up a second
@@ -3309,14 +3306,11 @@ describe("no two linkage fields ever share a name (reconcileImportedFields dedup
     });
   }
 
-  /** The adversarial import: a schema-valid document where the field named "ssn" is
-   * TYPED first_name instead -- a name/type-confused field, still referenced by its
-   * key -- while the columns also carry a genuine ssn-typed linkage column
-   * (ssn_col). Distinct from the existing name/type-confusion tests (which assert
-   * the confused field is refused or falls back): this document is the one shape
-   * where the confused import name and the inviter's own authored field name
-   * collide, which is exactly what reconcileImportedFields' `emitted` guard must
-   * resolve to a single field, not two. */
+  /** The adversarial import: the field named "ssn" is TYPED first_name instead --
+   * a name/type-confused field, still referenced by its key -- while the columns
+   * also have a genuine ssn-typed linkage column (ssn_col). This is the shape where
+   * the confused import name collides with the inviter's own authored field name,
+   * which reconcileImportedFields' `emitted` guard must resolve to one field. */
   function typeConfusedSsnImport(): LinkageTerms {
     const exported = defaultExport();
     const crafted = structuredClone(exported);

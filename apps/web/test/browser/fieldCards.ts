@@ -9,12 +9,10 @@ import { page, userEvent } from "vitest/browser";
  * field; their editors (input-column binding, cleaning steps, preview, coverage)
  * are reachable only once expanded.
  *
- * Selects by the card's stable `field-card-toggle` test id rather than each card's
- * semantic-type label, so a test stays correct as fields are added or types are
- * relabelled -- it expands whatever cards render, however many and whatever their
- * headings. Awaits the first toggle so it is robust to a render that commits after
- * the call (assumes at least one card is present); the snapshot is then read once
- * all cards from that commit are mounted.
+ * Selects by the `field-card-toggle` test id, not each card's semantic-type
+ * label, so it works regardless of field count or heading. Waits for the first
+ * toggle to appear (assumes at least one card is present), then clicks every
+ * toggle from that render.
  */
 export async function expandFieldCards(): Promise<void> {
   const toggles = page.getByTestId("field-card-toggle");

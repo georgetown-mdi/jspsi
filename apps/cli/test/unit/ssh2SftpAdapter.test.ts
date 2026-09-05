@@ -50,7 +50,7 @@ const noDelayClient = () => ({
   _sock: { setKeepAlive: () => {} },
 });
 
-// The same stand-in plus the seams the connection-per-poll idle release drives,
+// The same stand-in plus the call sites the connection-per-poll idle release drives,
 // which connect() verifies in that mode: the ssh2 Client's EventEmitter surface
 // and its socket's destroy() and half-close flag. Also what a faithful stand-in
 // for the pinned ssh2 Client looks like anywhere a recovery re-dial runs -- that
@@ -237,15 +237,10 @@ describe("connect retry", () => {
 
   test("does not retry a 'Host denied' host-key rejection (terminal, one attempt)", async () => {
     // The connect-retry predicate treats a host-key verification rejection as
-    // terminal by matching the `Host denied` message fragment. The two tests
-    // above pin the other direction -- a transient `connection refused` IS
-    // retried up to maxReconnectAttempts -- so the three together prove the
-    // predicate discriminates rather than disabling retry wholesale. A
-    // regression here (a renamed fatal message, a typo) would silently retry a
-    // host-key failure maxReconnectAttempts times before failing with the same
-    // outcome; the "Upgrading the SFTP Stack" checklist in
-    // docs/spec/DEPENDENCY_PINS.md names confirming this fragment as a per-bump
-    // obligation, which this pins.
+    // terminal by matching the `Host denied` message fragment; a renamed message
+    // would silently retry a host-key failure instead of failing after one
+    // attempt. Keep this in sync with the "Upgrading the SFTP Stack" checklist in
+    // docs/spec/DEPENDENCY_PINS.md.
     vi.useFakeTimers();
     const adapter = new SSH2SFTPClientAdapter();
     let calls = 0;
@@ -254,12 +249,11 @@ describe("connect retry", () => {
       connect: vi.fn().mockImplementation(async () => {
         calls++;
         // The fatal handshake message ssh2 raises on a host-key rejection
-        // (hostVerifier calling verify(false)): "Host denied (verification
+        // (hostVerifier calling verify(false)) is "Host denied (verification
         // failed)", from node_modules/ssh2/lib/protocol/kex.js. ssh2 sets no
-        // machine-readable `code` on it, so the predicate keys on the message
-        // fragment. Keep this string in sync with that same kex.js source named
-        // in docs/spec/DEPENDENCY_PINS.md ("Upgrading the SFTP Stack"); if a
-        // future bump renames it, that checklist and this string move together.
+        // machine-readable `code` on it, so the predicate keys on this message
+        // fragment. Keep it in sync with kex.js and the "Upgrading the SFTP
+        // Stack" checklist in docs/spec/DEPENDENCY_PINS.md.
         throw new Error("Host denied (verification failed)");
       }),
     };
@@ -319,8 +313,8 @@ describe("connect retry", () => {
   test("rejects at connect time when the internal SFTP API drops a method it drives", async () => {
     // createExclusive()/list() call open/close/opendir/readdir on the internal
     // SFTPWrapper directly. The connect-time guard must catch an upstream
-    // rename or removal of any of them and surface one actionable error here,
-    // rather than letting a TypeError surface at the first send()/poll.
+    // rename or removal of any of them and raise one actionable error here,
+    // rather than letting a TypeError show up at the first send()/poll.
     const adapter = new SSH2SFTPClientAdapter();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (adapter as any).client = {
@@ -533,7 +527,7 @@ describe("keyboard-interactive", () => {
 
   test("fails loudly when the ssh2 client cannot register the handler", async () => {
     // Without on(), a keyboard-interactive request would silently stall the
-    // handshake to readyTimeout; the connect-time guard surfaces it instead.
+    // handshake to readyTimeout; the connect-time guard reports it instead.
     const adapter = new SSH2SFTPClientAdapter();
     installClient(adapter, noDelayClient()); // no on()
 
@@ -553,14 +547,14 @@ describe("keyboard-interactive", () => {
 describe("rename retry", () => {
   // rename() wraps client.rename in retryPromise, but -- unlike the idempotent
   // put() -- gates the retry on the generic SSH_FX_FAILURE (status 4): the
-  // "operation did not take effect" code that surfaced as the `_rename: Failure`
+  // "operation did not take effect" code that showed up as the `_rename: Failure`
   // crashing the mixed-connection rendezvous joiner under load. These tests pin
   // that contract: a transient status-4 failure is absorbed within a bounded
-  // budget, a persistent one still surfaces after the bound, and a non-status-4
+  // budget, a persistent one is still reported after the bound, and a non-status-4
   // failure (e.g. SSH_FX_NO_SUCH_FILE) is terminal and is NOT retried, so a
   // succeeded-but-lost-reply rename cannot be amplified into a spurious error.
 
-  // An error shaped like the one ssh2-sftp-client surfaces: the raw numeric SFTP
+  // An error shaped like the one ssh2-sftp-client reports: the raw numeric SFTP
   // status on `code` (passed through fmtError).
   const sftpError = (message: string, code: number) =>
     Object.assign(new Error(message), { code });
@@ -651,7 +645,7 @@ describe("rename retry", () => {
     }
   });
 
-  test("does not retry a non-SSH_FX_FAILURE error (NO_SUCH_FILE surfaces at once)", async () => {
+  test("does not retry a non-SSH_FX_FAILURE error (NO_SUCH_FILE shows up at once)", async () => {
     vi.useFakeTimers();
     try {
       const adapter = new SSH2SFTPClientAdapter();
@@ -695,7 +689,7 @@ describe("rename retry", () => {
       (adapter as any).log = { warn: vi.fn(), debug: vi.fn() };
       // retries: 0 must disable the retry, not be coerced to the default of 5 --
       // the `?? 5` (not `|| 5`) guard. A status-4 failure that would otherwise be
-      // retried is surfaced after the single attempt.
+      // retried is reported after the single attempt.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (adapter as any).options = { retries: 0 };
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -817,7 +811,6 @@ describe("createExclusive", () => {
     await expect(adapter.createExclusive("/remote/existing.txt")).rejects.toBe(
       serverErr,
     );
-    // close must not be called when open fails
     expect(mockClose).not.toHaveBeenCalled();
   });
 
@@ -1276,7 +1269,7 @@ describe("capped get", () => {
     // 'end' can win the race and resolve(wtr) with the under-cap prefix before
     // the rejection settles. createCappedSink settles its own `result` at the
     // point of detection (inside the sink's write handler), so the adapter
-    // surfaces a FrameSizeExceededError regardless of which listener fired or
+    // raises a FrameSizeExceededError regardless of which listener fired or
     // how get() ultimately settles.
     const adapter = new SSH2SFTPClientAdapter();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1387,7 +1380,7 @@ describe("capped get", () => {
     // The uncapped path returns the library's get() promise directly and has no
     // counting sink (hence no per-chunk progress signal), so it is bounded by a
     // coarse whole-operation deadline. The transport always passes maxBytes, so
-    // this path is the defensive backstop.
+    // this path is the defensive safety check.
     vi.useFakeTimers();
     try {
       const adapter = new SSH2SFTPClientAdapter();
@@ -1410,7 +1403,7 @@ describe("capped get", () => {
 
 // --- bounded put (idle window) -----------------------------------------------
 //
-// Unlike the metadata ops, put carries a payload whose legitimate transfer can
+// Unlike the metadata ops, put has a payload whose legitimate transfer can
 // exceed a flat 60 s deadline over a slow link, so it is bounded by a
 // progress-based idle window (createBoundedPutSource): the payload is streamed in
 // chunks, and the window resets on each chunk pulled under the write stream's
@@ -1465,8 +1458,8 @@ describe("bounded put (idle window)", () => {
     // rdr.on('error') then rejects its put() promise, and that rejection lands on
     // the adapter's no-op `fail` (the source already settled `result`). This mock
     // mirrors that rdr.on('error') so the ordering is exercised: `result` must still
-    // carry the typed terminal error, and the put() rejection must be handled (a
-    // missing handler would surface as an unhandled rejection vitest fails on).
+    // hold the typed terminal error, and the put() rejection must be handled (a
+    // missing handler would show up as an unhandled rejection vitest fails on).
     vi.useFakeTimers();
     try {
       const adapter = new SSH2SFTPClientAdapter();
@@ -2004,7 +1997,7 @@ describe("bounded list", () => {
   test("bounds a server that returns empty non-EOF batches forever and closes the handle", async () => {
     // The liveness DoS: a hostile server returns valid but empty (count = 0)
     // non-EOF readdir batches without end. Each advances neither the entry-count
-    // nor the filename-length size bound and never carries the EOF status, so
+    // nor the filename-length size bound and never includes the EOF status, so
     // the batch loop would recurse forever. The round-trip cap must fail it with
     // the typed terminal error and still close the open handle. Fake timers keep
     // the test purely about the round-trip cap: list()'s wall-clock deadline is
@@ -2307,7 +2300,7 @@ describe("slow-operation warning", () => {
 
 // A stand-in for the raw ssh2 SFTPWrapper as a real EventEmitter, so the guarded
 // 'error' listener and Node's zero-listener throw semantics are exercised
-// faithfully. It carries the handle-based methods connect()'s presence guard
+// faithfully. It has the handle-based methods connect()'s presence guard
 // requires plus the EventEmitter surface (`on`), and tracks whether the
 // directory methods were invoked so a test can prove a post-crash operation
 // rejects WITHOUT issuing a request to the dead session.
@@ -2494,7 +2487,7 @@ describe("fatal wrapper-error guard", () => {
 // --- session heartbeat and TCP keepalive -------------------------------------
 //
 // connect() enables kernel TCP keepalive on the underlying socket (a transport-
-// layer backstop) and arms the application heartbeat that issues a periodic no-op
+// layer safety check) and arms the application heartbeat that issues a periodic no-op
 // realPath (which, unlike a transport keepalive, resets the server's SFTP-command
 // idle timer). The heartbeat must fire on the interval when the session is idle,
 // and must stop on every terminal path -- end() and a fatal wrapper error -- so
@@ -2642,7 +2635,7 @@ describe("out-of-band client event callbacks", () => {
     expect(error).toHaveBeenCalledTimes(1);
     const line = error.mock.calls[0][0] as string;
     // The escaped form is present; the raw control/ANSI/bidi/newline bytes are
-    // gone. Teeth: dropping sanitizeForDisplay surfaces the raw bytes here.
+    // gone. Teeth: dropping sanitizeForDisplay exposes the raw bytes here.
     expect(line).toContain("\\x1b[31mbad\\u202e\\x0aFORGED");
     expect(line).not.toContain("\x1b");
     expect(line).not.toContain("\u202e");
@@ -2657,7 +2650,7 @@ describe("out-of-band client event callbacks", () => {
     (adapter as any).log = { error, trace: vi.fn() };
 
     // Defense in depth: should a future ssh2 path ever interpolate key material
-    // into a Client-level error, sanitizeErrorForDisplay's redaction backstop
+    // into a Client-level error, sanitizeErrorForDisplay's redaction safety check
     // must strip the PEM block before it can persist to a --log-file -- not merely
     // escape it (plain escaping would leave the key bytes readable). Teeth:
     // routing through sanitizeForDisplay instead of sanitizeErrorForDisplay fails
@@ -3152,7 +3145,7 @@ describe("session recovery", () => {
     // rather than launching a re-dial whose readyTimeout would slow the close and
     // whose fresh session would outlive teardown. The refusal is at the
     // classifier, before the recovery path is entered at all: with no
-    // reconnection budget left, an op admitted to that path would surface the
+    // reconnection budget left, an op admitted to that path would report the
     // budget-exhausted error instead of the session diagnostic, so the diagnostic
     // is what says recovery was refused rather than merely thwarted.
     const wrapper = sessionWrapper();
@@ -3174,7 +3167,7 @@ describe("session recovery", () => {
 
   test("does not re-dial before any connect (no retained options)", async () => {
     // A server-driven op reaching the recovery path before connect() ran has
-    // nothing to re-dial with; the original diagnostic must surface unchanged
+    // nothing to re-dial with; the original diagnostic must be reported unchanged
     // rather than a re-dial or the retained-options invariant error.
     const adapter = new SSH2SFTPClientAdapter();
     stub(adapter);
@@ -3337,7 +3330,7 @@ describe("session recovery", () => {
 
     await adapter.list("/remote/dir");
     // The recovery re-dial's connect() succeeded on its first attempt, so connect()
-    // added zero; the recovery increment is what surfaces the survived drop. It
+    // added zero; the recovery increment is what reports the survived drop. It
     // registers in BOTH the merged reconnect total and the mid-exchange sub-count,
     // which the end-of-run summary reports apart from connect-time retries.
     expect(adapter.reconnectCount).toBe(1);
@@ -3386,7 +3379,7 @@ describe("session recovery", () => {
     expect(message).toContain("session-duration or idle limit");
     expect(message).toContain("cannot");
     // (c) names the real remedy under the held-session model by the flag the
-    //     operator can actually type, and is honest that a longer poll interval
+    //     operator can actually type, and correctly states that a longer poll interval
     //     helps only for a query-frequency reaction
     expect(message).toContain("--polling-frequency");
     expect(message).toContain("--connection-per-poll");
@@ -3447,7 +3440,7 @@ describe("session recovery", () => {
     // never one per drop.
     expect(warn).toHaveBeenCalledTimes(2);
     expect(warn.mock.calls.length).toBeLessThan(SFTP_REDIAL_WARN_INTERVAL);
-    // Both messages reassure that the exchange survives the drop and stay honest
+    // Both messages reassure that the exchange survives the drop and stay accurate
     // about the current single-session model (no "held open less often" claim).
     const first = warn.mock.calls[0][0] as string;
     expect(first).toContain("the exchange continues");
@@ -3456,7 +3449,7 @@ describe("session recovery", () => {
     expect(escalation).toContain(`${SFTP_REDIAL_WARN_INTERVAL} times`);
     expect(escalation).toContain("the exchange continues");
     // Each line reports the budget REMAINING at that point, so a rising count is
-    // legible as an approach to the terminal failure, not just as a tally.
+    // clear as an approach to the terminal failure, not just as a tally.
     expect(first).toContain("99 further mid-exchange re-dials are allowed");
     expect(escalation).toContain(
       `${100 - SFTP_REDIAL_WARN_INTERVAL} further mid-exchange re-dials are allowed`,
@@ -3471,11 +3464,11 @@ describe("session recovery", () => {
     expect(escalation).not.toContain("held open less often");
   });
 
-  test("closes a session dialed during teardown and surfaces the original loss", async () => {
+  test("closes a session dialed during teardown and reports the original loss", async () => {
     // Latch `closing` WHILE the recovery re-dial is in flight (the entry-guard
     // teardown test above covers `closing` latched BEFORE the op). The post-re-dial
     // check must then tear down the freshly-dialed session so it does not outlive
-    // the close, and surface the original clean-loss error rather than re-issuing.
+    // the close, and report the original clean-loss error rather than re-issuing.
     const wrapper = sessionWrapper();
     const state = { live: true };
     let connectCalls = 0;
@@ -3526,7 +3519,7 @@ describe("session recovery", () => {
     releaseRedial();
 
     const err = await listing;
-    // The original clean-loss error surfaces, not a re-issued result.
+    // The original clean-loss error is reported, not a re-issued result.
     expect((err as Error).message).toContain("SFTP session is not open");
     // The freshly-dialed session was torn down (its client.end() ran) and the op
     // did not re-issue into the closing adapter.
@@ -3542,7 +3535,7 @@ describe("session recovery", () => {
   test("preserves the original rename error when the re-issue's exists() probe rejects", async () => {
     // rename()'s re-issue confirms a landed pre-drop rename via exists(dest); if
     // that probe itself rejects, the ambiguity is unresolved, so the outcome is
-    // the undetermined one -- carrying the ORIGINAL rename error, not the probe's
+    // the undetermined one -- holding the ORIGINAL rename error, not the probe's
     // failure (mirrors createExclusiveOnce's SFTPv3 fallback to the original
     // openErr).
     const wrapper = sessionWrapper();
@@ -3581,12 +3574,12 @@ describe("session recovery", () => {
   });
 
   // The re-issue's existence probe is a server round trip like the rename it
-  // confirms, so it is issued through the private existsOnce: the seam carrying
-  // the outstanding-operation count, the per-operation deadline, and the
-  // dead-session guard. The cases below pin what that seam buys on this path;
+  // confirms, so it is issued through the private existsOnce: the call site
+  // holding the outstanding-operation count, the per-operation deadline, and the
+  // dead-session guard. The cases below pin what that call site buys on this path;
   // what the count itself buys is pinned in the connection-per-poll block, the
   // one mode where a boundary can fall while the probe is on the wire. Whichever
-  // way the probe fails, it confirms nothing, so the rename fails carrying the
+  // way the probe fails, it confirms nothing, so the rename fails with the
   // ORIGINAL error -- and fails promptly, rather than riding the whole-exchange
   // budget.
 
@@ -3602,7 +3595,7 @@ describe("session recovery", () => {
     (client as any).rename = vi.fn().mockImplementation(async () => {
       if (!state.live) throw notConnected("rename");
       // The re-issue sees the source gone (a landed pre-drop rename), and the
-      // reply that carries it is malformed: the guarded wrapper 'error' listener
+      // reply that holds it is malformed: the guarded wrapper 'error' listener
       // kills the session before the probe is issued.
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (adapter as any).fatalSftpError = new Error("Malformed DATA packet");
@@ -3768,10 +3761,10 @@ describe("session recovery", () => {
     );
   });
 
-  test("surfaces the original rename error when the source is still on the server", async () => {
+  test("reports the original rename error when the source is still on the server", async () => {
     // The other half of that pair: the destination is absent and the source is
     // still there, so nothing moved this party's file and the publish
-    // determinately did not land. Its own error surfaces, unwrapped -- the
+    // determinately did not land. Its own error is reported, unwrapped -- the
     // undetermined classification must not swallow a determinate failure.
     const wrapper = sessionWrapper();
     const { client, connect, state } = droppable(wrapper);
@@ -3807,7 +3800,7 @@ describe("session recovery", () => {
   test("leaves a FIRST-attempt rename's absence and dest-exists conflict terminal, with no probe", async () => {
     // The idempotency relaxation is the RE-ISSUE's alone. On a live session there
     // is no session loss to recover from, so a genuine absence and a persistent
-    // "operation did not take effect" both surface as themselves -- and neither
+    // "operation did not take effect" both show up as themselves -- and neither
     // consults the destination, which is what would turn a real conflict into a
     // silent success.
     const wrapper = sessionWrapper();
@@ -4079,7 +4072,7 @@ describe("session recovery", () => {
 // its connection close leaves the transport half-open -- this side's write half
 // ended, no FIN back -- with ssh2-sftp-client's `sftp` property STILL SET, since
 // the library clears it only from the ssh2 Client's 'close'. The operation on the
-// wire cannot complete on a transport that carries nothing, so it rides the
+// wire cannot complete on a transport that sends nothing, so it rides the
 // per-operation liveness deadline and rejects with the terminal stalled error.
 // Recovery therefore reads the TRANSPORT rather than the session property: it
 // forces the ended transport closed so the library clears the session, then
@@ -4103,7 +4096,7 @@ describe("mid-exchange drop against a partner that withholds its close", () => {
   // clears the session until this side destroys the socket, which is what the
   // library's global 'close' listener answers. `clearsOnDestroy: false` models an
   // ssh2 that no longer emits that 'close'; omitting `destroy` from the socket
-  // models one that no longer exposes the seam at all.
+  // models one that no longer exposes destroy() at all.
   function withholdingPartner(
     options: { clearsOnDestroy?: boolean; withDestroy?: boolean } = {},
   ) {
@@ -4170,8 +4163,8 @@ describe("mid-exchange drop against a partner that withholds its close", () => {
         "server; refusing to wait on the server further",
     );
 
-  // The adapter's own forced-close bound (not exported; a liveness backstop, not
-  // a tunable).
+  // The adapter's own forced-close bound (not exported; a liveness safety check,
+  // not a tunable).
   const FORCED_CLOSE_BOUND_MS = 1_000;
 
   function loggedAdapter() {
@@ -4342,9 +4335,9 @@ describe("mid-exchange drop against a partner that withholds its close", () => {
     expect(adapter.midExchangeReconnectCount).toBe(1);
   });
 
-  test("warns and leaves the operation terminal when the socket destroy seam has moved", async () => {
-    // The mechanism is checked, not assumed: with the seam gone the recovery
-    // cannot clear the session, so it says so -- naming the seam and the upgrade
+  test("warns and leaves the operation terminal when the socket destroy() call site has moved", async () => {
+    // The mechanism is checked, not assumed: with the call site gone the recovery
+    // cannot clear the session, so it says so -- naming the call site and the upgrade
     // checklist -- and degrades to the terminal outcome the operation already had,
     // in the same error class the poll loop stops on.
     const { client, connect, dropWithholdingClose } = withholdingPartner({
@@ -4361,7 +4354,7 @@ describe("mid-exchange drop against a partner that withholds its close", () => {
       TransportOperationStalledError,
     );
     expect(connect).toHaveBeenCalledTimes(1);
-    // The operation was not re-issued onto the session that can carry nothing.
+    // The operation was not re-issued onto the session that can send nothing.
     expect(del).toHaveBeenCalledOnce();
     expect(log.warn).toHaveBeenCalledOnce();
     const message = log.warn.mock.calls[0][0] as string;
@@ -4380,8 +4373,8 @@ describe("mid-exchange drop against a partner that withholds its close", () => {
   test("warns and leaves the operation terminal when the forced close's destroy raises", async () => {
     // net.Socket's destroy() is driven synchronously, so it can raise INTO the
     // recovery rather than rejecting a wait it can absorb. The recovery catches
-    // that where the connection-per-poll release deliberately does not: the
-    // operation already carries the loss the poll loop stops on, and an error of
+    // that where the connection-per-poll release does not, by design: the
+    // operation already holds the loss the poll loop stops on, and an error of
     // the mechanism's own would replace it with one the loop reads differently.
     const { client, connect, destroy, dropWithholdingClose } =
       withholdingPartner();
@@ -4416,7 +4409,7 @@ describe("mid-exchange drop against a partner that withholds its close", () => {
   });
 
   test("warns and leaves the operation terminal when the forced close does not clear the session", async () => {
-    // The one premise no dial can check -- that destroying the transport takes the
+    // The one assumption no dial can check -- that destroying the transport takes the
     // session with it -- is read back where it is driven, on the mid-exchange
     // path's own terms: a warning and the operation's own loss, not a raise of its
     // own that would replace it.
@@ -4540,7 +4533,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
   // ssh2-sftp-client global 'close' listener that clears this.sftp when the
   // connection closes. connect() restores the session. This lets releaseForIdle's
   // "drive the ssh2 Client's end() and await its 'close'" path run against a
-  // faithful stand-in without a live server. It carries the whole high-level op
+  // faithful stand-in without a live server. It has the whole high-level op
   // surface (the raw-wrapper ops come from the caller's `wrapper`), so an op can
   // be driven end to end across a boundary.
   function ephemeralClient(wrapper: ReturnType<typeof wrapperMethods>) {
@@ -4553,7 +4546,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     const rawClient = new EventEmitter() as EventEmitter &
       Record<string, unknown>;
     // A live net.Socket reports Node's half-close flags and its post-destroy flag,
-    // and carries destroy(); the release's seams are verified against the first two
+    // and has destroy(); the release's call sites are verified against the first two
     // at connect, and both forced closes read `destroyed` back where they drive it.
     const socket = {
       setKeepAlive: vi.fn(),
@@ -4576,7 +4569,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     const connect = vi.fn().mockImplementation(async () => {
       state.live = true;
       // A dial gets a FRESH socket: whatever a previous cycle's teardown did to the
-      // last one does not carry into it, so a release reading the socket sees this
+      // last one does not transfer to it, so a release reading the socket sees this
       // cycle's state rather than an earlier cycle's. Left alone when a test has
       // taken the socket, or the flag, away -- each of those is its own case.
       const dialed = rawClient._sock as
@@ -4847,7 +4840,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     // connection-per-poll it is gated off in EVERY phase, so recovery re-dials are
     // unbounded by the count (bounded instead by the peer-inactivity ceiling): more
     // drops than max_reconnect_attempts still recover, where the default mode would
-    // have failed terminally. This is what carries the rendezvous phase -- which
+    // have failed terminally. This is what sustains the rendezvous phase -- which
     // holds one session across its waits, unlike the poll loop -- through a server
     // cap that cuts it repeatedly.
     const wrapper = wrapperMethods({
@@ -5223,8 +5216,8 @@ describe("ephemeral session mode (connection-per-poll)", () => {
   // next point a session exists.
 
   // The ceiling on the whole re-issue drain, duplicated from the adapter for the
-  // same reason the close and acquire bounds above are (it is a liveness backstop,
-  // not a seam), so the cases below can sit either side of it.
+  // same reason the close and acquire bounds above are (it is a liveness safety
+  // check, not a call site), so the cases below can sit either side of it.
   const DRAIN_BOUND_MS = 5_000;
 
   // Wait for a condition the adapter reaches on its own schedule (a request
@@ -5269,7 +5262,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
   test("a cleanup delete issued while the release is in flight is re-issued at the next re-establishment", async () => {
     // The other reading, and the one no completed-boundary check covers: the
     // release has driven the ssh2 Client's end() and is awaiting its 'close', so
-    // the session still reads live over a transport that can no longer carry the
+    // the session still reads live over a transport that can no longer send the
     // delete.
     const { client, rawClient, deleted } = slowClosingClient(wrapperMethods());
     const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
@@ -5318,7 +5311,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     // budget above, so the drain's wait lands on teardown and on the recovery
     // gate's first attempt after an idle gap. A partner that ACCEPTS delete
     // requests and WITHHOLDS their callbacks must therefore not cost either of
-    // them a whole per-operation deadline: the re-issue carries the
+    // them a whole per-operation deadline: the re-issue has the
     // teardown-scale bound in its place, and its expiry keeps what it could not
     // perform.
     const { client, deleteControls } = ephemeralClient(wrapperMethods());
@@ -5414,7 +5407,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
 
   test("the drain bound covers the whole record, not one deadline per re-issued delete", async () => {
     // The re-issues go out concurrently, which is what makes ONE bound the
-    // honest description of the drain's cost. A record filled to its cap must
+    // accurate description of the drain's cost. A record filled to its cap must
     // therefore end at the same bound a single entry does.
     const { client, deleteControls } = ephemeralClient(wrapperMethods());
     const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
@@ -5766,7 +5759,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     // ssh2-sftp-client clears `this.sftp` from that 'close', not from end(), so
     // between the two the session still reports live while the channel is already
     // going away. An op landing in that window rejects with a live-looking
-    // session, which the clean-loss classifier reads as "not a session loss" and
+    // session, which the clean-loss classifier treats as "not a session loss" and
     // fails terminally -- so the op must wait the release out and re-establish
     // rather than race it.
     const wrapper = wrapperMethods();
@@ -5966,7 +5959,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     expect(boundarySaysReleaseTookTheSession(adapter)).toBe(false);
   });
 
-  // Every seam the idle release drives past the public API, and where it lives.
+  // Every call site the idle release drives past the public API, and where it lives.
   // The release is the only caller of any of them, so an upgrade that relocates
   // one takes the boundary with it silently -- a session held across every idle
   // gap, which is the one thing this mode exists to prevent.
@@ -6016,7 +6009,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       await expect(dial).rejects.toThrow(
         "which the installed SFTP library does not support",
       );
-      // The seam itself is contributor-tier detail: logged at debug rather than
+      // The call site itself is contributor-tier detail: logged at debug rather than
       // put on the operator's terminal.
       expect(adapterLog(adapter).debug).toHaveBeenCalledWith(
         expect.stringContaining(seam),
@@ -6024,9 +6017,9 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     },
   );
 
-  test("the default held-session mode is not held to the release's seams", async () => {
+  test("the default held-session mode is not held to the release's call sites", async () => {
     // Nothing outside connection-per-poll mode drives any of them, so failing a
-    // held-session dial on a seam it never reaches would ground the whole SFTP
+    // held-session dial on a call site it never reaches would ground the whole SFTP
     // channel on an upgrade that costs it nothing.
     const { client, rawClient } = ephemeralClient(wrapperMethods());
     delete rawClient.end;
@@ -6092,8 +6085,8 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       // this afterwards is a close wait that outlived the release that armed it.
       const dialedCloseListeners = rawClient.listenerCount("close");
       const release = adapter.releaseForIdle();
-      // The adapter's own close bound (not exported; a liveness backstop, not a
-      // tunable). Past it the partner's close is still outstanding.
+      // The adapter's own close bound (not exported; a liveness safety check, not
+      // a tunable). Past it the partner's close is still outstanding.
       await vi.advanceTimersByTimeAsync(5_000);
       await release;
 
@@ -6221,8 +6214,8 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       // Every cycle re-dialed, and none of them was reported as a drop.
       expect(adapter.reconnectCount).toBe(0);
       // The forced total is a SUBSET of the released one -- the same boundary
-      // reached two ways -- so an exchange whose every cycle was forced reads as
-      // the whole of its denominator rather than as a total with none.
+      // reached two ways -- so an exchange whose every cycle was forced is treated
+      // as the whole of its denominator rather than as a total with none.
       expect(adapter.forcedReleaseCount).toBe(cycles);
       expect(adapter.releasedBoundaryCount).toBe(cycles);
       expect(warn).toHaveBeenCalledTimes(3);
@@ -6286,7 +6279,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       await release;
       expect(sock.destroy).toHaveBeenCalledOnce();
 
-      // The two bounds, identified by their (unexported, liveness-backstop) delays.
+      // The two bounds, identified by their unexported liveness safety-check delays.
       const releaseBound = armed.filter((timer) => timer.delayMs === 5_000);
       const forcedBound = armed.filter((timer) => timer.delayMs === 1_000);
       expect(releaseBound).toHaveLength(1);
@@ -6345,12 +6338,12 @@ describe("ephemeral session mode (connection-per-poll)", () => {
   });
 
   test("a release that finds the transport still writable drops the latch", async () => {
-    // The warning above rests on an ssh2 premise -- end() ends the socket -- so it
+    // The warning above rests on an ssh2 assumption -- end() ends the socket -- so it
     // is checked, not asserted: an ssh2 whose end() stopped ending the socket would
     // leave a genuinely live session held across the idle gap, the one thing this
     // mode exists to prevent, and the operator must be pointed at the changelog
     // rather than told to expect a stall. It is also the one branch where the
-    // session may still be LIVE, so the check has to carry the latch as well as the
+    // session may still be LIVE, so the check has to handle the latch as well as the
     // log line: a latch standing over a live session exempts its next genuine drop
     // from the count and the warning. Proven by dropping that session and requiring
     // the re-dial to be reported.
@@ -6402,7 +6395,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
   });
 
   test("a second release that closes nothing draws a second warning", async () => {
-    // The one degraded outcome deliberately off the shared warn cadence: it
+    // The one degraded outcome off the shared warn cadence: it
     // keeps no run total, so a paced line would say "1" every time it fired and
     // the operator could not tell one occurrence from ten. Every occurrence is
     // its own record instead, which only a second one can measure -- the shared
@@ -6826,7 +6819,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     // (or, at max_reconnect_attempts=0, failing the operation outright) for a
     // session the adapter closed on purpose. Closing between the re-dial and the
     // re-issue is worse: the re-issue rejects on a session this side has just taken
-    // away, and a rename that DID land surfaces as a failure.
+    // away, and a rename that DID land shows up as a failure.
     //
     // What rules both out is one span: an operation is counted outstanding from
     // where it is ISSUED to where it finally settles, the failed attempt, the
@@ -7373,7 +7366,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     let failInFlight: ((error: unknown) => void) | undefined;
     let dialsInFlight = 0;
     let dials = 0;
-    // Every session transition in the order it happened, each teardown carrying
+    // Every session transition in the order it happened, each teardown holding
     // the number of handshakes live at that instant -- the sequence is the
     // assertion, since a teardown recorded alongside a dial is the overlap.
     const events: string[] = [];
@@ -7470,11 +7463,11 @@ describe("ephemeral session mode (connection-per-poll)", () => {
   // The cases below pin what the adapter DOES across a session transition --
   // which boundary is a deliberate release and which is a server-side drop, and
   // what a teardown may overlap -- through the reconnect counters, the operator
-  // warning, and the seams the adapter drives. None of them reads the adapter's
+  // warning, and the call sites the adapter drives. None of them reads the adapter's
   // internal bookkeeping, so each holds whatever machinery serializes the
   // transitions underneath.
 
-  // The SSH_FX_NO_SUCH_FILE status ssh2-sftp-client surfaces as the raw numeric
+  // The SSH_FX_NO_SUCH_FILE status ssh2-sftp-client reports as the raw numeric
   // SFTP code, which the delete and rename recovery resolvers read to tell a
   // pre-drop attempt that already LANDED from a genuine absence.
   const noSuchFile = (name: string) =>
@@ -7641,7 +7634,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     // The tear that survives the boundary precondition: the PARTNER drops the
     // session with the delete on the wire. The default held-session mode is where
     // this lands -- it runs no idle release at all -- and the resolver is what
-    // carries it: re-dial, re-issue, and the now-absent source read as the landed
+    // handles it: re-dial, re-issue, and the now-absent source read as the landed
     // attempt it was. The drop is the server's, so it is counted and warned.
     const { client, connect, landed, dropFromServer } =
       landedOnTearClient(wrapperMethods());
@@ -7825,7 +7818,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       // transport still owes its 'close'. Dialing there fails the dial and leaves
       // the session it opened abandoned at the server, and that session's own
       // later events fail the next dial in turn -- so the whole budget burns out
-      // and the operation surfaces a connect error instead of its session loss.
+      // and the operation reports a connect error instead of its session loss.
       // The recovery retires the transport first, so the one dial it makes lands.
       const { client, connect, socket, dropFromServer } =
         tornOnEndClient(wrapperMethods());
@@ -7849,7 +7842,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
   );
 
   test("warns and leaves the operation terminal when the owed close never lands", async () => {
-    // The premise the retirement rests on -- that destroying the transport draws
+    // The assumption the retirement rests on -- that destroying the transport draws
     // the client 'close' -- is read back where it is driven, like its two siblings
     // on this path: a warning naming the checklist, no dial, and the operation's
     // own session loss rather than an error of the mechanism's making.
@@ -7876,8 +7869,8 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       const failing = adapter.exists("/r/x.json").catch((e: unknown) => e);
       dropFromServer();
       // Past the retirement's own bound for a 'close' that never lands, and past
-      // the whole dialing-retry budget besides, so the case settles on what the
-      // recovery decided rather than on a wait still outstanding.
+      // the whole dialing-retry budget besides, so what the recovery decided
+      // determines the outcome here, not a wait still outstanding.
       await vi.advanceTimersByTimeAsync(10_000);
 
       const error = await failing;
@@ -7897,10 +7890,10 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     }
   });
 
-  // Takes the lifecycle watch's seam away from a Client, leaving the seams the
-  // retirement DRIVES intact: EventEmitter's own once() is implemented in terms of
-  // on(), so a hand-rolled substitute is what separates the reading's seam from the
-  // forced close's rather than removing both at once.
+  // Takes the lifecycle watch's call site away from a Client, leaving the call
+  // sites the retirement DRIVES intact: EventEmitter's own once() is implemented
+  // in terms of on(), so a hand-rolled substitute is what separates the reading's
+  // call site from the forced close's rather than removing both at once.
   function withoutClientOn(rawClient: EventEmitter & Record<string, unknown>) {
     const attach = rawClient.on.bind(rawClient);
     const once = (
@@ -7934,7 +7927,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     // tell", never "nothing owed": with no reading to take, the re-dial retires the
     // transport rather than dialing into a window it cannot see -- so the torn
     // operation still recovers on ONE dial, and the lost reading is reported as the
-    // seam failure it is instead of being spent silently on a failed dial.
+    // call site failure it is instead of being spent silently on a failed dial.
     const { client, connect, rawClient, socket, dropFromServer } =
       tornOnEndClient(wrapperMethods());
     withoutClientOn(rawClient);
@@ -8066,8 +8059,8 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       await adapter.connect({ host: "h", maxReconnectAttempts: 1 });
       const failing = adapter.exists("/r/x.json").catch((e: unknown) => e);
       dropFromServer();
-      // Past the retirement's own bound and the whole dialing-retry budget, so the
-      // case settles on what the recovery decided rather than on a wait still
+      // Past the retirement's own bound and the whole dialing-retry budget, so
+      // what the recovery decided determines the outcome here, not a wait still
       // outstanding.
       await vi.advanceTimersByTimeAsync(10_000);
 
@@ -8251,16 +8244,16 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     expect(connect).toHaveBeenCalledTimes(2);
   });
 
-  // Enter an idle release at the seam between the re-issued attempt's reply and
-  // the destination probe it fires.
+  // Enter an idle release at the boundary between the re-issued attempt's reply
+  // and the destination probe it fires.
   //
   // Entered from the same turn as that reply -- the only place a test can hand
   // work to the exact microtask queue the rejection drains -- and called
   // synchronously there: an idle transition queue is entered in the calling tick,
   // so the boundary falls with the re-issue's rejection queued and its probe not
-  // yet issued. There is deliberately no count for the device to watch for: the
+  // yet issued. There is no count for the device to watch for: the
   // operation is one span from issue to final settlement, so the count reads the
-  // same at this seam as it does anywhere else in the arm, which is the property
+  // same at this boundary as it does anywhere else in the arm, which is the property
   // the case is for.
   //
   // Reports whether it arrived: a device the mock never called would leave the
@@ -8275,12 +8268,12 @@ describe("ephemeral session mode (connection-per-poll)", () => {
   }
 
   test("an idle boundary landing between the rename re-issue and its probe closes nothing, and the landed rename still resolves", async () => {
-    // The seam the recovery arm's bracket exists for. The re-issue after the
+    // The boundary the recovery arm's bracket exists for. The re-issue after the
     // re-dial sees the source gone -- the pre-drop rename LANDED -- and fires the
-    // destination probe that says so. Its own bracket settles the count before the
+    // destination probe that says so. Its own bracket closes the count before the
     // probe's opens, and a release entering there would close the session the
-    // probe has yet to answer on: the unanswered probe reads as "the rename did
-    // not land", and a publish that reached the server fails terminally on the
+    // probe has yet to answer on: the unanswered probe is treated as "the rename
+    // did not land", and a publish that reached the server fails terminally on the
     // SSH_FX_NO_SUCH_FILE that drove the probe. The arm holds the count across the
     // whole of itself, so the boundary is held rather than closed.
     const adapter = new SSH2SFTPClientAdapter({
@@ -8321,8 +8314,8 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     // replacement session and the re-issue has not run on it yet; a release
     // entering there would close the very session just dialed, and the re-issue
     // would then reject with a dead-session error no recovery resolver reads at
-    // all -- so a rename that DID land surfaces as a failed publish, the same
-    // outcome as at the probe seam and by a different route.
+    // all -- so a rename that DID land shows up as a failed publish, the same
+    // outcome as at the probe boundary and by a different route.
     const adapter = new SSH2SFTPClientAdapter({
       ephemeralSessions: true,
       stallDeadlineMs: 300,
@@ -8387,7 +8380,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     // reply arrives, and what tells the adapter it landed is the re-issue's own
     // error plus the destination probe behind it -- both inside the arm. A
     // boundary closing anywhere across that arm would close the session the
-    // re-issue and the probe run on, and the landed publish would surface as a
+    // re-issue and the probe run on, and the landed publish would show up as a
     // failure. Swept across the arm rather than placed at one point: the span
     // covers the whole of it, so every depth reads the operation counted and is
     // held.
@@ -8440,7 +8433,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     // is the probe's per-operation deadline and nothing weaker. The count returns
     // to zero with the stat still outstanding at the server, and the next
     // boundary closes as an undisturbed one does -- so counting the probe buys
-    // the hold no bound the rest of the bracket does not already carry.
+    // the hold no bound the rest of the bracket does not already have.
     const { client, rawClient, state, dropFromServer } =
       landedOnTearClient(wrapperMethods());
     const probe = pendingExists(client);
@@ -8470,7 +8463,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     expect(state.live).toBe(true);
 
     // The probe is never answered: its deadline is what settles it, and the
-    // ORIGINAL rename error is what the rejection carries rather than the probe's
+    // ORIGINAL rename error is what the rejection holds rather than the probe's
     // own stall.
     const err = await publish.catch((e: unknown) => e);
     expect(err).toBeInstanceOf(TransportPublishIndeterminateError);
@@ -8878,8 +8871,8 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       return new Promise<string>(() => {});
     });
 
-    // The transfer is deliberately left unfinished, so its window trips whenever
-    // the trickle stops after this test; swallow that so it cannot surface as an
+    // The transfer is left unfinished by design, so its window trips whenever
+    // the trickle stops after this test; swallow that so it cannot show up as an
     // unhandled rejection.
     void adapter
       .put(Buffer.alloc(64 * SFTP_PUT_PROGRESS_CHUNK_BYTES), "/remote/out.bin")
@@ -8979,7 +8972,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       const { client, connect, state, sock } =
         withheldCloseClient(wrapperMethods());
       // A destroy that tears the socket down without the ssh2 Client 'close' that
-      // clears the session: the premise the release reads back and raises on.
+      // clears the session: the assumption the release reads back and raises on.
       sock.destroy = vi.fn();
       const adapter = new SSH2SFTPClientAdapter({ ephemeralSessions: true });
       const warn = vi.fn();
@@ -9041,21 +9034,21 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     await adapter.releaseForIdle();
     expect(releaseBoundaryStands(adapter)).toBe(true);
 
-    // The seam the release is verified against is gone by the next dial, which
+    // The call site the release is verified against is gone by the next dial, which
     // checks it after the handshake has established the session.
     delete (rawClient._sock as Record<string, unknown>).writableEnded;
     await expect(adapter.ensureConnected()).resolves.toBe(false);
     expect(state.live).toBe(true);
     expect(boundarySaysReleaseTookTheSession(adapter)).toBe(false);
 
-    // The release that follows drives nothing either: the same absent seam refuses
+    // The release that follows drives nothing either: the same absent call site refuses
     // it before it reaches the transport, so it too ends nothing.
     await expect(adapter.releaseForIdle()).rejects.toThrow(
       "which the installed SFTP library does not support",
     );
     expect(state.live).toBe(true);
 
-    // The absent seam is not what is under test past this point: put it back so the
+    // The absent call site is not what is under test past this point: put it back so the
     // drop below has a re-dial to recover on.
     (rawClient._sock as Record<string, unknown>).writableEnded = false;
     state.live = false;
@@ -9185,7 +9178,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
   // and that a failing transition frees it.
 
   // Records each transition's body entering and leaving, through the adapter's own
-  // acquire. Built test-side so the adapter carries no log of its own; an exact
+  // acquire. Built test-side so the adapter holds no log of its own; an exact
   // start/end sequence is what proves both the order and the non-overlap.
   function recordTransitions(adapter: SSH2SFTPClientAdapter): string[] {
     const log: string[] = [];
@@ -9269,7 +9262,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     const log = recordTransitions(adapter);
 
     // Every kind that can be requested after the latch, each returning what its
-    // caller reads as "nothing to do" -- except a re-open, which is refused.
+    // caller treats as "nothing to do" -- except a re-open, which is refused.
     await expect(adapter.ensureConnected()).resolves.toBe(true);
     await expect(adapter.releaseForIdle()).resolves.toBeUndefined();
     await expect(
@@ -9505,7 +9498,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
   test("an abandoned teardown that cannot close the transport still stops the keepalive", async () => {
     // The degraded branch reports this teardown DONE over a transport it could not
     // close, so the keepalive must not go on beating against that connection --
-    // which is why the stop precedes the seam, exactly as it does in the terminal
+    // which is why the stop precedes the call site, exactly as it does in the terminal
     // close. Driven in the default held-session mode, the one that arms a heartbeat.
     vi.useFakeTimers();
     try {
@@ -9517,7 +9510,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       const internals = adapter as any;
 
       await adapter.connect({ host: "h", maxReconnectAttempts: 0 });
-      // An ssh2 that relocated the socket's destroy, the one seam this path drives.
+      // An ssh2 that relocated the socket's destroy, the one call site this path drives.
       delete (rawClient._sock as { destroy?: unknown }).destroy;
       internals.session.beginClose();
       internals.forceCloseAbandonedTeardown();
@@ -9555,8 +9548,8 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     expect(log).toEqual([]);
   });
 
-  test("a release whose ssh2 seams went away after the dial fails loudly", async () => {
-    // The release resolves the seams again where it drives them, not only at the
+  test("a release whose ssh2 call sites went away after the dial fails loudly", async () => {
+    // The release resolves the call sites again where it drives them, not only at the
     // dial: an ssh2 that relocated one between the two would otherwise reach a
     // TypeError at the idle boundary instead of the actionable error the dial-time
     // check gives.
@@ -9606,8 +9599,8 @@ describe("ephemeral session mode (connection-per-poll)", () => {
   // the single, narrow exception.
 
   // The bound the adapter arms on every queued acquire. Duplicated from the
-  // adapter (the constant is deliberately not exported: it is a liveness backstop,
-  // not a seam), so the cases below can sit either side of it.
+  // adapter (the constant is not exported by design: it is a liveness safety
+  // check, not a call site), so the cases below can sit either side of it.
   const ACQUIRE_BOUND_MS = 10_000;
 
   // The two bounds a release spends in its worst case, duplicated from the adapter
@@ -9766,7 +9759,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
   test("a recovery re-dial that abandons over a held dead session fails the operation rather than re-issuing it", async () => {
     // The other arm of the abandoned re-dial's reading. Giving up the wait clears
     // nothing, so a session the partner dropped while withholding its close is
-    // still held over a transport that can carry nothing: a re-issue there would
+    // still held over a transport that can send nothing: a re-issue there would
     // ride the per-operation deadline a second time to reach the loss the
     // operation already has.
     vi.useFakeTimers();
@@ -9860,7 +9853,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
         `${SFTP_REDIAL_WARN_INTERVAL} idle boundaries released nothing this way`,
       );
       // What the end-of-run summary reports is every occurrence, not the paced
-      // subset the log carries -- and the two signals total separately there too,
+      // subset the log holds -- and the two signals total separately there too,
       // the release having declined once more than the cycle-start dial did. A
       // decline closed nothing, so it is neither a forced release nor a boundary
       // the partner closed on request, and none of the totals share a tally.
@@ -10010,7 +10003,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       expect(socket.destroyed).toBe(true);
       expect(client.end).not.toHaveBeenCalled();
       expect(rawClient.end).not.toHaveBeenCalled();
-      // The dial the destroy cut short reports the cycle it could not carry, and
+      // The dial the destroy cut short reports the cycle it could not complete, and
       // reports it SILENTLY: its rejection is the one a peer close produces, so
       // warning about a transient dial failure -- and promising a retry on a next
       // tick this closing run does not have -- would tell the operator the partner
@@ -10018,7 +10011,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       await expect(holder).resolves.toBe(false);
       // Reported to the operator at default verbosity, naming the cause: a slow
       // transition of this adapter's own rather than a slow partner. Neither a
-      // warning nor an error, so a run that already succeeded still reads as one.
+      // warning nor an error, so a run that already succeeded is still treated as one.
       expect(adapterLog(adapter).warn).not.toHaveBeenCalled();
       expect(adapterLog(adapter).error).not.toHaveBeenCalled();
       expect(adapterLog(adapter).info.mock.calls.flat()).toEqual([
@@ -10035,10 +10028,10 @@ describe("ephemeral session mode (connection-per-poll)", () => {
     }
   });
 
-  test("an operation whose recovery re-dial the teardown cut short surfaces the loss it was recovering from", async () => {
+  test("an operation whose recovery re-dial the teardown cut short reports the loss it was recovering from", async () => {
     // The other half of the same misattribution. A recovery re-dial can be the dial
     // an abandoning teardown destroys the transport beneath, and that rejection is
-    // the one a peer close produces -- so the operation would surface this adapter's
+    // the one a peer close produces -- so the operation would report this adapter's
     // own close in place of the session loss it was recovering from. Told apart by
     // the adapter's own reading of what it did, never by matching the error. Driven
     // in the default held-session mode, the one mid-exchange recovery was built for.
@@ -10276,7 +10269,7 @@ describe("ephemeral session mode (connection-per-poll)", () => {
       neverSettlingHolder(adapter, connect, state, rawClient);
       const released = adapter.releaseForIdle();
 
-      // Identified by its (unexported, liveness-backstop) delay, read before the
+      // Identified by its unexported liveness safety-check delay, read before the
       // wait settles and clears it.
       const acquireBound = armed.filter(
         (timer) => timer.delayMs === ACQUIRE_BOUND_MS,
@@ -10494,7 +10487,7 @@ describe("terminal close against a partner that withholds its close", () => {
     (adapter as any).client = client;
   };
 
-  // The adapter's own bounds (not exported; liveness backstops, not tunables).
+  // The adapter's own bounds (not exported; liveness safety checks, not tunables).
   const TERMINAL_CLOSE_BOUND_MS = 5_000;
   const FORCED_CLOSE_BOUND_MS = 1_000;
 
@@ -10530,7 +10523,7 @@ describe("terminal close against a partner that withholds its close", () => {
         expect(socket.destroy).toHaveBeenCalledOnce();
         expect(socket.destroyed).toBe(true);
         // Informational, at default verbosity, once: teardown's close runs last,
-        // so nothing here reads as a failure.
+        // so nothing here is treated as a failure.
         expect(log.info).toHaveBeenCalledTimes(1);
         const message = log.info.mock.calls[0][0] as string;
         expect(message).toContain("did not close the connection");
@@ -10619,7 +10612,7 @@ describe("terminal close against a partner that withholds its close", () => {
     "a teardown still closes the connection when only $seam has moved",
     async ({ seam }) => {
       // The terminal close drives client._sock.destroy() and reads
-      // _sock.destroyed; it touches none of the seams the connection-per-poll
+      // _sock.destroyed; it touches none of the call sites the connection-per-poll
       // release needs. Giving up on one of those would disable the forced destroy
       // over a member this path never calls -- and in the default mode connect()
       // checks nothing, so the first sign would be a completed run that never
@@ -10661,7 +10654,7 @@ describe("terminal close against a partner that withholds its close", () => {
   );
 
   test("a teardown whose forced close has no mechanism takes its safe branch", async () => {
-    // The seams are verified at connect only in connection-per-poll mode, so the
+    // The call sites are verified at connect only in connection-per-poll mode, so the
     // default mode meets an ssh2 upgrade that relocated one here, at teardown.
     // Failing a dial over a teardown-only mechanism would ground every
     // default-mode exchange on an upgrade that costs it nothing, so the branch
@@ -10687,7 +10680,7 @@ describe("terminal close against a partner that withholds its close", () => {
       expect(message).toContain(
         "not compatible with the installed SFTP library",
       );
-      // The seam it drives is logged at debug, not put on the terminal.
+      // The call site it drives is logged at debug, not put on the terminal.
       expect(log.debug).toHaveBeenCalledWith(
         expect.stringContaining("client._sock.destroy()"),
       );
@@ -10698,7 +10691,7 @@ describe("terminal close against a partner that withholds its close", () => {
   });
 
   test("a teardown whose destroyed socket does not close warns rather than throwing", async () => {
-    // The one premise connect() cannot check, because nothing at connect time
+    // The one assumption connect() cannot check, because nothing at connect time
     // destroys the socket: it is read back where it is driven. Nothing here may
     // throw -- core logs an end() rejection at debug, so a throw would be
     // invisible and would accomplish nothing.
@@ -11017,7 +11010,7 @@ describe("SFTP adapter session accounting", () => {
 
   // The scenario's guard is the per-cause assertion each step makes below:
   // WHICH cause was charged, and that its total moved by exactly one. The
-  // balance sum(losses) === generationsEnded is deliberately not asserted --
+  // balance sum(losses) === generationsEnded is not asserted --
   // it is an arithmetic identity of the ledger (losses rise only where `live`
   // clears, and the ended count is derived from `live`), so it holds whatever
   // the adapter does and a missed or mis-attributed charge cannot move it.
@@ -11137,7 +11130,7 @@ describe("SFTP adapter session accounting", () => {
       fatal: 0,
     });
     expect(accounting.generationsEnded).toBe(1);
-    // Teardown mechanics, so nothing an operator reads as a drop.
+    // Teardown mechanics, so nothing an operator would treat as a drop.
     expect(adapter.reconnectCount).toBe(0);
     expect(adapter.midExchangeReconnectCount).toBe(0);
   });
@@ -11159,7 +11152,7 @@ describe("SFTP adapter session accounting", () => {
     });
     expect(accounting.generationsEnded).toBe(1);
     // Replacing a session this side still held is this side's doing, so nothing
-    // an operator reads as a drop.
+    // an operator would treat as a drop.
     expect(adapter.reconnectCount).toBe(0);
     expect(adapter.midExchangeReconnectCount).toBe(0);
   });

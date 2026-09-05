@@ -52,7 +52,7 @@ import { OFFLINE_EXCHANGE_REASON } from "@bench/offlineExchangeGate";
 import { SPLIT_RENDEZVOUS_RETAIN_REQUIREMENT } from "@bench/filedropRendezvousChoice";
 
 // The send-row expectation derives its form from this function, so it pins that
-// the row carries the same form the step's chips do, not what that form is; the
+// the row holds the same form the step's chips do, not what that form is; the
 // literal FSI/PDI expectations live in
 // apps/web/test/unit/columnNameDisplay.test.ts.
 import { isolatedColumnName } from "@components/ColumnName";
@@ -64,7 +64,7 @@ import type {
 } from "@bench/inviterModel";
 import type { FieldValueCoverage } from "@psi/nonEmptyAggregate";
 
-// A right-to-left override, written as an escape so the source carries no raw
+// A right-to-left override, written as an escape so the source holds no raw
 // control byte (which would reorder the line it sits on).
 const RLO = "\u202e";
 
@@ -123,7 +123,7 @@ describe("spine derivation from the read file", () => {
   });
 
   test("the send row isolates the operator's own headers", () => {
-    // A header carrying a right-to-left override, unrecognized so it infers to
+    // A header holding a right-to-left override, unrecognized so it infers to
     // the disclosed set: the ledger names it verbatim inside the isolate, which
     // is how step 2's chips beside this rail show the same set. Escaping it here
     // would put one header two ways on the one screen where the operator decides
@@ -328,7 +328,7 @@ describe("review and create", () => {
     expect(validation.terms).toBeDefined();
   });
 
-  test("an invalid term surfaces a problem that targets its source", () => {
+  test("an invalid term raises a problem that targets its source", () => {
     const seeded = editorFromCsv("Dana", csv);
     // Sending a column to a partner that receives no results is the
     // incoherent pair validateAdvancedInvite refuses; the column table owns
@@ -501,7 +501,7 @@ describe("the create gate and the two sentences that state it", () => {
     },
   );
 
-  test("every gate the step carries is covered above", () => {
+  test("every gate the step holds is covered above", () => {
     expect(new Set(cases.map((one) => one.gate))).toEqual(
       new Set(Object.keys(clearGates)),
     );
@@ -733,7 +733,7 @@ describe("inviter cleaning attention", () => {
     expect(amber.fact).toBe("1 field failing");
   });
 
-  test("an unavailable sweep surfaces a distinct rail fact, not the plain count", () => {
+  test("an unavailable sweep shows a distinct rail fact, not the plain count", () => {
     const editor = editorFromCsv("Dana", csv);
     const attention = inviterCleaningAttention(editor, null, true);
     expect(attention.needsAttention).toBe(true);
@@ -838,7 +838,7 @@ describe("availableTransports matrix", () => {
     expect(available.defaultTransport).toBe("sftp");
     const byTransport = optionByTransport(true, true, true);
     // Browser is offered (never removed) but disabled: its in-tab exchange is out
-    // of scope on the appliance.
+    // of scope on the console.
     expect(byTransport.get("browser")).toBeDefined();
     expect(byTransport.get("browser")).toMatchObject({
       disabled: true,
@@ -872,7 +872,7 @@ describe("availableTransports matrix", () => {
     });
   });
 
-  test("the deliberate save-a-file preference flips the sftp card", () => {
+  test("the explicit save-a-file preference flips the sftp card", () => {
     const byTransport = new Map(
       availableTransports(true, false, false, true).options.map((option) => [
         option.transport,
@@ -954,7 +954,7 @@ describe("transport chooser copy by deployment", () => {
     const copy = transportChooserCopy(true, false, true);
     expect(copy.filedropLabel).toBe("Over a shared directory, run here");
     expect(copy.filedropDescription).toContain("Runs the exchange here");
-    // The Browser card names its in-tab exchange as out of scope on the appliance.
+    // The Browser card names its in-tab exchange as out of scope on the console.
     expect(copy.browserDescription).toContain("out of scope");
     expect(copy.capabilityNote).toContain("shared-directory exchanges here");
     expect(copy.capabilityNote).toContain("out of scope on this console");
@@ -980,7 +980,7 @@ describe("transport chooser copy by deployment", () => {
     expect(copy.filedropDescription).not.toContain("the same synced folder");
   });
 
-  test("an unavailable console relays the appliance's own reason over the generic one", () => {
+  test("an unavailable console relays its own reason over the generic one", () => {
     const problem =
       "JOB_RENDEZVOUS_OUTBOUND_DIR resolves inside the rendezvous directory";
     const copy = transportChooserCopy(true, false, false, false, { problem });
@@ -1007,7 +1007,7 @@ describe("transport chooser copy by deployment", () => {
     expect(copy.sftpDescription).toContain("read on this console");
   });
 
-  test("the deliberate save-a-file choice returns SFTP to the CLI copy", () => {
+  test("the explicit save-a-file choice returns SFTP to the CLI copy", () => {
     const copy = transportChooserCopy(true, false, false, true);
     expect(copy.sftpLabel).toBe(
       "Over SFTP, run by the psilink command-line tool",
@@ -1021,7 +1021,7 @@ describe("transport chooser copy by deployment", () => {
     expect(copy.sftpDescription).toContain(
       "SFTP connection set up on this machine",
     );
-    // The console SFTP card states the file is read on the appliance.
+    // The console SFTP card states the file is read on this console.
     expect(copy.sftpDescription).toContain("read on this console");
     expect(copy.capabilityNote).toContain("out of scope on this console");
   });
@@ -1104,7 +1104,7 @@ describe("after the exchange completes", () => {
     );
   });
 
-  test("the outcome fold carries the count's provenance out of the run outputs", () => {
+  test("the outcome fold holds the count's provenance out of the run outputs", () => {
     // Both seats' ledgers read the outcome through this fold, so a row that names
     // the provenance is only as good as what survives here.
     for (const countReportedByPartner of [true, false]) {
@@ -1397,7 +1397,7 @@ describe("a column retype reconciles standardization even with authored keys", (
     );
 
     // The re-derived last_name cleaning is present and the retyped column no longer
-    // carries a stale first_name binding: every remaining transformation resolves to
+    // holds a stale first_name binding: every remaining transformation resolves to
     // a field typed to match its column.
     const fields = authoredLinkageFields(
       retyped.draft.metadata,
@@ -1432,7 +1432,7 @@ describe("a column retype reconciles standardization even with authored keys", (
 
   test("authored keys survive the retype untouched", () => {
     // The keysAuthored protection is not weakened: reconciling the standardization
-    // must not touch the author-controlled key set. The seeded keys carry a
+    // must not touch the author-controlled key set. The seeded keys hold a
     // first_name element; author them, retype, and confirm the key NAMES and order
     // are byte-identical (reconcileKeys, which would drop the now-unofferable
     // first_name key, must stay off the authored set).
@@ -1482,7 +1482,7 @@ describe("per-key dead-key verdict on the authoring surface", () => {
 
   test("a value-killing parse_date flags the key dead, not unsatisfiable", () => {
     const editor = editorFromCsv("Dana", csv);
-    // Key 0 (SSN4 + LN + DOB) carries a date_of_birth element the columns supply.
+    // Key 0 (SSN4 + LN + DOB) holds a date_of_birth element the columns supply.
     const dead = withDeadDobKey(editor, 0);
     const verdict = keySatisfiabilityFor(dead);
     expect(verdict(0)).toBe("dead");

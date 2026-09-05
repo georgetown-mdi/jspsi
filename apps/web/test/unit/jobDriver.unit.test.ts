@@ -165,7 +165,7 @@ describe("validateAndSanitizeEvent enforces the v1 vocabulary and sanitizes", ()
 
     // The warning's own message is a whole composition; a sibling field on the
     // same event, a nested one, a stage label, and a terminal error's message
-    // each carry one value and keep the per-value cap.
+    // each hold one value and keep the per-value cap.
     const warning = validateAndSanitizeEvent({
       v: 1,
       type: "warning",
@@ -210,7 +210,7 @@ describe("validateAndSanitizeEvent enforces the v1 vocabulary and sanitizes", ()
 });
 
 describe("validateAndSanitizeEvent sanitizes object keys", () => {
-  test("an event key carrying a control byte is escaped", () => {
+  test("an event key holding a control byte is escaped", () => {
     const esc = String.fromCharCode(0x1b);
     const controlKey = `danger${esc}[31mkey`;
     const event = validateAndSanitizeEvent({

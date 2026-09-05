@@ -20,16 +20,11 @@ import { createAppMount, flushPendingUpdates } from "./renderApp";
 
 import type { NewManagedExchange } from "@psi/managedExchangeRecord";
 
-// The surface's own wiring of the run's phase boundary, which no pure test can
-// reach: the classification decides whether the operator is told nothing left this
-// device, and it decides that from a flag this component sets in the callback it
-// hands the driver. A regression to a literal value keeps every model test green,
-// so the flag is driven here through the real component, against a driver that
-// reports the boundary the way a real run does.
-//
-// The two directions are both pinned: a literal `false` would show the no-show
-// state for the post-boundary run, and a literal `true` would show the neutral
-// transport state for the pre-boundary one.
+// The classification depends on a flag the real component sets in the callback it
+// hands the driver, so only a rendered test -- not a model test -- catches a
+// regression that hardcodes the flag. Both directions are pinned: a literal
+// `false` would show the no-show state for the post-boundary run, and a literal
+// `true` would show the neutral transport state for the pre-boundary one.
 
 const phase = vi.hoisted(() => ({ dataExchangeStarted: false }));
 

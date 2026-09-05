@@ -79,7 +79,7 @@ const terms: LinkageTerms = {
       elements: [{ field: "ssn" }, { field: "last_name" }, { field: "dob" }],
     },
     // Truncated: the first-initial substring loosens the match, so the first-name
-    // entry carries a "(partial)" marker and the body leads with the slice phrase.
+    // entry has a "(partial)" marker and the body leads with the slice phrase.
     {
       name: "SSN + FN1",
       elements: [
@@ -102,12 +102,12 @@ const terms: LinkageTerms = {
 };
 
 // The count-only headline, spelled out as the whole sentence rather than read from
-// COUNT_ONLY_DISCLOSURE_STATEMENT. What it SAYS is load-bearing: it is the sentence
-// an acceptor could act on -- treating an exchange as safe to run because only a
-// count is revealed -- so an edit to it has to be made here as well, on this
-// surface, rather than followed. The CLI accept prompt pins it against the same
-// terms document (apps/cli/test/unit/accept.test.ts), which is what makes a copy
-// edit a deliberate edit on each surface rather than a divergence neither notices.
+// COUNT_ONLY_DISCLOSURE_STATEMENT. What it SAYS is critical: it is the sentence an
+// acceptor could act on -- treating an exchange as safe to run because only a count
+// is revealed -- so an edit here must be made on this surface too, not merely
+// followed. The CLI accept prompt pins it against the same terms document
+// (apps/cli/test/unit/accept.test.ts), so a copy edit on one surface forces the
+// same change on the other, rather than a silent divergence.
 const COUNT_ONLY_HEADLINE =
   "Only the number of records you have in common is revealed, not which " +
   "records match.";
@@ -115,8 +115,8 @@ const COUNT_ONLY_HEADLINE =
 // The five tier notes rendered beside that headline, read from the shared table.
 // All five, so the tier is measured whole rather than sampled: a half of the
 // count-only claim reaching an acceptor without the half that bounds it is the error
-// the shared table exists to prevent. The headline is deliberately not in the list
-// -- it is shared wording the two surfaces place differently, so its placement is a
+// the shared table exists to prevent. The headline is not in the list -- it is
+// shared wording the two surfaces place differently, so its placement is a
 // fact about this screen and is asserted as one.
 const COUNT_ONLY_TIER_NOTES = [
   CONSENT_FACTS.countOnlyResult.note,
@@ -197,7 +197,7 @@ function panelFor(name: string): HTMLElement {
   return panel;
 }
 
-// The Mantine Collapse panel inside the wrapper, carrying the aria-hidden + inert
+// The Mantine Collapse panel inside the wrapper, with the aria-hidden + inert
 // (and display:none) that hide the collapsed detail from assistive tech.
 function collapseFor(name: string): HTMLElement {
   const panel = panelFor(name).firstElementChild;
@@ -219,14 +219,12 @@ function group(name: string) {
   return page.getByRole("group", { name });
 }
 
-// Mantine 9's Collapse keeps a collapsed panel's content mounted inside a React
-// Activity (mode="hidden") boundary, which React commits at a DEFERRED priority.
-// Under load that commit can lag the always-visible core, so reading a panel
-// synchronously races it -- an empty textContent, or a not-yet-present Collapse
-// child. Resolve a panel only once its content has committed, so a collapsed-
-// content assertion waits the deferral out rather than sampling an empty panel
-// (every disclosure here has content, so this always settles). The synchronous
-// reads this replaces are why the suite flaked under full-suite CPU contention.
+// Mantine 9's Collapse mounts a collapsed panel's content inside a React Activity
+// (mode="hidden") boundary that commits at a DEFERRED priority, which can lag the
+// always-visible core under load. Reading a panel synchronously can race that
+// commit (an empty textContent, or a not-yet-present Collapse child), so this
+// resolves a panel only once its content has committed -- the flake this fixed
+// showed up under full-suite CPU contention.
 //
 // Gating on non-empty (rather than on each asserted substring) suffices because
 // React commits the hidden subtree atomically -- empty, then fully populated in
@@ -242,7 +240,7 @@ async function readyPanel(name: string): Promise<HTMLElement> {
       // multiple match -- still throws out of the poll rather than being swallowed.
       const id = toggle(name).query()?.getAttribute("aria-controls");
       const panel = id ? document.getElementById(id) : null;
-      // trim so a whitespace-only intermediate render does not read as settled.
+      // trim so a whitespace-only intermediate render is not treated as settled.
       return panel?.textContent.trim() ?? "";
     })
     .not.toBe("");
@@ -295,9 +293,9 @@ describe("InvitationTerms: per-key matching disclosures", () => {
       "Matches on the first character",
     );
 
-    // Each key's header one-liner is the honest anchor: shown beside the key name
+    // Each key's header one-liner is the accurate anchor: shown beside the key name
     // (not buried in the key's own collapsed rule body). The truncated element
-    // carries the "(partial)" breadth marker, the exact key carries none.
+    // has the "(partial)" breadth marker, the exact key has none.
     expect(app.container.textContent).toContain(
       "Matches on SSN - first name (partial)",
     );
@@ -321,7 +319,7 @@ describe("InvitationTerms: per-key matching disclosures", () => {
       "Matching on SSN, last name, date of birth, first name.",
     );
     // Structurally outside the disclosure: the summary is not inside the matching
-    // panel, which carries the collapsed per-key detail even while hidden.
+    // panel, which holds the collapsed per-key detail even while hidden.
     expect((await readyPanel("Matching strategies")).textContent).not.toContain(
       "Matching on SSN, last name, date of birth, first name.",
     );
@@ -341,7 +339,7 @@ describe("InvitationTerms: per-key matching disclosures", () => {
     },
   };
 
-  test("the rule-set citation is always-visible, each half carrying this build's verdict, and absent when none is cited", async () => {
+  test("the rule-set citation is always-visible, each half holding this build's verdict, and absent when none is cited", async () => {
     // The citation names the rules the collapsed list below enumerates, so it
     // stays outside the disclosure: an acceptor reads which set was cited, and
     // what psilink found about it, without expanding. A disproved half must not
@@ -375,7 +373,7 @@ describe("InvitationTerms: per-key matching disclosures", () => {
     );
   });
 
-  test("a truthful citation says so rather than reading as unchecked", async () => {
+  test("a truthful citation says so rather than being treated as unchecked", async () => {
     // The other side of the same block: rules genuinely drawn from the shipped
     // sets get a `consistent` verdict on both halves, so the absence of a warning
     // is never all an acceptor has to go on.
@@ -398,11 +396,11 @@ describe("InvitationTerms: per-key matching disclosures", () => {
     );
   });
 
-  test("a set name carrying a version-shaped token stays delimited from the version", async () => {
+  test("a set name containing a version-shaped token stays delimited from the version", async () => {
     // The name is partner-controlled free text and the version beside it is not,
     // so the quoting is what keeps the boundary between them readable: a name
-    // ending in a version-shaped token must not read as the version this block
-    // reports.
+    // ending in a version-shaped token must not be treated as the version this
+    // block reports.
     renderTerms(
       {
         ...citingTerms,
@@ -418,8 +416,8 @@ describe("InvitationTerms: per-key matching disclosures", () => {
   });
 
   test("a cited set name cannot render another citation's value", async () => {
-    // The name is delimited through core's terms-value seam, which doubles a
-    // delimiter inside a run, so a name carrying one cannot end its own value:
+    // The name is delimited through core's `quoteTermsValue`, which doubles a
+    // delimiter inside a run, so a name containing one cannot end its own value:
     // what an acceptor reads is the whole name, never the value a citation of a
     // shorter name at another version renders. Asserted on each half's own
     // element rather than on the screen's concatenated text, so what is measured
@@ -468,11 +466,11 @@ describe("InvitationTerms: per-key matching disclosures", () => {
     expect(app.container.textContent).not.toContain(imitated.fields);
   });
 
-  test("a version outside the bare shape reads as a delimited run, not as prose", async () => {
+  test("a version outside the bare shape is treated as a delimited run, not as prose", async () => {
     // The version renders undelimited on the strength of the shape the terms
-    // schema holds it to, and the seam re-checks that shape on the value in hand:
-    // one outside it takes the delimited run rather than standing in the citation
-    // unattributed.
+    // schema holds it to, and `bareTermsValue` re-checks that shape on the value
+    // in hand: one outside it takes the delimited run rather than standing in
+    // the citation unattributed.
     renderTerms(
       {
         ...citingTerms,
@@ -517,9 +515,9 @@ describe("InvitationTerms: per-key matching disclosures", () => {
   test("the attribution caveat is absent from the during-run accepted view, after consent is committed", async () => {
     // Same gate as the unverified-identity note: the caveat is a pre-consent
     // decision-point marker, so it drops once the decision it informs is past.
-    // The citation itself stays, since the accepted terms still carry it, and so
-    // does the disproved half's warning -- what a party accepted a false
-    // provenance under is worth reading back.
+    // The citation itself stays, since the accepted terms still hold it, and so
+    // does the disproved half's warning, since it names what a party accepted
+    // under a false provenance.
     renderTerms(citingTerms, { perspective: "accepted" });
     await expect.element(toggle("Matching strategies")).toBeInTheDocument();
     expect(app.container.textContent).toContain('"hmis-keys" 2.3.0');
@@ -626,7 +624,7 @@ describe("InvitationTerms: per-key matching disclosures", () => {
   test("a transform this version cannot explain is marked unrecognized, not stated as applied", async () => {
     // The function name is partner free text, so a lead composed around it states
     // an effect on matching this version cannot know and does not perform -- and a
-    // name chosen to read as an effect is then indistinguishable from one. The
+    // name chosen to look like an effect is then indistinguishable from one. The
     // shared note is what stands in the consequence's place, read from core so
     // this screen and the CLI accept prompt cannot drift on what an unexplained
     // rule is called; the name still renders, as technical identity beneath it.
@@ -651,10 +649,10 @@ describe("InvitationTerms: per-key matching disclosures", () => {
     const panel = await readyPanel("SSN + FN1");
     expect(panel.textContent).toContain(UNRECOGNIZED_TRANSFORM_NOTE);
     expect(panel.textContent).toContain(unrecognized);
-    // The wording that read as an effect the run performs.
+    // The wording that looked like an effect the run performs.
     expect(panel.textContent).not.toContain(`Applies ${unrecognized}`);
 
-    // A recognized function keeps its plain-language consequence and carries no
+    // A recognized function keeps its plain-language consequence and has no
     // marker, so the note tells the two apart rather than decorating both.
     app.unmount();
     renderTerms();
@@ -816,7 +814,7 @@ describe("InvitationTerms: the condensed reference view folds the lower tiers", 
   test("folding never sweeps the disclosure-critical count-only tier out of the always-visible core", async () => {
     // psi-c states a disclosure GUARANTEE (only the count is revealed), so the tier
     // that bounds it must stay in the always-visible "What the exchange produces"
-    // tier -- folding it would let a viewer read count-only as unqualified. This is
+    // tier -- folding it would let a viewer treat count-only as unqualified. This is
     // the tier that may never sit below its headline, so it must never move behind
     // the fold either.
     renderTerms(COUNT_ONLY_PROBE_TERMS, {
@@ -936,11 +934,11 @@ describe("InvitationTerms: a key disclosure stays mounted but hidden under a red
 
 describe("InvitationTerms: the counterparty identity is flagged unverified at consent", () => {
   // At the pre-consent review screen the displayed "Invitation from <name>" is a
-  // free-text field the sender typed, carried in an invitation accepted on a
+  // free-text field the sender typed, included in an invitation accepted on a
   // transcription checksum -- so psilink has not authenticated it. A terse marker
-  // keeps the acceptor from reading it as a psilink-verified fact; it is a small
-  // honesty marker on a self-asserted field, not a directive (parties normally
-  // coordinate the first exchange out of band, so they already know the
+  // keeps the acceptor from treating it as a psilink-verified fact; it is a small
+  // marker that does not overstate a self-asserted field, not a directive (parties
+  // normally coordinate the first exchange out of band, so they already know the
   // counterparty). Review-only: the note is a pre-consent decision-point marker, so it
   // is dropped on the during-run "accepted" view once consent is committed (the run's
   // handshake authenticates the peer's secret, not that the name is true), and the
@@ -972,7 +970,7 @@ describe("InvitationTerms: the counterparty identity is flagged unverified at co
     // screen-reader user may also jump straight to it by heading -- so the caveat is
     // wired as the heading's aria-describedby (the same subline-to-target idiom the
     // disclosure toggles use) rather than left as a loose sibling paragraph that the
-    // announcement would not carry.
+    // announcement would not convey.
     render("review");
     const heading = page.getByRole("heading", {
       name: "Invitation from County Health Department",
@@ -1002,7 +1000,7 @@ describe("InvitationTerms: the counterparty identity is flagged unverified at co
     render("accepted");
     await expect.element(toggle("Other details")).toBeInTheDocument();
     expect(app.container.textContent).not.toContain(noteText);
-    // The note is absent here, so the identity heading must not carry a dangling
+    // The note is absent here, so the identity heading must not have a dangling
     // aria-describedby pointing at a note that no longer renders.
     expect(
       page
@@ -1019,7 +1017,7 @@ describe("InvitationTerms: result sharing is stated from the viewer's perspectiv
   // Render the same terms with a chosen output direction and perspective. The
   // viewer is the inviter under "proposing" (its own preview) and the acceptor
   // under "review"/"accepted"; each must read its OWN outcome first-person, which
-  // is the consent-legible form for a one-sided exchange.
+  // is the form clear enough to consent on for a one-sided exchange.
   function renderOutput(
     output: { expectsOutput: boolean; shareWithPartner: boolean },
     perspective?: "review" | "accepted" | "proposing",
@@ -1043,12 +1041,12 @@ describe("InvitationTerms: result sharing is stated from the viewer's perspectiv
       "Your partner (the inviter) will receive the result: Yes",
     );
     // The acceptor's OWN non-receipt is a hard fact -- enforced by this tool, not a
-    // matter of trusting the partner -- so its "No" carries the enforced caveat.
+    // matter of trusting the partner -- so its "No" has the enforced caveat.
     expect(app.container.textContent).toContain(
       "Enforced: you are sent no result",
     );
     // The partner receives here (Yes): no cooperative caveat, but the partner "Yes"
-    // is the accountable disclosure, so it carries the brief governance pointer.
+    // is the accountable disclosure, so it has the brief governance pointer.
     expect(app.container.textContent).not.toContain(
       "By agreement, not enforced",
     );
@@ -1073,7 +1071,7 @@ describe("InvitationTerms: result sharing is stated from the viewer's perspectiv
     );
     // The PARTNER's non-receipt is cooperative -- it rests on the terms being
     // honored, not a guarantee this side imposes -- so its "No" is marked distinctly
-    // from an enforced one, and the acceptor's own "Yes" carries no enforced caveat.
+    // from an enforced one, and the acceptor's own "Yes" has no enforced caveat.
     expect(app.container.textContent).toContain("By agreement, not enforced");
     expect(app.container.textContent).not.toContain(
       "Enforced: you are sent no",
@@ -1127,8 +1125,8 @@ describe("InvitationTerms: result sharing is stated from the viewer's perspectiv
     expect(app.container.textContent).toContain(
       "Your partner will receive the result: No",
     );
-    // The proposer's partner does not receive: a cooperative "No", so it carries the
-    // by-agreement caveat and the proposer's own "Yes" carries none.
+    // The proposer's partner does not receive: a cooperative "No", so it has the
+    // by-agreement caveat and the proposer's own "Yes" has none.
     expect(app.container.textContent).toContain("By agreement, not enforced");
     expect(app.container.textContent).not.toContain(
       "Enforced: you are sent no",
@@ -1145,7 +1143,7 @@ describe("InvitationTerms: result sharing is stated from the viewer's perspectiv
   test("a symmetric both-receive exchange marks only the partner's disclosure", async () => {
     // Both parties receive: no withholding, so neither the enforced nor the
     // cooperative caveat renders. The viewer's own "Yes" (receiving your own result)
-    // stays unqualified; the partner's "Yes" carries the brief governance pointer,
+    // stays unqualified; the partner's "Yes" has the brief governance pointer,
     // since it is the accountable disclosure of your result to them.
     renderOutput({ expectsOutput: true, shareWithPartner: true });
     await expect.element(page.getByText("Result sharing")).toBeInTheDocument();
@@ -1213,7 +1211,7 @@ describe("InvitationTerms: the exchange's retained files", () => {
   });
 
   // An invitation that declares delete mode and one that declares nothing render
-  // alike, and deliberately: neither is a promise that the exchange cleans up
+  // alike, by design: neither is a promise that the exchange cleans up
   // after itself (a run killed outright, or one that fails after the handshake,
   // leaves files behind in either mode), so the screen states nothing for both.
   // A shared-directory endpoint joins them: it seeds no mode onto the acceptor,
@@ -1271,17 +1269,17 @@ describe("InvitationTerms: always-visible egress and legal-agreement facts, tier
       "Your partner requests 2 data columns from you.",
     );
     // ... and OUTSIDE the disclosure: the count is not inside the "Other details"
-    // panel, which carries the collapsed detail even while hidden.
+    // panel, which holds the collapsed detail even while hidden.
     const panel = await readyPanel("Other details");
     expect(panel.textContent).not.toContain(
       "Your partner requests 2 data columns from you",
     );
     // The column NAMES themselves stay one expand down in the disclosure -- the tier
-    // surfaces only the count, not the detail.
+    // shows only the count, not the detail.
     expect(panel.textContent).toContain("zip_code");
   });
 
-  test("the egress count reads singular for a single requested column", async () => {
+  test("the egress count is singular for a single requested column", async () => {
     render({
       ...terms,
       payload: { send: [], receive: [{ name: "ssn" }] },
@@ -1325,12 +1323,12 @@ describe("InvitationTerms: always-visible egress and legal-agreement facts, tier
   });
 
   test("the legal agreement is promoted whole into its own governance group, outside the 'Other details' disclosure", async () => {
-    // The module terms attach a legal agreement. Its governance-load-bearing substance
-    // -- reference, PURPOSE, and expiry -- is surfaced in the core as its own labelled
+    // The module terms attach a legal agreement. Its governance-critical substance
+    // -- reference, PURPOSE, and expiry -- is shown in the core as its own labelled
     // group (named by a short fixed "Legal agreement" aria-label, distinct from its
     // lead sentence so a screen reader does not read that sentence twice), not a bare
     // "attaches an agreement" flag, since the purpose is the field a 164.528 accounting
-    // / FERPA exception turns on (docs/COMPLIANCE.md) and must be legible at the
+    // / FERPA exception turns on (docs/COMPLIANCE.md) and must be clear at the
     // consent point.
     render(terms);
     await expect.element(toggle("Other details")).toBeInTheDocument();
@@ -1368,7 +1366,7 @@ describe("InvitationTerms: always-visible egress and legal-agreement facts, tier
 
 describe("InvitationTerms: a partner-authored allowed-character constraint is on notice at consent", () => {
   // A partner-defined allowedCharacters class is a rule on a linkage field the
-  // acceptor consents to. It must be legible at the consent point -- not dimmed
+  // acceptor consents to. It must be clear at the consent point -- not dimmed
   // inside the collapsed "Other details" disclosure -- so a partner-defined
   // character-class constraint is on notice before consenting. Promoted into its
   // own always-visible labelled group, with the raw partner-controlled class bound
@@ -1382,8 +1380,8 @@ describe("InvitationTerms: a partner-authored allowed-character constraint is on
     renderTerms(linkageTerms, perspective ? { perspective } : undefined);
   }
 
-  test("the constraint is surfaced always-visible, outside the 'Other details' disclosure", async () => {
-    // The module terms carry a first_name field with allowedCharacters "A-Z ".
+  test("the constraint is shown always-visible, outside the 'Other details' disclosure", async () => {
+    // The module terms have a first_name field with allowedCharacters "A-Z ".
     render(terms);
     await expect.element(toggle("Other details")).toBeInTheDocument();
 
@@ -1394,7 +1392,7 @@ describe("InvitationTerms: a partner-authored allowed-character constraint is on
     expect(constraints.element().textContent).toContain("First name");
     expect(constraints.element().textContent).toContain("A-Z ");
 
-    // ... and OUTSIDE the "Other details" panel, which carries its collapsed content
+    // ... and OUTSIDE the "Other details" panel, which holds its collapsed content
     // even while hidden: the class is not also dimmed there.
     const panel = await readyPanel("Other details");
     expect(panel.textContent).not.toContain("A-Z");
@@ -1425,7 +1423,7 @@ describe("InvitationTerms: a partner-authored allowed-character constraint is on
   });
 
   test("the raw partner class occupies its OWN element, not folded into a joined sentence", async () => {
-    // The security-load-bearing property: the raw partner-controlled class is bound
+    // The security-critical property: the raw partner-controlled class is bound
     // in its own bounded element between the fixed system label and the field
     // label, NOT concatenated into one string a crafted value could impersonate as
     // system chrome. Assert a leaf element holds the class verbatim and alone (its
@@ -1465,7 +1463,7 @@ describe("InvitationTerms: a partner-authored allowed-character constraint is on
 
   test("no constraints group when no field declares an allowed-character class", async () => {
     // Strip the only constrained field's class: the whole group is gated on at
-    // least one field carrying one, so it does not render (and no stray heading is
+    // least one field holding one, so it does not render (and no stray heading is
     // left behind).
     render({
       ...terms,
@@ -1492,7 +1490,7 @@ describe("InvitationTerms: a partner-authored allowed-character constraint is on
 describe("InvitationTerms: always-visible ingress count in the 'What you receive' tier", () => {
   // The ingress companion to the egress count: an always-visible count of the
   // columns the invitation will SEND the acceptor for matched records (inbound
-  // partner data), surfaced in the "What you receive" tier so the acceptor is on
+  // partner data), shown in the "What you receive" tier so the acceptor is on
   // notice before expanding "Other details". Weaker than the egress count -- receiving
   // is not a disclosure by the acceptor -- so it fires only on a non-empty send and
   // never in the inviter's own "proposing" preview (which shows its send as chips in
@@ -1528,17 +1526,17 @@ describe("InvitationTerms: always-visible ingress count in the 'What you receive
       "You will receive 2 data columns from your partner.",
     );
     // ... and OUTSIDE the disclosure: the count is not inside the "Other details"
-    // panel, which carries the collapsed detail even while hidden.
+    // panel, which holds the collapsed detail even while hidden.
     const panel = await readyPanel("Other details");
     expect(panel.textContent).not.toContain(
       "You will receive 2 data columns from your partner",
     );
     // The column NAMES themselves stay one expand down in the disclosure -- the hint
-    // surfaces only the count, not the detail.
+    // shows only the count, not the detail.
     expect(panel.textContent).toContain("diagnosis");
   });
 
-  test("the ingress hint reads singular for a single sent column", async () => {
+  test("the ingress hint is singular for a single sent column", async () => {
     // The module terms send a single column (risk_score).
     render(terms);
     await expect.element(toggle("Other details")).toBeInTheDocument();
@@ -1547,7 +1545,7 @@ describe("InvitationTerms: always-visible ingress count in the 'What you receive
     );
   });
 
-  test("the count derives from the actually-transmitted set carried on the token", async () => {
+  test("the count derives from the actually-transmitted set held on the token", async () => {
     // disclosedPayloadColumns is the inviter's own disclosure predicate output --
     // exactly the set that flows -- so the hint counts it, not the authored
     // payload.send (a single column here). Three transmitted columns => count 3.
@@ -1560,9 +1558,10 @@ describe("InvitationTerms: always-visible ingress count in the 'What you receive
     );
   });
 
-  test("the declared-empty 'receive nothing' lock-in raises no ingress count and no receive tier", async () => {
-    // A carried-but-empty disclosed set is the strict "(none)" lock-in: there is no
-    // incoming data to flag, so the count is absent even though the send is DECLARED.
+  test("the declared-empty 'receive nothing' commitment raises no ingress count and no receive tier", async () => {
+    // A present-but-empty disclosed set is the strict "(none)" commitment: there is
+    // no incoming data to flag, so the count is absent even though the send is
+    // DECLARED.
     // With no ingress (and no request under review), the "What you receive" tier does
     // not render at all -- distinct from Result sharing's "You will receive the
     // matched result" line, which lives in the produce tier.
@@ -1579,7 +1578,7 @@ describe("InvitationTerms: always-visible ingress count in the 'What you receive
   });
 
   test("a lazy (undeclared) send raises no ingress count and no receive tier", async () => {
-    // No send authored and no disclosed set carried: the inviter sends whatever its
+    // No send authored and no disclosed set present: the inviter sends whatever its
     // own metadata discloses (lazy), nothing declared up front, so nothing to flag and
     // no "What you receive" tier.
     render({ ...terms, payload: { receive: [] } });
@@ -1588,7 +1587,7 @@ describe("InvitationTerms: always-visible ingress count in the 'What you receive
   });
 
   test("the inviter's own proposing preview shows no ingress count (its send is chips in 'What you disclose')", async () => {
-    // Receiving-partner framing is acceptor-only. The inviter's preview surfaces its
+    // Receiving-partner framing is acceptor-only. The inviter's preview shows its
     // send as chips in "What you disclose" already, so the presence is not hidden in
     // Details and the acceptor-framed "you will receive" line is omitted (it would be
     // wrong for the inviter). The module terms request nothing (receive: []), so the
@@ -1596,8 +1595,8 @@ describe("InvitationTerms: always-visible ingress count in the 'What you receive
     render(terms, { perspective: "proposing" });
     await expect.element(toggle("Other details")).toBeInTheDocument();
     expect(group("What you receive").query()).toBeNull();
-    // The send presence is instead surfaced as the proposing chips, so it is not
-    // lost -- just carried under "What you disclose" for the inviter's own view.
+    // The send presence is instead shown as the proposing chips, so it is not
+    // lost -- just listed under "What you disclose" for the inviter's own view.
     const disclose = group("What you disclose");
     await expect.element(disclose).toBeInTheDocument();
     expect(disclose.element().textContent).toContain(
@@ -1633,7 +1632,7 @@ describe("InvitationTerms: the acceptor's outbound-disclosure forward-reference"
     render({ perspective: "review" });
     await expect.element(toggle("Other details")).toBeInTheDocument();
     expect(app.container.textContent).toContain(forwardReference);
-    // In the always-visible core, not the collapsed detail: it must be legible at
+    // In the always-visible core, not the collapsed detail: it must be clear at
     // the consent point without expanding "Other details". (Its fixed copy naming no
     // count or names is pinned by the exact-sentence match above -- a copy edit that
     // injected either would change the string and fail it.)
@@ -1728,7 +1727,7 @@ describe("InvitationTerms: the acceptor's outbound send is gated on the inviting
     expect(disclose.element().textContent).toContain(NO_PAYLOAD_SENTENCE);
     // Neither column name reaches the screen at all: "risk_score" is the module
     // terms' inviter-side send, which renders in Details as what the acceptor
-    // RECEIVES, so the acceptor's own set is pinned by the name only it carries.
+    // RECEIVES, so the acceptor's own set is pinned by the name only it holds.
     expect(app.container.textContent).not.toContain("diagnosis");
     expect(
       page
@@ -1851,7 +1850,7 @@ describe("InvitationTerms: the inviter's own send is gated on the accepting part
       .toHaveTextContent("risk_score");
   });
 
-  test("the acceptor's screens read the mirror of these same terms", async () => {
+  test("the acceptor's screens show the mirror of these same terms", async () => {
     // The direction control facing the other way: under terms that give the ACCEPTOR
     // nothing, the acceptor still sends -- the inviting party receives -- so its own
     // outbound list must stand. An acceptor block gated on the inviter's fact fails
@@ -1876,8 +1875,8 @@ describe("InvitationTerms: the outbound-send caption does not presuppose a non-e
   // send ...": a declarative caption presupposes a non-empty send, so it contradicts
   // its own empty-send body ("No columns are sent ...") and over-asserts a definite
   // send on the pre-file review screen, where the set is not yet known. These pin
-  // that the caption reads truthfully over both branches -- and that the
-  // presupposing phrasing does not creep back at either call site.
+  // that the caption is accurate over both branches -- and that the presupposing
+  // phrasing does not creep back at either call site.
   function render(options: {
     perspective: "review" | "accepted";
     outboundColumns?: Array<string>;
@@ -1891,7 +1890,7 @@ describe("InvitationTerms: the outbound-send caption does not presuppose a non-e
   // both phrasings share.
   const presupposingCaption = "Columns you will send to your partner";
 
-  test("reads as a topic phrase, not a definite send, above the empty-send confirmation", async () => {
+  test("displays as a topic phrase, not a definite send, above the empty-send confirmation", async () => {
     // A chosen file that sends nothing (outboundColumns []): the caption sits above
     // the explicit "No columns are sent ..." body.
     render({ perspective: "accepted", outboundColumns: [] });
@@ -2080,7 +2079,7 @@ describe("InvitationTerms: every labelled tier is announced through one shared b
   });
 
   test("the legal agreement takes the same block under a fixed short name", async () => {
-    // Its visible heading is a whole sentence, so the group carries a short noun
+    // Its visible heading is a whole sentence, so the group has a short noun
     // phrase as its name instead -- a screen reader would otherwise announce the
     // sentence as the name and then read it again as the heading. The block around it
     // is the same one: a leading heading at the tier level.
@@ -2097,7 +2096,7 @@ describe("InvitationTerms: every labelled tier is announced through one shared b
   });
 
   test("every tier caption follows the terms heading level together", async () => {
-    // headingOrder 1 is the bench review step, where the terms heading is the page's
+    // headingOrder 1 is the console review step, where the terms heading is the page's
     // own h1: every tier caption moves with it, so the outline nests rather than
     // skipping a level -- and moves together, since one component sets them all.
     renderTerms(everyTier, { headingOrder: 1 });
@@ -2179,7 +2178,7 @@ describe("InvitationTerms: the always-visible facts are tiered into labelled dir
   });
 
   test("the produce tier groups the matching method and result sharing, and only those", async () => {
-    // "What the exchange produces" carries the matching method and result sharing --
+    // "What the exchange produces" contains the matching method and result sharing --
     // what is revealed and to whom -- announced as one related set, and only that
     // pair: the matching mechanics (the field summary, the "Matching strategies"
     // disclosure) live in their own "How records are matched" tier.
@@ -2297,7 +2296,7 @@ describe("InvitationTerms: the always-visible facts are tiered into labelled dir
   });
 });
 
-describe("InvitationTerms: a declared-empty receive is surfaced, not collapsed with lazy", () => {
+describe("InvitationTerms: a declared-empty receive is shown, not collapsed with lazy", () => {
   // Mirror of the send-side "(none)" treatment: an authored empty payload.receive
   // is the strict "the acceptor sends nothing" assertion, which the consent screen
   // must show rather than confuse with the lazy (undeclared) case -- the latter
@@ -2316,14 +2315,14 @@ describe("InvitationTerms: a declared-empty receive is surfaced, not collapsed w
     expect(panel.textContent).toContain("Your partner requests from you:");
     expect(panel.textContent).toContain("(none)");
     // The "(none)" is bare: the line renders only for a declared direction (the
-    // lazy case below shows none at all), so it is already read as an explicit
+    // lazy case below shows none at all), so it is already treated as an explicit
     // declaration, and what a violated declaration costs is docs/CLI.md's to say.
     expect(panel.textContent).not.toContain("abort");
   });
 
   test("a lazy (undeclared) receive renders no request line", async () => {
     // Send is declared so the block still renders, but with no receive line: an
-    // absent receive is lazy, not a request, and must not read as "(none)".
+    // absent receive is lazy, not a request, and must not be treated as "(none)".
     render({ ...terms, payload: { send: [{ name: "risk_score" }] } });
     await expect.element(toggle("Other details")).toBeInTheDocument();
     expect((await readyPanel("Other details")).textContent).not.toContain(
@@ -2350,20 +2349,19 @@ describe("InvitationTerms: the declared payload lists are bounded by count", () 
   // and counts the rest.
 
   // Ordinary content rather than an attack, and outside printable ASCII: U+00E9
-  // LATIN SMALL LETTER E WITH ACUTE is what a real declaration carries, and it
+  // LATIN SMALL LETTER E WITH ACUTE is what a real declaration holds, and it
   // escapes at this sink, so a name of them spends the whole display allowance.
   // Written as an escape, never a raw byte, so a test about an invisible expansion
   // is itself readable.
   const NON_ASCII = "\u00E9";
 
   // What the "Other details" panel may paint with both declarations flooded. An
-  // ABSOLUTE number, deliberately not derived from MAX_DECLARED_NAMES_SHOWN: a
-  // ceiling that scaled with the cap would hold at any cap, including none, which is
-  // the change this check exists to catch. It leaves roughly 1400 characters of
-  // headroom over what the panel measures with both directions flooded, so a copy
-  // edit to the blocks sharing the disclosure does not trip it, and stays over a
-  // hundred times under the megabyte the same declaration paints uncapped -- the
-  // difference between scrolling the disclosure and being unable to read past it.
+  // ABSOLUTE number, not derived from MAX_DECLARED_NAMES_SHOWN: a ceiling that
+  // scaled with the cap would hold even with the cap raised or removed, defeating
+  // the check. It leaves roughly 1400 characters of headroom over both directions
+  // flooded, so a copy edit does not trip it, while staying far under the megabyte
+  // the same declaration paints uncapped -- the gap between a scrollable disclosure
+  // and an unreadable one.
   const PANEL_CEILING = 8_000;
 
   // The declaration at core's own ceiling, every name long enough to spend the whole
@@ -2376,7 +2374,7 @@ describe("InvitationTerms: the declared payload lists are bounded by count", () 
     );
   }
 
-  // Plain fields carrying no declared constraints, so every <li> inside the panel
+  // Plain fields with no declared constraints, so every <li> inside the panel
   // comes from a payload list: the personal-data block renders a constrained field's
   // constraints as their own bulleted list, which would otherwise be counted in.
   const unconstrainedTerms: LinkageTerms = {
@@ -2431,9 +2429,9 @@ describe("InvitationTerms: the declared payload lists are bounded by count", () 
   test("paints at most MAX_DECLARED_NAMES_SHOWN names per direction and counts the rest", async () => {
     const send = flooded("send");
     const receive = flooded("receive");
-    // The premise, asserted rather than assumed: each of those names spends the
-    // whole per-value allowance at this sink and is cut at it, so what is measured
-    // below is the worst case and not a mild one.
+    // The worst case is checked, not assumed: each of those names spends the whole
+    // per-value allowance at this sink and is cut at it, so what is measured below
+    // is the worst case and not a mild one.
     const escaped = sanitizeForDisplay(send[0]);
     expect(escaped.endsWith(DISPLAY_TRUNCATION_MARKER)).toBe(true);
     expect(escaped.length).toBeGreaterThan(DEFAULT_MAX_DISPLAY_LENGTH);
@@ -2516,10 +2514,10 @@ describe("InvitationTerms: the declared payload lists are bounded by count", () 
     expect(panel.textContent).not.toContain("more not shown here");
   });
 
-  test("a name carrying list separators or the count line's own words is still one item inside the list", async () => {
+  test("a name containing list separators or the count line's own words is still one item inside the list", async () => {
     // The escape neutralizes control, bidi, and non-ASCII code points and leaves
-    // printable ASCII alone, so a declared name may carry a comma or a semicolon --
-    // list separators, were the list one line -- or read exactly as the first-party
+    // printable ASCII alone, so a declared name may contain a comma or a semicolon --
+    // list separators, were the list one line -- or match exactly the first-party
     // sentence stating how many names were not painted. What tells a partner name
     // from that sentence is where it is painted: an entry is a bulleted item inside
     // the direction's list container, and the count line sits outside it.
@@ -2557,9 +2555,9 @@ describe("InvitationTerms: the declared payload lists are bounded by count", () 
     ] as const) {
       const block = directionBlock(panel, label);
       const list = listIn(block);
-      // One item per declared name and in the declared order: a name carrying a
+      // One item per declared name and in the declared order: a name containing a
       // separator is a single entry, never two, and the mimic is an entry rather
-      // than the line it reads as.
+      // than the line it appears to be.
       expect(
         Array.from(list.querySelectorAll("li"), (item) => item.textContent),
       ).toEqual(
@@ -2576,7 +2574,7 @@ describe("InvitationTerms: the declared payload lists are bounded by count", () 
   });
 });
 
-describe("InvitationTerms: the linkage strategy is surfaced at the consent point", () => {
+describe("InvitationTerms: the linkage strategy is shown at the consent point", () => {
   // The acceptor adopts the inviter's strategy (mandatory-consistency), and
   // single-pass is disclosure-affecting, so the note lives in the always-visible
   // core -- the acceptor must see the added disclosure before consenting. cascade,
@@ -2607,7 +2605,7 @@ describe("InvitationTerms: the linkage strategy is surfaced at the consent point
     expect(app.container.textContent).toContain("so it may be you");
   });
 
-  test("cascade (the baseline) surfaces no strategy note", async () => {
+  test("cascade (the baseline) shows no strategy note", async () => {
     render("cascade");
     await expect.element(toggle("Other details")).toBeInTheDocument();
     expect(app.container.textContent).not.toContain("matches in a single pass");
@@ -2728,13 +2726,13 @@ describe("InvitationTerms: a qualifying sentence sits at its headline's visibili
     // psi-c states a disclosure guarantee, so the sentences that bound it sit in the
     // always-visible core; the module terms' deduplicate caveat sits one expand down
     // in "Other details" -- exactly the differentiated-but-consistent rule. The
-    // count-only document carries deduplicate false, so the pair is measured across
+    // count-only document has deduplicate false, so the pair is measured across
     // the two renders rather than one.
     renderTerms(COUNT_ONLY_PROBE_TERMS);
     await expect.element(toggle("Other details")).toBeInTheDocument();
 
-    // Both disclosures start collapsed, yet the bound is legible: it is in the
-    // always-visible core, so the acceptor cannot read the count-only guarantee as
+    // Both disclosures start collapsed, yet the bound is clear: it is in the
+    // always-visible core, so the acceptor cannot treat the count-only guarantee as
     // unqualified without also meeting what it does not cover.
     expect(
       toggle("Other details").element().getAttribute("aria-expanded"),
@@ -2748,7 +2746,7 @@ describe("InvitationTerms: a qualifying sentence sits at its headline's visibili
 
     // Structurally in the core, not inside either disclosure (accessibility tree,
     // not styling): the sentence is within neither the "Other details" panel nor the
-    // "Matching strategies" panel, both of which carry their collapsed content even
+    // "Matching strategies" panel, both of which hold their collapsed content even
     // while hidden.
     expect((await readyPanel("Other details")).textContent).not.toContain(
       CONSENT_FACTS.countOnlyInputChoice.note,
@@ -2845,7 +2843,7 @@ describe("InvitationTerms: a qualifying sentence sits at its headline's visibili
       // waiting for that panel's content to commit is enough to read the whole
       // container safely.
       await readyPanel("Other details");
-      // Per probe, not only over the set: an entry carrying an empty list would
+      // Per probe, not only over the set: an entry with an empty list would
       // otherwise pass by rendering nothing at all.
       const copies = probe.requiredVariantCopy ?? [];
       expect(copies.length).toBeGreaterThan(0);
@@ -2911,7 +2909,7 @@ describe("InvitationTerms: a qualifying sentence sits at its headline's visibili
   });
 
   test("the fuzzy caveat sits with its annotation inside the key's own detail, behind the matching disclosure", async () => {
-    // A key element carrying a proposed (not-applied) fuzzy comparison. By the rule
+    // A key element with a proposed (not-applied) fuzzy comparison. By the rule
     // the caveat stays in the key's collapsed detail alongside the annotation it
     // qualifies -- the two are one sentence, so they cannot separate -- and the whole
     // key detail is behind the default-collapsed "Matching strategies" disclosure,
@@ -2930,8 +2928,8 @@ describe("InvitationTerms: a qualifying sentence sits at its headline's visibili
     await expect.element(toggle("Matching strategies")).toBeInTheDocument();
 
     // Behind the matching disclosure, not in the core: the caveat is within the
-    // collapsed "Matching strategies" panel (which carries the nested key detail even
-    // while hidden), so it is never surfaced always-visible like the psi-c caveat.
+    // collapsed "Matching strategies" panel (which holds the nested key detail even
+    // while hidden), so it is never shown always-visible like the psi-c caveat.
     expect((await readyPanel("Matching strategies")).textContent).toContain(
       "(proposed; not yet applied)",
     );
@@ -2944,7 +2942,7 @@ describe("InvitationTerms: a qualifying sentence sits at its headline's visibili
     expect(panel.textContent).toContain("(proposed; not yet applied)");
   });
 
-  test("a setting that matches the run carries no not-yet-applied caveat", async () => {
+  test("a setting that matches the run has no not-yet-applied caveat", async () => {
     // psi (identifiers revealed -- the run's actual behavior), deduplicate off, and
     // no fuzzy: every displayed setting equals what the run does, so none is
     // flagged. The flag gating itself is asserted in the summarizeInvitation unit
@@ -2968,7 +2966,7 @@ describe("InvitationTerms: a qualifying sentence sits at its headline's visibili
 describe("InvitationTerms: the send-columns chip list is named by its visible caption, not a duplicate aria-label", () => {
   // The always-visible send-columns disclosure renders a visible bold caption (the
   // Term) above a ColumnChips list. The list derives its accessible name from that
-  // caption via aria-labelledby rather than carrying a second, separately-authored
+  // caption via aria-labelledby rather than having a second, separately-authored
   // aria-label with the same text -- so the visible caption is the single source of
   // the list's name and the two cannot drift. (This does not change how often a screen
   // reader speaks the caption: a named list is still announced by name at its boundary,
@@ -2983,13 +2981,13 @@ describe("InvitationTerms: the send-columns chip list is named by its visible ca
   }
 
   // The list resolves by role + accessible name (so the caption still names it), AND
-  // carries no aria-label of its own (the name is not duplicated) but an
+  // has no aria-label of its own (the name is not duplicated) but an
   // aria-labelledby resolving to the visible caption text (its single source).
   async function expectNamedByVisibleCaptionOnly(caption: string) {
     const list = page.getByRole("list", { name: caption });
     await expect.element(list).toBeInTheDocument();
     const el = list.element();
-    // No second, identical name carried on the list itself.
+    // No second, identical name present on the list itself.
     expect(el.getAttribute("aria-label")).toBeNull();
     // Named via the visible caption instead: aria-labelledby -> the caption node,
     // whose text is exactly the caption the list's accessible name derives from.
@@ -3025,14 +3023,14 @@ describe("InvitationTerms: no partner-controlled byte reaches the screen", () =>
   // while the id reaches no rendered text or attribute, so that is checked here
   // rather than asserted in prose: the same hostile fixture is mounted whole,
   // and every string the screen presents must be printable ASCII, which the raw
-  // id (carrying a BEL) is not.
+  // id (containing a BEL) is not.
   //
   // The mounted tree, not the summary: a component that interpolated a raw
   // linkage-terms value of its own -- past the summary boundary entirely -- is
   // caught here too.
 
   // Attributes a user reads or hears, as opposed to the structural ones (class,
-  // id, aria-controls) that carry no partner text and are not presented.
+  // id, aria-controls) that hold no partner text and are not presented.
   const TEXT_ATTRIBUTES = [
     "aria-label",
     "aria-placeholder",
@@ -3043,13 +3041,11 @@ describe("InvitationTerms: no partner-controlled byte reaches the screen", () =>
   ];
 
   // The one code point outside printable ASCII the component's OWN fixed copy
-  // puts on the screen: the typographic apostrophe of its swap notes ("...are
-  // applied to Last name&rsquo;s value"). Allowed by name, and only this one, so
-  // the walk below still fails on every other non-ASCII byte. It cannot swallow a
-  // partner value: sanitizeForDisplay escapes U+2019 exactly as it escapes every
-  // other non-ASCII code point, so no partner string reaches the DOM carrying
-  // one -- and the fixture's own hostile code points are asserted absent
-  // separately, so a widening of this allowance cannot go unnoticed.
+  // puts on the screen: the apostrophe in its swap notes ("...applied to Last
+  // name&rsquo;s value"). Allowed by name, and only this one, so the walk below
+  // still fails on every other non-ASCII byte -- sanitizeForDisplay escapes
+  // U+2019 like any other non-ASCII code point, so no partner string can reach
+  // the DOM containing one.
   const FIRST_PARTY_APOSTROPHE = /\u2019/g;
 
   // Every string the mounted tree presents: each text node, plus the readable
@@ -3100,7 +3096,7 @@ describe("InvitationTerms: no partner-controlled byte reaches the screen", () =>
    * require that every string the screen presents is printable ASCII (bar the
    * first-party apostrophe above). `reachedScreen` names raw partner strings
    * whose escaped form must be on screen, so the walk cannot pass over a render
-   * that never carried the fixture's partner text -- the vacuity guard, with no
+   * that never included the fixture's partner text -- the vacuity guard, with no
    * per-field enumeration behind it.
    */
   async function expectEveryPresentedStringEscaped(
@@ -3133,7 +3129,7 @@ describe("InvitationTerms: no partner-controlled byte reaches the screen", () =>
 
   /**
    * The partner-controlled strings a variant's terms must put on screen for its
-   * walk to mean anything: every key's name, carried by its own disclosure
+   * walk to mean anything: every key's name, shown by its own disclosure
    * toggle, and every declared transform function name -- the deepest per-key
    * detail, which the body renders either as its lead or as the technical line
    * under a plainer one. Read off the terms rather than listed per variant, so a
@@ -3163,11 +3159,11 @@ describe("InvitationTerms: no partner-controlled byte reaches the screen", () =>
     },
   );
 
-  test("the same holds on the acceptor's review screen, over the columns and expiry the token carries", async () => {
-    // The props the accept screen supplies alongside the terms: the partner's
-    // carried disclosed-columns subset, the acceptor's own file header, and the
-    // token's expiry instant -- each reaching the screen through the same
-    // display boundary.
+  test("the same holds on the acceptor's review screen, over the columns and expiry the token includes", async () => {
+    // The props the accept screen supplies alongside the terms: the
+    // disclosed-columns subset the partner's token holds, the acceptor's own file
+    // header, and the token's expiry instant -- each reaching the screen through
+    // the same display boundary.
     await expectEveryPresentedStringEscaped(
       {
         linkageTerms: hostileTerms,

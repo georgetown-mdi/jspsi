@@ -100,14 +100,12 @@ describe("getDefaultStandardization — structure", () => {
   });
 
   test("metadata that binds no linkage field yields an empty standardization, not a throw", () => {
-    // Totality over the unsatisfiable case is what the CLI's `buildDataSpec`
-    // relies on: it derives the default standardization for terms from a
-    // partner's invitation over whatever columns the operator's CSV has,
-    // and writes the result. An input binding none of those fields is the
-    // worst case, resolving to an empty standardization rather than an
-    // error. Pin it here (CONTRIBUTING: encode a runtime fact as a check)
-    // so a future throwing step in this function or `resolveFieldColumns`
-    // trips this test, not a failed acceptance.
+    // The CLI's `buildDataSpec` relies on totality here: it derives
+    // standardization for a partner's terms over whatever columns the
+    // operator's CSV has, so an input binding none of those fields must
+    // resolve to an empty standardization, not a throw. Pinned as a check
+    // so a future throwing step here or in `resolveFieldColumns` trips this
+    // test, not a failed acceptance.
     const boundToNothing: ColumnMetadata[] = [
       // Right types, but no column is roled for matching.
       { name: "SSN", type: "ssn", role: "payload", isPayload: true },
@@ -188,15 +186,12 @@ describe("getDefaultStandardization — structure", () => {
 // --- Default chains never emit the empty string ------------------------------
 
 describe('default chains: a blank input yields null, never ""', () => {
-  // Empty-string-as-matchable-key (link.ts removeDuplicatesAndUndefineds
-  // drops only undefined, not every falsy value) rests on the assumption
-  // that default per-type cleaning maps a blank value to null, so a
-  // fully-default exchange never emits "" as a key. docs/spec/PROTOCOL.md
-  // (Key input data) and the CHANGELOG state this as prose; pin it as a
-  // check here so a future chain that lets a blank fall through does not
-  // silently widen default matching (CONTRIBUTING: encode a runtime fact
-  // as a check). null and "" are distinct outcomes downstream, so toBeNull
-  // also asserts the value is not "".
+  // Assumes default per-type cleaning maps a blank value to null, so a
+  // fully-default exchange never emits "" as a key (link.ts
+  // removeDuplicatesAndUndefineds drops only undefined). docs/spec/PROTOCOL.md
+  // and the CHANGELOG state this as prose; pinned here as a check so a chain
+  // that lets a blank fall through does not silently widen default matching.
+  // toBeNull also distinguishes the result from "".
   const blanks = ["", " ", "   ", "\t", " \t\n "];
   const transformations = getDefaultStandardization(fullMetadata, minimalTerms);
 
@@ -239,13 +234,11 @@ describe('default chains: a blank input yields null, never ""', () => {
 
 describe("default SSN / SSN4 pipelines: explicit blank-drop before pad_left", () => {
   // SSN/SSN4 pad a cleaned value to a fixed width, so an empty value would
-  // pad into an all-zeros placeholder ("000000000" / "0000") before any
-  // null-mapping step -- dropped only because the terminal placeholder
-  // null_if happens to list that value. An explicit `null_if ""` placed
-  // BEFORE pad_left drops the empty value as empty, preventing the
-  // blank-cell hazard even if an operator edits the placeholder list. Pin
-  // the step's presence, its position, and that it -- not the placeholder
-  // null_if -- handles the blank-drop.
+  // pad into an all-zeros placeholder ("000000000" / "0000") unless something
+  // drops it first. An explicit `null_if ""` placed BEFORE pad_left drops the
+  // empty value as empty regardless of edits to the terminal placeholder
+  // list. Pin the step's presence, its position, and that it -- not the
+  // placeholder null_if -- handles the blank-drop.
   const cases: Array<{ type: "ssn" | "ssn4"; column: string }> = [
     { type: "ssn", column: "SSN" },
     { type: "ssn4", column: "SSN4" },
@@ -272,12 +265,11 @@ describe("default SSN / SSN4 pipelines: explicit blank-drop before pad_left", ()
 
     test(`${type}: a blank or cleaned-empty value still drops with the placeholder null_if removed`, () => {
       // Prove the explicit empty-drop is critical, not redundant with the
-      // terminal placeholder null_if: strip the placeholder step (the
-      // null_if listing all-zeros/sequential placeholders via `values`) and
-      // a value that is blank ("", "   ") OR cleans to empty through the
-      // chain ("abc", "----" lose every non-digit) must still map to null.
-      // Without the explicit `null_if ""`, such a value would pad to an
-      // all-zeros value and survive as a matchable key.
+      // terminal placeholder null_if: strip the placeholder step (the null_if
+      // listing all-zeros/sequential placeholders via `values`), and a value
+      // that is blank ("", "   ") or cleans to empty ("abc", "----" lose every
+      // non-digit) must still map to null. Without `null_if ""`, it would pad
+      // to an all-zeros value and survive as a matchable key.
       const withoutPlaceholder = stepsFor(type, column).filter(
         (s) => !(s.function === "null_if" && s.params?.values !== undefined),
       );

@@ -213,17 +213,13 @@ async function makeConnectedConn(
   return conn;
 }
 
-// Drive conn.start()'s background poller until its first error and return the
-// collected errors so the caller keeps its own type/message/count/counter
-// assertions inline. Installs the error handler, starts the poller, races the
-// first error against a timeout reject (the message only appears on a real
-// hang), optionally waits settleMs (to let a wrong reschedule bump a counter
-// the caller re-asserts), then stops the poller in a finally.
-// pollerActiveBeforeDriverStop is captured just before that stop: asserting it
-// false proves a terminal error stopped the poller on its own, which the live
-// pollerActive flag cannot show once the driver has stopped it.
-// stopInHandler makes the handler call conn.stop() itself, for the tests that
-// prove the error handler -- not the poller's self-stop -- halts the loop.
+// Drives conn.start()'s poller until its first error, returning the
+// collected errors so the caller makes its own assertions. settleMs, if
+// given, is an extra wait before stopping, to let a wrong reschedule bump a
+// counter. pollerActiveBeforeDriverStop, captured just before that stop,
+// shows whether a terminal error already stopped the poller on its own.
+// stopInHandler makes the handler call conn.stop() itself, for tests
+// proving the handler halts the loop.
 async function driveUntilError(
   conn: FileSyncConnection,
   opts?: {
@@ -298,14 +294,12 @@ test("close is idempotent and safe on a connection that was never opened", async
 });
 
 test("close() ends no client while the first dial is still in flight", async () => {
-  // `connected` is set only once connect() has resolved, and close() drives
-  // end() only under it, so a close that lands over an unfinished first dial
-  // ends nothing. A transport can lean on that ordering: the SFTP transport
-  // bounds its own wait for whatever session transition is ahead of it, and a
-  // teardown whose wait expires destroys the socket beneath that transition --
-  // over a first dial that would expose the destroy's rejection to open()'s
-  // caller as a partner-side connect failure. Nothing there can check this gate
-  // for itself, so it is pinned here rather than left to hold by call order.
+  // `connected` is set only once connect() resolves, and close() drives end()
+  // only under it, so a close landing over an unfinished first dial ends
+  // nothing. The SFTP transport leans on that ordering: its own teardown
+  // destroys the socket beneath an in-flight session transition, which would
+  // otherwise expose the destroy's rejection to open()'s caller as a
+  // partner-side connect failure. Pinned here since nothing else checks it.
   const { client } = makeMockClient();
   let endCalls = 0;
   client.end = async () => {
@@ -590,15 +584,12 @@ test("open derives timeToLive from config peerTimeoutMs when no constructor time
 });
 
 test("open (sftp): the connect debug log records only that a username is set, not its value", async () => {
-  // The configured SFTP username is a credential component; the connect debug log
-  // must record only that one is set, never the value. The line is this.log.debug,
-  // so two things are needed to observe it: (1) raise the root level to "trace"
-  // (getLoggerForVerbosity never makes a named logger more verbose than the root,
-  // so the logger must be built while the root permits DEBUG), restored in
-  // finally; and (2) construct the connection inside the withCapturedLogs callback
-  // so its logger binds to the capture's method factory -- mirroring the
-  // providerOptions warning tests below. Teeth: reverting to `as ${username}`
-  // would show "alice" on this line.
+  // The configured SFTP username is a credential component; the connect debug
+  // log must record only that one is set, never the value. Observing it needs
+  // (1) the root level raised to "trace" (a named logger is never more
+  // verbose than the root), restored in finally, and (2) the connection
+  // constructed inside withCapturedLogs so its logger binds to the capture.
+  // Teeth: reverting to `as ${username}` would show "alice" on this line.
   const { client } = makeMockClient();
   const config: SFTPConnectionConfig = {
     channel: "sftp",
@@ -627,15 +618,13 @@ test("open (sftp): the connect debug log records only that a username is set, no
 });
 
 test("open (sftp): the connect debug log escapes control bytes in the host and path", async () => {
-  // The host and remote path are server-controlled and -- now that the CLI
-  // decodes percent-encoded URL components -- can hold CR/LF or other control
-  // bytes. At debug level an unescaped newline would let a hostile host or path
-  // forge an extra log line on the operator's terminal or --log-file, so this
-  // site routes both through sanitizeForDisplay. Same logger-capture setup as the
-  // username test above: raise the root level to "trace" so the named logger is
-  // built permitting DEBUG, and construct the connection inside the callback so it
-  // binds to the capture's method factory. Teeth: dropping sanitizeForDisplay from
-  // either value would show the raw newline and split this into a forged line.
+  // The host and remote path are server-controlled and, because the CLI
+  // decodes percent-encoded URL components, can hold CR/LF or other control
+  // bytes. An unescaped newline at debug level would let a hostile host or
+  // path forge an extra log line, so this site routes both through
+  // sanitizeForDisplay. Same logger-capture setup as the username test above.
+  // Teeth: dropping sanitizeForDisplay from either value would show the raw
+  // newline and split this into a forged line.
   const { client } = makeMockClient();
   const config: SFTPConnectionConfig = {
     channel: "sftp",
@@ -750,14 +739,10 @@ test("synchronize: the 'synchronizing at path' info log escapes control bytes in
 // allowlist tests can assert exactly what reaches ssh2-sftp-client. The mock's
 // connect is a no-op; here it records its single argument instead.
 //
-// The connection is constructed inside withCapturedLogs so its logger binds to
-// the interceptor: open() emits a WARN for each dropped providerOptions key, and
-// capturing them here keeps the allowlist option-assertion tests below from
-// leaking that noise to the suite output. The "a dropped providerOptions key /
-// algorithms sub-key is logged" tests wrap this helper in their own capture to
-// assert those WARNs -- the shared interceptor delivers each WARN to that outer
-// capture too, so suppressing here does not hide them from the tests that prove
-// they fire.
+// The connection is constructed inside withCapturedLogs to suppress open()'s
+// per-dropped-key WARNs from the suite output. The dropped-key logging tests
+// below wrap this helper in their own capture, so this suppression does not
+// hide those WARNs from them.
 async function captureSftpConnectOptions(
   config: SFTPConnectionConfig,
 ): Promise<Record<string, unknown>> {
@@ -1108,7 +1093,7 @@ test("probeHostKeyFingerprint sends no credential, so an unresolved @path never 
   // credential refs are resolved, so it must pass NO credential to ssh2. A
   // literal "@/secrets/id_rsa" left in privateKey would otherwise hit ssh2's
   // eager privateKey parse at connect time and abort with "Unsupported key
-  // format" -- surfacing as "could not read the server's host key" -- before the
+  // format" -- showing as "could not read the server's host key" -- before the
   // host key is ever read.
   const blob = ed25519Blob();
   const { client } = makeMockClient();
@@ -1164,7 +1149,7 @@ test("probeHostKeyFingerprint throws when the host presents no key", async () =>
   ).rejects.toThrow(/could not determine the server's host key/);
 });
 
-test("probeHostKeyFingerprint surfaces the connect failure cause when no key is presented", async () => {
+test("probeHostKeyFingerprint reports the connect failure cause when no key is presented", async () => {
   // A connect that REJECTS before the verifier fires (e.g. an unreachable host)
   // must propagate the original cause rather than collapse to the generic
   // "presented no key" message, so the operator can tell an unreachable host
@@ -1281,7 +1266,7 @@ test("providerOptions cannot supply readyTimeout when the config omits a connect
   // Symmetric to the case above: the allowlist drops a providerOptions
   // readyTimeout rather than letting it populate the connect option. With no
   // serverConnectTimeoutMs the connection then falls back to psilink's documented
-  // 30000 ms default (supplied at the connect site even for a config carrying no
+  // 30000 ms default (supplied at the connect site even for a config with no
   // options block), NOT to the dropped providerOptions value or ssh2's default.
   const opts = await captureSftpConnectOptions({
     channel: "sftp",
@@ -1616,7 +1601,7 @@ test("send encodes the exact serialized byte count in the filename", async () =>
 
 test("send writes the in-flight file with a .tmp extension and renames to .json", async () => {
   // A sync tool watching `*.json` must never match the partial write, so the
-  // temp file carries a `.tmp` extension; only the atomic rename target ends
+  // temp file has a `.tmp` extension; only the atomic rename target ends
   // in `.json`.
   const { client } = makeMockClient();
   const conn = await makeConnectedConn(client);
@@ -1684,13 +1669,11 @@ test("send streams the header and payload as two chunks, without a concat copy",
 test("a binary frame sent through the new framing is read back byte-exactly by a peer", async () => {
   // End-to-end guard the shape-only test above does not give: it stops at the
   // mock's file store. Here a SENDER writes a binary frame through send()'s
-  // [header, payload] framing and a PEER polls the same directory and decodes it,
-  // so a header/payload reorder, a wrong seq/version byte, or a byte-count vs
-  // on-disk-size mismatch that opened or jammed the partial-sync read gate would
-  // corrupt (or never deliver) the read-back rather than pass silently. The
-  // receiver's size gate must accept the frame for it to be delivered at all, so
-  // this also exercises the byteLength = header + payload formula against the
-  // gate for a binary frame.
+  // [header, payload] framing and a PEER polls the same directory and decodes
+  // it, so a header/payload reorder, a wrong seq/version byte, or a
+  // byte-count/on-disk-size mismatch would corrupt or drop the read-back
+  // rather than pass silently, and exercises byteLength = header + payload
+  // against the receiver's size gate.
   const { client } = makeMockClient();
   const sender = await makeConnectedConn(client, { pollingFrequency: 10 });
   const receiver = await makeConnectedConn(client, {
@@ -1779,7 +1762,7 @@ test("send times out when the previous message is never consumed", async () => {
 
 // --- TOCTOU race: ENOENT from get() ------------------------------------------
 
-test("poll does not emit error when get() throws ENOENT after list() surfaced the file", async () => {
+test("poll does not emit error when get() throws ENOENT after list() showed the file", async () => {
   // Simulate the TOCTOU window: list() shows the peer's message file, but by
   // the time get() runs the peer has already deleted it (their cleanup() raced
   // with our poll()). The poller must swallow ENOENT and reschedule rather than
@@ -2230,7 +2213,7 @@ test("synchronize() does not sweep a bare `-abort.json`; it stays an unexpected 
   expect(files.has(barePath)).toBe(true);
 });
 
-test("synchronize() does NOT sweep a leftover abort marker in retain mode; it surfaces as exit-64", async () => {
+test("synchronize() does NOT sweep a leftover abort marker in retain mode; it shows as exit-64", async () => {
   // In retain mode the directory is a durable audit transcript, so a leftover
   // marker beside it must not be auto-swept (that would reintroduce the
   // destruction the retain guard prevents). It falls through to the unexpected-
@@ -2260,7 +2243,7 @@ test("synchronize() does NOT sweep a leftover abort marker in retain mode; it su
   expect(files.has(ownAbortPath)).toBe(true);
 });
 
-test("synchronize() surfaces an over-cap peer hello as a terminal FrameSizeExceededError", async () => {
+test("synchronize() reports an over-cap peer hello as a terminal FrameSizeExceededError", async () => {
   // The rendezvous gate (readControlFileWithGate) must treat an over-cap hello
   // control file as terminal rather than retrying it until the deadline: a
   // hostile server could otherwise hold the gate open by serving an oversized
@@ -2312,7 +2295,7 @@ test("synchronize() surfaces an over-cap peer hello as a terminal FrameSizeExcee
   expect(peerHelloReads).toBe(1);
 });
 
-test("synchronize() surfaces a stalled peer-hello read as a terminal TransportOperationStalledError", async () => {
+test("synchronize() reports a stalled peer-hello read as a terminal TransportOperationStalledError", async () => {
   // Liveness sibling of the over-cap case above. The rendezvous gate
   // (readControlFileWithGate) must treat a stalled hello read as terminal
   // rather than retrying it: a hostile server that withholds the transfer makes
@@ -2463,15 +2446,13 @@ test("poll() stops the poller on a UsageError from a transport read, not retried
 });
 
 test("poll() stops the poller on a stalled consume-delete, not swallowed-and-re-emitted", async () => {
-  // The delete-mode consume path deletes a validated message (the go-ahead signal
-  // to the sender) before emitting it. A TRANSIENT delete failure is swallowed and
-  // the file re-read next cycle -- but a terminal UsageError (the per-op stall
-  // deadline a withheld delete callback trips) must NOT be swallowed: doing so
-  // would emit the message while its consume-delete never landed, leaving the file
-  // on disk to be re-emitted as a duplicate every cycle (a ~120 s/cycle stall loop).
-  // The poller must instead stop and report the terminal error, like every
-  // other transport-call site. Companion to the read-stall poll test above, for
-  // the consume-delete consumer.
+  // The delete-mode consume path deletes a validated message (the go-ahead
+  // signal to the sender) before emitting it. A TRANSIENT delete failure is
+  // swallowed and the file re-read next cycle, but a terminal UsageError (the
+  // per-op stall deadline a withheld delete callback trips) must NOT be: that
+  // would emit the message while its consume-delete never landed, leaving the
+  // file on disk to be re-emitted as a duplicate every cycle. Companion to
+  // the read-stall poll test above, for the consume-delete consumer.
   const peerId = "peer-test";
   const validMessage = objectMessage({ hello: "world" });
   const peerName = `${peerId}-${validMessage.length}.json`;
@@ -2513,21 +2494,14 @@ test("poll() stops the poller on a stalled consume-delete, not swallowed-and-re-
 });
 
 test("poll() stops the poller on a stalled retain-mode ack-write, not advanced-and-re-emitted", async () => {
-  // Retain mode never deletes the message; the consumption signal the sender
-  // waits for is instead a zero-length ack marker writeAck() publishes (a put
-  // then a rename) BEFORE poll() emits the payload and advances
-  // recvSeq/lastAckedNNN. A TRANSIENT ack-write failure reschedules and the
-  // never-deleted message is reprocessed next cycle -- but a terminal UsageError
-  // (the per-op stall deadline a withheld put callback trips) must NOT be
-  // swallowed: re-attempting just re-hits the stall, and advancing past it would
-  // emit a message whose ack never landed, leaving the sender blocked forever on
-  // an ack it will never see. The poller must instead stop and report the
-  // terminal error, like every other transport-call site. This is the retain
-  // sibling of the read-stall and consume-delete poll tests above -- the
-  // ack-write consumer in that terminal-on-UsageError family. It mirrors the
-  // consume-delete test's structure; its retain consume harness (an inline
-  // retain-mode connection reading a timestamped, recvSeq-matched message) is
-  // adapted from the retain-mode tests below.
+  // Retain mode never deletes the message; the consumption signal is a
+  // zero-length ack marker writeAck() publishes (a put then a rename) BEFORE
+  // poll() emits the payload and advances recvSeq/lastAckedNNN. A TRANSIENT
+  // ack-write failure reschedules and reprocesses the message next cycle,
+  // but a terminal UsageError must NOT be swallowed: advancing past it would
+  // emit a message whose ack never landed, blocking the sender forever.
+  // Retain sibling of the read-stall and consume-delete poll tests above;
+  // its harness is adapted from the retain-mode tests below.
   const peerId = "peer-sender";
   const id = "receiver-me";
   const validMessage = objectMessage({ hello: "world" });
@@ -2591,22 +2565,13 @@ test("poll() stops the poller on a stalled retain-mode ack-write, not advanced-a
 
 // --- whole-exchange liveness fallback (write/stat/delete + slow-drip read) ---
 //
-// The write-path analogue of the read-path liveness test above. The CLI
-// adapter's per-operation bounds fast-fail a stalled READ
-// (list/get/createExclusive) in 60s, but the always-executed write/stat/delete
-// ops (put/rename/delete/exists) have no per-op bound. FileSyncConnection's own
-// peer-inactivity budget is the fallback behind EVERY transport await, so a
-// withheld callback fails the exchange with a terminal
-// TransportOperationStalledError within the budget instead of hanging. The mock
-// here withholds the callback (a never-settling promise) -- it does NOT throw
-// -- so the failure can only come from the consumer-layer budget, not from any
-// per-op adapter wrapper (none of these tests name one), which is what makes
-// the fallback op-agnostic. A short peerTimeoutMs keeps the wall-clock wait
-// small; timeToLiveMs is left large so the rendezvous loop never fires first
-// and the budget race is the sole cause. The send-path waits do not compete: no
-// connection here has an outstanding message or a pending ack, so send()
-// reaches the transport call without entering one -- and a wait it did enter
-// would be armed from this same peer budget, not the TTL.
+// Write-path analogue of the read-path liveness test above: the CLI adapter's
+// per-operation bounds cover read ops only, so FileSyncConnection's own
+// peer-inactivity budget is the sole guard behind a stalled write/stat/delete
+// op, and must fail the exchange with TransportOperationStalledError instead
+// of hanging. The mock withholds its callback rather than throwing, so the
+// failure can only come from that budget. timeToLiveMs is left large so the
+// rendezvous loop cannot fire first and confound the cause.
 
 test("send() fails within the peer budget when the server withholds the put callback", async () => {
   const { client } = makeMockClient();
@@ -2636,17 +2601,13 @@ test("send() fails within the peer budget when the server withholds the rename c
   );
 });
 
-// The rename builder is the one bounded operation naming TWO transport paths,
-// so each takes a labelled link of its own -- the shape a marker in the source
-// cannot reach past. The fail-closed dangling redaction consumes the rest of the
-// fragment it is applied to, and that fragment ends at the source path, so the
-// destination and the first-party label introducing it are composed on the link
-// behind it rather than behind the marker. Driven through the bound transport
-// directly because every rename the exchange itself issues today has a
-// self-generated temp source -- a property of the current callers, not of this
-// builder, and precisely what a future caller must not be able to break
-// silently. Short paths keep each label inside one link, so the display cap is
-// not what ends it.
+// The rename builder names two transport paths, each with its own labelled
+// link, so a marker in the source cannot reach into the destination link.
+// Driven through the bound transport directly because every rename the
+// exchange itself issues today has a self-generated temp source -- a
+// property of today's callers, not this builder, and exactly what a future
+// caller must not silently break. Short paths keep each label inside one
+// link, so the display cap is not what ends it.
 test("a private-key-shaped rename source does not take the destination with it", async () => {
   const { client } = makeMockClient();
   const conn = await makeConnectedConn(client, {
@@ -2722,7 +2683,7 @@ test("poll() fails within the peer budget when the server withholds (slow-drips)
 test("poll() budget error escapes a hostile peer filename in the stalled-operation path", async () => {
   // The whole-exchange budget builds its TransportOperationStalledError from the
   // operation target; on a stalled get() that target is `${path}/${name}`, so a
-  // peer message filename carrying control/ANSI bytes would otherwise reach the
+  // peer message filename containing control/ANSI bytes would otherwise reach the
   // operator raw. (The core-side budget twin of the CLI adapter's per-operation
   // transportOperationStalledError, which escapes its path the same way.)
   const peerId = "peer-test";
@@ -2842,14 +2803,12 @@ test("close() applies the teardown budget as min(budget, peerTimeoutMs)", async 
 
 test("the cycle-boundary signals are forwarded unwrapped, unlike end()", async () => {
   // releaseForIdle and ensureConnected are local session-lifecycle calls, not
-  // peer round trips, so neither is raced against a fresh peer-inactivity budget
-  // the way every data-plane op is, and neither gets end()'s teardown budget
-  // either: whatever bounds them is the transport's own. A connection-per-poll
-  // transport builds on that -- its idle release bounds its close itself, and a
-  // budget imposed here would abandon core's wait mid-close on a session only
-  // that release can finish tearing down. Pinned by driving both against a
-  // transport that never settles either one: a wrap would settle them at the
-  // budget.
+  // peer round trips, so neither is raced against a fresh peer-inactivity
+  // budget or given end()'s teardown budget -- whatever bounds them is the
+  // transport's own. A connection-per-poll transport's idle release bounds
+  // its own close, so a budget imposed here would abandon core's wait
+  // mid-close on a session only that release can finish tearing down. Pinned
+  // by driving both against a transport that never settles either one.
   const peerTimeoutMs = 100;
   const { client } = makeMockClient();
   // Installed BEFORE the connection is constructed: the forwarding binds each
@@ -3264,10 +3223,9 @@ test("synchronize() lock-detection branch uses filename order (I7), not id order
   // lock-detection branch does NOT throw.
   //
   // "Agency A-hello.json" < "Agency-hello.json" because space (U+0020) sorts
-  // before "-" (U+002D). So "Agency A" arrived first by filename order.
-  // A raw `"Agency" < "Agency A"` id-compare would say "Agency" arrived first,
-  // producing the wrong expected lock name and a false rejection. Filename order
-  // is the source of truth (I7) and must win.
+  // before "-" (U+002D), so "Agency A" arrives first by filename order. A raw
+  // `"Agency" < "Agency A"` id-compare would say "Agency" arrived first,
+  // producing the wrong lock name and a false rejection.
   const myId = "Agency";
   const peerId = "Agency A";
   const { client, files } = makeMockClient();
@@ -3390,13 +3348,12 @@ test("synchronize() createExclusive winner: leaves own hello and lock name in re
 test("synchronize() two-hellos branch: tiebreaker uses UUID order only, ignoring divergent modifyTimes", async () => {
   // Across heterogeneous transports the two parties can observe different --
   // even contradictory -- modifyTimes for the same hello files, because sync
-  // tools stamp the transfer time rather than the original creation time. Here
-  // each side sees ITS OWN hello as the earlier file, the worst case for a
-  // modifyTime tiebreaker: it would make both parties believe they arrived
-  // first, both claim the starter role, and derive two different lock names --
-  // a deadlock. The UUID-only tiebreaker must instead assign the starter role
-  // to the lexicographically-smaller UUID on both sides regardless of
-  // modifyTime, so the parties agree on roles and on a single lock name.
+  // tools stamp the transfer time rather than the creation time. Here each
+  // side sees ITS OWN hello as earlier, the worst case for a modifyTime
+  // tiebreaker: both parties would believe they arrived first, both claim
+  // the starter role, and derive different lock names -- a deadlock. The
+  // UUID-only tiebreaker must instead agree on roles and a single lock name
+  // regardless of modifyTime.
   const idLow = "00000000-0000-4000-8000-000000000001";
   const idHigh = "ffffffff-ffff-4fff-bfff-ffffffffffff";
 
@@ -4273,7 +4230,7 @@ test("poll waits while the file is partially synced and reads it once the size m
   client.list = async () => {
     listCount++;
     // First two cycles: the file is present but not fully synced. It reports a
-    // smaller size and is deliberately absent from the store, so any premature
+    // smaller size and is absent from the store, so any premature
     // get() would throw "not found" and show up as an error below.
     if (listCount <= 2)
       return [{ name, modifyTime: 0, size: message.length - 5 }];
@@ -4456,8 +4413,8 @@ test("close() drains the last sent file before cleanup, preventing premature del
 });
 
 test("close() emits an info log at drain entry when the last sent file is still present", async () => {
-  // Verifies the info-level breadcrumb added so an operator running at default
-  // verbosity (verbose:0 = INFO) can tell close() is in a non-trivial drain
+  // Verifies the info-level breadcrumb that lets an operator running at
+  // default verbosity (verbose:0 = INFO) tell close() is in a non-trivial drain
   // rather than hanging. The file is consumed before the deadline so only the
   // entry log appears, not the deadline-fired log.
   const prevLevel = logLibrary.getLevel();
@@ -4506,7 +4463,7 @@ test("close() emits an info log at drain entry when the last sent file is still 
 });
 
 test("close() emits an info log when the drain deadline fires", async () => {
-  // Verifies the info-level breadcrumb added so an operator can distinguish a
+  // Verifies the info-level breadcrumb that lets an operator distinguish a
   // completed (peer consumed the terminal frame) close from a timed-out one that
   // deleted the frame as a fallback. The file is never consumed here, so close()
   // runs to the deadline and both the entry and deadline logs appear.
@@ -4558,18 +4515,15 @@ test("close() emits an info log when the drain deadline fires", async () => {
 });
 
 test("close() does not emit the deadline log when the final poll observes the file consumed at/after the deadline", async () => {
-  // Teeth for the deadline-log gate: it must key on the LAST OBSERVED presence,
-  // not the clock. A clock-only check (`Date.now() >= deadline`) mislabels a
-  // clean drain whose final filePresent() returned "absent" at/after the
-  // deadline as a fallback-delete timeout. That straddle is a sub-millisecond
-  // boundary with real timers (each list() is budgeted to exactly the time left
-  // to the deadline, so a late return is pre-empted into the catch), so this
-  // forces it with fake timers: setSystemTime() advances Date.now() past the
-  // deadline WITHOUT firing the unref'd budget setTimeout (which advanceTimers
-  // would), leaving the mocked list() to resolve "consumed" on a microtask that
-  // still wins the budget race. The drain then exits via filePresent()===false
-  // with Date.now() past the deadline -- the exact case a clock-only gate gets
-  // wrong.
+  // Teeth for the deadline-log gate: it must key on the LAST OBSERVED
+  // presence, not the clock. A clock-only check (`Date.now() >= deadline`)
+  // mislabels a clean drain whose final filePresent() returns "absent"
+  // at/after the deadline as a fallback-delete timeout. That straddle is a
+  // sub-millisecond boundary with real timers, so this forces it with fake
+  // timers: setSystemTime() advances Date.now() past the deadline without
+  // firing the unref'd budget setTimeout (which advanceTimers would),
+  // leaving the mocked list() to resolve "consumed" on a microtask that
+  // still wins the budget race.
   vi.useFakeTimers();
   vi.setSystemTime(0);
   const prevLevel = logLibrary.getLevel();
@@ -4593,7 +4547,7 @@ test("close() does not emit the deadline log when the final poll observes the fi
         files.set(`/test/${outName}`, Buffer.from("{}"));
         messageLoopInternals(conn).lastSentFile = outName;
 
-        // First list() (the entry filePresent at deadline-time 0) surfaces the
+        // First list() (the entry filePresent at deadline-time 0) shows the
         // file; the second (first loop poll) jumps the clock past the 1000 ms
         // deadline, then reports the file consumed. setSystemTime moves Date.now()
         // only -- it does not fire the budget timer -- so the list resolves
@@ -4741,20 +4695,18 @@ test("synchronize() lockless mode role assignment matches the lexicographic rule
 
 test("synchronize() lockless mode joiner fast-path is skipped; lockless barrier is entered even with peer hello already present", async () => {
   // The throwing delete proves the joiner fast-path (which calls delete) is
-  // not taken in lockless mode. The no-op safeDelete is robustness scaffolding
-  // only; real lockless transports support delete.
+  // not taken in lockless mode; the no-op safeDelete is scaffolding only --
+  // real lockless transports support delete.
   //
-  // When locklessRendezvous is set and a party's entry list() (or barrier loop)
-  // finds the peer's hello, it must NOT take the joiner shortcut (which would
-  // call delete(peer hello), unsupported on a lockless transport). It must
-  // write its own hello and enter the lockless ack-handshake barrier instead.
+  // When locklessRendezvous is set and a party's entry list() (or barrier
+  // loop) finds the peer's hello, it must not take the joiner shortcut
+  // (unsupported delete on a lockless transport) but instead write its own
+  // hello and enter the lockless ack-handshake barrier.
   //
-  // Both parties start against an empty directory and run concurrently: each
-  // writes its own hello during its own synchronize() and the slower-to-list
-  // party sees the peer hello already present, exercising the "peer hello
-  // already present" path. A's hello is not pre-planted, by design -- a
-  // party's own hello never predates its own synchronize() (it would be a
-  // self-hello and rejected by the entry precondition).
+  // Both parties start against an empty directory and run concurrently, so
+  // the slower-to-list party sees the peer hello already present, exercising
+  // that path. A's hello is not pre-planted: a party's own hello never
+  // predates its own synchronize() call.
   const idA = "00000000-0000-4000-8000-000000000001";
   const idB = "ffffffff-ffff-4fff-bfff-ffffffffffff";
 
@@ -4896,7 +4848,7 @@ test("a <a>-<b>-lock.json tiebreaker is not mistaken for a message by poll() or 
   expect(files.has(peerLockPath)).toBe(true);
 });
 
-test("synchronize() lockless timeout message carries no role prefix", async () => {
+test("synchronize() lockless timeout message has no role prefix", async () => {
   // The lockless-barrier timeout fires while the role is indeterminate
   // (it can occur after the peer hello was seen and acked, where filename order
   // may make this party the joiner), so the message has no [role] prefix --
@@ -4924,9 +4876,9 @@ test("synchronize() lockless timeout message carries no role prefix", async () =
 });
 
 test("synchronize() lockless mode throws when more than one peer hello is detected during the poll loop", async () => {
-  // Regression guard for the multi-peer-hello guard added to the lockless
-  // loop: mirrors the lock path's otherFiles.length > 1 check and catches a
-  // third party that slipped in after the initial synchronize() guard.
+  // Regression guard for the lockless loop's multi-peer-hello guard: mirrors
+  // the lock path's otherFiles.length > 1 check and catches a third party
+  // that slipped in after the initial synchronize() guard.
   const { client } = makeMockClient();
   const conn = new FileSyncConnection(client, {
     pollingFrequency: 10,
@@ -5198,7 +5150,7 @@ test("send() message timeout throws UsageError", async () => {
 // --- control file envelope: round-trip, partial-sync gate, malformed body -----
 
 test("synchronize() lockless mode: round-trip hello body and zero-length ack markers", async () => {
-  // Both parties write a hello carrying the bilateral-flag envelope and a
+  // Both parties write a hello containing the bilateral-flag envelope and a
   // zero-length ack marker named after the peer hello they acknowledge. The
   // hello is read through the gate; the ack is matched by name existence only.
   const idA = "00000000-0000-4000-8000-000000000001";
@@ -5476,19 +5428,16 @@ test("synchronize() lock starter: malformed joiner hello body is a UsageError", 
 const ID_LOW = "00000000-0000-4000-8000-000000000001";
 const ID_HIGH = "ffffffff-ffff-4fff-bfff-ffffffffffff";
 
-// Builds two FileSyncConnections sharing one in-memory directory, each already
-// in the post-open connected state, for concurrent-rendezvous tests. The
-// generous timeToLive means a stall (instead of a fast-fail) would exceed the
-// vitest timeout and fail the test, so a passing concurrent mismatch test is
-// itself proof the failure is at rendezvous and not at the peer timeout.
+// Builds two FileSyncConnections sharing one in-memory directory, each
+// already in the post-open connected state, for concurrent-rendezvous tests.
+// The generous timeToLive means a stall would exceed the vitest timeout and
+// fail the test, so a passing concurrent-mismatch test is itself proof the
+// failure is at rendezvous, not the peer timeout.
 //
-// Determinism note: the concurrent tests rely on the mock client's synchronous
-// in-memory Map (no await/delay in list/put), so the two parties' list()/put()
-// interleave predictably under the microtask scheduler and each sees the
-// other's hello on its first poll. If the mock ever gains artificial latency, a
-// party could miss the peer hello on its first list() and poll to the (generous)
-// TTL, surfacing as a vitest timeout -- a test artifact to fix in the mock, not
-// a production regression.
+// Determinism note: the mock client's list()/put() are synchronous
+// (no await/delay), so the two parties interleave predictably and each sees
+// the other's hello on its first poll; added mock latency would need fixing
+// there, not in production.
 function makeRendezvousPair(
   idA: string,
   optsA: Partial<ConstructorParameters<typeof FileSyncConnection>[1]>,
@@ -5529,7 +5478,7 @@ function makeRendezvousPair(
 // (a) Each rendezvous branch writes the hello with the advertised flags. Drive
 // the lock joiner fast-path against a matched peer so the hello it writes
 // survives (the joiner keeps its own hello) and can be inspected.
-test("(a) hello payload carries both bilateral flags", async () => {
+test("(a) hello payload has both bilateral flags", async () => {
   const { client, files } = makeMockClient();
   const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
   conn.id = ID_HIGH;
@@ -5789,7 +5738,7 @@ test("(c) lockless party reading a lock peer hello fails fast and leaves both he
   // Arrival order 2: the lockless party reads the lock peer's left-behind hello
   // in its ack barrier and detects the mismatch, after having written its own
   // hello before the loop. The same pairing's other side (above) detects via
-  // the joiner fast-path, so both parties surface it.
+  // the joiner fast-path, so both parties report it.
   const { client, files } = makeMockClient();
   const conn = new FileSyncConnection(client, {
     pollingFrequency: 10,
@@ -6836,7 +6785,7 @@ test("I8: send() whose rename throws -- seq unchanged, temp file cleaned up", as
 
 test("I8: retain send() ack-gate list throws -- send rejects rather than spinning", async () => {
   // Rule (a) + gateway liveness: when list() throws inside the ack-gate loop
-  // (waiting for the peer's ack after the first send), send() must surface the
+  // (waiting for the peer's ack after the first send), send() must expose the
   // error rather than looping silently.
   const { client } = makeMockClient();
   const id = "sender-me";
@@ -6981,13 +6930,12 @@ test("I8: retain poll() ack-write failure -- recvSeq held, message reprocessed a
 
 // --- synchronize() entry precondition matrix ---------------------------------
 // One mode-agnostic rule: at synchronize() entry the directory must be empty
-// except for at most one peer hello. The matrix is the full (file-kind x mode)
-// cross-product of that rule, generated rather than hand-listed so a missing
-// combination is structurally impossible. The only legal pre-entry states are an
-// empty directory and a single peer hello; every other file kind can appear only
-// AFTER entry and is rejected, in both modes.
-// If a kind below is not a direct consequence of the rule, the rule -- not the
-// matrix -- is wrong.
+// except for at most one peer hello. The matrix is the full (file-kind x
+// mode) cross-product of that rule, generated rather than hand-listed so a
+// missing combination is structurally impossible; every other file kind is
+// legal only AFTER entry, in both modes.
+// If a kind below is not a direct consequence of the rule, the rule -- not
+// the matrix -- is wrong.
 
 const ENTRY_SELF_ID = "00000000-0000-4000-8000-000000000001";
 const ENTRY_PEER_ID = "ffffffff-ffff-4fff-bfff-ffffffffffff";
@@ -7430,13 +7378,12 @@ test("poll(): the loop recognizes a real temp-<uuid>.tmp but treats a non-UUID t
 });
 
 // --- poll() error classification: terminal vs retryable ----------------------
-// poll() stops the poller on a terminal error (re-reading the same bytes cannot
-// help) and reschedules on a retryable one (a later attempt may succeed). The
-// terminal class includes a fully-synced message that fails to parse or
-// validate -- the missing case that let a corrupt, never-deleted retain-mode
-// message re-read until the peer timeout. The retryable class includes a
-// transient transport hiccup. (Seq/NNN-mismatch and duplicate-NNN terminal
-// cases are covered by their own tests above.)
+// poll() stops the poller on a terminal error (re-reading the same bytes
+// cannot help) and reschedules on a retryable one (a later attempt may
+// succeed). A fully-synced message that fails to parse or validate is
+// terminal -- otherwise a corrupt, never-deleted retain-mode message re-reads
+// until the peer timeout. A transient transport hiccup is retryable.
+// (Seq/NNN-mismatch and duplicate-NNN terminal cases are covered above.)
 
 test("poll() terminal: a fully-synced message with an unparseable body stops the poller", async () => {
   const { client, files } = makeMockClient();
@@ -7513,7 +7460,7 @@ test("poll() terminal: the unparseable-body error neutralizes deceptive Unicode 
   expect(rendered).toContain("\\u202e");
 });
 
-test("poll() terminal: an old-format JSON message surfaces a likely-incompatible-version hint", async () => {
+test("poll() terminal: an old-format JSON message shows a likely-incompatible-version hint", async () => {
   const { client, files } = makeMockClient();
   const peerId = "peer-sender";
   // An old-format JSON message body from a peer that predates the binary
@@ -7543,7 +7490,7 @@ test("poll() terminal: an old-format JSON message surfaces a likely-incompatible
   expect([...files.keys()].some((p) => p.endsWith("-ack.json"))).toBe(false);
 });
 
-test("poll() terminal: a foreign envelope version byte surfaces the same version hint", async () => {
+test("poll() terminal: a foreign envelope version byte shows the same version hint", async () => {
   const { client, files } = makeMockClient();
   const peerId = "peer-sender";
   // The forward-looking half of the same reader hint: a future build that raises
@@ -7607,17 +7554,15 @@ test("poll() retryable: a transient list() failure reschedules and the message i
 
 test("composed via fromEventConnection: the first transient poll() error is terminal -- receive() fails once naming the cause, and the poller does not reschedule", async () => {
   // The isolation test directly above proves a transient list() failure is
-  // retryable: poll() reschedules and delivers on a later cycle. That is a
-  // property of poll() STANDALONE. In the CLI a FileSyncConnection is never
-  // consumed directly -- apps/cli/src/protocol.ts always bridges it through
-  // fromEventConnection (fromEventConnection -> conn.start() -> mc.receive()),
-  // whose error listener routes every emitted poll() error into
-  // QueuedMessageConnection.fail(). fail() synchronously calls hooks.close() ->
-  // conn.close(), whose first statement -- before any await -- is conn.stop(),
-  // so pollerActive is cleared within that synchronous prefix, before poll()'s
-  // finally runs; the first emitted error is therefore terminal and the
-  // reschedule never happens. This pins that composed contract alongside the
-  // isolation tests; see the "Production composition note" under I8 in
+  // retryable: poll() reschedules and delivers on a later cycle, a property
+  // of poll() STANDALONE. In the CLI a FileSyncConnection is never consumed
+  // directly -- apps/cli/src/protocol.ts bridges it through
+  // fromEventConnection (-> conn.start() -> mc.receive()), whose error
+  // listener routes every emitted poll() error into
+  // QueuedMessageConnection.fail(), which synchronously calls hooks.close()
+  // -> conn.close(), whose first statement is conn.stop(), clearing
+  // pollerActive before poll()'s finally runs. The first emitted error is
+  // therefore terminal. See the "Production composition note" under I8 in
   // docs/spec/FILE_SYNC.md.
   const { client, files } = makeMockClient();
   const peerId = "peer-sender";
@@ -7947,17 +7892,15 @@ test("poll() terminal: a message envelope seq above MAX_SAFE_INTEGER is rejected
 
 test("retain mode: send() honors an ack already on disk even when its peer budget is spent", async () => {
   // Regression guard for the ack-gate ordering: the wait checks for the
-  // qualifying ack BEFORE its deadline, so an ack the peer has already written
-  // is honored rather than discarded as a spurious timeout. What bounds this
-  // wait is the peer-inactivity budget armed at THIS send (peerTimeoutMs, hence
-  // open() rather than a hand-flagged connection) -- the connection's timeToLive
-  // does not, so the elapsed condition has to be armed through that budget.
+  // qualifying ack BEFORE its deadline, so an already-written ack is honored
+  // rather than discarded as a spurious timeout. What bounds this wait is
+  // the peer-inactivity budget armed at THIS send (peerTimeoutMs, via
+  // open(), not a hand-flagged connection), not the connection's timeToLive.
   //
-  // It is armed by a clock that jumps two budgets on every reading: whatever
-  // value the wait arms its deadline from, every LATER reading is already past
-  // it. The real ordering never takes a later reading -- it lists, finds the
-  // ack, and breaks -- while a loop that consulted the deadline first would read
-  // a spent budget and throw before ever listing.
+  // It is armed by a clock that jumps two budgets on every reading, so any
+  // LATER reading is already past the deadline. The real ordering never
+  // takes a later reading -- it lists, finds the ack, and breaks -- while a
+  // deadline-first loop would read a spent budget and throw before listing.
   const { client, files } = makeMockClient();
   const id = "sender-me";
   const peerId = "peer-receiver";
@@ -8965,7 +8908,7 @@ test("poll refuses an over-cap message before reading it into memory", async () 
   expect((errors[0] as Error).message).toContain("maximum inbound frame size");
 });
 
-test("poll surfaces an adapter frame-size cap as a terminal error", async () => {
+test("poll reports an adapter frame-size cap as a terminal error", async () => {
   // A server that under-reports a file's size in its directory listing slips
   // past the pre-get() size check, so the adapter's hard read cap fires during
   // get() instead. That FrameSizeExceededError must be terminal -- the poller
@@ -9027,7 +8970,7 @@ test("normalizeFiledropPath: leaves interior segments and case untouched", () =>
   // Only backslashes and trailing slashes are normalized; interior "//", "."
   // and ".." segments and letter case are preserved verbatim. The CLI filedrop
   // path-equality check relies on this: collapsing interior segments here would
-  // make two genuinely different drops compare equal and silently skip a real
+  // make two different drops compare equal and silently skip a real
   // "wrong drop" conflict. Pin it so a future regex tidy-up cannot regress it.
   expect(normalizeFiledropPath("/a//b")).toBe("/a//b");
   expect(normalizeFiledropPath("/mnt/share/.")).toBe("/mnt/share/.");
@@ -9364,7 +9307,7 @@ test("synchronize() --sweep-exchange-files --force-retain-sweep: wipes the retai
   expect(warning?.message).not.toContain("unknown role");
 });
 
-test("synchronize() --sweep-exchange-files: a delete failure surfaces as a transport error (exit 69), not silent success", async () => {
+test("synchronize() --sweep-exchange-files: a delete failure shows as a transport error (exit 69), not silent success", async () => {
   const { client, files } = makeMockClient();
   const conn = await makeConnectedConn(client, { pollingFrequency: 10 });
   conn.id = "me";
@@ -9626,7 +9569,7 @@ test("synchronize() --sweep-exchange-files --force-retain-sweep: no danger warni
   ).toHaveLength(0);
 });
 
-test("synchronize() --sweep-exchange-files: a close() during the retain-signal inspection surfaces as a clean shutdown, not retain-uncertain", async () => {
+test("synchronize() --sweep-exchange-files: a close() during the retain-signal inspection shows as a clean shutdown, not retain-uncertain", async () => {
   // A close() racing the bounded hello-body inspection aborts the gate read with
   // the ConnectionClosedError reason. That must propagate as a clean shutdown
   // (exit 69), NOT be masked as a retain-uncertain UsageError (exit 64).
@@ -10010,7 +9953,7 @@ describe("connection-per-poll idle-boundary signal", () => {
     // The release and the reschedule sit inside the same poller-active guard,
     // and close() clears that flag through stop() before it drives anything on
     // the transport, so a cycle still running when close() lands never reaches
-    // a boundary at all: its session is carried into teardown rather than
+    // a boundary at all: its session is moved into teardown rather than
     // released and re-established.
     const { client } = makeMockClient();
     const trace: string[] = [];

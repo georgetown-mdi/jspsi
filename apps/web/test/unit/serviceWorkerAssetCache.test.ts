@@ -5,16 +5,12 @@ import {
   serviceWorkerSourceModel,
 } from "../utils/serviceWorkerHarness";
 
-// ASSET_CACHE is the worker's one growing cache: the fetch path adds to it on its
-// own initiative and an installed app warms every route's code into it at each
-// launch. Both of its writers therefore carry an invariant the cap alone does not
-// state -- each brings the cache back within MAX_ASSET_ENTRIES after its batch,
-// so a continuously deployed origin cannot accumulate past deployments' chunks.
-// A third writer would be the way that invariant is lost, and nothing about
-// adding one would say so. This guard names the two, so any other site reaching
-// the cache -- another function, or a listener body doing it inline -- fails here
-// rather than shipping. What the writers actually do is driven end to end in
-// serviceWorker.test.ts; this is only about who may do it.
+// ASSET_CACHE is the worker's one growing cache, written by the fetch path on
+// its own initiative and by the install/route-warm batch writer. Both keep
+// the cache within MAX_ASSET_ENTRIES after their batch, an invariant a third
+// writer could silently break. This guard names the two allowed writers, so
+// any other site reaching the cache fails here rather than shipping. What
+// they actually do is driven end to end in serviceWorker.test.ts.
 
 /** The functions the worker's asset cache is written by, and what each one is.
  * A site outside this set fails the checks below; so does an entry here that no

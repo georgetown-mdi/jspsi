@@ -39,7 +39,7 @@ const inviterEndpoint: WebRTCEndpoint = {
 };
 
 // The acceptor composes from THIS endpoint (the inviter's signaling location
-// carried on the invitation), not from its own browser location.
+// held in the invitation), not from its own browser location.
 const invitationEndpoint: WebRTCEndpoint = {
   channel: "webrtc",
   host: "inviter.example.net",
@@ -49,7 +49,7 @@ const invitationEndpoint: WebRTCEndpoint = {
 
 // ssn/first_name/last_name/dob infer matching keys; program_code is not in the
 // alias map, so it infers a disclosed payload column -- a non-trivial published
-// set for the inviter deposit to carry.
+// set for the inviter deposit to hold.
 const inviterColumns = [
   "ssn",
   "first_name",
@@ -94,7 +94,7 @@ describe("webrtcLocatorFromEndpoint", () => {
     });
   });
 
-  test("drops an absent optional rather than carrying an explicit undefined", () => {
+  test("drops an absent optional rather than holding an explicit undefined", () => {
     const bare: WebRTCEndpoint = { channel: "webrtc", host: "peer.example" };
     const locator = webrtcLocatorFromEndpoint(bare);
     expect(locator).not.toHaveProperty("port");
@@ -124,19 +124,19 @@ describe("composeManagedDocument", () => {
       connectionFromLocator(webrtcLocatorFromEndpoint(inviterEndpoint)),
     );
     expect(doc.authentication).toBeUndefined();
-    // No credential is representable: the webrtc server carries only host/port/path.
+    // No credential is representable: the webrtc server holds only host/port/path.
     expect(JSON.stringify(doc)).not.toContain("username");
     expect(JSON.stringify(doc)).not.toContain('"key"');
   });
 
-  test("carries caller-supplied payload commitments verbatim, never re-derived", () => {
+  test("holds caller-supplied payload commitments verbatim, never re-derived", () => {
     const doc = composeManagedDocument(
       {
         side: "inviter",
         linkageTerms: inviterTerms,
         metadata: inviterMetadata,
-        // Deliberately NOT what this metadata would derive, so the assertion
-        // proves the caller's set is carried as-is (one source: the token).
+        // NOT what this metadata would derive, so the assertion proves the
+        // caller's set is held as-is (one source: the token).
         disclosedPayloadColumns: ["program_code", "extra_committed"],
         expectedPayloadColumns: ["partner_col"],
       },
@@ -174,7 +174,7 @@ describe("composeManagedDocument", () => {
     expect(lazy).not.toHaveProperty("expectedPayloadColumns");
   });
 
-  test("carries the caller's terms-side lock-in verbatim, absent when none binds", () => {
+  test("holds the caller's terms-side commitment verbatim, absent when none binds", () => {
     // The declaration is the token's, never re-derived from the terms composed
     // beside it: an acceptor's own `deduplicate` is the mirror's false whatever
     // the inviter declared, so deriving it here would bind the wrong value.
@@ -332,18 +332,18 @@ describe("buildManagedDeposit (inviter)", () => {
     expect(deposit.exchangeFile.authentication).toBeUndefined();
     expect(deposit.label).toBe("Riverbend quarterly");
     // The persisted send-side commitment is the token's published set; the
-    // received set is unknowable at mint, so no receive lock-in is persisted.
+    // received set is unknowable at mint, so no receive commitment is persisted.
     expect(deposit.exchangeFile.disclosedPayloadColumns).toEqual(
       tokenDisclosedColumns,
     );
     expect(deposit.exchangeFile).not.toHaveProperty("expectedPayloadColumns");
   });
 
-  test("carries an input handle and no schedule: the offer has no schedule to make", () => {
-    // The unattended runner fires on a record carrying BOTH a schedule and a
+  test("holds an input handle and no schedule: the offer has no schedule to make", () => {
+    // The unattended runner fires on a record holding BOTH a schedule and a
     // persisted input handle. The deposit writes the handle and no schedule --
     // the offer has none to make -- so this path cannot assemble that pair; the
-    // import path, which can carry a schedule and reconstructs no handle, is its
+    // import path, which can hold a schedule and reconstructs no handle, is its
     // converse (test/unit/managedExchangeImport.test.ts). Neither is a claim a
     // comment could hold.
     const handle = {} as FileSystemFileHandle;
@@ -376,7 +376,7 @@ describe("buildManagedDeposit (inviter)", () => {
     expect(deposit.expires).toBe(new Date(now + 30 * 86_400_000).toISOString());
   });
 
-  test("carries an input-file handle only when one is captured", () => {
+  test("holds an input-file handle only when one is captured", () => {
     const handle = { name: "records.csv" } as unknown as FileSystemFileHandle;
     const withHandle = buildManagedDeposit(
       depositInputs({ inputFileHandle: handle }),
@@ -431,7 +431,7 @@ describe("buildManagedDeposit (acceptor)", () => {
     expect(deposit.exchangeFile.authentication).toBeUndefined();
   });
 
-  test("locks in the token's disclosed set as expectedPayloadColumns", () => {
+  test("commits the token's disclosed set as expectedPayloadColumns", () => {
     const deposit = acceptorDeposit(tokenDisclosedColumns);
     expect(deposit.exchangeFile.expectedPayloadColumns).toEqual(
       tokenDisclosedColumns,
@@ -450,17 +450,17 @@ describe("buildManagedDeposit (acceptor)", () => {
     expect(disclosedColumnNames(acceptorMetadata)).toEqual(["visit_id"]);
   });
 
-  test("an EMPTY token set persists as a strict receive-nothing lock-in", () => {
+  test("an EMPTY token set persists as a strict receive-nothing commitment", () => {
     const deposit = acceptorDeposit([]);
     expect(deposit.exchangeFile.expectedPayloadColumns).toEqual([]);
   });
 
-  test("a token with no set leaves the lock-in absent (lazy)", () => {
+  test("a token with no set leaves the commitment absent (lazy)", () => {
     const deposit = acceptorDeposit(undefined);
     expect(deposit.exchangeFile).not.toHaveProperty("expectedPayloadColumns");
   });
 
-  test("locks in the token's declared deduplicate for later re-runs", () => {
+  test("commits the token's declared deduplicate for later re-runs", () => {
     // A managed re-run runs from this document alone, with no token in hand, so
     // the declaration the acceptance consented to has to be in it or every re-run
     // after the one-shot runs unbound.
@@ -472,9 +472,9 @@ describe("buildManagedDeposit (acceptor)", () => {
 });
 
 // A deposit whose stored side disagrees with the side its document was composed
-// for stores an acceptor record carrying no consent record -- the silent pass the
+// for stores an acceptor record holding no consent record -- the silent pass the
 // field exists to prevent. The record's side and the document both come from the
-// one `side` in the deposit's parts, which is the single statement each bench
+// one `side` in the deposit's parts, which is the single statement each console
 // makes at its deposit call.
 describe("the deposit's side and its document", () => {
   const connection = webrtcLocatorFromEndpoint(invitationEndpoint);
@@ -541,7 +541,7 @@ describe("the label cap", () => {
       ),
     ).not.toThrow();
     // The deposit itself does not throw on an over-long label (the store's build
-    // enforces the cap), but the field carries it verbatim for that check.
+    // enforces the cap), but the field holds it verbatim for that check.
     const overCap = "x".repeat(MAX_LABEL_LENGTH + 1);
     const deposit = buildManagedDeposit(
       depositInputs({ choices: { label: overCap } }),

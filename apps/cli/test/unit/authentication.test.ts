@@ -35,7 +35,7 @@ afterEach(() => {
 function makeConn(): FileSyncConnection {
   // Explicit fast poll so the two-party handshake completes within the test
   // timeout; do not inherit DEFAULT_POLLING_FREQUENCY_MS (5 s), which is
-  // deliberately conservative for real SFTP servers, not test speed.
+  // conservative for real SFTP servers, not test speed.
   return new FileSyncConnection(new LocalFSClient(), {
     verbose: -1,
     pollingFrequency: 10,
@@ -104,19 +104,17 @@ test("both parties derive the same rotated token over a real connection", async 
   expect(a.rotatedSecret).toBe(b.rotatedSecret);
   expect(a.rotatedSecret).not.toBe(TOKEN_A);
   expect(SHARED_SECRET_REGEX.test(a.rotatedSecret)).toBe(true);
-  // Both parties requested encryption, so both surface the same wrap decision.
+  // Both parties requested encryption, so both show the same wrap decision.
   expect(a.applyEncryption).toBe(true);
   expect(b.applyEncryption).toBe(true);
 });
 
-test("applyEncryption surfaces own-OR-peer through authenticateConnection across flag combinations", async () => {
+test("applyEncryption shows own-OR-peer through authenticateConnection across flag combinations", async () => {
   // The OR semantics are pinned at the runKex layer; this asserts they survive
-  // through authenticateConnection, whose AuthResult carries applyEncryption.
-  // All four combinations are exercised so the auth layer pins both the
-  // unencrypted (false, false) -> false decision and the own-OR-peer rule on its
-  // own, rather than leaning on the (true, true) success path above. Run over an
-  // in-memory pipe -- the handshake completes the same as over a real transport,
-  // without the file-drop setup the rotation tests need.
+  // through authenticateConnection, whose AuthResult holds applyEncryption. All
+  // four combinations are exercised, not just the (true, true) success path
+  // above. Run over an in-memory pipe -- the handshake completes the same as
+  // over a real transport, without the file-drop setup the rotation tests need.
   const combos: Array<[boolean, boolean, boolean]> = [
     [false, false, false],
     [true, false, true],
@@ -164,7 +162,7 @@ test("authentication tags a pre-handshake-expiry error with psilinkRecoveryHintE
   const mc = fromEventConnection(makeConn());
   // Direct tag assertion, symmetric with the malformed-secret and post-
   // handshake-expiry paths: the pre-handshake expiry error (checked before any
-  // network activity) carries the recovery-hint tag so the CLI surfaces its
+  // network activity) holds the recovery-hint tag so the CLI shows its
   // specific "re-invite" instruction instead of the generic advisory.
   const err = await authenticateConnection(
     mc,
@@ -213,7 +211,7 @@ test("authentication throws for a token with valid base64url characters but wron
 
 test("authentication tags a malformed-secret error with psilinkRecoveryHintEmitted", async () => {
   const mc = fromEventConnection(makeConn());
-  // The secret-format error carries the recovery-hint tag so the CLI surfaces
+  // The secret-format error holds the recovery-hint tag so the CLI shows
   // its specific "re-invite" instruction instead of stacking the generic
   // transport-failure advisory on top (see runProtocol's catch).
   const err = await authenticateConnection(
@@ -294,29 +292,12 @@ test("a legacy SPAKE2-shaped reply fails a new initiator with a clean error", as
 
 // --- Post-handshake expiry ---------------------------------------------------
 //
-// authenticateConnection checks `expires` twice: once synchronously before the
-// key exchange starts, and once after runKex returns, to catch a secret that
-// expires *during* the round-trip. Only the pre-handshake check is covered
-// above ("authentication throws for an expired token..."); this test drives
-// the post-handshake branch (auth.ts) by faking only Date: start the clock
-// just before `expires`, kick off both sides over an in-memory pipe (no
-// real-timer coupling, so the handshake still completes), then advance the
-// clock past `expires` while the round-trip is in flight, so the post-handshake
-// checks -- which run only after both runKex calls resolve -- see the secret as
-// expired. (Ported from the deleted pake.test.ts, which covered the equivalent
-// SPAKE2 branch before the X25519 cutover.)
-//
-// The advance is synchronous, between starting the two authenticateConnection
-// promises and awaiting them, not scheduled on a microtask tick. The
-// pre-handshake expiry check runs in authenticateConnection's synchronous
-// prologue (before its first await, and before any frame is delivered -- pipe
-// deliveries are queued microtasks that only run during the await), so by the
-// time both calls have returned their promises both pre-checks have already
-// passed at the pre-advance clock. Advancing here is therefore strictly after
-// both pre-checks and strictly before both post-checks, independent of how many
-// microtasks the kex spans -- whereas a single Promise.resolve() tick is not a
-// reliable barrier and could land the advance after the post-check, silently
-// resolving fulfilled on the wrong branch.
+// authenticateConnection checks `expires` twice: synchronously before the key
+// exchange starts, and again after runKex returns, to catch a secret that
+// expires *during* the round-trip. This test drives the post-handshake branch
+// by faking Date and advancing the clock past `expires` synchronously, between
+// starting both authenticateConnection calls and awaiting them -- strictly
+// after both pre-handshake checks and before both post-handshake checks.
 
 test("authentication tags post-handshake-expiry errors with psilinkRecoveryHintEmitted", async () => {
   const expires = "2030-01-01T00:00:00.000Z";
@@ -343,7 +324,7 @@ test("authentication tags post-handshake-expiry errors with psilinkRecoveryHintE
   const [resultA, resultB] = await Promise.allSettled([pA, pB]);
   expect(resultA.status).toBe("rejected");
   expect(resultB.status).toBe("rejected");
-  // Tagged so the CLI surfaces a re-invite hint instead of the generic
+  // Tagged so the CLI shows a re-invite hint instead of the generic
   // transport-failure advisory.
   for (const result of [resultA, resultB] as PromiseRejectedResult[]) {
     expect(result.reason.message).toContain(

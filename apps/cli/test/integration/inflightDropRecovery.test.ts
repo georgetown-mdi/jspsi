@@ -46,9 +46,9 @@ import { inProcessOnly } from "../sftpBackendGate";
 const TEST_TIMEOUT_MS = 120_000;
 
 // The per-operation liveness deadline, lowered through the adapter's @internal
-// test seam. Only the cases that expect an operation to FAIL depend on it, and
-// only to avoid spending the production minute on a rejection they need to have
-// happened rather than to have timed.
+// `stallDeadlineMs` option. Only the cases that expect an operation to fail
+// depend on it, and only to avoid spending the production minute on a
+// rejection they need to have happened rather than to have timed.
 const STALL_DEADLINE_MS = 3_000;
 
 // Large enough that a cut can land deep inside the transfer rather than only at
@@ -302,7 +302,7 @@ for (const [arm, keepsCutting] of [
 }
 
 inProcessOnly(
-  "a drop that cannot be recovered surfaces the session loss and its remedies, " +
+  "a drop that cannot be recovered reports the session loss and its remedies, " +
     "not a connect failure",
   async () => {
     // max_reconnect_attempts=0 permits no mid-exchange reconnection at all, so the
@@ -351,7 +351,7 @@ inProcessOnly(
 );
 
 inProcessOnly(
-  "an exhausted mid-exchange budget surfaces the session loss and its remedies",
+  "an exhausted mid-exchange budget reports the session loss and its remedies",
   async () => {
     // The same statement one drop later: the budget's last re-dial is spent on the
     // first cut, so the second is terminal -- and terminal on the budget, with the
@@ -441,7 +441,7 @@ inProcessOnly(
         async () => {
           for (let i = 0; i < LANDED_PUBLISH_REPEATS; i++) {
             // The publish LANDED and its destination is still on the server: the
-            // premise the landed-confirmation probe rests on is intact, so the
+            // assumption the landed-confirmation probe rests on is intact, so the
             // torn rename resolves as the success it was.
             const kept = await publish(`kept-${i}`, () => {
               tear.tearAfterRenameLands = true;
@@ -464,7 +464,7 @@ inProcessOnly(
             );
             // The publish is never reported as sent: the operation still rejects,
             // and the transport's own error -- the SFTP status and both paths --
-            // is carried rather than replaced. Both reach the operator, each
+            // is preserved rather than replaced. Both reach the operator, each
             // rendered under its own display cap.
             const cause = (taken.error as Error).cause;
             expect(cause).toBeInstanceOf(Error);

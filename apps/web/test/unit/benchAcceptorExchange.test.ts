@@ -88,7 +88,7 @@ describe("prepareAcceptorExchange", () => {
     expect(prepared.linkageTerms.deduplicate).toBe(false);
   });
 
-  test("locks in the received-payload columns to the disclosed set exactly", () => {
+  test("commits the received-payload columns to the disclosed set exactly", () => {
     const prepared = prepareAcceptorExchange({
       linkageTerms: inviterTerms,
       acceptorName: "Sam Alvarez",
@@ -97,7 +97,7 @@ describe("prepareAcceptorExchange", () => {
       columns,
       disclosedPayloadColumns: ["program_code", "enrollment_date"],
     });
-    // The consent-screen disclosed set is the exact lock-in, so an inviter that
+    // The consent-screen disclosed set is the exact commitment, so an inviter that
     // transmits a different column set aborts (reconcileReceivedPayload).
     expect(prepared.expectedPayloadColumns).toEqual([
       "program_code",
@@ -106,10 +106,10 @@ describe("prepareAcceptorExchange", () => {
   });
 
   test("retains the invitation's declared deduplicate as the partner's expected value", () => {
-    // The terms-side lock-in: the acceptor's own value is derived as false, so
+    // The terms-side commitment: the acceptor's own value is derived as false, so
     // the invitation's declaration for the INVITER's side would otherwise be
     // lost between the consent screen and the terms exchange. Both values the
-    // invitation can carry are retained as-is -- never defaulted -- so the run
+    // invitation can hold are retained as-is -- never defaulted -- so the run
     // holds the partner to what this acceptance consented to.
     for (const declared of [false, true]) {
       const prepared = prepareAcceptorExchange({
@@ -125,7 +125,7 @@ describe("prepareAcceptorExchange", () => {
     }
   });
 
-  test("the empty disclosed set locks in 'receive nothing' (not lazy)", () => {
+  test("the empty disclosed set commits to 'receive nothing' (not lazy)", () => {
     const prepared = prepareAcceptorExchange({
       linkageTerms: inviterTerms,
       acceptorName: "Sam Alvarez",
@@ -134,7 +134,7 @@ describe("prepareAcceptorExchange", () => {
       columns,
       disclosedPayloadColumns: [],
     });
-    // An empty set is a lock-in, not the lazy case: a later non-empty payload
+    // An empty set is a commitment, not the lazy case: a later non-empty payload
     // aborts. So the prepared value is the empty array, never undefined.
     expect(prepared.expectedPayloadColumns).toEqual([]);
   });

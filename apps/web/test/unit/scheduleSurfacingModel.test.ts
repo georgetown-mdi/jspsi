@@ -19,13 +19,12 @@ import { withTimeZone } from "../utils/hostTimeZone";
 import type { ManagedExchangeSchedule } from "@psi/managedExchangeRecord";
 import type { ScheduleDueness } from "@bench/scheduleSurfacingModel";
 
-// The schedule's display derivation in Node, with the clock injected: where the
-// recurrence stands at an instant, the cadence in words, and the coordination state
-// a run of missed windows earns. Every window instant comes from the schedule
-// arithmetic in @psi/managedSchedule, so the suite pins what a re-derivation here
-// would break -- a reading taken off the lattice rather than off the record's
-// planned `nextWindow`, and a window that keeps its agreed instant across a
-// daylight-saving transition while its local rendering moves an hour.
+// The schedule's display derivation in Node, with the clock injected: where
+// the recurrence stands at an instant, the cadence in words, and the
+// coordination state a run of missed windows earns. Every window instant
+// comes from the schedule arithmetic in @psi/managedSchedule, read off the
+// lattice rather than the record's planned `nextWindow`, with the agreed
+// instant held across a daylight-saving transition.
 
 /** Anchor 2026-01-06T14:00Z, weekly, a three-hour window: window n opens
  * `2026-01-06 + 7n` at 14:00Z and closes at 17:00Z. */
@@ -51,7 +50,7 @@ function readAtUtc(
   return withTimeZone("UTC", () => scheduleDueness(schedule, at(instant)));
 }
 
-/** The window instants a reading carries: both for an open window, the open alone
+/** The window instants a reading holds: both for an open window, the open alone
  * for one still ahead. */
 function windowInstants(dueness: ScheduleDueness): {
   opensAt: string;
@@ -72,7 +71,7 @@ describe("where the recurrence stands", () => {
     expect(scheduleDueLine(dueness)).toMatch(/^Next run window: January 6, /);
   });
 
-  test("inside a window reads open and names when it closes", () => {
+  test("inside a window is treated as open and names when it closes", () => {
     const dueness = readAtUtc(weekly, "2026-01-06T15:30:00.000Z");
     expect(dueness.state).toBe("open");
     expect(windowInstants(dueness).closesAt).toMatch(
@@ -109,7 +108,7 @@ describe("where the recurrence stands", () => {
 
   test("the reading is the lattice's, not the record's planned window", () => {
     // `nextWindow` is bookkeeping a runner advances, so a browser that has never
-    // run the schedule carries a stale one. The surfaces must still name the
+    // run the schedule holds a stale one. The surfaces must still name the
     // window that is really open rather than the one the record last planned.
     const stale: ManagedExchangeSchedule = {
       ...weekly,
@@ -207,8 +206,8 @@ describe("repeated-miss coordination", () => {
   });
 
   test("the prompt offers no pause and says the cadence stands", () => {
-    // Surface-only, no auto-pause: the copy must not read as the app having
-    // stopped attempting on the operator's behalf.
+    // Surface-only, no auto-pause: the copy must not be treated as the app
+    // having stopped attempting on the operator's behalf.
     const { prompt } = repeatedMissCoordination(withMisses(2)) ?? {};
     expect(prompt).toMatch(/nothing has been paused/i);
     expect(prompt).toMatch(/the schedule stands/i);
@@ -231,7 +230,7 @@ describe("cadence in words", () => {
     );
   });
 
-  test("a daily cadence does not read as every 1 days", () => {
+  test("a daily cadence does not display as every 1 days", () => {
     expect(scheduleCadenceLine({ ...weekly, intervalDays: 1 })).toBe(
       "A run window opens every day and stays open 3 hours.",
     );
@@ -269,12 +268,11 @@ describe("the attendance note branches on the runtime", () => {
 
 describe("every schedule the record schema admits renders", () => {
   // The surfaces render a window instant directly, with no fallback for one no
-  // calendar carries. What makes that safe is the record schema's ceilings on
-  // `intervalDays` and `windowSeconds`: within them the window containing an
-  // instant, and the first one after it, both land on a renderable calendar. That
-  // is checked rather than asserted in prose -- one row that threw would take the
-  // whole list down with it -- by sweeping the schema's own extremes, at the
-  // extremes of the instant range as well as at a real clock's reading.
+  // calendar holds. Within the schema's ceilings on `intervalDays` and
+  // `windowSeconds`, the window containing an instant and the first one after
+  // it both land on a renderable calendar -- checked here by sweeping the
+  // schema's own extremes, at the extremes of the instant range and at a real
+  // clock's reading.
   const anchors = [
     "0000-01-01T00:00:00.000Z",
     "1970-01-01T00:00:00.000Z",
@@ -318,7 +316,7 @@ describe("every schedule the record schema admits renders", () => {
             );
             expect(dueness.state).toMatch(/^(open|upcoming)$/);
             // A rendered calendar moment, not a placeholder for one no calendar
-            // carries: `Intl` throws on an instant outside the range rather than
+            // holds: `Intl` throws on an instant outside the range rather than
             // formatting it, and an unrepresentable instant reaches it as an
             // invalid `Date`.
             const { opensAt, closesAt } = windowInstants(dueness);
@@ -332,7 +330,7 @@ describe("every schedule the record schema admits renders", () => {
 
   test("a period or width past the ceiling is refused before it reaches a surface", () => {
     // The other half of what makes the sweep above total: an imported or
-    // hand-edited record carrying either shape fails validation, so it is never a
+    // hand-edited record holding either shape fails validation, so it is never a
     // record these surfaces read.
     expect(() =>
       admittedSchedule(

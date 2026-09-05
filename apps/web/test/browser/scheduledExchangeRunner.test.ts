@@ -17,11 +17,9 @@ import { createAppMount, flushPendingUpdates } from "./renderApp";
 
 import type { ManagedScheduleRuntimeOptions } from "@psi/managedScheduleRuntime";
 
-// The runtime-wide mount the app root carries, in a real browser, because the
-// gate it turns on is a platform reading a fake cannot stand in for: this suite
-// runs in an ordinary Chromium tab, which is exactly the runtime the runner must
-// not fire in. The runner it starts is injected -- what is under test is the
-// gate and the mount's lifetime, not the tick, which is
+// This suite mounts in a real Chromium tab, the runtime the runner must not
+// fire in. The runner it starts is injected -- this file tests the gate and
+// the mount's lifetime, not the tick, which is
 // test/unit/managedScheduleRunner.test.ts.
 
 const app = createAppMount();
@@ -32,10 +30,10 @@ afterEach(async () => {
 });
 
 describe("the scheduled runner's mount", () => {
-  test("reads this ordinary tab as a non-installed runtime", () => {
-    // The premise the gate rests on, measured rather than assumed: a tab the
-    // operator opened is not the installed app runtime, and the display-mode
-    // query is what says so.
+  test("classifies this ordinary tab as a non-installed runtime", () => {
+    // The assumption the gate rests on, measured rather than assumed: a tab
+    // the operator opened is not the installed app runtime, and the
+    // display-mode query is what says so.
     expect(isInstalledRuntime()).toBe(false);
   });
 

@@ -10,24 +10,11 @@ import { expect, test } from "vitest";
 
 /**
  * The TURN allocation refresh timer, pinned because the CLI's teardown cannot
- * reach it.
- *
- * werift keeps a TURN allocation alive by re-sending REFRESH on a timer armed
- * from the lifetime the SERVER granted. Closing the peer connection stops the
- * loop from taking another turn but does not disarm the timer already waiting,
- * and that timer holds the Node event loop, so an exchange with a `turn` block
- * configured returns when the timer fires rather than when its work is done.
- * The wait is five sixths of the granted lifetime: about 500 s where a relay
- * grants the usual 600 s, which is the roughly eight minutes measured from
- * close to the process returning against coturn.
- *
- * Nothing werift exposes releases it: stopping the ICE transport, closing the
- * ICE connection, closing the TURN protocol and its transport again, and
- * resolving the refresh handle were each driven against a live allocation and
- * left the hold unchanged. The bound is therefore a stated limit
- * (docs/spec/WEBRTC_TRANSPORT.md) rather than a defect the transport can fix,
- * and this test is what says when the limit lapses: a werift release that
- * disarms the timer reddens it, and the statement comes out with it.
+ * reach it: werift re-arms REFRESH from the granted lifetime and nothing it
+ * exposes disarms the timer after `close()`, so an exchange with a `turn`
+ * block configured returns only when the timer fires -- about five sixths of
+ * the granted lifetime. This is a stated limit (docs/spec/WEBRTC_TRANSPORT.md);
+ * a werift release that disarms the timer should fail this test too.
  */
 
 type Address = ConstructorParameters<typeof TurnProtocol>[0];

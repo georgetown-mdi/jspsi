@@ -62,7 +62,7 @@ describe("prepareAcceptedInvitation", () => {
     });
 
     expect(token.sharedSecret).toBe(secret);
-    // A WebRTC endpoint is admitted on any profile, and only it carries `host`.
+    // A WebRTC endpoint is admitted on any profile, and only it has `host`.
     expect(endpoint.channel).toBe("webrtc");
     if (endpoint.channel === "webrtc") expect(endpoint.host).toBe("127.0.0.1");
   });
@@ -143,11 +143,8 @@ describe("prepareAcceptedInvitation", () => {
     ).rejects.toThrow();
   });
 
-  // A deduplicating term under a strategy that cannot match one is refused HERE
-  // rather than at launch: the review step is what states the terms, and a screen
-  // describing what this invitation's grouping discloses would describe a run
-  // that cannot happen. The guard reads core's own verdict, and both strategies
-  // this build ships match one, so both are admitted.
+  // The guard reads core's own verdict, and both strategies this build ships
+  // match a deduplicating term, so both are admitted.
   test.each(["cascade", "single-pass"] as const)(
     "admits a deduplicating term under %s",
     async (linkageStrategy) => {
@@ -229,7 +226,7 @@ describe("acceptorExchangeDataSpec", () => {
   test("adopts the inviter's terms but substitutes the acceptor's identity", () => {
     const spec = acceptorExchangeDataSpec(inviterTerms, "Accepting Org");
 
-    // The inviter's keys are carried verbatim...
+    // The inviter's keys are kept verbatim...
     expect(spec.linkageTerms?.linkageKeys).toEqual(inviterTerms.linkageKeys);
     // ...but the acceptor's identity replaces the inviter's, so the inviter's
     // identity does not leak into the acceptor's prepared terms.
@@ -298,7 +295,7 @@ describe("acceptorExchangeDataSpec", () => {
     expect(prepared.linkageTerms.identity).toBe("Accepting Org");
 
     // The acceptor's CSV columns would infer a different (multi-key) default set
-    // -- confirming the adopted terms genuinely diverge from CSV inference.
+    // -- confirming the adopted terms diverge from CSV inference.
     const csvInferred = getDefaultLinkageTerms(
       "Accepting Org",
       prepared.metadata,

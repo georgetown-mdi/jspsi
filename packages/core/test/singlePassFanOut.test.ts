@@ -235,7 +235,7 @@ test("a mixed-width table is refused for a cell inside the FIRST key's width and
   );
 });
 
-test("the ragged table is refused for carrying more candidates than the declared width admits", () => {
+test("the ragged table is refused for holding more candidates than the declared width admits", () => {
   // The running total is bounded by the sender's OWN advertised slot count, so
   // a frame within the width bound cell by cell is still refused when its cells
   // sum past what the sender said it would ship. It is the guard bounding the
@@ -761,7 +761,7 @@ test("a blind helper sending a fan-out table still receives no message 3", async
 
 // --- the derived caps account for the fan-out width --------------------------
 
-test("the receiver's read gate carries the ragged table's count-prefix term", async () => {
+test("the receiver's read gate includes the ragged table's count-prefix term", async () => {
   const setCalls: Array<number | undefined> = [];
   let resolveReceive: ((v: unknown) => void) | undefined;
   const effectiveKeyCount = FAN_OUT_CANDIDATES_PER_ELEMENT;
@@ -900,7 +900,7 @@ test("a row realizing more candidates than the party declared is refused, not sh
   // The advertisement is what the partner's element bounds, read gate, and decode
   // are all derived from, so a candidate producer the declared factors do not
   // account for must land here rather than on the wire. One key declared
-  // fan-out-free, one row carrying a set.
+  // fan-out-free, one row holding a set.
   const [conn] = createMessagePipe();
   const run = linkViaSinglePassPSI(
     { cardinality: "one-to-one" },

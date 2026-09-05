@@ -43,7 +43,7 @@ export const SENTINEL_GATED_LEVELS: readonly ConsoleLevel[] = [
  *
  * So seeding those as live matchers would only create dead entries. If one
  * regresses and starts leaking, the fix is to re-suppress/route it at the
- * source; accept it here ONLY when the output is genuinely intended on the
- * console, with the matcher's `reason` explaining why.
+ * source; accept it here ONLY when the output is intended on the console,
+ * with the matcher's `reason` explaining why.
  */
 export const INTEGRATION_CONSOLE_ALLOWLIST: readonly ConsoleAllowEntry[] = [];

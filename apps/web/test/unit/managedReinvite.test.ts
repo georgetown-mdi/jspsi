@@ -89,17 +89,17 @@ describe("composeManagedReinvite", () => {
     expect(token.linkageTerms).toEqual(record.exchangeFile.linkageTerms);
   });
 
-  test("the token carries the document's committed send set, so the partner's accept re-locks the same receive set", async () => {
+  test("the token holds the document's committed send set, so the partner's accept re-locks the same receive set", async () => {
     const record = inviterRecord();
     const reinvite = await composeManagedReinvite(record, location, seams);
     const token = await decodeInvitation(reinvite.encoded);
 
-    // The partner's receive lock-in derives from the token's disclosed set (see
-    // core's runtime lock-in); it must equal the record's own committed send set.
+    // The partner's receive enforcement derives from the token's disclosed set (see
+    // core's runtime enforcement); it must equal the record's own committed send set.
     expect(token.disclosedPayloadColumns).toEqual(["diagnosis_code"]);
 
     // The accept re-derives the acceptor's perspective from the same terms it did
-    // originally, without error -- the round-trip locks in.
+    // originally, without error -- the round-trip is consistent.
     expect(() =>
       deriveAcceptedLinkageTerms(token.linkageTerms, "Partner Org"),
     ).not.toThrow();
@@ -121,7 +121,7 @@ describe("composeManagedReinvite", () => {
     );
   });
 
-  test("the deep link carries the encoded token in its fragment", async () => {
+  test("the deep link contains the encoded token in its fragment", async () => {
     const reinvite = await composeManagedReinvite(
       inviterRecord(),
       location,

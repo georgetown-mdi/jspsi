@@ -8,8 +8,8 @@ import type { MessageConnection } from "@psilink/core";
 
 /** A MessageConnection whose `send` resolves and whose `receive` rejects with
  * `error`. As the initiator, the handshake sends its first frame then awaits a
- * reply, so this surfaces `error` from the kex's receive -- the seam by which a
- * peer-driven frame failure reaches the classifier. */
+ * reply, so this exposes `error` from the kex's receive -- the boundary by which
+ * a peer-driven frame failure reaches the classifier. */
 function rejectingReceiveMc(error: unknown): MessageConnection {
   return {
     send: () => Promise.resolve(),
@@ -30,7 +30,7 @@ const SECRET_B = Buffer.from(new Uint8Array(32).fill(0x22)).toString(
 );
 
 // The generic, non-oracular message every key-exchange authentication failure
-// surfaces (it must not hint at which check failed).
+// reports (it must not hint at which check failed).
 const GENERIC_FAILURE = "key exchange authentication failed";
 
 // Expiry fixtures for the threaded `expires` path: a value already in the past
@@ -43,7 +43,7 @@ const FUTURE_EXPIRES = "2999-01-01T00:00:00.000Z";
 
 /** The web handshake role assignment (ExchangeView.tsx): inviter -> responder,
  * acceptor -> initiator. Both ends share `expires` when given (an invitation
- * carries one bound both peers read); omitting it models an unbounded
+ * has one bound both peers read); omitting it models an unbounded
  * credential, leaving core's expiry guards no-op. */
 function runBothEnds(
   connInitiator: MessageConnection,
@@ -133,7 +133,7 @@ describe("authenticateExchange", () => {
   test("a transport drop is re-thrown unchanged, not re-tagged as a trust failure", async () => {
     const [connA, connB] = createMessagePipe();
     // The responder parks awaiting the initiator's first frame; dropping the peer
-    // surfaces a transport ConnectionError, which the kex remaps to its timeout
+    // produces a transport ConnectionError, which the kex remaps to its timeout
     // error (a plain Error wrapping the transport cause). That is a retryable
     // transport drop, NOT a trust failure, so authenticateExchange must not
     // re-tag it as security.
@@ -161,7 +161,7 @@ describe("authenticateExchange", () => {
 
   test("a protocol violation (peer out of turn) is re-tagged as a security trust failure", async () => {
     // A peer flooding/misordering frames during the handshake overflows the
-    // inbound buffer, surfacing a `protocol` ConnectionError. That is never
+    // inbound buffer, producing a `protocol` ConnectionError. That is never
     // benign mid-handshake, so it must be a non-retryable trust failure, not the
     // retryable transport bucket.
     const mc = rejectingReceiveMc(
@@ -243,21 +243,10 @@ describe("authenticateExchange", () => {
   test("a secret that expires during the round-trip fails closed post-handshake as security", async () => {
     // Drive the post-handshake branch by faking only Date: start the clock just
     // before `expires`, run both ends over an in-memory pipe (real timers, so the
-    // handshake still completes), and advance past `expires` while the round-trip
-    // is in flight. The post-handshake checks -- run only after each end's runKex
-    // resolves -- then see the secret as expired.
-    //
-    // The advance is synchronous, between starting the handshakes and awaiting
-    // them, rather than scheduled on a microtask tick. authenticateConnection's
-    // pre-handshake expiry check runs in its synchronous prologue (before its
-    // first await, and before any frame is delivered -- pipe deliveries are queued
-    // microtasks that only run during the await below), so by the time both
-    // authenticateExchange calls have returned their promises, both pre-checks
-    // have already passed at the pre-advance clock. Advancing here is therefore
-    // strictly after both pre-checks and strictly before both post-checks,
-    // independent of how many microtasks the kex spans -- whereas a single
-    // `Promise.resolve()` tick is not a reliable barrier and could land the
-    // advance after the post-check, silently passing on the wrong branch.
+    // handshake still completes), then advance past `expires` while the
+    // round-trip is in flight, so the post-handshake checks see the secret as
+    // expired. The advance runs synchronously, before either promise is
+    // awaited, since each pre-handshake check runs before any frame is sent.
     const expires = "2030-01-01T00:00:00.000Z";
     vi.useFakeTimers({
       toFake: ["Date"],
@@ -291,7 +280,7 @@ describe("authenticateExchange", () => {
       expect(reason).toBeInstanceOf(ConnectionError);
       // Re-tagged as the non-retryable trust failure, not a transport drop.
       expect((reason as ConnectionError).kind).toBe("security");
-      // The original cause's message (carrying the round-trip wording) survives
+      // The original cause's message (holding the round-trip wording) survives
       // the re-wrap, as does its recovery-hint tag.
       expect((reason as ConnectionError).message).toContain(
         "during the key-exchange round-trip",

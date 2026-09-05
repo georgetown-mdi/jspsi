@@ -47,7 +47,7 @@ describe("waitForIncomingConnection", () => {
 
   test("an aborted wait is not the no-show condition", async () => {
     // The operator (or, later, a runner closing its window) stopped the wait; the
-    // partner's absence was never established, so this must not read as a no-show.
+    // partner's absence was never established, so this must not be treated as a no-show.
     const controller = new AbortController();
     const promise = waitForIncomingConnection(makePeer().peer, {
       timeoutMs: 10_000,

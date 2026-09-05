@@ -74,7 +74,7 @@ describe("function grouping parity with the descriptor table", () => {
     // there cannot leave this surface asserting a behavior coalesce does not have.
     expect(display.blurb).toBe(descriptor.blurb);
     // The label stays plain language rather than the SQL term the descriptor
-    // carries, and states the condition core's does: a value an earlier rule of
+    // has, and states the condition core's does: a value an earlier rule of
     // the same pipeline emptied -- not an absent or empty input, which never
     // reaches the step.
     expect(display.label).not.toBe(descriptor.label);
@@ -96,7 +96,7 @@ describe("function grouping parity with the descriptor table", () => {
 
   test("an unrecognized (imported) function name is sanitized for display", () => {
     // The add-step menu only offers descriptor-backed functions, but an imported
-    // linkage-terms document carries a free-text transform `function`. An
+    // linkage-terms document has a free-text transform `function`. An
     // unrecognized name falls back to the raw name as its label -- which the editor
     // renders as text and into aria-labels -- so it must be sanitized: a bidi /
     // control / homoglyph payload must not survive into the DOM to spoof a benign
@@ -165,7 +165,7 @@ describe("the fan-out family is withheld from the add menu", () => {
   });
 
   test("keeps the withheld function descriptor-backed for a read-only row", () => {
-    // An imported document can still carry a fan-out step; it renders from its
+    // An imported document can still have a fan-out step; it renders from its
     // descriptor (label, blurb, typed params) rather than as a raw name, so the
     // operator can see and remove what blocks generation.
     for (const name of FAN_OUT_FUNCTION_NAMES) {
@@ -193,7 +193,7 @@ describe("descriptor-driven typed param fields", () => {
     expect(algorithm.enumOptions).toEqual(["soundex"]);
     expect(algorithm.defaultValue).toBe("soundex");
 
-    // parse_date: two strings, each carrying its declared default.
+    // parse_date: two strings, each holding its declared default.
     const parseDate = fields("parse_date");
     expect(parseDate.map((f) => f.kind)).toEqual(["string", "string"]);
     expect(parseDate.find((f) => f.key === "inputFormat")?.defaultValue).toBe(
@@ -220,7 +220,7 @@ describe("descriptor-driven typed param fields", () => {
     ).toEqual([]);
   });
 
-  test("every param field carries a non-empty plain-language label (standard and expert tiers)", () => {
+  test("every param field has a non-empty plain-language label (standard and expert tiers)", () => {
     for (const name of [...authorableFunctionNames, ...expertFunctionNames])
       for (const field of describeParamFields(
         STANDARDIZATION_FUNCTION_DESCRIPTORS[name],
@@ -247,8 +247,8 @@ describe("descriptor-driven typed param fields", () => {
           expect((field.enumOptions ?? []).length).toBeGreaterThan(0);
       }
     // The two deepest wrapper chains: `pad_left.char` is a refine folded under a
-    // default (must surface the "0" default as a string), and `coalesce.default` is
-    // an optional string (must surface as optional, not required).
+    // default (must show the "0" default as a string), and `coalesce.default` is
+    // an optional string (must show as optional, not required).
     const padChar = describeParamFields(
       STANDARDIZATION_FUNCTION_DESCRIPTORS["pad_left"],
     ).find((f) => f.key === "char");
@@ -568,7 +568,7 @@ describe("a coalesce that substitutes nothing where it sits", () => {
     ).toBeUndefined();
   });
 
-  test("each cause carries advice naming the remedy that reaches it", () => {
+  test("each cause has advice naming the remedy that reaches it", () => {
     expect(INERT_COALESCE_ADVICE["no-emptying-rule"]).toContain(
       "Move this step",
     );

@@ -245,14 +245,12 @@ test("buildOutputTable: a present prototype-member identifier column emits its r
 
 // --- assertPayloadSendDisclosed ----------------------------------------------
 
-// The payload.send data dictionary (exchanged, consented to, written into the
-// exchange record, and mirrored into a recurring partner's commitment) must
-// name EXACTLY what metadata actually transmits (isDisclosedToPartner =
-// isPayload && role !== "ignored") when present: an over-declaration (a name
-// not transmitted) or an under-declaration (a transmitted column omitted) is
-// rejected (UsageError -> CLI exit 64). Only an ABSENT dictionary is a no-op:
-// a present-but-empty one is an explicit "I disclose nothing" and is held to
-// it, in the direction where the payload actually crosses.
+// The payload.send dictionary -- exchanged, shown for consent, and written
+// into the exchange record -- must name EXACTLY what metadata transmits
+// (isDisclosedToPartner = isPayload && role !== "ignored"): an over- or
+// under-declaration is rejected (UsageError, CLI exit 64). Only an ABSENT
+// dictionary is a no-op -- a present-but-empty one means "I disclose
+// nothing" and is held to it, in the direction the payload crosses.
 
 // The output direction every case below runs in unless it says otherwise: the
 // partner is entitled to the result, so this party's disclosed columns leave the
@@ -474,13 +472,11 @@ test("assertPayloadSendDisclosed: every over-declared column is named, disclosed
 // --- assertPayloadSendDisclosed: the column names an operator is shown ---------
 
 // The offending names are partner-controlled on the accept side, where
-// deriveAcceptedLinkageTerms adopts the inviter's payload declaration, so this
-// refusal names values a mutually-distrusting party chose inside first-party
-// prose an operator reads as psilink's own. The names therefore compose
-// through the compatibility-message boundary, each in its own delimited run,
-// and what the cases below hold is that boundary's claim at this site: the
-// clause structure the operator is shown is the structure this function
-// wrote, whatever the name says.
+// deriveAcceptedLinkageTerms adopts the inviter's payload declaration, so
+// this refusal names values a mutually-distrusting party chose inside prose
+// an operator treats as psilink's own. The names compose through the
+// compatibility-message boundary in delimited runs; these cases hold the
+// shown clause structure to what this function wrote, whatever the name says.
 
 /** The refusal this assertion raises for `payload`/`meta`, as an operator sees it. */
 const disclosureRefusal = (payload: Payload, meta: Metadata): string => {
@@ -600,7 +596,7 @@ describe.each(NAMED_LIST_SITES)("$id", ({ compose }) => {
   );
 });
 
-test("assertPayloadSendDisclosed: a name carrying the list separator is one element", () => {
+test("assertPayloadSendDisclosed: a name containing the list separator is one element", () => {
   // A single column named `a, b` and two named `a` and `b` are different
   // declarations, and the rendering has to show that rather than print the same
   // bracketed list for both -- otherwise a partner-chosen name forges an element
@@ -782,15 +778,12 @@ test("disclosedColumnNames excludes a role: ignored column even with isPayload:t
 
 // --- assertDisclosureMatchesCommitment (send-side prior-promise check) --------
 
-// The persisted send-side commitment (the config's disclosedPayloadColumns, in
-// this party's OWN namespace) is compared against what current metadata discloses
-// (disclosedColumnNames). A drift in EITHER direction is rejected (UsageError ->
-// CLI exit 64), naming the offending column(s): a promised column no longer
-// transmittable (under-delivery), or a newly-transmitted column not promised
-// (over-delivery). An absent commitment is a no-op (lazy); an empty commitment is
-// strict "disclose nothing". Distinct from assertPayloadSendDisclosed: this
-// compares CURRENT metadata against an EARLIER persisted promise, not a present
-// payload.send dictionary against current metadata.
+// The persisted send-side commitment (disclosedPayloadColumns) is compared
+// against what current metadata discloses (disclosedColumnNames). A drift
+// in either direction is rejected (UsageError, CLI exit 64), naming the
+// offending columns. An absent commitment is a no-op; an empty one is
+// strict "disclose nothing". Distinct from assertPayloadSendDisclosed, which
+// compares a present payload.send dictionary against current metadata.
 
 // metaWithId discloses [patient_id, diagnosis]. This variant has drifted so
 // diagnosis is no longer transmitted (isPayload:false) -- it discloses only
@@ -852,7 +845,7 @@ test("assertDisclosureMatchesCommitment: a column now disclosed but not committe
   ).toThrow(/diagnosis/);
 });
 
-test("assertDisclosureMatchesCommitment: a drift carries the disclosure-refusal type", () => {
+test("assertDisclosureMatchesCommitment: a drift holds the disclosure-refusal type", () => {
   // The distinct type is what lets a caller keeping per-failure bookkeeping tell a
   // local refusal raised before anything is sent from a transport fault, without
   // giving up the `instanceof UsageError` classification the CLI's exit 64 rests on.
@@ -1237,14 +1230,13 @@ test("exchangePayloads: distinct row indices parse whatever order they arrive in
   });
 });
 
-test("exchangePayloads: a frame declaring no columns but carrying rows is refused at parse, as a protocol fault", async () => {
-  // The starkest width fault: every value in the frame's rows belongs to a column
-  // the frame does not name. Accepting it would commit those values to this
-  // party's exchange record while the record's readable received-column list --
-  // built from the same frame's columns -- said none were received. The wire
-  // schema refuses it where the message is parsed, with the classification every
-  // other malformed partner frame gets, so the receive rejects before any output
-  // or record stage reads the payload.
+test("exchangePayloads: a frame declaring no columns but holding rows is refused at parse, as a protocol fault", async () => {
+  // The starkest width fault: every value in the frame's rows belongs to a
+  // column the frame does not name. Accepting it would commit those values to
+  // this party's exchange record while the record's readable received-column
+  // list said none were received. The wire schema refuses it at parse, with
+  // the classification every other malformed partner frame gets, so the
+  // receive rejects before any output or record stage reads the payload.
   const [connA, connB] = createMessagePipe();
   const initiatorPromise = exchangePayloads(connA, "initiator", {
     hasData: false,
@@ -1264,7 +1256,7 @@ test("exchangePayloads: a frame declaring no columns but carrying rows is refuse
   );
 });
 
-test("exchangePayloads: a row carrying more values than the frame names columns is refused", async () => {
+test("exchangePayloads: a row holding more values than the frame names columns is refused", async () => {
   const [connA, connB] = createMessagePipe();
   const initiatorPromise = exchangePayloads(connA, "initiator", {
     hasData: false,
@@ -1284,7 +1276,7 @@ test("exchangePayloads: a row carrying more values than the frame names columns 
   );
 });
 
-test("exchangePayloads: a row carrying fewer values than the frame names columns is refused", async () => {
+test("exchangePayloads: a row holding fewer values than the frame names columns is refused", async () => {
   // The other width direction, refused by the same rule: a named column with no
   // value for the record would otherwise be committed as an absent cell the
   // record's column list still claims was received.
@@ -1335,7 +1327,7 @@ test("exchangePayloads: an ordinary output party's multi-column frame parses", a
   });
 });
 
-test("exchangePayloads: a zero-match frame naming columns but carrying no rows parses", async () => {
+test("exchangePayloads: a zero-match frame naming columns but holding no rows parses", async () => {
   // No row, so no row to be too wide or too narrow: a sender with transmittable
   // columns and nothing matched is honest, and the rule leaves it alone.
   const [connA, connB] = createMessagePipe();
@@ -1356,7 +1348,7 @@ test("exchangePayloads: a zero-match frame naming columns but carrying no rows p
   });
 });
 
-test("exchangePayloads: a columnless frame carrying no rows parses, committing nothing", async () => {
+test("exchangePayloads: a columnless frame holding no rows parses, committing nothing", async () => {
   // The boundary the rule stops at. This party's own preparePayload sends
   // hasData:false rather than this shape, but it holds no value against no
   // column, so its record's committed payload and readable column list agree at
@@ -1382,13 +1374,11 @@ test("exchangePayloads: a columnless frame carrying no rows parses, committing n
 // --- the wire schema's element predicates against the schemas they replace ------
 
 // `columns`, `rowIndices` and `rows` are validated by predicates inside a
-// single-issue array (utils/singleIssueArray.ts) rather than by element schemas,
-// which caps issue accumulation on a hostile frame without changing which frames
-// parse. The corpus below is what holds them to that second half: every frame is
-// parsed by the real receive path and by a reference schema written the plain
-// way, and the two verdicts must agree. A frame reaches the schema as parsed
-// JSON, so each is round-tripped through JSON first and only what a JSON body
-// can hold is in scope.
+// single-issue array (utils/singleIssueArray.ts) rather than by element
+// schemas, which caps issue accumulation on a hostile frame without changing
+// which frames parse. This corpus checks that second half by comparing the
+// real receive path against a plain reference schema on every frame, each
+// round-tripped through JSON first, so only a JSON body's shapes are in scope.
 const referenceFrameSchema = z.object({
   hasData: z.literal(true),
   columns: z.array(z.string().min(1).max(MAX_NAME_LENGTH)),
@@ -2119,14 +2109,12 @@ test("buildOutputTable: the width refusal states the declared count in agreement
 });
 
 // --- match multiplicity: payload rows per record, result rows per pair --------
-//
-// Under a deduplicating cardinality one side of the association table repeats a
-// row index. The payload frame stays one row per matched RECORD -- a repeat there
-// is a malformed frame the receiver's parse refuses -- while the result table is
-// one row per PAIR. The cases below run a fan in each direction against each
-// other: the partner's rows 0 and 1 grouped onto this party's row 1 (so this
-// party is the "one" side and its local half repeats), mirrored by the partner
-// holding the "many" side's table.
+// Under a deduplicating cardinality one side of the association table repeats
+// a row index. The payload frame stays one row per matched RECORD -- a
+// repeat there is a malformed frame the receiver's parse refuses -- while
+// the result table is one row per PAIR. The cases below run the fan in each
+// direction, mirroring which side holds the "one" table and which holds the
+// "many" one.
 
 const ONE_SIDE_TABLE: [Array<number>, Array<number>] = [
   [1, 1, 3],

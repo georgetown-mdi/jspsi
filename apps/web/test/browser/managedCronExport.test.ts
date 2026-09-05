@@ -35,13 +35,12 @@ import { createAppMount } from "./renderApp";
 import type { CapturedDownload } from "./captureDownloads";
 import type { NewManagedExchange } from "@psi/managedExchangeRecord";
 
-// The command-line export panel on the run surface, against real Chromium (the
-// record and its sibling stores are the real IndexedDB ones, and the export is the
-// real one: no download or spend is stubbed). What is pinned here is the hand-off
-// invariant -- the two files the CLI opens land, and this browser's copy is spent
-// ONLY on the operator's attestation that they did, so a dismissed save leaves one
-// live owner rather than two -- and the custody line beside it: these files are not a
-// backup this browser restores from, so this export never touches the backup marker.
+// The command-line export panel on the run surface, against real Chromium: real
+// IndexedDB stores, a real export, nothing stubbed. Pinned here: the hand-off
+// invariant (the two files the CLI opens land, and this browser's copy is spent
+// only on the operator's attestation, so a dismissed save leaves one live owner)
+// and the custody line (these files are not a backup this browser restores from,
+// so this export never touches the backup marker).
 
 vi.mock("@tanstack/react-router", async () =>
   (await import("./moduleMocks")).reactRouterMock(),
@@ -86,13 +85,11 @@ async function openExportPanel(): Promise<void> {
   expect(exportToggle().element().getAttribute("aria-expanded")).toBe("true");
 }
 
-/** Budget for the export dispatch: the click resolves as soon as the handler
- * starts, and the dispatch reads the record back out of IndexedDB before it
- * composes anything, so the two anchor clicks -- synchronous once the dispatch
- * reaches them -- land a store round trip after the click rather than with it.
- * The phase is bounded here rather than left on `vi.waitFor`'s 1s default,
- * which is no budget for a store round trip taken while this project's files run
- * in parallel, beside the integration suites in CI. */
+/** Budget for the export dispatch: the click resolves before the dispatch reads
+ * the record back out of IndexedDB, so the two anchor clicks land a store round
+ * trip after the click, not with it. Bounded higher than `vi.waitFor`'s 1s
+ * default, which is too tight for a store round trip while this project's files
+ * run in parallel with the integration suites in CI. */
 const EXPORT_DISPATCH_TIMEOUT_MS = 10_000;
 /** Budget for the capture to read each downloaded blob back off its object URL,
  * the phase after the anchors are clicked. It is waited on separately so a
@@ -252,7 +249,7 @@ describe("the export leaves the backup indicator exactly where it was", () => {
   // from -- and these two files are not one: this app's import does not accept them.
   // So no step of this export may mark the record, whichever way the operator goes.
 
-  test("a dismissed export marks nothing, and the exchange still reads backup-needed", async () => {
+  test("a dismissed export marks nothing, and the exchange is still backup-needed", async () => {
     const created = await createManagedExchange(newExchange());
     const downloads = captureDownloads();
     try {
@@ -298,7 +295,7 @@ describe("the export leaves the backup indicator exactly where it was", () => {
     }
   });
 
-  test("an earlier backup's date is carried through untouched", async () => {
+  test("an earlier backup's date stays untouched", async () => {
     // The other direction: a record that IS backed up must not lose or re-date its
     // marker for an export that has nothing to do with it.
     const created = await createManagedExchange(newExchange());
@@ -359,7 +356,7 @@ describe("the export leaves the backup indicator exactly where it was", () => {
 describe("the durable spent surface names the hand-off that spent it", () => {
   // The "Handed off to the command line" surface a confirmation leaves on screen is
   // session state. What a LATER VISIT shows is read back from the sibling store, so
-  // the stored spend is what has to carry the hand-off: a remount is the only way to
+  // the stored spend is what has to hold the hand-off: a remount is the only way to
   // see the copy the operator actually lives with.
 
   /** Mount the run surface again from nothing, as a later visit does: the surface

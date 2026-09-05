@@ -11,14 +11,12 @@ import {
   snapshotDiagnosticSinkAndLevel,
 } from "../loggingTestSupport";
 
-// The human check lines are a rendering an operator reads, not log records: the
-// Windows setup script collects them and re-prints them in an 80-column console,
-// where the CLI's ~50-column `[ISO] [LEVEL] [CONTEXT]` prefix wraps every line.
-// These tests run the mount battery to completion and assert what actually
-// reaches each destination, so the prefix cannot creep back in through a change
-// to the sink wiring, and the properties it must not cost -- the `--log-file`
-// capture, `--log-level`, the one-line `--json` verdict, and the prefix on the
-// command's other diagnostics -- are pinned beside it.
+// The human check lines are a rendering an operator reads, not log records: a
+// Windows setup script re-prints them in an 80-column console, where the
+// CLI's ~50-column `[ISO] [LEVEL] [CONTEXT]` prefix would wrap every line.
+// These tests run the mount checks to completion and assert what reaches
+// each destination, keeping `--log-file`, `--log-level`, the `--json`
+// verdict, and the prefix on other diagnostics intact.
 
 const LOG_PREFIX = /\[(TRACE|DEBUG|INFO|WARN|ERROR)\]/;
 const ISO_TIMESTAMP = /\[\d{4}-\d{2}-\d{2}T[\d:.]+Z\]/;
@@ -108,14 +106,11 @@ test("--log-file captures the check lines, and captures them prefix-free too", a
 });
 
 test("a level that does not admit info still silences the check lines", async () => {
-  // Dropping the prefix must not exempt the rendering from --log-level: at
-  // silent the exit code stays the whole answer, as it was when the lines went
-  // through log.info. The level is set on the logger the handler will reuse
-  // rather than left to the flag alone, because loglevel caches a logger by name
-  // for the life of the process and setDefaultLevel does not reach one that
-  // already exists -- so in a process where a doctor command has already run the
-  // flag does not lower it, for the rendering or for log.info. What is under
-  // test is a doctor logger at silent, however it got there.
+  // Dropping the prefix must not exempt the rendering from --log-level. The
+  // level is set directly on the logger, not just via the flag, because
+  // loglevel caches a logger by name for the process's life and
+  // setDefaultLevel does not reach one that already exists -- so in a
+  // process where doctor has already run, the flag alone would not lower it.
   const doctorLogger = logLibrary.getLogger("doctor-mount");
   const previousLevel = doctorLogger.getLevel();
   doctorLogger.setLevel(logLibrary.levels.SILENT);
@@ -162,7 +157,7 @@ test("a key marker in the operator's own mount path costs that line its predicat
 
 test("a diagnostic that is not the check rendering keeps its prefix", async () => {
   // A marker that is not a plain identifier is a usage error, reported through
-  // the logger before any check runs -- a log record, so it carries the prefix
+  // the logger before any check runs -- a log record, so it has the prefix
   // that identifies which run and which command wrote it.
   process.env["SMB_MARKER"] = "not a marker!";
   const { stderr } = await runMount();

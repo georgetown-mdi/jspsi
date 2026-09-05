@@ -28,23 +28,20 @@ import type {
   PreparedExchange,
 } from "@psilink/core";
 
-// One composed journey: this file mounts the acceptor route tree and drives it
-// end to end through the UI a user touches (file select, consent action,
-// Start), asserting the real inter-screen prop/state handoff between the acquire
-// phase, the consent gate, the columns step, and the run/completion screen. The
-// per-screen behaviors and the run screen's individual states live in
-// benchAccept.test.ts; the PSI mechanics live in invitedPSI.test.ts. What is
-// only tested here is that the composed handoff wires those screens together so
-// a real UI journey reaches Done and a downloadable result.
+// Mounts the acceptor route tree and drives it end to end through the UI a
+// user touches (file select, consent action, Start), checking the handoff
+// between the acquire phase, the consent gate, the columns step, and the
+// run/completion screen. Per-screen behavior lives in benchAccept.test.ts;
+// PSI mechanics live in invitedPSI.test.ts. This file checks only that the
+// screens hand off correctly for a full UI journey to Done with a
+// downloadable result.
 
 // Entry point: AcceptorBench, mounted directly. That is exactly the component
-// the /accept route renders (routes/accept.tsx), so this is the acceptor route
-// tree, and it matches the suite's mount idiom (direct createRoot, the router
-// seam mocked). Driving from a higher composition point would only add the
-// router shell this suite already stubs away, not more real handoff.
+// the /accept route renders (routes/accept.tsx), matching the suite's mount
+// idiom (direct createRoot, the router boundary mocked).
 
-// AcceptorBench's recovery links and lobby touch the router seam; the journey
-// never navigates.
+// AcceptorBench's recovery links and lobby touch the router boundary; the
+// journey never navigates.
 vi.mock("@tanstack/react-router", async () =>
   (await import("./moduleMocks")).reactRouterMock(),
 );
@@ -70,13 +67,11 @@ function preparedWith(keyCount: number): PreparedExchange {
 }
 
 // The lifecycle stub for this journey: unlike benchAccept.test.ts, which records
-// the call and lets the test hand-fire the seams after the fact, this stub
-// SETTLES THE RUN itself. On invocation it captures the owner's AbortController
-// (the run's `signal`), emits the real stage tree, walks the pre-run stages,
-// then delivers a result with a downloadable results blob and resolves -- the
-// same seam order the real lifecycle fires. The test then only touches UI
-// affordances and observes the journey reach Done, so it proves the Start ->
-// run -> completion -> download wiring without standing in for the lifecycle.
+// the call and fires the callbacks by hand afterward, this stub settles the run
+// itself. On invocation it captures the owner's AbortController (the run's
+// `signal`), emits the real stage tree, walks the pre-run stages, then delivers
+// a result with a downloadable results blob, and resolves -- the same call
+// order the real lifecycle fires.
 const journeyResultsUrl = URL.createObjectURL(new Blob(["a,b\nx,y\n"]));
 const settledRun = vi.hoisted(() => ({
   capturedSignal: undefined as AbortSignal | undefined,
@@ -195,8 +190,9 @@ test("acceptor journey reaches Done with a downloadable result driven only throu
     .toBeInTheDocument();
 
   // Start launches the run. The stubbed lifecycle settles it, so the journey
-  // advances Start -> run -> completion with no hand-fired seam: the run screen
-  // is reached purely by the columns step handing its launch to the run hook.
+  // advances Start -> run -> completion with no hand-fired callback: the run
+  // screen is reached purely by the columns step handing its launch to the run
+  // hook.
   await userEvent.click(
     page.getByRole("button", { name: "Start the exchange" }),
   );
@@ -209,9 +205,8 @@ test("acceptor journey reaches Done with a downloadable result driven only throu
     .element(page.getByText(/1,847.*matched records/))
     .toBeInTheDocument();
 
-  // A downloadable result is produced and points at the run's own results blob:
-  // the completion screen received the settled outputs through the handoff, not
-  // a fabricated fixture.
+  // The downloadable result points at the run's own results blob: the
+  // completion screen received it through the handoff from the settled outputs.
   const resultLink = Array.from(
     document.querySelectorAll<HTMLAnchorElement>("a[download]"),
   ).find((link) => link.textContent === "results.csv");

@@ -144,7 +144,7 @@ afterEach(() => {
 
 // --- registration -----------------------------------------------------------
 
-test("the registration URL carries the PeerJS query the broker expects", async () => {
+test("the registration URL has the PeerJS query the broker expects", async () => {
   const { socket } = await register();
   const url = new URL(socket.url);
   expect(url.protocol).toBe("ws:");
@@ -214,7 +214,7 @@ test("a path delimiter cannot open a second query or a fragment", async () => {
 
 test("an API key cannot reach past its own query parameter", async () => {
   // `key` is operator-authored -- an invitation endpoint is a strict
-  // host/port/path allowlist and carries none -- and it is encoded rather than
+  // host/port/path allowlist and holds none -- and it is encoded rather than
   // interpolated, so a delimiter in it stays a character of the key.
   const url = await addressFor({
     ...LOCATION,
@@ -266,7 +266,7 @@ test("an address naming another host is refused rather than dialed", async () =>
   };
   expect(moved).toThrow(UsageError);
   expect(moved).toThrow(BROKER_AUTHORITY_REFUSED);
-  // The same exit code the host refusal above carries, which is what the shared
+  // The same exit code the host refusal above has, which is what the shared
   // class buys: every undialable-endpoint refusal reports 64, so a supervisor
   // reads "nothing was dialed, and a retry reaches the same refusal" without
   // knowing which of the sites caught it.
@@ -277,7 +277,7 @@ test("an address naming another host is refused rather than dialed", async () =>
     refusal = err;
   }
   expect(exitCodeForError(refusal)).toBe(64);
-  // The refusal names the fields, not the address: that carries the peer id.
+  // The refusal names the fields, not the address: that holds the peer id.
   expect(BROKER_AUTHORITY_REFUSED).not.toContain(LOCAL_ID);
   // And the address the client itself builds passes.
   const url = await addressFor(LOCATION);
@@ -292,7 +292,7 @@ test("the consent-surface authority normalizes the host and always shows the por
   // server the run would not contact; the port is shown even where it is the
   // scheme's default, which the authority form drops -- a consent line naming a
   // coordination server states where the dial goes rather than leaving the port
-  // to a scheme the line does not carry.
+  // to a scheme the line does not state.
   // Written as escapes because one of the two is invisible in source.
   expect(
     dialedBrokerHostAndPort({
@@ -394,7 +394,7 @@ test("ID-TAKEN becomes an error naming the role misconfiguration", async () => {
 
 test.each([
   ["the INVALID-KEY type", { type: BROKER_MESSAGE.invalidKey }],
-  // The vendored broker answers a wrong key with a plain ERROR carrying this
+  // The vendored broker answers a wrong key with a plain ERROR holding this
   // wording rather than the dedicated type; both routes must reach the same fix.
   [
     "a generic ERROR carrying the broker's invalid-key wording",
@@ -423,7 +423,7 @@ test.each([
 
 // --- peer-id and server-text hygiene ----------------------------------------
 
-test("no error the client raises carries a peer id or the socket URL", async () => {
+test("no error the client raises has a peer id or the socket URL", async () => {
   const raised: Array<ConnectionError> = [];
   for (const frame of [
     {
@@ -481,7 +481,7 @@ test("a server ERROR payload's free text is not echoed to the operator", async (
 
 // --- steady state -----------------------------------------------------------
 
-test("an outbound frame carries only type, dst and payload", async () => {
+test("an outbound frame has only type, dst and payload", async () => {
   const { client, socket } = await register();
   client.send({
     type: BROKER_MESSAGE.offer,
@@ -627,7 +627,7 @@ test("an abort before registration rejects and closes the socket", async () => {
 test("a host that does not form a valid URL is a usage error, not a raw DOMException", async () => {
   // No socketFactory, so nothing stands between this host and the real
   // `new WebSocket`, which throws a DOMException on it -- an error outside the
-  // taxonomy the rest of the module maintains, carrying an address that carries
+  // taxonomy the rest of the module maintains, holding an address that holds
   // the peer id. What this holds is the refusal's shape and its silence about
   // both values, wherever in the two layers it is raised.
   const error = await connectToBroker({
@@ -640,8 +640,8 @@ test("a host that does not form a valid URL is a usage error, not a raw DOMExcep
   );
   expect(error).toBeInstanceOf(UsageError);
   expect(exitCodeForError(error)).toBe(64);
-  // The surfaced error names the operator's own fields and leaks neither the
-  // derived id nor the URL that carries it.
+  // The exposed error names the operator's own fields and leaks neither the
+  // derived id nor the URL that holds it.
   const rendered = `${(error as Error).message} ${(error as Error).stack ?? ""}`;
   expect(rendered).not.toContain(LOCAL_ID);
   expect(rendered).not.toContain("bad host");
@@ -650,9 +650,9 @@ test("a host that does not form a valid URL is a usage error, not a raw DOMExcep
 test("a socket constructor that refuses the address raises the same usage error", async () => {
   // The second of the two layers the refusal is raised at, and the one the test
   // above cannot reach: an address the parse admits, refused by the WebSocket
-  // constructor itself. One refusal wording carries one exit code, so what the
+  // constructor itself. One refusal wording has one exit code, so what the
   // constructor throws must be replaced rather than propagated -- its message
-  // can embed the URL, which carries the derived peer id, and it exits 69.
+  // can embed the URL, which has the derived peer id, and it exits 69.
   const error = await connectToBroker({
     location: LOCATION,
     id: LOCAL_ID,
@@ -668,7 +668,7 @@ test("a socket constructor that refuses the address raises the same usage error"
   expect(exitCodeForError(error)).toBe(64);
   expect((error as Error).message).toBe(BROKER_ADDRESS_REFUSED);
   // The thrown error is dropped rather than attached as a cause, so neither the
-  // id nor the URL that carries it reaches the rendered chain.
+  // id nor the URL that holds it reaches the rendered chain.
   expect((error as Error).cause).toBeUndefined();
   const rendered = `${(error as Error).message} ${(error as Error).stack ?? ""}`;
   expect(rendered).not.toContain(LOCAL_ID);

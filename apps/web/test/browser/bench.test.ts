@@ -21,7 +21,7 @@ import { stagesFor } from "@bench/exchangeRun";
 import styles from "@bench/bench.module.css";
 
 // The ledger and demotion-notice expectations derive their form from this
-// function, so they pin that those sinks carry the same form step 2's chips do,
+// function, so they pin that those sinks have the same form step 2's chips do,
 // not what that form is; the literal FSI/PDI expectations live in
 // apps/web/test/unit/columnNameDisplay.test.ts.
 import { isolatedColumnName } from "@components/ColumnName";
@@ -37,8 +37,8 @@ import type { PreparedExchange } from "@psilink/core";
 const typeLabel = (name: string) => `Type for ${isolatedColumnName(name)}`;
 const usedLabel = (name: string) => `How ${isolatedColumnName(name)} is used`;
 
-// The bench components touch the router seam (the lobby's Links). This suite
-// asserts the bench's structure, landmarks, and tokens, not navigation.
+// The console components touch the router boundary (the lobby's Links). This
+// suite asserts the console's structure, landmarks, and tokens, not navigation.
 vi.mock("@tanstack/react-router", async () =>
   (await import("./moduleMocks")).reactRouterMock(),
 );
@@ -107,8 +107,8 @@ vi.mock("@psi/rendezvous", async () =>
 
 // Stub the run lifecycle so creating an invitation never dials: record each
 // invocation's options so a test can drive the captured onStages/onStage/
-// onResult/onError seams -- the same seams the real lifecycle fires -- and
-// assert the bench's post-create screens against them.
+// onResult/onError callbacks -- the same callbacks the real lifecycle fires --
+// and assert the console's post-create screens against them.
 interface CapturedLifecycle {
   exchangeRole: "initiator" | "responder";
   sharedSecret: string;
@@ -150,8 +150,8 @@ const EM_DASH = "\u2014";
 const app = createAppMount();
 
 afterEach(async () => {
-  // Backstop for the fake-Date test below: a failure between useFakeTimers and
-  // its finally must not leak a frozen clock into the rest of the suite.
+  // Safety check for the fake-Date test below: a failure between useFakeTimers
+  // and its finally must not leak a frozen clock into the rest of the suite.
   vi.useRealTimers();
   app.unmount();
   mintHarness.fail = undefined;
@@ -160,7 +160,7 @@ afterEach(async () => {
   csvLoadHarness.lastSignal = undefined;
   csvLoadHarness.resolve = undefined;
   lifecycleHarness.calls.length = 0;
-  // The bench reads the viewport width to choose its wide vs narrow layout, so
+  // The console reads the viewport width to choose its wide vs narrow layout, so
   // a test that narrows the page must not leak that width into the next:
   // restore the browser project's configured wide default (vite.config.ts).
   await page.viewport(1280, 800);
@@ -197,7 +197,7 @@ async function createSealedInvitation() {
     .element(page.getByRole("heading", { level: 1 }))
     .toHaveTextContent("Your invitation is ready");
   // The run starts from an effect after the invitation lands; wait for it so
-  // callers can drive the captured lifecycle seams right away.
+  // callers can drive the captured lifecycle callbacks right away.
   await vi.waitFor(() => expect(lifecycleHarness.calls).toHaveLength(1));
 }
 
@@ -249,7 +249,7 @@ function preparedWith(
   } as unknown as PreparedExchange;
 }
 
-describe("bench quick path", () => {
+describe("console quick path", () => {
   test("renders the quick-path structure with one main and one h1", async () => {
     app.render(createElement(BenchLobby));
 
@@ -269,7 +269,7 @@ describe("bench quick path", () => {
     ]);
 
     // The in-browser processing assurance is a preserved invariant of the
-    // redesign; assert the exact copy so a rewording is a deliberate act.
+    // redesign; assert the exact copy so a rewording is an intentional change.
     await expect
       .element(
         page.getByText(
@@ -429,7 +429,7 @@ describe("inviter bench", () => {
 
     // The grid's two control labels, asserted before anything selects through
     // them: a label regression is a named expectation here rather than a locator
-    // timeout on the selects below, which reads as flake.
+    // timeout on the selects below, which is treated as flake.
     await expect
       .element(page.getByLabelText(typeLabel("program_code")))
       .toBeInTheDocument();
@@ -475,7 +475,7 @@ describe("inviter bench", () => {
     expect(document.documentElement.scrollWidth).toBeLessThanOrEqual(400);
   });
 
-  test("surfaces a two-identifier file in the rail's Problems block", async () => {
+  test("reports a two-identifier file in the rail's Problems block", async () => {
     app.render(createElement(InviterBench));
 
     await expect.element(page.getByLabelText("Your name")).toBeInTheDocument();
@@ -563,7 +563,7 @@ describe("inviter bench", () => {
       .toBeInTheDocument();
 
     // An incoherent direction (payload to a partner receiving no results)
-    // surfaces in the work column's Problems block and refuses to arm the
+    // shows up in the work column's Problems block and refuses to arm the
     // create button.
     await page
       .getByLabelText("Who receives the matched results")
@@ -619,7 +619,7 @@ describe("inviter bench", () => {
     expect(expiresRow?.querySelector("dd")?.textContent).toMatch(/20\d\d/);
   });
 
-  test("a silent-empty cleaning field surfaces from anywhere on the bench", async () => {
+  test("a silent-empty cleaning field shows up from anywhere on the console", async () => {
     app.render(createElement(InviterBench));
 
     await expect.element(page.getByLabelText("Your name")).toBeInTheDocument();
@@ -651,7 +651,7 @@ describe("inviter bench", () => {
       .toHaveTextContent("Review & create");
 
     // The ledger's Customize Cleaning row is a button whose first span is its
-    // label and whose fact span carries the amber attention class when failing.
+    // label and whose fact span has the amber attention class when failing.
     const cleaningCustomizeRow = () =>
       Array.from(
         document.querySelectorAll(
@@ -682,7 +682,7 @@ describe("inviter bench", () => {
       .toBeDisabled();
 
     // The Problems entry links into the Cleaning tab, where the per-field alarm
-    // and the polite coverage announcement surface the same collapse.
+    // and the polite coverage announcement report the same collapse.
     await page
       .getByRole("button", {
         name: 'Cleaning: "Date of birth" produces no value in any row',
@@ -772,7 +772,7 @@ describe("inviter bench", () => {
   });
 
   test("navigation never writes the file to storage or disk", async () => {
-    // The participant CSV is deliberately memory-only; walking the bench steps
+    // The participant CSV is memory-only by design; walking the bench steps
     // (including the History-integrated Back) must not spill it to IndexedDB,
     // localStorage, or a network write. Assert the runtime invariant rather
     // than trust a comment.
@@ -817,7 +817,7 @@ describe("inviter bench", () => {
         .element(page.getByRole("heading", { level: 1 }))
         .toHaveTextContent("Your file");
 
-      // No storage write anywhere carries the file's contents (a unique cell
+      // No storage write anywhere contains the file's contents (a unique cell
       // value stands in for the CSV bytes), and the file's rows never reach
       // IndexedDB (no database was even opened).
       const carries = (value: string) =>
@@ -825,8 +825,8 @@ describe("inviter bench", () => {
       expect(localWrites.some(carries)).toBe(false);
       expect(sessionWrites.some(carries)).toBe(false);
       expect(indexedDbOpened).toBe(0);
-      // The bench pushes only its own marked step entries; none carries the
-      // file's contents into the serialized history state.
+      // The bench pushes only its own marked step entries; none holds the
+      // file's contents in the serialized history state.
       expect(JSON.stringify(window.history.state ?? {})).not.toContain(
         SENTINEL,
       );
@@ -1038,8 +1038,7 @@ describe("inviter bench", () => {
 
       // Post-mint the synthetic-data reminder persists (the live invitation
       // was minted from sample records), but the one-click Clear is withheld
-      // once the terms seal: tearing down a listening run is startOver's
-      // deliberate path.
+      // once the terms seal: startOver tears down a listening run by design.
       const ledger = document.querySelector(
         'aside[aria-label="This exchange"]',
       ) as Element;
@@ -1173,8 +1172,8 @@ describe("inviter bench", () => {
       );
 
     // The ledger's Customize rows are plain buttons once the file is read;
-    // the open tab's row carries aria-current="true" (spine steps use
-    // "step"), and each row's accessible name carries its quiet fact.
+    // the open tab's row has aria-current="true" (spine steps use "step"),
+    // and each row's accessible name includes its quiet fact.
     await page.getByRole("button", { name: /Matching on/ }).click();
     await expect
       .element(page.getByRole("heading", { level: 1 }))
@@ -1197,7 +1196,7 @@ describe("inviter bench", () => {
     expect(orderAfter).not.toBe(orderBefore);
 
     // Selecting single-pass flows through the schema-parse guard and
-    // surfaces the disclosure warning at the point of choice.
+    // shows the disclosure warning at the point of choice.
     await page.getByLabelText("Single-pass").click();
     await expect
       .element(page.getByText("Single-pass widens what one of you can observe"))
@@ -1205,7 +1204,7 @@ describe("inviter bench", () => {
 
     // The matching-method and deduplication controls are both live: the exchange
     // conducts both algorithms, and it applies a deduplicating term, which an
-    // invitation carries to the accepting party as the inviting party's own side
+    // invitation states to the accepting party as the inviting party's own side
     // of the cardinality.
     await expect
       .element(page.getByLabelText("Matching method"))
@@ -1238,7 +1237,7 @@ describe("inviter bench", () => {
       "MOU-2025-0042",
     );
 
-    // The ported input contracts survive the bench: the expiry is a real
+    // The ported input contracts survive the console: the expiry is a real
     // date input and the reference keeps its length bound.
     const expiration = document.querySelector('input[type="date"]');
     expect(expiration).not.toBeNull();
@@ -1272,7 +1271,7 @@ describe("inviter bench", () => {
     ).toContain("None");
   });
 
-  test("intake surfaces rejections and gates on an in-flight parse", async () => {
+  test("intake reports rejections and gates on an in-flight parse", async () => {
     app.render(createElement(InviterBench));
 
     await expect.element(page.getByLabelText("Your name")).toBeInTheDocument();
@@ -1289,7 +1288,7 @@ describe("inviter bench", () => {
       .element(page.getByText("not a supported file type", { exact: false }))
       .toBeInTheDocument();
 
-    // While a parse is in flight Continue stays gated and the read carries an
+    // While a parse is in flight Continue stays gated and the read has an
     // abort signal; unmounting aborts it so the worker tears down.
     csvLoadHarness.defer = true;
     await userEvent.upload(
@@ -1351,7 +1350,7 @@ describe("inviter bench", () => {
       document.querySelector('nav[aria-label="Exchange progress"]'),
     ).toBeNull();
 
-    // A mint-time file error surfaces the shared user-actionable alert.
+    // A mint-time file error shows the shared user-actionable alert.
     mintHarness.fail = new InvitationFileError({
       kind: "unreadable",
       cause: new Error("gone"),
@@ -1488,7 +1487,7 @@ describe("inviter bench", () => {
     await expect
       .element(page.getByText("Keep this tab open."))
       .toBeInTheDocument();
-    // A hosted browser run: the callout names the browser listener, not an appliance
+    // A hosted browser run: the callout names the browser listener, not a console
     // running the exchange.
     await expect
       .element(
@@ -1528,7 +1527,7 @@ describe("inviter bench", () => {
     ).toBe("Share");
   });
 
-  test("post-create: the collapsed share screen never carries the full secret", async () => {
+  test("post-create: the collapsed share screen never contains the full secret", async () => {
     await createSealedInvitation();
 
     // Read the full value through the explicit reveal, then collapse again.
@@ -1640,7 +1639,7 @@ describe("inviter bench", () => {
         "psilink-record-2026-07-08T14-32.keys.json",
     );
 
-    // The timeline finishes whole, and the ledger settles what happened: the
+    // The timeline finishes whole, and the ledger fixes what happened: the
     // invitation is consumed and the receive row reports the actual count.
     const rail = document.querySelector('nav[aria-label="Exchange progress"]');
     expect((rail as Element).querySelector('[aria-current="step"]')).toBeNull();
@@ -1726,12 +1725,12 @@ describe("inviter bench", () => {
     const headline =
       document.querySelector(`.${styles.bigCount}`)?.textContent ?? "";
     expect(headline).toBe("Exchange complete - count only");
-    // Nothing here reads as the withheld helper's outcome: this party received
+    // Nothing here displays as the withheld helper's outcome: this party received
     // exactly what its terms promised.
     expect(document.body.textContent).not.toContain(
       "Your records contributed to the match",
     );
-    // And the count it computed itself carries no partner caveat.
+    // And the count it computed itself has no partner caveat.
     expect(document.body.textContent).not.toContain(
       "psilink does not check a count it is sent",
     );
@@ -1754,7 +1753,7 @@ describe("inviter bench", () => {
     expect(ledger).not.toContain("reported by your partner");
   });
 
-  test("post-create: a count the partner reported carries the trust caveat", async () => {
+  test("post-create: a count the partner reported has the trust caveat", async () => {
     // The sender seat's number arrived over the partner's count-report leg and is
     // checked against no round of this party's own, so the reminder lands where the
     // number is read rather than only at consent time.
@@ -1779,9 +1778,9 @@ describe("inviter bench", () => {
         ),
       )
       .toBeInTheDocument();
-    // The ledger restates the count in its own words, so it carries the row-sized
-    // form of the same fact: the condensed summary cannot read as a number this
-    // party computed.
+    // The ledger restates the count in its own words, so it has the row-sized
+    // form of the same fact: the condensed summary must not be mistaken for a
+    // number this party computed.
     expect(
       document.querySelector('aside[aria-label="This exchange"]')?.textContent,
     ).toContain(
@@ -1860,7 +1859,7 @@ describe("inviter bench", () => {
     expect(another?.getAttribute("href")).toBe("/quick");
   });
 
-  test("post-create: a config failure surfaces its message and starts over", async () => {
+  test("post-create: a config failure shows its message and starts over", async () => {
     await createSealedInvitation();
     lifecycleCall(0).onError({
       category: "config",
@@ -1868,7 +1867,7 @@ describe("inviter bench", () => {
     });
 
     // The prepare-time fault names only local config, so the actionable
-    // message is surfaced, and the recovery is the start-over path (a retry
+    // message is shown, and the recovery is the start-over path (a retry
     // would fail identically). Nothing will ever serve the link, so the copy
     // artifacts and the listening callout leave with the failure.
     await expect
@@ -1894,7 +1893,7 @@ describe("inviter bench", () => {
     await createSealedInvitation();
     lifecycleCall(0).onStage("waiting for peer");
     // The tagged expiry error core's guards raise (the tag marks its message
-    // as locally-composed recovery guidance, safe to surface).
+    // as locally-composed recovery guidance, safe to show).
     lifecycleCall(0).onError({
       category: "security",
       error: Object.assign(
@@ -2096,9 +2095,9 @@ describe("inviter bench", () => {
       await expect
         .element(page.getByRole("button", { name: "Copy invitation code" }))
         .toBeInTheDocument();
-      // The one copyable run command names the JUST-minted file with
+      // The one copyable run command names the just-minted file with
       // --config-file (the default `./psilink.yaml` would not match it) and
-      // carries the --invitation flag.
+      // includes the --invitation flag.
       await expect
         .element(
           page.getByText(
@@ -2108,7 +2107,7 @@ describe("inviter bench", () => {
         )
         .toBeInTheDocument();
 
-      // The downloaded YAML names the SFTP host and path and carries NO
+      // The downloaded YAML names the SFTP host and path and contains no
       // credential material -- the file locates the rendezvous, never
       // authenticates to it.
       await vi.waitFor(() => {
@@ -2283,7 +2282,7 @@ describe("inviter bench", () => {
   });
 });
 
-describe("bench at a narrow viewport", () => {
+describe("console at a narrow viewport", () => {
   const SAMPLE_CSV = new File(
     [
       "client_id,first_name,last_name,dob,program_code\n" +
@@ -2299,15 +2298,11 @@ describe("bench at a narrow viewport", () => {
   /**
    * Scroll a control into view and click it once it is genuinely hittable.
    *
-   * At this viewport the spine's step nav is sticky and overlays the top of the
-   * scroll area, so a row can be present, matched and visible while the point a
-   * synthetic click targets -- its centre -- belongs to the nav instead. The
-   * click is then delivered to the overlay and silently does nothing: no error,
-   * no navigation, and the failure surfaces later as an unrelated assertion
-   * timeout on whatever the click should have opened. Mantine's Collapse
-   * animation compounds it by moving the row while it expands. Poll on the hit
-   * test rather than sleeping, so this waits exactly as long as the layout takes
-   * and fails loudly if the control never becomes reachable.
+   * The spine's sticky step nav can overlay a row that is present, matched, and
+   * visible, so a click at the row's centre lands on the nav instead and fails
+   * silently -- showing up later as an unrelated timeout. Mantine's Collapse
+   * animation compounds this by moving the row while it expands, so this polls
+   * the actual hit test instead of sleeping.
    */
   async function clickWhenHittable(
     locator: { element: () => Element; click: () => Promise<void> },
@@ -2357,7 +2352,7 @@ describe("bench at a narrow viewport", () => {
     await reachMatchingSharingNarrow();
 
     // The setup nav no longer renders the full Mantine Stepper (no step-label
-    // nodes, the selector the wide-layout tests read); it carries the one-line
+    // nodes, the selector the wide-layout tests read); it has the one-line
     // step strip naming step 2 of the three-step spine.
     const nav = document.querySelector('nav[aria-label="Exchange setup"]');
     expect(nav).not.toBeNull();
@@ -2369,7 +2364,7 @@ describe("bench at a narrow viewport", () => {
     );
 
     // The decorative "N/M" badge is hidden from assistive tech -- the sentence
-    // already carries the position.
+    // already states the position.
     const badge = (nav as Element).querySelector('[aria-hidden="true"]');
     expect(badge?.textContent).toBe("2/3");
   });
@@ -2404,13 +2399,8 @@ describe("bench at a narrow viewport", () => {
     );
 
     // Opening the disclosure reaches each tab: the matching-keys editor opens
-    // its work column.
-    // Wait for the disclosure's expand animation to finish before clicking.
-    // Mantine's Collapse animates the panel's height, so the row is present and
-    // matchable while it is still travelling; a click dispatched at its
-    // pre-animation coordinates lands off-target and is silently swallowed, and
-    // the work column never opens. Settle on observed position rather than a
-    // fixed delay, which only trades one race for a slower one.
+    // its work column. clickWhenHittable guards the click against Mantine's
+    // Collapse animation, which can still be moving the row when it fires.
     await clickWhenHittable(keysRow);
     await expect
       .element(page.getByRole("heading", { level: 1 }))

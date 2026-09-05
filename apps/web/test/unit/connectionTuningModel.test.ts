@@ -66,15 +66,14 @@ const composedOptions = (
 };
 
 describe("the authored draft becomes an option block", () => {
-  test("an untouched draft carries no options and no problems", () => {
+  test("an untouched draft has no options and no problems", () => {
     expect(connectionTuningOptions(CONNECTION_TUNING_DEFAULT)).toBeUndefined();
     expect(connectionTuningProblems(CONNECTION_TUNING_DEFAULT)).toEqual([]);
     expect(connectionTuningAdvisories(CONNECTION_TUNING_DEFAULT)).toEqual([]);
   });
 
-  // The whole point of the untouched-form guarantee: a console run an operator
-  // never opened this card on composes exactly the config it composed before the
-  // card existed.
+  // A console run an operator never opened this card on composes exactly the
+  // config it composed before the card existed.
   test("an untouched form composes no options block at all", () => {
     const doc = parseYaml(
       composeConfigDocument(validIntent(), "/srv/jobs/x/exchange"),
@@ -130,7 +129,7 @@ describe("the authored draft becomes an option block", () => {
     ).toEqual({ maxReconnectAttempts: 0 });
   });
 
-  test("the SFTP session mode is emitted only when the flow can carry it", () => {
+  test("the SFTP session mode is emitted only when the flow can hold it", () => {
     const authored = draft({ connectionPerPoll: true });
     expect(connectionTuningOptions(authored, SFTP_CONNECTION_TUNING)).toEqual({
       connectionPerPoll: true,
@@ -143,8 +142,8 @@ describe("the authored draft becomes an option block", () => {
   });
 });
 
-describe("each knob round-trips into the composed config", () => {
-  test("every knob reaches a filedrop config under its snake_case name", () => {
+describe("each setting round-trips into the composed config", () => {
+  test("every setting reaches a filedrop config under its snake_case name", () => {
     expect(
       composedOptions(
         draft({
@@ -285,7 +284,7 @@ describe("a malformed value is a form problem, not a failed job", () => {
     });
   });
 
-  test("the connection attempt wait carries the same ceiling; the check interval carries none", () => {
+  test("the connection attempt wait has the same ceiling; the check interval has none", () => {
     const pastHours = String(MAX_TIMEOUT_SECONDS / 3600 + 1);
     expect(
       connectionTuningProblems(
@@ -422,8 +421,8 @@ describe("the CLI's two advisories are raised at authoring time", () => {
   });
 });
 
-describe("the collapsed summary counts only what the flow carries", () => {
-  test("an untouched draft reads as default and a tuned one as tuned", () => {
+describe("the collapsed summary counts only what the flow holds", () => {
+  test("an untouched draft displays as default and a tuned one as tuned", () => {
     expect(
       connectionTuningSummary(
         CONNECTION_TUNING_DEFAULT,
@@ -438,7 +437,7 @@ describe("the collapsed summary counts only what the flow carries", () => {
     ).toBe("Tuned");
   });
 
-  test("the session mode counts only where the flow carries it", () => {
+  test("the session mode counts only where the flow holds it", () => {
     // The operator ticks the box on sftp, then switches the transport to a shared
     // directory: the field is dropped from the emitted options, so a closed card
     // still reading "Tuned" would name a departure the run does not make.
@@ -460,7 +459,7 @@ describe("the placeholder shows core's own default in the chosen unit", () => {
     ["ms", "5000"],
     ["s", "5"],
   ] as const)(
-    "the poll default reads as a bare number in %s, which is exact",
+    "the poll default displays as a bare number in %s, which is exact",
     (unit, expected) => {
       expect(defaultPlaceholder(DEFAULT_POLLING_FREQUENCY_MS, unit)).toBe(
         expected,
@@ -499,7 +498,7 @@ describe("the placeholder shows core's own default in the chosen unit", () => {
 });
 
 describe("the fields the two cards contribute", () => {
-  /** Every knob the connection card can state, so the comparison below is over
+  /** Every setting the connection card can state, so the comparison below is over
    * the card's whole surface rather than the fields one draft happens to fill. */
   const everyTuningKnob = draft({
     pollInterval: { magnitude: "30", unit: "s" },

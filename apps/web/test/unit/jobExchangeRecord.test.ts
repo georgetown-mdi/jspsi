@@ -45,7 +45,7 @@ describe("fetchJobExchangeRecordOffer", () => {
   test("a terminated run's record is offered with the outcome it states", () => {
     // The run this reader exists for: it disclosed, then stopped, so it reaches
     // the seat as a failure with no completion downloads at all -- and the
-    // appliance's answer is the only thing that says the record is there.
+    // console's answer is the only thing that says the record is there.
     return expect(
       offerFor({
         status: "failed",
@@ -60,9 +60,9 @@ describe("fetchJobExchangeRecordOffer", () => {
     });
   });
 
-  test("a completed run's record carries its own outcome, not a default", async () => {
+  test("a completed run's record holds its own outcome, not a default", async () => {
     // The two are offered differently -- a terminated record's keys have nothing
-    // to open -- so the value is carried through rather than inferred from the
+    // to open -- so the value is passed through rather than inferred from the
     // run's status.
     await expect(
       offerFor({
@@ -74,7 +74,7 @@ describe("fetchJobExchangeRecordOffer", () => {
     ).resolves.toMatchObject({ kind: "available", outcome: "completed" });
   });
 
-  test("a run the appliance holds no record for leaves the seat nothing to say", async () => {
+  test("a run the console holds no record for leaves the seat nothing to say", async () => {
     // A failure before the disclosure owes no record and wrote none. The seat
     // renders nothing rather than stating an absence it cannot name, and the
     // recovery beside it acts straight through: this is the one definitive
@@ -89,7 +89,7 @@ describe("fetchJobExchangeRecordOffer", () => {
   });
 
   test("a run still going is not an answer about a record it may yet write", async () => {
-    // The pair is written near the end of a run, so the appliance's mid-run
+    // The pair is written near the end of a run, so the console's mid-run
     // denial says nothing about what this run will owe. It renders as nothing,
     // as the settled absence does.
     await expect(
@@ -101,11 +101,11 @@ describe("fetchJobExchangeRecordOffer", () => {
     ).resolves.toEqual({ kind: "none" });
   });
 
-  test("a record the appliance holds and cannot describe is its own answer", async () => {
+  test("a record the console holds and cannot describe is its own answer", async () => {
     // The version-skew case, distinct from a plain `none` denial: a record
-    // file IS in the run's folder, written by a psilink the appliance does not
+    // file IS in the run's folder, written by a psilink the console does not
     // recognize, and nothing downloads (the routes 404 under the same gate). The
-    // seat must not read that as the absence of a record, because the controls
+    // seat must not treat that as the absence of a record, because the controls
     // beside it destroy the folder it sits in.
     const offer = await offerFor({
       status: "failed",
@@ -117,7 +117,7 @@ describe("fetchJobExchangeRecordOffer", () => {
   });
 
   test("a withheld reason this bundle cannot read confirms rather than licenses", async () => {
-    // The same skew one level down: an appliance withholding the pair for
+    // The same skew one level down: a console withholding the pair for
     // something this bundle cannot name has not denied the record, so the reader
     // treats it as an ask that answered nothing -- the rule an unrecognized
     // `recordOutcome` already takes.
@@ -130,12 +130,12 @@ describe("fetchJobExchangeRecordOffer", () => {
     expect(untakenRecordConfirm(offer)).toBeDefined();
   });
 
-  test("a body denying availability is a plain none, whatever else it carries", async () => {
+  test("a body denying availability is a plain none, whatever else it contains", async () => {
     // `recordAvailable` is the only field this reader trusts to deny the record --
-    // absent, or anything but the literal `true`, reads as the appliance's own
+    // absent, or anything but the literal `true`, is treated as the console's own
     // not-available answer regardless of the rest of the body. With no reason
-    // beside it (an appliance that predates the field) that denial reads exactly
-    // as it always did.
+    // beside it (a console that predates the field) that denial is treated
+    // exactly as it always was.
     for (const body of [
       {},
       { recordAvailable: false },
@@ -151,10 +151,10 @@ describe("fetchJobExchangeRecordOffer", () => {
   });
 
   test("a body asserting availability with an unreadable pair is unanswered, not none", async () => {
-    // The appliance said it HOLDS a record, so a missing or unparseable detail
+    // The console said it HOLDS a record, so a missing or unparseable detail
     // beside that assertion cannot be folded into the straight-through-discard
     // state: doing so would let an unrecognized field license destroying a record
-    // the appliance just said is standing.
+    // the console just said is standing.
     for (const body of [
       { recordAvailable: true },
       { recordAvailable: true, recordCreatedAt: CREATED_AT },
@@ -171,7 +171,7 @@ describe("fetchJobExchangeRecordOffer", () => {
   test("an outcome this client bundle does not recognize confirms a discard rather than licensing one", async () => {
     // Version skew -- a stale cached bundle, or a data root a differently
     // versioned CLI wrote -- names an outcome this reader cannot map. The
-    // appliance still asserted it holds the record, so the ask ends unanswered,
+    // console still asserted it holds the record, so the ask ends unanswered,
     // and the doctrine line this pins is what that state buys downstream: the
     // failure surface's discard confirms rather than acting straight through.
     const offer = await offerFor({
@@ -207,8 +207,8 @@ describe("fetchJobExchangeRecordOffer", () => {
   });
 });
 
-describe("the record ask's bound on an appliance that stops answering", () => {
-  /** The appliance's own status body for a terminated run. */
+describe("the record ask's bound on a console that stops answering", () => {
+  /** The console's own status body for a terminated run. */
   const answered = (recordAvailable: boolean) => () =>
     new Response(
       JSON.stringify({
@@ -224,8 +224,8 @@ describe("the record ask's bound on an appliance that stops answering", () => {
       { status: 200, headers: { "Content-Type": "application/json" } },
     );
 
-  /** An ask that carries no answer about the record: the route erroring, which is
-   * also how a job the appliance forgot across a restart reads. */
+  /** An ask that holds no answer about the record: the route erroring, which is
+   * also how a job the console forgot across a restart appears. */
   const unanswerable = () => new Response("", { status: 503 });
 
   /** A status endpoint answering each successive ask with the next entry of the
@@ -254,7 +254,7 @@ describe("the record ask's bound on an appliance that stops answering", () => {
 
   const noWait = () => Promise.resolve();
 
-  test("a hiccup at settlement does not hide the record the appliance holds", async () => {
+  test("a hiccup at settlement does not hide the record the console holds", async () => {
     // The run settles once and the seat asks once when it does, so a single
     // failure there would withhold the download for the life of the seat -- while
     // the recovery controls beside it delete the file.
@@ -272,7 +272,7 @@ describe("the record ask's bound on an appliance that stops answering", () => {
     });
 
     expect(asks()).toBe(2);
-    // A real gap between the asks: one with none would burst at an appliance that
+    // A real gap between the asks: one with none would burst at a console that
     // has just stopped answering.
     expect(waits).toHaveLength(1);
     expect(waits.every((ms) => ms > 0)).toBe(true);
@@ -297,7 +297,7 @@ describe("the record ask's bound on an appliance that stops answering", () => {
   });
 
   test("an answered run is asked once, with no re-asks at all", async () => {
-    // The seat asks a settled run, so the appliance's answer cannot change and
+    // The seat asks a settled run, so the console's answer cannot change and
     // re-asking would spend its status route to be told the same thing.
     const { fetchImpl, asks } = scriptedFetch([answered(false)]);
     const waits: Array<number> = [];

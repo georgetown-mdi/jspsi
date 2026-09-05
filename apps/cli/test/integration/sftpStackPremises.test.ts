@@ -18,18 +18,15 @@ import {
 } from "../sftpServer";
 import { inProcessOnly } from "../sftpBackendGate";
 
-// Premises about the pinned ssh2 / ssh2-sftp-client stack that psilink's own code
-// is built on, driven at the layer each is asserted about: the raw
-// ssh2-sftp-client, not the adapter. They are here so a bump of either package
-// fails red at the premise that moved, and so the failure names which one --
-// where an adapter-level test would report the same break as a timeout.
-//
-// Which premises are checks and which stay re-verify-on-upgrade prose, and why,
-// is recorded in docs/spec/DEPENDENCY_PINS.md ("Upgrading the SFTP Stack").
-//
-// Only the in-process backend can be made to stall a handshake or drop a session,
-// so these run there and stand up their own server to reach the session controls
-// -- the shared globalSetup server hands the workers only its connection details.
+// Assumptions about the pinned ssh2 / ssh2-sftp-client stack that psilink's own
+// code is built on, driven at the layer each is asserted about: the raw
+// ssh2-sftp-client, not the adapter. A bump of either package fails red at the
+// assumption that moved, naming which one, where an adapter-level test would
+// report the same break as a timeout. Which assumptions are checks and which
+// stay re-verify-on-upgrade prose, and why: docs/spec/DEPENDENCY_PINS.md
+// ("Upgrading the SFTP Stack"). Only the in-process backend can be made to
+// stall a handshake or drop a session, so these run there with their own
+// server; the shared globalSetup server hands workers only connection details.
 
 // Far past every assertion window below, so a dial parked against the stalling
 // server settles only when a case settles it, never on its own deadline.
@@ -54,8 +51,8 @@ const STALE_WRAPPER_SILENCE_MS = 1_500;
 const FRESH_WRAPPER_ANSWER_CEILING_MS = 1_000;
 // A NAME reply at the widths below crosses loopback in single-digit
 // milliseconds; the ceiling is orders above that. A reply the client refuses
-// settles just as fast, so the longer window is spent only where the premise has
-// moved and the reply went nowhere at all.
+// settles just as fast, so the longer window is spent only where the assumption
+// has moved and the reply went nowhere at all.
 const NAME_REPLY_ANSWER_CEILING_MS = 1_000;
 const NAME_REPLY_SILENCE_MS = 1_500;
 // Wide enough that the fixed framing measured against it is a small part of the
@@ -67,8 +64,8 @@ const delay = (ms: number): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, ms));
 
 // The two internals every case here reaches: the session property whose
-// assignment discipline the captured-wrapper premise is about, and the socket
-// beneath the ssh2 Client that the abandoning teardown destroys.
+// assignment discipline the captured-wrapper assumption is about, and the
+// socket beneath the ssh2 Client that the abandoning teardown destroys.
 interface RawClientInternals {
   sftp?: SFTPWrapper;
   client?: { _sock?: Socket };
@@ -143,7 +140,7 @@ async function waitFor(
 // then writes nothing more, and hand back the socket beneath it. Every
 // stalled-handshake case starts here.
 //
-// Both waits are load-bearing. The server's count is what says the stall has the
+// Both waits are required. The server's count is what says the stall has the
 // connection: the client's socket exists from the moment it starts connecting,
 // so acting on the socket alone can act on a handshake that then completes
 // normally.
@@ -224,7 +221,7 @@ interface NameReplyOutcome {
   outcome: "delivered" | "errored" | "no reply";
   /** Payload length the server declared for the reply; -1 if it wrote none. */
   declaredPayloadBytes: number;
-  /** Filename bytes the entry that arrived carried; -1 when none did. */
+  /** Filename bytes the entry that arrived held; -1 when none did. */
   deliveredFilenameBytes: number;
 }
 
@@ -310,7 +307,7 @@ inProcessOnly(
       const endMs = Date.now() - started;
       await delay(PARKED_GRACE_MS);
 
-      // This is the premise that keeps the abandoning teardown reaching the
+      // This is the assumption that keeps the abandoning teardown reaching the
       // destroy and never end(): the call settles at once and leaves the
       // transport and the dial exactly as it found them.
       expect({
@@ -375,7 +372,7 @@ inProcessOnly(
 );
 
 inProcessOnly(
-  "a destroy-driven mid-handshake rejection carries a peer close's own error code",
+  "a destroy-driven mid-handshake rejection holds a peer close's own error code",
   async () => {
     const srv = await startInProcessSftpServer();
     const destroyer = createRawSftpClient();
@@ -442,7 +439,7 @@ inProcessOnly(
       await delay(DISABLED_DESTROY_WAIT_MS);
 
       // The destroy landed and settled nothing, well past the window in which it
-      // settles a dial on its own. This is the premise behind the rule that the
+      // settles a dial on its own. This is the assumption behind the rule that the
       // abandoning teardown must not create an end(): one ahead of the destroy
       // costs it the only thing it was for.
       expect({
@@ -499,7 +496,7 @@ inProcessOnly(
 );
 
 inProcessOnly(
-  `the pinned stack carries a NAME reply of ${READDIR_BATCH_BUDGET_BYTES} payload bytes`,
+  `the pinned stack's NAME reply holds ${READDIR_BATCH_BUDGET_BYTES} payload bytes`,
   async () => {
     const srv = await startInProcessSftpServer();
     const client = createRawSftpClient();
@@ -517,11 +514,11 @@ inProcessOnly(
 
       // The width the test backend packs every listing batch to, and the reason
       // a directory wider than one packet is served over several round trips at
-      // all. This is the premise a suite driving a wide listing rests on, where
-      // a stack that stopped carrying this width reads as that suite's own
-      // batching having broken. The whole reply is accounted for -- the entry
-      // arrives with every byte the server put in it -- so a truncated delivery
-      // is not read as a delivery.
+      // all. This is the assumption a suite driving a wide listing rests on,
+      // where a stack that stopped delivering this width would be treated as
+      // that suite's own batching having broken. The whole reply is accounted
+      // for -- the entry arrives with every byte the server put in it -- so a
+      // truncated delivery is not treated as a delivery.
       expect({
         outcome: reply.outcome,
         declaredPayloadBytes: reply.declaredPayloadBytes,
@@ -567,7 +564,7 @@ inProcessOnly(
       // sides at the byte: the server writes each reply through its own encoder,
       // and the width it declared for each is what the widths below are read
       // from. One byte past the wall the reply is refused at the client, not
-      // carried and not narrowed, and the server that wrote it is told nothing.
+      // delivered and not narrowed, and the server that wrote it is told nothing.
       // The budget is half of this, which is the margin that absorbs a wall that
       // moves a little; one that moved below the budget fails the case above as
       // well, and the two together say whether the batching still has room.
@@ -686,15 +683,12 @@ async function preIdentificationDialOutcome(
   }
 }
 
-// The premise arming the host-key probe's non-SSH-answer diagnosis
+// The assumption arming the host-key probe's non-SSH-answer diagnosis
 // (`apps/cli/src/connection/sftpPeerIdentification.ts`): the rejection this
-// stack raises for a dial that ended before the peer sent an SSH identification
-// string still carries wording the diagnosis matches. A version that reworded it
-// disarms the diagnosis -- which degrades to the undiagnosed rejection, never to
-// a wrong one -- and nothing else here would show it. Driven against bare
-// listeners rather than the test SFTP server, an SSH server being the one thing
-// these peers must not be, so this case is not backend-scoped like the ones
-// above.
+// stack raises for a dial that ended before an SSH identification string still
+// holds wording the diagnosis matches. Driven against bare listeners rather
+// than the test SFTP server, an SSH server being the one thing these peers must
+// not be, so this case is not backend-scoped like the ones above.
 test(
   "a peer that never identifies itself is rejected in wording the diagnosis gates on",
   async () => {
@@ -728,7 +722,7 @@ const LOOPBACK_HOST = "127.0.0.1";
 // address the stack itself names in its refusal -- the one place it reports
 // where it went. Undefined when the dial failed some other way, which here means
 // something is answering that port: such a rejection names no address, and
-// re-deriving one would be re-deriving the premise under test.
+// re-deriving one would be re-deriving the assumption under test.
 async function portlessDialTarget(): Promise<
   { host: string; port: number } | undefined
 > {
@@ -753,7 +747,7 @@ async function portlessDialTarget(): Promise<
   }
 }
 
-// The endpoint premise beside the wording one: the diagnosis opens a connection
+// The endpoint assumption beside the wording one: the diagnosis opens a connection
 // of its own, so it has to reach the endpoint the failed dial reached, the
 // default-port case included -- a read of a different port would report about a
 // peer the dial never spoke to. The default is not asserted as a number here; it

@@ -2,15 +2,12 @@ import { describe, expect, test } from "vitest";
 import { getLogger } from "@psilink/core";
 import { withCapturedLogs } from "@psilink/core/testing";
 
-// Materialize a named logger at module load -- before this file's first
-// withCapturedLogs call. loglevel binds a logger's methods from the methodFactory
-// live at getLogger time, so this logger routes through capture only because the
-// integration setup (capturedLogs.setup.ts) installs the withCapturedLogs
-// interceptor eagerly, ahead of any logger. Remove that eager install and this
-// logger binds to the bare factory at creation and its output bypasses capture --
-// the ordering footgun this test pins, which would re-fail the assertion below
-// (and leak the WARN past the console sentinel). The name is unique so it cannot
-// collide with a logger another integration file constructs.
+// Materialize a named logger at module load, before this file's first
+// withCapturedLogs call. It only routes through capture because the
+// integration setup (capturedLogs.setup.ts) installs the interceptor eagerly,
+// ahead of any logger; remove that and this logger binds to the bare factory
+// and bypasses capture, failing the assertion below. The name is unique so it
+// cannot collide with a logger another integration file constructs.
 const preCreatedLog = getLogger("eager-install-precreated");
 
 describe("withCapturedLogs eager install", () => {

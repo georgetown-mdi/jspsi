@@ -25,7 +25,7 @@ import type { WebRTCExchangeLocator } from "@psilink/core";
 
 // The pure derivation behind the managed exchange detail view, tested in Node: the
 // read-only configuration rows (both sides), the run-history entries around the most
-// recent run, and their honest disclosure/framing. The copy is the model's; the
+// recent run, and their accurate disclosure/framing. The copy is the model's; the
 // components render it.
 
 const linkageTerms = getDefaultLinkageTerms("County Health Dept");
@@ -64,7 +64,7 @@ describe("connectionRows", () => {
     const server = rows.find((row) => row.label === "Rendezvous server");
     expect(channel?.value).toBe("Live (browser)");
     expect(server?.value).toBe("signaling.example.org:3000/api/");
-    // No credential field is representable in the stored document, so none surfaces.
+    // No credential field is representable in the stored document, so none shows.
     const rendered = rows.map((row) => row.value).join(" ");
     expect(rendered).not.toContain("username");
     expect(rendered).not.toContain("key");
@@ -75,9 +75,8 @@ describe("connectionRows", () => {
 // the accepted document, or this operator -- and it is the surface a compliance
 // user reads to confirm the agreed terms. The class that matters is the one JSX
 // escaping does not touch: a bidi override, a zero-width joiner, or a homoglyph
-// renders as the term the reader expects while being another string. The model
-// is where the display boundary sits, so the escaping is pinned here rather than
-// on the component.
+// renders as the term the reader expects while being another string. Escaping is
+// pinned here, in the model, rather than in the component.
 describe("the configuration rows escape what somebody else authored", () => {
   // Written as escapes rather than literals: a raw bidi override in a source file
   // is itself the hazard these deliveries measure.
@@ -137,7 +136,7 @@ describe("the configuration rows escape what somebody else authored", () => {
 });
 
 describe("linkageTermsRows renders configuration for both sides", () => {
-  test("an exchange naming nobody reads as unnamed, not as a blank row", () => {
+  test("an exchange naming nobody displays as unnamed, not as a blank row", () => {
     // The stored document's `linkage_terms.identity` is optional. The detail
     // screen states every row it renders, so the one naming this party states its
     // absence rather than rendering an empty value.
@@ -198,7 +197,7 @@ describe("runHistoryEntries renders around the most recent run", () => {
     expect(entries).toHaveLength(1);
     expect(entries[0].outcome).toBe("Succeeded");
     expect(entries[0].disclosure).toContain("agreed terms");
-    // No fabricated count or match result -- the bookkeeping carries none.
+    // No fabricated count or match result -- the bookkeeping has none.
     expect(entries[0].disclosure).not.toMatch(/\d+ (rows|matches|records)/);
   });
 
@@ -275,7 +274,7 @@ describe("runHistoryEntries renders around the most recent run", () => {
   );
 });
 
-// What the accounting view reads to keep an empty accounting honest: an accounting
+// What the accounting view reads to keep an empty accounting accurate: an accounting
 // holding nothing is not evidence that nothing has completed, since the reset
 // destroys the entries and leaves the record standing.
 describe("completedRunRecorded reads the record's own bookkeeping", () => {
@@ -291,10 +290,11 @@ describe("completedRunRecorded reads the record's own bookkeeping", () => {
     expect(completedRunRecorded(record("inviter", { lastRun }))).toBe(true);
   });
 
-  // One-way: the record keeps only the most recent run, so a completed run followed
-  // by a non-completing one reads as false. The copy this drives is written to that
-  // -- the completed-run reading appears only where the record proves it, and the
-  // plain empty state stands everywhere else.
+  // One-way: the record keeps only the most recent run, so a completed run
+  // followed by a non-completing one is treated as false. The copy this
+  // drives is written to that -- the completed-run reading appears only
+  // where the record proves it, and the plain empty state stands everywhere
+  // else.
   test.each([
     { outcome: "failed" as const, failureKind: "transport" as const },
     { outcome: "missed" as const, failureKind: undefined },
@@ -314,7 +314,7 @@ describe("completedRunRecorded reads the record's own bookkeeping", () => {
 
 // The detail view's read-only run-schedule section: the cadence, where the
 // recurrence stands at the instant read, and the states this runtime owes the
-// operator honestly around it -- including whether an unattended run happens here
+// operator accurately around it -- including whether an unattended run happens here
 // at all, which is a different fact in an installed app and in an ordinary tab.
 describe("scheduleView", () => {
   const NOW = Date.parse("2026-07-14T12:00:00.000Z");
@@ -363,7 +363,7 @@ describe("scheduleView", () => {
   });
 
   test("an installed runtime's note says this app meets the windows itself", () => {
-    // The runner starts only in an installed runtime, so the honest copy differs
+    // The runner starts only in an installed runtime, so the accurate copy differs
     // by which one the operator is looking at rather than hedging across both.
     const view = scheduleView(
       record("inviter", { schedule: daily }),

@@ -151,7 +151,7 @@ describe("filenameTooLongError", () => {
     expectEveryLinkBounded(rendered);
   });
 
-  test("keeps the truncation marker when the name preview carries a PEM BEGIN marker", () => {
+  test("keeps the truncation marker when the name preview holds a PEM BEGIN marker", () => {
     // The dangling-key rule is fail-closed -- it replaces from an unterminated
     // BEGIN marker to the end of the text -- so redacting the preview and the
     // marker together would let a planted marker consume the marker itself and

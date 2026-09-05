@@ -312,7 +312,7 @@ describe("setColumnType keeps disclosure intent", () => {
   });
 
   test("a sent column survives a retype to a matchable type (it is not demoted)", () => {
-    // The highest-risk keep-branch case: retyping a deliberately-sent column to a
+    // The highest-risk keep-branch case: retyping a column sent by design to a
     // linkage or identifier type must KEEP it sent, not drop it to a not-sent
     // fallback. The "never starts disclosing" property below does not cover this
     // (staying sent), so pin it explicitly.

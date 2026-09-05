@@ -211,17 +211,17 @@ describe("probeSftpHostKey drives the CLI probe subcommand", () => {
   });
 });
 
-// The diagnosis is the CLI's, carried structurally. Every field is re-checked
-// here because it is a distrusted child's stdout, and the excerpt is bytes an
-// untrusted party chose.
+// The diagnosis is the CLI's, held as structured fields. Every field is
+// re-checked here because it is a distrusted child's stdout, and the excerpt
+// is bytes an untrusted party chose.
 describe("parseProbeDiagnosis re-validates the exit-69 diagnosis line", () => {
-  test("a closed-unanswered line is carried through", () => {
+  test("a closed-unanswered line parses to its kind", () => {
     expect(parseProbeDiagnosis('{"diagnosis":"closed_unanswered"}')).toEqual({
       kind: "closedUnanswered",
     });
   });
 
-  test("a non-SSH line carries the shape and the excerpt", () => {
+  test("a non-SSH line includes the shape and the excerpt", () => {
     expect(
       parseProbeDiagnosis(
         JSON.stringify({
@@ -275,7 +275,7 @@ describe("parseProbeDiagnosis re-validates the exit-69 diagnosis line", () => {
     expect(excerpt?.endsWith(DISPLAY_TRUNCATION_MARKER)).toBe(true);
   });
 
-  test("a shape outside the closed vocabulary is dropped, not carried", () => {
+  test("a shape outside the closed vocabulary is dropped, not kept", () => {
     expect(
       parseProbeDiagnosis(
         JSON.stringify({
@@ -298,12 +298,12 @@ describe("parseProbeDiagnosis re-validates the exit-69 diagnosis line", () => {
     expect(parseProbeDiagnosis("")).toBeUndefined();
   });
 
-  test("a success line carries no diagnosis, so the two shapes cannot be read for one another", () => {
+  test("a success line has no diagnosis, so the two shapes cannot be read for one another", () => {
     expect(parseProbeDiagnosis(okLine())).toBeUndefined();
   });
 });
 
-describe("an unreachable probe carries the child's diagnosis when it emitted one", () => {
+describe("an unreachable probe has the child's diagnosis when it emitted one", () => {
   test("exit 69 with a diagnosis line attaches it to the unreachable result", () => {
     expect(reconcileProbeExit(69, '{"diagnosis":"closed_unanswered"}')).toEqual(
       {
@@ -390,13 +390,11 @@ describe("the diagnosis fits inside the probe's own watchdog", () => {
     );
   });
 
-  // The headroom above is arithmetic over a value this workspace only MIRRORS:
-  // the read budget belongs to the CLI child. apps/web must not import apps/cli
-  // (apps consume packages, not each other), so the mirror is held to the CLI's
-  // own declaration by reading it, the way the record/keys pairing is held to
-  // the CLI's derivation rule. What this checks is the declared value, not what
-  // the child spends at runtime; a source that no longer declares the constant
-  // fails here rather than passing vacuously.
+  // The read budget belongs to the CLI child; apps/web must not import apps/cli
+  // (apps consume packages, not each other), so this mirror reads the CLI's own
+  // declaration instead. It checks the declared value, not what the child
+  // spends at runtime, so a source that no longer declares the constant fails
+  // here rather than passing vacuously.
   test("the mirrored peer-read budget is the value the CLI declares", () => {
     const source = fs.readFileSync(
       path.join(

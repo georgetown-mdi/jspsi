@@ -96,7 +96,7 @@ interface MarkerCase {
 
 /** Encode a value with the real BinaryPack packer and return the wire bytes. The
  * packer resolves synchronously for everything but a `Blob`, which no corpus value
- * is; the await keeps the declared type honest. */
+ * is; the await keeps the declared type accurate. */
 async function packBytes(value: Packable): Promise<Uint8Array> {
   return new Uint8Array(await pack(value));
 }
@@ -1195,7 +1195,7 @@ describe("the map-key rule against the real packer", () => {
     }
   });
 
-  test("refuses to pack the JS values that would carry a non-string key", () => {
+  test("refuses to pack the JS values that would hold a non-string key", () => {
     // A map on the wire comes only from a plain JS object, whose own keys are
     // strings. The structures that could key one otherwise are rejected by the
     // packer itself -- synchronously, before any wire bytes exist -- so a send
@@ -1214,15 +1214,12 @@ describe("the map-key rule against the real packer", () => {
 });
 
 describe("a non-string map key over a cursor underrun", () => {
-  // The two properties that are dangerous together: a map key whose subtree
-  // DECLARES far more descendants than the wire backs, so the scan's cursor
-  // underruns partway through it. An underrun on its own is safe to accept -- bytes
-  // past the end unpack as zeros into slots already charged -- but under a key the
-  // real unpacker goes on materializing every declared descendant and joins the
-  // whole zero-filled structure into one coerced property name, a cost no charge
-  // taken during the walk covers. The key rule closes the combination by
-  // construction: the decision is taken on the key's own marker byte, before the
-  // scan descends, so no underrun deeper in the frame can reach it.
+  // Dangerous together: a map key whose subtree declares more descendants
+  // than the wire backs, so the cursor underruns. An underrun alone is safe
+  // -- the zero-filled bytes land in already-charged slots -- but under a
+  // key, the unpacker joins the whole zero-filled subtree into one property
+  // name, a cost no charge covers. The key rule decides on the marker byte
+  // before the scan descends, so an underrun deeper in the frame can't reach it.
 
   const LEVELS = 8;
   const WIDTH = 20_000;

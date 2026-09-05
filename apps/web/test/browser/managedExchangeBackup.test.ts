@@ -113,7 +113,7 @@ describe("export/import round-trip against the real store", () => {
     // It is the one owner in the store.
     const all = await listManagedExchanges();
     expect(all.map((r) => r.id)).toEqual([installed.id]);
-    // The import marks it backed-up, so it reads green immediately.
+    // The import marks it backed-up, so it shows green immediately.
     const local = await getManagedLocalState(installed.id);
     expect(local?.backup).toBeDefined();
   });
@@ -153,7 +153,7 @@ describe("the import marker is the restore evidence the desync tiering reads", (
     const bytes = serializeManagedExchangeArtifact(
       encodeManagedExchangeArtifact(source),
     );
-    // The artifact carries no import marker (a sibling, never in the export).
+    // The artifact contains no import marker (a sibling, never in the export).
     expect(bytes).not.toMatch(/importedAt/);
 
     await deleteManagedExchange(source.id);
@@ -205,8 +205,8 @@ describe("the import marker is the restore evidence the desync tiering reads", (
   });
 });
 
-describe("an unattended run's failure surfaces through the same tiers at the next visit", () => {
-  test("a stored auth failure with no benign evidence reads as the unexplained tier", async () => {
+describe("an unattended run's failure shows through the same tiers at the next visit", () => {
+  test("a stored auth failure with no benign evidence is treated as the unexplained tier", async () => {
     const record = await createManagedExchange(newExchange());
     // An unattended run failed closed and recorded auth -- nothing else explains it.
     await recordManagedExchangeLastRun(
@@ -220,7 +220,7 @@ describe("an unattended run's failure surfaces through the same tiers at the nex
     expect(failure?.recovery).toBe("confirm");
   });
 
-  test("a stored storage failure reads as the benign storage tier at the next visit", async () => {
+  test("a stored storage failure is treated as the benign storage tier at the next visit", async () => {
     const record = await createManagedExchange(newExchange());
     await recordManagedExchangeLastRun(
       record.id,
@@ -235,7 +235,7 @@ describe("an unattended run's failure surfaces through the same tiers at the nex
 });
 
 describe("a migration spends the source", () => {
-  test("marking spent surfaces a spent row (no run) and revives by import", async () => {
+  test("marking spent shows a spent row (no run) and revives by import", async () => {
     const source = await createManagedExchange(newExchange());
     const bytes = serializeManagedExchangeArtifact(
       encodeManagedExchangeArtifact(source),
@@ -264,13 +264,13 @@ describe("a migration spends the source", () => {
 
 describe("the spend is checked against the stored record in one step", () => {
   // Against the real store: a hand-off is only ever spent while no run of the
-  // record is in flight and it still carries the secret its files carry. These
+  // record is in flight and it still has the secret its files hold. These
   // cases pin both conditions; the transaction interleaving itself is not driven
   // here.
 
   test("a run holding the run+rotate lock refuses the spend, writing nothing", async () => {
     // The ordering no currency check can decide: the run has not rotated yet, so
-    // the stored secret is still the one the operator's files carry -- and would
+    // the stored secret is still the one the operator's files hold -- and would
     // be superseded by that run's own persist the moment it lands. The exclusion
     // is what refuses it, on the very lock the run holds.
     const record = await createManagedExchange(newExchange());
@@ -410,9 +410,9 @@ describe("the spend is checked against the stored record in one step", () => {
 });
 
 describe("the export binds the marker to the bytes it serialized", () => {
-  // The seams a real export drives against the live store: read-and-mark atomically,
-  // then download the bytes read. The download is captured so the test can inspect
-  // the exact bytes the marker attests.
+  // The call sites a real export drives against the live store: read-and-mark
+  // atomically, then download the bytes read. The download is captured so the
+  // test can inspect the exact bytes the marker attests.
   function exportDeps(): {
     downloaded: Array<string>;
     readAndMark: typeof readRecordAndMarkBackedUp;
@@ -428,7 +428,7 @@ describe("the export binds the marker to the bytes it serialized", () => {
     };
   }
 
-  test("the post-run completion export carries the ROTATED secret, not the mount-time one", async () => {
+  test("the post-run completion export contains the ROTATED secret, not the mount-time one", async () => {
     const record = await createManagedExchange(newExchange());
     const original = record.sharedSecret;
     // Simulate a run: the rotation persist advances the stored secret (and clears any
@@ -447,7 +447,7 @@ describe("the export binds the marker to the bytes it serialized", () => {
     expect(restored.sharedSecret).toBe(rotated);
     expect(restored.sharedSecret).not.toBe(original);
 
-    // And the exchange reads green against the rotated store.
+    // And the exchange shows green against the rotated store.
     const rows = savedExchangeRows(
       await listManagedExchanges(),
       await listManagedLocalState(),
@@ -621,7 +621,7 @@ describe("importing a spent secret-match revives in place", () => {
     });
 
     // Nothing was written: no revive of the migration husk, no fresh install, and both
-    // records still carry exactly the spent state they were left with.
+    // records still have exactly the spent state they were left with.
     const all = await listManagedExchanges();
     expect(all.map((r) => r.id).sort()).toEqual(
       [migrated.id, handedOff.id].sort(),
@@ -655,7 +655,7 @@ describe("importing a spent secret-match revives in place", () => {
     expect(revived.sharedSecret).toBe(source.sharedSecret);
     // The revive restores the whole artifact, not just the secret: the unattended
     // path picks the recurrence back up at the window and miss count the artifact
-    // carries, rather than reviving an attended-only husk.
+    // holds, rather than reviving an attended-only husk.
     expect(revived.schedule).toEqual(
       importManagedExchangeArtifact(bytes).schedule,
     );

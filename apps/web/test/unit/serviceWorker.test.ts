@@ -14,12 +14,10 @@ import {
 
 import type { ServiceWorkerHarness } from "../utils/serviceWorkerHarness";
 
-// The shipped app-shell worker (apps/web/public/serviceWorker.js), driven through a
-// fabricated service-worker global scope so the real install, activate, message, and
-// fetch handlers run. Node is the right place for all of it: none of the worker's
-// behavior needs a browser, and the file is a static asset a browser test could only
-// reach through a real registration, whose lifecycle is exactly what is under test
-// here. What Chromium does own -- that an offline shell renders the list from the
+// The shipped app-shell worker (apps/web/public/serviceWorker.js), driven
+// through a fabricated service-worker global scope so the real install,
+// activate, message, and fetch handlers run. None of this needs a browser;
+// what Chromium does own -- that an offline shell renders the list from the
 // local store -- is test/browser/offlineShell.test.ts.
 
 const SHELL_CACHE = "psilink-shell-v1";
@@ -571,12 +569,10 @@ describe("the manifest and icons", () => {
 });
 
 // A browser can refuse a cache at any moment -- quota exhausted, storage
-// switched off, the bucket evicted under the worker -- and the worker is in
-// front of every document and asset the app loads. So what a storage failure may
-// cost is the offline copy, and never the response: it must not fail a request
-// the network answered, nor serve the stale document over the fresh one the
-// network delivered, which would leave the app worse off than with no worker at
-// all.
+// switched off, the bucket evicted under the worker. A storage failure may
+// cost the offline copy, but never the response: it must not fail a request
+// the network answered, nor serve a stale document over a fresher one the
+// network delivered.
 
 describe("a fetch handler meeting a failing cache", () => {
   let harness: ServiceWorkerHarness;
@@ -703,7 +699,7 @@ describe("the worker's lifecycle meeting a failing cache", () => {
 });
 
 describe("the synthesized offline document", () => {
-  test("carries the security headers every other document of this origin does", async () => {
+  test("has the security headers every other document of this origin does", async () => {
     const cold = createServiceWorkerHarness();
     cold.network.goOffline();
 
@@ -711,7 +707,7 @@ describe("the synthesized offline document", () => {
 
     // Held against the server's own header set rather than a copy of the values,
     // so the worker's literals cannot drift from what every rendered document
-    // carries. The count keeps the loop from passing vacuously.
+    // has. The count keeps the loop from passing vacuously.
     expect(Object.keys(securityResponseHeaders).length).toBe(4);
     for (const [header, value] of Object.entries(securityResponseHeaders))
       expect(response?.headers.get(header)).toBe(value);

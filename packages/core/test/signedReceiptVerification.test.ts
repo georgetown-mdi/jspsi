@@ -342,7 +342,7 @@ describe("verifyDualSignedRecord", () => {
     expect(report.responder.signature).toBe("verified");
   });
 
-  test("a record carrying no run binder reports the receipt as unpaired", async () => {
+  test("a record holding no run binder reports the receipt as unpaired", async () => {
     // An explicit null: the record is in hand and records an exchange that produced
     // no signed receipt, so the receipt beside it is contradicted rather than
     // unchecked.
@@ -692,8 +692,8 @@ describe("decideSignedReceiptVerdict", () => {
       expect(party.certificateAnchor.status).toBe("unanchored");
       expect(party.certificateAnchor.tone).toBe("incomplete");
       // Nothing was compared against either certificate, so neither clause is
-      // supported: an unanchored slot must not read as a check it was put to and
-      // failed.
+      // supported: an unanchored slot must not be treated as a check it was put
+      // to and failed.
       expect(party.certificateAnchor.unanchoredClauses).toEqual([]);
       expect(party.signature.tone).toBe("verified");
     }

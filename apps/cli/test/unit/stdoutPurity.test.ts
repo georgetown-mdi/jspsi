@@ -21,16 +21,11 @@ import {
   snapshotDiagnosticSinkAndLevel,
 } from "../loggingTestSupport";
 
-// Executable form of the stdout contract: stdout carries
-// only a command's result data, and every diagnostic goes to stderr. These tests
-// run a command to completion and assert nothing diagnostic reached stdout -- the
-// property a prose note could only claim, not enforce (CONTRIBUTING: encode a
-// runtime claim as a check). The result reaches stdout by two mechanisms: a
+// The stdout contract: stdout holds only a command's result data, and every
+// diagnostic goes to stderr. stdout reaches the caller by two mechanisms -- a
 // direct `process.stdout.write` (the CSV writers) or `console.log` (the invitation
-// token, the fingerprint value); diagnostics reach stderr through core's
-// diagnostic sink, i.e. `process.stderr.write`. So a run's stdout is captured from
-// both `console.log` and `process.stdout.write`, and stderr from
-// `process.stderr.write`.
+// token, the fingerprint value) -- so each run's stdout is captured from both;
+// diagnostics are captured from `process.stderr.write`, core's diagnostic sink.
 //
 // Covered here are the offline, no-network commands whose stdout shape is
 // unambiguous: `invite` (a single opaque token), `init` (no stdout result -- its
@@ -96,7 +91,7 @@ test("offline invite: stdout is the invitation token only, diagnostics on stderr
     );
 
     // stdout is exactly one line -- the opaque token -- with no diagnostic prefix,
-    // no whitespace (prose would carry spaces), and none of the guidance the
+    // no whitespace (prose would include spaces), and none of the guidance the
     // command also emits.
     const stdoutLines = stdout.split("\n").filter((l) => l.length > 0);
     expect(stdoutLines).toHaveLength(1);
@@ -125,7 +120,7 @@ test("init: stdout is empty (its result is the written file), diagnostics on std
       } as unknown as Arguments),
     );
 
-    // init's result is the file it writes, so stdout carries nothing at all.
+    // init's result is the file it writes, so stdout holds nothing at all.
     expect(stdout).toBe("");
     // The "wrote a configuration template to ..." notice is a diagnostic on stderr.
     expect(fs.existsSync(configFile)).toBe(true);

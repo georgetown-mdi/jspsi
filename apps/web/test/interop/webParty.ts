@@ -64,7 +64,7 @@ export interface WebInvitation extends WebPartySetup {
  * Every step is the app's own (apps/web/src/bench): the confirm-columns editor's
  * seed over this file's header, the recommended per-type cleaning it derives, the
  * launch payload it hands off, and `prepareAcceptorExchange`'s terms adoption
- * with its disclosed-payload and partner-deduplicate lock-ins. What the harness
+ * with its disclosed-payload and partner-deduplicate commitments. What the harness
  * supplies is the CSV and the name -- an acceptor who opened the file and edited
  * nothing.
  */
@@ -99,15 +99,14 @@ export async function acceptAsWebParty(params: {
 
 /**
  * The web app's inviter seat: mint an invitation naming the shared file-drop
- * directory, and assemble this party's half on the terms the token carries.
+ * directory, and assemble this party's half on the terms the token holds.
  *
  * `generateInvitation` is the app's own mint, taken on its `profiledColumns`
- * branch -- the console's, where the columns are known without the browser
- * parsing the file -- because that is the branch whose CSV handling a node host
- * can reach. It returns no rows on that branch (the console hands the run to the
- * CLI), so the rows this party links on are read here and bound through
- * `inviterExchangeDataSpec`, the app's own inviter spec assembly, exactly as the
- * bench's inviter run does.
+ * branch (the console's, where columns are known without the browser parsing
+ * the file) since that is the branch a node host's CSV handling can reach.
+ * It returns no rows on that branch (the console hands the run to the CLI),
+ * so the rows this party links on are read here and bound through
+ * `inviterExchangeDataSpec`, the app's own inviter spec assembly.
  */
 export async function inviteAsWebParty(params: {
   identity: string;
@@ -143,15 +142,13 @@ export async function inviteAsWebParty(params: {
  * Which handshake driver the web party runs.
  *
  * `app` is the web app's own {@link authenticateExchange}: it asks for no
- * application-layer AEAD and refuses a partner that asks, because the app
- * exchanges only over a DTLS-confidential WebRTC channel. A CLI party on a
- * file-sync channel asks unconditionally -- the frames sit in a share whose
- * admin can read them -- and `applyEncryption` is the OR of the two requests, so
- * this driver fails closed against one. That refusal is a live property this
- * suite pins rather than works around.
+ * application-layer AEAD and refuses a partner that asks, since the app exchanges
+ * only over a DTLS-confidential WebRTC channel. A CLI party on a file-sync channel
+ * asks unconditionally -- the frames sit in a share whose admin can read them --
+ * so `applyEncryption` (the OR of both requests) forces this driver to fail closed.
  *
- * `aead-stand-in` is what a web party WOULD run if the app applied the file-sync
- * wrap: the same core handshake asking for encryption, and core's
+ * `aead-stand-in` is what a web party WOULD run if the app applied the
+ * file-sync wrap: the same core handshake asking for encryption, and core's
  * `EncryptedMessageConnection` over the result. It stands in for the one piece
  * apps/web does not implement, so the completing arms can exercise everything
  * above and below it. Nothing else on the web party's side is substituted.
@@ -166,7 +163,7 @@ export interface WebPartyOutcome {
   pairs: Array<[number, number]>;
 }
 
-/** The matched pairs an exchange result carries, ordered so two parties'
+/** The matched pairs an exchange result holds, ordered so two parties'
  * mirrored tables compare directly. */
 function matchedPairs(
   associationTable: [Array<number>, Array<number>] | undefined,
@@ -186,7 +183,7 @@ function matchedPairs(
  * The PSI backend is loaded exactly as the app loads it -- `loadPsiBackend` with
  * only a WASM loader and `isNode: false`, over `@openmined/psi.js/psi_wasm_web`
  * -- so this party never reaches the native addon a CLI party may pick. That
- * asymmetry is deliberate: the two engines agreeing on the wire is the point.
+ * asymmetry is by design: the two engines agreeing on the wire is the point.
  */
 export async function runWebPartyExchange(params: {
   dropDir: string;

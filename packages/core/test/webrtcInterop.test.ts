@@ -134,7 +134,7 @@ describe("invitation encoding", () => {
     );
   });
 
-  test("the token carries the secret the peer ids are derived from", () => {
+  test("the token holds the secret the peer ids are derived from", () => {
     // Ties the two halves of the fixture together: an app that decodes this
     // token and derives a rendezvous id from what it holds lands on the ids
     // pinned above.

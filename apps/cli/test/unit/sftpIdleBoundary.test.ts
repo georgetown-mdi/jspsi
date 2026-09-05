@@ -11,16 +11,11 @@ import {
 import type { SessionBoundary } from "../../src/connection/sftpIdleBoundary";
 
 // The idle-boundary classification: three tables over one recorded outcome, and
-// the lookup the adapter's record site reads the first of them through.
-//
-// Nothing here reaches ssh2 or a server. What a real partner driven into each
-// boundary variant shows is covered by the real-server legs
-// (test/integration/ephemeralSessionExchange.test.ts and
-// heldSessionWithheldClose.test.ts); what those legs cannot show is that each
-// table stays TOTAL over its key type, which is what makes every projection of
-// an outcome a stated answer rather than a default. The key sets are checked
-// against the partition the ledger itself owns, so an outcome added there and
-// missed here fails rather than reading undefined.
+// the lookup the adapter's record site reads the first of them through. Real
+// server behavior per boundary variant is driven in
+// test/integration/ephemeralSessionExchange.test.ts and
+// heldSessionWithheldClose.test.ts. This file checks that each table stays
+// total over its key type, matching the partition the ledger itself owns.
 
 const ledger = (): SftpAdapterLedger =>
   new SftpAdapterLedger({ warn: () => {} });
@@ -141,7 +136,7 @@ describe("ending a generation agrees with the ledger's accounting", () => {
       expect(sessions.accounting.generationsEnded).toBe(1);
       // The ledger raises on a dial over a generation whose end nothing
       // recorded, so the next poll cycle is where a boundary wrongly marked as
-      // ending nothing would surface.
+      // ending nothing would show up.
       expect(() => sessions.dialSucceeded()).not.toThrow();
     },
   );

@@ -144,7 +144,7 @@ describe("sample data", () => {
     const partner = await acquire(SAMPLE_PARTNER_CSV, SAMPLE_PARTNER_FILE_NAME);
 
     // Rows 1-7 (0-based 0-6) are the matching pairs, in the same order on both
-    // sides. Each carries a distinct near-miss the default pipeline resolves.
+    // sides. Each holds a distinct near-miss the default pipeline resolves.
     for (let row = 0; row < 7; row += 1) {
       expect(rowsIntersect(inviter, row, partner, row)).toBe(true);
     }

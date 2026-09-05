@@ -53,13 +53,12 @@ const TEMP_DIR_SEGMENT = `${tempDirPrefix("rendezvous")}${"X".repeat(
  * What the mount an "ordinary" budget case is driven at renders to, pinned rather
  * than left to whatever the host's temp root happens to make it.
  *
- * Ordinary means short enough that the notice about the mount still names it, and
- * what a notice has room for is whatever its own first-party copy leaves of
- * {@link RENDEZVOUS_NOTICE_BUDGET} -- tens of characters, measured against this
- * number by the premise test below rather than asserted in prose here. A mkdtemp
- * directory and a short name measure this much under a `/tmp` root, so the pin
- * changes nothing where the root is already short and makes every other host
- * compose the same notice.
+ * Ordinary means short enough that the notice about the mount still names it --
+ * tens of characters past what {@link RENDEZVOUS_NOTICE_BUDGET}'s own copy
+ * leaves, checked by the assumption test below rather than asserted here. A
+ * mkdtemp directory and a short name measure this much under a `/tmp` root, so
+ * the pin changes nothing where the root is already short and matches every
+ * host's notice.
  */
 const ORDINARY_MOUNT_COST = 36;
 
@@ -79,13 +78,12 @@ const POSIX_SHORT_TEMP_ROOT = "/tmp";
  * The root the directories here are created under: `os.tmpdir()` where that is
  * short enough to build an ordinary mount under, and `/tmp` where it is not.
  *
- * The host's own root is not a safe default for a mount a notice has to NAME. The
- * budget those notices are fitted to leaves a mount tens of characters once the
- * notice's own copy is spent, which is less than the difference between the `/tmp`
- * a Linux host hands `os.tmpdir()` and the `/var/folders/<hash>/T` a macOS one
- * does. Rooted at the host's temp dir, an "ordinary" mount is ordinary on the one
- * host and past the budget on the other, where the fit drops the path and the
- * budget cases read as a product regression rather than a host difference.
+ * The host's own root is not a safe default for a mount a notice must NAME: the
+ * budget leaves only tens of characters once the notice's own copy is spent --
+ * less than the gap between the `/tmp` a Linux host hands `os.tmpdir()` and the
+ * `/var/folders/<hash>/T` a macOS one does. Rooted at the host's own temp dir,
+ * an "ordinary" mount would fit on the one host and blow the budget on the
+ * other, making a host difference look like a product regression.
  *
  * A host with no short root of its own -- Windows, whose temp dir is long and whose
  * drive root is not writable -- is served by pointing TMPDIR (TEMP there) at a short
@@ -280,7 +278,7 @@ describe("the memoized rendezvous provisioning", () => {
 
 /** The name and the locator together, as the rendezvous route composes them: the
  * shared folder's name where the console can name it, and the value the invitation
- * carries either way. */
+ * holds either way. */
 function locatorFor(env: NodeJS.ProcessEnv): {
   folderName: string | undefined;
   locator: string | undefined;
@@ -293,7 +291,7 @@ describe("the shared folder's name the invitation is minted from", () => {
   test("a name the segment rule admits can never be what fails a mint", () => {
     // The folder-name bound rides the shared segment rule's 255-character cap;
     // the endpoint schema's path cap is what a mint enforces. The inequality is
-    // the load-bearing fact: were it to flip, an admitted name could fail the
+    // the critical fact: were it to flip, an admitted name could fail the
     // mint it feeds.
     expect(MAX_INPUT_NAME_LENGTH).toBeLessThan(MAX_ENDPOINT_PATH_LENGTH);
   });
@@ -356,8 +354,8 @@ describe("the shared folder's name the invitation is minted from", () => {
   ])(
     "a %s name leaves the console unable to name the folder",
     (_label, name) => {
-      // Deliberately NOT falling back to the mount point: a caller that set the
-      // variable has already said the mount point does not name the folder.
+      // By design, this does not fall back to the mount point: a caller that set
+      // the variable has already said the mount point does not name the folder.
       expect(
         locatorFor({
           JOB_RENDEZVOUS_DIR: "/rendezvous",
@@ -418,7 +416,7 @@ describe("the shared folder's name the invitation is minted from", () => {
 
 describe("the split rendezvous a second mount provisions", () => {
   test("the outbound leg has no data-root fallback, so the variable is the whole signal", () => {
-    // Set the variable and the appliance is split; leave it unset and it is not,
+    // Set the variable and the console is split; leave it unset and it is not,
     // whatever else is mounted. That is the whole signal.
     expect(
       resolveJobRendezvousOutboundDir({ JOB_DATA_ROOT: "/data" }),
@@ -434,7 +432,7 @@ describe("the split rendezvous a second mount provisions", () => {
     ).toBeUndefined();
   });
 
-  test("a coherent pair carries both legs, both names, and both locators", () => {
+  test("a coherent pair has both legs, both names, and both locators", () => {
     const provisioning = resolveJobRendezvousProvisioning({
       JOB_RENDEZVOUS_DIR: "/mnt/from-partner",
       JOB_RENDEZVOUS_OUTBOUND_DIR: "/mnt/to-partner",
@@ -480,7 +478,7 @@ describe("the split rendezvous a second mount provisions", () => {
   test("an outbound leg NESTED in the inbound one is refused too", () => {
     // Core's own distinctness refine is textual same-directory only, so nesting --
     // which would have this party read its own writes as the partner's just the
-    // same -- is caught here, where the appliance's mounts are known.
+    // same -- is caught here, where the console's mounts are known.
     expect(
       resolveJobRendezvousProvisioning({
         JOB_RENDEZVOUS_DIR: "/mnt/share",
@@ -497,7 +495,7 @@ describe("the split rendezvous a second mount provisions", () => {
 
   test("an outbound leg whose basename starts with .. is refused", () => {
     // The containment test is segment-aware, so a folder the operator named
-    // "..outgoing" is read as the child of the inbound leg it is, not as a
+    // "..outgoing" is treated as the child of the inbound leg it is, not as a
     // sibling the prefix makes it look like.
     expect(
       resolveJobRendezvousProvisioning({
@@ -649,7 +647,7 @@ describe("the split rendezvous a second mount provisions", () => {
 
   test("an unusable name variable withholds the name, not the locator", () => {
     // The name variable governs only what the sheet may PRINT as the folder's
-    // name; the locator the invitation carries still falls back to the mount's own
+    // name; the locator the invitation holds still falls back to the mount's own
     // last segment, exactly as it does on a single-mount console.
     const provisioning = resolveJobRendezvousProvisioning({
       JOB_RENDEZVOUS_DIR: "/rendezvous",
@@ -777,7 +775,7 @@ describe("whether a rendezvous leg holds the data root", () => {
   test("the data-root fallback does: the single-folder console", () => {
     // The layout the identity-location advisory exists for -- one mount, so the
     // folder the partner syncs is the folder the signing key is written into.
-    // Lexically established, not defaulted, so it carries no uncertainty flag.
+    // Lexically established, not defaulted, so it holds no uncertainty flag.
     const provisioning = resolveJobRendezvousProvisioning({
       JOB_DATA_ROOT: "/data/jobs",
     });
@@ -931,7 +929,7 @@ describe("whether a rendezvous leg holds the data root", () => {
     // The identity that would join the two is exactly what could not be read, and
     // the verdict decides a warn-and-guide advisory, so what cannot be ruled out
     // is reported rather than dropped. The paths here relate the two not at all,
-    // so it is the unreadable identity carrying the verdict and nothing else.
+    // so it is the unreadable identity deciding the verdict and nothing else.
     const mounts = tempDir("mounts");
     const work = subDir(mounts, "work");
     const share = subDir(mounts, "share");
@@ -978,7 +976,7 @@ describe("whether a rendezvous leg holds the data root", () => {
 });
 
 describe("each leg's preflight names the mount it is about", () => {
-  test("a split appliance's notices distinguish the two folders", () => {
+  test("a split console's notices distinguish the two folders", () => {
     const dataRoot = tempDir("data");
     const inbound = tempDir("inbound");
     fs.writeFileSync(path.join(inbound, "console-hello.json"), "");
@@ -1167,7 +1165,7 @@ describe("rendezvousStartupWarnings overlap branch", () => {
 
   test("warns when the work-input directory is reached through a symlinked parent", () => {
     // The other side of the same comparison: it is the configured work-input path
-    // that carries the link, and the mount that is the plain path.
+    // that holds the link, and the mount that is the plain path.
     const mounts = tempDir("mounts");
     const volume = subDir(mounts, "volume");
     const rendezvous = subDir(volume, "sync");
@@ -1233,7 +1231,7 @@ describe("rendezvousStartupWarnings overlap branch", () => {
 
   test("an unreadable mount symlinked onto the data root reports the narrowed check", () => {
     // The overlap itself goes unseen, which is exactly what the notice says: the
-    // console reports what it could not check rather than reading as silent.
+    // console reports what it could not check rather than looking silent.
     const mounts = tempDir("mounts");
     const dataRoot = subDir(mounts, "data");
     const rendezvous = path.join(mounts, "sync");
@@ -1300,7 +1298,7 @@ describe("rendezvousStartupWarnings overlap branch", () => {
   test("an unreadable data root symlinked onto the mount reports the narrowed check", () => {
     // The overlap the resolution would have caught goes unseen from this side
     // exactly as it does from the mount's, and the notice is what says so rather
-    // than the comparison reading as a clean one.
+    // than the comparison looking like a clean one.
     const mounts = tempDir("mounts");
     const rendezvous = subDir(mounts, "sync");
     const dataRoot = path.join(mounts, "data");
@@ -1353,7 +1351,7 @@ function isContentWarning(warning: string): boolean {
 /** The rendezvous preflight run over a directory holding `entries`, isolated from
  * the overlap branch by non-overlapping sibling fixtures, and reduced to the
  * warnings about what the directory holds. Raw, as the preflight composes them and
- * as the job event stream carries them. */
+ * as the job event stream reports them. */
 function contentWarnings(
   entries: Array<string>,
   sweepExchangeFiles: boolean = SWEEP_OFF,
@@ -1416,9 +1414,9 @@ describe("rendezvousStartupWarnings emptiness branch", () => {
     for (const name of retainedTranscript) expect(listing).toContain(name);
   });
 
-  test("the lead reaches the operator carrying its whole recovery", () => {
+  test("the lead reaches the operator with its whole recovery", () => {
     // The sink caps what it renders, and the clause the cap would eat first is
-    // the one that keeps the recovery from reading as "empty this folder".
+    // the one that keeps the recovery from looking like "empty this folder".
     const [lead] = renderedContentWarnings(["console-hello.json"]);
     expect(lead).toContain("an exchange refuses to start");
     expect(lead).toContain('Turn on "Clear leftover exchange files"');
@@ -1440,7 +1438,7 @@ describe("rendezvousStartupWarnings emptiness branch", () => {
     );
   });
 
-  test("the recovery for a launch carrying the sweep is pinned whole", () => {
+  test("the recovery for a launch with the sweep is pinned whole", () => {
     // Pinned whole for the reason the form above is, and for one of its own: this
     // form says the sweep RUNS, never that it clears, because the CLI's sweep
     // refuses a retain-mode transcript and the console composes no escalation past
@@ -1470,7 +1468,7 @@ describe("rendezvousStartupWarnings emptiness branch", () => {
     expect(lead).not.toContain(DISPLAY_TRUNCATION_MARKER);
   });
 
-  test("the recovery sends the operator to a control the console carries", () => {
+  test("the recovery sends the operator to a control the console holds", () => {
     // The recovery is the console's own sweep, quoted by the opening of the
     // control's visible label because the whole label does not fit beside the
     // mount path. Either side of that pair drifting leaves the operator hunting
@@ -1621,7 +1619,7 @@ describe("rendezvousStartupWarnings emptiness branch", () => {
     const [, listing] = renderedContentWarnings(["a.json", wide]);
     expect(listing.length).toBeLessThanOrEqual(DEFAULT_MAX_DISPLAY_LENGTH);
     expect(listing).not.toContain(DISPLAY_TRUNCATION_MARKER);
-    // A name the cap chopped reads like a whole name the operator could go and
+    // A name the cap chopped looks like a whole name the operator could go and
     // delete, so the count absorbs it and the shorter name is still named.
     expect(listing).toContain("a.json");
     expect(listing).toContain("and 1 more");
@@ -1661,7 +1659,7 @@ describe("rendezvousStartupWarnings emptiness branch", () => {
   });
 
   test.skipIf(process.getuid?.() === 0)(
-    "an unlistable mount says so rather than reading as empty",
+    "an unlistable mount says so rather than looking empty",
     () => {
       const rendezvous = tempDir("rendezvous");
       fs.writeFileSync(path.join(rendezvous, "console-hello.json"), "");
@@ -1689,21 +1687,16 @@ describe("rendezvousStartupWarnings emptiness branch", () => {
   );
 });
 
-// Every notice the preflight can raise, on every leg it can be raised for, driven
-// through the branch that raises it and then through the seat's real display
-// boundary. The mount path is the one unbounded fragment in all of them -- it is the
-// operator's own server-side configuration, and nothing caps its length -- so each
-// shape is driven at an ordinary path, where the notice must NAME the mount, and at
-// paths far past the budget, where it must still deliver the clause the operator
-// acts on. Truncation cutting a warning's final clause is the failure this table
-// exists to catch, and it is invisible to a check that reads only the composed
-// string: composing is where the fit is decided, but the seat is where the cut would
-// land. What bounds the copy is the module's own exported budget, so growing a
-// notice past it reddens here rather than being caught by hand.
+// Every notice shape below is driven across every leg, through the real display
+// boundary rather than the composed string alone -- a truncated final clause
+// would only show up there, not at composition. The mount path is the one
+// unbounded fragment (operator-configured, with no length cap), so each shape
+// runs at an ordinary path, where the notice must NAME the mount, and at a path
+// far past the budget, where it must still fit its actionable clause.
 
 /** One preflight notice shape: the branch that raises it, and the clause its copy
  * ends on -- the part a cap eats first. Every shape is driven over every leg label,
- * because a split appliance preflights each of its two mounts separately: the leg
+ * because a split console preflights each of its two mounts separately: the leg
  * lengthens the notice's own first-party wording, and for the unwritable mount it
  * changes the recovery outright. */
 interface NoticeShape {
@@ -1730,7 +1723,7 @@ interface NoticeShape {
 }
 
 /** Every leg a notice is composed for: the single shared mount of a one-mount
- * console, and each half of a split appliance's pair. */
+ * console, and each half of a split console's pair. */
 const NOTICE_LEGS: ReadonlyArray<RendezvousLeg> = [
   "shared",
   "inbound",
@@ -1782,7 +1775,7 @@ function overlongMount(segment: string): string {
  * Nothing is created: each shape creates what its branch needs.
  *
  * A root leaving no room for it is refused here rather than measured. What a notice
- * does with a mount it cannot fit is drop it, so a root that broke the premise would
+ * does with a mount it cannot fit is drop it, so a root that broke the assumption would
  * otherwise reach the cases as a fit that gave up a path it had room for.
  */
 function ordinaryMount(root: string = TEST_TEMP_ROOT): string {
@@ -1889,7 +1882,7 @@ const NOTICE_SHAPES: Array<NoticeShape> = [
     namesMount: true,
   },
   {
-    // The same branch on a launch that already carries the sweep: the lead has a
+    // The same branch on a launch that already includes the sweep: the lead has a
     // second copy with its own length to fit, and a budget held only at the
     // wording a fresh launch reads is one the other form can overrun unseen.
     label: "the lead of a mount that is not empty on a sweeping launch",
@@ -2054,7 +2047,7 @@ describe("every preflight notice fits its budget once rendered", () => {
 
   test("an ordinary mount fits the residual the widest notice leaves", () => {
     // What every ordinary case below rests on: a mount short enough that the fit
-    // has no reason to drop it. The residual is what makes that a premise rather
+    // has no reason to drop it. The residual is what makes that an assumption rather
     // than a triviality -- a notice's own first-party copy is most of the budget,
     // so what is left for the mount is tens of characters, and a mount built under
     // the host's own temp root is one host apart from not fitting in it. Measured
@@ -2099,17 +2092,17 @@ describe("every preflight notice fits its budget once rendered", () => {
           expect(rendered).toContain(mount);
         }
         expect(rendered).toContain(shape.tail(leg));
-        // Which of the appliance's mounts the operator is being sent to.
+        // Which of the console's mounts the operator is being sent to.
         expect(rendered).toContain(legPhrase(leg));
         expect(rendered).not.toContain(DISPLAY_TRUNCATION_MARKER);
         expectWithinNoticeBudget(allRaw);
       });
 
       // The two ways a mount runs a notice past the budget. The second is a segment
-      // of confusables at a length whose RAW form still fits: what carries it over is
+      // of confusables at a length whose RAW form still fits: what pushes it over is
       // the escape expansion alone, so a fit measuring raw lengths would keep the
       // path there. Which arithmetic the fit does is the whole of the difference
-      // between the two classes, and the raw-length premise below is what says so.
+      // between the two classes, and the raw-length assumption below is what says so.
       for (const [pathLabel, segment, rawLengthFitsBudget] of [
         ["past the budget on its own length", OVERLONG_SEGMENT, false],
         [
@@ -2143,7 +2136,7 @@ describe("every preflight notice fits its budget once rendered", () => {
             // of it, so a leg's wording that outgrows the budget fails here.
             expectWithinNoticeBudget(allRaw);
             // The mount is what gives way, and it gives way WHOLE: a clipped path
-            // reads like a path the operator could go and look at.
+            // looks like a path the operator could go and look at.
             if (shape.namesMount) expect(raw).not.toContain(mount);
             expect(rendered).toContain(shape.tail(leg));
             expect(rendered).toContain(legPhrase(leg));

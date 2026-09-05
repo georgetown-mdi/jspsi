@@ -2,11 +2,11 @@ import { describe, expect, test } from "vitest";
 
 import { resolveSigningFingerprint } from "@psi/signingIdentityClient";
 
-// The appliance is trusted and its fingerprint body is still re-validated field
+// The console is trusted and its fingerprint body is still re-validated field
 // by field on the way in. The stakes are what the card does with it: the
 // fingerprint is the value the operator SHARES for a partner to pin, and the two
 // file names are what they go looking for in their own folder, so a malformed
-// body has to degrade to an honest failure rather than reach either surface as it
+// body has to degrade to an accurate failure rather than reach either surface as it
 // arrived. These pin that re-validation and the status/HTTP dispatch around it.
 
 /** A canonical 43-character fingerprint (the final character drawn from the
@@ -44,7 +44,7 @@ function okBody(
   return body;
 }
 
-describe("the request carries the label and the toggle only", () => {
+describe("the request has the label and the toggle only", () => {
   /** Resolve one fingerprint through a fetch that records what it was called
    * with and answers a well-formed body. */
   async function captureRequest(
@@ -163,7 +163,7 @@ describe("the ok body is re-validated field by field", () => {
     ["a value that is not a string", 7],
     ["an absent value", undefined],
   ])(
-    "an identity file name carrying %s is a malformed body, not a location to render",
+    "an identity file name holding %s is a malformed body, not a location to render",
     async (_label, identityFileName) => {
       // The name is rendered as a file the operator goes looking for in one
       // folder, so anything that describes a location instead is refused whole
@@ -219,7 +219,7 @@ describe("the outcome is read from the body's status, not from the HTTP status",
   test.each([
     ["refused", { kind: "refused" }],
     ["timeout", { kind: "timeout" }],
-  ])("a 200 carrying status %s is that category", async (status, expected) => {
+  ])("a 200 holding status %s is that category", async (status, expected) => {
     expect(
       await resolveSigningFingerprint("Agency A", false, answering({ status })),
     ).toEqual(expected);
@@ -230,7 +230,7 @@ describe("the outcome is read from the body's status, not from the HTTP status",
     ["no status at all", { fingerprint: FINGERPRINT, created: true }],
     ["a status that is not a string", { status: 0 }],
   ])(
-    "a 200 carrying %s degrades to an error rather than an empty ok",
+    "a 200 holding %s degrades to an error rather than an empty ok",
     async (_label, body) => {
       expect(
         await resolveSigningFingerprint("Agency A", false, answering(body)),
@@ -258,7 +258,7 @@ describe("the HTTP status dispatches before the body is read", () => {
     ).toEqual({ kind: "busy" });
   });
 
-  test("a 400 carries the server's field-path reason through", async () => {
+  test("a 400 passes the server's field-path reason through", async () => {
     expect(
       await resolveSigningFingerprint(
         "Agency A",
@@ -277,7 +277,7 @@ describe("the HTTP status dispatches before the body is read", () => {
     ["an empty error field", JSON.stringify({ error: "" })],
     ["a body that is not JSON at all", "<html>bad request</html>"],
   ])(
-    "a 400 whose body carries %s falls back to a fixed message",
+    "a 400 whose body holds %s falls back to a fixed message",
     async (_label, body) => {
       const outcome = await resolveSigningFingerprint("Agency A", false, () =>
         Promise.resolve(new Response(body, { status: 400 })),

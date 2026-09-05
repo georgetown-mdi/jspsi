@@ -31,20 +31,16 @@ import type Peer from "peerjs";
  * the key exchange's own arguments.
  *
  * The side-to-role table itself is pinned against the shared interop vectors in
- * webrtcInterop.test.ts, but a correct table read on the wrong key is the same
- * failure on the wire: two peers that resolve one side to two roles never
- * complete a handshake -- both initiators reject each other's second message,
- * both responders deadlock on receive. A web-to-web test cannot see it either,
- * since a swapped key moves both ends together. So each flow is driven here
- * through its own hook, and the CLI's matching call sites are driven against the
- * same fixture from apps/cli's suite. The managed re-run, the third reader of
- * the table, is driven the same way in managedRunDriver.test.ts.
+ * webrtcInterop.test.ts, but a correct table read on the wrong key still fails
+ * on the wire, and a web-to-web test cannot catch it -- a swapped key moves both
+ * ends together. So each flow is driven here through its own hook; the CLI's
+ * matching call sites are driven against the same fixture in apps/cli's suite,
+ * and the managed re-run is covered the same way in managedRunDriver.test.ts.
  *
- * Everything below the hook is mocked at the transport seams the browser suite
- * owns -- the rendezvous, the inbound wait, the message connection, and the
- * handshake -- so what is left running is the flow's own composition. The
- * handshake mock rejects: the role has been recorded by then, and a rejection
- * ends the run without a PSI exchange to stand up.
+ * Everything below the hook is mocked at the transport boundaries the browser
+ * suite owns -- the rendezvous, the inbound wait, the message connection,
+ * and the handshake. The handshake mock rejects: the role is recorded by then,
+ * and a rejection ends the run without a PSI exchange to stand up.
  */
 
 interface InteropVectors {

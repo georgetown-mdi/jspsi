@@ -33,16 +33,14 @@ import {
 } from "../utils/jobFixtures";
 
 // The console's authoring cards and the CLI's own parser, met where they touch:
-// the argv the appliance drives -- the zero-setup one throughout, and the exchange
-// one for the per-run controls both forms carry. The tokens under test are produced
-// by the cards' models and the intent's argv builder, spawned through the production
-// driver, and then handed to the REAL built CLI -- never compared against a
-// hand-written token list, which would only assert that this file and the emitter
-// agree about flags the CLI may not have (CLAUDE.md: settle a question about an
-// external tool by driving it).
+// the argv the console drives -- the zero-setup form throughout, and the exchange
+// form for the per-run controls both hold. The tokens under test are produced by
+// the cards' models and the intent's argv builder, spawned through the production
+// driver, and handed to the real built CLI -- never compared against a hand-written
+// token list (CLAUDE.md: settle a question about an external tool by driving it).
 //
 // apps/web must not import apps/cli (apps consume packages, not each other), so the
-// parser is reached the way the appliance reaches it: as a subprocess of the built
+// parser is reached the way the console reaches it: as a subprocess of the built
 // binary.
 
 /** The built CLI the console spawns in production -- resolved through the driver's
@@ -60,7 +58,7 @@ const BUILD_ARGS = ["run", "build", "-w", "apps/cli"];
 const EXIT_USAGE = 64;
 
 /** The connection portion of a filedrop zero-setup argv. A directory that does not
- * exist is deliberate: every case here fails at the input file, before the CLI opens
+ * exist is by design: every case here fails at the input file, before the CLI opens
  * a transport, so no case can reach a network or a rendezvous. */
 const RENDEZVOUS_URL = "file:///srv/jobs/abc/rendezvous";
 
@@ -69,17 +67,14 @@ const RENDEZVOUS_URL = "file:///srv/jobs/abc/rendezvous";
 const CHILD_EXIT_TIMEOUT_MS = 60_000;
 
 /**
- * The budget for every test in the suite below, vitest's 5s default being the
- * wrong scale for them: each spawns up to two sequential real node children --
- * the stub, then the built CLI, whose ~1MB bundle every spawn parses afresh --
- * where a sibling unit test only calls a function. On a loaded machine those
- * spawns run past 5s, and the file then reds with a bare test timeout rather
- * than a parser verdict, while the {@link CHILD_EXIT_TIMEOUT_MS} bound each
- * spawn already carries never gets to fire. Sized above the sum both spawns of
- * one test may legitimately take, so a child-level timeout is always the one
- * that reports, naming the child that stalled; carried by the suite rather
- * than by each test so a test added later cannot silently fall back to the 5s
- * default.
+ * The budget for every test below: vitest's 5s default is the wrong scale,
+ * since each spawns up to two sequential real node children -- the stub, then
+ * the built CLI, whose ~1MB bundle every spawn parses afresh -- where a
+ * sibling unit test only calls a function. Sized above the sum both spawns of
+ * one test may legitimately take, so a stalled child's own
+ * {@link CHILD_EXIT_TIMEOUT_MS} always fires and names it, set on the suite
+ * rather than each test so a test added later cannot silently fall back to
+ * the 5s default.
  */
 const SPAWNS_PER_TEST = 2;
 const SPAWN_TEST_TIMEOUT_MS = SPAWNS_PER_TEST * CHILD_EXIT_TIMEOUT_MS + 10_000;
@@ -158,12 +153,12 @@ function retainModeFileSyncArgs(): Array<string> {
 
 /**
  * The zero-setup connection-tuning tokens the console emits for an operator who
- * tuned every knob the card offers, taken through the card's own model
+ * tuned every setting the card offers, taken through the card's own model
  * ({@link connectionTuningOptions}) and the intent's builder
  * ({@link zeroSetupOptionsArgv}) rather than written out here. The units are the
  * card's, not this file's: whether a millisecond poll interval and a
  * seconds-scaled timeout are grammars the CLI's own duration flags accept is
- * exactly what the parse below settles.
+ * exactly what the parse below decides.
  */
 function tunedOptionArgs(): Array<string> {
   return zeroSetupOptionsArgv(
@@ -241,7 +236,7 @@ describe(
     test("every emitted file-sync token survives a real parse", async () => {
       const optionArgs = retainModeFileSyncArgs();
       // The card's model resolves retain mode's implications, so the emitted set is
-      // the trio plus the party name -- the argv the appliance really builds.
+      // the trio plus the party name -- the argv the console really builds.
       expect(optionArgs.length).toBe(4);
       const { argv, dir } = await captureFiledropArgv(optionArgs);
 
@@ -258,7 +253,7 @@ describe(
       expect(parsed.stderr).not.toContain("Unknown argument");
       expect(parsed.status).not.toBe(EXIT_USAGE);
       // Parsing ran to completion rather than short-circuiting: the run reached the
-      // input file, which this argv deliberately does not create.
+      // input file, which this argv does not create.
       expect(parsed.stderr).toContain("input.csv does not exist");
     });
 
@@ -279,8 +274,8 @@ describe(
       const parsed = parseWithRealCli(argv, dir);
       expect(parsed.stderr).not.toContain("Unknown argument");
       // Parsing ran to completion: the run reached the config file this argv
-      // deliberately does not create, and reported it into the log file the
-      // diagnostic tokens pointed the CLI at rather than to stderr.
+      // does not create, and reported it into the log file the diagnostic
+      // tokens pointed the CLI at rather than to stderr.
       expect(fs.readFileSync(logFilePath, "utf8")).toContain(
         "psilink.yaml does not exist",
       );
@@ -307,7 +302,7 @@ describe(
       expect(argv).toContain("--verbose");
       expect(argv).toContain(`--log-file=${logFilePath}`);
       // Never the escalation past the retain guard: the console has no control
-      // that can produce it, so no argv it builds can carry it.
+      // that can produce it, so no argv it builds can hold it.
       expect(argv).not.toContain("--force-retain-sweep");
 
       const parsed = parseWithRealCli(argv, dir);
@@ -484,7 +479,7 @@ describe(
 
     test("the foreign-file policy has no flag, which is why zero-setup withholds it", async () => {
       // The capabilities gate's reason, driven rather than asserted: the card offers
-      // `unexpected_files` only where a configuration document carries it, and a
+      // `unexpected_files` only where a configuration document holds it, and a
       // zero-setup run composes none. Were it emitted anyway, the run would not
       // silently drop the operator's choice -- the CLI would refuse the command.
       const { argv, dir } = await captureFiledropArgv([
@@ -513,7 +508,7 @@ describe(
       });
       const parsed = parseWithRealCli(argv, dir);
       // The parser took every token, and the run got past the connection
-      // overrides to the input file this argv deliberately does not create.
+      // overrides to the input file this argv does not create.
       expect(parsed.stderr).not.toContain("Unknown argument");
       expect(parsed.status).not.toBe(EXIT_USAGE);
       expect(parsed.stderr).toContain("input.csv does not exist");
@@ -554,7 +549,7 @@ describe(
       });
       const parsed = parseWithRealCli(argv, dir);
       // The parser took every token, and the run got past the connection
-      // overrides to the input file this argv deliberately does not create.
+      // overrides to the input file this argv does not create.
       expect(parsed.stderr).not.toContain("Unknown argument");
       expect(parsed.status).not.toBe(EXIT_USAGE);
       expect(parsed.stderr).toContain("input.csv does not exist");

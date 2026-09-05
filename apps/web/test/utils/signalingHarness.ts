@@ -18,7 +18,7 @@ export interface SignalingHarness {
   httpServer: Server;
   port: number;
   realm: IRealm;
-  /** Every `error` the server re-emitted (an over-cap frame surfaces as one),
+  /** Every `error` the server re-emitted (an over-cap frame shows up as one),
    * collected so it does not throw as an unhandled EventEmitter `error`. */
   errors: Array<Error>;
 }

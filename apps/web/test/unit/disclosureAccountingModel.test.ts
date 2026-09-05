@@ -53,7 +53,7 @@ function factNamed(
   return found;
 }
 
-/** The values of one labelled fact, or its named empty state when it carries
+/** The values of one labelled fact, or its named empty state when it holds
  * none. */
 function factValues(
   facts: ReadonlyArray<DisclosureFact>,
@@ -78,7 +78,7 @@ describe("a disclosure's facts", () => {
   test("name an unnamed partner as unnamed, on screen and in the export", () => {
     // `linkage_terms.identity` is optional, so a record can name no partner. The
     // accounting is a compliance reader's artifact: a blank Partner cell would
-    // read as a rendering fault, and a stand-in would assert a party nobody
+    // be treated as a rendering fault, and a stand-in would assert a party nobody
     // named. Both the on-screen fact and the exported row say what happened.
     return disclosureRecord({ partnerIdentity: null }).then((record) => {
       expect("partnerIdentity" in record).toBe(false);
@@ -197,10 +197,10 @@ describe("a disclosure's facts", () => {
   });
 
   test("escape a cited set's name and version, which the authoring party chose", async () => {
-    // The citation is carried through unvetted, so its names and versions are free
+    // The citation passes through unvetted, so its names and versions are free
     // text of somebody's choosing exactly as the partner identity is; this module
     // is their display sink too. A version renders undelimited on the strength of
-    // a shape the seam re-checks on the value in hand, so the escaped one below
+    // a shape the boundary re-checks on the value in hand, so the escaped one below
     // takes the delimited run rather than standing in the line unattributed.
     const record = await disclosureRecord({
       linkageRuleSet: {
@@ -218,11 +218,11 @@ describe("a disclosure's facts", () => {
     ]);
   });
 
-  test("a crafted set name cannot read as a shorter name at another version", async () => {
-    // A set name is free text the authoring party chose, so one carrying the
+  test("a crafted set name cannot be treated as a shorter name at another version", async () => {
+    // A set name is free text the authoring party chose, so one holding the
     // delimiter and a version-shaped token beside it can spell the citation of
     // another set at another version, on the row a compliance reader consults.
-    // The seam's run is what answers that: the delimiter is doubled inside the
+    // The boundary's run is what answers that: the delimiter is doubled inside the
     // name, so what the name spells stays content of one value rather than
     // structure this line asserted.
     //
@@ -251,14 +251,14 @@ describe("a disclosure's facts", () => {
   });
 
   test("a cited half crosses the display boundary once, delimiters and all", async () => {
-    // The seam states delimiting, not escaping, so its result reaches a fact by
+    // The boundary states delimiting, not escaping, so its result reaches a fact by
     // an assertion rather than by the escape's own return type, and what that
     // assertion claims is measured here: over names and versions built from the
     // classes the escape exists to remove, every byte of the rendered line is
     // printable ASCII, so nothing the escape rewrites survives into a run.
     //
     // The escape's own mark is what says it ran at all: each of these values
-    // escapes to a form carrying a backslash, so re-escaping the line changes
+    // escapes to a form holding a backslash, so re-escaping the line changes
     // it. That much is a floor, not a count -- a twice-escaped line would read
     // the same way here -- and the exact forms below are what pin the count,
     // since a second pass would double every backslash in them.
@@ -302,7 +302,7 @@ describe("a disclosure's facts", () => {
     expect(partner).toBe("Riverbend\\u202eSchools\\x1b[31m");
   });
 
-  test("state how the exchange ended, so a terminated run does not read as a completed one", async () => {
+  test("state how the exchange ended, so a terminated run does not display as a completed one", async () => {
     // The record is written once the exchange has disclosed, whether or not the
     // signed-receipt swap after it completed (docs/spec/EXCHANGE_RECORD.md, When
     // a record is owed). Both entries are real disclosures, and this row is what
@@ -320,7 +320,7 @@ describe("a disclosure's facts", () => {
     ]);
   });
 
-  test("carry the labels the export's columns are named for", async () => {
+  test("state the labels the export's columns are named for", async () => {
     // The exported header is stated once so an empty accounting still has one; this
     // pins it against the facts a real record produces, so the two cannot drift.
     const facts = disclosureFacts(await disclosureRecord());
@@ -347,7 +347,7 @@ describe("the accounting's entries", () => {
     expect(entries[0].when).toContain("2026");
   });
 
-  test("carry the partner at the display boundary for the collapsed summary", async () => {
+  test("hold the partner at the display boundary for the collapsed summary", async () => {
     const accounting = accountingOf(
       await disclosureRecord({ partnerIdentity: "Riverbend‮Schools" }),
     );
@@ -357,7 +357,7 @@ describe("the accounting's entries", () => {
     );
   });
 
-  test("carry the record's own bindingNonce as the entry's identity, distinct even when two runs share a createdAt", async () => {
+  test("hold the record's own bindingNonce as the entry's identity, distinct even when two runs share a createdAt", async () => {
     // createdAt is millisecond-resolution and not guaranteed unique (rapid
     // re-runs, a browser that coarsens Date resolution); bindingNonce is the
     // record's own CSPRNG-generated per-run identity (see appendDisclosureRecord
@@ -400,7 +400,7 @@ describe("the exported accounting", () => {
     expect(rows[2]).toContain(newest.when);
   });
 
-  test("carries every fact of a run in its row", async () => {
+  test("has every fact of a run in its row", async () => {
     const accounting = accountingOf(
       await disclosureRecord({
         recordsExposed: 7,
@@ -421,7 +421,7 @@ describe("the exported accounting", () => {
     expect(row).toContain('"Program share drive, 3-year hold"');
   });
 
-  test("carries the rule-set citation and its caveat in the same row as the run's other governance fields", async () => {
+  test("has the rule-set citation and its caveat in the same row as the run's other governance fields", async () => {
     const accounting = accountingOf(
       await disclosureRecord({ linkageRuleSet: true }),
     );
@@ -429,7 +429,7 @@ describe("the exported accounting", () => {
     const [header, row] = csvRows(disclosureAccountingCsv(accounting));
 
     // One cell of the one run's row, beside the agreement and the matching basis:
-    // both cited halves and the caveat, which the export carries because it is
+    // both cited halves and the caveat, which the export holds because it is
     // read without the screen that showed it.
     expect(
       splitCsvRow(row)[splitCsvRow(header).indexOf("Rule set cited")],
@@ -478,7 +478,7 @@ describe("the exported accounting", () => {
     expect(row).not.toContain("\"'Keys:");
   });
 
-  test("quotes a value carrying the delimiter, so a comma cannot shift the columns", async () => {
+  test("quotes a value holding the delimiter, so a comma cannot shift the columns", async () => {
     const accounting = accountingOf(
       await disclosureRecord({
         legalAgreement: {
@@ -507,7 +507,7 @@ describe("the exported accounting", () => {
     expect(row).toContain('"Riverbend ""Schools"""');
   });
 
-  test("separates a multi-value cell with a newline no value can itself carry", async () => {
+  test("separates a multi-value cell with a newline no value can itself hold", async () => {
     // The display boundary escapes every non-printable-ASCII code point, so a
     // newline inside a quoted cell is unambiguously the separator. A partner
     // planting one in a column name gets the escape, not a second line.
@@ -551,7 +551,7 @@ describe("the exported accounting", () => {
 
   test("leaves a tab- or return-led value unprefixed, the display boundary having escaped the lead", async () => {
     // Tab and carriage return are formula leads a spreadsheet honors, and the
-    // guard deliberately does not list them: a value reaches a cell only through
+    // guard does not list them: a value reaches a cell only through
     // the display boundary, which escapes every non-printable-ASCII code point, so
     // what leads the cell is a backslash rather than the control character. Pinned
     // here so the narrowing is checked rather than argued.
@@ -620,7 +620,7 @@ describe("the stored accounting as a recovery file", () => {
     });
 
     // Deep equality after a round trip, not a spot check on a field: the export's
-    // one job is to lose nothing, and a field the current format does not carry is
+    // one job is to lose nothing, and a field the current format does not hold is
     // exactly the field a bump would have made unreadable.
     expect(JSON.parse(document)).toEqual({
       version: DISCLOSURE_ACCOUNTING_VERSION,
@@ -628,7 +628,7 @@ describe("the stored accounting as a recovery file", () => {
     });
   });
 
-  test("carries no reading of the entries, only the stored shape", () => {
+  test("has no reading of the entries, only the stored shape", () => {
     const document = storedDisclosureAccountingDocument({
       version: DISCLOSURE_ACCOUNTING_VERSION,
       entries: storedEntries,
@@ -636,7 +636,7 @@ describe("the stored accounting as a recovery file", () => {
 
     // The CSV's column labels are this app's reading of a record under the CURRENT
     // format's meaning. An entry from another version licenses none of it, so the
-    // recovery file must carry the record's own field names and no label of ours.
+    // recovery file must hold the record's own field names and no label of ours.
     for (const label of DISCLOSURE_FACT_LABELS)
       expect(document).not.toContain(label);
     expect(document).toContain("partnerIdentity");

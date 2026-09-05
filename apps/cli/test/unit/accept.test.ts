@@ -121,7 +121,7 @@ silentLog.setLevel("silent");
 let optionsCounter = 0;
 // Minimal options pointing config/key at fresh, non-existent temp paths so the
 // conflict gate passes and validateAccept reaches the step under test. The
-// identity is part of that minimum: the acceptor derives terms carrying its own
+// identity is part of that minimum: the acceptor derives terms holding its own
 // label, and a run without one stops at the identity gate before the step under
 // test.
 function testOptions(
@@ -162,10 +162,10 @@ function sampleToken(
   };
 }
 
-// The same token carrying a SPLIT inbound/outbound endpoint. Core requires the
+// The same token holding a SPLIT inbound/outbound endpoint. Core requires the
 // retain declaration beside that shape at the mint (a split directory puts every
 // connection built from it in retain mode), so a case that goes through
-// encodeInvitation carries it exactly as a real inviter's mint does. A case that
+// encodeInvitation has it exactly as a real inviter's mint does. A case that
 // renders a token without minting it uses sampleToken directly, since an
 // undeclared split endpoint stays a decodable shape.
 function splitEndpointToken(
@@ -320,7 +320,7 @@ test("encode/decode round-trips an invitation at the command level", async () =>
 test("a hard-wrapped invitation paste decodes at the command level", async () => {
   const token = sampleToken(FUTURE());
   const encoded = await encodeInvitation(token);
-  // What a token pasted out of a wrapping mail client carries: line breaks and
+  // What a token pasted out of a wrapping mail client holds: line breaks and
   // the indentation of a quoted reply, none of it part of the invitation.
   const wrapped = `${encoded.slice(0, 30)}\n  ${encoded.slice(30, 60)}\n${encoded.slice(60)}`;
   const decoded = await decodeAndValidateInvitation(wrapped);
@@ -400,7 +400,7 @@ test("validateAccept: an invalid invitation is rejected before the prompt", asyn
 
 test("validateAccept: a missing or blank --identity is refused", async () => {
   // The acceptor records its OWN identity in the derived terms (the invitation
-  // carries the inviter's), so a valid invitation is not a label this party can
+  // has the inviter's), so a valid invitation is not a label this party can
   // borrow: with none supplied, the acceptance stops. A blank value -- the
   // scripted `--identity "$ORG"` with ORG unset -- is none supplied.
   const encoded = await encodeInvitation(sampleToken(FUTURE()));
@@ -414,7 +414,7 @@ test("validateAccept: a missing or blank --identity is refused", async () => {
     ).rejects.toThrow(IDENTITY_REQUIRED);
 });
 
-test("validateAccept: an --identity still carrying the init placeholder is refused", async () => {
+test("validateAccept: an --identity still holding the init placeholder is refused", async () => {
   // Accepting authors a durable partnership under this party's own label, so the
   // template's placeholder is refused here exactly as no label at all -- whether
   // it was copied verbatim or with the whitespace a quoted argument leaves.
@@ -432,7 +432,7 @@ test("validateAccept: an --identity still carrying the init placeholder is refus
 test("validateAccept: with no --identity, the answer at the terminal is this party's label", async () => {
   // The label the acceptance records is the one the operator typed, trimmed the
   // way a flag value is -- so what the partner reads and what the written
-  // configuration carries is the answer, not the keystrokes around it.
+  // configuration holds is the answer, not the keystrokes around it.
   const encoded = await encodeInvitation(sampleToken(FUTURE()));
   const askIdentity = vi.fn().mockResolvedValue("  Agency B  ");
   const ready = await validateAccept({
@@ -461,7 +461,7 @@ test("validateAccept: --identity is answer enough; no question is asked over it"
 });
 
 test("validateAccept: a blank answer is absence, and the acceptance stops unnamed", async () => {
-  // Blank at the question reads as blank at the flag: absence, not a label. An
+  // Blank at the question is treated as blank at the flag: absence, not a label. An
   // acceptance authors a durable partnership, so absence is where it stops --
   // pressing return past the question does not name this party the empty string.
   const encoded = await encodeInvitation(sampleToken(FUTURE()));
@@ -666,7 +666,7 @@ async function withStdin<T>(csv: string, fn: () => Promise<T>): Promise<T> {
 
 test("validateAccept: offline `-` with consentToTerms reads the CSV from stdin and proceeds", async () => {
   // A CSV the default linkage terms can satisfy, so the satisfiability pre-flight
-  // passes and the dataSpec carries metadata inferred from the stdin header --
+  // passes and the dataSpec holds metadata inferred from the stdin header --
   // proof the CSV was actually read from stdin rather than `-` being rejected.
   const csv =
     "first_name,last_name,dob,ssn\nAlice,Smith,1990-01-02,123456789\n";
@@ -750,7 +750,7 @@ test("validateAccept: an unsupported URL is rejected before the input file is re
 
 // --- connection_per_poll ignored on a non-sftp online URL --------------------
 // A file:// URL resolves to filedrop, which holds no session, so an online accept
-// carrying --connection-per-poll must warn it is ignored rather than silently
+// passing --connection-per-poll must warn it is ignored rather than silently
 // drop it. connectionFromURL applies the override only on sftp, so on filedrop the
 // raw flag is the sole carrier of the operator's intent; validateAccept reads it
 // and warns. On sftp the mode is valid, so the ignored-warning stays silent.
@@ -927,7 +927,7 @@ const LINKAGE_COLUMNS = ["first_name", "last_name", "dob", "ssn"];
 // The built-in rule set narrowed to the keys LINKAGE_COLUMNS supports, the way a
 // party's own file narrows it. Every terms fixture in this file uses it, on both
 // sides: an acceptance is refused unless its CSV can satisfy every key the
-// invitation declares, so terms declaring a key no test CSV here carries would
+// invitation declares, so terms declaring a key no test CSV here holds would
 // refuse every acceptance below.
 function sampleTerms(identity: string): LinkageTerms {
   return getDefaultLinkageTerms(identity, inferMetadata(LINKAGE_COLUMNS));
@@ -1027,7 +1027,7 @@ function countOnlyToken(): InvitationToken {
 }
 
 test("validateAccept: refuses a count-only invitation whose own columns would send one", async () => {
-  // The count-only rule this party's own metadata carries: `diagnosis` is an
+  // The count-only rule this party's own metadata holds: `diagnosis` is an
   // unrecognized column, which inferMetadata marks for transmission, and a
   // count-only exchange moves no data column in either direction. Refused at the
   // accept boundary, naming what to clear -- not left to the algorithm gate,
@@ -1074,7 +1074,7 @@ test("validateAccept: a count-only invitation over a file that sends nothing is 
 });
 
 test("validateAccept: a crafted count-only invitation outside the shape is refused at the decode", async () => {
-  // The four terms-carried rules, on the partner's document: minting one is
+  // The four rules the terms hold, on the partner's document: minting one is
   // refused by the same schema, so it reaches this party only as a crafted token
   // -- and the decode is where the acceptance meets it, before the prompt.
   const base = countOnlyToken();
@@ -1109,7 +1109,7 @@ test("validateAccept: warns when the input discloses columns the invitation acce
   expect(refused).toContain("is_payload: false");
   expect(refused).toContain("ask your partner for an invitation");
   // One entry per line, the rendering both consent surfaces use, so a name
-  // carrying the list separator cannot be read as two entries.
+  // holding the list separator is not misread as two entries.
   expect(refused).toContain("\n  - diagnosis");
   expect(refused).toContain(`\n  - ${sanitizeForDisplay(hostile)}`);
   // The names are the operator's own file's and reach the log sink without ever
@@ -1209,10 +1209,10 @@ test("validateAccept: stays silent, and the display stays consistent, when the i
 
 test("validateAccept: offline warns that a --server-* override is ignored", async () => {
   // The offline path builds the connection block from connectionFromEndpoint (a
-  // placeholder here, since sampleToken carries no endpoint; or an endpoint seed
+  // placeholder here, since sampleToken has no endpoint; or an endpoint seed
   // when one is present -- the warning reads only `options`, so it fires the same
   // way either way), so a --server-* override cannot take effect; it must be
-  // surfaced rather than silently dropped.
+  // reported rather than silently dropped.
   const input = writeInputCSV(["first_name", "last_name", "dob", "ssn"]);
   const log = getLogger("accept-offline-override-warn");
   log.setLevel("silent");
@@ -1290,7 +1290,7 @@ test("validateAccept: online does not warn about a --server-* override (it is ap
 test("validateAccept: offline warns that a connection-options override is ignored", async () => {
   // The offline path builds the connection block from connectionFromEndpoint
   // (placeholder or endpoint seed), which has no `options` block, so a
-  // connection-options override cannot take effect; it must be surfaced with a
+  // connection-options override cannot take effect; it must be reported with a
   // remedy pointing at connection.options, distinct from the server warning.
   const input = writeInputCSV(["first_name", "last_name", "dob", "ssn"]);
   const log = getLogger("accept-offline-opt-override-warn");
@@ -1467,7 +1467,7 @@ test("validateAccept: offline stamps role: acceptor onto a seeded webrtc connect
 
 test("validateAccept: offline leaves a non-webrtc connection without a role", async () => {
   // `role` is a WebRTC-only field, so an sftp acceptance (here the placeholder
-  // block an endpoint-less invitation seeds) carries no such key at all.
+  // block an endpoint-less invitation seeds) has no such key at all.
   const input = writeInputCSV(["first_name", "last_name", "dob", "ssn"]);
   try {
     const encoded = await encodeInvitation(sampleToken(FUTURE()));
@@ -1486,7 +1486,7 @@ test("validateAccept: offline leaves a non-webrtc connection without a role", as
 });
 
 // --- accepting and running a webrtc exchange in one command ------------------
-// An invitation naming a webrtc coordination server carries everything the
+// An invitation naming a webrtc coordination server has everything the
 // exchange needs, so an acceptance given an input file runs it rather than
 // printing a second command for the operator to type while the inviter sits
 // inside its accept timeout. Everything else -- another channel's endpoint, no
@@ -1537,7 +1537,7 @@ test("validateAccept: a webrtc invitation with an input file prepares the exchan
       host: "peer.example.org",
       path: "/psi",
     });
-    // The prepared exchange carries the same two bindings the URL-driven mode
+    // The prepared exchange has the same two bindings the URL-driven mode
     // sets, so this single run enforces what the acceptance consented to.
     expect(ready.prepared.expectedPayloadColumns).toEqual(["diagnosis"]);
     expect(ready.prepared.expectedPartnerDeduplicate).toBe(
@@ -1562,7 +1562,7 @@ test("validateAccept: a webrtc invitation with no input file keeps the two-comma
   expect(ready.mode).toBe("offline");
 });
 
-test("validateAccept: an invitation carrying no webrtc endpoint keeps the two-command shape", async () => {
+test("validateAccept: an invitation holding no webrtc endpoint keeps the two-command shape", async () => {
   // The fallback the acceptance criteria name: no endpoint at all, and an
   // endpoint on a channel whose credentials the operator still supplies by hand.
   // Neither fails; each writes a connection block to complete.
@@ -1661,7 +1661,7 @@ test("validateAccept: a partner endpoint the dial would refuse is refused before
 
 test("validateAccept: a partner endpoint that forms no dialable address is refused as a usage error", async () => {
   // The shapes the delimiter refusal above does not cover: the endpoint schema
-  // bounds the host by length alone, so one carrying a port or an unterminated
+  // bounds the host by length alone, so one holding a port or an unterminated
   // IPv6 bracket arrives and fails the authority parse instead. Deterministic in
   // the invitation alone, so it exits 64 like its delimiter sibling -- a 69 would
   // set an unattended supervisor re-running an acceptance that cannot dial -- and
@@ -1702,7 +1702,7 @@ test("validateAccept: a partner endpoint that forms no dialable address is refus
 test("validateAccept: an OUTPUT_FILE an acceptance cannot honor is reported, not dropped", async () => {
   // The result destination belongs to a run. An acceptance that writes only a
   // configuration and key file has no result to send there, so the positional is
-  // named rather than silently ignored -- and a running acceptance carries it
+  // named rather than silently ignored -- and a running acceptance passes it
   // through to the bootstrap instead.
   const input = writeInputCSV(["first_name", "last_name", "dob", "ssn"]);
   const stops: string[] = [];
@@ -1814,7 +1814,7 @@ test("validateAccept: an acceptance that keeps an existing config takes its labe
  * reporting the prepared acceptance alongside every line it emitted -- the calls
  * it made on the logger, the lines that survived the level to reach the log's
  * own sink, and what it wrote where the confirmation prompt asks. The saved
- * connection agrees with the online URL, so the reuse verdict carries no
+ * connection agrees with the online URL, so the reuse verdict has no
  * connection divergence of its own and the only notice a case can raise is the
  * one it is about.
  *
@@ -1976,7 +1976,7 @@ test("validateAccept: a flag that asks for the stored label reports nothing", as
 test("validateAccept: the no-effect notice reaches the prompt whatever the log routing", async () => {
   // The operator answers the y/N for the name this notice reports, so it takes
   // the consent surface's routing rather than a plain diagnostic's: a
-  // --log-file carries the log's copy off the terminal the question is asked
+  // --log-file moves the log's copy off the terminal the question is asked
   // on, and a level above `warn` drops that copy altogether. Under either, the
   // notice is still written where the prompt asks -- the promise docs/CLI.md
   // makes under acceptance. The `--log-file` value is what the sink reads to
@@ -2032,10 +2032,10 @@ test("validateAccept: an unattended acceptance keeps the notice in the log alone
   expect(promptWrites).toBe("");
 });
 
-test("validateAccept: a kept configuration carrying no identity refuses the acceptance", async () => {
+test("validateAccept: a kept configuration holding no identity refuses the acceptance", async () => {
   // The acceptance writes no configuration, so a label supplied here would name
   // this party for one run and leave every later one unnamed -- which is the
-  // refusal rather than something a flag can paper over.
+  // refusal rather than something a flag can hide.
   for (const stored of [undefined, "   "])
     await expect(
       acceptOverKeptConfig({
@@ -2046,7 +2046,7 @@ test("validateAccept: a kept configuration carrying no identity refuses the acce
     ).rejects.toThrow("has no linkage_terms.identity");
 });
 
-test("validateAccept: a kept configuration still carrying the placeholder refuses", async () => {
+test("validateAccept: a kept configuration still holding the placeholder refuses", async () => {
   // The template's own instruction to name the party is not a name, and reading
   // the label out of a file rather than off the command line does not make it
   // one.
@@ -2080,7 +2080,7 @@ test("validateAccept: the no-effect notice escapes both labels it reports", asyn
 });
 
 /** The default terms with their first two keys swapped: rules that no longer
- *  support the rule-set citation the same terms carry, key order being cascade
+ *  support the rule-set citation the same terms hold, key order being cascade
  *  order. */
 function termsCitingASetTheyLeft(identity: string): LinkageTerms {
   const terms = sampleTerms(identity);
@@ -2091,7 +2091,7 @@ function termsCitingASetTheyLeft(identity: string): LinkageTerms {
 test("validateAccept: a reused config's rule-set citation is checked against its own rules", async () => {
   // The reconcile compares the terms that define the agreement, and the citation
   // is not one of them -- so a config agreeing with the invitation key for key
-  // can still carry a citation its own rules left. Reuse proceeds, and the drift
+  // can still hold a citation its own rules left. Reuse proceeds, and the drift
   // is reported before the confirmation prompt.
   const options = testOptions();
   writeExistingConfig(options.configFile, {
@@ -2233,7 +2233,7 @@ test("validateAccept: a malformed-YAML config does not echo an inline credential
     }
     expect(caught).toBeInstanceOf(UsageError);
     expect((caught as Error).message).toMatch(/not valid YAML/);
-    // The credential must not appear anywhere in the surfaced message.
+    // The credential must not appear anywhere in the shown message.
     expect((caught as Error).message).not.toContain(SECRET);
   } finally {
     fs.rmSync(options.configFile, { force: true });
@@ -2494,9 +2494,9 @@ async function encodeRaw(obj: unknown): Promise<string> {
 }
 
 test("decode error escapes a hostile unrecognized endpoint key name end to end", async () => {
-  // A malicious inviter adds an endpoint key whose NAME carries control/ANSI
+  // A malicious inviter adds an endpoint key whose NAME has control/ANSI
   // bytes; strictObject rejects it, echoing the name into the message that
-  // decodeAndValidateInvitation surfaces to the operator as a UsageError.
+  // decodeAndValidateInvitation shows to the operator as a UsageError.
   const encoded = await encodeRaw({
     ...sampleToken(FUTURE()),
     connectionEndpoint: {
@@ -2610,10 +2610,10 @@ test("displayInvitation escapes a hostile inviter identity and key names", () =>
   expect(joined).toContain("\\u202e");
 });
 
-test("displayInvitation: the carried disclosed subset shows names, '(none)' when empty, and nothing when absent", () => {
+test("displayInvitation: the held disclosed subset shows names, '(none)' when empty, and nothing when absent", () => {
   // The acceptor's "columns you will receive" line. A present subset is shown
   // (an empty one as "(none)", since the empty set is a real "receive nothing"
-  // lock-in); an absent subset (an older or metadata-unknown mint, reconciled
+  // commitment); an absent subset (an older or metadata-unknown mint, reconciled
   // lazily) shows no line at all.
   const log = getLogger("accept-display-receive-test");
   log.setLevel("silent");
@@ -2630,7 +2630,7 @@ test("displayInvitation: the carried disclosed subset shows names, '(none)' when
   // The empty set is a bare "(none)", with nothing after it: the line renders only
   // for a declared direction (the absent case below prints no line at all), so the
   // reader of a "(none)" is already looking at an explicit declaration, and the
-  // enforcement register is what the label's marker carries. What the declaration
+  // enforcement register is what the label's marker holds. What the declaration
   // commits its party to is stated at length in docs/CLI.md, not on the prompt.
   expect(lines({ ...base, disclosedPayloadColumns: [] }).split("\n")).toContain(
     "  columns you will receive (enforced, 0 declared): (none)",
@@ -2640,9 +2640,9 @@ test("displayInvitation: the carried disclosed subset shows names, '(none)' when
   );
 });
 
-test("displayInvitation: the rule-set citation reads as the partner's word, and is absent when none is cited", () => {
+test("displayInvitation: the rule-set citation displays as the partner's word, and is absent when none is cited", () => {
   // The citation is the inviting party's own claim about its rules, so the block
-  // carries the trust-contingent marker rather than reading as a provenance
+  // holds the trust-contingent marker rather than displaying as a provenance
   // psilink vouched for. An invitation citing nothing prints no line:
   // hand-authored rules have no citation, and inventing one would attribute them.
   const log = getLogger("accept-display-rule-set-test");
@@ -2664,7 +2664,7 @@ test("displayInvitation: the rule-set citation reads as the partner's word, and 
 
   // The name is partner-controlled free text and the version beside it is not, so
   // the quoting is what keeps the boundary between them readable: a name ending in
-  // a version-shaped token must not read as the version this line reports.
+  // a version-shaped token must not be treated as the version this line reports.
   const spacedName = renderDisplayInvitation(log, {
     ...base,
     linkageTerms: {
@@ -2687,8 +2687,8 @@ test("displayInvitation: the rule-set citation reads as the partner's word, and 
 });
 
 test("displayInvitation: a cited set name cannot render another citation's line", () => {
-  // The name is delimited through core's terms-value seam, which doubles a
-  // delimiter inside a run, so a name carrying one cannot end its own value: what
+  // The name is delimited through core's terms-value boundary, which doubles a
+  // delimiter inside a run, so a name holding one cannot end its own value: what
   // the operator reads is the whole name, never the line a citation of a shorter
   // name at another version produces.
   const log = getLogger("accept-display-rule-set-delimiter-test");
@@ -2738,7 +2738,7 @@ test("displayInvitation: a cited set name cannot render another citation's line"
   ).toContain(`    keys (${marker}): "hmis-keys" "1.0.0"" 9.9.9"`);
 });
 
-test("displayInvitation: each citation half carries this build's own verdict on it", () => {
+test("displayInvitation: each citation half holds this build's own verdict on it", () => {
   const log = getLogger("accept-display-rule-set-verdict-test");
   log.setLevel("silent");
   const base = sampleToken(FUTURE());
@@ -2831,7 +2831,7 @@ test("displayInvitation: a disproved citation is repeated in the block above the
   expect(
     rendered.split(LINKAGE_RULE_SET_VERDICT_COPY.contradicted.note).length - 1,
   ).toBe(3);
-  // The repeated block carries the citation whole -- both halves under their own
+  // The repeated block holds the citation whole -- both halves under their own
   // markers, each name behind a fixed first-party label -- so an operator reads
   // WHICH name is disproved. Only the disproved caveat is repeated with it.
   const decisionLines: string[] = [];
@@ -2859,19 +2859,19 @@ test("displayInvitation: a disproved citation is repeated in the block above the
   expect(truthfulLines.join("\n")).not.toContain("linkage rule set");
 });
 
-test("displayInvitation: the received-columns marker follows what the invitation carried, not what it declared", () => {
+test("displayInvitation: the received-columns marker follows what the invitation held, not what it declared", () => {
   // The same line has two sources and they do not rest on the same thing. The
-  // carried subset is the set an acceptance locks in and reconciles the received
-  // payload against; an authored payload.send with no carried subset locks in
+  // held subset is the set an acceptance locks in and reconciles the received
+  // payload against; an authored payload.send with no held subset locks in
   // nothing, so an inviter that declares one set and transmits another is not
   // stopped on the online run. Marking that case "enforced" would announce a check
-  // that does not run, so the marker is keyed on what was carried.
+  // that does not run, so the marker is keyed on what was held.
   const log = getLogger("accept-display-receive-basis-test");
   log.setLevel("silent");
   const base = sampleToken(FUTURE());
-  // One terms document for both renderings, authoring the columns the carried
+  // One terms document for both renderings, authoring the columns the held
   // subset also names, so the only difference between the two is whether the token
-  // carries the subset.
+  // holds the subset.
   const linkageTerms: LinkageTerms = {
     ...base.linkageTerms,
     payload: { send: [{ name: "diagnosis" }, { name: "notes" }] },
@@ -2900,8 +2900,8 @@ test("displayInvitation: the received-columns marker follows what the invitation
       "columns you will receive (enforced, 2 declared)",
     ),
   ).toBe(carried);
-  // An authored EMPTY send is not a declaration at all -- it carries no subset and
-  // prints no line -- so a rendered "(none)" is always the carried, enforced case.
+  // An authored EMPTY send is not a declaration at all -- it holds no subset and
+  // prints no line -- so a rendered "(none)" is always the held, enforced case.
   expect(
     renderDisplayInvitation(log, {
       ...base,
@@ -2962,14 +2962,14 @@ const declaredReceiveHeading = (declaredTotal: number): string =>
  * escaped display allowance: the shape that decides whether the operator can still
  * reach the question this prompt is asking.
  *
- * The count deliberately overdrives what the intake path can deliver, to pin the
+ * The count overdrives what the intake path can deliver, to pin the
  * cap's arithmetic at the schema ceiling rather than at whatever an encoded token
  * happens to fit: `decodeInvitation` refuses an encoded invitation above
  * `MAX_ENCODED_INVITATION_LENGTH` (64 KiB) before it parses, which holds a declared
  * list to roughly 346 names of this shape.
  *
  * The filler is ordinary content rather than an attack, and outside printable
- * ASCII: U+00E9 LATIN SMALL LETTER E WITH ACUTE is what a real declaration carries
+ * ASCII: U+00E9 LATIN SMALL LETTER E WITH ACUTE is what a real declaration holds
  * and it escapes at this sink, so a name of them spends the allowance in full.
  * Written as an escape rather than a raw byte, so a test about an invisible
  * expansion is itself readable.
@@ -2982,7 +2982,7 @@ function floodedDeclaration(prefix: string): Array<{ name: string }> {
 }
 
 test("displayInvitation: bounds each declared payload list by count and states the remainder", () => {
-  // Both declared directions carry partner free text at core's MAX_PAYLOAD_ENTRIES
+  // Both declared directions hold partner free text at core's MAX_PAYLOAD_ENTRIES
   // ceiling, above what intake can deliver so the arithmetic is pinned at the schema
   // bound; what an invitation actually reaches through the 64 KiB decode cap is
   // roughly 346 names of this shape, some 93 KB of painted text and a thousand-odd
@@ -2996,8 +2996,8 @@ test("displayInvitation: bounds each declared payload list by count and states t
   // everything the prompt can render -- the linkage-key block, up to
   // MAX_LINKAGE_ENTRIES (256) keys of MAX_KEY_ELEMENTS (256) elements each through
   // the uncapped logList path, stays the larger partner-controlled render on this
-  // surface and this fixture does not exercise it. An ABSOLUTE number, deliberately
-  // not derived from MAX_DECLARED_NAMES_SHOWN: a ceiling that scaled with the cap
+  // surface and this fixture does not exercise it. An ABSOLUTE number, not derived
+  // from MAX_DECLARED_NAMES_SHOWN: a ceiling that scaled with the cap
   // would hold at any cap, including none, which is the change this check exists to
   // catch. It leaves several thousand characters of headroom over what this fixture
   // measures today, so a copy edit elsewhere on the prompt does not trip it, and
@@ -3021,11 +3021,11 @@ test("displayInvitation: bounds each declared payload list by count and states t
     declaredSendHeading(MAX_PAYLOAD_ENTRIES),
     declaredReceiveHeading(MAX_PAYLOAD_ENTRIES),
   ]) {
-    // Per direction, not in total: each list carries its own cap, so one flooded
+    // Per direction, not in total: each list holds its own cap, so one flooded
     // declaration cannot spend the other's allowance.
     const entries = entriesUnder(lines, heading);
     expect(entries).toHaveLength(MAX_DECLARED_NAMES_SHOWN);
-    // The premise, asserted rather than assumed: each painted name spends the whole
+    // The assumption, asserted rather than assumed: each painted name spends the whole
     // per-value allowance and is cut at it, so what is measured here is the worst
     // case and not a mild one.
     for (const entry of entries) {
@@ -3045,7 +3045,7 @@ test("displayInvitation: bounds each declared payload list by count and states t
   // What the same declaration would paint uncapped, measured rather than argued
   // from the constants: the bound is only worth pinning against the size it
   // replaces. That magnitude belongs to the schema ceiling this fixture drives, not
-  // to anything an invitation delivers -- one carrying it never decodes -- and the
+  // to anything an invitation delivers -- one holding it never decodes -- and the
   // reachable worst case the bound forecloses is the ~93 KB, a thousand-odd rows,
   // that the 64 KiB decode cap does leave room for.
   const uncappedSize = [...send, ...receive].reduce(
@@ -3086,7 +3086,7 @@ test("displayInvitation: bounds each declared payload list by count and states t
 
 test("displayInvitation: each declared direction's heading states its own declared total", () => {
   // Under the count bound the closing "and N more" line is the only magnitude a cut
-  // list carries below it, and a padded declared name reproduces that row at a
+  // list holds below it, and a padded declared name reproduces that row at a
   // matching terminal width (the stated limit on logDeclaredPayloadList). The
   // heading states the same magnitude from above the first painted name, where no
   // partner text precedes it, so the total is read before any of the declaration's
@@ -3113,7 +3113,7 @@ test("displayInvitation: each declared direction's heading states its own declar
     [declaredReceiveHeading(receive.length), receive],
   ] as const) {
     // Found by exact text, so the rendered heading states this direction's declared
-    // length -- not the cap it painted, not the other direction's -- and carries
+    // length -- not the cap it painted, not the other direction's -- and holds
     // nothing the declaration supplied: an interpolated name would fail the match.
     const headingIndex = lines.indexOf(heading);
     expect(headingIndex).toBeGreaterThanOrEqual(0);
@@ -3130,12 +3130,12 @@ test("displayInvitation: each declared direction's heading states its own declar
   }
 });
 
-test("displayInvitation: a declared name reading as the count line stays a list entry", () => {
+test("displayInvitation: a declared name displaying as the count line stays a list entry", () => {
   // sanitizeForDisplay passes printable ASCII verbatim, so a partner can declare a
   // column named exactly as the sentence closing its own bounded list. The bullet is
   // what tells them apart among the emitted lines, a line-oriented sink having no
   // container to place one inside and the other outside: a painted name always
-  // carries the bullet, and cannot break its own line to shed it, while the
+  // has the bullet, and cannot break its own line to shed it, while the
   // first-party count line never does. What a terminal ROW shows is outside what
   // this asserts -- soft wrap can reproduce the bare count row from a padded name,
   // the stated limit on logDeclaredPayloadList.
@@ -3215,9 +3215,9 @@ test("displayInvitation: the empty and not-yet-known outbound-send cases avoid a
   );
   expect(outboundSendEntries(empty.split("\n"))).toEqual([]);
   // Not-yet-known: no metadata at prompt time, so the line says the set is not
-  // known rather than claiming any count -- and names what actually settles it,
+  // known rather than claiming any count -- and names what actually determines it,
   // including the confirmation the run stops for and the refusal an unattended run
-  // gets instead. The forward reference is only honest while that checkpoint
+  // gets instead. The forward reference is only accurate while that checkpoint
   // exists, so it is pinned here beside the acceptance that records it as pending.
   const unknown = renderDisplayInvitation(log, base, undefined);
   expect(unknown).toContain(`${OUTBOUND_SEND_LABEL}: not yet known`);
@@ -3282,7 +3282,7 @@ test("displayInvitation: shows the linkage strategy and, for single-pass, the di
   expect(cascade).toContain("linkage strategy (enforced): cascade");
   expect(cascade).not.toContain("consented disclosure tradeoff");
   // single-pass is the disclosure-affecting choice the acceptor consents to, so
-  // it carries the shared tradeoff note (with the operator-facing doc pointer).
+  // it holds the shared tradeoff note (with the operator-facing doc pointer).
   const singlePass = lines({
     ...base,
     linkageTerms: { ...base.linkageTerms, linkageStrategy: "single-pass" },
@@ -3334,7 +3334,7 @@ test("displayInvitation: represents every consent-relevant linkage term, bar the
   log.setLevel("silent");
   // One token, reused across every rendering, so only the terms move -- minting
   // a fresh one per render would vary the displayed `expires` too. Its
-  // `disclosedPayloadColumns` is left absent deliberately: it is a token field
+  // `disclosedPayloadColumns` is left absent: it is a token field
   // the inviter derives from its own metadata, not a linkage term, and supplying
   // one would answer the question about it rather than about `payload.send`. The
   // acceptor's own outbound-send set is held at the not-yet-known case for the
@@ -3357,7 +3357,7 @@ test("displayInvitation: represents every consent-relevant linkage term, bar the
       .sort(),
   );
 
-  // A term whose variant turns on a disclosure carries the sentence stating it in
+  // A term whose variant turns on a disclosure holds the sentence stating it in
   // the classification, and both surfaces are held to that one string: moving the
   // output is not enough where an acceptor is entitled to read what the setting
   // costs. Asserted absent from the base too, so the pin measures the setting
@@ -3369,7 +3369,7 @@ test("displayInvitation: represents every consent-relevant linkage term, bar the
   );
   expect(pinned.length).toBeGreaterThan(0);
   for (const probe of pinned) {
-    // Per probe, not only over the set: an entry carrying an empty list would
+    // Per probe, not only over the set: an entry holding an empty list would
     // otherwise satisfy the loop below by rendering nothing at all.
     const copies = probe.requiredVariantCopy ?? [];
     expect(copies.length, probe.label).toBeGreaterThan(0);
@@ -3394,8 +3394,8 @@ test("displayInvitation: represents every consent-relevant linkage term, bar the
 
 test("displayInvitation: shows each matching rule the acceptor is consenting to", () => {
   // The representation check above proves each term MOVES the output; these pin
-  // what it actually says, so a term cannot satisfy that check while reading as
-  // something else. The probe terms carry one of everything: a parameterized
+  // what it actually says, so a term cannot satisfy that check while displaying as
+  // something else. The probe terms hold one of everything: a parameterized
   // transform, a fuzzy comparison, a swap, field constraints, a payload in both
   // directions, and a legal agreement.
   const log = getLogger("accept-display-rules-test");
@@ -3407,7 +3407,7 @@ test("displayInvitation: shows each matching rule the acceptor is consenting to"
 
   expect(out).toContain("    - given name, family name, and date of birth");
   // The elements the key combines, each under its declared semantic type -- the
-  // partner-authored field name is deliberately not shown.
+  // partner-authored field name is not shown.
   expect(out).toContain("        - First name");
   expect(out).toContain("        - Last name");
   expect(out).toContain("        - Date of birth");
@@ -3528,7 +3528,7 @@ test("displayInvitation: a sole-receiver deduplicating term states psilink prese
   );
   // The limit on that withholding is its own classified fact, rendered from the
   // shared table at the same level as the statement it qualifies: what the
-  // statement says psilink presents, this says the rounds still carry.
+  // statement says psilink presents, this says the rounds still hold.
   expect(soleReceiver).toContain(
     `    ${CONSENT_FACTS.duplicateGroupingDisplayLimit.note}`,
   );
@@ -3604,8 +3604,8 @@ test("displayInvitation: the retain line is printed at both decision blocks, its
   const noteLine = `    ${CONSENT_FACTS.retainedFiles.note}`;
   expect(lines.filter((line) => line === noteLine)).toHaveLength(1);
   // Directly under the line it explains. The block emits the retain line last for
-  // this: a caveat printed after whatever else the block reached would read as
-  // that line's instead, and the contradicted-citation lines can be there.
+  // this: a caveat printed after whatever else the block reached would be treated
+  // as that line's instead, and the contradicted-citation lines can be there.
   expect(lines[retainAt[0] + 1]).toBe(noteLine);
   // And nothing of it reaches the repetition, whose whole point here is its
   // length: the tail from the heading down is the block alone.
@@ -3644,7 +3644,7 @@ test("displayInvitation: a split-directory endpoint states the retention with no
   );
   expect(rendered).toContain(`    ${CONSENT_FACTS.retainedFiles.note}`);
 
-  // And the shape test does not widen to "carries an endpoint": a single shared
+  // And the shape test does not widen to "holds an endpoint": a single shared
   // directory seeds no options, and its acceptor sets its own mode, so an
   // invitation naming one and declaring nothing states nothing here.
   const shared: ConnectionEndpoint = {
@@ -3659,9 +3659,9 @@ test("displayInvitation: a split-directory endpoint states the retention with no
   expect(sharedRendered).not.toContain(CONSENT_FACTS.retainedFiles.note);
 });
 
-test("displayInvitation: every classified fact is marked, and carries core's caveat verbatim", () => {
+test("displayInvitation: every classified fact is marked, and holds core's caveat verbatim", () => {
   // An acceptor meets two unlike kinds of fact here: ones the exchange holds
-  // itself, and ones that are only what the inviting party declared. Reading a
+  // itself, and ones that are only what the inviting party declared. Treating a
   // cooperative undertaking as a cryptographic guarantee is the error this
   // marking exists to prevent, so an enforced line is marked positively rather
   // than told apart by the absence of a marker on the other.
@@ -3681,7 +3681,7 @@ test("displayInvitation: every classified fact is marked, and carries core's cav
           : { ...CONSENT_PROBE_TERMS.payload, receive: [] },
       },
     });
-  // Between them these two raise every caveat the shared table carries: this
+  // Between them these two raise every caveat the shared table holds: this
   // party receives nothing while the inviter does, then the reverse.
   const acceptorWithheld = render(
     { expectsOutput: true, shareWithPartner: false },
@@ -3697,7 +3697,7 @@ test("displayInvitation: every classified fact is marked, and carries core's cav
   // exempted from the sweep.
   //
   // The retain declaration is the fourth, and for the same reason one step further
-  // out: it is carried on the TOKEN rather than in the terms, so no variation of
+  // out: it is held on the TOKEN rather than in the terms, so no variation of
   // `output`, `payload`, or `algorithm` above can raise its caveat.
   const retaining = renderDisplayInvitation(log, {
     ...sampleToken(FUTURE()),
@@ -3767,7 +3767,7 @@ test("displayInvitation: every classified fact is marked, and carries core's cav
     "  the inviting party will receive the result (your partner's word): no",
   );
   // The honest-helper disclosure is its own fact, not a rider on the cooperative
-  // caveat: it holds however honestly the partner behaves, so it carries the
+  // caveat: it holds however honestly the partner behaves, so it has the
   // opposite basis and may not inherit that line's marker.
   expect(inviterWithheld).toContain(
     "  what your partner learns either way (enforced):",
@@ -3809,7 +3809,7 @@ const COUNT_ONLY_INPUT_CHOICE_BOUND =
  * invitation reaches every one of them on BOTH surfaces and a `psi` invitation
  * reaches none, so an assertion over this list states a cross-surface invariant.
  *
- * COUNT_ONLY_STATEMENT is deliberately not in it. That sentence is shared wording
+ * COUNT_ONLY_STATEMENT is not in it. That sentence is shared wording
  * with a different placement on each surface -- the web renders it as its
  * matching-method headline, this prompt beneath the algorithm it names -- so its
  * placement is a fact about this prompt alone and is asserted as one.
@@ -3919,7 +3919,7 @@ test("a one-sided count-only invitation states no honest-helper membership discl
     `    ${CONSENT_FACTS.countOnlyRoundDisclosures.note}`,
   );
   // Non-vacuous the other way: the same one-sided pair under `psi` -- the algorithm
-  // the fact is true of -- carries it in full, so the absence above is the
+  // the fact is true of -- holds it in full, so the absence above is the
   // algorithm's doing and not the output pair's.
   const revealing = renderDisplayInvitation(log, {
     ...sampleToken(FUTURE()),
@@ -3971,7 +3971,7 @@ test("a count-only rendering refuses a resolved outbound set rather than state (
   // The "(none)" line states a precondition -- psi-c admits no payload in either
   // direction -- rather than a set the renderer read. This set is this party's own
   // resolved metadata, so a column in it is one the accept path already refused
-  // (assertCountOnlyTransmitsNoColumn); this throw is the render-side backstop
+  // (assertCountOnlyTransmitsNoColumn); this throw is the render-side safety check
   // behind it, since printing "(none)" over a column would take the operator's
   // consent to a disclosure that happens, on the one screen where the disclosure IS
   // the decision. Driven with a column in the set, so the check is measured firing
@@ -4053,7 +4053,7 @@ test("the count a party did not compute is caveated only where both parties are 
 });
 
 /**
- * The probe terms carrying a single linkage key whose one element applies
+ * The probe terms holding a single linkage key whose one element applies
  * `transform`, so a transform-rendering assertion reads that key's detail with no
  * other key's rules at the same indent. The probe's own fields are reused as-is.
  */
@@ -4085,7 +4085,7 @@ test("displayInvitation: a transform this version cannot explain is marked as un
   const unrecognized = render([{ function: "org_internal_rule" }]);
   expect(unrecognized).toContain("          transform: org_internal_rule");
   expect(unrecognized).toContain(`            ${UNRECOGNIZED_TRANSFORM_NOTE}`);
-  // A recognized function carries its plain-language consequence and no marker, so
+  // A recognized function has its plain-language consequence and no marker, so
   // the marker tells the two apart rather than decorating both.
   const recognized = render([{ function: "to_upper_case" }]);
   expect(recognized).toContain(
@@ -4115,8 +4115,8 @@ test("displayInvitation: a coerced transform parameter names the parameter and t
   const param = "            - replacement: null";
   expect(lines).toContain(param);
   expect(lines).toContain(coercion);
-  // The parameter names itself first: a swapped interpolation would read as a
-  // parameter called "the empty string".
+  // The parameter names itself first: a swapped interpolation would be treated as
+  // a parameter called "the empty string".
   expect(lines).not.toContain(
     "            the empty string runs as replacement",
   );
@@ -4126,8 +4126,8 @@ test("displayInvitation: a coerced transform parameter names the parameter and t
 test("displayInvitation: names the fields matched on, once at the top and under each key", () => {
   // The key `name` is partner free text and would otherwise be the only line at a
   // key's own level, so an operator scanning key headings would read nothing but
-  // strings the inviter chose. The derived field one-liner is the honest anchor,
-  // and it carries the breadth the rules alone do not spell out.
+  // strings the inviter chose. The derived field one-liner is the accurate anchor,
+  // and it has the breadth the rules alone do not spell out.
   const log = getLogger("accept-display-matched-fields-test");
   log.setLevel("silent");
   const lines = renderDisplayInvitation(log, {
@@ -4139,7 +4139,7 @@ test("displayInvitation: names the fields matched on, once at the top and under 
     "  matched on (enforced): first name, last name, date of birth",
   );
   // The swap re-attributes each element's marker to its partner's field. Its two
-  // positions carry one transform -- the terms refuse a pair whose transforms
+  // positions hold one transform -- the terms refuse a pair whose transforms
   // differ -- so the truncation is shown on both of the fields it reads, and the
   // unswapped date element keeps its own marker.
   const keyIndex = lines.indexOf(
@@ -4154,7 +4154,7 @@ test("displayInvitation: names the fields matched on, once at the top and under 
 });
 
 test("displayInvitation: the operator's own outbound heading sits level with the other payload headings", () => {
-  // Indentation carries hierarchy in this outline, so the operator's own outbound
+  // Indentation shows hierarchy in this outline, so the operator's own outbound
   // disclosure must not be the one heading a level below its two counterparts, at
   // the depth of a linkage-key entry.
   const log = getLogger("accept-display-indent-test");
@@ -4221,7 +4221,7 @@ test("displayInvitation: the decision facts are repeated verbatim immediately be
     { linkageTerms: defaultTerms, ownOutboundSend: undefined },
     { linkageTerms: CONSENT_PROBE_TERMS, ownOutboundSend: ["diagnosis"] },
     { linkageTerms: COUNT_ONLY_PROBE_TERMS, ownOutboundSend: [] },
-    // A retaining invitation, whose fact is carried in the block while its caveat
+    // A retaining invitation, whose fact is held in the block while its caveat
     // is printed once between the two printings. That split is exactly what a
     // sliding or prefix comparison would miss, so the case belongs here: the
     // caveat leaking into either printing lengthens it past the independently
@@ -4232,7 +4232,7 @@ test("displayInvitation: the decision facts are repeated verbatim immediately be
       inviterRetainsFiles: true,
     },
     // The hostile fixtures, so the repetition is measured on a partner identity
-    // carrying escapes rather than only on well-behaved text.
+    // holding escapes rather than only on well-behaved text.
     ...hostileVariants.map(({ source }) => ({
       linkageTerms: source.linkageTerms,
       ownOutboundSend: [`own${BEL}column`],
@@ -4286,7 +4286,7 @@ test("displayInvitation: the decision facts are repeated verbatim immediately be
       if (!promptFollows) expect(lines).not.toContain(REPEAT_HEADING);
     }
 
-    // Non-vacuous: the block carries the decisive partner-controlled fact rather
+    // Non-vacuous: the block holds the decisive partner-controlled fact rather
     // than being an empty tail that trivially matches.
     expect(
       block.some((line) => line.startsWith(`  ${INVITING_PARTY_LABEL}: `)),
@@ -4301,7 +4301,7 @@ test("displayInvitation: every linkage key is listed, including one after an ent
   // entriesUnder backs the separator-safety assertions, so it must collect
   // siblings across an entry's own nested block (a key's derived one-liner and its
   // elements) rather than halting there and silently under-checking. The first key
-  // also carries the list separator in its name, which a joined list would misread
+  // also has the list separator in its name, which a joined list would misread
   // as two keys.
   const log = getLogger("accept-display-key-siblings-test");
   log.setLevel("silent");
@@ -4334,7 +4334,7 @@ test.each(hostileVariants)(
     // whole output rather than the few fields an enumeration would list. The
     // fixture is the same one the web app's consent screen is walked with, so the
     // two surfaces cannot drift on what a hostile invitation looks like. This also
-    // pins that a key's raw `id` never reaches the prompt: it carries the
+    // pins that a key's raw `id` never reaches the prompt: it has the
     // unsanitized key name, which would fail here.
     const log = getLogger("accept-display-hostile-test");
     log.setLevel("silent");
@@ -4753,7 +4753,7 @@ test("handler: a webrtc acceptance given an input file accepts and runs the exch
     );
     expect(passed.reuseExistingConfig).toBe(false);
     // The acceptor observes nothing it must crystallize: its received set is the
-    // one the invitation declared, which it already carries.
+    // one the invitation declared, which it already has.
     expect(passed.persistObservedReceivedPayload).toBeUndefined();
   } finally {
     exit.mockRestore();
@@ -4807,7 +4807,7 @@ test("handler: the consent gate stands on the one-command path", async () => {
 
 test("handler: an accepted sftp invitation writes no role", async () => {
   // The complement of the webrtc case: `role` belongs to the WebRTC channel
-  // alone, so a file-sync acceptance's connection block carries none.
+  // alone, so a file-sync acceptance's connection block has none.
   const { dir, input, configFile, keyFile } = offlineAcceptFixture();
   const exit = vi
     .spyOn(process, "exit")
@@ -4833,7 +4833,7 @@ test("handler: an accepted sftp invitation writes no role", async () => {
     } as unknown as Arguments);
     expect(exit).not.toHaveBeenCalled();
     const raw = fs.readFileSync(configFile, "utf8");
-    // Read the connection block itself: `metadata` carries a `role` of its own
+    // Read the connection block itself: `metadata` has a `role` of its own
     // (the column's linkage/payload role), so a whole-file search would confuse
     // the two.
     const written = YAML.parse(raw) as {
@@ -4848,7 +4848,7 @@ test("handler: an accepted sftp invitation writes no role", async () => {
 });
 
 test("handler: a declared inviterRetainsFiles does not reach the acceptor's own connection options", async () => {
-  // FILE_SYNC.md states this boundary as load-bearing: a declared flag on the
+  // FILE_SYNC.md states this boundary as critical: a declared flag on the
   // invitation stays disclosure-only, and an accept path that reads it into the
   // acceptor's own configuration -- even to pre-fill it -- has crossed from
   // disclosure into adaptation. Pin it on a non-split sftp endpoint (a single
@@ -5082,7 +5082,7 @@ async function runOfflineAcceptCapturingStdio(params: {
 }): Promise<{ stderrWrites: Array<string>; stdoutWrites: Array<string> }> {
   const { encoded, fixture, positionals, flags, onPrompt } = params;
   // A real invocation creates getLogger("accept") after applying --log-level, so
-  // the command's logger carries the level the flag names. This suite runs many
+  // the command's logger has the level the flag names. This suite runs many
   // invocations in one process, where that logger already exists and loglevel's
   // setDefaultLevel does not reach an existing named logger (driven against
   // loglevel 1.9.2: an existing logger keeps the level it was created with), so
@@ -5171,7 +5171,7 @@ test("handler: nothing reaches the operator between the terms and the question",
   }
 });
 
-test("the rendered server carries the display brand, not a bare string", () => {
+test("the rendered server has the display brand, not a bare string", () => {
   // Both sinks that name the server interpolate the value into a first-party
   // line, so neither demands a `Displayable` and nothing but this annotation
   // holds the brand on the return type. It is the check, not documentation:
@@ -5189,7 +5189,7 @@ test("handler: the one-command path names the coordination server it will dial b
   // On this path the confirmation is the last checkpoint before data moves, and
   // the locator is one the operator never typed: the surface states that this
   // acceptance runs the exchange and names the server it resolves to dial, and
-  // the question carries that server too, since the terms between the two run
+  // the question has that server too, since the terms between the two run
   // past a screen.
   const fixture = offlineAcceptFixture();
   const runOnlineBootstrapMock = vi.mocked(runOnlineBootstrap);
@@ -5209,7 +5209,7 @@ test("handler: the one-command path names the coordination server it will dial b
     });
     expect(atPrompt).toBeDefined();
     const beforeThePrompt = atPrompt!.join("\n");
-    // The endpoint carries no port, so the line resolves the default the dial
+    // The endpoint has no port, so the line resolves the default the dial
     // would use rather than leaving it to be inferred from a scheme it does not
     // print.
     expect(beforeThePrompt).toContain(
@@ -5237,10 +5237,10 @@ test("handler: the one-command path names the coordination server it will dial b
 });
 
 test("handler: the server named on both surfaces keeps its port at any host length", async () => {
-  // The port is the reason this line carries more than the plain authority, and
+  // The port is the reason this line has more than the plain authority, and
   // a host is partner-supplied at up to the length the whole display budget
   // allows -- so escaping a joined "host:port" would cut away exactly the value
-  // the line exists to add. Driven at the longest host an invitation can carry,
+  // the line exists to add. Driven at the longest host an invitation can hold,
   // on both surfaces that name the server: the endpoint schema's maximum is
   // inclusive, and it is exactly the per-value display cap, so an admissible
   // host of that length is the equality case of the escape's own comparison.
@@ -5316,7 +5316,7 @@ test("handler: the unattended one-command path states the run it is about to mak
 test("handler: an acceptance that runs no exchange names no server and states no run", async () => {
   // The two shapes that keep the two-command form -- no input file to exchange,
   // and an invitation naming no webrtc coordination server -- dial nothing, so
-  // neither surface carries a locator or the run statement, and each asks the
+  // neither surface has a locator or the run statement, and each asks the
   // question about writing files that it always asked.
   const fixture = offlineAcceptFixture();
   try {
@@ -5423,7 +5423,7 @@ test("handler: the terms and the decline read identically at every level", async
   // setting, so the comparison is of BYTES rather than of lines with the prefix
   // taken off: the run from the heading to the decline is one string, the same
   // under the default level, a level that drops it from the log, and one that
-  // turns the log up -- which holds only while no copy of it carries the log's
+  // turns the log up -- which holds only while no copy of it has the log's
   // own prefix at any of them.
   const fixture = offlineAcceptFixture();
   promptConfirmMock.mockResolvedValue(false);
@@ -5461,7 +5461,7 @@ test("handler: the default prompting path prints each line of the terms exactly 
   // The prompt's copy and the log's own would land on the same terminal here, so
   // writing both would print the whole multi-screen outline twice. Every line
   // appears exactly as many times as the renderer emitted it -- twice for the
-  // decision facts it deliberately repeats, once for everything else.
+  // decision facts it repeats, once for everything else.
   const fixture = offlineAcceptFixture();
   promptConfirmMock.mockResolvedValue(false);
   try {
@@ -5489,7 +5489,7 @@ test("handler: the default prompting path prints each line of the terms exactly 
   }
 });
 
-// --- handler: the prompt's copy carries the redaction on its own -------------
+// --- handler: the prompt's copy has the redaction on its own -------------
 // Nothing between summarizeInvitation's composition and the operator's terminal
 // redacts key material on this routing: the prompt's own stream runs no pass, and
 // with no --log-file the log sink -- where core's prefixer would have been a
@@ -5511,7 +5511,7 @@ const ARMOR_DANGLING =
 const ARMOR_BODIES = ["MIIEowIBAAKCAQEA", "b3BlbnNzaC1rZXktdjEA"];
 
 // One planting per partner-declared value the consent surface renders, each
-// carrying a distinctive prefix so the assertion that it arrived reads the value
+// holding a distinctive prefix so the assertion that it arrived reads the value
 // rather than the label beside it.
 const ARMORED_IDENTITY = `Inviter Org ${ARMOR_WHOLE}`;
 const ARMORED_REFERENCE = `MOU-2026-0042 ${ARMOR_WHOLE}`;
@@ -5539,7 +5539,7 @@ const ARMORED_RENDERED = [
 ];
 
 /**
- * An invitation carrying key material in the partner-declared values the
+ * An invitation holding key material in the partner-declared values the
  * consent surface renders that this fixture plants (the rule-set citation names
  * and the transform names and parameters are left plain): the inviting party's
  * identity, the payload names declared in each direction, a linkage key's name,
@@ -5618,7 +5618,7 @@ test("handler: hostile terms leave the sink-level pass nothing to do", async () 
     expect(stdoutWrites.join("")).toBe("");
     const transcript = stderrWrites.join("");
     expect(transcript).toContain(SURFACE_HEADING);
-    // No line carries the log's prefix, so no sink-level pass ran over any of
+    // No line has the log's prefix, so no sink-level pass ran over any of
     // this: a routing that sent the surface through the log as well would fail
     // here rather than leave the prefixer masking a composition site that
     // stopped redacting.
@@ -5766,13 +5766,13 @@ test("handler: hostile terms stay printable ASCII on the prompt's own sink", asy
   }
 });
 
-// --- handler: online accept threads the token lock-in to the persistence layer
+// --- handler: online accept threads the token commitment to the persistence layer
 
 test("handler: online accept forwards the token's disclosed set to runOnlineBootstrap", async () => {
   // The accept-side wiring: the online handler must pass
   // token.disclosedPayloadColumns to runOnlineBootstrap as the acceptance's
   // receivedPayloadLockIn, so the config records the consented received-column
-  // lock-in (runOnlineBootstrap's own tests cover the write). It is mocked here so
+  // commitment (runOnlineBootstrap's own tests cover the write). It is mocked here so
   // no connection is opened; --consent-to-terms skips the prompt.
   const { dir, input, configFile, keyFile } = offlineAcceptFixture();
   const runOnlineBootstrapMock = vi.mocked(runOnlineBootstrap);
@@ -5802,7 +5802,7 @@ test("handler: online accept forwards the token's disclosed set to runOnlineBoot
     expect(passed.receivedPayloadLockIn).toEqual({
       consentedColumns: ["diagnosis", "notes"],
     });
-    // A fresh (non-reuse) config, so the lock-in is actually written.
+    // A fresh (non-reuse) config, so the commitment is actually written.
     expect(passed.reuseExistingConfig).toBe(false);
   } finally {
     exit.mockRestore();
@@ -5812,8 +5812,8 @@ test("handler: online accept forwards the token's disclosed set to runOnlineBoot
   }
 });
 
-test("handler: online accept-reuse forwards the lock-in the kept config must be refreshed to", async () => {
-  // A re-accept over a config that reconciles for reuse still carries this
+test("handler: online accept-reuse forwards the commitment the kept config must be refreshed to", async () => {
+  // A re-accept over a config that reconciles for reuse still passes this
   // acceptance's consented set to the persistence layer, which refreshes the kept
   // config's field in place -- the reuse branch must not be a no-op, or the next
   // recurring exchange would enforce the previous acceptance's set against an
@@ -5865,12 +5865,12 @@ test("handler: online accept-reuse forwards the lock-in the kept config must be 
   }
 });
 
-// --- handler: offline accept-reuse refreshes the received-payload lock-in -----
+// --- handler: offline accept-reuse refreshes the received-payload commitment -----
 
 /**
  * Run the offline accept handler over a pre-existing config, with
  * --consent-to-terms so the confirmation prompt is skipped (its own tests cover
- * the prompt gate). The token carries `disclosed`, the disclosed subset the
+ * the prompt gate). The token holds `disclosed`, the disclosed subset the
  * operator consents to on this acceptance. Returns the config file's raw text and
  * the exit spy so the caller can assert the on-disk refresh.
  */
@@ -5906,15 +5906,15 @@ async function runOfflineAcceptReuse(params: {
   }
 }
 
-test("handler: offline accept-reuse refreshes a stale lock-in, preserving operator content", async () => {
-  // A reused config carrying an OLD consented set is re-accepted over an invitation
+test("handler: offline accept-reuse refreshes a stale commitment, preserving operator content", async () => {
+  // A reused config holding an OLD consented set is re-accepted over an invitation
   // whose disclosed subset changed. The surgical refresh overwrites the stale
   // value, preserving the operator's connection block, linkage terms, and a
   // hand-authored comment.
   const { dir, input, configFile } = offlineAcceptFixture();
   try {
     // A config whose linkage terms agree with the invitation's defaults (so it
-    // reconciles for reuse), then a hand-authored comment and a stale lock-in
+    // reconciles for reuse), then a hand-authored comment and a stale commitment
     // appended so the surgical write has operator content to preserve.
     writeExistingConfig(configFile);
     fs.appendFileSync(
@@ -5959,7 +5959,7 @@ test("handler: accept-reuse leaves the kept configuration's identity untouched",
   }
 });
 
-test("handler: offline accept-reuse fixes the false-abort a stale lock-in would have caused", async () => {
+test("handler: offline accept-reuse fixes the false-abort a stale commitment would have caused", async () => {
   // The end-to-end failure this task closes. Before the refresh the config holds
   // the partner's OLD disclosed set; the partner now discloses a new set, so a
   // recurring exchange's reconcileReceivedPayload would abort the honest exchange.
@@ -5969,7 +5969,7 @@ test("handler: offline accept-reuse fixes the false-abort a stale lock-in would 
   const { dir, input, configFile } = offlineAcceptFixture();
   try {
     writeExistingConfig(configFile);
-    // Seed the stale lock-in the operator originally consented to.
+    // Seed the stale commitment the operator originally consented to.
     fs.appendFileSync(configFile, "expected_payload_columns:\n  - old_col\n");
     const staleSpec = parseExchangeSpec(
       YAML.parse(fs.readFileSync(configFile, "utf8")),
@@ -5988,14 +5988,14 @@ test("handler: offline accept-reuse fixes the false-abort a stale lock-in would 
       rowIndices: [],
       rows: [],
     };
-    // The refreshed lock-in matches the partner's transmission -> no abort.
+    // The refreshed commitment matches the partner's transmission -> no abort.
     expect(() =>
       reconcileReceivedPayload(
         partnerPayload,
         refreshedSpec.expectedPayloadColumns,
       ),
     ).not.toThrow();
-    // The stale lock-in would have aborted the same honest exchange.
+    // The stale commitment would have aborted the same honest exchange.
     expect(() =>
       reconcileReceivedPayload(
         partnerPayload,
@@ -6007,9 +6007,9 @@ test("handler: offline accept-reuse fixes the false-abort a stale lock-in would 
   }
 });
 
-test("handler: offline accept-reuse removes the lock-in when the invitation carries no disclosed subset", async () => {
-  // A re-accept whose invitation carried no disclosed subset (an older or
-  // metadata-unknown mint) records no consented set: the prior lock-in is cleared
+test("handler: offline accept-reuse removes the commitment when the invitation holds no disclosed subset", async () => {
+  // A re-accept whose invitation held no disclosed subset (an older or
+  // metadata-unknown mint) records no consented set: the prior commitment is cleared
   // so the recurring exchange reconciles lazily, not left stale.
   const { dir, input, configFile } = offlineAcceptFixture();
   try {
@@ -6056,7 +6056,7 @@ test("handler: offline accept-reuse writes an empty consented set verbatim (stri
   }
 });
 
-// --- the acceptance's terms-side lock-in reaches the config ------------------
+// --- the acceptance's terms-side commitment reaches the config ------------------
 
 test("handler: offline accept writes the invitation's declared deduplicate to the config", async () => {
   // Offline accept writes a config and stops, so the binding the invitation
@@ -6102,7 +6102,7 @@ test("handler: offline accept writes the invitation's declared deduplicate to th
 });
 
 test("handler: offline accept-reuse refreshes a stale declaration, preserving operator content", async () => {
-  // A kept config carrying a PRIOR acceptance's declaration, re-accepted over an
+  // A kept config holding a PRIOR acceptance's declaration, re-accepted over an
   // invitation declaring the other value. Leaving the stale `true` would refuse
   // the honest partner now presenting `false`; the surgical refresh overwrites it
   // and leaves the operator's comment and connection block alone.
@@ -6176,7 +6176,7 @@ test("handler: online accept forwards the invitation's declared deduplicate to r
   }
 });
 
-// --- accept-reuse warns when the re-acceptance drops the lock-in -------------
+// --- accept-reuse warns when the re-acceptance drops the commitment -------------
 
 // The distinctive clause of the removal warning, kept apart from the column list
 // and the remedy the assertions check separately.
@@ -6185,10 +6185,10 @@ const DROPPED_LOCK_IN_CLAUSE =
 
 /**
  * Every warning a reuse acceptance emits over a config recording `recorded` as
- * its received-payload lock-in, re-accepted from an invitation carrying
+ * its received-payload commitment, re-accepted from an invitation holding
  * `disclosed`. Both accept-reuse paths reconcile the same kept config, so `mode`
  * drives either through one fixture; the saved connection agrees with the online
- * URL, so the reuse verdict carries no connection warning of its own.
+ * URL, so the reuse verdict has no connection warning of its own.
  */
 async function reuseLockInWarnings(params: {
   recorded: string[] | undefined;
@@ -6213,7 +6213,7 @@ async function reuseLockInWarnings(params: {
   const log = getLogger(loggerName);
   log.setLevel("silent");
   const warnSpy = vi.spyOn(log, "warn");
-  // These options carry the default flag identity, which the kept file does not
+  // These options have the default flag identity, which the kept file does not
   // match, so every case here also raises the no-effect notice on the prompt's
   // own sink; capture it rather than leaving it in the suite's output.
   const stdio = captureStdio();
@@ -6235,7 +6235,7 @@ async function reuseLockInWarnings(params: {
       options: testOptions({ configFile, keyFile }),
       log,
     });
-    // Every case here is a reuse: a warning about the kept config's lock-in is
+    // Every case here is a reuse: a warning about the kept config's commitment is
     // meaningless if the config was not kept.
     expect(ready.reuseExistingConfig).toBe(true);
     return warnSpy.mock.calls.map((c) => String(c[0]));
@@ -6246,16 +6246,16 @@ async function reuseLockInWarnings(params: {
   }
 }
 
-/** The one dropped-lock-in warning in `warnings`, asserted to be exactly one. */
+/** The one dropped-commitment warning in `warnings`, asserted to be exactly one. */
 function droppedLockInWarning(warnings: string[]): string {
   const dropped = warnings.filter((m) => m.includes(DROPPED_LOCK_IN_CLAUSE));
   expect(dropped).toHaveLength(1);
   return dropped[0];
 }
 
-test("validateAccept: offline reuse warns, naming the columns, when the re-acceptance drops the lock-in", async () => {
+test("validateAccept: offline reuse warns, naming the columns, when the re-acceptance drops the commitment", async () => {
   // The kept config records what the operator consented to receive; this
-  // invitation carries no disclosed subset, so accepting it removes that record
+  // invitation has no disclosed subset, so accepting it removes that record
   // and leaves the next exchange reconciling lazily. One warning, naming the
   // columns being given up, while the operator can still decline.
   const warnings = await reuseLockInWarnings({
@@ -6264,14 +6264,14 @@ test("validateAccept: offline reuse warns, naming the columns, when the re-accep
     loggerName: "accept-lockin-drop-offline",
   });
   const dropped = droppedLockInWarning(warnings);
-  // One column per line, so a name carrying the list separator cannot be misread
+  // One column per line, so a name holding the list separator cannot be misread
   // as two entries.
   expect(dropped).toContain("\n  - diagnosis");
   expect(dropped).toContain("\n  - notes");
   expect(dropped).toContain("accepts whatever columns the partner transmits");
 });
 
-test("validateAccept: online reuse warns when the re-acceptance drops the lock-in", async () => {
+test("validateAccept: online reuse warns when the re-acceptance drops the commitment", async () => {
   // The second accept-reuse path: the online acceptance refreshes the same kept
   // config, so the same removal must be visible there -- and it lands before any
   // network activity, so the operator sees it at the same prompt.
@@ -6284,7 +6284,7 @@ test("validateAccept: online reuse warns when the re-acceptance drops the lock-i
   expect(droppedLockInWarning(warnings)).toContain("\n  - diagnosis");
 });
 
-test("validateAccept: reuse stays silent when the acceptance records a lock-in of its own", async () => {
+test("validateAccept: reuse stays silent when the acceptance records a commitment of its own", async () => {
   // Nothing is dropped when this acceptance consents to a set: an unchanged set
   // leaves the record as it stands, and a changed one is a refresh the operator
   // just consented to. Neither loses the check, so neither warns.
@@ -6304,8 +6304,8 @@ test("validateAccept: reuse stays silent when the acceptance records a lock-in o
   expect(changed.filter((m) => m.includes(DROPPED_LOCK_IN_CLAUSE))).toEqual([]);
 });
 
-test("validateAccept: reuse stays silent when the acceptance newly sets the lock-in", async () => {
-  // A kept config that recorded no lock-in loses nothing by gaining one.
+test("validateAccept: reuse stays silent when the acceptance newly sets the commitment", async () => {
+  // A kept config that recorded no commitment loses nothing by gaining one.
   const warnings = await reuseLockInWarnings({
     recorded: undefined,
     disclosed: ["diagnosis"],
@@ -6317,7 +6317,7 @@ test("validateAccept: reuse stays silent when the acceptance newly sets the lock
 });
 
 test("validateAccept: reuse warns that a recorded receive-nothing consent is dropped", async () => {
-  // The strictest lock-in of all -- an empty recorded set, which aborts on any
+  // The strictest commitment of all -- an empty recorded set, which aborts on any
   // transmitted column -- has no column names to list, so the warning has to name
   // the consent itself rather than fall silent on an empty list.
   const warnings = await reuseLockInWarnings({
@@ -6330,8 +6330,8 @@ test("validateAccept: reuse warns that a recorded receive-nothing consent is dro
   );
 });
 
-test("validateAccept: the dropped lock-in's column names are escaped for display", async () => {
-  // The recorded set is the partner's namespace, carried into the config by an
+test("validateAccept: the dropped commitment's column names are escaped for display", async () => {
+  // The recorded set is the partner's namespace, brought into the config by an
   // earlier acceptance, so a name planted with a terminal escape must not reach
   // the operator raw when this warning reads it back out.
   const hostile = `notes${ESC}[0m`;
@@ -6463,7 +6463,7 @@ test("handler: an acceptance that transmits nothing records no consent", async (
 test("handler: offline accept-reuse refreshes the outbound consent, preserving operator content", async () => {
   // A re-acceptance is a fresh consent to a freshly displayed set, so the kept
   // config's record is rewritten to it rather than left at a prior acceptance's
-  // value -- the same reasoning as the received-payload lock-in beside it, and the
+  // value -- the same reasoning as the received-payload commitment beside it, and the
   // same surgical write.
   const { dir, input, configFile } = fixtureWithPayloadColumn();
   try {
@@ -6492,7 +6492,7 @@ test("handler: offline accept-reuse refreshes the outbound consent, preserving o
 
 test("handler: a no-output invitation cannot strip the record from a kept config that shares", async () => {
   // The partner-controlled shape the reuse derivation exists for: reconciliation
-  // compares no output field, so an invitation carrying expects_output: false
+  // compares no output field, so an invitation holding expects_output: false
   // reconciles as matching a kept config that still shares. The mirror then
   // yields no record -- and deleting the existing one would leave the later run
   // ungated (the gate no-ops on an absent record). The record falls to pending
@@ -6631,7 +6631,7 @@ test("handler: online accept whose config write failed keeps exit 73 and says so
   // read a rotated key with no configuration as a completed setup. The
   // persistence-loss code is set where the write failed (runProtocol's hook
   // handling), so the mocked runOnlineBootstrap stands in for that run by
-  // leaving 73 behind, and what is asserted here is that the handler carries it
+  // leaving 73 behind, and what is asserted here is that the handler passes it
   // through untouched -- a summary that assigned the exit code itself would
   // overwrite exactly this. No connection is opened; --log-level error is the
   // level the summary is written at, and the level the underlying error it

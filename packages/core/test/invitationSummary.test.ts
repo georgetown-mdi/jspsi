@@ -33,7 +33,7 @@ const DISCLOSING_COLUMNS = [
 const LINKAGE_ONLY_COLUMNS = ["ssn", "first_name", "last_name", "dob"];
 
 describe("the consent summary's payload block", () => {
-  test("derives the received set from the carried subset with no payload.send authored", () => {
+  test("derives the received set from the held subset with no payload.send authored", () => {
     // A CLI-style invitation: the terms author no payload block, but the token
     // holds the disclosed-columns subset. The acceptor's consent display must
     // derive the columns-it-will-receive from that subset -- the same predicate
@@ -79,7 +79,7 @@ describe("the consent summary's payload block", () => {
     });
   });
 
-  test("shows no received columns when nothing is carried or authored", () => {
+  test("shows no received columns when nothing is held or authored", () => {
     const terms = getDefaultLinkageTerms(
       "Inviter",
       inferMetadata(LINKAGE_ONLY_COLUMNS),
@@ -88,7 +88,7 @@ describe("the consent summary's payload block", () => {
     expect(summary.payload).toBeUndefined();
   });
 
-  test("surfaces an empty carried subset as a declared 'receive nothing'", () => {
+  test("shows an empty held subset as a declared 'receive nothing'", () => {
     // The web inviter always includes the disclosed subset, possibly empty. An
     // empty held set is the strict "receive nothing" commitment (a later
     // non-empty payload aborts), NOT the lazy case -- so the section is
@@ -112,7 +112,7 @@ describe("the consent summary's payload block", () => {
     });
   });
 
-  test("surfaces an authored empty payload.receive as a declared request", () => {
+  test("shows an authored empty payload.receive as a declared request", () => {
     // The receive-side mirror of the declared-empty send case above: an
     // authored `payload.receive: []` is the strict "the acceptor sends
     // nothing" assertion, distinct from an absent receive (lazy). It must
@@ -280,7 +280,7 @@ describe("the consent summary's fan-out register", () => {
     expect(summary.fansOut).toBe(false);
   });
 
-  test("the deduplicate register carries the strategy's own verdict on the term", () => {
+  test("the deduplicate register holds the strategy's own verdict on the term", () => {
     // The applied flag is the strategy's verdict on the term -- the signal a
     // surface reads to withhold what a deduplicating run discloses for an
     // invitation acceptance would refuse outright. Both shipped strategies

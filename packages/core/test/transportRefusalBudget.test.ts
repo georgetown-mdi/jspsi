@@ -31,14 +31,9 @@ const CAUSE_SEPARATOR = sanitizeErrorForDisplay(
 
 const linksOf = (rendered: string): string[] => rendered.split(CAUSE_SEPARATOR);
 
-// "This link was truncated" as a length comparison rather than a marker
-// search, since one first-party fragment (the over-long filename preview)
-// ends with the marker by construction and would display as a truncation
-// that never happened. The two are equivalent: sanitizeForDisplay appends a
-// code point only when its whole escape fits (at most ten characters), so a
-// truncated link retains more than COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH - 10
-// characters plus the marker -- longer than the cap in every case, while an
-// untruncated link is within it by definition.
+// A length check, not a marker search: an untruncated first-party fragment
+// can end with the same marker by coincidence, but a truncated link is
+// always longer than the cap, and an untruncated one is always within it.
 const truncatedLinks = (rendered: string): string[] =>
   linksOf(rendered).filter(
     (link) => link.length > COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
@@ -82,11 +77,10 @@ const ACK_FILENAME = `${PEER_ID}-${MESSAGE_FILENAME.replace(/\.json$/, "")}-ack.
 
 // The widest name a listed entry can have on the shipped path: the bound
 // the CLI's directory-listing guard enforces on every entry it enumerates
-// (MAX_FILENAME_LENGTH, apps/cli/src/connection/listingGuard.ts). It is
-// restated rather than imported since packages/core does not depend on
-// apps/cli, and it is the tightest bound there is -- core bounds no
-// filename of its own, and the SFTP protocol imposes none either, so a
-// name reaching the frame gate is bounded only by whichever adapter listed it.
+// (MAX_FILENAME_LENGTH, apps/cli/src/connection/listingGuard.ts). Restated
+// rather than imported since packages/core does not depend on apps/cli; it
+// is the tightest bound there is, since core and the SFTP protocol impose
+// none of their own.
 const MAX_LISTED_FILENAME_LENGTH = 255;
 // A peer message file at exactly that width, still selected by the loop's
 // message grammar: the peer prefix the scan keys on and the byte-count terminal
@@ -190,12 +184,11 @@ async function frameGateRefusal(messageName: string): Promise<unknown> {
 }
 
 // Every core site that raises one of the three bounded-transport refusals
-// and whose error reaches an operator through sanitizeErrorForDisplay, each
-// driven by its real route. The two teardown constructions in `close()` are
-// absent by design: the drain's rejection is swallowed by its own catch and
-// `end()`'s is written to a debug log by message, so neither reaches the
-// cause-chain renderer this file measures. A site added later is covered by
-// the class-level invariants at the foot of this file, not by this table.
+// and reaches an operator through sanitizeErrorForDisplay, each driven by
+// its real route. The two teardown paths in `close()` are excluded since
+// neither reaches the cause-chain renderer this file measures. A site added
+// later is covered by the invariants at the foot of this file, not by this
+// table.
 const CORE_SITES: Array<{
   name: string;
   recoveryStep: string;
@@ -281,12 +274,10 @@ for (const site of CORE_SITES) {
 }
 
 // The two core sites naming more than one chooser, driven at the widest
-// values the shipped path admits rather than at the ordinary sizes above.
-// One chooser per link is what the ordinary sizes cannot pin: two of them
-// share a link undetected until the first fills the budget, and then the
-// cap deletes the second outright and the first can forge the label that
-// would have introduced it. Each delivery below is a width at which one
-// link could not hold both, so a site that folded its two choosers back
+// values the shipped path admits: at ordinary sizes two choosers could share
+// a link undetected, but here the cap would delete the second and let the
+// first forge the label that introduced it. Each delivery below is a width
+// at which one link could not hold both, so a site that folded its choosers
 // together fails here.
 
 test("the writing peer keeps a link of its own at the widest message filename a listing admits", async () => {

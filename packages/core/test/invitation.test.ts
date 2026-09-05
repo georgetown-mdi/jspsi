@@ -226,7 +226,7 @@ test("round-trips full linkage terms including all fields", async () => {
   expect(decoded.expires).toBe("2030-01-01T00:00:00.000Z");
 });
 
-test("decodeInvitation rejects linkage terms carrying an out-of-dialect transform regex", async () => {
+test("decodeInvitation rejects linkage terms holding an out-of-dialect transform regex", async () => {
   // A crafted invitation -- valid checksum (the checksum is a transcription-error
   // detector, not an authenticity guarantee, so anyone can recompute it over a
   // hostile payload) whose linkage terms embed a transform pattern outside the
@@ -512,7 +512,7 @@ test("rejects a body whose length is not a valid base64 length", async () => {
   );
 });
 
-test("rejects a body carrying the whitespace a wrapped paste leaves", async () => {
+test("rejects a body holding the whitespace a wrapped paste leaves", async () => {
   // The strictness the accept call sites normalize for: whitespace inside the
   // token is refused here, and stripInvitationWhitespace is what makes the same
   // paste decode. Pinning both halves keeps the call sites and the decoder in
@@ -558,19 +558,11 @@ test("decodeInvitation refuses an over-bound raw input with the length message",
 // --- Decode-error message swallows (display-injection safety check) ----------
 
 // decodeInvitation catches the JSON.parse and base64url-decode failures and
-// rethrows a FIXED string rather than the underlying message, because those
-// messages can quote partner-controlled input bytes. That thrown .message is
-// relayed verbatim by describeDecodeError for a non-Zod Error. Its critical
-// consumer is the web accept page's operator-facing alert (apps/web
-// AcceptorBench), which renders describeDecodeError's output in a React text
-// node with no further sanitize pass: React neutralizes HTML markup but NOT the
-// deceptive-Unicode / terminal-control / bidi-override / zero-width bytes below.
-// (The CLI accept path renders the same decode error to a terminal but escapes
-// it independently via sanitizeErrorForDisplay, so the swallow is
-// belt-and-suspenders there, not the sole guard.) For the web alert the swallows
-// are the only thing keeping partner bytes out of that .message; these tests pin
-// them so a future "improve the error by relaying the original" refactor fails
-// loudly here instead of silently reopening the vector.
+// rethrows a FIXED string rather than the underlying message, since that
+// message can quote partner-controlled bytes. describeDecodeError relays it
+// verbatim to the web accept page's alert (apps/web AcceptorBench), which
+// renders it with no further escaping. These tests pin the swallow so a
+// future refactor cannot relay the original message and reopen it.
 
 // Representative partner-controllable bytes, one per class the display-boundary
 // hardening neutralizes. Written as explicit escapes -- never pasted glyphs --
@@ -720,14 +712,12 @@ test("decodeInvitation succeeds on a token with a past expires", async () => {
 // rejection per channel on both the encode and decode paths), instead of
 // relying on a reviewer to notice a missing cell.
 
-// Locator shapes per channel: a minimal form (only required fields) and a full
-// form (every optional locator field set). The filedrop full form uses a
-// RELATIVE path on purpose -- the endpoint schema intentionally accepts a
-// relative file-drop path (the acceptor remaps it to its own mount), unlike
-// FileDropConnectionConfigSchema in connection.ts which requires absolute; this
-// row guards that decision against a silent tightening. The type annotation
-// makes the compiler reject any shape that is not a valid, credential-free
-// ConnectionEndpoint.
+// Locator shapes per channel: a minimal form (only required fields) and a
+// full form (every optional field set). The filedrop full form uses a
+// RELATIVE path on purpose -- the endpoint schema accepts one, since the
+// acceptor remaps it to its own mount, unlike FileDropConnectionConfigSchema
+// in connection.ts, which requires absolute. The type annotation holds every
+// shape here to a valid, credential-free ConnectionEndpoint.
 const CHANNEL_SHAPES: Record<
   string,
   { minimal: ConnectionEndpoint; full: ConnectionEndpoint }
@@ -756,20 +746,12 @@ const CHANNEL_SHAPES: Record<
   },
 };
 
-// Non-locator fields a real connection config has that an endpoint must
-// reject -- both credentials and server-identity material -- using the actual
-// SFTP and PeerJS field identifiers from connection.ts. `certificate` is SSH
-// cert-based auth material; `hostKeyFingerprint`/`knownHosts` are the
-// server-identity fields SECURITY_DESIGN.md names as excluded (not secret, but
-// not locators either). `providerOptions` is the opaque transport-options map:
-// it is operator-local-only by design and an invitation must never include it,
-// so this case pins that invariant -- a future change that let an invitation
-// smuggle a `providerOptions` (and thus reach the SFTP connect path) would
-// fail this test loudly. Every name is rejected by the same strictObject
-// unrecognized-keys branch, so this matrix documents the invariant and guards
-// against the allowlist being loosened (e.g. strictObject -> looseObject); it
-// is not additional branch coverage. This list is a curated regression sample,
-// not an exhaustive denylist -- the binding rule is the locator allowlist.
+// Non-locator fields (credentials and server-identity material) named after
+// the actual SFTP/PeerJS identifiers in connection.ts, which an endpoint must
+// reject. `providerOptions` is the operator-local transport-options map an
+// invitation must never hold, since it would reach the SFTP connect path. A
+// curated regression sample, not exhaustive -- the binding rule is the locator
+// allowlist.
 const FORBIDDEN_FIELDS = [
   "password",
   "privateKey",
@@ -863,7 +845,7 @@ test("a token minted without the retain declaration still decodes (top-level bac
   expect(decoded.inviterRetainsFiles).toBeUndefined();
 });
 
-test("decodeInvitation carries a declared-false retain mode verbatim", async () => {
+test("decodeInvitation returns a declared-false retain mode verbatim", async () => {
   // A foreign implementation may state the negative. It decodes rather than
   // being rejected, and stays distinguishable from an absent declaration on the
   // token; what neither states on a consent surface is the summary's business.
@@ -904,7 +886,7 @@ test.each([
   },
 );
 
-test("a webrtc endpoint may still carry an explicit false or no declaration", async () => {
+test("a webrtc endpoint may still hold an explicit false or no declaration", async () => {
   // The refusal is scoped to the claim, not to the field: a webrtc token that
   // declares nothing (the ordinary web mint) and one that states the negative
   // both encode, so the guard cannot become a reason to strip the field.
@@ -1079,7 +1061,7 @@ test("decodeInvitation rejects a disclosed-columns entry with an empty name", as
 });
 
 test.each(credentialCases)(
-  "encodeInvitation rejects a $channel endpoint carrying $field",
+  "encodeInvitation rejects a $channel endpoint holding $field",
   async ({ field, minimal }) => {
     const token = {
       ...baseToken,
@@ -1092,7 +1074,7 @@ test.each(credentialCases)(
 );
 
 test.each(credentialCases)(
-  "decodeInvitation rejects a $channel endpoint carrying $field",
+  "decodeInvitation rejects a $channel endpoint holding $field",
   async ({ field, minimal }) => {
     const encoded = await encodeRaw({
       ...baseToken,
@@ -1158,7 +1140,7 @@ test("escapes a hostile unrecognized endpoint key name in the rejection message"
 
 test("the locator rejection's guidance survives the display boundary whole", async () => {
   // The guidance is the whole point of this rejection: it says what a locator may
-  // carry, why every other field is refused, and what to remove. It is fixed
+  // hold, why every other field is refused, and what to remove. It is fixed
   // first-party copy longer than one VALUE's budget, and the boundary an operator
   // reads it through is sanitizeErrorForDisplay over the composed rejection --
   // where a per-value cap would deliver a prefix of the sentence instead. Driven

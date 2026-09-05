@@ -32,7 +32,7 @@ describe("appendSanitizedRunWarning", () => {
   });
 
   test("a second pass would double a partner's backslash, so the renderer adds none", () => {
-    // The premise behind escaping at the sink alone: sanitizeForDisplay is not
+    // The assumption behind escaping at the sink alone: sanitizeForDisplay is not
     // idempotent over a backslash, so a renderer that escaped again would show one
     // backslash in a partner filename as four.
     const raw = PARTNER_ENTRY_WARNING("q1\\cohort.csv");

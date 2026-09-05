@@ -242,7 +242,7 @@ test("keyTypeFromBlob accepts a 64-byte type and replaces a 65-byte one", () => 
   );
 });
 
-test("keyTypeFromBlob replaces a type carrying a byte outside the charset", () => {
+test("keyTypeFromBlob replaces a type containing a byte outside the charset", () => {
   // One ESC in an otherwise ordinary type is enough: the whole type is replaced
   // by the hex of its leading bytes, so no byte of it reaches an operator.
   expect(keyTypeFromBlob(blobNamingType("ssh-\x1b[31med25519"))).toBe(

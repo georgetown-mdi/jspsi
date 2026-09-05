@@ -7,7 +7,7 @@ import { page } from "vitest/browser";
 import { createElement } from "react";
 
 // Load Mantine's stylesheet so components render with their real geometry, as the
-// other bench component suites do.
+// other console component suites do.
 import "@mantine/core/styles.css";
 
 import {
@@ -31,9 +31,10 @@ import { AcceptorColumnsStep } from "@bench/AcceptorColumnsStep";
 // expected label from it rather than restating the isolate as literal characters.
 import { isolatedColumnName } from "@components/ColumnName";
 
-// The seam the grid's own "How it is used" control edits through, so a test that
-// opens on a column set to something other than "sent" reaches that state the way
-// the operator would rather than by hand-writing role/isPayload.
+// applyDisclosure is the call the grid's own "How it is used" control edits
+// through, so a test that opens on a column set to something other than "sent"
+// reaches that state the way the operator would rather than by hand-writing
+// role/isPayload.
 import { applyDisclosure } from "@psi/metadataEditing";
 
 import { createAppMount } from "./renderApp";
@@ -78,22 +79,17 @@ const acceptorTerms: LinkageTerms = {
 const RLO = "\u202E";
 
 // Ordinary content rather than an attack, and outside printable ASCII: U+00E9 LATIN
-// SMALL LETTER E WITH ACUTE is what a real header and a real declaration both carry,
-// which is what makes it the character the two treatments on this screen disagree
-// about. Written as an escape for the reason RLO above is.
+// SMALL LETTER E WITH ACUTE is what a real header and a real declaration both
+// contain, which is what makes it the character the two treatments on this screen
+// disagree about. Written as an escape for the reason RLO above is.
 const NON_ASCII = "\u00E9";
 
-// What the conflict notice may paint with the declaration flooded. An ABSOLUTE
-// number, deliberately not derived from MAX_DECLARED_NAMES_SHOWN: a ceiling that
-// scaled with the cap would hold at any cap, including none, which is the change
-// this check exists to catch. It leaves headroom over what the notice measures
-// today (roughly 440 characters over the worst measured shape, a flooded
-// declaration that also renders the widening remedy) so small copy edits do not
-// trip it -- and it bounds the partner-driven half only; the notice's other list
-// is the operator's own headers. It stays
-// hundreds of times under the megabyte the same declaration paints uncapped -- the
-// difference between scrolling past the notice to reach the grid and the launch
-// control, and not reaching them.
+// What the conflict notice may show with the declaration flooded. An absolute
+// number, not derived from MAX_DECLARED_NAMES_SHOWN, so removing that cap would
+// not also remove this check. It leaves headroom over what the notice measures
+// today (roughly 440 characters for a flooded declaration) and bounds only the
+// partner-driven list, not the operator's own headers -- staying hundreds of
+// times under the megabyte the same declaration would paint uncapped.
 const NOTICE_CEILING = 4_000;
 
 // The over-declared half's remedies as the notice states them: the partner's first,
@@ -111,7 +107,7 @@ function mountStep(
   linkageTerms: LinkageTerms,
   columns: Array<string>,
   // Columns the step opens with set to "Not used", the state a column has to be in
-  // to sit in the declared-but-not-sent half while the file still carries it.
+  // to sit in the declared-but-not-sent half while the file still contains it.
   unsent: ReadonlyArray<string> = [],
 ) {
   const rows = [Object.fromEntries(columns.map((c) => [c, "x"]))];
@@ -207,7 +203,7 @@ describe("acceptor columns step: a disagreeing non-empty declaration", () => {
   const columns = ["first_name", "last_name", "notes"];
 
   test("says a declared column is absent from the file, and offers no local edit for it", async () => {
-    // A column this file does not carry cannot be marked at all, so the entry says
+    // A column this file does not contain cannot be marked at all, so the entry says
     // so and the remedies stay the partner's or a different file's.
     mountStep(
       {
@@ -274,7 +270,7 @@ describe("acceptor columns step: a disagreeing non-empty declaration", () => {
 
     // The use the sentence says sending replaces, as the grid states it: the
     // control the operator is sent to holds one choice, and here it is the
-    // identifier -- not matching, which this column does not do. The label carries
+    // identifier -- not matching, which this column does not do. The label contains
     // the isolate as characters (a string sink cannot hold the markup), so the
     // query is built from the same helper the grid labels with.
     const use = app.container.querySelector<HTMLInputElement>(
@@ -291,7 +287,7 @@ describe("acceptor columns step: a disagreeing non-empty declaration", () => {
       { length: MAX_PAYLOAD_ENTRIES },
       (_, index) => `${index}-${NON_ASCII.repeat(MAX_NAME_LENGTH)}`,
     );
-    // The premise, asserted rather than assumed: each of those names spends the
+    // The assumption, asserted rather than assumed: each of those names spends the
     // whole per-value allowance at this sink and is cut at it, so what is measured
     // below is the worst case and not a mild one.
     const escaped = sanitizeForDisplay(flooded[0]);
@@ -331,9 +327,9 @@ describe("acceptor columns step: a disagreeing non-empty declaration", () => {
     expect(notice.textContent.length).toBeLessThanOrEqual(NOTICE_CEILING);
   });
 
-  test("escapes a declared name the file also carries, while the grid row it points at renders that header verbatim", async () => {
+  test("escapes a declared name the file also has, while the grid row it points at renders that header verbatim", async () => {
     // The one column two provenances meet on: the invitation declares it and the
-    // operator's file carries a header of the same bytes. The notice escapes the
+    // operator's file has a header of the same bytes. The notice escapes the
     // partner's copy -- it is text this operator cannot inspect -- while the grid
     // row it sends them to renders their own header as itself inside its isolate,
     // so the same name reaches the operator in two forms on one screen.

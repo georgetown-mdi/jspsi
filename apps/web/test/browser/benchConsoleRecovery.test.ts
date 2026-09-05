@@ -17,7 +17,7 @@ import { createAppMount, flushPendingUpdates } from "./renderApp";
 
 import type { JobHandoff } from "@jobs/handoff";
 
-// The bench components touch the router seam.
+// The bench components touch the router boundary.
 vi.mock("@tanstack/react-router", async () =>
   (await import("./moduleMocks")).reactRouterMock(),
 );
@@ -75,7 +75,7 @@ const RECOVERY_HANDOFF = {
   },
 } satisfies JobHandoff;
 
-/** The same-origin job API stubbed at the global fetch seam, tailored to the
+/** The same-origin job API stubbed at the global fetch boundary, tailored to the
  * recovery panel: the inputs/sftp/rendezvous the idle bench reads, plus the
  * status / events / cancel / delete routes the panel drives for one job id. */
 function stubRecoveryApi(options: RecoveryStubOptions = {}): {
@@ -216,7 +216,7 @@ describe("console inputs disabled state", () => {
     await expect
       .element(page.getByText("JOB_DATA_ROOT", { exact: false }))
       .toBeInTheDocument();
-    // The transient red fault must not be what shows for a deliberate 404. The
+    // The transient red fault must not be what shows for an intentional 404. The
     // ServerFilePicker notice title is the anchor: it belongs to the error branch
     // alone, where a fragment of the body would have to match a longer sentence.
     expect(
@@ -249,7 +249,7 @@ describe("console strand recovery panel", () => {
       )
       .toBeInTheDocument();
 
-    // Discard is irreversible and removes appliance-only data, so it confirms
+    // Discard is irreversible and removes console-only data, so it confirms
     // first: the first click only opens the modal -- nothing is deleted yet.
     await page.getByRole("button", { name: "Discard" }).click();
     await expect
@@ -346,7 +346,7 @@ describe("console strand recovery panel", () => {
       )
       .toBeInTheDocument();
 
-    // The replay delivers the result frame; the appliance download row renders.
+    // The replay delivers the result frame; the console download row renders.
     await vi.waitFor(() =>
       expect(
         api.captured.some((r) => r.url === "/api/jobs/job-done/events"),
@@ -692,7 +692,7 @@ describe("console strand recovery panel", () => {
 describe("console lobby occupancy probe (no stored attachment)", () => {
   test("an occupied slot renders the panel with the neutral copy and discards the probed id", async () => {
     // Empty localStorage: the slot-occupancy probe is the only signal that an
-    // exchange is on the appliance.
+    // exchange is on the console.
     const api = stubRecoveryApi({
       jobId: "job-probe",
       status: "running",
@@ -765,7 +765,7 @@ describe("console lobby occupancy probe (no stored attachment)", () => {
       .toBeInTheDocument();
 
     // The re-attach reads the PROBED id's event stream; its result frame renders
-    // the appliance download row.
+    // the console download row.
     await vi.waitFor(() =>
       expect(
         api.captured.some((r) => r.url === "/api/jobs/job-probe/events"),
@@ -781,7 +781,7 @@ describe("console lobby occupancy probe (no stored attachment)", () => {
   });
 
   test("a probed slot that already stopped shows the stopped lead and only Discard", async () => {
-    // The slot probe surfaces an occupant whose run already stopped
+    // The slot probe reports an occupant whose run already stopped
     // (failed/cancelled): the panel heads stopped from the initial status,
     // promises no downloads, and offers only Discard -- the persisted stopped
     // path, reached through the probe rather than a stored attachment.
@@ -851,7 +851,7 @@ describe("console lobby occupancy probe (no stored attachment)", () => {
 describe("console strand recovery panel run warnings", () => {
   // The rendezvous preflight's not-empty lead, and a listing naming a PARTNER-chosen
   // entry (the partner syncs its own files into the rendezvous mount). Both are
-  // composed raw by the appliance for the console sink's single escape.
+  // composed raw, and escaped once where they are displayed.
   const NOT_EMPTY_LEAD =
     "the rendezvous directory /mnt/rendezvous is not empty; an exchange " +
     "refuses to start on an earlier run's files. Turn on \"Clear leftover " +

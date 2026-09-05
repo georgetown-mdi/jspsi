@@ -116,7 +116,7 @@ function str32Header(byteLen: number): Uint8Array {
 
 /** A BinaryPack array16 of `n` empty objects (each a one-byte `fixmap` of zero
  * pairs) -- the cheapest-on-the-wire, heaviest-in-memory shape, the worst case the
- * byte-aware budget exists to charge honestly. */
+ * byte-aware budget exists to charge exactly. */
 function arrayOfEmptyObjects(n: number): Uint8Array {
   const out = [0xdc, (n >>> 8) & 0xff, n & 0xff];
   for (let i = 0; i < n; i++) out.push(0x80); // fixmap(0)
@@ -554,7 +554,7 @@ describe("boundChunkReassembly: deserialized-structure bound at the unpack choke
 
   test("refuses a binary value one byte below its view overhead", () => {
     // The other side of that boundary: the view a `bin`/`raw` value decodes to is
-    // charged, so a budget below it refuses a frame carrying the same 256-byte
+    // charged, so a budget below it refuses a frame holding the same 256-byte
     // charge the budget above admits (that test's raw16 differs in payload, not
     // in charge).
     const conn = new FakeChunkedConnection();

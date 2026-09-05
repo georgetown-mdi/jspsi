@@ -71,9 +71,9 @@ afterEach(() => {
 });
 
 describe("the manager the environment builds", () => {
-  test("carries the resolved rendezvous problem, so a filedrop create is refused", async () => {
+  test("holds the resolved rendezvous problem, so a filedrop create is refused", async () => {
     // An outbound leg inside the inbound one: the provisioning refuses the pair,
-    // and the intent carries the retain trio, so the refusal that lands can only be
+    // and the intent holds the retain trio, so the refusal that lands can only be
     // the problem the manager was constructed with.
     const inbound = madeDir("wiring-inbound");
     const manager = managerForSplit(path.join(inbound, "outgoing"), inbound);
@@ -82,7 +82,7 @@ describe("the manager the environment builds", () => {
     ).rejects.toBeInstanceOf(JobRendezvousUnavailableError);
   });
 
-  test("carries no problem for a coherent pair, so the create reaches the retain gate", async () => {
+  test("holds no problem for a coherent pair, so the create reaches the retain gate", async () => {
     // The same call with the outbound leg mounted beside the inbound one. The
     // create is refused for the retain mode a split pair requires -- a refusal
     // reachable only PAST the problem gate, so it is what says the coherent

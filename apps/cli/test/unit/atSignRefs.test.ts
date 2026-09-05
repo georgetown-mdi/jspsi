@@ -103,9 +103,7 @@ test("resolveConnectionCredentials resolves an @path password and private key", 
 
 test("resolveConnectionCredentials resolves an @path private-key passphrase", () => {
   // The save-path resolver reads the passphrase for live use while the caller
-  // persists the original @path (see the no-mutation test below); this closes
-  // the gap where a flag-supplied passphrase would otherwise slip through
-  // unresolved on the URL/flag-based flows.
+  // persists the original @path (see the no-mutation test below).
   const keyFile = path.join(dir, "id_rsa");
   const passFile = path.join(dir, "phrase");
   fs.writeFileSync(keyFile, "KEYDATA\n");
@@ -161,15 +159,15 @@ test("resolveConnectionCredentials is a no-op on a filedrop connection", () => {
   expect(resolveConnectionCredentials(conn)).toBe(conn);
 });
 
-test("resolveConnectionCredentials surfaces a missing @path file as a UsageError", () => {
+test("resolveConnectionCredentials reports a missing @path file as a UsageError", () => {
   const conn = sftpConn({ host: "h", password: `@${path.join(dir, "gone")}` });
   expect(() => resolveConnectionCredentials(conn)).toThrow(UsageError);
 });
 
 // --- readConnectionCredentials / applyConnectionCredentials ------------------
 
-test("readConnectionCredentials surfaces a missing @path file without touching the connection", () => {
-  // What lets a caller settle the local-file refusal before it does anything
+test("readConnectionCredentials reports a missing @path file without touching the connection", () => {
+  // What lets a caller resolve the local-file refusal before it does anything
   // that reaches the network: the read alone raises it, and the connection is
   // still the unmodified original the caller goes on to pin and persist.
   const conn = sftpConn({ host: "h", password: `@${path.join(dir, "gone")}` });
@@ -177,10 +175,10 @@ test("readConnectionCredentials surfaces a missing @path file without touching t
   expect(conn.server.password).toBe(`@${path.join(dir, "gone")}`);
 });
 
-test("applyConnectionCredentials carries a mutation made after the read into the clone", () => {
+test("applyConnectionCredentials includes a mutation made after the read in the clone", () => {
   // The zero-setup ordering: the credential files are read first, the host-key
   // step then pins the fingerprint onto the original, and the clone taken here
-  // must carry that pin as well as the resolved secret.
+  // must hold that pin as well as the resolved secret.
   const pwFile = path.join(dir, "pw3");
   fs.writeFileSync(pwFile, "s3cret\n");
   const original = sftpConn({ host: "h", password: `@${pwFile}` });
@@ -417,8 +415,9 @@ test("resolveExchangeSpecRefs resolves @path auth on a webrtc iceProvision endpo
 
 test("resolveExchangeSpecRefs leaves a free-text field with a literal leading @ unchanged", () => {
   // A literal leading @ would have errored at load under the old blanket
-  // recursion (read as the file path `home`); it now survives parse + resolution
-  // verbatim, so it lands in the self-attested exchange record as written.
+  // recursion (treated as the file path `home`); it now survives parse +
+  // resolution verbatim, so it lands in the self-attested exchange record as
+  // written.
   const spec = parseSpec({
     linkage_terms: { ...BASE_LINKAGE, identity: "@home" },
     connection: { channel: "sftp", server: { host: "h" } },
@@ -430,7 +429,7 @@ test("resolveExchangeSpecRefs leaves a free-text field with a literal leading @ 
 });
 
 test("resolveExchangeSpecRefs does not read a free-text leading-@ value even when the path exists", () => {
-  // The closed foot-gun: a free-text value whose @path happens to resolve to a
+  // The closed hazard: a free-text value whose @path happens to resolve to a
   // real file must NOT pull that file's contents into the record.
   const ref = atFile("on-disk", "EXFILTRATED");
   const spec = parseSpec({
@@ -473,7 +472,7 @@ test("resolveExchangeSpecRefs does not mutate its input (the @path survives)", (
   );
 });
 
-test("resolveExchangeSpecRefs surfaces a missing @path credential file as a UsageError", () => {
+test("resolveExchangeSpecRefs reports a missing @path credential file as a UsageError", () => {
   const spec = parseSpec({
     connection: {
       channel: "sftp",

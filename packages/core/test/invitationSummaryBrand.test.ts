@@ -104,7 +104,7 @@ describe("the display-struct brand", () => {
     expect(agreement.reference).toBe(raw);
   });
 
-  test("rejects an un-sanitized string in each display struct that carries partner text", () => {
+  test("rejects an un-sanitized string in each display struct that holds partner text", () => {
     const raw: string = HOSTILE_IDENTITY;
     // @ts-expect-error -- the inviter's self-asserted identity
     const invitingParty: InvitationSummary["invitingParty"] = raw;

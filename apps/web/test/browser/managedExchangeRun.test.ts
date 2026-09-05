@@ -358,7 +358,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
 
     // Force the rotation persist to fail by aborting the FIRST readwrite
     // transaction the run opens, sparing the follow-up bookkeeping write. The
-    // put's own transaction abort surfaces as a rejected persist, which the
+    // put's own transaction abort shows as a rejected persist, which the
     // ordering turns into the storage-tier failure.
     const realTransaction = IDBDatabase.prototype.transaction;
     let failNextReadwrite = true;
@@ -411,7 +411,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
     expect(stored?.lastRun?.failureKind).toBe("storage");
   });
 
-  test("a total storage fault still surfaces the RotationPersistError, not the bookkeeping failure", async () => {
+  test("a total storage fault still exposes the RotationPersistError, not the bookkeeping failure", async () => {
     const created = await createManagedExchange(newExchange());
     const rotatedSecret = generateSharedSecret();
     let dataExchangeRan = false;
@@ -419,7 +419,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
     // Fail EVERY readwrite the run opens: the rotation persist fails, and so
     // does the in-catch storage bookkeeping write. The second rejection must not
     // replace the RotationPersistError -- the runner's classification, and the
-    // storage lastRun the error carries, depend on the original propagating.
+    // storage lastRun the error holds, depend on the original propagating.
     const realTransaction = IDBDatabase.prototype.transaction;
     IDBDatabase.prototype.transaction = function (
       this: IDBDatabase,
@@ -457,7 +457,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
       IDBDatabase.prototype.transaction = realTransaction;
     }
 
-    // The original error survives the failed bookkeeping write, still carrying
+    // The original error survives the failed bookkeeping write, still holding
     // the storage lastRun for the runner to classify on.
     expect(error).toBeInstanceOf(RotationPersistError);
     expect((error as RotationPersistError).lastRun.failureKind).toBe("storage");
@@ -469,7 +469,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
     expect(stored?.lastRun).toBeUndefined();
   });
 
-  test("a total storage fault still surfaces the ManagedInputError, not the bookkeeping failure", async () => {
+  test("a total storage fault still exposes the ManagedInputError, not the bookkeeping failure", async () => {
     const created = await createManagedExchange(newExchange());
     let handshakeRan = false;
 
@@ -669,14 +669,12 @@ describe("runManagedExchange: persist-before-success end to end", () => {
   });
 
   test("a run whose custody reading fails refuses it under its own kind", async () => {
-    // The sibling entry a corruption or an app upgrade invalidated, driven
-    // through the real validating read: a run that cannot tell whether the copy
-    // was handed off does not proceed on the assumption it was not. What it
-    // records is the custody-unreadable kind -- the entry is unchanged at the
-    // next attempt, so the retryable transport fault would offer a retry, and a
-    // scheduled window would spend its whole attempt budget, on a permanent local
-    // problem -- and what it must not record is the storage kind, which reports a
-    // rotation this run never reached.
+    // The sibling entry a corruption or an app upgrade invalidated, driven through
+    // the real validating read: a run that cannot tell whether the copy was handed
+    // off must not assume it was not. It records the custody-unreadable kind, not
+    // the storage kind, which would wrongly report a rotation this run never
+    // reached -- and not the retryable transport kind, which would keep offering a
+    // scheduled window a retry on a permanent local problem.
     const created = await createManagedExchange(newExchange());
     await putRawLocalState(created.id, {
       spent: { spentAt: "not an instant" },
@@ -716,7 +714,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
       failureKind: "custody-unreadable",
     });
     // What the stamp resolves to at the next visit -- the reading an unattended
-    // run's refusal surfaces through, having classified no live error of its own.
+    // run's refusal shows through, having classified no live error of its own.
     // The sibling read the tier derivation would take fails on the same entry, so
     // the derivation is given what a caller that could not read it holds.
     expect(deriveManagedFailureTier(stored!, undefined, refusedAt)).toBe(

@@ -15,20 +15,18 @@ import {
 } from "../peerIdentification";
 
 // The non-SSH-answer diagnosis on the two host-key probe entry points --
-// `probe-host-key` and the first-use trust prompt -- driven against a peer that
-// answers with a proxy's error page. Both dial a peer of their own rather than
-// the test SFTP server, so no SFTP backend has any bearing on them and they run
-// once per pull request; the dial paths that reach a real server, and the
-// control cases that prove the diagnosis disturbs neither, are in
-// ../dialPeerIdentification.test.ts.
+// `probe-host-key` and the first-use trust prompt -- driven against a peer
+// that answers with a proxy's error page. Both dial a peer of their own
+// rather than the test SFTP server, so no SFTP backend has any bearing on
+// them and they run once per pull request. The dial paths that reach a real
+// server, and the control cases, are in ../dialPeerIdentification.test.ts.
 //
 // These cases COUNT what the endpoint saw, because the diagnosis is a TCP
 // connection of its own: the adapter is the only layer that runs it, so a
 // diagnosed probe opens exactly one connection that sends nothing and the
-// operator is told once. A second diagnosis wrapped around a probe caller would
-// read the peer twice over -- the gate walks the cause chain, so it matches the
-// rejection core keeps under its own host-key message -- which is invisible in
-// the copy but plain in the connection count.
+// operator is told once. A second diagnosis wrapped around a probe caller
+// would read the peer twice over -- invisible in the rendered copy (the gate
+// walks the cause chain to the same host-key message) but plain in the count.
 //
 // The peer is a real listener rather than a stub because what is asserted is
 // what arrives on a socket.
@@ -56,7 +54,7 @@ test(
       const links = displayLinks(raised);
       expect(links[0]).toContain("could not read the server's host key");
       expectNonSshAnswerDiagnosis(links, peer);
-      // One diagnosis, and one connection carrying no bytes at all: the peer
+      // One diagnosis, and one connection holding no bytes at all: the peer
       // was read once, whatever the dial itself spent on retries.
       expect(diagnosisCount(links)).toBe(1);
       expect(peer.accepted().silent).toBe(1);
@@ -106,10 +104,10 @@ test(
 // The bytes the `--json` machine route puts on a caller's stdout, read off a
 // real socket rather than handed to the composer: the peer writes DEL, a C1
 // control, and a PEM private-key marker, and the assertion is on the line the
-// handler would print. The handler's two emission steps -- read the diagnosis
-// off the raised error, compose the line -- are re-implemented here rather than
-// invoked through the handler itself, so this drives the wire-to-diagnosis path
-// but not the handler's own gate that decides whether to print at all.
+// handler would print. The handler's two emission steps -- read the diagnosis,
+// compose the line -- are re-implemented here rather than invoked through the
+// handler itself, so this drives the wire-to-diagnosis path, not its own gate
+// on whether to print at all.
 test(
   "the --json diagnosis line prints as ASCII whatever the peer answered with",
   async () => {

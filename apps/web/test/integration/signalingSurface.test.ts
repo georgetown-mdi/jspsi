@@ -1,14 +1,11 @@
 import { describe, expect, test } from "vitest";
 
-// Integration coverage for the backend-free rendezvous: the dev-server
-// globalSetup stands up the Vite/TanStack server, and these tests assert at the
-// HTTP boundary that the PeerJS signaling server it mounts answers with a
-// usable peer id while the former session-coordination backend (`/api/psi/*`)
-// stays gone. Node env: PeerJS itself needs a browser (the live exchange lives
-// in the browser project), so this checks the routes, not a peer connection.
-// Peers otherwise find each other through ids derived from the invitation
-// secret, so the signaling id route is the only session coordination the
-// server performs.
+// Integration coverage for the backend-free rendezvous: these assert at the HTTP
+// boundary that the PeerJS signaling server the dev server mounts answers with
+// a usable peer id, while the former session-coordination backend (`/api/psi/*`)
+// stays gone -- peers now find each other through ids derived from the invitation
+// secret. This is Node env, so it checks the routes only, not a peer connection
+// (PeerJS itself needs a browser).
 //
 // The port matches the dev-server globalSetup, which derives it the same way.
 const port = parseInt(process.env.PORT ?? "3000", 10);

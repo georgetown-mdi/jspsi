@@ -20,19 +20,13 @@ import type {
 import type { BrokerProcess } from "../../signaling/brokerProcess";
 
 /**
- * The CLI's hand-written signaling client against the repository's REAL vendored
- * PeerJS broker, spawned as a process.
+ * Tests the CLI's signaling client against the repository's real vendored
+ * PeerJS broker, spawned as a process. The client's wire format comes from
+ * facts measured against the broker, not read from its source, so this suite
+ * catches an envelope detail that drifted before a browser peer would.
  *
- * The client is written to wire facts that were measured rather than read out of
- * the broker's source, and those facts are the riskiest thing about it: an
- * envelope detail that drifted would otherwise surface only when a browser peer
- * fails to answer. This suite is that check -- a CLI peer registers with the
- * real broker, exchanges a full OFFER/ANSWER round trip with a second CLI peer,
- * and takes the broker's refusals on the paths an operator can actually reach.
- *
- * It deliberately stops at signaling: no RTCPeerConnection, no ICE, no data
- * channel. Those belong to the transport suite, and keeping them out means a
- * broker-wire regression fails here with nothing else to rule out first.
+ * Stops at signaling: no RTCPeerConnection, ICE, or data channel -- those are
+ * the transport suite's job.
  */
 
 let broker: BrokerProcess;
@@ -251,12 +245,10 @@ test("a wrong API key is refused with the field to fix", async () => {
 }, 60_000);
 
 test("a broker diagnostic reaches stderr, leaving the ready-line stdout alone", async () => {
-  // The harness reads the port off stdout with a single match and the runner
-  // promises it nothing else, so a diagnostic that reached the wrong stream would
-  // break that read and put peer-chosen text on the stream a parent parses. A
-  // registered socket sending bytes that are not JSON is the one diagnostic a
-  // peer raises on demand, which is what makes the stdout assertion below carry
-  // weight rather than pass on a broker that logged nothing at all.
+  // The harness parses the port from a single stdout line; a diagnostic must
+  // go to stderr instead. Sending bytes that are not JSON is the one
+  // diagnostic a peer can force on demand, so the stdout check below means
+  // something.
   const { inviterId } = await freshIds();
   let socket: WebSocket | undefined;
   const client = await connectToBroker({
@@ -277,10 +269,9 @@ test("a broker diagnostic reaches stderr, leaving the ready-line stdout alone", 
 }, 60_000);
 
 test("a registered peer stays registered past the broker's silent-socket reaper", async () => {
-  // The broker closes a registered socket that sends nothing about twenty
-  // seconds in. The heartbeat is what keeps an exchange alive across a peer's
-  // long single-threaded PSI compute, so this holds that as a check rather than
-  // leaving the cadence to a comment.
+  // The broker closes a registered socket that has sent nothing for about
+  // twenty seconds. A heartbeat keeps the connection alive across a peer's
+  // long single-threaded PSI computation.
   const { inviterId, acceptorId } = await freshIds();
   const peer = await register(acceptorId);
   await new Promise((resolve) => setTimeout(resolve, 25_000));

@@ -31,38 +31,26 @@ import type { BrokerProcess } from "../../signaling/brokerProcess";
 import type { TlsBrokerFront } from "../../signaling/tlsBrokerFront";
 
 /**
- * The one-command acceptance, live: an inviting CLI mints a webrtc invitation
- * and waits, and an accepting CLI runs the whole acceptance -- positional
- * resolution, the consent prompt, the connection resolved from the invitation's
- * own endpoint, the dial, and the exchange -- in the single command an operator
- * types.
+ * The live one-command acceptance: an inviting CLI mints a webrtc invitation
+ * and waits, while an accepting CLI runs the whole acceptance -- resolution,
+ * the consent prompt, the dial, and the exchange -- in the single command an
+ * operator types.
  *
- * Both parties are child processes running the real command line, so what is
- * exercised is the wiring BETWEEN the steps rather than any one of them: the
- * unit suite drives the acceptance path with the bootstrap mocked out, and the
- * sibling `test/integration/onlineInviteAccept.test.ts` drives the bootstrap
- * with the command layer left out. A break in the seam between them -- an
- * acceptance that resolves a connection it cannot dial, prompts about a server
- * it does not use, or reaches the exchange without the token's secret -- shows
- * up here and nowhere else.
- *
- * Only the acceptance is the subject; the inviting party is the peer it needs.
- * The two roles must differ or the second registration meets the broker's
- * id-taken refusal, and each command stamps its own (`withWebRTCPeerRole`).
+ * Both parties are real child processes, so this exercises the wiring
+ * between those steps; the unit suite and
+ * `test/integration/onlineInviteAccept.test.ts` cover the steps on their own.
+ * Only the acceptance is under test; the inviter is just its peer.
  */
 
 /**
  * A webrtc invitation names a coordination server without a scheme, so the
- * acceptance seeded from it resolves TLS and the leg needs a `wss://` broker
- * (see `test/signaling/tlsBrokerFront.ts`). Minting the throwaway certificate
- * needs `openssl`, which the environment supplies rather than this repository.
+ * acceptance needs a `wss://` broker (see `test/signaling/tlsBrokerFront.ts`)
+ * and a throwaway certificate minted with `openssl`, which the environment
+ * supplies rather than this repository.
  *
- * Absent, the leg cannot run. Where the environment was supposed to supply it
- * -- CI, provisioned to a spec -- that is a hard failure rather than a skip, so
- * a run cannot report a pass over a leg that never executed; anywhere else the
- * leg skips and the run's skipped-leg report names it. The opt-out is the same
- * one the web suite's prerequisite gate takes, so an operator who knows their
- * machine has no `openssl` sets one variable for both.
+ * Where the environment must supply `openssl` (CI), its absence is a hard
+ * failure rather than a skip. Elsewhere the leg skips and the report names
+ * it; `ALLOW_MISSING_PREREQUISITES_ENV` opts out of the hard failure.
  */
 if (loopbackTlsCert === null && prerequisitesAreRequired(process.env))
   throw new Error(
@@ -78,21 +66,19 @@ const BROKER_HOST = "127.0.0.1";
 
 /**
  * The inviting party's budget for the whole run: the wait for the partner to
- * accept, and the peer waits of the exchange that follows. Generous against the
- * measured ~12s an ICE round takes here (candidate gathering falls back to host
- * candidates, which costs about ten seconds), and well inside the per-process
- * deadlines below, so a stall is reported as a peer timeout by the party that
- * hit it rather than by a killed process.
+ * accept, plus the exchange's own peer waits after. Generous against the
+ * measured ~12s an ICE round takes here, and inside the per-process
+ * deadlines below, so a stall reports as a peer timeout, not a killed
+ * process.
  */
 const ACCEPT_TIMEOUT = "60s";
 
 /**
- * Hard deadline on each party. The accepting side takes the webrtc transport's
- * own rendezvous default (ten minutes) because an acceptance seeded from an
- * invitation endpoint carries no `peer_timeout_ms` and the offline path applies
- * no `--peer-timeout` override, so without this a stalled acceptance would run
- * until vitest killed the worker under it. Killed here instead, the run is
- * reported with its cause and its diagnostics.
+ * Hard deadline on each party. The accepting side takes the webrtc
+ * transport's own rendezvous default (ten minutes), since an acceptance
+ * seeded from an invitation endpoint carries no `peer_timeout_ms` and gets
+ * no `--peer-timeout` override; without this, a stalled acceptance would run
+ * until vitest killed the worker instead of reporting its cause.
  */
 const PARTY_DEADLINE_MS = 90_000;
 
@@ -184,16 +170,14 @@ function resultTable(file: string): { header: string; pairs: Set<string> } {
 liveTest(
   "the vendored broker answers through the TLS front (environment precondition)",
   async () => {
-    // Separate from the leg below, and ahead of it, so a broker that did not
-    // start, a front that is not listening, or a certificate this environment
-    // could not mint fails as itself. Past this, a failure below belongs to the
-    // command path rather than to the coordination server it runs through.
+    // Separate from, and ahead of, the leg below: if the broker, front, or
+    // certificate itself is broken, it fails here instead of being blamed on
+    // the command path.
     //
-    // A plain request is the whole round trip in one: the front terminates TLS
-    // with the certificate the parties are given, pipes the stream on, and the
-    // broker's own handler answers 404 to anything that is not a WebSocket
-    // upgrade. The certificate is passed as the only trusted authority, so this
-    // also proves what the parties will trust is what the front presents.
+    // A plain request exercises the whole path: the front terminates TLS
+    // with the parties' own certificate and forwards to the broker, whose
+    // handler answers 404 to anything but a WebSocket upgrade -- proving
+    // what the parties trust is what the front actually presents.
     const status = await new Promise<number | undefined>((resolve, reject) => {
       const request = https.request(
         {

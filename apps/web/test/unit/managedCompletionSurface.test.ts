@@ -16,7 +16,7 @@ describe("managedRerunCompletion", () => {
     expect(completion.backupHook).toBeUndefined();
   });
 
-  test("with an exporter wired, the surface offers the refresh and carries the hook", () => {
+  test("with an exporter wired, the surface offers the refresh and holds the hook", () => {
     const downloadUpdatedBackup = vi.fn(() => Promise.resolve());
     const hook: ManagedBackupExportHook = { downloadUpdatedBackup };
     const completion = managedRerunCompletion(hook);

@@ -14,7 +14,7 @@
 // observed host key (docs/spec/PROTOCOL.md, The counts ride the terms exchange).
 // A partner reads that envelope by field name, so adding, renaming, dropping, or
 // re-ordering one is a wire-format delta. Nothing pinned it: the suites around it
-// assert what a field MEANS, never the whole set a frame carries. This file is
+// assert what a field MEANS, never the whole set a frame holds. This file is
 // that set, per frame slot, and packages/core/test/termsEnvelopeVectors.test.ts
 // replays each scenario through the real exchangeTerms and holds the frames to it.
 //
@@ -24,7 +24,7 @@
 // come from sendAbort directly, the abort slot being reachable only on a failure
 // path; their `abortReasons` are fixed literals of this generator's own rather
 // than real compatibility copy, so a reworded diagnostic does not move the pin.
-// The abort frames carry no separate input block: sendAbort relays the reasons
+// The abort frames hold no separate input block: sendAbort relays the reasons
 // verbatim, so the captured `envelope.abortReasons` is also what the replay feeds
 // back in.
 //
@@ -46,7 +46,7 @@ import {
 } from "../../dist/testing.esm.js";
 
 // A compatible pair of minimal terms: two linkage keys, so the effective key
-// count the envelope carries is legibly the key count rather than colliding with
+// count the envelope holds is clearly the key count rather than colliding with
 // the 1 a single-key exchange would advertise. Identity is the only field that
 // differs, which validateCompatibility permits.
 const partyATerms = {
@@ -69,7 +69,7 @@ const partyATerms = {
 
 const partyBTerms = { ...partyATerms, identity: "Party B" };
 
-// A third fixture carrying no `identity` at all: the field is optional, and a
+// A third fixture holding no `identity` at all: the field is optional, and a
 // party that supplied no name sends the terms with the key absent rather than
 // empty. Same terms otherwise, so the scenario driving it differs from the
 // others at the identity alone.
@@ -114,7 +114,7 @@ const scenarios = [
       saveIntent: true,
       hostKey: responderHostKey,
       // Explicitly false rather than omitted: the flag is spread whenever the
-      // caller supplies it, so a no-payload party still carries an explicit
+      // caller supplies it, so a no-payload party still has an explicit
       // `disclosesPayload` the partner's withhold gate reads.
       disclosesPayload: false,
     },
@@ -195,7 +195,7 @@ function splitFrame(frame) {
       continue;
     }
     // Matched on the whole document rather than on `identity`, which is optional
-    // and absent from one fixture: the terms a frame carries are one of the
+    // and absent from one fixture: the terms a frame holds are one of the
     // fixtures above verbatim, so equality names which.
     const carried = JSON.stringify(frame.linkageTerms);
     carriesLinkageTerms = Object.keys(linkageTerms).find(

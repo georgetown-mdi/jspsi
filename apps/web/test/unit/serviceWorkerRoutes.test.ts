@@ -6,13 +6,12 @@ import {
 } from "../utils/declaredRoutes";
 import { serviceWorkerStringArray } from "../utils/serviceWorkerHarness";
 
-// The worker's SHELL_ROUTES is what an installed app warms so every route opens
-// with no network, and it is a hand-written list: a route added to src/routes/
-// without an entry here ships offline-broken, and nothing about writing the route
-// would say so. This is that check. The route paths come from the route files
-// themselves (see ../utils/declaredRoutes), so a change to the file-naming
-// convention cannot make it silently vacuous. What the entries here actually pull
-// out of the built deployment is test/integration/appShellWarm.test.ts.
+// SHELL_ROUTES is the worker's hand-written list of routes an installed app
+// warms for offline use; a route added to src/routes/ without an entry here
+// ships offline-broken, silently. This is that check, reading route paths
+// from the route files themselves (../utils/declaredRoutes) rather than a
+// separately hand-written list. What the entries actually pull out of the
+// built deployment is test/integration/appShellWarm.test.ts.
 
 const shellRoutes = serviceWorkerStringArray("SHELL_ROUTES");
 

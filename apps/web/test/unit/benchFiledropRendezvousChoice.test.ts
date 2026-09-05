@@ -46,14 +46,14 @@ const SPLIT: JobRendezvousConfig = {
 };
 
 describe("the invitation endpoint a console filedrop mints", () => {
-  test("a single mount carries the one shared locator", () => {
+  test("a single mount has the one shared locator", () => {
     expect(filedropEndpointForRendezvous(SHARED)).toEqual({
       channel: "filedrop",
       path: "psilink",
     });
   });
 
-  test("a split appliance carries the pair as THIS party authored it", () => {
+  test("a split console has the pair as THIS party authored it", () => {
     // Not mirrored here: an endpoint's pair is defined from the inviter's side and
     // the swap belongs to the single consumer that builds a connection from one.
     expect(filedropEndpointForRendezvous(SPLIT)).toEqual({
@@ -68,7 +68,7 @@ describe("the invitation endpoint a console filedrop mints", () => {
     // core refuses a filedrop endpoint whose halves resolve alike -- so this is
     // the check that the console's two locators reach a real mint distinct, rather
     // than a restatement of the rule. Minted with the retain declaration core
-    // requires beside a split pair, as a console mint of this rendezvous carries.
+    // requires beside a split pair, as a console mint of this rendezvous holds.
     const decoded = await decodeInvitation(
       await encodeInvitation({
         ...BASE_TOKEN,
@@ -127,15 +127,15 @@ describe("what the partner's accept kit is told about the rendezvous", () => {
     ).toEqual({ channel: "filedrop" });
   });
 
-  test("a split appliance carries the SHAPE whether or not it has the names", () => {
+  test("a split console has the SHAPE whether or not it has the names", () => {
     expect(acceptKitEndpointForRendezvous(SPLIT)).toEqual({
       channel: "filedrop",
       split: true,
       inboundPath: "from-partner",
       outboundPath: "to-partner",
     });
-    // A sheet naming one folder of a two-folder rendezvous would read as though
-    // the other did not exist, so it is both names or neither.
+    // A sheet naming one folder of a two-folder rendezvous would be treated as
+    // though the other did not exist, so it is both names or neither.
     expect(
       acceptKitEndpointForRendezvous({
         ...SPLIT,
@@ -144,15 +144,15 @@ describe("what the partner's accept kit is told about the rendezvous", () => {
     ).toEqual({ channel: "filedrop", split: true });
   });
 
-  test("an unavailable appliance describes no rendezvous at all", () => {
+  test("an unavailable console describes no rendezvous at all", () => {
     expect(
       acceptKitEndpointForRendezvous({ configured: false }),
     ).toBeUndefined();
   });
 });
 
-describe("the retain-mode precondition a split rendezvous carries", () => {
-  test("a split appliance without retain mode states the requirement", () => {
+describe("the retain-mode precondition a split rendezvous has", () => {
+  test("a split console without retain mode states the requirement", () => {
     expect(splitRendezvousRetainProblem(SPLIT, false)).toBe(
       SPLIT_RENDEZVOUS_RETAIN_REQUIREMENT,
     );

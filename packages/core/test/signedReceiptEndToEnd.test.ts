@@ -787,14 +787,14 @@ function heldByInitiator(
 }
 
 describe("the run binder pairs a receipt to one exchange run", () => {
-  test("both parties' records carry the run's receipt binder", async () => {
+  test("both parties' records hold the run's receipt binder", async () => {
     expect(firstRecord.receiptBinder).toBe(firstReceipt.content.binder);
     expect(firstRun[1].audit!.record.receiptBinder).toBe(
       firstRecord.receiptBinder,
     );
   });
 
-  test("two runs of one partnership under identical terms carry distinct binders", async () => {
+  test("two runs of one partnership under identical terms hold distinct binders", async () => {
     // Every signed value an offline verifier can CHECK is equal across the two
     // runs: the terms hash (recomputable from both parties' terms) and the two
     // certificates. The directional payload MACs do vary with the session key, but
@@ -864,7 +864,7 @@ describe("the run binder pairs a receipt to one exchange run", () => {
 
 // --- The record a terminated swap leaves behind ------------------------------
 
-// A second pair of datasets carrying a payload column, for the routes that need
+// A second pair of datasets holding a payload column, for the routes that need
 // one to have crossed. The suite's main fixtures link on first_name alone, and a
 // party that transmits nothing gives the received-payload check nothing to refuse.
 const payloadServer = [
@@ -1010,7 +1010,7 @@ describe("a run terminated after its disclosure keeps the record of it", () => {
     expect(kept?.record.receiptBinder).toBeDefined();
   });
 
-  test("a completed run's record says so, and a failure before the disclosure carries none", async () => {
+  test("a completed run's record says so, and a failure before the disclosure has none", async () => {
     // The two ends of the rule. A run that finished records `completed`; a run
     // that never disclosed has no record to hand back, because there was no
     // disclosure to attest -- here the terms-time refusal of a signing run whose
