@@ -26,9 +26,12 @@ The package root reaches everything core declares, so the broker's closure
 became core's: the schema validator, the regex engine, the CSV and YAML parsers,
 the date library, the id generator, the event emitter and the PSI bindings. None
 of that is an exploitable path -- the broker calls none of it -- and that is the
-point. A closure is the set of packages an advisory can force a redeploy of a
-network-facing service over, and whether the advisory is reachable through the
-service does not enter into it.
+point. A closure here is the packages it can reach at run time: the packages its
+built code actually loads and executes, as distinct from the packages its
+manifest declares. Narrowing it leaves the manifest and the tooling that reads
+it unchanged -- `packages/peerjs-broker/package.json` still declares
+`@psilink/core` as a runtime dependency, and `npm audit`, the SBOM, and
+Dependabot still resolve core's own dependencies under the broker.
 
 ## The subpath
 
