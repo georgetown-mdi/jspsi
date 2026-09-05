@@ -87,7 +87,7 @@ export async function handler(argv: Arguments): Promise<void> {
       // Install the sink, apply the level, and build getLogger("init") through the
       // shared configureLogging helper (in that order, so the logger inherits the
       // sink): the file sink when --log-file is given, otherwise the default stderr
-      // sink so stdout carries only result data. A missing parent directory
+      // sink so stdout holds only result data. A missing parent directory
       // (configureLogFile) or a repeated --log-file (singleValue) is a UsageError
       // -> exit 64, mapped here by the enclosing runOrExit.
       const { log, close } = configureLogging({
@@ -102,7 +102,7 @@ export async function handler(argv: Arguments): Promise<void> {
         DEFAULT_CONFIG_PATH;
       // Read here, with the other flags, so a repeated --identity is a usage
       // error before any question is asked or any file is written; what the
-      // value means is settled below, once it is known whether this run can ask
+      // value means is decided below, once it is known whether this run can ask
       // for one instead.
       const identityFlag = singleValue(argv, "identity") as string | undefined;
       const positionals = (argv["args"] as Array<string> | undefined) ?? [];
@@ -135,7 +135,7 @@ export async function handler(argv: Arguments): Promise<void> {
       // Asked after the overwrite decision, so a run that leaves the existing
       // file alone asks nothing: there is no file being written for the answer
       // to be remembered in, and psilink remembers an answer nowhere else.
-      // Absent both the flag and an answer, the template carries the
+      // Absent both the flag and an answer, the template holds the
       // placeholder, like the connection's host and username: init produces a
       // scaffold to hand-edit, not a runnable config.
       const identity =
@@ -212,14 +212,10 @@ export function resolveInitInput(
  * Resolve the exchange-data sections of the template: the inferred metadata,
  * linkage fields, and standardization when an input CSV is given, or just the
  * default linkage terms when it is not. Reuses `buildDataSpec` -- the same
- * inference `invite`/`accept`/zero-setup run -- so the template's terms match
- * what those commands would author from the same file. Reads the input through
- * `inferDateInputFormatFromSource` (header plus a bounded DOB sample), not the
- * full row set the exchange commands load, since init's inference needs no more:
- * it wants only the column header and the DOB date-input format, and the bounded
- * sample yields the same format as a full read (see that helper). The metadata,
- * linkage fields, and standardization then follow from the header alone in
- * `buildDataSpec`, fed the pre-inferred format.
+ * inference `invite`/`accept`/zero-setup run -- so the template matches what
+ * those commands would author from the same file. Reads only the header plus
+ * a bounded DOB sample via {@link inferDateInputFormatFromSource}, which
+ * yields the same format as a full read.
  *
  * @internal exported for testing
  */
@@ -238,9 +234,9 @@ export async function buildTemplateData(
   } catch (err) {
     // openInputSource's stdin-specific rejections (`-` disallowed, `-` at a bare
     // TTY) are already UsageErrors with actionable wording -- keep them. A missing
-    // or unreadable file throws a plain Error (carrying exitCode 69 for the
-    // network commands); init has no transport, so reclassify it as a usage error
-    // (exit 64) naming the file.
+    // or unreadable file throws a plain Error (exitCode 69, the network commands'
+    // default); init has no transport, so reclassify it as a usage error (exit
+    // 64) naming the file.
     if (err instanceof UsageError) throw err;
     throw new UsageError(
       `could not read input file ${input}: ` +

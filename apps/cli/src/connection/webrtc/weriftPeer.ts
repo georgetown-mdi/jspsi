@@ -33,21 +33,12 @@ import type {
  * Both derive the same pair of rendezvous ids from the shared secret
  * (`deriveRendezvousPeerId`), so neither has to be told the other's address.
  *
- * Three measured werift behaviours shape this module; the pin's premises and
- * their re-verification are in docs/spec/DEPENDENCY_PINS.md.
- *
- * - Candidates start firing DURING `setLocalDescription`, before the local
- *   description can have reached the broker, and a browser PeerJS peer discards
- *   a candidate it cannot yet apply -- silently, from the sender's side. So
- *   local candidates are queued until this side's description is sent. werift
- *   also inlines its candidates in the SDP, which masks the loss: a connection
- *   built without the queue works until the inlined set is not enough.
- * - A configured `iceServers` list REPLACES werift's built-in Google STUN
- *   default rather than adding to it, which is what makes a deliberately
- *   configured list the list actually used.
- * - The broker does not hold a message for a peer that has not registered yet
- *   and sends nothing back to say so, so the dialer's only route is to re-offer
- *   on a timer until it is answered.
+ * Three measured werift behaviours shape this module -- local candidates are
+ * queued until this side's description is sent to the broker, a configured
+ * `iceServers` list replaces rather than extends werift's built-in STUN
+ * default, and the broker drops an undeliverable offer silently, so the
+ * dialer re-offers on a timer -- each with its assumptions and
+ * re-verification in docs/spec/DEPENDENCY_PINS.md.
  */
 
 const log = getLogger("webrtc");
@@ -180,16 +171,10 @@ export interface WebRtcPeerSession {
  * the peer having it: `outboundQueue` holds chunks not yet transmitted, and
  * `sentQueue` holds chunks transmitted but not yet acknowledged. Both empty is
  * the only observable point at which tearing the connection down cannot lose
- * data.
- *
- * This reaches past werift's public API, which is why werift is exact-pinned
- * (docs/spec/DEPENDENCY_PINS.md). It is not a refinement of the channel's
- * `bufferedAmount`: that counter reaches zero while chunks are still
- * unacknowledged, and closing on it loses them -- measured at roughly one frame
- * in three, nine datagrams of sixty-two, on a loopback channel with no packet
- * loss at all. The premise is asserted at every session, so a werift release
- * that renames or restructures these fails loud rather than silently restoring
- * that data loss.
+ * data; the channel's own `bufferedAmount` is not a refinement of that and
+ * loses data if used instead. This reaches past werift's public API, which is
+ * why werift is exact-pinned -- the measurement behind it and its
+ * re-verification: docs/spec/DEPENDENCY_PINS.md.
  */
 interface SctpDrainInternals {
   sctp: { sctp: { outboundQueue: Array<unknown>; sentQueue: Array<unknown> } };
@@ -210,7 +195,7 @@ function sctpQueues(
 
 /**
  * Assert the SCTP queues {@link sctpOutboundAcknowledged} reads are present.
- * Encodes the dependency premise as a check rather than a comment: without
+ * Encodes the dependency assumption as a check rather than a comment: without
  * these the clean close has no acknowledgement to wait on, and a final frame is
  * lost silently. Called once the channel is open, where the association exists.
  *
@@ -238,7 +223,7 @@ export function assertSctpDrainSupported(peer: RTCPeerConnection): void {
  * open, not for the rest of the session, so `queues === undefined` here is
  * reachable -- chiefly once the association behind them has been torn down.
  * At that point there is no further acknowledgement this side could wait on
- * anyway, so `true` is the deliberate answer: the close's own liveness checks
+ * anyway, so `true` is the answer by design: the close's own liveness checks
  * (`channel.readyState`, `session.isConnected()` in `drainOutbound`) are what
  * decide when a torn-down peer stops being worth waiting for, not this
  * fallback.
@@ -343,26 +328,19 @@ const PATH_AUTHORITY_DELIMITERS = /[@?#\\]|\s/;
  * infers from the page it was served over and the CLI cannot -- see
  * {@link WebRTCServer.secure} for why an omitted value is TLS.
  *
- * It is also where `host` and `path` are refused for shape. Both routes to a
- * webrtc connection pass through here -- an operator's `psilink.yaml` and the
- * invitation endpoint an offline accept persists -- and on the second the two
- * fields are partner-supplied, bounded by the endpoint schema only in length.
- * The socket URL is built through the URL API downstream, which contains an
- * injected authority on its own, but a value that could move or reshape the
- * authority is a misconfiguration or an attack either way and is refused before
- * anything is dialed rather than quietly re-encoded. `key` needs no equivalent:
- * it cannot appear on an invitation endpoint (whose schema is a strict
- * host/port/path allowlist) and it is encoded as a query parameter.
+ * It is also where `host` and `path` are refused for shape, since both routes
+ * here -- an operator's `psilink.yaml` and the invitation endpoint an offline
+ * accept persists -- can hold a partner-supplied value; the refused
+ * characters and both routes are recorded in docs/spec/WEBRTC_TRANSPORT.md.
+ * `key` needs no equivalent refusal: it cannot appear on an invitation
+ * endpoint and is encoded as a query parameter.
  *
- * A location that resolves to plaintext warns rather than refuses, and warns
- * here because this is the one place the choice becomes a socket the run will
- * dial. The choice is the operator's own -- the invitation endpoint schema
- * carries no `secure`, so no partner-supplied content can select it -- and a
- * broker reached without a network in between is its legitimate use, so the run
- * proceeds past the line.
+ * A location that resolves to plaintext warns rather than refuses, here
+ * because this is the one place the choice becomes a socket the run will
+ * dial; what that discloses is recorded in docs/CLI.md.
  *
  * @throws {UsageError} if the configured port is not a dialable 1-65535 value,
- *   or if `host` or `path` carries a shape that could move the authority.
+ *   or if `host` or `path` has a shape that could move the authority.
  */
 export function brokerLocationFromConnection(
   server: WebRTCConnectionConfig["server"],
@@ -492,7 +470,7 @@ function adoptableConnectionId(offered: unknown): string | undefined {
   return offered;
 }
 
-/** The `{type, sdp}` a broker payload carries, if it carries one. */
+/** The `{type, sdp}` a broker payload holds, if it holds one. */
 function sessionDescriptionFrom(
   payload: unknown,
 ): { type: "offer" | "answer"; sdp: string } | undefined {
@@ -507,7 +485,7 @@ function sessionDescriptionFrom(
 
 /**
  * The plain object form of a locally-gathered candidate, as a `CANDIDATE`
- * payload carries it. werift's `RTCIceCandidate` is a class instance whose
+ * payload holds it. werift's `RTCIceCandidate` is a class instance whose
  * `toJSON` produces exactly the browser-shaped
  * `{candidate, sdpMid, sdpMLineIndex, usernameFragment}` a PeerJS peer expects,
  * so the conversion goes through it rather than reading the fields off the
@@ -520,7 +498,7 @@ function candidateToPayload(
   return { ...candidate.toJSON() };
 }
 
-/** The candidate object a CANDIDATE payload carries, if it carries one. */
+/** The candidate object a CANDIDATE payload holds, if it holds one. */
 function candidateFrom(payload: unknown): Record<string, unknown> | undefined {
   if (typeof payload !== "object" || payload === null) return undefined;
   const candidate = (payload as { candidate?: unknown }).candidate;
@@ -681,7 +659,7 @@ class Negotiation {
     const { peer, role, signal } = this.options;
 
     peer.onicecandidate = ({ candidate }) => {
-      // An end-of-candidates event carries no candidate and needs no frame: the
+      // An end-of-candidates event has no candidate and needs no frame: the
       // remote learns gathering is done from the description it already has.
       if (!candidate) return;
       this.emitLocalCandidate(candidateToPayload(candidate));
@@ -702,15 +680,13 @@ class Negotiation {
       this.settle = { resolve, reject };
       if (this.failure !== undefined) reject(this.failure);
     });
-    // Keep the rejection handled from the instant the promise exists, before the
-    // acceptor's `await this.offer()` below yields the turn. A broker socket
-    // drop, a terminal broker ERROR, a peer LEAVE, or connectionState "failed"
-    // in that window all latch a failure through fail(), which rejects `opened`
-    // while nothing is awaiting it yet -- an unhandled rejection, which
-    // terminates the process at exit 1 past runProtocol's catch, its cleanup,
-    // and any classified fd-3 error. This handler changes nothing else: the
-    // `await opened` below is still what surfaces the latched failure, and it
-    // reads an already-rejected promise on that path.
+    // Keep the rejection handled from the instant the promise exists, before
+    // the acceptor's `await this.offer()` below yields the turn: a failure
+    // latched through fail() in that window rejects `opened` while nothing is
+    // awaiting it yet, which would otherwise be an unhandled rejection that
+    // terminates the process. `await opened` below still exposes the latched
+    // failure -- this handler only keeps the interim rejection from going
+    // unhandled.
     opened.catch(() => {});
 
     if (role === "acceptor") {
@@ -770,7 +746,7 @@ class Negotiation {
     // peer, for the remaining lifetime of the session.
     if (this.finished || this.failure !== undefined) return;
     // Only the derived peer id is a legitimate source, and the honest broker
-    // always stamps `src` on a relayed frame, so a frame carrying none is not
+    // always stamps `src` on a relayed frame, so a frame holding none is not
     // peer traffic and is dropped. A third party would have to know an id
     // derived from the invitation secret to reach here at all, so this is depth
     // rather than the primary control -- but it means a stray, planted, or
@@ -909,7 +885,7 @@ class Negotiation {
     try {
       await this.options.peer.addIceCandidate(candidate);
     } catch {
-      // Deliberately silent: logging per candidate would let a peer that sprays
+      // Silent by design: logging per candidate would let a peer that sprays
       // malformed candidates drive the operator's console.
     }
   }
@@ -970,7 +946,7 @@ class Negotiation {
    * broker drops a message addressed to a peer that is not registered and says
    * nothing about it, so a dialer that offered before its partner arrived has no
    * signal to wait on -- only a repeat that lands once the partner is there. A
-   * repeat carries the same connection id, which a browser PeerJS peer that
+   * repeat has the same connection id, which a browser PeerJS peer that
    * already has the connection ignores.
    */
   private startOfferRetries(): void {
@@ -1062,15 +1038,14 @@ class Negotiation {
   }
 
   /**
-   * Start the ceiling on the channel opening, at whichever comes last of the
-   * channel existing and the peer's description being applied -- the point the
-   * ceiling's premise holds, that the peer is present and negotiating.
+   * Start the ceiling on the channel opening, once both the channel exists
+   * and the peer's description is applied -- the point at which the peer is
+   * known to be present and negotiating.
    *
-   * The dialer creates its channel before it has even offered, so arming there
-   * would spend a network-path ceiling waiting for a partner who has not
-   * started yet. That wait belongs to the far larger rendezvous budget, and
-   * ending it early would both cut the rendezvous short and blame a network
-   * path for an operator who is running late.
+   * The dialer creates its channel before it has even offered, so arming here
+   * instead would spend the network-path ceiling waiting for a partner who
+   * has not started yet; that wait belongs to the rendezvous budget, not
+   * this one.
    */
   private armChannelOpenDeadline(): void {
     if (this.finished || this.channelOpenTimer !== undefined) return;

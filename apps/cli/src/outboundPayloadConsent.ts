@@ -20,20 +20,15 @@ import {
 import { promptConfirm } from "./util/cli";
 
 /**
- * The heading the run-time outbound-consent surface leads with. It names what the
- * answer still decides -- nothing has been sent yet -- because that is what makes
- * answering it consequential rather than a notice after the fact.
- *
- * It is deliberately a claim about disclosure rather than about connection order:
- * where the question sits in a run is the calling command's to place, so what
- * this copy can promise wherever it is asked is the narrower fact that no
- * credential, terms, or data precede the answer.
+ * The heading the outbound-consent surface leads with. States only that no
+ * credential, terms, or data precede the answer -- not where in the run the
+ * question sits, which is the calling command's to place.
  */
 const OUTBOUND_CONSENT_HEADING =
   "Nothing is sent until you confirm what this exchange will send:";
 
 /**
- * The label the column list carries, spelled to match the acceptance display's
+ * The label the column list holds, spelled to match the acceptance display's
  * `columns you will send (enforced)` line: an operator confirming here is
  * answering for the same fact that display named, so it is named the same way.
  */
@@ -64,20 +59,12 @@ const OUTBOUND_CONSENT_QUESTION =
 
 /**
  * Render the set this run would transmit, and what changed about it, through
- * `emit`. Every column name is redacted and escaped at this sink: unlike the
- * names composed into {@link outboundPayloadConsentRefusal}'s message (an error,
- * escaped once where it is rendered), these reach the terminal as plain lines
- * with no error to carry them. They are this party's own CSV header, not
- * partner-controlled, but a header is untrusted enough to be worth neutralizing
- * before it addresses a terminal the next line asks a question on.
- *
- * Redacting at this composition rather than leaving it to the sinks is what
- * makes the two sinks agree: {@link consentSurfaceSink} sends a line to
- * `writePromptLine`, which runs no pass at all, wherever a prompt follows, and to
- * `log.info`, where core's prefixer strips key material per argument, wherever
- * the log is the one recording it. A name shaped like armor would otherwise read
- * as the replacement in the log and verbatim at the question it is answered
- * against.
+ * `emit`. Every column name is redacted and escaped here, at the composition
+ * site, not left to the two sinks {@link consentSurfaceSink} fans out to
+ * (`writePromptLine`, which runs no pass, and `log.info`, whose prefixer
+ * redacts independently) -- so both destinations render the same bytes.
+ * Rationale: docs/spec/CHANNEL_SECURITY.md, "Display sanitization escape
+ * format".
  */
 function displayOutboundColumns(
   emit: ConsentSurfaceSink,
@@ -109,43 +96,34 @@ function displayOutboundColumns(
 
 /**
  * Show and confirm the columns this run would send to the partner, before any
- * credential, terms, or data are sent, when the exchange carries an
- * outbound-payload consent record its current set does not satisfy.
+ * credential, terms, or data are sent, when the exchange has an
+ * outbound-payload consent record its current set does not satisfy. A no-op
+ * otherwise -- every non-acceptor, and an acceptor whose resolved set already
+ * matches what was confirmed. Record shapes and the safety check this
+ * confirmation runs ahead of: docs/spec/EXCHANGE_FILE.md, "Payload-disclosure
+ * consent".
  *
- * A no-op for every exchange with no consent record -- which is every party that
- * is not an acceptor -- and for one whose resolved set is exactly what was
- * confirmed. Where a confirmation IS owed, the outcome depends on whether anything
- * can answer:
+ * INTERACTIVE (`stdin` is a terminal): shows the set, asks, and on yes
+ * persists the confirmation to `configPath` and updates `spec` in place so
+ * `prepareForExchange`'s safety check sees the same answer. A no refuses;
+ * nothing is written or sent.
  *
- * - INTERACTIVE (standard input is a terminal): the set is shown and the question
- *   asked. A yes records the confirmation in the config -- so later runs are held
- *   to it and ask again if it changes -- and updates `spec` in place, so the
- *   fail-closed backstop in `prepareForExchange` reads the answer just given. A no
- *   refuses; nothing is written and nothing is sent.
- * - NON-INTERACTIVE (a cron run, a piped stdin, a `-` CSV that already claims it):
- *   nothing can answer a prompt, so this refuses with the shared refusal rather
- *   than reading end-of-file and treating that as a decline the operator never
- *   made. The refusal names the set and how to confirm it.
+ * NON-INTERACTIVE: refuses with the shared refusal rather than reading
+ * end-of-file as a decline nobody made. The interactivity test is strict
+ * (`isTTY === true`, matching `openInputSource`): a pipe, redirect, or
+ * `/dev/null` reports `isTTY` as `undefined`, never `false`, so the test
+ * cannot mistake one for an answerable terminal.
  *
- * The interactivity test is strict (`isTTY === true`), matching `openInputSource`:
- * `isTTY` is `undefined` rather than `false` for a pipe, a redirect, or
- * `/dev/null`, so a strict test can never mistake one of those for a terminal that
- * could answer.
+ * The set renders through {@link consentSurfaceSink}; see
+ * {@link displayOutboundColumns} for that sink's own constraint.
  *
- * The set is rendered through {@link consentSurfaceSink}, the same routing the
- * acceptance display uses: where a prompt follows, the columns go to the terminal
- * it asks on, plain and at every level, and the log keeps its own copy only where
- * that copy lands elsewhere -- so the columns cannot be routed to a `--log-file`
- * while the question is asked somewhere they are not.
- *
- * @throws {UsageError} when the confirmation is owed and cannot be given, or is
- *   declined (exit 64) -- a local configuration decision taken before any
- *   credential, terms, or data are sent, distinct from a transport failure.
+ * @throws {UsageError} when the confirmation is owed and cannot be given, or
+ *   is declined (exit 64).
  */
 export async function confirmOutboundPayloadConsent(params: {
   /**
    * The spec this run prepares from. Read for its consent record and UPDATED IN
-   * PLACE on a confirmation, so the prepare-time backstop sees the answer.
+   * PLACE on a confirmation, so the prepare-time safety check sees the answer.
    */
   spec: ExchangeDataSpec;
   /** The metadata this run resolved -- the source of what it would transmit. */

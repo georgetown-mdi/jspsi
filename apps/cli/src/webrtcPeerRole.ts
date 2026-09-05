@@ -5,23 +5,23 @@ import type {
 } from "@psilink/core";
 
 /**
- * Return `connection` carrying `role`, for the bootstrap commands to apply to
+ * Return `connection` holding `role`, for the bootstrap commands to apply to
  * every connection they run and persist -- `psilink invite` stamps `inviter`
  * and `psilink accept` stamps `acceptor`, decided by which command runs and
  * orthogonal to the PSI sender/receiver roles the linkage terms resolve.
  *
- * On the WebRTC channel the role is the label this party's deterministic
- * rendezvous peer id is derived from (`deriveRendezvousPeerId`), so the two
- * commands stamping complementary roles is what makes the derived ids a meeting
- * pair: the derivation stands in for an out-of-band address exchange, and the
+ * On the WebRTC channel `role` is the half of the rendezvous peer-id
+ * derivation the CLI supplies (see docs/spec/PROTOCOL.md,
+ * "WebRTC rendezvous peer-id derivation"): the two commands stamping
+ * complementary roles is what makes the derived ids a meeting pair, and the
  * persisted role is the only place a later run learns which side of it this
  * party is on.
  *
- * `role` is a WebRTC-only field (the sftp and filedrop connection schemas define
- * none), so a connection on any other channel is returned unchanged rather than
- * carrying a field its own schema would reject. The argument is never mutated: a
- * stamped WebRTC connection is a copy, and every other channel returns the
- * argument itself.
+ * `role` is a WebRTC-only field (the sftp and filedrop connection schemas
+ * define none), so a connection on any other channel is returned unchanged
+ * rather than holding a field its own schema would reject. The argument is
+ * never mutated: a stamped WebRTC connection is a copy; every other channel
+ * returns the argument itself.
  */
 export function withWebRTCPeerRole<Connection extends ConnectionConfig>(
   connection: Connection,

@@ -31,38 +31,25 @@ import {
   singleValue,
 } from "../util/cli";
 
-// `psilink fingerprint` is the front door to the signing identity. Generation is
-// LAZY and anchored here, not at exchange time: a party must display its
-// fingerprint to share it before any signed exchange (the partner pins it
-// out-of-band first), so the fingerprint command is the natural -- and earliest
-// -- point at which the identity must exist. Creating it here (rather than via a
-// separate keygen step) keeps the CLI surface minimal while respecting the
-// pin-first ordering. Creation is announced, never silent; regeneration is a
-// deliberate, gated action (`--force`) because it invalidates pins.
+// `psilink fingerprint` is the front door to the signing identity: generation
+// is lazy and anchored here, not at exchange time, since a party must display
+// its fingerprint to share it before any signed exchange. Creation is
+// announced, never silent; regeneration is a gated action (`--force`) because
+// it invalidates pins.
 //
-// Where the identity is kept is the OPERATOR's decision, never this command's:
-// the file is a credential, and a location psilink picked would be an ephemeral
-// container home (a fresh key and a fresh fingerprint every run) or a folder a
-// partner syncs into (the private key handed over) as easily as the right place.
-// So a run given no path refuses and says how to name one, rather than creating
-// the identity somewhere the operator did not choose.
+// Where the identity is kept is the OPERATOR's decision, never this
+// command's: the file is a credential, so a run given no path refuses and
+// says how to name one, rather than creating the identity somewhere the
+// operator did not choose.
 
 /**
  * What a run that names no identity path is told, in place of creating one.
  *
- * The guidance carries the whole remedy because a bare "name a path" invites a
- * throwaway location: this file is the only thing that keeps a pinned
- * fingerprint valid, and losing it costs a re-key coordinated with every
- * partner. So it states both spellings of the path, an example under a mount of
- * the identity's own, what the directory has to be (writable for this run,
- * read-only afterwards, durable, and never partner-synced), and the reuse case
- * that must not turn into a second identity.
- *
- * A single line, and one that ends in the message rather than in a probe: it
- * renders through the display-boundary sanitizer, which escapes a newline and
- * truncates past `COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH`, and psilink looks in no
- * location to tell the operator whether an earlier identity is there -- looking
- * is the behavior this refusal removes.
+ * A single line: it renders through the display-boundary sanitizer, which
+ * escapes a newline and truncates past `COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH`.
+ * Holds the whole remedy -- both spellings of the path, the directory's
+ * requirements, and the reuse-vs-new-identity guidance -- because psilink has
+ * no way to tell the operator whether an earlier identity exists elsewhere.
  */
 const NO_IDENTITY_PATH_REFUSAL =
   "no signing identity path is configured. Name the path and re-run -- " +
@@ -185,13 +172,13 @@ export function readConfigHints(
  * route into that field is bounded and refused a control character
  * ({@link TEXT_CONTROL_CHAR_PATTERN}); the console's fingerprint route applies
  * the same two rules at its own boundary. Unchecked here, the CLI would mint
- * certificates carrying labels the terms document itself refuses -- and this one
+ * certificates holding labels the terms document itself refuses -- and this one
  * is not a transient: it is bound into a long-lived certificate, read back and
  * DISPLAYED by whoever pinned the fingerprint, long after the run that chose it.
  *
  * Applied to the value actually being bound, whichever source supplied it, the
- * binding carried forward by a `--force` re-key included: what a new certificate
- * carries is what the check is about.
+ * binding continued by a `--force` re-key included: what a new certificate
+ * holds is what the check is about.
  *
  * Neither message echoes the label. The offending value is the operator's own
  * text and naming it back adds nothing to a rule about its shape, which is the
@@ -258,7 +245,7 @@ export async function resolveSigningIdentity(
   };
 
   // A file that exists but is unreadable (malformed/inconsistent) normally
-  // surfaces as an error. With --force the user has explicitly asked to
+  // shows up as an error. With --force the user has explicitly asked to
   // regenerate, so an unreadable existing file is treated as a file to replace
   // rather than a blocker -- this makes --force a genuine recovery path.
   let existing: SigningIdentity | undefined;
@@ -307,8 +294,8 @@ export async function resolveSigningIdentity(
 
   // A genuine first creation (no file on disk at all) is exclusive, so two
   // concurrent invocations cannot both generate and silently overwrite each
-  // other. A --force regenerate (over a valid OR an unreadable file) is a
-  // deliberate overwrite.
+  // other. A --force regenerate (over a valid OR an unreadable file) is an
+  // overwrite by design.
   if (existing === undefined && !replacingUnreadable) {
     // First-time creation is an atomic create-if-absent so two concurrent
     // first-time creators cannot both win. Under a race three things can happen:
@@ -372,7 +359,7 @@ function report(
   // The regeneration warning is a diagnostic, so it goes to stderr via log.warn
   // (not an ungated write): it obeys --log-level like every other warning, so a
   // re-key at --log-level error/silent shows only the new value with no warning.
-  // That is deliberate -- --force is itself the explicit destructive gesture, and
+  // This is by design -- --force is itself the explicit destructive gesture, and
   // the resolveSigningIdentity re-key/adopt warnings are likewise log.warn;
   // singling this one out as un-silenceable would be inconsistent, and an ungated
   // stderr write would also escape --log-file capture. The stdout-purity contract

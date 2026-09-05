@@ -6,8 +6,8 @@ import {
 import type { PreparedExchange } from "@psilink/core";
 
 /**
- * Surface the value-level constraint violations a prepared dataset's cleaned
- * values trip, as warn-not-enforce log lines on the CLI's exchange/prepare path.
+ * Report the value-level constraint violations a prepared dataset's cleaned
+ * values trip, as advisory log lines on the CLI's exchange/prepare path.
  *
  * The detection lives in `@psilink/core`'s
  * {@link summarizeDatasetConstraintViolations} -- the SAME per-value check the web

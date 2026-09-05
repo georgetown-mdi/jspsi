@@ -24,7 +24,7 @@ export const MOUNT_CHECK_IDS = [
   "rename_onto_existing",
 ] as const;
 
-/** Working names this battery creates and removes inside the mounted folder. */
+/** Working names the checks create and remove inside the mounted folder. */
 const WRITE_NAME = ".psilink-w.tmp";
 const WRITE_RENAMED_NAME = ".psilink-w2.tmp";
 const EXCLUSIVE_NAME = ".psilink-x.tmp";
@@ -32,7 +32,7 @@ const RENAME_SOURCE_NAME = ".psilink-a.tmp";
 const RENAME_TARGET_NAME = ".psilink-b.tmp";
 
 /**
- * The filesystem operations the battery performs, injectable so a share that
+ * The filesystem operations the checks perform, injectable so a share that
  * answers differently from the local disk -- one that does not refuse an
  * exclusive create, one that will not rename onto an existing file -- can be
  * exercised without one.
@@ -128,9 +128,9 @@ function markerCheck(
       `to tell the two apart, delete ${input.marker} from the drop folder ` +
         "and run this again: if it comes back, you have company.",
     );
-  // The mount check owns the marker's lifecycle: the probe deliberately leaves
-  // it, and this is where it is consumed. A mount that matches but refuses the
-  // delete still gets its verdict -- the write checks below own that diagnosis.
+  // The mount check owns the marker's lifecycle: the probe leaves it, and this
+  // is where it is consumed. A mount that matches but refuses the delete still
+  // gets its verdict -- the write checks below own that diagnosis.
   try {
     mountFs.remove(markerPath);
   } catch {
@@ -147,7 +147,7 @@ function markerCheck(
 }
 
 /**
- * Run the mount-semantics battery against an already-mounted directory and
+ * Run the mount-semantics checks against an already-mounted directory and
  * report a verdict. Every file it creates is removed before it returns.
  */
 export function runMountChecks(
@@ -158,9 +158,9 @@ export function runMountChecks(
   const checks: DoctorCheckRecord[] = [];
   const at = (name: string): string => path.join(directory, name);
 
-  // A working name the battery cannot clear -- usually a directory someone left
+  // A working name the checks cannot clear -- usually a directory someone left
   // in the shared drop folder, which best-effort remove() cannot take -- blocks
-  // that one check, never the battery: the verdict document comes back whatever
+  // that one check, never the checks: the verdict document comes back whatever
   // the folder holds.
   const clearName = (name: string): boolean => {
     try {

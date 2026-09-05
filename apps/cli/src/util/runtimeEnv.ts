@@ -21,7 +21,7 @@ export interface RuntimeEnvSnapshot {
   /**
    * The cgroup/OS memory limit in bytes from `process.constrainedMemory()`, or
    * `0` when undetermined. When the process is unconstrained this is a sentinel
-   * far larger than {@link hostMemBytes} (cgroup v2's "max" surfaces as
+   * far larger than {@link hostMemBytes} (cgroup v2's "max" is exposed as
    * UINT64_MAX, ~2^64), so a "real" container limit is only the case
    * `0 < constrainedMemBytes < hostMemBytes`.
    */
@@ -50,16 +50,14 @@ const gib = (bytes: number): string =>
 
 /**
  * Render a one-line runtime banner for the start of an exchange log: the Node
- * version and the memory ceilings the run operates under. It states observed
- * facts only -- it deliberately does NOT editorialize (e.g. warn when the V8 heap
- * limit exceeds a container limit), because this tool's real peak is well under a
- * gigabyte, so such a warning would cry wolf on every modestly-sized container.
- * A human reading a failed log connects the numbers; the line just makes sure the
- * numbers are present.
+ * version and the memory ceilings the run operates under. States observed
+ * facts only; it does not editorialize (e.g. warn when the V8 heap limit
+ * exceeds a container limit) -- a human reading a failed log connects the
+ * numbers.
  *
- * The container memory limit is appended only when a real, tighter cgroup limit
- * is detected (`0 < constrainedMemBytes < hostMemBytes`); the unconstrained
- * sentinel and the undetermined `0` both omit it.
+ * The container memory limit is appended only when a real, tighter cgroup
+ * limit is detected (`0 < constrainedMemBytes < hostMemBytes`); the
+ * unconstrained sentinel and the undetermined `0` both omit it.
  */
 export function formatRuntimeEnv(snapshot: RuntimeEnvSnapshot): string {
   const { nodeVersion, hostMemBytes, heapLimitBytes, constrainedMemBytes } =

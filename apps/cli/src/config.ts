@@ -57,15 +57,9 @@ export const DEFAULT_CONFIG_PATH = "./psilink.yaml";
 /**
  * The server/credential overrides {@link applyConnectionOverrides} writes into a
  * connection's `connection.server` block (host/port/credentials) and its
- * channel directory paths -- WHERE the rendezvous is and HOW to authenticate to
- * it. This is one half of the {@link ConnectionOverrides} seam, mirroring the
- * config schema's `server` + path fields as distinct from the tuning/toggle
- * {@link ConnectionOptionsOverrides} that land in `connection.options`.
- *
- * Named "server", not "locator": this set is credential-BEARING
- * (username/password/private-key), so it is deliberately NOT the credential-free
- * `ConnectionEndpoint` "locator" an invitation may carry -- the same "server"
- * label {@link OfflineIgnoredServerOverrides} uses for exactly this set.
+ * channel directory paths. Paired with the tuning/toggle
+ * {@link ConnectionOptionsOverrides}, which lands in `connection.options`,
+ * inside {@link ConnectionOverrides}.
  */
 export interface ConnectionServerOverrides {
   username?: string;
@@ -86,13 +80,9 @@ export interface ConnectionServerOverrides {
   /**
    * Pre-pinned SSH host-key fingerprint (OpenSSH SHA256 format), from
    * `--server-host-key-fingerprint`; already `@file`-resolved and
-   * format-validated by {@link hostKeyFingerprintFlag} before it reaches here.
-   * Overwrites any fingerprint already on the base config -- an explicit CLI
-   * pin is the operator's current word on the server's identity. Feeding it
-   * into `connection.server.hostKeyFingerprint` lets `establishHostKeyTrust`
-   * find a pin already set and skip the interactive prompt; the real connect
-   * then verifies it exactly as a stored pin, so a wrong value still fails
-   * closed. sftp-only.
+   * format-validated by {@link hostKeyFingerprintFlag}. Overwrites any
+   * fingerprint already on the base config. A wrong value still fails closed
+   * at the real connect. sftp-only.
    */
   hostKeyFingerprint?: string;
   port?: number;
@@ -109,17 +99,12 @@ export interface ConnectionServerOverrides {
 
 /**
  * The tuning/toggle overrides {@link applyConnectionOverrides} writes into a
- * connection's `connection.options` block: the SharedOptions timeouts/reconnect
- * bound applied on every channel (`connectionTimeout`, `peerTimeout`,
- * `maxReconnectAttempts`) and the FileSyncOptions poll interval / toggles gated
- * to the file-sync channels (`pollIntervalMs`, `locklessRendezvous`, `peerId`,
- * `retainFiles`, `timestampInFilename`). `connectionTimeout`/`peerTimeout` are in
- * seconds here and the apply step scales them to the schema's milliseconds;
- * `pollIntervalMs` is already in milliseconds (the poll interval is sub-second
- * capable, so it is not routed through a lossy seconds scale) and is applied
- * verbatim. This is the `connection.options` half of the
- * {@link ConnectionOverrides} seam, as distinct from the server/credential
- * {@link ConnectionServerOverrides}.
+ * connection's `connection.options` block: SharedOptions timeouts/reconnect
+ * bounds on every channel, and FileSyncOptions poll interval/toggles gated to
+ * `sftp`/`filedrop`. `connectionTimeout`/`peerTimeout` are in seconds here and
+ * scaled to the schema's milliseconds; `pollIntervalMs` is already in
+ * milliseconds and applied verbatim. Paired with
+ * {@link ConnectionServerOverrides} inside {@link ConnectionOverrides}.
  */
 export interface ConnectionOptionsOverrides {
   connectionTimeout?: number;
@@ -145,12 +130,12 @@ export interface ConnectionOptionsOverrides {
 }
 
 /**
- * CLI overrides applied to a base connection by {@link applyConnectionOverrides},
- * split along the same seam the config schema keeps: the server/credential set
- * (plus directory paths) that lands in `connection.server`
- * ({@link ConnectionServerOverrides}), and the tuning/toggle set that lands in
- * `connection.options` ({@link ConnectionOptionsOverrides}). Each sub-group is
- * optional and itself sparse; an absent group (or field) applies no override.
+ * CLI overrides applied to a base connection by {@link applyConnectionOverrides}:
+ * the server/credential set (plus directory paths) that lands in
+ * `connection.server` ({@link ConnectionServerOverrides}), and the tuning/toggle
+ * set that lands in `connection.options` ({@link ConnectionOptionsOverrides}).
+ * Each sub-group is optional and itself sparse; an absent group or field applies
+ * no override.
  */
 export interface ConnectionOverrides {
   server?: ConnectionServerOverrides;
@@ -162,9 +147,7 @@ export function applyConnectionOverrides(
   overrides: ConnectionOverrides,
 ): ConnectionConfig {
   const result = structuredClone(connection);
-  // The override seam: the server/credential sub-group feeds connection.server
-  // and the directory paths; the options sub-group feeds connection.options.
-  // Default each to empty so an absent group simply applies nothing.
+  // Default each sub-group to empty so an absent group applies no override.
   const { server: serverOverrides = {}, options: optionsOverrides = {} } =
     overrides;
 
@@ -192,12 +175,9 @@ export function applyConnectionOverrides(
     if (serverOverrides.keyboardInteractive !== undefined)
       server.keyboardInteractive = serverOverrides.keyboardInteractive;
     if (serverOverrides.hostKeyFingerprint !== undefined) {
-      // A pre-pin overwrites any fingerprint already on the base config, list or
-      // scalar: an explicit CLI pin is the operator's current word on the
-      // server's identity, superseding whatever the config carried. The value
-      // has already been @file-resolved and format-validated at the CLI parse
-      // boundary (hostKeyFingerprintFlag), so it can be assigned as-is here; the
-      // re-validation below re-checks it as part of the whole connection anyway.
+      // Already @file-resolved and format-validated at the CLI parse boundary
+      // (hostKeyFingerprintFlag), so it can be assigned as-is; the
+      // re-validation below re-checks it as part of the whole connection.
       server.hostKeyFingerprint = serverOverrides.hostKeyFingerprint;
       serverModified = true;
     }
@@ -206,12 +186,10 @@ export function applyConnectionOverrides(
       serverModified = true;
     }
 
-    // A passphrase decrypts an encrypted private key and is meaningless without
-    // one. Reject it up front with a flag-named message rather than deferring to
-    // the core schema's config-field wording (its "privateKeyPassphrase is only
-    // valid with privateKey" refine, which this mirrors). The private key may
-    // arrive from --server-private-key (applied just above) or already sit in the
-    // loaded config; either satisfies the precondition.
+    // A passphrase decrypts an encrypted private key and is meaningless
+    // without one; reject it up front with a flag-named message rather than
+    // the core schema's generic one. The key may come from
+    // --server-private-key or the loaded config.
     if (
       server.privateKeyPassphrase !== undefined &&
       server.privateKey === undefined
@@ -222,13 +200,11 @@ export function applyConnectionOverrides(
           "encrypted private key and has no effect without one.",
       );
 
-    // keyboard-interactive answers the server's prompts with the password, so it
-    // is meaningless without one. Reject it up front with a flag-named message
-    // rather than deferring to the core schema's config-field wording (its
-    // "keyboard_interactive requires password" refine, which this mirrors), since
-    // the override is applied after the config was parsed and would otherwise not
-    // be re-validated. The password may arrive from --server-password (applied
-    // just above) or already sit in the loaded config.
+    // keyboard-interactive answers the server's prompts with the password, so
+    // it is meaningless without one; reject it up front with a flag-named
+    // message, since the override is applied after the config was parsed and
+    // would otherwise go unchecked. The password may come from
+    // --server-password or the loaded config.
     if (server.keyboardInteractive === true && server.password === undefined)
       throw new UsageError(
         "--server-keyboard-interactive requires --server-password (or a " +
@@ -263,12 +239,10 @@ export function applyConnectionOverrides(
     optionsModified = true;
   }
 
-  // pollIntervalMs, locklessRendezvous, peerId, retainFiles, and
-  // timestampInFilename are FileSyncOptions fields; only apply them on channels
-  // that use FileSyncConnection. The other overrides above (peerTimeout etc.) are
-  // SharedOptions that apply to all channels including webrtc. pollIntervalMs is
-  // applied verbatim -- it is already in milliseconds (see
-  // ConnectionOptionsOverrides), unlike the seconds-scaled timeout fields.
+  // These are FileSyncOptions fields, applied only on channels that use
+  // FileSyncConnection; the overrides above are SharedOptions, applying to
+  // every channel including webrtc. pollIntervalMs is applied verbatim -- it
+  // is already in milliseconds, unlike the seconds-scaled timeout fields.
   if (
     (result.channel === "sftp" || result.channel === "filedrop") &&
     (optionsOverrides.pollIntervalMs !== undefined ||
@@ -301,7 +275,7 @@ export function applyConnectionOverrides(
 
   // connectionPerPoll is SFTP-only: the ephemeral-session mode dials a real SFTP
   // socket, which filedrop's connectionless client lacks. Apply it only on sftp,
-  // so a filedrop config never carries an inert setting; on filedrop it is dropped
+  // so a filedrop config never holds an inert setting; on filedrop it is dropped
   // and warnUnsupportedFileSyncFlags reports it ignored. Unlike the file-sync
   // block above (which spans sftp and filedrop), this is gated to sftp alone.
   if (
@@ -316,20 +290,11 @@ export function applyConnectionOverrides(
   }
 
   // Re-validate the merged options through FileSyncOptionsSchema once, whenever
-  // any override touched them -- a SharedOptions/timeout field or a
-  // FileSyncOptions field. A single validation point keeps the schema the sole
-  // source of truth for every floor (peerTimeoutMs/serverConnectTimeoutMs
-  // positivity, peer_id min length and its timestamp_in_filename dependency,
-  // reserved values, the retain_files implications) and removes the asymmetry
-  // where the timeout merge above would otherwise trust its inputs while the
-  // FileSync merge re-parsed: neither block can now bypass a floor the schema
-  // enforces, regardless of which override path reached the value.
-  //
-  // FileSyncOptionsSchema is a safe superset for validating a webrtc
-  // SharedOptions object: each of its FileSyncOptions-only refines is guarded
-  // by that field's own presence, so none can fire on options that carry none
-  // of those fields, and the shared floors are checked identically on every
-  // channel.
+  // any override touched them, so no override path can bypass a floor the
+  // schema enforces (timeout positivity, peer_id constraints, retain_files
+  // implications). FileSyncOptionsSchema also safely validates a webrtc
+  // SharedOptions object: each FileSyncOptions-only refine is guarded by that
+  // field's own presence.
   if (optionsModified) {
     const validation = safeParseFileSyncOptions(result.options);
     if (!validation.success) {
@@ -342,13 +307,10 @@ export function applyConnectionOverrides(
     }
   }
 
-  // --outbound-path: split the single shared directory into a separate inbound
-  // (peer-written) and outbound (self-written) directory. The path source -- the
-  // server URL/positional for the URL-driven commands, or the loaded config for
-  // `exchange` -- supplies the inbound directory; this override supplies the
-  // outbound. Applied here, the single chokepoint every bootstrap command routes
-  // its connection through, so the four commands share one mapping rather than
-  // re-deriving it per command. Only the file-sync channels carry a directory.
+  // --outbound-path splits the single shared directory into separate inbound
+  // (peer-written) and outbound (self-written) directories. Applied here, the
+  // one chokepoint every bootstrap command routes its connection through.
+  // Only the file-sync channels have a directory.
   if (serverOverrides.outboundPath !== undefined) {
     if (result.channel === "sftp") {
       const { server } = result;
@@ -365,19 +327,17 @@ export function applyConnectionOverrides(
       serverModified = true;
     } else {
       // webrtc has no directory, so the flag is meaningless there: refuse it
-      // with a cause naming the channels that do carry one, rather than
+      // with a cause naming the channels that do have one, rather than
       // silently dropping it the way the channel-gated overrides above are.
       throw new UsageError(
         "--outbound-path is only supported on the sftp and filedrop channels",
       );
     }
 
-    // Retain mode is a hard precondition for a split directory. Fail fast with a
-    // CLI-oriented message naming the flag, rather than letting the core schema
-    // below reject it with its config-field message. retain_files is the merged
-    // value: --retain-files (applied above) or, for `exchange`, the loaded
-    // config. The else branch above threw for webrtc, so result is a file-sync
-    // channel here; the channel test re-narrows for the options read.
+    // Retain mode is a hard precondition for a split directory; fail fast with
+    // a flag-named message rather than the core schema's generic one. The
+    // else branch above threw for webrtc, so result is a file-sync channel
+    // here; the channel test re-narrows for the options read.
     if (
       (result.channel === "sftp" || result.channel === "filedrop") &&
       result.options?.retainFiles !== true
@@ -389,18 +349,12 @@ export function applyConnectionOverrides(
       );
   }
 
-  // Re-validate the merged connection through the core schema once, whenever an
-  // override touched result.server or its directory paths -- a credential, the
-  // port, or the outbound-path split. This is the connection-wide counterpart to
-  // the options re-validation above: it runs on every path that can introduce an
-  // invalid value (not only the --outbound-path branch), so an out-of-range
-  // --server-port is caught here regardless of which other overrides accompany
-  // it. The remaining outbound-path-specific rejections -- an inbound equal to
-  // the outbound, a relative or unset filedrop path, the pair-set-together rule
-  // -- surface from the same call with the same messages and rules the live
-  // connection enforces, rather than being re-implemented here. The literal
-  // `@path` credential refs a connection may still carry validate cleanly as
-  // strings (resolved later, at live use).
+  // Re-validate the merged connection through the core schema once, whenever
+  // an override touched result.server or its directory paths, so every path
+  // that can introduce an invalid value is caught here. The
+  // outbound-path-specific rejections come from the same call with the same
+  // messages the live connection enforces. A literal `@path` credential ref
+  // validates cleanly as a string (resolved later, at live use).
   if (serverModified) {
     const connValidation = safeParseConnectionConfig(result);
     if (!connValidation.success)
@@ -413,14 +367,13 @@ export function applyConnectionOverrides(
 }
 
 /**
- * Logs a one-time reminder, on the file-sync channels only, that retain mode is
- * a bilateral agreement with no negotiation: this party has it enabled (with the
- * `lockless_rendezvous` and `timestamp_in_filename` it implies), and the peer
- * must set all three identically. A `retain_files` or `lockless_rendezvous`
- * mismatch is detected at rendezvous and fails fast on both sides with a clear
- * error naming each side's setting (`timestamp_in_filename` is not advertised,
- * but it cannot diverge independently of `retain_files`). Shared by the
- * `exchange` and `zero-setup` commands so the wording cannot drift between them.
+ * Logs a one-time reminder, on the file-sync channels only, that retain mode
+ * is a bilateral agreement with no negotiation: this party has it enabled
+ * (with the `lockless_rendezvous` and `timestamp_in_filename` it implies),
+ * and the peer must set all three identically. A `retain_files` or
+ * `lockless_rendezvous` mismatch fails fast at rendezvous on both sides;
+ * `timestamp_in_filename` is not advertised but cannot diverge on its own.
+ * Shared by `exchange` and `zero-setup` so the wording cannot drift.
  */
 export function announceRetainMode(
   connection: ConnectionConfig,
@@ -440,12 +393,10 @@ export function announceRetainMode(
 
 /**
  * Validates the CLI-only entry-sweep flags. `--force-retain-sweep` is an
- * escalation of `--sweep-exchange-files`, never a standalone control: passing it
- * on its own is a {@link UsageError} (CLI exit 64) so it cannot be left set as a
- * permanent "always force" habit. Whether retain is actually "in play" is a
- * runtime property of the directory (the PEER may be the retain party), so it is
- * NOT checked here -- the connection's pre-sweep inspection enforces that. Shared
- * by the `exchange` and `zero-setup` commands so the rule cannot drift.
+ * escalation of `--sweep-exchange-files`, never standalone: passing it alone
+ * is a {@link UsageError} (exit 64). Whether retain is actually in play is a
+ * runtime property of the directory, checked instead by the connection's
+ * pre-sweep inspection. Shared by `exchange` and `zero-setup`.
  */
 export function assertRetainSweepGuard(
   sweepExchangeFiles: boolean,
@@ -477,13 +428,9 @@ export interface ReconcileDiff {
   /**
    * Rendering of the value in the pre-existing config; `(unset)` when absent.
    *
-   * A fragment rather than a `string`, so a value somebody else chose cannot be
-   * interpolated into a conflict line without passing the delimiting seam
-   * ({@link reconcileDiffValue} and the renderers beside it, over core's
-   * `quoteTermsValue`). Both sides carry chosen bytes -- the invitation's on the
-   * incoming side, and on the existing side too wherever an earlier acceptance
-   * adopted the inviter's terms into the kept config -- so neither side is
-   * exempt. See {@link formatReconcileDiffs} for what the brand does not cover.
+   * A fragment rather than a `string`, so a value cannot be interpolated into
+   * a conflict line without passing through {@link reconcileDiffValue} (or a
+   * renderer beside it) first.
    */
   existing: CompatibilityMessageFragment;
   /** Rendering of the value the invitation or URL requires. */
@@ -491,12 +438,11 @@ export interface ReconcileDiff {
   /**
    * How each side is fitted where the line's slot cannot hold it whole.
    *
-   * Absent where a side is ONE delimited run, which has nothing inside it to
-   * partition: the slot's clip degrades that run and takes nothing else with it.
-   * Supplied where a side is a CLAUSE -- several chosen values inside
-   * first-party structure -- so the slot's share is divided among those values
-   * rather than spent left to right on the first of them, which would delete the
-   * structure standing behind it (see {@link reconcileClause}).
+   * Absent when a side is one delimited run: the slot's clip degrades that
+   * run directly. Supplied when a side is a CLAUSE -- several values inside
+   * first-party structure -- so the slot's share divides among those values
+   * instead of being spent left to right on the first of them (see
+   * {@link reconcileClause}).
    */
   fit?: ReconcileDiffFit;
 }
@@ -504,7 +450,7 @@ export interface ReconcileDiff {
 /**
  * The two sides of one conflict line as claims on the block's budget.
  *
- * Carried BESIDE the sides rather than in place of them, and produced by the one
+ * Held BESIDE the sides rather than in place of them, and produced by the one
  * composition that produced those sides ({@link reconcileClause}), so a fitted
  * side cannot describe a different clause than the unfitted one it replaces.
  */
@@ -527,7 +473,7 @@ export interface ReconcileSideFit {
   /** Rendered cost of this side whole, which is all it can ever spend. */
   need: number;
   /**
-   * Least this side can be given and still read as what it is. A side given
+   * Least this side can be given and still display as what it is. A side given
    * less than the smaller of this and its `need` is not fitted at all: its LINE
    * names its field and drops both values, which costs the operator less than a
    * clause cut back to punctuation and truncation markers.
@@ -541,37 +487,15 @@ export interface ReconcileSideFit {
 export const RECONCILE_UNSET = compatibilityMessage`(unset)`;
 
 /**
- * One value somebody else chose, TREATED for a reconcile conflict line: redacted
- * as private-key material, then rendered as one delimited run through core's
- * terms-value seam.
- *
- * Redaction comes first because the display boundary's private-key rule is
- * fail-closed past a `BEGIN` marker carrying no `END` -- it replaces from the
- * marker to the end of the cause-chain link -- and the whole reconcile refusal
- * is one link, so a marker planted in a linkage-field name would otherwise
- * consume every conflict line composed behind it. Redacting where the value is
- * interpolated bounds that rule to the fragment that carried the marker (see
- * {@link redactPrivateKeyMaterial}).
- *
- * Delimiting answers the other half, which redaction and the display escape both
- * pass over: a conflict line is first-party prose an operator reads as psilink's
- * own -- `linkage_keys: existing X vs required Y` -- and a value of
- * `A vs required B` is printable ASCII throughout, so nothing at the display
- * boundary rewrites it. The seam's doubling grammar makes a value unable to
- * terminate its own run, so it reads as content rather than as structure the
- * refusal asserted.
- *
- * The seam's control-character treatment answers the same half one level up,
- * where this block's structure is a `\n` rather than a printable connective: the
- * whole refusal is escaped as ONE link, so the block's own line breaks reach the
- * operator as the escape's `\xHH` and a value's own would reach them as the same
- * token. Treated, that token is the composition's alone (see
- * {@link replaceControlCharactersForDisplay}).
- *
- * None of the three passes is escaping: the run's bytes stay raw for the single
- * escape the display sink applies (CONTRIBUTING.md, Operator-facing escaping),
- * and the seam emits only printable ASCII, which that escape passes through
- * unchanged.
+ * One value somebody else chose, treated for a reconcile conflict line:
+ * redacted as private-key material, then delimited as one run through core's
+ * terms-value grammar. Redaction runs on the individual value, before
+ * composition: the display boundary's private-key rule is fail-closed from a
+ * `BEGIN` marker to the end of the whole composed link, so redacting only the
+ * final message would let one marker consume every line behind it. Delimiting
+ * keeps a value from forging the line's own structure or line breaks; neither
+ * pass is the display escape itself, which the sink still applies once where
+ * the message is shown.
  */
 export function reconcileDiffValue(
   value: string,
@@ -582,7 +506,7 @@ export function reconcileDiffValue(
 /**
  * The same treatment for a value the linkage-terms schema constrains to a shape
  * no clause boundary is made of -- a semver string, an ISO date -- which core's
- * checked bare form renders undelimited so the common line reads as prose. The
+ * checked bare form renders undelimited so the common line displays as prose. The
  * check runs on the value in hand, so a value that does not meet the shape falls
  * back to the delimited form rather than being trusted for its field's sake.
  */
@@ -595,40 +519,24 @@ const DISPLAY_TRUNCATION_MARKER_COST = renderedDisplayCost(
 );
 
 /**
- * The delimiter core's seam wraps a terms value in and doubles inside one, read
- * off the seam rather than restated, so the fit below cannot drift from the
- * grammar it has to preserve.
+ * The delimiter core's terms-value grammar wraps a value in and doubles
+ * inside one, read off that grammar rather than restated, so the fit below
+ * cannot drift from it.
  */
 const TERMS_VALUE_DELIMITER = quoteTermsValue("")[0];
 
 const TERMS_VALUE_DELIMITER_COST = renderedDisplayCost(TERMS_VALUE_DELIMITER);
 
 /**
- * Fit a composed conflict-line fragment to `budget`, cutting the VALUE inside a
- * delimited run rather than the run's rendering: the cut never falls between the
- * two characters of a doubled delimiter, and a cut that lands inside a run
- * delimits what it kept -- truncation marker inside -- rather than leaving the
- * run open.
- *
- * This is the treatment's own order (redact, clip, delimit) carried to where the
- * composition happens, and it is what keeps the seam's guarantee over a fitted
- * line: the run structure an operator reads is the structure this module
- * composed, at any budget and for any value width. Core's
- * {@link clipToRenderedCost} cuts the rendered form instead, so a value the
- * partner sized to land the cut mid-run leaves that run open and everything
- * composed after it on the line -- the clause's next value, the other side of
- * the line -- reads at the opposite run parity from the one it was composed at.
- *
- * The doubling is why the clip cannot simply be moved ahead of the delimiting: a
- * raw prefix measured against the budget renders WIDER once its delimiters are
- * doubled back in. Charging each doubled pair as it is kept is that same clip,
- * costed at what the run renders to.
- *
- * The seam's control-character markers are the other unit a cut may not fall
- * inside, and they are backed off out of the kept prefix
- * ({@link trimPartialControlCharacterMarker}) before the marker and any closing
- * delimiter are appended -- so the budget bounds this rather than being met by
- * it, and the run the walk above ended in is still the run this closes.
+ * Fit a composed conflict-line fragment to `budget`, cutting the VALUE inside
+ * a delimited run rather than the run's rendering: a cut never falls between
+ * the two characters of a doubled delimiter, and a cut inside a run closes it
+ * (truncation marker, then delimiter) rather than leaving it open. Unlike
+ * core's {@link clipToRenderedCost}, which cuts the rendered form and can
+ * leave a run open mid-cut, misreading everything composed after it at the
+ * wrong run parity. A partial control-character marker is trimmed off the
+ * kept prefix ({@link trimPartialControlCharacterMarker}) before the closing
+ * marker and delimiter are appended.
  */
 function fitToRenderedCostClosingRuns(text: string, budget: number): string {
   if (renderedDisplayCost(text) <= budget) return text;
@@ -659,42 +567,29 @@ function fitToRenderedCostClosingRuns(text: string, budget: number): string {
 }
 
 /**
- * Least a conflict line may spend on ONE of its two values while still showing
- * any of that value's own bytes.
- *
- * A fitted value pays for its delimiters and, when the fit cuts it, for the
- * truncation marker, so below this a side renders as punctuation and a marker
- * with nothing of the value left inside. A line whose sides cannot both be given
- * this much is named without its values instead ({@link formatReconcileDiffs}),
- * which is the honest reading of "there is no room for this line's values" and
- * costs the operator less than a marker.
+ * Least a conflict line may spend on ONE of its two values while still
+ * showing any of that value's own bytes. A fitted value pays for its
+ * delimiters and, when cut, the truncation marker; below this floor a side
+ * renders as punctuation and a marker with nothing of the value inside. A
+ * line whose sides cannot both reach this is named without its values
+ * instead ({@link formatReconcileDiffs}).
  */
 const RECONCILE_MIN_VALUE_BUDGET = 32;
 
 /**
- * The same floor for ONE value inside a clause, which pays for the marker out of
- * its own share the way a whole side does.
- *
- * Sized off the marker rather than restated, because what makes a share useless
- * is that the marker consumes it: at or below the marker's cost a clipped value
- * renders as a run with nothing of its own inside, so a clause given the count
- * of its values times this floor still shows some of every value's own bytes.
- * Smaller than the whole-side floor above, since a clause fits several values
- * into a slot sized for one side and the alternative is dropping the line's
- * values entirely.
+ * The same floor for ONE value inside a clause. Sized off the truncation
+ * marker's own cost: at or below it a clipped value renders as a run with
+ * nothing of its own inside. Smaller than the whole-side floor above, since a
+ * clause fits several values into a slot sized for one side.
  */
 const RECONCILE_MIN_CLAUSE_VALUE_BUDGET = DISPLAY_TRUNCATION_MARKER_COST + 8;
 
 /**
- * Divide `budget` among claims of the given `needs`, need-aware: a claim takes
- * only what it needs, and what it leaves is available to the claims that exceed
- * an equal share, so a constraint falls only on the claims too wide for the room
- * -- never on a claim that was already going to fit.
- *
- * Serving the claims in ascending order is what settles that in one pass: every
- * claim still unserved is at least as wide as the one being served, so an equal
- * share of what remains is the most the current claim can take without stranding
- * one behind it, and a claim narrower than that share hands the difference on.
+ * Divide `budget` among claims of the given `needs`, need-aware: a claim
+ * takes only what it needs, and what it leaves is available to claims that
+ * exceed an equal share, so the constraint falls only on claims too wide for
+ * the room. Serving claims in ascending order decides this in one pass:
+ * every claim still unserved is at least as wide as the one being served.
  */
 function allocateByNeed(needs: readonly number[], budget: number): number[] {
   const shares = needs.map(() => 0);
@@ -705,12 +600,10 @@ function allocateByNeed(needs: readonly number[], budget: number): number[] {
   for (let served = 0; served < ascending.length; served += 1) {
     const share = Math.floor(remaining / (ascending.length - served));
     if (needs[ascending[served]] > share) {
-      // Every claim still unserved is at least this wide, so they are all
-      // constrained and all take the same share. What the division leaves over
-      // goes unspent rather than to whichever claim happened to be served last:
-      // two claims of equal need are two claims that fit alike, and a line whose
-      // two sides differ by the odd character left over is a line whose sides
-      // were cut at different points for no reason the operator can see.
+      // Every claim still unserved is at least this wide, so they all take the
+      // same share; what the division leaves over goes unspent rather than to
+      // whichever claim was served last, so two claims of equal need render
+      // alike.
       for (let rest = served; rest < ascending.length; rest += 1)
         shares[ascending[rest]] = share;
       break;
@@ -731,32 +624,15 @@ export interface ReconcileClause extends ReconcileSideFit {
 }
 
 /**
- * Compose a conflict line's side as a tagged template, keeping the values apart
- * from the first-party spans around them so a slot too small for the whole
- * clause can be divided among the VALUES.
- *
- * This is the provenance partition {@link formatReconcileDiffs} applies between
- * lines, carried one level down into a line: the clause's own spans are
- * first-party copy, measured where they stand, and what the slot leaves is
- * shared out among the values it names by the same need-aware rule the block
- * applies between sides, so a version of five characters cannot hold a quarter
- * of the slot away from the name beside it. Clipping the composed clause instead
- * spends the slot left to right, so the first value takes all of it and the
- * connective, the values behind it, and the clause's second half are deleted -- a
- * partner-chosen set name at the schema's length would leave the operator a
- * citation with no version, no `over`, and no field set on either side.
- * Sub-partitioned, degradation happens INSIDE a value: at any share the clause
- * still reads as a name, a version, the connective, and the other half, however
- * little of each survives.
- *
- * A share too small for its value degrades that value's own bytes and nothing
- * around them: the fit cuts inside the run and delimits what it kept
- * ({@link fitToRenderedCostClosingRuns}), so no cut can leave a run open for the
- * clause's next value -- or for the other side of the line -- to be read inside.
- * The fitted form is a plain string rather than a fragment because it is
- * composed by concatenation rather than through core's tagged template; what
- * holds the run structure over it is a check on the rendered lines
- * (`apps/cli/test/unit/config.test.ts`).
+ * Compose a conflict line's side as a tagged template, keeping the values
+ * apart from the first-party spans around them so a slot too small for the
+ * whole clause is divided among the VALUES, not spent left to right (which
+ * would delete the connective and everything behind the first value). A
+ * share too small for its value degrades only that value's own bytes: the
+ * fit cuts inside the run and delimits what it kept
+ * ({@link fitToRenderedCostClosingRuns}). The fitted form is a plain string,
+ * not a fragment, since it is composed by concatenation; a test over the
+ * rendered lines holds the run structure instead (config.test.ts).
  */
 export function reconcileClause(
   fixedSpans: TemplateStringsArray,
@@ -783,11 +659,10 @@ export function reconcileClause(
         composed +=
           fitToRenderedCostClosingRuns(values[index], shares[index]) +
           fixedSpans[index + 1];
-      // A share below what the marker and the run's own delimiters cost leaves
-      // a clipped value wider than its share, so the composed clause is held to
-      // the slot it was given rather than to the sum of the parts it fitted. The
-      // block's floor keeps a fitted line off that shape; this is the backstop
-      // under a budget reached some other way.
+      // A share below what the marker and delimiters cost leaves a clipped
+      // value wider than its share, so the composed clause is held to the
+      // slot it was given. This is a fallback for a budget reached some other
+      // way; the block's own floor keeps a fitted line off that shape.
       return fitToRenderedCostClosingRuns(composed, budget);
     },
   };
@@ -811,7 +686,7 @@ export function reconcileValueClause(value: string): ReconcileClause {
 
 /**
  * The side of a conflict on an OPTIONAL block that names no chosen value at all,
- * as a clause -- so a line whose other side is one can carry a fit for both of
+ * as a clause -- so a line whose other side is one can hold a fit for both of
  * its sides. Nothing here to sub-partition: the placeholder is first-party copy,
  * so it asks for exactly its own width and is held to the slot it was given.
  */
@@ -843,33 +718,19 @@ export function reconcileClauseConflict(
 }
 
 /**
- * Recursively drop every key whose value is `undefined` from a JSON-like value,
- * preserving the rest of its structure. An explicit `undefined` (which an
- * in-process object built by spread may carry, unlike a Zod-parsed one where
- * absent optionals are simply omitted) is treated as absent rather than handed
- * to {@link canonicalString}, which rejects it. Two values that differ only in
- * an absent vs explicitly-`undefined` optional therefore compare equal, matching
- * how the schema treats them.
+ * Recursively drop every key whose value is `undefined` from a JSON-like
+ * value, preserving the rest of its structure, so an absent key and an
+ * explicitly-`undefined` one compare equal to {@link canonicalString} (which
+ * rejects `undefined`). Strings pass through untouched, normalization form
+ * included, since the compare this feeds is byte-exact (see
+ * {@link diffLinkageTerms}).
  *
- * Strings are carried through untouched, normalization form included: the
- * equality this feeds is byte-exact, because that is the predicate core holds
- * the same values to (see {@link diffLinkageTerms}).
- *
- * `depth` bounds the native recursion at the same {@link MAX_NESTING_DEPTH} the
- * camelize chokepoint applies on every linkage-terms parse path. Both sides
- * reach this walk already depth-bounded: the invitation decode path normalizes
- * `transform.params` through the bounded `camelizeKeys` chokepoint (core's
- * invitation decode pre-pass), so a partner-controlled one-key-per-level
- * `params` is rejected at decode before it could reach here, and the
- * existing-config side is bounded the same way at load. This guard is the
- * reconcile walk's own backstop, kept because the walk is an independent
- * recursion that must not rely on every caller having pre-bounded its input: an
- * unguarded deep value would overflow it with a `RangeError` the command
- * boundary maps to a generic internal-error exit (69), whereas rejecting at 256
- * yields a clean, terminal {@link NestingDepthExceededError} (a `UsageError`, CLI
- * exit 64) long before the overflow, with headroom far above any real config (the
- * deepest schema path is under a dozen levels, and `params` legitimately holds
- * shallow scalars). See docs/spec/CHANNEL_SECURITY.md.
+ * `depth` bounds the native recursion at {@link MAX_NESTING_DEPTH}. Both
+ * sides reach this walk already depth-bounded upstream, but this is the
+ * walk's own check: an unguarded deep value overflows with an uncaught
+ * `RangeError` instead of the clean {@link NestingDepthExceededError}
+ * (`UsageError`, exit 64) this raises well ahead of the real limit. See
+ * docs/spec/CHANNEL_SECURITY.md.
  */
 function withoutUndefinedDeep(value: unknown, depth = 0): unknown {
   if (depth >= MAX_NESTING_DEPTH) throw new NestingDepthExceededError();
@@ -886,16 +747,13 @@ function withoutUndefinedDeep(value: unknown, depth = 0): unknown {
 
 /**
  * Canonical (RFC 8785) encoding of a value for the reconcile's structural
- * equality check, byte-exact over the strings inside it. The canonical encoder
- * sorts object keys, so property-insertion order does not affect the result;
- * array order is preserved, so the caller pre-sorts any list whose order is not
- * significant.
+ * equality check, byte-exact over the strings inside it. Object keys are
+ * sorted; array order is preserved, so the caller pre-sorts any list whose
+ * order is not significant.
  *
- * No key-casing fold is applied: `transform.params` keys (the only ones whose
- * form could vary) are normalized to camelCase upstream on every parse path that
- * produces these terms -- the existing config at load, and the invitation's
- * adopted terms at decode (core's invitation decode pre-pass) -- so both sides
- * reach this compare in the one camelCase form.
+ * No key-casing fold is applied: `transform.params` keys are normalized to
+ * camelCase upstream on every parse path that produces these terms, so both
+ * sides reach this compare already in that form.
  */
 function reconcileCanonical(value: unknown): string {
   return canonicalString(withoutUndefinedDeep(value));
@@ -903,12 +761,9 @@ function reconcileCanonical(value: unknown): string {
 
 /**
  * Render the identifiers of a list of named entries (linkage fields/keys,
- * payload columns) for a diff line, in the order given.
- *
- * Each name is delimited on its own rather than the joined list being delimited
- * once, so the rendered list shows the same partition the byte-exact,
- * element-wise comparison used to decide the conflict: one entry named `a,b`
- * renders as one run where two entries named `a` and `b` render as two.
+ * payload columns) for a diff line, in the order given. Each name is
+ * delimited on its own rather than the joined list once, so `a,b` as one
+ * entry renders differently from `a` and `b` as two.
  */
 function renderNames(
   list: ReadonlyArray<{ name: string }>,
@@ -919,19 +774,14 @@ function renderNames(
 }
 
 /**
- * When the two rendered sides of a diff come out identical despite a canonical
- * difference -- a name-only rendering of values that share every name but differ
- * in a sub-field (a linkage field/key's type/constraints/`swap`, a payload
- * column's description) -- fall back to the full JSON of each value, so the
- * conflict message shows what actually differs instead of two identical-looking
- * summaries. The JSON is of whatever the caller hands it, not the form the
- * comparison encoded, so the user sees the stored values to edit.
- *
- * The fallback's JSON carries the same chosen bytes the name-only rendering
- * withheld, so it takes the same treatment ({@link reconcileDiffValue}) -- over the
- * serialized text rather than value by value, which reaches a name nested
- * anywhere inside the structure. Rendering it raw here would put back on the
- * message the marker and the clause forgery the summary form took out of it.
+ * When the two rendered sides of a diff come out identical despite a
+ * canonical difference -- e.g. values sharing every name but differing in a
+ * sub-field -- fall back to the full JSON of each value, so the conflict
+ * message shows what actually differs. The JSON is of whatever the caller
+ * hands it, not the form the comparison encoded, so the user sees the stored
+ * values to edit. It takes the same treatment as the summary form
+ * ({@link reconcileDiffValue}), over the serialized text rather than value by
+ * value.
  */
 function disambiguate(
   existingRendered: CompatibilityMessageFragment,
@@ -968,20 +818,14 @@ function renderStructural(
 }
 
 /**
- * Render a rule-set citation for a diff line, keys first -- the order core's own
- * mismatch message and the drift warning both render the pair in, and built from
- * the same seam, so the two accounts of one citation cannot drift apart on how a
- * name is delimited. Unescaped, unlike {@link describeRuleSetCitation}, whose
- * sink is a `log.warn`: a diff line is composed into a {@link UsageError} and
- * escaped once where it is shown.
- *
- * All four values stand in ONE clause rather than two halves composed together,
- * because the sub-partition the fit runs is over the values a clause names
- * ({@link reconcileClause}): as two nested halves the outer clause would divide
- * its slot between the halves and each half would then divide again, giving the
- * name and the version of each side a quarter of the slot the same way, but only
- * after two rounds of the marker's own cost. One clause of four values is the
- * same share arithmetic charged once.
+ * Render a rule-set citation for a diff line, keys first -- the order core's
+ * own mismatch message and the drift warning both use, so the two accounts
+ * of one citation cannot drift apart on how a name is delimited. Unescaped,
+ * unlike {@link describeRuleSetCitation}: a diff line is composed into a
+ * {@link UsageError} and escaped once where it is shown. All four values
+ * stand in ONE clause rather than two nested halves, so the
+ * {@link reconcileClause} sub-partition runs once rather than dividing a
+ * quarter share twice over.
  */
 function renderRuleSetCitation(
   reference: LinkageRuleSetReference,
@@ -992,14 +836,11 @@ function renderRuleSetCitation(
 /**
  * The two sides of a `linkage_rule_set` conflict, each as its clause.
  *
- * No full-detail fallback beside it, unlike the structural lists: the clause is
- * built from delimited runs and a checked bare form, which no two different
- * citations can spell alike, so two clauses that read the same are two citations
- * whose difference redaction took out -- and the full detail of those same
- * values, redacted the same way, would read alike too. The pair that reaches
- * that state is reported by {@link formatReconcileDiffs}, which is where the fit
- * that can also collapse a pair happens; this renderer is deliberately not a
- * second place that decides it.
+ * No full-detail fallback beside it, unlike the structural lists: the clause
+ * is built from delimited runs and a checked bare form, which no two
+ * different citations can spell alike, so two clauses that read the same are
+ * citations whose difference redaction took out. {@link formatReconcileDiffs}
+ * is where a pair that reads alike is reported.
  */
 function renderRuleSetCitationConflict(
   existing: LinkageRuleSetReference,
@@ -1012,65 +853,28 @@ function renderRuleSetCitationConflict(
 }
 
 /**
- * Compare a pre-existing config's linkage terms against the terms an acceptance
- * would adopt from the invitation, returning the mandatory disagreements that
- * must abort the acceptance and the soft mismatches that only warn.
+ * Compare a pre-existing config's linkage terms against the terms an
+ * acceptance would adopt from the invitation, returning the mandatory
+ * disagreements that must abort the acceptance and the soft mismatches that
+ * only warn.
  *
- * This is an equality check ("do these describe the same exchange agreement?"),
- * NOT the cross-party {@link validateCompatibility} (which checks that two
- * different parties' terms work together). Reusing the existing config must not
- * silently change what was agreed, so the agreement-defining fields -- version,
- * algorithm, the linkage strategy, linkage fields and keys, the rule-set
- * citation (where both sides declare one), legal agreement, and payload -- must
- * match.
+ * This is an equality check ("do these describe the same exchange
+ * agreement?"), not the cross-party {@link validateCompatibility} (which
+ * checks that two different parties' terms work together). The
+ * agreement-defining fields -- version, algorithm, linkage strategy, linkage
+ * fields and keys, the rule-set citation (where both sides declare one),
+ * legal agreement, and payload -- must match; per-party fields (`identity`,
+ * `output`, `deduplicate`) are excluded, since each party legitimately holds
+ * its own value. `date` is soft, matching `validateCompatibility`.
  *
- * The per-party fields are excluded, because each party legitimately holds its
- * own value (per the LinkageTerms consistency model): `identity` (the holding
- * party's name), `output` (an each-party preference the protocol checks as a
- * complementary *mirror*, not an equality, in `validateCompatibility` -- so two
- * compatible parties have unequal output blocks), and `deduplicate` (a per-party
- * flag with no cross-party check at all). Comparing any of these by equality
- * against the invitation's copy -- which carries the *inviter's* per-party
- * choices -- would falsely reject a valid existing config; genuine output
- * incompatibility is caught against the live partner at exchange time. `date` is
- * soft (a mismatch warns rather than aborts, matching `validateCompatibility`).
- * Ordering follows what each structural field's own order means: linkage fields
- * are pre-sorted by name on both sides (their array order is not significant),
- * linkage keys are compared in place (their order is).
- *
- * The rule-set citation is compared ONLY where both sides declare one, which is
- * `validateCompatibility`'s rule for it rather than a second one invented here:
- * a side declaring none is not held to the other's citation, so a kept config
- * citing nothing against an invitation that cites (or the reverse) reconciles
- * cleanly. Where both cite, a difference is a conflict on the same footing as
- * the other agreement-defining fields -- the exchange would otherwise abort
- * mid-run on `validateCompatibility`'s "linkage rule set mismatch", after the
- * reconcile had reported the config as matching.
- *
- * Every value compared here is compared BYTE-EXACT, by canonical form or (for a
- * schema-constrained scalar) by string equality, because that is the predicate
- * `validateCompatibility` applies to the same values: core holds linkage fields,
- * linkage keys, and the citation to `canonicalString` equality and the legal
- * agreement and payload column names to string equality, so a pair differing
- * only in Unicode normalization form is a mismatch on every one of them.
- * Folding two such values together here would report the reuse clean and then
- * abort every run mid-exchange on it, with the partner keeping the invitation's
- * spelling. Reported at accept instead, the operator can still settle the
- * spelling with the inviting party, or accept onto a fresh config. Matching the
- * gate (both sides declare a citation) without matching the predicate would
- * leave that gap open on the field the gate was written for.
- *
- * On the PAYLOAD alone this compare is STRICTER than core, which reads only the
- * column names its send/receive mirror cross-checks: a column's `description`
- * takes part in the whole-object compare here and is never read there. On the
- * legal agreement the two are EQUALLY strict -- the object is compared whole
- * here, and `validateCompatibility` cross-checks each of its fields, a parity
- * `test/unit/config.test.ts` holds field by field rather than leaving to this
- * sentence. The extra strictness on the payload answers the question this
- * compare asks, which is whether the document being reused is the one the
- * acceptance adopts; in that direction it only refuses a reuse the operator can
- * still make onto a fresh config, and it cannot pass terms the exchange would
- * then refuse.
+ * Every value is compared BYTE-EXACT (canonical form, or string equality for
+ * a schema-constrained scalar), matching the predicate `validateCompatibility`
+ * applies to the same values -- so a pair differing only in Unicode
+ * normalization is a mismatch here too, reported at accept rather than
+ * aborting mid-exchange later. On the payload this compare is stricter than
+ * core (a column's `description` takes part here; core cross-checks only
+ * names), an asymmetry that only refuses a reuse the operator can still make
+ * onto a fresh config.
  */
 export function diffLinkageTerms(
   existing: LinkageTerms,
@@ -1086,26 +890,15 @@ export function diffLinkageTerms(
     conflicts.push({ field, existing: a, incoming: b });
   };
 
-  // canonicalString rejects values it cannot encode -- e.g. an integer outside
-  // the JSON-safe range in a transform param, which the `z.unknown()` params
-  // record lets through. Wrap the canonical comparison (mirroring core's
-  // validateCompatibility, which wraps the same primitive) so such a value does
-  // not abort the reconcile with a raw encoding error -- which would otherwise
-  // reject even two IDENTICAL configs. When a side cannot be encoded the equality
-  // cannot be decided here, so warn and do not treat it as a conflict: the
-  // cross-party validateCompatibility re-checks compatibility at exchange setup
-  // and surfaces an un-encodable value as a hard error there, so reuse stays
-  // backstopped.
+  // canonicalString rejects a value it cannot encode (e.g. an integer outside
+  // the JSON-safe range in a transform param). Wrapped so an un-encodable
+  // value warns rather than aborting the reconcile on two otherwise-identical
+  // configs; validateCompatibility re-checks compatibility at exchange setup
+  // and reports it there as a hard error.
   //
-  // Only CanonicalEncodingError is softened to a warning. The undefined-pruning
-  // walk's own depth guard can also throw NestingDepthExceededError, and that is
-  // deliberately left to propagate as the terminal exit-64 usage error established
-  // for a pathological token -- a too-deep structure is rejected, not
-  // reconciled-and-deferred the way an un-encodable value is. Both sides are
-  // depth-bounded upstream (the invitation's params at decode, the config at
-  // load), so this backstop is not normally reachable; it stays because
-  // withoutUndefinedDeep is an independent recursion that must not depend on its
-  // callers (see withoutUndefinedDeep).
+  // Only CanonicalEncodingError is softened. NestingDepthExceededError from
+  // withoutUndefinedDeep's own depth guard is left to propagate as the
+  // terminal usage error for a pathological token, not reconciled-and-deferred.
   const canonicalDiffers = (a: unknown, b: unknown, label: string): boolean => {
     let ca: string;
     let cb: string;
@@ -1126,15 +919,10 @@ export function diffLinkageTerms(
     return ca !== cb;
   };
 
-  // version, algorithm, and linkageStrategy are compared by string equality
-  // rather than through the canonical encoder used below. All three are
-  // schema-constrained scalars -- version to a semver string
-  // (/^\d+\.\d+\.\d+$/), algorithm to a fixed enum ("psi" | "psi-c"), and
-  // linkageStrategy to a fixed enum ("cascade" | "single-pass") -- so the
-  // encoding of each is the string itself, and this is the byte-exact equality
-  // core's validateCompatibility compares them by. (Semver range matching, as
-  // opposed to exact equality, is a cross-cutting concern that belongs in core's
-  // validateCompatibility, which also compares version exactly.)
+  // version, algorithm, and linkageStrategy compare by string equality, not
+  // the canonical encoder below: all three are schema-constrained scalars
+  // (semver, and two fixed enums), so each one's encoding is the string
+  // itself -- the same byte-exact equality validateCompatibility uses.
   if (existing.version !== incoming.version)
     add(
       "version",
@@ -1147,16 +935,11 @@ export function diffLinkageTerms(
       reconcileDiffValue(existing.algorithm),
       reconcileDiffValue(incoming.algorithm),
     );
-  // linkageStrategy is mandatory-consistency exactly like algorithm (core's
-  // validateCompatibility aborts on a mismatch), so a reused config whose strategy
-  // differs from the invitation's is a conflict, not a silent reuse: without this
-  // the reconcile would report "matches" and keep a config whose linkage_strategy
-  // differs from the one the acceptor was shown on the consent prompt, so the
-  // later `psilink exchange` could run a strategy -- and a disclosure tradeoff --
-  // the operator never consented to (it would abort against the live partner, but
-  // only after the false "matches" assurance). Surfaced as a `single-pass`
-  // disclosure surface, so the reused config and the consented strategy stay
-  // identical.
+  // linkageStrategy is mandatory-consistency like algorithm
+  // (validateCompatibility aborts on a mismatch): without this check a reused
+  // config could silently diverge from the strategy the acceptor consented
+  // to, and the later exchange would abort against the partner only after a
+  // false "matches" assurance here.
   if (existing.linkageStrategy !== incoming.linkageStrategy)
     add(
       "linkage_strategy",
@@ -1164,12 +947,10 @@ export function diffLinkageTerms(
       reconcileDiffValue(incoming.linkageStrategy),
     );
 
-  // Sort linkage fields by name (their order is not significant) before the
-  // canonical compare; compare linkage keys in place (their order is). The
-  // comparator is core's own -- the raw name, ordered by UTF-16 code unit, not
-  // localeCompare -- so the two sides reach the byte-exact compare below in the
-  // order validateCompatibility would put them in, and a field set that agrees
-  // there agrees here rather than differing over which side sorted how.
+  // Sort linkage fields by name (order not significant) before comparing;
+  // compare linkage keys in place (order is significant). The comparator is
+  // core's own -- raw name, UTF-16 code unit order, not localeCompare -- so
+  // both sides reach the compare in the order validateCompatibility uses.
   const byName = (a: { name: string }, b: { name: string }): number =>
     a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
   const existingFields = [...existing.linkageFields].sort(byName);
@@ -1207,13 +988,9 @@ export function diffLinkageTerms(
   }
 
   // The reference is partner-chosen free text and the expiration date is
-  // schema-constrained, so each takes the form its own shape earns rather than
-  // the pair being delimited once: a reference reading `X (expires 2030-01-01)`
-  // cannot then be mistaken for the clause this line composes around it. Two
-  // values inside first-party copy is a clause, so the slot divides between them
-  // (reconcileClause): a reference at the schema's length degrades itself rather
-  // than deleting the expiry -- which is both the half the two sides may be
-  // differing in and the half an operator can check against their own copy.
+  // schema-constrained, so each takes the form its own shape earns, as a
+  // clause: a slot too small divides between the two values rather than
+  // deleting the expiry.
   const renderAgreement = (
     la: LinkageTerms["legalAgreement"],
   ): ReconcileClause =>
@@ -1267,21 +1044,12 @@ export function diffLinkageTerms(
 }
 
 /**
- * What the operator's own configuration path may render to at the head of the
- * reconciliation refusal.
- *
- * The path is the operator's own -- a `--config-file` value or the built-in
- * default -- so this is not an adversary's budget; it is the second half of a
- * partition BY PROVENANCE, which is what keeps one chooser from spending
- * another's room. Nothing bounds the path's length, and it is composed ahead of
- * everything else in the message, so leaving it unfitted would let a long path
- * (or a path whose bytes escape wide at the display boundary) crowd out the
- * conflict detail and the recovery step behind it.
- *
- * Sized well above any path a real run carries and below what would leave the
- * diff block without room; a longer one is clipped rather than dropped, since a
- * path an operator can still recognize the tail of is worth more here than the
- * few characters the clip saves.
+ * What the operator's own configuration path may render to at the head of
+ * the reconciliation refusal. Fitted so a long path (or one whose bytes
+ * escape wide at the display boundary) cannot crowd out the conflict detail
+ * and recovery step behind it. Sized well above any real path and below what
+ * would leave the diff block without room; a longer path is clipped rather
+ * than dropped.
  */
 const RECONCILE_CONFIG_PATH_BUDGET = 128;
 
@@ -1293,31 +1061,23 @@ const RECONCILE_LINE_INCOMING = " vs required ";
 
 /**
  * Explains a line whose two sides read alike -- what a pair differing only
- * inside redacted or clipped bytes comes to -- once for the block rather than
- * once per line.
- *
- * Both sides are still shown as they fitted, rather than the second being
- * replaced by fixed text saying it matched the first: what the two sides DO
- * share is the operator's whole reading of a value the display cannot show them,
- * and a standin deletes it from the side that could have carried it. Its cost is
- * taken out of the block's budget before the values are re-fitted against it, so
- * saying this never costs the line that needed it.
+ * inside redacted or clipped bytes comes to -- once for the block rather
+ * than once per line. Both sides are still shown as they fitted rather than
+ * a standin replacing the second, since that would delete the operator's own
+ * reading of a value the display cannot show. Its cost comes out of the
+ * block's budget before the values are re-fitted, so this note never costs
+ * the line that needed it.
  */
 const RECONCILE_WITHHELD_NOTE =
   "  (two sides that read alike differ only inside what this display withheld: " +
   "bytes redacted as private-key material, or clipped for length)";
 
 /**
- * Explains a line the block named without its values, so a bare field name does
- * not read as a field with nothing to say about it -- beside lines that carry
- * both their values, or as the whole block when the room reaches no line's.
- *
- * States the reason a line came to that, which is why it is one notice rather
- * than one per shape: what the block ran out of is room against the WIDTH the
- * values asked for, whether that was one wide line among short ones or a field
- * list long enough to leave nothing for any of them. Truncation eats conflict
- * detail here, which is the whole point of composing the recovery step ahead of
- * this block (see {@link reconcileConflictMessage}).
+ * Explains a line the block named without its values, so a bare field name
+ * does not look as though nothing differs -- beside lines holding both
+ * their values, or as the whole block when no line got room. Truncation
+ * eats conflict detail here, which is why the recovery step is composed
+ * ahead of this block (see {@link reconcileConflictMessage}).
  */
 const RECONCILE_NAMED_ONLY_NOTE =
   "  (a field named above without its values has values too wide for the room " +
@@ -1333,59 +1093,29 @@ const RECONCILE_NOTICE_RESERVE_CEILING = renderedDisplayCost(
 
 /**
  * Render a list of {@link ReconcileDiff} as an indented, human-readable block
- * for a reconciliation error message, fitted so its rendered cost at the display
- * boundary is at most `budget`.
+ * for a reconciliation error message, fitted so its rendered cost at the
+ * display boundary is at most `budget`.
  *
- * Both sides of every line carry bytes somebody else chose -- the invitation's
- * linkage field and key names, its rule-set citation and legal-agreement
- * reference, and (for an online split accept) the inviter's own
- * `inbound_path`/`outbound_path` from the connection endpoint -- and each has
- * already been redacted and delimited by the producer that composed it
- * ({@link reconcileDiffValue}). They are interpolated RAW: the display boundary
- * escapes the whole message once where it is shown. That is also why the `\n`
- * this block separates its lines with is structure only the block can place --
- * the escape renders it and a value's own line break alike, and the treatment at
- * the seam is what leaves the rendered token unshared.
+ * Both sides of every line hold bytes somebody else chose, already redacted
+ * and delimited by the producer that composed it ({@link reconcileDiffValue}).
+ * They are interpolated RAW: the display boundary escapes the whole message
+ * once where it is shown, including the block's own `\n` line breaks.
  *
- * What this adds is the LENGTH half. The schema bounds those values by code
- * point, which is not a display bound -- one code point escapes to as many as
- * ten characters -- and it bounds a name list at 256 entries, so a single
- * conflict line can render past the whole budget the renderer gives the one link
- * this message is. The budget is therefore shared out, and shared out by NEED:
- * every line is charged the first-party skeleton it is named by, each side is
- * measured at what it would actually render to, and what a short value does not
- * take is available to the long value beside it. A constraint then falls only on
- * the sides too wide for the room -- eight ordinary disagreements are eight
- * lines carrying both their values, however many of them there are, because
- * counting them was never what decided it. A slot whose side is a clause of
- * several values shares its slot out among those values by the same rule
- * ({@link reconcileClause}), so what a slot too small to hold everything
- * degrades is a value rather than the clause structure standing behind it.
+ * The budget is shared out by NEED, not by count: every line is charged its
+ * first-party skeleton, each side is measured at what it would actually
+ * render to, and what a short value does not take is available to a longer
+ * one beside it -- so a constraint falls only on the sides too wide for the
+ * room. A clause side sub-partitions its own slot among its values the same
+ * way ({@link reconcileClause}). A side that cannot be given the least it
+ * can display as drops both of that LINE's values, naming only the field,
+ * with a first-party notice under the block explaining why.
  *
- * Where a side cannot be given the least it can read as -- a delimited run
- * showing some of its own bytes, or a clause showing some of every value it
- * names inside its own connectives -- that LINE names its field and drops both
- * values, and a first-party notice under the block says so. Degrading the line
- * whole is what keeps the alternative off the message: a clause cut back to a
- * column of truncation markers, or to a name with the connective and the second
- * half deleted behind it. Every disagreeing field is named whatever becomes of
- * its values, because a field an operator is never told about is a difference
- * they cannot go and resolve.
- *
- * The cut lands wherever `budget` falls, and where that is inside a delimited
- * run it cuts the value and delimits what it kept, marker inside
- * ({@link fitToRenderedCostClosingRuns}). So the runs a fitted line shows are
- * the runs this composition placed, at every budget and every value width: a
- * value cannot be sized to land the cut where its own bytes would take over the
- * closing of a run, and nothing composed after a cut value -- the clause's next
- * value, the other side of the line -- can be read at a run parity it was not
- * composed at. That is held by a check over the rendered lines rather than by
- * this paragraph (`apps/cli/test/unit/config.test.ts`).
- *
- * One property is recorded rather than closed: the marker is plain ASCII the
- * escape passes through, and it stands inside the cut value's own run, which is
- * where a value spelling its text would put it -- so a value can claim a cut
- * that did not happen. What an operator can rely on is the marker's ABSENCE.
+ * A cut always lands inside a delimited run closed properly (marker inside,
+ * per {@link fitToRenderedCostClosingRuns}), which a check over the rendered
+ * lines holds (`apps/cli/test/unit/config.test.ts`) rather than this comment.
+ * The one property recorded rather than closed: the marker is plain ASCII a
+ * value could also spell, so a value can claim a cut that did not happen --
+ * what an operator can rely on is the marker's ABSENCE.
  *
  * @internal exported for testing; `reconcileConflictMessage` is the caller.
  */
@@ -1398,14 +1128,14 @@ export function formatReconcileDiffs(
   const nameOnly = (d: ReconcileDiff): string =>
     `${RECONCILE_LINE_PREFIX}${d.field}`;
   // Charged with the line break that follows it, which the display escape widens
-  // like any other control character rather than carrying at its own width. Its
+  // like any other control character rather than keeping its own width. Its
   // field name is what a line costs even after its values are dropped, so it is
   // taken off the top rather than shared out.
   const nameCost = diffs.reduce(
     (total, d) => total + renderedDisplayCost(`${nameOnly(d)}\n`),
     0,
   );
-  // What a line pays on top of its name for carrying values at all.
+  // What a line pays on top of its name for holding values at all.
   const valueSkeletonCost = renderedDisplayCost(
     `${RECONCILE_LINE_EXISTING}${RECONCILE_LINE_INCOMING}`,
   );
@@ -1439,8 +1169,8 @@ export function formatReconcileDiffs(
   const layOut = (reserved: number): { block: string; noticeCost: number } => {
     const pool = budget - reserved - nameCost;
     // Cheapest first, which shows values on as many lines as the room admits;
-    // ascending order also means the first line that does not fit settles every
-    // line behind it, each of which asks for at least as much.
+    // ascending order also means the first line that does not fit decides
+    // every line behind it, each of which asks for at least as much.
     const shown = new Set<number>();
     let claimed = 0;
     for (const index of lines
@@ -1496,12 +1226,10 @@ export function formatReconcileDiffs(
     };
   };
 
-  // A notice's own cost comes out of the values' share rather than out of the
-  // budget the layout already spent, so the explanation cannot be what pushes
-  // the block past its bound. Which notices a layout needs is only known once it
-  // is laid out, so a layout needing more than it reserved is laid out again
-  // under what it needed; the last reservation is the most any layout can need,
-  // which is what settles this rather than a further pass.
+  // A notice's own cost comes out of the values' share rather than the budget
+  // already spent, so the explanation cannot push the block past its bound.
+  // Which notices are needed is only known once laid out, so a layout
+  // needing more than it reserved is laid out again under what it needed.
   let reserved = 0;
   let attempt = layOut(reserved);
   if (attempt.noticeCost > reserved) {
@@ -1510,47 +1238,32 @@ export function formatReconcileDiffs(
   }
   if (attempt.noticeCost > reserved)
     attempt = layOut(RECONCILE_NOTICE_RESERVE_CEILING);
-  // The arithmetic above holds the block inside `budget` for every shape reached
-  // today, which a test pins by asserting no line of a worst-case message is
-  // cut. This is the backstop under it: a producer that adds a wider first-party
-  // skeleton, or a field-name list past what the notices can absorb, is bounded
-  // here rather than silently spending the recovery step's room.
+  // The arithmetic above holds the block inside `budget` for every shape
+  // reached today, pinned by a test asserting no line of a worst-case
+  // message is cut. This is the fallback under it: a wider first-party
+  // skeleton or field-name list is bounded here rather than silently
+  // spending the recovery step's room.
   return fitToRenderedCostClosingRuns(attempt.block, budget);
 }
 
 /**
  * The refusal `psilink accept` raises when a pre-existing configuration
  * disagrees with the invitation (and, online, the connection URL): what
- * disagreed, and what the operator does about it, composed to one display link.
+ * disagreed, and what the operator does about it, composed to one display
+ * link.
  *
- * The recovery step is composed AHEAD of the diff block, and this is the whole
- * reason the composition lives here rather than at the throw site. The display
- * boundary caps a link at {@link COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH} and drops
- * the tail, so whatever is last is what a cut deletes -- and the step the
- * operator has to act on is the one part of this message they cannot reconstruct
- * from their own config. Putting the conflict detail last makes truncation eat
- * detail, which they can go and read in the two documents themselves.
+ * The recovery step is composed AHEAD of the diff block: the display
+ * boundary caps a link and drops the tail, and the recovery step is the one
+ * part the operator cannot reconstruct from their own config, so truncation
+ * should eat conflict detail instead.
  *
- * The budget is then partitioned by WHO CHOSE THE BYTES, the discipline the SFTP
- * host-key refusals apply for the same reason: first-party copy is measured
- * where it stands, the operator's own configuration path is fitted to
- * {@link RECONCILE_CONFIG_PATH_BUDGET}, and the diff block is handed exactly
- * what remains ({@link formatReconcileDiffs}), inside which each chooser's
- * values get an equal share. So no chooser can spend a budget that is not their
- * own, and the fixed copy's own fit is held by measurement -- pinned by a test
- * that fails if this message's copy grows past what the cap admits.
- *
- * `against` and `retryWith` are the caller's first-party copy naming what the
- * configuration was compared against and how to retry; they are measured here
- * rather than assumed, so the block's share follows the wording rather than a
- * restatement of it.
- *
- * The path takes the block's per-value treatments in the block's own order --
- * redacted, then its control characters replaced, then fitted -- though it is the
- * operator's own value rather than a chooser this message defends against. The
- * uniformity is the point: "this fragment is the operator's, so it may keep a
- * line break" is a premise about provenance that no check holds and a later
- * caller silently breaks, and treating it costs a path that has none nothing.
+ * The budget is partitioned by WHO CHOSE THE BYTES: first-party copy is
+ * measured where it stands, the operator's own configuration path is fitted
+ * to {@link RECONCILE_CONFIG_PATH_BUDGET}, and the diff block gets exactly
+ * what remains ({@link formatReconcileDiffs}). The path takes the same
+ * redact/replace/fit treatment as a chooser's value even though it is the
+ * operator's own, so no later caller can assume a fragment is exempt from
+ * that treatment because of its provenance.
  */
 export function reconcileConflictMessage(params: {
   configPath: string;
@@ -1584,20 +1297,18 @@ export function reconcileConflictMessage(params: {
 // --- Config writer -----------------------------------------------------------
 
 /**
- * Serialize an {@link ExchangeSpec} and write it to `configPath` as snake_case
- * YAML, owner-read-only -- a config may carry an SFTP credential: a literal
- * `server.password`/`server.privateKey` is a secret at rest, while an `@path`-
- * supplied one is preserved as the reference, not inlined. Either way it gets the
- * same `0600` / ACL protection as the key file via {@link writeFileOwnerOnly}.
+ * Serialize an {@link ExchangeSpec} and write it to `configPath` as
+ * snake_case YAML, owner-read-only -- a config may hold an SFTP credential.
+ * Gets the same `0600`/ACL protection as the key file via
+ * {@link writeFileOwnerOnly}.
  *
- * The shared secret and its expiration live only in the key file and never belong
- * in the config; they are stripped from the top-level `authentication` block here
- * even if a caller leaves them populated, so the secret cannot be duplicated onto
- * disk (and cannot go stale after token rotation). The caller's spec is not
- * mutated.
+ * The shared secret and its expiration live only in the key file: they are
+ * stripped from the top-level `authentication` block here even if the
+ * caller left them populated, so the secret cannot be duplicated onto disk.
+ * The caller's spec is not mutated.
  *
- * Does not guard against overwriting an existing file; callers provision through
- * `provisionConfigAndKey`, which runs the conflict gate first.
+ * Does not guard against overwriting an existing file; callers provision
+ * through `provisionConfigAndKey`, which runs the conflict gate first.
  */
 export function saveConfig(configPath: string, spec: ExchangeSpec): void {
   const sanitized = structuredClone(spec);
@@ -1605,7 +1316,7 @@ export function saveConfig(configPath: string, spec: ExchangeSpec): void {
   if (auth) {
     delete auth.sharedSecret;
     delete auth.expires;
-    // Drop the container if those were its only keys, so the config carries no
+    // Drop the container if those were its only keys, so the config holds no
     // noisy empty `authentication: {}` block. Operator-policy fields (e.g.
     // token_max_age_days) keep it non-empty when present.
     if (Object.keys(auth).length === 0) delete sanitized.authentication;
@@ -1614,29 +1325,20 @@ export function saveConfig(configPath: string, spec: ExchangeSpec): void {
 }
 
 /**
- * Write (or overwrite) `connection.server.host_key_fingerprint` in an existing
- * `psilink.yaml`, used to persist a host-key pin established interactively on
- * first use. Unlike {@link saveConfig}, which re-serializes the whole spec, this
- * edits the file in place through the YAML document model so the operator's
- * comments, key order, and formatting survive -- the config is a hand-authored,
- * commented file, and a first-use pin should add one field, not rewrite it.
+ * Write (or overwrite) `connection.server.host_key_fingerprint` in an
+ * existing `psilink.yaml`, used to persist a host-key pin established
+ * interactively on first use. Unlike {@link saveConfig}, this edits the file
+ * in place through the YAML document model so the operator's comments, key
+ * order, and formatting survive.
  *
- * The pin is a non-secret public fingerprint, but the file is rewritten with the
- * same owner-only permissions {@link saveConfig} uses (a config may carry an SFTP
- * credential). The fingerprint key is written snake_case to match the on-disk
- * convention. Throws if the file cannot be read or parsed -- the caller has just
- * loaded the same file, so a failure here is unexpected and must not be silently
- * swallowed (it would leave the operator believing the pin was saved).
+ * Rewritten with the same owner-only permissions {@link saveConfig} uses.
+ * Throws if the file cannot be read or parsed, since the caller just loaded
+ * it and a silent failure would leave the operator believing the pin was
+ * saved.
  *
- * Fails closed on a non-sftp config: a host-key fingerprint is an sftp-only pin
- * (`connection.server` is the sftp shape), so a `connection.channel` other than
- * `sftp` is rejected with a {@link UsageError} before anything is written
- * (config.test.ts, "persistHostKeyFingerprint rejects a non-sftp config and
- * leaves the file untouched"). The sole caller {@link establishHostKeyTrust}
- * returns off sftp before reaching it (hostKeyTrust.test.ts, "is a no-op for a
- * non-sftp channel"), so the guard holds the invariant at the function itself,
- * for a direct caller that would otherwise synthesize a bogus pin and a `server`
- * mapping a filedrop/webrtc schema does not expect.
+ * Fails closed on a non-sftp config: a host-key fingerprint is an sftp-only
+ * pin, so any other `connection.channel` is rejected with a
+ * {@link UsageError} before anything is written (config.test.ts).
  */
 export function persistHostKeyFingerprint(
   configPath: string,
@@ -1652,17 +1354,11 @@ export function persistHostKeyFingerprint(
     `config file ${configPath}`,
     (doc) => {
       // Read the channel discriminant off the parsed document (not a
-      // schema-loaded spec) and reject anything but sftp before the write, so
-      // the function -- not its caller -- holds the sftp-only invariant. The
-      // channel is a non-secret discriminant; echo it (sanitized for display,
-      // as the rest of this trust flow treats config-derived values -- see
-      // hostKeyTrust.ts) so the operator sees which channel was rejected. A
-      // missing or non-scalar channel is reported generically rather than
-      // echoed. getIn does not resolve aliases, so an alias-spelled channel (or
-      // an aliased connection block) reads as a non-string node and is rejected
-      // even when it would resolve to sftp -- the safe direction (refuse, not
-      // mis-pin), and not a form a hand-authored config uses. Resolving it
-      // would mean materializing the document, which this module avoids.
+      // schema-loaded spec) and reject anything but sftp before the write.
+      // getIn does not resolve aliases, so an alias-spelled channel is
+      // treated as a non-string node and is rejected even when it would
+      // resolve to sftp -- the safe direction, and not a form a
+      // hand-authored config uses.
       const channel = doc.getIn(["connection", "channel"]);
       if (channel !== "sftp") {
         const found =
@@ -1673,16 +1369,11 @@ export function persistHostKeyFingerprint(
             `not be written to a non-sftp config.`,
         );
       }
-      // setIn creates the connection/server path nodes if absent; for an sftp
-      // config loaded by the exchange command they already exist, so this updates
-      // the one field. snake_case path matches the written convention (see
-      // saveConfig). A config that parses but whose `connection`/`server` is a
-      // scalar or sequence (not a mapping) makes setIn throw a YAML error naming
-      // the path key (not a value), so it is safe to surface as the UsageError
-      // this function's contract promises (mapped to exit 64) rather than an
-      // opaque library stack trace. On the exchange call path the schema load has
-      // already rejected such a shape, so this guards a hand-edit between load and
-      // write, or a caller that skips validation.
+      // setIn creates the connection/server path nodes if absent; for an
+      // sftp config loaded by the exchange command they already exist. A
+      // `connection`/`server` that is a scalar or sequence, not a mapping,
+      // makes setIn throw a YAML error, reported here as a UsageError rather
+      // than an opaque library stack trace.
       try {
         doc.setIn(
           ["connection", "server", "host_key_fingerprint"],
@@ -1701,36 +1392,25 @@ export function persistHostKeyFingerprint(
 }
 
 /**
- * Write, overwrite, or remove the top-level `disclosed_payload_columns` in an
- * existing `psilink.yaml`. This is the SEND-side disclosure commitment (this
- * party's own column namespace): the set it published on the invitation it just
- * (re-)minted, which a later recurring `psilink exchange` verifies its current
- * metadata still discloses ({@link assertDisclosureMatchesCommitment} in core).
+ * Write, overwrite, or remove the top-level `disclosed_payload_columns` in
+ * an existing `psilink.yaml`: the SEND-side disclosure commitment (this
+ * party's own column namespace) that a later recurring `psilink exchange`
+ * verifies its current metadata still discloses
+ * ({@link assertDisclosureMatchesCommitment} in core).
  *
- * Used by the offline invite-from-config / re-invite path, which reuses the
- * operator's existing config rather than rewriting it. Like
- * {@link persistHostKeyFingerprint} -- and unlike {@link saveConfig}, which
- * re-serializes the whole spec and would strip comments -- this edits the file in
- * place through the YAML document model so the operator's comments, key order, and
- * formatting survive: the commitment is one machine-managed field, not operator
- * prose. Binding this write to every (re-)mint is what keeps the commitment from
- * going stale relative to the token the partner locked in (a re-invite over
- * drifted metadata refreshes it here; an exchange with no re-invite keeps the
- * prior commitment and fails fast on drift).
+ * Used by the offline invite-from-config / re-invite path. Like
+ * {@link persistHostKeyFingerprint}, this edits the file in place through
+ * the YAML document model so the operator's comments, key order, and
+ * formatting survive.
  *
- * `columns === undefined` REMOVES the field (deleteIn), never leaves a stale value:
- * a config whose metadata is unknown at mint publishes no disclosed subset (the
- * acceptor reconciles lazily), so any commitment previously recorded must be
- * cleared rather than silently retained. An empty array is written verbatim -- a
- * strict "disclose nothing" commitment, distinct from absent.
+ * `columns === undefined` removes the field rather than leaving a stale
+ * value; an empty array is written verbatim, a strict "disclose nothing"
+ * commitment distinct from absent.
  *
- * The columns are this party's own (metadata-derived), non-secret, but the file is
- * rewritten with the same owner-only permissions {@link saveConfig} uses (a config
- * may carry an SFTP credential). The key is written snake_case to match the
- * on-disk convention. Throws if the file cannot be read or parsed -- the caller
- * has just read the same file, so a failure here is unexpected and must not be
- * silently swallowed (it would leave the operator believing the commitment was
- * recorded).
+ * Rewritten with the same owner-only permissions {@link saveConfig} uses.
+ * Throws if the file cannot be read or parsed, since the caller just read it
+ * and a silent failure would leave the operator believing the commitment was
+ * recorded.
  */
 export function persistDisclosedPayloadColumns(
   configPath: string,
@@ -1760,37 +1440,23 @@ export function persistDisclosedPayloadColumns(
 
 /**
  * Write, overwrite, or remove the top-level `expected_payload_columns` in an
- * existing `psilink.yaml`. This is the RECEIVE-side consent lock-in (the
- * PARTNER's column namespace): the disclosed subset the operator consented to on
- * the acceptance it just made, which a later recurring `psilink exchange` holds
- * the received payload to ({@link reconcileReceivedPayload} in core).
+ * existing `psilink.yaml`: the RECEIVE-side consent commitment (the
+ * PARTNER's column namespace) that a later recurring `psilink exchange`
+ * holds the received payload to ({@link reconcileReceivedPayload} in core).
  *
- * Used by both accept-reuse paths -- offline, and the online hook's reuse
- * branch -- which keep the operator's existing config rather than rewriting
- * it. Like {@link persistDisclosedPayloadColumns}
- * -- its send-side twin -- and unlike {@link saveConfig}, which re-serializes the
- * whole spec and would strip comments, this edits the file in place through the
- * YAML document model so the operator's comments, key order, and formatting
- * survive: the lock-in is one machine-managed field, not operator prose. Binding
- * this write to the accept-reuse path is what keeps the consent record from going
- * stale relative to what the operator consented to on the latest acceptance (a
- * re-accept over a changed disclosed set refreshes it here; an exchange with no
- * re-accept keeps the prior lock-in).
+ * Used by both accept-reuse paths (offline, and the online hook's reuse
+ * branch). Like {@link persistDisclosedPayloadColumns}, its send-side twin,
+ * this edits the file in place through the YAML document model so the
+ * operator's comments, key order, and formatting survive.
  *
- * `columns === undefined` REMOVES the field (deleteIn), never leaves a stale
- * value: an acceptance whose invitation carried no disclosed subset (an older or
- * metadata-unknown mint) records no consented set (the exchange reconciles
- * lazily), so any lock-in previously recorded must be cleared rather than
- * silently retained. An empty array is written verbatim -- a strict "receive
- * nothing" consent, distinct from absent.
+ * `columns === undefined` removes the field rather than leaving a stale
+ * value; an empty array is written verbatim, a strict "receive nothing"
+ * consent distinct from absent.
  *
- * The columns are the partner's (token-derived), non-secret, but the file is
- * rewritten with the same owner-only permissions {@link saveConfig} uses (a
- * config may carry an SFTP credential). The key is written snake_case to match
- * the on-disk convention. Throws if the file cannot be read or parsed -- the
- * caller has just reconciled the same file, so a failure here is unexpected and
- * must not be silently swallowed (it would leave the operator believing the
- * lock-in was refreshed).
+ * Rewritten with the same owner-only permissions {@link saveConfig} uses.
+ * Throws if the file cannot be read or parsed, since the caller just
+ * reconciled it and a silent failure would leave the operator believing the
+ * commitment was refreshed.
  */
 export function persistExpectedPayloadColumns(
   configPath: string,
@@ -1820,33 +1486,23 @@ export function persistExpectedPayloadColumns(
 
 /**
  * Write, overwrite, or remove the top-level `outbound_payload_consent` in an
- * existing `psilink.yaml`. This is this party's consent to its OWN outbound set
- * (its own column namespace): the columns it confirmed it sends to the partner for
- * matched records, or the `pending` marker recorded when an acceptance could not
- * resolve them yet. A later `psilink exchange` holds the set it would actually
- * transmit to this record ({@link assertOutboundPayloadConsented} in core).
+ * existing `psilink.yaml`: this party's consent to its OWN outbound set (or
+ * the `pending` marker recorded when an acceptance could not resolve it
+ * yet), which a later `psilink exchange` holds the transmitted set to
+ * ({@link assertOutboundPayloadConsented} in core).
  *
- * Used by the two paths that keep an existing config rather than writing a fresh
- * one -- the accept-reuse path, and the run that resolves and confirms a `pending`
- * record in place. Like {@link persistDisclosedPayloadColumns} and
- * {@link persistExpectedPayloadColumns} -- and unlike {@link saveConfig}, which
- * re-serializes the whole spec and would strip comments -- this edits the file in
- * place through the YAML document model so the operator's comments, key order, and
- * formatting survive: the record is one machine-managed field, not operator prose.
+ * Used by the accept-reuse path and the run that resolves and confirms a
+ * `pending` record in place. Like {@link persistDisclosedPayloadColumns},
+ * this edits the file in place through the YAML document model so the
+ * operator's comments, key order, and formatting survive.
  *
- * `consent === undefined` REMOVES the field (deleteIn), never leaves a stale
- * value: an acceptance that transmits nothing to the partner records no consent
- * (there is no disclosure to consent to), so any record from a prior acceptance
- * must be cleared rather than silently retained and later enforced against a
- * different set.
+ * `consent === undefined` removes the field rather than leaving a stale
+ * value: an acceptance transmitting nothing records no consent.
  *
- * The columns are this party's own (metadata-derived), non-secret, but the file is
- * rewritten with the same owner-only permissions {@link saveConfig} uses (a config
- * may carry an SFTP credential). The keys are written snake_case to match the
- * on-disk convention; `status` and `columns` are single words either way. Throws if
- * the file cannot be read or parsed -- the caller has just read the same file, so a
- * failure here is unexpected and must not be silently swallowed (it would leave the
- * operator believing their confirmation was recorded, and be asked again next run).
+ * Rewritten with the same owner-only permissions {@link saveConfig} uses.
+ * Throws if the file cannot be read or parsed, since the caller just read
+ * it and a silent failure would leave the operator believing their
+ * confirmation was recorded.
  */
 export function persistOutboundPayloadConsent(
   configPath: string,
@@ -1873,34 +1529,24 @@ export function persistOutboundPayloadConsent(
 }
 
 /**
- * Write or overwrite the top-level `expected_partner_deduplicate` in an existing
- * `psilink.yaml`. This is the TERMS-side consent lock-in: the `deduplicate` the
- * accepted invitation declared for the INVITING party's own side, which a later
- * `psilink exchange` holds the value the partner presents at the terms exchange
- * to ({@link assertPresentedDeduplicateMatchesInvitation} in core), refusing a
- * contradiction before any key or payload moves.
+ * Write or overwrite the top-level `expected_partner_deduplicate` in an
+ * existing `psilink.yaml`: the TERMS-side consent commitment, the
+ * `deduplicate` the accepted invitation declared for the inviting party's
+ * own side, which a later `psilink exchange` holds the partner's presented
+ * value to ({@link assertPresentedDeduplicateMatchesInvitation} in core),
+ * refusing a contradiction before any key or payload moves.
  *
- * The terms-side twin of {@link persistExpectedPayloadColumns}, written by the
- * same accept-reuse paths -- offline, and the online hook's reuse branch -- and
- * for the same reason: they keep the operator's existing config rather than
- * rewriting it, so like the payload lock-in this edits the file in place through
- * the YAML document model, preserving comments, key order, and formatting.
- * Binding the write to the accept-reuse path is what keeps the declaration from
- * lagging the latest acceptance (a re-accept over a changed declaration refreshes
- * it here).
+ * The terms-side twin of {@link persistExpectedPayloadColumns}, written by
+ * the same accept-reuse paths, editing the file in place the same way.
  *
- * Takes a plain `boolean`: an acceptance always has a declaration to record --
- * `deduplicate` is mandatory on the linkage-terms schema -- so there is no
- * removal to express. The absent field is the state of a config no acceptance
- * stands behind, reached by never writing one rather than by clearing one.
+ * Takes a plain `boolean`: `deduplicate` is mandatory on the linkage-terms
+ * schema, so an acceptance always has a declaration to record and there is
+ * no removal to express.
  *
- * The value is a schema boolean, not partner free text, but the file is rewritten
- * with the same owner-only permissions {@link saveConfig} uses (a config may carry
- * an SFTP credential). The key is written snake_case to match the on-disk
- * convention. Throws if the file cannot be read or parsed -- the caller has just
- * reconciled the same file, so a failure here is unexpected and must not be
- * silently swallowed (it would leave the operator believing the binding was
- * refreshed).
+ * Rewritten with the same owner-only permissions {@link saveConfig} uses.
+ * Throws if the file cannot be read or parsed, since the caller just
+ * reconciled it and a silent failure would leave the operator believing the
+ * commitment was refreshed.
  */
 export function persistExpectedPartnerDeduplicate(
   configPath: string,
@@ -1922,48 +1568,40 @@ export function persistExpectedPartnerDeduplicate(
 // --- Config reader -----------------------------------------------------------
 
 /**
- * The portion of a pre-existing config that `invite` uses as the source for an
- * invitation: the linkage terms (which the invitation carries) and the explicit
- * data standardization and metadata, if any (which the config-vs-input
- * reconciliation honors so it resolves columns to linkage fields exactly as the
- * eventual exchange does), plus the one connection fact the invitation declares.
- * The connection block itself is intentionally omitted -- `invite` does not build
- * a connection from it.
+ * The portion of a pre-existing config that `invite` uses as the source for
+ * an invitation: the linkage terms, the explicit data standardization and
+ * metadata if any, plus the one connection fact the invitation declares. The
+ * connection block itself is omitted -- `invite` does not build a connection
+ * from it.
  */
 export interface ConfigLinkageSource {
   linkageTerms: LinkageTerms;
   /** The config's explicit `standardization` block, absent when not present. */
   standardization?: Standardization;
   /**
-   * The config's explicit `metadata` block, absent when not present. Forwarded
-   * to the satisfiability check so it resolves the type fallback against the same
-   * column types the exchange does -- without it, a config that retypes a column
-   * (e.g. names a non-standard column as an `ssn`, or types an inferred column
-   * away) would be checked against name inference and could mint an invitation
-   * for an input the exchange cannot actually satisfy.
+   * The config's explicit `metadata` block, absent when not present.
+   * Forwarded to the satisfiability check so it resolves the type fallback
+   * against the same column types the exchange does -- without it, a config
+   * that retypes a column could mint an invitation for an input the exchange
+   * cannot actually satisfy.
    */
   metadata?: Metadata;
   /**
    * Whether the config's connection block has retain mode on
    * (`connection.options.retain_files: true`), which the minted invitation
-   * declares to the partner as a consent fact -- the exchange this config runs
-   * leaves a permanent transcript at the rendezvous location.
+   * declares to the partner as a consent fact.
    *
    * Read as that ONE boolean at its fixed path, never by validating the
-   * connection block: the block is deliberately left unparsed here so an
-   * unfinished or still-placeholder one does not block generating an invitation,
-   * and a single boolean read keeps that contract. Anything other than a literal
-   * `true` -- absent, false, a non-boolean, no connection block at all -- reads
-   * as false, which declares nothing rather than declaring delete mode, as does
-   * a `webrtc` connection, a channel with no retain mode to declare.
+   * connection block, so an unfinished or placeholder one does not block
+   * generating an invitation. Anything other than a literal `true` counts
+   * as false, including a `webrtc` connection.
    */
   retainsFiles: boolean;
   /**
-   * Whether an acceptance stands behind the config's linkage terms, for the
-   * readers that report on the citation those terms carry. Read as the single
-   * presence check {@link linkageTermsStandingOf} describes, at the top-level key
-   * rather than through the spec schema, for the reason `retainsFiles` is read
-   * that way: the rest of the file is deliberately left unparsed here.
+   * Whether an acceptance stands behind the config's linkage terms, for
+   * readers that report on the citation those terms hold. Read as the
+   * single presence check {@link linkageTermsStandingOf} describes, at the
+   * top-level key rather than through the spec schema.
    */
   linkageTermsStanding: LinkageTermsStanding;
 }
@@ -1982,31 +1620,19 @@ export type ConfigLinkageSourceResult =
   | { status: "loaded"; source: ConfigLinkageSource };
 
 /**
- * Render a config block's schema issues as `<key path>: <reason>` clauses, so the
- * operator can locate each offending field, mirroring accept's decode-error
- * formatting. Each path is relative to the block it came from.
+ * Render a config block's schema issues as `<key path>: <reason>` clauses,
+ * so the operator can locate each offending field, mirroring accept's
+ * decode-error formatting.
  *
- * `keys` says how the block was parsed, which is what decides the spelling the
- * path is named in. A block parsed through `camelizeKeys` (`camelized`) yields
- * issue paths in camelCase while the file writes those keys in snake_case, so
- * each segment is put back through {@link snakeizeKey} -- the same rewrite
- * {@link saveConfig}'s writer uses -- and the message names the key the file
- * contains. A block whose schema parses the on-disk form directly (`as-written`)
- * is named verbatim: its paths already carry the file's own spelling, and a
- * rewrite there would mis-name a free-form key the operator spelled with capitals
- * of their own.
+ * `keys` says how the block was parsed. A block parsed through
+ * `camelizeKeys` (`camelized`) yields issue paths in camelCase while the
+ * file writes snake_case, so each segment is put back through
+ * {@link snakeizeKey}. A block whose schema parses the on-disk form directly
+ * (`as-written`) is named verbatim.
  *
- * A camelized path STOPS at a `params` segment, naming the block and not the key
- * inside it. That rewrite is exact only for a key the camelize pass built, and
- * the one free-form record the schema carries -- a transform's `params` -- holds
- * the author's own key: the camelized `EvilKey` is what a file writing either
- * `_evil_key` or `EvilKey` arrives as, so the two on-disk spellings are no longer
- * distinguishable here and naming either one names a key some file does not
- * contain. Everything before the segment is fixed schema structure, which is what
- * still locates the problem. The web importer's terms reader truncates the same
- * path for its own reason (that key can be partner-supplied and its contract is
- * value-free); an unbounded free-form key is also the one fragment here that
- * could spend a whole rendered link on its own.
+ * A camelized path STOPS at a `params` segment, naming the block rather than
+ * the key inside it: that free-form record holds the author's own key, and
+ * the camelized form of two different on-disk spellings can collide.
  */
 function describeSchemaIssues(
   issues: ReadonlyArray<{ path: ReadonlyArray<PropertyKey>; message: string }>,
@@ -2032,27 +1658,24 @@ function describeSchemaIssues(
 }
 
 /**
- * Read the linkage-terms source from a config file, reporting a missing file and
- * a config that defines no `linkage_terms` as distinct outcomes instead of one
- * absence and one throw, so each caller attributes them in its own terms.
+ * Read the linkage-terms source from a config file, reporting a missing file
+ * and a config that defines no `linkage_terms` as distinct outcomes, so each
+ * caller attributes them in its own terms.
  *
- * Only the `linkage_terms`, `standardization`, and `metadata` blocks are parsed
- * and validated. The connection block is deliberately not among them, so a
- * still-placeholder or otherwise unfinished one does not fail the read.
+ * Only the `linkage_terms`, `standardization`, and `metadata` blocks are
+ * parsed and validated; the connection block is excluded by design, so a
+ * still-placeholder one does not fail the read.
  *
- * Every other defect -- a file that exists but cannot be read, YAML that is not
- * a mapping, an invalid `linkage_terms`, `standardization`, or `metadata` block
- * -- is a {@link UsageError}: a config present at the path is treated as
- * intentional, so a broken one is surfaced for the user to fix. Mirrors
- * {@link saveConfig}'s snake_case-on-disk convention -- the top-level keys are
- * read as either `linkage_terms`/`standardization` (the written form) or their
- * camelCase spellings, and `safeParseLinkageTerms` camelizes the nested keys.
+ * Every other defect is a {@link UsageError}: a config present at the path
+ * is treated as intentional, so a broken one is reported for the user to
+ * fix. Top-level keys are read as either the written snake_case form or
+ * their camelCase spelling.
  */
 export function readConfigLinkageSource(
   configPath: string,
 ): ConfigLinkageSourceResult {
   // Read, then parse through the sensitive-file chokepoint. A read failure
-  // carries only a path and errno (ENOENT means no config, not an error here); a
+  // holds only a path and errno (ENOENT means no config, not an error here); a
   // YAML parse can echo source bytes (an inline credential), so it routes through
   // parseSensitiveYaml, which reports path-only (see sensitiveFile.ts).
   let source: string;
@@ -2090,8 +1713,8 @@ export function readConfigLinkageSource(
 
   // The explicit standardization is optional. Its `output`/`input`/`steps` keys
   // are single words (snake == camel) and `params` is free-form, so the schema
-  // parses the on-disk form without camelizing. An invalid block is surfaced as
-  // a usage error, like invalid linkage_terms above.
+  // parses the on-disk form without camelizing. An invalid block is reported
+  // as a usage error, like invalid linkage_terms above.
   const rawStd = obj["standardization"];
   let standardization: Standardization | undefined;
   if (rawStd !== undefined) {
@@ -2106,7 +1729,7 @@ export function readConfigLinkageSource(
 
   // The explicit metadata is optional. safeParseMetadata camelizes the on-disk
   // snake_case keys (e.g. `is_payload`) before validating, like linkage_terms
-  // above. An invalid block is surfaced as a usage error rather than silently
+  // above. An invalid block is reported as a usage error rather than silently
   // dropped, so the satisfiability check cannot fall back to name inference on a
   // config the operator believes types its columns explicitly.
   const rawMetadata = obj["metadata"];
@@ -2134,21 +1757,16 @@ export function readConfigLinkageSource(
 }
 
 /**
- * The standing of a loaded config's terms, read from the presence of a top-level
- * `expected_partner_deduplicate` at its fixed key so the rest of the file stays
- * unparsed here (the reason {@link readRetainFilesDeclaration} reads its own key
- * that way). Both spellings are accepted for the reason the top-level keys above
- * accept both: `saveConfig` writes snake_case, but a hand-authored config may
- * carry either.
+ * The standing of a loaded config's terms, read from the presence of a
+ * top-level `expected_partner_deduplicate` at its fixed key, unparsed for
+ * the same reason {@link readRetainFilesDeclaration} reads its own key that
+ * way. Both spellings are accepted, matching `saveConfig`'s snake_case
+ * write.
  *
- * Presence alone decides it, on {@link linkageTermsStandingOf}'s rule that the
- * record says an acceptance happened rather than what was agreed. `psilink
- * accept` writes only a boolean, so any other value is an operator's edit of a
- * machine-written record -- but the record still stands there, and reading it as
- * an acceptance is what points that operator at settling the citation with their
- * partner rather than at rewriting terms both parties hold. A value the strict
- * paths refuse is refused there, by core's schema, on the commands that build an
- * exchange from the file.
+ * Presence alone decides it, on {@link linkageTermsStandingOf}'s rule that
+ * the record says an acceptance happened rather than what was agreed. A
+ * value the strict paths refuse is refused there, by core's schema, on the
+ * commands that build an exchange from the file.
  */
 function readLinkageTermsStanding(
   obj: Record<string, unknown>,
@@ -2159,30 +1777,22 @@ function readLinkageTermsStanding(
 }
 
 /**
- * The config's `connection.options.retain_files`, read as a single boolean at its
- * fixed path so a still-placeholder connection block is not validated on the way
- * (see {@link ConfigLinkageSource.retainsFiles}). Both key spellings are accepted
- * for the same reason the top-level keys above are: `saveConfig` writes
- * snake_case, but a hand-authored config may carry either.
+ * The config's `connection.options.retain_files`, read as a single boolean
+ * at its fixed path so a still-placeholder connection block is not
+ * validated on the way (see {@link ConfigLinkageSource.retainsFiles}). Both
+ * key spellings are accepted, matching `saveConfig`'s snake_case write.
  *
- * Only a literal `true` reads as a declaration. Every other shape -- absent,
- * false, a non-boolean, a non-object `connection` or `options` -- yields false,
- * which the invitation carries as no declaration at all rather than as a claim
- * that the exchange deletes its files.
+ * Only a literal `true` counts as a declaration; every other shape yields
+ * false.
  *
- * A `webrtc` connection declares nothing whatever its options say: retain mode is
- * a file-sync setting the webrtc channel does not have, and the channel check
- * below is the gate that keeps it off a partner's consent screen -- not a
- * downstream schema refusal. `ConnectionConfigSchema` does not refuse the pair: a
- * webrtc connection's `options` parses through `SharedOptionsSchema`, which
- * declares no `retainFiles` field, so the value is silently dropped rather than
- * rejected, and a hand-authored config pairing `channel: webrtc` with
- * `options: {retain_files: true}` loads successfully and runs in delete mode.
- * What blocks the pairing at psilink's own authoring sites -- `saveConfig` and
- * every other in-repo writer of a webrtc connection -- is the type system, not a
- * runtime check: `WebRTCConnectionConfig.options` is typed `SharedOptions`, which
- * has no `retainFiles` member. That protection does not reach a hand-authored
- * file, which is what this function's own gate is for.
+ * A `webrtc` connection declares nothing whatever its options say. This is
+ * a runtime gate, not a schema refusal: `SharedOptionsSchema` silently
+ * drops an unknown `retainFiles` on a webrtc connection's `options` rather
+ * than rejecting it, so a hand-authored config pairing `channel: webrtc`
+ * with `retain_files: true` loads successfully. In-repo writers are held to
+ * this by the type system instead (`WebRTCConnectionConfig.options` has no
+ * `retainFiles` member); that protection does not reach a hand-authored
+ * file, which is what this function's own check is for.
  */
 function readRetainFilesDeclaration(config: Record<string, unknown>): boolean {
   const connection = config["connection"];
@@ -2196,19 +1806,14 @@ function readRetainFilesDeclaration(config: Record<string, unknown>): boolean {
 }
 
 /**
- * The linkage-terms source for `invite`'s config-as-source path: the config named
- * at `configPath`, or `undefined` when no file exists there (the caller then falls
- * back to inferring terms from an input file).
+ * The linkage-terms source for `invite`'s config-as-source path: the config
+ * named at `configPath`, or `undefined` when no file exists there (the
+ * caller then falls back to inferring terms from an input file).
  *
- * A config present at the path is the authoritative source of the invitation's
- * linkage terms, so one that defines none cannot serve as that source and is a
- * {@link UsageError} rather than a silent fall-through to input inference.
- * `invite` builds no connection from the block (the config persists for a later
- * `psilink exchange` to read and validate), so an unfinished one must not block
- * generating an invitation -- {@link readConfigLinkageSource}, which carries the
- * rest of the reading contract, leaves it unvalidated and takes from outside the
- * terms only the `retain_files` boolean the invitation declares and the
- * `expected_partner_deduplicate` record the terms' standing is read from.
+ * A config present at the path is the authoritative source of the
+ * invitation's linkage terms, so one that defines none cannot serve as that
+ * source and is a {@link UsageError} rather than a silent fall-through to
+ * input inference.
  */
 export function loadConfigLinkageSource(
   configPath: string,
@@ -2227,21 +1832,16 @@ export function loadConfigLinkageSource(
 // --- Rule-set citation drift -------------------------------------------------
 
 /**
- * One half of a rule-set citation -- a set's name and content version -- for the
- * drift warning, which names a half on its own wherever it reports on that half
- * alone.
+ * One half of a rule-set citation -- a set's name and content version -- for
+ * the drift warning, which names a half on its own wherever it reports on
+ * that half alone.
  *
- * The names are free text whoever authored the config chose, and a `log.warn` is
- * their sink (a value that never becomes an `Error` is escaped at the call site
- * that shows it), so each is escaped here. The pair then renders through core's
- * terms-value seam ({@link ruleSetCitation}) -- the same grammar core's own
- * rule-set mismatch message and both consent surfaces use -- which is what makes
- * the name's boundaries readable, the escape having preserved every printable
- * ASCII character a name could forge the clause's structure with.
- *
- * Escaping BEFORE delimiting, not after: the escape truncates its output, and a
- * truncation applied to an already-delimited run could take the closing
- * delimiter off it.
+ * The names are free text the config author chose, and `log.warn` is their
+ * sink, so each is escaped here before rendering through core's terms-value
+ * grammar ({@link ruleSetCitation}) -- the same grammar core's own mismatch
+ * message and both consent surfaces use. Escaping BEFORE delimiting:
+ * escaping after could truncate a value and take the closing delimiter off
+ * it.
  */
 function describeRuleSetHalf(identity: LinkageSetIdentity): string {
   return ruleSetCitation(
@@ -2263,51 +1863,42 @@ function describeRuleSetCitation(reference: LinkageRuleSetReference): string {
 }
 
 /**
- * Whether an acceptance stands behind a config's linkage terms, which is what
- * decides the remedy the drift warning can honestly offer for the citation those
- * terms carry.
+ * Whether an acceptance stands behind a config's linkage terms, which
+ * decides the remedy the drift warning can accurately offer for the
+ * citation those terms hold.
  *
- * - `held-alone` -- no acceptance stands behind them, so they bind this party
- *   only and both remedies are open: drop a citation the rules no longer earn,
- *   or put the cited set's rules back.
- * - `accepted-with-partner` -- an acceptance put them under agreement with an
- *   inviting party, whether by adopting that party's terms verbatim onto a fresh
- *   config or by reconciling a kept one against the invitation. Editing the
- *   rules to match the citation would take them out of that agreement, and the
- *   exchange would refuse them against the partner still running the originals.
+ * - `held-alone` -- no acceptance stands behind them, so both remedies are
+ *   open: drop a citation the rules no longer earn, or put the cited set's
+ *   rules back.
+ * - `accepted-with-partner` -- an acceptance put them under agreement with
+ *   an inviting party. Editing the rules to match the citation would take
+ *   them out of that agreement, and the exchange would refuse them against
+ *   the partner still running the originals.
  */
 export type LinkageTermsStanding = "held-alone" | "accepted-with-partner";
 
 /**
- * What a command can offer its operator besides settling a drifted citation with
- * the party whose acceptance stands behind the terms. Only the
- * `accepted-with-partner` reading takes it: terms no acceptance stands behind
- * are the operator's own either way.
+ * What a command can offer its operator besides settling a drifted citation
+ * with the party whose acceptance stands behind the terms. Only the
+ * `accepted-with-partner` reading takes it.
  *
- * - `decline-to-reuse` -- the command is putting the agreed terms to use
- *   (accepting against them, running an exchange on them, verifying a receipt
- *   with them), so the operator can leave them and start from terms that carry
- *   no claim they cannot support.
+ * - `decline-to-reuse` -- the command is putting the agreed terms to use, so
+ *   the operator can leave them and start from terms that hold no claim
+ *   they cannot support.
  * - `author-fresh-terms` -- the command is minting an invitation FROM those
- *   terms, where declining to reuse them is not the choice on offer: the
- *   operator is authoring a new document and can author its terms instead of
- *   carrying the accepted ones onto it.
+ *   terms, so the operator can author fresh ones instead of reusing the
+ *   accepted ones for it.
  */
 export type CitationDriftAlternative =
   "decline-to-reuse" | "author-fresh-terms";
 
 /**
- * Whether an acceptance stands behind a loaded config's linkage terms, read from
- * `expected_partner_deduplicate`. `psilink accept` records the invitation's
- * declared partner cardinality on every config it writes AND on every config it
- * reuses, and nothing else writes one, so its presence is exactly the mark of a
- * config an acceptance stands behind. That the absent field is the state of a
- * config no acceptance stands behind is
- * {@link persistExpectedPartnerDeduplicate}'s own contract, which this reads
- * rather than restates.
- *
- * Both of its values read the same way: the record says an acceptance happened,
- * not what was agreed.
+ * Whether an acceptance stands behind a loaded config's linkage terms, read
+ * from `expected_partner_deduplicate`. `psilink accept` writes this field on
+ * every config it writes or reuses, and nothing else writes one, so its
+ * presence is exactly the mark of a config an acceptance stands behind (see
+ * {@link persistExpectedPartnerDeduplicate}). Both values read the same
+ * way: the record says an acceptance happened, not what was agreed.
  */
 export function linkageTermsStandingOf(
   spec: Pick<ExchangeSpec, "expectedPartnerDeduplicate">,
@@ -2318,42 +1909,26 @@ export function linkageTermsStandingOf(
 }
 
 /**
- * Warn when a loaded config's `linkage_terms.linkage_rule_set` cites a set this
- * build ships over rules that are not drawn from it: the state a hand edit to
- * `linkage_fields` or `linkage_keys` leaves behind, since nothing on the CLI
- * re-decides the citation the config was written with. Left unreported, that
- * citation travels onto the invitation and into both parties' exchange records
- * claiming a provenance the rules no longer have.
+ * Warn when a loaded config's `linkage_terms.linkage_rule_set` cites a set
+ * this build ships over rules that are not drawn from it -- the state a
+ * hand edit to `linkage_fields` or `linkage_keys` leaves behind. Left
+ * unreported, that citation travels onto the invitation and both parties'
+ * exchange records claiming a provenance the rules no longer have.
  *
- * Only a half this build can RESOLVE is judged. A citation naming a set psilink
- * does not ship states nothing checkable here -- there is no content behind the
- * name to compare the rules against -- so that half is passed over, and a
- * citation whose halves both name a foreign set reports nothing at all. The two
- * halves are resolved separately for the reason the design names and versions
- * them separately: pairing one built-in name with a foreign one must not buy the
- * built-in half a pass it could not earn alone.
+ * Only a half this build can RESOLVE is judged: a citation naming a set
+ * psilink does not ship has no content here to compare the rules against,
+ * so that half is passed over, and each half is judged separately so a
+ * foreign half cannot buy the built-in half a pass.
  *
- * Warns rather than refuses. The config is the operator's own file, the citation
- * is display-and-record only (it never selects or alters matching), and the
- * exchange that follows is the one the declared fields and keys describe either
- * way -- so this reports a claim that has drifted from its rules, and the command
- * proceeds.
+ * Warns rather than refuses: the citation is display-and-record only, and
+ * the exchange runs on the declared fields and keys either way.
  *
- * `standing` decides the remedy, because the two cases have different ones to
- * offer (see {@link LinkageTermsStanding}). Terms an acceptance stands behind are
- * agreed with the inviting party: telling that operator to restore the cited
- * set's rules would edit terms both parties already hold, and the exchange would
- * then abort against the partner that still runs the originals -- so that
- * reading offers settling the citation with that party, and does not address the
- * operator as the author of either side. `alternative` names what that operator
- * can do instead of settling, which is the command's to say rather than this
- * function's: the wording is one source here, and only the tail varies (see
+ * `standing` decides the remedy wording (see {@link LinkageTermsStanding}):
+ * terms an acceptance stands behind are agreed with the inviting party, so
+ * restoring the cited set's rules would edit terms both parties hold and
+ * the exchange would then abort against the partner. `alternative` names
+ * what that operator can do instead of settling (see
  * {@link CitationDriftAlternative}).
- *
- * Each drifted half is reported against the set that half cites, never against
- * "the citation": only a resolvable half is judged, so a citation pairing a
- * built-in half with a foreign one would otherwise read as though this build
- * shipped the foreign half too.
  */
 export function warnOnLinkageRuleSetCitationDrift(
   terms: Pick<LinkageTerms, "linkageRuleSet" | "linkageFields" | "linkageKeys">,
@@ -2373,12 +1948,10 @@ export function warnOnLinkageRuleSetCitationDrift(
     citedHalf.name === shippedHalf.name &&
     citedHalf.version === shippedHalf.version;
 
-  // Each half is judged on its own by handing the predicate that half's shipped
-  // declarations over rules that carry nothing on the other side. An empty list
-  // runs neither of the predicate's two loops, so the half not under test cannot
-  // decide the answer -- which a self-comparison (declaring the config's own
-  // rules for that half) would not guarantee, since a value the canonical encoder
-  // rejects fails even against itself.
+  // Each half is judged by handing the predicate that half's shipped
+  // declarations over rules with nothing on the other side: an empty list
+  // runs neither of the predicate's loops, so the half not under test
+  // cannot decide the answer.
   const drifted: string[] = [];
   const reportDrift = (field: string, citedHalf: LinkageSetIdentity): void => {
     drifted.push(

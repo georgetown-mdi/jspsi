@@ -24,15 +24,14 @@ import {
   filenameTooLongError,
 } from "./listingGuard";
 
-// O_NOFOLLOW makes an open refuse a final-component symlink (ELOOP on POSIX), so
-// a symlink planted at a rendezvous entry in the partner-writable directory is
-// never traversed by the read/write primitives below. It refuses only a
-// symlinked *entry*, not a symlinked mount point: an intermediate directory
-// component (a symlinked share root) is still followed, so a legitimate
-// symlinked mount is unaffected. @types/node types O_NOFOLLOW as a number, but
-// it is absent on Windows, where `?? 0` drops it from the mask -- leaving the
-// open otherwise unchanged -- mirroring the writeFileOwnerOnly / writeFileAtomic
-// hardening in fileUtils.ts.
+// O_NOFOLLOW makes an open refuse a final-component symlink (ELOOP on POSIX),
+// so a symlink planted at a rendezvous entry in the partner-writable
+// directory is never traversed by the read/write primitives below. It
+// refuses only the symlinked entry, not a symlinked mount point -- an
+// intermediate directory component is still followed, so a legitimate
+// symlinked mount is unaffected. @types/node types it as a number but it is
+// absent on Windows, where `?? 0` drops it from the mask, mirroring the
+// writeFileOwnerOnly / writeFileAtomic hardening in fileUtils.ts.
 const OPEN_FLAGS = {
   r: fs.constants.O_RDONLY,
   w: fs.constants.O_WRONLY | fs.constants.O_CREAT | fs.constants.O_TRUNC,
@@ -43,16 +42,15 @@ const OPEN_FLAGS = {
 /**
  * Opens `filePath` with the numeric equivalent of the string `flag` plus
  * `O_NOFOLLOW`, so the open refuses to traverse a symlink at the final path
- * component rather than following it. What this refusal defends against differs
- * by primitive: for the read primitive ({@link LocalFSClient.get}) it is a
- * backstop, since {@link LocalFSClient.list} already filters symlink entries out
- * (its `opendir` walk keeps only `Dirent.isFile()` names) and every read reads a
- * name the listing surfaced, so `O_NOFOLLOW` only catches a symlink swapped in
- * after the listing committed the name (a TOCTOU race). For the write primitives
- * ({@link LocalFSClient.put}, {@link LocalFSClient.createExclusive}) it is the
- * primary defense, not a backstop: their destinations are built from protocol
- * state at predictable names and never pass through `list()`, so `O_NOFOLLOW` is
- * what refuses a symlink pre-planted at one of those names.
+ * component rather than following it.
+ *
+ * For the read primitive ({@link LocalFSClient.get}) this is a safety
+ * check: {@link LocalFSClient.list} already filters symlink entries out, so
+ * `O_NOFOLLOW` here only catches a symlink swapped in after the listing
+ * committed the name (a TOCTOU race). For the write primitives
+ * ({@link LocalFSClient.put}, {@link LocalFSClient.createExclusive}) it is
+ * the primary defense: their destinations are built from protocol state at
+ * predictable names and never pass through `list()`.
  */
 function openNoFollow(filePath: string, flag: keyof typeof OPEN_FLAGS) {
   return fs.open(filePath, OPEN_FLAGS[flag] | (fs.constants.O_NOFOLLOW ?? 0));
@@ -94,13 +92,13 @@ async function drainStream(src: NodeJS.ReadableStream): Promise<Buffer> {
 /**
  * {@link FileTransportClient} backed by the local filesystem. Use this when
  * both parties share a network-mounted folder (e.g. an IT-provisioned share
- * synced to an SFTP server). No SSH connection is made; the operating system's
- * filesystem driver handles all I/O.
+ * synced to an SFTP server). No SSH connection is made; the operating
+ * system's filesystem driver handles all I/O.
  *
- * NOTE: `rename` relies on OS primitives that are atomic only within a single
- * filesystem. The mounted share and the message temp files must reside on the
- * same volume. This is always true when both paths are within the same network
- * mount.
+ * `rename` relies on OS primitives that are atomic only within a single
+ * filesystem, so the mounted share and the message temp files must reside
+ * on the same volume -- always true when both paths are within the same
+ * network mount.
  */
 export class LocalFSClient implements FileTransportClient {
   private reconnectAttempts = 0;
@@ -116,13 +114,11 @@ export class LocalFSClient implements FileTransportClient {
 
   /**
    * The session and retry counters the SFTP adapter reports, each fixed at 0
-   * here. The filedrop transport opens no connection and holds no session: its
-   * per-operation resilience is the poll-read loop in
-   * {@link FileSyncConnection} rather than a re-issue, there is nothing to drop
-   * mid-exchange, and no idle boundary to release, decline, force or hold. They
-   * are load-bearing rather than decorative -- the end-of-run summary and the
-   * metrics event read one union of the two client types, so a metric absent
-   * here would not compile there.
+   * here: the filedrop transport opens no connection or session, so there is
+   * nothing to drop, retry, or release mid-exchange. These are required, not
+   * decorative -- the end-of-run summary and the metrics event read one
+   * union of both client types, so a metric absent here would not compile
+   * there.
    */
   get transportRetryCount(): number {
     return 0;
@@ -189,11 +185,10 @@ export class LocalFSClient implements FileTransportClient {
     // fs.access on a stalled NFS/CIFS hard mount blocks a libuv thread-pool
     // worker, not the event loop, so setTimeout fires normally and this race
     // enforces the per-attempt deadline rather than waiting out the OS-level
-    // retry window (which can be several minutes). A timed-out attempt is
-    // terminal; see the shouldRetry predicate below for why a retry cannot help.
-    // Count each re-attempt (every access past the first) as a reconnect, for
-    // the metrics summary. Incrementing inside the retried callback ties the
-    // count to the retry loop's own re-issue decision -- no separate state.
+    // retry window (which can run several minutes); see the shouldRetry
+    // predicate below for why a timed-out attempt is terminal. Incrementing
+    // the reconnect count inside the retried callback ties it to the retry
+    // loop's own re-issue decision, with no separate state.
     let attempted = false;
     await retryPromise(
       () => {
@@ -215,23 +210,15 @@ export class LocalFSClient implements FileTransportClient {
       },
       maxReconnects,
       1_000,
-      // A TimeoutError means the mount did not answer within the budget. The
-      // abandoned fs.access keeps its thread-pool worker until the OS releases the
-      // syscall, and nothing in-process can cancel an already-dispatched blocking
-      // syscall (fs.access does not honor an AbortSignal, and libuv's uv_cancel only
-      // drops still-queued work), so a retry cannot succeed where the first attempt
-      // timed out and would only strand a second stalled worker (and, across
-      // maxReconnects, more), risking exhaustion of the default 4-thread pool. A
-      // timeout is therefore terminal, bounding concurrent stalled workers to one;
-      // every other (fast) error is the transient the retry budget exists for
-      // (EACCES/ENOENT while a share or its permissions are still settling). The
-      // brand-on-name fallback keeps a timeout terminal even if @psilink/core were
-      // ever loaded as two copies in one process (a future dual-package split),
-      // where instanceof across the copies would silently fail and otherwise
-      // re-enable the very worker-stacking retry this guards against. No non-timeout
-      // error this path sees carries that name (the wrapped access failure below is
-      // a fresh Error), so the fallback cannot make a transient error wrongly
-      // terminal.
+      // A TimeoutError means the mount did not answer within the budget; the
+      // abandoned fs.access keeps its thread-pool worker (fs.access ignores
+      // AbortSignal, and libuv cannot cancel already-dispatched work), so a
+      // retry would only strand another worker toward exhausting the
+      // default 4-thread pool. A timeout is therefore terminal; every other
+      // (fast) error is the transient the retry budget exists for
+      // (EACCES/ENOENT while a share is still settling). The name check
+      // alongside `instanceof` is a fallback for `@psilink/core` loaded as
+      // two module copies, where `instanceof` alone would silently fail.
       (err) =>
         !(
           err instanceof TimeoutError ||
@@ -244,17 +231,15 @@ export class LocalFSClient implements FileTransportClient {
   async end(): Promise<void> {}
 
   /**
-   * Enforces the directory-listing bounds (see {@link ./listingGuard}) at the
-   * transport read layer. The enumeration streams entries through `fs.opendir`
-   * rather than `fs.readdir`: `readdir` materializes the whole directory into one
-   * array (and this method then fans out a stat per file), so both allocations
-   * would scale with the attacker-controlled entry count before any check could
-   * run. `opendir` yields entries in bounded batches, so the count check below
-   * stops the walk -- and caps the retained `fileNames` array and the downstream
-   * stat fan-out -- at {@link MAX_DIRECTORY_ENTRIES} regardless of how many
-   * entries the directory actually holds. The count check covers every entry
-   * (the adversary controls the count whatever the entry type); the returned set
-   * is still files only, preserving the prior behavior.
+   * Enforces the directory-listing bounds (see {@link ./listingGuard}) at
+   * the transport read layer. Enumeration streams entries through
+   * `fs.opendir` rather than `fs.readdir`: `readdir` would materialize the
+   * whole directory -- and this method's per-file stat fan-out -- to scale
+   * with an attacker-controlled entry count before any check could run.
+   * `opendir` yields entries in bounded batches, so the count check below
+   * stops the walk at {@link MAX_DIRECTORY_ENTRIES} regardless of the
+   * directory's actual size. The count covers every entry of any type; the
+   * returned set is files only.
    */
   async list(dir: string): Promise<FileInfo[]> {
     const fileNames: string[] = [];
@@ -296,19 +281,19 @@ export class LocalFSClient implements FileTransportClient {
 
   /**
    * `options.encoding` is not applied; always returns a raw Buffer. Callers
-   * that need a decoded string should use `.toString(encoding)` on the result.
+   * that need a decoded string should use `.toString(encoding)` on the
+   * result.
    *
-   * When `options.maxBytes` is set, the read is bounded to that many bytes: the
-   * file is opened, the open handle is `fstat`ed, and a file larger than the cap
-   * is refused with a typed terminal error (see {@link frameSizeExceededError})
-   * before any content buffer is allocated. The stat and the read share one
-   * file handle, so that read pulls exactly the fstat'd size; a writer that
-   * appends after the stat (a TOCTOU race a plain `stat` + `readFile` would
-   * lose) cannot drive an allocation past the cap. Omitting `maxBytes` keeps the
-   * unbounded fast path.
+   * When `options.maxBytes` is set, the read is bounded to that many bytes:
+   * the handle is `fstat`ed and a file larger than the cap is refused (see
+   * {@link frameSizeExceededError}) before any content buffer is allocated.
+   * The stat and read share one handle, so a writer that appends after the
+   * stat cannot drive an allocation past the cap -- a TOCTOU race a plain
+   * `stat` + `readFile` would lose. Omitting `maxBytes` keeps the unbounded
+   * fast path.
    *
-   * Both paths open through {@link openNoFollow}, so a symlink at `filePath` is
-   * refused rather than followed to its target.
+   * Both paths open through {@link openNoFollow}, so a symlink at
+   * `filePath` is refused rather than followed.
    */
   async get(
     filePath: string,
@@ -320,7 +305,7 @@ export class LocalFSClient implements FileTransportClient {
       try {
         return (await handle.readFile()) as Buffer<ArrayBufferLike>;
       } finally {
-        // Read-only handle: a failed close carries no data-integrity meaning and
+        // Read-only handle: a failed close has no data-integrity meaning and
         // must not replace the returned buffer, the same reason the bounded path
         // below swallows its close error.
         await handle.close().catch(() => {});
@@ -353,7 +338,7 @@ export class LocalFSClient implements FileTransportClient {
         : (buffer.subarray(0, offset) as Buffer<ArrayBufferLike>);
     } finally {
       // Swallow a close() failure. This handle is read-only, so a failed close
-      // carries no data-integrity meaning; letting it reject here would replace
+      // has no data-integrity meaning; letting it reject here would replace
       // the in-flight result -- masking a FrameSizeExceededError (whose
       // UsageError type the poll loop relies on to stop re-reading the oversized
       // file) or turning a successful read into a spurious transport error.
@@ -387,20 +372,19 @@ export class LocalFSClient implements FileTransportClient {
     try {
       if (Array.isArray(payload)) {
         // A [header, payload] chunk list: write the parts back-to-back with
-        // writev so the 10-byte header is prepended WITHOUT concatenating the
-        // payload into a fresh buffer (the send-path peak-shaving this mirrors --
-        // for a binary frame the payload is never copied). The resulting on-disk
-        // bytes are the parts joined, byte-identical to writing their
+        // writev so the 10-byte header is prepended without concatenating
+        // the payload into a fresh buffer (the payload is never copied,
+        // mirroring the send-path peak-shaving). The resulting on-disk
+        // bytes are the parts joined, byte-identical to their
         // concatenation. encoding does not apply to a raw chunk list and is
-        // deliberately not passed.
+        // not passed.
         //
         // A SHORT write is not a failure and does not reject: the kernel may
-        // take fewer bytes than were offered, and what it did not take would
-        // otherwise publish as a truncated frame that the peer waits out its
-        // whole budget on before blaming the partner. So re-offer what is left
-        // until nothing is, the way get() loops its reads. No position is passed
-        // on any pass, so each write continues at the handle's own position and
-        // an `a` (append) flag keeps its meaning.
+        // take fewer bytes than offered, and what it did not take would
+        // otherwise publish as a truncated frame -- so re-offer what remains
+        // until nothing is, the way get() loops its reads. No position is
+        // passed on any pass, so each write continues at the handle's own
+        // position and an `a` (append) flag keeps its meaning.
         let remaining = payload;
         while (remaining.length > 0) {
           const { bytesWritten } = await handle.writev(remaining);
@@ -421,7 +405,7 @@ export class LocalFSClient implements FileTransportClient {
       await handle.close().catch(() => {});
       throw err;
     }
-    // Write succeeded: await close and surface its error rather than swallow it
+    // Write succeeded: await close and report its error rather than swallow it
     // -- on a write handle a failed close can signal the bytes did not durably
     // land (e.g. a deferred ENOSPC), the same as createExclusive's direct close.
     await handle.close();

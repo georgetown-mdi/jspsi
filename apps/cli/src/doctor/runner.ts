@@ -1,12 +1,11 @@
 import { spawn } from "node:child_process";
 
-// The one process boundary `psilink doctor probe` crosses. Every invocation goes
-// through this seam so the batteries stay unit-testable against a recorded tool
-// transcript, and so the two rules that make the boundary safe are stated once
-// rather than at each call site: an argv ARRAY (never a shell string, since the
-// server, share, path, username, and domain in it are operator input), and a
-// bounded wait (a file server that accepts the connection and then answers
-// nothing must not hang an unattended run).
+// The one process boundary `psilink doctor probe` crosses, through
+// `CommandRunner`, so the checks stay unit-testable against a recorded
+// transcript. Two rules make it safe: an argv ARRAY, never a shell string --
+// the server, share, path, username, and domain in it are operator input --
+// and a bounded wait, since a server that accepts the connection and answers
+// nothing must not hang an unattended run.
 
 /** The outcome of one child process. */
 export interface CommandResult {
@@ -23,7 +22,7 @@ export interface CommandResult {
   spawnErrorCode?: string;
 }
 
-/** The injectable process runner the doctor batteries invoke smbclient through. */
+/** The injectable process runner the doctor checks invoke smbclient through. */
 export interface CommandRunner {
   run(
     file: string,

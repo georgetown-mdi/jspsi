@@ -42,15 +42,13 @@ import { builder as doctorBuilder } from "./commands/doctor";
 
 /**
  * Read this package's own version from its co-located package.json, resolved
- * relative to this module's own file rather than left to yargs' `.version()`
- * default. yargs' own heuristic walks up from ITS install directory (not this
- * CLI's), which in an npm-workspaces monorepo lands on the hoisted
- * node_modules' enclosing directory -- the repo root -- and reports the root
- * manifest's version instead of the CLI's. Resolving from `__dirname` instead
- * is correct both from the built dist (dist/index.js, one level below
- * apps/cli) and from this source file under a test runner (src/cliParser.ts,
- * also one level below apps/cli): package.json sits at the same relative
- * `../package.json` in both.
+ * from `__dirname` rather than left to yargs' `.version()` default: yargs
+ * walks up from its own install directory, which in this npm-workspaces
+ * monorepo lands on the repo root and reports the root manifest's version
+ * instead. `__dirname` resolves correctly both from the built dist
+ * (dist/index.js) and this source file under a test runner (src/cliParser.ts)
+ * -- both one level below apps/cli, so `../package.json` is the same relative
+ * path in either.
  */
 function readCliVersion(): string {
   const pkgPath = path.join(__dirname, "..", "package.json");
@@ -132,32 +130,27 @@ export function buildCli(argv: string[]): Argv {
         doctorBuilder,
       )
       .usage("$0 [command] [options]")
-      // Fail fast on a misspelled option (e.g. --server-user for --server-username):
-      // without this, yargs silently drops an unrecognized flag into argv where no
-      // command reads it, so a typo'd credential or path override is quietly ignored
-      // and the run proceeds with the wrong (or default) value. strictOptions, not
-      // strict: it validates flags only, leaving the positionals the zero-setup and
-      // exchange commands read straight from argv._ (URL/input/output) untouched --
-      // full strict rejects those as "unknown arguments". The invite/accept/init
-      // commands set unknown-options-as-args (to admit a `-`-leading invitation
-      // string as a positional), so on those a mistyped option is absorbed as a
-      // positional and caught by the command's own argument validation instead.
+      // Fail fast on a misspelled option (e.g. --server-user for
+      // --server-username): otherwise yargs drops it unread into argv,
+      // silently ignoring a typo'd credential or path override. strictOptions
+      // (not strict) validates flags only, leaving the zero-setup/exchange
+      // commands' argv._ positionals (URL/input/output) untouched; full
+      // strict would reject those as unknown arguments. invite/accept/init
+      // instead set unknown-options-as-args (to admit a `-`-leading
+      // invitation string as a positional), so a mistyped option there is
+      // absorbed as a positional and caught by the command's own validation
+      // instead.
       .strictOptions()
       .fail((msg, err) => {
-        // yargs invokes this for a parse/validation failure (msg set, err null) and
-        // for an error thrown while parsing or in a command handler (err set). Let a
-        // thrown error propagate to the caller's catch, which sanitizes any partner-/
-        // server-controlled bytes before display; only yargs' own validation
-        // messages are handled here. An unrecognized option (or other argument-shape
-        // failure) is a usage error, so exit 64 (EX_USAGE) to match the repeated-
-        // single-value-option and other usage-error exits, rather than yargs' default
-        // exit 1. yargs builds `msg` from the option tokens on this operator's own
-        // command line, so it should hold no wire-controlled bytes -- but it is
-        // routed through the same display-boundary sanitizer as every other operator-
-        // facing sink rather than trusting that: the sanitizer makes the safety a
-        // property of the code, not a comment that could rot. The trailing hint is
-        // fixed text, so it stays outside the sanitize call to keep its newline
-        // literal.
+        // yargs invokes this for a parse/validation failure (msg set, err
+        // null) and for an error thrown while parsing or in a handler (err
+        // set); a thrown error propagates to the caller's catch, which
+        // sanitizes partner-/server-controlled bytes before display. An
+        // unrecognized option is a usage error: exit 64 (EX_USAGE), matching
+        // the CLI's other usage-error exits. `msg` comes from this operator's
+        // own command line but still routes through the display-boundary
+        // sanitizer. The trailing hint is fixed text, kept outside the
+        // sanitize call to preserve its literal newline.
         if (err) throw err;
         console.error(
           `${sanitizeForDisplay(msg)}\nRun with --help to see the available options.`,

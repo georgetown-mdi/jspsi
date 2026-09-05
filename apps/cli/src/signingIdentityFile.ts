@@ -14,23 +14,17 @@ import { warnIfFileOverPermissive, writeFileOwnerOnly } from "./fileUtils";
 import { parseSensitiveJson } from "./sensitiveFile";
 
 // File custody for the long-lived signing identity (private key + self-signed
-// certificate). Kept in its OWN file, separate from the rotating key file
-// (`.psilink.key`): the shared secret rotates every exchange, whereas the signing
-// key must be stable for its whole life so a fingerprint a partner pinned once
-// keeps matching.
+// certificate), kept separate from the rotating key file (`.psilink.key`):
+// the shared secret rotates every exchange; the signing key must stay stable
+// so a partner's pinned fingerprint keeps matching.
 //
-// The path is always the operator's: `signing.identity_file` or
-// `--identity-file`. This module resolves no location of its own, and no caller
-// may substitute one -- a key reused across every exchange and every partner is a
-// credential, and where a credential lives is a custody decision (a mounted
-// secrets directory, typically read-only) that psilink is in no position to make.
-// A location psilink chose would be wrong in exactly the cases that matter: an
-// ephemeral container home mints a fresh key with a fresh fingerprint on every
-// run, and a working directory a partner syncs into publishes the private key to
-// them. Every function here therefore takes the path it operates on.
+// The path is always the operator's (`signing.identity_file` /
+// `--identity-file`); this module resolves no location of its own. Why:
+// docs/notes/signing-identity-custody.md, "What a chosen location costs" and
+// "The posture".
 
 // The identity file read both loaders share, parsed only as far as JSON. A read
-// failure carries only a path and errno (no file content), safe to surface. The
+// failure holds only a path and errno (no file content), safe to show. The
 // JSON parse can echo a span of the source, and this file holds the P-256
 // private key, so it routes through parseSensitiveJson, which reports path-only
 // (see sensitiveFile.ts). The wrapper distinguishes an absent file from one
@@ -112,7 +106,7 @@ export async function loadSigningCertificate(
 ): Promise<SigningCertificate | undefined> {
   const read = readIdentityDocument(identityPath);
   if (read === undefined) return undefined;
-  // The certificate carries its own version literal, but the document around it
+  // The certificate holds its own version literal, but the document around it
   // does not have to be an identity file at all; checking it keeps an
   // unrecognized identity format from being mined for a certificate here while
   // loadSigningIdentity refuses it.
@@ -140,7 +134,7 @@ export async function loadSigningCertificate(
  * owner-only write path (`0600` on Unix, a restricted ACL on Windows). Creates
  * parent directories as needed. Pass `exclusive` when first creating the
  * identity so a concurrent creator cannot silently overwrite it (a regenerate
- * deliberately overwrites and omits it).
+ * overwrites by design and omits it).
  */
 export function saveSigningIdentity(
   identityPath: string,

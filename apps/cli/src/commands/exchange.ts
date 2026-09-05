@@ -222,14 +222,11 @@ export function parseArgs(argv: Arguments): ExchangeArgs {
   const common = parseCommonBootstrapArgs(argv);
   return {
     ...common,
-    // exchange tilde-expands the local file paths it reads/writes. Unlike the
-    // persistence commands (zero-setup --save, invite/accept), which defer @path
-    // resolution so a saved config keeps the reference, exchange resolves any
-    // @path credential ref here at parse time: it only ever reads a config,
-    // never writes one, so there is no reference to preserve and the resolved
-    // value is needed immediately for the connection. (server-password /
-    // -private-key / -private-key-passphrase are credential values, not paths to
-    // tilde-expand.)
+    // exchange resolves any @path credential ref here at parse time, unlike the
+    // persistence commands (--save, invite/accept), which defer resolution to
+    // preserve the reference in a saved config; exchange only reads a config, so
+    // there is nothing to preserve. (server-password / -private-key /
+    // -private-key-passphrase are credential values, not paths to tilde-expand.)
     configFile: expandTilde(common.configFile),
     keyFile: expandTilde(common.keyFile),
     recordFile: expandTilde(common.recordFile),
@@ -252,7 +249,7 @@ export function parseArgs(argv: Arguments): ExchangeArgs {
       (argv["sweep-exchange-files"] as boolean | undefined) ?? false,
     forceRetainSweep:
       (argv["force-retain-sweep"] as boolean | undefined) ?? false,
-    // Carried through verbatim: unlike the server-* credential flags above, the
+    // Kept verbatim: unlike the server-* credential flags above, the
     // invitation is NOT @-resolved here. Its @-file form is read at decode time
     // by decodeAndValidateInvitation (via provisionKeyFileFromInvitation), so the
     // code stays out of process argv even when supplied as `@code.txt`.
@@ -262,11 +259,9 @@ export function parseArgs(argv: Arguments): ExchangeArgs {
 
 // The runtime-injected authentication fields: their values come only from
 // `.psilink.key`, so an operator who sets them in the top-level `authentication`
-// block of psilink.yaml is warned and the value is stripped. Each canonical name
-// carries the user-input spellings it can appear as before `camelizeKeys` runs
-// (snake_case is the YAML convention; camelCase is accepted too), so neither
-// form slips through silently, alongside the hint shown when it is stripped.
-// Keeping forms and hint in one entry keeps them from drifting out of sync.
+// block of psilink.yaml is warned and the value is stripped. Each entry lists
+// the user-input spellings (snake_case and camelCase) a field can appear as
+// before `camelizeKeys` runs, plus the hint shown when it is stripped.
 const INJECTED_AUTH_FIELDS: Record<string, { forms: string[]; hint: string }> =
   {
     sharedSecret: {
@@ -331,7 +326,7 @@ export function loadConfig(options: ExchangeOptions): {
 
   // Read, then parse through the sensitive-file chokepoint. The fs read can only
   // fail with an errno (ENOENT, EACCES, EISDIR) -- a path plus code, no config
-  // content -- so it is surfaced; ENOENT gets the create-a-config guidance. The
+  // content -- so it is reported; ENOENT gets the create-a-config guidance. The
   // YAML parse can echo source bytes (an inline credential), so it routes through
   // parseSensitiveYaml, which reports path-only (see sensitiveFile.ts). Invalid
   // caller configuration is a UsageError (exit 64), not a transport failure (69).
@@ -382,15 +377,12 @@ export function loadConfig(options: ExchangeOptions): {
   }
 
   // Resolve @-file references in the supported credential/opaque fields after
-  // schema validation, and outside the parse try/catch above: a missing or
-  // unreadable referenced file (including a preserved @path credential whose file
-  // has since moved) is a UsageError naming the reference (exit 64), so it must
-  // propagate as-is rather than be re-wrapped as an "invalid exchange spec",
-  // which would mislabel a credential-access failure as a schema error. The
-  // literal @path strings validate cleanly as the fields' string values, so
-  // resolving after the parse loses no validation. Scoped to the documented
-  // @-file fields (all under `connection`); a free-text field such as
-  // linkageTerms.identity or retentionDisposition keeps a literal leading `@`.
+  // schema validation: a missing or unreadable referenced file is a UsageError
+  // naming the reference (exit 64), propagated unwrapped rather than relabeled as
+  // an invalid exchange spec. The literal @path strings validate cleanly as plain
+  // string values, so resolving after the parse loses no validation. Scoped to
+  // the documented @-file fields under `connection`; a free-text field such as
+  // linkageTerms.identity keeps a literal `@`.
   const resolvedSpec = resolveExchangeSpecRefs(parsedSpec);
   const {
     connection: baseConn,
@@ -415,16 +407,15 @@ export function loadConfig(options: ExchangeOptions): {
   // The channel here comes from the loaded config (post-override); warn on the
   // file-sync-only flags before the channel allowlist below.
   //
-  // connectionPerPoll is read from BOTH the raw CLI flag and the merged config,
-  // not just one: it is the mode's documented primary home, so a persisted
-  // connection_per_poll: true in a filedrop config must draw the ignored-warning
-  // (only the merged connection.options carries that). But applyConnectionOverrides
-  // applies the CLI override only on sftp, dropping it off any other channel, so a
-  // CLI --connection-per-poll against a filedrop config never reaches
-  // connection.options -- only the raw flag carries that intent. Either source
-  // being on means the operator asked for a mode this channel ignores. The other
-  // flags stay raw-CLI-only: they warn solely on a non-file-sync channel
-  // (webrtc), whose SharedOptions cannot express them, so no merged value exists.
+  // connectionPerPoll is read from both the raw CLI flag and the merged config:
+  // a persisted connection_per_poll: true in a filedrop config must draw the
+  // ignored-warning too, which only the merged connection.options holds.
+  // applyConnectionOverrides applies the CLI override only on sftp, so a CLI
+  // --connection-per-poll against a filedrop config never reaches
+  // connection.options -- only the raw flag states that intent. Either source
+  // being on means the operator asked for a mode this channel ignores. The
+  // other flags stay raw-CLI-only: they warn solely on a non-file-sync channel
+  // (webrtc), whose SharedOptions cannot express them.
   warnUnsupportedFileSyncFlags(
     connection.channel,
     {
@@ -435,7 +426,7 @@ export function loadConfig(options: ExchangeOptions): {
       // connection.options is typed SharedOptions | FileSyncOptions; read
       // connectionPerPoll through a FileSyncOptions cast (as the core webrtc
       // refines do), which yields undefined on a SharedOptions block that cannot
-      // carry it.
+      // hold it.
       connectionPerPoll:
         options.connectionPerPoll === true ||
         (connection.options as FileSyncOptions | undefined)
@@ -479,7 +470,7 @@ export function loadConfig(options: ExchangeOptions): {
     // to the config union is refused here until runProtocol learns to run it
     // (CONTRIBUTING.md, Transport branching). The `never` binding is what makes
     // that a check rather than a hope: it compiles only while the list above
-    // covers every channel the union carries, so adding one to core without
+    // covers every channel the union contains, so adding one to core without
     // adding it here fails the build rather than reaching an operator.
     const unsupported: never = connection;
     throw new UsageError(
@@ -492,7 +483,7 @@ export function loadConfig(options: ExchangeOptions): {
   // wasteful setting persisted in psilink.yaml is flagged, not only a CLI
   // --connection-per-poll. Read through a FileSyncOptions cast for the same
   // reason as the call above: the merged options are typed for every channel,
-  // and a webrtc block cannot carry either field. A no-op off sftp (the mode is
+  // and a webrtc block cannot hold either field. A no-op off sftp (the mode is
   // SFTP-only).
   warnConnectionPerPollShortInterval(
     connection.channel,
@@ -531,7 +522,7 @@ export function loadConfig(options: ExchangeOptions): {
   // PAKE handshake. The `expires` in the key file is authoritative regardless of
   // token_max_age_days -- it may be an invitation token's short lifetime or a
   // max-age stamp from a prior rotation. authenticateConnection enforces the same
-  // condition pre-handshake, but surfacing it here exits earlier and with a
+  // condition pre-handshake, but reporting it here exits earlier and with a
   // re-invite-specific message. UsageError -> exit 64, like the malformed/missing
   // key-file cases above. (The threshold-dependent "expiring soon" advisory is
   // emitted later, in the handler, because it is conditional on the rotation
@@ -553,7 +544,7 @@ export function loadConfig(options: ExchangeOptions): {
   }
   const authPersist: AuthPersist = {
     // Operator-policy fields parsed from the YAML `authentication` block (today,
-    // token_max_age_days), carried end to end -- protocol.ts reads
+    // token_max_age_days), passed through end to end -- protocol.ts reads
     // tokenMaxAgeDays here to stamp the rotated token's expiry. The injected
     // fields below come only from the key file and override any YAML value.
     ...specAuth,
@@ -619,7 +610,7 @@ export function shouldWarnTokenExpiring(
  * `undefined` to stay silent. Call only when the exchange attempt has finished
  * (success or failure).
  *
- * `now` is the CURRENT time -- deliberately later than the load-time `now` that
+ * `now` is the CURRENT time -- later than the load-time `now` that
  * produced `expiryBefore`, so the re-check reflects time that elapsed during the
  * exchange and can catch a token that lapsed mid-run; `warnThresholdDays` is the
  * same value used at load.
@@ -635,7 +626,7 @@ export function shouldWarnTokenExpiring(
  * read/parse failure (the file existed and validated at load but became
  * unreadable or corrupt during the exchange) is not swallowed here; it propagates
  * to the caller, which decides how to treat it. The advisory is best-effort, so
- * the handler logs such a failure at debug and continues rather than surfacing it
+ * the handler logs such a failure at debug and continues rather than reporting it
  * as the exchange's outcome. The re-read suppresses the over-permissive-file
  * warning already emitted at load.
  *
@@ -704,15 +695,12 @@ export async function prepareDataset(
   });
 
   // Pre-flight this run's CSV against the committed linkage terms before any
-  // exchange work, the same satisfiability gate accept applies -- advance notice,
-  // in configuration-specific wording, of the refusal prepareForExchange raises
-  // from the same core verdict below. It guards a recurring run whose CSV has
-  // drifted from the terms the configuration committed to: a file swapped since
-  // setup, or one never checked at an offline accept. Gated on explicit
-  // linkageTerms only: the wording here names the operator's committed terms, and
-  // terms derived from the CSV when none are committed are graded by the run
-  // boundary alone. The config's standardization and metadata are passed so the
-  // verdict matches what prepareForExchange grades (accept passes neither).
+  // exchange work -- the same satisfiability gate accept applies, in
+  // configuration-specific wording, ahead of the refusal prepareForExchange
+  // raises from the same core verdict below. Guards a recurring run whose CSV
+  // has drifted from the terms the configuration committed to. Gated on
+  // explicit linkageTerms only; the config's standardization and metadata are
+  // passed so the verdict matches what prepareForExchange grades.
   if (exchangeDataSpec.linkageTerms !== undefined)
     checkLinkageSatisfiability(
       columns,
@@ -729,15 +717,13 @@ export async function prepareDataset(
     );
 
   // Show and confirm this party's OWN outbound columns before any credential,
-  // terms, or data are sent, when the exchange carries a consent record its current
-  // set does not satisfy -- an acceptance that could not resolve the set at accept
-  // time, or one whose input file has changed since. The inputs are resolved
-  // through the same seam prepareForExchange resolves them from, so what is
-  // confirmed is what the run would transmit; a confirmation is recorded in the
-  // config and folded into `exchangeDataSpec`, and an unconfirmable or declined set
-  // refuses here. Runs before prepareForExchange only so the confirmation can
-  // precede its fail-closed backstop (assertOutboundPayloadConsented); a party with
-  // no consent record -- every non-acceptor -- passes through untouched.
+  // terms, or data are sent, when the exchange has a consent record its current
+  // set does not satisfy. Resolved through the same resolveExchangeInputs call
+  // prepareForExchange itself uses, so what is confirmed is what the run would
+  // transmit; the confirmation is recorded in the config, and an unconfirmable or
+  // declined set refuses here -- ahead of prepareForExchange's fail-closed safety
+  // check (assertOutboundPayloadConsented). A party with no consent record --
+  // every non-acceptor -- passes through untouched.
   const resolved = resolveExchangeInputs(exchangeDataSpec, identity, columns);
   await confirmOutboundPayloadConsent({
     spec: exchangeDataSpec,
@@ -755,34 +741,29 @@ export async function prepareDataset(
     columns,
   );
   warnOnValueConstraints(prepared, log);
-  // Recurring / offline-accept lock-in: a committed config has its received payload
-  // verified against the locked-in column set at runtime (see
-  // reconcileReceivedPayload), so a partner that transmits a different set aborts
-  // the exchange. The canonical, local source is the top-level expectedPayloadColumns
-  // (written by an offline acceptance from the invitation's disclosedPayloadColumns);
-  // it falls back to the negotiated payload.receive names for an authored recurring
-  // config that carries only the data dictionary. That fallback is exact because
-  // assertPayloadSendDisclosed holds a present payload.send to the partner's full
-  // disclosed set, so payload.receive (the mirror of that send) equals what the
-  // partner actually transmits; without that invariant a partner whose send
-  // under-declared its metadata would transmit more than the mirror and false-abort.
-  // An empty set is enforced strictly ("receive nothing"); an absent source
-  // reconciles lazily, as before. A no-output party's "receive nothing" is enforced
-  // independently by runExchange regardless of this field.
+  // Recurring / offline-accept enforcement: a committed config has its received
+  // payload verified against the pinned column set at runtime (see
+  // reconcileReceivedPayload), so a partner that transmits a different set
+  // aborts the exchange. The canonical source is the top-level
+  // expectedPayloadColumns, written by an offline acceptance; it falls back to
+  // the negotiated payload.receive names for an authored recurring config that
+  // holds only the data dictionary. An empty set means "receive nothing"
+  // strictly; an absent source reconciles lazily (a no-output party's "receive
+  // nothing" is enforced independently by runExchange regardless of this field).
   const expectedFromConfig =
     exchangeDataSpec.expectedPayloadColumns ??
     exchangeDataSpec.linkageTerms?.payload?.receive?.map((c) => c.name);
   if (expectedFromConfig !== undefined)
     prepared.expectedPayloadColumns = expectedFromConfig;
-  // The terms-side half of the same acceptance's lock-in: the `deduplicate` the
-  // invitation declared for the inviting party's own side, written by the accept
-  // paths into the config this run loads. Restored so the partner's presented
-  // value is held to it at the terms exchange, before any key or payload moves
-  // (assertPresentedDeduplicateMatchesInvitation). No fallback and no derivation:
-  // this party's own linkage_terms.deduplicate is its OWN side, so reading the
-  // binding off it would refuse the legitimate differing pair. An absent field --
-  // an exchange authored from two parties' own documents -- binds nothing, as
-  // before.
+  // The terms-side half of the same acceptance's enforcement: the `deduplicate`
+  // the invitation declared for the inviting party's own side, written by the
+  // accept paths into the config this run loads. Restored so the partner's
+  // presented value is held to it at the terms exchange, before any key or
+  // payload moves (assertPresentedDeduplicateMatchesInvitation). No fallback and
+  // no derivation: this party's own linkage_terms.deduplicate is its OWN side,
+  // so reading the binding off it would refuse the legitimate differing pair.
+  // An absent field -- an exchange authored from two parties' own documents --
+  // binds nothing.
   if (exchangeDataSpec.expectedPartnerDeduplicate !== undefined)
     prepared.expectedPartnerDeduplicate =
       exchangeDataSpec.expectedPartnerDeduplicate;
@@ -793,15 +774,12 @@ export async function prepareDataset(
  * What a `certificate`-mode config that names no signing identity is told,
  * before it connects.
  *
- * Fixed prose over this party's own config, so it names no partner-authored
- * content and carries no path of its own beyond the illustrative one: psilink
- * chooses no location for a signing identity, and a message that guessed at one
- * would be the very default this refusal exists to remove. It names both
- * spellings the operator writes the path in, an example under a mount of the
+ * Fixed prose over this party's own config: names no partner-authored content
+ * and no path of its own beyond the illustrative example, under a mount of the
  * identity's own -- the shape docs/DEPLOYMENT.md gives it, kept clear of the
- * read-write mount the rotating key file needs -- and the mode that makes the
- * run legal without one: the shape the unpinned-partner refusal beside it
- * already takes.
+ * read-write mount the rotating key file needs. Names both spellings the
+ * operator writes the path in, and the mode that makes the run legal without
+ * one.
  */
 const SIGNING_IDENTITY_FILE_UNSET_REFUSAL =
   "this exchange signs receipts (signing.mode: certificate) but names no " +
@@ -835,7 +813,7 @@ function certificateModeIdentityPath(identityFile: string | undefined): string {
  * server and whose accepted pin is written into the operator's `psilink.yaml`.
  * A run this refuses could never have finished, so none of that should have
  * happened on its way to being told so. {@link resolveSigningPersist} raises the
- * same refusal at the seam that loads the identity, which is where a caller
+ * same refusal where it loads the identity, which is where a caller
  * outside the handler meets it.
  *
  * A no-op for every other mode and for a config with no `signing` block: neither
@@ -864,12 +842,12 @@ function assertSigningIdentityNamed(signing: SigningConfig | undefined): void {
  * at use, as `psilink fingerprint` does) and nothing else: the signing identity
  * is a credential, so where it lives is the operator's custody decision and no
  * location is resolved on their behalf. A `certificate`-mode block that names
- * none is refused at this seam as well, in the one wording
- * {@link assertSigningIdentityNamed} carries -- an {@link OperatorConfigError}
+ * none is refused here as well, in the one wording
+ * {@link assertSigningIdentityNamed} uses -- an {@link OperatorConfigError}
  * joining the pre-flight family that refuses an unpinned partner and an unnamed
  * local party, and the same exit 64. The exchange handler raises it earlier
  * still, from the parsed configuration alone, so an operator never reaches this
- * seam by way of a prompt or a connection the refusal makes pointless.
+ * point by way of a prompt or a connection the refusal makes pointless.
  *
  * The pinned partner fingerprint is passed through verbatim, and this resolver
  * states no rule about its absence: a certificate-mode block with no pin is
@@ -1024,10 +1002,10 @@ export async function handler(argv: Arguments): Promise<void> {
     // termsIdentity is the identity this run PUTS IN THE AGREED TERMS, which is
     // what a partner verifies a signed receipt's certificate against. It comes
     // from --identity, else the loaded configuration's linkage_terms.identity,
-    // and is absent when neither names this party: the terms then carry no
+    // and is absent when neither names this party: the terms then hold no
     // identity at all rather than a label the operator never chose. A blank flag
     // value is what a scripted `--identity "$ORG"` sends with ORG unset, so it
-    // reads as absent and leaves the configuration's own label standing.
+    // is treated as absent and leaves the configuration's own label standing.
     let termsIdentity: string | undefined;
     let flagIdentity: string | undefined;
     try {
@@ -1035,7 +1013,7 @@ export async function handler(argv: Arguments): Promise<void> {
     } catch (err) {
       // The one value the flag refuses rather than reads (the init template's
       // identity placeholder) is a local usage fault decided before anything is
-      // sent, so it exits 64 here; the enclosing try carries only a finally, so
+      // sent, so it exits 64 here; the enclosing try has only a finally, so
       // an escaping refusal would reach the top-level printer and exit 1.
       exitWithError(log, err, 64);
     }
@@ -1058,8 +1036,8 @@ export async function handler(argv: Arguments): Promise<void> {
       });
     } catch (err) {
       // A usage error (exit 64) -- the `-`-at-an-interactive-terminal rejection
-      // openInputSource raises is a UsageError carrying no exitCode -- must map to
-      // 64, not collapse to 69; a missing input file carries its own exitCode 69.
+      // openInputSource raises is a UsageError with no exitCode -- must map to
+      // 64, not collapse to 69; a missing input file has its own exitCode 69.
       exitWithError(log, err, exitCodeForError(err));
     }
 
@@ -1070,7 +1048,7 @@ export async function handler(argv: Arguments): Promise<void> {
     // identity is refused while the run can still be stopped rather than after
     // it has sent this party's data toward receipts the partner rejects. Both
     // refusals read this party's own configuration and its own identity file, so
-    // they are settled ahead of the host-key step below and the transport its
+    // they are decided ahead of the host-key step below and the transport its
     // first-use probe opens. `null` when signing is not configured for
     // certificate mode, which leaves the exchange unsigned.
     let signing: SigningPersist | null;
@@ -1122,7 +1100,7 @@ export async function handler(argv: Arguments): Promise<void> {
         "exchange",
         recordOutput,
         // saveIntent and onAuthenticated are both undefined on the authenticated
-        // exchange path; the trailing object carries the CLI-only sweep controls
+        // exchange path; the trailing object holds the CLI-only sweep controls
         // and the --event-stream toggle, then the signed-receipt inputs.
         undefined,
         undefined,

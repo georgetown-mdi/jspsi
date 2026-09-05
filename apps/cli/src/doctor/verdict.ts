@@ -14,12 +14,12 @@ import { asciiSafeJsonLine } from "../util/jsonLine";
  */
 export const DOCTOR_VERDICT_VERSION = 1;
 
-/** Which battery produced a verdict. */
+/** Which check set produced a verdict. */
 export type DoctorMode = "probe" | "mount";
 
 /**
  * The outcome of a single check. `warn` is a check that ran and does not block
- * an exchange, but carries a meaning and an action the operator should read.
+ * an exchange, but has a meaning and an action the operator should read.
  * `skipped` covers both "an earlier check failed so this one never ran" and
  * "this check does not apply to the inputs given", which the check's `meaning`
  * distinguishes.
@@ -34,15 +34,12 @@ export type DoctorCheckStatus = "ok" | "warn" | "fail" | "skipped";
  */
 export type DoctorOverall = "ok" | "fix_and_retry" | "fatal";
 
-// The two shapes the emitted document is made of are type aliases rather than
-// interfaces for one reason: an object type alias carries the implicit index
-// signature asciiSafeJsonLine's JsonLineObject parameter needs, an interface
-// does not. What withholds a check record's human-only fields is verdictOf's
-// explicit field picking: the inner `satisfies DoctorCheck` on the map
-// callback's literal pins that at compile time (the outer annotation is
-// redundant with the return-type annotation), and the emitted-document
-// equality test covers what it misses -- a `checks: report.checks`
-// passthrough typechecks clean.
+// Type aliases, not interfaces, for the emitted-document shapes: an object type
+// alias has the implicit index signature asciiSafeJsonLine's JsonLineObject
+// parameter needs, an interface does not. verdictOf's explicit field picking
+// withholds a check record's human-only fields, pinned at compile time by the
+// inner `satisfies DoctorCheck`; the emitted-document equality test covers
+// what a `checks: report.checks` passthrough would miss.
 
 /** One check as it appears in the `--json` verdict. */
 export type DoctorCheck = {
@@ -58,20 +55,20 @@ export type DoctorCheck = {
 /**
  * A check plus the fields that exist only for the human rendering. `summary` is
  * the headline line; `detail` is the tool output behind a failure, which is
- * server-controlled text and so is deliberately absent from the JSON verdict --
+ * server-controlled text and so, by design, is absent from the JSON verdict --
  * a launcher gets the classified `meaning`/`action`, not raw bytes to re-render.
  */
 export interface DoctorCheckRecord extends DoctorCheck {
   summary: string;
   detail?: string;
   /**
-   * Set on a failure that stopped the battery from running rather than one it
-   * ran and returned a verdict on; it is what makes the overall `fatal`.
+   * Set on a failure that stopped the run rather than one it ran and returned a
+   * verdict on; it is what makes the overall `fatal`.
    */
   blocksRun?: boolean;
 }
 
-/** The full result of one battery, before rendering. */
+/** The full result of one run, before rendering. */
 export interface DoctorReport {
   mode: DoctorMode;
   checks: DoctorCheckRecord[];
@@ -85,10 +82,10 @@ export type DoctorVerdict = {
   checks: DoctorCheck[];
 };
 
-// Record builders shared by both batteries.
+// Record builders shared by both check sets.
 
 /**
- * A check that passed and asks nothing of the operator. It cannot carry an
+ * A check that passed and asks nothing of the operator. It cannot have an
  * `action`: a passing check that has one is a `warn`, which is what both
  * renderings key on.
  */
@@ -129,18 +126,11 @@ export function skipped(
 }
 
 /**
- * Exit code per overall verdict, the closed set a caller may see from a run that
- * produced a verdict. All are below 125, which Docker reserves for its own
- * failures to start a container -- a caller running the doctor in a container
- * can therefore tell "Docker could not run it" from any verdict this command
- * reaches. A usage error (a missing or malformed input) is not in this set: it
- * exits 64 like every other psilink usage error and prints no verdict, because
- * the checks never ran.
- *
- * The two nonzero values follow BSD `sysexits`, as the rest of the CLI does:
- * `fix_and_retry` is a configuration the operator changes (EX_CONFIG), and
- * `fatal` is something the doctor depends on not being available (EX_UNAVAILABLE
- * -- the smbclient binary, or the mounted directory itself).
+ * Exit code per overall verdict, the closed set a caller may see from a run
+ * that produced a verdict. Below 125 -- Docker's own reserved range -- and
+ * following BSD `sysexits` for the two nonzero values. A usage error is not
+ * in this set: it exits 64 and prints no verdict, because the checks never
+ * ran. See docs/spec/CLI_DOCTOR.md, "Exit codes".
  */
 export const DOCTOR_EXIT_CODE: Record<DoctorOverall, number> = {
   ok: 0,
@@ -149,9 +139,9 @@ export const DOCTOR_EXIT_CODE: Record<DoctorOverall, number> = {
 };
 
 /**
- * Roll the individual checks up. A failure that stopped the battery running
- * (`blocksRun`) outranks one it ran and returned a verdict on, because the two
- * ask different things of the caller: the first has no ACTION to follow.
+ * Roll the individual checks up. A failure that stopped the run (`blocksRun`)
+ * outranks one it ran and returned a verdict on, because the two ask different
+ * things of the caller: the first has no ACTION to follow.
  */
 export function overallOf(report: DoctorReport): DoctorOverall {
   const failures = report.checks.filter((check) => check.status === "fail");
@@ -178,25 +168,18 @@ export function verdictOf(report: DoctorReport): DoctorVerdict {
 }
 
 /**
- * The single stdout line the `--json` form emits. A check's `meaning` and
- * `action` interpolate the operator's own `SMB_*` values (`SMB_PATH` reaches
- * one verbatim, and its validation rejects only the C0 controls and DEL, so the
- * C1 range, U+2028/U+2029 and an astral character all pass through) and, on the
- * authentication and share_open arms, the smbclient NT_STATUS token, which is
- * bounded to NT_STATUS_[A-Z_]+ where it is extracted and so is ASCII by
- * construction. The line rides {@link asciiSafeJsonLine}, which leaves every byte of it
- * printable ASCII while the keys, the value types, and the parsed values stay
- * exactly what `JSON.stringify` alone produces. The escapes are JSON's own, so
- * this is no second escaping altitude: a launcher that renders a parsed field
- * to a human still escapes it once, at its own sink (see CONTRIBUTING.md,
- * Operator-facing escaping).
+ * The single stdout line the `--json` form emits, kept printable ASCII by
+ * {@link asciiSafeJsonLine} despite operator-supplied `SMB_*` values and the
+ * smbclient NT_STATUS token reaching it unescaped. See docs/spec/CLI_DOCTOR.md,
+ * "The line is printable ASCII", and CONTRIBUTING.md, "Operator-facing
+ * escaping".
  */
 export function verdictJson(report: DoctorReport): string {
   return asciiSafeJsonLine(verdictOf(report));
 }
 
 /**
- * Bounds on the tool output carried behind a failing check. smbclient can answer
+ * Bounds on the tool output held behind a failing check. smbclient can answer
  * with a whole share listing, and an operator is asked to send this output on to
  * whoever is helping them, so the excerpt is capped rather than sprayed.
  */
@@ -205,16 +188,10 @@ const MAX_DETAIL_CHARS = 2000;
 
 /**
  * Redaction runs HERE, over the whole detail, rather than over the lines this
- * returns: a private-key block arrives from the tool in its canonical multi-line
- * form, so splitting first leaves every line but the `BEGIN` one carrying no
- * marker, and the body renders verbatim. The rendering escapes and redacts again
- * per rendered line, but that pass sees one line at a time and so cannot catch a
- * body this one leaves behind; the rendering's sink is the CLI's plain-line
- * writer, which bypasses core's prefixer, so there is no third pass behind
- * either. Redacting before the slice is safe for the budget because the
- * replacement never lengthens its input, and failing closed past a dangling
- * `BEGIN` costs only more tool output -- the check's own MEANING and ACTION text
- * is composed as separate lines.
+ * returns: splitting first would leave a multi-line private-key block's
+ * `BEGIN` marker on its own line and the body would render verbatim. See
+ * docs/spec/CLI_DOCTOR.md, "What the verdict withholds", for the bounds and
+ * the redact-before-slice ordering.
  *
  * @internal exported for testing
  */
@@ -237,17 +214,10 @@ const WRAP_COLUMNS = 76;
 // the first word rather than under the label, the shape the setup script's
 // MEANING/ACTION blocks have and operators are asked to read back.
 //
-// Redaction runs HERE, over the whitespace-normalized text -- the exact text
-// the re-flow emits -- for the reason clampDetail redacts ahead of its split:
-// a marker straddling a wrap would reach the rendering's per-line pass as two
-// lines that neither match, and the material behind it would render verbatim.
-// Normalizing BEFORE redacting is load-bearing: the re-flow collapses every
-// whitespace class to ASCII spaces, so a marker whose internal separators are
-// non-ASCII whitespace would be re-formed by the normalization after a
-// raw-text redaction had already run. The fail-closed reach is one labelled
-// block -- MEANING and ACTION are wrapped separately -- and the label is
-// composed outside the redacted text, so a dangling BEGIN takes the rest of
-// its own block and reaches neither the label nor the sibling block.
+// Redaction runs HERE, over the whitespace-normalized text, ahead of the re-flow
+// -- normalizing before redacting matters, not the reverse, or a marker whose
+// separators are non-ASCII whitespace would be re-formed post-redaction. See
+// docs/spec/CHANNEL_SECURITY.md, "Display sanitization escape format".
 function wrapLabelled(label: string, text: string): string[] {
   const indent = " ".repeat(label.length);
   const lines: string[] = [];
@@ -276,7 +246,7 @@ function wrapLabelled(label: string, text: string): string[] {
 }
 
 /**
- * The label a check's headline carries, one per status. A check that passed but
+ * The label a check's headline has, one per status. A check that passed but
  * still asks something of the operator -- a share that works for an exchange
  * only with `--lockless-rendezvous`, a share nearly out of space -- is a `warn`
  * and is labelled WARN, keeping the setup script's distinction between "this

@@ -74,7 +74,7 @@ export type InboundOutcome =
   /** A complete application frame, ready for the message queue. */
   | { kind: "frame"; value: unknown };
 
-/** Per-bound overrides; set only by tests, never an operator-facing knob. */
+/** Per-bound overrides; set only by tests, never an operator-facing setting. */
 export interface InboundBoundOptions {
   maxFrameBytes?: number;
   maxConcurrentReassemblies?: number;
@@ -90,10 +90,11 @@ export interface InboundBoundOptions {
  * message names the rule that fired rather than one standing in for the rest.
  * For the five pre-scan rules the predicate comes from core's one renderer, so
  * both transports word those identically; the wire-byte and chunk-cap
- * predicates are composed here, from this side's own fixed limits. Kind `protocol`: every bound sits far above any
- * legitimate frame, so meeting one is the peer violating the message contract,
- * never benign. It carries only the fixed limits, no peer-controlled bytes, so it
- * needs no redaction.
+ * predicates are composed here, from this side's own fixed limits.
+ *
+ * Kind `protocol`: every bound sits far above any legitimate frame, so meeting
+ * one is the peer violating the message contract, never benign. It holds only
+ * the fixed limits, no peer-controlled bytes, so it needs no redaction.
  */
 function frameRefusalError(predicate: string): ConnectionError {
   return new ConnectionError(`inbound WebRTC frame ${predicate}`, "protocol");
@@ -102,7 +103,7 @@ function frameRefusalError(predicate: string): ConnectionError {
 /**
  * A reassembly the peer framed in a way no PeerJS sender produces. Distinct from
  * {@link frameRefusalError}: the fault is in the chunk stream around the frames
- * rather than in a frame the scan read. Also `protocol`, and likewise carries no
+ * rather than in a frame the scan read. Also `protocol`, and likewise holds no
  * peer-controlled bytes.
  */
 function reassemblyProtocolError(detail: string): ConnectionError {
@@ -274,7 +275,7 @@ export class BoundedInboundFrames {
 
     // A repeated ordinal is charged above (so a repeat flood still meets the
     // caps) but never overwrites the slice already held: the first arrival wins,
-    // and the frame stays one ordinal short until a genuinely new one lands.
+    // and the frame stays one ordinal short until a new one lands.
     if (entry.parts[index] === undefined) {
       entry.parts[index] = data;
       entry.distinct += 1;

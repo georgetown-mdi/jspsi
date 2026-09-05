@@ -10,15 +10,14 @@ const PARTNER_READS_IT =
   "The identity is the name your partner reads in the agreed linkage terms";
 
 /**
- * The identity `psilink init` writes into a fresh template when the run gives it
- * no `--identity`, and the one string no resolver here accepts. It lives beside
- * the resolvers rather than beside the template writer that emits it so the
- * value written and the value refused are a single definition.
+ * The placeholder `psilink init` writes into a fresh template when given no
+ * `--identity`, and the one value no resolver here accepts. It sits beside
+ * the resolvers rather than the template writer, so the written and refused
+ * values share one definition.
  *
- * It has to be non-empty for the template to parse -- the linkage-terms schema
- * gives identity a one-character minimum -- which is exactly why nothing else
- * catches it: it is a well-formed label, and only knowing this specific string
- * distinguishes it from a name the operator chose.
+ * It must be non-empty for the template to parse -- the linkage-terms schema
+ * gives identity a one-character minimum -- so no other check catches it;
+ * only this exact string distinguishes it from a name the operator chose.
  */
 export const PLACEHOLDER_IDENTITY = "REPLACE_WITH_YOUR_IDENTITY";
 
@@ -34,7 +33,7 @@ function isPlaceholderIdentity(identity: string): boolean {
 }
 
 /**
- * The refusal every `--identity` path raises when the flag carries the template
+ * The refusal every `--identity` path raises when the flag holds the template
  * placeholder rather than a name.
  */
 export const IDENTITY_STILL_PLACEHOLDER =
@@ -63,16 +62,12 @@ export const IDENTITY_REQUIRED =
   `${PARTNER_READS_IT}, the invitation, and the disclosure record.`;
 
 /**
- * The refusal {@link resolveInvitationIdentity} raises, naming the configuration
- * file that was expected to carry the label.
+ * The refusal {@link resolveInvitationIdentity} raises, naming the
+ * configuration file expected to hold the label.
  *
- * The path composes RAW, as every fragment interpolated into an `Error` does:
- * `sanitizeErrorForDisplay` escapes and redacts the whole rendered chain once,
- * where the CLI shows it. Escaping here as well would escape it twice -- a
- * Windows path's every backslash reaching the operator quadrupled -- which is
- * what the sibling `--identity` warning in `commands/invite.ts` does NOT do
- * either: that one goes to a `log` sink, its own display boundary, and so escapes
- * there. See CONTRIBUTING.md, Operator-facing escaping.
+ * The path composes RAW: `sanitizeErrorForDisplay` escapes the whole
+ * rendered chain once at the CLI's display boundary, so escaping here too
+ * would double-escape it. See CONTRIBUTING.md, Operator-facing escaping.
  */
 export function configuredIdentityRequired(configPath: string): string {
   return (
@@ -84,8 +79,8 @@ export function configuredIdentityRequired(configPath: string): string {
 
 /**
  * The refusal {@link resolveKeptConfigurationIdentity} raises, naming the
- * configuration this acceptance keeps as the file that was expected to carry the
- * label.
+ * configuration this acceptance keeps as the file that was expected to hold
+ * the label.
  *
  * The path composes RAW, for the reason and with the single escape
  * {@link configuredIdentityRequired} documents.
@@ -100,11 +95,10 @@ export function keptConfigurationIdentityRequired(configPath: string): string {
 }
 
 /**
- * The refusal both configured-label resolvers raise when the configuration still
- * carries the template placeholder, naming the field to edit and the file it
- * sits in. One wording serves both: the placeholder is refused for the same
- * reason wherever a file supplies the label, and neither command can replace it
- * from the command line.
+ * The refusal both configured-label resolvers raise when the configuration
+ * still holds the template placeholder, naming the field to edit and the
+ * file it sits in. One wording serves both, since neither command can
+ * replace the label from the command line.
  *
  * The path composes RAW, for the reason and with the single escape
  * {@link configuredIdentityRequired} documents.
@@ -120,20 +114,17 @@ export function configuredIdentityStillPlaceholder(configPath: string): string {
 }
 
 /**
- * This party's identity label for a command that authors its own linkage terms:
- * the `--identity` value, trimmed, and nothing else.
+ * This party's identity label for a command that authors its own linkage
+ * terms: the `--identity` value, trimmed, and nothing else.
  *
- * There is no fallback of any kind, so this reads no system state and a run
- * without the flag stops. The label lands in the terms, the invitation, and the
- * disclosure record, where the partner reads it as this party's name, so it is
- * the operator's to choose: the account psilink runs as is not a name they
- * chose (in the published image it is the image's own), and a blank value --
- * what `--identity "$ORG"` sends with `ORG` unset -- is a run that meant to
- * name this party and did not.
+ * There is no fallback: a run with no flag, or a blank value (e.g. an unset
+ * `$ORG` in `--identity "$ORG"`), stops rather than defaulting to system
+ * state such as the account psilink runs as, because the partner reads this
+ * label as the operator's own chosen name.
  *
- * {@link PLACEHOLDER_IDENTITY} is refused alongside blank: it is a name only in
- * the sense that the schema accepts it, and a run under it would send the words
- * asking for a name as this party's own.
+ * {@link PLACEHOLDER_IDENTITY} is refused alongside blank: the schema
+ * accepts it as a label, but sending it would name this party with the
+ * words asking for a name.
  */
 export function resolveIdentity(identity: string | undefined): string {
   const chosen = identity?.trim() ?? "";
@@ -144,19 +135,14 @@ export function resolveIdentity(identity: string | undefined): string {
 }
 
 /**
- * This party's identity label for a run that may go unnamed: the `--identity`
- * value, trimmed, or `undefined` where the flag names nothing.
+ * This party's identity label for a run that may go unnamed: the
+ * `--identity` value, trimmed, or `undefined` where the flag names nothing.
  *
- * A blank value is absence rather than a label: it is what a scripted
- * `--identity "$ORG"` sends with `ORG` unset, and an empty string is not a name
- * the terms schema would accept. Absence is carried through as absence -- the
- * terms simply hold no identity, and psilink substitutes nothing for it.
- *
- * {@link PLACEHOLDER_IDENTITY} is refused instead, the only value this rejects:
- * it is neither a label nor absence. Read as a label it would name this party
- * the words asking for its name, and read as absence it would silently unname a
- * run whose operator typed a value believing it named them -- on the runs that
- * take this resolver, leaving whatever the configuration carries standing.
+ * A blank value (e.g. an unset `$ORG` in `--identity "$ORG"`) is absence,
+ * not a label -- the terms simply hold no identity.
+ * {@link PLACEHOLDER_IDENTITY} is refused rather than treated as absence:
+ * unlike blank, it is a value the operator typed believing it named them,
+ * so silently dropping it would unname a run behind their back.
  */
 export function optionalIdentity(
   identity: string | undefined,
@@ -186,7 +172,7 @@ export const INIT_IDENTITY_QUESTION =
   "by hand later:";
 
 /**
- * The question `psilink accept` asks. It carries no blank-answer note because
+ * The question `psilink accept` asks. It has no blank-answer note because
  * blank is absence and an acceptance will not proceed unnamed
  * ({@link IDENTITY_REQUIRED}): it authors a durable partnership the partner
  * reads a name off.
@@ -209,22 +195,17 @@ export function askIdentityAtPrompt(question: string): Promise<string> {
 }
 
 /**
- * This party's label from `--identity`, or from a question at the terminal when
- * the flag carried none: the trimmed value, or `undefined` where neither source
- * named this party.
+ * This party's label from `--identity`, or from a question at the terminal
+ * when the flag held none: the trimmed value, or `undefined` where neither
+ * source named this party.
  *
- * Both sources take one treatment, {@link optionalIdentity}'s: trimmed, a blank
- * or whitespace-only value read as absence rather than as a label, and
- * {@link PLACEHOLDER_IDENTITY} refused as neither. A prompt that is answered the
- * way the flag can be misused is therefore refused the way the flag is, and an
- * operator cannot reach a laxer path by typing at the question instead of
- * passing the flag.
+ * Both sources take {@link optionalIdentity}'s treatment -- blank read as
+ * absence, {@link PLACEHOLDER_IDENTITY} refused -- so an operator cannot
+ * reach a laxer path by typing at the prompt instead of passing the flag.
  *
- * `ask` is the whole interactivity decision, made by the caller: `undefined`
- * means no question is possible or wanted -- no terminal, an input CSV already
- * holding stdin, an unattended run -- and the flag's answer stands alone, so
- * nothing scripted gains a prompt. The flag is read first either way, so
- * supplying it is what keeps the question from being asked.
+ * `ask` is the caller's whole interactivity decision: `undefined` means no
+ * prompt runs and the flag's answer stands alone. The flag is read first
+ * either way, so supplying it is what skips the question.
  */
 export async function identityFromFlagOrPrompt(
   identity: string | undefined,
@@ -237,32 +218,18 @@ export async function identityFromFlagOrPrompt(
 
 /**
  * This party's identity label for an invitation minted from a saved
- * configuration: the `linkage_terms.identity` that configuration carries.
+ * configuration: the `linkage_terms.identity` that configuration holds.
  *
- * Inviting is a ceremony interface -- it authors a durable partnership the
- * partner reads a name off, in the invitation and in every exchange that follows
- * -- so it is one of the two commands that will not proceed unnamed, and this is
- * that refusal for the path whose label comes from a file rather than a flag.
- * `--identity` is not an alternative here: the configuration persists unchanged
- * and supplies the terms of every later run, so a label given for this one
- * invocation would leave the partnership named in the invitation and unnamed
- * everywhere after it.
+ * Inviting authors a durable partnership, so it will not proceed unnamed,
+ * and `--identity` is not an alternative: the configuration persists and
+ * supplies every later run's terms. Whitespace-only and
+ * {@link PLACEHOLDER_IDENTITY} are refused for the same reason blank and
+ * the placeholder are refused elsewhere in this module.
  *
- * A whitespace-only value takes the same refusal, on the same reading of blank
- * the `--identity` paths take: the schema's `.min(1)` admits it, and it would
- * otherwise mint an invitation whose inviter heading renders empty -- named as
- * far as every check is concerned and nameless to the partner reading it.
- * {@link PLACEHOLDER_IDENTITY} is refused for the same reason and at the same
- * point: the operator edited the file and passed over this field, and the
- * invitation would go out -- certificate mode included -- naming the party the
- * template's own instruction to name it.
- *
- * What comes back is the configured value VERBATIM, trimmed or not. Trimming
- * only decides whether this refuses; the label the partnership actually sends is
- * the configuration's own bytes, which every later `psilink exchange` reads
- * straight from the file, and a certificate authorizes an exact identity string.
- * Returning a trimmed copy would name the partnership one way in the invitation
- * and another in every run under it.
+ * The value comes back VERBATIM: a certificate authorizes an exact
+ * identity string, and every later `psilink exchange` reads the
+ * configuration's own bytes, so a trimmed copy would name the partnership
+ * differently in the invitation than in the runs under it.
  */
 export function resolveInvitationIdentity(
   configuredIdentity: string | undefined,
@@ -276,21 +243,20 @@ export function resolveInvitationIdentity(
 }
 
 /**
- * This party's identity label for an acceptance that keeps the configuration
- * already at the path: that file's own `linkage_terms.identity`.
+ * This party's identity label for an acceptance that keeps the
+ * configuration already at the path: that file's own
+ * `linkage_terms.identity`.
  *
- * Such an acceptance writes no configuration, so the label it presents has to be
- * the one the kept file carries: `psilink exchange` reads that file for every
- * run the partnership makes, and under `signing.mode: certificate` the label in
- * the agreed terms is what a receipt is verified against -- so a run under any
- * other label would name this party one way for the acceptance and another way
- * for the partnership it belongs to. `--identity` is not an alternative for the
- * same reason it is not one when inviting from a configuration; renaming the
- * party is an edit of that file.
+ * Such an acceptance writes no configuration, so the label has to be the
+ * kept file's own: under `signing.mode: certificate` the agreed terms'
+ * label is what a receipt is verified against, so a run under any other
+ * label would name this party one way for the acceptance and another for
+ * the partnership it belongs to. `--identity` is not an alternative, for
+ * the same reason it is not one when inviting from a configuration.
  *
- * Blank and {@link PLACEHOLDER_IDENTITY} are refused, and the value comes back
- * VERBATIM, exactly as {@link resolveInvitationIdentity} treats them and for the
- * reasons recorded there.
+ * Blank and {@link PLACEHOLDER_IDENTITY} are refused, and the value comes
+ * back VERBATIM, exactly as {@link resolveInvitationIdentity} treats them
+ * and for the reasons recorded there.
  */
 export function resolveKeptConfigurationIdentity(
   configuredIdentity: string | undefined,

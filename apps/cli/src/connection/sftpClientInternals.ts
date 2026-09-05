@@ -1,21 +1,10 @@
 // The typed view of the ssh2 / ssh2-sftp-client internals the SFTP adapter
-// reaches past their public APIs, and the feature detection that resolves the
-// transport-close seams off it.
-//
-// Everything here is a declaration or a pure resolver over one internals value:
-// nothing holds adapter state, issues a server round trip, or decides a
-// severity. A resolver reports the FIRST seam the installed library no longer
-// exposes and leaves the caller to choose what that costs -- the connect-time
-// check and the idle release raise, the terminal close warns -- so one reading
-// serves both. Resolution order is therefore part of the contract rather than an
-// accident of how the checks are written: it decides which seam an operator is
-// told about first.
-//
-// The unavailable-seam arms cannot be driven by any real server against the
-// pinned library, so they are modeled in the unit file only; the resolved arms
-// run on every real-server integration leg. Re-verify the premises on any ssh2 /
-// ssh2-sftp-client bump per docs/spec/DEPENDENCY_PINS.md ("Upgrading the SFTP
-// Stack").
+// reaches past their public APIs, plus the feature detection that resolves
+// the transport-close seams off it. Everything here is a declaration or a
+// pure resolver over one internals value: no adapter state, no server round
+// trip, no severity decision -- each resolver function below documents its
+// own contract. Re-verify the assumptions on any ssh2 / ssh2-sftp-client
+// bump per docs/spec/DEPENDENCY_PINS.md ("Upgrading the SFTP Stack").
 
 import { REPORT_LIBRARY_INCOMPATIBILITY } from "./libraryIncompatibility";
 
@@ -31,7 +20,7 @@ export interface Ssh2DirEntry {
 
 /**
  * ssh2 reports SFTP failures (including end-of-directory from readdir) as an
- * Error carrying the numeric SFTP status code on `code`.
+ * Error holding the numeric SFTP status code on `code`.
  */
 export type Ssh2SftpError = Error & { code?: number };
 
@@ -48,7 +37,7 @@ export type Ssh2SftpError = Error & { code?: number };
 export interface Ssh2ClientSocket {
   /**
    * ssh2 exposes setNoDelay but not setKeepAlive, so connect()'s kernel TCP
-   * keepalive backstop reaches the socket for it.
+   * keepalive fallback reaches the socket for it.
    */
   setKeepAlive?(enable: boolean, initialDelay: number): void;
   /**
@@ -77,8 +66,8 @@ export interface Ssh2ClientSocket {
   /**
    * Node's own post-destroy flag, read back by the terminal close to confirm the
    * socket it destroyed actually closed. Not part of the connect-time seam set:
-   * an absent flag reads as "did not close" and warns, rather than failing a dial
-   * over a teardown-only read.
+   * an absent flag is treated as "did not close" and warns, rather than
+   * failing a dial over a teardown-only read.
    */
   destroyed?: boolean;
 }
@@ -240,15 +229,14 @@ export function resolveTerminalCloseSeam(
 }
 
 /**
- * The seams a forced close of an already-ended transport drives past the public
- * API: the ssh2 Client's own once()/removeListener() for the 'close' that clears
- * the session, plus the terminal close's socket seam above and Node's
- * writableEnded flag on that same socket. Both forced closes resolve them where
- * they use them -- the connection-per-poll release through the wider set below,
- * which connect() verifies at dial time in that mode, and the mid-exchange
- * recovery on its own, which does not (its severity is a warning and the
- * operation's own terminal failure, not a failed dial). Re-verify on any ssh2 /
- * ssh2-sftp-client upgrade per docs/spec/DEPENDENCY_PINS.md.
+ * The seams a forced close of an already-ended transport drives past the
+ * public API: the ssh2 Client's own once()/removeListener() for the 'close'
+ * that clears the session, plus the terminal close's socket seam and Node's
+ * writableEnded flag on that same socket. Both forced closes resolve them
+ * where they use them: the connection-per-poll release through the wider set
+ * below (verified at dial time), and the mid-exchange recovery on its own,
+ * whose severity is a warning rather than a failed dial. Re-verify on any
+ * ssh2 / ssh2-sftp-client upgrade per docs/spec/DEPENDENCY_PINS.md.
  */
 export function resolveEndedTransportCloseSeams(
   internals: Ssh2SftpClientInternals,
@@ -294,7 +282,7 @@ export function resolveTransportCloseSeams(
  * worse than a failed dial), while the terminal close warns and returns.
  *
  * The message names no ssh2 internal: the caller logs the missing seam at debug,
- * and the premises are re-verified per the "Upgrading the SFTP Stack" checklist
+ * and the assumptions are re-verified per the "Upgrading the SFTP Stack" checklist
  * in docs/spec/DEPENDENCY_PINS.md.
  */
 export function transportCloseSeamError(): Error {
