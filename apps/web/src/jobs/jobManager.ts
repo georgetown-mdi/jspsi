@@ -45,6 +45,7 @@ import type {
   CliDriverHandle,
   CliDriverHandlers,
   CliRunControls,
+  CliRunDiagnostics,
   JobTerminalState,
   RelayEvent,
 } from "./cliDriver";
@@ -789,7 +790,8 @@ export class JobManager {
           message,
           degraded: true,
         }),
-      onTerminal: (state) => this.reconcileTerminal(record, state),
+      onTerminal: (state, diagnostics) =>
+        this.reconcileTerminal(record, state, diagnostics),
     };
 
     record.handle = this.spawnForMode(intent, {
@@ -1069,12 +1071,23 @@ export class JobManager {
    * the loss named on `terminal.outcome`; with no terminal event at all the
    * status is `failed` and nothing is offered.
    *
+   * A synthesized failure names what the CLI printed on stderr
+   * ({@link withStderrTail}): that terminal stands in for the diagnosis the
+   * run never emitted, and the tail is the only account of it the console
+   * holds. An interrupt takes none -- the operator asked for the exit -- and a
+   * run that emitted its own terminal event is synthesized nothing at all, so
+   * no diagnosis reaches the operator twice.
+   *
    * The only slot-release point besides the pre-spawn create failure: fires
    * on the child's `close` (or a spawn `error`), so a killed child is
    * confirmed dead before {@link maybeFreeSlot} frees the slot for a
    * successor.
    */
-  private reconcileTerminal(record: JobRecord, state: JobTerminalState): void {
+  private reconcileTerminal(
+    record: JobRecord,
+    state: JobTerminalState,
+    diagnostics: CliRunDiagnostics,
+  ): void {
     record.terminal = state;
     this.clearCancelTimers(record);
 
@@ -1109,20 +1122,24 @@ export class JobManager {
           v: 1,
           type: "error",
           category: "output",
-          message:
+          message: withStderrTail(
             "the run reported a lost local write and its event stream broke " +
-            "before naming which one, so this console cannot confirm which " +
-            "files reached disk; look in the folder it writes its exchange " +
-            "files to",
+              "before naming which one, so this console cannot confirm which " +
+              "files reached disk; look in the folder it writes its exchange " +
+              "files to",
+            diagnostics.stderrTail,
+          ),
         });
       else
         this.synthesizeTerminal(record, {
           v: 1,
           type: "error",
           category: "exchange",
-          message:
+          message: withStderrTail(
             "CLI exited without a terminal event; the event stream broke" +
-            (state.exitCode !== null ? ` (exit ${state.exitCode})` : ""),
+              (state.exitCode !== null ? ` (exit ${state.exitCode})` : ""),
+            diagnostics.stderrTail,
+          ),
         });
     }
 
@@ -1326,6 +1343,20 @@ function liveRecordAvailability(record: JobRecord):
     recordCreatedAt: summary.createdAt,
     recordOutcome: summary.outcome,
   };
+}
+
+/**
+ * Name the child's stderr after a synthesized diagnostic, so an operator whose
+ * run emitted no terminal event reads what the CLI printed instead of only that
+ * the stream broke. The tail arrives escaped and capped from the driver
+ * ({@link CliRunDiagnostics}) and is composed in as it stands: escaping it a
+ * second time would double every backslash on its way to the operator
+ * (CONTRIBUTING.md, Operator-facing escaping).
+ */
+function withStderrTail(message: string, stderrTail: string): string {
+  return stderrTail.length === 0
+    ? message
+    : `${message} (stderr: ${stderrTail})`;
 }
 
 /**

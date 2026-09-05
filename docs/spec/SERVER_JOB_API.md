@@ -480,7 +480,7 @@ Each duration is emitted in the unit its own flag's grammar takes. `--polling-fr
 
 `spawn` is used rather than `execFile` by design: `execFile` caps stdio at three pipes and cannot pass fd 3, which the event stream requires. The child's `stdio` is `["ignore", "pipe", "pipe", "pipe"]` (fd 3 wired for the event stream), `cwd` is the workdir, and the environment is minimal -- only `PATH`, `HOME`, `LANG`, `LC_ALL`, and `TZ` are forwarded from the server process, so the child inherits no ambient secret. The job's inputs reach the child through the workdir files (or, for a mounted `inputFile`, the operator's own mount), never the environment.
 
-A bounded, sanitized tail of the child's stderr (up to 8192 UTF-16 code units, kept as a rolling tail) is retained for diagnostics; it is passed through the display sanitizer before it is shown and is never streamed to the client raw.
+A bounded, sanitized tail of the child's stderr (up to 8192 UTF-16 code units, kept as a rolling tail) is retained for diagnostics; it is passed through the display sanitizer before it is shown and is never streamed to the client raw. It reaches the client only inside a synthesized terminal event (see [Exit-code reconciliation](#exit-code-reconciliation)), never as a stream of its own.
 
 ## Event relay over SSE
 
@@ -532,6 +532,8 @@ The child's exit is classified from the exit code and signal, per the CLI's term
 - `succeeded` with no terminal event: a `result` terminal (`resultWritten: true`).
 - `completedWithPersistenceLoss` with no terminal event: an `error` terminal with `category: "output"`, the local-output-stage category, whose message states that a local write was lost and that the console cannot say which one. The category is critical rather than cosmetic: it is the one a console seat renders with no way to run the exchange again, while the `exchange` category below is retryable and would invite the re-run this exit code exists to prevent.
 - any other exit with no terminal event: a `failed` terminal (`category: "exchange"`) noting the stream broke and, when known, the exit code.
+
+The two synthesized terminals that stand in for a diagnosis the run never emitted -- the persistence-loss one and the stream-broke one -- append the retained stderr tail to their message as ` (stderr: <tail>)` when the child wrote any, so the cause the CLI printed reaches the operator even though fd 3 stayed empty. The tail arrives already escaped and capped at the display boundary and is composed in as it stands, escaped once rather than twice. The interrupt terminal appends nothing: the operator asked for that exit, so no diagnosis is missing. A run that emitted its own terminal event is synthesized nothing, so the tail is never a second copy of a diagnosis the CLI already sent.
 
 A synthesized `result` terminal sets `status` to `succeeded` and a synthesized `error` to `failed` -- except the interrupt case above, whose `status` is already `cancelled` before synthesis and keeps it. A persistence loss with no terminal event is therefore `failed`: the console never saw an artifact announced, so it promises none, which is the rule every broken stream takes regardless of exit code. The outcome still states the do-not-repeat signal, and the synthesized message points the operator at the workdir.
 

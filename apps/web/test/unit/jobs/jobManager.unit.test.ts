@@ -4,6 +4,11 @@ import { pathToFileURL } from "node:url";
 
 import { afterEach, describe, expect, test, vi } from "vitest";
 
+import {
+  DEFAULT_MAX_DISPLAY_LENGTH,
+  DISPLAY_TRUNCATION_MARKER,
+} from "@psilink/core";
+
 import * as cliDriver from "@jobs/cliDriver";
 import {
   ExchangeBusyError,
@@ -67,6 +72,7 @@ function makeManager(options: {
   raw?: string;
   exitCode?: number;
   outputFile?: string;
+  stderr?: string;
   delayMs?: number;
   ignoreSigint?: boolean;
   ignoreSigterm?: boolean;
@@ -90,6 +96,7 @@ function makeManager(options: {
     childEnv.STUB_EXIT_CODE = String(options.exitCode);
   if (options.outputFile !== undefined)
     childEnv.STUB_OUTPUT_FILE = options.outputFile;
+  if (options.stderr !== undefined) childEnv.STUB_STDERR = options.stderr;
   if (options.recordJson !== undefined)
     childEnv.STUB_RECORD_JSON = options.recordJson;
   if (options.delayMs !== undefined)
@@ -259,6 +266,93 @@ describe("JobManager end-to-end via the stub CLI", () => {
     const terminal = record.events[record.events.length - 1].event;
     expect(terminal.type).toBe("error");
     expect(String(terminal.message)).toContain("stream broke");
+  });
+
+  test("a non-zero exit with no terminal event reports the retained stderr", async () => {
+    // What the CLI printed is the only account of the failure the console holds
+    // when fd 3 stayed empty, so the synthesized terminal has to name it.
+    const manager = makeManager({
+      exitCode: 64,
+      stderr: "no linkage key satisfied the configured terms\n",
+    });
+    const id = await manager.createJob(validIntent());
+    const record = manager.getJob(id)!;
+    await waitForTerminal(record);
+    const terminal = record.events[record.events.length - 1].event;
+    expect(String(terminal.message)).toContain("stream broke");
+    expect(String(terminal.message)).toContain(
+      "no linkage key satisfied the configured terms",
+    );
+  });
+
+  test("a run that emitted its own terminal event repeats no stderr", async () => {
+    // The CLI named the failure itself, so the terminal it sent stands alone:
+    // appending the same text off stderr would show the operator the diagnosis
+    // twice.
+    const manager = makeManager({
+      events: [
+        {
+          v: 1,
+          type: "error",
+          category: "exchange",
+          message: "the partner aborted the exchange",
+        },
+      ],
+      exitCode: 64,
+      stderr: "the partner aborted the exchange\n",
+    });
+    const id = await manager.createJob(validIntent());
+    const record = manager.getJob(id)!;
+    await waitForTerminal(record);
+    await vi.waitFor(() => expect(record.terminal).not.toBeNull());
+    const terminal = record.events[record.events.length - 1].event;
+    expect(String(terminal.message)).toBe("the partner aborted the exchange");
+    expect(
+      record.events.every(
+        (entry) => !String(entry.event.message ?? "").includes("stderr:"),
+      ),
+    ).toBe(true);
+  });
+
+  test("a hostile stderr tail is escaped before the operator reads it", async () => {
+    // The tail is child output, not first-party copy: an ANSI screen clear, a
+    // bell, and a bidi override in it must reach the operator as escapes.
+    const manager = makeManager({
+      exitCode: 64,
+      stderr: "\u001b[2J\u0007\u202eevil\r\nconfig load failed",
+    });
+    const id = await manager.createJob(validIntent());
+    const record = manager.getJob(id)!;
+    await waitForTerminal(record);
+    const message = String(
+      record.events[record.events.length - 1].event.message,
+    );
+    expect(message).toContain("\\x1b[2J\\x07\\u202eevil\\x0d\\x0a");
+    expect(message).toContain("config load failed");
+    // eslint-disable-next-line no-control-regex -- asserting on control characters is the point
+    expect(/[\u0000-\u001f\u007f\u202e]/.test(message)).toBe(false);
+  });
+
+  test("a flooding stderr tail is truncated at the display bound", async () => {
+    const manager = makeManager({
+      exitCode: 64,
+      stderr: "cause: " + "A".repeat(64 * 1024),
+    });
+    const id = await manager.createJob(validIntent());
+    const record = manager.getJob(id)!;
+    await waitForTerminal(record);
+    const message = String(
+      record.events[record.events.length - 1].event.message,
+    );
+    const opening = "(stderr: ";
+    const tail = message.slice(
+      message.indexOf(opening) + opening.length,
+      -")".length,
+    );
+    expect(tail.endsWith(DISPLAY_TRUNCATION_MARKER)).toBe(true);
+    expect(tail.length).toBe(
+      DEFAULT_MAX_DISPLAY_LENGTH + DISPLAY_TRUNCATION_MARKER.length,
+    );
   });
 
   test("exit 73 beside the CLI's result terminal completes with a persistence loss", async () => {
@@ -564,7 +658,10 @@ describe("event cap fails the job", () => {
       });
     expect(record.status).toBe("failed");
 
-    handlers.onTerminal({ outcome: "succeeded", exitCode: 0, signal: null });
+    handlers.onTerminal(
+      { outcome: "succeeded", exitCode: 0, signal: null },
+      { stderrTail: "" },
+    );
     expect(record.status).toBe("failed");
     const terminal = record.events[record.events.length - 1].event;
     expect(terminal.type).toBe("error");
@@ -1663,11 +1760,10 @@ describe("the single exchange slot", () => {
     );
 
     // The child's close frees the slot; a successor create then succeeds.
-    handlersRef.current!.onTerminal({
-      outcome: "failed",
-      exitCode: null,
-      signal: "SIGKILL",
-    });
+    handlersRef.current!.onTerminal(
+      { outcome: "failed", exitCode: null, signal: "SIGKILL" },
+      { stderrTail: "" },
+    );
     const secondId = await manager.createJob(validIntent());
     expect(secondId).not.toBe(firstId);
   });
@@ -1733,11 +1829,10 @@ describe("occupiedSlotId reports the slot occupant", () => {
     expect(manager.occupiedSlotId()).toBe(id);
 
     // The child's close frees the slot; the probe then reads free.
-    handlersRef.current!.onTerminal({
-      outcome: "failed",
-      exitCode: null,
-      signal: "SIGKILL",
-    });
+    handlersRef.current!.onTerminal(
+      { outcome: "failed", exitCode: null, signal: "SIGKILL" },
+      { stderrTail: "" },
+    );
     expect(manager.occupiedSlotId()).toBeNull();
   });
 });
