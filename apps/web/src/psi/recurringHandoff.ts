@@ -1,3 +1,8 @@
+import {
+  MAX_JOB_HANDOFF_RESPONSE_BYTES,
+  readBoundedJson,
+} from "@psi/jobApiBody";
+
 import type { JobHandoff, JobHandoffTemplate } from "@jobs/handoff";
 
 /**
@@ -19,7 +24,9 @@ export async function fetchRecurringHandoff(
       method: "GET",
     });
     if (!response.ok) return null;
-    return parseHandoff(await response.json());
+    return parseHandoff(
+      await readBoundedJson(response, MAX_JOB_HANDOFF_RESPONSE_BYTES),
+    );
   } catch {
     return null;
   }

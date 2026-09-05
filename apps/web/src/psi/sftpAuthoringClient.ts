@@ -3,7 +3,13 @@ import {
   HOST_KEY_FINGERPRINT_REGEX,
 } from "@psilink/core";
 
-import { isRecord, readJsonOrNull } from "./jobApiBody";
+import {
+  MAX_JOB_LISTING_RESPONSE_BYTES,
+  MAX_JOB_STATUS_RESPONSE_BYTES,
+  MAX_SFTP_CONNECTION_RESPONSE_BYTES,
+  isRecord,
+  readJsonOrNull,
+} from "./jobApiBody";
 import { sftpConnectionProjectionOf } from "./serverJobExchangeDriver";
 
 import type { AuthoredSftpServerRequest } from "@jobs/sftpServer";
@@ -131,7 +137,9 @@ export async function fetchSecretsEntries(
     });
     if (response.status === 404) return { kind: "disabled" };
     if (!response.ok) return { kind: "error" };
-    const listing = secretsEntriesOf(await readJsonOrNull(response));
+    const listing = secretsEntriesOf(
+      await readJsonOrNull(response, MAX_JOB_LISTING_RESPONSE_BYTES),
+    );
     return listing ?? { kind: "error" };
   } catch {
     return { kind: "error" };
@@ -157,7 +165,7 @@ export async function putSftpConnection(
   }
   if (response.ok) {
     const connection = sftpConnectionProjectionOf(
-      await readJsonOrNull(response),
+      await readJsonOrNull(response, MAX_SFTP_CONNECTION_RESPONSE_BYTES),
     );
     return connection === null ? { kind: "error" } : { kind: "ok", connection };
   }
@@ -165,7 +173,9 @@ export async function putSftpConnection(
   if (response.status === 400)
     return {
       kind: "invalid",
-      message: validationMessageOf(await readJsonOrNull(response)),
+      message: validationMessageOf(
+        await readJsonOrNull(response, MAX_JOB_STATUS_RESPONSE_BYTES),
+      ),
     };
   return { kind: "error" };
 }
@@ -370,8 +380,12 @@ export async function probeSftpHostKey(
   if (response.status === 400)
     return {
       kind: "invalid",
-      message: probeValidationMessage(await readJsonOrNull(response)),
+      message: probeValidationMessage(
+        await readJsonOrNull(response, MAX_JOB_STATUS_RESPONSE_BYTES),
+      ),
     };
   if (!response.ok) return { kind: "error" };
-  return probeOutcomeOf(await readJsonOrNull(response));
+  return probeOutcomeOf(
+    await readJsonOrNull(response, MAX_JOB_STATUS_RESPONSE_BYTES),
+  );
 }

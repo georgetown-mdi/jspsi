@@ -14,6 +14,10 @@
  * watch ends on an outcome the seat can state.
  */
 
+import {
+  MAX_JOB_STATUS_RESPONSE_BYTES,
+  readBoundedJson,
+} from "@psi/jobApiBody";
 import { delayUntilAborted } from "@psi/delayUntilAborted";
 
 /** The console endpoint the log downloads from. The browser never composes the
@@ -59,7 +63,10 @@ export async function fetchJobLogState(
   try {
     const response = await fetchImpl(`/api/jobs/${jobId}`, { method: "GET" });
     if (!response.ok) return "unanswered";
-    const body: unknown = await response.json();
+    const body: unknown = await readBoundedJson(
+      response,
+      MAX_JOB_STATUS_RESPONSE_BYTES,
+    );
     if (body === null || typeof body !== "object") return "unanswered";
     const status = body as { logAvailable?: unknown; logRequested?: unknown };
     if (status.logAvailable === true) return "available";

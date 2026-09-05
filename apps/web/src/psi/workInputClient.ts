@@ -1,4 +1,10 @@
-import { isRecord, readJsonOrNull } from "./jobApiBody";
+import {
+  MAX_JOB_LISTING_RESPONSE_BYTES,
+  MAX_JOB_STATUS_RESPONSE_BYTES,
+  isRecord,
+  readBoundedJson,
+  readJsonOrNull,
+} from "./jobApiBody";
 
 import type {
   JobInputListing,
@@ -195,7 +201,10 @@ export async function fetchJobInputs(
     const response = await fetchImpl("/api/jobs/inputs", { method: "GET" });
     if (response.status === 404) return { kind: "disabled" };
     if (!response.ok) return { kind: "error" };
-    const body: unknown = await response.json();
+    const body: unknown = await readBoundedJson(
+      response,
+      MAX_JOB_LISTING_RESPONSE_BYTES,
+    );
     const listing = jobInputListingOf(body);
     return listing === null ? { kind: "error" } : { kind: "listing", listing };
   } catch {
@@ -222,11 +231,16 @@ export async function fetchJobInputProfile(
       if (response.status === 400)
         return {
           kind: "unavailable",
-          reason: profileErrorReasonOf(await readJsonOrNull(response)),
+          reason: profileErrorReasonOf(
+            await readJsonOrNull(response, MAX_JOB_STATUS_RESPONSE_BYTES),
+          ),
         };
       return { kind: "unavailable", reason: "unknown" };
     }
-    const body: unknown = await response.json();
+    const body: unknown = await readBoundedJson(
+      response,
+      MAX_JOB_LISTING_RESPONSE_BYTES,
+    );
     const profile = jobInputProfileOf(body);
     return profile === null
       ? { kind: "unavailable", reason: "unknown" }
@@ -251,7 +265,10 @@ async function probeJobRendezvous(
   try {
     const response = await fetchImpl("/api/jobs/rendezvous", { method: "GET" });
     if (!response.ok) return null;
-    const body: unknown = await response.json();
+    const body: unknown = await readBoundedJson(
+      response,
+      MAX_JOB_STATUS_RESPONSE_BYTES,
+    );
     if (!isRecord(body) || typeof body.configured !== "boolean") return null;
     if (!body.configured) {
       const problem = body.problem;
@@ -421,7 +438,9 @@ export async function postJobInputCoverage(
       signal,
     });
     if (response.ok) {
-      const rates = coverageRatesOf(await readJsonOrNull(response));
+      const rates = coverageRatesOf(
+        await readJsonOrNull(response, MAX_JOB_LISTING_RESPONSE_BYTES),
+      );
       return rates === null
         ? { kind: "unavailable" }
         : { kind: "rates", rates };

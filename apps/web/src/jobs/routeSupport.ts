@@ -1,8 +1,6 @@
-import {
-  getLogger,
-  parseBoundedJson,
-  redactAndSanitizeForDisplay,
-} from "@psilink/core";
+import { getLogger, redactAndSanitizeForDisplay } from "@psilink/core";
+
+import { readBoundedJsonBody } from "@utils/boundedJsonBody";
 
 import { MAX_INPUT_CSV_LENGTH } from "./intent";
 
@@ -15,6 +13,7 @@ import {
 import { isValidJobId } from "./workdir";
 import { useJobManager } from "./index";
 
+import type { BoundedJsonBodyResult } from "@utils/boundedJsonBody";
 import type { JobApiConfig } from "./gate";
 import type { JobManager } from "./jobManager";
 
@@ -193,60 +192,25 @@ export const MAX_SIGNING_FINGERPRINT_BODY_BYTES = 4 * 1024;
 /**
  * The outcome of reading a job request body under a byte cap:
  * - `too-large`: the body exceeded the cap (mapped to 413).
- * - `invalid`: the body was absent, was not valid UTF-8, was not valid JSON, or
- *   exceeded the structural bound parseBoundedJson enforces (mapped to 400).
+ * - `invalid`: the body was absent, failed part-way through the stream, was not
+ *   valid UTF-8, was not valid JSON, or exceeded the structural bound
+ *   parseBoundedJson enforces (mapped to 400).
  * - `parsed`: the decoded JSON value.
  */
-export type JobRequestBodyResult =
-  | { kind: "too-large" }
-  | { kind: "invalid" }
-  | { kind: "parsed"; value: unknown };
+export type JobRequestBodyResult = BoundedJsonBodyResult;
 
 /**
- * Read a request body as JSON under a hard byte cap, without trusting
- * `Content-Length` (absent or understated on a chunked request). Streamed via
- * {@link ReadableStream.getReader}; the read aborts, and the reader is
- * cancelled, the moment the running byte total exceeds `maxBytes` -- the body
- * is never buffered first. Decodes and parses the accumulated bytes itself,
- * since consuming the stream leaves `request.json()` unavailable. Pure over
- * its arguments, so a test can drive it with any `Request`.
+ * Read a request body as JSON under a hard byte cap, through the app's one
+ * byte-capped body read ({@link readBoundedJsonBody}): streamed rather than
+ * buffered, `Content-Length` never trusted, and parsed through
+ * `parseBoundedJson`. Pure over its arguments, so a test can drive it with any
+ * `Request`.
  */
-export async function readJobRequestBody(
+export function readJobRequestBody(
   request: Request,
   maxBytes: number,
 ): Promise<JobRequestBodyResult> {
-  const body = request.body;
-  if (body === null) return { kind: "invalid" };
-  const reader = body.getReader();
-  const chunks: Array<Uint8Array> = [];
-  let total = 0;
-  try {
-    for (;;) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      total += value.byteLength;
-      if (total > maxBytes) {
-        await reader.cancel();
-        return { kind: "too-large" };
-      }
-      chunks.push(value);
-    }
-  } finally {
-    reader.releaseLock();
-  }
-  const merged = new Uint8Array(total);
-  let offset = 0;
-  for (const chunk of chunks) {
-    merged.set(chunk, offset);
-    offset += chunk.byteLength;
-  }
-  let value: unknown;
-  try {
-    value = parseBoundedJson(merged);
-  } catch {
-    return { kind: "invalid" };
-  }
-  return { kind: "parsed", value };
+  return readBoundedJsonBody(request, maxBytes);
 }
 
 /**
