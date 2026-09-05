@@ -7,17 +7,18 @@ import { setLogLevel } from "@psilink/core";
 import { withCapturedLogs } from "@psilink/core/testing";
 
 import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
-import { SSH_WIRE_TRACE_PREFIX } from "../../src/connection/sftpWireTrace";
+import { SSH_WIRE_TRACE_LOGGER_NAME } from "../../src/connection/sftpWireTrace";
 import { serverAuth, sftpServer } from "../sftpServer/testContext";
 
 // What a dial reports about its own SSH handshake, driven against the real
 // stack rather than modeled from ssh2's callback contract (CLAUDE.md,
-// settle-by-driving-the-tool). Four things are held here: that the highest
-// diagnostic level answers "did the handshake complete, and on what" from one
-// run; that no credential the dial sends is among what it reports; that every
-// level below it emits not one line of it; and that a peer's own bytes reach
-// the operator escaped, since a name-list the peer chose arrives verbatim from
-// ssh2 (docs/spec/DEPENDENCY_PINS.md, "Upgrading the SFTP Stack").
+// settle-by-driving-the-tool). Four things are held here: that `--log-level
+// trace` alone answers "did the handshake complete, and on what" from one run;
+// that no credential the dial sends is among what it reports; that every level
+// below trace emits not one line of it, whatever the `-v` count; and that a
+// peer's own bytes reach the operator escaped, since a name-list the peer chose
+// arrives verbatim from ssh2 (docs/spec/DEPENDENCY_PINS.md, "Upgrading the SFTP
+// Stack").
 
 const TEST_TIMEOUT_MS = 60_000;
 const DIAL_BUDGET_MS = 5_000;
@@ -142,10 +143,10 @@ function keyboardInteractivePeer(password: string): {
 }
 
 /**
- * Dial `options` with an adapter built at `verbosity` under a root log level of
- * `rootLevel`, and hand back every diagnostic line the run emitted. The root
- * level is raised before the adapter is constructed because a
- * `getLoggerForVerbosity` logger is never more verbose than the root live when
+ * Dial `options` with an adapter built at `verbosity` -- the `-v` count -- under
+ * a root log level of `rootLevel`, and hand back every diagnostic line the run
+ * emitted. The root level is applied before the adapter is constructed because
+ * a `getLoggerForVerbosity` logger is never more verbose than the root live when
  * it is built (`@psilink/core/testing`, `withCapturedLogs`).
  */
 async function dialCapturingLogs(
@@ -181,8 +182,10 @@ async function dialCapturingLogs(
   }
 }
 
+// The rendered prefix names the logger that emitted the line, which is how a
+// stack line is told from the adapter's own (core's `setLogPrefixer`).
 const wireTraceOf = (lines: string[]): string[] =>
-  lines.filter((line) => line.includes(SSH_WIRE_TRACE_PREFIX));
+  lines.filter((line) => line.includes(`[${SSH_WIRE_TRACE_LOGGER_NAME}]`));
 
 const holds = (lines: string[], pattern: RegExp): boolean =>
   lines.some((line) => pattern.test(line));
@@ -201,14 +204,14 @@ function serverDialOptions(): Record<string, unknown> {
   };
 }
 
-describe("the highest diagnostic level", () => {
+describe("a root log level of trace, with no -v count", () => {
   test(
     "answers from one run whether the handshake completed and on what",
     { timeout: TEST_TIMEOUT_MS },
     async () => {
       const { lines, failure } = await dialCapturingLogs(
         logLibrary.levels.TRACE,
-        2,
+        0,
         serverDialOptions(),
       );
       expect(failure).toBeUndefined();
@@ -237,7 +240,7 @@ describe("the highest diagnostic level", () => {
       // server then accepts is nothing the trace renders differently.
       const password = "psilink-wire-trace-probe-not-a-real-secret";
       const { privateKey: _key, ...rest } = serverDialOptions();
-      const { lines } = await dialCapturingLogs(logLibrary.levels.TRACE, 2, {
+      const { lines } = await dialCapturingLogs(logLibrary.levels.TRACE, 0, {
         ...rest,
         password,
       });
@@ -258,7 +261,7 @@ describe("the highest diagnostic level", () => {
       try {
         const { lines, failure } = await dialCapturingLogs(
           logLibrary.levels.TRACE,
-          2,
+          0,
           {
             host: "127.0.0.1",
             port: await peer.port,
@@ -281,15 +284,15 @@ describe("the highest diagnostic level", () => {
   );
 });
 
-describe("every level below it", () => {
+describe("every root log level below trace", () => {
   test.for([
-    { name: "debug", rootLevel: logLibrary.levels.DEBUG, verbosity: 2 },
-    { name: "info", rootLevel: logLibrary.levels.INFO, verbosity: 2 },
-    { name: "warn", rootLevel: logLibrary.levels.WARN, verbosity: 2 },
+    { name: "debug", rootLevel: logLibrary.levels.DEBUG, verbosity: 0 },
+    { name: "info", rootLevel: logLibrary.levels.INFO, verbosity: 0 },
+    { name: "warn", rootLevel: logLibrary.levels.WARN, verbosity: 0 },
     {
-      name: "trace with a lower adapter verbosity",
-      rootLevel: logLibrary.levels.TRACE,
-      verbosity: 1,
+      name: "debug under the highest -v count",
+      rootLevel: logLibrary.levels.DEBUG,
+      verbosity: 2,
     },
   ])(
     "emits no wire trace at $name",
@@ -318,7 +321,7 @@ describe("a peer's own bytes", () => {
       try {
         const { lines, failure } = await dialCapturingLogs(
           logLibrary.levels.TRACE,
-          2,
+          0,
           {
             host: "127.0.0.1",
             port: await peer.port,

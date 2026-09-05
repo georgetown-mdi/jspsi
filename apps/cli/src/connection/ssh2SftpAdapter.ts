@@ -15,6 +15,7 @@ import {
   PutOptions,
   PutSource,
   TransportOperationStalledError,
+  getLogger,
   getLoggerForVerbosity,
   retryPromise,
   sanitizeErrorForDisplay,
@@ -58,7 +59,10 @@ import {
   isPreIdentificationDialFailure,
   peerProbeTargetFromConnectOptions,
 } from "./sftpPeerIdentification";
-import { sshWireTraceCallback } from "./sftpWireTrace";
+import {
+  SSH_WIRE_TRACE_LOGGER_NAME,
+  sshWireTraceCallback,
+} from "./sftpWireTrace";
 import {
   SubsystemOpenTimeoutError,
   subsystemOpenTimeoutMs,
@@ -103,6 +107,12 @@ import {
   unboundedSubsystemOpenWarning,
   unreadableTransportLifecycleWarning,
 } from "./sftpAdapterWarnings";
+
+// The SSH stack's diagnostics reach the operator under a logger of their own,
+// at the level `--log-level` applies: `getLoggerForVerbosity` floors a logger
+// to the quieter of that level and the `-v` count, which would put this trace
+// behind both flags.
+const sshWireTraceLog = getLogger(SSH_WIRE_TRACE_LOGGER_NAME);
 
 // SSH_FX_FAILURE: the generic SFTPv3 status (4) a server returns when an
 // operation did not take effect for a reason it does not further classify. The
@@ -410,11 +420,11 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // release reading stands where a session is live.
   private sessionBoundary: SessionBoundary = "notReleased";
   private log: ReturnType<typeof getLoggerForVerbosity>;
-  // Where the SSH stack's own diagnostics go, or undefined when this adapter's
-  // logger is not at the trace level (see ./sftpWireTrace). Resolved from the
-  // logger built below rather than per dial: an application applies the
-  // operator's level before it builds a connection, so the level a dial would
-  // read is the one already read here.
+  // Where the SSH stack's own diagnostics go, or undefined when the operator's
+  // log level is not trace (see ./sftpWireTrace). Resolved in the constructor
+  // rather than per dial: an application applies the operator's level before it
+  // builds a connection, so the level a dial would read is the one already read
+  // here.
   private readonly wireTrace: ((line: string) => void) | undefined;
   // The raw SFTPWrapper this adapter has already attached its fatal-'error'
   // listener to, so connect() attaches exactly once per wrapper instance (see
@@ -485,7 +495,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     } = {},
   ) {
     this.log = getLoggerForVerbosity("sftp-adapter", options.verbosity ?? 1);
-    this.wireTrace = sshWireTraceCallback(this.log);
+    this.wireTrace = sshWireTraceCallback(sshWireTraceLog);
     // ssh2-sftp-client's bare constructor installs default callbacks that
     // console.error/console.log the underlying ssh2 Client's error/end/close
     // events whenever they fire outside a high-level operation it initiated.
@@ -1519,7 +1529,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     // transport-agnostic; cast here is intentional.
     const { maxReconnectAttempts: _, ...rest } = options;
     const connectOptions = rest as Ssh2SftpClient.ConnectOptions;
-    // Route the SSH stack's own diagnostics into this adapter's logger for the
+    // Route the SSH stack's own diagnostics into psilink's logger for the
     // life of the connection this dial opens, at the trace level and nowhere
     // else (see ./sftpWireTrace). Seated on the per-dial options rather than the
     // retained ones, so no callback is stored on what a recovery re-dial reads

@@ -16,10 +16,14 @@ import logLibrary from "loglevel";
 import { redactAndSanitizeForDisplay } from "@psilink/core";
 
 /**
- * Marks a line as the SSH stack's own rather than this adapter's, since both
- * reach the operator through the same logger and context name.
+ * Name of the logger the SSH stack's lines reach the operator under. One of its
+ * own rather than the adapter's, for the level: this trace answers for the
+ * connection, so it follows the level the operator set with `--log-level` and
+ * not the `-v`-floored one the adapter's logger holds. It is also what tells
+ * the two apart in the rendered `[LEVEL] [CONTEXT]` prefix, so a line needs no
+ * marker of its own.
  */
-export const SSH_WIRE_TRACE_PREFIX = "ssh: ";
+export const SSH_WIRE_TRACE_LOGGER_NAME = "ssh";
 
 /**
  * Cap on the escaped characters one traced line emits, above the 256-character
@@ -55,7 +59,6 @@ export interface WireTraceLogger {
  * is the same last-resort safety check the connect log applies.
  */
 export const sshWireTraceLine = (line: string): string =>
-  SSH_WIRE_TRACE_PREFIX +
   redactAndSanitizeForDisplay(line, {
     maxLength: SSH_WIRE_TRACE_MAX_DISPLAY_LENGTH,
   });

@@ -1,19 +1,26 @@
 import logLibrary from "loglevel";
-import { describe, expect, test } from "vitest";
-
-import { DISPLAY_TRUNCATION_MARKER } from "@psilink/core";
+import { afterEach, describe, expect, test } from "vitest";
 
 import {
+  DISPLAY_TRUNCATION_MARKER,
+  getLogger,
+  getLoggerForVerbosity,
+  setLogLevel,
+} from "@psilink/core";
+
+import {
+  SSH_WIRE_TRACE_LOGGER_NAME,
   SSH_WIRE_TRACE_MAX_DISPLAY_LENGTH,
-  SSH_WIRE_TRACE_PREFIX,
   sshWireTraceCallback,
   sshWireTraceLine,
 } from "../../../src/connection/sftpWireTrace";
 import type { WireTraceLogger } from "../../../src/connection/sftpWireTrace";
 
-// The escaping and the level gate on the SSH stack's diagnostic lines. What the
-// installed stack actually emits into them -- and that a real server's bytes
-// arrive needing this escape -- is DRIVEN, off a real dial, in
+// The escaping and the level gate on the SSH stack's diagnostic lines, and the
+// level the logger the trace rides comes up at -- driven against the real
+// loglevel registry rather than modeled from its resolution order. What the
+// installed stack actually emits into those lines -- and that a real server's
+// bytes arrive needing this escape -- is DRIVEN, off a real dial, in
 // test/integration/sftpWireTrace.test.ts.
 
 /** Records what a logger at `level` was asked to trace. */
@@ -29,10 +36,8 @@ function recordingLogger(level: number): WireTraceLogger & {
 }
 
 describe("sshWireTraceLine", () => {
-  test("marks the line as the stack's own", () => {
-    expect(sshWireTraceLine("Handshake completed")).toBe(
-      `${SSH_WIRE_TRACE_PREFIX}Handshake completed`,
-    );
+  test("passes a line the stack composed through unchanged", () => {
+    expect(sshWireTraceLine("Handshake completed")).toBe("Handshake completed");
   });
 
   test("escapes the bytes a server chooses", () => {
@@ -66,9 +71,7 @@ describe("sshWireTraceLine", () => {
     const line = sshWireTraceLine("x".repeat(4096));
     expect(line).toContain(DISPLAY_TRUNCATION_MARKER);
     expect(line.length).toBeLessThanOrEqual(
-      SSH_WIRE_TRACE_PREFIX.length +
-        SSH_WIRE_TRACE_MAX_DISPLAY_LENGTH +
-        DISPLAY_TRUNCATION_MARKER.length,
+      SSH_WIRE_TRACE_MAX_DISPLAY_LENGTH + DISPLAY_TRUNCATION_MARKER.length,
     );
   });
 
@@ -99,8 +102,50 @@ describe("sshWireTraceCallback", () => {
     debug!("Remote ident: 'SSH-2.0-\x1b[31mred'");
     debug!("Handshake completed");
     expect(log.traced).toEqual([
-      `${SSH_WIRE_TRACE_PREFIX}Remote ident: 'SSH-2.0-\\x1b[31mred'`,
-      `${SSH_WIRE_TRACE_PREFIX}Handshake completed`,
+      "Remote ident: 'SSH-2.0-\\x1b[31mred'",
+      "Handshake completed",
     ]);
+  });
+});
+
+describe("the logger the trace rides", () => {
+  const rootLevelAtLoad = logLibrary.getLevel();
+  afterEach(() => {
+    setLogLevel(rootLevelAtLoad);
+  });
+
+  test.for([
+    { name: "trace", level: logLibrary.levels.TRACE },
+    { name: "debug", level: logLibrary.levels.DEBUG },
+    { name: "info", level: logLibrary.levels.INFO },
+    { name: "warn", level: logLibrary.levels.WARN },
+    { name: "error", level: logLibrary.levels.ERROR },
+    { name: "silent", level: logLibrary.levels.SILENT },
+  ])("comes up at the root level $name", ({ level }) => {
+    setLogLevel(level);
+    const log = getLogger(SSH_WIRE_TRACE_LOGGER_NAME);
+    expect(log.getLevel()).toBe(level);
+    expect(sshWireTraceCallback(log) !== undefined).toBe(
+      level === logLibrary.levels.TRACE,
+    );
+  });
+
+  test("is at trace with a root level of trace and no -v count", () => {
+    setLogLevel(logLibrary.levels.TRACE);
+    for (const verbosity of [0, 1]) {
+      const adapterLog = getLoggerForVerbosity("sftp-adapter", verbosity);
+      const log = getLogger(SSH_WIRE_TRACE_LOGGER_NAME);
+      expect(adapterLog.getLevel()).toBeGreaterThan(logLibrary.levels.TRACE);
+      expect(log.getLevel()).toBe(logLibrary.levels.TRACE);
+      expect(sshWireTraceCallback(log)).toBeDefined();
+    }
+  });
+
+  test("is not brought to trace by the -v count alone", () => {
+    setLogLevel(logLibrary.levels.DEBUG);
+    getLoggerForVerbosity("sftp-adapter", 2);
+    const log = getLogger(SSH_WIRE_TRACE_LOGGER_NAME);
+    expect(log.getLevel()).toBe(logLibrary.levels.DEBUG);
+    expect(sshWireTraceCallback(log)).toBeUndefined();
   });
 });
