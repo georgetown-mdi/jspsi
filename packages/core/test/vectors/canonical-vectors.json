@@ -1,5 +1,5 @@
 {
-  "_comment": "RFC 8785 (JCS) canonicalization test vectors for psilink receipts. For each vector, encoding `value` per docs/spec/CANONICAL_ENCODING.md must produce the UTF-8 byte string `bytesHex`, whose string form is `canonical` and whose SHA-256 is `sha256Hex`. Reusable by any independent implementation. See docs/spec/CANONICAL_ENCODING.md. Note: the -0 -> 0 normalization is normative (see the Numbers section and worked examples in docs/spec/CANONICAL_ENCODING.md) but cannot appear here because JSON has no negative zero -- a -0 literal parses to 0 -- so verify it from a -0 literal in your own language (the Node suite does so in packages/core/test/utils/canonical.test.ts).",
+  "_comment": "RFC 8785 (JCS) canonicalization test vectors for psilink receipts. A vector with `refuses` set to true must be REJECTED with an error and states no `canonical`, `bytesHex`, or `sha256Hex`; for every other vector, encoding `value` per docs/spec/CANONICAL_ENCODING.md must produce the UTF-8 byte string `bytesHex`, whose string form is `canonical` and whose SHA-256 is `sha256Hex`. Reusable by any independent implementation. See docs/spec/CANONICAL_ENCODING.md. Note: the -0 -> 0 normalization is normative (see the Numbers section and worked examples in docs/spec/CANONICAL_ENCODING.md) but cannot appear here because JSON has no negative zero -- a -0 literal parses to 0 -- so verify it from a -0 literal in your own language (the Node suite does so in packages/core/test/utils/canonical.test.ts).",
   "vectors": [
     {
       "name": "scalars-sorted",
@@ -114,13 +114,27 @@
     },
     {
       "name": "lone-surrogate",
-      "description": "an unpaired UTF-16 surrogate is escaped as \\uXXXX with lowercase hex (ECMA-262 well-formed JSON), not emitted as raw bytes",
+      "description": "a string holding an unpaired high surrogate is refused (RFC 8785 section 3.2.2.2), not escaped and encoded",
       "value": {
         "s": "\ud834"
       },
-      "canonical": "{\"s\":\"\\ud834\"}",
-      "bytesHex": "7b2273223a225c7564383334227d",
-      "sha256Hex": "0529b152a7e0d22407f9d829f2728e21191a34fe2dfbdea3773dca8a998fda9e"
+      "refuses": true
+    },
+    {
+      "name": "lone-surrogate-low",
+      "description": "an unpaired LOW surrogate is refused on the same rule as an unpaired high one",
+      "value": {
+        "s": "\udd1e"
+      },
+      "refuses": true
+    },
+    {
+      "name": "lone-surrogate-object-key",
+      "description": "an unpaired surrogate in an object KEY is refused, as in a value",
+      "value": {
+        "\ud834": 1
+      },
+      "refuses": true
     },
     {
       "name": "control-character-escapes",

@@ -3,7 +3,11 @@
 
 import { describe, expect, test } from "vitest";
 
-import { canonicalBytes, canonicalString } from "@psilink/core";
+import {
+  CanonicalEncodingError,
+  canonicalBytes,
+  canonicalString,
+} from "@psilink/core";
 
 // The companion to packages/core/test/utils/canonical.test.ts: it runs the SAME
 // checked-in vectors through the browser build of @psilink/core in real
@@ -20,14 +24,22 @@ import { canonicalBytes, canonicalString } from "@psilink/core";
 // loader cannot represent an unpaired surrogate in the module it emits.
 import vectorsRaw from "../../../../packages/core/test/vectors/canonical-vectors.json?raw";
 
-interface Vector {
-  name: string;
-  description: string;
-  value: unknown;
-  canonical: string;
-  bytesHex: string;
-  sha256Hex: string;
-}
+type Vector =
+  | {
+      name: string;
+      description: string;
+      value: unknown;
+      canonical: string;
+      bytesHex: string;
+      sha256Hex: string;
+      refuses?: undefined;
+    }
+  | {
+      name: string;
+      description: string;
+      value: unknown;
+      refuses: true;
+    };
 
 const vectors = (JSON.parse(vectorsRaw) as { vectors: Array<Vector> }).vectors;
 
@@ -38,6 +50,16 @@ describe("canonical encoding in the browser", () => {
   test.each(vectors)(
     "$name: browser output matches the checked-in vector",
     async (vector) => {
+      if (vector.refuses) {
+        expect(() => canonicalString(vector.value)).toThrow(
+          CanonicalEncodingError,
+        );
+        expect(() => canonicalBytes(vector.value)).toThrow(
+          CanonicalEncodingError,
+        );
+        return;
+      }
+
       expect(canonicalString(vector.value)).toBe(vector.canonical);
 
       const bytes = canonicalBytes(vector.value);

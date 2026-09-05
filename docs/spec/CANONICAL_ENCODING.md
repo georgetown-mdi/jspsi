@@ -30,15 +30,14 @@ bytes; the rules in [Encoding rules](#encoding-rules) restate the parts of
 RFC 8785 that matter here, plus the additional constraints PSI-Link imposes so
 that the input domain is always reproducible.
 
-One case falls outside that equivalence, and it is stated here rather than left
-to be discovered. RFC 8785 section 3.2.2.2 requires a compliant implementation
-to **terminate with an error** on invalid Unicode data such as a lone surrogate;
-PSI-Link instead escapes it and emits bytes (see [Strings](#strings)). So for a
-value containing a lone surrogate the two do not agree: an implementation written
-to RFC 8785 alone produces no output where PSI-Link produces a hashable byte
-string. Reproducing PSI-Link's bytes for that input requires this document's
-rule, not the RFC's. For every other value in the domain below, RFC 8785 output
-is PSI-Link output.
+There is no exception to that equivalence. Across the whole domain, RFC 8785
+output is PSI-Link output, so an implementation written to the RFC alone
+reproduces every canonical byte string PSI-Link produces. The domain admits only
+a well-formed string, which is what keeps the two in step over the one case
+where an encoder could otherwise diverge: RFC 8785 section 3.2.2.2 requires a
+compliant implementation to **terminate with an error** on invalid Unicode data
+such as a lone surrogate, and PSI-Link refuses such a value rather than encoding
+it (see [Strings](#strings)).
 
 RFC 8785 builds both of its primitive serializations on ECMAScript
 ([ECMA-262](https://tc39.es/ecma262/)): number-to-string conversion
@@ -75,7 +74,7 @@ A value to be canonically encoded is one of:
 
 | Kind | Notes |
 |------|-------|
-| string | any JavaScript string, including one containing an unpaired UTF-16 surrogate (see [Strings](#strings)) |
+| string | a **well-formed** JavaScript string: every UTF-16 surrogate is paired, so the string has a UTF-8 encoding (see [Strings](#strings)) |
 | number | finite; integers must be **safe** (see [Numbers](#numbers)) |
 | boolean | `true` or `false` |
 | null | the JSON null literal |
@@ -106,6 +105,9 @@ because silent coercion is the classic way two implementations diverge:
   and a symbol-keyed property on an array or an object. Only the elements
   `[0, length)` and an object's string keys are encoded, so such a property
   would be dropped without a trace.
+- A string -- a value or an object key -- holding a lone UTF-16 surrogate. It is
+  not a Unicode scalar value and has no UTF-8 encoding (see
+  [Strings](#strings)).
 
 A conforming implementation MUST reject each of these with an error rather than
 emit bytes for it.
@@ -199,12 +201,15 @@ string, which is what RFC 8785 requires:
 - Every other character, including all non-ASCII characters, is emitted as its
   **raw UTF-8 bytes** -- it is not `\u`-escaped. For example the euro sign
   (U+20AC) is emitted as the three bytes `E2 82 AC`.
-- A lone surrogate (an unpaired UTF-16 surrogate code point) is escaped as
-  `\uXXXX` with lowercase hex, per ECMA-262 well-formed JSON stringification.
-  This is the one rule here that departs from RFC 8785, whose section 3.2.2.2
-  requires a compliant implementation to terminate with an error on such data
-  instead; a reproducer must follow this rule rather than the RFC's. The
-  `lone-surrogate` test vector fixes the bytes.
+- A string holding a lone surrogate (an unpaired UTF-16 surrogate code unit) is
+  **refused**: the encoder terminates with an error and emits no bytes, as
+  RFC 8785 section 3.2.2.2 requires for invalid Unicode data. A lone surrogate is
+  not a Unicode scalar value and has no UTF-8 encoding, so there are no bytes for
+  it to have. The refusal covers an object **key** as well as a string value,
+  since both are serialized as JSON strings. The `lone-surrogate`,
+  `lone-surrogate-low`, and `lone-surrogate-object-key` test vectors fix the
+  refusal; a well-formed surrogate pair is unaffected and emits its raw UTF-8
+  bytes, as the `astral-emoji` vector fixes.
 
 ### Absent versus null
 
@@ -277,13 +282,15 @@ It is a JSON object with a `vectors` array; each entry has:
 | `name` | short identifier |
 | `description` | what the vector exercises |
 | `value` | the input value |
+| `refuses` | present and `true` on a vector the encoder MUST reject; such a vector has none of the three fields below |
 | `canonical` | the expected canonical character string |
 | `bytesHex` | the expected canonical byte string, as lowercase hex |
 | `sha256Hex` | the SHA-256 of `bytesHex`'s bytes, as lowercase hex |
 
 An independent implementation reproduces the bytes by encoding each `value` and
 checking the result equals `bytesHex` (and, if it also hashes, that the SHA-256
-equals `sha256Hex`).
+equals `sha256Hex`). A vector marked `refuses` is the other half of the contract:
+encoding its `value` MUST terminate with an error rather than produce any bytes.
 
 One normative case is absent from the file: the `-0` to `0` normalization
 ([Numbers](#numbers) and the worked example `{"n":-0}` -> `{"n":0}`). JSON has no

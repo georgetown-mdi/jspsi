@@ -23,9 +23,10 @@ import { redactPrivateKeyMaterial } from "./sanitizeErrorForDisplay.js";
  * arrays and plain objects, recursively. `undefined`, `bigint`, symbols,
  * functions, and non-plain objects (Date, Map, TypedArray, class instances,
  * ...) are rejected at runtime; binary data must be base64url-encoded to a
- * string first. Documented as a type for reference only -- the encode
- * functions accept `unknown` and enforce the domain at runtime, which is the
- * actual contract a reimplementation must match.
+ * string first. A string must be well-formed UTF-16 (see
+ * {@link loneSurrogateIndex}). Documented as a type for reference only -- the
+ * encode functions accept `unknown` and enforce the domain at runtime, which
+ * is the actual contract a reimplementation must match.
  */
 export type CanonicalValue =
   | string
@@ -70,6 +71,44 @@ function fail(reason: string, path: string, cause?: unknown): never {
     // (which have none) do not allocate an options object per call.
     cause === undefined ? undefined : { cause },
   );
+}
+
+/**
+ * Index of the first UTF-16 code unit of `value` that is an unpaired
+ * surrogate, or -1 when the string is well-formed. A lone surrogate is not a
+ * Unicode scalar value and has no UTF-8 encoding, so RFC 8785 section 3.2.2.2
+ * requires an implementation to terminate with an error rather than emit bytes
+ * for it (see docs/spec/CANONICAL_ENCODING.md).
+ *
+ * A code-unit scan rather than `String.prototype.isWellFormed`, which is
+ * ES2024 while this package compiles against the ES2022 lib.
+ */
+function loneSurrogateIndex(value: string): number {
+  for (let index = 0; index < value.length; index++) {
+    const unit = value.charCodeAt(index);
+    if (unit < 0xd800 || unit > 0xdfff) continue;
+    if (unit >= 0xdc00) return index;
+    // charCodeAt past the end is NaN, which fails this range test, so a high
+    // surrogate in the final position is reported as unpaired.
+    const next = value.charCodeAt(index + 1);
+    if (!(next >= 0xdc00 && next <= 0xdfff)) return index;
+    index++;
+  }
+  return -1;
+}
+
+function assertWellFormedString(
+  value: string,
+  path: string,
+  subject: "string" | "object key",
+): void {
+  const index = loneSurrogateIndex(value);
+  if (index >= 0)
+    fail(
+      `${subject} holds an unpaired UTF-16 surrogate at code unit ` +
+        `${String(index)}; a lone surrogate has no UTF-8 encoding`,
+      path,
+    );
 }
 
 function isPlainObject(value: object): boolean {
@@ -118,6 +157,8 @@ function assertNoToJson(value: object, path: string): void {
 function assertCanonical(value: unknown, path: string): void {
   switch (typeof value) {
     case "string":
+      assertWellFormedString(value, path, "string");
+      return;
     case "boolean":
       return;
     case "number":
@@ -198,6 +239,7 @@ function assertCanonical(value: unknown, path: string): void {
         const childPath = /^[A-Za-z_$][\w$]*$/.test(key)
           ? `${path}.${key}`
           : `${path}[${JSON.stringify(key)}]`;
+        assertWellFormedString(key, childPath, "object key");
         assertCanonical(child, childPath);
       }
       return;
