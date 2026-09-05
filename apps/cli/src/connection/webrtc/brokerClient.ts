@@ -160,9 +160,10 @@ export interface BrokerConnectOptions {
    */
   socketFactory?: (url: string) => WebSocket;
   /**
-   * Asks what the certificate check said once a socket has failed; injected so
-   * a unit test can drive both answers without a server. Defaults to
-   * {@link probeSignalingCertificate}.
+   * Asks what the certificate check said once a socket has failed, before it
+   * registered; injected so a unit test can drive both answers without a
+   * server. Defaults to {@link probeSignalingCertificate}, and is handed
+   * `signal` so an interrupt releases the handshake it holds open.
    */
   certificateProbe?: SignalingCertificateProbe;
 }
@@ -642,9 +643,18 @@ export function connectToBroker(
 
     // Every terminal path that can name its failure at once funnels here, so
     // teardown runs exactly once and the outcome is reported once.
-    const end = (error: ConnectionError | undefined): void => {
+    const end = (error: ConnectionError): void => {
       if (!claimTerminal()) return;
       settle(error);
+    };
+
+    // The caller's own close. It claims the settlement rather than routing
+    // through `end`, which a path that has already torn down leaves early: a
+    // close while an answer about the endpoint is still out has to silence that
+    // answer rather than let it report through `onClose`.
+    const closeLocally = (): void => {
+      claimTerminal();
+      settle(undefined);
     };
 
     // An abort is answered wherever it lands, including after a failing path
@@ -704,7 +714,7 @@ export function connectToBroker(
         // would latch a registration's wording onto every later abort and make
         // the caller's own unreachable.
         signal?.removeEventListener("abort", onAbort);
-        resolve({ localId: id, send: sendRaw, close: () => end(undefined) });
+        resolve({ localId: id, send: sendRaw, close: closeLocally });
         return;
       }
       // Non-terminal frames reach the handler in both phases. The measured
@@ -717,14 +727,21 @@ export function connectToBroker(
 
     // The socket's `error` event has no detail worth exposing (and in Node its
     // message can embed the URL, which holds the peer id), so what failed is
-    // asked of the endpoint instead, and only for a `wss://` location. The
-    // teardown is claimed synchronously, so the `close` that follows reports
-    // nothing while the question is still out.
+    // asked of the endpoint instead -- for a `wss://` location, and only where
+    // the failure precedes registration. A socket that registered completed
+    // that handshake, so an answer about it would name a check that had passed,
+    // and waiting for one would hold the report for the probe's ceiling.
     const onSocketError = (): void => {
+      if (opened) {
+        end(signalingSocketError(undefined));
+        return;
+      }
       if (!claimTerminal()) return;
-      void (certificateProbe ?? probeSignalingCertificate)(location).then(
-        (certificateProblem) =>
-          settle(signalingSocketError(certificateProblem)),
+      void (certificateProbe ?? probeSignalingCertificate)(
+        location,
+        signal,
+      ).then((certificateProblem) =>
+        settle(signalingSocketError(certificateProblem)),
       );
     };
 

@@ -567,10 +567,10 @@ test("a dropped socket reports a transport failure once", async () => {
   const { socket, closes } = await register();
   socket.fail();
   socket.drop();
-  // A socket error asks the endpoint what its certificate check said before it
-  // can name the failure, so the report lands a turn later; the drop behind it
-  // still reports nothing.
-  await vi.waitFor(() => expect(closes).toHaveLength(1));
+  // A socket that had registered names its failure at once (the certificate
+  // question belongs to the phase before registration, and is driven in
+  // webrtcSignalingTls.test.ts); the drop behind it reports nothing.
+  expect(closes).toHaveLength(1);
   expect(closes[0]?.kind).toBe("transport");
 });
 

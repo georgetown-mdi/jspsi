@@ -519,7 +519,7 @@ A rendezvous that ends without a data channel names what ICE found, so the failu
 
 The failure states whether a relay candidate was gathered, how many remote candidates the partner sent, and how many pairs were tried. A report of no relay candidate is the first case or the second according to your own `turn` configuration, which the failure does not read. A completed exchange reports the candidate pair it settled on at `--log-level debug`, which is what tells you whether a run that worked went direct or through the relay.
 
-**A failure against the signaling server names a certificate problem when that is what it was.** A `wss://` socket that cannot be opened is checked once more against the same endpoint, and a certificate that does not verify on this host is reported as such rather than as a generic connection failure. On a network that intercepts TLS, the remedy is to trust that network's certificate authority -- add it to the host's trust store, or name a file holding it in `NODE_EXTRA_CA_CERTS`.
+**A failure against the signaling server names a certificate problem when that is what it was.** A `wss://` socket that fails before the server confirms the registration is checked once more against the same endpoint, and a certificate that does not verify on this host is reported as such rather than as a generic connection failure. A socket that drops later already completed that handshake, so its failure is reported at once and names no certificate. On a network that intercepts TLS, the remedy is to trust that network's certificate authority -- add it to the host's trust store, or name a file holding it in `NODE_EXTRA_CA_CERTS`.
 
 ### Sweeping a stale exchange directory
 

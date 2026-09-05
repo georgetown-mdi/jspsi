@@ -13,9 +13,11 @@ import type {
   BrokerLocation,
   BrokerMessage,
 } from "../../../src/connection/webrtc/brokerClient";
+import type { SignalingCertificateProbe } from "../../../src/connection/webrtc/signalingTls";
 
 /**
- * What a failed signaling socket tells the operator about the certificate.
+ * What a failed signaling socket tells the operator about the certificate, and
+ * which failures are asked about at all.
  *
  * The certificate answer itself is measured against a real TLS listener in
  * test/integration/webrtc/signalingCertificate.test.ts; here the probe is
@@ -64,22 +66,37 @@ class FakeSocket {
     this.emit("error", {});
   }
 
-  wired(): boolean {
-    return (this.listeners.get("message")?.size ?? 0) > 0;
-  }
-
   private emit(type: string, event: unknown): void {
     for (const handler of [...(this.listeners.get(type) ?? [])]) handler(event);
   }
 }
 
-/** Register, then fail the socket, and render what the failure reports. */
-async function failureAfterRegistration(
+/** A scripted probe that counts the endpoints it was asked about. */
+function countingProbe(answer: Promise<string | undefined>): {
+  probe: SignalingCertificateProbe;
+  dials: () => number;
+} {
+  let dials = 0;
+  return {
+    probe: () => {
+      dials += 1;
+      return answer;
+    },
+    dials: () => dials,
+  };
+}
+
+/**
+ * Fail the socket before the broker confirms it, and render what the rejected
+ * registration reports. That is the phase a certificate failure lands in: a
+ * socket that never registered is one whose handshake may be what failed.
+ */
+async function failureBeforeRegistration(
   certificateProblem: string | undefined,
 ): Promise<string> {
   const socket = new FakeSocket();
   const closes: Array<unknown> = [];
-  const client = await connectToBroker({
+  const failure = await connectToBroker({
     location: LOCATION,
     id: LOCAL_ID,
     handlers: {
@@ -87,27 +104,28 @@ async function failureAfterRegistration(
       onClose: (error) => closes.push(error),
     },
     socketFactory: () => {
-      queueMicrotask(() => socket.register());
+      queueMicrotask(() => socket.fail());
       return socket as unknown as WebSocket;
     },
     certificateProbe: () => Promise.resolve(certificateProblem),
-  });
-  socket.fail();
-  // The report lands a turn later: a socket error asks the endpoint what its
-  // certificate check said before it can name what failed.
-  await vi.waitFor(() => expect(closes).toHaveLength(1));
-  client.close();
-  return sanitizeErrorForDisplay(closes[0]);
+  }).then(
+    () => new Error("the registration was expected to fail"),
+    (err: unknown) => err,
+  );
+  // A registration that never opened reports through its own rejection; the
+  // handlers belong to the phase after it.
+  expect(closes).toHaveLength(0);
+  return sanitizeErrorForDisplay(failure);
 }
 
 test("a failed socket whose certificate verified reports only the failure", async () => {
-  const rendered = await failureAfterRegistration(undefined);
+  const rendered = await failureBeforeRegistration(undefined);
   expect(rendered).toContain(SIGNALING_SOCKET_FAILED_MESSAGE);
   expect(rendered).not.toContain("certificate check reported");
 });
 
 test("a certificate that did not verify is named, with the remedy", async () => {
-  const rendered = await failureAfterRegistration(
+  const rendered = await failureBeforeRegistration(
     "DEPTH_ZERO_SELF_SIGNED_CERT",
   );
   expect(rendered).toContain(SIGNALING_CERTIFICATE_FAILED_MESSAGE);
@@ -117,7 +135,7 @@ test("a certificate that did not verify is named, with the remedy", async () => 
 });
 
 test("a hostile verification code cannot drive the operator's terminal", async () => {
-  const rendered = await failureAfterRegistration(
+  const rendered = await failureBeforeRegistration(
     `CERT\u001b[31m\nFAKE: exchange complete${"A".repeat(4000)}`,
   );
   expect(rendered).toContain("CERT\\x1b[31m\\x0aFAKE: exchange complete");
@@ -127,8 +145,70 @@ test("a hostile verification code cannot drive the operator's terminal", async (
   expect(rendered).toContain("NODE_EXTRA_CA_CERTS");
 });
 
+test("a socket that fails before registering is asked about the certificate", async () => {
+  const socket = new FakeSocket();
+  const { probe, dials } = countingProbe(
+    Promise.resolve("DEPTH_ZERO_SELF_SIGNED_CERT"),
+  );
+  const failure = await connectToBroker({
+    location: LOCATION,
+    id: LOCAL_ID,
+    handlers: { onMessage: () => {}, onClose: () => {} },
+    socketFactory: () => {
+      queueMicrotask(() => socket.fail());
+      return socket as unknown as WebSocket;
+    },
+    certificateProbe: probe,
+  }).then(
+    () => new Error("the registration was expected to fail"),
+    (err: unknown) => err as Error,
+  );
+  expect(dials()).toBe(1);
+  expect(failure.message).toBe(SIGNALING_CERTIFICATE_FAILED_MESSAGE);
+});
+
+test("a socket that fails after registering reports at once, asking nothing", async () => {
+  // This socket completed the handshake the endpoint's certificate is checked
+  // in, so a drop after it is not a certificate failure. Asking anyway would
+  // hold the report for the probe's ceiling and could name a check that had
+  // passed. The probe here never answers, so a report that waited on one would
+  // never come at all.
+  const socket = new FakeSocket();
+  const closes: Array<Error> = [];
+  const { probe, dials } = countingProbe(
+    new Promise<string | undefined>(() => {}),
+  );
+  const client = await connectToBroker({
+    location: LOCATION,
+    id: LOCAL_ID,
+    handlers: {
+      onMessage: () => {},
+      onClose: (error) => closes.push(error),
+    },
+    socketFactory: () => {
+      queueMicrotask(() => socket.register());
+      return socket as unknown as WebSocket;
+    },
+    certificateProbe: probe,
+  });
+  socket.fail();
+  expect(dials()).toBe(0);
+  expect(closes).toHaveLength(1);
+  expect(closes[0]?.message).toBe(SIGNALING_SOCKET_FAILED_MESSAGE);
+  // The caller closing behind the report adds nothing: one failure is reported
+  // once.
+  client.close();
+  await vi.waitFor(() => expect(closes).toHaveLength(1));
+});
+
 test("a plaintext location is answered without opening a socket", async () => {
   await expect(
     probeSignalingCertificate({ ...LOCATION, secure: false }),
+  ).resolves.toBeUndefined();
+});
+
+test("an aborted probe is answered without dialing", async () => {
+  await expect(
+    probeSignalingCertificate(LOCATION, AbortSignal.abort()),
   ).resolves.toBeUndefined();
 });
