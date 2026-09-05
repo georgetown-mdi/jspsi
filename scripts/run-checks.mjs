@@ -230,7 +230,7 @@ export const OUT_OF_CHECK_ALL = [
  */
 export const SEPARATE_WORKFLOW_STEPS = [
   {
-    command: "npm audit",
+    command: "npm run audit:production",
     reason:
       "Reaches the npm registry's advisory endpoint, so it does not run from an offline checkout, and it runs last so an advisory standing open over the production tree does not mask the guards' results.",
   },
