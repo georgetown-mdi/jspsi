@@ -218,13 +218,14 @@ while the exchange itself calls it from `runExchange` and hands the caller the
 result.
 
 A third class followed: the constants only a test reads. The file-sync
-envelope's framing bytes and the AEAD envelope's version marker, the invitation
-and CSV input bounds, the WebRTC pre-scan's per-kind weights, and the two
-display markers are each enforced or written by core itself, and what a caller
-does is send a message, decode an invitation, or read rendered text. They moved
-to `./testing`, where each app's suite builds a frame or drives a bound at its
-edge, and the capabilities their neighbours on the main entry publish -- the
-codecs, the parsers, the display renderers -- stayed.
+envelope's framing bytes and the AEAD envelope's version marker, the terminal
+frame's drain timeout, the invitation and CSV input bounds, the WebRTC
+pre-scan's per-kind weights, and the two display markers are each enforced or
+written by core itself, and what a caller does is send a message, decode an
+invitation, or read rendered text. They moved to `./testing`, where each app's
+suite builds a frame or drives a bound at its edge, and the capabilities their
+neighbours on the main entry publish -- the codecs, the parsers, the display
+renderers -- stayed.
 
 One subject arrived that is neither a fixture nor a codec:
 `withNoListedFanOutFunctions`, the lever that stands a listed fan-out producer
