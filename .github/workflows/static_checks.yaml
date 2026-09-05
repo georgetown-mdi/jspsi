@@ -63,6 +63,14 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
+        with:
+          # The comment history-narration check reads the comment lines the pull
+          # request adds against its base branch, which it finds through `git
+          # merge-base` in the checkout. The default single-commit fetch carries
+          # no base branch to find, and the check fails rather than passing an
+          # empty range, so this job takes the full history. The job beside it
+          # keeps the default.
+          fetch-depth: 0
       # Pins Node, installs from the lockfile, and builds @psilink/core. Most of
       # the checks below read their parsers and fixtures out of the install; the
       # vectors check reads the built dist, since its generators import the

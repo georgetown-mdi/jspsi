@@ -210,7 +210,7 @@ If you are writing a constant value, a byte/wire layout, an HKDF info string or 
 
 All three documentation tiers (`docs/`, `docs/spec/`, `docs/notes/`) must stay scannable: no multi-hundred-word paragraphs -- use subheadings and lists. When an edit lands in a section that is already a wall of text, restructure the section rather than growing a sentence in place. One exception: a `docs/spec/` paragraph holding a MUST, SHOULD, MUST NOT, or NEVER is not split by this rule, because the keyword binds the sentences of its own paragraph and splitting it changes what the spec requires -- that is a spec change, made on its own. Spec prose with no normative keyword stays inside the bound.
 
-Write documentation as the target state, not a narration of what changed -- no "now", "previously", or "no longer"; the reader cannot see the diff, and change history belongs in the commit message. This holds in all three tiers and in source comments.
+Write documentation as the target state, not a narration of what changed -- no "now", "previously", or "no longer"; the reader cannot see the diff, and change history belongs in the commit message. This holds in all three tiers and in source comments. `check:all` holds the source-comment half over the comment lines a change adds or modifies, and names the override for the rare legitimate use; the documentation tiers are review's.
 
 Use an obviously fake placeholder for any credential-shaped value in an example config or sample document -- GitHub push protection rejects a push whose commits add a real-looking secret anywhere, docs and example YAML included, and recovering means amending the offending commit rather than adding a follow-up on top of it.
 

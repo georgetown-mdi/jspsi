@@ -59,6 +59,11 @@ export const CHECKS = [
       "CLAUDE.md stays under the byte budget every agent session pays to load it, so a new rule relocates its own weight.",
   },
   {
+    script: "check:comment-narration",
+    description:
+      "No comment line a change adds or modifies narrates how the repository changed rather than stating what the code does.",
+  },
+  {
     script: "check:command-inventory",
     description:
       "Every CLI subcommand the parser registers is named in docs/DESIGN.md and docs/CLI.md.",

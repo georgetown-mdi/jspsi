@@ -19,6 +19,7 @@
     "check:all": "node scripts/run-checks.mjs",
     "check:contributing": "node scripts/check-contributing-scope.mjs",
     "check:claudemd-budget": "node scripts/check-claudemd-budget.mjs",
+    "check:comment-narration": "node scripts/check-comment-history-narration.mjs",
     "check:pr-checklist": "node scripts/check-pr-checklist.mjs",
     "check:command-inventory": "node scripts/check-command-inventory.mjs",
     "check:image-capabilities": "node scripts/assert-image-capabilities.mjs --coverage",
