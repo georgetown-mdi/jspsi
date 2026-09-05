@@ -6,14 +6,13 @@ import { readBoundedJsonBody } from "@utils/boundedJsonBody";
  * takes, and the narrowing both the work-input and SFTP-authoring clients apply
  * before reading fields off a body.
  *
- * The console is trusted and the fetch is same-origin, so the bound is not there
- * to catch a hostile answer: it is there so an answer that is not the one this
- * endpoint returns -- a proxy's error page, a truncated stream, a console at a
- * different version -- costs a bounded read and a clean failure state rather
- * than an unbounded buffer in the operator's tab. `Response.json()` is banned
- * across src/ and server/ so a new client cannot read one unbounded; the ban and
- * its reach are in apps/web/eslint.config.js and
- * scripts/eslint-web-json-parse-ban.test.mjs.
+ * The bound holds what an answer that is not this endpoint's -- a proxy's error
+ * page, a truncated stream, a console at a different version -- can cost the
+ * operator's tab: a bounded read and the client's own malformed-body state,
+ * never an unbounded buffer. `Response.json()` is banned across src/ and
+ * server/ so a new client cannot read one unbounded (apps/web/eslint.config.js;
+ * scripts/eslint-web-json-parse-ban.test.mjs for its reach). What fixes each cap
+ * below: docs/spec/SERVER_JOB_API.md, Size caps.
  */
 
 /**

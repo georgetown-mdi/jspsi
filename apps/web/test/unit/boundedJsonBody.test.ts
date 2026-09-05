@@ -13,8 +13,8 @@ import { readBoundedJsonBody } from "@utils/boundedJsonBody";
 // job-API client takes. What is pinned here is the read itself -- that the cap
 // is enforced on the running byte total rather than on a header, that an
 // unreadable body never reaches a caller as a value, and that the throwing
-// response-side form raises JobApiBodyError where Response.json() raised a
-// SyntaxError.
+// response-side form raises JobApiBodyError rather than the SyntaxError a
+// platform `json()` raises.
 
 const encoder = new TextEncoder();
 
@@ -116,9 +116,10 @@ describe("readBoundedJsonBody caps the read, not Content-Length", () => {
     // error escaping the read.
     const depth = 100_000;
     const body = "[".repeat(depth) + "]".repeat(depth);
+    const bytes = encoder.encode(body);
     const result = await readBoundedJsonBody(
-      byteResponse(encoder.encode(body)),
-      MAX_JOB_STATUS_RESPONSE_BYTES * 1024,
+      byteResponse(bytes),
+      bytes.byteLength,
     );
     expect(result.kind).toBe("invalid");
   });
@@ -151,9 +152,8 @@ describe("readBoundedJson raises rather than returning a partial answer", () => 
     ).resolves.toEqual({ status: "succeeded" });
   });
 
-  test("a body over the cap raises, where Response.json() would have parsed it", async () => {
-    // Valid JSON, only too large: the old form read and parsed exactly this
-    // body, so the refusal is the bound and not the shape.
+  test("a body over the cap raises rather than resolving to its value", async () => {
+    // Valid JSON, only too large, so the refusal is the cap and not the shape.
     const body = JSON.stringify({ pad: "a".repeat(64 * 1024) });
     await expect(
       readBoundedJson(

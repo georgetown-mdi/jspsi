@@ -31,12 +31,12 @@ import { resolveSigningFingerprint } from "@psi/signingIdentityClient";
 
 // Every job-API client reads the console's answer under a byte cap. Each case
 // below hands the client a body that is VALID JSON and valid for that client's
-// own shape check, and only too large: the old Response.json() read every one of
-// them and returned the success value, so each of these assertions fails on that
-// form and passes only because the read is bounded.
+// own shape check, and only too large -- a read that did not enforce the cap
+// returns the success value off every one of them -- so each assertion here
+// rests on the cap and nothing else.
 //
-// A client's refusal state is its own existing malformed-body state, so nothing
-// here is a new failure path -- only a new way to reach one.
+// A client's refusal state is its own malformed-body state, so no case reaches a
+// path the client did not already have.
 
 /** A JSON body whose encoded length exceeds `cap`, carrying `fields` intact so
  * the client's shape check would accept it if it ever reached one. */
@@ -184,8 +184,9 @@ describe("a status body over its cap fails the reader safely", () => {
   });
 
   test("a body holding an invalid UTF-8 byte is unanswered, not decoded with U+FFFD substituted", async () => {
-    // The old form decoded leniently and parsed this body into an available
-    // record; the bounded read decodes UTF-8-fatal and refuses it.
+    // A lenient decode substitutes U+FFFD for the stray byte and parses this
+    // body into an available record; the read decodes UTF-8-fatal and refuses
+    // it.
     const encoder = new TextEncoder();
     const bytes = Uint8Array.from([
       ...encoder.encode(
@@ -200,8 +201,8 @@ describe("a status body over its cap fails the reader safely", () => {
   });
 
   test("a body under the byte cap but past the structural bound is unanswered", async () => {
-    // Nesting no console answer holds, inside the byte cap: the old form parsed
-    // it and read the record off the fields beside it.
+    // Nesting no console answer holds, inside the byte cap: a read carrying no
+    // structural bound parses it and takes the record off the fields beside it.
     const depth = 5_000;
     const body =
       '{"recordAvailable":true,"recordOutcome":"completed",' +
