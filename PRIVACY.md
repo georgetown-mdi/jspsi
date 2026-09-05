@@ -1,7 +1,7 @@
 ---
 title: "Privacy Statement"
 review_owner: "psilink maintainers"
-last_reviewed: "2026-08-13"
+last_reviewed: "2026-09-05"
 ---
 
 # Privacy statement
@@ -58,7 +58,7 @@ An exchange relies on services that are operated by one of the parties, by the p
 
 The SFTP and file-drop case is the one that turns on how the exchange is set up:
 
-- **A recurring, authenticated exchange** wraps the exchange in application-layer encryption keyed from the two parties' shared secret, so the server operator sees only ciphertext and file timing.
+- **A recurring, authenticated exchange** wraps the exchange in application-layer encryption keyed from the two parties' shared secret, so the server operator sees ciphertext and file timing rather than the exchange's contents. The rendezvous files, the key-exchange handshake frames that establish the key the wrap uses, and the abort marker a failing party leaves for its partner sit outside that wrap and are its stated exceptions; none of them holds exchange data or the identifiers used for matching (see [docs/COMPLIANCE.md's SC-8 row](docs/COMPLIANCE.md#nist-sp-800-53)).
 - **A zero-setup exchange** carries no such key and relies on the transport alone -- SSH in transit, and the server's own access controls at rest. The server operator can read the files that pass through it, which include the payload values disclosed for matched rows. Where the server is outside both parties' control, prefer an authenticated exchange.
 
 ## What psilink retains on your systems
