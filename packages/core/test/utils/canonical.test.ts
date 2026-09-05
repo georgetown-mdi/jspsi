@@ -10,14 +10,22 @@ import {
   safeIntegerSchema,
 } from "../../src/utils/canonical";
 
-interface Vector {
-  name: string;
-  description: string;
-  value: unknown;
-  canonical: string;
-  bytesHex: string;
-  sha256Hex: string;
-}
+type Vector =
+  | {
+      name: string;
+      description: string;
+      value: unknown;
+      canonical: string;
+      bytesHex: string;
+      sha256Hex: string;
+      refuses?: undefined;
+    }
+  | {
+      name: string;
+      description: string;
+      value: unknown;
+      refuses: true;
+    };
 
 const { vectors } = JSON.parse(
   readFileSync(new URL("../vectors/canonical-vectors.json", import.meta.url), {
@@ -31,14 +39,57 @@ const toHex = (bytes: Uint8Array): string =>
 // --- Checked-in test vectors -------------------------------------------------
 // These are the cross-implementation contract: any independent
 // implementation (in any language) must reproduce `canonical`, `bytesHex`,
-// and `sha256Hex` from `value`.
+// and `sha256Hex` from `value`, and must reject a `refuses` vector's `value`
+// rather than emit bytes for it.
 
 describe("canonical-vectors.json", () => {
   test("the vector file is non-empty", () => {
     expect(vectors.length).toBeGreaterThan(0);
   });
 
+  test("the corpus holds both encoding and refusal vectors", () => {
+    expect(vectors.filter((vector) => vector.refuses).length).toBeGreaterThan(
+      0,
+    );
+    expect(vectors.filter((vector) => !vector.refuses).length).toBeGreaterThan(
+      0,
+    );
+  });
+
+  // The file's own shape rule, which no encoder run checks:
+  // docs/spec/CANONICAL_ENCODING.md states that a `refuses` vector has none of
+  // `canonical`, `bytesHex`, or `sha256Hex` and that every other vector has all
+  // three. A byte string left behind on a vector that became a refusal would
+  // otherwise sit in the file unread, stating bytes no implementation may emit.
+  test("each vector states the encoded fields its refuses flag admits", () => {
+    const encodedFields = ["canonical", "bytesHex", "sha256Hex"] as const;
+    const statedPerVector = Object.fromEntries(
+      vectors.map((vector) => [
+        vector.name,
+        encodedFields.filter((field) => field in vector),
+      ]),
+    );
+    expect(statedPerVector).toEqual(
+      Object.fromEntries(
+        vectors.map((vector) => [
+          vector.name,
+          vector.refuses ? [] : [...encodedFields],
+        ]),
+      ),
+    );
+  });
+
   test.each(vectors)("$name: $description", (vector) => {
+    if (vector.refuses) {
+      expect(() => canonicalString(vector.value)).toThrow(
+        CanonicalEncodingError,
+      );
+      expect(() => canonicalBytes(vector.value)).toThrow(
+        CanonicalEncodingError,
+      );
+      return;
+    }
+
     expect(canonicalString(vector.value)).toBe(vector.canonical);
 
     const bytes = canonicalBytes(vector.value);
@@ -83,6 +134,57 @@ describe("string and unicode escaping", () => {
     expect(canonicalString({ s: '\u0000\t\n"\\' })).toBe(
       '{"s":"\\u0000\\t\\n\\"\\\\"}',
     );
+  });
+});
+
+// --- Lone surrogates ---------------------------------------------------------
+
+describe("a lone surrogate is refused rather than escaped", () => {
+  test.each([
+    ["a lone high surrogate", { s: "\ud834" }],
+    ["a lone low surrogate", { s: "\udd1e" }],
+    ["a lone high surrogate inside a longer string", { s: "ab\ud834cd" }],
+    ["a low surrogate before a high one", { s: "\udd1e\ud834" }],
+    ["a lone surrogate in an array element", { a: [1, "\ud834"] }],
+    ["a top-level lone surrogate string", "\ud834"],
+  ])("%s is rejected", (_label, value) => {
+    expect(() => canonicalString(value)).toThrow(CanonicalEncodingError);
+    expect(() => canonicalBytes(value)).toThrow(CanonicalEncodingError);
+  });
+
+  test("the refusal names the value's path and the offending code unit", () => {
+    expect(() => canonicalString({ a: 1, s: "ab\ud834" })).toThrow(
+      /\$\.s: string holds an unpaired UTF-16 surrogate at code unit 2/,
+    );
+  });
+
+  test("a lone surrogate in an object KEY is rejected too", () => {
+    expect(() => canonicalString({ "\ud834": 1 })).toThrow(
+      CanonicalEncodingError,
+    );
+    expect(() => canonicalString({ "\ud834": 1 })).toThrow(
+      /object key holds an unpaired UTF-16 surrogate at code unit 0/,
+    );
+  });
+
+  test("the refusal message stays well-formed UTF-16", () => {
+    // The JSON path is the only partner-chosen text in the message and it is
+    // built with JSON.stringify, so a refused key reaches a display or log
+    // sink as its escape rather than as the code unit that has no UTF-8 form.
+    let message = "";
+    try {
+      canonicalString({ "\ud834": 1 });
+    } catch (err) {
+      message = (err as Error).message;
+    }
+    expect(message).toContain('$["\\ud834"]');
+    expect(message).not.toMatch(/[\uD800-\uDFFF]/);
+  });
+
+  test("a well-formed surrogate pair still encodes to raw UTF-8 bytes", () => {
+    // U+1D11E, the pair whose halves the cases above reject on their own.
+    expect(canonicalString({ s: "𝄞" })).toBe('{"s":"𝄞"}');
+    expect(toHex(canonicalBytes({ s: "𝄞" }))).toBe("7b2273223a22f09d849e227d");
   });
 });
 

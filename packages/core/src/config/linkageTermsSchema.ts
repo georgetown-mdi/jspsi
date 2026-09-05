@@ -1,7 +1,7 @@
 import { z } from "zod";
 import { AlgorithmSchema } from "../types.js";
 import type { Algorithm } from "../types.js";
-import { camelizeKeys } from "../utils/camelizeKeys.js";
+import { camelizeKeys, MAX_NESTING_DEPTH } from "../utils/camelizeKeys.js";
 import { safeParseCamelized } from "./safeParseCamelized.js";
 import { boundedArray } from "../utils/boundedArray.js";
 import {
@@ -13,6 +13,7 @@ import {
   REGEX_STEP_PATTERN_PARAM,
 } from "./transformRegexDialect.js";
 import { exceedsOwnKeyCount } from "../utils/objectKeyCount.js";
+import { loneSurrogateIndex } from "../utils/wellFormedString.js";
 import {
   COUNT_ONLY_SHAPE_REFUSALS,
   countOnlyShapeViolation,
@@ -90,6 +91,24 @@ export const TEXT_CONTROL_CHAR_PATTERN = /[\u0000-\u001f\u007f-\u009f]/;
  */
 export const TEXT_CONTROL_CHAR_MESSAGE =
   "a linkage terms free-text value must not contain control characters";
+
+/**
+ * Shared refusal message for a terms string -- a member value, an array
+ * element, or an object KEY -- that is not well-formed UTF-16. A fixed literal
+ * naming no submitted value: the offending string is located by the issue
+ * `path`, which `describeDecodeError` escapes segment by segment, as the
+ * unsanitized parse-error path (protocolSetup) requires.
+ */
+export const LONE_SURROGATE_MESSAGE =
+  "a linkage terms text value must not contain an unpaired UTF-16 surrogate";
+
+/**
+ * Shared refusal message for a terms document that nests deeper than
+ * {@link MAX_NESTING_DEPTH}, which the well-formedness walk reports rather than
+ * recursing into. A fixed literal naming no submitted value, for the reason
+ * {@link LONE_SURROGATE_MESSAGE} gives.
+ */
+export const NESTING_DEPTH_MESSAGE = `a linkage terms value must not nest deeper than ${MAX_NESTING_DEPTH} levels`;
 
 /**
  * Upper bound on the COUNT of entries in the `linkageFields` and
@@ -215,6 +234,75 @@ const freeTextValue = (schema: z.ZodString) =>
   schema.refine((value) => !TEXT_CONTROL_CHAR_PATTERN.test(value), {
     message: TEXT_CONTROL_CHAR_MESSAGE,
   });
+
+/**
+ * What the well-formedness walk refused, and where: a string -- a member value,
+ * an array element, or an object KEY -- holding an unpaired UTF-16 surrogate,
+ * or a value nested past the depth the walk goes to.
+ */
+type WellFormednessRefusal = {
+  reason: "lone-surrogate" | "too-deep";
+  path: PropertyKey[];
+};
+
+/**
+ * The first thing in `value` that fails the well-formed UTF-16 rule
+ * ({@link loneSurrogateIndex}), or undefined when every string in it is
+ * well-formed and it nests no deeper than {@link MAX_NESTING_DEPTH}.
+ *
+ * A walk over the parsed document rather than a per-field check: it reaches
+ * every string-typed field the schema declares at once, the keys of a
+ * `transform.params` record, and the arbitrary JSON a param VALUE may hold --
+ * the last of which no per-field refine can be written for.
+ *
+ * The width bound is the camelize pre-pass's, not the walk's own:
+ * `parseLinkageTerms` and `safeParseLinkageTerms` run the pre-pass first,
+ * which caps total node count (`MAX_NODE_COUNT`) before the walk ever runs,
+ * while `LinkageTermsSchema` is also consumed bare (config/exchangeSpec.ts,
+ * the web app's job-intent schemas), where nothing runs ahead of the walk and
+ * its width over one `params` value is unbounded and linear in that value's
+ * size -- on operator-local input only, since every partner-reachable path
+ * goes through the capped pre-pass.
+ *
+ * The depth bound is the walk's own, not the camelize pre-pass's: the camelize
+ * bound covers `parseLinkageTerms` and `safeParseLinkageTerms`, while
+ * `LinkageTermsSchema` is also consumed bare (config/exchangeSpec.ts, the web
+ * app's job-intent schemas), where an arbitrarily deep param value would
+ * otherwise overflow this recursion and raise a `RangeError` out of
+ * `safeParse`. A value at the bound is refused rather than walked, matching
+ * what the camelize pre-pass does at the same depth.
+ */
+function firstWellFormednessRefusal(
+  value: unknown,
+  path: PropertyKey[],
+  depth: number,
+): WellFormednessRefusal | undefined {
+  if (typeof value === "string")
+    return loneSurrogateIndex(value) >= 0
+      ? { reason: "lone-surrogate", path }
+      : undefined;
+  if (value === null || typeof value !== "object") return undefined;
+  if (depth >= MAX_NESTING_DEPTH) return { reason: "too-deep", path };
+  if (Array.isArray(value)) {
+    for (const [index, element] of value.entries()) {
+      const found = firstWellFormednessRefusal(
+        element,
+        [...path, index],
+        depth + 1,
+      );
+      if (found !== undefined) return found;
+    }
+    return undefined;
+  }
+  for (const [key, child] of Object.entries(value)) {
+    const childPath = [...path, key];
+    if (loneSurrogateIndex(key) >= 0)
+      return { reason: "lone-surrogate", path: childPath };
+    const found = firstWellFormednessRefusal(child, childPath, depth + 1);
+    if (found !== undefined) return found;
+  }
+  return undefined;
+}
 
 /**
  * A constraint `exclude` denylist: partner-controlled free-text values, each
@@ -1242,6 +1330,26 @@ export const LinkageTermsSchema: z.ZodType<LinkageTerms> =
     .refine((a) => countOnlyShapeViolation(a) !== "payload", {
       message: COUNT_ONLY_SHAPE_REFUSALS.payload,
       path: ["payload"],
+    })
+    // Refuse an ill-formed UTF-16 string anywhere in the document. The terms
+    // are canonically encoded WHOLE -- by validateCompatibility and by
+    // computeTermsHash, which runs after the exchange has disclosed -- and
+    // RFC 8785 requires an encoder to terminate on a lone surrogate, so a
+    // document admitted here ends the run with neither a receipt nor the
+    // record of that disclosure. Every parse path inherits it, and a document
+    // too deeply nested for the walk to finish is refused under its own
+    // message. Full reasoning: docs/spec/CANONICAL_ENCODING.md, "Strings".
+    .superRefine((terms, ctx) => {
+      const refusal = firstWellFormednessRefusal(terms, [], 0);
+      if (refusal !== undefined)
+        ctx.addIssue({
+          code: "custom",
+          message:
+            refusal.reason === "lone-surrogate"
+              ? LONE_SURROGATE_MESSAGE
+              : NESTING_DEPTH_MESSAGE,
+          path: refusal.path,
+        });
     });
 
 // --- Parse -------------------------------------------------------------------

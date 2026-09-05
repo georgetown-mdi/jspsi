@@ -3,6 +3,7 @@ import { z } from "zod";
 
 import { UsageError } from "../errors.js";
 import { redactPrivateKeyMaterial } from "./sanitizeErrorForDisplay.js";
+import { loneSurrogateIndex } from "./wellFormedString.js";
 
 // Canonical encoding for receipt and record artifacts (RFC 8785, JSON
 // Canonicalization Scheme): the same logical object must serialize to a
@@ -23,9 +24,11 @@ import { redactPrivateKeyMaterial } from "./sanitizeErrorForDisplay.js";
  * arrays and plain objects, recursively. `undefined`, `bigint`, symbols,
  * functions, and non-plain objects (Date, Map, TypedArray, class instances,
  * ...) are rejected at runtime; binary data must be base64url-encoded to a
- * string first. Documented as a type for reference only -- the encode
- * functions accept `unknown` and enforce the domain at runtime, which is the
- * actual contract a reimplementation must match.
+ * string first. A string must be well-formed UTF-16 (see
+ * {@link loneSurrogateIndex}, utils/wellFormedString.ts). Documented as a
+ * type for reference only -- the encode functions accept `unknown` and
+ * enforce the domain at runtime, which is the actual contract a
+ * reimplementation must match.
  */
 export type CanonicalValue =
   | string
@@ -70,6 +73,20 @@ function fail(reason: string, path: string, cause?: unknown): never {
     // (which have none) do not allocate an options object per call.
     cause === undefined ? undefined : { cause },
   );
+}
+
+function assertWellFormedString(
+  value: string,
+  path: string,
+  subject: "string" | "object key",
+): void {
+  const index = loneSurrogateIndex(value);
+  if (index >= 0)
+    fail(
+      `${subject} holds an unpaired UTF-16 surrogate at code unit ` +
+        `${String(index)}; a lone surrogate has no UTF-8 encoding`,
+      path,
+    );
 }
 
 function isPlainObject(value: object): boolean {
@@ -118,6 +135,8 @@ function assertNoToJson(value: object, path: string): void {
 function assertCanonical(value: unknown, path: string): void {
   switch (typeof value) {
     case "string":
+      assertWellFormedString(value, path, "string");
+      return;
     case "boolean":
       return;
     case "number":
@@ -198,6 +217,7 @@ function assertCanonical(value: unknown, path: string): void {
         const childPath = /^[A-Za-z_$][\w$]*$/.test(key)
           ? `${path}.${key}`
           : `${path}[${JSON.stringify(key)}]`;
+        assertWellFormedString(key, childPath, "object key");
         assertCanonical(child, childPath);
       }
       return;

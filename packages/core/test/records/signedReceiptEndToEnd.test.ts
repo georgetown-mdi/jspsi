@@ -27,6 +27,8 @@ import {
   generateSigningIdentity,
 } from "../../src/records/signingIdentity";
 import { COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH } from "../../src/utils/sanitizeForDisplay";
+import { canonicalString } from "../../src/utils/canonical";
+import { toCommittedPayload } from "../../src/payloadExchange";
 
 import type { Output } from "../../src/config/linkageTermsSchema";
 import type { MessageConnection } from "../../src/connection/messageConnection";
@@ -1169,5 +1171,268 @@ describe("a run terminated after its disclosure keeps the record of it", () => {
       "receipt-swap-terminated",
     );
     expect(exchangeRecordOwedButUnbuilt(initiatorFailure)).toBe(false);
+  });
+});
+
+describe("partner terms holding a lone surrogate end the run before disclosure", () => {
+  // A lone surrogate is not a Unicode scalar value and has no UTF-8 encoding,
+  // so RFC 8785 requires the canonical encoder to terminate on a string holding
+  // one (docs/spec/CANONICAL_ENCODING.md). The whole terms document is
+  // canonically encoded to compute the agreed-terms hash both the receipt and
+  // the self-attested record commit to, and the hash is computed after the
+  // exchange has disclosed -- so the linkage-terms schema refuses such a
+  // document where the partner's terms are parsed, which is before
+  // compatibility is weighed and before either party's data moves.
+  const LONE_SURROGATE = "\ud800";
+
+  test("the honest party refuses at the terms parse, sending only terms and an abort", async () => {
+    const [rawHonest, rawHostile] = createMessagePipe();
+    const honestSide = recording(rawHonest);
+    const hostileSide = recording(rawHostile);
+
+    const honest = runExchange(
+      honestSide.conn,
+      "initiator",
+      prepared("Initiator Co", both, clientRows),
+      {
+        psiLibrary,
+        signingIdentity: identityA,
+        partnerFingerprint: fingerprintB,
+        sessionKey,
+      },
+    ).then(
+      () => {
+        throw new Error("expected the honest party to refuse");
+      },
+      (reason: unknown) => reason,
+    );
+    // The hostile party signs nothing: its own leg never reaches the swap, and
+    // the identity it authored would not be one its certificate authorizes.
+    const hostile = runExchange(
+      hostileSide.conn,
+      "responder",
+      prepared(`Responder Co${LONE_SURROGATE}`, both, serverRows),
+      { psiLibrary },
+    ).catch((reason: unknown) => reason);
+
+    const raised = await honest;
+    expect((raised as Error).message).toContain(
+      "partner linkage terms failed to parse",
+    );
+    // The refusal reports no receipt and owes no record: nothing was disclosed,
+    // so there is no disclosure for a record to attest and none is lost.
+    expect(exchangeRecordFromFailure(raised)).toBeUndefined();
+    expect(exchangeRecordOwedButUnbuilt(raised)).toBe(false);
+
+    // The timing, read off the wire: the terms frame and then the abort, and
+    // nothing else -- no linkage key, no payload row, no receipt frame. The
+    // hostile side sent its terms and got the abort back.
+    expect(honestSide.sent.map(frameKind)).toEqual(["terms", "abort"]);
+    expect(hostileSide.sent.map(frameKind)).toEqual(["terms"]);
+
+    await rawHonest.close();
+    await rawHostile.close();
+    await hostile;
+  });
+
+  test("the same pair produces a receipt and a record on well-formed terms", async () => {
+    // The control for the refusal above: with the responder's identity
+    // well-formed, the run reaches the swap and both parties hold the three
+    // things the refused run has none of.
+    const [resInit, resResp] = await runBoth(
+      {
+        signingIdentity: identityA,
+        partnerFingerprint: fingerprintB,
+        sessionKey,
+      },
+      {
+        signingIdentity: identityB,
+        partnerFingerprint: fingerprintA,
+        sessionKey,
+      },
+    );
+    expect(resInit.signedReceipt).toBeDefined();
+    expect(resResp.signedReceipt).toBeDefined();
+    expect(resInit.audit?.record.outcome).toBe("completed");
+    expect(resResp.audit?.record.outcome).toBe("completed");
+    expect(resInit.audit?.record.termsHash).toBe(
+      resResp.audit?.record.termsHash,
+    );
+  });
+});
+
+describe("a partner payload holding a lone surrogate is refused at the wire schema", () => {
+  // The received column names and cells go verbatim into the committed payload
+  // the receipt MACs and the record's payload commitments are computed over, and
+  // the canonical encoder terminates on an unpaired UTF-16 surrogate. JSON
+  // escapes one on the way out and restores it on the way in, so it crosses the
+  // wire intact -- the payload wire schema therefore refuses it where the frame
+  // is parsed, ahead of an encode that only runs once the exchange has
+  // disclosed. See docs/spec/CANONICAL_ENCODING.md, "Strings".
+  const LONE_SURROGATE = "\ud800";
+
+  /** Append a lone surrogate to the first cell of this party's outbound payload
+   * frame, leaving every other message of the exchange -- and every other field
+   * of that frame -- exactly as the honest run sends it. */
+  function withTaintedPayload(conn: MessageConnection): MessageConnection {
+    const taint = (data: unknown): unknown => {
+      if (typeof data !== "object" || data === null || !("hasData" in data))
+        return data;
+      const frame = data as {
+        hasData: boolean;
+        rows?: Array<Array<string | null>>;
+      };
+      if (!frame.hasData || frame.rows === undefined) return data;
+      const rows = frame.rows.map((row) => [...row]);
+      rows[0][0] = `${String(rows[0][0])}${LONE_SURROGATE}`;
+      return { ...frame, rows };
+    };
+    return {
+      send: (data: unknown) => conn.send(taint(data)),
+      receive: (timeoutMs?: number) => conn.receive(timeoutMs),
+      close: () => conn.close(),
+    };
+  }
+
+  test("the honest responder refuses it before its own payload goes on the wire", async () => {
+    // The responder receives the payload frame before it sends its own, so the
+    // refusal lands ahead of its disclosure: nothing of its data has moved, and
+    // the run ends with no receipt and no record owed.
+    const [rawHostile, rawHonest] = createMessagePipe();
+    const honestSide = recording(rawHonest);
+    const hostile = runExchange(
+      withTaintedPayload(rawHostile),
+      "initiator",
+      preparedWithPayload("Initiator Co", payloadClient),
+      { psiLibrary },
+    ).catch((reason: unknown) => reason);
+    const raised = await runExchange(
+      honestSide.conn,
+      "responder",
+      preparedWithPayload("Responder Co", payloadServer),
+      {
+        psiLibrary,
+        signingIdentity: identityB,
+        partnerFingerprint: fingerprintA,
+        sessionKey,
+      },
+    ).then(
+      () => {
+        throw new Error("expected the honest party to refuse the payload");
+      },
+      (reason: unknown) => reason,
+    );
+
+    expect(raised).toBeInstanceOf(ConnectionError);
+    expect((raised as ConnectionError).kind).toBe("protocol");
+    expect(String((raised as ConnectionError).cause)).toMatch(
+      /unpaired UTF-16 surrogate/,
+    );
+    // No payload frame and no receipt frame went out, so there is no disclosure
+    // for a record to attest and none is reported lost.
+    expect(honestSide.sent.map(frameKind)).not.toContain("payload");
+    expect(honestSide.sent.map(frameKind)).not.toContain("receipt");
+    expect(exchangeRecordFromFailure(raised)).toBeUndefined();
+    expect(exchangeRecordOwedButUnbuilt(raised)).toBe(false);
+
+    await rawHonest.close();
+    await rawHostile.close();
+    await hostile;
+  });
+
+  test("the honest initiator, which sends first, refuses it at the same parse", async () => {
+    // The initiator's own payload has already crossed when the tainted frame
+    // arrives, so this leg shows the refusal itself rather than the timing: the
+    // frame never becomes a committed payload, and the run ends as a protocol
+    // failure instead of terminating later inside the receipt build.
+    const [rawHonest, rawHostile] = createMessagePipe();
+    const hostile = runExchange(
+      withTaintedPayload(rawHostile),
+      "responder",
+      preparedWithPayload("Responder Co", payloadServer),
+      { psiLibrary },
+    ).catch((reason: unknown) => reason);
+    const raised = await runExchange(
+      rawHonest,
+      "initiator",
+      preparedWithPayload("Initiator Co", payloadClient),
+      {
+        psiLibrary,
+        signingIdentity: identityA,
+        partnerFingerprint: fingerprintB,
+        sessionKey,
+      },
+    ).then(
+      () => {
+        throw new Error("expected the honest party to refuse the payload");
+      },
+      (reason: unknown) => reason,
+    );
+
+    expect(raised).toBeInstanceOf(ConnectionError);
+    expect((raised as ConnectionError).kind).toBe("protocol");
+    expect(String((raised as ConnectionError).cause)).toMatch(
+      /unpaired UTF-16 surrogate/,
+    );
+    // A frame refused at the parse leaves no record on either handshake role,
+    // as every other malformed payload frame does
+    // (test/connection/payloadRowWidth.test.ts); what the refusal removes is a
+    // run that reaches the receipt build and loses the record it owes there.
+    expect(exchangeRecordFromFailure(raised)).toBeUndefined();
+    expect(exchangeRecordOwedButUnbuilt(raised)).toBe(false);
+
+    await rawHonest.close();
+    await rawHostile.close();
+    await hostile;
+  });
+
+  test("the same exchange left well-formed holds the receipt MACs and the committed bytes it always had", async () => {
+    // The control for the refusals above, pinning what the rule must NOT have
+    // moved: the bytes the encoder is handed for each direction, and the two
+    // session-keyed MACs over them. The values are fixed literals rather than a
+    // cross-party comparison, so a change to either the committed shape or the
+    // encoding fails here rather than agreeing with itself on both sides.
+    const [connInitiator, connResponder] = createMessagePipe();
+    const [resInit, resResp] = await Promise.all([
+      runExchange(
+        connInitiator,
+        "initiator",
+        preparedWithPayload("Initiator Co", payloadClient),
+        {
+          psiLibrary,
+          signingIdentity: identityA,
+          partnerFingerprint: fingerprintB,
+          sessionKey,
+        },
+      ),
+      runExchange(
+        connResponder,
+        "responder",
+        preparedWithPayload("Responder Co", payloadServer),
+        {
+          psiLibrary,
+          signingIdentity: identityB,
+          partnerFingerprint: fingerprintA,
+          sessionKey,
+        },
+      ),
+    ]);
+
+    expect(canonicalString(toCommittedPayload(resInit.partnerPayload))).toBe(
+      '{"columns":["note"],"rows":[["s-c"],["s-e"]]}',
+    );
+    expect(canonicalString(toCommittedPayload(resResp.partnerPayload))).toBe(
+      '{"columns":["note"],"rows":[["c-c"],["c-e"]]}',
+    );
+    const receipt = resInit.signedReceipt!;
+    expect(resResp.signedReceipt).toEqual(receipt);
+    expect(receipt.content.initiatorToResponderPayload).toBe(
+      "q5b2XIyMH1ps6ViDniNujF6o_hYFS5VArRScrdMwxeg",
+    );
+    expect(receipt.content.responderToInitiatorPayload).toBe(
+      "FtC6GHClWSbJeQowI_k_ncnqjJEYlcD7lbRIEfE5MvA",
+    );
+    expect(resInit.audit?.record.outcome).toBe("completed");
+    expect(resResp.audit?.record.outcome).toBe("completed");
   });
 });
