@@ -75,7 +75,7 @@ export function builder(cmd: Argv): Argv {
         "Usage:\n" +
           "  $0 [--save] [options] URL INPUT_FILE [OUTPUT_FILE]\n\n" +
           "Arguments:\n" +
-          "  URL          server URL (sftp:// or ws://)\n" +
+          "  URL          server URL (sftp://, ssh://, or file://)\n" +
           "  INPUT_FILE   CSV to link; use `-` to read from stdin\n" +
           "  OUTPUT_FILE  where to write results; defaults to stdout\n\n" +
           "Both parties run this command against the same server URL. Linkage\n" +
