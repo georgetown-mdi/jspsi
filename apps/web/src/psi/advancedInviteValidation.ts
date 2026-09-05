@@ -390,10 +390,10 @@ export function validateAdvancedInvite(
 
   // An already-passed expiry is not a schema rule (it checks only the date
   // format), so add it here, mirroring the exchange, which rejects an
-  // expirationDate strictly before today (config/linkageTerms.ts). A same-day
-  // expiry is still honored at the exchange, so accept it here too. Applied only
-  // once the date is well-formed and schema-accepted, so a malformed date shows
-  // the format error instead.
+  // expirationDate strictly before today (config/linkageTermsSchema.ts). A
+  // same-day expiry is still honored at the exchange, so accept it here too.
+  // Applied only once the date is well-formed and schema-accepted, so a
+  // malformed date shows the format error instead.
   const expiration = draft.legalAgreement?.expirationDate.trim();
   if (
     expiration !== undefined &&

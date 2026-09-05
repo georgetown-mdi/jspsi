@@ -202,7 +202,9 @@ describe("the digest the pins are taken over", () => {
 
 describe("the source it names", () => {
   it("is the file the built-in sets are declared in", () => {
-    expect(RULE_SET_SOURCE).toBe("packages/core/src/defaults/linkageTerms.ts");
+    expect(RULE_SET_SOURCE).toBe(
+      "packages/core/src/defaults/builtInLinkageTerms.ts",
+    );
   });
 
   it("names every declaration it reads", () => {

@@ -14,8 +14,8 @@ import {
   quoteTermsValueList,
   ruleSetCitation,
 } from "../src/config/compatibilityMessage";
-import { validateCompatibility } from "../src/config/linkageTerms";
-import type { LinkageTerms } from "../src/config/linkageTerms";
+import { validateCompatibility } from "../src/linkageTermsNegotiation";
+import type { LinkageTerms } from "../src/config/linkageTermsSchema";
 import {
   redactAndSanitizeForDisplay,
   sanitizeErrorForDisplay,
@@ -274,7 +274,7 @@ test("a raw terms value cannot be composed into a diagnostic", () => {
 // --- The vocabulary a bare value must not be able to spell --------------------
 
 const DIAGNOSTIC_MODULE_PATH = fileURLToPath(
-  new URL("../src/config/linkageTerms.ts", import.meta.url),
+  new URL("../src/linkageTermsNegotiation.ts", import.meta.url),
 );
 const DIAGNOSTIC_MODULE_SOURCE = readFileSync(DIAGNOSTIC_MODULE_PATH, "utf8");
 

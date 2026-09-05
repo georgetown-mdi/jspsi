@@ -1,7 +1,7 @@
 import { z } from "zod";
 
 import { boundedArray } from "../utils/boundedArray.js";
-import { MAX_NAME_LENGTH, MAX_PAYLOAD_ENTRIES } from "./linkageTerms.js";
+import { MAX_NAME_LENGTH, MAX_PAYLOAD_ENTRIES } from "./linkageTermsSchema.js";
 
 /**
  * This party's recorded consent to its OWN outbound payload set -- the

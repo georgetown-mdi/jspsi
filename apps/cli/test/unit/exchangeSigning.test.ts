@@ -226,9 +226,9 @@ test("certificate mode with no pin resolves (the run is refused before this boun
 // --- divergence from the run's linkage_terms.identity ------------------------
 // The loaded certificate is bound to "Party A" throughout; only the terms
 // identity handed to the resolver varies. A diverging run cannot leave both
-// parties holding a verifiable receipt on either handshake role -- driven end to
-// end in packages/core/test/signedReceiptEndToEnd.test.ts -- so this boundary
-// refuses it before any credential, terms, or data are sent.
+// parties holding a verifiable receipt on either handshake role -- driven end
+// to end in packages/core/test/records/signedReceiptEndToEnd.test.ts -- so this
+// boundary refuses it before any credential, terms, or data are sent.
 
 /** A certificate-mode block over the identity saved for this test. */
 function certificateModeOver(

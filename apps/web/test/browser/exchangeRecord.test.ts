@@ -23,9 +23,9 @@ type ExchangeRecordRandomness = NonNullable<
   Parameters<typeof buildExchangeRecord>[1]
 >;
 
-// The companion to packages/core/test/exchangeRecord.test.ts's vector suite: it
-// runs the SAME checked-in record vectors through the browser build of
-// @psilink/core in real Chromium. The Node suite proves Node reproduces the
+// The companion to packages/core/test/records/exchangeRecord.test.ts's vector
+// suite: it runs the SAME checked-in record vectors through the browser build
+// of @psilink/core in real Chromium. The Node suite proves Node reproduces the
 // vectors and this suite proves the browser reproduces the same vectors, so a
 // record built by the CLI (Node) and one built by the web app (browser) are
 // byte-identical for the same inputs and randomness. The commitment scheme uses
@@ -131,9 +131,10 @@ describe("web-produced record: round-trip and cross-verification", () => {
   );
 
   // Cross-verification across runtimes: the checked-in vectors are the CLI/Node
-  // side of the contract (packages/core/test/exchangeRecord.test.ts); verifying
-  // one here proves the web build verifies a CLI-produced record. The reverse
-  // direction is covered by byte-identity with the vector-replay suite above.
+  // side of the contract (packages/core/test/records/exchangeRecord.test.ts);
+  // verifying one here proves the web build verifies a CLI-produced record. The
+  // reverse direction is covered by byte-identity with the vector-replay suite
+  // above.
   test.each(vectors)(
     "$name: the web build verifies a CLI-produced record",
     async (vector) => {

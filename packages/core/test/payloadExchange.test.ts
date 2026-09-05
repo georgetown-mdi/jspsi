@@ -10,17 +10,19 @@ import {
   reconcileReceivedPayload,
 } from "../src/payloadExchange";
 import { prepareForExchange } from "../src/exchange";
-import {
-  deriveAcceptedLinkageTerms,
-  MAX_NAME_LENGTH,
-} from "../src/config/linkageTerms";
+import { deriveAcceptedLinkageTerms } from "../src/linkageTermsNegotiation";
+import { MAX_NAME_LENGTH } from "../src/config/linkageTermsSchema";
 import { disclosedColumnNames } from "../src/config/metadata";
 import { OutboundDisclosureRefusalError, UsageError } from "../src/errors";
 import { sanitizeErrorForDisplay } from "../src/utils/sanitizeErrorForDisplay";
 import { readMessage } from "./utils/compatibilityMessageReader";
 
 import type { Metadata } from "../src/config/metadata";
-import type { LinkageTerms, Output, Payload } from "../src/config/linkageTerms";
+import type {
+  LinkageTerms,
+  Output,
+  Payload,
+} from "../src/config/linkageTermsSchema";
 import type { PartnerPayload } from "../src/payloadExchange";
 
 import {

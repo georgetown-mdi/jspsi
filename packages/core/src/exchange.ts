@@ -8,27 +8,29 @@ import {
   assertBothSidedDeduplicateImplemented,
   assertCountOnlyTermsShape,
   assertDeduplicateImplemented,
-} from "./config/linkageTerms.js";
-import { getDefaultLinkageTerms } from "./defaults/linkageTerms.js";
-import { getDefaultStandardization } from "./defaults/standardization.js";
+} from "./linkageTermsPolicy.js";
+import { getDefaultLinkageTerms } from "./defaults/builtInLinkageTerms.js";
+import { getDefaultStandardization } from "./defaults/builtInStandardization.js";
 import {
   buildStandardizedDataset,
-  assertFanOutImplemented,
-  assertLinkageTermsSatisfiable,
-  assertStandardizationMatchesTerms,
   declaredEffectiveKeyCount,
   declaredKeyWidth,
   localFanOutFactor,
   StandardizedKeyIterable,
 } from "./standardization.js";
+import {
+  assertFanOutImplemented,
+  assertLinkageTermsSatisfiable,
+  assertStandardizationMatchesTerms,
+} from "./linkageSatisfiability.js";
 import { columnValues, inferDateFormat } from "./utils/date.js";
 import {
   redactAndSanitizeForDisplay,
   sanitizeErrorForDisplay,
 } from "./utils/sanitizeErrorForDisplay.js";
 import type { CSVRow } from "./file.js";
-import { PSIParticipant } from "./participant.js";
-import type { PsiEngine, PsiEngineMode } from "./psiEngine.js";
+import { PSIParticipant } from "./psi/participant.js";
+import type { PsiEngine, PsiEngineMode } from "./psi/psiEngine.js";
 import {
   exchangeTerms,
   exchangeBootstrapSecret,
@@ -42,10 +44,10 @@ import {
   linkViaPSI,
   linkViaSinglePassPSI,
   withholdsSenderAssociationTable,
-} from "./link.js";
-import type { LinkageCardinality } from "./link.js";
+} from "./psi/link.js";
+import type { LinkageCardinality } from "./psi/link.js";
 import type { ResolvedRunShape } from "./pairTableProjection.js";
-import { InProcessPsiEngine } from "./psiEngine.js";
+import { InProcessPsiEngine } from "./psi/psiEngine.js";
 import {
   partyFansOut,
   psiElementBounds,
@@ -63,16 +65,19 @@ import {
   reconcileReceivedPayload,
 } from "./payloadExchange.js";
 import type { PayloadWireMessage } from "./payloadExchange.js";
-import { buildExchangeRecord, computeTermsHash } from "./exchangeRecord.js";
+import {
+  buildExchangeRecord,
+  computeTermsHash,
+} from "./records/exchangeRecord.js";
 import {
   buildReceiptContent,
   deriveReceiptBinder,
   exchangeSignedReceipt,
   ReceiptVerificationError,
-} from "./signedReceipt.js";
+} from "./records/signedReceipt.js";
 import { OperatorConfigError, UsageError, causeChainSome } from "./errors.js";
 import type { Metadata } from "./config/metadata.js";
-import type { LinkageTerms } from "./config/linkageTerms.js";
+import type { LinkageTerms } from "./config/linkageTermsSchema.js";
 import type { StandardizedDataset } from "./standardization.js";
 import type {
   HandshakeRole,
@@ -87,16 +92,18 @@ import type { PresentedHostKey } from "./connection/fileSyncConnection.js";
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 import type { ExchangeSpec } from "./config/exchangeSpec.js";
 import type { PartnerPayload } from "./payloadExchange.js";
-import type { BuiltExchangeRecord } from "./exchangeRecord.js";
-import { certificateAuthorizesIdentity } from "./signingIdentity.js";
-import type { CertificateBody, SigningIdentity } from "./signingIdentity.js";
+import type { BuiltExchangeRecord } from "./records/exchangeRecord.js";
+import { certificateAuthorizesIdentity } from "./records/signingIdentity.js";
+import type {
+  CertificateBody,
+  SigningIdentity,
+} from "./records/signingIdentity.js";
 import { partnerPinIsPresent } from "./config/signing.js";
 import type { SigningConfig, SigningMode } from "./config/signing.js";
-import type { DualSignedRecord, ReceiptContent } from "./signedReceipt.js";
-
-// Defined in config/linkageTerms.ts, which cannot import this module without
-// a cycle; re-exported here at the run boundary that applies them.
-export { assertBothSidedDeduplicateImplemented, assertDeduplicateImplemented };
+import type {
+  DualSignedRecord,
+  ReceiptContent,
+} from "./records/signedReceipt.js";
 
 /**
  * The subset of an exchange specification that governs data preparation.

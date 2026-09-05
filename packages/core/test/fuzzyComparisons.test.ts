@@ -14,13 +14,13 @@ import {
   StandardizedField,
 } from "../src/standardization";
 import { declaredEffectiveKeyCount } from "../src/fanOutFunctions";
-import { APPLIED_SETTINGS } from "../src/appliedSettings";
+import { APPLIED_SETTINGS } from "../src/consent/appliedSettings";
 import { UsageError } from "../src/errors";
 import type {
   GenerateFuzzyComparisons,
   LinkageKey,
   LinkageTerms,
-} from "../src/config/linkageTerms";
+} from "../src/config/linkageTermsSchema";
 
 const FUZZY_KINDS: readonly GenerateFuzzyComparisons[] = [
   "transpositions",

@@ -10,7 +10,7 @@ import { parseExchangeSpec } from "../src/config/exchangeSpec";
 import { OutboundDisclosureRefusalError, UsageError } from "../src/errors";
 
 import type { Metadata } from "../src/config/metadata";
-import type { LinkageTerms, Output } from "../src/config/linkageTerms";
+import type { LinkageTerms, Output } from "../src/config/linkageTermsSchema";
 import type { OutboundPayloadConsent } from "../src/config/outboundPayloadConsent";
 
 // The acceptor shape this whole mechanism exists for: an invitation authors

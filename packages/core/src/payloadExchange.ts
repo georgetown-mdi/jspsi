@@ -7,8 +7,8 @@ import {
   disclosedColumnNames,
   overlongDisclosedColumnPositions,
 } from "./config/metadata.js";
-import type { Output, Payload } from "./config/linkageTerms.js";
-import { MAX_NAME_LENGTH } from "./config/linkageTerms.js";
+import type { Output, Payload } from "./config/linkageTermsSchema.js";
+import { MAX_NAME_LENGTH } from "./config/linkageTermsSchema.js";
 import type { CompatibilityMessageFragment } from "./config/compatibilityMessage.js";
 import {
   compatibilityMessage,
@@ -17,7 +17,7 @@ import {
 import type { OutboundPayloadConsent } from "./config/outboundPayloadConsent.js";
 import { readRowColumn } from "./file.js";
 import type { CSVRow } from "./file.js";
-import type { CommittedPayload } from "./exchangeRecord.js";
+import type { CommittedPayload } from "./records/exchangeRecord.js";
 import type { MessageConnection } from "./connection/messageConnection.js";
 import {
   ConnectionError,

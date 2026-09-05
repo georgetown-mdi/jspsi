@@ -3,10 +3,12 @@ import { describe, expect, test } from "vitest";
 
 import {
   deriveAcceptedLinkageTerms,
+  validateCompatibility,
+} from "../src/linkageTermsNegotiation";
+import {
   parseLinkageTerms,
   referencedLinkageFieldNames,
   safeParseLinkageTerms,
-  validateCompatibility,
   MAX_NAME_LENGTH,
   MAX_TEXT_LENGTH,
   TEXT_CONTROL_CHAR_MESSAGE,
@@ -20,15 +22,15 @@ import {
   MAX_TRANSFORM_STEPS,
   MAX_KEY_ELEMENTS,
   MAX_PAYLOAD_ENTRIES,
-} from "../src/config/linkageTerms";
-import type { LinkageKey } from "../src/config/linkageTerms";
-import type { LinkageTerms } from "../src/config/linkageTerms";
+} from "../src/config/linkageTermsSchema";
+import type { LinkageKey } from "../src/config/linkageTermsSchema";
+import type { LinkageTerms } from "../src/config/linkageTermsSchema";
 import {
   assertPresentedDeduplicateMatchesInvitation,
   InvitationTermDivergenceError,
 } from "../src/exchange";
 import { UsageError } from "../src/errors";
-import { pipelineAlwaysDrops } from "../src/standardization";
+import { pipelineAlwaysDrops } from "../src/linkageSatisfiability";
 import {
   DISPLAY_TRUNCATION_MARKER,
   COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,

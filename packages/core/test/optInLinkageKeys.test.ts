@@ -8,7 +8,7 @@ import {
   isOptInLinkageKey,
   linkageRuleSetReferenceFor,
   optInLinkageKeys,
-} from "../src/defaults/linkageTerms";
+} from "../src/defaults/builtInLinkageTerms";
 import { SEMANTIC_TYPES } from "../src/types";
 
 import type { ColumnMetadata } from "../src/config/metadata";

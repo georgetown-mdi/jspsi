@@ -6,7 +6,7 @@ import { exchangeBootstrapSecret, exchangeTerms } from "../src/protocolSetup";
 import { prepareForExchange, runExchange } from "../src/exchange";
 import { SHARED_SECRET_REGEX } from "../src/config/connection";
 import type { HandshakeRole } from "../src/types";
-import type { LinkageTerms } from "../src/config/linkageTerms";
+import type { LinkageTerms } from "../src/config/linkageTermsSchema";
 import type { ExchangeResult } from "../src/exchange";
 
 import {

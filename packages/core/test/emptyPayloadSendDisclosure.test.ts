@@ -6,12 +6,12 @@ import { prepareForExchange, runExchange } from "../src/exchange";
 import {
   deriveAcceptedLinkageTerms,
   validateCompatibility,
-} from "../src/config/linkageTerms";
+} from "../src/linkageTermsNegotiation";
 import { disclosedColumnNames, inferMetadata } from "../src/config/metadata";
 import { createMessagePipe } from "../src/connection/messageConnection";
 import { UsageError } from "../src/errors";
 
-import type { LinkageTerms } from "../src/config/linkageTerms";
+import type { LinkageTerms } from "../src/config/linkageTermsSchema";
 import type { MessageConnection } from "../src/connection/messageConnection";
 
 // An inviter that declares `payload.receive: []` mirrors to a present, empty

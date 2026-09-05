@@ -10,7 +10,7 @@ import {
 import { MAX_RECORD_COUNT } from "../src/connection/frameSize";
 import { prepareForExchange, runExchange } from "../src/exchange";
 import { createMessagePipe } from "../src/connection/messageConnection";
-import { parseLinkageTerms } from "../src/config/linkageTerms";
+import { parseLinkageTerms } from "../src/config/linkageTermsSchema";
 
 import type { ResolvedRunShape } from "../src/pairTableProjection";
 import type { ExchangeResult, PreparedExchange } from "../src/exchange";

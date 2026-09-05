@@ -10,7 +10,7 @@ import {
 import {
   parseLinkageTerms,
   safeParseLinkageTerms,
-} from "../src/config/linkageTerms";
+} from "../src/config/linkageTermsSchema";
 import { safeParseExchangeSpec } from "../src/config/exchangeSpec";
 import {
   safeParseConnectionConfig,

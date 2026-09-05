@@ -2,8 +2,8 @@ import { expect, test } from "vitest";
 
 import PSI from "@openmined/psi.js";
 
-import { PSIParticipant } from "../src/participant";
-import { linkViaPSI, linkViaSinglePassPSI } from "../src/link";
+import { PSIParticipant } from "../src/psi/participant";
+import { linkViaPSI, linkViaSinglePassPSI } from "../src/psi/link";
 import {
   MAX_RECORD_COUNT,
   psiElementBounds,

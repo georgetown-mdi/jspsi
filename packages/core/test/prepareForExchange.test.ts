@@ -12,8 +12,8 @@ import {
 import {
   assertPartnerCertificateTrusted,
   generateSigningIdentity,
-} from "../src/signingIdentity";
-import { ReceiptVerificationError } from "../src/signedReceipt";
+} from "../src/records/signingIdentity";
+import { ReceiptVerificationError } from "../src/records/signedReceipt";
 import {
   LinkageTermsUnsatisfiableError,
   OperatorConfigError,
@@ -30,20 +30,21 @@ import {
   declaredEffectiveKeyCount,
   FAN_OUT_CANDIDATES_PER_ELEMENT,
 } from "../src/fanOutFunctions";
-import {
-  DEDUPLICATE_IMPLEMENTED_BY_STRATEGY,
-  MAX_NAME_LENGTH,
-} from "../src/config/linkageTerms";
+import { DEDUPLICATE_IMPLEMENTED_BY_STRATEGY } from "../src/linkageTermsPolicy";
+import { MAX_NAME_LENGTH } from "../src/config/linkageTermsSchema";
 
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 
 import type { ExchangeDataSpec } from "../src/exchange";
 import type { MessageConnection } from "../src/connection/messageConnection";
 import type { Algorithm } from "../src/types";
-import type { LinkageStrategy, LinkageTerms } from "../src/config/linkageTerms";
+import type {
+  LinkageStrategy,
+  LinkageTerms,
+} from "../src/config/linkageTermsSchema";
 import type { Metadata } from "../src/config/metadata";
 import type { SigningConfig, SigningMode } from "../src/config/signing";
-import type { Standardization } from "../src/config/standardization";
+import type { Standardization } from "../src/config/standardizationSchema";
 import type { CSVRow } from "../src/file";
 
 // --- Fixtures ----------------------------------------------------------------

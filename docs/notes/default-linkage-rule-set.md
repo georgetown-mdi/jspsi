@@ -5,7 +5,7 @@ title: "The built-in linkage rules: provenance, naming, and versioning"
 # The built-in linkage rules: provenance, naming, and versioning
 
 _Status: decided and built. The two sets are defined in
-`packages/core/src/defaults/linkageTerms.ts` as
+`packages/core/src/defaults/builtInLinkageTerms.ts` as
 `DEFAULT_LINKAGE_FIELD_SET_NAME` / `DEFAULT_LINKAGE_FIELD_SET_VERSION` and
 `DEFAULT_LINKAGE_KEY_SET_NAME` / `DEFAULT_LINKAGE_KEY_SET_VERSION`, and the
 operator-facing description -- which paths use them and what each name covers

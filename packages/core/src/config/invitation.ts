@@ -4,8 +4,8 @@ import {
   MAX_NAME_LENGTH,
   MAX_PARAMS_ENTRIES,
   MAX_PAYLOAD_ENTRIES,
-} from "./linkageTerms.js";
-import type { LinkageTerms } from "./linkageTerms.js";
+} from "./linkageTermsSchema.js";
+import type { LinkageTerms } from "./linkageTermsSchema.js";
 import { camelizeKeys } from "../utils/camelizeKeys.js";
 import { SHARED_SECRET_REGEX } from "./connection.js";
 import { sanitizeForDisplay } from "../utils/sanitizeForDisplay.js";
@@ -454,8 +454,9 @@ export interface InvitationToken {
 }
 
 // The params width bound the decode fold applies, mirrored from
-// linkageTerms.ts's PARAMS_WIDTH_BOUND (kept module-private there, so the bound
-// and the schema below both stay off @psilink/core's wholesale public export).
+// linkageTermsSchema.ts's PARAMS_WIDTH_BOUND (kept module-private there, so
+// the bound and the schema below both stay off @psilink/core's wholesale
+// public export).
 // Both derive the value from the one shared MAX_PARAMS_ENTRIES constant, so
 // they cannot drift: an over-MAX_PARAMS_ENTRIES params record is left verbatim
 // by the camelize pre-pass and rejected by the schema's own count refine, not
@@ -682,7 +683,7 @@ const CHECKSUM_CHARS = 6;
  *
  * This is the boundary that transitively bounds every untrusted field at
  * decode, so no per-field check has to do oversized-input work; the per-field
- * `.max()` bounds in linkageTerms.ts are defense-in-depth atop it.
+ * `.max()` bounds in linkageTermsSchema.ts are defense-in-depth atop it.
  * {@link encodeInvitation} enforces the same cap on its output, so psilink
  * never produces a token it could not itself decode.
  */

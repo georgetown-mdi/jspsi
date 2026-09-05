@@ -5,24 +5,26 @@ import {
   resolveFieldColumns,
   buildStandardizedDataset,
   buildKeyStrings,
-  validateStandardizationAgainstTerms,
-  assertFanOutImplemented,
-  assertStandardizationMatchesTerms,
   FAN_OUT_FUNCTION_NAMES,
   FAN_OUT_CANDIDATES_PER_ELEMENT,
   describeTransformCoercions,
   dateFormatComponents,
+  StandardizedField,
+  StandardizedDataset,
+  accumulationFateAtCharge,
+  canProduceMultipleValues,
+  STANDARDIZATION_FUNCTION_NAMES,
+  type FieldValue,
+} from "../src/standardization";
+import {
+  validateStandardizationAgainstTerms,
+  assertFanOutImplemented,
+  assertStandardizationMatchesTerms,
   unsatisfiedLinkageFields,
   assessLinkageSatisfiability,
   assertLinkageTermsSatisfiable,
   decideLinkageTermsVerdict,
   summarizeLinkageShortfall,
-  checkValueConstraints,
-  summarizeDatasetConstraintViolations,
-  StandardizedField,
-  StandardizedDataset,
-  accumulationFateAtCharge,
-  canProduceMultipleValues,
   coalesceSubstitutesConstant,
   substringCollapsesParsedDateToConstant,
   substringRunDropsEveryParsedDate,
@@ -33,12 +35,18 @@ import {
   stepCanEmptyRealizedValue,
   pipelineAlwaysDrops,
   parseDateInputDropsEveryRecord,
-  STANDARDIZATION_FUNCTION_NAMES,
-  type FieldValue,
   type LinkageTermsStanding,
-} from "../src/standardization";
+} from "../src/linkageSatisfiability";
+import {
+  checkValueConstraints,
+  summarizeDatasetConstraintViolations,
+} from "../src/valueConstraints";
 import * as standardizationModule from "../src/standardization";
-import { ESC, PRINTABLE_ASCII, RLO } from "../src/displayEscapingFixtures";
+import {
+  ESC,
+  PRINTABLE_ASCII,
+  RLO,
+} from "../src/consent/displayEscapingFixtures";
 import {
   LinkageTermsUnsatisfiableError,
   OperatorConfigError,
@@ -55,25 +63,25 @@ import {
   DEFAULT_LINKAGE_RULE_SET,
   getDefaultLinkageTerms,
   linkageTermsFromRuleSet,
-} from "../src/defaults/linkageTerms";
-import { getDefaultStandardization } from "../src/defaults/standardization";
+} from "../src/defaults/builtInLinkageTerms";
+import { getDefaultStandardization } from "../src/defaults/builtInStandardization";
 import {
   MAX_KEY_ELEMENTS,
   MAX_TRANSFORM_PARAM_LENGTH,
   safeParseLinkageTerms,
-} from "../src/config/linkageTerms";
+} from "../src/config/linkageTermsSchema";
 import type {
   LinkageField,
   LinkageKey,
   LinkageKeyElement,
   LinkageTerms,
   TransformStep,
-} from "../src/config/linkageTerms";
+} from "../src/config/linkageTermsSchema";
 import type { ColumnMetadata, Metadata } from "../src/config/metadata";
 import {
   StandardizationSchema,
   type Standardization,
-} from "../src/config/standardization";
+} from "../src/config/standardizationSchema";
 import { withUnlistedFanOutFunctions } from "./utils/unlistedFanOut";
 import {
   isListedFanOutFunction,

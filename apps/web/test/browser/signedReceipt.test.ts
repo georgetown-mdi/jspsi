@@ -25,7 +25,7 @@ import type {
   SigningIdentity,
 } from "@psilink/core";
 
-// The companion to packages/core/test/signedReceipt.test.ts and
+// The companion to packages/core/test/records/signedReceipt.test.ts and
 // signingIdentity.test.ts: it runs the same checked-in vectors through the
 // browser build of @psilink/core in real Chromium. ECDSA signing is
 // randomized, so cross-build verification (not signature reproduction) is

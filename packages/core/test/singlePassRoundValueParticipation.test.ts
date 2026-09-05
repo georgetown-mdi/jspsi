@@ -4,11 +4,11 @@ import {
   replaySinglePassCascade,
   RoundValueParticipation,
   roundValueFirstRows,
-} from "../src/link";
+} from "../src/psi/link";
 
 // The single-pass replay asks the sender's side of each round one question --
 // does the row the sweep has reached take part with this value
-// (replaySinglePassCascade, packages/core/src/link.ts) -- and a sender that
+// (replaySinglePassCascade, packages/core/src/psi/link.ts) -- and a sender that
 // KEEPS its duplicates always answers yes, so the replay builds no form for
 // it. That runtime claim is checked here by driving the REAL sweep: each
 // corpus round replays as the second of two rounds, with the sender's cells

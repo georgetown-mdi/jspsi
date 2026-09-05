@@ -8,22 +8,26 @@ import {
   prepareForExchange,
   runExchange,
   resolveLinkageCardinality,
-  assertBothSidedDeduplicateImplemented,
-  assertDeduplicateImplemented,
   assertMatchedPairsWellFormed,
   matchedPairCount,
   InvitationTermDivergenceError,
 } from "../src/exchange";
+import {
+  assertBothSidedDeduplicateImplemented,
+  assertDeduplicateImplemented,
+} from "../src/linkageTermsPolicy.js";
 import { createMessagePipe } from "../src/connection/messageConnection";
 import {
   DEDUPLICATE_IMPLEMENTED_BY_STRATEGY,
   MANY_TO_MANY_IMPLEMENTED_BY_STRATEGY,
-  deriveAcceptedLinkageTerms,
   manyToManyIsImplementedForStrategy,
-  parseLinkageTerms,
+} from "../src/linkageTermsPolicy";
+import {
+  deriveAcceptedLinkageTerms,
   validateCompatibility,
-} from "../src/config/linkageTerms";
-import { entityClusters } from "../src/entityClosure";
+} from "../src/linkageTermsNegotiation";
+import { parseLinkageTerms } from "../src/config/linkageTermsSchema";
+import { entityClusters } from "../src/psi/entityClosure";
 import { inferMetadata } from "../src/config/metadata";
 import { mintExchangeFile } from "../src/config/exchangeFile";
 import { parseExchangeSpec } from "../src/config/exchangeSpec";
@@ -32,7 +36,10 @@ import { UsageError } from "../src/errors";
 
 import type { PreparedExchange, ExchangeResult } from "../src/exchange";
 import type { MessageConnection } from "../src/connection/messageConnection";
-import type { LinkageStrategy, LinkageTerms } from "../src/config/linkageTerms";
+import type {
+  LinkageStrategy,
+  LinkageTerms,
+} from "../src/config/linkageTermsSchema";
 import type { CSVRow } from "../src/file";
 
 // The cardinality runExchange passes to the linkage strategies comes from the

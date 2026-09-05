@@ -11,10 +11,13 @@ import {
   isDrawnFromLinkageRuleSet,
   linkageRuleSetReferenceFor,
   linkageTermsFromRuleSet,
-} from "../src/defaults/linkageTerms";
+} from "../src/defaults/builtInLinkageTerms";
 
 import type { ColumnMetadata, Metadata } from "../src/config/metadata";
-import type { LinkageKey, LinkageTerms } from "../src/config/linkageTerms";
+import type {
+  LinkageKey,
+  LinkageTerms,
+} from "../src/config/linkageTermsSchema";
 import type { SemanticType } from "../src/types";
 
 const col = (

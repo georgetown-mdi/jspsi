@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 
 import PSI from "@openmined/psi.js";
 
-import { PSIParticipant } from "../../src/participant";
+import { PSIParticipant } from "../../src/psi/participant";
 import { createMessagePipe } from "../../src/connection/messageConnection";
 import { psiElementBounds } from "../../src/connection/frameSize";
 

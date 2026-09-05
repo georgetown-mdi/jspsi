@@ -1,12 +1,10 @@
 import * as z from "zod";
 
 import type { HandshakeRole, PsiRole } from "./types";
-import type { LinkageTerms, Output } from "./config/linkageTerms";
+import type { LinkageTerms, Output } from "./config/linkageTermsSchema";
 import type { PresentedHostKey } from "./connection/fileSyncConnection";
-import {
-  parseLinkageTerms,
-  validateCompatibility,
-} from "./config/linkageTerms";
+import { parseLinkageTerms } from "./config/linkageTermsSchema";
+import { validateCompatibility } from "./linkageTermsNegotiation";
 import { SHARED_SECRET_REGEX } from "./config/connection";
 import { MAX_RECORD_COUNT } from "./connection/frameSize";
 import { randomBytes, toBase64Url } from "./utils/crypto";

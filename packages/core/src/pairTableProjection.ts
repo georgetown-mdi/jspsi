@@ -1,6 +1,6 @@
 import { MAX_RECORD_COUNT } from "./connection/frameSize.js";
 
-import type { LinkageCardinality } from "./link.js";
+import type { LinkageCardinality } from "./psi/link.js";
 
 /**
  * What a run resolved to at the post-terms, pre-round boundary: the

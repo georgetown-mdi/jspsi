@@ -1,23 +1,23 @@
 import { describe, expect, test } from "vitest";
 
-import { APPLIED_SETTINGS } from "../src/appliedSettings.js";
+import { APPLIED_SETTINGS } from "../src/consent/appliedSettings.js";
 import {
   CONSENT_FACTS,
   COUNT_ONLY_DISCLOSURE_STATEMENT,
   PROPOSED_NOT_APPLIED_NOTES,
-} from "../src/consentFacts.js";
-import { parseLinkageTerms } from "../src/config/linkageTerms.js";
+} from "../src/consent/consentFacts.js";
+import { parseLinkageTerms } from "../src/config/linkageTermsSchema.js";
 import {
   COUNT_ONLY_PROBE_TERMS,
   consentRepresentationProbes,
-} from "../src/linkageTermConsentCoverage.js";
-import { summarizeInvitation } from "../src/invitationSummary.js";
+} from "../src/consent/linkageTermConsentCoverage.js";
+import { summarizeInvitation } from "../src/consent/invitationSummary.js";
 
 import type {
   ConsentFact,
   ConsentFactBasis,
   ConsentFactId,
-} from "../src/consentFacts.js";
+} from "../src/consent/consentFacts.js";
 
 /**
  * The basis each count-only fact has, checked against the per-party

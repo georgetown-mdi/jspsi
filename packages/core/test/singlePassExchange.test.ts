@@ -8,8 +8,8 @@ import {
   type MessageConnection,
 } from "../src/connection/messageConnection";
 
-import type { BuiltExchangeRecord } from "../src/exchangeRecord";
-import type { LinkageStrategy, Output } from "../src/config/linkageTerms";
+import type { BuiltExchangeRecord } from "../src/records/exchangeRecord";
+import type { LinkageStrategy, Output } from "../src/config/linkageTermsSchema";
 import type { ExchangeResult } from "../src/exchange";
 
 // Integration coverage of the linkageStrategy dispatch in runExchange: a

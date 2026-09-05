@@ -11,7 +11,7 @@ import {
 import { createMessagePipe } from "../src/connection/messageConnection";
 import { recordingConnection } from "./utils/recordingConnection";
 
-import type { LinkageTerms } from "../src/config/linkageTerms";
+import type { LinkageTerms } from "../src/config/linkageTermsSchema";
 import type { MessageConnection } from "../src/connection/messageConnection";
 import type { PresentedHostKey } from "../src/connection/fileSyncConnection";
 import type { TermsExchangeResult } from "../src/protocolSetup";

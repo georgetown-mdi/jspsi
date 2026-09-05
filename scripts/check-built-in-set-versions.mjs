@@ -15,7 +15,7 @@
 // Two parts, each read from the tree alone:
 //
 //   A. THE SET CONTENT, digested per set out of
-//      packages/core/src/defaults/linkageTerms.ts: the fields with their
+//      packages/core/src/defaults/builtInLinkageTerms.ts: the fields with their
 //      constraints, and the keys with their elements, transforms, swaps, and the
 //      order they are applied in. The digest is taken over the evaluated
 //      declarations rather than the file text, so a comment, a reflow, a move

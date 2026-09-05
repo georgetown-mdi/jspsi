@@ -1,6 +1,6 @@
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 
-// Mirrors apps/cli/src/psiBackend.ts:isNativeUnavailable: the ordinary "no
+// Mirrors apps/cli/src/psi/psiBackend.ts:isNativeUnavailable: the ordinary "no
 // prebuild ships for this platform" case (node-gyp-build) or an older vendored
 // package that lacks the native entry (module not found). A present-but-broken
 // .node (e.g. ERR_DLOPEN_FAILED from an ABI mismatch or a missing transitive

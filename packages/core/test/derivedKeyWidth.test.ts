@@ -6,7 +6,7 @@ import { expect, test, describe, vi } from "vitest";
 // inert case). This file drives the flag on, so the derivation, its ceiling,
 // and the boundary that enforces it are verified rather than only reachable in
 // review.
-vi.mock("../src/appliedSettings", () => ({
+vi.mock("../src/consent/appliedSettings", () => ({
   APPLIED_SETTINGS: { deduplicate: true, fuzzyComparisons: true },
 }));
 
@@ -47,9 +47,9 @@ import type {
   LinkageTerms,
   Output,
   TransformStep,
-} from "../src/config/linkageTerms";
+} from "../src/config/linkageTermsSchema";
 import type { Metadata } from "../src/config/metadata";
-import type { Standardization } from "../src/config/standardization";
+import type { Standardization } from "../src/config/standardizationSchema";
 import type { CSVRow } from "../src/file";
 import type { PsiRole } from "../src/types";
 

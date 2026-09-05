@@ -1,6 +1,6 @@
 // The one boundary through which a linkage-terms value enters an
 // operator-facing cross-party compatibility diagnostic
-// (`validateCompatibility`, config/linkageTerms.ts). Those diagnostics are
+// (`validateCompatibility`, linkageTermsNegotiation.ts). Those diagnostics are
 // first-party prose an operator reads as psilink's own -- "legal agreement
 // reference mismatch: local is X, partner is Y" -- and the values they
 // name are partner-chosen, including two on the "local" side that

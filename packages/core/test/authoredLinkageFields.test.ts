@@ -3,10 +3,10 @@ import { describe, expect, test } from "vitest";
 import {
   authoredLinkageFields,
   getDefaultLinkageTerms,
-} from "../src/defaults/linkageTerms";
+} from "../src/defaults/builtInLinkageTerms";
 
 import type { ColumnMetadata, Metadata } from "../src/config/metadata";
-import type { Standardization } from "../src/config/standardization";
+import type { Standardization } from "../src/config/standardizationSchema";
 import type { SemanticType } from "../src/types";
 
 const col = (

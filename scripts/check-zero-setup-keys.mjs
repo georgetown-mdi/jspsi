@@ -19,7 +19,7 @@
 // that rots, because the edit that breaks it is one nobody would recognize as
 // touching zero-setup at all.
 //
-// Two things are read from packages/core/src/defaults/linkageTerms.ts and
+// Two things are read from packages/core/src/defaults/builtInLinkageTerms.ts and
 // nothing is restated: the field set, which IS the guaranteed minimum, and the
 // keys held to it. For each element of each key:
 //

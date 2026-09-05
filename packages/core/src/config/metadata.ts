@@ -2,7 +2,8 @@ import { z } from "zod";
 
 import { UsageError } from "../errors.js";
 import { SEMANTIC_TYPES } from "../types";
-import { COUNT_ONLY_SHAPE_REFUSALS, MAX_NAME_LENGTH } from "./linkageTerms.js";
+import { COUNT_ONLY_SHAPE_REFUSALS } from "../linkageTermsPolicy.js";
+import { MAX_NAME_LENGTH } from "./linkageTermsSchema.js";
 import { safeParseCamelized } from "./safeParseCamelized.js";
 
 import type { Algorithm, SemanticType } from "../types";
@@ -94,7 +95,7 @@ export function disclosedColumnNames(metadata: Metadata): Array<string> {
  *
  * False for every `psi` exchange and for an absent metadata block. The
  * terms-held rules are `countOnlyShapeViolation` in
- * `config/linkageTerms.ts`.
+ * `config/linkageTermsSchema.ts`.
  */
 export function countOnlyTransmitsColumn(
   algorithm: Algorithm,

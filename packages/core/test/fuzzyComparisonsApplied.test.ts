@@ -4,7 +4,7 @@ import { expect, test, describe, afterEach, vi } from "vitest";
 // is false in the shipped build because no PSI round consumes a candidate set
 // yet. This file pins what the expansion does once that flag flips, so the
 // key-building half is verified rather than only reachable in review.
-vi.mock("../src/appliedSettings", () => ({
+vi.mock("../src/consent/appliedSettings", () => ({
   APPLIED_SETTINGS: { deduplicate: false, fuzzyComparisons: true },
 }));
 
@@ -16,7 +16,10 @@ import {
 import { FAN_OUT_CANDIDATES_PER_ELEMENT } from "../src/fanOutFunctions";
 import { UsageError } from "../src/errors";
 import { getLogger } from "../src/utils/logger";
-import type { LinkageKey, TransformStep } from "../src/config/linkageTerms";
+import type {
+  LinkageKey,
+  TransformStep,
+} from "../src/config/linkageTermsSchema";
 import { withUnlistedFanOutFunctions } from "./utils/unlistedFanOut";
 
 // A `transpositions` element declares one candidate per PAIR of its value's

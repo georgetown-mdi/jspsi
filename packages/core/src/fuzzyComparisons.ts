@@ -1,6 +1,6 @@
 import { UsageError } from "./errors.js";
 import { isCalendarDateValid } from "./utils/calendarDate.js";
-import type { GenerateFuzzyComparisons } from "./config/linkageTerms.js";
+import type { GenerateFuzzyComparisons } from "./config/linkageTermsSchema.js";
 
 /**
  * The longest standardized value the fuzzy expansion will widen.

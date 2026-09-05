@@ -18,8 +18,8 @@ import {
 } from "../src/standardization";
 import { getLogger } from "../src/utils/logger";
 
-import type { PsiEngine } from "../src/psiEngine";
-import type { Output } from "../src/config/linkageTerms";
+import type { PsiEngine } from "../src/psi/psiEngine";
+import type { Output } from "../src/config/linkageTermsSchema";
 
 const psiLibrary = await PSI();
 

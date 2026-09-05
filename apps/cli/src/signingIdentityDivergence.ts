@@ -25,7 +25,7 @@ import type { CertificateBody } from "@psilink/core";
 // sent -- the disposition its sibling certificate-mode faults take
 // (assertCertificateModePinsPartner and assertCertificateModeNamesLocalParty
 // in @psilink/core).
-// packages/core/test/signedReceiptEndToEnd.test.ts drives both role
+// packages/core/test/records/signedReceiptEndToEnd.test.ts drives both role
 // assignments, backing this refusal's assumption with a check.
 //
 // `psilink fingerprint` WARNS. It runs no exchange and sends nothing, and
