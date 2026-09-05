@@ -30,7 +30,7 @@ const rawYamlParserImportBan = {
 // `undefined` where it accepts an absent property -- and a draft is live objects the
 // editor rebuilds, where a spread restates an unset property as `undefined`. So a
 // direct import of core's predicate reads a key that says exactly what the offer says
-// as a non-match, dropping its opt-in badge on the bench and its rule-set citation
+// as a non-match, dropping its opt-in badge on the screen and its rule-set citation
 // from the built terms: a partner-visible provenance claim lost over a property that
 // says nothing. The failure is silent at the call site, which is why the routing is a
 // rule rather than a note in the module.
@@ -98,6 +98,23 @@ const seatWarningSinkBan = {
 // consumers plus the exchange-run and coverage-worker internals that read rawRows off
 // non-acquired shapes (a prepared/minted invitation, a worker request, the
 // controller's own field).
+// The dependency direction between the app's layers. src/psi (the protocol and
+// the run models) and src/components (the React pieces more than one product
+// renders) sit BELOW the three product directories -- src/exchange, src/recurring
+// and src/console -- so neither may import from them. Direction is what keeps the
+// headless scheduled runner out of the screens' graph: the runner enters through
+// src/psi, and one import of a screen from there pulls the whole product tree in
+// behind it. A module two layers need belongs in src/psi when it is React-free
+// and in src/components when it is not.
+const productDirectoryBans = ["console", "exchange", "recurring"].map(
+  (dir) => ({
+    group: [`@${dir}/*`, `../${dir}/*`],
+    message:
+      `src/psi and src/components sit below the product directories; neither may import from src/${dir}. ` +
+      "Move what both layers need into src/psi (React-free) or src/components (React), and import it from there.",
+  }),
+);
+
 const rawRowsConsumers = [
   "src/exchange/AcceptorScreen.tsx",
   "src/exchange/InviterScreen.tsx",
@@ -275,6 +292,41 @@ export default [
         "error",
         sensitiveYamlParseBan,
         seatWarningSinkBan,
+      ],
+    },
+  },
+  {
+    // The layer-direction ban (see productDirectoryBans above), over the two
+    // directories below the products. A block of its own rather than an entry on
+    // the src/ blocks above, because those cover the product directories too, and
+    // it re-carries every group and path they set for these files: flat config
+    // replaces a rule's whole options across blocks. The chokepoint module is
+    // spared here for the reason the block above spares it, and takes the same
+    // direction ban in its own block below.
+    files: ["src/psi/**/*.{ts,tsx}", "src/components/**/*.{ts,tsx}"],
+    ignores: ["src/psi/linkageComparison.ts"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: [rawYamlParserImportBan, linkageComparisonChokepointBan],
+          patterns: [...crossWorkspaceImportBans.web, ...productDirectoryBans],
+        },
+      ],
+    },
+  },
+  {
+    // The linkage-compare chokepoint takes the direction ban like the rest of
+    // src/psi, without the ban on calling core's predicates -- it is the module
+    // that calls them.
+    files: ["src/psi/linkageComparison.ts"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: [rawYamlParserImportBan],
+          patterns: [...crossWorkspaceImportBans.web, ...productDirectoryBans],
+        },
       ],
     },
   },

@@ -19,6 +19,34 @@ npm run -w apps/web dev
 
 Then visit [http://localhost:3000](http://localhost:3000).
 
+## Source layout
+
+`src/` holds three products and the layers below them. Each `@`-prefixed alias in
+the list is registered in `vite.config.ts` (`srcAliases`) and `nitro.config.ts`
+(`serverAliases`); `tsconfig.json` resolves them through its `@*` catch-all.
+
+| Path             | Alias         | What it holds                                                                       |
+| ---------------- | ------------- | ----------------------------------------------------------------------------------- |
+| `src/exchange/`  | `@exchange`   | The one-off exchange: the invite, accept, direct and verify screens and their models |
+| `src/recurring/` | `@recurring`  | The recurring-exchange manager: the saved list, the managed run surface, schedules   |
+| `src/console/`   | `@console`    | What only the console build renders: the mount file pickers, SFTP authoring, the server-job settings cards |
+| `src/psi/`       | `@psi`        | The protocol and run models. React-free                                             |
+| `src/components/`| `@components` | React pieces more than one product renders                                          |
+| `src/jobs/`      | `@jobs`       | The console server's job machinery, behind the API routes                           |
+| `src/utils/`     | `@utils`      | Configuration and generic helpers                                                    |
+| `src/styles/`    | `@styles`     | The design tokens and the stylesheet the screens share                              |
+| `src/routes/`    |               | Route entries, which compose the products                                            |
+
+The direction runs one way: `src/psi` and `src/components` sit below the three
+product directories and must not import from them, which is what keeps the
+headless scheduled runner -- it enters through `src/psi` -- out of the screens'
+graph. An ESLint `no-restricted-imports` ban in `eslint.config.js` enforces it,
+and `scripts/eslint-web-layer-direction.test.mjs` drives the ban itself. A module
+two layers need belongs in `src/psi` when it is React-free and in
+`src/components` when it is not. Between the products the graph is not
+constrained: the recurring manager reuses the exchange's run surface, and the
+exchange screens render the console's cards under the console build's own gate.
+
 ## Generated route tree
 
 `src/routeTree.gen.ts` is written by the TanStack Router codegen, which the `tanstackStart` plugin in `vite.config.ts` runs whenever anything loads that config -- the dev server, a build, or a vitest run.
