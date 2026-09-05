@@ -1,7 +1,8 @@
 // Whether a set of declared linkage terms can ever produce a value -- the
-// static, data-free half of standardization. Nothing here runs during an
-// exchange: it answers "would these terms work?" ahead of one, by compiling the
-// declared pipelines and running probe values through them.
+// static, data-free half of standardization. These refusals judge agreed
+// terms: prepareForExchange and runExchange call them inside an exchange,
+// and the apps call them ahead of one to ask whether terms would work, by
+// compiling the declared pipelines and running probe values through them.
 //
 // The execution half is standardization.ts, which owns the compiler and the key
 // builder this reads; the value-level companion, which judges values an actual
