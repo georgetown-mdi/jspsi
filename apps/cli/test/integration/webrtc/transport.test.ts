@@ -9,6 +9,10 @@ import { ConnectionError, generateSharedSecret } from "@psilink/core";
 
 import { openWebRtcMessageConnection } from "../../../src/connection/webrtc/webrtcMessageConnection";
 import {
+  describeSelectedCandidatePair,
+  readIceStats,
+} from "../../../src/connection/webrtc/iceDiagnostics";
+import {
   WERIFT_BUILT_IN_STUN_URI,
   openWebRtcPeerSession,
 } from "../../../src/connection/webrtc/weriftPeer";
@@ -16,6 +20,7 @@ import { PEERJS_CHUNK_MTU } from "../../../src/connection/webrtc/peerjsWire";
 import { startBrokerProcess } from "../../signaling/brokerProcess";
 
 import type { BrokerLocation } from "../../../src/connection/webrtc/brokerClient";
+import type { RTCIceServer } from "werift";
 import type { BrokerProcess } from "../../signaling/brokerProcess";
 import type { MessageConnection } from "@psilink/core";
 
@@ -344,6 +349,63 @@ test("the built-in default is the endpoint the warning and the export panel name
     expect(request.readUInt32BE(4)).toBe(0x2112a442);
   }
 }, 60_000);
+
+/**
+ * The candidate types ICE defines. The diagnostics read werift's own entries by
+ * field name, so a selected type outside this set is a field that moved rather
+ * than an unusual network path.
+ */
+const ICE_CANDIDATE_TYPES = ["host", "srflx", "prflx", "relay"];
+
+test("the ICE report reads the statistics real werift produces", async () => {
+  // The reader itself is exercised against hand-written reports in
+  // test/unit/connection/webrtcIceDiagnostics.test.ts. What only a live pair
+  // holds is that the entries werift emits still carry the field names it keys
+  // on -- `candidateType`, `localCandidateId`, `remoteCandidateId`, `state`,
+  // `nominated` -- so a bump that renames one reddens here rather than reaching
+  // an operator as a report that quietly names nothing.
+  const common = partyOptions(generateSharedSecret());
+  const peers: Array<RTCPeerConnection> = [];
+  const capturePeer = (configuration: {
+    iceServers?: Array<RTCIceServer>;
+  }): RTCPeerConnection => {
+    const peer = new RTCPeerConnection(configuration);
+    peers.push(peer);
+    return peer;
+  };
+  const [inviter, acceptor] = await Promise.all([
+    openWebRtcMessageConnection({
+      ...common,
+      role: "inviter",
+      peerConnectionFactory: capturePeer,
+    }),
+    openWebRtcMessageConnection({
+      ...common,
+      role: "acceptor",
+      peerConnectionFactory: capturePeer,
+    }),
+  ]);
+  openConnections.push(inviter, acceptor);
+  // One frame each way first, so the pair the report names is one that carried
+  // the exchange rather than one that had only been probed.
+  await acceptor.send({ step: "hello" });
+  expect(await inviter.receive()).toEqual({ step: "hello" });
+
+  expect(peers).toHaveLength(2);
+  for (const peer of peers) {
+    const report = await readIceStats(peer);
+    if (report === undefined)
+      throw new Error("the open channel reported no ICE statistics");
+    expect(report.local.count).toBeGreaterThan(0);
+    expect(report.remote.count).toBeGreaterThan(0);
+    expect(report.succeededPairCount).toBeGreaterThan(0);
+    expect(ICE_CANDIDATE_TYPES).toContain(report.selected?.localType);
+    expect(ICE_CANDIDATE_TYPES).toContain(report.selected?.remoteType);
+    expect(describeSelectedCandidatePair(report)).toMatch(
+      /^local [a-z]+, remote [a-z]+$/,
+    );
+  }
+}, 120_000);
 
 test("an over-cap inbound frame fails the connection closed", async () => {
   // The bound is driven over the real channel rather than at the reassembler,
