@@ -16,7 +16,8 @@
 // unexpected failure here falls through to exit 0 (fail open) so a bug in this hook
 // can never wedge every Bash command.
 
-import { readFileSync } from "node:fs";
+import { commandOf, eventForTools } from "./lib/event.mjs";
+import { splitSegments, tokenize } from "./lib/shell.mjs";
 
 const IDENTITY_ENV = new Set([
   "GIT_AUTHOR_NAME",
@@ -32,22 +33,6 @@ function block(reason) {
       "wrong, say so to the maintainer instead of overriding it on the command line.\n",
   );
   process.exit(2);
-}
-
-// Split a command line into shell segments so an override hidden in a compound
-// command (`a && git commit ...`, `b; git commit ...`) is still inspected.
-// Pragmatic, not a full shell parser: an override buried inside `bash -c "..."` or
-// behind an alias is not read.
-function splitSegments(command) {
-  return command.split(/\s*(?:&&|\|\||[;|\n])\s*/);
-}
-
-// Whitespace tokenizer that keeps quoted spans intact, then strips quotes, so a
-// quoted value (`-c user.email="a@b"`, `--author='N <a@b>'`) reads the same as a
-// bare one. Not POSIX-complete.
-function tokenize(segment) {
-  const tokens = segment.match(/(?:[^\s'"]+|'[^']*'|"[^"]*")+/g) || [];
-  return tokens.map((t) => t.replace(/['"]/g, ""));
 }
 
 // Words that stand in front of the real command word without changing which
@@ -236,15 +221,10 @@ function configWriteTarget(args) {
 }
 
 function main() {
-  let event;
-  try {
-    event = JSON.parse(readFileSync(0, "utf8"));
-  } catch {
-    process.exit(0); // unreadable event -- do not interfere
-  }
-  if (event.tool_name !== "Bash") process.exit(0);
-  const command = event?.tool_input?.command;
-  if (typeof command !== "string") process.exit(0);
+  const event = eventForTools("Bash");
+  if (event === null) process.exit(0); // unreadable, or another tool
+  const command = commandOf(event);
+  if (command === null) process.exit(0);
   if (!command.includes("git") && !command.includes("GIT_")) process.exit(0);
 
   for (const segment of splitSegments(command)) {

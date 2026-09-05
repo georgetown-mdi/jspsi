@@ -24,16 +24,11 @@
 // main-worktree refusal is path-scoped: it fires whoever writes and from
 // wherever, since no session writes that content. The sibling refusal cannot be,
 // because pointing a spawn at a tree by absolute path from the primary checkout
-// is the dispatch shape the by-ref model is built on -- a session whose own
-// directory is the main checkout writes into a branch's worktree as its normal
-// work. So the sibling rule binds only a session already working inside a linked
-// worktree, where a write into a DIFFERENT linked worktree has no legitimate
-// reading. A session directory that cannot be placed in a worktree at all leaves
-// the sibling rule silent, like every other unanswerable state here.
-//
-// A linked worktree sits UNDER the main root's path prefix (.claude/worktrees/ is
-// inside it), so the worktree owning a path is the longest matching entry of
-// `git worktree list --porcelain` rather than a prefix test against the first.
+// is the dispatch shape the by-ref model is built on. So the sibling rule binds
+// only a session already working inside a linked worktree, where a write into a
+// DIFFERENT linked worktree has no legitimate reading. A session directory that
+// cannot be placed in a worktree at all leaves the sibling rule silent, like
+// every other unanswerable state here.
 //
 // WHAT PASSES, and why the test is IGNORED-ness rather than tracked-ness. Under
 // the by-ref model the main session writes no branch content at all, so the only
@@ -83,8 +78,11 @@
 // Exit 0 allows the call; exit 2 blocks it and feeds stderr back to Claude.
 
 import { execFileSync } from "node:child_process";
-import { existsSync, readFileSync, realpathSync } from "node:fs";
+import { existsSync, realpathSync } from "node:fs";
 import { basename, dirname, join, relative, resolve } from "node:path";
+
+import { eventCwd, eventForTools } from "./lib/event.mjs";
+import { owningWorktree, worktreeRecords } from "./lib/worktrees.mjs";
 
 const GUARDED_TOOLS = new Set(["Edit", "Write", "NotebookEdit"]);
 const PATH_KEYS = ["file_path", "notebook_path"];
@@ -121,27 +119,11 @@ function blockSiblingWorktreeWrite(target, path, owner, sessionTree) {
   process.exit(2);
 }
 
-// Run git, returning trimmed stdout, or null on any failure. Every null here
-// allows the call: this hook fails open.
-function git(args) {
-  try {
-    return execFileSync("git", args, {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
-  } catch {
-    return null;
-  }
-}
-
 function targetPath(toolInput, cwd) {
   for (const key of PATH_KEYS) {
     const value = toolInput?.[key];
     if (typeof value === "string" && value.length > 0) {
-      return resolve(
-        typeof cwd === "string" && cwd.length > 0 ? cwd : ".",
-        value,
-      );
+      return resolve(cwd ?? ".", value);
     }
   }
   return null;
@@ -176,35 +158,21 @@ function nearestExistingDirectory(path) {
   }
 }
 
-// Worktree paths of the repository the directory belongs to, main worktree first
-// (git lists it first, from any of them); null when git would not answer.
+// Worktree paths of the repository the directory belongs to, main worktree
+// first, each resolved through its symlinks the way a target path is; null when
+// git would not answer.
 function worktreePaths(directory) {
-  const listing = git(["-C", directory, "worktree", "list", "--porcelain"]);
-  if (listing === null) return null;
-  const paths = listing
-    .split("\n")
-    .filter((line) => line.startsWith("worktree "))
-    .map((line) => canonical(line.slice("worktree ".length)));
-  return paths.length === 0 ? null : paths;
-}
-
-function isInside(path, directory) {
-  return path === directory || path.startsWith(`${directory}/`);
-}
-
-// The worktree a path belongs to: the longest registered path containing it, so
-// a linked worktree nested under the main root wins over the main root itself.
-function owningWorktree(path, paths) {
-  return paths
-    .filter((candidate) => isInside(path, candidate))
-    .sort((a, b) => b.length - a.length)[0];
+  const records = worktreeRecords(directory);
+  return records === null
+    ? null
+    : records.map((record) => canonical(record.path));
 }
 
 // The worktree the session itself is working in, or undefined when its directory
 // cannot be placed in one -- an event carrying no cwd, or one outside this
 // repository. Undefined leaves the sibling rule silent.
 function sessionWorktree(cwd, paths) {
-  if (typeof cwd !== "string" || cwd.length === 0) return undefined;
+  if (cwd === null) return undefined;
   return owningWorktree(canonical(cwd), paths);
 }
 
@@ -230,15 +198,11 @@ function isIgnored(root, path) {
 }
 
 function main() {
-  let event;
-  try {
-    event = JSON.parse(readFileSync(0, "utf8"));
-  } catch {
-    process.exit(0); // unparseable event -- do not interfere
-  }
-  if (!GUARDED_TOOLS.has(event.tool_name)) process.exit(0);
+  const event = eventForTools(...GUARDED_TOOLS);
+  if (event === null) process.exit(0); // unreadable, or another tool
 
-  const target = targetPath(event.tool_input, event.cwd);
+  const cwd = eventCwd(event);
+  const target = targetPath(event.tool_input, cwd);
   if (target === null) process.exit(0);
   const path = canonical(target);
 
@@ -251,7 +215,7 @@ function main() {
   const owner = owningWorktree(path, paths);
   if (owner === undefined) process.exit(0); // outside every checkout of this repo
 
-  const sessionTree = sessionWorktree(event.cwd, paths);
+  const sessionTree = sessionWorktree(cwd, paths);
   const writesAnotherWorktree =
     sessionTree !== undefined &&
     sessionTree !== mainRoot &&

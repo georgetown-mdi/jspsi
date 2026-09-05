@@ -18,21 +18,26 @@
 // agent's tier, not the session's).
 //
 // Design: MARKER-GATED, no file I/O. There is no transcript read and nothing that
-// can fail open on I/O. The allow paths are: a non-SendMessage or unparseable event;
-// a send to "main" (a background subagent reporting up, with no pinned recipient to
-// drop); or a message carrying the literal [accept-model-drop] marker. Every other
-// SendMessage -- resuming or steering a spawned agent -- blocks. The only throwing
-// operation is JSON.parse, which has its
-// own inner catch that exits 0 (an unreadable event must not interfere). The outer
-// try/catch is therefore purely defensive: no expected path reaches it, but if an
-// unexpected error ever does on a SendMessage event, it blocks (exit 2) to match the
-// fail-closed posture the other guards take for their enforced tool.
+// can fail open on I/O. The allow paths are: an event naming another tool, or one
+// stdin held nothing parseable for; a send to "main" (a background subagent
+// reporting up, with no pinned recipient to drop); or a message carrying the
+// literal [accept-model-drop] marker. Every other SendMessage -- resuming or
+// steering a spawned agent -- blocks, and so does a payload that parses to a JSON
+// value other than an object -- null, an array, a primitive -- which names no tool
+// and so leaves nothing to rule the send out. The only throwing operation is
+// JSON.parse, which has its own inner catch that exits 0 (an unreadable event
+// must not interfere). The outer try/catch is therefore purely defensive: no
+// expected path reaches it, but if an unexpected error ever does on a SendMessage
+// event, it blocks (exit 2) to match the fail-closed posture the other guards
+// take for their enforced tool.
 //
 // Exit 0 allows the call; exit 2 blocks it and feeds stderr back to Claude.
 
-import { readFileSync } from "node:fs";
+import { NOT_AN_EVENT, readEvent } from "./lib/event.mjs";
 
 const OVERRIDE_MARKER = "[accept-model-drop]";
+const UNCONFIRMED =
+  "could not confirm the message; TaskStop and make a fresh spawn instead";
 
 function block(reason) {
   process.stderr.write(
@@ -42,13 +47,9 @@ function block(reason) {
 }
 
 function main() {
-  let event;
-  try {
-    event = JSON.parse(readFileSync(0, "utf8"));
-  } catch {
-    process.exit(0); // unparseable event -- do not interfere
-  }
-  if (event.tool_name !== "SendMessage") process.exit(0);
+  const event = readEvent();
+  if (event === NOT_AN_EVENT) block(UNCONFIRMED);
+  if (event === null || event.tool_name !== "SendMessage") process.exit(0);
 
   // A background subagent reporting to the main conversation (to: "main") has no
   // spawned, model-pinned recipient to drop, so it is not gated.
@@ -75,7 +76,5 @@ try {
   // non-SendMessage tool) are decided before this can be reached, and JSON.parse
   // has its own inner catch, so any error arriving here is on a SendMessage event
   // that must block, not allow.
-  block(
-    "could not confirm the message; TaskStop and make a fresh spawn instead",
-  );
+  block(UNCONFIRMED);
 }

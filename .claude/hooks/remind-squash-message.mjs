@@ -79,9 +79,11 @@
 // open on every error (unreadable event, missing git, unresolvable origin/staging):
 // a hook whose only job is a reminder must never disrupt the session over it.
 
-import { readFileSync, statSync } from "node:fs";
-import { execFileSync } from "node:child_process";
+import { statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
+
+import { commandOf, eventCwd, eventForTools } from "./lib/event.mjs";
+import { git } from "./lib/shell.mjs";
 
 const PR_BASE = "origin/staging";
 const MESSAGE_SUBDIR = join("scratch", "squash-messages");
@@ -97,25 +99,15 @@ const HEAD_FLAG = /--head(?:=|\s+)(?:"([^"]*)"|'([^']*)'|(\S+))/g;
 
 const GH_PR_CREATE = /gh pr create/g;
 
-function git(cwd, args) {
-  return execFileSync("git", args, {
-    cwd,
-    encoding: "utf8",
-    stdio: ["ignore", "pipe", "ignore"],
-  }).trim();
-}
-
-// Number of commits `ref` carries over the PR base, or null when it cannot be
+// Number of commits `ref` has over the PR base, or null when it cannot be
 // determined (no git, not a repo, origin/staging not fetched, ref unresolvable).
 function commitCountOverBase(cwd, ref) {
-  try {
-    const count = Number(
-      git(cwd, ["rev-list", "--count", `${PR_BASE}..${ref}`, "--"]),
-    );
-    return Number.isInteger(count) && count >= 0 ? count : null;
-  } catch {
-    return null;
-  }
+  const output = git(["rev-list", "--count", `${PR_BASE}..${ref}`, "--"], {
+    cwd,
+  });
+  if (output === null) return null;
+  const count = Number(output);
+  return Number.isInteger(count) && count >= 0 ? count : null;
 }
 
 // Every branch the command tells `gh pr create` to open a pull request for, in
@@ -144,19 +136,15 @@ function prNumbersFromResponse(toolResponse) {
 }
 
 function branchKey(cwd) {
-  try {
-    const branch = git(cwd, ["rev-parse", "--abbrev-ref", "HEAD"]);
-    if (branch === "" || branch === "HEAD") return null;
-    return `branch-${branch.replace(/[^A-Za-z0-9._-]+/g, "-")}`;
-  } catch {
-    return null;
-  }
+  const branch = git(["rev-parse", "--abbrev-ref", "HEAD"], { cwd });
+  if (branch === null || branch === "" || branch === "HEAD") return null;
+  return `branch-${branch.replace(/[^A-Za-z0-9._-]+/g, "-")}`;
 }
 
 function mainCheckoutRoot(cwd) {
+  const commonDir = git(["rev-parse", "--git-common-dir"], { cwd });
+  if (commonDir === null || commonDir === "") return null;
   try {
-    const commonDir = git(cwd, ["rev-parse", "--git-common-dir"]);
-    if (commonDir === "") return null;
     const root = dirname(resolve(cwd, commonDir));
     return statSync(root).isDirectory() ? root : null;
   } catch {
@@ -226,19 +214,14 @@ function multiCreateReminder(cwd, command, toolResponse) {
 }
 
 function main() {
-  let event;
-  try {
-    event = JSON.parse(readFileSync(0, "utf8"));
-  } catch {
-    process.exit(0); // unreadable event -- do not interfere
-  }
-  if (event.tool_name !== "Bash") process.exit(0);
-  const command = event?.tool_input?.command;
-  if (typeof command !== "string") process.exit(0);
+  const event = eventForTools("Bash");
+  if (event === null) process.exit(0); // unreadable, or another tool
+  const command = commandOf(event);
+  if (command === null) process.exit(0);
   const createCount = [...command.matchAll(GH_PR_CREATE)].length;
   if (createCount === 0) process.exit(0);
 
-  const cwd = typeof event.cwd === "string" ? event.cwd : process.cwd();
+  const cwd = eventCwd(event) ?? process.cwd();
   const reminder =
     createCount === 1
       ? singleCreateReminder(cwd, command, event.tool_response)

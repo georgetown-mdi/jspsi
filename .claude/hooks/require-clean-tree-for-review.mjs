@@ -43,11 +43,13 @@
 // backstops a false clean, so every state where a target cannot be CONFIRMED
 // clean must block: a non-git cwd, a git error, a missing cwd, an unreadable
 // `args`, a ref that does not resolve, a dirty status, and a lock that cannot be
-// written all exit 2. Only an unparseable or non-Workflow event exits 0 -- a
-// clean-tree precondition is benign for any workflow, and committing is always
-// available, so this applies to every Workflow call rather than being scoped to
-// review scripts (scoping by script text would fail open on the scriptPath and
-// resume forms).
+// written all exit 2. So does a payload that parses to a JSON value other than an
+// object -- null, an array, a primitive -- which names no tool and so leaves
+// nothing to rule the call out. Only an event stdin held nothing parseable for, or
+// one naming a tool other than Workflow, exits 0 -- a clean-tree precondition is
+// benign for any workflow, and committing is always available, so this applies to
+// every Workflow call rather than being scoped to review scripts (scoping by
+// script text would fail open on the scriptPath and resume forms).
 //
 // Why the porcelain check is a clean signal: `scratch/` and the round artifacts
 // under it are gitignored, so a normal review round's own artifacts never appear
@@ -71,7 +73,6 @@
 //
 // Exit 0 allows the call; exit 2 blocks it and feeds stderr back to Claude.
 
-import { execFileSync } from "node:child_process";
 import {
   mkdirSync,
   readFileSync,
@@ -81,11 +82,16 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 
+import { eventCwd, NOT_AN_EVENT, readEvent } from "./lib/event.mjs";
+import { git } from "./lib/shell.mjs";
+import { worktreeRecords } from "./lib/worktrees.mjs";
+
 const DIRTY_ENTRIES_SHOWN = 10;
 const ROUNDS_DIR = join("scratch", "review-rounds");
 const LOCK_SUFFIX = ".lock";
 const ROUND_LOCK_TTL_MS = 90 * 60 * 1000;
 const LIGHT_REVIEW_MARKER = "light-review";
+const UNCONFIRMED = "could not confirm a clean tree; commit and retry";
 
 function block(reason) {
   // A multi-line reason (the dirty-entry list) is self-terminating; only a
@@ -96,20 +102,6 @@ function block(reason) {
     `Blocked by require-clean-tree-for-review hook: ${reason}${suffix}`,
   );
   process.exit(2);
-}
-
-// Run git with the given args, returning trimmed stdout, or null on any failure
-// (non-zero exit, missing binary, non-git directory). The caller decides what a
-// null means -- here every null is a fail-closed block.
-function git(args) {
-  try {
-    return execFileSync("git", args, {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
-  } catch {
-    return null;
-  }
 }
 
 // The Workflow's named arguments, as an object; null when `args` was delivered
@@ -155,31 +147,6 @@ function namesLightReview(toolInput) {
   return [toolInput?.scriptPath, toolInput?.workflow, toolInput?.name].some(
     (field) => typeof field === "string" && field.includes(LIGHT_REVIEW_MARKER),
   );
-}
-
-// Worktrees of this repository as `{path, head, branch}`, main worktree first
-// (git lists it first, from any of them); null when git would not answer.
-function worktreeRecords(root) {
-  const listing = git(["-C", root, "worktree", "list", "--porcelain"]);
-  if (listing === null) return null;
-  const records = [];
-  for (const line of listing.split("\n")) {
-    if (line.startsWith("worktree ")) {
-      records.push({
-        path: line.slice("worktree ".length),
-        head: null,
-        branch: null,
-      });
-      continue;
-    }
-    const current = records[records.length - 1];
-    if (current === undefined) continue;
-    if (line.startsWith("HEAD ")) current.head = line.slice("HEAD ".length);
-    else if (line.startsWith("branch ")) {
-      current.branch = line.slice("branch ".length);
-    }
-  }
-  return records.length === 0 ? null : records;
 }
 
 function branchName(ref) {
@@ -278,19 +245,15 @@ function requireClean(path, subject) {
 }
 
 function main() {
-  let event;
-  try {
-    event = JSON.parse(readFileSync(0, "utf8"));
-  } catch {
-    process.exit(0); // unparseable event -- do not interfere
-  }
-  if (event.tool_name !== "Workflow") process.exit(0);
+  const event = readEvent();
+  if (event === NOT_AN_EVENT) block(UNCONFIRMED);
+  if (event === null || event.tool_name !== "Workflow") process.exit(0);
 
-  // From here every path fails CLOSED. A missing or non-string cwd is a
+  // From here every path fails CLOSED. An event naming no directory is a
   // fail-closed case, not a crash: without a directory to inspect the tree cannot
   // be confirmed clean.
-  const cwd = event.cwd;
-  if (typeof cwd !== "string" || cwd.length === 0) {
+  const cwd = eventCwd(event);
+  if (cwd === null) {
     block(
       "could not locate a git repo to confirm a clean tree; commit and retry",
     );
@@ -398,5 +361,5 @@ try {
   // Structural fail-closed backstop: the two exit-0 cases (unparseable event,
   // non-Workflow tool) are decided before any throwing code, so any error that
   // reaches here is on a path that must block, not allow.
-  block("could not confirm a clean tree; commit and retry");
+  block(UNCONFIRMED);
 }

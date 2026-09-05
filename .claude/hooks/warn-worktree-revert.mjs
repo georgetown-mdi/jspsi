@@ -33,23 +33,13 @@
 //     that scopes every command with `git -C` or an absolute path is warned all
 //     the same, since the hook cannot tell those apart from bare ones.
 
-import { execFileSync } from "node:child_process";
 import { readFileSync, realpathSync, statSync } from "node:fs";
 import { dirname, isAbsolute, normalize, resolve } from "node:path";
 
-const MAX_TRANSCRIPT_BYTES = 64 * 1024 * 1024;
+import { eventCwd, readEvent } from "./lib/event.mjs";
+import { git } from "./lib/shell.mjs";
 
-// Run git, returning trimmed stdout, or null on any failure -- which is silence.
-function git(cwd, ...args) {
-  try {
-    return execFileSync("git", ["-C", cwd, ...args], {
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    }).trim();
-  } catch {
-    return null;
-  }
-}
+const MAX_TRANSCRIPT_BYTES = 64 * 1024 * 1024;
 
 /** A tool_result block's content flattened to text. */
 function resultText(block) {
@@ -131,12 +121,13 @@ function canonical(path) {
 // yields from any worktree of the repository.
 function resolveIntended(cwd, intended) {
   if (isAbsolute(intended)) return canonical(intended);
-  const common = git(
+  const common = git([
+    "-C",
     cwd,
     "rev-parse",
     "--path-format=absolute",
     "--git-common-dir",
-  );
+  ]);
   return common === null
     ? null
     : canonical(resolve(dirname(normalize(common)), intended));
@@ -155,14 +146,10 @@ function warning(intended, current, branch) {
 }
 
 function main() {
-  let event;
-  try {
-    event = JSON.parse(readFileSync(0, "utf8"));
-  } catch {
-    process.exit(0); // unreadable event -- do not interfere
-  }
+  const event = readEvent();
+  if (event === null) process.exit(0); // unreadable event -- do not interfere
 
-  const cwd = typeof event.cwd === "string" ? event.cwd : process.cwd();
+  const cwd = eventCwd(event) ?? process.cwd();
   const transcriptPath = event.transcript_path;
   if (typeof transcriptPath !== "string") process.exit(0);
   const transcript = readTranscript(transcriptPath);
@@ -171,7 +158,7 @@ function main() {
   const recorded = intendedWorktree(transcript);
   if (recorded === null) process.exit(0);
 
-  const reported = git(cwd, "rev-parse", "--show-toplevel");
+  const reported = git(["-C", cwd, "rev-parse", "--show-toplevel"]);
   if (reported === null) process.exit(0); // not in a repository -- nothing to compare
   const current = canonical(reported);
 
@@ -191,7 +178,7 @@ function main() {
         additionalContext: warning(
           intended,
           current,
-          git(cwd, "branch", "--show-current") || "?",
+          git(["-C", cwd, "branch", "--show-current"]) || "?",
         ),
       },
     }),

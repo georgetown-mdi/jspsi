@@ -28,18 +28,13 @@
 // costs an ungated review round, not a security boundary, so every unexpected
 // error fails OPEN rather than wedge Agent spawns.
 
-import { readFileSync } from "node:fs";
+import { eventForTools } from "./lib/event.mjs";
 
 const CONTRACTED_ROLES = ["security-reviewer", "adversarial-verifier"];
 
 function main() {
-  let event;
-  try {
-    event = JSON.parse(readFileSync(0, "utf8"));
-  } catch {
-    process.exit(0); // unreadable event -- do not interfere
-  }
-  if (event.tool_name !== "Agent") process.exit(0);
+  const event = eventForTools("Agent");
+  if (event === null) process.exit(0); // unreadable, or another tool
 
   const role = event?.tool_input?.subagent_type;
   if (typeof role !== "string" || !CONTRACTED_ROLES.includes(role)) {

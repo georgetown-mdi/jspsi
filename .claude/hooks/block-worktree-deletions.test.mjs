@@ -255,6 +255,22 @@ describe("block-worktree-deletions hook", () => {
     ]);
   });
 
+  // The shapes the header records as unread, pinned so the record is a check
+  // rather than a claim. Each one destroys the sibling tree if it runs; each is
+  // allowed here because closing it means a shell-syntax-aware parser, which is
+  // a larger and more fragile thing than the accident this hook guards against.
+  // A row that starts failing means the hook grew to see that shape, and the
+  // header's stated limit has to go with it.
+  it("records the command shapes it does not read", () => {
+    expectAllowed([
+      // A command substitution keeps its brackets inside the stage carrying it,
+      // so the deletion inside one is never the stage's command word.
+      `echo $(rm -rf ${SIBLING})`,
+      // A target that only exists at runtime stands nowhere on the line.
+      `rm -rf $(cat /tmp/tree-path)`,
+    ]);
+  });
+
   it("catches a quoted command word its deletion pre-filter would skip", () => {
     // The pre-filter strips quotes the same way the tokenizer does, so a quote
     // buried in the command word no longer hides the deletion from the gate.

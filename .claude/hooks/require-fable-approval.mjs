@@ -25,6 +25,8 @@
 import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 
+import { eventForTools } from "./lib/event.mjs";
+
 const ASK_REASON =
   "This spawn runs on the Fable tier, which requires your explicit approval " +
   "(per the model-tiering rule in CLAUDE.md): Fable is reserved for deliberate " +
@@ -67,13 +69,8 @@ function pinnedModelFor(agentsDir, subagentType) {
 }
 
 function main() {
-  let event;
-  try {
-    event = JSON.parse(readFileSync(0, "utf8"));
-  } catch {
-    process.exit(0); // unreadable event -- do not interfere
-  }
-  if (event.tool_name !== "Agent") process.exit(0);
+  const event = eventForTools("Agent");
+  if (event === null) process.exit(0); // unreadable, or another tool
 
   // Explicit-model path: no filesystem, always decisive.
   const model = event?.tool_input?.model;
