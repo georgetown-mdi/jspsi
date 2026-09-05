@@ -1798,6 +1798,11 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
       return;
     }
     try {
+      // This wait's outcome is not read: an expired wait -- the destroy
+      // landed but no close arrived within the bound -- is reported exactly
+      // like a clean close. Measured against the pinned stack the close
+      // lands within a millisecond of the destroy, so the expiry branch is a
+      // library-relocation shape rather than a reachable one.
       await this.awaitClientClose(
         held,
         transport.once,
