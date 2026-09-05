@@ -131,16 +131,18 @@ const productDirectoryBans = productDirectories.map((dir) => ({
   message: productDirectoryBanMessage(`src/${dir}`),
 }));
 
-// The enforcing half of the ban. One regex over the whole specifier decides every
-// import and export form, so no two forms can disagree about a spelling: a path
-// segment exactly a product directory, either as the alias (`@exchange`) or after
-// any `/`. That covers the tsconfig `@*` -> `./src/*` catch-all (`@/exchange/Lobby`
-// names the same module), every climb spelling including one with a `./` step in it
-// (`.././exchange/Lobby`), and the climb past `src/` and back down. A segment that
-// merely BEGINS with a product name (`@components/exchangeRecord`) has no `/` or end
-// after it and is not matched. The ImportExpression arm is required rather than
-// hypothetical: no-restricted-imports reads static declarations only, and the app
-// loads modules dynamically (ScheduledExchangeRunner, csvParseController).
+// The enforcing half of the ban. One regex over every string-literal specifier
+// decides each import and export form, so no two forms can disagree about a
+// spelling: a path segment exactly a product directory, either as the alias
+// (`@exchange`) or after any `/`. That covers the tsconfig `@*` -> `./src/*`
+// catch-all (`@/exchange/Lobby` names the same module), every climb spelling
+// including one with a `./` step in it (`.././exchange/Lobby`), and the climb past
+// `src/` and back down. A segment that merely BEGINS with a product name
+// (`@components/exchangeRecord`) has no `/` or end after it and is not matched. The
+// ImportExpression arm is required rather than hypothetical: no-restricted-imports
+// reads static declarations only, and the app loads modules dynamically
+// (ScheduledExchangeRunner, csvParseController). A dynamic import whose argument is
+// a template literal or a concatenation is outside what either rule sees.
 const productDirectoryBanPattern = `(^@|\\/)(${productDirectories.join("|")})(\\/|$)`;
 
 const productDirectorySpecifierBan = {

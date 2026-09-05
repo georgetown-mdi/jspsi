@@ -38,6 +38,12 @@ import { afterAll, describe, expect, test } from "vitest";
  * resolves to no file fails the run by name rather than counting as a bare
  * package, because counting it that way drops its whole subtree from the walk
  * and leaves every claim below it unmade. The fixture cases below hold both.
+ *
+ * The walk resolves only the alias prefixes in its ALIASES table, so a
+ * specifier through the tsconfig `@*` catch-all (`@/...`) or `@theme` is
+ * treated as a bare package and its subtree is not walked. And it counts only
+ * `node:`-prefixed specifiers as builtins, so an unprefixed builtin such as
+ * `fs` passes.
  */
 
 const here = dirname(fileURLToPath(import.meta.url));

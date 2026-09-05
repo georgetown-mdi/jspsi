@@ -47,12 +47,14 @@ workers with their controllers).
 The direction runs one way: `src/psi` and `src/components` sit below the three
 product directories and must not import from them, which is what keeps the
 headless scheduled runner -- it enters through `src/psi` -- out of the screens'
-graph. An ESLint `no-restricted-imports` ban in `eslint.config.js` enforces it,
-and `scripts/eslint-web-layer-direction.test.mjs` drives the ban itself. A module
-two layers need belongs in `src/psi` when it is React-free and in
-`src/components` when it is not. Between the products the graph is not
-constrained: the recurring manager reuses the exchange's run surface, and the
-exchange screens render the console's cards under the console build's own gate.
+graph. Two rules in `eslint.config.js` enforce it: `no-restricted-imports`
+groups for static specifiers and a `no-restricted-syntax` selector over every
+string-literal specifier, dynamic imports included.
+`scripts/eslint-web-layer-direction.test.mjs` drives both. A module two layers
+need belongs in `src/psi` when it is React-free and in `src/components` when it
+is not. Between the products the graph is not constrained: the recurring
+manager reuses the exchange's run surface, and the exchange screens render the
+console's cards under the console build's own gate.
 
 ## Generated route tree
 
