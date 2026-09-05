@@ -65,6 +65,14 @@ const PSI_FIRST_PARSE = resolve(
   "apps/web/src/psi/transport/peerLogging.ts",
 );
 
+// A file one directory deeper than PSI: src/psi has its own subdirectories
+// (transport/, workers/, jobClient/, managed/, authoring/), and a climb from one
+// of those needs an extra ".." to reach a product directory.
+const PSI_NESTED = resolve(
+  repoRoot,
+  "apps/web/src/psi/transport/boundedReassembly.ts",
+);
+
 const BELOW = [
   ["src/psi", PSI],
   ["src/components", COMPONENTS],
@@ -80,6 +88,14 @@ const REFUSED_SPECIFIERS = [
   "../console/mountListing",
   "../exchange/Lobby",
   "../recurring/SavedExchanges",
+];
+
+// The same relative climb, one directory deeper, as written from a nested src/psi
+// subdirectory.
+const NESTED_REFUSED_SPECIFIERS = [
+  "../../console/mountListing",
+  "../../exchange/Lobby",
+  "../../recurring/SavedExchanges",
 ];
 
 // What the layers below must keep accepting: each other, the shared helpers, and
@@ -106,6 +122,7 @@ describe("the web app's layer-direction ban", { timeout: 60_000 }, () => {
       CHOKEPOINT,
       PRODUCT,
       PSI_FIRST_PARSE,
+      PSI_NESTED,
     ]) {
       expect(existsSync(path), `${path} no longer exists`).toBe(true);
     }
@@ -140,9 +157,12 @@ describe("the web app's layer-direction ban", { timeout: 60_000 }, () => {
           "@console/*",
           "@exchange/*",
           "@recurring/*",
-          "../console/*",
-          "../exchange/*",
-          "../recurring/*",
+          "**/../console",
+          "**/../console/**",
+          "**/../exchange",
+          "**/../exchange/**",
+          "**/../recurring",
+          "**/../recurring/**",
         ]),
       );
     }
@@ -181,6 +201,17 @@ describe("the web app's layer-direction ban", { timeout: 60_000 }, () => {
         ).not.toHaveLength(0);
       });
     }
+  }
+
+  // A pattern scoped to one ".." catches the climb from src/psi's own files but
+  // not from a nested subdirectory one level further down; each case here plants
+  // the deeper climb to pin that the pattern covers it too.
+  for (const specifier of NESTED_REFUSED_SPECIFIERS) {
+    it(`refuses '${specifier}' from a nested src/psi subdirectory`, async () => {
+      expect(
+        await directionHits(PSI_NESTED, `import "${specifier}";\n`),
+      ).not.toHaveLength(0);
+    });
   }
 
   for (const [layer, filePath, specifier] of ACCEPTED) {

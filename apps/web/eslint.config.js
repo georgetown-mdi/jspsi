@@ -108,7 +108,7 @@ const seatWarningSinkBan = {
 // and in src/components when it is not.
 const productDirectoryBans = ["console", "exchange", "recurring"].map(
   (dir) => ({
-    group: [`@${dir}/*`, `../${dir}/*`],
+    group: [`@${dir}/*`, `**/../${dir}`, `**/../${dir}/**`],
     message:
       `src/psi and src/components sit below the product directories; neither may import from src/${dir}. ` +
       "Move what both layers need into src/psi (React-free) or src/components (React), and import it from there.",
