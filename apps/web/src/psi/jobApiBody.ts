@@ -96,12 +96,12 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value);
 }
 
-/** Decode a response body as JSON, or null when it is empty or not JSON (an
- * error response may have no body). */
-export async function readJsonOrNull(response: Response): Promise<unknown> {
-  try {
-    return (await response.json()) as unknown;
-  } catch {
-    return null;
-  }
+/** Decode a response body as JSON under `maxBytes`, or null when it is empty,
+ * over the cap, or not JSON (an error response may have no body). */
+export async function readJsonOrNull(
+  response: Response,
+  maxBytes: number,
+): Promise<unknown> {
+  const result = await readBoundedJsonBody(response, maxBytes);
+  return result.kind === "parsed" ? result.value : null;
 }

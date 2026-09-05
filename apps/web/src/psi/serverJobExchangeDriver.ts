@@ -5,6 +5,11 @@ import {
   parseBoundedJson,
 } from "@psilink/core";
 
+import {
+  MAX_JOB_STATUS_RESPONSE_BYTES,
+  MAX_SFTP_CONNECTION_RESPONSE_BYTES,
+  readBoundedJson,
+} from "@psi/jobApiBody";
 import { jobRecordDownloads } from "@psi/jobExchangeRecord";
 import { whenDiagnostic } from "@utils/diagnostics";
 
@@ -253,7 +258,10 @@ export function createFetchJobApiClient(
           // other status (an empty-bodied 400/413/500 is treated as no id).
           response.status === 409 ? await readBodyJobId(response) : undefined,
         );
-      const body: unknown = await response.json();
+      const body: unknown = await readBoundedJson(
+        response,
+        MAX_JOB_STATUS_RESPONSE_BYTES,
+      );
       const id = (body as { id?: unknown }).id;
       if (typeof id !== "string" || id.length === 0)
         throw new JobApiRequestError(
@@ -289,7 +297,9 @@ export function createFetchJobApiClient(
       try {
         return {
           kind: "live",
-          status: jobStatusViewOf(await response.json()).status,
+          status: jobStatusViewOf(
+            await readBoundedJson(response, MAX_JOB_STATUS_RESPONSE_BYTES),
+          ).status,
         };
       } catch {
         // A 200 proves the exchange is present; an unparseable body is
@@ -303,7 +313,10 @@ export function createFetchJobApiClient(
         signal,
       });
       if (!response.ok) return { available: false };
-      const body: unknown = await response.json();
+      const body: unknown = await readBoundedJson(
+        response,
+        MAX_JOB_STATUS_RESPONSE_BYTES,
+      );
       const available = (body as { recordAvailable?: unknown }).recordAvailable;
       const createdAt = (body as { recordCreatedAt?: unknown }).recordCreatedAt;
       if (available !== true || typeof createdAt !== "string")
@@ -320,7 +333,10 @@ export function createFetchJobApiClient(
  * and the caller falls back to its persisted id. */
 async function readBodyJobId(response: Response): Promise<string | undefined> {
   try {
-    const body: unknown = await response.json();
+    const body: unknown = await readBoundedJson(
+      response,
+      MAX_JOB_STATUS_RESPONSE_BYTES,
+    );
     const id = (body as { id?: unknown }).id;
     return typeof id === "string" && id.length > 0 ? id : undefined;
   } catch {
@@ -372,7 +388,9 @@ export async function fetchSlotOccupancy(
       signal,
     });
     if (!response.ok) return { occupied: false };
-    return slotOccupancyOf(await response.json());
+    return slotOccupancyOf(
+      await readBoundedJson(response, MAX_JOB_STATUS_RESPONSE_BYTES),
+    );
   } catch {
     return { occupied: false };
   }
@@ -412,7 +430,10 @@ export async function fetchSftpConnection(
   try {
     const response = await fetchImpl("/api/jobs/sftp", { method: "GET" });
     if (!response.ok) return { connection: null };
-    const body: unknown = await response.json();
+    const body: unknown = await readBoundedJson(
+      response,
+      MAX_SFTP_CONNECTION_RESPONSE_BYTES,
+    );
     return { connection: sftpConnectionProjectionOf(body) };
   } catch {
     return { connection: null };

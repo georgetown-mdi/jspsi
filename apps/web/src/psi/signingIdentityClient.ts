@@ -1,6 +1,10 @@
 import { FINGERPRINT_REGEX } from "@psilink/core";
 
-import { isRecord, readJsonOrNull } from "./jobApiBody";
+import {
+  MAX_JOB_STATUS_RESPONSE_BYTES,
+  isRecord,
+  readJsonOrNull,
+} from "./jobApiBody";
 
 /**
  * The browser-side client for the console's signing-identity surface
@@ -130,8 +134,12 @@ export async function resolveSigningFingerprint(
   if (response.status === 400)
     return {
       kind: "invalid",
-      message: validationMessage(await readJsonOrNull(response)),
+      message: validationMessage(
+        await readJsonOrNull(response, MAX_JOB_STATUS_RESPONSE_BYTES),
+      ),
     };
   if (!response.ok) return { kind: "error" };
-  return fingerprintOutcomeOf(await readJsonOrNull(response));
+  return fingerprintOutcomeOf(
+    await readJsonOrNull(response, MAX_JOB_STATUS_RESPONSE_BYTES),
+  );
 }

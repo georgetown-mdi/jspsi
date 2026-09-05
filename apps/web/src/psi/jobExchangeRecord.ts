@@ -21,6 +21,10 @@
 
 import { EXCHANGE_RECORD_OUTCOMES } from "@psilink/core";
 
+import {
+  MAX_JOB_STATUS_RESPONSE_BYTES,
+  readBoundedJson,
+} from "@psi/jobApiBody";
 import { delayUntilAborted } from "@psi/delayUntilAborted";
 
 import { recordFileStamp } from "@bench/runOutputs";
@@ -175,7 +179,10 @@ export async function fetchJobExchangeRecordOffer(
   try {
     const response = await fetchImpl(`/api/jobs/${jobId}`, { method: "GET" });
     if (!response.ok) return { kind: "unanswered" };
-    const body: unknown = await response.json();
+    const body: unknown = await readBoundedJson(
+      response,
+      MAX_JOB_STATUS_RESPONSE_BYTES,
+    );
     if (body === null || typeof body !== "object") return { kind: "none" };
     const status = body as JobStatusFields;
     if (status.recordAvailable !== true)
