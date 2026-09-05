@@ -22,13 +22,14 @@ import { useOnlineStatus } from "@components/useOnlineStatus";
 import {
   LIFETIME_CHOICES,
   RESULTS_DIRECTION_LABELS,
-  answersRows,
-  availableTransports,
   expiryLabel,
-  inviterCreateStatus,
+} from "@psi/formatting";
+import { answersRows, inviterCreateStatus } from "@psi/inviterModel";
+import {
+  availableTransports,
   transportChooserCopy,
   transportRunMode,
-} from "@psi/inviterModel";
+} from "@psi/transportChooser";
 import { receiptsProblems } from "@psi/receiptsModel";
 import { runDiagnosticsProblems } from "@psi/runDiagnosticsModel";
 
@@ -52,13 +53,10 @@ import styles from "@styles/app.module.css";
 
 import { CitationDropNotice } from "./CitationDropNotice";
 
-import type {
-  AcquiredCsv,
-  InviterEditor,
-  SpineProblem,
-  SpineTarget,
-  Transport,
-} from "@psi/inviterModel";
+import type { AcquiredCsv, InviterEditor } from "@psi/inviterEditor";
+import type { SpineProblem, SpineTarget } from "@psi/inviterModel";
+import type { Transport } from "@psi/transportChooser";
+
 import type { ConnectionTuningDraft } from "@console/connectionTuningModel";
 import type { ExchangeFilesDraft } from "@console/exchangeFilesModel";
 import type { JobRendezvousConfig } from "@psi/jobClient/workInputClient";

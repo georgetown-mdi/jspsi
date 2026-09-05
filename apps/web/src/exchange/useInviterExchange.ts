@@ -36,7 +36,7 @@ import { whenDiagnostic } from "@utils/diagnostics";
 
 import { appendSanitizedRunWarning } from "@psi/runWarnings";
 import { buildRunOutputs } from "@psi/runOutputs";
-import { invitationUsable } from "@psi/inviterModel";
+import { invitationUsable } from "@psi/formatting";
 import { selectExchangeDriver } from "@psi/exchangeDriverSelection";
 
 import { isExchangeBusyError, reattachOnBusy } from "./reattachOnBusy";
@@ -71,7 +71,7 @@ import type { JobExchangeOptions } from "@jobs/intent";
 import type { ReceiptsIntentFields } from "@psi/receiptsModel";
 import type { RunDiagnosticsIntentFields } from "@psi/runDiagnosticsModel";
 import type { RunOutputs } from "@psi/runOutputs";
-import type { Transport } from "@psi/inviterModel";
+import type { Transport } from "@psi/transportChooser";
 
 /** A failed run, ready to render: the lifecycle's category (which decides the
  * recovery the alert offers) and the operator-facing alert content, composed

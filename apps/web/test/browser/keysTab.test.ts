@@ -6,7 +6,7 @@ import { page } from "vitest/browser";
 
 import { createElement } from "react";
 
-import { editorFromCsv, editorWithAuthoredDraft } from "@psi/inviterModel";
+import { editorFromCsv, editorWithAuthoredDraft } from "@psi/inviterEditor";
 
 import {
   buildAdvancedTerms,
@@ -18,7 +18,7 @@ import { consoleAcquiredCsv } from "@console/consoleAcquiredCsv";
 
 import { createAppMount } from "./renderApp";
 
-import type { AcquiredCsv } from "@psi/inviterModel";
+import type { AcquiredCsv } from "@psi/inviterEditor";
 
 // A minimal file with a date_of_birth column, so the seeded default keys
 // include one built from it (the element the dead-key transform below targets).

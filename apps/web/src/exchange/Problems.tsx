@@ -1,6 +1,6 @@
 import styles from "@styles/app.module.css";
 
-import type { RailProblem } from "@psi/inviterModel";
+import type { RailProblem } from "@psi/rail";
 
 /**
  * The work column's error summary: it appears only when something needs

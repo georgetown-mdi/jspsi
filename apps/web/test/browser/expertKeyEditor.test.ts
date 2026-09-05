@@ -15,7 +15,7 @@ import { ExpertKeyEditor } from "@components/ExpertKeyEditor";
 import { restoreMatchMedia, stubReducedMotion } from "./reducedMotion";
 import { createAppMount } from "./renderApp";
 
-import type { KeyVerdict } from "@psi/inviterModel";
+import type { KeyVerdict } from "@psi/inviterEditor";
 
 // A file holding every default linkage column, so the seed keeps the full key set
 // -- several collapsed key cards, each its own disclosure.

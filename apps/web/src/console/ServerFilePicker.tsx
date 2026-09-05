@@ -21,7 +21,7 @@ import {
   fetchJobInputs,
 } from "@psi/jobClient/workInputClient";
 
-import { byteSizeLabel, dateTimeLabel } from "@psi/inviterModel";
+import { byteSizeLabel, dateTimeLabel } from "@psi/formatting";
 
 import styles from "@styles/app.module.css";
 

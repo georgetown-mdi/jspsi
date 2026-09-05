@@ -5,10 +5,12 @@ import { authoredLinkageFields } from "@psilink/core";
 import { buildAdvancedTerms } from "@psi/authoring/advancedInvite";
 
 import {
-  answersRows,
-  availableTransports,
   byteSizeLabel,
-  cleaningCoverageProblems,
+  fileCardMeta,
+  invitationUsable,
+  lifetimeLabel,
+} from "@psi/formatting";
+import {
   editorFromCsv,
   editorReprofiled,
   editorWithAlgorithm,
@@ -28,25 +30,30 @@ import {
   editorWithOutputDirection,
   editorWithTransport,
   enabledKeys,
-  fileCardMeta,
   identifierProblem,
-  invitationUsable,
+  keySatisfiabilityFor,
+  resetToRecommended,
+  sealEditor,
+  unsealEditor,
+} from "@psi/inviterEditor";
+
+import {
+  answersRows,
+  cleaningCoverageProblems,
   inviterCleaningAttention,
   inviterCreateStatus,
-  inviterLedgerRows,
   inviterRailFacts,
-  isCliTransport,
-  keySatisfiabilityFor,
-  ledgerOutcomeOf,
-  lifetimeLabel,
-  resetToRecommended,
   reviewValidation,
-  sealEditor,
   spineProblems,
+} from "@psi/inviterModel";
+import { inviterLedgerRows, ledgerOutcomeOf } from "@psi/ledger";
+
+import {
+  availableTransports,
+  isCliTransport,
   transportChooserCopy,
   transportRunMode,
-  unsealEditor,
-} from "@psi/inviterModel";
+} from "@psi/transportChooser";
 
 import { OFFLINE_EXCHANGE_REASON } from "@psi/offlineExchangeGate";
 import { SPLIT_RENDEZVOUS_RETAIN_REQUIREMENT } from "@console/filedropRendezvousChoice";
@@ -57,11 +64,10 @@ import { SPLIT_RENDEZVOUS_RETAIN_REQUIREMENT } from "@console/filedropRendezvous
 // apps/web/test/unit/columnNameDisplay.test.ts.
 import { isolatedColumnName } from "@components/ColumnName";
 
-import type {
-  AcquiredCsv,
-  InviterCreateGates,
-  Transport,
-} from "@psi/inviterModel";
+import type { AcquiredCsv } from "@psi/inviterEditor";
+import type { InviterCreateGates } from "@psi/inviterModel";
+import type { Transport } from "@psi/transportChooser";
+
 import type { FieldValueCoverage } from "@psi/workers/nonEmptyAggregate";
 
 // A right-to-left override, written as an escape so the source holds no raw

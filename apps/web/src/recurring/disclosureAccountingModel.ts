@@ -30,7 +30,7 @@ import {
   sanitizeForDisplay,
 } from "@psilink/core";
 
-import { dateTimeLabel } from "@psi/inviterModel";
+import { dateTimeLabel } from "@psi/formatting";
 import { recordFileStamp } from "@psi/runOutputs";
 
 import type {

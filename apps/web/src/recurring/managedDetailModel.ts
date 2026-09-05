@@ -22,7 +22,7 @@ import {
   sanitizeForDisplay,
 } from "@psilink/core";
 
-import { dateTimeLabel } from "@psi/inviterModel";
+import { dateTimeLabel } from "@psi/formatting";
 
 import {
   SCHEDULE_INPUT_RESELECTION_NOTE,

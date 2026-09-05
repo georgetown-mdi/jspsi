@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 
-import { invitationUsable } from "@psi/inviterModel";
+import { invitationUsable } from "@psi/formatting";
 
 import { RecurringHandoff } from "@recurring/RecurringHandoff";
 import styles from "@styles/app.module.css";

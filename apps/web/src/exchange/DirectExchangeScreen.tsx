@@ -60,7 +60,7 @@ import type { AlertContent } from "@components/csvIntake";
 import type { ConnectionTuningDraft } from "@console/connectionTuningModel";
 import type { ExchangeFilesDraft } from "@console/exchangeFilesModel";
 import type { LinkageStrategy } from "@psilink/core";
-import type { RailStep } from "@psi/inviterModel";
+import type { RailStep } from "@psi/rail";
 import type { RunDiagnosticsDraft } from "@psi/runDiagnosticsModel";
 import type { SftpConnectionProjection } from "@jobs/jobManager";
 

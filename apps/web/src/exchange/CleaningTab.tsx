@@ -13,13 +13,13 @@ import {
 import { CleaningErrorBoundary } from "@components/CleaningErrorBoundary";
 import { StandardizationCards } from "@components/StandardizationCards";
 
-import { declaredFieldsFor } from "@psi/inviterModel";
+import { declaredFieldsFor } from "@psi/inviterEditor";
 import styles from "@styles/app.module.css";
 
 import type { LinkageField, StandardizationStep } from "@psilink/core";
 import type { ColumnSamples } from "@psi/columnSamples";
 import type { FieldValueCoverage } from "@psi/workers/nonEmptyAggregate";
-import type { InviterEditor } from "@psi/inviterModel";
+import type { InviterEditor } from "@psi/inviterEditor";
 
 /**
  * The Cleaning tab: per-field pipelines with previews and whole-file coverage,

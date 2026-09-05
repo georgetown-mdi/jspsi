@@ -1,5 +1,5 @@
 import type { DeploymentProfile } from "@utils/clientConfig";
-import type { Transport } from "./inviterModel";
+import type { Transport } from "./transportChooser";
 
 /**
  * How a chosen channel runs in a given build. `browser` runs the live WebRTC

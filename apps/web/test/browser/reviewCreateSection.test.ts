@@ -6,7 +6,7 @@ import { page } from "vitest/browser";
 
 import { createElement } from "react";
 
-import { editorFromCsv, editorWithAuthoredDraft } from "@psi/inviterModel";
+import { editorFromCsv, editorWithAuthoredDraft } from "@psi/inviterEditor";
 
 import {
   buildAdvancedTerms,
@@ -21,7 +21,7 @@ import { ReviewCreateSection } from "@exchange/ReviewCreateSection";
 
 import { createAppMount } from "./renderApp";
 
-import type { AcquiredCsv, InviterEditor } from "@psi/inviterModel";
+import type { AcquiredCsv, InviterEditor } from "@psi/inviterEditor";
 import type { AdvancedInviteDraft } from "@psi/authoring/advancedInvite";
 
 const CITATION_DROP_NOTICE_NAME =

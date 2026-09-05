@@ -1,7 +1,7 @@
 import { Alert, Button, TextInput } from "@mantine/core";
 import { IconAlertCircle } from "@tabler/icons-react";
 
-import { dateTimeLabel } from "@psi/inviterModel";
+import { dateTimeLabel } from "@psi/formatting";
 
 import styles from "@styles/app.module.css";
 

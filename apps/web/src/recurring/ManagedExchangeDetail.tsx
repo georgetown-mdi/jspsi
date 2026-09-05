@@ -16,7 +16,7 @@ import { isInstalledRuntime } from "@utils/installedRuntime";
 import { storedInputHandleUsable } from "@psi/managed/managedInputHandle";
 import { triggerBlobDownload } from "@components/blobDownload";
 
-import { dateLabel } from "@psi/inviterModel";
+import { dateLabel } from "@psi/formatting";
 
 import {
   LABEL_GUIDANCE,

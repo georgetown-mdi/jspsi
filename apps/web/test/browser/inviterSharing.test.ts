@@ -17,8 +17,9 @@ import {
   editorFromCsv,
   editorWithColumnDisclosure,
   editorWithColumnType,
-  inviterLedgerRows,
-} from "@psi/inviterModel";
+} from "@psi/inviterEditor";
+import { inviterLedgerRows } from "@psi/ledger";
+
 import { Ledger } from "@exchange/Ledger";
 import { MatchingSharingSection } from "@exchange/MatchingSharingSection";
 
@@ -31,7 +32,7 @@ import { isolatedColumnName } from "@components/ColumnName";
 import { createAppMount } from "./renderApp";
 import { visualOrderWithin } from "./visualOrder";
 
-import type { AcquiredCsv } from "@psi/inviterModel";
+import type { AcquiredCsv } from "@psi/inviterEditor";
 import type { Metadata } from "@psilink/core";
 
 // The inviter's step 2 states what the partner will receive in two voices at

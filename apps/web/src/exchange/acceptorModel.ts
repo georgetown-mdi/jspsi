@@ -10,15 +10,16 @@ import { isBareSftpHost } from "@psi/sftpHost";
 
 import { isolatedColumnName } from "@components/ColumnName";
 
-import {
-  TRANSPORT_LEDGER_LABELS,
-  dateTimeLabel,
-  settledReceiveValue,
-} from "@psi/inviterModel";
+import { dateTimeLabel } from "@psi/formatting";
+import { settledReceiveValue } from "@psi/ledger";
+
+import { TRANSPORT_LEDGER_LABELS } from "@psi/transportChooser";
 import { saveRailNote } from "./saveExchangeModel";
 
 import type { InvitationToken, LinkageTerms, Metadata } from "@psilink/core";
-import type { LedgerOutcome, RailFact, RailStepState } from "@psi/inviterModel";
+import type { LedgerOutcome } from "@psi/ledger";
+
+import type { RailFact, RailStepState } from "@psi/rail";
 import type { AcceptableInvitation } from "@psi/acceptInvitation";
 
 /**

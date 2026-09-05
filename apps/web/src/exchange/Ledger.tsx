@@ -9,7 +9,7 @@ import styles from "@styles/app.module.css";
 import { DisclosureSection } from "../components/DisclosureSection";
 import { useNarrowViewport } from "./narrowViewport";
 
-import type { RailFact } from "@psi/inviterModel";
+import type { RailFact } from "@psi/rail";
 import type { ReactNode } from "react";
 
 /** The narrow share bar's rows in ledger order: the headline disclosure facts

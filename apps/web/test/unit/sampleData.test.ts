@@ -16,9 +16,9 @@ import {
   SAMPLE_PARTNER_CSV,
   SAMPLE_PARTNER_FILE_NAME,
 } from "@exchange/sampleData";
-import { editorFromCsv } from "@psi/inviterModel";
+import { editorFromCsv } from "@psi/inviterEditor";
 
-import type { AcquiredCsv } from "@psi/inviterModel";
+import type { AcquiredCsv } from "@psi/inviterEditor";
 import type { CSVRow } from "@psilink/core";
 
 const EXPECTED_COLUMNS = [

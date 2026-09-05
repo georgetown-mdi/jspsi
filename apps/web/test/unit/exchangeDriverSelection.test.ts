@@ -7,7 +7,7 @@ import {
 
 import type { DeploymentProfile } from "@utils/clientConfig";
 import type { ExchangeDriverSelection } from "@psi/exchangeDriverSelection";
-import type { Transport } from "@psi/inviterModel";
+import type { Transport } from "@psi/transportChooser";
 
 const PROFILES: ReadonlyArray<DeploymentProfile> = ["hosted", "console"];
 const CHANNELS: ReadonlyArray<Transport> = ["browser", "sftp", "filedrop"];

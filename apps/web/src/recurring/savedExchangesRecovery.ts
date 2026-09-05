@@ -13,7 +13,7 @@
  * entries hold display essentials only.
  */
 
-import { dateLabel } from "@psi/inviterModel";
+import { dateLabel } from "@psi/formatting";
 
 import { SIDE_LABEL } from "./savedExchangesModel";
 

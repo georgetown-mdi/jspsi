@@ -9,7 +9,7 @@ import { MAX_CSV_FILE_BYTES } from "@components/csvIntake";
 
 import { isConsoleBuild } from "@utils/clientConfig";
 
-import { fileCardMeta } from "@psi/inviterModel";
+import { fileCardMeta } from "@psi/formatting";
 
 import { ServerFilePicker } from "@console/ServerFilePicker";
 import styles from "@styles/app.module.css";
@@ -20,7 +20,7 @@ import type {
   ProfiledJobInput,
   WorkInputReference,
 } from "@psi/jobClient/workInputClient";
-import type { AcquiredCsv } from "@psi/inviterModel";
+import type { AcquiredCsv } from "@psi/inviterEditor";
 import type { AlertContent } from "@components/csvIntake";
 import type { FileRejection } from "@mantine/dropzone";
 

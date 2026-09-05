@@ -3,7 +3,7 @@ import type {
   GeneratedInvitation,
 } from "@psi/invitation";
 import type { ExchangeFileConnection, ExchangeFileInput } from "@psilink/core";
-import type { Transport } from "@psi/inviterModel";
+import type { Transport } from "@psi/transportChooser";
 
 /**
  * The pure model behind the save-exchange-file surface: the transport-specific

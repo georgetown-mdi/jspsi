@@ -50,7 +50,7 @@ import type {
   AdvancedInviteDraft,
   FuzzyComparison,
 } from "@psi/authoring/advancedInvite";
-import type { KeyVerdict } from "@psi/inviterModel";
+import type { KeyVerdict } from "@psi/inviterEditor";
 
 /** The expert-editor badge copy and Mantine color for each per-key verdict
  * ({@link KeyVerdict}), reading consistently with the guided list. A dead key is

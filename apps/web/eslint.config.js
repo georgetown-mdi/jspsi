@@ -119,10 +119,10 @@ const rawRowsConsumers = [
   "src/exchange/AcceptorScreen.tsx",
   "src/exchange/InviterScreen.tsx",
   "src/exchange/useInviterExchange.ts",
-  "src/psi/inviterModel.ts",
+  "src/psi/inviterEditor.ts",
+  "src/psi/runOutputs.ts",
   "src/psi/workers/nonEmptyAggregate.worker.ts",
   "src/psi/workers/nonEmptyAggregateController.ts",
-  "src/psi/runOutputs.ts",
 ];
 
 export default [

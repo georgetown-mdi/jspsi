@@ -26,7 +26,7 @@ import { selectExchangeDriver } from "@psi/exchangeDriverSelection";
 
 import { appendSanitizedRunWarning } from "@psi/runWarnings";
 import { buildRunOutputs } from "@psi/runOutputs";
-import { invitationUsable } from "@psi/inviterModel";
+import { invitationUsable } from "@psi/formatting";
 
 import {
   WAITING_STAGE_ID,
@@ -66,7 +66,7 @@ import type { ReceiptsIntentFields } from "@psi/receiptsModel";
 import type { RunDiagnosticsIntentFields } from "@psi/runDiagnosticsModel";
 import type { RunFailure } from "./useInviterExchange";
 import type { RunOutputs } from "@psi/runOutputs";
-import type { Transport } from "@psi/inviterModel";
+import type { Transport } from "@psi/transportChooser";
 
 /** The connection-endpoint channels the acceptor can drive, narrowed from the
  * token by {@link prepareAcceptedInvitation}: WebRTC always, file-drop or SFTP on

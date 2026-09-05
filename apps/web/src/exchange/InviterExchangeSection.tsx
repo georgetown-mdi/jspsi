@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 
 import { Button } from "@mantine/core";
 
-import { dateTimeLabel, invitationUsable } from "@psi/inviterModel";
+import { dateTimeLabel, invitationUsable } from "@psi/formatting";
 import { RecurringHandoff } from "@recurring/RecurringHandoff";
 import styles from "@styles/app.module.css";
 

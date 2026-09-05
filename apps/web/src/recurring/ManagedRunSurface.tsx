@@ -37,7 +37,7 @@ import { runManagedExchangeInBrowser } from "@psi/managed/managedRunDriver";
 import { storedInputHandleUsable } from "@psi/managed/managedInputHandle";
 import { whenDiagnostic } from "@utils/diagnostics";
 
-import { dateLabel, dateTimeLabel } from "@psi/inviterModel";
+import { dateLabel, dateTimeLabel } from "@psi/formatting";
 import { OFFLINE_EXCHANGE_REASON } from "@psi/offlineExchangeGate";
 import { appendSanitizedRunWarning } from "@psi/runWarnings";
 

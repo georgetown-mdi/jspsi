@@ -38,13 +38,17 @@ import {
   declaredFieldsFor,
   keySatisfiabilityFor,
   seedRows,
-} from "@psi/inviterModel";
+} from "@psi/inviterEditor";
 
 import styles from "@styles/app.module.css";
 
 import { CITATION_DROP_TITLE, CitationDropNotice } from "./CitationDropNotice";
 
-import type { AcquiredCsv, InviterEditor, KeyVerdict } from "@psi/inviterModel";
+import type {
+  AcquiredCsv,
+  InviterEditor,
+  KeyVerdict,
+} from "@psi/inviterEditor";
 import type { Algorithm, LinkageStrategy, LinkageTerms } from "@psilink/core";
 import type { AdvancedInviteDraft } from "@psi/authoring/advancedInvite";
 

@@ -6,7 +6,7 @@ import { Link } from "@tanstack/react-router";
 
 import { DEFAULT_PEER_TIMEOUT_MS } from "@psilink/core";
 
-import { dateTimeLabel } from "@psi/inviterModel";
+import { dateTimeLabel } from "@psi/formatting";
 import styles from "@styles/app.module.css";
 
 import type { NoResultFileOutputs, RunOutputs } from "@psi/runOutputs";

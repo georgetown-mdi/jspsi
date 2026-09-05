@@ -1,5 +1,5 @@
 import type { AcceptorAcquiredCsv } from "@exchange/acceptorColumnsModel";
-import type { AcquiredCsv } from "@psi/inviterModel";
+import type { AcquiredCsv } from "@psi/inviterEditor";
 import type { CSVRow } from "@psilink/core";
 
 /**
