@@ -23,6 +23,13 @@ import type { TLSSocket } from "node:tls";
  * (measured: a refused port reports `ECONNREFUSED` with a null
  * `authorizationError`). The socket is destroyed as soon as either outcome is
  * known and nothing is ever written to it.
+ *
+ * The probe dials the configured endpoint's own host and port directly. When
+ * Node's opt-in environment proxying (`NODE_USE_ENV_PROXY` with `HTTPS_PROXY`
+ * set) routes the `WebSocket` dial through a proxy instead, the probe's
+ * verdict describes the origin's certificate rather than the proxy's, and the
+ * failure the operator hit at the proxy is reported as the generic signaling
+ * failure.
  */
 
 /**
