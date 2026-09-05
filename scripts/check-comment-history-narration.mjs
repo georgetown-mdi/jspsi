@@ -41,8 +41,8 @@
 //   C. THE TELLS. NARRATION_TELLS below, each a phrase whose ordinary reading is
 //      a statement about how this repository changed. They are phrases rather
 //      than the three words CONTRIBUTING.md names, which is the design decision
-//      this check rests on: measured over the 115,834 comment lines of the tree
-//      it was written against, bare "now" appears on 329, "no longer" on 187 and
+//      this check rests on: measured over the 117,042 comment lines of the tree
+//      it was written against, bare "now" appears on 329, "no longer" on 188 and
 //      "previously" on 11, and nearly every one of those is a statement about
 //      run time -- `Date.now()`, a path that no longer exists, a previously
 //      captured error. A check on the bare words would report a few hundred

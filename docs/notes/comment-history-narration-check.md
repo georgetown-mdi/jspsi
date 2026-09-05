@@ -38,12 +38,12 @@ measurement of the wiring.
 ## Why phrases and not the three words
 
 Measured over the tree at `66419d3a`: 1,230 files in the scanned extensions,
-115,834 comment lines. The three words CONTRIBUTING.md names appear on:
+117,042 comment lines. The three words CONTRIBUTING.md names appear on:
 
 | Word         | Comment lines |
 | ------------ | ------------- |
 | `now`        | 329           |
-| `no longer`  | 187           |
+| `no longer`  | 188           |
 | `previously` | 11            |
 
 Nearly every one is a statement about run time, not about the repository:
