@@ -16,6 +16,7 @@ import {
   TEARDOWN_SIGNALS,
   appScriptNames,
   coreBuildIsCurrent,
+  createTeardown,
   parseAppScript,
   runDevLoop,
   startProcess,
@@ -155,6 +156,20 @@ describe("the root dev loop", () => {
     expect(h.watchers).toHaveLength(0);
   });
 
+  it("starts nothing long-running when a signal ends the build", async () => {
+    const h = harness();
+    await expect(
+      runDevLoop({
+        appScript: "dev",
+        isCoreBuildCurrent: h.isCoreBuildCurrent,
+        runToCompletion: h.runToCompletion,
+        startWatcher: h.startWatcher,
+        teardownSignal: () => "SIGINT",
+      }),
+    ).resolves.toBe(130);
+    expect(h.watchers).toHaveLength(0);
+  });
+
   it("takes down the app server when the core watcher exits", async () => {
     const h = harness();
     const { loop } = await startedLoop(h);
@@ -198,8 +213,9 @@ describe("core's build currency", () => {
 
 // A workspace whose one script runs a node process that records its own pid and
 // then stays up, reproducing the shape the dev loop tears down: npm, the shell
-// npm runs the script through, and the tool underneath.
-function leafWorkspace() {
+// npm runs the script through, and the tool underneath. It never finishes, so it
+// also stands in for a core build a signal arrives in the middle of.
+function leafWorkspace(script = "leaf") {
   const root = mkdtempSync(join(tmpdir(), "psilink-dev-leaf-"));
   writeFileSync(
     join(root, "package.json"),
@@ -207,7 +223,7 @@ function leafWorkspace() {
       name: "leaf-probe",
       version: "0.0.0",
       private: true,
-      scripts: { leaf: "node leaf.mjs" },
+      scripts: { [script]: "node leaf.mjs" },
     }),
   );
   writeFileSync(
@@ -277,6 +293,49 @@ describe.skipIf(ON_WINDOWS)("a child of the dev loop", () => {
     },
     90_000,
   );
+});
+
+// npm reports a signal rather than an exit code for the child it killed, so the
+// build's own result cannot say whether dist was brought up to date. Starting
+// the watchers on it brings rollup and the dev server up for a session already
+// being torn down, and they outlive the loop that started them.
+describe.skipIf(ON_WINDOWS)("a teardown signal during the core build", () => {
+  const leaves = [];
+
+  afterEach(() => {
+    for (const leaf of leaves.splice(0)) {
+      if (isAlive(leaf)) process.kill(leaf, "SIGKILL");
+    }
+  });
+
+  it("starts no watcher and leaves no build process behind", async () => {
+    const root = leafWorkspace("build");
+    const pidFile = join(root, "leaf.pid");
+    const teardown = createTeardown();
+    const started = [];
+
+    const loop = runDevLoop({
+      appScript: "dev",
+      isCoreBuildCurrent: () => false,
+      runToCompletion: () =>
+        teardown.track(startProcess(["--prefix", root, "run", "build"])).exited,
+      startWatcher: (args) => {
+        started.push(args);
+        return { kill: () => {}, exited: Promise.resolve(0) };
+      },
+      teardownSignal: teardown.signal,
+    });
+
+    await until(() => existsSync(pidFile), 60_000, "the core build to start");
+    const build = Number(readFileSync(pidFile, "utf8"));
+    leaves.push(build);
+    await new Promise((resume) => setTimeout(resume, 800));
+    teardown.tearDown("SIGTERM");
+
+    expect(await loop).toBe(143);
+    expect(started).toEqual([]);
+    await until(() => !isAlive(build), 15_000, `pid ${build} to exit`);
+  }, 90_000);
 });
 
 describe("the dev loop's app-script argument", () => {
