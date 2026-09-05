@@ -1,6 +1,6 @@
 /// <reference types="@vitest/browser-playwright/context" />
 
-import { afterEach, beforeEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test } from "vitest";
 
 import { page, userEvent } from "vitest/browser";
 
@@ -38,7 +38,6 @@ import {
   hostileTerms,
   hostileVariants,
 } from "@psilink/core/testing";
-import { restoreMatchMedia, stubReducedMotion } from "./reducedMotion";
 import { createAppMount } from "./renderApp";
 
 import type { ComponentProps } from "react";
@@ -148,8 +147,7 @@ afterEach(app.unmount);
 function renderTerms(
   linkageTerms: LinkageTerms = terms,
   options?: {
-    perspective?: "review" | "accepted" | "proposing";
-    condensed?: boolean;
+    perspective?: "review" | "proposing";
     disclosedPayloadColumns?: Array<string>;
     inviterRetainsFiles?: boolean;
     connectionEndpoint?: ConnectionEndpoint;
@@ -161,7 +159,6 @@ function renderTerms(
     createElement(InvitationTerms, {
       linkageTerms,
       ...(options?.perspective ? { perspective: options.perspective } : {}),
-      ...(options?.condensed ? { condensed: true } : {}),
       ...(options?.inviterRetainsFiles !== undefined
         ? { inviterRetainsFiles: options.inviterRetainsFiles }
         : {}),
@@ -512,23 +509,6 @@ describe("InvitationTerms: per-key matching disclosures", () => {
     );
   });
 
-  test("the attribution caveat is absent from the during-run accepted view, after consent is committed", async () => {
-    // Same gate as the unverified-identity note: the caveat is a pre-consent
-    // decision-point marker, so it drops once the decision it informs is past.
-    // The citation itself stays, since the accepted terms still hold it, and so
-    // does the disproved half's warning, since it names what a party accepted
-    // under a false provenance.
-    renderTerms(citingTerms, { perspective: "accepted" });
-    await expect.element(toggle("Matching strategies")).toBeInTheDocument();
-    expect(app.container.textContent).toContain('"hmis-keys" 2.3.0');
-    expect(app.container.textContent).toContain(
-      LINKAGE_RULE_SET_VERDICT_COPY.contradicted.note,
-    );
-    expect(app.container.textContent).not.toContain(
-      LINKAGE_RULE_SET_VERDICT_COPY.unchecked.note,
-    );
-  });
-
   test("terms citing no rule set render no citation at all", async () => {
     // Hand-authored rules have no citation, and inventing one would attribute
     // them -- so the block is absent rather than empty or hedged, and there is no
@@ -750,188 +730,6 @@ describe("InvitationTerms: per-key matching disclosures", () => {
   });
 });
 
-describe("InvitationTerms: the condensed reference view folds the lower tiers", () => {
-  // Surfaces that show the terms as post-consent / authored REFERENCE render the
-  // summary condensed: the disclose/produce facts stay always-visible; the lower
-  // reference tiers (what you receive, how records are matched, the legal agreement,
-  // and "Other details") fold behind one "See the full terms" disclosure. The
-  // acceptor's PRE-CONSENT review screen never passes condensed -- guarded directly
-  // in accept.test.ts, and here by every other test rendering without it.
-  const FOLD = "See the full terms";
-  function renderCondensed(overrides?: Partial<LinkageTerms>) {
-    renderTerms(
-      { ...terms, ...overrides },
-      { perspective: "proposing", condensed: true },
-    );
-  }
-
-  test("the must-see facts stay always-visible; the lower tiers fold behind a collapsed disclosure", async () => {
-    renderCondensed();
-
-    // The fold toggle is present and collapsed by default.
-    const fold = toggle(FOLD);
-    await expect.element(fold).toBeInTheDocument();
-    expect(fold.element().getAttribute("aria-expanded")).toBe("false");
-
-    // It is a real disclosure held to the same contract as the others: while closed
-    // its panel is hidden from AT + the tab order (aria-hidden + inert), proving the
-    // tiers are present-but-hidden rather than merely absent.
-    const collapse = await readyCollapse(FOLD);
-    expect(collapse.getAttribute("aria-hidden")).toBe("true");
-    expect(collapse.hasAttribute("inert")).toBe(true);
-
-    // The must-see facts stay in the always-visible core: the viewer's own send
-    // ("What you disclose", chips) and the matching-method / result-sharing pair
-    // ("What the exchange produces").
-    const disclose = group("What you disclose");
-    await expect.element(disclose).toBeInTheDocument();
-    expect(disclose.element().textContent).toContain(
-      "Columns sent to your partner",
-    );
-    const produce = group("What the exchange produces");
-    await expect.element(produce).toBeInTheDocument();
-    expect(produce.element().textContent).toContain("Result sharing");
-
-    // The lower tiers are folded away. Gate on the fold panel having committed first
-    // (readyPanel), so a regression that leaked the tiers visible cannot pass on a
-    // not-yet-committed read: once committed, they are still out of the accessibility
-    // tree until the fold is opened.
-    await readyPanel(FOLD);
-    expect(group("How records are matched").query()).toBeNull();
-    expect(group("Legal agreement").query()).toBeNull();
-  });
-
-  test("opening the fold reveals the lower tiers -- nothing was removed, only folded", async () => {
-    renderCondensed();
-    await userEvent.click(toggle(FOLD));
-
-    // Once expanded, the matching mechanics and the legal-agreement governance frame
-    // are reachable again.
-    await expect.element(group("How records are matched")).toBeInTheDocument();
-    await expect.element(group("Legal agreement")).toBeInTheDocument();
-  });
-
-  test("folding never sweeps the disclosure-critical count-only tier out of the always-visible core", async () => {
-    // psi-c states a disclosure GUARANTEE (only the count is revealed), so the tier
-    // that bounds it must stay in the always-visible "What the exchange produces"
-    // tier -- folding it would let a viewer treat count-only as unqualified. This is
-    // the tier that may never sit below its headline, so it must never move behind
-    // the fold either.
-    renderTerms(COUNT_ONLY_PROBE_TERMS, {
-      perspective: "proposing",
-      condensed: true,
-    });
-    const produce = group("What the exchange produces");
-    await expect.element(produce).toBeInTheDocument();
-    expect(produce.element().textContent).toContain(COUNT_ONLY_HEADLINE);
-    expect(produce.element().textContent).toContain(
-      CONSENT_FACTS.countOnlyInputChoice.note,
-    );
-  });
-
-  test("the fold toggle is self-describing (perspective-neutral, so it fits agreed terms too)", async () => {
-    renderCondensed();
-    const fold = toggle(FOLD);
-    await expect.element(fold).toBeInTheDocument();
-    const describedById = fold.element().getAttribute("aria-describedby");
-    expect(describedById).toBeTruthy();
-    expect(document.getElementById(describedById!)?.textContent).toBe(
-      "Contains how records are matched and the other terms.",
-    );
-  });
-});
-
-describe("InvitationTerms: a key disclosure stays mounted but hidden under a reduced-motion preference", () => {
-  // Since Mantine 9.4 a closed Collapse no longer unmounts its panel for a
-  // reduced-motion user: it keeps the panel mounted inside a hidden React Activity
-  // boundary and hides it with display:none (rather than the height animation plus
-  // aria-hidden + inert it uses with motion). display:none keeps the collapsed
-  // detail out of sight, the accessibility tree, and the tab order all the same.
-  // Force the reduced-motion configuration -- the OS signal (matchMedia) and the
-  // theme switch that honors it -- and assert each disclosure's panel is present,
-  // hidden, and its aria-controls still resolves to its wrapper.
-  beforeEach(() => {
-    stubReducedMotion(true);
-  });
-
-  afterEach(restoreMatchMedia);
-
-  test("every disclosure's aria-controls resolves to a present, hidden panel while collapsed under reduced motion", async () => {
-    app.render(createElement(InvitationTerms, { linkageTerms: terms }));
-
-    // The always-mounted-wrapper design for every disclosure. The top-level ones
-    // are the matching list ("Matching strategies") and the master "Other details";
-    // the per-key widgets live nested inside "Matching strategies" and are exercised
-    // after it is opened. Since Mantine 9.4 a closed Collapse under reduced motion
-    // keeps the collapsed detail out of sight one of two ways depending on the
-    // environment -- it unmounts the panel, or it keeps it mounted in a hidden
-    // React Activity boundary (display:none) -- and both leave the detail out of the
-    // accessibility tree and the tab order. The durable invariant across both is
-    // that the wrapper holding aria-controls stays a present element, so the
-    // reference never dangles (the reason the id lives on the wrapper, not the
-    // panel). Assert that, after waiting for the reduced-motion media effect to
-    // collapse the panel away.
-    async function expectResolvableCollapsedWrapper(name: string) {
-      await expect.element(toggle(name)).toBeInTheDocument();
-      expect(toggle(name).element().getAttribute("aria-expanded")).toBe(
-        "false",
-      );
-      const id = toggle(name).element().getAttribute("aria-controls");
-      expect(id).toBeTruthy();
-      // Wait for the post-mount reduced-motion effect to settle: the closed panel
-      // is then either gone (unmounted) or hidden (display:none).
-      await expect
-        .poll(() => {
-          const panel = document.getElementById(id!)
-            ?.firstElementChild as HTMLElement | null;
-          return panel === null || getComputedStyle(panel).display === "none";
-        })
-        .toBe(true);
-      // ... and through it all the wrapper stays present, so aria-controls resolves.
-      expect(document.getElementById(id!)).not.toBeNull();
-    }
-
-    for (const name of ["Matching strategies", "Other details"])
-      await expectResolvableCollapsedWrapper(name);
-
-    // Open the matching list so its per-key disclosures mount, then assert each
-    // closed per-key wrapper likewise stays a resolvable target.
-    await userEvent.click(toggle("Matching strategies"));
-    for (const name of ["SSN + LN + DOB", "SSN + FN1"])
-      await expectResolvableCollapsedWrapper(name);
-  });
-
-  test("the condensed fold's aria-controls wrapper survives collapse under reduced motion", async () => {
-    // The new "See the full terms" fold uses the same always-mounted-wrapper design.
-    // Under reduced motion Mantine may UNMOUNT the closed panel, so an id placed on
-    // the Collapse panel (instead of the outer wrapper) would dangle -- assert the
-    // wrapper stays present here, the invariant the other disclosures are held to.
-    app.render(
-      createElement(InvitationTerms, {
-        linkageTerms: terms,
-        perspective: "proposing",
-        condensed: true,
-      }),
-    );
-    const fold = toggle("See the full terms");
-    await expect.element(fold).toBeInTheDocument();
-    expect(fold.element().getAttribute("aria-expanded")).toBe("false");
-    const id = fold.element().getAttribute("aria-controls");
-    expect(id).toBeTruthy();
-    // Wait for the reduced-motion effect to settle: the closed panel is then either
-    // gone (unmounted) or hidden (display:none).
-    await expect
-      .poll(() => {
-        const panel = document.getElementById(id!)
-          ?.firstElementChild as HTMLElement | null;
-        return panel === null || getComputedStyle(panel).display === "none";
-      })
-      .toBe(true);
-    // ... and through it all the wrapper stays present, so aria-controls resolves.
-    expect(document.getElementById(id!)).not.toBeNull();
-  });
-});
-
 describe("InvitationTerms: the counterparty identity is flagged unverified at consent", () => {
   // At the pre-consent review screen the displayed "Invitation from <name>" is a
   // free-text field the sender typed, included in an invitation accepted on a
@@ -939,11 +737,9 @@ describe("InvitationTerms: the counterparty identity is flagged unverified at co
   // keeps the acceptor from treating it as a psilink-verified fact; it is a small
   // marker that does not overstate a self-asserted field, not a directive (parties
   // normally coordinate the first exchange out of band, so they already know the
-  // counterparty). Review-only: the note is a pre-consent decision-point marker, so it
-  // is dropped on the during-run "accepted" view once consent is committed (the run's
-  // handshake authenticates the peer's secret, not that the name is true), and the
-  // inviter's "proposing" preview shows its OWN identity (which needs no such note).
-  function render(perspective?: "review" | "accepted" | "proposing") {
+  // counterparty). The inviter's "proposing" preview shows its OWN identity,
+  // which needs no such note.
+  function render(perspective?: "review" | "proposing") {
     renderTerms(terms, perspective ? { perspective } : undefined);
   }
 
@@ -990,37 +786,16 @@ describe("InvitationTerms: the counterparty identity is flagged unverified at co
     await expect.element(toggle("Other details")).toBeInTheDocument();
     expect(app.container.textContent).not.toContain(noteText);
   });
-
-  test("the note is absent from the during-run accepted view, after consent is committed", async () => {
-    // The "accepted" view is the during-run view, after the acceptor has already
-    // consented; the note is scoped to the pre-consent decision point, so it is
-    // dropped there. Not because the name becomes verified -- the run's handshake
-    // authenticates the peer's secret, not that the name is true -- but because the
-    // decision the note informs is past.
-    render("accepted");
-    await expect.element(toggle("Other details")).toBeInTheDocument();
-    expect(app.container.textContent).not.toContain(noteText);
-    // The note is absent here, so the identity heading must not have a dangling
-    // aria-describedby pointing at a note that no longer renders.
-    expect(
-      page
-        .getByRole("heading", {
-          name: "Invitation from County Health Department",
-        })
-        .element()
-        .getAttribute("aria-describedby"),
-    ).toBeNull();
-  });
 });
 
 describe("InvitationTerms: result sharing is stated from the viewer's perspective", () => {
   // Render the same terms with a chosen output direction and perspective. The
   // viewer is the inviter under "proposing" (its own preview) and the acceptor
-  // under "review"/"accepted"; each must read its OWN outcome first-person, which
+  // under "review"; each must read its OWN outcome first-person, which
   // is the form clear enough to consent on for a one-sided exchange.
   function renderOutput(
     output: { expectsOutput: boolean; shareWithPartner: boolean },
-    perspective?: "review" | "accepted" | "proposing",
+    perspective?: "review" | "proposing",
   ) {
     renderTerms(
       { ...terms, output },
@@ -1245,7 +1020,7 @@ describe("InvitationTerms: always-visible egress and legal-agreement facts, tier
   // count stays in the "Other details" disclosure.
   function render(
     linkageTerms: LinkageTerms,
-    perspective?: "review" | "accepted" | "proposing",
+    perspective?: "review" | "proposing",
   ) {
     renderTerms(linkageTerms, perspective ? { perspective } : undefined);
   }
@@ -1375,7 +1150,7 @@ describe("InvitationTerms: a partner-authored allowed-character constraint is on
   const GROUP = "Partner-defined character constraints";
   function render(
     linkageTerms: LinkageTerms,
-    perspective?: "review" | "accepted" | "proposing",
+    perspective?: "review" | "proposing",
   ) {
     renderTerms(linkageTerms, perspective ? { perspective } : undefined);
   }
@@ -1498,7 +1273,7 @@ describe("InvitationTerms: always-visible ingress count in the 'What you receive
   function render(
     linkageTerms: LinkageTerms,
     options?: {
-      perspective?: "review" | "accepted" | "proposing";
+      perspective?: "review" | "proposing";
       disclosedPayloadColumns?: Array<string>;
     },
   ) {
@@ -1615,7 +1390,7 @@ describe("InvitationTerms: the acceptor's outbound-disclosure forward-reference"
   // with the actual send list (the acceptor is not told "confirm later" once it has
   // the list), and is absent from the inviter's own preview.
   function render(options?: {
-    perspective?: "review" | "accepted" | "proposing";
+    perspective?: "review" | "proposing";
     outboundColumns?: Array<string>;
   }) {
     renderTerms(terms, options);
@@ -1645,7 +1420,7 @@ describe("InvitationTerms: the acceptor's outbound-disclosure forward-reference"
     // A chosen file supplies outboundColumns: the real send list renders (the
     // acceptor's own header, sanitized as chips) and the forward-reference must not
     // also show.
-    render({ perspective: "accepted", outboundColumns: ["risk_score"] });
+    render({ perspective: "review", outboundColumns: ["risk_score"] });
     await expect.element(toggle("Other details")).toBeInTheDocument();
     expect(app.container.textContent).not.toContain(forwardReference);
     expect(app.container.textContent).toContain("risk_score");
@@ -1655,7 +1430,7 @@ describe("InvitationTerms: the acceptor's outbound-disclosure forward-reference"
     // outboundColumns [] is a chosen file that sends nothing: the explicit "no
     // columns are sent" confirmation renders, so the forward-reference must not --
     // the set IS known (to be empty), the decision no longer pending.
-    render({ perspective: "accepted", outboundColumns: [] });
+    render({ perspective: "review", outboundColumns: [] });
     await expect.element(toggle("Other details")).toBeInTheDocument();
     expect(app.container.textContent).not.toContain(forwardReference);
     expect(app.container.textContent).toContain(
@@ -1695,7 +1470,7 @@ describe("InvitationTerms: the acceptor's outbound send is gated on the inviting
   function render(
     linkageTerms: LinkageTerms,
     options: {
-      perspective: "review" | "accepted" | "proposing";
+      perspective: "review" | "proposing";
       outboundColumns?: Array<string>;
     },
   ) {
@@ -1713,7 +1488,7 @@ describe("InvitationTerms: the acceptor's outbound send is gated on the inviting
 
   test("a chosen file's columns are not listed, and the line states why", async () => {
     render(oneSided, {
-      perspective: "accepted",
+      perspective: "review",
       outboundColumns: ["risk_score", "diagnosis"],
     });
     await expect.element(toggle("Other details")).toBeInTheDocument();
@@ -1749,7 +1524,7 @@ describe("InvitationTerms: the acceptor's outbound send is gated on the inviting
   test("wins over the empty-set confirmation", async () => {
     // A chosen file that discloses nothing: both statements are true, and the one
     // that survives the operator changing their input file is the one shown.
-    render(oneSided, { perspective: "accepted", outboundColumns: [] });
+    render(oneSided, { perspective: "review", outboundColumns: [] });
     await expect.element(toggle("Other details")).toBeInTheDocument();
     expect(app.container.textContent).toContain(NO_PAYLOAD_SENTENCE);
     expect(app.container.textContent).not.toContain(emptySendLine);
@@ -1759,7 +1534,7 @@ describe("InvitationTerms: the acceptor's outbound send is gated on the inviting
     // The direction is the whole of the gate: the same acceptor set renders as
     // chips under the two-sided module terms.
     render(terms, {
-      perspective: "accepted",
+      perspective: "review",
       outboundColumns: ["risk_score", "diagnosis"],
     });
     await expect.element(toggle("Other details")).toBeInTheDocument();
@@ -1856,7 +1631,7 @@ describe("InvitationTerms: the inviter's own send is gated on the accepting part
     // outbound list must stand. An acceptor block gated on the inviter's fact fails
     // here.
     renderTerms(acceptorGetsNothing, {
-      perspective: "accepted",
+      perspective: "review",
       outboundColumns: ["diagnosis"],
     });
     await expect.element(toggle("Other details")).toBeInTheDocument();
@@ -1878,7 +1653,7 @@ describe("InvitationTerms: the outbound-send caption does not presuppose a non-e
   // that the caption is accurate over both branches -- and that the presupposing
   // phrasing does not creep back at either call site.
   function render(options: {
-    perspective: "review" | "accepted";
+    perspective: "review";
     outboundColumns?: Array<string>;
   }) {
     renderTerms(terms, options);
@@ -1893,7 +1668,7 @@ describe("InvitationTerms: the outbound-send caption does not presuppose a non-e
   test("displays as a topic phrase, not a definite send, above the empty-send confirmation", async () => {
     // A chosen file that sends nothing (outboundColumns []): the caption sits above
     // the explicit "No columns are sent ..." body.
-    render({ perspective: "accepted", outboundColumns: [] });
+    render({ perspective: "review", outboundColumns: [] });
     await expect.element(toggle("Other details")).toBeInTheDocument();
     expect(app.container.textContent).toContain(caption);
     expect(app.container.textContent).toContain(
@@ -1962,7 +1737,7 @@ describe("InvitationTerms: the outbound send states its count before the column 
     // A chosen file supplies three columns: the magnitude is stated as a sentence
     // above the three chips, not left to be counted off them.
     renderTerms(terms, {
-      perspective: "accepted",
+      perspective: "review",
       outboundColumns: ["risk_score", "diagnosis", "zip"],
     });
     await expect.element(toggle("Other details")).toBeInTheDocument();
@@ -1974,7 +1749,7 @@ describe("InvitationTerms: the outbound send states its count before the column 
 
   test("a single column is stated in the singular", async () => {
     renderTerms(terms, {
-      perspective: "accepted",
+      perspective: "review",
       outboundColumns: ["risk_score"],
     });
     await expect.element(toggle("Other details")).toBeInTheDocument();
@@ -2002,7 +1777,7 @@ describe("InvitationTerms: the outbound send states its count before the column 
     // A chosen file that sends nothing: the explicit "No columns are sent ..."
     // confirmation stands alone. A count line here would state a send in the same
     // breath as its own denial.
-    renderTerms(terms, { perspective: "accepted", outboundColumns: [] });
+    renderTerms(terms, { perspective: "review", outboundColumns: [] });
     await expect.element(toggle("Other details")).toBeInTheDocument();
     expect(app.container.textContent).toContain(
       "No columns are sent to your partner",
@@ -2025,7 +1800,7 @@ describe("InvitationTerms: the outbound send states its count before the column 
     // leaves whatever the file holds, so the count of that file's columns would name
     // a send that does not happen.
     renderTerms(oneSided, {
-      perspective: "accepted",
+      perspective: "review",
       outboundColumns: ["risk_score", "diagnosis"],
     });
     await expect.element(toggle("Other details")).toBeInTheDocument();
@@ -2128,7 +1903,7 @@ describe("InvitationTerms: the always-visible facts are tiered into labelled dir
   function render(
     linkageTerms: LinkageTerms,
     options?: {
-      perspective?: "review" | "accepted" | "proposing";
+      perspective?: "review" | "proposing";
       disclosedPayloadColumns?: Array<string>;
     },
   ) {
@@ -2303,7 +2078,7 @@ describe("InvitationTerms: a declared-empty receive is shown, not collapsed with
   // accepts whatever the acceptor discloses.
   function render(
     linkageTerms: LinkageTerms,
-    perspective?: "review" | "accepted" | "proposing",
+    perspective?: "review" | "proposing",
   ) {
     renderTerms(linkageTerms, perspective ? { perspective } : undefined);
   }
@@ -2581,7 +2356,7 @@ describe("InvitationTerms: the linkage strategy is shown at the consent point", 
   // the baseline that discloses less, is not flagged.
   function render(
     linkageStrategy: LinkageStrategy,
-    perspective?: "review" | "accepted" | "proposing",
+    perspective?: "review" | "proposing",
   ) {
     renderTerms(
       { ...terms, linkageStrategy },
@@ -2974,7 +2749,7 @@ describe("InvitationTerms: the send-columns chip list is named by its visible ca
   // "proposing" send and the acceptor's own outbound send -- so a fix cannot correct
   // one and leave the twin on a duplicate aria-label.
   function render(options: {
-    perspective?: "review" | "accepted" | "proposing";
+    perspective?: "review" | "proposing";
     outboundColumns?: Array<string>;
   }) {
     renderTerms(terms, options);
@@ -3007,7 +2782,7 @@ describe("InvitationTerms: the send-columns chip list is named by its visible ca
   test("the acceptor's outbound send list is named by its visible caption, not a duplicate aria-label", async () => {
     // A chosen file supplies outboundColumns: the acceptor's own send renders as
     // chips under the "What you will send to your partner" caption.
-    render({ perspective: "accepted", outboundColumns: ["risk_score"] });
+    render({ perspective: "review", outboundColumns: ["risk_score"] });
     await expect.element(toggle("Other details")).toBeInTheDocument();
     await expectNamedByVisibleCaptionOnly("What you will send to your partner");
   });

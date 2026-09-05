@@ -222,7 +222,7 @@ interface FieldErrors {
  * stopped at the review step, before consent or intake, in a state that names
  * what it cannot run.
  *
- * {@link InvitationTerms} renders the full, never-condensed terms at the review
+ * {@link InvitationTerms} renders the full terms at the review
  * step, and {@link acceptorConsentName} (the shared `commitAcceptance` gate)
  * governs the consent step's submit BOTH as its disabled state and as a re-check
  * inside the handler.

@@ -407,11 +407,7 @@ describe("acceptor screen: review terms", () => {
       .element(page.getByText("psilink has not verified it", { exact: false }))
       .toBeInTheDocument();
 
-    // Never condensed at the consent decision point: no "See the full terms"
-    // fold, and a lower tier is always-visible unaided.
-    expect(
-      page.getByRole("button", { name: "See the full terms" }).query(),
-    ).toBeNull();
+    // Every tier is always-visible at the consent decision point, unaided.
     await expect
       .element(page.getByRole("heading", { name: "How records are matched" }))
       .toBeInTheDocument();
