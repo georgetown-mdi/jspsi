@@ -343,5 +343,70 @@ export default tseslint.config(
       ],
     },
   },
+  {
+    // The signaling broker's share of the three bans above. It reaches their
+    // chokepoints through the `@psilink/core` dependency this workspace already
+    // declares (packages/peerjs-broker/package.json), so unlike the core and CLI
+    // blocks it carves out no exemption of its own: it owns no chokepoint.
+    //
+    // The untrusted-JSON ban is the one with a live adversary behind it: the
+    // broker's `socket.on("message")` handler parses bytes any unauthenticated
+    // internet client can send -- the signaling server runs under `/api/` gated
+    // only by the well-known default key -- and a process-terminating parser
+    // abort there ends rendezvous for every peer rather than for one session.
+    // parseBoundedJson bounds a body structurally before JSON.parse sees it; the
+    // `ws` maxPayload cap is the byte half of the same control
+    // (docs/spec/CHANNEL_SECURITY.md).
+    //
+    // The raw-error ban applies because the diagnostics sink writes a peer's own
+    // error text to the operator's log, and the YAML ban because a config reader
+    // added here would leak source bytes exactly as one in core would. Upstream's
+    // unedited message routing is not linted at all (the ignores at the top of
+    // this file).
+    files: ["packages/peerjs-broker/src/**/*.ts"],
+    // Fail CI on a stray or rule-silencing disable so the ban cannot be quietly
+    // turned off on an untrusted parse (a bare `eslint .` only warns).
+    linterOptions: { reportUnusedDisableDirectives: "error" },
+    rules: {
+      "no-restricted-syntax": [
+        "error",
+        {
+          selector:
+            "CallExpression[callee.object.name='YAML'][callee.property.name=/^(parse|parseDocument|parseAllDocuments)$/]",
+          message:
+            "Parse operator/credential files through @psilink/core (parseSensitiveYaml / editSensitiveYamlDocument); raw YAML.parse leaks source into errors and the warning channel. Non-sensitive parse: eslint-disable-next-line with a one-line justification.",
+        },
+        ...noRawErrorAtDisplaySink,
+      ],
+      // Close the named-import bypass (`import { parse } from "yaml"`); the
+      // chokepoint imports the YAML default, so this never hits legitimate code.
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: [
+            {
+              name: "yaml",
+              importNames: ["parse", "parseDocument", "parseAllDocuments"],
+              message:
+                "Parse operator/credential files through @psilink/core; do not import yaml's raw parsers directly.",
+            },
+          ],
+          patterns: crossWorkspaceImportBans.packages,
+        },
+      ],
+      // no-restricted-properties rather than a CallExpression selector, so the
+      // ban also catches an alias, a computed access, and a destructure -- the
+      // same form and the same limits as the packages/core/src ban above.
+      "no-restricted-properties": [
+        "error",
+        {
+          object: "JSON",
+          property: "parse",
+          message:
+            "Parse a peer's signaling frame through @psilink/core's parseBoundedJson; it structurally bounds the body before JSON.parse so a pathological object/array cannot abort the broker every peer shares. A trusted parse: eslint-disable-next-line with a one-line justification.",
+        },
+      ],
+    },
+  },
   ...scopeToDir("apps/web", webConfig),
 );

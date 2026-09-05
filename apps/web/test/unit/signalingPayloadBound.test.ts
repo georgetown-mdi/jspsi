@@ -3,6 +3,8 @@ import { createServer } from "node:http";
 import { afterEach, describe, expect, test } from "vitest";
 import { WebSocketServer as WsServer } from "ws";
 
+import { JsonStructureBoundError } from "@psilink/core";
+
 import {
   MAX_SIGNALING_PAYLOAD_BYTES,
   WebSocketServer,
@@ -111,6 +113,44 @@ describe("signaling-server inbound frame bound", () => {
 
     const message = await handled;
     expect(message).toMatchObject({ type: "OFFER", src: "at-limit" });
+  });
+
+  test("the deepest frame the byte cap admits is refused by the structural bound, leaving the socket open", async () => {
+    const { wss, port } = await startHarness();
+
+    const ws = await connectRegistered(port, clients, { id: "deep" });
+
+    // The two arms are raced rather than the refusal awaited alone, so a frame
+    // that got through the bound would fail on the delivery instead of on the
+    // suite's timeout.
+    const outcome = new Promise<{
+      delivered: boolean;
+      error?: Error;
+      source?: unknown;
+    }>((resolve) => {
+      wss.on("error", (error: Error, source: unknown) =>
+        resolve({ delivered: false, error, source }),
+      );
+      wss.on("message", () => resolve({ delivered: true }));
+    });
+
+    // The deepest well-formed body that fits the byte cap exactly: two ASCII
+    // bytes per level, so this lands on the boundary `ws` admits and the byte
+    // half of the bound cannot refuse it. It is the frame the structural half
+    // exists for -- core's nesting-depth ceiling sits far below this depth, so
+    // the body is refused before `JSON.parse` sees it.
+    const depth = MAX_SIGNALING_PAYLOAD_BYTES / 2;
+    const frame = "[".repeat(depth) + "]".repeat(depth);
+    expect(frame.length).toBe(MAX_SIGNALING_PAYLOAD_BYTES);
+    ws.send(frame);
+
+    const { delivered, error, source } = await outcome;
+    expect(delivered).toBe(false);
+    expect(error).toBeInstanceOf(JsonStructureBoundError);
+    // Attributed to the peer that sent it, not to this server, and reported
+    // rather than thrown: the handler absorbs it like any other parse failure.
+    expect(source).toBe("client-frame");
+    expect(ws.readyState).toBe(ws.OPEN);
   });
 
   test("a custom factory that drops the maxPayload bound fails closed at construction", () => {
