@@ -12,9 +12,27 @@
 // ssh2-sftp-client bump per docs/spec/DEPENDENCY_PINS.md ("Upgrading the SFTP
 // Stack").
 
-import { DEFAULT_SERVER_CONNECT_TIMEOUT_MS } from "@psilink/core";
+import { DEFAULT_SERVER_CONNECT_TIMEOUT_MS, TimeoutError } from "@psilink/core";
 
-import { subsystemOpenTimeoutError } from "./sftpAdapterWarnings";
+import { subsystemOpenTimeoutMessage } from "./sftpAdapterWarnings";
+
+/**
+ * The rejection this bound raises, and the type the dial classifies it by: a
+ * subsystem-open deadline is terminal -- the server took the whole per-attempt
+ * budget on a connection it had already authenticated -- while a `TimeoutError`
+ * from anywhere else in a dial stays retryable. A subclass rather than the base
+ * type so that classification cannot widen to a deadline this module did not
+ * raise.
+ *
+ * Extends {@link TimeoutError}, so it keeps that type's reading everywhere else:
+ * an availability failure (the CLI's exit 69), not a misconfigured command.
+ */
+export class SubsystemOpenTimeoutError extends TimeoutError {
+  constructor(message: string) {
+    super(message);
+    this.name = "SubsystemOpenTimeoutError";
+  }
+}
 
 /**
  * The two ssh2 `Client` members the bound reaches past ssh2-sftp-client's public
@@ -55,10 +73,9 @@ export function subsystemOpenTimeoutMs(readyTimeoutMs: unknown): number {
  */
 export interface SubsystemOpenWatch {
   /**
-   * Rejects with a {@link import("@psilink/core").TimeoutError} once the bound
-   * has elapsed since authentication succeeded. It settles no other way, so a
-   * caller races it against the dial and reads a rejection as this phase and
-   * only this phase.
+   * Rejects with a {@link SubsystemOpenTimeoutError} once the bound has elapsed
+   * since authentication succeeded. It settles no other way, so a caller races
+   * it against the dial and reads that type as this phase and only this phase.
    */
   readonly expired: Promise<never>;
   /**
@@ -97,7 +114,10 @@ export function watchSubsystemOpen(
   });
   const armBound = (): void => {
     timer = setTimeout(
-      () => fail?.(subsystemOpenTimeoutError(timeoutMs)),
+      () =>
+        fail?.(
+          new SubsystemOpenTimeoutError(subsystemOpenTimeoutMessage(timeoutMs)),
+        ),
       timeoutMs,
     );
     // The dial this bounds is parked on a live socket, which holds the process

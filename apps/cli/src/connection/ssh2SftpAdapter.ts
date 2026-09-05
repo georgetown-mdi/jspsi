@@ -14,7 +14,6 @@ import {
   GetOptions,
   PutOptions,
   PutSource,
-  TimeoutError,
   TransportOperationStalledError,
   getLoggerForVerbosity,
   retryPromise,
@@ -60,6 +59,7 @@ import {
   peerProbeTargetFromConnectOptions,
 } from "./sftpPeerIdentification";
 import {
+  SubsystemOpenTimeoutError,
   subsystemOpenTimeoutMs,
   watchSubsystemOpen,
 } from "./sftpSubsystemOpen";
@@ -1550,9 +1550,8 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
           // A subsystem-open deadline is terminal: the server took the whole
           // per-attempt budget on a connection it had already authenticated, and
           // a re-attempt puts the same request to the same server for the rest
-          // of the reconnect budget. Nothing else in this dial raises a
-          // TimeoutError, so the type is the classification.
-          if (err instanceof TimeoutError) return false;
+          // of the reconnect budget.
+          if (err instanceof SubsystemOpenTimeoutError) return false;
           // A key-exchange negotiation with nothing in common is terminal on a
           // process missing a primitive: the offer this side can make is fixed
           // for the life of the process, so every re-attempt puts the same
@@ -1752,7 +1751,8 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
       // behind forever (docs/spec/DEPENDENCY_PINS.md). Closed before the
       // rejection is reported, so no caller can observe the failure over a
       // transport that is still open.
-      if (error instanceof TimeoutError) this.closeUnansweredDial();
+      if (error instanceof SubsystemOpenTimeoutError)
+        this.closeUnansweredDial();
       throw error;
     } finally {
       watch.cancel();
@@ -1763,17 +1763,27 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // destroy() needs nothing from the peer, and it settles the abandoned dial as
   // well (measured against the pinned stack in
   // test/integration/sftpStackPremises.test.ts). Nothing here throws: the caller
-  // is already reporting a failure, and a transport this build cannot reach is
-  // one the operator can do nothing about beyond that report.
+  // is already reporting the dial's own failure, and a transport this build
+  // cannot reach is reported as a warning beside it.
   private closeUnansweredDial(): void {
     const transport = resolveTerminalCloseSeam(
       this.client as unknown as Ssh2SftpClientInternals,
     );
     if ("missing" in transport) {
+      this.log.warn(
+        `The SFTP server left this connection's SFTP subsystem request ` +
+          `unanswered and this build could not close the connection from this ` +
+          `side, so it is left to the operating system: until that closes it, ` +
+          `a later dial on this connection waits behind it with no deadline. ` +
+          `Interrupt the command if it stops making progress. This build of ` +
+          `psilink is not compatible with the installed SFTP library; ` +
+          `${REPORT_LIBRARY_INCOMPATIBILITY}.`,
+      );
       this.log.debug(
         `closing an abandoned dial from this side drives ssh2's ` +
-          `${transport.missing}, which is not available, so its transport is ` +
-          `left to the operating system`,
+          `${transport.missing}, which is not available after connect(); the ` +
+          `installed ssh2 / ssh2-sftp-client version may have renamed, ` +
+          `relocated, or removed it`,
       );
       return;
     }

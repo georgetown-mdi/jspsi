@@ -12,7 +12,6 @@
 // counters, so a fragment reaching one later must already arrive escaped by
 // the call site that is its sink.
 import {
-  TimeoutError,
   TransportOperationStalledError,
   TransportPublishIndeterminateError,
   UsageError,
@@ -244,11 +243,10 @@ export function unreadableTransportLifecycleWarning(
 }
 
 /**
- * The terminal error a dial reports when the server authenticated it and then
- * left the SFTP subsystem request unanswered for the whole bound. A
- * {@link TimeoutError} rather than a `UsageError`, on the same terms as every
- * other connect-phase deadline: an availability failure (exit 69), not a
- * misconfigured command.
+ * The message a dial reports when the server authenticated it and then left the
+ * SFTP subsystem request unanswered for the whole bound. `./sftpSubsystemOpen`
+ * raises it as a `SubsystemOpenTimeoutError`, the type the dial classifies that
+ * phase by: this module holds the words, that one the type.
  *
  * The message names the phase, which is what tells this apart from the two
  * failures it would otherwise read as: the credentials were accepted, so it is
@@ -258,17 +256,17 @@ export function unreadableTransportLifecycleWarning(
  *
  * @param subsystemOpenTimeoutMs - The bound the request went unanswered for.
  */
-export function subsystemOpenTimeoutError(
+export function subsystemOpenTimeoutMessage(
   subsystemOpenTimeoutMs: number,
-): TimeoutError {
-  return new TimeoutError(
+): string {
+  return (
     `the SFTP server accepted this connection's credentials and then did not ` +
-      `open the SFTP subsystem within ${subsystemOpenTimeoutMs} ms, so no ` +
-      `SFTP session was established. Check that ` +
-      `the account psilink signs in as may use SFTP on that server -- an ` +
-      `OpenSSH server needs a 'Subsystem sftp' line, and a per-user or ` +
-      `per-group setting can withdraw it -- or raise ` +
-      `server_connect_timeout_ms if the server is only slow to open it.`,
+    `open the SFTP subsystem within ${subsystemOpenTimeoutMs} ms, so no ` +
+    `SFTP session was established. Check that ` +
+    `the account psilink signs in as may use SFTP on that server -- an ` +
+    `OpenSSH server needs a 'Subsystem sftp' line, and a per-user or ` +
+    `per-group setting can withdraw it -- or raise ` +
+    `server_connect_timeout_ms if the server is only slow to open it.`
   );
 }
 
