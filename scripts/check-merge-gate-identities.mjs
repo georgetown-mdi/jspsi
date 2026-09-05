@@ -2,7 +2,7 @@
 // Merge gate identity check, run by static_checks.yaml on every PR.
 //
 // A branch ruleset names each required status check by a bare context string,
-// which GitHub matches against the check runs a pull request produces. Two
+// which GitHub matches against the check runs a pull request produces. Three
 // ordinary edits break that match with nothing red to show for it, leaving the
 // requirement pending forever and every pull request unmergeable until branch
 // protection is edited:
@@ -12,8 +12,11 @@
 //   B. Adding a `paths:` / `paths-ignore:` filter to a gating workflow. A pull
 //      request touching nothing the filter globs skips the workflow, so its
 //      check runs are never created on that pull request at all.
+//   C. Requiring a context whose job a workflow outside GATING_WORKFLOWS
+//      declares. Rule 2 reads only the files that list names, so hazard B is
+//      unwatched on the workflow the requirement just added to the merge gate.
 //
-// Two rules, one per hazard:
+// Three rules, one per hazard:
 //
 //   1. Every required status-check context on main and staging matches a job
 //      name under .github/workflows. Reading the rules needs a token, so this
@@ -23,6 +26,10 @@
 //   2. The gating workflows in GATING_WORKFLOWS declare no `paths:` or
 //      `paths-ignore:` under `on.pull_request`, and do declare that trigger. No
 //      API, so this rule runs on every invocation including rule 1's skips.
+//   3. Every workflow declaring a job one of those contexts names is in
+//      GATING_WORKFLOWS, so rule 2's scope is the merge gate's own rather than
+//      a hand-held list nothing measures against it. It reads the branch rules
+//      rule 1 reads, and states the same skip when they cannot be read.
 //
 // The rules are read per protected branch rather than per ruleset name, so
 // renaming a ruleset does not drop coverage, and the branch endpoint reports
@@ -37,17 +44,16 @@
 //   - It matches names, not runs. That a job with the right name exists says
 //     nothing about whether the workflow holding it runs on a pull request to
 //     the protected branch, or whether the run succeeds. Rule 2 covers that
-//     question for the workflows GATING_WORKFLOWS names and for no others.
+//     question for the workflows GATING_WORKFLOWS names, and rule 3 holds that
+//     list to every workflow declaring a required job.
 //   - A job calling a reusable workflow produces composed check-run names
 //     (`caller / callee`); only the caller's own name is collected here.
-//   - Rule 2's scope is the hand-held GATING_WORKFLOWS list rather than the
-//     branch rules. Rule 1 reads the required contexts but never maps one back
-//     to the workflow declaring its job, so making a job in an unlisted
-//     workflow required leaves that workflow's path filters unread here: the
-//     list has to grow with the merge gate. Mapping a context back would need
-//     one declaring file per name, which nothing constrains: two workflows may
-//     declare the same job name, and which of their check runs satisfies the
-//     requirement is GitHub's resolution to make rather than one to infer here.
+//   - Rule 3 maps a context to every workflow declaring a job of that name, not
+//     to the one whose check run satisfies it: nothing constrains a job name to
+//     one file, and which of two identically named check runs GitHub matches is
+//     its resolution to make rather than one to infer here. So a context is
+//     held to all of its declarers, and one unlisted file fails the rule even
+//     when another declarer is listed.
 
 import { execFileSync } from "node:child_process";
 import { existsSync } from "node:fs";
@@ -69,7 +75,7 @@ export const PROTECTED_BRANCHES = ["main", "staging"];
  * rules require a status check from. Each is unfiltered by design, and the
  * header comment in each says why and points back here. Making a job in some
  * other workflow required means adding that workflow here in the same edit --
- * nothing derives this list, so nothing else notices it went short.
+ * rule 3 fails until it is added, on any run that can read the branch rules.
  */
 export const GATING_WORKFLOWS = [
   `${WORKFLOW_DIR}/codeql.yaml`,
@@ -106,19 +112,25 @@ export function jobCheckNames(workflow) {
 }
 
 /**
- * Every job name the workflow tree declares: `literal` is the set a context can
- * be matched against, `templated` the `{file, name}` pairs holding an
+ * Every job name the workflow tree declares: `literal` maps each name a context
+ * can be matched against to the files declaring it, in tree order with each
+ * file listed once; `templated` holds the `{file, name}` pairs with an
  * expression or a nameless matrix expansion, which no context can match here.
  */
 export function workflowJobIndex(root) {
-  const literal = new Set();
+  const literal = new Map();
   const templated = [];
   for (const { path: file, source } of readWorkflows(root)) {
     for (const { name, templated: isTemplated } of jobCheckNames(
       parseWorkflow(file, source),
     )) {
-      if (isTemplated) templated.push({ file, name });
-      else literal.add(name);
+      if (isTemplated) {
+        templated.push({ file, name });
+        continue;
+      }
+      const declaredBy = literal.get(name);
+      if (declaredBy === undefined) literal.set(name, [file]);
+      else if (!declaredBy.includes(file)) declaredBy.push(file);
     }
   }
   return { literal, templated };
@@ -336,6 +348,37 @@ export function pathFilterViolations(root, files = GATING_WORKFLOWS) {
 }
 
 /**
+ * Every required context declared by a workflow rule 2 does not hold
+ * filter-free, as message strings naming the files to list. Empty means every
+ * workflow that can raise one of those check runs is in `files`, so rule 2
+ * reads the whole merge gate. A context matching no job name at all is rule 1's
+ * to report and is passed over here.
+ */
+export function declaringWorkflowViolations(
+  merged,
+  index,
+  files = GATING_WORKFLOWS,
+) {
+  const gating = new Set(files);
+  const violations = [];
+  for (const entry of merged) {
+    if (isForeignContext(entry)) continue;
+    const declaredBy = index.literal.get(entry.context) ?? [];
+    const unlisted = declaredBy.filter((file) => !gating.has(file));
+    if (unlisted.length === 0) continue;
+    const listed = declaredBy.filter((file) => gating.has(file));
+    const alsoListed =
+      listed.length === 0
+        ? ""
+        : ` The same job name is also declared by ${list(listed)}, but GitHub resolves which check run satisfies the requirement, so every declaring workflow has to be held filter-free.`;
+    violations.push(
+      `${list(entry.branches)}: the branch rules require the status check "${entry.context}", and its job is declared outside GATING_WORKFLOWS in scripts/check-merge-gate-identities.mjs, by ${list(unlisted)}. The path-filter rule reads only the listed files, so a pull_request path filter added there skips the workflow, its check run is never created, and the requirement holds every non-matching pull request pending until branch protection is edited. Add ${list(unlisted)} to GATING_WORKFLOWS, or drop the requirement.${alsoListed}`,
+    );
+  }
+  return violations;
+}
+
+/**
  * The merged required contexts of every protected branch, or a `skipped` reason
  * naming why they could not be read. The token is whatever the environment
  * offers; the repository is `GITHUB_REPOSITORY` under Actions and the origin
@@ -392,14 +435,20 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   // the path-filter rule that still ran goes on to fail.
   const { merged, skipped } = await readRequiredContexts({ cwd: root });
   if (skipped !== null) {
-    const stated = `Merge gate identities: the required-context rule was SKIPPED -- ${skipped}. The pull_request path-filter rule still ran.`;
+    const stated = `Merge gate identities: the required-context rule and the declaring-workflow rule were SKIPPED -- ${skipped}. Both read the branch rules. The pull_request path-filter rule still ran.`;
     if (process.env.GITHUB_ACTIONS === "true") {
       console.log(`::warning title=Merge gate identities::${stated}`);
     }
     console.log(stated);
   }
 
-  const violations = merged === null ? [] : contextViolations(merged, index);
+  const violations =
+    merged === null
+      ? []
+      : [
+          ...contextViolations(merged, index),
+          ...declaringWorkflowViolations(merged, index),
+        ];
   violations.push(...pathFilterViolations(root));
   if (violations.length > 0) {
     for (const violation of violations) console.error(violation);
@@ -408,7 +457,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
 
   if (merged === null) {
     console.log(
-      `Path-filter rule passed: ${list(GATING_WORKFLOWS)} carry no pull_request path filter.`,
+      `Path-filter rule passed: ${list(GATING_WORKFLOWS)} declare no pull_request path filter.`,
     );
   } else {
     const plural = (count, noun) => `${count} ${noun}${count === 1 ? "" : "s"}`;
@@ -423,7 +472,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
             ),
           )}.`;
     console.log(
-      `Merge gate identities check passed: ${plural(merged.length - foreign.length, "required context")} across ${list(PROTECTED_BRANCHES)} match a job name under ${WORKFLOW_DIR}, and ${list(GATING_WORKFLOWS)} carry no pull_request path filter.${raisedElsewhere}`,
+      `Merge gate identities check passed: ${plural(merged.length - foreign.length, "required context")} across ${list(PROTECTED_BRANCHES)} match a job name under ${WORKFLOW_DIR}, every workflow declaring one of those jobs is named in GATING_WORKFLOWS, and ${list(GATING_WORKFLOWS)} declare no pull_request path filter.${raisedElsewhere}`,
     );
   }
 }

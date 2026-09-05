@@ -10,6 +10,7 @@ import {
   PROTECTED_BRANCHES,
   branchRequiredContexts,
   contextViolations,
+  declaringWorkflowViolations,
   fetchBranchRules,
   foreignContexts,
   jobCheckNames,
@@ -60,7 +61,19 @@ const rulesWithChecks = (...checks) => [
   },
 ];
 
-const indexOf = (...names) => ({ literal: new Set(names), templated: [] });
+const indexOf = (...names) => ({
+  literal: new Map(
+    names.map((name) => [name, [".github/workflows/gate.yaml"]]),
+  ),
+  templated: [],
+});
+
+const bothBranches = (...checks) =>
+  mergeContexts(
+    PROTECTED_BRANCHES.flatMap((branch) =>
+      branchRequiredContexts(branch, rulesWithChecks(...checks)),
+    ),
+  );
 
 const withTempRoot = (body) => {
   const root = mkdtempSync(join(tmpdir(), "merge-gate-identities-"));
@@ -136,15 +149,39 @@ describe("workflow job index", () => {
       writeFileSync(join(root, ".github/workflows/README.md"), "not yaml\n");
 
       const index = workflowJobIndex(root);
-      expect([...index.literal].sort()).toEqual([
-        "Dependency Review",
-        "Typecheck, Lint, Format",
+      expect([...index.literal.entries()].sort()).toEqual([
+        ["Dependency Review", [".github/workflows/b.yml"]],
+        ["Typecheck, Lint, Format", [".github/workflows/a.yaml"]],
       ]);
       expect(index.templated).toEqual([
         {
           file: ".github/workflows/b.yml",
           name: "Build the ${{ matrix.variant }} image",
         },
+      ]);
+    });
+  });
+
+  it("holds every file declaring a name, each file once", () => {
+    withTempRoot((root) => {
+      writeFileSync(
+        join(root, ".github/workflows/a.yaml"),
+        `jobs:
+  first:
+    name: Test
+  second:
+    name: Test
+`,
+        "utf8",
+      );
+      writeFileSync(
+        join(root, ".github/workflows/b.yaml"),
+        "jobs:\n  only:\n    name: Test\n",
+        "utf8",
+      );
+      expect(workflowJobIndex(root).literal.get("Test")).toEqual([
+        ".github/workflows/a.yaml",
+        ".github/workflows/b.yaml",
       ]);
     });
   });
@@ -215,13 +252,6 @@ describe("required contexts", () => {
 });
 
 describe("rule 1: a required context names a job", () => {
-  const bothBranches = (...checks) =>
-    mergeContexts(
-      PROTECTED_BRANCHES.flatMap((branch) =>
-        branchRequiredContexts(branch, rulesWithChecks(...checks)),
-      ),
-    );
-
   it("passes when every Actions context matches a job name", () => {
     expect(
       contextViolations(
@@ -473,6 +503,74 @@ jobs:
   );
 });
 
+describe("rule 3: every workflow declaring a required job is listed", () => {
+  const listedFile = ".github/workflows/gate.yaml";
+  const unlistedFile = ".github/workflows/side.yaml";
+
+  // Each case declares its jobs in a tree the index then reads, so what the
+  // rule is held to is that mapping rather than one the case handed it.
+  const violationsFor = (
+    context,
+    declarations,
+    integrationId = GITHUB_ACTIONS_APP_ID,
+  ) =>
+    withTempRoot((root) => {
+      for (const [file, name] of Object.entries(declarations)) {
+        writeFileSync(join(root, file), gatingWorkflow(name), "utf8");
+      }
+      return declaringWorkflowViolations(
+        bothBranches(requiredCheck(context, integrationId)),
+        workflowJobIndex(root),
+        [listedFile],
+      );
+    });
+
+  it("passes a context whose only declarer is listed", () => {
+    expect(
+      violationsFor("Gate", {
+        [listedFile]: "Gate",
+        [unlistedFile]: "Some other job",
+      }),
+    ).toEqual([]);
+  });
+
+  it("fails a context declared outside the list, naming the file to add", () => {
+    const violations = violationsFor("Gate", { [unlistedFile]: "Gate" });
+    expect(violations).toHaveLength(1);
+    expect(violations[0]).toContain(
+      `main, staging: the branch rules require the status check "Gate", and its job is declared outside GATING_WORKFLOWS in scripts/check-merge-gate-identities.mjs, by ${unlistedFile}.`,
+    );
+    expect(violations[0]).toContain(
+      `Add ${unlistedFile} to GATING_WORKFLOWS, or drop the requirement.`,
+    );
+    expect(violations[0]).not.toContain("also declared by");
+  });
+
+  it("fails a context two workflows declare when one of them is unlisted", () => {
+    const violations = violationsFor("Gate", {
+      [listedFile]: "Gate",
+      [unlistedFile]: "Gate",
+    });
+    expect(violations).toHaveLength(1);
+    expect(violations[0]).toContain(
+      `its job is declared outside GATING_WORKFLOWS in scripts/check-merge-gate-identities.mjs, by ${unlistedFile}.`,
+    );
+    expect(violations[0]).toContain(
+      `The same job name is also declared by ${listedFile}, but GitHub resolves which check run satisfies the requirement`,
+    );
+  });
+
+  it("leaves a context matching no job name to rule 1", () => {
+    expect(violationsFor("Gone", { [listedFile]: "Gate" })).toEqual([]);
+  });
+
+  it("passes over a context another app raises", () => {
+    expect(
+      violationsFor("CodeQL", { [unlistedFile]: "CodeQL" }, 57789),
+    ).toEqual([]);
+  });
+});
+
 describe("repository resolution", () => {
   it("reads the slug out of either remote spelling", () => {
     for (const remote of [
@@ -666,10 +764,13 @@ describe("the real repository tree", () => {
       { encoding: "utf8", env },
     );
     expect(output).toContain("::warning title=Merge gate identities::");
-    expect(output).toContain("the required-context rule was SKIPPED");
+    expect(output).toContain(
+      "the required-context rule and the declaring-workflow rule were SKIPPED",
+    );
     expect(output).toContain("neither GH_TOKEN nor GITHUB_TOKEN is set");
     expect(output).toContain(
       "Path-filter rule passed: .github/workflows/codeql.yaml, .github/workflows/dependency_review.yaml, .github/workflows/native_alpine.yaml, .github/workflows/static_checks.yaml",
     );
+    expect(output).not.toContain("Merge gate identities check passed");
   });
 });
