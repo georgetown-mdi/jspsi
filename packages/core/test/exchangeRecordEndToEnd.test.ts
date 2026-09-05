@@ -3,7 +3,7 @@ import { expect, test } from "vitest";
 import PSI from "@openmined/psi.js";
 
 import { prepareForExchange, runExchange } from "../src/exchange";
-import { verifyCommitmentOpening } from "../src/exchangeRecord";
+import { verifyCommitmentOpening } from "../src/records/exchangeRecord";
 import { toCommittedPayload } from "../src/payloadExchange";
 import {
   ConnectionError,
@@ -13,7 +13,7 @@ import { LinkageTermsUnsatisfiableError, UsageError } from "../src/errors";
 import { sanitizeErrorForDisplay } from "../src/utils/sanitizeErrorForDisplay";
 
 import type { Algorithm } from "../src/types";
-import type { BuiltExchangeRecord } from "../src/exchangeRecord";
+import type { BuiltExchangeRecord } from "../src/records/exchangeRecord";
 import type { Output } from "../src/config/linkageTerms";
 import type { ExchangeResult } from "../src/exchange";
 

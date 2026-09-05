@@ -6,8 +6,8 @@ import {
   PSIParticipant,
   associationTableMessage,
   numberArrayMessage,
-} from "../src/participant";
-import { InProcessPsiEngine } from "../src/psiEngine";
+} from "../src/psi/participant";
+import { InProcessPsiEngine } from "../src/psi/psiEngine";
 
 import {
   createMessagePipe,

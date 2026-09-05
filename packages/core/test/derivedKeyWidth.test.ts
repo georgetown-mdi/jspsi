@@ -6,7 +6,7 @@ import { expect, test, describe, vi } from "vitest";
 // inert case). This file drives the flag on, so the derivation, its ceiling,
 // and the boundary that enforces it are verified rather than only reachable in
 // review.
-vi.mock("../src/appliedSettings", () => ({
+vi.mock("../src/consent/appliedSettings", () => ({
   APPLIED_SETTINGS: { deduplicate: true, fuzzyComparisons: true },
 }));
 

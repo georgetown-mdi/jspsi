@@ -1,10 +1,10 @@
 import { associationTableMessage, type PSIParticipant } from "./participant";
-import type { AssociationTable } from "./types";
+import type { AssociationTable } from "../types";
 import {
   receiveParsed,
   parseOrProtocolError,
   type MessageConnection,
-} from "./connection/messageConnection";
+} from "../connection/messageConnection";
 import {
   MAX_SINGLE_PASS_CELLS,
   partyFansOut,
@@ -14,14 +14,14 @@ import {
   valueSlots,
   type SinglePassCeilingBreach,
   type SinglePassPartySize,
-} from "./connection/frameSize";
+} from "../connection/frameSize";
 import { assertBlockDiagonalClosure } from "./entityClosure";
-import { FAN_OUT_CANDIDATES_PER_ELEMENT } from "./fanOutFunctions";
+import { FAN_OUT_CANDIDATES_PER_ELEMENT } from "../fanOutFunctions";
 import {
   fanOutReachedMatchingRefusal,
   type KeyCandidates,
-} from "./standardization";
-import { singleIssueArray } from "./utils/singleIssueArray";
+} from "../standardization";
+import { singleIssueArray } from "../utils/singleIssueArray";
 import {
   assertPartnerIndexCount,
   assertPartnerIndices,
@@ -29,15 +29,15 @@ import {
   partnerProtocolError,
   type PartnerIndexGrouping,
   type PartnerIndexRules,
-} from "./utils/partnerIndices";
+} from "../utils/partnerIndices";
 import {
   COUNT_ONLY_SHAPE_REFUSALS,
   manyToManyIsImplementedForStrategy,
-} from "./linkageTermsPolicy";
-import { InternalConsistencyError, UsageError } from "./errors";
-import { receiveCountReport, sendCountReport } from "./protocolSetup";
+} from "../linkageTermsPolicy";
+import { InternalConsistencyError, UsageError } from "../errors";
+import { receiveCountReport, sendCountReport } from "../protocolSetup";
 
-import { getLoggerForVerbosity } from "./utils/logger";
+import { getLoggerForVerbosity } from "../utils/logger";
 
 interface IndexIterationPair {
   theirIndex: number;

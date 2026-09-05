@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 
 import PSI from "@openmined/psi.js";
 
-import { PSIParticipant } from "../src/participant";
+import { PSIParticipant } from "../src/psi/participant";
 import {
   linkViaPSI,
   linkViaSinglePassPSI,
@@ -13,7 +13,7 @@ import {
   encodeSinglePassReply,
   decodeSinglePassReply,
   type LinkageCardinality,
-} from "../src/link";
+} from "../src/psi/link";
 import { MAX_WEBRTC_FRAME_BYTES } from "../src/connection/binaryPackBounds";
 import {
   FAN_OUT_CANDIDATES_PER_ELEMENT,

@@ -15,7 +15,7 @@
  * where consumers read them from.
  */
 
-import { APPLIED_SETTINGS } from "./appliedSettings.js";
+import { APPLIED_SETTINGS } from "./consent/appliedSettings.js";
 import { MAX_LINKAGE_ENTRIES } from "./config/linkageTerms.js";
 import type { LinkageKey, LinkageTerms } from "./config/linkageTerms.js";
 import { UsageError } from "./errors.js";

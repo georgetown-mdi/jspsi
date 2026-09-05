@@ -4,8 +4,8 @@ import { expect, test } from "vitest";
 
 import PSI from "@openmined/psi.js";
 
-import { PSIParticipant } from "../src/participant";
-import { linkViaPSI } from "../src/link";
+import { PSIParticipant } from "../src/psi/participant";
+import { linkViaPSI } from "../src/psi/link";
 import { createMessagePipe } from "../src/connection/messageConnection";
 import type { AssociationTable } from "../src/types";
 import { sortAssociationTable } from "../src/testing";

@@ -15,14 +15,14 @@ import {
   serializeVerificationKeys,
   verifyCommitmentOpening,
   verifyRecordCommitments,
-} from "../src/exchangeRecord";
+} from "../src/records/exchangeRecord";
 import { fromBase64Url, randomBytes, toBase64Url } from "../src/utils/crypto";
 
 import type {
   CommittedPayload,
   ExchangeRecordInputs,
   ExchangeRecordRandomness,
-} from "../src/exchangeRecord";
+} from "../src/records/exchangeRecord";
 import type { CanonicalValue } from "../src/utils/canonical";
 import type { LinkageTerms } from "../src/config/linkageTerms";
 import {

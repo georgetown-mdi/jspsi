@@ -1,5 +1,5 @@
-import { fromBase64Url, toBase64Url } from "./utils/crypto.js";
-import { UsageError } from "./errors.js";
+import { fromBase64Url, toBase64Url } from "../utils/crypto.js";
+import { UsageError } from "../errors.js";
 
 // The single path from a stored JWK to a usable ECDSA P-256 key, shared by the
 // certificate self-signature (signingIdentity.ts) and the receipt signature

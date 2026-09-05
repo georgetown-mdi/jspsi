@@ -14,7 +14,7 @@
 // to core; a derivation cannot judge whether a field bears on consent.
 // Each half covers what the other cannot.
 
-import { parseLinkageTerms } from "./config/linkageTerms.js";
+import { parseLinkageTerms } from "../config/linkageTerms.js";
 import {
   CONSENT_FACTS,
   DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
@@ -26,7 +26,7 @@ import type {
   LinkageField,
   LinkageTerms,
   TransformStep,
-} from "./config/linkageTerms.js";
+} from "../config/linkageTerms.js";
 
 /**
  * @internal

@@ -17,7 +17,7 @@ import {
 import type { OutboundPayloadConsent } from "./config/outboundPayloadConsent.js";
 import { readRowColumn } from "./file.js";
 import type { CSVRow } from "./file.js";
-import type { CommittedPayload } from "./exchangeRecord.js";
+import type { CommittedPayload } from "./records/exchangeRecord.js";
 import type { MessageConnection } from "./connection/messageConnection.js";
 import {
   ConnectionError,

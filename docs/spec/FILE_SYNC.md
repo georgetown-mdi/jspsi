@@ -135,7 +135,7 @@ Decoding is untouched: the same token still decodes, and the acceptance surfaces
 
 **No token-version bump (top-level, like `disclosedPayloadColumns`).** An optional field at the *top* level is ignored by an older decoder's non-strict `z.object`, so it takes the backward-compatible path the `version` policy describes rather than the one-time strict-endpoint allowance the split pair needed. What the field puts on the wire is a setting the inviter advertises in its hello a few seconds later regardless; what it moves is the point at which the partner sees it, from after the acceptance to before it.
 
-The classification the two acceptance surfaces render it under -- enforced on the mode agreement, the inviter's word on what becomes of the transcript -- is the `retainedFiles` entry of `packages/core/src/consentFacts.ts`, with the reasoning in [shared-consent-summary.md](../notes/shared-consent-summary.md).
+The classification the two acceptance surfaces render it under -- enforced on the mode agreement, the inviter's word on what becomes of the transcript -- is the `retainedFiles` entry of `packages/core/src/consent/consentFacts.ts`, with the reasoning in [shared-consent-summary.md](../notes/shared-consent-summary.md).
 
 ## Phases and legal directory contents
 

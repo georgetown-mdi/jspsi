@@ -29,8 +29,8 @@ import {
   sanitizeErrorForDisplay,
 } from "./utils/sanitizeErrorForDisplay.js";
 import type { CSVRow } from "./file.js";
-import { PSIParticipant } from "./participant.js";
-import type { PsiEngine, PsiEngineMode } from "./psiEngine.js";
+import { PSIParticipant } from "./psi/participant.js";
+import type { PsiEngine, PsiEngineMode } from "./psi/psiEngine.js";
 import {
   exchangeTerms,
   exchangeBootstrapSecret,
@@ -44,10 +44,10 @@ import {
   linkViaPSI,
   linkViaSinglePassPSI,
   withholdsSenderAssociationTable,
-} from "./link.js";
-import type { LinkageCardinality } from "./link.js";
+} from "./psi/link.js";
+import type { LinkageCardinality } from "./psi/link.js";
 import type { ResolvedRunShape } from "./pairTableProjection.js";
-import { InProcessPsiEngine } from "./psiEngine.js";
+import { InProcessPsiEngine } from "./psi/psiEngine.js";
 import {
   partyFansOut,
   psiElementBounds,
@@ -65,13 +65,16 @@ import {
   reconcileReceivedPayload,
 } from "./payloadExchange.js";
 import type { PayloadWireMessage } from "./payloadExchange.js";
-import { buildExchangeRecord, computeTermsHash } from "./exchangeRecord.js";
+import {
+  buildExchangeRecord,
+  computeTermsHash,
+} from "./records/exchangeRecord.js";
 import {
   buildReceiptContent,
   deriveReceiptBinder,
   exchangeSignedReceipt,
   ReceiptVerificationError,
-} from "./signedReceipt.js";
+} from "./records/signedReceipt.js";
 import { OperatorConfigError, UsageError, causeChainSome } from "./errors.js";
 import type { Metadata } from "./config/metadata.js";
 import type { LinkageTerms } from "./config/linkageTerms.js";
@@ -89,12 +92,18 @@ import type { PresentedHostKey } from "./connection/fileSyncConnection.js";
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 import type { ExchangeSpec } from "./config/exchangeSpec.js";
 import type { PartnerPayload } from "./payloadExchange.js";
-import type { BuiltExchangeRecord } from "./exchangeRecord.js";
-import { certificateAuthorizesIdentity } from "./signingIdentity.js";
-import type { CertificateBody, SigningIdentity } from "./signingIdentity.js";
+import type { BuiltExchangeRecord } from "./records/exchangeRecord.js";
+import { certificateAuthorizesIdentity } from "./records/signingIdentity.js";
+import type {
+  CertificateBody,
+  SigningIdentity,
+} from "./records/signingIdentity.js";
 import { partnerPinIsPresent } from "./config/signing.js";
 import type { SigningConfig, SigningMode } from "./config/signing.js";
-import type { DualSignedRecord, ReceiptContent } from "./signedReceipt.js";
+import type {
+  DualSignedRecord,
+  ReceiptContent,
+} from "./records/signedReceipt.js";
 
 /**
  * The subset of an exchange specification that governs data preparation.

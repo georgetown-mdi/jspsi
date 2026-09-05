@@ -4,32 +4,32 @@ import {
   DEFAULT_DATE_OUTPUT_FORMAT,
   describeTransformCoercions,
   FAN_OUT_FUNCTION_NAMES,
-} from "./standardization.js";
+} from "../standardization.js";
 import {
   coalesceSubstitutesConstant,
   CONSENT_VERDICT_PARAM_NAMES,
   parseDateInputDropsEveryRecord,
   pipelineAlwaysDrops,
   substringCollapsesParsedDateToConstant,
-} from "./linkageSatisfiability.js";
-import { displayText } from "./utils/sanitizeForDisplay.js";
-import { redactAndSanitizeForDisplay } from "./utils/sanitizeErrorForDisplay.js";
-import { redactAndDisplayPartyIdentity } from "./partyIdentityDisplay.js";
+} from "../linkageSatisfiability.js";
+import { displayText } from "../utils/sanitizeForDisplay.js";
+import { redactAndSanitizeForDisplay } from "../utils/sanitizeErrorForDisplay.js";
+import { redactAndDisplayPartyIdentity } from "../records/partyIdentityDisplay.js";
 
-import { endpointRequiresRetainedFiles } from "./config/invitation.js";
-import type { InvitationToken } from "./config/invitation.js";
-import { checkLinkageRuleSetCitation } from "./defaults/linkageTerms.js";
-import type { LinkageRuleSetCitationVerdict } from "./defaults/linkageTerms.js";
-import { deduplicateIsImplementedForStrategy } from "./linkageTermsPolicy.js";
+import { endpointRequiresRetainedFiles } from "../config/invitation.js";
+import type { InvitationToken } from "../config/invitation.js";
+import { checkLinkageRuleSetCitation } from "../defaults/linkageTerms.js";
+import type { LinkageRuleSetCitationVerdict } from "../defaults/linkageTerms.js";
+import { deduplicateIsImplementedForStrategy } from "../linkageTermsPolicy.js";
 import type {
   LinkageField,
   LinkageKey,
   LinkageKeyElement,
   LinkageStrategy,
   TransformStep,
-} from "./config/linkageTerms.js";
-import type { Algorithm } from "./types.js";
-import type { Displayable } from "./utils/sanitizeForDisplay.js";
+} from "../config/linkageTerms.js";
+import type { Algorithm } from "../types.js";
+import type { Displayable } from "../utils/sanitizeForDisplay.js";
 
 /**
  * Human-readable label for each linkage-field semantic type. `type` is a

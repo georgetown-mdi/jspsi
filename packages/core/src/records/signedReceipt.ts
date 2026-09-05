@@ -1,12 +1,12 @@
 import { z } from "zod";
 
-import { canonicalBytes } from "./utils/canonical.js";
-import { hkdfDerive, hmacSha256, toBase64Url } from "./utils/crypto.js";
+import { canonicalBytes } from "../utils/canonical.js";
+import { hkdfDerive, hmacSha256, toBase64Url } from "../utils/crypto.js";
 import {
   ConnectionError,
   receiveParsed,
-} from "./connection/messageConnection.js";
-import { MAX_TEXT_LENGTH } from "./config/linkageTerms.js";
+} from "../connection/messageConnection.js";
+import { MAX_TEXT_LENGTH } from "../config/linkageTerms.js";
 import {
   SIGNING_CERTIFICATE_VERSION,
   computeCertificateFingerprint,
@@ -20,9 +20,9 @@ import {
   verifyWithP256,
 } from "./signingKeys.js";
 
-import type { HandshakeRole } from "./types.js";
-import type { MessageConnection } from "./connection/messageConnection.js";
-import type { CanonicalValue } from "./utils/canonical.js";
+import type { HandshakeRole } from "../types.js";
+import type { MessageConnection } from "../connection/messageConnection.js";
+import type { CanonicalValue } from "../utils/canonical.js";
 import type { CommittedPayload } from "./exchangeRecord.js";
 import type { SigningCertificate, SigningIdentity } from "./signingIdentity.js";
 

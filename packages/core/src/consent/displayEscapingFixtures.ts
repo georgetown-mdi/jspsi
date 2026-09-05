@@ -4,8 +4,8 @@
 // `./testing` subpath, so the two cannot drift apart on what a hostile
 // invitation looks like.
 
-import type { InvitationToken } from "./config/invitation.js";
-import type { LinkageTerms } from "./config/linkageTerms.js";
+import type { InvitationToken } from "../config/invitation.js";
+import type { LinkageTerms } from "../config/linkageTerms.js";
 
 /**
  * @internal

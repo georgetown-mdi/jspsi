@@ -6,7 +6,7 @@ export {
   CONSENT_PROBE_TERMS,
   COUNT_ONLY_PROBE_TERMS,
   consentRepresentationProbes,
-} from "./linkageTermConsentCoverage.js";
+} from "./consent/linkageTermConsentCoverage.js";
 
 export {
   BEL,
@@ -17,7 +17,7 @@ export {
   hostileSource,
   hostileTerms,
   hostileVariants,
-} from "./displayEscapingFixtures.js";
+} from "./consent/displayEscapingFixtures.js";
 
 // The key-schedule core, so the browser cross-implementation suite can run the
 // checked-in known-answer vectors through the browser build the way the Node
@@ -39,7 +39,7 @@ export {
   encodeSinglePassReply,
   getSortedDistinctValueIndices,
   linkViaPSI,
-} from "./link.js";
+} from "./psi/link.js";
 export { FAN_OUT_CANDIDATES_PER_ELEMENT } from "./fanOutFunctions.js";
 export { StandardizedKeyIterable } from "./standardization.js";
 export {

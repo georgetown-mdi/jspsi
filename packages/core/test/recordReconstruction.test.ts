@@ -8,7 +8,7 @@ import {
   buildExchangeRecord,
   parseExchangeRecord,
   serializeExchangeRecord,
-} from "../src/exchangeRecord";
+} from "../src/records/exchangeRecord";
 import {
   matchedPairCount,
   prepareForExchange,
@@ -24,13 +24,13 @@ import {
   reconstructCommittedData,
   toRetainedResult,
   verifyExchangeRecord,
-} from "../src/recordVerification";
+} from "../src/records/recordVerification";
 import { createMessagePipe } from "../src/connection/messageConnection";
 
 import type { LinkageTerms, Output } from "../src/config/linkageTerms";
 import type { Metadata } from "../src/config/metadata";
 import type { PartnerPayload } from "../src/payloadExchange";
-import type { RetainedResult } from "../src/recordVerification";
+import type { RetainedResult } from "../src/records/recordVerification";
 import type { AssociationTable } from "../src/types";
 import type { CSVRow } from "../src/file";
 

@@ -15,19 +15,19 @@ export {
   chainDetailCauses,
   isPeerWaitTimeout,
 } from "./errors";
-export { PSIParticipant, ProcessState } from "./participant";
-export { loadPsiBackend } from "./psiBackend";
-export type { PsiBackendOptions, PsiBackendSelection } from "./psiBackend";
-export { InProcessPsiEngine } from "./psiEngine";
-export type { PsiEngine, PsiEngineMode } from "./psiEngine";
-export { WorkerPsiEngine, servePsiWorker } from "./psiWorkerEngine";
+export { PSIParticipant, ProcessState } from "./psi/participant";
+export { loadPsiBackend } from "./psi/psiBackend";
+export type { PsiBackendOptions, PsiBackendSelection } from "./psi/psiBackend";
+export { InProcessPsiEngine } from "./psi/psiEngine";
+export type { PsiEngine, PsiEngineMode } from "./psi/psiEngine";
+export { WorkerPsiEngine, servePsiWorker } from "./psi/psiWorkerEngine";
 export type {
   PsiWorkerHandle,
   PsiWorkerInit,
   PsiWorkerRequest,
   PsiWorkerResponse,
-} from "./psiWorkerEngine";
-export { linkViaSinglePassPSI } from "./link";
+} from "./psi/psiWorkerEngine";
+export { linkViaSinglePassPSI } from "./psi/link";
 
 export { AlgorithmSchema, SEMANTIC_TYPES } from "./types";
 export type {
@@ -331,13 +331,13 @@ export {
   serializeCertificate,
   serializeSigningIdentity,
   verifyCertificateSelfSignature,
-} from "./signingIdentity";
+} from "./records/signingIdentity";
 export type {
   CertificateBody,
   P256PrivateJwk,
   SigningCertificate,
   SigningIdentity,
-} from "./signingIdentity";
+} from "./records/signingIdentity";
 export {
   FAN_OUT_FUNCTION_NAMES,
   STANDARDIZATION_FUNCTION_DESCRIPTORS,
@@ -380,12 +380,12 @@ export type {
 export {
   summarizeInvitation,
   TRANSFORM_FUNCTION_GLOSSARY,
-} from "./invitationSummary.js";
+} from "./consent/invitationSummary.js";
 export type {
   InvitationKeySummary,
   InvitationRuleSetSummary,
   InvitationSummary,
-} from "./invitationSummary.js";
+} from "./consent/invitationSummary.js";
 // The classification and caveat copy that go with that display model: whether a
 // fact the acceptance surfaces state is enforced by the exchange or rests on the
 // partner's word, and the fixed sentences both surfaces render for it.
@@ -403,19 +403,19 @@ export {
   UNRECOGNIZED_TRANSFORM_NOTE,
   distinctLinkageRuleSetVerdicts,
   linkageRuleSetVerdictNote,
-} from "./consentFacts.js";
-export type { ConsentFact, ConsentFactId } from "./consentFacts.js";
+} from "./consent/consentFacts.js";
+export type { ConsentFact, ConsentFactId } from "./consent/consentFacts.js";
 // The count every acceptance surface paints a partner-declared name list under,
 // and the sentence a bounded list closes on: one cut and one wording across the
 // CLI accept prompt and the two web surfaces.
 export {
   MAX_DECLARED_NAMES_SHOWN,
   unshownDeclaredNamesLine,
-} from "./declaredNameBound.js";
+} from "./consent/declaredNameBound.js";
 // Which proposed settings today's exchange actually applies. Read by the summary
 // above (to flag a proposed-but-not-applied term) and by the web app's linkage-
 // terms editor and import path.
-export { APPLIED_SETTINGS } from "./appliedSettings.js";
+export { APPLIED_SETTINGS } from "./consent/appliedSettings.js";
 export {
   loadCSVFile,
   streamCSVRows,
@@ -475,7 +475,7 @@ export {
   serializeExchangeRecord,
   serializeVerificationKeys,
   verifyRecordCommitments,
-} from "./exchangeRecord";
+} from "./records/exchangeRecord";
 export type {
   BuiltExchangeRecord,
   CommitmentName,
@@ -485,12 +485,12 @@ export type {
   ExchangeRecordOutcome,
   RecordLinkageRuleSet,
   VerificationKeys,
-} from "./exchangeRecord";
+} from "./records/exchangeRecord";
 export {
   UNNAMED_PARTY_LABEL,
   displayPartyIdentity,
   redactAndDisplayPartyIdentity,
-} from "./partyIdentityDisplay";
+} from "./records/partyIdentityDisplay";
 export {
   ReceiptVerificationError,
   SIGNED_RECEIPT_VERSION,
@@ -499,8 +499,8 @@ export {
   serializeDualSignedRecord,
   signReceiptContent,
   verifyReceiptSignature,
-} from "./signedReceipt";
-export type { DualSignedRecord, ReceiptContent } from "./signedReceipt";
+} from "./records/signedReceipt";
+export type { DualSignedRecord, ReceiptContent } from "./records/signedReceipt";
 export {
   deriveOurIdColumn,
   reconstructCommittedData,
@@ -509,17 +509,17 @@ export {
   reproductionMismatchCauses,
   toRetainedResult,
   verifyExchangeRecord,
-} from "./recordVerification";
+} from "./records/recordVerification";
 export type {
   CommitmentStatus,
   RecordVerificationReport,
   ResultSizeStatus,
   TermsHashStatus,
-} from "./recordVerification";
+} from "./records/recordVerification";
 export {
   decideSignedReceiptVerdict,
   verifyDualSignedRecord,
-} from "./signedReceiptVerification";
+} from "./records/signedReceiptVerification";
 export type {
   AnchoredCertificateSlot,
   AnchoredCertificateStatus,
@@ -539,7 +539,7 @@ export type {
   SignedReceiptVerdictParty,
   SignedReceiptVerdictRunBinding,
   UnanchoredCertificateClause,
-} from "./signedReceiptVerification";
+} from "./records/signedReceiptVerification";
 export {
   assertDisclosedNamesCarriable,
   assertPayloadSendDisclosed,

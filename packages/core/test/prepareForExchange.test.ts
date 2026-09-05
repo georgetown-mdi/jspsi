@@ -12,8 +12,8 @@ import {
 import {
   assertPartnerCertificateTrusted,
   generateSigningIdentity,
-} from "../src/signingIdentity";
-import { ReceiptVerificationError } from "../src/signedReceipt";
+} from "../src/records/signingIdentity";
+import { ReceiptVerificationError } from "../src/records/signedReceipt";
 import {
   LinkageTermsUnsatisfiableError,
   OperatorConfigError,

@@ -8,7 +8,7 @@ import {
   type MessageConnection,
 } from "../src/connection/messageConnection";
 
-import type { BuiltExchangeRecord } from "../src/exchangeRecord";
+import type { BuiltExchangeRecord } from "../src/records/exchangeRecord";
 import type { LinkageStrategy, Output } from "../src/config/linkageTerms";
 import type { ExchangeResult } from "../src/exchange";
 

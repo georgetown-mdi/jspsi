@@ -3,19 +3,19 @@ import { describe, expect, test } from "vitest";
 import PSI from "@openmined/psi.js";
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 
-import { removeDuplicatesAndUndefineds } from "../src/link";
+import { removeDuplicatesAndUndefineds } from "../src/psi/link";
 import {
   InProcessPsiEngine,
   valuesContributedExactlyOnce,
   type PsiEngine,
   type PsiEngineMode,
-} from "../src/psiEngine";
+} from "../src/psi/psiEngine";
 import {
   WorkerPsiEngine,
   servePsiWorker,
   type PsiWorkerHandle,
   type PsiWorkerResponse,
-} from "../src/psiWorkerEngine";
+} from "../src/psi/psiWorkerEngine";
 import type { Config } from "../src/types";
 import { loadNativeAddonOrSkip } from "./utils/nativeAddon";
 

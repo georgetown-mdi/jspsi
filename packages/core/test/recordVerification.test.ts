@@ -2,7 +2,7 @@ import { Readable } from "node:stream";
 
 import { describe, expect, test } from "vitest";
 
-import { buildExchangeRecord } from "../src/exchangeRecord";
+import { buildExchangeRecord } from "../src/records/exchangeRecord";
 import { buildOutputTable, preparePayload } from "../src/payloadExchange";
 import { loadCSVFile } from "../src/file";
 import {
@@ -11,13 +11,13 @@ import {
   reproductionMismatchCauses,
   toRetainedResult,
   verifyExchangeRecord,
-} from "../src/recordVerification";
+} from "../src/records/recordVerification";
 
 import type {
   CommitmentName,
   CommittedPayload,
   ExchangeRecordInputs,
-} from "../src/exchangeRecord";
+} from "../src/records/exchangeRecord";
 import type { LinkageTerms } from "../src/config/linkageTerms";
 import type { Metadata } from "../src/config/metadata";
 import type { PartnerPayload } from "../src/payloadExchange";
@@ -25,7 +25,7 @@ import type {
   CommitmentStatus,
   RecordVerificationReport,
   RetainedResult,
-} from "../src/recordVerification";
+} from "../src/records/recordVerification";
 import type { CanonicalValue } from "../src/utils/canonical";
 import type { AssociationTable } from "../src/types";
 import type { CSVRow } from "../src/file";

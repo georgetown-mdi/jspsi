@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 
 import PSI from "@openmined/psi.js";
 
-import { PSIParticipant } from "../src/participant";
+import { PSIParticipant } from "../src/psi/participant";
 import {
   prepareForExchange,
   runExchange,
@@ -13,7 +13,7 @@ import {
   linkViaSinglePassPSI,
   type LinkageCardinality,
   type SinglePassSessionBounds,
-} from "../src/link";
+} from "../src/psi/link";
 import {
   declaredEffectiveKeyCount,
   FAN_OUT_CANDIDATES_PER_ELEMENT,

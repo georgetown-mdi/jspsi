@@ -5,8 +5,8 @@ import {
   buildStandardizedDataset,
   StandardizedKeyIterable,
 } from "../src/standardization";
-import { PSIParticipant } from "../src/participant";
-import { linkViaPSI } from "../src/link";
+import { PSIParticipant } from "../src/psi/participant";
+import { linkViaPSI } from "../src/psi/link";
 import type { LinkageTerms } from "../src/config/linkageTerms";
 import type { ColumnMetadata } from "../src/config/metadata";
 

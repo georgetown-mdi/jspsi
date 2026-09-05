@@ -2,14 +2,14 @@ import { expect, test } from "vitest";
 
 import PSI from "@openmined/psi.js";
 
-import { PSIParticipant } from "../src/participant";
-import { linkViaPSI } from "../src/link";
+import { PSIParticipant } from "../src/psi/participant";
+import { linkViaPSI } from "../src/psi/link";
 import {
   createMessagePipe,
   ConnectionError,
   type MessageConnection,
 } from "../src/connection/messageConnection";
-import { entityClusters } from "../src/entityClosure";
+import { entityClusters } from "../src/psi/entityClosure";
 import { matchedPairCount } from "../src/exchange";
 import { buildOutputTable, preparePayload } from "../src/payloadExchange";
 import type { Metadata } from "../src/config/metadata";

@@ -3,7 +3,7 @@ import { describe, expect, test } from "vitest";
 import PSI from "@openmined/psi.js";
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 
-import { PSIParticipant } from "../src/participant";
+import { PSIParticipant } from "../src/psi/participant";
 import { createMessagePipe } from "../src/connection/messageConnection";
 import { sortAssociationTable } from "../src/testing";
 import { loadNativeAddonOrSkip } from "./utils/nativeAddon";

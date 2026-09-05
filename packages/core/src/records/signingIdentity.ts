@@ -1,14 +1,14 @@
 import { z } from "zod";
 
-import { camelizeKeys } from "./utils/camelizeKeys.js";
-import { partnerPinIsPresent } from "./config/signing.js";
-import { canonicalBytes } from "./utils/canonical.js";
+import { camelizeKeys } from "../utils/camelizeKeys.js";
+import { partnerPinIsPresent } from "../config/signing.js";
+import { canonicalBytes } from "../utils/canonical.js";
 import {
   bytesEqual,
   fromBase64Url,
   sha256,
   toBase64Url,
-} from "./utils/crypto.js";
+} from "../utils/crypto.js";
 import {
   SigningError,
   assertPrivateKeyMatchesPublic,
@@ -20,7 +20,7 @@ import {
   verifyWithP256,
 } from "./signingKeys.js";
 
-import type { CanonicalValue } from "./utils/canonical.js";
+import type { CanonicalValue } from "../utils/canonical.js";
 import type { P256PrivateJwk, P256PublicJwk } from "./signingKeys.js";
 
 // The long-lived signing identity that backs certificate-mode exchange

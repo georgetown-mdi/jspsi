@@ -42,7 +42,11 @@ import {
   summarizeDatasetConstraintViolations,
 } from "../src/valueConstraints";
 import * as standardizationModule from "../src/standardization";
-import { ESC, PRINTABLE_ASCII, RLO } from "../src/displayEscapingFixtures";
+import {
+  ESC,
+  PRINTABLE_ASCII,
+  RLO,
+} from "../src/consent/displayEscapingFixtures";
 import {
   LinkageTermsUnsatisfiableError,
   OperatorConfigError,

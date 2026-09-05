@@ -12,12 +12,12 @@ import {
   serializeDualSignedRecord,
   signReceiptContent,
   verifyReceiptSignature,
-} from "../src/signedReceipt";
+} from "../src/records/signedReceipt";
 import { fromBase64Url, hkdfDerive, toBase64Url } from "../src/utils/crypto";
 import {
   computeCertificateFingerprint,
   generateSigningIdentity,
-} from "../src/signingIdentity";
+} from "../src/records/signingIdentity";
 import {
   ConnectionError,
   createMessagePipe,
@@ -27,9 +27,12 @@ import type {
   DualSignedRecord,
   ReceiptContent,
   SignedReceiptExchangeInputs,
-} from "../src/signedReceipt";
-import type { CommittedPayload } from "../src/exchangeRecord";
-import type { P256PrivateJwk, SigningIdentity } from "../src/signingIdentity";
+} from "../src/records/signedReceipt";
+import type { CommittedPayload } from "../src/records/exchangeRecord";
+import type {
+  P256PrivateJwk,
+  SigningIdentity,
+} from "../src/records/signingIdentity";
 
 // --- Fixtures ----------------------------------------------------------------
 

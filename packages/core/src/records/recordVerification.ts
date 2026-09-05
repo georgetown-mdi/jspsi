@@ -1,6 +1,6 @@
 import { computeTermsHash, verifyCommitmentOpening } from "./exchangeRecord.js";
-import { readRowColumn } from "./file.js";
-import { distinctMatchedRows } from "./payloadExchange.js";
+import { readRowColumn } from "../file.js";
+import { distinctMatchedRows } from "../payloadExchange.js";
 
 import type {
   CommitmentName,
@@ -8,10 +8,10 @@ import type {
   ExchangeRecord,
   VerificationKeys,
 } from "./exchangeRecord.js";
-import type { CanonicalValue } from "./utils/canonical.js";
-import type { LinkageTerms } from "./config/linkageTerms.js";
-import type { CSVRow } from "./file.js";
-import type { AssociationTable } from "./types.js";
+import type { CanonicalValue } from "../utils/canonical.js";
+import type { LinkageTerms } from "../config/linkageTerms.js";
+import type { CSVRow } from "../file.js";
+import type { AssociationTable } from "../types.js";
 
 // The verification consumer for the self-attested exchange record: it reads
 // a stored record and its verification keys, re-derives the record's

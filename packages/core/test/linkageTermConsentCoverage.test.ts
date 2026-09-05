@@ -4,11 +4,11 @@ import {
   CONSENT_PROBE_TERMS,
   LINKAGE_TERM_CONSENT_CLASSIFICATION,
   consentRepresentationProbes,
-} from "../src/linkageTermConsentCoverage.js";
+} from "../src/consent/linkageTermConsentCoverage.js";
 import { declaredPositions } from "./utils/declaredPositions.js";
 
 import type { LinkageTerms } from "../src/config/linkageTerms.js";
-import type { ConsentRelevantTerm } from "../src/linkageTermConsentCoverage.js";
+import type { ConsentRelevantTerm } from "../src/consent/linkageTermConsentCoverage.js";
 
 /**
  * Every property path {@link LinkageTerms} and the structs nested under it

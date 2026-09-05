@@ -1,5 +1,5 @@
-import { InternalConsistencyError } from "./errors";
-import type { AssociationTable } from "./types";
+import { InternalConsistencyError } from "../errors";
+import type { AssociationTable } from "../types";
 
 /**
  * One entity cluster of an association table: a connected component of the

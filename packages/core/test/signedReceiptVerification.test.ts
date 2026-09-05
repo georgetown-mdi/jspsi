@@ -6,28 +6,31 @@ import {
   SIGNED_RECEIPT_VERSION,
   parseDualSignedRecord,
   signReceiptContent,
-} from "../src/signedReceipt";
+} from "../src/records/signedReceipt";
 import {
   decideSignedReceiptVerdict,
   verifyDualSignedRecord,
-} from "../src/signedReceiptVerification";
+} from "../src/records/signedReceiptVerification";
 import {
   computeCertificateFingerprint,
   generateSigningIdentity,
-} from "../src/signingIdentity";
+} from "../src/records/signingIdentity";
 
 import type {
   DualSignedRecord,
   ReceiptContent,
   SignedReceiptParty,
-} from "../src/signedReceipt";
+} from "../src/records/signedReceipt";
 import type {
   CertificateAnchorStatus,
   DualSignedRecordVerificationReport,
   SignedReceiptPartyReport,
   SignedReceiptVerdict,
-} from "../src/signedReceiptVerification";
-import type { P256PrivateJwk, SigningIdentity } from "../src/signingIdentity";
+} from "../src/records/signedReceiptVerification";
+import type {
+  P256PrivateJwk,
+  SigningIdentity,
+} from "../src/records/signingIdentity";
 import type { HandshakeRole } from "../src/types";
 
 // The verification consumer for the dual-signed record: what a party (or an

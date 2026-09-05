@@ -14,7 +14,7 @@ import {
   StandardizedField,
 } from "../src/standardization";
 import { declaredEffectiveKeyCount } from "../src/fanOutFunctions";
-import { APPLIED_SETTINGS } from "../src/appliedSettings";
+import { APPLIED_SETTINGS } from "../src/consent/appliedSettings";
 import { UsageError } from "../src/errors";
 import type {
   GenerateFuzzyComparisons,

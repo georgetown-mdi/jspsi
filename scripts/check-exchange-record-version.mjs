@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 // The two obligations EXCHANGE_RECORD_VERSION holds, run by
 // static_checks.yaml on every PR. Both read the same literal out of
-// packages/core/src/exchangeRecord.ts, and both fall due long after the
+// packages/core/src/records/exchangeRecord.ts, and both fall due long after the
 // sentence stating them was written, which is the shape that rots: nothing
 // fails when they are forgotten. They are one check so that one literal edit
 // gets one verdict rather than two failures to be read together.
@@ -36,7 +36,7 @@
 //
 // RULE 2, THE RESET. EXCHANGE_RECORD_VERSION is an internal development counter.
 // It has cycled freely -- through psilink-exchange-record/v1 and on up -- because
-// no published artifact contains any of its literals: packages/core/src/exchangeRecord.ts
+// no published artifact contains any of its literals: packages/core/src/records/exchangeRecord.ts
 // does not exist at v0.1.0, the only release this project has tagged. First
 // publication ships the counter reset to psilink-exchange-record/v1, and the
 // reset is taken AT that release rather than earlier: re-using a
@@ -112,7 +112,8 @@ import {
 export { PRE_PUBLICATION_RELEASE, RELEASE_MANIFEST };
 
 /** Where the record version literal is declared. */
-export const RECORD_VERSION_SOURCE = "packages/core/src/exchangeRecord.ts";
+export const RECORD_VERSION_SOURCE =
+  "packages/core/src/records/exchangeRecord.ts";
 
 /** This file, named by every failure that asks for an edit to it. */
 export const CHECK_SOURCE = "scripts/check-exchange-record-version.mjs";

@@ -2,15 +2,15 @@ import { expect, test } from "vitest";
 
 import PSI from "@openmined/psi.js";
 
-import { PSIParticipant } from "../src/participant";
-import { linkViaPSI, linkViaSinglePassPSI } from "../src/link";
+import { PSIParticipant } from "../src/psi/participant";
+import { linkViaPSI, linkViaSinglePassPSI } from "../src/psi/link";
 import { createMessagePipe } from "../src/connection/messageConnection";
 import {
   WorkerPsiEngine,
   servePsiWorker,
   type PsiWorkerHandle,
   type PsiWorkerResponse,
-} from "../src/psiWorkerEngine";
+} from "../src/psi/psiWorkerEngine";
 import type { Config } from "../src/types";
 import { sortAssociationTable } from "../src/testing";
 import { UNBOUNDED_PSI_ELEMENTS } from "./utils/psiElementBounds";

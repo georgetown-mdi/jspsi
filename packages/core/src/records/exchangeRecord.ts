@@ -4,7 +4,7 @@ import {
   canonicalBytes,
   canonicalString,
   safeIntegerSchema,
-} from "./utils/canonical.js";
+} from "../utils/canonical.js";
 import {
   bytesEqual,
   fromBase64Url,
@@ -12,20 +12,20 @@ import {
   randomBytes,
   sha256,
   toBase64Url,
-} from "./utils/crypto.js";
-import { AlgorithmSchema } from "./types.js";
+} from "../utils/crypto.js";
+import { AlgorithmSchema } from "../types.js";
 import {
   MAX_LINKAGE_ENTRIES,
   MAX_NAME_LENGTH,
   MAX_PAYLOAD_ENTRIES,
   MAX_TEXT_LENGTH,
-} from "./config/linkageTerms.js";
-import { checkLinkageRuleSetCitation } from "./defaults/linkageTerms.js";
-import { boundedArray } from "./utils/boundedArray.js";
+} from "../config/linkageTerms.js";
+import { checkLinkageRuleSetCitation } from "../defaults/linkageTerms.js";
+import { boundedArray } from "../utils/boundedArray.js";
 
-import type { CanonicalValue } from "./utils/canonical.js";
-import type { LinkageTerms } from "./config/linkageTerms.js";
-import type { Algorithm, AssociationTable } from "./types.js";
+import type { CanonicalValue } from "../utils/canonical.js";
+import type { LinkageTerms } from "../config/linkageTerms.js";
+import type { Algorithm, AssociationTable } from "../types.js";
 
 // The exchange record: a self-attested, unsigned disclosure-log entry each party
 // writes once the exchange has disclosed, whatever the run's outcome

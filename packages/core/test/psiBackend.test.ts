@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 
-import { detectNodeRuntime, loadPsiBackend } from "../src/psiBackend";
+import { detectNodeRuntime, loadPsiBackend } from "../src/psi/psiBackend";
 
 // Distinct sentinels standing in for real PSILibrary instances; the selector
 // only routes them, it never calls into them.

@@ -4,10 +4,13 @@
 // psilink runs as. Every sink that shows a party identity routes through here
 // and displays the same marker, so it is treated as an absence, not a name.
 
-import { redactAndSanitizeForDisplay } from "./utils/sanitizeErrorForDisplay.js";
-import { displayText, sanitizeForDisplay } from "./utils/sanitizeForDisplay.js";
+import { redactAndSanitizeForDisplay } from "../utils/sanitizeErrorForDisplay.js";
+import {
+  displayText,
+  sanitizeForDisplay,
+} from "../utils/sanitizeForDisplay.js";
 
-import type { Displayable } from "./utils/sanitizeForDisplay.js";
+import type { Displayable } from "../utils/sanitizeForDisplay.js";
 
 /**
  * What a surface shows in place of a party's identity when the party supplied

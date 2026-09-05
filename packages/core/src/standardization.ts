@@ -36,7 +36,7 @@ import {
   expandFuzzyComparisons,
   expandsOnReceiverOnly,
 } from "./fuzzyComparisons.js";
-import { APPLIED_SETTINGS } from "./appliedSettings.js";
+import { APPLIED_SETTINGS } from "./consent/appliedSettings.js";
 import {
   DEFAULT_DATE_OUTPUT_FORMAT,
   SOUNDEX_CODE_LENGTH,

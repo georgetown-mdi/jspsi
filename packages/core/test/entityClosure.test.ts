@@ -3,7 +3,7 @@ import { describe, expect, test } from "vitest";
 import {
   assertBlockDiagonalClosure,
   entityClusters,
-} from "../src/entityClosure";
+} from "../src/psi/entityClosure";
 import { InternalConsistencyError } from "../src/errors";
 import type { AssociationTable } from "../src/types";
 

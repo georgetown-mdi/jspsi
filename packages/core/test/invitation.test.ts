@@ -25,7 +25,7 @@ import {
   MAX_DATE_FORMAT_LENGTH,
   MAX_TRANSFORM_PARAM_LENGTH,
 } from "../src/config/linkageTerms";
-import { summarizeInvitation } from "../src/invitationSummary";
+import { summarizeInvitation } from "../src/consent/invitationSummary";
 import { NestingDepthExceededError } from "../src/utils/camelizeKeys";
 import { describeDecodeError } from "../src/utils/describeDecodeError";
 import { sanitizeErrorForDisplay } from "../src/utils/sanitizeErrorForDisplay";

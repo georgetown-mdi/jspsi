@@ -2,7 +2,7 @@ import { expect, test } from "vitest";
 
 import PSI from "@openmined/psi.js";
 
-import { PSIParticipant } from "../src/participant";
+import { PSIParticipant } from "../src/psi/participant";
 import {
   associationAndIterationArray,
   attributableRoundMatches,
@@ -12,7 +12,7 @@ import {
   linkViaSinglePassPSI,
   removeDuplicatesAndUndefineds,
   type LinkageCardinality,
-} from "../src/link";
+} from "../src/psi/link";
 import {
   createMessagePipe,
   receiveParsed,

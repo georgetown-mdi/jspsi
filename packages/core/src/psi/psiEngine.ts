@@ -2,7 +2,7 @@ import type { Client as PSIClient } from "@openmined/psi.js/implementation/clien
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 import type { Server as PSIServer } from "@openmined/psi.js/implementation/server.d.ts";
 
-import type { Config } from "./types";
+import type { Config } from "../types";
 
 // The deserialized server setup the joiner holds between receiving it and matching
 // against it (see PsiEngine.receiveServerSetup and the match that consumes it). A live

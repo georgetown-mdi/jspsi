@@ -4,7 +4,7 @@ import { getDefaultLinkageTerms } from "../src/defaults/linkageTerms.js";
 import {
   summarizeInvitation,
   TRANSFORM_FUNCTION_GLOSSARY,
-} from "../src/invitationSummary.js";
+} from "../src/consent/invitationSummary.js";
 import { disclosedColumnNames, inferMetadata } from "../src/config/metadata.js";
 import {
   assertDeduplicateImplemented,

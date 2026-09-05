@@ -8,15 +8,15 @@ import {
   RLO,
   hostileSource,
   hostileVariants,
-} from "../src/displayEscapingFixtures.js";
-import { summarizeInvitation } from "../src/invitationSummary.js";
+} from "../src/consent/displayEscapingFixtures.js";
+import { summarizeInvitation } from "../src/consent/invitationSummary.js";
 import { sanitizeForDisplay } from "../src/utils/sanitizeForDisplay.js";
 import { declaredPositions } from "./utils/declaredPositions.js";
 
 import type {
   InvitationLegalAgreementSummary,
   InvitationSummary,
-} from "../src/invitationSummary.js";
+} from "../src/consent/invitationSummary.js";
 
 /**
  * A linkage key's `id` holds the raw partner key name verbatim: it is the
@@ -175,7 +175,7 @@ describe("the display-struct brand", () => {
       // An optional field added to a summary struct joins `declared.optional`
       // with no edit here, and fails below until a fixture populates it.
       const declared = declaredPositions({
-        sourcePathFromCoreRoot: "src/invitationSummary.ts",
+        sourcePathFromCoreRoot: "src/consent/invitationSummary.ts",
         rootInterface: "InvitationSummary",
         stringIntersectionEndsPath: true,
       });

@@ -19,21 +19,21 @@ import {
   ReceiptVerificationError,
   SIGNED_RECEIPT_VERSION,
   verifyReceiptSignature,
-} from "../src/signedReceipt";
-import { verifyDualSignedRecord } from "../src/signedReceiptVerification";
+} from "../src/records/signedReceipt";
+import { verifyDualSignedRecord } from "../src/records/signedReceiptVerification";
 import {
   certificateAuthorizesIdentity,
   computeCertificateFingerprint,
   generateSigningIdentity,
-} from "../src/signingIdentity";
+} from "../src/records/signingIdentity";
 import { COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH } from "../src/utils/sanitizeForDisplay";
 
 import type { Output } from "../src/config/linkageTerms";
 import type { MessageConnection } from "../src/connection/messageConnection";
-import type { ExchangeRecord } from "../src/exchangeRecord";
+import type { ExchangeRecord } from "../src/records/exchangeRecord";
 import type { ExchangeResult } from "../src/exchange";
 import type { RunExchangeOptions } from "../src/exchange";
-import type { DualSignedRecordVerificationInputs } from "../src/signedReceiptVerification";
+import type { DualSignedRecordVerificationInputs } from "../src/records/signedReceiptVerification";
 
 // End-to-end coverage of the signed-receipt step in runExchange: two parties
 // run a full exchange over an in-memory pipe (real PSI) with signing identities

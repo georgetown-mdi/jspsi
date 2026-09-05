@@ -5,7 +5,7 @@ import {
   type PsiEngine,
   type PsiEngineMode,
 } from "./psiEngine";
-import type { Config } from "./types";
+import type { Config } from "../types";
 
 // The runtime-agnostic PSI worker boundary. It moves the
 // blocking elliptic-curve masking off the thread that owns the network transport

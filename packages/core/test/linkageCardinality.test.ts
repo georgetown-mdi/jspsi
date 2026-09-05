@@ -27,7 +27,7 @@ import {
   validateCompatibility,
 } from "../src/linkageTermsNegotiation";
 import { parseLinkageTerms } from "../src/config/linkageTerms";
-import { entityClusters } from "../src/entityClosure";
+import { entityClusters } from "../src/psi/entityClosure";
 import { inferMetadata } from "../src/config/metadata";
 import { mintExchangeFile } from "../src/config/exchangeFile";
 import { parseExchangeSpec } from "../src/config/exchangeSpec";

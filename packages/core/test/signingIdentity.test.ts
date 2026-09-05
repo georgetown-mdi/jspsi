@@ -18,19 +18,19 @@ import {
   serializeSigningIdentity,
   verifyCertificateSelfSignature,
   verifyPresentedCertificate,
-} from "../src/signingIdentity";
+} from "../src/records/signingIdentity";
 import {
   assertPrivateKeyMatchesPublic,
   ECDSA_P256_SIGNATURE_BYTES,
   importPrivateSigningKey,
-} from "../src/signingKeys";
+} from "../src/records/signingKeys";
 import { fromBase64Url, toBase64Url } from "../src/utils/crypto";
 
 import type {
   P256PrivateJwk,
   SigningCertificate,
   SigningIdentity,
-} from "../src/signingIdentity";
+} from "../src/records/signingIdentity";
 
 const IDENTITY = "Jane Smith, Agency A\njsmith@agency-a.gov";
 

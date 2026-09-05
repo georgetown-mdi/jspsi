@@ -1,7 +1,7 @@
 import { describe, expect, test } from "vitest";
 
-import { consentRepresentationProbes } from "../src/linkageTermConsentCoverage.js";
-import { summarizeInvitation } from "../src/invitationSummary.js";
+import { consentRepresentationProbes } from "../src/consent/linkageTermConsentCoverage.js";
+import { summarizeInvitation } from "../src/consent/invitationSummary.js";
 
 import type { LinkageTerms } from "../src/config/linkageTerms.js";
 

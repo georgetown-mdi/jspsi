@@ -1,4 +1,4 @@
-import type { SinglePassSessionBounds } from "../../src/link";
+import type { SinglePassSessionBounds } from "../../src/psi/link";
 
 /**
  * The session bounds a FAN-OUT-FREE single-pass exchange holds: every key has

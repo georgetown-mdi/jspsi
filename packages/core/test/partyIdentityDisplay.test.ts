@@ -4,9 +4,9 @@ import {
   displayPartyIdentity,
   redactAndDisplayPartyIdentity,
   UNNAMED_PARTY_LABEL,
-} from "../src/partyIdentityDisplay";
-import { summarizeInvitation } from "../src/invitationSummary";
-import { ESC, hostileTerms, RLO } from "../src/displayEscapingFixtures";
+} from "../src/records/partyIdentityDisplay";
+import { summarizeInvitation } from "../src/consent/invitationSummary";
+import { ESC, hostileTerms, RLO } from "../src/consent/displayEscapingFixtures";
 
 import type { LinkageTerms } from "../src/config/linkageTerms";
 

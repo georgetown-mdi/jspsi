@@ -1,30 +1,30 @@
 import * as z from "zod";
 
-import type { AssociationTable, Config } from "./types";
+import type { AssociationTable, Config } from "../types";
 import {
   receiveParsed,
   parseOrProtocolError,
   type MessageConnection,
-} from "./connection/messageConnection";
+} from "../connection/messageConnection";
 import {
   MAX_PSI_DECODE_ELEMENTS,
   type PsiElementBounds,
-} from "./connection/frameSize";
+} from "../connection/frameSize";
 import {
   countDeclaredPsiElements,
   type PsiMessageKind,
-} from "./connection/psiElementScan";
-import { singleIssueArray } from "./utils/singleIssueArray";
+} from "../connection/psiElementScan";
+import { singleIssueArray } from "../utils/singleIssueArray";
 import {
   assertPartnerIndexCount,
   assertPartnerIndices,
   assertPartnerIndexTable,
-} from "./utils/partnerIndices";
+} from "../utils/partnerIndices";
 import { InProcessPsiEngine, type PsiEngine } from "./psiEngine";
 
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 
-import { getLoggerForVerbosity } from "./utils/logger";
+import { getLoggerForVerbosity } from "../utils/logger";
 
 const statusCompletedMessage = z.object({
   status: z.literal("completed"),

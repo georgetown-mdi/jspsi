@@ -11,7 +11,7 @@ import type {
   TermsHashStatus,
 } from "./recordVerification.js";
 import type { DualSignedRecord, SignedReceiptParty } from "./signedReceipt.js";
-import type { HandshakeRole } from "./types.js";
+import type { HandshakeRole } from "../types.js";
 
 // The verification consumer for the DUAL-SIGNED record (the signed evidence
 // bundle the signed-receipt step produces): per party it checks the record's
