@@ -1,6 +1,6 @@
 /// <reference types="@vitest/browser-playwright/context" />
 
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
 import { page, userEvent } from "vitest/browser";
 
@@ -38,6 +38,7 @@ import {
   hostileTerms,
   hostileVariants,
 } from "@psilink/core/testing";
+import { restoreMatchMedia, stubReducedMotion } from "./reducedMotion";
 import { createAppMount } from "./renderApp";
 
 import type { ComponentProps } from "react";
@@ -727,6 +728,67 @@ describe("InvitationTerms: per-key matching disclosures", () => {
     // ... and the per-key matching detail moved out, into the key's own
     // disclosure.
     expect(panel.textContent).not.toContain("Matches on the first character");
+  });
+});
+
+describe("InvitationTerms: a key disclosure stays mounted but hidden under a reduced-motion preference", () => {
+  // Since Mantine 9.4 a closed Collapse no longer unmounts its panel for a
+  // reduced-motion user: it keeps the panel mounted inside a hidden React Activity
+  // boundary and hides it with display:none (rather than the height animation plus
+  // aria-hidden + inert it uses with motion). display:none keeps the collapsed
+  // detail out of sight, the accessibility tree, and the tab order all the same.
+  // Force the reduced-motion configuration -- the OS signal (matchMedia) and the
+  // theme switch that honors it -- and assert each disclosure's panel is present,
+  // hidden, and its aria-controls still resolves to its wrapper.
+  beforeEach(() => {
+    stubReducedMotion(true);
+  });
+
+  afterEach(restoreMatchMedia);
+
+  test("every disclosure's aria-controls resolves to a present, hidden panel while collapsed under reduced motion", async () => {
+    app.render(createElement(InvitationTerms, { linkageTerms: terms }));
+
+    // The always-mounted-wrapper design for every disclosure. The top-level ones
+    // are the matching list ("Matching strategies") and the master "Other details";
+    // the per-key widgets live nested inside "Matching strategies" and are exercised
+    // after it is opened. Since Mantine 9.4 a closed Collapse under reduced motion
+    // keeps the collapsed detail out of sight one of two ways depending on the
+    // environment -- it unmounts the panel, or it keeps it mounted in a hidden
+    // React Activity boundary (display:none) -- and both leave the detail out of the
+    // accessibility tree and the tab order. The durable invariant across both is
+    // that the wrapper holding aria-controls stays a present element, so the
+    // reference never dangles (the reason the id lives on the wrapper, not the
+    // panel). Assert that, after waiting for the reduced-motion media effect to
+    // collapse the panel away.
+    async function expectResolvableCollapsedWrapper(name: string) {
+      await expect.element(toggle(name)).toBeInTheDocument();
+      expect(toggle(name).element().getAttribute("aria-expanded")).toBe(
+        "false",
+      );
+      const id = toggle(name).element().getAttribute("aria-controls");
+      expect(id).toBeTruthy();
+      // Wait for the post-mount reduced-motion effect to settle: the closed panel
+      // is then either gone (unmounted) or hidden (display:none).
+      await expect
+        .poll(() => {
+          const panel = document.getElementById(id!)
+            ?.firstElementChild as HTMLElement | null;
+          return panel === null || getComputedStyle(panel).display === "none";
+        })
+        .toBe(true);
+      // ... and through it all the wrapper stays present, so aria-controls resolves.
+      expect(document.getElementById(id!)).not.toBeNull();
+    }
+
+    for (const name of ["Matching strategies", "Other details"])
+      await expectResolvableCollapsedWrapper(name);
+
+    // Open the matching list so its per-key disclosures mount, then assert each
+    // closed per-key wrapper likewise stays a resolvable target.
+    await userEvent.click(toggle("Matching strategies"));
+    for (const name of ["SSN + LN + DOB", "SSN + FN1"])
+      await expectResolvableCollapsedWrapper(name);
   });
 });
 
