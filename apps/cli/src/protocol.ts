@@ -1183,40 +1183,34 @@ async function closeRunLayers(params: {
 }
 
 /**
- * The end-of-run transport counters, one line each and only when non-zero: how
- * often the connection was re-established, and the connection-per-poll
- * boundaries where the session was released, forced closed, held, or skipped.
- * All are this party's own integers, never partner-controlled.
+ * The end-of-run transport counters, one line each and only when non-zero: the
+ * sessions lost and re-established mid-exchange, the dialing retries, and the
+ * connection-per-poll boundaries where the session was released, forced closed,
+ * held, or skipped. All are this party's own integers, never partner-controlled.
  */
 function logTransportCounters(
   client: LocalFSClient | SSH2SFTPClientAdapter | undefined,
   log: ReturnType<typeof getLogger>,
 ): void {
-  // Show the reconnect counts at normal verbosity so the operator sees a
-  // server that repeatedly dropped and was re-dialed even without
-  // --event-stream (which reports the total as a machine metric). The
-  // per-drop WARN in the SFTP adapter already flags each recovery burst;
-  // this is the one end-of-run summary. The total counts connect-time
-  // retries plus mid-exchange session losses (SFTP only), reported apart
-  // so the operator can tell benign startup retries from chronic
-  // mid-exchange drops. Zero on a clean run, so the guard stays quiet.
-  const reconnects = client?.reconnectCount ?? 0;
+  // The end-of-run summary at normal verbosity: --event-stream reports the
+  // two counts only as one machine metric, and the SFTP adapter's per-drop
+  // WARN flags each recovery burst, not the run. Two lines rather than one
+  // total because a dial retried until it gave up never connected, and
+  // reporting it as a re-establishment would read as a flaky link where the
+  // server or directory was never reachable. Both are zero on a clean run.
   const midExchangeLosses = client?.midExchangeReconnectCount ?? 0;
-  if (reconnects > 0) {
-    const summary =
-      `the connection was re-established ${reconnects} ` +
-      `time${reconnects === 1 ? "" : "s"} during this exchange`;
+  const connectRetries = client?.connectRetryCount ?? 0;
+  if (midExchangeLosses > 0)
     log.info(
-      midExchangeLosses > 0
-        ? `${summary}, of which ${midExchangeLosses} ` +
-            `${
-              midExchangeLosses === 1
-                ? "was a session lost mid-exchange"
-                : "were sessions lost mid-exchange"
-            }`
-        : summary,
+      `the connection was lost and re-established ${midExchangeLosses} ` +
+        `time${midExchangeLosses === 1 ? "" : "s"} during this exchange`,
     );
-  }
+  if (connectRetries > 0)
+    log.info(
+      `connecting was retried ${connectRetries} ` +
+        `time${connectRetries === 1 ? "" : "s"} during this exchange ` +
+        `(not a lost connection)`,
+    );
   // Connection-per-poll's per-cycle outcomes, each its own line on its own
   // count: their inline WARNs are paced or absent, so this is the only
   // place the true totals are stated for an unattended run. Not folded

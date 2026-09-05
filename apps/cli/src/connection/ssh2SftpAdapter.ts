@@ -543,6 +543,18 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     return this.ledger.midExchangeReconnectCount;
   }
 
+  /**
+   * The other subset of {@link reconnectCount}: dialing re-attempts past a
+   * connect's first, wherever that connect ran -- opening the exchange, or
+   * recovering a session the partner took away. A dial that never established
+   * anything is counted here, so a run that failed to connect at all reports
+   * its retries as retries rather than as re-establishments it never made. A
+   * plain operational counter, never a partner-controlled value.
+   */
+  get connectRetryCount(): number {
+    return this.ledger.connectRetryCount;
+  }
+
   /** @internal */
   get sessionAccounting(): SftpSessionAccounting {
     return this.ledger.accounting;
