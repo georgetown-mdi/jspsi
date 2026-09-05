@@ -14,8 +14,9 @@ import { parseBoundedJson } from "@psilink/core";
 /**
  * The outcome of reading a body under a byte cap:
  * - `too-large`: the body exceeded the cap.
- * - `invalid`: the body was absent, was not valid UTF-8, was not valid JSON, or
- *   exceeded the structural bound parseBoundedJson enforces.
+ * - `invalid`: the body was absent, failed part-way through the stream, was not
+ *   valid UTF-8, was not valid JSON, or exceeded the structural bound
+ *   parseBoundedJson enforces.
  * - `parsed`: the decoded JSON value.
  */
 export type BoundedJsonBodyResult =
@@ -32,6 +33,10 @@ export type BoundedJsonBodyResult =
  * since consuming the stream leaves the message's own `json()` unavailable.
  * Pure over its arguments, so a test can drive it with any `Request` or
  * `Response`.
+ *
+ * Every failure is a returned refusal, never a raised one: a stream that errors
+ * part-way through reads as `invalid`, so a caller's refusal path handles a
+ * dropped connection the same way it handles an unparseable body.
  */
 export async function readBoundedJsonBody(
   message: Request | Response,
@@ -48,11 +53,15 @@ export async function readBoundedJsonBody(
       if (done) break;
       total += value.byteLength;
       if (total > maxBytes) {
-        await reader.cancel();
+        // A cancel that rejects leaves the verdict alone: the cap was already
+        // passed, so the refusal is decided before the cancel runs.
+        await reader.cancel().catch(() => undefined);
         return { kind: "too-large" };
       }
       chunks.push(value);
     }
+  } catch {
+    return { kind: "invalid" };
   } finally {
     reader.releaseLock();
   }

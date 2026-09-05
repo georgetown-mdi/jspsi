@@ -194,14 +194,18 @@ export default [
     // A parse of a value this process serialized itself opts out with an
     // eslint-disable-next-line carrying a one-line why.
     //
-    // Beside it, the `json` ban closes the same gap for a body read off a
-    // `Response`: a JSON.parse ban alone does not reach one, since the parse
-    // happens inside the platform method. It is a property ban with no object
-    // name, because the receiver of a `.json()` is a variable a selector cannot
-    // resolve -- so it also matches `Response.json()` the response builder,
-    // which this app does not use (it builds responses through
-    // `jobJsonResponse`). Nothing under src/ or server/ reads a `.json`
-    // property for any other reason, so the ban has no standing exemption.
+    // Beside it, the `json` ban closes ONE route to a fetched body: the platform
+    // `.json()`, which a JSON.parse ban does not see, since that parse happens
+    // inside the method. It does not reach a `response.text()` or
+    // `response.arrayBuffer()` read, each of which buffers the whole body before
+    // any parse; what a client takes instead of either is the bounded read in
+    // src/psi/jobApiBody.ts, and docs/spec/SERVER_JOB_API.md (Size caps) states
+    // that limit. It is a property ban with no object name, because the receiver
+    // of a `.json()` is a variable a selector cannot resolve -- so it also
+    // matches `Response.json()` the response builder, which this app does not
+    // use (it builds responses through `jobJsonResponse`). Nothing under src/ or
+    // server/ reads a `.json` property for any other reason, so the ban has no
+    // standing exemption.
     files: ["src/**/*.{ts,tsx}", "server/**/*.ts"],
     // Fail CI on a stray or rule-silencing disable so an untrusted parse cannot
     // be quietly exempted (a bare `eslint .` only warns). The sibling block above

@@ -4,6 +4,7 @@ import {
   JobApiBodyError,
   MAX_JOB_STATUS_RESPONSE_BYTES,
   readBoundedJson,
+  readJsonOrNull,
 } from "@psi/jobApiBody";
 import { readBoundedJsonBody } from "@utils/boundedJsonBody";
 
@@ -37,6 +38,18 @@ function streamedResponse(
     },
   });
   return new Response(stream, { headers });
+}
+
+/** A Response whose body enqueues one chunk and then errors, the state a dropped
+ * connection or a reset response leaves the read in. */
+function failingStreamResponse(): Response {
+  const stream = new ReadableStream<Uint8Array>({
+    start(controller) {
+      controller.enqueue(encoder.encode('{"status":"suc'));
+      controller.error(new Error("connection reset"));
+    },
+  });
+  return new Response(stream);
 }
 
 /** A Response carrying exactly `bytes`, with no Content-Length claim of its own. */
@@ -124,6 +137,14 @@ describe("readBoundedJsonBody caps the read, not Content-Length", () => {
     expect(result.kind).toBe("invalid");
   });
 
+  test("a body that fails part-way through the stream is invalid", async () => {
+    // The stream errors after a partial chunk, so the failure lands inside the
+    // read rather than at the parse: it is a refusal the caller handles, not a
+    // rejection escaping the read.
+    const result = await readBoundedJsonBody(failingStreamResponse(), 1024);
+    expect(result.kind).toBe("invalid");
+  });
+
   test("a bodyless response is invalid", async () => {
     const result = await readBoundedJsonBody(
       new Response(null, { status: 204 }),
@@ -169,6 +190,15 @@ describe("readBoundedJson raises rather than returning a partial answer", () => 
         readBoundedJson(byteResponse(encoder.encode(body)), 1024),
       ).rejects.toBeInstanceOf(JobApiBodyError);
     }
+  });
+
+  test("a body that fails part-way through the stream raises, and reads as null", async () => {
+    await expect(
+      readBoundedJson(failingStreamResponse(), MAX_JOB_STATUS_RESPONSE_BYTES),
+    ).rejects.toBeInstanceOf(JobApiBodyError);
+    await expect(
+      readJsonOrNull(failingStreamResponse(), MAX_JOB_STATUS_RESPONSE_BYTES),
+    ).resolves.toBeNull();
   });
 
   test("the raised message holds none of the body's bytes", async () => {

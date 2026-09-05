@@ -38,14 +38,21 @@ import { resolveSigningFingerprint } from "@psi/signingIdentityClient";
 // A client's refusal state is its own malformed-body state, so no case reaches a
 // path the client did not already have.
 
-/** A JSON body whose encoded length exceeds `cap`, carrying `fields` intact so
- * the client's shape check would accept it if it ever reached one. */
-function overCapBody(cap: number, fields: Record<string, unknown>): string {
+/** A JSON body of exactly `bytes`, carrying `fields` intact beside the padding an
+ * ignored key holds, so the client's shape check reads the same fields at any
+ * length. */
+function bodyOfExactly(bytes: number, fields: Record<string, unknown>): string {
   const withoutPad = JSON.stringify({ ...fields, pad: "" });
   return JSON.stringify({
     ...fields,
-    pad: "a".repeat(cap + 1 - withoutPad.length),
+    pad: "a".repeat(bytes - withoutPad.length),
   });
+}
+
+/** A JSON body whose encoded length exceeds `cap`, carrying `fields` intact so
+ * the client's shape check would accept it if it ever reached one. */
+function overCapBody(cap: number, fields: Record<string, unknown>): string {
+  return bodyOfExactly(cap + 1, fields);
 }
 
 /** A 200 carrying `body`, streamed so no Content-Length shortcut is available. */
@@ -66,6 +73,20 @@ function jsonResponse(body: string, status = 200): Response {
 /** A fetch stub answering every request with `body` at `status`. */
 function answering(body: string, status = 200): typeof fetch {
   return () => Promise.resolve(jsonResponse(body, status));
+}
+
+/** A fetch stub answering with a body that enqueues one chunk and then errors,
+ * the state a dropped connection leaves the read in. */
+function answeringWithFailingStream(): typeof fetch {
+  return () => {
+    const stream = new ReadableStream<Uint8Array>({
+      start(controller) {
+        controller.enqueue(new TextEncoder().encode('{"status":"o'));
+        controller.error(new Error("connection reset"));
+      },
+    });
+    return Promise.resolve(new Response(stream));
+  };
 }
 
 /** A fetch stub answering with raw bytes, for a body no string can express. */
@@ -330,6 +351,101 @@ describe("a listing body over its cap fails the reader safely", () => {
     });
     await expect(fetchSecretsEntries([], answering(body))).resolves.toEqual({
       kind: "error",
+    });
+  });
+});
+
+describe("a body that fails part-way through the stream fails the reader safely", () => {
+  // The failure lands inside the read rather than at the parse. Each client
+  // below reads through readJsonOrNull, whose null every one of them maps to its
+  // own error state, so none of these calls rejects.
+  test("authoring reports an error", async () => {
+    await expect(
+      putSftpConnection(
+        {} as unknown as Parameters<typeof putSftpConnection>[0],
+        answeringWithFailingStream(),
+      ),
+    ).resolves.toEqual({ kind: "error" });
+  });
+
+  test("a host-key probe reports an error", async () => {
+    await expect(
+      probeSftpHostKey("host.example", undefined, answeringWithFailingStream()),
+    ).resolves.toEqual({ kind: "error" });
+  });
+
+  test("a signing-fingerprint request reports an error", async () => {
+    await expect(
+      resolveSigningFingerprint("me", false, answeringWithFailingStream()),
+    ).resolves.toEqual({ kind: "error" });
+  });
+});
+
+describe("a well-formed body under its cap reaches the client", () => {
+  test("the diagnostic-log state is read off the status body", async () => {
+    await expect(
+      fetchJobLogState(
+        "job-1",
+        answering(JSON.stringify({ logRequested: true, logAvailable: true })),
+      ),
+    ).resolves.toBe("available");
+  });
+
+  test("the recurring hand-off is the template the body carries", async () => {
+    const handoff = {
+      mode: "exchange",
+      channel: "sftp",
+      usedKeyFile: true,
+      credentialPasted: false,
+      usedSigningIdentity: false,
+      template: { kind: "config", yaml: "version: 1\n" },
+    };
+    await expect(
+      fetchRecurringHandoff("job-1", answering(JSON.stringify(handoff))),
+    ).resolves.toEqual(handoff);
+  });
+
+  test("the secrets-mount listing is the entries the body carries", async () => {
+    const body = JSON.stringify({
+      configured: true,
+      readable: true,
+      entries: [{ name: "sftp-key", kind: "file" }],
+    });
+    await expect(fetchSecretsEntries([], answering(body))).resolves.toEqual({
+      kind: "entries",
+      configured: true,
+      readable: true,
+      entries: [{ name: "sftp-key", kind: "file" }],
+    });
+  });
+
+  test("a projection exactly at the cap is authored, not refused", async () => {
+    // The cap is the last length the read accepts, so a projection of exactly
+    // that many bytes separates a cap enforced on the running total from one
+    // enforced a byte early.
+    const body = bodyOfExactly(MAX_SFTP_CONNECTION_RESPONSE_BYTES, {
+      configured: true,
+      host: "sftp.example",
+      port: 22,
+      path: "/drop",
+      credentialWarnings: [],
+    });
+    expect(new TextEncoder().encode(body).byteLength).toBe(
+      MAX_SFTP_CONNECTION_RESPONSE_BYTES,
+    );
+    await expect(
+      putSftpConnection(
+        {} as unknown as Parameters<typeof putSftpConnection>[0],
+        answering(body),
+      ),
+    ).resolves.toEqual({
+      kind: "ok",
+      connection: {
+        host: "sftp.example",
+        port: 22,
+        path: "/drop",
+        credentialWarnings: [],
+      },
     });
   });
 });

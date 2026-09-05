@@ -192,8 +192,9 @@ export const MAX_SIGNING_FINGERPRINT_BODY_BYTES = 4 * 1024;
 /**
  * The outcome of reading a job request body under a byte cap:
  * - `too-large`: the body exceeded the cap (mapped to 413).
- * - `invalid`: the body was absent, was not valid UTF-8, was not valid JSON, or
- *   exceeded the structural bound parseBoundedJson enforces (mapped to 400).
+ * - `invalid`: the body was absent, failed part-way through the stream, was not
+ *   valid UTF-8, was not valid JSON, or exceeded the structural bound
+ *   parseBoundedJson enforces (mapped to 400).
  * - `parsed`: the decoded JSON value.
  */
 export type JobRequestBodyResult = BoundedJsonBodyResult;

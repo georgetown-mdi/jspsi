@@ -38,12 +38,21 @@ export const MAX_SFTP_CONNECTION_RESPONSE_BYTES = 64 * 1024;
 /**
  * The cap on the recurring-run hand-off (`GET /api/jobs/:jobId/handoff`), whose
  * `template` is the `psilink.yaml` text or the argv of the command the operator
- * would schedule. Its length follows the create intent's linkage terms and
- * standardization, which the intent schema bounds in element count but not in
- * bytes -- so 1 MiB is headroom over any template that schema admits rather than
- * a figure the code fixes.
+ * would schedule. The config template recomposes the create intent's own blocks,
+ * so the intent schema's caps decide its length: `metadata` at
+ * `MAX_METADATA_COLUMNS` entries each holding a
+ * `MAX_METADATA_DESCRIPTION_LENGTH` description accounts for about 18 MB of it,
+ * and `expectedPayloadColumns` plus the standardization outputs and inputs at
+ * `MAX_NAME_LENGTH` for about 4 MB more; 32 MiB is the next power of two above
+ * that sum, and its margin holds the linkage terms, connection, signing block,
+ * tuning options, and the standardization steps, which core's compose refuses
+ * past its node budget rather than serializing. A step's `function` name and
+ * `params` record are the one part no field-level cap bounds, so an intent that
+ * inflates them past this cap reads as no hand-off.
+ * jobHandoffResponseCap.unit.test.ts mints the widest template the compose
+ * admits and pins the derivation against those constants.
  */
-export const MAX_JOB_HANDOFF_RESPONSE_BYTES = 1024 ** 2;
+export const MAX_JOB_HANDOFF_RESPONSE_BYTES = 32 * 1024 ** 2;
 
 /**
  * The cap on the variable-length bodies: the mounted-input listing
@@ -59,9 +68,10 @@ export const MAX_JOB_LISTING_RESPONSE_BYTES = 8 * 1024 ** 2;
 
 /**
  * Thrown by {@link readBoundedJson} when a console answer cannot be read: it
- * exceeded its byte cap, or it was absent, not valid UTF-8, not valid JSON, or
- * past the structural bound `parseBoundedJson` enforces. The message is fixed
- * text holding no body bytes. Most callers catch it into their own
+ * exceeded its byte cap, or it was absent, failed part-way through the stream,
+ * not valid UTF-8, not valid JSON, or past the structural bound
+ * `parseBoundedJson` enforces. The message is fixed text holding no body bytes.
+ * Most callers catch it into their own
  * "unanswered"/"error" state; the two that let it propagate (`createJob` and
  * `fetchRecordAvailability` in serverJobExchangeDriver) already handle the
  * `SyntaxError` an unreadable body threw before, and classify this the same way.
@@ -99,7 +109,8 @@ export function isRecord(value: unknown): value is Record<string, unknown> {
 }
 
 /** Decode a response body as JSON under `maxBytes`, or null when it is empty,
- * over the cap, or not JSON (an error response may have no body). */
+ * over the cap, failed part-way through the stream, or not JSON (an error
+ * response may have no body). */
 export async function readJsonOrNull(
   response: Response,
   maxBytes: number,
