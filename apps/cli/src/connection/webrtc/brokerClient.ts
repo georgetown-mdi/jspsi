@@ -1,6 +1,16 @@
 import { randomBytes } from "node:crypto";
 
-import { ConnectionError, parseBoundedJson, UsageError } from "@psilink/core";
+import {
+  chainDetailCauses,
+  ConnectionError,
+  parseBoundedJson,
+  UsageError,
+} from "@psilink/core";
+
+import { fittedCauseLink } from "../causeLink";
+import { probeSignalingCertificate } from "./signalingTls";
+
+import type { SignalingCertificateProbe } from "./signalingTls";
 
 /**
  * The PeerJS broker signaling client, written against the broker's WebSocket
@@ -149,6 +159,12 @@ export interface BrokerConnectOptions {
    * Node has supplied since v22.
    */
   socketFactory?: (url: string) => WebSocket;
+  /**
+   * Asks what the certificate check said once a socket has failed; injected so
+   * a unit test can drive both answers without a server. Defaults to
+   * {@link probeSignalingCertificate}.
+   */
+  certificateProbe?: SignalingCertificateProbe;
 }
 
 /**
@@ -169,6 +185,50 @@ export const ID_TAKEN_MESSAGE =
 
 function idTakenError(): ConnectionError {
   return new ConnectionError(ID_TAKEN_MESSAGE, "usage");
+}
+
+/** What a failed signaling socket reports when the certificate verified. */
+export const SIGNALING_SOCKET_FAILED_MESSAGE =
+  "the connection to the signaling server failed";
+
+/**
+ * What a failed signaling socket reports when the certificate did not verify.
+ * Names the remedy an operator on a managed network needs: the failure is
+ * usually a proxy presenting its own certificate, and trusting that proxy's
+ * certificate authority is what fixes it.
+ */
+export const SIGNALING_CERTIFICATE_FAILED_MESSAGE =
+  "the connection to the signaling server failed because its TLS certificate " +
+  "did not verify on this machine. If this network intercepts TLS, add its " +
+  "certificate authority to this machine's trust store, or name a file " +
+  "holding it in NODE_EXTRA_CA_CERTS; otherwise check that the signaling " +
+  "server's own certificate is current and issued for the configured `host`.";
+
+/** Label the verification failure's code takes a cause link of its own under. */
+const CERTIFICATE_PROBLEM_LINK_LABEL = "certificate check reported: ";
+
+/**
+ * The error a failed signaling socket reports, given what the certificate
+ * check said about the same endpoint.
+ *
+ * The code is a fixed OpenSSL or Node token, but it is reached through a
+ * certificate the far end chose, so it takes a labelled cause link of its own
+ * rather than the summary, and is escaped where the chain is rendered.
+ */
+function signalingSocketError(
+  certificateProblem: string | undefined,
+): ConnectionError {
+  if (certificateProblem === undefined)
+    return new ConnectionError(SIGNALING_SOCKET_FAILED_MESSAGE, "transport");
+  return new ConnectionError(
+    SIGNALING_CERTIFICATE_FAILED_MESSAGE,
+    "transport",
+    {
+      cause: chainDetailCauses([
+        fittedCauseLink(CERTIFICATE_PROBLEM_LINK_LABEL, certificateProblem),
+      ]),
+    },
+  );
 }
 
 /**
@@ -497,6 +557,7 @@ export function connectToBroker(
     heartbeatIntervalMs = BROKER_HEARTBEAT_INTERVAL_MS,
     signal,
     socketFactory,
+    certificateProbe,
   } = options;
 
   return new Promise<BrokerClient>((resolve, reject) => {
@@ -538,11 +599,12 @@ export function connectToBroker(
       openTimer = undefined;
     };
 
-    // Every terminal path funnels here so teardown runs exactly once and the
-    // outcome lands on exactly one of the three settlement paths: a rejected
-    // registration, a reported failure, or a silent local close.
-    const end = (error: ConnectionError | undefined): void => {
-      if (ended) return;
+    // Claims the terminal path and tears down, so a later event on the same
+    // socket -- the `close` that follows an `error` -- reports nothing. Apart
+    // from the settlement below, so a path that has to ask a question before
+    // it can name the failure still closes the socket first.
+    const claimTerminal = (): boolean => {
+      if (ended) return false;
       ended = true;
       detach();
       try {
@@ -551,6 +613,12 @@ export function connectToBroker(
         // A socket already closed by the peer throws on close in some states;
         // the outcome is reported below either way.
       }
+      return true;
+    };
+
+    // The outcome lands on exactly one of the three settlement paths: a
+    // rejected registration, a reported failure, or a silent local close.
+    const settle = (error: ConnectionError | undefined): void => {
       if (!opened) {
         reject(
           error ??
@@ -563,6 +631,13 @@ export function connectToBroker(
         return;
       }
       if (error !== undefined) handlers.onClose(error);
+    };
+
+    // Every terminal path that can name its failure at once funnels here, so
+    // teardown runs exactly once and the outcome is reported once.
+    const end = (error: ConnectionError | undefined): void => {
+      if (!claimTerminal()) return;
+      settle(error);
     };
 
     const onAbort = (): void =>
@@ -626,17 +701,18 @@ export function connectToBroker(
       handlers.onMessage(message);
     };
 
-    // The socket's `error` event has no detail worth exposing (and in Node
-    // its message can embed the URL, which holds the peer id), so it is
-    // reported as a plain transport failure. `close` follows it, but `end` is
-    // idempotent.
-    const onSocketError = (): void =>
-      end(
-        new ConnectionError(
-          "the connection to the signaling server failed",
-          "transport",
-        ),
+    // The socket's `error` event has no detail worth exposing (and in Node its
+    // message can embed the URL, which holds the peer id), so what failed is
+    // asked of the endpoint instead, and only for a `wss://` location. The
+    // teardown is claimed synchronously, so the `close` that follows reports
+    // nothing while the question is still out.
+    const onSocketError = (): void => {
+      if (!claimTerminal()) return;
+      void (certificateProbe ?? probeSignalingCertificate)(location).then(
+        (certificateProblem) =>
+          settle(signalingSocketError(certificateProblem)),
       );
+    };
 
     const onSocketClose = (): void =>
       end(

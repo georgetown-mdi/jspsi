@@ -1,12 +1,19 @@
 import {
+  chainDetailCauses,
   ConnectionError,
   UsageError,
   deriveRendezvousPeerId,
   getLogger,
+  redactAndSanitizeForDisplay,
 } from "@psilink/core";
 
 import { REPORT_LIBRARY_INCOMPATIBILITY } from "../libraryIncompatibility";
 import { BROKER_MESSAGE, connectToBroker } from "./brokerClient";
+import {
+  describeSelectedCandidatePair,
+  iceFailureDetails,
+  readIceStats,
+} from "./iceDiagnostics";
 import { PEERJS_SERIALIZATION } from "./peerjsWire";
 
 import type {
@@ -579,6 +586,7 @@ export async function openWebRtcPeerSession(
     });
     const channel = await negotiation.run(broker);
     assertSctpDrainSupported(peer);
+    await logSelectedCandidatePair(peer);
     // Take the state hook back off the negotiation, whose interest in it ended
     // when the channel opened.
     let onLost: (() => void) | undefined;
@@ -600,6 +608,34 @@ export async function openWebRtcPeerSession(
     await teardown();
     throw err;
   }
+}
+
+/**
+ * Report which candidate pair the open channel runs over.
+ *
+ * The remote candidate type is the partner's own token, so it is escaped here,
+ * at the log sink, rather than composed raw (CONTRIBUTING.md, Operator-facing
+ * escaping). A report that names no pair says so: an operator comparing two
+ * runs learns as much from the absence as from a type.
+ */
+async function logSelectedCandidatePair(
+  peer: RTCPeerConnection,
+): Promise<void> {
+  const report = await readIceStats(peer);
+  if (report === undefined) {
+    log.debug("the data channel opened; no ICE statistics were available");
+    return;
+  }
+  const pair = describeSelectedCandidatePair(report);
+  if (pair === undefined) {
+    log.debug(
+      "the data channel opened; ICE reported no selected candidate pair",
+    );
+    return;
+  }
+  log.debug(
+    `the data channel opened over candidate pair ${redactAndSanitizeForDisplay(pair)}`,
+  );
 }
 
 interface NegotiationOptions {
@@ -654,6 +690,31 @@ class Negotiation {
     this.settle?.reject(error);
   }
 
+  /**
+   * Latch a failure of the network path, with what ICE gathered, received and
+   * tried attached as labelled cause links.
+   *
+   * The two failures that reach here -- the peer connection reporting `failed`,
+   * and the channel-open deadline -- are both "both parties are present and no
+   * path formed", the case an operator can act on only once they know whether a
+   * relay candidate was even gathered. The stats are collected BEFORE the
+   * failure is latched, since latching it tears the peer connection down, and
+   * are bounded so a diagnostic cannot hold a bounded failure open.
+   */
+  private async failWithIceDiagnosis(summary: string): Promise<void> {
+    if (this.failure !== undefined) return;
+    const report = await readIceStats(this.options.peer);
+    this.fail(
+      new ConnectionError(
+        summary,
+        "transport",
+        report === undefined
+          ? undefined
+          : { cause: chainDetailCauses(iceFailureDetails(report)) },
+      ),
+    );
+  }
+
   async run(broker: BrokerClient): Promise<RTCDataChannel> {
     this.broker = broker;
     const { peer, role, signal } = this.options;
@@ -666,12 +727,9 @@ class Negotiation {
     };
     peer.onconnectionstatechange = () => {
       if (peer.connectionState === "failed") {
-        this.fail(
-          new ConnectionError(
-            "the peer connection failed before the data channel opened; no " +
-              "network path between the two parties could be established",
-            "transport",
-          ),
+        void this.failWithIceDiagnosis(
+          "the peer connection failed before the data channel opened; no " +
+            "network path between the two parties could be established",
         );
       }
     };
@@ -1052,13 +1110,10 @@ class Negotiation {
     if (this.channel === undefined || !this.remoteDescriptionSet) return;
     this.channelOpenTimer = setTimeout(
       () =>
-        this.fail(
-          new ConnectionError(
-            `the data channel did not open within ` +
-              `${this.options.channelOpenTimeoutMs}ms after the exchange ` +
-              "partner's session description arrived",
-            "transport",
-          ),
+        void this.failWithIceDiagnosis(
+          `the data channel did not open within ` +
+            `${this.options.channelOpenTimeoutMs}ms after the exchange ` +
+            "partner's session description arrived",
         ),
       this.options.channelOpenTimeoutMs,
     );

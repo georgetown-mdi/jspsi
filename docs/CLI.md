@@ -509,6 +509,17 @@ connection:
 
 **A run that allocates against a relay does not return when its work is done.** The allocation a relay hands out is held open by a refresh timer the exchange's teardown cannot cancel, so the command lingers for five sixths of the lifetime the relay granted -- roughly eight minutes where a relay grants the usual ten. The result file, the exchange record and the receipt are all written before the wait, and nothing is transferred during it; what it holds is the process, and in a container the container, which is what a scheduled recurring exchange has to allow for. The mechanism and its measurement are in [WEBRTC_TRANSPORT.md](spec/WEBRTC_TRANSPORT.md#budgets).
 
+#### When a WebRTC exchange does not connect
+
+A rendezvous that ends without a data channel names what ICE found, so the two failures that look alike from the outside can be told apart:
+
+- **No relay candidate was gathered.** Nothing on this host could reach the TURN server -- the network blocked it, the credentials were wrong, or the relay presented a certificate this host does not trust. Fix the relay, or arrange a direct path; waiting longer changes nothing.
+- **A relay candidate was gathered and no candidate pair succeeded.** Both sides had addresses to try and none of the pairs worked. This is a path problem between the two parties, so the partner's side is where to look next.
+
+The failure states which of the two it is, alongside how many remote candidates the partner sent and how many pairs were tried. A completed exchange reports the candidate pair it settled on at `--log-level debug`, which is what tells you whether a run that worked went direct or through the relay.
+
+**A failure against the signaling server names a certificate problem when that is what it was.** A `wss://` socket that cannot be opened is checked once more against the same endpoint, and a certificate that does not verify on this host is reported as such rather than as a generic connection failure. On a network that intercepts TLS, the remedy is to trust that network's certificate authority -- add it to the host's trust store, or name a file holding it in `NODE_EXTRA_CA_CERTS`.
+
 ### Sweeping a stale exchange directory
 
 A crashed or mismatched prior run can leave protocol files in an `sftp`/`filedrop` directory that stall the next rendezvous. `--sweep-exchange-files` deletes every protocol file in the directory before the rendezvous -- this party's and the peer's hellos, acks, locks, joining sentinels, and messages -- and starts a fresh exchange. Foreign (non-protocol) files are never touched. It is accepted by `psilink exchange` and the zero-setup form, is CLI-only, and is never persisted to `psilink.yaml`. Confirm that no other session is using the directory before passing it: a sweep during a live exchange destroys that exchange's state.

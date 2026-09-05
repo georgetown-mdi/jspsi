@@ -318,6 +318,12 @@ actually used. An empty or absent list means "use the default"; it does not mean
 nothing is configured, what it discloses, and the unreachable-entry idiom for
 gathering host candidates only -- are in [CLI.md](../CLI.md#webrtc-exchanges).
 
+A rendezvous that ends with no data channel reports the candidate types this
+side gathered, the types the partner sent, and how many candidate pairs were
+tried, each on a labelled cause link of its own, so a relay that was never
+gathered is distinguishable from one that was and still found no path. What an
+operator does with that answer is in [CLI.md](../CLI.md#webrtc-exchanges).
+
 `connection.provider_options` is inert on this channel: no transport on either
 side reads it, so no key in it reaches the PeerJS client, the peer connection,
 or the ICE configuration above, and the only honored form of the map is the SFTP
@@ -352,6 +358,8 @@ condition holds.
 | Parked receive | 1 h | Peer silence on an open channel; it bounds the peer's single-threaded PSI compute, which sends no keepalive while it runs |
 | Close drain | 5 min | The clean close's wait above -- the CLI's acknowledgement drain, the web's wait for the peer's close -- sized from the largest admissible frame and the measured send rate |
 | Sentinel hand-off | 2 s | Getting the close sentinel itself onto the wire |
+| ICE statistics | 2 s | Collecting the candidate report a failure or an open channel is described by; expiring costs the description, not the outcome |
+| Signaling certificate check | 5 s | The handshake that answers whether a failed `wss://` socket failed on its certificate |
 
 `connection.options.peer_timeout_ms`, when set, replaces the rendezvous,
 channel-open, and parked-receive budgets: on this channel the documented "total
