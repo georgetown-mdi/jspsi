@@ -107,7 +107,7 @@ export { retryPromise, withTimeout, TimeoutError } from "./utils/promise";
 // reads JSON text off a socket the signaling server and the remote peer both
 // feed -- and that parse must be the same structurally-bounded one, not a second
 // implementation of it (CONTRIBUTING.md, Untrusted-JSON parsing).
-export { parseBoundedJson } from "./utils/boundedJson";
+export { parseBoundedJson, JsonStructureBoundError } from "./utils/boundedJson";
 // The split-directory distinctness comparison. Barrelled because the console
 // decides, ahead of a mint, whether the two rendezvous locators it would put on an
 // invitation endpoint are distinct -- and that verdict has to be the one core's own
