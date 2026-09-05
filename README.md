@@ -181,7 +181,7 @@ The `docker run` command has two parts. The first is the Docker invocation, whic
 docker run --rm --mount type=bind,src=WORK_PATH,dst=/work vdorie/psi-link:latest
 ```
 
-The second part is the invocation of the psi-link script and includes any command line options you wish to use. In the first example above it is:
+The second part is the invocation of the psilink script and includes any command line options you wish to use. In the first example above it is:
 
 ```sh
 sftp://SFTP_USER:SFTP_PASSWORD@SFTP_HOST:SFTP_PORT/SFTP_PATH INPUT_FILE OUTPUT_FILE

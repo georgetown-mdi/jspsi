@@ -10,7 +10,7 @@ and copied into this repository as `lib/openmined-psi.js-<version>.tgz`, a
 `file:` dependency. This is the procedure for replacing those bytes, and the
 steps a reviewer performs to establish where they came from.
 
-The tarball carries native `.node` addons that are loaded into the process with
+The tarball contains native `.node` addons that are loaded into the process with
 full privilege and run the PSI crypto, so its chain of custody is the point of
 this document, not a formality.
 
@@ -48,7 +48,7 @@ Arming requires the producing workflow to attest the artifact. The fork's
 `actions/attest-build-provenance` under `id-token: write` and
 `attestations: write`, ahead of the artifact upload, so a tarball is published
 only once its provenance was signed. A tarball packed by a run older than that
-step carries nothing to verify, and its marker stays disarmed.
+step has nothing to verify, and its marker stays disarmed.
 
 ## Procedure
 
@@ -81,7 +81,7 @@ run's commit. Then, from a branch in this repository:
    is the disarmed case: record it in the pull request and leave the marker's
    `attestation_expected` at `false`.
 
-3. **Write the provenance marker** `lib/<tarball>.provenance.json`, carrying the
+3. **Write the provenance marker** `lib/<tarball>.provenance.json`, with the
    new digest, the producer identity above, and -- when step 2 succeeded --
    `attestation_expected: true` with the `source_ref` and `source_digest` that
    verified. Arming without those two is refused.
@@ -205,14 +205,14 @@ procedure. Against the branch:
 
 The positive path has run end to end: the fork attests, and
 `npm run check:prebuild-provenance` passes against a real attestation rather
-than only in its failing direction. Two things are still worth watching on the
+than only in its failing direction. Two things still need watching on the
 pull request that arms a marker:
 
 - **The verifier passes in CI, not only locally**, which only CI's own run can
   exercise. CI authenticates with the workflow's `GITHUB_TOKEN` against the
   fork's attestations, which is a different credential from a maintainer's
   `gh` login. The fork's attestation endpoint answers an unauthenticated
-  request while both repositories are public, so any token carrying public
+  request while both repositories are public, so any token with public
   read suffices; a fork turned private would be where this breaks.
 
 - **The `--source-ref` recorded matches what the fork's default branch is

@@ -54,7 +54,7 @@ HKDF.
   of the default image's three, from the same release workflow and signed under
   the same Sigstore identity. The claim that goes with it is written once, in
   [COMPLIANCE.md](../COMPLIANCE.md#fips-140); the pull-and-verify mechanics are
-  in [RELEASES.md](../RELEASES.md#which-image-carries-which-posture).
+  in [RELEASES.md](../RELEASES.md#which-image-has-which-posture).
 - **Unprivileged, as the default image is.** Both drop to `node` at uid 1000 and
   gid 1000, and both strip every setuid and setgid bit their OS closure holds.
   Amazon Linux 2023 has no `node` account, the Node runtime here coming from a

@@ -69,7 +69,7 @@ paths. The in-process backend adds two surfaces a real `sshd` cannot offer:
 
 - Fault injection -- a malformed NAME or DATA packet, a request accepted and
   never answered, transient RENAME failures, capped READDIR batches, a run of
-  READDIR batches carrying neither an entry nor end-of-directory (the
+  READDIR batches holding neither an entry nor end-of-directory (the
   progress-free flood the listing's round-trip cap exists for, and the only
   shape that reaches it), and a NAME reply of a chosen width (the hook the
   pinned stack's reply wall is measured through; see
@@ -107,19 +107,19 @@ paths. The in-process backend adds two surfaces a real `sshd` cannot offer:
   and replies as they are written, across every session being served at once, so
   a suite driving a concurrent fan reads how deep the client let its request
   pipeline run on the one channel from the end this project owns rather than
-  from the client library's internals. A reading carries per-opcode counts and
+  from the client library's internals. A reading holds per-opcode counts and
   the peak simultaneously-unanswered depth. A reply written straight onto the
   channel by a fault injection, and a withheld reply, are never counted as
   answers, so each leaves its request outstanding for the rest of the window.
 
 Adapter behavior against a partner that cuts, stalls, or never closes is
-asserted through those controls. A probe that settles a dependency fact belongs
-in that tree too: questions about `ssh2` / `ssh2-sftp-client` behavior are
-decided by measurement rather than by reading the library, and the probe that
-decided one graduates into the suite with the PR relying on the answer, written
-as a test driven by this harness -- not left in `scratch/`. The premise is
-load-bearing once a change is built on it, and a premise no suite re-checks goes
-stale silently at the next pinned bump of either package.
+asserted through those controls. A probe that determines a dependency fact
+belongs in that tree too: questions about `ssh2` / `ssh2-sftp-client` behavior
+are decided by measurement rather than by reading the library, and the probe
+that decided one graduates into the suite with the PR relying on the answer,
+written as a test driven by this harness -- not left in `scratch/`. The
+assumption is critical once a change is built on it, and an assumption no
+suite re-checks goes stale silently at the next pinned bump of either package.
 
 #### What the real-server legs cannot reach
 
@@ -177,13 +177,14 @@ and the ship-gate step in `release.yaml`), and a new file joins it by being
 written in that directory rather than by matching a naming convention. Its
 project skips the SFTP `globalSetup` entirely, so no server is started for it.
 
-`broker.test.ts` holds one deliberately slow check -- that a registered CLI peer
-is still registered and routable after the broker's silent-socket reap window
-has passed, which takes a real 25-second wait. It is kept rather than trimmed:
-it is the only place the CLI client's own heartbeat cadence is joined to the
-vendored broker's reap window over the real wire, and the two constants live in
-different workspaces, so no unit check on either side can stand in for it. It runs in
-its own worker process alongside the longer transport file.
+`broker.test.ts` holds one check that is slow by design -- that a registered
+CLI peer is still registered and routable after the broker's silent-socket
+reap window has passed, which takes a real 25-second wait. It is kept rather
+than trimmed: it is the only place the CLI client's own heartbeat cadence is
+joined to the vendored broker's reap window over the real wire, and the two
+constants live in different workspaces, so no unit check on either side can
+stand in for it. It runs in its own worker process alongside the longer
+transport file.
 
 Its broker harness is `apps/cli/test/signaling/`. It starts the repository's own
 vendored PeerJS broker as a child PROCESS rather than importing it, because a
@@ -194,11 +195,11 @@ what that service does on the wire; the process entry point it spawns is
 on `apps/cli`. Each file starts a broker of its own. The same measurement
 discipline applies here as to the SFTP tree: what the CLI's hand-written
 signaling client and PeerJS framing rest on was established by driving the real
-broker and the real `peerjs`/`peerjs-js-binarypack` packages, and the premises
-that follow are held as checks -- see
+broker and the real `peerjs`/`peerjs-js-binarypack` packages, and the
+assumptions that follow are held as checks -- see
 [docs/spec/DEPENDENCY_PINS.md](spec/DEPENDENCY_PINS.md#upgrading-the-cli-webrtc-peer-werift).
 
-One premise the live suite cannot hold, and where it lives instead: werift
+One assumption the live suite cannot hold, and where it lives instead: werift
 inlines its ICE candidates in the SDP, so two peers connect on loopback even
 when every trickled candidate is discarded. The candidate-queue rule the
 transport exists to honour is therefore invisible end to end and would fail only
@@ -221,7 +222,7 @@ exists to cover. It costs about fifteen seconds, most of it ICE gathering fallin
 back to host candidates.
 
 The leg needs a `wss://` coordination server. An invitation's connection endpoint
-is a credential-free locator carrying no scheme, so an acceptance seeded from one
+is a credential-free locator with no scheme, so an acceptance seeded from one
 resolves the coordination server over TLS, and the one-command form has no
 configuration file for an operator to set `secure: false` on first. So the leg
 puts a TLS terminator (`apps/cli/test/signaling/tlsBrokerFront.ts`) in front of
@@ -237,7 +238,7 @@ precondition test ahead of the leg fetches the broker's own 404 through the
 front, with the throwaway certificate as its only trusted authority, so a broker
 that did not start, a front that is not listening, or a certificate this
 environment could not mint fails as itself; past it, a failing leg belongs to the
-command path. Each party also carries a hard deadline of its own, so a stalled
+command path. Each party also has a hard deadline of its own, so a stalled
 run is reported with its exit status and the tail of its diagnostics instead of
 running until the framework kills the worker under it.
 
@@ -271,7 +272,7 @@ both halves share in `apps/cli/test/integration/peerIdentification.ts`.
 
 A move trades a recurring per-leg cost for a one-off one, so measure it first: a
 case costing milliseconds saves milliseconds five times over and still leaves a
-split file to keep in step. Several leg-agnostic cases are deliberately left in
+split file to keep in step. Several leg-agnostic cases are left in
 `integration` on that measurement.
 
 A standing console sentinel guards all three CLI integration projects:
@@ -287,7 +288,7 @@ sees. A matcher that never fires across a run is reported at teardown so the
 allowlist cannot accumulate dead entries. That report is advisory (a warning,
 never a failure) and is produced by the `integration` project's `globalSetup`,
 so it sees only that project's files: a matcher fired solely by a `webrtc` or
-`backend-agnostic` file reads as dead there.
+`backend-agnostic` file displays as dead there.
 
 Web (dev server managed automatically -- same pattern as the CLI integration tests):
 
@@ -300,7 +301,7 @@ Some of these specs drive the built production server at
 Without that build the project fails at setup, naming the missing path and the
 build command, rather than reporting a pass with those specs quietly skipped.
 
-For a deliberate dev-server-only run, set `PSILINK_ALLOW_MISSING_WEB_BUILD=1`:
+For a dev-server-only run, set `PSILINK_ALLOW_MISSING_WEB_BUILD=1`:
 the built-server specs report as skipped and the run passes. That is the one
 opt-out, and it is the only way an absent build is not an error.
 
@@ -344,7 +345,7 @@ A change to the web `optimizeDeps` or a worker dependency is verified only
 against a cold optimizer cache: remove `apps/web/node_modules/.vite` first -- a
 warm cache passes even when the configuration is wrong. Inline vitest projects
 do not inherit the root `optimizeDeps`/`resolve` configuration; each project
-that needs it carries its own.
+that needs it has its own.
 
 ## Cross-runtime interop suite
 
@@ -384,8 +385,8 @@ PSI backend and result CSV; the web app's acceptor assembly, its invitation mint
 and inviter spec assembly, and its browser WASM PSI engine.
 
 It runs on both `cli_build_and_test.yaml` and `eb_build_and_test.yaml`. That is
-deliberate rather than redundant: the drift it exists to catch can land on either
-runtime, and each workflow's path filter sees only its own.
+by design rather than redundant: the drift it exists to catch can land on
+either runtime, and each workflow's path filter sees only its own.
 
 ## What a run did not cover
 
@@ -412,7 +413,7 @@ npm run build -w packages/core
 ```
 
 Set `PSILINK_ALLOW_STALE_CORE_DIST=1` to run against the dist as it stands.
-`packages/core`'s own suite carries no such guard: `pretest` rebuilds, and those
+`packages/core`'s own suite has no such guard: `pretest` rebuilds, and those
 tests import `src`. A run that selects no app project pays nothing either --
 `npm run test:scripts` needs no build and never asks for one.
 
@@ -434,7 +435,7 @@ run continues, with the missing prerequisite, the coverage it costs, and how to
 supply it named on the console. Under `CI`, the run fails instead: a runner is
 provisioned to a spec, so a prerequisite absent there is a defect in the image
 or the workflow rather than a property of somebody's laptop. Set
-`PSILINK_ALLOW_MISSING_TEST_PREREQUISITES=1` to skip those legs deliberately.
+`PSILINK_ALLOW_MISSING_TEST_PREREQUISITES=1` to skip those legs.
 
 A suite that needs a new prerequisite adds it to `webTestPrerequisites()` beside
 the certificate. The CLI states three of its own the same way but per leg, since
@@ -448,12 +449,12 @@ variable for both.
 
 ### Every skipped test is named
 
-Vitest counts skips (`2 passed | 3 skipped`) but names none of them, so a leg
-that starts skipping reads as green with nothing to say which suite went quiet.
-The skipped-leg reporter (`scripts/lib/skippedLegReporter.mjs`) ends every run
-by listing each skipped test under its project and file, with the reason where a
-runtime `ctx.skip(reason)` gave one. `test.todo` is left out, being a
-placeholder vitest already reports on its own.
+Vitest counts skips (`2 passed | 3 skipped`) but names none of them, so a
+leg that starts skipping displays as green with nothing to say which suite
+went quiet. The skipped-leg reporter (`scripts/lib/skippedLegReporter.mjs`)
+ends every run by listing each skipped test under its project and file,
+with the reason where a runtime `ctx.skip(reason)` gave one. `test.todo`
+is left out, being a placeholder vitest already reports on its own.
 
 It reports and never fails: which skips are legitimate is a per-suite question
 -- the SFTP matrix legs skip the backends they are not running, and the whole
@@ -469,12 +470,12 @@ body that returns before its first assertion instead -- `if (process.platform
 counted as coverage and there is no skip for the reporter to see.
 
 `scripts/platform-gate-skips.test.mjs` (run by `npm run test:scripts`, a CI
-static check) is what holds that, reading every test module the checkout carries
-rather than a maintained list. It fails on a gate that returns early when the
-platform is `linux` or `darwin` -- the hosts the suites are actually run on, CI
-being `ubuntu-latest` throughout -- and reports a gate it cannot evaluate rather
-than passing it over. Its reach and what it deliberately leaves standing are in
-its own header.
+static check) is what holds that, reading every test module the checkout
+contains rather than a maintained list. It fails on a gate that returns early
+when the platform is `linux` or `darwin` -- the hosts the suites are actually
+run on, CI being `ubuntu-latest` throughout -- and reports a gate it cannot
+evaluate rather than passing it over. Its reach and what it leaves standing by
+design are in its own header.
 
 ## Where a test goes
 
@@ -497,14 +498,14 @@ route every project by directory alone and define no suffix glob at all.
 `*.integration.test.ts` / `*.browser.test.ts` suffix as an alternate match
 alongside its `test/unit/**`, `test/integration/**`, `test/browser/**` globs,
 but a file already under one of those directories matches by directory
-regardless of the suffix -- `apps/web/test/unit/` carries the suffix on 26 of
+regardless of the suffix -- `apps/web/test/unit/` has the suffix on 26 of
 its 160 files and omits it on the other 134, and both route identically. Name
 a file for its module or scenario, not for its project.
 
 ### Grouping
 
 Group related tests with vitest's own `describe`, never with a title prefix
-written into a string. `packages/core/test/fileSyncConnection.test.ts` carries
+written into a string. `packages/core/test/fileSyncConnection.test.ts` contains
 240 test titles that open `"synchronize(): ..."` where a `describe` block was
 meant: a title is a `describe` spelled as a string, so it does not nest, does
 not collapse in a reporter, and does not survive a rename. A `describe` title
@@ -521,8 +522,8 @@ The harder rule: a test file splits when its source module splits.
 `apps/cli/test/unit/ssh2SftpAdapter.test.ts` (11,006 lines) covers several
 modules' subjects, and `packages/core/test/fileSyncConnection.test.ts` (10,442
 lines) is in the same state -- both are cases where the source was split and
-the test file was not, so it kept asserting behavior that now lives in several
-modules. Left unsplit, a module's tests become unfindable without grep.
+the test file was not, so it asserts behavior that lives in several modules.
+Left unsplit, a module's tests become unfindable without grep.
 
 ### Where helpers live
 
@@ -567,7 +568,7 @@ externals from `dependencies` alone, so an import of anything else either fails
 that build or is inlined into the package core publishes.
 
 Its admission rule, which is narrow on purpose: material goes in only when a
-second workspace's test tree genuinely needs it AND it cannot take the
+second workspace's test tree needs it AND it cannot take the
 `@psilink/core/testing` channel, and it is exported one explicit subpath at a
 time. Nothing moves in for tidiness, and the existing `@psilink/core/testing`
 subjects stay where they are. Its one subject today is the WebRTC inbound frame
@@ -597,17 +598,17 @@ and it classifies every file in the directory -- generated, a verifier
 (`canonical-vectors.json` and `psi-prebuild-manifest.json`) -- so a file added
 beside the others fails until it is classified rather than passing unchecked.
 
-Two files carry values the check cannot compare, both in
+Two files hold values the check cannot compare, both in
 `signed-receipt-vectors.json` and `signing-cert-vectors.json`: the ECDSA
 `signature` fields, freshly randomized on every signing run, and
 `signatureProducer`, which records the `openssl version` of the host that signed
-the checked-in bytes and so reproduces only on a host carrying that same build.
+the checked-in bytes and so reproduces only on a host with that same build.
 Those are masked by name and by the shape each value takes, the mask fails closed
 if it stops matching, and the signatures' validity is asserted by the suites that
 verify them. Refreshing any vectors file is running its generator and then
 `npm run format`, as each generator's header states.
 
-Reading one from more than one workspace is deliberate, along two axes. A
+Reading one from more than one workspace is by design, along two axes. A
 construction that two applications implement independently is guarded only when
 each application's OWN call sites are driven against one pinned answer; a test
 that computes both "sides" through a single shared path proves nothing about
@@ -640,7 +641,7 @@ no per-application call sites to guard.
 
 ## Verifying Windows owner-only file protections
 
-On Windows the CLI protects its owner-only files with ACLs rather than POSIX mode bits. A nightly `windows-latest` job (`.github/workflows/nightly_platform.yaml`) now runs the CLI unit suite, including this describe's cases, but until that leg has stayed green the checks below remain the procedure to trust. The checks below are a manual procedure to run on a Windows host to confirm the owner-only writers still narrow ACLs correctly after a change to their Windows branch. Run them in PowerShell from a scratch directory on an NTFS volume that carries the usual inheritable ACEs (a subdirectory of the user profile is fine); each check produces an artifact you then inspect. `$me` below is the domain-qualified account the CLI narrows the file to; derive it from `whoami`, the same call the CLI uses to name the grant principal, so the comparison matches the granted identity exactly (domain casing and NetBIOS form included).
+On Windows the CLI protects its owner-only files with ACLs rather than POSIX mode bits. A nightly `windows-latest` job (`.github/workflows/nightly_platform.yaml`) runs the CLI unit suite, including this describe's cases, but until that leg has stayed green the checks below remain the procedure to trust. The checks below are a manual procedure to run on a Windows host to confirm the owner-only writers still narrow ACLs correctly after a change to their Windows branch. Run them in PowerShell from a scratch directory on an NTFS volume that has the usual inheritable ACEs (a subdirectory of the user profile is fine); each check produces an artifact you then inspect. `$me` below is the domain-qualified account the CLI narrows the file to; derive it from `whoami`, the same call the CLI uses to name the grant principal, so the comparison matches the granted identity exactly (domain casing and NetBIOS form included).
 
 ```powershell
 $me = (whoami)
@@ -705,32 +706,37 @@ npm run coverage                    # all workspaces; writes a report per worksp
 npm run coverage -w packages/core   # a single workspace
 ```
 
-It uses `@vitest/coverage-v8` (first-party Vitest tooling, so no second runner)
-and writes a text summary to the terminal plus a browsable HTML report and an
-`lcov.info` (for editors/tooling) under each workspace's `coverage/` directory.
-The denominator is scoped to product source under each `src/` tree, with the
-generated route tree excluded, so the numbers reflect hand-written product code;
-the vendored signaling broker is a workspace of its own (`packages/peerjs-broker`)
-and runs no coverage, so it sits outside every denominator. The report runs `core` unit, `cli`
-unit, integration, webrtc, and backend-agnostic (the SFTP adapter is exercised
-only by the integration suite, the WebRTC transport only by the webrtc suite,
-and the exchange and zero-setup command handlers only by the backend-agnostic
-suite, so dropping any of them would read what it covers as near-uncovered), and
-`web` unit plus `web` browser (real Chromium via Playwright). The web
-unit and browser projects run together and their coverage is merged, so the
-component, live-exchange, and consent-gate paths exercised only in the browser
-are reflected instead of reading as near-zero; running `npm run coverage` for the
-web workspace therefore stands up the dev server and Chromium the same way `npm
-run test:browser` does. The web black-box integration suite is deliberately
-excluded: it fetches a separately-spawned dev-server process and imports no
-`src`, so under `--coverage` it measures the empty runner process, not the
-server. Capturing that server-entry/route-handler code is feasible -- run the
-spawned server under `NODE_V8_COVERAGE` and merge its profile -- but low-value:
-it buys a bespoke merge step outside Vitest's model to cover thin server-entry
-and route glue whose behavior the integration suite already asserts end-to-end,
+It uses `@vitest/coverage-v8` (first-party Vitest tooling, so no second
+runner) and writes a text summary to the terminal plus a browsable HTML
+report and an `lcov.info` (for editors/tooling) under each workspace's
+`coverage/` directory. The denominator is scoped to product source under each
+`src/` tree, with the generated route tree excluded, so the numbers reflect
+hand-written product code; the vendored signaling broker is a workspace of
+its own (`packages/peerjs-broker`) and runs no coverage, so it sits outside
+every denominator.
+
+The report runs `core` unit, `cli` unit, integration, webrtc, and
+backend-agnostic (the SFTP adapter is exercised only by the integration
+suite, the WebRTC transport only by the webrtc suite, and the exchange
+and zero-setup command handlers only by the backend-agnostic suite, so
+dropping any of them would leave what it covers looking near-uncovered),
+and `web` unit plus `web` browser (real Chromium via Playwright). The
+web unit and browser projects run together and their coverage is merged,
+so the component, live-exchange, and consent-gate paths exercised only in
+the browser are reflected instead of reading as near-zero; running `npm
+run coverage` for the web workspace therefore stands up the dev server and
+Chromium the same way `npm run test:browser` does.
+
+The web black-box integration suite is excluded by design: it fetches
+a separately-spawned dev-server process and imports no `src`, so under
+`--coverage` it measures the empty runner process, not the server. Capturing
+that server-entry/route-handler code is feasible -- run the spawned server
+under `NODE_V8_COVERAGE` and merge its profile -- but low-value: it buys
+a bespoke merge step outside Vitest's model to cover thin server-entry and
+route glue whose behavior the integration suite already asserts end-to-end,
 so it is out of scope, not a deferred gap.
 
-There is deliberately NO global percentage gate, and adding one is not a missing
+By design there is NO global percentage gate, and adding one is not a missing
 piece to be "fixed": a blanket "N% or the build fails" bar rewards vanity tests
 that raise the number without raising confidence, so the report informs review
 rather than blocking merges. Do not add a `thresholds` line to the Vitest
@@ -755,7 +761,7 @@ npm run test:mutation
 ```
 
 The run takes a couple of minutes against an installed tree (`npm ci` plus the
-core build). Stryker is deliberately not a repository dependency -- it drags in
+core build). Stryker is not a repository dependency by design -- it drags in
 a second copy of Vitest and its own TypeScript -- so
 `scripts/stryker-security.mjs` installs it into a private prefix under the work
 directory: `$RUNNER_TEMP` in CI, the system temp directory locally, and
@@ -766,18 +772,18 @@ checks out `staging` explicitly and uploads both as a run artifact.
 
 ### The floors
 
-`packages/core/stryker.config.mjs` carries the corpus and each file's committed
+`packages/core/stryker.config.mjs` holds the corpus and each file's committed
 floor in one table: the keys are the files to mutate, the values their minimum
 mutation score in whole percent. The gate is per file rather than Stryker's
 whole-run `thresholds.break`, so a file whose tests were gutted cannot be
-carried by the others; the leg fails naming the file, its score, and its floor.
+offset by the others; the leg fails naming the file, its score, and its floor.
 
 - **Raising a floor.** When tests land that raise a file's score, raise its floor
   to the new score rounded down to a whole percent. The runner prints the value
   to use for each file that has moved above its floor.
 - **Never lowering one.** A floor is not lowered to make a red leg green: a drop
-  means a test that used to distinguish the mutated behavior no longer does,
-  which is the finding the leg exists to report.
+  means a test stops distinguishing the mutated behavior, which is the finding
+  the leg exists to report.
 - **Widening the corpus.** Adding a fourth file is one line in the table, with
   the floor that file measures when it is added.
 

@@ -190,7 +190,7 @@ operator's setup run.
 `Dockerfile.fips` builds a second image on Amazon Linux 2023 carrying the
 CMVP-validated OpenSSL FIPS provider AWS publishes for that distribution. It is
 published from the same release workflow under the default image's tags with
-`-fips` appended ([RELEASES.md](../RELEASES.md#which-image-carries-which-posture));
+`-fips` appended ([RELEASES.md](../RELEASES.md#which-image-has-which-posture));
 why it exists, what may be claimed of it, and what stops working inside it are in
 [fips-variant-image.md](../notes/fips-variant-image.md). Everything above about
 the npm freeze applies to it unchanged -- same lockfile, same `npm ci`, same

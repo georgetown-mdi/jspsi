@@ -1,6 +1,6 @@
 ---
 title: "Security Incident Response Runbook"
-review_owner: "PSI-Link maintainers"
+review_owner: "psilink maintainers"
 last_reviewed: "2026-08-15"
 ---
 
@@ -50,13 +50,13 @@ Reproduce before deciding anything. If the report is not reproducible, say so in
 
 **Is it in scope?** [SECURITY.md#scope](../SECURITY.md#scope) lists what is in and what is out. A flaw in the PSI primitive itself goes upstream to OpenMined/PSI, with a note back to us so the vendored copy gets updated. Declining is a legitimate verdict and gets the same care as confirming: name the scope line it falls outside, and where the reporter should take it instead. One caveat when reading that list: it is a reporter-facing summary rather than the boundary of what gets fixed, so a report describing a real defect in a control this project documents is triaged even when the list does not name that control, and the scope question goes to the maintainer rather than to the reporter as a decline.
 
-**How severe?** Anchor the call in what PSI-Link claims:
+**How severe?** Anchor the call in what psilink claims:
 
 - **Critical or High** -- a result revealing more than the agreed intersection, authentication bypass or partner impersonation, shared-secret or key-file exposure, or record data exposed in plaintext on a path documented as confidential.
 - **Moderate** -- a documented control that fails open without being fully bypassed, or an exposure that needs an unlikely configuration.
 - **Low** -- disclosure of non-record metadata, or a denial of service against a party's own run.
 
-Two design facts settle a recurring class of report before it consumes a week. Zero-setup exchanges carry no application-layer AEAD by design and rely on transport encryption alone ([SECURITY_DESIGN.md#channel-security](SECURITY_DESIGN.md#channel-security)), and an adversary who has already compromised the host running PSI-Link is out of scope. A report resting on either is a documented limitation; say which one, explicitly, when declining on that basis.
+Two design facts settle a recurring class of report before it consumes a week. Zero-setup exchanges have no application-layer AEAD by design and rely on transport encryption alone ([SECURITY_DESIGN.md#channel-security](SECURITY_DESIGN.md#channel-security)), and an adversary who has already compromised the host running psilink is out of scope. A report resting on either is a documented limitation; say which one, explicitly, when declining on that basis.
 
 Score the severity with CVSS in the draft advisory (step 5) rather than in the thread, so the number the reporter is told and the number that publishes are the same one.
 
@@ -72,13 +72,13 @@ Patches cover the current major release and the previous major ([SECURITY.md#sup
   git log --oneline vX.Y.Z -- <path of the affected file>
   ```
 
-- A flaw that exists only on `staging` and in no tag needs a fix, not an advisory: no released artifact carries it. Tell the reporter that is the verdict and that the fix ships with the next release.
+- A flaw that exists only on `staging` and in no tag needs a fix, not an advisory: no released artifact contains it. Tell the reporter that is the verdict and that the fix ships with the next release.
 - While the released line is `0.x`, there is no previous major to patch. The current release is the only supported version, and the previous-major row starts binding at 1.0. An empty row is not a claim that older releases are covered.
 - Write down the affected range and the fixing version as soon as they are known. Both go into the advisory verbatim, and into the reporter's next update.
 
 ## 4. Fix privately, then release
 
-The release mechanics are [RELEASES.md#hotfix-releases](RELEASES.md#hotfix-releases): branch from the affected release tag, one minimal focused commit, then the ordinary release checklist with a PATCH bump. Follow it as written. What it does not carry, and what this step adds, is the disclosure sequencing around it.
+The release mechanics are [RELEASES.md#hotfix-releases](RELEASES.md#hotfix-releases): branch from the affected release tag, one minimal focused commit, then the ordinary release checklist with a PATCH bump. Follow it as written. What it does not cover, and what this step adds, is the disclosure sequencing around it.
 
 - Develop out of public view: GitHub's temporary private fork from the report thread, or a local branch. Do not push the branch to the public repository.
 - Write a regression test that fails without the fix. A security fix that ships without one is how the same flaw comes back.
@@ -92,9 +92,9 @@ The release mechanics are [RELEASES.md#hotfix-releases](RELEASES.md#hotfix-relea
 
 The advisory and the CVE both run through the repository's Security tab, under Advisories. GitHub is a CNA, so the CVE request goes there and nowhere else.
 
-1. **Draft it from the report.** Starting the draft from the private report thread keeps the reporter attached to it, which is what carries the credit through to publication.
+1. **Draft it from the report.** Starting the draft from the private report thread keeps the reporter attached to it, which is what keeps the credit attached through to publication.
 2. **Fill in the substance**: a title naming the component and the impact; a description covering impact, affected versions, the fixed version, and a workaround for anyone who cannot upgrade immediately; the CVSS vector; and a CWE if one fits.
-3. **Affected products.** That section is built around package ecosystems, and PSI-Link publishes no registry package -- the released artifacts are a signed container image and the tagged source ([RELEASES.md#release-artifacts](RELEASES.md#release-artifacts)). Put the affected and fixed versions in the description as well, where they are legible regardless of what the form accepts. This project has not yet driven that form against a real advisory, so treat this paragraph as a starting point to confirm at first use rather than as tested guidance, and correct it here afterwards.
+3. **Affected products.** That section is built around package ecosystems, and psilink publishes no registry package -- the released artifacts are a signed container image and the tagged source ([RELEASES.md#release-artifacts](RELEASES.md#release-artifacts)). Put the affected and fixed versions in the description as well, where they are readable regardless of what the form accepts. This project has not yet driven that form against a real advisory, so treat this paragraph as a starting point to confirm at first use rather than as tested guidance, and correct it here afterwards.
 4. **Request the CVE ID** from the draft before publishing. The identifier is assigned to the draft and travels with it to publication.
 5. **Credit the reporter** by the name or handle they use, unless they asked for anonymity ([SECURITY.md#disclosure-policy](../SECURITY.md#disclosure-policy)).
 6. **Share the draft with the reporter** for accuracy before publishing. They usually catch an overstated or understated impact.
@@ -111,20 +111,20 @@ Every milestone below is a message the reporter should not have to ask for.
 | Fix plan             | With the verdict, if confirmed | The affected versions, the intended fixing version, and a target date          |
 | Slip                 | Before the date passes         | The new date and the reason, said early rather than explained late            |
 | Draft advisory       | Before publication            | The text, the credit line as it will read, and a chance to correct both        |
-| Publication          | Same day                      | The advisory link, the CVE, and the released version carrying the fix          |
+| Publication          | Same day                      | The advisory link, the CVE, and the released version with the fix          |
 
 The 90-day window in [SECURITY.md](../SECURITY.md#response-timeline) runs from confirmation, and reporters are asked to hold disclosure until the advisory or that date, whichever is first. If the window is going to be missed, raise it well before it elapses and agree what happens next -- an early conversation keeps a coordinated disclosure coordinated.
 
 ## 7. Close out
 
-- Confirm the published state: advisory live with its CVE, release notes and CHANGELOG carrying the security entry, patched image published and signed.
+- Confirm the published state: advisory live with its CVE, release notes and CHANGELOG holding the security entry, patched image published and signed.
 - Thank the reporter and close the thread.
 - Fix whatever in this runbook fought you, in the same week, while the friction is still remembered.
 - If the incident exposed a gap in a control rather than a single defect, that is follow-up work in its own right; raise it with the maintainer rather than leaving it in the closed thread.
 
 ## When the maintainer is unavailable
 
-This section is for the co-owner. All of it is communication. None of it is a release: the signing key and registry credentials are the maintainer's alone, so no fix can ship on this path, and an honest date is worth more to a reporter than an attempted release.
+This section is for the co-owner. All of it is communication. None of it is a release: the signing key and registry credentials are the maintainer's alone, so no fix can ship on this path, and an accurate date is worth more to a reporter than an attempted release.
 
 In order:
 
@@ -159,14 +159,14 @@ This runbook is walked once a year against a simulated report, and again after a
 
 ### 2026-08-15
 
-**Scenario (simulated).** A researcher privately reports that on Windows the CLI writes the result CSV with an inherited ACL granting a second local account read access, so any user of that machine can read the linked records. This scenario is invented for the exercise and describes no defect in PSI-Link: the owner-only write path it imagines failing is specified in [CREDENTIAL_STORAGE.md](spec/CREDENTIAL_STORAGE.md). It was chosen because it is confirmable, platform-scoped, and severe enough to reach publication, so the walk covers every step rather than ending at a decline.
+**Scenario (simulated).** A researcher privately reports that on Windows the CLI writes the result CSV with an inherited ACL granting a second local account read access, so any user of that machine can read the linked records. This scenario is invented for the exercise and describes no defect in psilink: the owner-only write path it imagines failing is specified in [CREDENTIAL_STORAGE.md](spec/CREDENTIAL_STORAGE.md). It was chosen because it is confirmable, platform-scoped, and severe enough to reach publication, so the walk covers every step rather than ending at a decline.
 
 **Walked.** Steps 1 through 7 in order, against the repository as it stood on the exercise date: intake and acknowledgement, the severity call (High -- record data readable by a non-owner on the same host), affected versions (`v0.1.0`, the only signed release tag; no previous major exists on a `0.x` line), the hotfix path (branch from `v0.1.0`, fix, `v0.1.1`), advisory drafting and CVE request, and the reporter messages at each milestone.
 
 **Findings fixed in this runbook:**
 
 1. The supported-version rule does not resolve on a pre-1.0 line: with only `0.x` released, the previous-major row is empty and reads either as "nothing is supported" or as "everything older is". Step 3 states how to apply the rule until 1.0.
-2. Following the hotfix procedure literally opens a public pull request carrying the fix diff, potentially days before the advisory publishes. The procedure is about mechanics and says nothing about when the fix becomes public. Step 4 carries the sequencing, and the hotfix section points at it.
+2. Following the hotfix procedure literally opens a public pull request with the fix diff, potentially days before the advisory publishes. The procedure is about mechanics and says nothing about when the fix becomes public. Step 4 states the sequencing, and the hotfix section points at it.
 3. The advisory form's affected-products fields assume a package ecosystem, and this project publishes none, so an advisory drafted from it can end up without a machine-readable affected range. Step 5 records putting the versions in the description, and marks the form's behavior as unconfirmed until a real advisory is drafted.
 
 **Findings referred to the maintainer:**
