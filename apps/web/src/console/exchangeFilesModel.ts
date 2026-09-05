@@ -3,12 +3,9 @@ import {
   withRetainModeImplications,
 } from "@psilink/core";
 
-import {
-  PEER_ID_SHAPE_MESSAGE,
-  isAdmissiblePeerId,
-} from "@psi/transport/peerIdLabel";
+import { PEER_ID_SHAPE_MESSAGE, isAdmissiblePeerId } from "@jobs/intentSchemas";
 
-import type { JobExchangeOptions } from "@jobs/intent";
+import type { JobExchangeOptions } from "@jobs/intentSchemas";
 
 /**
  * The pure model behind the console's "Exchange files" authoring card: how the

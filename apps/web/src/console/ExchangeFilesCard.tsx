@@ -8,7 +8,7 @@ import {
 } from "@mantine/core";
 import { IconAlertTriangle, IconInfoCircle } from "@tabler/icons-react";
 
-import { MAX_PEER_ID_LENGTH } from "@psi/transport/peerIdLabel";
+import { MAX_PEER_ID_LENGTH } from "@jobs/intentSchemas";
 
 import { DisclosureSection } from "../components/DisclosureSection";
 

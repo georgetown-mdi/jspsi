@@ -13,6 +13,18 @@ import {
 } from "@psilink/core";
 
 import {
+  zeroSetupFiledropArgv,
+  zeroSetupOptionsArgv,
+  zeroSetupSftpArgv,
+} from "@jobs/intentArgv";
+
+import {
+  composeConfigDocument,
+  composeKeyFileDocument,
+  composeSftpConfigDocument,
+} from "@jobs/intentConfig";
+
+import {
   JOB_FILE_NAMES,
   MAX_EXPECTED_PAYLOAD_COLUMNS,
   MAX_IDENTITY_LENGTH,
@@ -21,16 +33,10 @@ import {
   MAX_METADATA_DESCRIPTION_LENGTH,
   MAX_STANDARDIZATION_STEPS,
   MAX_STANDARDIZATION_TRANSFORMATIONS,
-  composeConfigDocument,
-  composeKeyFileDocument,
-  composeSftpConfigDocument,
   jobCreateIntentSchema,
   jobExchangeIntentSchema,
   jobZeroSetupIntentSchema,
-  zeroSetupFiledropArgv,
-  zeroSetupOptionsArgv,
-  zeroSetupSftpArgv,
-} from "@jobs/intent";
+} from "@jobs/intentSchemas";
 
 import {
   SAMPLE_INPUT_FILE_REF,

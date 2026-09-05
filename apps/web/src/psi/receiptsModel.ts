@@ -1,9 +1,9 @@
 import { FINGERPRINT_REGEX, MAX_TEXT_LENGTH } from "@psilink/core";
 
-import { NOTE_CONTROL_CHAR_PATTERN } from "./retentionNoteShape";
+import { NOTE_CONTROL_CHAR_PATTERN } from "@jobs/intentSchemas";
 
 import type { JobRendezvousConfig } from "./jobClient/workInputClient";
-import type { JobSigningChoice } from "@jobs/intent";
+import type { JobSigningChoice } from "@jobs/intentSchemas";
 
 /**
  * The pure model behind the console's "Receipts and record keeping" card:
@@ -13,8 +13,8 @@ import type { JobSigningChoice } from "@jobs/intent";
  *
  * The fingerprint shape and note length ceiling are core's own constants; the
  * note's control-character refusal is the console's own job-intent rule
- * ({@link NOTE_CONTROL_CHAR_PATTERN}, `@psi/retentionNoteShape`), shared with
- * the server schema that enforces it.
+ * ({@link NOTE_CONTROL_CHAR_PATTERN}, `@jobs/intentSchemas`), read from the
+ * same module as the server schema that enforces it.
  *
  * Regenerating the signing identity is a command-line action, not offered
  * here ({@link IDENTITY_REGENERATION_NOTICE}); the identity's location is

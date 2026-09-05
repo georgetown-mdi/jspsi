@@ -62,7 +62,7 @@ const PRODUCT = resolve(repoRoot, "apps/web/src/exchange/Lobby.tsx");
 // Reserved for the first-parse check, linted by nothing else here.
 const PSI_FIRST_PARSE = resolve(
   repoRoot,
-  "apps/web/src/psi/transport/peerIdLabel.ts",
+  "apps/web/src/psi/transport/peerLogging.ts",
 );
 
 const BELOW = [

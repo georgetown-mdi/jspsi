@@ -41,7 +41,7 @@ import type { CliDriverHandlers, RelayEvent } from "@jobs/cliDriver";
 import type {
   JobFiledropExchangeIntent,
   JobInputFileReference,
-} from "@jobs/intent";
+} from "@jobs/intentSchemas";
 import type { ExchangeErrorCategory } from "@psi/exchangeLifecycle";
 import type { JobApiClient } from "@psi/jobClient/serverJobExchangeDriver";
 

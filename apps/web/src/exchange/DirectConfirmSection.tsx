@@ -23,7 +23,7 @@ import { useOnlineStatus } from "@components/useOnlineStatus";
 import {
   IDENTITY_CONTROL_CHAR_PATTERN,
   MAX_IDENTITY_LENGTH,
-} from "@psi/identityLabel";
+} from "@jobs/intentSchemas";
 import {
   LINKAGE_STRATEGY_LABEL,
   LINKAGE_STRATEGY_OPTION_COPY,

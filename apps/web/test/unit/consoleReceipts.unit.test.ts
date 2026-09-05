@@ -34,12 +34,15 @@ import {
   receiptsWithField,
 } from "@psi/receiptsModel";
 import {
-  JOB_FILE_NAMES,
   composeConfigDocument,
   composeSftpConfigDocument,
+} from "@jobs/intentConfig";
+
+import {
+  JOB_FILE_NAMES,
   jobCreateIntentSchema,
   jobExchangeIntentSchema,
-} from "@jobs/intent";
+} from "@jobs/intentSchemas";
 import {
   SIGNING_CERTIFICATE_FILE_NAME,
   SIGNING_IDENTITY_FILE_NAME,
@@ -65,7 +68,7 @@ import {
 } from "../utils/jobFixtures";
 
 import type { JobRendezvousConfig } from "@psi/jobClient/workInputClient";
-import type { JobSigningPaths } from "@jobs/intent";
+import type { JobSigningPaths } from "@jobs/intentSchemas";
 import type { LinkageTerms } from "@psilink/core";
 import type { ReceiptsDraft } from "@psi/receiptsModel";
 
@@ -913,8 +916,8 @@ describe("the receipts card's model", () => {
 
   test("a control character in the retention note is caught on the card, not only at submit", () => {
     // Mirrors the server's own refusal (NOTE_CONTROL_CHAR_PATTERN in
-    // apps/web/src/jobs/intent.ts, via the shared @psi/retentionNoteShape
-    // pattern): a NUL or an ESC pasted into the note must report a card
+    // apps/web/src/jobs/intentSchemas.ts, the pattern both surfaces read):
+    // a NUL or an ESC pasted into the note must report a card
     // problem here, or the operator would see nothing wrong until the run
     // failed at submit with a generic 400.
     expect(

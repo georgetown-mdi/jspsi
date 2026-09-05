@@ -6,7 +6,7 @@ import {
   IDENTITY_CONTROL_CHAR_MESSAGE,
   IDENTITY_CONTROL_CHAR_PATTERN,
   MAX_IDENTITY_LENGTH,
-} from "@psi/identityLabel";
+} from "@jobs/intentSchemas";
 
 import {
   MAX_SIGNING_FINGERPRINT_BODY_BYTES,
@@ -28,7 +28,7 @@ import type { SigningFingerprintResult } from "@jobs/signingIdentity";
  * whether to also write the public certificate out. `.strictObject` rejects any
  * unmodeled key, so the request can only ever say WHOSE identity to mint, never
  * where to read or write. The label is held to the shared label contract
- * (`@psi/identityLabel`): bounded by {@link MAX_IDENTITY_LENGTH}, refused a
+ * (`@jobs/intentSchemas`): bounded by {@link MAX_IDENTITY_LENGTH}, refused a
  * leading `-`, and refused any control character -- the last is critical rather
  * than defensive, since the label binds into a long-lived certificate every
  * partner pins, and a NUL would otherwise be caught only incidentally, where the

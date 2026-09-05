@@ -14,7 +14,7 @@ import type {
   JobSftpExchangeIntent,
   JobZeroSetupFiledropIntent,
   JobZeroSetupSftpIntent,
-} from "@jobs/intent";
+} from "@jobs/intentSchemas";
 import type { JobSftpServerEntry } from "@jobs/sftpServer";
 import type { LinkageTerms } from "@psilink/core";
 

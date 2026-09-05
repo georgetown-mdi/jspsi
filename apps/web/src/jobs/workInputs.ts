@@ -22,7 +22,7 @@ import { MAX_INPUT_NAME_LENGTH, isAdmissibleInputName } from "./workInputName";
 import {
   MAX_STANDARDIZATION_STEPS,
   MAX_STANDARDIZATION_TRANSFORMATIONS,
-} from "./intent";
+} from "./intentSchemas";
 import { JOB_DATA_ROOT_ENV } from "./gate";
 
 import type { FieldValueCoverage } from "@psi/workers/nonEmptyAggregate";

@@ -4,10 +4,10 @@
  * ({@link ../exchange/KeysTab}) and the console's Direct-exchange confirm screen
  * ({@link ../exchange/DirectConfirmSection}).
  *
- * Separate for the same reason as {@link ./identityLabel}: the disclosure note
- * is the consent-critical half of the choice -- the browser's wording of the
- * CLI's own `singlePassDisclosureNotice`, which the partner reads again on the
- * terms panel -- so both surfaces must state it in the same words.
+ * The disclosure note is the consent-critical half of the choice -- the
+ * browser's wording of the CLI's own `singlePassDisclosureNotice`, which the
+ * partner reads again on the terms panel -- so both surfaces must state it in
+ * the same words.
  */
 
 import type { LinkageStrategy } from "@psilink/core";

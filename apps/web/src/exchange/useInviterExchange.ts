@@ -67,7 +67,7 @@ import type {
   ServerJobExchangeTransport,
 } from "@psi/jobClient/serverJobExchangeDriver";
 import type { GeneratedInvitation } from "@psi/invitation";
-import type { JobExchangeOptions } from "@jobs/intent";
+import type { JobExchangeOptions } from "@jobs/intentSchemas";
 import type { ReceiptsIntentFields } from "@psi/receiptsModel";
 import type { RunDiagnosticsIntentFields } from "@psi/runDiagnosticsModel";
 import type { RunOutputs } from "@psi/runOutputs";

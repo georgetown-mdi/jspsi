@@ -61,7 +61,7 @@ import type {
   ServerJobExchangeTransport,
 } from "@psi/jobClient/serverJobExchangeDriver";
 import type { ExchangeRun } from "./exchangeRun";
-import type { JobExchangeOptions } from "@jobs/intent";
+import type { JobExchangeOptions } from "@jobs/intentSchemas";
 import type { ReceiptsIntentFields } from "@psi/receiptsModel";
 import type { RunDiagnosticsIntentFields } from "@psi/runDiagnosticsModel";
 import type { RunFailure } from "./useInviterExchange";

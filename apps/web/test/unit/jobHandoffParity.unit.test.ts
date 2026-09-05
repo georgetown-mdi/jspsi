@@ -9,7 +9,8 @@ import {
   HANDOFF_SIGNING_IDENTITY_PLACEHOLDER,
   buildJobHandoff,
 } from "@jobs/handoff";
-import { composeSftpConfigDocument, jobCreateIntentSchema } from "@jobs/intent";
+import { composeSftpConfigDocument } from "@jobs/intentConfig";
+import { jobCreateIntentSchema } from "@jobs/intentSchemas";
 
 import {
   TEST_HOST_KEY_FINGERPRINT,
@@ -22,7 +23,7 @@ import type {
   JobExchangeOptions,
   JobSftpExchangeIntent,
   JobZeroSetupSftpIntent,
-} from "@jobs/intent";
+} from "@jobs/intentSchemas";
 import type { Metadata, Standardization } from "@psilink/core";
 
 /**

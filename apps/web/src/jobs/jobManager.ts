@@ -1,14 +1,18 @@
 import path from "node:path";
 
 import {
-  JOB_FILE_NAMES,
-  composeConfigDocument,
-  composeKeyFileDocument,
-  composeSftpConfigDocument,
   zeroSetupFiledropArgv,
   zeroSetupOptionsArgv,
   zeroSetupSftpArgv,
-} from "./intent";
+} from "./intentArgv";
+
+import {
+  composeConfigDocument,
+  composeKeyFileDocument,
+  composeSftpConfigDocument,
+} from "./intentConfig";
+import { JOB_FILE_NAMES } from "./intentSchemas";
+
 import { JobInputNotFoundError, jobInputFilePath } from "./workInputs";
 import {
   createWorkdir,
@@ -49,7 +53,7 @@ import type {
   JobExchangeIntent,
   JobInputFileReference,
   JobSigningPaths,
-} from "./intent";
+} from "./intentSchemas";
 import type { ExchangeRecordOutcome } from "@psilink/core";
 import type { JobHandoff } from "./handoff";
 import type { JobSftpServerEntry } from "./sftpServer";

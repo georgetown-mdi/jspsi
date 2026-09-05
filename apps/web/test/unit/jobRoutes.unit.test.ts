@@ -3,7 +3,7 @@ import path from "node:path";
 
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-import { JOB_FILE_NAMES, MAX_INPUT_CSV_LENGTH } from "@jobs/intent";
+import { JOB_FILE_NAMES, MAX_INPUT_CSV_LENGTH } from "@jobs/intentSchemas";
 import {
   MAX_JOB_BODY_BYTES,
   MAX_SFTP_AUTHOR_BODY_BYTES,
@@ -36,7 +36,10 @@ import {
   validSftpIntent,
 } from "../utils/jobFixtures";
 
-import type { JobCreateIntent, JobInputFileReference } from "@jobs/intent";
+import type {
+  JobCreateIntent,
+  JobInputFileReference,
+} from "@jobs/intentSchemas";
 import type { ExchangeRecordOutcome } from "@psilink/core";
 import type { JobManager as JobManagerType } from "@jobs/jobManager";
 

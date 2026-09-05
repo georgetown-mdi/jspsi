@@ -1,16 +1,16 @@
+import { zeroSetupOptionsArgv, zeroSetupSftpArgv } from "./intentArgv";
+
 import {
   composeConfigDocument,
   composeSftpConfigDocument,
-  zeroSetupOptionsArgv,
-  zeroSetupSftpArgv,
-} from "./intent";
+} from "./intentConfig";
 
 import type {
   JobCreateIntent,
   JobExchangeIntent,
   JobSigningPaths,
   JobZeroSetupIntent,
-} from "./intent";
+} from "./intentSchemas";
 import type { JobSftpServerEntry } from "./sftpServer";
 
 /**

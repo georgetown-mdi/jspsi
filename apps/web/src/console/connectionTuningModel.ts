@@ -9,7 +9,7 @@ import {
   MAX_TIMEOUT_SECONDS,
 } from "@psilink/core";
 
-import type { JobExchangeOptions } from "@jobs/intent";
+import type { JobExchangeOptions } from "@jobs/intentSchemas";
 
 /**
  * The pure model behind the console's "Connection tuning" authoring card: how the

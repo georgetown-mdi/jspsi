@@ -31,11 +31,12 @@ import {
   defaultPlaceholder,
   withConnectionTuning,
 } from "@console/connectionTuningModel";
+import { zeroSetupOptionsArgv } from "@jobs/intentArgv";
+
 import {
   composeConfigDocument,
   composeSftpConfigDocument,
-  zeroSetupOptionsArgv,
-} from "@jobs/intent";
+} from "@jobs/intentConfig";
 
 import {
   testSftpServerEntry,

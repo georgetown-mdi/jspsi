@@ -2,7 +2,7 @@ import { getLogger, redactAndSanitizeForDisplay } from "@psilink/core";
 
 import { readBoundedJsonBody } from "@utils/boundedJsonBody";
 
-import { MAX_INPUT_CSV_LENGTH } from "./intent";
+import { MAX_INPUT_CSV_LENGTH } from "./intentSchemas";
 
 import {
   JOB_ALLOWED_HOSTS_ENV,

@@ -27,7 +27,7 @@ import type {
   JobExchangeSide,
   JobZeroSetupIntent,
   JobZeroSetupLinkageStrategy,
-} from "@jobs/intent";
+} from "@jobs/intentSchemas";
 import type { LinkageTerms, Metadata, Standardization } from "@psilink/core";
 import type { RelayEvent, RelayEventType } from "@jobs/cliDriver";
 import type { ReceiptsIntentFields } from "../receiptsModel";

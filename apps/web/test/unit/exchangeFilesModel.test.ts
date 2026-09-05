@@ -9,8 +9,11 @@ import {
   exchangeFilesOptions,
   exchangeFilesProblems,
 } from "@console/exchangeFilesModel";
-import { composeConfigDocument, zeroSetupOptionsArgv } from "@jobs/intent";
-import { PEER_ID_SHAPE_MESSAGE } from "@psi/transport/peerIdLabel";
+import { zeroSetupOptionsArgv } from "@jobs/intentArgv";
+
+import { composeConfigDocument } from "@jobs/intentConfig";
+
+import { PEER_ID_SHAPE_MESSAGE } from "@jobs/intentSchemas";
 
 import { validIntent } from "../utils/jobFixtures";
 

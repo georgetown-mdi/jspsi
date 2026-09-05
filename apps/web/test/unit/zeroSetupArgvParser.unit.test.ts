@@ -22,7 +22,7 @@ import {
   zeroSetupFiledropArgv,
   zeroSetupOptionsArgv,
   zeroSetupSftpArgv,
-} from "@jobs/intent";
+} from "@jobs/intentArgv";
 
 import {
   awaitJobTerminalState,
