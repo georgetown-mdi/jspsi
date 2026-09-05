@@ -584,6 +584,7 @@ export function connectToBroker(
     // can never both reject the registration and report through onClose.
     let opened = false;
     let ended = false;
+    let settled = false;
     let heartbeat: ReturnType<typeof setInterval> | undefined;
     let openTimer: ReturnType<typeof setTimeout> | undefined;
 
@@ -592,7 +593,6 @@ export function connectToBroker(
       socket.removeEventListener("message", onSocketMessage);
       socket.removeEventListener("error", onSocketError);
       socket.removeEventListener("close", onSocketClose);
-      signal?.removeEventListener("abort", onAbort);
       if (heartbeat !== undefined) clearInterval(heartbeat);
       if (openTimer !== undefined) clearTimeout(openTimer);
       heartbeat = undefined;
@@ -602,7 +602,9 @@ export function connectToBroker(
     // Claims the terminal path and tears down, so a later event on the same
     // socket -- the `close` that follows an `error` -- reports nothing. Apart
     // from the settlement below, so a path that has to ask a question before
-    // it can name the failure still closes the socket first.
+    // it can name the failure still closes the socket first. The abort listener
+    // is left installed until the settlement, so an unanswered certificate
+    // check is not what an interrupt waits on.
     const claimTerminal = (): boolean => {
       if (ended) return false;
       ended = true;
@@ -617,8 +619,13 @@ export function connectToBroker(
     };
 
     // The outcome lands on exactly one of the three settlement paths: a
-    // rejected registration, a reported failure, or a silent local close.
+    // rejected registration, a reported failure, or a silent local close --
+    // once, so an answer that arrives after an abort has already settled the
+    // registration reports nothing.
     const settle = (error: ConnectionError | undefined): void => {
+      if (settled) return;
+      settled = true;
+      signal?.removeEventListener("abort", onAbort);
       if (!opened) {
         reject(
           error ??
@@ -640,13 +647,20 @@ export function connectToBroker(
       settle(error);
     };
 
-    const onAbort = (): void =>
-      end(
+    // An abort is answered wherever it lands, including after a failing path
+    // has claimed the teardown and is still asking the endpoint what its
+    // certificate check said: an interrupt waits out none of this transport's
+    // budgets (WEBRTC_TRANSPORT.md, Budgets), and the answer that arrives
+    // behind it is dropped.
+    const onAbort = (): void => {
+      claimTerminal();
+      settle(
         new ConnectionError(
           "connecting to the signaling server was cancelled",
           "closed",
         ),
       );
+    };
 
     const onSocketOpen = (): void => {
       // Registration is confirmed by the server's OPEN, not by the socket

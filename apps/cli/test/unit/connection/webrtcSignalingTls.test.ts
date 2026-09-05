@@ -1,4 +1,4 @@
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 
 import { sanitizeErrorForDisplay } from "@psilink/core";
 
@@ -93,9 +93,9 @@ async function failureAfterRegistration(
     certificateProbe: () => Promise.resolve(certificateProblem),
   });
   socket.fail();
-  for (let attempt = 0; attempt < 200 && closes.length === 0; attempt += 1) {
-    await new Promise((resolve) => setTimeout(resolve, 5));
-  }
+  // The report lands a turn later: a socket error asks the endpoint what its
+  // certificate check said before it can name what failed.
+  await vi.waitFor(() => expect(closes).toHaveLength(1));
   client.close();
   return sanitizeErrorForDisplay(closes[0]);
 }

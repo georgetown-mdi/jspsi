@@ -627,6 +627,51 @@ test("an abort before registration rejects and closes the socket", async () => {
   expect(sockets[0].closed).toBe(true);
 });
 
+test("an abort while the certificate question is out settles at once", async () => {
+  // The failure path asks the endpoint what its certificate check said before
+  // it can name the failure, and that question has a ceiling of its own. An
+  // interrupt waits out neither it nor any other budget on this transport
+  // (WEBRTC_TRANSPORT.md, Budgets), so the abort settles the registration and
+  // the answer behind it reports nothing. The probe here never answers on its
+  // own, so a settlement that waited for it would never come at all.
+  sockets = [];
+  const controller = new AbortController();
+  const closes: Array<ConnectionError | undefined> = [];
+  let answer: ((problem: string | undefined) => void) | undefined;
+  const pending = connectToBroker({
+    location: LOCATION,
+    id: LOCAL_ID,
+    handlers: {
+      onMessage: () => {},
+      onClose: (error) => {
+        closes.push(error);
+      },
+    },
+    socketFactory,
+    signal: controller.signal,
+    certificateProbe: () =>
+      new Promise<string | undefined>((resolve) => {
+        answer = resolve;
+      }),
+  });
+  sockets[0].open();
+  sockets[0].fail();
+  const startedAt = Date.now();
+  controller.abort();
+  const error = await pending.then(
+    () => undefined,
+    (err: unknown) => err as ConnectionError,
+  );
+  expect(Date.now() - startedAt).toBeLessThan(100);
+  expect(error?.kind).toBe("closed");
+  expect(error?.message).toContain("cancelled");
+  expect(sockets[0].closed).toBe(true);
+
+  answer?.("DEPTH_ZERO_SELF_SIGNED_CERT");
+  await new Promise((resolve) => setTimeout(resolve, 0));
+  expect(closes).toHaveLength(0);
+});
+
 test("a host that does not form a valid URL is a usage error, not a raw DOMException", async () => {
   // No socketFactory, so nothing stands between this host and the real
   // `new WebSocket`, which throws a DOMException on it -- an error outside the
