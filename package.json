@@ -43,6 +43,7 @@
     "check:exchange-record-version": "node scripts/check-exchange-record-version.mjs",
     "check:stun-default-claims": "node scripts/check-stun-default-claims.mjs",
     "check:webrtc-provider-options-unread": "node scripts/check-webrtc-provider-options-unread.mjs",
+    "check:run-failure-sink": "node scripts/check-run-failure-sink.mjs",
     "check:zero-setup-keys": "node scripts/check-zero-setup-keys.mjs",
     "check:built-in-set-versions": "node scripts/check-built-in-set-versions.mjs",
     "check:release-version": "node scripts/check-release-version.mjs",
