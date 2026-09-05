@@ -30,9 +30,13 @@
 //   B. THE COMMENT LINES. Comments are read out of the TypeScript parse rather
 //      than matched out of the raw text, so a `//` inside a string or a regular
 //      expression is not a comment and a comment inside a template literal is.
+//      The parse is walked down to its TOKENS and every one's trivia is read, so
+//      a comment sharing a line with the code before it -- after a comma, a
+//      brace or an operator -- is read like a comment on a line of its own.
 //      Adjacent comment lines are joined into one block before matching, since a
 //      phrase written across a line break is one phrase to a reader and two
-//      lines to a scan.
+//      lines to a scan. The override is scoped tighter than the block: to the
+//      one `//` line or the one block comment it is written in.
 //
 //   C. THE TELLS. NARRATION_TELLS below, each a phrase whose ordinary reading is
 //      a statement about how this repository changed. They are phrases rather
@@ -122,42 +126,43 @@ export function baseCandidates(env) {
 /**
  * The phrases reported as history narration. `tell` names the form for the
  * failure message; `pattern` matches a comment block's text with the comment
- * markers stripped and the lines joined by single spaces.
+ * markers stripped and the lines joined by single spaces. Each is global: a
+ * block stating one tell twice reports it twice, at each of its own lines.
  */
 export const NARRATION_TELLS = [
   {
     tell: "a past state named as past",
     pattern:
-      /\b(?:was|were|is|are|had|has|have)\s+previously\b|\bpreviously[,;:]|\bformerly\b|\bhistorically\b|\buntil recently\b/i,
+      /\b(?:was|were|is|are|had|has|have)\s+previously\b|\bpreviously[,;:]|\bformerly\b|\bhistorically\b|\buntil recently\b/gi,
   },
   {
     tell: "what the code used to do",
     pattern:
-      /(?<!\bwhat\s)\bused to\s+(?:be|live|sit|hold|call|read|write|return|take|throw|emit|run|handle|accept|happen|land|fire|do)\b/i,
+      /(?<!\bwhat\s)\bused to\s+(?:be|live|sit|hold|call|read|write|return|take|throw|emit|run|handle|accept|happen|land|fire|do)\b/gi,
   },
   {
     tell: "code called surplus to a past need",
-    pattern: /\bno longer\s+(?:needed|used|necessary|required|relevant)\b/i,
+    pattern: /\bno longer\s+(?:needed|used|necessary|required|relevant)\b/gi,
   },
   {
     tell: "a reference to the change itself",
     pattern:
-      /\bthis\s+(?:change|commit|patch|rewrite|refactor|pull request|PR)\b/i,
+      /\bthis\s+(?:change|commit|patch|rewrite|refactor|pull request|PR)\b/gi,
   },
   {
     tell: "an earlier version of the code named as such",
     pattern:
-      /\bthe\s+(?:old|previous|original|earlier|former|prior)\s+(?:implementation|behaviou?r|approach|design)\b|\b(?:old|previous|earlier|former)\s+behaviou?rs?\b/i,
+      /\bthe\s+(?:old|previous|original|earlier|former|prior)\s+(?:implementation|behaviou?r|approach|design)\b|\b(?:old|previous|earlier|former)\s+behaviou?rs?\b/gi,
   },
   {
     tell: "the author narrating their own edit",
     pattern:
-      /\bwe\s+(?:now|no longer|used to|previously)\b|\b(?:has|have|had)\s+(?:since\s+)?been\s+(?:renamed|moved|extracted|inlined|promoted|hoisted|folded|superseded)\b/i,
+      /\bwe\s+(?:now|no longer|used to|previously)\b|\b(?:has|have|had)\s+(?:since\s+)?been\s+(?:renamed|moved|extracted|inlined|promoted|hoisted|folded|superseded)\b/gi,
   },
   {
     tell: "code described by where it came from",
     pattern:
-      /\bmoved here (?:from|out of)\b|\b(?:renamed|extracted|inlined|hoisted|lifted|split)\s+(?:out\s+)?(?:from|of)\s+(?:the\s+)?(?:old|previous|former)\b/i,
+      /\bmoved here (?:from|out of)\b|\b(?:renamed|extracted|inlined|hoisted|lifted|split)\s+(?:out\s+)?(?:from|of)\s+(?:the\s+)?(?:old|previous|former)\b/gi,
   },
 ];
 
@@ -175,63 +180,79 @@ function stripCommentMarkers(line) {
 }
 
 /**
+ * Every comment of one source, in source order, each read once.
+ *
+ * A comment is trivia between one token's full start and its start, so the parse
+ * is walked down to its TOKENS -- punctuation and keywords included, which
+ * `forEachChild` skips over -- and both readers run at each one: TypeScript
+ * attaches a comment sharing a line with the token before it as that token's
+ * trailing trivia, and leaves the rest to the next token's leading trivia. A
+ * range reaching past the token's own start is not trivia at all, which is how
+ * JSX text opening with `//` reads, and is dropped.
+ *
+ * The parse decides where a token ends rather than a scan of the raw text: a
+ * regular expression and a template literal with a substitution are each several
+ * scanner tokens whose spelling can hold `//`, and the parser alone resolves
+ * them.
+ */
+function commentRangesOf(source, text) {
+  const ranges = new Map();
+  const readTrivia = (token) => {
+    const from = token.getFullStart();
+    const start = token.getStart(source);
+    for (const found of [
+      ts.getTrailingCommentRanges(text, from),
+      ts.getLeadingCommentRanges(text, from),
+    ]) {
+      for (const range of found ?? []) {
+        if (range.end <= start) ranges.set(range.pos, range);
+      }
+    }
+  };
+  const visit = (node) => {
+    const children = node.getChildren(source);
+    if (children.length === 0) readTrivia(node);
+    else for (const child of children) visit(child);
+  };
+  visit(source);
+  return [...ranges.values()].sort((first, second) => first.pos - second.pos);
+}
+
+/**
  * The comment blocks of one source: maximal runs of comments on consecutive
  * lines, joined into the text a reader sees. Each block records the span of
- * joined text every source line contributed, so a match maps back to a line.
- *
- * The comments come from the parse walked node by node: TypeScript attaches
- * every comment as leading or trailing trivia of some token, and the end-of-file
- * token carries the ones past the last statement. A line's text is cut from the
- * comment ranges themselves rather than read off the raw line, so code sharing a
- * line with a comment is not scanned as comment text.
+ * joined text every source line contributed, so a match maps back to a line, and
+ * the span each comment contributed, so the override reaches its own comment and
+ * no further. A line's text is cut from the comment ranges themselves rather
+ * than read off the raw line, so code sharing a line with a comment is not
+ * scanned as comment text.
  */
 export function commentBlocks(fileName, text) {
   const source = parseSource(fileName, text);
-  const ranges = new Map();
-  const collect = (found) => {
-    if (found) for (const range of found) ranges.set(range.pos, range);
-  };
-  const visit = (node) => {
-    collect(ts.getLeadingCommentRanges(text, node.getFullStart()));
-    collect(ts.getTrailingCommentRanges(text, node.getEnd()));
-    node.forEachChild(visit);
-  };
-  visit(source);
-  collect(
-    ts.getLeadingCommentRanges(text, source.endOfFileToken.getFullStart()),
-  );
-
-  const commentText = new Map();
-  for (const range of [...ranges.values()].sort(
-    (first, second) => first.pos - second.pos,
-  )) {
-    const start = source.getLineAndCharacterOfPosition(range.pos).line;
+  const blocks = [];
+  let open = null;
+  let lastLine = null;
+  for (const range of commentRangesOf(source, text)) {
+    const first = source.getLineAndCharacterOfPosition(range.pos).line;
+    if (open === null || first > lastLine + 1) {
+      open = { text: "", spans: [], ranges: [] };
+      blocks.push(open);
+    }
+    const start = open.text.length === 0 ? 0 : open.text.length + 1;
     text
       .slice(range.pos, range.end)
       .split("\n")
       .forEach((slice, offset) => {
-        const held = commentText.get(start + offset) ?? "";
         const stripped = stripCommentMarkers(slice);
-        const separator = held.length > 0 && stripped.length > 0 ? " " : "";
-        commentText.set(start + offset, `${held}${separator}${stripped}`);
+        if (open.text.length > 0) open.text += " ";
+        open.spans.push({
+          end: open.text.length + stripped.length,
+          line: first + offset + 1,
+        });
+        open.text += stripped;
+        lastLine = first + offset;
       });
-  }
-
-  const blocks = [];
-  let open = null;
-  for (const line of [...commentText.keys()].sort((a, b) => a - b)) {
-    if (open === null || line !== open.lines.at(-1) + 1) {
-      open = { lines: [], text: "", spans: [] };
-      blocks.push(open);
-    }
-    const stripped = commentText.get(line);
-    if (open.text.length > 0) open.text += " ";
-    open.spans.push({
-      end: open.text.length + stripped.length,
-      line: line + 1,
-    });
-    open.text += stripped;
-    open.lines.push(line);
+    open.ranges.push({ start, end: open.text.length, line: first + 1 });
   }
   return blocks;
 }
@@ -258,28 +279,36 @@ const OVERRIDE_PATTERN = new RegExp(
 );
 
 /**
- * Every history-narration tell in one source, as `{ line, tell, excerpt }`. A
- * block carrying OVERRIDE_MARKER reports nothing; a block carrying it with no
+ * Every history-narration tell in one source, as `{ line, tell, excerpt }`, each
+ * occurrence its own entry. A comment carrying OVERRIDE_MARKER reports nothing
+ * for its own text -- the one `//` line or the one block comment it sits in,
+ * which is narrower than the block that comment joins; carrying it with no
  * reason after `--` reports that instead, so the override cannot be pasted in
  * empty.
  */
 export function narrationInSource(fileName, text) {
   const found = [];
   for (const block of commentBlocks(fileName, text)) {
-    const override = OVERRIDE_PATTERN.exec(block.text);
-    if (override) {
+    const exempt = [];
+    for (const range of block.ranges) {
+      const override = OVERRIDE_PATTERN.exec(
+        block.text.slice(range.start, range.end),
+      );
+      if (!override) continue;
+      exempt.push(range);
       if (override[2]) continue;
-      const marker = override.index + override[1].length;
+      const marker = range.start + override.index + override[1].length;
       found.push({
         line: lineOfOffset(block, marker),
         tell: `${OVERRIDE_MARKER} carries no reason after \`--\``,
         excerpt: excerptAt(block, marker),
       });
-      continue;
     }
+    const isExempt = (offset) =>
+      exempt.some((range) => offset >= range.start && offset < range.end);
     for (const { tell, pattern } of NARRATION_TELLS) {
-      const match = pattern.exec(block.text);
-      if (match) {
+      for (const match of block.text.matchAll(pattern)) {
+        if (isExempt(match.index)) continue;
         found.push({
           line: lineOfOffset(block, match.index),
           tell,
