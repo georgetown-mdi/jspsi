@@ -253,8 +253,16 @@ type WellFormednessRefusal = {
  * A walk over the parsed document rather than a per-field check: it reaches
  * every string-typed field the schema declares at once, the keys of a
  * `transform.params` record, and the arbitrary JSON a param VALUE may hold --
- * the last of which no per-field refine can be written for. Its width is
- * bounded by the schema's own count bounds.
+ * the last of which no per-field refine can be written for.
+ *
+ * The width bound is the camelize pre-pass's, not the walk's own:
+ * `parseLinkageTerms` and `safeParseLinkageTerms` run the pre-pass first,
+ * which caps total node count (`MAX_NODE_COUNT`) before the walk ever runs,
+ * while `LinkageTermsSchema` is also consumed bare (config/exchangeSpec.ts,
+ * the web app's job-intent schemas), where nothing runs ahead of the walk and
+ * its width over one `params` value is unbounded and linear in that value's
+ * size -- on operator-local input only, since every partner-reachable path
+ * goes through the capped pre-pass.
  *
  * The depth bound is the walk's own, not the camelize pre-pass's: the camelize
  * bound covers `parseLinkageTerms` and `safeParseLinkageTerms`, while

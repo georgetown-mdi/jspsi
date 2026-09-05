@@ -209,10 +209,14 @@ string, which is what RFC 8785 requires:
   since both are serialized as JSON strings. The `lone-surrogate`,
   `lone-surrogate-low`, and `lone-surrogate-object-key` test vectors fix the
   refusal; a well-formed surrogate pair is unaffected and emits its raw UTF-8
-  bytes, as the `astral-emoji` vector fixes. A record or receipt an earlier
-  build produced over such a value does not verify: the recomputation refuses
-  where that build emitted escaped bytes, which `psilink verify-receipt`
-  reports as a terms-hash mismatch.
+  bytes, as the `astral-emoji` vector fixes. A linkage terms document an
+  earlier build accepted over such a value is refused before
+  `psilink verify-receipt` reaches a verdict: its `--config-file` and
+  `--partner-terms` inputs both load their document through the linkage terms
+  parse, which refuses it and reports the CLI's own invalid-linkage-terms
+  usage error (`config file <path> has invalid linkage_terms: a linkage
+  terms text value must not contain an unpaired UTF-16 surrogate`) rather
+  than a terms-hash mismatch.
 
 A linkage terms document MUST be well-formed UTF-16 throughout -- every string
 value, every array element, and every object key, the partner-named
