@@ -7,13 +7,11 @@ import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 import { loadNativeAddonOrSkip } from "./utils/nativeAddon";
 
 // Native-addon counterpart to psiEngineWireVectors.test.ts: the native N-API
-// backend must reproduce the exact serialized bytes committed in
-// psi-engine-wire-vectors.json for the four operations, byte-for-byte
-// with the WASM build (same private-join-and-compute P-256 curve and wire
-// format). The addon is a prebuilt binary shipped only for some platforms, so
-// this suite SKIPS when no prebuild exists for the running platform (e.g. a dev
-// laptop whose arch has no prebuild in the vendored package) -- there the WASM
-// test covers the contract, and CI runs this on the platforms it builds.
+// backend must reproduce the bytes in psi-engine-wire-vectors.json for the four
+// operations, byte-for-byte with the WASM build (same private-join-and-compute
+// P-256 curve and wire format). The addon ships as a prebuilt binary for only
+// some platforms, so this suite skips where none exists; CI runs it on the
+// platforms it builds.
 
 interface WireVectors {
   revealIntersection: boolean;

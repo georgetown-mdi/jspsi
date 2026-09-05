@@ -5,32 +5,27 @@ import { UsageError } from "../errors.js";
 import { redactPrivateKeyMaterial } from "./sanitizeErrorForDisplay.js";
 
 // Canonical encoding for receipt and record artifacts (RFC 8785, JSON
-// Canonicalization Scheme). The same logical object must serialize to a
+// Canonicalization Scheme): the same logical object must serialize to a
 // byte-identical string on both parties and in any independent third-party
-// implementation, so that hashes and signatures over the bytes verify across
-// implementations. The full normative specification -- written so an auditor
-// can reproduce the bytes without reading this source -- lives in
+// implementation, so hashes and signatures over the bytes verify across
+// implementations. Normative spec, reproducible without reading this source:
 // docs/spec/CANONICAL_ENCODING.md. This module is the project's single
 // canonicalization primitive; nothing hashed, committed, or signed may use ad
 // hoc `JSON.stringify` or key-sorting instead.
 //
-// RFC 8785 is delegated to the `canonicalize` package (the scheme author's
-// reference implementation): it sorts object keys by UTF-16 code unit, formats
-// numbers and strings via ECMAScript `JSON.stringify` (which is exactly the
-// RFC's number- and string-serialization rule), and emits non-ASCII characters
-// as raw UTF-8 rather than `\u` escapes. What this module adds is a strict
+// RFC 8785 itself is delegated to the `canonicalize` package (the scheme
+// author's reference implementation). What this module adds is a strict
 // pre-validation pass that REJECTS, rather than silently coerces, every value
 // outside the safe reproducible domain (see {@link assertCanonical}).
 
 /**
- * The value domain {@link canonicalString} accepts: JSON primitives plus arrays
- * and plain objects, recursively. `undefined`, `bigint`, symbols, functions,
- * and non-plain objects (Date, Map, TypedArray, class instances, ...) are
- * outside the domain and are rejected at runtime -- binary data must be
- * base64url-encoded to a string by the caller before it enters a canonical
- * object. Documented as a type for reference; the encode functions accept
- * `unknown` and enforce the domain at runtime, which is the actual contract a
- * third-party reimplementation must match.
+ * The value domain {@link canonicalString} accepts: JSON primitives plus
+ * arrays and plain objects, recursively. `undefined`, `bigint`, symbols,
+ * functions, and non-plain objects (Date, Map, TypedArray, class instances,
+ * ...) are rejected at runtime; binary data must be base64url-encoded to a
+ * string first. Documented as a type for reference only -- the encode
+ * functions accept `unknown` and enforce the domain at runtime, which is the
+ * actual contract a reimplementation must match.
  */
 export type CanonicalValue =
   | string
@@ -42,19 +37,18 @@ export type CanonicalValue =
 
 /**
  * Thrown when a value cannot be canonically encoded because it falls outside
- * the reproducible domain (see {@link assertCanonical}). The message names the
- * offending value's JSON path (e.g. `$.linkageKeys[0].elements[1]`) so the
- * caller can locate it. One exception: an error the boundary guard in
- * {@link canonicalString} converts -- a property getter that throws, or a
- * circular reference that overflows the traversal -- is pathed at the root `$`,
- * because the precise location is not recoverable there; the original error is
- * preserved on `.cause`, whose stack still locates it.
+ * the reproducible domain (see {@link assertCanonical}). The message names
+ * the offending value's JSON path (e.g. `$.linkageKeys[0].elements[1]`), or
+ * the root `$` for an error the boundary guard in {@link canonicalString}
+ * converts (a throwing getter, or a circular reference overflowing the
+ * traversal) -- the precise location is not recoverable there, but the
+ * original error is preserved on `.cause`.
  *
- * It extends {@link UsageError}: a value outside the canonical domain is a
+ * Extends {@link UsageError}: a value outside the canonical domain is a
  * configuration/data problem, so any call site that lets it propagate to the
- * CLI is classified as exit 64 (EX_USAGE), not 69 (EX_UNAVAILABLE). This holds
- * even for future callers that, unlike `validateCompatibility`, do not wrap
- * `canonicalString` in their own try/catch.
+ * CLI exits 64 (EX_USAGE), not 69 (EX_UNAVAILABLE) -- even for a future
+ * caller that, unlike `validateCompatibility`, does not wrap
+ * `canonicalString` in its own try/catch.
  */
 export class CanonicalEncodingError extends UsageError {
   constructor(message: string, options?: { cause?: unknown }) {
@@ -68,8 +62,8 @@ export class CanonicalEncodingError extends UsageError {
 
 function fail(reason: string, path: string, cause?: unknown): never {
   throw new CanonicalEncodingError(
-    // The pointer is built from the encoded object's own keys, partner-chosen on
-    // a partner-supplied document, and it stands ahead of the reason (see
+    // The pointer is built from the encoded object's own keys, partner-chosen
+    // on a partner-supplied document, and it stands ahead of the reason (see
     // redactPrivateKeyMaterial).
     `canonical encoding failed at ${redactPrivateKeyMaterial(path)}: ${reason}`,
     // Only pass options when there is a cause, so the common origin rejections
@@ -88,14 +82,12 @@ function isPlainObject(value: object): boolean {
 }
 
 /**
- * Reject a value that carries a callable `toJSON`. `canonicalize` tests
- * `typeof object.toJSON === "function"` before it ever inspects `Array.isArray`
- * or enumerates keys (see canonicalize.js), so it would serialize the return of
- * `toJSON()` instead of the array or object actually passed -- a silent
- * coercion, and undetectable by an element/property walk (the method may be
- * non-enumerable, and on an array is never an indexed element). The
- * pre-validator must mirror that precedence and reject it. `typeof value.toJSON`
- * matches canonicalize's check, covering own and inherited, enumerable or not.
+ * Reject a value that has a callable `toJSON`. `canonicalize` checks
+ * `typeof object.toJSON === "function"` before it inspects `Array.isArray` or
+ * enumerates keys, so it would serialize `toJSON()`'s return instead of the
+ * array or object actually passed -- a silent coercion, undetectable by an
+ * element/property walk (the method may be non-enumerable, and on an array is
+ * never an indexed element). The pre-validator mirrors that precedence.
  */
 function assertNoToJson(value: object, path: string): void {
   if (typeof (value as { toJSON?: unknown }).toJSON === "function")
@@ -108,23 +100,19 @@ function assertNoToJson(value: object, path: string): void {
 
 /**
  * Recursively assert that `value` is within the canonical domain, throwing a
- * {@link CanonicalEncodingError} otherwise. This runs before delegating to
- * `canonicalize` so that the cases `JSON.stringify`/`canonicalize` would
- * silently coerce -- `undefined` and symbol-valued properties dropped,
- * `undefined`/symbol array elements turned into `null`, `Date` rendered via
- * `toJSON` -- are rejected instead, and so that numbers that are not
- * portable across implementations are caught.
+ * {@link CanonicalEncodingError} otherwise. Runs before delegating to
+ * `canonicalize` so the cases `JSON.stringify`/`canonicalize` would silently
+ * coerce -- dropped `undefined`/symbol properties, `undefined`/symbol array
+ * elements turned to `null`, `Date` rendered via `toJSON` -- are rejected
+ * instead, and so an implementation-unportable number is caught.
  *
- * Number rule: a number must be finite, and an integer-valued number must be a
- * safe integer (|n| <= 2^53 - 1). Integers beyond the safe range may not
- * round-trip identically from their source JSON across implementations, so they
- * must be string-encoded by the caller; finite non-integers are permitted and
- * formatted by the RFC 8785 (ECMAScript) number rule. Receipt/record numeric
- * fields that are hashed or signed are additionally constrained to safe
- * integers at the schema level via {@link safeIntegerSchema}.
+ * Number rule: must be finite, and an integer must be a safe integer (|n| <=
+ * 2^53 - 1) -- string-encode a wider one, since it may not round-trip
+ * identically across implementations. A hashed or signed receipt/record
+ * numeric field is additionally held to {@link safeIntegerSchema}.
  *
- * Absent vs null: an absent field is simply a key that is not present; `null`
- * is a distinct, permitted value. A property explicitly set to `undefined` is
+ * Absent vs null: an absent field is a key that is not present; `null` is a
+ * distinct, permitted value. A property explicitly set to `undefined` is
  * rejected -- callers omit the key instead.
  */
 function assertCanonical(value: unknown, path: string): void {
@@ -200,15 +188,12 @@ function assertCanonical(value: unknown, path: string): void {
         );
       // Object.entries includes a key explicitly set to `undefined`, so the
       // recursive call rejects it rather than letting canonicalize drop it.
-      // Hazard: Object.entries reads each enumerable property value, which
-      // invokes any getter -- a getter that throws escapes here as its own raw
-      // error, not a CanonicalEncodingError. That is tolerated rather than
-      // guarded per-property: the boundary try/catch in canonicalString converts
-      // any such error so the module's single-error-type contract holds even for
-      // non-schema-parsed input (the only kind that can carry a throwing getter).
-      // Identifier-like keys extend the path with dot notation; any other key
-      // (containing a dot, a digit-leading name, etc.) uses bracket notation so
-      // the path stays unambiguous, e.g. `$["a.b"]` rather than `$.a.b`.
+      // A getter that throws escapes here as its own raw error, not a
+      // CanonicalEncodingError; the boundary try/catch in canonicalString
+      // converts it, holding the module's single-error-type contract even for
+      // non-schema-parsed input. Identifier-like keys extend the path with dot
+      // notation; any other key uses bracket notation, e.g. `$["a.b"]` rather
+      // than `$.a.b`.
       for (const [key, child] of Object.entries(value)) {
         const childPath = /^[A-Za-z_$][\w$]*$/.test(key)
           ? `${path}.${key}`
@@ -234,24 +219,27 @@ function assertCanonical(value: unknown, path: string): void {
  */
 export function canonicalString(value: unknown): string {
   try {
-    // assertCanonical MUST run first: the safety of the output rests entirely on
-    // it catching every value canonicalize would coerce. canonicalize does
-    // not uniformly skip out-of-domain values -- e.g. a function-valued property
-    // is stringified to the literal `undefined`, producing invalid JSON -- so the
-    // pre-validator, not canonicalize, is what guarantees well-formed output.
+    // assertCanonical MUST run first: the safety of the output rests entirely
+    // on it catching every value canonicalize would coerce. canonicalize does
+    // not uniformly skip out-of-domain values -- e.g. a function-valued
+    // property is stringified to the literal `undefined`, producing invalid
+    // JSON -- so the pre-validator, not canonicalize, guarantees well-formed
+    // output.
     assertCanonical(value, "$");
     const encoded = canonicalize(value);
-    // canonicalize returns undefined for any top-level value that JSON.stringify
-    // drops entirely -- undefined, a function, or a symbol. assertCanonical has
-    // already rejected all of those, so this only guards the declared return type.
+    // canonicalize returns undefined for any top-level value that
+    // JSON.stringify drops entirely -- undefined, a function, or a symbol.
+    // assertCanonical already rejected all of those, so this only guards the
+    // declared return type.
     if (encoded === undefined) fail("value is not canonicalizable", "$");
     return encoded;
   } catch (err) {
-    // Boundary guard upholding the module's contract that every rejection is a
-    // CanonicalEncodingError. Domain rejections carry their precise JSON path, so
-    // re-throw them unchanged. Anything else (a throwing getter, a circular
-    // reference that overflows the recursion) is converted to a root-pathed
-    // CanonicalEncodingError with the original preserved on `.cause`.
+    // Boundary guard upholding the module's contract that every rejection is
+    // a CanonicalEncodingError. Domain rejections hold their precise JSON
+    // path, so re-throw them unchanged. Anything else (a throwing getter, a
+    // circular reference that overflows the recursion) is converted to a
+    // root-pathed CanonicalEncodingError with the original preserved on
+    // `.cause`.
     if (err instanceof CanonicalEncodingError) throw err;
     fail(
       `unexpected error during traversal (${
@@ -263,8 +251,9 @@ export function canonicalString(value: unknown): string {
   }
 }
 
-// Local TextEncoder so this module depends only on a platform API rather than
-// on crypto.ts. UTF-8 with no BOM is the canonical byte encoding (see the spec).
+// Local TextEncoder so this module depends only on a platform API rather
+// than on crypto.ts. UTF-8 with no BOM is the canonical byte encoding (see
+// the spec).
 const enc = new TextEncoder();
 
 /**
@@ -279,14 +268,14 @@ export function canonicalBytes(value: unknown): Uint8Array<ArrayBuffer> {
 }
 
 /**
- * Zod schema for a numeric field that is hashed, committed, or signed: a finite
- * safe integer (|n| <= 2^53 - 1). Receipt and record fields that carry counts
- * or sizes MUST validate with this (or be string-encoded) so the canonical
- * number format is unambiguous across implementations.
+ * Zod schema for a numeric field that is hashed, committed, or signed: a
+ * finite safe integer (|n| <= 2^53 - 1). Receipt and record fields that hold
+ * counts or sizes MUST validate with this (or be string-encoded) so the
+ * canonical number format is unambiguous across implementations.
  *
- * `-0` is accepted (it is a safe integer) but canonical-encodes to `0` (see the
- * worked examples in docs/spec/CANONICAL_ENCODING.md); do not rely on a sign on zero
- * surviving encoding. See also {@link canonicalString}.
+ * `-0` is accepted (it is a safe integer) but canonical-encodes to `0` (see
+ * the worked examples in docs/spec/CANONICAL_ENCODING.md); do not rely on a
+ * sign on zero surviving encoding. See also {@link canonicalString}.
  */
 export const safeIntegerSchema: z.ZodType<number> = z
   .number()

@@ -1,10 +1,11 @@
 import { expect, test, describe, vi } from "vitest";
 
-// The width a fuzzy element declares is gated on APPLIED_SETTINGS.fuzzyComparisons,
-// false in the shipped build because the expansion it sizes builds nothing there
-// (fuzzyComparisons.test.ts pins that inert case). This file drives the flag on,
-// so the derivation, its ceiling, and the seam that enforces it are verified
-// rather than only reachable in review.
+// The width a fuzzy element declares is gated on
+// APPLIED_SETTINGS.fuzzyComparisons, false in the shipped build because the
+// expansion it sizes builds nothing there (fuzzyComparisons.test.ts pins that
+// inert case). This file drives the flag on, so the derivation, its ceiling,
+// and the boundary that enforces it are verified rather than only reachable in
+// review.
 vi.mock("../src/appliedSettings", () => ({
   APPLIED_SETTINGS: { deduplicate: true, fuzzyComparisons: true },
 }));
@@ -135,9 +136,9 @@ describe("the ceiling each fuzzy kind declares", () => {
     "%s never realizes more candidates than its ceiling",
     (kind) => {
       // The ceiling is the factor the key's declared width multiplies in, so an
-      // expansion realizing more than it would have an honest row refused at the
-      // width seam. Measured against the real expansion at the longest value it
-      // accepts rather than restated as a number.
+      // expansion realizing more than it would have an honest row refused at
+      // the width bound. Measured against the real expansion at the longest
+      // value it accepts rather than restated as a number.
       const realized = expandFuzzyComparisons(
         longestExpandableValue(kind),
         kind,
@@ -159,8 +160,8 @@ describe("the ceiling each fuzzy kind declares", () => {
   });
 });
 
-// The one-step chains whose declared params settle an output width, with the
-// width each settles. Every other function core knows derives none, which the
+// The one-step chains whose declared params fix an output width, with the
+// width each fixes. Every other function core knows derives none, which the
 // enumeration below holds to the registry rather than to this list.
 const WIDTH_SHAPING_STEPS: ReadonlyArray<[string, TransformStep, number]> = [
   [
@@ -202,7 +203,7 @@ describe("the width an element's transforms bound its value to", () => {
     expect(
       elementValueWidthBound([{ function: "pad_left", params: { length: 9 } }]),
     ).toBeUndefined();
-    // It raises one the chain already carries, since a value shorter than the
+    // It raises one the chain already holds, since a value shorter than the
     // pad leaves it at the pad's own length.
     expect(
       elementValueWidthBound([
@@ -210,7 +211,7 @@ describe("the width an element's transforms bound its value to", () => {
         { function: "pad_left", params: { length: 9 } },
       ]),
     ).toBe(9);
-    // A pad below the width carried into it moves nothing.
+    // A pad below the width already flowing into it moves nothing.
     expect(
       elementValueWidthBound([
         { function: "substring", params: { start: 1, length: 9 } },
@@ -232,16 +233,16 @@ describe("the width an element's transforms bound its value to", () => {
         { function: "phonetic" },
       ]),
     ).toBe(4);
-    // A step whose output width its params do not settle clears the width: an
-    // upper-casing can emit more characters than it was handed.
+    // A step whose output width its params do not determine clears the width:
+    // an upper-casing can emit more characters than it was handed.
     expect(
       elementValueWidthBound([
         { function: "substring", params: { start: 1, length: 10 } },
         { function: "to_upper_case" },
       ]),
     ).toBeUndefined();
-    // A step that returns the value it was handed, or drops it, carries the
-    // width through.
+    // A step that returns the value it was handed, or drops it, leaves the
+    // width unchanged.
     expect(
       elementValueWidthBound([
         { function: "substring", params: { start: 1, length: 10 } },
@@ -252,18 +253,19 @@ describe("the width an element's transforms bound its value to", () => {
   });
 
   test("a width that settles at zero is floored at one", () => {
-    // A value always yields at least itself, so the narrowest honest bound is one
-    // character. `parse_date` with an empty output layout is the one shape whose
-    // params settle zero -- the rendered date is as wide as the format -- and a
-    // zero would declare a key narrower than the single candidate the row builder
-    // emits for it. The terms schema refuses the shape (linkageTerms.test.ts), so
-    // this floor is what holds for a chain reaching the derivation another way.
+    // A value always yields at least itself, so the narrowest honest bound is
+    // one character. `parse_date` with an empty output layout is the one shape
+    // whose params fix the width at zero -- the rendered date is as wide as the
+    // format -- and a zero would declare a key narrower than the single
+    // candidate the row builder emits for it. The terms schema refuses the
+    // shape (linkageTerms.test.ts), so this floor is what holds for a chain
+    // reaching the derivation another way.
     expect(
       elementValueWidthBound([
         { function: "parse_date", params: { outputFormat: "" } },
       ]),
     ).toBe(1);
-    // And through a chain that carries it: a pad reads the floored width, not a
+    // And through a chain that holds it: a pad reads the floored width, not a
     // zero.
     expect(
       elementValueWidthBound([
@@ -377,8 +379,8 @@ describe("the width a key declares", () => {
 
   test("a key declaring swap doubles the product of its elements' factors", () => {
     // The receiver assembles the key in both orders, so a record contributes
-    // twice what its elements' factors alone would carry, and the sender declares
-    // the same number for the role it may not hold.
+    // twice what its elements' factors alone would total, and the sender
+    // declares the same number for the role it may not hold.
     const key: LinkageKey = {
       name: "FN+LN",
       elements: [{ field: "last_name" }, { field: "ssn" }],
@@ -428,10 +430,10 @@ describe("the width a key declares", () => {
   });
 
   test("two all-pairs elements in one key compound past the ceiling at nine characters each", () => {
-    // The stacked case the reference states: each element alone is admissible at
-    // a nine-character bound, and the two together are not. It is settled from
-    // the terms, so no row is read and no machinery beyond the width derivation
-    // is involved.
+    // The stacked case the reference states: each element alone is admissible
+    // at a nine-character bound, and the two together are not. It is determined
+    // from the terms, so no row is read and no machinery beyond the width
+    // derivation is involved.
     const boundTo = (length: number): TransformStep[] => [
       { function: "substring", params: { start: 1, length } },
     ];
@@ -517,7 +519,7 @@ describe("the width a key declares", () => {
   });
 
   test("an element only a pad shapes takes the global cap", () => {
-    // A pad settles no maximum on its own, so the element declares what a value
+    // A pad fixes no maximum on its own, so the element declares what a value
     // of any admissible width can realize.
     const terms = termsWithFuzzyKey("edit_distances");
     terms.linkageKeys[0].elements[0].transform = [
@@ -565,7 +567,7 @@ describe("the width a key declares", () => {
   });
 
   test("the same ceiling refuses the row build at the width seam", () => {
-    // The seam that refuses a fuzzy-widened row is the one that refuses an
+    // The check that refuses a fuzzy-widened row is the one that refuses an
     // over-ceiling key: both read the width the terms declare, so an operator
     // meets one message rather than a drop at one bound and a refusal at another.
     const key: LinkageKey = {
@@ -608,7 +610,7 @@ describe("both parties derive the same width with no round-trip", () => {
       ),
     ]);
 
-    // Nothing on the wire carries a width, in either direction.
+    // Nothing on the wire holds a width, in either direction.
     for (const frame of [...initiatorSent, ...responderSent])
       expect(frame).not.toHaveProperty("effectiveKeyCount");
 

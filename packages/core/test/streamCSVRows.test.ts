@@ -105,7 +105,8 @@ const PAPA_LOCAL_CHUNK_BYTES = 10 * 1024 * 1024;
 
 // Generating and parsing the >10MB fixture runs right at vitest's 5s default
 // timeout on a fast machine and past it on a slower CI runner; the generous
-// explicit timeout keeps the bound a hang backstop, not a speed assertion.
+// explicit timeout keeps the bound a safety check against hangs, not a speed
+// assertion.
 test(
   "streamCSVRows reassembles rows split across chunk boundaries in a >10MB file",
   { timeout: 60_000 },
@@ -124,7 +125,7 @@ test(
       for (const row of rows) collected.push(row);
     });
 
-    // The >10MB input genuinely crossed a chunk boundary.
+    // The >10MB input crossed a chunk boundary.
     expect(chunkCalls).toBeGreaterThan(1);
     // Every row survived, in order, with its value intact: a mis-joined boundary row
     // would break the sequential id run.

@@ -16,8 +16,9 @@ import {
 // STANDARDIZATION_FUNCTION_NAMES is derived from the STANDARDIZING_FUNCTIONS
 // registry (its keys, plus `coalesce`), so asserting descriptor/name parity is
 // equivalent to asserting descriptor/registry parity: a registry function added
-// without a descriptor surfaces as a name with no descriptor, and a descriptor
-// for a dropped function surfaces as a descriptor with no name. Either fails CI.
+// without a descriptor shows up as a name with no descriptor, and a
+// descriptor for a dropped function shows up as a descriptor with no name.
+// Either fails CI.
 describe("descriptor / registry parity", () => {
   test("the descriptor key set equals the recognized-name set exactly", () => {
     expect(Object.keys(STANDARDIZATION_FUNCTION_DESCRIPTORS).sort()).toEqual(

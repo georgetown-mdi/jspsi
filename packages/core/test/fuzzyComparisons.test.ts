@@ -336,10 +336,10 @@ describe("buildKeyStrings while fuzzy expansion is not applied", () => {
     );
   }
 
-  // Guards the premise the rest of this file's expectations rest on. If the flag
-  // is flipped without the PSI round that consumes a candidate set, this fails
-  // rather than letting the gated-off expectations below silently describe a
-  // behavior the build no longer has.
+  // Guards the assumption the rest of this file's expectations rest on. If
+  // the flag is flipped without the PSI round that consumes a candidate set,
+  // this fails rather than letting the gated-off expectations below silently
+  // describe a behavior the build no longer has.
   test("the applied-settings flag is still off", () => {
     expect(APPLIED_SETTINGS.fuzzyComparisons).toBe(false);
   });

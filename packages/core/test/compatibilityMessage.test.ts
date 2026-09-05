@@ -49,7 +49,7 @@ test("the reader recovers exactly what the seam delimited", () => {
   }
 });
 
-// --- The seam's constructors -------------------------------------------------
+// --- The delimiting constructors ---------------------------------------------
 
 describe("quoteTermsValue", () => {
   test("wraps the value and doubles every delimiter inside it", () => {
@@ -85,9 +85,10 @@ describe("quoteTermsValue", () => {
     // is the same bound one level up, where a composition's own structure is a
     // control character -- a block that separates its lines with `\n` and is
     // escaped whole where it is shown. The escape renders that line break and a
-    // value's own alike, so the seam replaces the value's; every control
-    // character is covered rather than the line break alone, since which ones a
-    // composition builds structure from is not this module's to know.
+    // value's own alike, so the delimiting boundary replaces the value's;
+    // every control character is covered rather than the line break alone,
+    // since which ones a composition builds structure from is not this
+    // module's to know.
     for (let codePoint = 0; codePoint <= 0x9f; codePoint += 1) {
       const character = String.fromCodePoint(codePoint);
       if (!/\p{Cc}/u.test(character)) continue;
@@ -106,9 +107,9 @@ describe("quoteTermsValue", () => {
 
   test("the treatment is idempotent and adds no run boundary of its own", () => {
     // It runs at a composition site, and a value may pass more than one before
-    // it is shown (a fragment redacted and delimited by a producer, then carried
-    // into a wider clause), so a second pass must be a no-op rather than a
-    // second marker over the first.
+    // it is shown (a fragment redacted and delimited by a producer, then
+    // included in a wider clause), so a second pass must be a no-op rather
+    // than a second marker over the first.
     const value = "a\nb\tc\x7fd";
     const once = replaceControlCharactersForDisplay(value);
     expect(replaceControlCharactersForDisplay(once)).toBe(once);
@@ -125,9 +126,10 @@ describe("bareTermsValue", () => {
   });
 
   test("falls back to the delimited form for anything else", () => {
-    // The premise "the schema constrains this field" is CHECKED on the value in
-    // hand rather than assumed of the caller: validateCompatibility's signature
-    // takes two LinkageTerms objects and nothing in it makes them schema-parsed.
+    // The assumption "the schema constrains this field" is CHECKED on the value
+    // in hand rather than assumed of the caller: validateCompatibility's
+    // signature takes two LinkageTerms objects and nothing in it makes them
+    // schema-parsed.
     for (const value of [
       "",
       "psi",
@@ -140,10 +142,11 @@ describe("bareTermsValue", () => {
       "0".repeat(MAX_BARE_TERMS_VALUE_LENGTH + 1),
     ]) {
       expect(bareTermsValue(value)).toBe(quoteTermsValue(value));
-      // Recovered as the seam renders it, which is the raw value but for the
-      // control characters the quoted branch treats: the bare branch is where a
-      // value would otherwise reach a clause both undelimited and untreated, so
-      // the ANSI case above is what pins that it cannot.
+      // Recovered as the delimiting boundary renders it, which is the raw
+      // value but for the control characters the quoted branch treats:
+      // the bare branch is where a value would otherwise reach a clause
+      // both undelimited and untreated, so the ANSI case above is what
+      // pins that it cannot.
       expect(readMessage(bareTermsValue(value)).values).toEqual([
         replaceControlCharactersForDisplay(value),
       ]);
@@ -154,18 +157,19 @@ describe("bareTermsValue", () => {
     // Half of what licenses rendering a value bare at all: the payload list is
     // built from `,`, `[`, and `]`, and a run is closed by the delimiter, so a
     // shape admitting none of those cannot reach for the structure around it.
-    // Each case carries a digit so it is the character under test that fails it
+    // Each case has a digit so it is the character under test that fails it
     // rather than the digit requirement below.
     //
-    // The last three are the non-ASCII characters a charset relaxation would
-    // most plausibly admit: a class widened for a non-ASCII set name -- anything
-    // but the clause characters and ASCII whitespace -- takes all three, and one
-    // widened only to exclude JavaScript's `\s` still takes the zero-width
-    // space, which that class does not count as whitespace. Each breaks the
-    // premise the bare form rests on, that a value the shape admits is exactly
-    // one token, in a way none of the ASCII cases above does: the first two
-    // separate a token or break a line while the ASCII whitespace class names
-    // neither, and the third is invisible, so the token a reader sees is not the
+    // The last three are the non-ASCII characters a charset relaxation
+    // would most plausibly admit: a class widened for a non-ASCII set
+    // name -- anything but the clause characters and ASCII whitespace --
+    // takes all three, and one widened only to exclude JavaScript's `\s`
+    // still takes the zero-width space, which that class does not count
+    // as whitespace. Each breaks the assumption the bare form rests on,
+    // that a value the shape admits is exactly one token, in a way none of
+    // the ASCII cases above does: the first two separate a token or break
+    // a line while the ASCII whitespace class names neither, and the third
+    // is invisible, so the token a reader sees is not the
     // one the vocabulary check measured. Named rather than listed bare so a
     // failure says which character got through.
     for (const [name, forbidden] of [
@@ -190,7 +194,7 @@ describe("bareTermsValue", () => {
     // connective position: the TEMPLATE supplies the spaces around a bare slot,
     // so a letters-only value would stand in the clause as undelimited as the
     // connective beside it. The digit is what separates the two vocabularies --
-    // every value these diagnostics render bare carries one, and no token of
+    // every value these diagnostics render bare has one, and no token of
     // first-party copy does, which the templates themselves are held to below.
     for (const value of [
       "over",
@@ -230,9 +234,9 @@ describe("ruleSetCitation", () => {
   });
 
   test("a name cannot spell the pair beside it", () => {
-    // What the delimiting is for: a name reading as a name plus a version, or
-    // carrying a delimiter of its own, stays one run rather than standing in the
-    // citation as a set at a version the invitation does not name.
+    // What the delimiting is for: a name displaying as a name plus a version,
+    // or holding a delimiter of its own, stays one run rather than standing
+    // in the citation as a set at a version the invitation does not name.
     const citation = ruleSetCitation('hmis-keys 9.9.9" over "other', "1.2.0");
     expect(citation).toBe('"hmis-keys 9.9.9"" over ""other" 1.2.0');
     const read = readMessage(citation);
@@ -255,10 +259,11 @@ describe("ruleSetCitation", () => {
 });
 
 test("a raw terms value cannot be composed into a diagnostic", () => {
-  // The compile-time half of the sweep: the tagged template takes only fragments
-  // the seam produced, so dropping a delimiter is a build failure rather than a
-  // review catch. Both accumulators in validateCompatibility hold the same brand,
-  // which is what extends this from one call to every message in the function.
+  // The compile-time half of the sweep: the tagged template takes only
+  // fragments the delimiting boundary produced, so dropping a delimiter
+  // is a build failure rather than a review catch. Both accumulators in
+  // validateCompatibility hold the same brand, which is what extends this
+  // from one call to every message in the function.
   const partnerChosen: string = 'MOU-001", partner is "MOU-666';
   // @ts-expect-error a plain string is not a CompatibilityMessageFragment
   const composed = compatibilityMessage`local is ${partnerChosen}`;
@@ -324,7 +329,7 @@ const diagnosticTemplates = (): string[] => {
  * Every token of first-party copy the compatibility diagnostics are built from.
  *
  * Read out of the templates rather than restated here, so the vocabulary cannot
- * fall behind a template edit: a diagnostic reworded to carry a digit in its
+ * fall behind a template edit: a diagnostic reworded to include a digit in its
  * prose fails the assertion below instead of silently reopening the bare form's
  * connective position.
  */
@@ -337,12 +342,12 @@ const firstPartyTokens = (): string[] =>
 
 test("no connective or label the diagnostics are built from is bare-shaped", () => {
   // The argument the bare form rests on, as a check rather than as prose. A bare
-  // value carries no space, so it is exactly one token wherever the template
+  // value has no space, so it is exactly one token wherever the template
   // drops it; if no token the templates are built from can meet the bare shape,
   // then no bare value can be read as a connective or a label this function
   // wrote, whatever the partner chose. The digit requirement is what makes the
   // two vocabularies disjoint, so a pattern relaxed to admit a digit-free value
-  // -- or a connective reworded to carry a digit -- fails here.
+  // -- or a connective reworded to include a digit -- fails here.
   const tokens = firstPartyTokens();
   expect(tokens).toEqual(
     expect.arrayContaining([
@@ -420,7 +425,7 @@ const only = (
 
 /**
  * A diagnostic together with the accumulator it arrived on. The route travels
- * with the message because it decides the display pipeline that carries it to an
+ * with the message because it decides the display pipeline that sends it to an
  * operator, and the two differ in how many times the escape runs. It is produced
  * by the two helpers below rather than declared per entry, so a case is rendered
  * through the route `validateCompatibility` actually put it on.
@@ -478,10 +483,10 @@ const renderForRoute = ({ route, message }: RoutedDiagnostic): string =>
  * A code point outside printable ASCII that is NOT a control character, which is
  * what the escape-count assertions below count passes with.
  *
- * The escape rewrites it and the seam's control-character treatment does not, so
- * it is the one class of byte that still reaches the display boundary from
- * inside a value: a control character would be replaced at composition and count
- * no passes at all.
+ * The escape rewrites it and the delimiting boundary's control-character
+ * treatment does not, so it is the one class of byte that still reaches
+ * the display boundary from inside a value: a control character would be
+ * replaced at composition and count no passes at all.
  */
 const NON_ASCII_CODE_POINT = "é";
 
@@ -498,7 +503,7 @@ const TWICE_ESCAPED_NON_ASCII = "\\\\xe9";
 
 /**
  * How a COMPOSITION's own control character renders once a route has escaped it,
- * for the ESC the hostile values below carry -- the token a value must not be
+ * for the ESC the hostile values below hold -- the token a value must not be
  * able to produce, since a composition builds its structure (a block's line
  * breaks) out of exactly these.
  */
@@ -507,7 +512,8 @@ const ESCAPED_ESC = "\\x1b";
 /** What a SECOND escape pass writes over that, the first pass's backslash doubled. */
 const TWICE_ESCAPED_ESC = "\\\\x1b";
 
-/** The same ESC as the seam's treatment renders it, read off the constructor. */
+/** The same ESC as the delimiting boundary's treatment renders it, read off the
+ * constructor. */
 const TREATED_ESC = controlCharacterMarker(0x1b);
 
 /**
@@ -517,7 +523,7 @@ const TREATED_ESC = controlCharacterMarker(0x1b);
  * renders are driven rather than one standing in for the rest -- the two sides
  * of a slot pair are separate interpolations, and a delimiter dropped from
  * either is a separate defect. Each entry supplies a benign token the case would
- * carry anyway, and the adversarial shapes below are built AROUND that token, so
+ * have anyway, and the adversarial shapes below are built AROUND that token, so
  * a benign run and a hostile run of the same entry differ in nothing but the
  * value.
  *
@@ -528,7 +534,7 @@ const TREATED_ESC = controlCharacterMarker(0x1b);
  */
 interface SweptDiagnostic {
   readonly id: string;
-  /** A value of the shape this diagnostic legitimately carries. */
+  /** A value of the shape this diagnostic legitimately has. */
   readonly benign: string;
   /**
    * Produce the diagnostic with `value` in the partner-chosen position, on the
@@ -538,7 +544,8 @@ interface SweptDiagnostic {
   /**
    * Whether the value reaches the message byte-for-byte. False only where the
    * message names the value through another encoding of its own -- the canonical
-   * encoder's JSON-quoted path -- which re-escapes before the seam sees it.
+   * encoder's JSON-quoted path -- which re-escapes before the delimiting
+   * boundary sees it.
    */
   readonly verbatim?: false;
   /**
@@ -981,10 +988,11 @@ const SWEPT: readonly SweptDiagnostic[] = [
 
 /**
  * The adversarial value shapes, each built around the benign token the
- * diagnostic would carry anyway. The first three reach the seam's DELIMITED
- * branch, whose hostile case is a value carrying a delimiter or a space; the last
- * two reach its BARE branch, whose hostile case is a value the checked bare shape
- * admits and the template then surrounds with spaces of its own.
+ * diagnostic would have anyway. The first three reach the delimiting
+ * boundary's DELIMITED branch, whose hostile case is a value holding a
+ * delimiter or a space; the last two reach its BARE branch, whose hostile case
+ * is a value the checked bare shape admits and the template then surrounds
+ * with spaces of its own.
  */
 const ADVERSARIAL_SHAPES: ReadonlyArray<{
   readonly name: string;
@@ -993,14 +1001,14 @@ const ADVERSARIAL_SHAPES: ReadonlyArray<{
   readonly marker?: string;
 }> = [
   {
-    // A value carrying the delimiter itself: undelimited, it closes psilink's
+    // A value holding the delimiter itself: undelimited, it closes psilink's
     // own quoted token and opens a second clause.
     name: "a double quote",
     shape: (benign) => `${benign}", partner is "${benign}-forged`,
     marker: "forged",
   },
   {
-    // A value carrying the clause separators these diagnostics are built from --
+    // A value holding the clause separators these diagnostics are built from --
     // every connective at once, including the payload list's punctuation.
     name: "the clause separator",
     shape: (benign) =>
@@ -1008,28 +1016,30 @@ const ADVERSARIAL_SHAPES: ReadonlyArray<{
     marker: "forged",
   },
   {
-    // A value that reads as the "<name> <version>" pair the rule-set clause
+    // A value that displays as the "<name> <version>" pair the rule-set clause
     // renders, so an undelimited one passes off a version nobody cited.
     name: "a space-joined version",
     shape: (benign) => `${benign} 9.9.9 over forged-substrate`,
     marker: "forged",
   },
   {
-    // A bare connective, which the other three cannot be: each carries a space or
+    // A bare connective, which the other three cannot be: each has a space or
     // a comma, so each is delimited whatever the value slot does with it. This
-    // one is the seam's charset throughout and spells the rule-set clause's own
-    // " over " with none of the space -- the template supplies that -- so it is
-    // the shape the digit requirement exists for, and it takes the delimited
-    // branch only because it carries no digit. It plants no marker: it IS a token
-    // the templates are built from, which is the whole of the attack.
+    // one is the delimiting boundary's charset throughout and spells the
+    // rule-set clause's own " over " with none of the space -- the template
+    // supplies that -- so it is the shape the digit requirement exists for, and
+    // it takes the delimited branch only because it has no digit. It plants no
+    // marker: it IS a token the templates are built from, which is the whole of
+    // the attack.
     name: "a bare connective",
     shape: () => "over",
   },
   {
-    // The bare branch's own hostile case: still the seam's charset, and this one
-    // DOES carry a digit, so it renders undelimited into a slot the template
-    // spaces on both sides. What holds there is the vocabulary argument rather
-    // than a delimiter -- one token, and not one the templates are built from.
+    // The bare branch's own hostile case: still the delimiting boundary's
+    // charset, and this one DOES have a digit, so it renders undelimited into
+    // a slot the template spaces on both sides. What holds there is the
+    // vocabulary argument rather than a delimiter -- one token, and not one
+    // the templates are built from.
     name: "a bare digit-carrying connective",
     shape: (benign) => `${benign}9over-forged`,
     marker: "forged",
@@ -1038,24 +1048,25 @@ const ADVERSARIAL_SHAPES: ReadonlyArray<{
 
 /**
  * The clause skeleton `rendered` shows an operator, with the terms value `value`
- * collapsed to one placeholder whichever of the seam's two forms it took.
+ * collapsed to one placeholder whichever of the delimiting boundary's two
+ * forms it took.
  *
  * A delimited run is collapsed by {@link readMessage} itself. A value that meets
  * the checked bare shape leaves no run to collapse -- which is what that shape
  * licenses -- so its own text is collapsed here instead. Normalizing both forms
- * to the same placeholder keeps the comparison about STRUCTURE: which branch the
- * seam took for a given value is the control choosing a rendering, not a
- * difference to fail on. What makes collapsing the bare form sound is the
- * vocabulary check above -- a bare value is one token, and no token these
- * templates are built from can be bare-shaped -- so a bare value cannot be
- * standing where a connective would.
+ * to the same placeholder keeps the comparison about STRUCTURE: which branch
+ * the delimiting boundary took for a given value is the control choosing a
+ * rendering, not a difference to fail on. What makes collapsing the bare
+ * form sound is the vocabulary check above -- a bare value is one token,
+ * and no token these templates are built from can be bare-shaped -- so a
+ * bare value cannot be standing where a connective would.
  *
  * The bare form is collapsed ONCE, at the slot the template rendered it into,
  * rather than everywhere it occurs. A slot is driven by exactly one entry above,
  * so one occurrence is what a correct message holds; collapsing every copy would
  * erase a second one the composition wrote -- a value echoed into a slot beside
  * its own -- from both the skeleton comparison and the marker assertion, which is
- * the whole of what either has to say about a value carried bare.
+ * the whole of what either has to say about a value rendered bare.
  */
 const clauseSkeleton = (rendered: string, value: string): string => {
   const { skeleton } = readMessage(rendered);
@@ -1067,7 +1078,7 @@ const clauseSkeleton = (rendered: string, value: string): string => {
 /**
  * The value the display-route assertions use: the shape with an ANSI control
  * sequence and a non-ASCII code point appended, so the route they run through
- * carries one byte the seam treats and one the escape acts on.
+ * contains one byte the delimiting boundary treats and one the escape acts on.
  */
 const withControlSequence = (shaped: string): string =>
   `${shaped}\x1b[31m${NON_ASCII_CODE_POINT}`;
@@ -1099,7 +1110,7 @@ test("every adversarial shape is swept across all but one diagnostic", () => {
 test("a hostile value does reach the seam's bare branch", () => {
   // Otherwise the shapes above would say nothing about the branch the digit
   // requirement governs: every slot could quote every one of them and the sweep
-  // would still pass. A value is carried bare where the message holds it
+  // would still pass. A value is rendered bare where the message holds it
   // undelimited, which is exactly where readMessage recovers no run for it.
   const bareShapes = ADVERSARIAL_SHAPES.filter(
     ({ shape }) => bareTermsValue(shape("1.0.0")) === shape("1.0.0"),
@@ -1137,7 +1148,7 @@ describe.each(SWEPT)("$id", (diagnostic) => {
       expect(hostileSkeleton).toBe(
         clauseSkeleton(composed(diagnostic.benign), diagnostic.benign),
       );
-      // And the value is carried whole rather than mangled or split, so the
+      // And the value is rendered whole rather than mangled or split, so the
       // delimiting costs the operator no fidelity: inside one run, or -- where
       // the checked bare shape let it through -- verbatim in the clause.
       if (diagnostic.verbatim !== false)
@@ -1156,7 +1167,7 @@ describe.each(SWEPT)("$id", (diagnostic) => {
     "survives its own display route intact under $name",
     ({ shape, marker }) => {
       // The delimiting is composed in validateCompatibility and the escape runs
-      // on the route that carries the diagnostic away from it, so the structure
+      // on the route that sends the diagnostic away from it, so the structure
       // has to hold on what the operator actually sees -- with a control
       // sequence in the value for the escape to act on.
       const hostile = withControlSequence(shape(diagnostic.benign));
@@ -1176,28 +1187,28 @@ describe.each(SWEPT)("$id", (diagnostic) => {
         expect(rendered).not.toContain("\x1b");
         if (routed.route === "errors") {
           // Composed raw and escaped once at the renderer, so a composition's
-          // own control character IS the once-escaped token. The seam's
-          // treatment is what keeps a value from spelling it.
+          // own control character IS the once-escaped token. The delimiting
+          // boundary's treatment is what keeps a value from spelling it.
           expect(rendered).not.toContain(ESCAPED_ESC);
           expect(rendered).toContain(TREATED_ESC);
         } else {
-          // Escaped at composition, ahead of the seam, so nothing is left for
-          // the treatment to act on and the sink's second pass doubles the
-          // backslash the first wrote. The value's control character therefore
-          // arrives one backslash wider than a composition's own would -- the
-          // doubling CHANNEL_SECURITY.md records for this route, standing here
-          // as the same distinction.
+          // Escaped at composition, ahead of the delimiting boundary,
+          // so nothing is left for the treatment to act on and the sink's
+          // second pass doubles the backslash the first wrote. The value's
+          // control character therefore arrives one backslash wider than
+          // a composition's own would -- the doubling CHANNEL_SECURITY.md
+          // records for this route, standing here as the same distinction.
           expect(rendered).toContain(TWICE_ESCAPED_ESC);
         }
         // The escape acted inside the run and left the run's boundaries
         // untouched, and it ran as many times as this route escapes: once at
         // the error renderer, or -- on the warnings route -- once at composition
         // and once at the sink. Counted on a non-ASCII code point rather than a
-        // control character, which the seam replaces ahead of the escape on the
-        // errors route. That doubling is reachable here because
-        // validateCompatibility's signature admits terms no schema parsed; a
-        // date that came through the terms schema carries no byte the escape
-        // rewrites at all, which linkageTerms.test.ts pins.
+        // control character, which the delimiting boundary replaces ahead of
+        // the escape on the errors route. That doubling is reachable here
+        // because validateCompatibility's signature admits terms no schema
+        // parsed; a date that came through the terms schema has no byte the
+        // escape rewrites at all, which linkageTerms.test.ts pins.
         if (routed.route === "errors") {
           expect(rendered).toContain(ONCE_ESCAPED_NON_ASCII);
           expect(rendered).not.toContain(TWICE_ESCAPED_NON_ASCII);
@@ -1214,7 +1225,8 @@ describe.each(SWEPT)("$id", (diagnostic) => {
 test("the value-free diagnostics carry no delimiter at all", () => {
   // The rest of the class: fixed first-party copy, which the brand covers the
   // same way but which has no value to delimit. Pinned so a later edit that
-  // interpolates a terms value into one of them has to come through the seam --
+  // interpolates a terms value into one of them has to come through the
+  // delimiting boundary --
   // and shows up here as well as at the compiler.
   const valueFree = [
     validateCompatibility(base, {

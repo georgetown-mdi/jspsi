@@ -15,40 +15,42 @@ import type {
 import type { SemanticType } from "../types";
 
 /**
- * Neutral, stable identifier of the built-in linkage FIELD set: the PII
+ * Neutral, stable identifier of the built-in linkage field set: the PII
  * substrate ({@link DEFAULT_LINKAGE_FIELDS}) that
- * {@link getDefaultLinkageTerms} emits when a party does not author its own. It
- * names which PII elements the built-in rules work from and how each is cleaned
- * and bounded -- not which combinations of them constitute a match, which is
- * what the key set ({@link DEFAULT_LINKAGE_KEY_SET_NAME}) names. The two are
- * separate artifacts because the substrate is generic where the keys are
- * specific: every built-in key is built from these fields, but the same fields
- * support key sets settled for other uses.
+ * {@link getDefaultLinkageTerms} emits when a party does not author its
+ * own. It names which PII elements the built-in rules work from and how
+ * each is cleaned and bounded -- not which combinations constitute a
+ * match, which is what the key set ({@link DEFAULT_LINKAGE_KEY_SET_NAME})
+ * names. The two are separate artifacts because the substrate is generic
+ * where the keys are specific: every built-in key is built from these
+ * fields, but the same fields support key sets settled for other uses.
  *
- * Naming it is what lets "which rules did this linkage match on" be answered by
- * a name rather than by "the defaults", and lets the set be cited in a
- * data-sharing agreement or a governance review without quoting the field list.
+ * Naming it lets "which rules did this linkage match on" be answered by a
+ * name rather than by "the defaults", and lets the set be cited in a
+ * data-sharing agreement or a governance review without quoting the field
+ * list.
  *
- * Deliberately says nothing about who validated anything: these fields carry no
- * validation lineage of their own -- what was validated, against what, and the
- * criticisms on record all attach to the key set, and belong in
- * `docs/notes/default-linkage-rule-set.md` rather than in either identifier.
+ * By design, it says nothing about who validated anything: these fields
+ * hold no validation lineage of their own -- what was validated, against
+ * what, and the criticisms on record all attach to the key set, recorded
+ * in `docs/notes/default-linkage-rule-set.md` rather than in either
+ * identifier.
  */
 export const DEFAULT_LINKAGE_FIELD_SET_NAME = "baseline-pii";
 
 /**
  * Version of the field set named by {@link DEFAULT_LINKAGE_FIELD_SET_NAME}.
  *
- * Distinct from `LinkageTerms.version`, which versions the terms SCHEMA and is
- * cross-checked between the parties at exchange time. This one versions the
- * CONTENT of the built-in field set -- which fields it declares and which
- * constraints they carry -- and is not on the wire. Neither it nor
+ * Distinct from `LinkageTerms.version`, which versions the terms schema and
+ * is cross-checked between the parties at exchange time. This one versions
+ * the content of the built-in field set -- which fields it declares and
+ * which constraints they hold -- and is not on the wire. Neither it nor
  * {@link DEFAULT_LINKAGE_KEY_SET_VERSION} may ever be assigned to a terms
  * document's `version`.
  *
- * Bump it in the same change that edits {@link DEFAULT_LINKAGE_FIELDS}: a field
- * added or dropped, or a constraint loosened or tightened. The two sets version
- * independently, so an edit to the keys bumps
+ * Bump it in the same change that edits {@link DEFAULT_LINKAGE_FIELDS}: a
+ * field added or dropped, or a constraint loosened or tightened. The two
+ * sets version independently, so an edit to the keys bumps
  * {@link DEFAULT_LINKAGE_KEY_SET_VERSION} and leaves this one alone.
  */
 export const DEFAULT_LINKAGE_FIELD_SET_VERSION = "1.0.0";
@@ -105,45 +107,46 @@ export const DEFAULT_LINKAGE_KEY_SET_NAME = "hmis-keys";
 /**
  * Version of the key set named by {@link DEFAULT_LINKAGE_KEY_SET_NAME}.
  *
- * Distinct from `LinkageTerms.version`, which versions the terms SCHEMA and is
- * cross-checked between the parties at exchange time. This one versions the
- * CONTENT of the built-in key set -- which key combinations it declares and in
- * what order -- and is not on the wire. Neither it nor
+ * Distinct from `LinkageTerms.version`, which versions the terms schema and
+ * is cross-checked between the parties at exchange time. This one versions
+ * the content of the built-in key set -- which key combinations it
+ * declares and in what order -- and is not on the wire. Neither it nor
  * {@link DEFAULT_LINKAGE_FIELD_SET_VERSION} may ever be assigned to a terms
  * document's `version`.
  *
  * Bump it in the same change that edits {@link DEFAULT_LINKAGE_KEYS}: a key
- * added or removed, an element or transform changed, or the keys REORDERED --
- * order is cascade order, so a reorder changes which key claims a record that
- * more than one would match. The recorded validation attaches to the name and
- * version together, so an edited set carrying the old version makes that record
- * describe rules nobody ran.
+ * added or removed, an element or transform changed, or the keys
+ * reordered -- order is cascade order, so a reorder changes which key
+ * claims a record that more than one would match. The recorded validation
+ * attaches to the name and version together, so an edited set holding the
+ * old version makes that record describe rules nobody ran.
  */
 export const DEFAULT_LINKAGE_KEY_SET_VERSION = "1.0.0";
 
 /**
- * The linkage key combinations of the {@link DEFAULT_LINKAGE_KEY_SET_NAME} key
- * set, in the set's cascade order: an earlier key claims a record first, and a
- * record it claims is withheld from every later round.
+ * The linkage key combinations of the {@link DEFAULT_LINKAGE_KEY_SET_NAME}
+ * key set, in the set's cascade order: an earlier key claims a record
+ * first, and a record it claims is withheld from every later round.
  *
  * The order is not a ranking by precision or by strength of evidence, and
- * reading it as one misdescribes the set: keys carrying no SSN evidence sit
- * above SSN-bearing ones, and a key carrying an SSN but no last name sits above
- * both. What the published cascades order on instead, and what the per-key
- * measurements say about either arrangement, is set out in
+ * reading it as one misdescribes the set: keys holding no SSN evidence sit
+ * above SSN-bearing ones, and a key holding an SSN but no last name sits
+ * above both. What the published cascades order on instead, and what the
+ * per-key measurements say about either arrangement, is set out in
  * `docs/notes/linkage-rule-grounding.md`.
  *
- * The ordering the set does hold to is over the date of birth: coarsening it to
- * a year and month is a fallback for a key's own full-date form rather than a
- * competitor to it, so wherever the set declares both, the full-date key
- * precedes the coarsened key built from the same other elements.
+ * The ordering the set does hold to is over the date of birth: coarsening
+ * it to a year and month is a fallback for a key's own full-date form
+ * rather than a competitor to it, so wherever the set declares both, the
+ * full-date key precedes the coarsened key built from the same other
+ * elements.
  *
  * Both statements are asserted over this array in
- * `test/builtInLinkageKeyOrder.test.ts` -- an ordering claim made only in prose
- * has nothing to fail when an edit breaks it.
+ * `test/builtInLinkageKeyOrder.test.ts` -- an ordering claim made only in
+ * prose has nothing to fail when an edit breaks it.
  *
- * {@link linkageTermsFromRuleSet} emits a SUBSET of these: a key whose elements
- * the input's columns cannot satisfy is dropped.
+ * {@link linkageTermsFromRuleSet} emits a subset of these: a key whose
+ * elements the input's columns cannot satisfy is dropped.
  */
 const DEFAULT_LINKAGE_KEYS: ReadonlyArray<LinkageKey> = [
   {
@@ -332,28 +335,29 @@ function frozenThroughContents<T>(value: T): T {
 }
 
 /**
- * The one built-in rule set: the {@link DEFAULT_LINKAGE_KEY_SET_NAME} keys over
- * the {@link DEFAULT_LINKAGE_FIELD_SET_NAME} fields, at the version each
- * declares. It is the set every path that authors nothing selects, so a
- * zero-setup exchange, the `psilink init` template, and the web invite editors'
- * starting point all cite the same rules.
+ * The one built-in rule set: the {@link DEFAULT_LINKAGE_KEY_SET_NAME} keys
+ * over the {@link DEFAULT_LINKAGE_FIELD_SET_NAME} fields, at the version
+ * each declares. It is the set every path that authors nothing selects, so
+ * a zero-setup exchange, the `psilink init` template, and the web invite
+ * editors' starting point all cite the same rules.
  *
  * Composed from the six declarations above rather than replacing them: the
- * built-in sets' drift and zero-setup checks read those declarations out of this
- * file by name and require each to be a literal (`scripts/lib/builtInRuleSets.mjs`).
+ * built-in sets' drift and zero-setup checks read those declarations out
+ * of this file by name and require each to be a literal
+ * (`scripts/lib/builtInRuleSets.mjs`).
  *
- * Frozen through every level, and this object with it. The reference, the fields,
- * and the keys are all ALIASED into every terms document derived from the set
- * ({@link linkageTermsFromRuleSet}) and from there into each party's exchange
- * record, so a single in-place edit of a name, a version, a constraint, or a key
- * element would rewrite the built-in set in every document the process later
- * derives, and in every record written from one -- without touching the
- * declarations above that the drift checks pin. The rules carry the same weight
- * the citation does: they are what {@link checkLinkageRuleSetCitation} compares a
- * cited document against, so an edited set decides later verdicts too. Freezing
- * makes such an edit throw where it is attempted instead, and it happens at this
- * composition because those declarations must stay plain literals for the checks
- * named above to read them.
+ * Frozen through every level, and this object with it. The reference, the
+ * fields, and the keys are all aliased into every terms document derived
+ * from the set ({@link linkageTermsFromRuleSet}) and from there into each
+ * party's exchange record, so a single in-place edit of a name, a version,
+ * a constraint, or a key element would rewrite the built-in set in every
+ * document the process later derives, and in every record written from
+ * one -- without touching the declarations above that the drift checks
+ * pin. The rules hold the same weight the citation does: they are what
+ * {@link checkLinkageRuleSetCitation} compares a cited document against,
+ * so an edited set decides later verdicts too. Freezing makes such an
+ * edit throw instead, at this composition, because those declarations
+ * must stay plain literals for the checks named above to read them.
  */
 export const DEFAULT_LINKAGE_RULE_SET: BuiltInLinkageRuleSet = Object.freeze({
   reference: Object.freeze({
@@ -371,28 +375,31 @@ export const DEFAULT_LINKAGE_RULE_SET: BuiltInLinkageRuleSet = Object.freeze({
 });
 
 /**
- * Whether `rules` were drawn from `ruleSet`: every key byte-identical to a key
- * the set declares, in the set's own cascade order, and every field
- * byte-identical to a DISTINCT field it declares. A narrowed emission passes --
- * what an input file cannot supply is left out -- while an added, edited, or
- * repeated key or field, and a reordered cascade, do not.
+ * Whether `rules` were drawn from `ruleSet`: every key byte-identical to a
+ * key the set declares, in the set's own cascade order, and every field
+ * byte-identical to a distinct field it declares. A narrowed emission
+ * passes -- what an input file cannot supply is left out -- while an
+ * added, edited, or repeated key or field, and a reordered cascade, do
+ * not.
  *
- * Order is part of the answer for the keys and not for the fields, for the same
- * reason each set versions its own content: key order is cascade order, so
- * moving one changes which key claims a record more than one would match,
- * whereas the field array's order is not significant.
+ * Order is part of the answer for the keys and not for the fields, for
+ * the same reason each set versions its own content: key order is cascade
+ * order, so moving one changes which key claims a record more than one
+ * would match, whereas the field array's order is not significant.
  *
- * This is what keeps a citation honest where rules are EDITED after being seeded
- * from a set -- the web invite editors' path. A received document's citation is
- * judged by {@link checkLinkageRuleSetCitation} instead, which annotates it with
- * a verdict rather than rewriting or dropping it: the reference stays that
- * party's own statement about its own rules.
+ * This is what keeps a citation accurate where rules are edited after
+ * being seeded from a set -- the web invite editors' path. A received
+ * document's citation is judged by {@link checkLinkageRuleSetCitation}
+ * instead, which annotates it with a verdict rather than rewriting or
+ * dropping it: the reference stays that party's own statement about its
+ * own rules.
  *
- * Compared through the canonical encoding, the same equality the two parties'
- * terms are compared under, so property order does not enter it. A value outside
- * the canonical domain (a transform param beyond the safe integer range) cannot
- * be compared and answers `false` rather than throwing: such rules are not the
- * built-in set, which carries no such value.
+ * Compared through the canonical encoding, the same equality the two
+ * parties' terms are compared under, so property order does not enter
+ * it. A value outside the canonical domain (a transform param beyond the
+ * safe integer range) cannot be compared and answers `false` rather than
+ * throwing: such rules are not the built-in set, which holds no such
+ * value.
  */
 export function isDrawnFromLinkageRuleSet(
   ruleSet: BuiltInLinkageRuleSet,
@@ -405,16 +412,16 @@ export function isDrawnFromLinkageRuleSet(
 }
 
 /**
- * `value` in the canonical encoding, the equality the two parties' terms are
- * compared under, or `null` when it carries a value outside the canonical domain
- * (a transform param beyond the safe integer range) and so cannot be compared.
- * Every comparison here reads `null` as no match rather than throwing, the answer
- * {@link isDrawnFromLinkageRuleSet} and {@link isOptInLinkageKey} give such rules:
- * the built-in and offered sets carry no such value, so nothing incomparable is
- * one of them.
+ * `value` in the canonical encoding, the equality the two parties' terms
+ * are compared under, or `null` when it holds a value outside the
+ * canonical domain (a transform param beyond the safe integer range) and
+ * so cannot be compared. Every comparison here reads `null` as no match
+ * rather than throwing, the answer {@link isDrawnFromLinkageRuleSet} and
+ * {@link isOptInLinkageKey} give such rules: the built-in and offered sets
+ * hold no such value, so nothing incomparable is one of them.
  *
- * @internal exported for the web editor's key reconciliation, which matches a
- * draft key to an offer under this same equality.
+ * @internal exported for the web editor's key reconciliation, which
+ * matches a draft key to an offer under this same equality.
  */
 export function encodeForComparison(value: unknown): string | null {
   try {
@@ -425,7 +432,7 @@ export function encodeForComparison(value: unknown): string | null {
 }
 
 /** The field half of {@link isDrawnFromLinkageRuleSet}: every candidate field
- * byte-identical to a DISTINCT declared field, order not significant. */
+ * byte-identical to a distinct declared field, order not significant. */
 function fieldsDrawnFromSet(
   declaredFieldList: ReadonlyArray<LinkageField>,
   fields: ReadonlyArray<LinkageField>,
@@ -479,15 +486,15 @@ function keysDrawnFromSet(
  * - `consistent` -- the cited half names a set this build ships, and the rules
  *   the same document declares for that half are drawn from it.
  * - `contradicted` -- the cited half names a set this build ships, and the
- *   declared rules are NOT drawn from it: the citation states a provenance the
+ *   declared rules are not drawn from it: the citation states a provenance the
  *   rules beside it do not have.
  * - `unchecked` -- the cited half names a set this build does not ship, so
  *   nothing here resolves the name and no comparison was made.
  *
- * Three states rather than two because the absence of `contradicted` must never
- * read as verification: a build that cannot resolve a name has checked nothing,
- * which is a different statement from having checked and found the rules to
- * match.
+ * Three states rather than two because the absence of `contradicted` must
+ * never be treated as verification: a build that cannot resolve a name has
+ * checked nothing, which is a different statement from having checked and
+ * found the rules to match.
  */
 export type LinkageRuleSetCitationVerdict =
   "consistent" | "contradicted" | "unchecked";
@@ -514,29 +521,30 @@ function namesSameSet(
 }
 
 /**
- * This build's verdict on `citation`, the rule set `rules` are cited to, one half
- * at a time.
+ * This build's verdict on `citation`, the rule set `rules` are cited to,
+ * one half at a time.
  *
  * Total over a citation that exists: a caller renders or records a verdict
- * exactly where it has a citation to be about, so the absence of one is the
- * caller's own branch rather than a fourth state here.
+ * exactly where it has a citation to be about, so the absence of one is
+ * the caller's own branch rather than a fourth state here.
  *
- * The verdict is the checking build's OWN check, made at the moment it is asked
- * for and against the sets that build ships. It is not a property of the terms
- * and not a cross-party agreement: two parties on different builds may reach
- * different verdicts on one document, since a set one of them ships is a set the
- * other may not.
+ * The verdict is the checking build's own check, made at the moment it is
+ * asked for and against the sets that build ships. It is not a property
+ * of the terms and not a cross-party agreement: two parties on different
+ * builds may reach different verdicts on one document, since a set one of
+ * them ships is a set the other may not.
  *
- * Resolution is per half and by name AND version together, the pattern the web
- * import path already resolves a citation by: a half naming the shipped set is
- * compared against that set's own rules, and any other name is `unchecked`.
- * Nothing here resolves a partner's set name to content -- an unresolvable name
- * stays unresolvable, carried and caveated rather than guessed at.
+ * Resolution is per half and by name and version together, the pattern
+ * the web import path already resolves a citation by: a half naming the
+ * shipped set is compared against that set's own rules, and any other
+ * name is `unchecked`. Nothing here resolves a partner's set name to
+ * content -- an unresolvable name stays unresolvable, held and caveated
+ * rather than guessed at.
  *
  * What "drawn from" means is exactly {@link isDrawnFromLinkageRuleSet}'s
- * answer for that half, so this widens and narrows nothing: a narrowed emission
- * is `consistent`, while an added, edited, or repeated rule, or a reordered
- * cascade, is `contradicted`.
+ * answer for that half, so this widens and narrows nothing: a narrowed
+ * emission is `consistent`, while an added, edited, or repeated rule, or
+ * a reordered cascade, is `contradicted`.
  */
 export function checkLinkageRuleSetCitation(
   citation: LinkageRuleSetReference,
@@ -565,17 +573,19 @@ export function checkLinkageRuleSetCitation(
 
 /**
  * The citation `rules` are entitled to: {@link DEFAULT_LINKAGE_RULE_SET}'s
- * reference where the rules were drawn from that set, and `undefined` where they
- * were not -- edited, reordered, authored from scratch, or declaring no key. The
- * single place a builder that lets an operator EDIT seeded rules decides whether
- * the result may still cite the set it started from.
+ * reference where the rules were drawn from that set, and `undefined`
+ * where they were not -- edited, reordered, authored from scratch, or
+ * declaring no key. The single place a builder that lets an operator edit
+ * seeded rules decides whether the result may still cite the set it
+ * started from.
  *
- * A citation asserts that the keys came from the named set, so rules declaring
- * none carry no provenance to claim: they are drawn from every set vacuously,
- * and the predicate alone would hand them the built-in citation over whatever
- * field declarations outlived their keys. A builder reaches that state as an
- * intermediate (disabling every key in the web editor), so the keyless case is
- * excluded here rather than left to the downstream rejection.
+ * A citation asserts that the keys came from the named set, so rules
+ * declaring none hold no provenance to claim: they are drawn from every
+ * set vacuously, and the predicate alone would hand them the built-in
+ * citation over whatever field declarations outlived their keys. A
+ * builder reaches that state as an intermediate (disabling every key in
+ * the web editor), so the keyless case is excluded here rather than left
+ * to the downstream rejection.
  */
 export function linkageRuleSetReferenceFor(
   rules: Pick<LinkageTerms, "linkageFields" | "linkageKeys">,
@@ -587,20 +597,21 @@ export function linkageRuleSetReferenceFor(
 }
 
 /**
- * Returns a {@link LinkageTerms} drawn from `ruleSet`, citing it: the terms a
- * party runs when it authors none of its own.
+ * Returns a {@link LinkageTerms} drawn from `ruleSet`, citing it: the terms
+ * a party runs when it authors none of its own.
  *
- * When metadata are provided, only linkage key templates whose elements can be
- * satisfied by the present columns are included. If no metadata is provided,
- * all templates are included as a fallback. Either way the emitted keys are a
- * SUBSET of the set, never an addition to it: what the input supports narrows
- * the set, and nothing widens it -- which is what makes the emitted citation
- * honest, an upper bound on what was tried rather than a claim that every key
- * ran.
+ * When metadata are provided, only linkage key templates whose elements
+ * can be satisfied by the present columns are included. If no metadata is
+ * provided, all templates are included as a fallback. Either way the
+ * emitted keys are a subset of the set, never an addition to it: what the
+ * input supports narrows the set, and nothing widens it -- which is what
+ * makes the emitted citation accurate, an upper bound on what was tried
+ * rather than a claim that every key ran.
  *
- * Narrowed all the way to no key, the citation goes with the keys: it asserts
- * where the keys came from, so a derivation emitting none has no provenance to
- * claim -- the same exclusion {@link linkageRuleSetReferenceFor} makes.
+ * Narrowed all the way to no key, the citation goes with the keys: it
+ * asserts where the keys came from, so a derivation emitting none has no
+ * provenance to claim -- the same exclusion
+ * {@link linkageRuleSetReferenceFor} makes.
  */
 export function linkageTermsFromRuleSet(
   ruleSet: BuiltInLinkageRuleSet,
@@ -663,21 +674,23 @@ export function getDefaultLinkageTerms(
 
 /**
  * The matchable semantic types no key of {@link DEFAULT_LINKAGE_KEY_SET_NAME}
- * references, so a party whose file carries one of these columns gets no
+ * references, so a party whose file holds one of these columns gets no
  * matching value from the built-in rules.
  *
- * They are offered as an addition a party OPTS IN to
- * ({@link optInLinkageKeys}), never folded into the built-in set: that set is
- * frozen, and its recorded validation covers the keys it declares, which say
- * nothing about how these types match. Their standardization pipelines are
- * settled ({@link getDefaultStandardization}) even though no built-in key uses
- * them, so opting one in cleans the column exactly as a partner cleans its own.
+ * They are offered as an addition a party opts in to
+ * ({@link optInLinkageKeys}), never folded into the built-in set: that set
+ * is frozen, and its recorded validation covers the keys it declares,
+ * which say nothing about how these types match. Their standardization
+ * pipelines are settled ({@link getDefaultStandardization}) even though no
+ * built-in key uses them, so opting one in cleans the column exactly as a
+ * partner cleans its own.
  *
- * Written out rather than derived from the difference between the semantic types
- * and the built-in fields', so each type is offered because it was decided on
- * rather than because it arrived in the enum. The difference is asserted equal to
- * this list by test, so a matchable type added without that decision fails there
- * instead of going silently unoffered.
+ * Written out rather than derived from the difference between the
+ * semantic types and the built-in fields', so each type is offered
+ * because it was decided on rather than because it arrived in the enum.
+ * The difference is asserted equal to this list by test, so a matchable
+ * type added without that decision fails there instead of going silently
+ * unoffered.
  */
 export const OPT_IN_LINKAGE_FIELD_TYPES = [
   "phone_number",
@@ -689,33 +702,37 @@ export const OPT_IN_LINKAGE_FIELD_TYPES = [
 type OptInLinkageFieldType = (typeof OPT_IN_LINKAGE_FIELD_TYPES)[number];
 
 /**
- * The one linkage key each {@link OPT_IN_LINKAGE_FIELD_TYPES} type is offered as:
- * the type's own field together with the backbone the published evidence pairs it
- * with, each element naming a field {@link authoredLinkageFields} declares for a
- * column of that type. The shapes and their cascade placement are derived in
+ * The one linkage key each {@link OPT_IN_LINKAGE_FIELD_TYPES} type is
+ * offered as: the type's own field together with the backbone the
+ * published evidence pairs it with, each element naming a field
+ * {@link authoredLinkageFields} declares for a column of that type. The
+ * shapes and their cascade placement are derived in
  * `docs/notes/linkage-rule-grounding.md`.
  *
- * Compound and never the type alone, for two reasons that point the same way. A
- * key built from a single identifier is a membership oracle: a party holding a
- * candidate value learns from the result whether its holder is in the other
- * party's file, which is the differencing exposure `docs/SECURITY_DESIGN.md`
- * scopes the privacy guarantee against. And a contact value is a SHARED value in
- * program-application data -- one phone number or one email address carries across
- * a household and across the people an organization files for -- so a key over one
- * alone reports different people as the same person.
+ * Compound and never the type alone, for two reasons that point the same
+ * way. A key built from a single identifier is a membership oracle: a
+ * party holding a candidate value learns from the result whether its
+ * holder is in the other party's file, which is the differencing exposure
+ * `docs/SECURITY_DESIGN.md` scopes the privacy guarantee against. And a
+ * contact value is a shared value in program-application data -- one
+ * phone number or one email address spans a household and the people an
+ * organization files for -- so a key over one alone reports different
+ * people as the same person.
  *
- * One key per type is the whole offer. Any other combination is a rule with
- * precision and recall consequences nothing here has settled, which is what the
- * expert key editor is for.
+ * One key per type is the whole offer. Any other combination is a rule
+ * with precision and recall consequences nothing here has settled, which
+ * is what the expert key editor is for.
  *
- * Frozen through every level, for the reason {@link DEFAULT_LINKAGE_RULE_SET} is:
- * {@link optInLinkageKeys} hands these objects out BY REFERENCE, into an editor
- * draft and from there into the terms a party generates, so a single in-place
- * edit of a name or an element would redefine what is offered for the rest of the
- * process. It would also desync {@link OPT_IN_LINKAGE_KEY_ENCODINGS}, encoded once
- * at load: {@link isOptInLinkageKey} would then answer `false` for the very key
- * the editor is holding, dropping the outside-the-default-set badge and the
- * departure guidance from a key that is still an addition to the built-in set.
+ * Frozen through every level, for the reason
+ * {@link DEFAULT_LINKAGE_RULE_SET} is: {@link optInLinkageKeys} hands
+ * these objects out by reference, into an editor draft and from there
+ * into the terms a party generates, so a single in-place edit of a name
+ * or an element would redefine what is offered for the rest of the
+ * process. It would also desync {@link OPT_IN_LINKAGE_KEY_ENCODINGS},
+ * encoded once at load: {@link isOptInLinkageKey} would then answer
+ * `false` for the very key the editor is holding, dropping the
+ * outside-the-default-set badge and the departure guidance from a key
+ * that is still an addition to the built-in set.
  */
 const OPT_IN_LINKAGE_KEYS: Record<OptInLinkageFieldType, LinkageKey> =
   frozenThroughContents({
@@ -744,25 +761,27 @@ const OPT_IN_LINKAGE_KEYS: Record<OptInLinkageFieldType, LinkageKey> =
   });
 
 /**
- * The opt-in keys `metadata` can supply, in {@link OPT_IN_LINKAGE_FIELD_TYPES}
- * order -- one per type whose key EVERY element the columns supply, and none for
- * a key any element goes unsupplied for. Declaration order rather than column
- * order, so what an operator is offered does not shuffle with how their file
- * happens to be laid out.
+ * The opt-in keys `metadata` can supply, in
+ * {@link OPT_IN_LINKAGE_FIELD_TYPES} order -- one per type whose key every
+ * element the columns supply, and none for a key any element goes
+ * unsupplied for. Declaration order rather than column order, so what an
+ * operator is offered does not shuffle with how their file happens to be
+ * laid out.
  *
  * The same satisfiability rule {@link linkageTermsFromRuleSet} narrows the
- * built-in keys by, over the whole compound for the same reason it runs over the
- * whole of a built-in key: only a `role: linkage` column supplies a matchable
- * type, so an element resting on an identifier, payload, ignored, or absent
- * column would bind nothing at exchange time. A file carrying a phone number but
- * no date of birth is therefore offered no phone key rather than a thinner one.
+ * built-in keys by, over the whole compound for the same reason it runs
+ * over the whole of a built-in key: only a `role: linkage` column
+ * supplies a matchable type, so an element resting on an identifier,
+ * payload, ignored, or absent column would bind nothing at exchange time.
+ * A file holding a phone number but no date of birth is therefore offered
+ * no phone key rather than a thinner one.
  *
- * These are OFFERS, not terms: nothing here enables one, and a caller that
- * enables none emits exactly what it emitted before this existed. Enabling one
- * takes the emitted rules out of {@link DEFAULT_LINKAGE_RULE_SET} -- they are no
- * longer drawn from it -- so the terms carry no citation of the built-in set,
- * which is the honest reading of what a party that added a key of its own is
- * running.
+ * These are offers, not terms: nothing here enables one, and enabling
+ * none leaves emitted terms unchanged. Enabling one takes the emitted
+ * rules out of {@link DEFAULT_LINKAGE_RULE_SET} -- they are no longer
+ * drawn from it -- so the terms hold no citation of the built-in set,
+ * which is the accurate reading of what a party that added a key of its
+ * own is running.
  */
 export function optInLinkageKeys(metadata: Metadata): Array<LinkageKey> {
   const available = new Set<SemanticType>(
@@ -787,15 +806,16 @@ const OPT_IN_LINKAGE_KEY_ENCODINGS: ReadonlySet<string> = new Set(
 );
 
 /**
- * Whether `key` is one of the keys {@link optInLinkageKeys} offers, so a surface
- * can tell an offered addition apart from a built-in key beside it in the same
- * list without holding a flag of its own.
+ * Whether `key` is one of the keys {@link optInLinkageKeys} offers, so a
+ * surface can tell an offered addition apart from a built-in key beside
+ * it in the same list without holding a flag of its own.
  *
- * Compared through the canonical encoding, the equality the two parties' terms
- * are compared under, so a key that merely borrows an offered key's NAME -- one
- * an expert editor renamed, or an imported document declares -- is not mistaken
- * for the offer. A value outside the canonical domain cannot be compared and
- * answers `false` rather than throwing: the offered keys carry no such value.
+ * Compared through the canonical encoding, the equality the two parties'
+ * terms are compared under, so a key that merely borrows an offered key's
+ * name -- one an expert editor renamed, or an imported document declares
+ * -- is not mistaken for the offer. A value outside the canonical domain
+ * cannot be compared and answers `false` rather than throwing: the
+ * offered keys hold no such value.
  */
 export function isOptInLinkageKey(key: LinkageKey): boolean {
   const encoded = encodeForComparison(key);
@@ -815,47 +835,51 @@ function isLinkageFieldType(type: SemanticType): type is LinkageField["type"] {
 }
 
 /**
- * The linkage fields a `(metadata, standardization)` pair declares: the single
- * source the web invite editors derive both their pickable field list and the
- * emitted `linkageFields` from, replacing the
- * `getDefaultLinkageTerms(metadata).linkageFields` derivation. That derivation
- * collapses to one field per semantic type, so it cannot express two fields of the
- * same type -- e.g. a maiden and a current name -- bound to different columns; this
- * can.
+ * The linkage fields a `(metadata, standardization)` pair declares: the
+ * single source the web invite editors derive both their pickable field
+ * list and the emitted `linkageFields` from, replacing the
+ * `getDefaultLinkageTerms(metadata).linkageFields` derivation. That
+ * derivation collapses to one field per semantic type, so it cannot
+ * express two fields of the same type -- e.g. a maiden and a current name
+ * -- bound to different columns; this can.
  *
  * Per present `role: linkage` semantic type in `metadata`:
  *
- * - When `standardization` carries one or more transformations whose `input`
- *   column has that type, one field is emitted per transformation: `name` is the
- *   transformation's `output`, `type` is the column's type, and `constraints` are
- *   that type's default constraints (a same-typed field is bounded like the default
- *   one). The distinct `output` names -- the standardization schema forbids a
- *   duplicate `output` -- are what let two same-typed fields coexist, and the
- *   explicit `input` each transformation carries is what binds them to different
- *   columns at exchange time (see {@link resolveFieldColumns}).
- * - Otherwise a single field is emitted for the type: the type's default field
- *   ({@link DEFAULT_LINKAGE_FIELDS}) when it has one, else a synthetic default named
- *   for the type (`name` and `type` both the semantic type, no constraints). The
- *   synthetic case is what lets a column of a matchable type the default keys do not
- *   use (`zip_code`, `phone_number`, `email_address`) be referenced as a linkage
- *   field with no authored cleaning -- it resolves to that column by type at exchange
- *   time. A metadata-only pair (no `standardization`) thus yields exactly one field
- *   per present matchable type, and for the default types alone is byte-identical to
- *   the default per-type field set, so the guided path is unchanged.
+ * - When `standardization` holds one or more transformations whose
+ *   `input` column has that type, one field is emitted per
+ *   transformation: `name` is the transformation's `output`, `type` is
+ *   the column's type, and `constraints` are that type's default
+ *   constraints (a same-typed field is bounded like the default one). The
+ *   distinct `output` names -- the standardization schema forbids a
+ *   duplicate `output` -- are what let two same-typed fields coexist, and
+ *   the explicit `input` each transformation holds is what binds them to
+ *   different columns at exchange time (see {@link resolveFieldColumns}).
+ * - Otherwise a single field is emitted for the type: the type's default
+ *   field ({@link DEFAULT_LINKAGE_FIELDS}) when it has one, else a
+ *   synthetic default named for the type (`name` and `type` both the
+ *   semantic type, no constraints). The synthetic case is what lets a
+ *   column of a matchable type the default keys do not use (`zip_code`,
+ *   `phone_number`, `email_address`) be referenced as a linkage field
+ *   with no authored cleaning -- it resolves to that column by type at
+ *   exchange time. A metadata-only pair (no `standardization`) thus
+ *   yields exactly one field per present matchable type, and for the
+ *   default types alone is byte-identical to the default per-type field
+ *   set, so the guided path is unchanged.
  *
- * A transformation whose `input` is a non-`linkage` (identifier/payload/ignored)
- * or absent column declares no field: matching participation requires
- * `role: linkage`, which wins over an explicit binding in
- * {@link resolveFieldColumns}, so the field would resolve to no column anyway.
+ * A transformation whose `input` is a non-`linkage`
+ * (identifier/payload/ignored) or absent column declares no field:
+ * matching participation requires `role: linkage`, which wins over an
+ * explicit binding in {@link resolveFieldColumns}, so the field would
+ * resolve to no column anyway.
  *
- * Field order follows {@link DEFAULT_LINKAGE_FIELDS}, with a default type's explicit
- * fields emitted in `standardization` order at that type's position; any
- * explicit-only type (one with no default field, e.g. `phone_number`) follows in
- * `standardization` order, then any present matchable type with no field yet (the
- * synthetic case) in metadata order. The returned set is the CANDIDATE fields keys
- * may reference; a caller that emits final terms filters it to the fields its
- * enabled keys reference (as `buildAdvancedTerms` does), which leaves the
- * no-`standardization` emission byte-identical to today for the default types. Pure.
+ * Field order follows {@link DEFAULT_LINKAGE_FIELDS}, with a default
+ * type's explicit fields emitted in `standardization` order at that
+ * type's position; any explicit-only type (one with no default field,
+ * e.g. `phone_number`) follows in `standardization` order, then any
+ * present matchable type with no field yet (the synthetic case) in
+ * metadata order. The returned set is the candidate fields keys may
+ * reference; a caller that emits final terms filters it to the fields
+ * its enabled keys reference (as `buildAdvancedTerms` does). Pure.
  */
 export function authoredLinkageFields(
   metadata: Metadata,

@@ -14,63 +14,34 @@ import type { DualSignedRecord, SignedReceiptParty } from "./signedReceipt.js";
 import type { HandshakeRole } from "./types.js";
 
 // The verification consumer for the DUAL-SIGNED record (the signed evidence
-// bundle the signed-receipt step produces): it reads a stored record and checks,
-// per party, the certificate the record carries, the receipt signature made under
-// that certificate's key, what anchors that certificate outside the record, and
-// the identity it authorizes. Read-only -- it never mutates or re-signs
-// the artifact -- and every check yields a status rather than throwing for any
-// record of the shape parseDualSignedRecord produces: the FIELD VALUES inside it
-// may be hostile (an identity the canonical encoder refuses, a malformed
-// signature, a public key that is not a P-256 point) and each still resolves to a
-// status. That contract covers the values, not the shape: a hand-built record
-// missing a structural member (no `content`, a party without a certificate) is a
-// programming error and reaches a TypeError.
+// bundle the signed-receipt step produces): per party it checks the record's
+// certificate, the receipt signature made under that certificate's key, what
+// anchors the certificate outside the record, and the identity it authorizes.
+// Read-only. Every check yields a status rather than throwing for a hostile
+// field value; a structurally malformed record (no `content`, a party without
+// a certificate) is a programming error and reaches a TypeError.
 //
-// This is the SIGNED path, evidence against the partner, and is the counterpart of
-// recordVerification.ts, which checks the unsigned self-attested record's internal
-// consistency. The two artifacts are separate files (see
-// docs/spec/EXCHANGE_RECORD.md) and a caller may hold either or both.
+// Counterpart of recordVerification.ts, which checks the unsigned self-attested
+// record's internal consistency instead (docs/spec/EXCHANGE_RECORD.md).
 //
-// Beside the per-party checks it makes two whole-record ones: the agreed-terms
-// hash against the value the caller holds, and the receipt's per-exchange binder
-// against the `receiptBinder` of the exchange record for the run it is being read
-// beside. That pairing is what ties a receipt to ONE run rather than to a
-// partnership: across recurring runs under one set of terms every signed value a
-// verifier can otherwise check repeats byte for byte (the terms hash and both
-// certificates), and the directional payload MACs, which do vary per run, are
-// reported rather than recomputed -- no verifier holds the session key they are
-// keyed under.
-//
-// What "verified" costs here: a dual-signed record is self-consistent by
-// construction, so signature verification alone proves only that whoever holds the
-// two certificates' private keys signed this content -- an attacker who mints two
-// certificates of its own produces a bundle whose signatures verify. ANCHORING is
-// what makes it evidence: a certificate counts only when something outside the
-// record ties it to a party the verifier knows -- a fingerprint pinned out-of-band,
-// or the verifier's own signing identity. The record carries two certificates, so
-// the report reaches `verified` only when BOTH are anchored; one anchored
-// certificate leaves the other slot mintable by whoever assembled the record, and
-// is `incomplete` -- the same tier as the third-party auditor's unanchored run,
-// which the acceptance wording calls "certificate fingerprint trust not
-// established". The trust model is specified in docs/spec/PROTOCOL.md (Signing
-// identity and certificate pinning).
-//
-// An unrecognized bundle version is rejected earlier, at parse
-// (parseDualSignedRecord pins the version literal), so a record reaching this
-// module is already a recognized one.
+// The report reaches `verified` only when both certificates are anchored
+// outside the record (a pinned fingerprint, or the verifier's own signing
+// identity): signature verification alone proves only that whoever holds the
+// two certificates' keys signed this content. Trust model:
+// docs/spec/PROTOCOL.md, Signing identity and certificate pinning.
 
 /**
  * Whether a certificate's own self-signature verifies. The self-signature covers
  * the certificate body -- version, algorithm, identity, and public key -- so this
  * is the certificate's IDENTITY BINDING: it is what ties the identity string the
- * certificate carries to the key that signed the receipt. `failed` means the
+ * certificate holds to the key that signed the receipt. `failed` means the
  * certificate does not bind its identity to its key (it was altered, or its key is
- * not a valid P-256 point), so nothing it carries can be attributed to that
+ * not a valid P-256 point), so nothing it holds can be attributed to that
  * identity.
  */
 export type CertificateBindingStatus = "verified" | "failed";
 
-/** Whether a party's receipt signature verifies against the certificate carried
+/** Whether a party's receipt signature verifies against the certificate held
  * beside it in the record, over the canonical signed bytes re-derived for that
  * party's role. */
 export type ReceiptSignatureStatus = "verified" | "failed";
@@ -82,19 +53,16 @@ export type ReceiptSignatureStatus = "verified" | "failed";
  * - `partner-pin`: its fingerprint matches a value the verifier pinned
  *   out-of-band.
  * - `local-identity`: it is the certificate of the verifier's own signing
- *   identity. Certificates are public, so this says whose certificate occupies
- *   the slot and nothing more -- whoever assembled the record could have copied
- *   it in. What refuses a slot its certificate's holder did not sign is the
- *   receipt signature there, which verifies only under the private key the
- *   verifier holds.
- * - `unanchored`: nothing outside the record vouches for this certificate. It is
- *   still checked against itself (its self-signature, its signature over the
- *   content, and the expected identities), all of which whoever assembled the
- *   record can satisfy with a certificate it minted.
+ *   identity. Certificates are public, so this only says whose certificate
+ *   occupies the slot -- whoever assembled the record could have copied it in.
+ *   The receipt signature there, which verifies only under the verifier's own
+ *   private key, is what refuses a slot its holder did not sign.
+ * - `unanchored`: nothing outside the record vouches for this certificate; a
+ *   certificate the assembler minted itself can still satisfy every internal
+ *   check (self-signature, content signature, expected identity).
  *
- * Each anchoring value reaches at most one certificate, so a single value -- or
- * several carrying the same digest, whatever their spelling and whether they
- * arrived as pins or as the verifier's own identity -- can never anchor both
+ * Each anchoring value reaches at most one certificate: two values matching the
+ * same digest, however spelled or however they arrived, can never anchor both
  * slots.
  */
 export type CertificateAnchorStatus =
@@ -137,20 +105,19 @@ export type AssertedIdentityStatus = "verified" | "mismatch" | "not-checked";
 /**
  * Whether this receipt belongs to the one exchange run the verifier is reading it
  * beside, decided by comparing the receipt's per-exchange binder against the
- * `receiptBinder` the exchange record for that run carries. Both parties derive
- * that value from the run's session key, and every run derives a different one, so
- * it is what separates one run of a recurring partnership from the next -- the
- * agreed-terms hash, the identities, and the certificates all repeat byte for byte
- * across such runs.
+ * `receiptBinder` the exchange record for that run holds. Every run derives a
+ * different binder from its own session key, so it is what separates one run of
+ * a recurring partnership from the next -- the agreed-terms hash, identities,
+ * and certificates all repeat byte for byte across such runs.
  *
- * - `verified`: the record and the receipt carry the same run's binder.
- * - `mismatch`: they carry different ones, so they are not the same run.
- * - `unpaired`: the record carries no binder at all. It records an exchange that
- *   produced no signed receipt (no signing identity, or a path with no session
- *   key), so no receipt belongs to it -- a contradiction, not an unchecked box.
- * - `not-checked`: no record was supplied. A holder of the receipt alone has
- *   nothing to pair it to, which holds the verdict short of `verified` without
- *   failing it.
+ * - `verified`: the record and the receipt hold the same run's binder.
+ * - `mismatch`: they hold different ones, so they are not the same run.
+ * - `unpaired`: the record holds no binder at all (no signing identity, or a
+ *   path with no session key) -- it records an exchange that produced no
+ *   signed receipt, so no receipt belongs to it. A contradiction, not an
+ *   unchecked box.
+ * - `not-checked`: no record was supplied, so there is nothing to pair the
+ *   receipt to. Holds the verdict short of `verified` without failing it.
  */
 export type RunBindingStatus =
   "verified" | "mismatch" | "unpaired" | "not-checked";
@@ -160,7 +127,7 @@ export type RunBindingStatus =
 export interface SignedReceiptPartyReport {
   /** The handshake role whose slot this is; the record keys parties by role. */
   role: HandshakeRole;
-  /** The identity the certificate in this slot carries. Free text supplied by
+  /** The identity the certificate in this slot holds. Free text supplied by
    * that party -- a consumer that renders it must escape it at its display
    * sink. */
   identity: string;
@@ -182,13 +149,13 @@ export interface DualSignedRecordVerificationReport {
   /** The overall verdict, on the same tri-state as the unsigned record's report:
    * `failed` if any check was contradicted, `verified` only if every check ran and
    * passed, `incomplete` when nothing was contradicted but something could not be
-   * checked -- notably a certificate left unanchored. */
+   * checked -- for example a certificate left unanchored. */
   outcome: RecordVerificationOutcome;
   initiator: SignedReceiptPartyReport;
   responder: SignedReceiptPartyReport;
   /**
    * What the fingerprints the verifier pinned reached: `matched` when every one
-   * of them matches a certificate the record carries, `unmatched` when one
+   * of them matches a certificate the record holds, `unmatched` when one
    * matches neither -- the record is not the pinned party's, which fails the
    * verification.
    */
@@ -203,8 +170,8 @@ export interface DualSignedRecordVerificationReport {
    * How that identity reached the verification, when one was supplied. The
    * outcome already turns on it -- what a non-match costs is the whole
    * difference between a contradiction and a note -- so the report states it
-   * rather than leaving a consumer to carry it alongside. Absent when no local
-   * identity was supplied.
+   * rather than leaving a consumer to infer it. Absent when no local identity
+   * was supplied.
    */
   localIdentitySource?: LocalIdentitySource;
   /** Whether the record's agreed-terms hash matches the one the caller supplied. */
@@ -217,14 +184,13 @@ export interface DualSignedRecordVerificationReport {
    */
   runBinding: RunBindingStatus;
   /**
-   * The per-exchange binder both signatures cover, verbatim from the record. It is
-   * derived from the exchange's session key, which only the two parties ever held
-   * and neither retains, so a verifier confirms that the signers signed a receipt
-   * carrying THIS binder and does not recompute it: what an offline verifier can
-   * check is that it is the value the run's own record carries ({@link
-   * runBinding}), not that it derives from that run's session key. A binder
-   * substituted into BOTH artifacts is detectable only during the live exchange,
-   * where each party derives it independently.
+   * The per-exchange binder both signatures cover, verbatim from the record.
+   * Derived from the exchange's session key, which neither party retains after
+   * the run, so an offline verifier confirms only that the signers signed a
+   * receipt holding THIS value against the run's own record ({@link
+   * runBinding}), not that it derives from that session key. A binder
+   * substituted into both artifacts is detectable only during the live
+   * exchange, where each party derives it independently.
    */
   binder: string;
 }
@@ -236,11 +202,10 @@ export interface DualSignedRecordVerificationReport {
 export interface DualSignedRecordVerificationInputs {
   /**
    * Certificate fingerprints the verifier pinned out-of-band, one per party it
-   * can vouch for: the partner's alone on a party's own run (the verifier's
-   * `signing.partner_fingerprint`, or a value supplied at the command line), or
-   * both parties' for a verifier that was party to no exchange. Together with
-   * {@link localIdentity} these are what turn a self-consistent record into
-   * evidence: without an anchor on each certificate the report cannot reach
+   * can vouch for: the partner's alone on a party's own run, or both parties'
+   * for a verifier that was party to no exchange. Together with
+   * {@link localIdentity}, these are what turn a self-consistent record into
+   * evidence -- without an anchor on each certificate the report cannot reach
    * `verified`.
    */
   pinnedFingerprints?: readonly string[];
@@ -261,18 +226,16 @@ export interface DualSignedRecordVerificationInputs {
    * re-derived from both parties' terms), compared against the record's. */
   expectedTermsHash?: string;
   /**
-   * The `receiptBinder` of the exchange record this receipt is being read beside,
-   * which is what pairs the receipt to one run: the value when that record carries
-   * one, or `null` when the record is in hand and carries NONE (an exchange that
-   * produced no signed receipt, which no receipt belongs to). Absent when no
-   * record is in hand at all, which leaves the pairing unchecked rather than
-   * contradicted. The distinction is load-bearing: passing `undefined` for a
-   * record that carries no binder would report a contradiction as an unchecked
-   * box.
+   * The `receiptBinder` of the exchange record this receipt is being read
+   * beside, which pairs the receipt to one run: the value when that record
+   * holds one, `null` when the record is in hand and holds NONE (an exchange
+   * that produced no signed receipt, so no receipt belongs to it), or absent
+   * when no record is in hand at all, leaving the pairing unchecked rather
+   * than contradicted. The distinction is critical: passing `undefined` for a
+   * record holding no binder would report a contradiction as an unchecked box.
    *
-   * A verifier holding both parties' terms but no record supplies the agreed-terms
-   * hash by re-deriving it and still pairs nothing: terms belong to a partnership,
-   * not to one run of it.
+   * A verifier holding both parties' terms but no record still pairs nothing:
+   * terms belong to a partnership, not to one run of it.
    */
   recordReceiptBinder?: string | null;
 }
@@ -361,14 +324,12 @@ interface AnchorAssignment {
 }
 
 /**
- * Assign the anchoring values the verifier holds to the record's two certificate
- * slots, as an assignment rather than a per-value test: equal values count once
- * and each value claims at most one slot, so one anchoring value -- or several
- * equal ones, pinned or derived from the verifier's own identity -- anchors a
- * single slot and leaves the other to be anchored by something else or not at
- * all. Whether a value matched at all is reported separately from what it
- * anchored, so a value that matched a slot another value already claimed is not
- * reported as matching nothing.
+ * Assign the anchoring values the verifier holds to the record's two
+ * certificate slots, as an assignment rather than a per-value test: equal
+ * values count once, and each value claims at most one slot, leaving the
+ * other to be anchored by something else or not at all. Whether a value
+ * matched at all is reported separately from what it anchored, so a value
+ * that matched an already-claimed slot is not reported as matching nothing.
  */
 async function assignAnchors(
   record: DualSignedRecord,
@@ -401,16 +362,13 @@ async function assignAnchors(
   // cannot otherwise reach, while the local identity's slot is the one the
   // verifier could name either way.
   //
-  // Two anchoring values that reach the same slots are the same fingerprint
-  // whatever their spelling and wherever they came from -- each matched the
-  // digest of the certificate in that slot -- so their match patterns
-  // deduplicate the values without depending on how they were written. Without
-  // that, one fingerprint supplied twice, or a pin equal to the verifier's own
-  // identity, would claim both slots of a record whose two slots carry a single
-  // certificate, and a record only that certificate's key holder can assemble --
-  // both receipt signatures must verify under it -- would read as two
-  // independent anchors. Values that reach NO slot share a pattern without being
-  // one value; nothing turns on that, since none of them claims a slot anyway.
+  // Two anchoring values that reach the same slots are the same fingerprint,
+  // however spelled or however they arrived -- each matched the digest of the
+  // certificate in that slot -- so match patterns deduplicate the values
+  // without depending on how they were written. Without that, a fingerprint
+  // supplied twice, or a pin equal to the verifier's own identity, would count
+  // as two independent anchors on a record whose two slots hold one identical
+  // certificate.
   const claimedPatterns = new Set<string>();
   const claimOnce = (
     matches: SlotMatches,
@@ -472,33 +430,23 @@ function identityStatuses(
 
 /**
  * Verify a stored {@link DualSignedRecord}: for each party, re-derive the
- * canonical signed bytes and check that party's receipt signature against the
- * certificate the record carries, check that certificate's identity binding (its
- * self-signature), check what anchors its certificate outside the record (a
- * pinned fingerprint, or the caller's own signing identity), and check the
- * identity it authorizes when the caller supplies the expected pair. Beside those,
- * check the agreed-terms hash and -- against the exchange record for the run, when
- * the caller holds it -- that this receipt is that run's. Read-only; it never
- * mutates or re-signs the record.
+ * canonical signed bytes and check the receipt signature, the certificate's
+ * self-signature, what anchors the certificate outside the record, and (when
+ * the caller supplies the expected pair) the identity it authorizes. Also
+ * checks the agreed-terms hash and, against the exchange record for the run
+ * when the caller holds it, that this receipt is that run's. Read-only.
  *
- * Returns a {@link DualSignedRecordVerificationReport} on the same tri-state as
- * the unsigned record's report, so "not checked" is never reported as "verified".
- * The report reaches `verified` only when BOTH certificates are anchored outside
- * the record -- each by a pinned fingerprint or by the verifier's own signing
- * identity: signature verification alone proves only that the holders of the two
- * embedded certificates' keys signed this content, which anyone can arrange with
- * two certificates of their own. A run that anchors one certificate, and the
- * third-party auditor's run that anchors neither, are both `incomplete`. A run
- * that pairs the receipt to no exchange record is `incomplete` for the same
- * reason: which of a recurring partnership's runs the receipt attests is open
- * until the record for one of them is beside it.
+ * Returns a {@link DualSignedRecordVerificationReport} on the same tri-state
+ * as the unsigned record's report, so "not checked" is never reported as
+ * "verified". A run that anchors one certificate, and the third-party
+ * auditor's run that anchors neither, are both `incomplete`; so is a run that
+ * pairs the receipt to no exchange record, since which run of a recurring
+ * partnership it attests is open until that run's record sits beside it.
  *
- * Fail-safe over field values: given a record of the shape
- * `parseDualSignedRecord` produces, every check yields a status rather than an
- * exception however hostile the certificate and signature values it carries, so
- * a hostile record always produces a verdict. The shape itself is the caller's:
- * a hand-built record missing a structural member (no `content`, a party without a
- * certificate) is a programming error and reaches a TypeError. An unrecognized
+ * Fail-safe over field values: every check yields a status rather than an
+ * exception however hostile the certificate and signature values are, so a
+ * hostile record always produces a verdict. A structurally malformed record
+ * is a programming error and reaches a TypeError instead. An unrecognized
  * record version is rejected earlier, at parse.
  */
 export async function verifyDualSignedRecord(
@@ -564,7 +512,7 @@ export async function verifyDualSignedRecord(
         party.signature === "failed" ||
         party.assertedIdentity === "mismatch",
     );
-  // The record carries two certificates and a verdict speaks for both, so an
+  // The record holds two certificates and a verdict speaks for both, so an
   // unanchored slot holds the report short of `verified`: its certificate is one
   // whoever assembled the record could have minted.
   const anyUnverified =
@@ -600,19 +548,21 @@ export async function verifyDualSignedRecord(
 // --- The verdict decision ----------------------------------------------------
 //
 // What a verification report MEANS to whoever reads it, decided once for every
-// surface: the tier the whole verdict carries and the tier each row carries,
-// which sentences an unanchored slot supports, and what a run has earned as
+// surface: the tier the whole verdict holds and the tier each row holds, which
+// sentences an unanchored slot supports, and what a run has earned as
 // remediation. A surface renders that decision in its own vocabulary -- console
-// lines, or a page's alert rows -- and decides none of it, so no two surfaces can
-// drift apart on which conditions grade a receipt incomplete rather than failed.
+// lines, or a page's alert rows -- and decides none of it, so no two surfaces
+// can drift apart on which conditions grade a receipt incomplete rather than
+// failed.
 //
-// Presentation is the surface's: nothing here carries display text, an exit code,
-// or a colour. Free text the record supplies (a certificate identity, the binder)
-// travels verbatim and is escaped by the surface at its display sink, the one
-// altitude this project escapes at (CONTRIBUTING.md, Operator-facing escaping).
+// Presentation is the surface's: nothing here holds display text, an exit code,
+// or a colour. Free text the record supplies (a certificate identity, the
+// binder) travels verbatim and is escaped by the surface at its display sink,
+// the one altitude this project escapes at (CONTRIBUTING.md, Operator-facing
+// escaping).
 
 /**
- * The tier a verdict or one of its rows carries, which a surface renders in its
+ * The tier a verdict or one of its rows holds, which a surface renders in its
  * own emphasis. It is the display tier of ONE line rather than the outcome of the
  * verification: a row is `incomplete` when its own check could not be made,
  * whatever the whole record's outcome.
@@ -632,25 +582,24 @@ export type AnchoredCertificateStatus = Exclude<
  * be narrated as a check this certificate failed.
  *
  * - `no-pinned-value-matches`: a pinned value was supplied and this slot's
- *   certificate is not one it reached. Withheld while both slots carry ONE
- *   certificate, where the value that anchored the other slot matches this one
- *   too and what left this slot unanchored is that each value claims a single
- *   slot.
+ *   certificate is not one it reached. Withheld while both slots hold ONE
+ *   certificate, where the value anchoring the other slot matches this one too
+ *   and what left this slot unanchored is that each value claims a single slot.
  * - `not-your-own-certificate`: the verifier's own certificate was compared
  *   against the record and reached neither slot.
  */
 export type UnanchoredCertificateClause =
   "no-pinned-value-matches" | "not-your-own-certificate";
 
-/** One decided row: the status the report states, and the tier it carries. */
+/** One decided row: the status the report states, and the tier it holds. */
 export interface SignedReceiptVerdictCheck<Status> {
   status: Status;
   tone: SignedReceiptVerdictTone;
 }
 
-/** The certificate-anchor row. An `unanchored` status also carries the clauses
+/** The certificate-anchor row. An `unanchored` status also holds the clauses
  * the report supports for it, in the order a surface states them; an anchored
- * slot carries none. */
+ * slot holds none. */
 export interface SignedReceiptVerdictAnchor extends SignedReceiptVerdictCheck<CertificateAnchorStatus> {
   unanchoredClauses: readonly UnanchoredCertificateClause[];
 }
@@ -659,7 +608,7 @@ export interface SignedReceiptVerdictAnchor extends SignedReceiptVerdictCheck<Ce
 export interface SignedReceiptVerdictParty {
   /** The handshake role whose slot this is. */
   role: HandshakeRole;
-  /** The identity the certificate carries. Free text supplied by that party -- a
+  /** The identity the certificate holds. Free text supplied by that party -- a
    * surface that renders it escapes it at its display sink. */
   identity: string;
   /** The fingerprint recomputed from the record, or `null` for a certificate
@@ -681,11 +630,11 @@ export interface AnchoredCertificateSlot {
 /**
  * The verdict's headline, by tier.
  *
- * The `verified` arm carries the two anchored slots typed so that `unanchored`
- * cannot appear: a verified verdict speaks for both certificates, and a surface
- * naming what anchored each of them can therefore not claim an anchor that does
- * not exist. The `incomplete` arm names the slots nothing outside the record
- * reaches, so the reader is not left to find them among the rows.
+ * The `verified` arm holds the two anchored slots typed so `unanchored` cannot
+ * appear: a verified verdict speaks for both certificates, so a surface naming
+ * what anchored each cannot claim an anchor that does not exist. The
+ * `incomplete` arm names the slots nothing outside the record reaches, so the
+ * reader need not find them among the rows.
  */
 export type SignedReceiptVerdictHeadline =
   | { tone: "verified"; anchoredSlots: readonly AnchoredCertificateSlot[] }
@@ -695,12 +644,10 @@ export type SignedReceiptVerdictHeadline =
 /** The receipt-record pairing row. */
 export interface SignedReceiptVerdictRunBinding extends SignedReceiptVerdictCheck<RunBindingStatus> {
   /**
-   * Whether the run earned the advice to pair the two artifacts by the timestamp
-   * stamp an exchange writes them under. It is earned by a pairing the record in
-   * hand contradicts -- from another run, or from an exchange that produced no
-   * receipt at all -- both of which are answered by finding the record written
-   * beside this receipt, and by neither a pairing that held nor one nothing was
-   * supplied to make.
+   * Whether the run earned the advice to pair the two artifacts by the
+   * timestamp stamp an exchange writes them under: earned by a pairing the
+   * record in hand contradicts (another run, or an exchange with no receipt
+   * at all), and not by one that held or one nothing was supplied to make.
    */
   pairByStamp: boolean;
 }
@@ -815,13 +762,12 @@ function decideParty(
 }
 
 // The anchoring assignment produces the three CertificateAnchorStatus values and
-// nothing else, so a status from outside them anchors nothing and reaches the
-// decision only from a caller that stepped past the type. Every tier of the
-// verdict words the slot from that status -- the verified headline names what
-// anchored each certificate, and the degraded ones still carry the row -- so an
-// unnamed status is a sentence naming an anchor that exists nowhere, whichever
-// tier the run lands on. Refused for the whole decision rather than on the
-// verified arm alone.
+// nothing else, so a status from outside them reaches the decision only from a
+// caller that stepped past the type. Every tier of the verdict words the slot
+// from that status -- the verified headline names what anchored each
+// certificate, and the degraded ones still hold the row -- so an unnamed status
+// is a sentence naming an anchor that exists nowhere. Refused for the whole
+// decision rather than the verified arm alone.
 function refuseAnchorOutsideTheUnion(party: SignedReceiptPartyReport): void {
   if (
     party.certificateAnchor !== "partner-pin" &&
@@ -877,8 +823,8 @@ function decideGuidance(
   const localUnmatched = report.localIdentity === "unmatched";
   if (localUnmatched && report.localIdentitySource === "named")
     guidance.push({ kind: "named-local-identity-unmatched" });
-  // An identity that anchors nothing is worth stating only while a slot is still
-  // waiting to be anchored; beside a fully anchored record it is noise.
+  // Reported only while a slot is still waiting to be anchored; beside a fully
+  // anchored record it adds nothing.
   else if (
     localUnmatched &&
     report.localIdentitySource === "resolved" &&
@@ -966,28 +912,23 @@ function decidedRows(
 }
 
 /**
- * Decide what a {@link DualSignedRecordVerificationReport} means to a reader: the
- * tier of the verdict and of every row it carries, which sentences an unanchored
- * slot supports, whether the two artifacts should be paired by their stamp, and
- * what remediation the run has earned. Pure over the report -- it re-derives no
- * check and can therefore claim no anchor and no comparison the verification did
- * not make.
+ * Decide what a {@link DualSignedRecordVerificationReport} means to a reader:
+ * the tier of the verdict and of every row it holds, which sentences an
+ * unanchored slot supports, whether the two artifacts should be paired by
+ * their stamp, and what remediation the run has earned. Pure over the report
+ * -- it re-derives no check and claims no anchor and no comparison the
+ * verification did not make.
  *
- * Every surface renders this one decision, so a receipt's verdict does not depend
- * on which of them a reader is holding. What stays with the surface is the words:
- * a status carries a tier here and its wording there, and a remediation names the
- * inputs that surface actually takes.
+ * Every surface renders this one decision, so a receipt's verdict does not
+ * depend on which of them a reader is holding.
  *
- * Total over a report {@link verifyDualSignedRecord} produces. Its refusals are a
- * report contradicting itself, which only a hand-built one can state: a verdict
- * that speaks for a slot nothing anchors, a verified verdict over a row reported
- * as failed, a run anchoring neither certificate beside a pinned value that
- * reached one, and a local identity reported as matching neither certificate
- * without stating how it reached the verification -- named or resolved being the
- * whole difference between a contradiction and a note. A certificate anchor from
- * outside the {@link CertificateAnchorStatus} union is refused on the same
- * footing, whatever the outcome: only a caller past the type can state one, and
- * no surface has words for it.
+ * Total over a report {@link verifyDualSignedRecord} produces. Its refusals
+ * are a report contradicting itself, which only a hand-built one can state: a
+ * verdict speaking for a slot nothing anchors, a verified verdict over a row
+ * reported as failed, a run anchoring neither certificate beside a pinned
+ * value that reached one, a local identity reported as matching neither
+ * certificate without stating how it reached the verification, or a
+ * certificate anchor from outside the {@link CertificateAnchorStatus} union.
  */
 export function decideSignedReceiptVerdict(
   report: DualSignedRecordVerificationReport,
@@ -1022,7 +963,7 @@ export function decideSignedReceiptVerdict(
   // The verification withholds `verified` while any check it made was
   // contradicted, so a verified headline always sits over rows that all passed.
   // Were that to stop holding, every surface would render a verified verdict over
-  // a row reading failed -- evidence overstated -- so the verdict fails loudly
+  // a row that failed -- evidence overstated -- so the verdict fails loudly
   // here instead, once for all of them, as the unanchored slot above does.
   if (headline.tone === "verified") {
     const failed = decidedRows(decided).find(

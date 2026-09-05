@@ -6,9 +6,9 @@ import { describeDecodeError } from "../src/utils/describeDecodeError";
 describe("describeDecodeError", () => {
   test("collapses a real ZodError to a one-liner, not its raw issues blob", () => {
     // A real ZodError's own `.message` is the multi-line serialized issues blob
-    // (field path, code, message) that the unreadable raw render surfaces;
-    // describeDecodeError must instead emit a single readable `<path>: <message>`
-    // line drawn from the first issue.
+    // (field path, code, message) that the unreadable raw render produces;
+    // describeDecodeError must instead emit a single readable `<path>:
+    // <message>` line drawn from the first issue.
     const err = z
       .object({ host: z.string().max(5) })
       .safeParse({ host: "far too long" }).error;
@@ -43,9 +43,9 @@ describe("describeDecodeError", () => {
 
   test("escapes a path component carrying control/deceptive-Unicode bytes", () => {
     // A Zod path can name a partner-controlled object KEY in the general case
-    // (the invitation is crafted by the inviting party), not only a fixed schema
-    // field, so a key carrying a raw ESC (ANSI) or a bidi override must reach the
-    // operator escaped, never raw.
+    // (the invitation is crafted by the inviting party), not only a fixed
+    // schema field, so a key holding a raw ESC (ANSI) or a bidi override must
+    // reach the operator escaped, never raw.
     const out = describeDecodeError({
       issues: [
         { path: ["connectionEndpoint", "\x1b[31mKEY\u202e"], message: "bad" },

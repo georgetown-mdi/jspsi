@@ -19,24 +19,14 @@ import {
 import type { Config } from "../src/types";
 import { loadNativeAddonOrSkip } from "./utils/nativeAddon";
 
-// The count-only (psi-c) construction at the PsiEngine seam: a round that resolves
-// to the intersection cardinality and to nothing that names a match. Every property
-// asserted here is a normative row of docs/spec/PROTOCOL.md, PSI-C -- the cleared
-// reveal flag as a wire-enforced agreement rather than a local preference, the
-// unavailability of the identifier-revealing operations, the response order the
-// receiver cannot attribute, and the uniqueness filter that makes the count
-// comparable to a single-key `psi` run.
-//
-// These tests exercise the seam directly; countOnlyRun.test.ts drives the exchange
-// that sits on it.
-//
-// A refusal the library raises is asserted as a refusal wherever a WebAssembly party
-// raises it: that build surfaces the association-table condition as an opaque embind
-// marshalling error where the native addon names it
-// (docs/notes/psi-c-count-only.md). The mode mismatch is the exception, and
-// deliberately so: the engine reads the reveal flag off the request and names the
-// condition itself, so both backends give a party the same diagnosis rather than one
-// of them an error it cannot tell from a malformed frame.
+// The count-only (psi-c) construction at the PsiEngine boundary: a round
+// resolving to the intersection cardinality and nothing that names a match.
+// Tested properties are the normative rows of docs/spec/PROTOCOL.md, PSI-C.
+// These tests exercise the boundary directly; countOnlyRun.test.ts drives
+// the exchange built on it. A library refusal is asserted generically,
+// since WASM reports it as an opaque marshalling error where the native
+// addon names it (docs/notes/psi-c-count-only.md) -- except the mode
+// mismatch, which the engine names itself off the request.
 
 const wasm = await PSI();
 
@@ -80,9 +70,10 @@ type EngineFactory = (
 const inProcess: EngineFactory = (library, role, id, mode) =>
   new InProcessPsiEngine(library, role, id, mode);
 
-// The worker seam driven through an in-process dispatcher, as psiWorkerEngine.test.ts
-// drives it: structuredClone at the boundary is what a real worker's postMessage
-// does, so a mode or a count that could not cross it fails here.
+// The worker boundary driven through an in-process dispatcher, as
+// psiWorkerEngine.test.ts drives it: structuredClone here is what a real
+// worker's postMessage does, so a mode or a count that could not cross it
+// fails here.
 const workerBacked: EngineFactory = (library, role, id, mode) => {
   let deliver: (response: PsiWorkerResponse) => void = () => {};
   const dispatch = servePsiWorker(library, { role, id, mode }, (response) =>
@@ -265,7 +256,7 @@ describe.each([
     const permutedRequestBytes = permutedRequest.serializeBinary();
     expect(permutedRequestBytes).not.toStrictEqual(request);
 
-    // A response carrying the request's order would be permuted with it. The two
+    // A response holding the request's order would be permuted with it. The two
     // are instead byte-identical, so no response position names a request position
     // -- and the receiver cannot re-derive the correspondence, which would take
     // encrypting its own value under the sender's key.
@@ -278,13 +269,13 @@ describe.each([
     countOnlyReceiver.dispose();
   });
 
-  // TypeScript does not reach a JS caller of the published package, which can pass a
-  // string outside PsiEngineMode, and both worker seams read their init back through
-  // an unchecked cast, so a spawn site that omits the mode delivers undefined. The
-  // casts stand in for both. Every mode decision derives from a single boolean, so a
-  // value naming no mode has to land wholly on the nondisclosing side rather than
-  // clearing the reveal flag while leaving the contribution filter or the sorting
-  // permutation set for `psi`.
+  // TypeScript cannot reach a caller of the published package, who can pass a
+  // string outside PsiEngineMode; both worker boundaries read their init back
+  // through an unchecked cast, so a spawn site that omits the mode delivers
+  // undefined. The casts stand in for both. Every mode decision derives from
+  // a single boolean, so a value naming no mode must land wholly on the
+  // nondisclosing side, not clear the reveal flag while leaving the
+  // contribution filter or sorting permutation set for `psi`.
   const unrecognizedModes: ReadonlyArray<PsiEngineMode> = [
     "reveal-everything" as PsiEngineMode,
     undefined as unknown as PsiEngineMode,
@@ -311,9 +302,10 @@ describe.each([
         duplicatingSenderValues,
       );
       expect(permutation).toStrictEqual([]);
-      // Pins the sender's own uniqueness filter, not just the empty permutation: an
-      // unfiltered setup would carry all four of duplicatingSenderValues instead of
-      // the two values it holds exactly once.
+      // Pins the sender's own uniqueness filter, not just the empty
+      // permutation: an unfiltered setup would include all four of
+      // duplicatingSenderValues instead of the two values it holds exactly
+      // once.
       expect(
         wasm.serverSetup
           .deserializeBinary(setup)
@@ -387,15 +379,14 @@ describe.each([
   });
 });
 
-// The normative singleton rule -- a party contributes the values occurring exactly
-// once in its own dataset, in first-appearance order -- has two implementations: the
-// engine's count-only contribution filter and the cascade's
-// removeDuplicatesAndUndefineds, which link.ts runs on the live `psi` path. This pins
-// their AGREEMENT on the shared vector set below: which values survive, and the order
-// they survive in. A later fix to either implementation that changes that rule fails
-// here rather than silently leaving the two paths on different rules. What it does not
-// pin is the cascade's extra job -- undefined means "no value for this key" there,
-// where the engine is handed a dense list of strings and never sees one.
+// The normative singleton rule -- a party contributes the values occurring
+// exactly once in its own dataset, in first-appearance order -- has two
+// implementations: the engine's count-only contribution filter, and the
+// cascade's removeDuplicatesAndUndefineds that link.ts runs on the live
+// `psi` path. This pins their agreement on the vector set below: which
+// values survive, and in what order. It does not pin the cascade's extra
+// job -- undefined means "no value for this key" there, where the engine
+// sees only a dense list of strings.
 test("the count-only contribution filter and the cascade agree on the singleton rule", () => {
   const vectors: Array<Array<string>> = [
     [],
@@ -435,17 +426,16 @@ test("the count-only contribution filter and the cascade agree on the singleton 
 });
 
 test("a duplicated response does not inflate the reported cardinality", async () => {
-  // The sender's cheapest inflation attempt on the one figure a count-only run
-  // produces: repeat the response's encrypted elements. psilink's own frame guard
-  // does not close that class -- the response element bound is the raw
-  // `keyCount * recordCount` product (psiElementBounds, connection/frameSize.ts),
-  // which upper-bounds a party's DISTINCT values, so a dataset holding any repeated
-  // or empty key value leaves room for more elements than the receiver contributed.
-  // What refuses the inflation is the vendored library's own cardinality operation, a
-  // measured property of that library rather than something psilink enforces: driven
-  // here at the engine seam, with every element repeated five times, the count is
-  // unchanged. A library bump that changed the property fails here rather than
-  // silently raising a reported count.
+  // The sender's cheapest inflation attempt on a count-only run's one figure:
+  // repeat the response's encrypted elements. psilink's frame guard does not
+  // close this -- the response element bound (psiElementBounds,
+  // connection/frameSize.ts) is `keyCount * recordCount`, which upper-bounds
+  // a party's DISTINCT values, so a dataset with any repeated or empty key
+  // leaves room for more elements than the receiver contributed. What
+  // refuses the inflation is the vendored library's own cardinality
+  // operation, driven here with every element repeated five times: the
+  // count is unchanged. A library bump that changed this fails here instead
+  // of silently inflating the reported count.
   const countOnlySender = inProcess(wasm, "starter", "sender", "count-only");
   const countOnlyReceiver = inProcess(wasm, "joiner", "receiver", "count-only");
 
@@ -475,9 +465,10 @@ test("a duplicated response does not inflate the reported cardinality", async ()
 });
 
 test("the library's cardinality operation reports the multiset size the filter excludes", () => {
-  // The premise behind the uniqueness filter, driven against the real library: a
-  // raw column passed through counts a value repeated on both sides once per
-  // matched pair -- three here, where the filtered round yields one.
+  // The assumption behind the uniqueness filter, driven against the real
+  // library: a raw column passed through counts a value repeated on both
+  // sides once per matched pair -- three here, where the filtered round
+  // yields one.
   const server = wasm.server!.createWithNewKey(false);
   const client = wasm.client!.createWithNewKey(false);
   try {
@@ -604,11 +595,12 @@ describe.each(backendPairs)("count-only backend parity: $name", (pair) => {
       settled(() => countOnlyReceiver.computeAssociationTable(response)),
     ).rejects.toThrow();
 
-    // The refusal is pinned to the reveal flag the request carries disagreeing with
-    // the one this sender's key was generated under, on EITHER backend: the flag is
-    // read off the request and the condition named before the library is asked, which
-    // is what makes the WebAssembly sender's diagnosis as good as the addon's (the
-    // library itself surfaces this as an opaque marshalling error there).
+    // The refusal is pinned to the reveal flag the request holds disagreeing
+    // with the one this sender's key was generated under, on EITHER backend:
+    // the flag is read off the request and the condition named before the
+    // library is asked, which is what makes the WebAssembly sender's
+    // diagnosis as good as the addon's (the library itself reports this as
+    // an opaque marshalling error there).
     const revealingRequest =
       await revealingReceiver.createClientRequest(receiverValues);
     await expect(

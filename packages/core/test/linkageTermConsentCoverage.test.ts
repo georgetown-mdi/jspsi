@@ -12,15 +12,15 @@ import type { ConsentRelevantTerm } from "../src/linkageTermConsentCoverage.js";
 
 /**
  * Every property path {@link LinkageTerms} and the structs nested under it
- * declare. Derived rather than listed because the classification table it feeds
- * must fail on a field added to core, and a list only ever covers what someone
- * remembered to add to it. The judgment the derivation cannot make -- whether an
- * acceptor's consent turns on a field -- is what the table supplies.
+ * declare. Derived rather than listed, so the classification table it feeds
+ * must fail on a field added to core rather than silently missing it. The
+ * judgment the derivation cannot make -- whether an acceptor's consent turns
+ * on a field -- is what the table supplies.
  *
- * A transform step's `params` is the one position whose index signature is the
- * value rather than structure: consent turns on the parameters as a set, so the
- * record is classified whole. Any other index signature reaching the derivation
- * throws instead.
+ * A transform step's `params` is the one position whose index signature is
+ * the value rather than structure: consent turns on the parameters as a set,
+ * so the record is classified whole. Any other index signature reaching the
+ * derivation throws.
  */
 function declaredTermPositions(): Set<string> {
   return declaredPositions({
@@ -53,14 +53,15 @@ function valuePositions(declared: ReadonlySet<string>): Set<string> {
 }
 
 /**
- * The value a terms document holds at each derived value position, as the ordered
- * list of every occurrence (array entries collapse onto one path, so a changed
- * count shows up as a changed list). The walk stops at a value position, so a
- * `params` record is compared whole -- the grain its classification is made at.
+ * The value a terms document holds at each derived value position, as the
+ * ordered list of every occurrence (array entries collapse onto one path, so
+ * a changed count shows up as a changed list). The walk stops at a value
+ * position, so a `params` record is compared whole -- the grain its
+ * classification is made at.
  *
- * A primitive at a path the derivation does not name would mean the walk stopped
- * short of a field the schema admits, which would silently shrink what the
- * variants below are checked against, so it throws rather than being skipped.
+ * A primitive at a path the derivation does not name means the walk stopped
+ * short of a field the schema admits, so it throws rather than silently
+ * shrinking what the variants below are checked against.
  */
 function valuesByPosition(
   terms: LinkageTerms,

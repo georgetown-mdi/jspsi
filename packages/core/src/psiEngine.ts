@@ -47,17 +47,18 @@ function modeName(revealsIdentifiers: boolean): PsiEngineMode {
 /**
  * @internal
  *
- * The values a party contributes to a count-only round: those occurring EXACTLY
- * ONCE in its own dataset, in input order. Every occurrence of a repeated value is
- * dropped, not just the later ones -- an ambiguous match cannot be attributed to a
- * single record.
+ * The values a party contributes to a count-only round: those occurring
+ * EXACTLY ONCE in its own dataset, in input order. Every occurrence of a
+ * repeated value is dropped, not just the later ones -- an ambiguous match
+ * cannot be attributed to a single record.
  *
- * Normative for psi-c (docs/spec/PROTOCOL.md, PSI-C), and not a filter the library
- * applies: its cardinality operation reports the size of the MULTISET
- * intersection, where a value repeated on both sides contributes the smaller of
- * the two multiplicities. A count-only round surfaces no identifier that would
- * contradict such a figure, so the filter is applied here, at the seam that owns
- * the contribution, rather than left to a caller.
+ * Normative for psi-c (docs/spec/PROTOCOL.md, PSI-C), and not a filter the
+ * library applies: its cardinality operation reports the size of the
+ * MULTISET intersection, where a value repeated on both sides contributes
+ * the smaller of the two multiplicities. A count-only round shows no
+ * identifier that would contradict such a figure, so the filter is applied
+ * here, at the point that owns the contribution, rather than left to a
+ * caller.
  */
 export function valuesContributedExactlyOnce(
   values: ReadonlyArray<string>,
@@ -69,27 +70,29 @@ export function valuesContributedExactlyOnce(
 }
 
 /**
- * The CPU-bound PSI crypto core behind {@link ./participant.PSIParticipant}. It
- * owns the library's stateful `server` / `client` objects -- and thus the secret
- * key -- and performs the deserialize + elliptic-curve masking + serialize for each
- * protocol step, taking raw bytes / value lists and returning raw bytes / index
- * lists.
+ * The CPU-bound PSI crypto core behind {@link ./participant.PSIParticipant}.
+ * It owns the library's stateful `server` / `client` objects -- and thus
+ * the secret key -- and performs the deserialize + elliptic-curve masking +
+ * serialize for each protocol step, taking raw bytes / value lists and
+ * returning raw bytes / index lists.
  *
- * The whole surface is deliberately bytes-in / bytes-out (or value-list-in): nothing
- * that crosses it is a live library handle, so a worker-hosted implementation can
- * stand behind the same interface without the caller changing. The one piece of
- * cross-call state -- the joiner's deserialized setup between
- * {@link receiveServerSetup} and the match that consumes it -- lives INSIDE the
- * engine for the same reason: the deserialized setup cannot cross a worker
+ * The whole interface is bytes-in / bytes-out (or value-list-in) by design:
+ * nothing that crosses it is a live library handle, so a worker-hosted
+ * implementation can stand behind the same interface without the caller
+ * changing. The one piece of cross-call state -- the joiner's deserialized
+ * setup between {@link receiveServerSetup} and the match that consumes it
+ * -- lives INSIDE the engine for the same reason: it cannot cross a worker
  * boundary, so the engine holds it rather than handing it back.
  *
- * The host-side, pre-deserialize element-count guards stay ABOVE this seam in
- * {@link ./participant.PSIParticipant}, which runs them on the raw wire bytes before
- * dispatching here, so the engine only ever deserializes an already-bounded frame.
+ * The host-side, pre-deserialize element-count guards stay above this
+ * boundary, in {@link ./participant.PSIParticipant}, which runs them on the
+ * raw wire bytes before dispatching here, so the engine only ever
+ * deserializes an already-bounded frame.
  *
- * An engine is built for exactly one {@link PsiEngineMode}, and the operations of
- * the other mode refuse rather than return: which disclosure a round produces is
- * fixed with the key it is produced under, not chosen when the result is read.
+ * An engine is built for exactly one {@link PsiEngineMode}, and the
+ * operations of the other mode refuse rather than return: which disclosure
+ * a round produces is fixed with the key it is produced under, not chosen
+ * when the result is read.
  */
 export interface PsiEngine {
   /**
@@ -113,8 +116,8 @@ export interface PsiEngine {
   /**
    * Encrypts this party's values once under the client key. Client role. A
    * count-only engine contributes only the values occurring exactly once in
-   * `values`, and the request carries its cleared reveal flag, which the partner's
-   * server enforces agreement on.
+   * `values`, and the request holds its cleared reveal flag, which the
+   * partner's server enforces agreement on.
    */
   createClientRequest(values: ReadonlyArray<string>): Promise<Uint8Array>;
   /**
@@ -159,12 +162,12 @@ export interface PsiEngine {
 }
 
 /**
- * The default {@link PsiEngine}: runs the crypto synchronously on the calling
- * thread, wrapping the injected {@link PSILibrary}. This is today's behavior,
- * extracted behind the interface so a worker-backed engine can replace it without
- * disturbing {@link ./participant.PSIParticipant} or its callers. The browser and
- * every test use it directly; the CLI wraps a worker-backed engine around the same
- * per-thread logic.
+ * The default {@link PsiEngine}: runs the crypto synchronously on the
+ * calling thread, wrapping the injected {@link PSILibrary}, extracted
+ * behind the interface so a worker-backed engine can replace it without
+ * disturbing {@link ./participant.PSIParticipant} or its callers. The
+ * browser and every test use it directly; the CLI wraps a worker-backed
+ * engine around the same per-thread logic.
  */
 export class InProcessPsiEngine implements PsiEngine {
   private readonly library: PSILibrary;
@@ -183,19 +186,20 @@ export class InProcessPsiEngine implements PsiEngine {
     library: PSILibrary,
     role: Config["role"],
     id: string,
-    // Fixed here rather than per call: the reveal flag it sets is generated into
-    // the key objects below and rides the request on the wire, so a round's
-    // disclosure is settled with its key. Required rather than defaulted, because a
-    // default is a disclosure a caller can reach by forgetting: a revealing round
-    // run under count-only terms is the substitution the mode exists to prevent.
+    // Fixed here rather than per call: the reveal flag it sets is generated
+    // into the key objects below and rides the request on the wire, so a
+    // round's disclosure is fixed together with its key. Required rather
+    // than defaulted, because a default is a disclosure a caller can reach
+    // by forgetting: a revealing round run under count-only terms is the
+    // substitution the mode exists to prevent.
     mode: PsiEngineMode,
   ) {
     this.library = library;
     this.id = id;
     this.revealsIdentifiers = modeRevealsIdentifiers(mode);
-    // Generate the fresh secret key for this exchange, held inside the library's
-    // server / client object. An unresolved ("either") role creates neither; the
-    // role-guarded methods below then reject, exactly as before this extraction.
+    // Generate the fresh secret key for this exchange, held inside the
+    // library's server / client object. An unresolved ("either") role
+    // creates neither; the role-guarded methods below then reject.
     if (role === "starter") {
       this.server = library.server!.createWithNewKey(this.revealsIdentifiers);
     } else if (role === "joiner") {
@@ -231,15 +235,13 @@ export class InProcessPsiEngine implements PsiEngine {
         `${this.id}: processClientRequest requires the server role`,
       );
     const request = this.library.request.deserializeBinary(requestBytes);
-    // The reveal flag rides the request, and the library refuses to serve a request
-    // whose flag disagrees with the key this server was created under -- the
-    // wire-enforced mode agreement (docs/spec/PROTOCOL.md, PSI-C). Read the flag and
-    // name the condition here: the native addon names it, but the WebAssembly build
-    // surfaces the same refusal as an opaque embind marshalling error, which leaves a
-    // count-only sender unable to tell "the partner ran the revealing mode" from
-    // "the frame was malformed". Both are protocol aborts; only this one names a
-    // partner whose run mode contradicts the agreed algorithm. Fixed literals only:
-    // the request is partner-supplied.
+    // The reveal flag rides the request, and the library refuses to serve a
+    // request whose flag disagrees with the key this server was created
+    // under -- the wire-enforced mode agreement (docs/spec/PROTOCOL.md,
+    // PSI-C). Read the flag and name the condition here: the native addon
+    // names it, but the WebAssembly build reports the same refusal as an
+    // opaque embind marshalling error, indistinguishable from a malformed
+    // frame. Fixed literals only: the request is partner-supplied.
     if (request.getRevealIntersection() !== this.revealsIdentifiers)
       throw new Error(
         `${this.id} protocol error: the partner's PSI request ran the ` +
@@ -263,15 +265,15 @@ export class InProcessPsiEngine implements PsiEngine {
 
   receiveServerSetup(setupBytes: Uint8Array): Promise<void> {
     const setup = this.library.serverSetup.deserializeBinary(setupBytes);
-    // This protocol only ever sends a Raw server setup (createSetupMessage with
-    // dataStructure.Raw), so a received setup whose data-structure oneof is anything
-    // other than Raw -- or is unset -- is malformed: getRaw() reads undefined, and
-    // the reveal-intersection path requires Raw and aborts on it with a cryptic
-    // library error. Reject it here as a clean protocol abort. (The pre-deserialize
-    // element scan in PSIParticipant already bounded the setup's allocation; a
-    // non-Raw setup carries a single bounded byte blob, not a repeated element list,
-    // so it does not amplify -- this is a correctness / fail-closed guard, not a
-    // memory bound.)
+    // This protocol only ever sends a Raw server setup (createSetupMessage
+    // with dataStructure.Raw), so a received setup whose data-structure
+    // oneof is anything other than Raw -- or is unset -- is malformed:
+    // getRaw() reads undefined, and the reveal-intersection path requires
+    // Raw and aborts on it with a cryptic library error. Reject it here as
+    // a clean protocol abort. (A non-Raw setup holds a single bounded byte
+    // blob, not a repeated element list, so this is a correctness /
+    // fail-closed guard, not a memory bound -- the pre-deserialize element
+    // scan in PSIParticipant already bounded the setup's allocation.)
     if (!setup.getRaw())
       throw new Error(
         `${this.id} protocol error: PSI server setup is not a Raw data structure`,

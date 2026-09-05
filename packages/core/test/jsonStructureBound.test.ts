@@ -2,12 +2,11 @@ import { expect, test } from "vitest";
 
 import { exceedsJsonStructureBound } from "../src/utils/jsonStructureBound";
 
-// Each test isolates one bound by overriding it and leaving the others generous,
-// so a failure points at the bound under test. Small explicit values keep the
-// over/under cases tiny and legible; the scan is bound-agnostic, so behavior at
-// keys/elements/depth of 4 generalizes to the production values. The helper runs
-// both representations the scanner accepts -- the UTF-8 bytes and the string --
-// and asserts they agree, so every case below covers both paths for free.
+// Each test isolates one bound by overriding it and leaving the others
+// generous. The scan is bound-agnostic, so small values (4) generalize to
+// the production budgets. `check` runs both representations the scanner
+// accepts -- UTF-8 bytes and string -- and asserts they agree, so every
+// case below covers both paths.
 function check(
   json: string,
   { keys = 1_000, elements = 1_000, depth = 1_000 } = {},

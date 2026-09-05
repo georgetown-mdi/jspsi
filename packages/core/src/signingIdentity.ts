@@ -23,24 +23,23 @@ import {
 import type { CanonicalValue } from "./utils/canonical.js";
 import type { P256PrivateJwk, P256PublicJwk } from "./signingKeys.js";
 
-// The long-lived signing identity that backs certificate-mode exchange receipts
-// (Phase 2). Each party generates one keypair and one self-signed certificate
-// carrying its `identity`, persists it owner-read-only, and reuses it across
-// every exchange and every partner. The partner pins this certificate's
-// fingerprint out-of-band at setup; every later receipt verifies against the
-// same key, so the identity must be stable for its whole life. Regenerating it
-// is a deliberate act that invalidates any fingerprint a partner has pinned.
+// The long-lived signing identity that backs certificate-mode exchange
+// receipts (Phase 2). Each party generates one keypair and one self-signed
+// certificate holding its `identity`, persists it owner-read-only, and
+// reuses it across every exchange and every partner. The partner pins this
+// certificate's fingerprint out-of-band at setup; every later receipt
+// verifies against the same key, so the identity must stay stable for its
+// whole life. Regenerating it invalidates any fingerprint a partner has
+// pinned.
 //
-// Trust model: pinned self-signed. There is no CA chain and no revocation -- the
-// fingerprint pin, exchanged over a trusted out-of-band channel, IS the trust
-// anchor (the same channel the parties already use for the invitation). The
-// certificate format is a small canonical-JSON document signed over its RFC 8785
-// canonical bytes, reusing the project's single canonicalization primitive
-// rather than introducing an X.509/ASN.1 surface; see docs/SECURITY_DESIGN.md
-// for the rationale and the extensibility seam toward an authority-backed mode.
+// Trust model: pinned self-signed. There is no CA chain and no revocation --
+// the fingerprint pin, exchanged out-of-band over the same channel as the
+// invitation, is the trust anchor. The certificate format is a small
+// canonical-JSON document signed over its RFC 8785 canonical bytes; see
+// docs/SECURITY_DESIGN.md.
 //
 // Key handling, the signature encoding, and the algorithm parameters live in
-// signingKeys.ts, the one chokepoint this module and signedReceipt.ts share.
+// signingKeys.ts, shared with signedReceipt.ts.
 
 export { SigningError } from "./signingKeys.js";
 export type { P256PrivateJwk } from "./signingKeys.js";
@@ -49,10 +48,9 @@ export type { P256PrivateJwk } from "./signingKeys.js";
 
 /** Single recognized certificate format version; a reader rejects any other
  * value rather than migrating it. Doubles as the format discriminant over the
- * signature scheme and the public-key representation together, so a document
- * written under a different version is refused rather than reinterpreted under
- * this one; a future authority-backed (X.509) representation would likewise be a
- * distinct version. */
+ * signature scheme and the public-key representation together: a document
+ * written under a different version is refused, not reinterpreted under this
+ * one. */
 export const SIGNING_CERTIFICATE_VERSION = "psilink-signing-cert/v2";
 
 /** Single recognized version for the on-disk signing identity file (private key
@@ -61,20 +59,19 @@ export const SIGNING_IDENTITY_VERSION = "psilink-signing-identity/v2";
 
 // Domain-separation labels folded into the bytes that are signed and hashed.
 // They keep a certificate self-signature cryptographically distinct from a
-// receipt signature and from the fingerprint pre-image, so a signature or digest
-// produced in one context can never be replayed as another. Keep them distinct
-// -- this is the same domain-separation discipline used for the exchange-record
-// commitments and the agreed-terms hash. They are not versioned alongside the
-// certificate format: the body's own `version` field is inside the bytes both
-// labels cover, so a v1 and a v2 body already separate.
+// receipt signature and from the fingerprint pre-image, so a signature or
+// digest produced in one context can never be replayed as another. Not
+// versioned alongside the certificate format: the body's own `version` field
+// is already inside the bytes both labels cover, so a v1 and a v2 body
+// already separate.
 const CERTIFICATE_SIGNATURE_DOMAIN = "psilink-signing-cert-signature/v1";
 const CERTIFICATE_FINGERPRINT_DOMAIN = "psilink-signing-cert-fingerprint/v1";
 
 /** The one signature algorithm supported by this certificate version: ECDSA
  * over P-256 with SHA-256, the signature encoded as the fixed-length raw
- * `r || s` (IEEE P1363). A field rather than an implicit assumption so an
- * authority-backed mode (which may carry another scheme) can add a value without
- * changing the certificate shape. */
+ * `r || s` (IEEE P1363). A field rather than an implicit assumption, so an
+ * authority-backed mode (which may use another scheme) can add a value
+ * without changing the certificate shape. */
 type SigningAlgorithm = "ecdsa-p256-sha256";
 
 const SIGNING_ALGORITHM: SigningAlgorithm = "ecdsa-p256-sha256";
@@ -175,7 +172,7 @@ const SigningIdentitySchema: z.ZodType<SigningIdentity> = z.object({
 
 /** Extract just the signed/fingerprinted body from a certificate, in a fixed
  * shape, so the signature- and fingerprint-input bytes never depend on extra
- * fields or property order a caller's object might carry. */
+ * fields or property order a caller's object might hold. */
 function certificateBody(cert: CertificateBody): CanonicalValue {
   return {
     version: cert.version,
@@ -207,14 +204,14 @@ function fingerprintInput(cert: CertificateBody): Uint8Array<ArrayBuffer> {
 // --- Fingerprint -------------------------------------------------------------
 
 /**
- * Compute a certificate's fingerprint: the unpadded base64url SHA-256 over the
- * domain-separated canonical encoding of the certificate body. The body carries
- * both the public key and the asserted identity, so the fingerprint binds them
- * together -- pinning a fingerprint pins that key-to-identity binding. It covers
- * the body and never the signature, so it stays a known answer for a given key
- * and identity even though ECDSA signing is randomized. The same logical
- * certificate yields the same fingerprint on any implementation (RFC 8785); see
- * docs/spec/CANONICAL_ENCODING.md.
+ * Compute a certificate's fingerprint: the unpadded base64url SHA-256 over
+ * the domain-separated canonical encoding of the certificate body. The body
+ * holds both the public key and the asserted identity, so the fingerprint
+ * binds them together -- pinning a fingerprint pins that key-to-identity
+ * binding. It covers the body and never the signature, so it stays a known
+ * answer for a given key and identity even though ECDSA signing is
+ * randomized. The same logical certificate yields the same fingerprint on
+ * any implementation (RFC 8785); see docs/spec/CANONICAL_ENCODING.md.
  */
 export async function computeCertificateFingerprint(
   cert: CertificateBody,
@@ -235,13 +232,13 @@ interface GenerateSigningIdentityOptions {
 
 /**
  * Generate a new long-lived signing identity bound to `identity`: a P-256
- * keypair, a self-signed certificate carrying `identity` and the public key, and
- * the private key. The certificate's fingerprint is fully determined by the key
- * and the identity; the self-signature is not, because ECDSA signing is
- * randomized.
+ * keypair, a self-signed certificate holding `identity` and the public key,
+ * and the private key. The certificate's fingerprint is fully determined by
+ * the key and the identity; the self-signature is not, because ECDSA
+ * signing is randomized.
  *
- * @throws {SigningError} if `identity` is empty or `options.privateKey` is not a
- *   valid P-256 private key.
+ * @throws {SigningError} if `identity` is empty or `options.privateKey` is
+ *   not a valid P-256 private key.
  */
 export async function generateSigningIdentity(
   identity: string,
@@ -329,8 +326,8 @@ export async function verifyCertificateSelfSignature(
  * validation this rejects a public key that is not a canonically encoded point
  * on P-256 and a certificate whose self-signature does not verify, so a parsed
  * certificate is always internally consistent (it does not establish trust --
- * that is the pin's job). A certificate carrying any other `version` is rejected
- * by the schema rather than reinterpreted under this scheme.
+ * that is the pin's job). A certificate with any other `version` is rejected
+ * by the schema, not reinterpreted under this one.
  *
  * @throws {ZodError} if the shape is invalid.
  * @throws {SigningError} if the key is malformed or the self-signature does not
@@ -420,7 +417,7 @@ function canonicalBytesEqual(a: string, b: string): boolean {
 /**
  * Assert that `certificate` authorizes `assertedIdentity`, throwing a
  * {@link SigningError} otherwise. Used to gate accepting a receipt: a receipt
- * whose asserted identity is not the one its presenting certificate carries is
+ * whose asserted identity is not the one its presenting certificate holds is
  * rejected.
  */
 export function assertCertificateAuthorizesIdentity(
@@ -449,29 +446,24 @@ export async function matchesPinnedFingerprint(
     actualBytes = fromBase64Url(actual);
     pinnedBytes = fromBase64Url(pinnedFingerprint);
   } catch {
-    // A malformed pinned value cannot match anything.
-    //
-    // A malformed pin is indistinguishable here from a genuine mismatch -- both
-    // end as "fingerprint does not match" -- so a caller validates the pin
-    // against FINGERPRINT_REGEX before it reaches this comparison and reports a
-    // malformed one as its own error. The exchange path gets that from
-    // SigningConfigSchema; `verify-receipt` validates both its
-    // --partner-fingerprint flag and the config value it reads directly. A caller
-    // that skips it turns "your pin is malformed" into "the partner's
-    // certificate does not match", which is a confusing diagnosis rather than an
-    // unsafe one: this returns false either way.
+    // A malformed pinned value cannot match anything, so this returns false
+    // rather than throwing. A caller should validate the pin against
+    // FINGERPRINT_REGEX before this comparison to report a malformed pin as
+    // its own error rather than a certificate mismatch; the exchange path
+    // gets that from SigningConfigSchema, and `verify-receipt` validates
+    // both its --partner-fingerprint flag and the config value directly.
     return false;
   }
   return bytesEqual(actualBytes, pinnedBytes);
 }
 
 /**
- * Assert that a presented partner certificate is trusted: it self-verifies and
- * its fingerprint matches the pinned value. Rejects, with a clear error, a
- * certificate presented when no fingerprint is pinned (`pinnedFingerprint`
- * absent), one whose self-signature does not verify, and one whose fingerprint
- * does not match the pin -- in every case before any receipt it carries is
- * accepted.
+ * Assert that a presented partner certificate is trusted: it self-verifies
+ * and its fingerprint matches the pinned value. Rejects, with a clear error,
+ * a certificate presented when no fingerprint is pinned (`pinnedFingerprint`
+ * absent), one whose self-signature does not verify, and one whose
+ * fingerprint does not match the pin -- in every case before any receipt
+ * presented with it is accepted.
  *
  * @throws {SigningError}
  */
@@ -485,7 +477,7 @@ export async function assertPartnerCertificateTrusted(
         "certificate cannot be trusted; obtain the partner's fingerprint " +
         "out-of-band and set signing.partner_fingerprint",
     );
-  // Surface the precise reason (invalid key vs. failed signature) with
+  // Report the precise reason (invalid key vs. failed signature) with
   // partner-facing context rather than a single generic message.
   try {
     await assertCertificateSelfSignature(certificate);
@@ -505,7 +497,7 @@ export async function assertPartnerCertificateTrusted(
 
 /** Inputs to {@link verifyPresentedCertificate}. */
 interface PresentedCertificateCheck {
-  /** The certificate presented by the partner (e.g. carried in a receipt). */
+  /** The certificate presented by the partner (e.g. included in a receipt). */
   certificate: SigningCertificate;
   /** The locally pinned partner fingerprint, if any. */
   pinnedFingerprint: string | undefined;

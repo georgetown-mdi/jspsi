@@ -31,23 +31,23 @@ const CAUSE_SEPARATOR = sanitizeErrorForDisplay(
 
 const linksOf = (rendered: string): string[] => rendered.split(CAUSE_SEPARATOR);
 
-// "This link was truncated" as a length comparison rather than a marker search,
-// because one first-party fragment (the over-long filename preview) ends with
-// the marker by construction and would read as a truncation that never happened.
-// The two are equivalent: sanitizeForDisplay appends a code point only when its
-// whole escape fits, an escape runs to at most ten characters, so a truncated
-// link retains more than COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH - 10 characters and
-// then carries the marker on top -- longer than the cap in every case, while an
+// "This link was truncated" as a length comparison rather than a marker
+// search, since one first-party fragment (the over-long filename preview)
+// ends with the marker by construction and would display as a truncation
+// that never happened. The two are equivalent: sanitizeForDisplay appends a
+// code point only when its whole escape fits (at most ten characters), so a
+// truncated link retains more than COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH - 10
+// characters plus the marker -- longer than the cap in every case, while an
 // untruncated link is within it by definition.
 const truncatedLinks = (rendered: string): string[] =>
   linksOf(rendered).filter(
     (link) => link.length > COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
   );
 
-// The class-uniform recovery step, read off a minimal construction of the class
-// rather than restated here: what each site is asserted to deliver is then the
-// sentence the class actually carries, and an edit to that sentence cannot leave
-// a stale copy passing here.
+// The class-uniform recovery step, read off a minimal construction of the
+// class rather than restated here: what each site is asserted to deliver is
+// then the sentence the class actually holds, and an edit to that sentence
+// cannot leave a stale copy passing here.
 const recoveryStepOf = (error: Error): string =>
   linksOf(sanitizeErrorForDisplay(error))[1];
 
@@ -80,13 +80,13 @@ const TEMP_FILENAME = `temp-${PEER_ID}.tmp`;
 // message name.
 const ACK_FILENAME = `${PEER_ID}-${MESSAGE_FILENAME.replace(/\.json$/, "")}-ack.json`;
 
-// The widest name a listed entry can carry through the shipped path: the bound
+// The widest name a listed entry can have on the shipped path: the bound
 // the CLI's directory-listing guard enforces on every entry it enumerates
 // (MAX_FILENAME_LENGTH, apps/cli/src/connection/listingGuard.ts). It is
-// restated rather than imported because packages/core does not depend on
-// apps/cli, and it is the tightest bound there is -- core bounds no filename of
-// its own, and the SFTP protocol imposes none either, so a name reaching the
-// frame gate is bounded only by whichever adapter listed it.
+// restated rather than imported since packages/core does not depend on
+// apps/cli, and it is the tightest bound there is -- core bounds no
+// filename of its own, and the SFTP protocol imposes none either, so a
+// name reaching the frame gate is bounded only by whichever adapter listed it.
 const MAX_LISTED_FILENAME_LENGTH = 255;
 // A peer message file at exactly that width, still selected by the loop's
 // message grammar: the peer prefix the scan keys on and the byte-count terminal
@@ -127,8 +127,8 @@ async function boundTransportOf(
   const config: FileDropConnectionConfig = {
     channel: "filedrop",
     path: RENDEZVOUS_PATH,
-    // Short enough that the budget fires promptly; the number it reports is the
-    // one variable the budget's own summary carries, and a wider one only
+    // Short enough that the budget fires promptly; the number it reports is
+    // the one variable the budget's own summary holds, and a wider one only
     // shortens the margin measured here by the digits it adds.
     options: { peerTimeoutMs: 20 },
   };
@@ -189,13 +189,13 @@ async function frameGateRefusal(messageName: string): Promise<unknown> {
   }
 }
 
-// Every core site that raises one of the three bounded-transport refusals and
-// whose error reaches an operator through sanitizeErrorForDisplay, each driven
-// by its real route. The two teardown constructions in `close()` are
-// deliberately absent: the drain's rejection is swallowed by its own catch and
+// Every core site that raises one of the three bounded-transport refusals
+// and whose error reaches an operator through sanitizeErrorForDisplay, each
+// driven by its real route. The two teardown constructions in `close()` are
+// absent by design: the drain's rejection is swallowed by its own catch and
 // `end()`'s is written to a debug log by message, so neither reaches the
-// cause-chain renderer this file measures. A site added later is covered by the
-// class-level invariants at the foot of this file, not by this table.
+// cause-chain renderer this file measures. A site added later is covered by
+// the class-level invariants at the foot of this file, not by this table.
 const CORE_SITES: Array<{
   name: string;
   recoveryStep: string;
@@ -236,10 +236,10 @@ const CORE_SITES: Array<{
     },
   },
   {
-    // The one bounded operation naming two transport paths, more than a display
-    // budget of them before any fixed copy is counted, so each takes a link of
-    // its own. The width at which one link could not carry both is driven
-    // below.
+    // The one bounded operation naming two transport paths, more than a
+    // display budget of them before any fixed copy is counted, so each
+    // takes a link of its own. The width at which one link could not hold
+    // both is driven below.
     name: "whole-exchange transport budget, rename",
     recoveryStep: STALLED_RECOVERY_STEP,
     raise: async () => {
@@ -280,13 +280,14 @@ for (const site of CORE_SITES) {
   });
 }
 
-// The two core sites naming more than one chooser, driven at the widest values
-// the shipped path admits rather than at the ordinary sizes above. One chooser
-// per link is what the ordinary sizes cannot pin: two of them share a link
-// undetected until the first fills the budget, and then the cap deletes the
-// second outright and the first can forge the label that would have introduced
-// it. Each delivery below is a width at which one link could not carry both, so
-// a site that folded its two choosers back together fails here.
+// The two core sites naming more than one chooser, driven at the widest
+// values the shipped path admits rather than at the ordinary sizes above.
+// One chooser per link is what the ordinary sizes cannot pin: two of them
+// share a link undetected until the first fills the budget, and then the
+// cap deletes the second outright and the first can forge the label that
+// would have introduced it. Each delivery below is a width at which one
+// link could not hold both, so a site that folded its two choosers back
+// together fails here.
 
 test("the writing peer keeps a link of its own at the widest message filename a listing admits", async () => {
   expect(WIDEST_MESSAGE_FILENAME).toHaveLength(MAX_LISTED_FILENAME_LENGTH);

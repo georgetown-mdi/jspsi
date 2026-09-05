@@ -13,21 +13,17 @@ import type { InvitationToken } from "../src/config/invitation";
 import type { RendezvousRole } from "../src/rendezvous";
 
 /**
- * The core half of the CLI<->web WebRTC interop conformance check.
- *
- * A CLI peer and a browser peer implement the same rendezvous and authenticated
- * key exchange from this package, independently, so a change to a construction
- * neither app owns -- the invitation encoding or the peer-id derivation -- would
- * pass both apps' own suites and fail only when the two first meet. Those two
- * have a single implementation here and no app-side degrees of freedom, so this
- * file pins them against the literal known-answer vectors in
+ * The core half of the CLI<->web WebRTC interop conformance check: a CLI
+ * peer and a browser peer implement the same rendezvous and authenticated
+ * key exchange from this package, independently. This file pins that
+ * single implementation against the known-answer vectors in
  * test/vectors/webrtc-interop-vectors.json (produced by an independent
- * node:crypto generator beside it). The parts each app DOES construct for itself
- * -- which peer id it registers under, which handshake role and
- * request-encryption flag it feeds the key exchange, how it builds and consumes
- * the token -- are driven from each app's own suite against the same file:
- * apps/cli/test/unit/webrtcInterop.test.ts, apps/cli/test/unit/webrtcDispatch.test.ts,
- * and apps/web/test/unit/webrtcInterop.test.ts.
+ * node:crypto generator beside it). The parts each app constructs for
+ * itself -- peer id, handshake role, request-encryption flag, and token
+ * handling -- are driven from each app's own suite against the same file:
+ * apps/cli/test/unit/webrtcInterop.test.ts,
+ * apps/cli/test/unit/webrtcDispatch.test.ts, and
+ * apps/web/test/unit/webrtcInterop.test.ts.
  */
 
 interface InteropVectors {
@@ -140,7 +136,7 @@ describe("invitation encoding", () => {
 
   test("the token carries the secret the peer ids are derived from", () => {
     // Ties the two halves of the fixture together: an app that decodes this
-    // token and derives a rendezvous id from what it carries lands on the ids
+    // token and derives a rendezvous id from what it holds lands on the ids
     // pinned above.
     expect(vectors.invitation.token.sharedSecret).toBe(
       vectors.inputs.sharedSecret,

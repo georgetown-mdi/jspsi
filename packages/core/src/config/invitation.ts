@@ -18,7 +18,7 @@ import { boundedArray } from "../utils/boundedArray.js";
 
 /**
  * A WebRTC signaling locator: where the acceptor reaches the PeerJS
- * peer-coordination server. Carries no PeerJS API key or other secret.
+ * peer-coordination server. Has no PeerJS API key or other secret.
  */
 export interface WebRTCEndpoint {
   channel: "webrtc";
@@ -42,11 +42,9 @@ export interface SFTPEndpoint {
   /**
    * Inbound (peer-written) remote directory for a split-directory exchange, as
    * the INVITER sees it. The acceptor mirror-swaps the pair -- the inviter's
-   * outbound becomes the acceptor's inbound and vice versa -- so the two parties
-   * start as mirror images (the swap lives at the single consumer
-   * `connectionFromEndpoint` in apps/cli). Carried as a pair with
-   * {@link outboundPath}: both halves present or neither, and mutually exclusive
-   * with {@link path}.
+   * outbound becomes the acceptor's inbound and vice versa (the swap lives at
+   * `connectionFromEndpoint` in apps/cli). Paired with {@link outboundPath}:
+   * both halves present or neither, mutually exclusive with {@link path}.
    */
   inboundPath?: string;
   /**
@@ -69,8 +67,8 @@ export interface FileDropEndpoint {
   /**
    * Inbound (peer-written) directory for a split-directory exchange, as the
    * INVITER sees it; the acceptor mirror-swaps the pair (see
-   * {@link SFTPEndpoint.inboundPath}). Carried as a pair with
-   * {@link outboundPath}; mutually exclusive with {@link path}.
+   * {@link SFTPEndpoint.inboundPath}). Paired with {@link outboundPath};
+   * mutually exclusive with {@link path}.
    */
   inboundPath?: string;
   /**
@@ -81,41 +79,35 @@ export interface FileDropEndpoint {
 }
 
 /**
- * A credential-free connection locator an invitation MAY carry so the acceptor
+ * A credential-free connection locator an invitation MAY hold so the acceptor
  * can reach the rendezvous point without separate out-of-band setup.
  * Discriminated by `channel`, mirroring `ConnectionConfig` in `connection.ts`.
  *
- * INVARIANT: an endpoint carries only a public locator (signaling URL, SFTP
+ * INVARIANT: an endpoint contains only a public locator (signaling URL, SFTP
  * host/port, file-drop path, or a split inbound/outbound directory pair) and
- * MUST NEVER carry credentials -- no password, private key, key file, or PeerJS
- * API key. The per-channel shapes have no
- * field for any of these, and {@link ConnectionEndpointSchema} rejects any
- * field outside the locator allowlist, so a credential cannot ride along. A
- * public locator is not a secret, so including it does not weaken the
- * invitation; see docs/SECURITY_DESIGN.md.
+ * MUST NEVER contain credentials -- no password, private key, key file, or
+ * PeerJS API key. The per-channel shapes have no field for any of these, and
+ * {@link ConnectionEndpointSchema} rejects any field outside the locator
+ * allowlist, so a credential cannot ride along. A public locator is not a
+ * secret, so including it does not weaken the invitation.
  */
 export type ConnectionEndpoint =
   WebRTCEndpoint | SFTPEndpoint | FileDropEndpoint;
 
 // Custom error for the strict-object guard below: any field outside a channel's
 // locator allowlist is rejected rather than silently stripped. The message
-// leads with the allowlist (so a benign extra field like `username` is not
-// mischaracterized as an attempted credential) and names the kind of field the
-// rule excludes as the reason it is strict, rather than emitting Zod's generic
-// "Unrecognized key". The named fields are illustrative, not exhaustive: the
-// binding rule is the allowlist (anything that is not one of a channel's locator
-// fields -- channel/host/port/path, plus the inbound_path/outbound_path pair for
-// sftp/filedrop -- is rejected), so the examples here and in the docs are
-// representative and need not enumerate every connection field a future schema
-// might add.
+// leads with the allowlist (so a benign field like `username` is not
+// mischaracterized as an attempted credential), naming a few examples rather
+// than emitting Zod's generic "Unrecognized key". The named fields are
+// illustrative, not exhaustive: the binding rule is the allowlist itself
+// (channel/host/port/path, plus inbound_path/outbound_path for sftp/filedrop).
 const endpointKeyError: z.core.$ZodErrorMap = (issue) => {
   if (issue.code === "unrecognized_keys") {
     // The rejected key names are partner-controlled (the inviter crafts the
-    // token), and this message is surfaced to the accepting operator (the CLI
-    // terminal or the web accept screen) via the shared describeDecodeError,
-    // which relays the issue message as is. Escape each name so a key like
-    // "\x1b[31m..." cannot inject terminal control/ANSI sequences or deceptive
-    // Unicode.
+    // token). This message reaches the accepting operator (the CLI terminal or
+    // the web accept screen) through the shared describeDecodeError, which
+    // relays it as is, so each name is escaped -- a key like "\x1b[31m..." must
+    // not inject terminal control/ANSI sequences or deceptive Unicode.
     return (
       "a connection endpoint may carry only a credential-free locator (channel " +
       "plus host/port/path, or an inbound_path/outbound_path pair for a split " +
@@ -134,19 +126,17 @@ const endpointKeyError: z.core.$ZodErrorMap = (issue) => {
 };
 
 /**
- * Generous upper bound on a connection endpoint `host`. The host is
- * partner-controlled (the inviter crafts the token), and for a WebRTC endpoint
- * it is where the acceptor's own browser aims its PeerJS signaling WebSocket, so
- * an unbounded value is a (low-severity) SSRF-shaped nuisance. A DNS FQDN is at
- * most 253 characters and an IPv6 literal far shorter; 256 admits every real
- * hostname or IP an inviter would legitimately emit while refusing a padded one.
+ * Generous upper bound on a connection endpoint `host`: 256 characters. The
+ * host is partner-controlled (the inviter crafts the token), and for a WebRTC
+ * endpoint it is where the acceptor's browser aims its PeerJS signaling
+ * WebSocket, so an unbounded value is a low-severity SSRF-shaped nuisance. A
+ * DNS FQDN is at most 253 characters and an IPv6 literal far shorter, so 256
+ * admits every real hostname or IP while refusing a padded one.
  *
- * Length-only by design: a strict hostname/IP regex risks rejecting a legitimate
- * but unusual locator (an IPv6 literal, an internal name, a punycode IDN), and
- * the finding asks only for a length/format bound as cheap hardening. Applied to
- * both the WebRTC and SFTP endpoint hosts -- the finding named the WebRTC host
- * (the browser-SSRF vector), but the SFTP host is the identical
- * partner-controlled locator field, so neither is left unbounded.
+ * Length-only by design, not a strict hostname/IP regex, to avoid rejecting a
+ * legitimate but unusual locator (an IPv6 literal, an internal name, a punycode
+ * IDN). Applied to both the WebRTC and SFTP endpoint hosts: the SFTP host is
+ * the identical partner-controlled locator field, so neither is left unbounded.
  */
 export const MAX_ENDPOINT_HOST_LENGTH = 256;
 
@@ -166,15 +156,14 @@ export const MAX_ENDPOINT_PATH_LENGTH = 4096;
 // objects enforce the locator allowlist, so any credential field is rejected;
 // type safety is enforced at the ConnectionEndpointSchema level instead.
 /**
- * The credential-free WebRTC signaling-locator schema: `channel`/`host`/`port`/
- * `path` only, `z.strictObject` so any field outside that allowlist -- a PeerJS
- * `key`, a `server.username`, a `turn` entry -- is rejected rather than
- * stripped. Exported (unlike its sftp/filedrop siblings) as the single locator
- * source of truth the exchange-file mint layer composes a webrtc connection
- * block from, so the invitation endpoint and the composed connection agree on
- * the credential-free shape by construction rather than by two parallel
- * definitions. See {@link WebRTCEndpoint} for the aligned interface and
- * `connectionFromLocator` in exchangeFile.ts for the consumer.
+ * The credential-free WebRTC signaling-locator schema:
+ * `channel`/`host`/`port`/`path` only, `z.strictObject` so any field outside
+ * that allowlist -- a PeerJS `key`, a `server.username`, a `turn` entry -- is
+ * rejected rather than stripped. Exported (unlike its sftp/filedrop siblings)
+ * as the locator source of truth the exchange-file mint layer composes a webrtc
+ * connection block from, so the invitation endpoint and the composed connection
+ * agree on the shape by construction. See {@link WebRTCEndpoint} and
+ * `connectionFromLocator` in exchangeFile.ts.
  */
 export const WebRTCEndpointSchema = z.strictObject(
   {
@@ -182,8 +171,8 @@ export const WebRTCEndpointSchema = z.strictObject(
     host: z.string().min(1).max(MAX_ENDPOINT_HOST_LENGTH),
     // A reachable rendezvous port is 1-65535. Port 0 means "let the OS assign
     // an ephemeral port" and can never be an address an acceptor connects to,
-    // so the endpoint is deliberately stricter here than connection.ts (which
-    // allows 0): an invitation locator must name a port a peer can reach.
+    // so the endpoint is stricter here than connection.ts (which allows 0): an
+    // invitation locator must name a port a peer can reach.
     port: z.int().min(1).max(65535).optional(),
     // Non-empty when present: an empty path is a meaningless locator (a blank
     // signaling path), so omit the field rather than send "".
@@ -202,14 +191,13 @@ const SFTPEndpointSchema = z.strictObject(
     // Non-empty when present: an empty remote working directory is meaningless;
     // omit the field instead of sending "".
     path: z.string().min(1).max(MAX_ENDPOINT_PATH_LENGTH).optional(),
-    // The split-directory pair (the inviter's own inbound/outbound directories),
-    // mirror-swapped by the acceptor. Non-empty like `path`; the directory-mode
-    // refines on ConnectionEndpointSchema enforce both-or-neither, mutual
-    // exclusion with `path`, and that the two differ. Only the absolute-path rule
-    // stays deferred to connection.ts on the acceptor's final config -- it is a
-    // per-party property (the acceptor remaps the inviter's paths), so the
-    // inviter's absoluteness is not meaningful to the acceptor, exactly as the
-    // single-`path` form defers it.
+    // The split-directory pair (the inviter's own inbound/outbound
+    // directories), mirror-swapped by the acceptor. Non-empty like `path`;
+    // ConnectionEndpointSchema's directory-mode refines enforce
+    // both-or-neither, exclusion with `path`, and that the two differ.
+    // Absoluteness stays deferred to connection.ts on the acceptor's final
+    // config, since the acceptor remaps the paths and the inviter's
+    // absoluteness is not meaningful here.
     inboundPath: z.string().min(1).max(MAX_ENDPOINT_PATH_LENGTH).optional(),
     outboundPath: z.string().min(1).max(MAX_ENDPOINT_PATH_LENGTH).optional(),
     // No `username` (or other identity/auth field) by design: those are not
@@ -222,17 +210,17 @@ const SFTPEndpointSchema = z.strictObject(
 );
 
 // `path` (and each half of the split pair) is validated only as non-empty here,
-// NOT as absolute the way FileDropConnectionConfigSchema in connection.ts is.
-// Deliberate: a file-drop endpoint carries the inviter's own mount path, which
-// the acceptor remaps to its local mount before use, so the inviter's path being
+// not as absolute the way FileDropConnectionConfigSchema in connection.ts is.
+// By design: a file-drop endpoint holds the inviter's own mount path, which the
+// acceptor remaps to its local mount before use, so the inviter's path being
 // absolute is not meaningful to the acceptor. The acceptor's final connection
 // config is re-validated by connection.ts (which enforces absolute), so a bad
-// absolute path is caught where it matters; duplicating that per-party rule here
-// would be meaningless once the acceptor remaps the path. The endpoint's security
-// invariant is "no credentials", not "absolute path". (Distinctness of the split
-// halves, unlike absoluteness, survives the swap, so it IS enforced here by the
-// directory-mode refines.) `path` is optional; the directory-mode refines
-// require exactly one form (single path or the split pair).
+// absolute path is caught where it matters.
+//
+// The endpoint's security invariant is 'no credentials', not 'absolute path'.
+// Distinctness of the split halves, unlike absoluteness, survives the swap, so
+// it IS enforced here by the directory-mode refines. `path` is optional; those
+// refines require exactly one form (single path or the split pair).
 const FileDropEndpointSchema = z.strictObject(
   {
     channel: z.literal("filedrop"),
@@ -263,20 +251,19 @@ function endpointDirMode(
 }
 
 /**
- * Whether an endpoint's SHAPE puts every connection built from it in retain mode:
- * true for a file-sync endpoint carrying the split inbound/outbound directory
- * pair, false for a single shared directory, a webrtc endpoint, or no endpoint
- * at all.
+ * Whether an endpoint's SHAPE puts every connection built from it in retain
+ * mode: true for a file-sync endpoint holding the split inbound/outbound pair,
+ * false for a single shared directory, a webrtc endpoint, or no endpoint at
+ * all.
  *
- * A split directory cannot be configured without retain mode --
- * `ConnectionConfigSchema` (connection.ts) refuses the pair unless `retain_files`
- * is true, so the acceptor's own accept path seeds the retain trio onto the
- * connection it builds from such an endpoint. The derivation is from the shape,
- * not from {@link InvitationToken.inviterRetainsFiles}: an acceptor reaching a
- * split rendezvous runs in retain mode whether or not the token declared it,
- * which is why the consent summary states the retention on this predicate as well
- * as on the declaration. Both the seeding and the display read this one function,
- * so what an acceptor is put into and what it is shown cannot drift apart.
+ * A split directory cannot be configured without retain mode
+ * ({@link ConnectionConfigSchema} refuses the pair unless `retain_files` is
+ * true), so the acceptor's own accept path seeds the retain trio from such an
+ * endpoint's shape, not from {@link InvitationToken.inviterRetainsFiles}: an
+ * acceptor reaching a split rendezvous runs in retain mode whether or not the
+ * token declared it, which is why the consent summary states retention on this
+ * predicate as well as the declaration. Both the seeding and the display read
+ * this one function, so they cannot drift apart.
  */
 export function endpointRequiresRetainedFiles(
   endpoint: ConnectionEndpoint | undefined,
@@ -366,37 +353,32 @@ const ConnectionEndpointSchema: z.ZodType<ConnectionEndpoint> = z
 // --- Token -------------------------------------------------------------------
 
 /**
- * The invitation token passed from inviter to acceptor out-of-band.
- * Carries linkage terms and a short-lived shared-secret credential, and MAY carry a
+ * The invitation token passed from inviter to acceptor out-of-band. Holds
+ * linkage terms and a short-lived shared-secret credential, and MAY hold a
  * credential-free connection endpoint (see {@link ConnectionEndpoint}) so the
  * acceptor can reach the rendezvous point without separate out-of-band setup.
  *
- * The endpoint is a public locator only: the token MUST NEVER carry connection
+ * The endpoint is a public locator only: the token MUST NEVER hold connection
  * credentials (password, private key, key file, PeerJS API key). Each party
  * still configures the credential portion of its own `connection` block
- * independently. Because the token carries the established shared secret -- and,
+ * independently. Because the token holds the established shared secret -- and,
  * for the web flow, the rendezvous derived from it -- the encoded invitation is
- * confidential and must be forwarded only over a trusted out-of-band channel;
- * see docs/SECURITY_DESIGN.md.
+ * confidential and must travel only over a trusted out-of-band channel.
  */
 export interface InvitationToken {
   /**
    * Token format version. Increment only on an *incompatible* format change --
    * one an existing decoder could not read correctly. Adding an optional field
-   * at THIS top level is backward compatible (an older decoder validates with a
-   * non-strict `z.object` and simply ignores the field), so it does not bump the
-   * version.
+   * at THIS top level is backward compatible (an older decoder's non-strict
+   * `z.object` ignores it), so it does not bump the version.
    *
    * The per-channel endpoint sub-schemas are `z.strictObject`, so an older
-   * decoder REJECTS (it does not ignore) any field added to one of them: an
-   * endpoint-shape addition is in principle an incompatible change. The
-   * split-directory `inbound_path`/`outbound_path` pair was nonetheless added to
-   * the sftp and filedrop endpoint shapes WITHOUT bumping the version -- a
-   * deliberate one-time decision taken while psilink is pre-release with no
-   * decoder deployed in the field. With no released consumer, no decoder can
-   * observe the incompatibility, so a bump would only churn the version for no
-   * reader. A strict-endpoint addition made AFTER a release ships must bump the
-   * version (or otherwise stage compat). See docs/spec/FILE_SYNC.md.
+   * decoder REJECTS (does not ignore) an added field there: an endpoint-shape
+   * addition is in principle incompatible. The split-directory
+   * `inbound_path`/`outbound_path` pair was added to the sftp and filedrop
+   * endpoints without bumping the version, since psilink was pre-release with
+   * no decoder deployed. A strict-endpoint addition made AFTER a release ships
+   * MUST bump the version (or otherwise stage compat).
    */
   version: "1";
   linkageTerms: LinkageTerms;
@@ -409,125 +391,111 @@ export interface InvitationToken {
   expires?: string;
   /**
    * Optional credential-free connection locator (see
-   * {@link ConnectionEndpoint}). Never carries credentials.
+   * {@link ConnectionEndpoint}). Never holds credentials.
    */
   connectionEndpoint?: ConnectionEndpoint;
   /**
    * The inviter's disclosed-columns subset: exactly the column names the
-   * acceptor will RECEIVE for matched records -- the set the inviter's
-   * `disclosedColumnNames(metadata)` / `isDisclosedToPartner` predicate gathers
-   * and `preparePayload` transmits. Carried so the acceptor's consent display
-   * and its runtime lock-in derive from the wire's own transmission predicate
-   * rather than from a separately-authored `terms.payload.send` dictionary each
-   * mint path must remember to write; the displayed/consented set then cannot
-   * diverge from the bytes that flow.
+   * acceptor will RECEIVE for matched records -- the set
+   * `disclosedColumnNames(metadata)`/`isDisclosedToPartner` gathers and
+   * `preparePayload` transmits. Included so the acceptor's consent display and
+   * its runtime enforcement derive from the wire's own transmission predicate,
+   * not a separately-authored `terms.payload.send` dictionary each mint path
+   * must remember to write; the displayed/consented set then cannot diverge
+   * from the bytes that flow.
    *
-   * The names are in the INVITER's column namespace and the acceptor reasons
-   * about them as "what I will receive" -- NOT as its own `payload.send` (the
-   * acceptor's `payload.send` is the inviter's `receive` mirrored into the
-   * acceptor's namespace; see `deriveAcceptedLinkageTerms`). Only the
-   * consent-relevant disclosed subset is carried -- linkage/identifier/ignored
-   * columns that are not transmitted are not included and do not leave the
-   * inviter's machine.
+   * Names are in the INVITER's column namespace; the acceptor reasons about
+   * them as "what I will receive", not its own `payload.send` (that is the
+   * inviter's `receive` mirrored into the acceptor's namespace; see
+   * `deriveAcceptedLinkageTerms`). Only the consent-relevant disclosed subset
+   * is included -- linkage/identifier/ignored columns that are not transmitted
+   * do not leave the inviter's machine.
    *
-   * Optional. Omitted ONLY on a mint path that does not know its metadata, and
-   * then the acceptor reconciles lazily from the first transmission. When the
-   * metadata IS known the subset is carried verbatim, INCLUDING the empty set when
-   * nothing is disclosed -- an empty set is NOT the lazy case: it LOCKS IN "receive
-   * nothing," so a later non-empty payload aborts. Whenever present (empty or not)
-   * it locks in the acceptor's expectation: a received payload whose column set
-   * differs aborts the exchange as a protocol error (the party promised one set and
-   * delivered another). Only an OMITTED (undefined) field is lazy. See
+   * Optional: omitted only on a mint path that does not know its metadata, in
+   * which case the acceptor reconciles lazily from the first transmission. When
+   * metadata is known, the subset is included verbatim, including the empty set
+   * when nothing is disclosed -- that locks in "receive nothing," so a later
+   * non-empty payload aborts. Any present value (empty or not) locks in the
+   * acceptor's expectation: a received payload with a different column set
+   * aborts as a protocol error. Only an omitted field is lazy. See
    * {@link reconcileReceivedPayload}.
    */
   disclosedPayloadColumns?: string[];
   /**
    * The inviting party's declaration that its exchange runs in retain mode --
-   * `connection.options.retain_files`, under which no exchange file is deleted as
-   * a protocol step and the rendezvous location becomes a permanent transcript
-   * (docs/spec/FILE_SYNC.md). Carried so an acceptor is told before it consents,
-   * rather than by a failed run or by an accept kit the inviter may not send.
+   * `connection.options.retain_files`, under which no exchange file is deleted
+   * as a protocol step and the rendezvous location becomes a permanent
+   * transcript (docs/spec/FILE_SYNC.md). Included so an acceptor is told before
+   * it consents, rather than by a failed run or by an accept kit the inviter
+   * may not send.
    *
-   * A DECLARATION, never a setting. Nothing on the accept path reads it into a
-   * connection: the accepting party still chooses its own half, and a
-   * disagreement fast-fails at the hello (`BilateralModeMismatchError`) exactly
-   * as it does for an invitation carrying no declaration at all. Disclosing a
-   * bilateral flag is not negotiating one; see docs/spec/FILE_SYNC.md
-   * ("Bilateral configuration: detect and fail, never negotiate").
+   * A DECLARATION, never a setting: nothing on the accept path reads it into a
+   * connection. The accepting party still chooses its own half, and a
+   * disagreement fast-fails at the hello (`BilateralModeMismatchError`),
+   * exactly as for an invitation with no declaration at all. Disclosing a
+   * bilateral flag is not negotiating one (docs/spec/FILE_SYNC.md, "Bilateral
+   * configuration: detect and fail, never negotiate").
    *
    * Absence is "nothing declared", not "delete mode": a mint path may have no
-   * settled connection to read (an offline invite whose connection block is still
-   * a placeholder scaffold), the channel may have no retain mode at all
+   * settled connection to read, the channel may have no retain mode at all
    * (`webrtc`), or the token may predate this field. A `false` from a foreign
    * implementation decodes and states nothing, which is what both acceptance
-   * surfaces render for it -- the `retainedFiles` entry of `consentFacts.ts`
-   * carries why the negative is not a claim either.
+   * surfaces render for it.
    *
-   * Two pairings {@link InvitationTokenSchema} refuses outright, at encode and at
-   * decode alike, each stating a mode no run of the token could be in: a `true`
-   * beside a `webrtc` endpoint, and a `false` beside a split-directory endpoint
+   * Two pairings {@link InvitationTokenSchema} refuses outright, at encode and
+   * decode alike, each stating a mode no run of the token could be in: `true`
+   * beside a `webrtc` endpoint, and `false` beside a split-directory endpoint
    * whose shape ({@link endpointRequiresRetainedFiles}) contradicts it. A third
-   * rule binds a MINT alone -- see {@link MintedInvitationTokenSchema}, which is
-   * why "psilink emits the declaration wherever the endpoint's shape requires
-   * retention" is a check rather than a claim made here.
-   *
-   * `lockless_rendezvous` is equally bilateral and equally fast-failing and is
-   * deliberately NOT carried: nothing about it changes what an acceptor consents
-   * to, and the token's declaration list is held to facts with consent weight.
+   * rule binds a MINT alone -- see {@link MintedInvitationTokenSchema}.
+   * `lockless_rendezvous` is equally bilateral and equally fast-failing but is
+   * not included here: it changes nothing an acceptor consents to.
    */
   inviterRetainsFiles?: boolean;
 }
 
-// The params width bound the decode fold carries, mirrored from linkageTerms.ts's
-// PARAMS_WIDTH_BOUND (kept module-private there, so the bound and the schema below
-// both stay off @psilink/core's wholesale public export). Both derive the value
-// from the one shared MAX_PARAMS_ENTRIES constant, so they cannot drift: an
-// over-MAX_PARAMS_ENTRIES params record is left verbatim by the camelize pre-pass
-// and rejected by the schema's own count refine, not rewritten key by key.
+// The params width bound the decode fold applies, mirrored from
+// linkageTerms.ts's PARAMS_WIDTH_BOUND (kept module-private there, so the bound
+// and the schema below both stay off @psilink/core's wholesale public export).
+// Both derive the value from the one shared MAX_PARAMS_ENTRIES constant, so
+// they cannot drift: an over-MAX_PARAMS_ENTRIES params record is left verbatim
+// by the camelize pre-pass and rejected by the schema's own count refine, not
+// rewritten key by key.
 const PARAMS_WIDTH_BOUND: ReadonlyMap<string, number> = new Map([
   ["params", MAX_PARAMS_ENTRIES],
 ]);
 
 /**
- * {@link LinkageTermsSchema} preceded by the shared {@link camelizeKeys} pre-pass
- * (carrying the {@link MAX_PARAMS_ENTRIES} params width bound), so a decoded token's
- * value is folded to the canonical camelCase key form BEFORE it is validated --
- * exactly as `parseLinkageTerms` does for the config-load and post-handshake wire
- * paths. This is the decode chokepoint for the casing asymmetry: the bare schema
- * leaves `transform.params` keys verbatim (`z.unknown()` content with no key-form
- * constraint), so without this a token's params would stay snake_case while the
- * same agreement loaded from config or received off the wire is camelCase --
- * desyncing the canonical comparison, the agreed-terms hash (`computeTermsHash`),
- * and the standardization runtime (which reads `params.inputFormat`). Folding here
- * makes "a decoded token's `transform.params` is camelCase" a structural invariant.
+ * {@link LinkageTermsSchema} preceded by the shared {@link camelizeKeys}
+ * pre-pass (with the {@link MAX_PARAMS_ENTRIES} params width bound), so a
+ * decoded token's value folds to camelCase BEFORE validation, exactly as
+ * `parseLinkageTerms` does for the config-load and wire paths. The bare schema
+ * leaves `transform.params` keys verbatim, so without this a token's params
+ * would stay snake_case while the same agreement loaded elsewhere is camelCase
+ * -- desyncing the canonical comparison, `computeTermsHash`, and the
+ * standardization runtime (`params.inputFormat`). Folding here makes a decoded
+ * token's `transform.params` camelCase a structural invariant.
  *
- * The pre-pass runs BEFORE validation, and that ordering is load-bearing: the
- * per-step length screens (`parse_date` / `pad_left` refines on `TransformStep`,
- * and the raw-pattern length cap) and the dialect-conformance gate on
- * {@link LinkageTermsSchema} read their inputs at the camelCase param names
- * (`inputFormat`, `length`, `pattern`). A snake_case-params token validated first
- * and folded after would evade the screen keyed on a multi-word name (an
- * `input_format` slipping the format-length cap), then activate the unscreened
- * value once camelized downstream -- a DoS bound bypass. Folding first runs every
- * screen on the normalized form. The
- * pre-pass is bounded: it throws NestingDepthExceededError / NodeCountExceededError
- * (UsageError subclasses, fixed input-free messages) on a pathologically deep or
- * wide `params`; the throw propagates from {@link InvitationTokenSchema}'s `.parse`
- * for {@link decodeInvitation} / {@link encodeInvitation} to surface as a clean
- * bounded rejection.
+ * The pre-pass running BEFORE validation is required: the per-step length
+ * screens and the dialect-conformance gate on {@link LinkageTermsSchema} read
+ * camelCase param names. Validating a snake_case-params token first and folding
+ * after would evade a screen keyed on a multi-word name, then activate the
+ * unscreened value once camelized downstream -- a DoS bound bypass. The
+ * pre-pass itself is bounded: it throws
+ * `NestingDepthExceededError`/`NodeCountExceededError` (`UsageError`
+ * subclasses) on a pathologically deep or wide `params`, propagating from
+ * {@link InvitationTokenSchema}'s `.parse` as a clean bounded rejection.
  *
- * The accepted-token SET widens only as the config path's already does: a
- * snake_case STRUCTURAL key (e.g. `linkage_fields`) now folds and validates rather
- * than being rejected, matching how a hand-authored config is read. Only the
- * linkage-terms field is wrapped, so the token's other fields and the strict
- * connection-endpoint credential allowlist are unaffected.
+ * The accepted-token set widens the same way the config path's already does: a
+ * snake_case structural key (e.g. `linkage_fields`) folds and validates,
+ * matching a hand-authored config. Only the linkage-terms field is wrapped; the
+ * token's other fields and the strict connection-endpoint credential allowlist
+ * are unaffected.
  *
- * Module-private by design: a `z.preprocess` that throws does not honor the
- * non-throwing contract a `.safeParse()` implies (Zod does not trap a preprocessor
- * throw), so keeping this schema off `@psilink/core`'s public export means no
- * external caller can reach a schema whose `.safeParse()` would surprise them with
- * a throw. Its only consumer is {@link InvitationTokenSchema}, which uses `.parse()`;
- * code needing a non-throwing linkage-terms parse uses `safeParseLinkageTerms`.
+ * Module-private by design: a `z.preprocess` that throws breaks
+ * `.safeParse()`'s non-throwing contract, so keeping this off `@psilink/core`'s
+ * public export means no external caller hits a surprise throw. Its only
+ * consumer is {@link InvitationTokenSchema} (`.parse()`); a non-throwing
+ * linkage-terms parse uses `safeParseLinkageTerms`.
  */
 const InvitationLinkageTermsSchema: z.ZodType<LinkageTerms> = z.preprocess(
   (raw) => camelizeKeys(raw, PARAMS_WIDTH_BOUND),
@@ -553,20 +521,20 @@ const InvitationTokenBodySchema = z.object({
   expires: z.iso.datetime().optional(),
   connectionEndpoint: ConnectionEndpointSchema.optional(),
   // The inviter's disclosed-columns subset (see the interface field). Each name
-  // is bounded to the same MAX_NAME_LENGTH ceiling and the count to the same
-  // MAX_PAYLOAD_ENTRIES cap a `payload.send`/`receive` list carries, since this
-  // is the same disclosed set those would name; the whole token is already
-  // structurally bounded by parseBoundedJson at decode, so boundedArray here is
-  // defense-in-depth on the field. Names are partner-controlled (the inviter
-  // crafts the token) and are routed through sanitizeForDisplay wherever they
-  // reach a consent surface or a diagnostic. The `.min(1)` floor rejects an empty
-  // name, matching the metadata/payload name floors -- an honest inviter derives
-  // these from metadata whose names are already non-empty. There is deliberately
-  // no array-level minimum: an empty array is MEANINGFUL -- it is the strict
-  // "receive nothing" lock-in carried when an inviter that knows its metadata
-  // discloses no payload column, which reconcileReceivedPayload enforces (a later
-  // non-empty payload aborts) -- so it must not be rejected at decode. Only an
-  // OMITTED field reconciles lazily.
+  // is bounded to MAX_NAME_LENGTH and the count to MAX_PAYLOAD_ENTRIES, the
+  // same caps a `payload.send`/`receive` list has, since this names the same
+  // disclosed set; the whole token is already structurally bounded by
+  // parseBoundedJson at decode, so boundedArray here is defense-in-depth. Names
+  // are partner-controlled and are routed through sanitizeForDisplay wherever
+  // they reach a consent surface or a diagnostic.
+  //
+  // The `.min(1)` floor rejects an empty name, matching the metadata/payload
+  // name floors -- an honest inviter derives these from metadata whose names
+  // are already non-empty. No array-level minimum: an empty array is meaningful
+  // -- the strict "receive nothing" commitment when an inviter that knows its
+  // metadata discloses no payload column, which reconcileReceivedPayload
+  // enforces (a later non-empty payload aborts) -- so it must not be rejected
+  // at decode. Only an omitted field reconciles lazily.
   disclosedPayloadColumns: boundedArray(
     z.string().min(1).max(MAX_NAME_LENGTH),
     MAX_PAYLOAD_ENTRIES,
@@ -583,14 +551,14 @@ const InvitationTokenBodySchema = z.object({
 
 const InvitationTokenSchema: z.ZodType<InvitationToken> =
   InvitationTokenBodySchema
-    // A retain declaration on a webrtc endpoint is refused rather than displayed:
-    // `retain_files` is a file-sync option that the webrtc channel does not have
-    // (ConnectionConfigSchema in connection.ts rejects it on that channel for the
-    // same reason), so a token pairing the two states a mode no run of it could
-    // be in. Refusing at the schema means a mint path cannot stamp the pair by
-    // mistake and a decoder cannot surface one for consent. A token with no
-    // endpoint at all is unconstrained: the offline file-sync invite carries the
-    // declaration with no locator beside it.
+    // A retain declaration on a webrtc endpoint is refused rather than
+    // displayed: `retain_files` is a file-sync option the webrtc channel does
+    // not have (ConnectionConfigSchema in connection.ts rejects it there for
+    // the same reason), so pairing the two states a mode no run of the token
+    // could be in. Refusing at the schema means a mint path cannot stamp the
+    // pair by mistake and a decoder cannot show one for consent. A token with
+    // no endpoint at all is unconstrained: the offline file-sync invite holds
+    // the declaration with no locator beside it.
     .refine(
       (token) =>
         token.connectionEndpoint?.channel !== "webrtc" ||
@@ -602,16 +570,16 @@ const InvitationTokenSchema: z.ZodType<InvitationToken> =
         path: ["inviterRetainsFiles"],
       },
     )
-    // The mirror refusal on the file-sync side. A split inbound/outbound endpoint
-    // requires retain mode of every connection built from it -- read through
-    // `endpointRequiresRetainedFiles`, the same predicate the accept path's own
-    // seeding reads -- so a token pairing that endpoint with an explicit `false`
-    // states a mode no run of it could be in, exactly as a `true` on webrtc does.
-    // Refusing here keeps a mint path from stamping the pair and a decoder from
-    // surfacing one, rather than leaving the consent summary's OR to render the
-    // safe side over a declaration the shape contradicts. Scoped to the explicit
-    // negative: an omitted field on the same endpoint is "nothing declared", the
-    // case the summary's second ground exists to cover, so it stays valid.
+    // The mirror refusal on the file-sync side: a split inbound/outbound
+    // endpoint requires retain mode of every connection built from it
+    // (`endpointRequiresRetainedFiles`, the same predicate the accept path's
+    // own seeding reads), so pairing that endpoint with an explicit `false`
+    // states a mode no run of the token could be in, exactly as `true` on
+    // webrtc does. Refusing here keeps a mint path from stamping the pair and a
+    // decoder from showing one, rather than leaving the consent summary's OR to
+    // render the safe side over a declaration the shape contradicts. Scoped to
+    // the explicit negative: an omitted field on the same endpoint is "nothing
+    // declared", which the summary's second ground already covers.
     .refine(
       (token) =>
         !endpointRequiresRetainedFiles(token.connectionEndpoint) ||
@@ -627,27 +595,26 @@ const InvitationTokenSchema: z.ZodType<InvitationToken> =
 
 /**
  * {@link InvitationTokenSchema} plus the one rule that binds a MINT and not a
- * decode: a token carrying a split `inboundPath`/`outboundPath` endpoint must
+ * decode: a token holding a split `inboundPath`/`outboundPath` endpoint must
  * declare `inviterRetainsFiles: true`.
  *
  * Every connection built from that endpoint runs in retain mode
  * ({@link endpointRequiresRetainedFiles}), so an invitation emitting one while
- * leaving the retention undeclared offers the partner a permanent transcript that
+ * leaving the retention undeclared offers the partner a permanent transcript
  * only the locator's shape reveals -- and any artifact composed from the
- * declaration rather than from the shape (an accept kit's file-handling
- * disclosure among them) then states nothing. This is the executable form of that
- * invariant, at the single seam every mint path reaches, so no producer has to
- * restate it as a gate of its own.
+ * declaration rather than the shape (an accept kit's file-handling disclosure
+ * among them) then states nothing. This is the executable form of that
+ * invariant, at the single point every mint path reaches, so no producer has to
+ * restate it.
  *
- * Mint-only, and deliberately NOT a tightening of
- * {@link InvitationTokenSchema}: an omitted declaration beside a split endpoint
- * remains a valid token to DECODE, because absence means "nothing declared" and
- * every psilink read path derives the retention from the endpoint's shape rather
- * than from the declaration (`summarizeInvitation` ORs
- * {@link endpointRequiresRetainedFiles} into its retained-files disclosure, and
- * the accept paths seed the retain trio from the same predicate). Refusing it at
- * decode would reject, on a public protocol surface, a foreign token psilink
- * already handles and displays correctly.
+ * Mint-only, not a tightening of {@link InvitationTokenSchema}: an omitted
+ * declaration beside a split endpoint remains a valid token to DECODE, since
+ * absence means "nothing declared" and every psilink read path derives the
+ * retention from the endpoint's shape rather than the declaration
+ * (`summarizeInvitation` ORs {@link endpointRequiresRetainedFiles} into its
+ * disclosure; the accept paths seed the retain trio from the same predicate).
+ * Refusing at decode would reject a foreign token psilink already handles and
+ * displays correctly.
  */
 const MintedInvitationTokenSchema: z.ZodType<InvitationToken> =
   InvitationTokenSchema.refine(
@@ -676,15 +643,15 @@ export const INVITATION_LIFETIME_SECONDS = 60 * 60;
 
 /**
  * Hard upper bound on an invitation lifetime in seconds: one year. The setup
- * secret an invitation carries is short-lived by design, so a lifetime override
- * is capped here -- a deliberately generous ceiling (recurring exchanges may run
- * only monthly, and an invitation may need to outlast operational breakage before
- * a re-invite), but a hard one, so an erroneous override cannot make the secret
- * effectively permanent and defeat the bounded-lifetime property. See
- * docs/SECURITY_DESIGN.md. Both inviters reference this one value; each rejects an
- * over-ceiling lifetime up front, with a surface-specific error, before minting.
- * This is a bound on the chosen lifetime at the call site, not a check inside
- * {@link encodeInvitation} (which validates only that `expires` is in the future).
+ * secret an invitation holds is short-lived by design, so a lifetime override
+ * is capped here -- a generous ceiling (recurring exchanges may run only
+ * monthly, and an invitation may need to outlast operational breakage before a
+ * re-invite), but a hard one, so an erroneous override cannot make the secret
+ * effectively permanent. Both inviters reference this one value; each rejects
+ * an over-ceiling lifetime up front, with its own error, before minting. A
+ * bound on the chosen lifetime at the call site, not a check inside
+ * {@link encodeInvitation} (which validates only that `expires` is in the
+ * future).
  */
 export const MAX_INVITATION_LIFETIME_SECONDS = 365 * 24 * 60 * 60;
 
@@ -702,20 +669,22 @@ function toBase64Url(bytes: Uint8Array): string {
 const CHECKSUM_CHARS = 6;
 
 /**
- * Generous upper bound on the length of an encoded invitation string accepted by
- * {@link decodeInvitation}, enforced at the decode boundary BEFORE the string is
- * base64-decoded, hashed, JSON-parsed, or schema-validated. The 4-byte checksum
- * detects transcription errors only -- anyone can recompute it over a crafted
- * payload (see {@link decodeInvitation}) -- so it is no barrier to an oversized
- * token; this cap is. A maximal real invitation (full linkage terms, an
- * endpoint, an expiry) encodes to a few KiB, and the web flow's URL-length limit
- * caps it besides; 64 KiB is an order of magnitude above any legitimate token
- * yet refuses the multi-megabyte payload a checksum-valid token could otherwise
- * carry. This is the boundary that transitively bounds every untrusted field at
+ * Generous upper bound on the length of an encoded invitation string accepted
+ * by {@link decodeInvitation}, enforced at the decode boundary BEFORE the
+ * string is base64-decoded, hashed, JSON-parsed, or schema-validated. The
+ * 4-byte checksum only detects transcription errors -- anyone can recompute it
+ * over a crafted payload (see {@link decodeInvitation}) -- so it is no barrier
+ * to an oversized token; this cap is. A maximal real invitation (full linkage
+ * terms, an endpoint, an expiry) encodes to a few KiB, and the web flow's
+ * URL-length limit caps it besides; 64 KiB is an order of magnitude above any
+ * legitimate token yet refuses the multi-megabyte payload a checksum-valid
+ * token could otherwise hold.
+ *
+ * This is the boundary that transitively bounds every untrusted field at
  * decode, so no per-field check has to do oversized-input work; the per-field
  * `.max()` bounds in linkageTerms.ts are defense-in-depth atop it.
- * {@link encodeInvitation} enforces the same cap on its output, so psilink never
- * produces a token it could not itself decode.
+ * {@link encodeInvitation} enforces the same cap on its output, so psilink
+ * never produces a token it could not itself decode.
  */
 export const MAX_ENCODED_INVITATION_LENGTH = 64 * 1024;
 
@@ -729,16 +698,16 @@ export const MAX_ENCODED_INVITATION_LENGTH = 64 * 1024;
 export const MAX_RAW_INVITATION_LENGTH = 2 * MAX_ENCODED_INVITATION_LENGTH;
 
 /**
- * Serializes an {@link InvitationToken} as a base64url string with a
- * 4-byte truncated-SHA-256 checksum appended for transcription-error
- * detection. The checksum provides no security guarantee; the key exchange handles
+ * Serializes an {@link InvitationToken} as a base64url string with a 4-byte
+ * truncated-SHA-256 checksum appended for transcription-error detection. The
+ * checksum gives no security guarantee; the key exchange handles
  * authentication.
  *
- * This is the mint seam every psilink invitation is emitted through, so it
- * validates against {@link MintedInvitationTokenSchema} -- strictly stronger than
- * the schema {@link decodeInvitation} parses, by the split-endpoint retain
- * declaration it requires. Producing a token psilink would not itself emit is
- * refused here rather than at each caller's own gate.
+ * The single point every psilink invitation is emitted through, so it validates
+ * against {@link MintedInvitationTokenSchema} -- strictly stronger than the
+ * schema {@link decodeInvitation} parses, by the split-endpoint retain
+ * declaration it requires. A token psilink would not itself emit is refused
+ * here rather than at each caller's own gate.
  *
  * Uses `btoa`/`atob` and `globalThis.crypto.subtle.digest`
  * (Node.js 19+ / all modern browsers).
@@ -751,21 +720,20 @@ export const MAX_RAW_INVITATION_LENGTH = 2 * MAX_ENCODED_INVITATION_LENGTH;
  *   `transform.params` is too deeply nested or too wide for the bounded camelCase
  *   pre-pass `InvitationLinkageTermsSchema` runs while validating (the same
  *   schema {@link decodeInvitation} parses through). Reachable only via a
- *   type-bypassed `token`, since a well-typed {@link InvitationToken} carries an
+ *   type-bypassed `token`, since a well-typed {@link InvitationToken} has an
  *   already-structured `params`; both are `UsageError` subclasses.
  */
 export async function encodeInvitation(
   token: InvitationToken,
 ): Promise<string> {
   // Serialize the PARSE RESULT, not the original token. The top-level schema is
-  // non-strict (decode must stay forward-compatible: an older decoder ignores a
-  // newer token's added field, per the `version` policy), which means a caller
-  // who bypasses the types -- e.g. `x as unknown as InvitationToken` -- could
-  // otherwise carry an extra top-level field into the invitation verbatim. Zod
-  // strips unknown keys on parse, so serializing `validated` makes "only the
-  // schema's fields are encoded" a structural guarantee rather than one that
-  // rests on TypeScript. (Endpoint sub-schemas are strict, so a credential on
-  // the endpoint is already rejected, not merely stripped.)
+  // non-strict (decode must stay forward-compatible per the `version` policy),
+  // so a caller who bypasses the types (`x as unknown as InvitationToken`)
+  // could otherwise put an extra top-level field into the invitation verbatim.
+  // Zod strips unknown keys on parse, so serializing `validated` makes "only
+  // the schema's fields are encoded" a structural guarantee, not one resting on
+  // TypeScript. (Endpoint sub-schemas are strict, so a credential there is
+  // already rejected, not merely stripped.)
   const validated = MintedInvitationTokenSchema.parse(token);
   if (
     validated.expires !== undefined &&
@@ -780,10 +748,11 @@ export async function encodeInvitation(
   const encoded = body + checksum;
   // Symmetric with decodeInvitation's boundary cap: fields all within their
   // per-field bounds can still, in aggregate, encode past
-  // MAX_ENCODED_INVITATION_LENGTH, and the far end would then reject the token at
-  // its decode boundary. Refuse to produce it here so the failure surfaces on the
-  // inviter's own side with a clear cause rather than at the partner's decode. In
-  // practice this fires only on a programming error, never a real config.
+  // MAX_ENCODED_INVITATION_LENGTH, and the far end would then reject the token
+  // at its decode boundary. Refuse to produce it here so the failure appears on
+  // the inviter's own side with a clear cause rather than at the partner's
+  // decode. In practice this fires only on a programming error, never a real
+  // config.
   if (encoded.length > MAX_ENCODED_INVITATION_LENGTH) {
     throw new Error(
       "encoded invitation exceeds the maximum length of " +
@@ -796,27 +765,25 @@ export async function encodeInvitation(
 /**
  * Removes every character in the ECMAScript `\s` class (the `WhiteSpace` and
  * `LineTerminator` code points `String.prototype.trim` strips at the edges,
- * including the non-ASCII ones such as U+00A0 and U+2028) from a pasted
- * invitation string, at every position -- interior as well as leading and
- * trailing.
+ * including non-ASCII ones such as U+00A0 and U+2028) from a pasted invitation
+ * string, at every position -- interior as well as leading and trailing.
  *
- * The normalization the web lobby's paste-to-navigate helper and the CLI
- * accept seam each apply before {@link decodeInvitation}, which holds a strict
- * base64url alphabet; the web's hash-fragment decode path does not apply it
- * and decodes unstripped. A token pasted out of a
- * hard-wrapped email or chat message carries line breaks and indentation the
- * wrapping introduced, not anything the inviter encoded, and would otherwise
- * be refused for them. Stripping the full `\s` class rather than only the
- * ASCII subset keeps this one implementation in agreement with the seams that
- * call `String.prototype.trim` ahead of it (the web paste and the CLI
- * `@`-file reference both do), so a token carrying trim-set whitespace decodes
- * the same way through every delivery, CLI argv included.
+ * Applied by the web lobby's paste-to-navigate helper and the CLI accept path
+ * before {@link decodeInvitation}, which holds a strict base64url alphabet; the
+ * web's hash-fragment decode path does not apply it and decodes unstripped. A
+ * token pasted out of a hard-wrapped email or chat message has line breaks and
+ * indentation the wrapping introduced, not anything the inviter encoded, and
+ * would otherwise be refused. Stripping the full `\s` class, not just the ASCII
+ * subset, keeps this in agreement with the places that call
+ * `String.prototype.trim` ahead of it (the web paste and the CLI `@`-file
+ * reference both do), so a token with trim-set whitespace decodes the same way
+ * through every delivery, CLI argv included.
  *
  * When `input.length` exceeds {@link MAX_RAW_INVITATION_LENGTH}, `input` is
  * returned unchanged -- no strip work runs -- so the caller's own decode
  * boundary ({@link decodeInvitation}'s {@link MAX_ENCODED_INVITATION_LENGTH}
- * check) is what refuses an oversized paste, with its own precise message.
- * This function never throws.
+ * check) refuses an oversized paste, with its own precise message. This
+ * function never throws.
  */
 export function stripInvitationWhitespace(input: string): string {
   if (input.length > MAX_RAW_INVITATION_LENGTH) {
@@ -838,13 +805,13 @@ export function stripInvitationWhitespace(input: string): string {
  * {@link isInvitationExpired}).
  *
  * @throws {Error} if the string exceeds {@link MAX_ENCODED_INVITATION_LENGTH}
- *   (checked at the boundary before any other work), is too short to carry a
+ *   (checked at the boundary before any other work), is too short to hold a
  *   checksum, fails the checksum, or is invalid base64url.
  * @throws {ZodError} on schema validation failure.
  * @throws {NestingDepthExceededError|NodeCountExceededError} if the token's
  *   `transform.params` is too deeply nested or too wide for the bounded camelCase
  *   pre-pass `InvitationLinkageTermsSchema` runs before validating; both are
- *   `UsageError` subclasses a caller surfaces as a clean bounded rejection.
+ *   `UsageError` subclasses a caller reports as a clean bounded rejection.
  */
 export async function decodeInvitation(
   encoded: string,
@@ -886,7 +853,7 @@ export async function decodeInvitation(
   try {
     // The chokepoint structurally bounds the token before JSON.parse (a wide
     // object / long array would otherwise crash the parser uncatchably) and
-    // fatal-decodes the UTF-8; a structural or decode/parse failure surfaces
+    // fatal-decodes the UTF-8; a structural or decode/parse failure appears
     // here as the same fixed-text rejection.
     raw = parseBoundedJson(bytes);
   } catch {
@@ -922,11 +889,11 @@ type UnparseableExpiryVerdict = "fail-closed" | "fail-open";
  *
  * `onUnparseable` has no default. `new Date(...)` yields `NaN` for a value it
  * cannot parse and a bare `<=` against `NaN` is `false`, so an unparseable bound
- * reads as not-passed unless a caller decides otherwise; requiring the verdict
- * puts that decision at the call site, where what the bound governs is visible.
- * An unreadable `now` -- an Invalid Date -- takes the same verdict: neither
- * instant is comparable, and one side being the clock rather than the bound does
- * not make the answer safer.
+ * is treated as not-passed unless a caller decides otherwise; requiring the
+ * verdict puts that decision at the call site, where what the bound governs is
+ * visible. An unreadable `now` -- an Invalid Date -- takes the same verdict:
+ * neither instant is comparable, and one side being the clock rather than the
+ * bound does not make the answer safer.
  */
 export function hasExpiryInstantPassed(
   expires: string | undefined,
@@ -951,9 +918,9 @@ export function hasExpiryInstantPassed(
  * `now` is already expired (never valid for one last instant), and an
  * unparseable `expires` is rejected rather than honored. The malformed case is
  * defense in depth: {@link decodeInvitation}'s schema already rejects a non-ISO
- * `expires`, so a token reaching here through decode never carries one -- but
- * every acceptor fails closed on its own, not only by relying on that upstream
- * gate. Shared by the CLI and web acceptors so both enforce identical semantics.
+ * `expires`, so a token reaching here through decode never has one -- but every
+ * acceptor fails closed on its own, not only by relying on that upstream gate.
+ * Shared by the CLI and web acceptors so both enforce identical semantics.
  */
 export function isInvitationExpired(
   expires: string | undefined,

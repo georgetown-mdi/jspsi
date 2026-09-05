@@ -19,24 +19,22 @@ import type {
 } from "../src/invitationSummary.js";
 
 /**
- * The one position the walk below skips: a linkage key's `id` carries the raw
- * partner key name verbatim, as the stable identity per-key UI state is keyed
- * by, and reaches no rendered text or attribute -- that claim is checked at each
- * render boundary (the web app's browser consent-screen suite and the CLI's
- * accept-prompt escaping test), not asserted here.
- * Matched by PATH rather than by key name, so a future `id` anywhere else in the
- * summary is checked rather than silently exempted too.
+ * A linkage key's `id` holds the raw partner key name verbatim: it is the
+ * stable identity per-key UI state is keyed by, and reaches no rendered text
+ * or attribute. That claim is checked at each render boundary -- the web
+ * app's browser consent-screen suite and the CLI's accept-prompt escaping
+ * test -- not here. Matched by path, not key name, so a future `id` anywhere
+ * else in the summary is still checked, not silently exempted.
  */
 const RAW_KEY_IDENTITY = /^linkageKeys\[\d+\]\.id$/;
 
 /**
- * Every string reachable in `value`, paired with the path it sits at. Property
- * names are visited alongside their values, so a summary field that is a record
- * keyed by partner text is covered as well.
+ * Every string reachable in `value`, paired with the path it sits at.
+ * Property names are visited alongside their values, so a summary field that
+ * is a record keyed by partner text is covered too.
  *
- * Recursive rather than a per-field enumeration: a field added to the summary is
- * checked without being listed anywhere, which is the whole point -- an
- * enumeration only ever covers what someone remembered to add to it.
+ * Recursive, not a per-field enumeration, so a field added to the summary is
+ * covered without being listed anywhere.
  */
 function displayStrings(
   value: unknown,
@@ -61,18 +59,18 @@ function displayStrings(
 
 /**
  * A bound on the compiler-API walk the coverage test below runs, sized as a
- * backstop for a derivation that never returns, not as an assertion about how
- * fast a loaded machine can build a program: the walk creates a whole
- * `ts.Program` over the summary source, which costs seconds on an idle container
- * and several times that when the rest of the suite is competing for the same
- * cores.
+ * safety check for a derivation that never returns, not as an assertion
+ * about how fast a loaded machine can build a program: the walk creates a
+ * whole `ts.Program` over the summary source, which costs seconds on an idle
+ * container and several times that when the rest of the suite is competing
+ * for the same cores.
  */
 const TYPE_WALK_HANG_BACKSTOP_MS = 60_000;
 
 /**
  * Every position a built summary actually holds a value at, normalized the way
  * {@link declaredPositions} normalizes a declared one. Presence is read from the
- * VALUE, not the key: the builder returns object literals that carry an absent
+ * VALUE, not the key: the builder returns object literals that hold an absent
  * optional field as an explicit `undefined`, which occupies no position.
  */
 function presentPositions(

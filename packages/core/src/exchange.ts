@@ -94,10 +94,8 @@ import { partnerPinIsPresent } from "./config/signing.js";
 import type { SigningConfig, SigningMode } from "./config/signing.js";
 import type { DualSignedRecord, ReceiptContent } from "./signedReceipt.js";
 
-// The deduplicating-strategy refusals are defined beside the accept path the
-// per-party one also guards (config/linkageTerms.ts), which cannot import this
-// module without closing a cycle, and re-exported here at the run boundary that
-// applies them.
+// Defined in config/linkageTerms.ts, which cannot import this module without
+// a cycle; re-exported here at the run boundary that applies them.
 export { assertBothSidedDeduplicateImplemented, assertDeduplicateImplemented };
 
 /**
@@ -120,7 +118,7 @@ export interface PreparedExchange {
   metadata: Metadata;
   linkageTerms: LinkageTerms;
   /**
-   * Optional self-facing retention/disposition pointer carried from the local
+   * Optional self-facing retention/disposition pointer, held in the local
    * exchange config (NOT the agreed linkage terms): where this party files its
    * copy of the result and under what retention schedule. Threaded into the
    * self-attested record at the end of the exchange; never sent to the partner
@@ -128,96 +126,46 @@ export interface PreparedExchange {
    */
   retentionDisposition?: string;
   /**
-   * The payload column set this party has LOCKED IN as what it will receive, if
-   * any -- the inviter's `disclosedPayloadColumns` carried on an accepted
-   * invitation, or a party's persisted local lock-in (the exchange config's
-   * `expectedPayloadColumns`, falling back to the negotiated `payload.receive`).
-   * When set, {@link runExchange} verifies the partner's transmitted payload
-   * columns match it exactly and aborts otherwise (see
-   * {@link reconcileReceivedPayload}); the empty set is enforced strictly
-   * ("receive nothing"). When absent (undefined), this party reconciles lazily and
-   * accepts whatever the sender's own disclosure metadata transmits.
-   *
-   * Applies only to an output party. {@link runExchange} independently forces a
-   * party with `expectsOutput: false` to receive no payload at all, regardless of
-   * this field, so a non-receiving helper does not rely on the caller setting it.
-   *
-   * Populated by the caller (the accept/exchange front end that holds the token
-   * or the persisted config), NOT by {@link prepareForExchange}: it is a
-   * consent-fidelity expectation, not a property derived from this party's local
-   * data, and the party that is lazy on this direction leaves it undefined.
+   * The payload columns this party has locked in to receive: an accepted
+   * invitation's `disclosedPayloadColumns`, or a persisted
+   * `expectedPayloadColumns` (falling back to `payload.receive`). When set,
+   * {@link runExchange} requires the partner's transmitted columns to match
+   * it exactly ({@link reconcileReceivedPayload}); undefined accepts
+   * whatever the sender transmits. Set by the caller, not
+   * {@link prepareForExchange}. A party with `expectsOutput: false` always
+   * receives none, regardless of this field.
    */
   expectedPayloadColumns?: string[];
   /**
-   * The `deduplicate` the accepted INVITATION declared for the partner's own
-   * side, if this run was reached by accepting one. When set,
-   * {@link runExchange} holds the value the partner presents at the terms
-   * exchange to it and refuses a contradiction before any key or payload moves
-   * (see {@link assertPresentedDeduplicateMatchesInvitation}).
-   *
-   * Populated by the caller -- the accept front end that holds the token, or the
-   * recurring front end that restores the acceptance's persisted
-   * `expectedPartnerDeduplicate` off its config -- NOT by
-   * {@link prepareForExchange}, for the same reason as
-   * {@link expectedPayloadColumns} beside it: it is a consent-fidelity
-   * expectation carried by the invitation rather than a property derived from
-   * this party's own data or terms -- `deriveAcceptedLinkageTerms` sets this
-   * party's own `deduplicate` to `false` and retains nothing of the inviter's.
-   *
-   * Absent (undefined) where no invitation was accepted: an exchange authored
-   * from two parties' own configuration files carries no declaration to hold the
-   * partner to, and the two documents legitimately differ.
+   * The `deduplicate` an accepted invitation declared for the partner's
+   * side. When set, {@link runExchange} refuses a partner terms value that
+   * contradicts it, before any key or payload moves
+   * ({@link assertPresentedDeduplicateMatchesInvitation}). Set by the
+   * caller, not {@link prepareForExchange}. Undefined when no invitation
+   * was accepted, where the two parties' own configs may legitimately
+   * differ.
    */
   expectedPartnerDeduplicate?: boolean;
   dataset: StandardizedDataset;
   /**
    * The original parsed CSV rows, retained for payload extraction after
-   * linkage.
-   *
-   * All rows are held in memory from ingestion through the end of
-   * {@link runExchange}. This roughly doubles peak memory usage relative to
-   * holding only the standardized dataset. If streaming over input data is
-   * ever supported, this field will need to be revisited.
+   * linkage. Held in memory from ingestion through the end of
+   * {@link runExchange}, roughly doubling peak memory versus holding only
+   * the standardized dataset.
    */
   rawRows: Array<CSVRow>;
   rowCount: number;
 }
 
 /**
- * Refuse a linkage-terms `algorithm` this build cannot actually honor, before any
- * matched identifier is revealed.
- *
- * `psi` reveals matched identifiers (`linkViaPSI` / `linkViaSinglePassPSI`), which
- * is what its record attests. `psi-c` (count-only) resolves to the intersection
- * size alone over one round of one key ({@link linkViaCountOnlyPSI}); the shape
- * that round demands is enforced by the count-only refusals rather than here, so
- * this guard answers only whether a run path exists for the algorithm at all.
- *
- * What the refusal protects is the record's integrity: an algorithm with no run path
- * would disclose differently than the self-attested exchange record asserts -- a gap
- * in the compliance accounting (HIPAA 45 CFR 164.528 and FERPA disclosure accounting
- * turn on what was ACTUALLY disclosed). A terms value reaching core through ANY mint
- * or accept path -- a hand-crafted token, a CLI-authored config, a non-web mint -- is
- * refused here rather than left to each client to clamp. This is the run-side half
- * the record-integrity guarantee rests on; a pure record-side clamp would keep the
- * record honest but silently ignore an operator's stated intent to disclose only a
- * count, so the run refuses instead.
- *
- * The guard is an ALLOWLIST, not a denylist of the unimplemented: `psi` and `psi-c`,
- * with any algorithm later added to `AlgorithmSchema` refused by default until it too
- * is implemented and allowed here. This follows the repo's allowlist-over-blocklist
- * rule (CONTRIBUTING.md, Code Conventions) and keeps enum growth fail-closed --
- * `buildExchangeRecord` copies `algorithm` verbatim with no guard of its own, so a new
- * unimplemented member slipping past this run-side gate is exactly what the allowlist
- * prevents.
- *
- * Plain {@link UsageError}, deliberately NOT an `OperatorConfigError`: on the
- * accept side the algorithm is adopted verbatim from the partner's invitation
- * (see `deriveAcceptedLinkageTerms`), so -- like `assertPayloadSendDisclosed` -- it is
- * not unconditionally this operator's own content, and its message stays swallowed
- * by the web's generic alert rather than surfaced. The message names only the
- * fixed enum literals, never partner-controlled free text; the CLI classifies it
- * as a usage error (exit 64).
+ * Refuse a linkage-terms `algorithm` this build has no run path for, before
+ * any matched identifier is revealed. Allowlists `psi` (reveals matched
+ * identifiers) and `psi-c` (count only, {@link linkViaCountOnlyPSI}); any
+ * other value -- including one adopted verbatim from a partner's invitation
+ * -- is refused so the self-attested record never attests a disclosure the
+ * run did not make. Plain {@link UsageError}, not `OperatorConfigError`:
+ * the accept path adopts the algorithm from the partner's invitation, so
+ * the fault is not provably this operator's own config.
  */
 export function assertAlgorithmImplemented(algorithm: Algorithm): void {
   if (algorithm === "psi") return;
@@ -233,17 +181,14 @@ export function assertAlgorithmImplemented(algorithm: Algorithm): void {
 }
 
 /**
- * The refusal raised when the two parties' agreed terms name different algorithms
- * at the run boundary ({@link resolveCountOnlyRun}).
+ * The refusal raised when the two parties' agreed terms name different
+ * algorithms at the run boundary ({@link resolveCountOnlyRun}).
  *
- * A {@link ConnectionError} of kind `protocol` rather than a {@link UsageError}:
- * this party's own algorithm is its own config, so a divergence is the partner
- * having proceeded past the terms-exchange compatibility abort that refuses one --
- * a peer violating the message protocol, not a local misconfiguration. The CLI's
- * exit-code mapping therefore yields 69 -- the `usage` kind is the one it reads as
- * 64 -- and a consumer keeping per-failure bookkeeping can branch on the type. The
- * message names only the fixed algorithm literals of `AlgorithmSchema`, never
- * partner free text.
+ * A {@link ConnectionError} of kind `protocol`, not {@link UsageError}: this
+ * party's own algorithm is its own config, so a divergence means the
+ * partner proceeded past the terms-exchange compatibility abort -- a
+ * protocol violation, not a local misconfiguration (CLI exit 69, not 64).
+ * The message names only the fixed algorithm literals, never partner text.
  */
 export class AlgorithmDivergenceError extends ConnectionError {
   constructor(message: string) {
@@ -253,27 +198,15 @@ export class AlgorithmDivergenceError extends ConnectionError {
 }
 
 /**
- * Resolve whether this exchange runs the count-only (`psi-c`) path, from BOTH
- * parties' agreed terms, and refuse a count-only exchange outside the shape the
- * specification admits.
+ * Resolve whether this exchange runs the count-only (`psi-c`) path, from
+ * both parties' agreed terms, and refuse a count-only exchange outside the
+ * shape docs/spec/PROTOCOL.md (PSI-C) admits.
  *
- * The agreed-terms run boundary the specification names (docs/spec/PROTOCOL.md,
- * PSI-C), and the second of the two enforcement points core owns -- the first being
- * the local prepare step, which sees only this party's own terms. Symmetric in the
- * pair: each party calls it with its own terms plus the partner's and asserts over
- * both, so a refusal aborts both parties at the same point rather than desyncing the
- * lockstep round. Same shape and same reason as
- * {@link resolveLinkageCardinality}, which resolves the matching cardinality
- * immediately after the terms exchange.
- *
- * The pair must name ONE algorithm, and a divergent pair is refused here with an
- * {@link AlgorithmDivergenceError} rather than resolved to either party's value:
- * resolving would run the revealing engine while this party's record attested the
- * count-only algorithm its own terms named -- the substitution docs/spec/PROTOCOL.md
- * forbids. `algorithm` is a mandatory-consistency term, so `validateCompatibility`
- * aborts a divergent pair at the terms exchange upstream; this is that invariant
- * encoded at the boundary the run turns on rather than asserted about it. The verdict
- * is then simply whether the agreed algorithm is `psi-c`.
+ * Symmetric: each party calls it with its own terms plus the partner's, so
+ * a refusal aborts both parties at the same point rather than desyncing
+ * the lockstep round -- the same shape as {@link resolveLinkageCardinality}.
+ * A pair naming different algorithms is refused as an
+ * {@link AlgorithmDivergenceError} rather than resolved to either value.
  */
 export function resolveCountOnlyRun(
   localTerms: LinkageTerms,
@@ -296,38 +229,11 @@ export function resolveCountOnlyRun(
 }
 
 /**
- * Requires an association table to carry well-formed matched PAIRS, at the seam
- * {@link runExchange} consumes it: halves of equal length, a local half in
- * ascending order, no pair repeated, and a local row repeated only where the
- * cardinality this exchange resolved produces one.
- *
- * Everything downstream reads the table as a list of pairs. The payload carries
- * one row per DISTINCT matched local row ({@link preparePayload}), the result file
- * one row per pair ({@link buildOutputTable}), and the attested result size the
- * pair count ({@link matchedPairCount}).
- *
- * Which table shapes those readings admit follows from the resolved cardinality,
- * so it is passed in rather than inferred from the table. Under `one-to-one` a
- * matched record of ours stands in exactly one pair and the local half is strictly
- * ascending. A repeat there is admitted only where this party is the "one" side of
- * a deduplicating exchange, several of the partner's records linking to one of
- * ours (`one-to-many`, and `many-to-many`, which fans both ways -- see
- * {@link AssociationTable}). Where this party is the "many" side the multiplicity
- * lands on the PARTNER half, whose repeats sit ACROSS runs of equal local rows --
- * the local half being strictly ascending -- where the pair check below never
- * allocates or fires; a repeat WITHIN one run is a repeated pair and is refused
- * below regardless. Detecting a repeat across the whole half costs an allocation
- * over every matched pair on the `one-to-one` path too, where the local half's
- * strict ascent costs nothing.
- *
- * What no cardinality produces, and what no consumer could read, is refused. A
- * local half out of order would put the result rows and the payload rows in an
- * order the re-supply path does not reproduce, so the record's commitments would
- * not reopen from the retained files. A repeated pair would count one link twice
- * in the attested size and write the same result row twice. Equal local rows are
- * contiguous in an ascending half, so the pair check holds only the partner
- * indices of the run in hand and allocates nothing at all for a strictly ascending
- * table.
+ * Requires an association table to hold well-formed matched pairs, before
+ * {@link runExchange} consumes it: halves of equal length, a local
+ * half in ascending order, no pair repeated, and a local row repeated only
+ * where the given `cardinality` admits it. The payload, the result file,
+ * and the attested result size all depend on this shape.
  *
  * @internal exported for the association-table invariant test.
  */
@@ -381,35 +287,26 @@ export function assertMatchedPairsWellFormed(
 }
 
 /**
- * The result size a record attests for a matched table: its PAIR count.
- *
- * Under `one-to-one` the pairs, this party's matched records, and the partner's
- * matched records are one figure. Under a deduplicating cardinality they diverge,
- * and the pair count is what the record carries: it is the figure both parties
- * derive identically from the single exchanged table, where a per-party
- * matched-record count would put two different "result sizes" on the two records
- * of one exchange. A repeated row index on one side of a pair is still a pair
- * (docs/spec/EXCHANGE_RECORD.md, Result size under a deduplicating cardinality).
+ * The result size a record attests for a matched table: its pair count.
+ * Under `one-to-one` this equals both parties' matched-record counts; under
+ * a deduplicating cardinality they diverge, and the pair count is the
+ * figure both parties derive identically from the single exchanged table
+ * (docs/spec/EXCHANGE_RECORD.md, Result size under a deduplicating
+ * cardinality).
  */
 export function matchedPairCount(associationTable: AssociationTable): number {
   return associationTable[0].length;
 }
 
 /**
- * Refuse agreed terms that declare a per-record candidate width on a strategy
- * matching a single value per record, before anything goes on the wire.
- *
- * The terms' effective key count exceeding their key count declares that some key
- * may realize several candidates ({@link partyFansOut}), and fan-out matching runs
- * under single-pass alone (docs/spec/PROTOCOL.md, Fan-out runs under single-pass
- * only). Both parties derive the same width from the same agreed terms, so both
- * refuse in lockstep and neither waits on a run the other has abandoned.
- *
- * `assertFanOutImplemented` covers the same ground for a declared fan-out step by
- * name; this reaches the width a fuzzy comparison declares, which no step name
- * shows. The width is a function of terms the accept path adopts wholesale, so the
- * message names the terms and stays a {@link UsageError}, like the width refusals
- * the single-pass build raises for the same class of over-declared size.
+ * Refuse agreed terms that declare a per-record candidate width
+ * ({@link partyFansOut}) on a strategy matching a single value per record,
+ * before anything goes on the wire: fan-out matching runs under
+ * single-pass only (docs/spec/PROTOCOL.md, Fan-out runs under single-pass
+ * only). Covers the width a fuzzy comparison declares, which
+ * `assertFanOutImplemented` does not reach by step name. A
+ * {@link UsageError}: the width is a function of terms the accept path
+ * adopts wholesale.
  */
 function assertDeclaredWidthMatchesStrategy(
   terms: LinkageTerms,
@@ -430,44 +327,13 @@ function assertDeclaredWidthMatchesStrategy(
 }
 
 /**
- * Refuse a `signing.mode` the exchange cannot honor, before it runs.
- *
- * `SigningModeSchema` accepts `session-derived` (a MAC under the shared session
- * key) but no code path produces one: the signing step runs only for a
- * `certificate`-mode block, so a `session-derived` config would complete an
- * exchange and leave the operator with the ordinary unsigned record: the receipt
- * the configuration asked for is never produced, and nothing says so. Refuse it
- * in {@link prepareForExchange} instead, before any credential, terms, or data
- * are sent, so the answer arrives while the operator is still configuring rather
- * than as a missing file after a completed exchange.
- *
- * The guard ALLOWLISTS the two modes the exchange honors -- `certificate` (signs
- * and swaps a dual-signed receipt) and `none` (asks for no receipt, as does an
- * absent block) -- rather than denylisting `session-derived`, so a mode later
- * added to `SigningModeSchema` (the enum is documented as the extensibility seam
- * for an authority-backed trust model) is refused by default until it too is
- * implemented and allowed here. This follows the repo's allowlist-over-blocklist
- * rule (CONTRIBUTING.md, Code Conventions).
- *
- * An {@link OperatorConfigError}, unlike its {@link assertAlgorithmImplemented}
- * and {@link assertDeduplicateImplemented} siblings: those read a linkage-terms
- * value that reaches them from the partner too -- adopted from its invitation,
- * or read off its terms document at {@link resolveLinkageCardinality} -- so the
- * fault is not provably local, while the `signing` block is only ever this
- * party's own config -- it lives on the local {@link ExchangeSpec} and no
- * invitation or accept path carries one (see `config/signing.ts`). That is
- * `OperatorConfigError`'s membership rule, so the fault surfaces as the
- * actionable config category on both front ends rather than as a generic
- * exchange failure; the message names only the fixed enum literals, and the CLI
- * still classifies it as a usage error (exit 64) through the base class.
- *
- * When a session-derived receipt path lands, REPLACE this refusal with it rather
- * than merely widening the allowlist: the mode needs a signing step of its own,
- * not just permission to reach the certificate one.
- *
- * It refuses before the exchange runs rather than at receipt time: a
- * non-certificate mode would otherwise leave the exchange with the ordinary
- * unsigned record while the configuration asked for a signed receipt.
+ * Refuse a `signing.mode` the exchange has no run path for, before it
+ * runs. Allowlists `certificate` (signs and swaps a dual-signed receipt)
+ * and `none`; `session-derived` and any other value would otherwise
+ * complete the exchange and leave the operator the ordinary unsigned
+ * record with no signal that the receipt it asked for was never produced.
+ * An {@link OperatorConfigError}: `signing` is always this party's own
+ * config, never adopted from the partner.
  */
 export function assertSigningModeImplemented(
   mode: SigningMode | undefined,
@@ -483,46 +349,14 @@ export function assertSigningModeImplemented(
 }
 
 /**
- * Refuse a `certificate`-mode exchange that pins no partner fingerprint, before
- * it runs.
- *
- * Such a run cannot finish, and it fails at the worst possible point. The
- * signature swap is the last step of a successful exchange, so the payloads have
- * already crossed when it starts, and the partner's certificate arrives with
- * nothing on file to check it against: {@link assertPartnerCertificateTrusted}
- * rejects unconditionally on an absent pin, which terminates the run. The result
- * and the receipt are written after {@link runExchange} returns, so the operator
- * is left with neither -- at most the self-attested record of the disclosure the
- * run had already made, which the throw carries back
- * ({@link exchangeRecordFromFailure}) -- while this party's data is in the
- * partner's hands, and on the leg that sends its `{certificate, signature}` frame
- * first the partner also holds this party's signed receipt.
- * Nothing about the partner or the network changes that: the `signing` block is
- * only ever this party's own config, and no invitation or accept path supplies a
- * pin later (see `config/signing.ts`), so the outcome is settled while the
- * operator is still configuring.
- *
- * That record is named as the MOST such a run keeps, never as a promise of one:
- * whether it reaches disk is the calling front end's record-writing setting (a
- * CLI run under `--no-record` writes none and keeps nothing at all), and this
- * gate reads nothing of that setting -- the `signing` block is all it takes, and
- * a message offering the record outright would name a consolation the operator
- * does not get.
- *
- * Refused here for the reason its {@link assertSigningModeImplemented} sibling
- * is, and as the same {@link OperatorConfigError}: this is a local configuration
- * fault with an actionable remedy, surfaced as that category on both front ends
- * (and exit 64 on the CLI, through the base class). Strictly the worse of the
- * two, in fact -- a `session-derived` config at least COMPLETES the exchange and
- * leaves the operator its result beside the ordinary unsigned record.
- *
- * Scoped to `certificate` mode alone: `none`, an absent block, and an
- * unimplemented mode (already refused above) verify no partner certificate, so
- * they need no pin. The pin's own SHAPE is the schema's
- * ({@link FINGERPRINT_REGEX}), which is what keeps a malformed pin reported as
- * malformed rather than as a partner mismatch; this gate asks only whether one
- * was set at all, through the predicate the verification-time refusal reads
- * ({@link partnerPinIsPresent}).
+ * Refuse a `certificate`-mode exchange that pins no partner fingerprint,
+ * before it runs. The signature swap runs after payloads have crossed and
+ * rejects unconditionally on an absent pin, so an unpinned run sends this
+ * party's data and terminates with no result and no receipt, keeping at
+ * most the self-attested record of that disclosure
+ * ({@link exchangeRecordFromFailure}). An {@link OperatorConfigError}:
+ * `signing` is always this party's own config. Scoped to `certificate`
+ * mode; `none` and an absent block need no pin.
  */
 export function assertCertificateModePinsPartner(
   signing: SigningConfig | undefined,
@@ -545,41 +379,14 @@ export function assertCertificateModePinsPartner(
 }
 
 /**
- * Refuse a `certificate`-mode exchange whose own agreed terms name no party,
- * before it runs.
- *
- * A receipt names both parties, and a certificate is trusted by the identity its
- * holder used in the AGREED TERMS rather than the one the certificate carries, so
- * a party that named itself none has nothing for its partner to authorize the
- * certificate against: {@link runExchange} refuses such a run at the terms
- * exchange and again at the signature swap. Either refusal lands only once the
- * connection is open, this party's credentials have been presented, and its own
- * terms have gone out, and it leaves no local artifact behind -- the result and
- * the exchange record as much as the receipt are written only once the exchange
- * returns. This party's own absence is settled while the operator is still
- * configuring, so it is refused here instead, before any credential, terms, or
- * data are sent.
- *
- * Held to the RESOLVED local terms rather than to the identity argument
- * {@link prepareForExchange} takes, because those are what the run puts on the
- * wire: a spec carrying its own `linkageTerms` keeps their identity whatever that
- * argument says. The condition is the one the swap reads -- the field absent, on
- * the same `prepared.linkageTerms` -- so the gate refuses exactly the local half
- * of what the swap would, no more; a present value is held to non-empty by
- * {@link LinkageTermsSchema}, so no parsed document reaches either with a blank
- * label.
- *
- * The PARTNER's half cannot be settled here -- their terms arrive at the terms
- * exchange -- so it is settled there, by
- * {@link assertSignedReceiptNamesBothParties}, which also stands in for this one
- * on a {@link runExchange} call whose signing options were threaded past
- * `prepareForExchange`.
- *
- * An {@link OperatorConfigError}, as its {@link assertCertificateModePinsPartner}
- * and {@link assertSigningModeImplemented} siblings are: `signing.mode` and this
- * party's own terms are both this party's own config, so the fault is local and
- * actionable, surfaced as that category on both front ends (and exit 64 on the
- * CLI, through the base class).
+ * Refuse a `certificate`-mode exchange whose own agreed terms name no
+ * party, before it runs. A certificate is trusted by the identity its
+ * holder used in the agreed terms, so an unnamed party has nothing for
+ * its partner to authorize the certificate against. Held to the resolved
+ * `localTerms`, not the identity argument {@link prepareForExchange}
+ * takes, since that is what the run puts on the wire. The partner's half
+ * is decided at the terms exchange, by
+ * {@link assertSignedReceiptNamesBothParties}. An {@link OperatorConfigError}.
  */
 export function assertCertificateModeNamesLocalParty(
   signing: SigningConfig | undefined,
@@ -601,36 +408,14 @@ export function assertCertificateModeNamesLocalParty(
 }
 
 /**
- * Refuse a run that will sign a receipt when either party's AGREED terms carry no
- * identity.
- *
- * A receipt names both parties, and each party's certificate is trusted by the
- * identity its holder used in the agreed terms rather than the one the certificate
- * carries. An unnamed party therefore has nothing for the pin to authorize: this
- * side could not present a certificate the partner can check, and could not check
- * the partner's against a name it never gave. Fail closed and name which side is
- * unnamed rather than reaching for a substitute, which would make the binding
- * check vacuous.
- *
- * {@link runExchange} calls this at TWO points, over the same pair of agreed
- * terms. The first is the terms exchange, the moment the partner's terms are in
- * hand: the partner's absence is knowable there, so the run ends before the
- * bootstrap frame, any linkage key, or any payload row moves, rather than after
- * this party's data has crossed. The second is the signature swap itself, where a
- * receipt cannot be built from an unnamed pair whatever route reached it. Holding
- * the same condition at both keeps the point of use fail-closed without resting on
- * the earlier gate having run.
- *
- * A {@link ReceiptVerificationError} -- the security-category error the swap's own
- * pin and signature refusals raise -- because what fails is the receipt's identity
- * binding, not this party's configuration: on the partner's half the fault is not
- * locally correctable at all, and {@link assertCertificateModeNamesLocalParty}
- * already raises the operator-config form for the half that is, before the run
- * starts.
- *
- * Returns the two names it just held to being present, so the swap binds the
- * values this check passed rather than re-reading a field and reaching for a
- * fallback if it were absent.
+ * Refuse a run that will sign a receipt when either party's agreed terms
+ * hold no identity: a certificate is trusted by the identity its holder
+ * used in the agreed terms, so an unnamed party has nothing for the pin to
+ * authorize. Called at two points over the same pair -- the terms
+ * exchange, before the bootstrap frame or any key or payload moves, and
+ * the signature swap itself. A {@link ReceiptVerificationError}: the
+ * failing binding may be the partner's, not this party's config. Returns
+ * the two names it held to being present.
  */
 export function assertSignedReceiptNamesBothParties(
   localTerms: LinkageTerms,
@@ -652,40 +437,15 @@ export function assertSignedReceiptNamesBothParties(
 }
 
 /**
- * Refuse a run whose own signing certificate does not authorize the identity this
- * party carries in its AGREED TERMS.
- *
- * A certificate is trusted by the identity its holder used in the agreed terms
- * rather than the one the certificate carries, so a party signing under a
- * certificate bound to any other name signs a receipt that verifies nowhere --
- * its own `verify-receipt` included. Unheld, what such a run leaves that party
- * turns on the handshake role it drew, which none of its own configuration
- * decides: signing first, its frame is refused and the run terminates; signing
- * last, it sends its frame before the partner can refuse it and returns as a
- * success does, holding that worthless receipt. Neither outcome is representable
- * with the binding held here, the local counterpart of the partner half
- * {@link exchangeSignedReceipt} holds at the swap.
- *
- * Both values it compares are settled before the exchange opens, and the identity
- * the run agrees terms under is fixed the moment the partner's terms arrive, so
- * {@link runExchange} applies it there -- before any linkage key or payload row
- * crosses -- and again at the swap, where a certificate is about to reach the
- * wire (see {@link assertReceiptBindingsOrAbort}).
- *
- * An {@link OperatorConfigError}, not the {@link ReceiptVerificationError} the
- * swap's other refusals raise, even though it fires where that category owns the
- * failures. Nothing about the peer is consulted to reach it -- both values that
- * disagree are this party's own -- and the security-kind error asserts the
- * opposite: a caller branching on it, the CLI's exit-code mapping first (64 for
- * this party's own configuration against 69 for a failure met at the peer), would
- * report a local misconfiguration as the partner's fault.
- *
- * The message names both disagreeing values, which are this party's own: nothing
- * partner-controlled is quoted. They are composed raw, escaped once at the
- * display sink like every other fragment (CONTRIBUTING.md, Operator-facing
- * escaping), and land LAST, after the remedy, for the reason its CLI sibling
- * gives: the renderer caps a composed link, and an over-long name should spend
- * that truncation on itself rather than on the step the operator has to act on.
+ * Refuse a run whose own signing certificate does not authorize the
+ * identity in this party's agreed terms: a certificate bound to
+ * any other name signs a receipt that verifies nowhere, including its own
+ * `verify-receipt`. Applied at the terms exchange, before any linkage key
+ * or payload row crosses, and again at the swap
+ * ({@link assertReceiptBindingsOrAbort}). An {@link OperatorConfigError},
+ * not {@link ReceiptVerificationError}: both disagreeing values are this
+ * party's own, nothing partner-controlled. The message names both values,
+ * last, after the remedy.
  */
 export function assertLocalCertificateAuthorizesAgreedIdentity(
   certificate: CertificateBody,
@@ -705,14 +465,9 @@ export function assertLocalCertificateAuthorizesAgreedIdentity(
   );
 }
 
-// The abort reasons the two local receipt bindings send. Fixed literals, as every
-// reason on this frame must be: the frame is a disclosure to the partner like any
-// other (see sendAbort). Neither names a value. The first states a fact over the
-// two identities both sides already hold -- each sent the other its own terms --
-// so the only thing it adds is that this side meant to sign, which its receipt
-// frame would have said moments later. The second adds only that this party's own
-// certificate is bound away from the name it agreed terms under, which is this
-// party's own configuration and nothing the partner supplied.
+// The abort reasons the two local receipt bindings send. Fixed literals, as
+// every reason on this frame must be (see sendAbort): the frame is a
+// disclosure to the partner like any other, so neither names a value.
 const UNNAMED_PARTY_ABORT_REASON =
   "a signed receipt names both parties and one side's agreed terms name no " +
   "identity";
@@ -721,41 +476,18 @@ const CERTIFICATE_DIVERGENCE_ABORT_REASON =
   "terms under";
 
 /**
- * Hold the two receipt bindings that follow from the agreed terms alone -- both
- * parties named ({@link assertSignedReceiptNamesBothParties}), and this party's
- * own certificate authorizing the name it agreed terms under
- * ({@link assertLocalCertificateAuthorizesAgreedIdentity}) -- sending the partner
- * an abort before either refusal propagates.
+ * Hold the two receipt bindings that follow from the agreed terms alone --
+ * both parties named ({@link assertSignedReceiptNamesBothParties}) and
+ * this party's own certificate authorizing the name it agreed terms under
+ * ({@link assertLocalCertificateAuthorizesAgreedIdentity}) -- sending the
+ * partner a best-effort abort before either refusal propagates. Applied at
+ * the terms exchange and again at the signature swap, over the same three
+ * values, so the two points cannot drift into different predicates or
+ * abort reasons. Returns the two names.
  *
- * {@link runExchange} applies it at TWO points over the same three values. The
- * first is the terms exchange, the moment the partner's terms are in hand and
- * every input is settled: both refusals therefore land before the bootstrap
- * frame, any linkage key, and any payload row. The second is the signature swap
- * itself, which cannot build a receipt from an unnamed pair or present a
- * certificate that authorizes neither name, whatever route reached it. Holding
- * the pair here rather than at each call site is what keeps the two points from
- * drifting into different predicates or different abort reasons -- the earlier
- * refusal admits exactly the runs the later one does.
- *
- * Both refusals are ONE-SIDED: a partner that is not signing, or whose own
- * certificate is bound correctly, derives neither of them, so without the abort
- * it waits out its whole peer-inactivity budget (a full poll budget on a file
- * channel, whose drop directory holds the bytes for that whole wait) for rounds
- * this party will never run. The abort is best-effort and carries a fixed
- * literal; what ends the partner's run is the frame's ARRIVAL, and where in the
- * protocol that arrival lands decides what the partner makes of it. From the
- * swap it reaches a peer awaiting the receipt frame, which refuses it as a
- * `protocol` {@link ConnectionError}; from the terms exchange it lands where the
- * invitation-term refusal's does, which
- * {@link assertPresentedDeduplicateMatchesInvitation}'s call site describes. The
- * specific fault stays with this party either way.
- *
- * Returns the two names, so the swap binds the values this check passed rather
- * than re-reading a field and reaching for a fallback if it were absent.
- *
- * @internal exported for the swap-side abort test, which cannot reach this point
- *   through `runExchange`: the terms-exchange application refuses the same inputs
- *   first.
+ * @internal exported for the swap-side abort test, which cannot reach this
+ *   point through `runExchange`: the terms-exchange application refuses
+ *   the same inputs first.
  */
 export async function assertReceiptBindingsOrAbort(
   conn: MessageConnection,
@@ -786,25 +518,16 @@ export async function assertReceiptBindingsOrAbort(
 }
 
 /**
- * The refusal raised when a partner presents a `deduplicate` its invitation did
- * not declare ({@link assertPresentedDeduplicateMatchesInvitation}).
+ * The refusal raised when a partner presents a `deduplicate` its
+ * invitation did not declare
+ * ({@link assertPresentedDeduplicateMatchesInvitation}).
  *
- * A {@link ConnectionError} of kind `protocol` rather than a {@link UsageError},
- * for the same reason as {@link AlgorithmDivergenceError}: the contradiction is
- * between two documents the PARTNER authored, so the fault is the peer's rather
- * than this operator's configuration. The CLI's exit-code mapping therefore yields
- * 69 -- the `usage` kind is the one it reads as 64 -- and a consumer keeping
- * per-failure bookkeeping can branch on the type.
- *
- * It carries `psilinkRecoveryHintEmitted` (the class-field form its
- * `PeerAbortError` and `FrameSizeExceededError` siblings use in `errors.ts`) so
- * the CLI's hint-walker suppresses the generic "retry the exchange without
- * re-inviting" advisory. The refusal is terminal against the invitation this
- * party holds, and its own message prescribes the opposite step -- obtain an
- * invitation declaring the setting the partner will run -- so the generic line
- * would tell an operator to re-run a refusal that repeats identically, and an
- * unattended recurring exchange would loop on it. The advisory's window is
- * reached on the online path, where the token rotates before the run.
+ * A {@link ConnectionError} of kind `protocol`, not {@link UsageError}:
+ * the contradiction is between two documents the partner authored (CLI
+ * exit 69, not 64). Has `psilinkRecoveryHintEmitted` so the CLI's
+ * hint-walker suppresses the generic "retry without re-inviting" advisory
+ * -- this refusal is terminal against the held invitation and would
+ * otherwise loop an unattended recurring exchange.
  */
 export class InvitationTermDivergenceError extends ConnectionError {
   readonly psilinkRecoveryHintEmitted = true;
@@ -816,30 +539,14 @@ export class InvitationTermDivergenceError extends ConnectionError {
 }
 
 /**
- * Bind the `deduplicate` a partner presents at the terms exchange to the value
- * its INVITATION declared, for a run this party reached by accepting one.
- *
- * The term is per-party, so nothing in the agreed terms compares the two sides:
- * `deriveAcceptedLinkageTerms` sets this party's own value to `false` and the
- * partner's arrives on its terms message, where a value contradicting the
- * invitation would otherwise run unremarked. The declaration is what the consent
- * surfaces stated and what this party agreed to -- an invitation declaring
- * `false` shows no grouping disclosure at all, while the run its author can
- * produce by presenting `true` widens what this party's own records disclose
- * (more of them match, each disclosing its membership and any payload columns
- * this party sends). So the presented value is held to the declared one, and the
- * exchange is refused before any key or payload moves.
- *
- * Scoped to the invitation path, and NOT a cross-party equality rule: the
- * expectation is set only by an accept path that holds the token
- * ({@link PreparedExchange.expectedPartnerDeduplicate}), and `undefined` -- every
- * exchange authored from two parties' own configuration files -- is a no-op. A
- * one-sided deduplicating exchange whose two documents legitimately differ is
- * exactly what makes one party the "many" side, and it still runs.
- *
- * The message names the contradiction with the two declared booleans and no
- * partner-controlled value: the invitation's `deduplicate` is a schema boolean,
- * and nothing else about the partner's document is quoted.
+ * Bind the `deduplicate` a partner presents at the terms exchange to the
+ * value its invitation declared, for a run reached by accepting one: a
+ * value presented as `true` where the invitation declared `false` widens
+ * what this party's records disclose beyond what was consented to.
+ * Refused before any key or payload moves. Scoped to the invitation path:
+ * `undefined` ({@link PreparedExchange.expectedPartnerDeduplicate}) is a
+ * no-op, since a config-authored exchange states no declaration to hold
+ * the partner to.
  */
 export function assertPresentedDeduplicateMatchesInvitation(
   invitationDeclared: boolean | undefined,
@@ -861,32 +568,15 @@ export function assertPresentedDeduplicateMatchesInvitation(
 }
 
 /**
- * Resolve the matching cardinality {@link runExchange} passes to the linkage
- * strategies, from the two parties' agreed `deduplicate` settings.
- *
- * Each party calls it with the same agreed pair -- its own terms first, the
- * partner's second, read off the terms exchange -- so both derive one cardinality
- * from the same authenticated state and the lockstep PSI rounds cannot be
- * desynced by a divergent resolution. The label is read from the CALLING party's
- * own side, a `deduplicate: true` party being the "many" one, so the two parties
- * hold mirror labels for the single procedure they run (docs/spec/PROTOCOL.md,
- * Deduplicating cardinalities): `(true, false)` gives the declaring party
- * `many-to-one` and its partner `one-to-many`, while `(false, false)` and
- * `(true, true)` are each their own mirror.
- *
- * `(true, true)` resolves to `many-to-many`, which is its own mirror: both sides
- * keep their within-dataset duplicates, every candidate pair a round produces is
- * accepted, and the transitive closure that resolves the resulting table into
- * entity clusters -- what makes it actionable for either party -- runs locally
- * over the cascade's own output (docs/spec/PROTOCOL.md, The `many-to-many` entity
- * closure). What that pair still needs from the agreed terms is a strategy that
- * matches it, which {@link assertBothSidedDeduplicateImplemented} holds it to:
- * the cascade pairs it and `single-pass` does not.
- *
- * Every refusal here is a symmetric function of the agreed pair -- each party
- * asserts over BOTH documents, and the both-sided strategy test reads both
- * documents' strategies -- so a refused pair aborts both parties at this same
- * point rather than starting a round one side would refuse.
+ * Resolve the matching cardinality {@link runExchange} passes to the
+ * linkage strategies, from the two parties' agreed `deduplicate`
+ * settings. The label is read from the calling party's own side, so the
+ * two parties hold mirror labels for one procedure
+ * (docs/spec/PROTOCOL.md, Deduplicating cardinalities): `(true, false)`
+ * gives the declaring party `many-to-one`; `(true, true)` gives
+ * `many-to-many`, which {@link assertBothSidedDeduplicateImplemented}
+ * requires a matching strategy for. A refusal is symmetric and aborts
+ * both parties at this point.
  */
 export function resolveLinkageCardinality(
   localTerms: LinkageTerms,
@@ -902,15 +592,12 @@ export function resolveLinkageCardinality(
 }
 
 /**
- * The metadata and linkage terms an exchange resolves from its spec: the config's
- * own where it carries them, else the ones derived from this run's input columns.
- *
- * This is the single definition {@link prepareForExchange} itself uses, exported so
- * a front end that must inspect either BEFORE preparing -- the outbound-payload
- * confirmation, which shows the set this run would transmit and records the
- * operator's answer into the config prepare then reads -- resolves them exactly as
- * the run does. A front end deriving its own would be free to drift from what is
- * actually transmitted, which is the whole property that confirmation rests on.
+ * The metadata and linkage terms an exchange resolves from its spec: the
+ * config's own where it holds them, else the ones derived from this
+ * run's input columns. The single definition {@link prepareForExchange}
+ * itself uses, exported so a front end that must inspect either before
+ * preparing -- the outbound-payload confirmation -- resolves them exactly
+ * as the run does.
  */
 export function resolveExchangeInputs(
   exchangeDataSpec: ExchangeDataSpec,
@@ -966,116 +653,89 @@ export function prepareForExchange(
     columnNames,
   );
 
-  // Fail closed on an algorithm with no run path before any credential, terms, or
-  // data are sent: such a run would disclose differently than its self-attested
-  // record asserts. Refuse here (friendly, revealing nothing) and again at the run
-  // boundary (runExchange) so the refusal holds even for a PreparedExchange built
-  // without going through this function. See assertAlgorithmImplemented.
+  // Fail closed on an algorithm with no run path before any credential,
+  // terms, or data are sent. Refused again at the run boundary (runExchange)
+  // so the refusal holds for a PreparedExchange built without this
+  // function. See assertAlgorithmImplemented.
   assertAlgorithmImplemented(linkageTerms.algorithm);
 
-  // The local prepare step of the count-only shape refusal, the first of the two
-  // enforcement points core owns (the other is the agreed-terms run boundary; see
-  // resolveCountOnlyRun). Both run over metadata RESOLVED above -- the config's own
-  // or the one inferred from this run's input columns -- so the transmit rule is
-  // never asked of an unresolved block, which would pass it vacuously. A no-op on
-  // every `psi` exchange. See assertCountOnlyTermsShape and
-  // assertCountOnlyTransmitsNoColumn.
+  // The local prepare step of the count-only shape refusal; the other is
+  // the agreed-terms run boundary (resolveCountOnlyRun). Both run over
+  // metadata resolved above, so the transmit rule is never asked of an
+  // unresolved block. A no-op on every `psi` exchange. See
+  // assertCountOnlyTermsShape and assertCountOnlyTransmitsNoColumn.
   assertCountOnlyTermsShape(linkageTerms);
   assertCountOnlyTransmitsNoColumn(linkageTerms.algorithm, metadata);
 
-  // Fail closed on a deduplicating term the agreed strategy cannot match before
-  // any credential, terms, or data are sent: a strategy matching one record per
-  // value would under-deliver the consented cardinality. Refused again from both
-  // parties' agreed terms in runExchange (resolveLinkageCardinality), which holds
-  // for a PreparedExchange built without going through this function. See
-  // assertDeduplicateImplemented.
+  // Fail closed on a deduplicating term the agreed strategy cannot match,
+  // before any credential, terms, or data are sent. Refused again from
+  // both parties' agreed terms in runExchange (resolveLinkageCardinality).
+  // See assertDeduplicateImplemented.
   assertDeduplicateImplemented(linkageTerms);
 
-  // Fail closed on a signing mode with no run path before any credential, terms,
-  // or data are sent: only certificate mode signs a receipt, so a session-derived
-  // block would otherwise run to completion and leave the operator the unsigned
-  // record they did not ask for. See assertSigningModeImplemented.
+  // Fail closed on a signing mode with no run path: only certificate mode
+  // signs a receipt, so a session-derived block would otherwise run to
+  // completion and leave the operator the unsigned record they did not
+  // ask for. See assertSigningModeImplemented.
   assertSigningModeImplemented(exchangeDataSpec.signing?.mode);
 
-  // Fail closed on the same footing when certificate mode pins no partner: the
-  // signature swap runs after the payloads have crossed and rejects any
-  // certificate presented against an absent pin, so the run discloses this
-  // party's data and then terminates with no result and no receipt, leaving the
-  // operator only the record of that disclosure. See
-  // assertCertificateModePinsPartner.
+  // Fail closed when certificate mode pins no partner: the signature swap
+  // runs after the payloads have crossed and rejects any certificate
+  // against an absent pin, terminating the run with no result and no
+  // receipt. See assertCertificateModePinsPartner.
   assertCertificateModePinsPartner(exchangeDataSpec.signing);
 
-  // And on the same footing when certificate mode names no party: a certificate
-  // is trusted by the identity its holder used in the agreed terms, so the
-  // signature swap refuses an unnamed side -- again after the payloads have
-  // crossed. The local half of that refusal is knowable here. See
-  // assertCertificateModeNamesLocalParty.
+  // Fail closed when certificate mode names no party: a certificate is
+  // trusted by the identity its holder used in the agreed terms, so the
+  // signature swap refuses an unnamed side after the payloads have
+  // crossed. See assertCertificateModeNamesLocalParty.
   assertCertificateModeNamesLocalParty(exchangeDataSpec.signing, linkageTerms);
 
-  // Reject a payload data dictionary that does not match what metadata transmits.
-  // `payload.send` is exchanged, consented to, written into the exchange record,
-  // and mirrored into a recurring partner's lock-in, while metadata's
-  // isPayload/role is the single source of truth for what actually leaves the
-  // machine. This is the one step with both in scope, so the CLI and web paths
-  // inherit the same fail-closed check; it is a no-op on the default and guided
-  // paths, which author no payload block. See assertPayloadSendDisclosed.
+  // Reject a payload data dictionary that does not match what metadata
+  // transmits: metadata's isPayload/role is the single source of truth for
+  // what leaves the machine. A no-op on the default and guided paths,
+  // which author no payload block. See assertPayloadSendDisclosed.
   assertPayloadSendDisclosed(
     linkageTerms.payload,
     metadata,
     linkageTerms.output,
   );
 
-  // Reject a disclosed column whose name is too long to carry. A transmitted
-  // column's name rides the payload frame to the partner and is written into this
-  // party's own exchange record, and both bound it; metadata inferred from a CSV
-  // header passes through no schema, so without this the partner's parse is the
-  // first enforcement -- reached only after the frame is sent. Refused again at the
-  // run boundary (runExchange), so the refusal holds even for a PreparedExchange
-  // built without going through this function. See assertDisclosedNamesCarriable.
+  // Reject a disclosed column whose name is too long to carry, before the
+  // frame is sent. Refused again at the run boundary (runExchange), so the
+  // refusal holds for a PreparedExchange built without this function. See
+  // assertDisclosedNamesCarriable.
   assertDisclosedNamesCarriable(metadata, linkageTerms.output);
 
-  // Fail fast when this party can no longer produce a payload disclosure it
-  // committed to on a prior invitation. disclosedPayloadColumns is the send-side
-  // commitment persisted by every `psilink invite` mint path (the online
-  // invite/bootstrap, offline infer, and offline invite-from-config paths); the
-  // partner locked that exact set
-  // in as what it will receive, so a metadata drift here would otherwise
-  // under- or over-deliver and make the PARTNER abort mid-exchange
-  // (reconcileReceivedPayload), a partner-attributed failure. This is the
-  // send-side, prior-promise counterpart of assertPayloadSendDisclosed above and
-  // is a no-op when no commitment is on record (absent field). See
-  // assertDisclosureMatchesCommitment.
+  // Fail fast when this party cannot produce a payload disclosure it
+  // committed to on a prior invitation (disclosedPayloadColumns): a
+  // metadata drift here would otherwise make the partner abort mid-exchange
+  // (reconcileReceivedPayload). A no-op when no commitment is on record.
+  // See assertDisclosureMatchesCommitment.
   assertDisclosureMatchesCommitment(
     exchangeDataSpec.disclosedPayloadColumns,
     metadata,
   );
 
-  // Fail closed on an outbound payload set this party has not confirmed. An
-  // acceptor's own send set is authored by no party -- the invitation authors the
-  // inviter's send, the mirror leaves the acceptor's absent, and the set is
-  // resolved from its own CSV header -- so a recorded confirmation is what makes it
-  // chosen rather than inferred. A front end that shows the set and asks records
-  // the answer and passes here; one that does not refuses, before any credential,
-  // terms, or data are sent, rather than transmit a set neither party chose. A
-  // no-op for every party with no consent record, which is every non-acceptor. See
-  // assertOutboundPayloadConsented.
+  // Fail closed on an outbound payload set this party has not confirmed.
+  // An acceptor's own send set is authored by no party, so a recorded
+  // confirmation is what makes it chosen rather than inferred. A no-op for
+  // every party with no consent record. See assertOutboundPayloadConsented.
   assertOutboundPayloadConsented(
     exchangeDataSpec.outboundPayloadConsent,
     metadata,
     linkageTerms.output,
   );
 
-  // The effective key count the agreed terms declare: the sum over their keys of
-  // the width each key's own elements declare. It reads the terms alone, so the
-  // partner derives the identical number, and it sizes the pre-flight gate below.
+  // The effective key count the agreed terms declare: the sum over their
+  // keys of the width each key's elements declare. Sizes the pre-flight
+  // gate below.
   const effectiveKeyCount = declaredEffectiveKeyCount(linkageTerms);
 
   let dateInputFormat: string | undefined;
   if (exchangeDataSpec.standardization === undefined) {
-    // Only a `role: linkage` date_of_birth column participates in linkage, so
-    // only one may drive the inferred date format -- a column roled identifier/
-    // payload/ignored does not match and resolveFieldColumns would not bind it as
-    // the dob field.
+    // Only a `role: linkage` date_of_birth column participates in linkage,
+    // so only one may drive the inferred date format.
     const dobCol = metadata.find(
       (c) => c.type === "date_of_birth" && c.role === "linkage",
     );
@@ -1092,10 +752,10 @@ export function prepareForExchange(
 
   // Fail closed on an authoritative config whose standardization contradicts its
   // linkage terms (see assertStandardizationMatchesTerms for the full rationale
-  // and the exit-64 / web-surfacing contract). Gated on an authored
+  // and the exit-64 / web-display contract). Gated on an authored
   // standardization: the terms-only path (undefined) reconstructs one from the
   // terms via getDefaultStandardization above and so cannot contradict them, and
-  // is deliberately not gated. The same shared assert runs at the `psilink invite`
+  // is not gated. The same shared assert runs at the `psilink invite`
   // mint boundary, so `invite` never discloses a token this exchange would refuse.
   if (exchangeDataSpec.standardization !== undefined)
     assertStandardizationMatchesTerms(
@@ -1103,19 +763,18 @@ export function prepareForExchange(
       linkageTerms,
     );
 
-  // Fail closed when this input cannot satisfy every linkage key the agreed terms
-  // declare -- a key whose fields the columns cannot produce, a key whose own
-  // declared cleaning drops every record, or terms declaring no key at all. Such a
-  // run matches on fewer keys than both parties consented to while its exchange
-  // record still names every field the terms declare, and the shortfall is settled
-  // with the partner out of band rather than run anyway. Refused here, before any
-  // credential, terms, or data are sent, so no front end's own pre-flight can
-  // proceed past it. Graded over the AUTHORED standardization rather than the
-  // resolved default just below, so the front ends that grade earlier from the same
-  // spec cannot disagree with this gate. Ordered behind the standardization/terms
-  // contradiction above so an authored transform whose output names no declared
-  // field is reported as that rather than as the unsatisfied field it leaves
-  // behind. See assertLinkageTermsSatisfiable.
+  // Fail closed when this input cannot satisfy every linkage key the agreed
+  // terms declare -- a key whose fields the columns cannot produce, a key whose
+  // own declared cleaning drops every record, or terms declaring no key at all.
+  // Such a run would match fewer keys than both parties consented to while its
+  // record still names every declared field, so the shortfall is resolved with
+  // the partner out of band instead. Fires before any credential, terms, or
+  // data are sent. Graded over the AUTHORED standardization rather than the
+  // resolved default just below, so a front end grading the same spec earlier
+  // cannot disagree with this gate; ordered behind the standardization/terms
+  // contradiction above, so an authored transform whose output names no
+  // declared field is reported as that rather than as the unsatisfied field it
+  // leaves behind. See assertLinkageTermsSatisfiable.
   assertLinkageTermsSatisfiable(
     columnNames,
     linkageTerms,
@@ -1128,57 +787,25 @@ export function prepareForExchange(
   // record's candidate set has no round to enter there, and the run would abort
   // once it reached one. Run over the RESOLVED standardization (authored or
   // default, which declares no fan-out) plus the terms' element transforms, so
-  // both authoring surfaces are covered; the terms half is refused again at the
+  // both authoring paths are covered; the terms half is refused again at the
   // run boundary. See assertFanOutImplemented.
   assertFanOutImplemented(linkageTerms, standardization);
 
-  // Pre-flight the single-pass dataset ceiling. This is a coarse, ONE-PARTY
-  // lower-bound gate: it can only see this party's own row count, not the
-  // partner's nor either side's distinct-value counts (never computed locally, and
-  // never exchanged). If this party's own
-  // value slots already exceed the budget, single-pass cannot succeed
-  // whatever the partner's size, so fail here rather than after the handshake and
-  // the PSI encryption. The authoritative, symmetric two-party check runs in
-  // linkViaSinglePassPSI once both record counts are exchanged; that asymmetry --
-  // a coarse local pre-flight versus the post-encryption authoritative gate -- is
-  // preserved deliberately. The check applies to EITHER role: the cell-count
-  // ceiling is symmetric (the receiver holds both encrypted sets resident, so its
-  // own dataset is bounded exactly as the sender's), so an over-ceiling exchange
-  // aborts whichever side is over -- and the coarse one-party gate predicts that
-  // from this party's own count regardless of whether it sends or receives. It is
-  // not narrowed to a potential sender: doing so would let a dedicated output-only
-  // receiver pay a full handshake and PSI encryption before the authoritative gate
-  // caught the same over-ceiling dataset.
+  // Pre-flight the single-pass dataset ceiling: a coarse, ONE-PARTY lower
+  // bound. It sees only this party's own row count, never the partner's or
+  // either side's distinct-value counts (not computed locally or exchanged),
+  // so it cannot replace the authoritative, symmetric two-party check in
+  // linkViaSinglePassPSI, which runs once both record counts are exchanged.
+  // Applies to either role: the ceiling is symmetric (a receiver holds both
+  // encrypted sets resident, bounded exactly as the sender's), so this
+  // party's own count predicts an abort regardless of which side it plays.
   //
-  // Ordered BEHIND the fan-out refusal above, so a config declaring a fan-out
-  // under a strategy that cannot match one is refused for what actually stops it
-  // rather than offered a smaller size that build refuses at any size. A runnable
-  // single-pass fan-out reaches this gate, whose fan-out remedy is a real one for
-  // it.
+  // Ordered behind the fan-out refusal above, so a fan-out a strategy cannot
+  // match is refused for that rather than for size. An OperatorConfigError
+  // naming only this party's own counts and a fixed constant -- no
+  // partner-authored content, so the accept path never echoes invitation
+  // text through it.
   //
-  // An OperatorConfigError, joining the membership rule the front ends key their
-  // actionable config category off -- a decision taken for this check, not for
-  // this file's prepare-time refusals as a class. What it fires on is this party's
-  // OWN record count, whichever seat it holds, and the remedies the message names
-  // are that party's own to take: fewer records, smaller batches, one less
-  // fan-out. The key count is named as the agreed term it is, so an acceptor is
-  // not sent to narrow a set its invitation carried. The message interpolates no
-  // name at all -- fixed prose over two counts and a fixed constant -- so
-  // nothing partner-authored rides it on the accept path, where the agreed key
-  // count is adopted from the invitation. That is what separates it from the
-  // prepare-time refusals that stay plain UsageErrors:
-  // assertAlgorithmImplemented and the element-transform arm of
-  // assertFanOutImplemented refuse a value the accept path adopts wholesale and no
-  // local change can fix, and assertLinkageTermsSatisfiable carries the agreed
-  // terms' own field and key names on its cause links. The authoritative
-  // two-party gate is outside the family for a further reason: it fires mid-run,
-  // and its message names the partner's declared sizes beside this party's
-  // (linkViaSinglePassPSI). Through the base class the CLI still classifies this
-  // one as a usage error (exit 64), like the width refusals the single-pass build
-  // raises for the same class of over-declared size. Whether to offer the fan-out
-  // remedy is read through partyFansOut, the single layout discriminant, so the
-  // guidance and the frame layout cannot disagree about whether this party fans
-  // out.
   // Sanitize the key names for display: on the accept side these come from the
   // partner's invitation (charset-unconstrained), and the operator already
   // reviewed the same escaped form when agreeing to the terms (displayInvitation).
@@ -1227,17 +854,17 @@ export function prepareForExchange(
     // A self-facing operator note, passed through untouched from the local
     // config to the record builder; absent when the config omits it.
     retentionDisposition: exchangeDataSpec.retentionDisposition,
-    // NOTE: the two invitation lock-ins -- expectedPayloadColumns (the
-    // received-payload set) and expectedPartnerDeduplicate (the partner's declared
-    // cardinality side) -- are deliberately NOT threaded here, unlike
+    // The two invitation commitments -- expectedPayloadColumns (the
+    // received-payload set) and expectedPartnerDeduplicate (the partner's
+    // declared cardinality side) -- are NOT threaded here, unlike
     // retentionDisposition above. The caller sets each on the returned
-    // PreparedExchange after this returns, because the accept path's source is the
-    // invitation token (not this dataSpec) and the recurring path applies a
+    // PreparedExchange after this returns: the accept path's source is the
+    // invitation token (not this dataSpec), and the recurring path applies a
     // fallback for the payload set (config expectedPayloadColumns, else
-    // payload.receive). A caller that wants a lock-in must set it explicitly; see
-    // PreparedExchange.expectedPayloadColumns and
-    // PreparedExchange.expectedPartnerDeduplicate. (Both ride ExchangeDataSpec only
-    // so the exchange command can read them off the parsed config.)
+    // payload.receive). A caller that wants a commitment must set it
+    // explicitly; see PreparedExchange.expectedPayloadColumns and
+    // PreparedExchange.expectedPartnerDeduplicate. (Both ride ExchangeDataSpec
+    // only so the exchange command can read them off the parsed config.)
     dataset,
     rawRows,
     rowCount: rawRows.length,
@@ -1320,26 +947,21 @@ export interface ExchangeResult {
    */
   associationTable: AssociationTable | undefined;
   /**
-   * The size of the intersection, and the whole result of a count-only (`psi-c`)
-   * exchange: present exactly when this party ran one AND its agreed terms entitle it
-   * to output. `undefined` on every `psi` exchange, whose result is the association
-   * table above -- the count is not a second reading of a `psi` run.
+   * The size of the intersection, and the whole result of a count-only
+   * (`psi-c`) exchange: present exactly when this party ran one AND its agreed
+   * terms entitle it to output. `undefined` on every `psi` exchange, whose
+   * result is the association table above.
    *
-   * This is what keeps a count-only receiver from presenting as the withheld-helper
-   * shape: `associationTable === undefined` alone means "this party receives nothing",
-   * which is true of a count-only helper and false of a count-only receiver, and only
-   * this field tells them apart. A count-only run leaves the table undefined for BOTH
-   * parties -- it produces no pairing for either to hold, so there is nothing to
-   * withhold -- and the count reaches the sender only through the count-report leg
-   * the agreed entitlements gate.
+   * Distinguishes a count-only receiver from the withheld-helper shape:
+   * `associationTable` stays undefined for BOTH parties on a count-only run
+   * (there is no pairing for either to hold), so this field alone tells a
+   * count-only helper (receives nothing) from a count-only receiver.
    *
-   * Its presence rule is this party's OWN entitlement, deliberately not the
-   * both-entitled gate the record's result size takes: in a one-sided run the
-   * receiver holds a count its own record does not carry
-   * (docs/spec/EXCHANGE_RECORD.md, Count-only records), and that receiver is the
-   * party the run was conducted for. The sender's copy, when it gets one, is the
-   * receiver's report rather than a figure it computed -- the same trust posture as
-   * the `psi` association-table return leg (docs/spec/PROTOCOL.md, PSI-C).
+   * Presence follows this party's OWN entitlement, not the both-entitled gate
+   * the record's result size takes: a one-sided run's receiver holds a count
+   * its own record omits (docs/spec/EXCHANGE_RECORD.md, Count-only records).
+   * The sender's copy, when present, is the receiver's report, not a figure it
+   * computed itself (docs/spec/PROTOCOL.md, PSI-C).
    */
   intersectionCount: number | undefined;
   /** Linkage terms received from the partner during the handshake. */
@@ -1413,7 +1035,7 @@ const unbuiltRecordsByTerminatedRun = new WeakSet<object>();
 /**
  * The self-attested record of the disclosure a terminated run had ALREADY made,
  * recovered from the error {@link runExchange} threw; `undefined` when the failure
- * carries none.
+ * holds none.
  *
  * A run past its payload exchange has already sent and received its payloads, so
  * the disclosure the record attests occurred whatever the steps after it then do.
@@ -1422,7 +1044,7 @@ const unbuiltRecordsByTerminatedRun = new WeakSet<object>();
  * {@link ExchangeResult.audit}: the run still failed, and the record's own
  * `outcome` field states that rather than passing for a completed run's.
  *
- * A failure raised BEFORE the payload exchange returns carries nothing, this
+ * A failure raised BEFORE the payload exchange returns holds nothing, this
  * party's own payload having possibly crossed inside it -- the initiator sends
  * before it receives, and a cut in that window leaves no record (the durability
  * point's stated residual: docs/spec/EXCHANGE_RECORD.md, When a record is owed).
@@ -1464,7 +1086,7 @@ export function exchangeRecordOwedButUnbuilt(error: unknown): boolean {
 }
 
 /**
- * `error`, marked for the two accessors above: carrying `audit` where the record
+ * `error`, marked for the two accessors above: holding `audit` where the record
  * built, and recording the loss where it did not, so a caller can tell that
  * absence from a failure that owed no record. A thrown non-object can hold
  * neither mark, which is warned here: what goes missing is the operator's
@@ -1502,10 +1124,11 @@ function carryingExchangeRecord(
  * count is trust-contingent"). False for every party that computed its own count,
  * and false for a run that produced no count at all.
  *
- * Both front ends read this one predicate rather than each restating the role rule:
- * it decides whether the seat's completion copy carries the trust-contingent caveat,
- * and a second reading that disagreed would caveat a locally computed count or
- * present a reported one as this party's own finding.
+ * Both front ends read this one predicate rather than each restating the role
+ * rule: it decides whether the seat's completion copy holds the
+ * trust-contingent caveat, and a second reading that disagreed would caveat a
+ * locally computed count or present a reported one as this party's own
+ * finding.
  */
 export function countIsPartnerReported(
   result: Pick<ExchangeResult, "intersectionCount" | "resolvedRole">,
@@ -1543,19 +1166,19 @@ export interface RunExchangeOptions {
   /** Called for each non-fatal warning produced during terms exchange. */
   onWarning?: (msg: string) => void;
   /**
-   * Called once after the confirming-protocol stage completes, before the
-   * first PSI key stage begins. Useful for surfacing partner identity and
-   * resolved role without waiting for the full exchange to finish.
+   * Called once after the confirming-protocol stage completes, before the first
+   * PSI key stage begins. Useful for reporting partner identity and resolved
+   * role without waiting for the full exchange to finish.
    *
-   * `runShape` carries what the agreed terms resolved to at this same seam --
-   * the matching cardinality, the two record counts its derived pair table grows
-   * with, and the entitlements deciding which party holds that table and what the
-   * other one reads of the match -- so a front end can name the run's cardinality
-   * and project that table before the first round. Nothing here refuses or warns
-   * on either: the pair-table advisory is a front end's discretion
-   * (docs/spec/PROTOCOL.md, The both-sided expansion has no ceiling of its own),
-   * and {@link describeResolvedRunShape} is the shared composition each seat
-   * renders.
+   * `runShape` holds what the agreed terms resolved to at this same point --
+   * the matching cardinality, the two record counts its derived pair table
+   * grows with, and the entitlements deciding which party holds that table and
+   * what the other one reads of the match -- so a front end can name the run's
+   * cardinality and project that table before the first round. Nothing here
+   * refuses or warns on either: the pair-table advisory is a front end's
+   * discretion (docs/spec/PROTOCOL.md, The both-sided expansion has no ceiling
+   * of its own), and {@link describeResolvedRunShape} is the shared composition
+   * each seat renders.
    */
   onProtocolConfirmed?: (
     partnerTerms: LinkageTerms,
@@ -1591,7 +1214,7 @@ export interface RunExchangeOptions {
    * argument is a complete, display-safe warning naming both observed values.
    * Not called when the fingerprints match, when either party observed no host
    * key, or when {@link observedHostKey} was not supplied. The divergence is
-   * non-fatal -- the exchange continues -- so a caller surfaces it as a warning
+   * non-fatal -- the exchange continues -- so a caller reports it as a warning
    * rather than aborting.
    */
   onHostKeyDivergence?: (message: string) => void;
@@ -1604,8 +1227,8 @@ export interface RunExchangeOptions {
    * malformed value is dropped either way and reconciliation is skipped for it
    * -- this is a diagnostic-only signal, so a caller logs it at a low level (the
    * CLI logs it at debug) rather than warning or aborting. The dropped bytes are
-   * deliberately not surfaced: they are unusable, and echoing partner-controlled
-   * content into a log is an injection risk.
+   * not shown: they are unusable, and echoing partner-controlled content into a
+   * log is an injection risk.
    */
   onPartnerHostKeyMalformed?: () => void;
   /**
@@ -1662,21 +1285,22 @@ export async function runExchange(
 ): Promise<ExchangeResult> {
   const { dataset, linkageTerms, rowCount, retentionDisposition } = prepared;
 
-  // Last line of defense for the disclosure-integrity guarantee: refuse an algorithm
-  // with no run path before anything goes on the wire, so the self-attested record
-  // can never attest a disclosure the run did not make. prepareForExchange refuses it
-  // at prepare time; this holds even for a PreparedExchange constructed without going
-  // through it, and fires before the terms exchange puts anything on the wire. The
-  // partner's half of the same question is settled after the terms exchange, from the
-  // agreed pair (resolveCountOnlyRun). See assertAlgorithmImplemented.
+  // Last line of defense for the disclosure-integrity guarantee: refuse an
+  // algorithm with no run path before anything goes on the wire, so the
+  // self-attested record can never attest a disclosure the run did not make.
+  // prepareForExchange refuses it at prepare time; this holds even for a
+  // PreparedExchange constructed without going through it, and fires before the
+  // terms exchange puts anything on the wire. The partner's half of the same
+  // question is decided after the terms exchange, from the agreed pair
+  // (resolveCountOnlyRun). See assertAlgorithmImplemented.
   assertAlgorithmImplemented(linkageTerms.algorithm);
 
-  // Refuse a count-only exchange whose input metadata would transmit a column before
-  // anything goes on the wire, over the RESOLVED metadata a PreparedExchange always
-  // carries -- the rule fails open on an unresolved block, and this is the boundary
-  // that holds one. prepareForExchange refuses it at prepare time; this holds for a
-  // PreparedExchange assembled without going through it. See
-  // assertCountOnlyTransmitsNoColumn.
+  // Refuse a count-only exchange whose input metadata would transmit a column
+  // before anything goes on the wire, over the RESOLVED metadata a
+  // PreparedExchange always holds -- the rule fails open on an unresolved
+  // block, and this is the boundary that holds one. prepareForExchange refuses
+  // it at prepare time; this holds for a PreparedExchange assembled without
+  // going through it. See assertCountOnlyTransmitsNoColumn.
   assertCountOnlyTransmitsNoColumn(linkageTerms.algorithm, prepared.metadata);
 
   // Refuse a fan-out element transform under a strategy that matches one value
@@ -1761,7 +1385,7 @@ export async function runExchange(
   // compatibility rule compares the two sides, and the value this party consented
   // to is the invitation's rather than whatever arrives here. Before the
   // cardinality is resolved from it, and before any key or payload moves. A no-op
-  // on an exchange authored from configuration files, which carries no
+  // on an exchange authored from configuration files, which states no
   // declaration. See assertPresentedDeduplicateMatchesInvitation.
   try {
     assertPresentedDeduplicateMatchesInvitation(
@@ -1770,20 +1394,17 @@ export async function runExchange(
     );
   } catch (err) {
     // Best-effort abort before the throw, as every refusal inside exchangeTerms
-    // sends one. This one is one-sided -- only this party holds the declaration
-    // -- so the partner derives no refusal of its own and would otherwise wait
-    // out its whole peer-inactivity budget (a full poll budget on a file
-    // channel) for rounds this party will never run. Sent in the abort
-    // decision's own shape rather than as a private signal of its own, though no
-    // decision slot is left to read it here: what ends the partner's run is the
-    // frame's arrival, and the specific fault stays with this party. The reason
-    // is a fixed literal about values the partner itself declared, so the frame
-    // discloses nothing new. What the partner surfaces from that arrival is not
-    // a refusal at all: the frame reaches the partner's PSI binary seam still
-    // awaiting its own next round, so that run ends with the PSI library's own
-    // "Type not convertible to a Uint8Array" error, with no psilink framing or
-    // cause attached -- fast-fail without diagnosis. Classifying that seam's
-    // decode failure is follow-on work, not a property this branch claims.
+    // sends one. This refusal is one-sided -- only this party holds the
+    // declaration -- so without it the partner would wait out its full
+    // peer-inactivity budget (a full poll budget on a file channel) for rounds
+    // this party never runs. The reason is a fixed literal about values the
+    // partner itself declared, so the frame discloses nothing new. What the
+    // partner sees from that arrival is not a refusal at all: the frame reaches
+    // its PSI binary boundary still awaiting its next round, so that run ends
+    // with the PSI library's own "Type not convertible to a Uint8Array" error,
+    // with no psilink framing or cause attached -- fast-fail without diagnosis.
+    // Classifying that decode failure is follow-on work, not a property this
+    // branch claims.
     await sendAbort(conn, [
       "partner presented a deduplicate its invitation did not declare",
     ]);
@@ -1791,7 +1412,7 @@ export async function runExchange(
   }
 
   // A run that will sign a receipt needs both parties named and its own
-  // certificate bound to the name it agreed terms under. Both are settled the
+  // certificate bound to the name it agreed terms under. Both are decided the
   // moment the partner's terms arrive, so both are held here, at the same point
   // and for the same reason as the deduplicate check above: before the bootstrap
   // frame, before any linkage key, and before any payload row moves. The
@@ -1829,7 +1450,7 @@ export async function runExchange(
   if (partnerHostKeyMalformed) options.onPartnerHostKeyMalformed?.();
 
   // Cross-party host-key reconciliation. Both parties advertised the host key
-  // they observed on the terms exchange just above; compare them, and surface a
+  // they observed on the terms exchange just above; compare them, and report a
   // divergence (no-op when either party observed none, or when the fingerprints
   // match -- see reconcileHostKeyFingerprints). It is advisory, like the save
   // intent, and never aborts the exchange.
@@ -1855,8 +1476,8 @@ export async function runExchange(
     bootstrap = { partnerSaveIntent, sharedSecret };
   }
 
-  // Local computation: both parties' DECLARED record counts were carried on the
-  // terms exchange above (partnerRecordCount), so the role follows without a
+  // Local computation: both parties' DECLARED record counts were already
+  // exchanged above (partnerRecordCount), so the role follows without a
   // further message. It is the declared count on both sides, so a party whose own
   // cleaning fans out is weighed at the larger figure and trends toward SENDER,
   // in proportion to the work its fan-out actually costs -- away from the
@@ -1877,7 +1498,7 @@ export async function runExchange(
   // resolved SENDER is a non-receiving helper (expectsOutput false) disclosing no
   // payload, it needs nothing back, so the receiver suppresses its
   // association-table half entirely and the sender skips awaiting it -- keeping a
-  // genuinely blind helper blind to its own membership. The sender's properties
+  // blind helper blind to its own membership. The sender's properties
   // come from whichever side we are: our own when we are the sender, the partner's
   // (read off the terms exchange) when we are the receiver. A missing partner flag
   // (undefined -- a non-conforming peer that did not advertise it) defaults to
@@ -1895,7 +1516,7 @@ export async function runExchange(
     senderDisclosesPayload,
   );
 
-  // The seam a front end names the run's resolved shape from. It carries the two
+  // This is where a front end reads the run's resolved shape. It holds the two
   // entitlements as well as the cardinality because the copy composed from it
   // speaks about a result file and about what the partner reads, and neither
   // follows from the cardinality: this party's own entitlement is the same
@@ -1920,11 +1541,11 @@ export async function runExchange(
       new StandardizedKeyIterable(key, dataset, rowCount, isReceiver, keyIndex),
   );
 
-  // Per-message element-count caps for the PSI decode seams, from authenticated
-  // session state only: the two exchanged record counts and the effective key
-  // count both parties derive from the agreed terms. The receiver (joiner) is the
-  // PSI sender's counterpart, so the sender's set is the partner's when this party
-  // receives; both parties compute identical bounds.
+  // Per-message element-count caps for the PSI decode boundaries, from
+  // authenticated session state only: the two exchanged record counts and the
+  // effective key count both parties derive from the agreed terms. The receiver
+  // (joiner) is the PSI sender's counterpart, so the sender's set is the
+  // partner's when this party receives; both parties compute identical bounds.
   const singlePassBounds = {
     partnerRecordCount,
     keyWidths,
@@ -1951,27 +1572,26 @@ export async function runExchange(
   // and the index-table layout, identically on both parties (see
   // linkViaSinglePassPSI and frameSize.ts).
   //
-  // Build the crypto engine, then the participant, INSIDE the disposing try. The
-  // engine psiEngineFactory returns is a worker (a worker_threads worker in the CLI, a
-  // Web Worker in the browser) that must be terminated on every exit path. Evaluating
-  // the factory as a constructor argument would spawn that worker BEFORE the
-  // PSIParticipant constructor runs, so a throw in the constructor would orphan it;
-  // building the engine first and disposing it in the finally when the participant
-  // never took ownership makes "the worker is never orphaned" a structural guarantee
-  // rather than a comment resting on the constructor happening not to throw. The
-  // default in-process engine is built here too, from `library`, so the engine the
-  // finally disposes is a real one on every path -- it holds the library's server or
-  // client objects (the secret key among them) whether or not the participant took
-  // ownership of it. Nothing above depends on the participant, so this ordering is
-  // free.
+  // Build the crypto engine, then the participant, INSIDE the disposing try.
+  // The engine psiEngineFactory returns is a worker (worker_threads in the CLI,
+  // a Web Worker in the browser) that must be terminated on every exit path.
+  // Evaluating the factory as a constructor argument would spawn that worker
+  // BEFORE the PSIParticipant constructor runs, so a throw in the constructor
+  // would orphan it; building the engine first and disposing it in the finally
+  // when the participant never took ownership makes "the worker is never
+  // orphaned" a structural guarantee. The default in-process engine is built
+  // here too, from `library`, so the engine the finally disposes is always real
+  // -- it holds the library's server or client objects (the secret key among
+  // them) whether or not the participant took ownership.
   const psiRole = isReceiver ? "joiner" : "starter";
   const psiId = isReceiver ? "client" : "server";
-  // The disclosure this round is built for, settled once from the agreed algorithm
-  // and generated into the engine's key material rather than chosen when the result
-  // is read: a count-only engine refuses the operations that would name a match, and
-  // an identifier-revealing one refuses to report a cardinality, so a round cannot
-  // resolve to the disclosure the other mode's terms agreed. It also rides the
-  // receiver's request on the wire, where the partner's sender enforces agreement.
+  // The disclosure this round is built for, fixed once from the agreed
+  // algorithm and generated into the engine's key material rather than
+  // chosen when the result is read: a count-only engine refuses the
+  // operations that would name a match, and an identifier-revealing one
+  // refuses to report a cardinality, so a round cannot resolve to the
+  // disclosure the other mode's terms agreed. It also rides the receiver's
+  // request on the wire, where the partner's sender enforces agreement.
   const engineMode: PsiEngineMode = countOnly
     ? "count-only"
     : "identifier-revealing";
@@ -2064,7 +1684,7 @@ export async function runExchange(
   // One entry per matched PAIR, in this party's own ascending row order, is what
   // every reader below assumes of the table -- the payload's transmitted rows, the
   // result file, and the attested result size. The cardinality resolved above
-  // settles which multiplicities those readings admit; see
+  // decides which multiplicities those readings admit; see
   // assertMatchedPairsWellFormed for the shapes that would break them.
   if (associationTable !== undefined)
     assertMatchedPairsWellFormed(associationTable, cardinality);
@@ -2078,9 +1698,9 @@ export async function runExchange(
   // recorded as such. The disclosure is closed at the source here, not merely
   // declared empty.
   //
-  // A count-only run has no association table to attach payload values to, and its
-  // terms carry no payload column in either direction, so it exchanges the empty
-  // message -- committed explicitly as empty, never omitted
+  // A count-only run has no association table to attach payload values to, and
+  // its terms declare no payload column in either direction, so it exchanges
+  // the empty message -- committed explicitly as empty, never omitted
   // (docs/spec/EXCHANGE_RECORD.md, Count-only records).
   const localPayload: PayloadWireMessage =
     partnerTerms.output.expectsOutput && associationTable !== undefined
@@ -2101,22 +1721,23 @@ export async function runExchange(
   // escape with no record and no mark set. A statement added to this region
   // must join one of the two guarded windows, or the region must gain a single
   // enclosing guard, or it opens that hole rather than closing it. A holder
-  // rather than a bare `unknown`, so a thrown `undefined` still reads as a
-  // failure and cannot pass for a run that got through.
+  // rather than a bare `unknown`, so a thrown `undefined` is still treated as
+  // a failure and cannot pass for a run that got through.
   let postDisclosureFailure: { error: unknown } | undefined;
 
   // Received-payload enforcement, fail-closed before the result is returned (so a
-  // mismatched payload is never surfaced or written as a result):
+  // mismatched payload is never shown or written as a result):
   // - A count-only run locks in the empty column set unconditionally: psi-c
   //   refuses payload in either direction and its record's payload commitments
   //   are fixed present-and-empty (docs/spec/EXCHANGE_RECORD.md, Count-only
   //   (psi-c) records), so a transmitted column can never be lazily accepted
-  //   here regardless of expectsOutput or any lock-in the prepare step carries.
+  //   here regardless of expectsOutput or any commitment the prepare step
+  //   holds.
   // - A no-output party (expectsOutput:false) must receive NO payload. The
   //   send-gate above keeps a conforming partner from sending any; expecting the
   //   empty set here closes it fail-closed against a non-conforming one.
   // - An output party enforces the column set it consented to receive (a fresh
-  //   acceptor's carried disclosedPayloadColumns, or a persisted lock-in); a lazy
+  //   acceptor's disclosedPayloadColumns, or a persisted commitment); a lazy
   //   one (expectedPayloadColumns undefined) takes whatever the sender's own
   //   disclosure metadata transmits.
   //
@@ -2144,13 +1765,14 @@ export async function runExchange(
     linkageTerms.output.expectsOutput && partnerTerms.output.expectsOutput;
   const heldResult = linkageTerms.output.expectsOutput;
 
-  // The intersection size this party can attest, whichever algorithm produced it: the
-  // count is a count-only run's whole result, so it takes the result-size field the
-  // matched table's length takes under `psi`, under the same unchanged entitlement
-  // gate. A count-only run's record carries NO association-table commitment on either
-  // side -- neither party holds a pairing to commit to, whatever its entitlement --
-  // and that absence is normative rather than incidental (the commitment's presence
-  // is what marks a party as having received the matched pairing). See
+  // The intersection size this party can attest, whichever algorithm produced
+  // it: the count is a count-only run's whole result, so it takes the
+  // result-size field the matched table's length takes under `psi`, under the
+  // same unchanged entitlement gate. A count-only run's record holds NO
+  // association-table commitment on either side -- neither party holds a
+  // pairing to commit to, whatever its entitlement -- and that absence is
+  // normative rather than incidental (the commitment's presence is what marks a
+  // party as having received the matched pairing). See
   // docs/spec/EXCHANGE_RECORD.md, Count-only records.
   const attestedResultSize = countOnly
     ? intersectionCount
@@ -2185,7 +1807,7 @@ export async function runExchange(
     try {
       // Both parties fold in the INITIATOR's role, so both derive the same binder
       // with no extra messages; see deriveReceiptBinder. Derived before the record
-      // is built, so both artifacts carry the one value.
+      // is built, so both artifacts hold the one value.
       receiptBinder = await deriveReceiptBinder(sessionKey, "initiator");
       // The identity bindings again, at the point of use: a receipt cannot be
       // built from a pair either side of which named nobody, nor signed under a
@@ -2207,7 +1829,7 @@ export async function runExchange(
       // byte-identical across parties). It is therefore independent of the
       // non-fatal audit build below; a party that could not build its local record
       // can still sign a receipt. The binder it signs is the same value the record
-      // carries, which is what pairs the two artifacts to this one run.
+      // holds, which is what pairs the two artifacts to this one run.
       const termsHash = await computeTermsHash(linkageTerms, partnerTerms);
       const content: ReceiptContent = await buildReceiptContent(
         handshakeRole,
@@ -2231,11 +1853,11 @@ export async function runExchange(
     }
   }
 
-  // Build the record once the run's outcome is settled, so it can state it. It is
-  // a secondary audit artifact, so a failure to build it (e.g. an unexpected
-  // non-canonical value) must not fail a run that otherwise succeeded or discard
-  // its result: catch, warn, and continue without a record. The caller treats the
-  // audit field as optional.
+  // Build the record once the run's outcome is decided, so it can state it. It
+  // is a secondary audit artifact, so a failure to build it (e.g. an unexpected
+  // non-canonical value) must not fail a run that otherwise succeeded or
+  // discard its result: catch, warn, and continue without a record. The caller
+  // treats the audit field as optional.
   let audit: BuiltExchangeRecord | undefined;
   try {
     audit = await buildExchangeRecord({

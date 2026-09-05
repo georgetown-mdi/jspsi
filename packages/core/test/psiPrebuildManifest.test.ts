@@ -9,13 +9,12 @@ import {
   readTgz,
 } from "./utils/prebuildTarball";
 
-// Guards the vendored @openmined/psi.js native prebuild tarball against silent
-// drift. The sha256 sidecar (verified in CI before npm ci) proves the bytes are
-// the committed ones; this proves those bytes still mean what we expect -- the
-// same platform set, per-platform libc tagging, genuinely musl-linked musl
-// builds, and the glibc floor -- so a re-vendor that quietly drops a platform,
-// mis-tags or mis-links a libc, corrupts the WASM fallback, or raises the glibc
-// floor fails here instead of degrading to WASM unnoticed. Contract lives in
+// Guards the vendored @openmined/psi.js native prebuild tarball against
+// silent drift. The sha256 sidecar (verified in CI before npm ci) proves
+// the bytes match the commit; this proves those bytes still mean what is
+// expected -- platform set, per-platform libc tagging, genuinely
+// musl-linked musl builds, and the glibc floor -- so a bad re-vendor fails
+// here instead of silently degrading to WASM. Contract lives in
 // ./vectors/psi-prebuild-manifest.json.
 
 interface Manifest {
@@ -56,10 +55,10 @@ const linuxPlatforms = [...new Set(linuxPrebuilds.map((p) => p.platform))];
 
 describe("vendored PSI prebuild tarball manifest", () => {
   test("names the one tarball the apps install, the sidecar pins, and lib/ holds", () => {
-    // Without this, the guard could validate an artifact the app never loads: a
-    // seclink.N bump that updates package.json but leaves the old .tgz in lib/
-    // (a forgotten `git rm`) would have this suite check the stale file green.
-    // Tie the manifest to every place the vendored version is named.
+    // Without this, the guard could validate an artifact the app never
+    // loads: a seclink.N bump that updates package.json but leaves the
+    // old .tgz in lib/ (a forgotten `git rm`) would have this suite check
+    // the stale file green.
     const libFiles = readdirSync(`${repoRoot}lib`);
     expect(libFiles.filter((f) => f.endsWith(".tgz"))).toEqual([tarballName]);
     expect(libFiles.filter((f) => f.endsWith(".tgz.sha256"))).toEqual([

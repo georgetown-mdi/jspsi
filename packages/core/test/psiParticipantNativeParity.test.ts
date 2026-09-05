@@ -9,16 +9,13 @@ import { sortAssociationTable } from "../src/testing";
 import { loadNativeAddonOrSkip } from "./utils/nativeAddon";
 import { UNBOUNDED_PSI_ELEMENTS } from "./utils/psiElementBounds";
 
-// Cross-backend parity: a party running the native N-API
-// addon and a party running the WASM engine must complete a full identify-
-// intersection round and agree, in BOTH role assignments. This is the end-to-end
-// consequence of the byte-for-byte interop the wire-vector tests pin: since the
-// native addon emits the same setup/request/response bytes as WASM, a mixed
-// exchange resolves to the same association table as a same-backend one.
+// Cross-backend parity: a party running the native N-API addon and a
+// party running the WASM engine must complete a full identify-
+// intersection round and agree, in BOTH role assignments.
 //
-// The native addon is a per-platform prebuilt binary, so this SKIPS when no
-// prebuild exists for the running platform; CI runs it on the platforms it
-// builds.
+// The native addon is a per-platform prebuilt binary, so this SKIPS when
+// no prebuild exists for the running platform; CI runs it on the
+// platforms it builds.
 
 const wasm = await PSI();
 
@@ -93,14 +90,13 @@ describe("native <-> WASM cross-backend parity", () => {
   });
 });
 
-// The exchanges above use small inputs, so the native addon runs its EC loops
-// single-threaded: parallel_ec.cpp only shards at >= kMinInputsForThreads (1024)
-// inputs. Nothing else pins the threaded path against WASM. Run a > 1024-element
-// flow through each backend from the same keys and assert byte- and association-
-// identical output, exercising the threaded encrypt (setup / request), re-encrypt
-// (response), and decrypt (association) loops and their shard-clone / index-range
-// bookkeeping. Unique inputs make every sort a total order, so both backends
-// order identically and the messages compare exactly.
+// The exchanges above use small inputs, so the native addon runs its EC
+// loops single-threaded: parallel_ec.cpp only shards at
+// kMinInputsForThreads (1024) inputs and up, and nothing else pins the
+// threaded path against WASM. This exercises it: a > 1024-element flow
+// through each backend, asserting byte- and association-identical
+// output. Unique inputs give every sort a total order, so the messages
+// compare exactly.
 describe("native <-> WASM parity above the threading threshold", () => {
   const toHex = (bytes: Uint8Array): string =>
     Buffer.from(bytes).toString("hex");
@@ -155,8 +151,9 @@ describe("native <-> WASM parity above the threading threshold", () => {
   // this package does off the stress tier: 2.2s alone on an idle container, and
   // 4.1s measured inside the full unit suite on four cores -- 82% of vitest's 5s
   // default, which is why CI has seen it lose. Sized at roughly seven times that
-  // worst measurement, the bound stays a backstop for an EC loop that never
-  // returns rather than an assertion about how fast the addon shards its work.
+  // worst measurement, the bound stays a safety check for an EC loop that
+  // never returns rather than an assertion about how fast the addon
+  // shards its work.
   test(
     "threaded native EC loops reproduce the WASM output",
     { timeout: 30_000 },

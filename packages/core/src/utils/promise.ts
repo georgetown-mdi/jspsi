@@ -22,7 +22,7 @@ export class TimeoutError extends Error {
 
 /**
  * Races `promise` against a `ms`-millisecond deadline. Rejects with a
- * {@link TimeoutError} carrying `message` if the deadline fires first;
+ * {@link TimeoutError} holding `message` if the deadline fires first;
  * otherwise settles with `promise`'s own result. The timer is cleared when
  * `promise` settles.
  *

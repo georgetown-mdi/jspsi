@@ -6,47 +6,32 @@ import {
   roundValueFirstRows,
 } from "../src/link";
 
-// The single-pass replay asks the sender's side of each round one question -- does
-// the row the sweep has reached take part with this value (replaySinglePassCascade,
-// packages/core/src/link.ts) -- and a sender that KEEPS its duplicates has a single
-// answer to it, so the replay builds it no form at all. That is a claim about what
-// happens at runtime, so it is checked here rather than written down.
+// The single-pass replay asks the sender's side of each round one question --
+// does the row the sweep has reached take part with this value
+// (replaySinglePassCascade, packages/core/src/link.ts) -- and a sender that
+// KEEPS its duplicates always answers yes, so the replay builds no form for
+// it. That runtime claim is checked here by driving the REAL sweep: each
+// corpus round replays as the second of two rounds, with the sender's cells
+// wrapped to record every read, and the first round pairs off exactly the
+// rows the corpus wants out of candidacy so the cascade's own removal step
+// puts them there.
 //
-// The check drives the REAL sweep. Each round of the corpus below is replayed as
-// the SECOND of two rounds through replaySinglePassCascade, with the sender's cells
-// wrapped so that every read the sweep makes is recorded; the first round pairs off
-// exactly the rows the corpus round wants out of candidacy, so the cascade's own
-// removal step rather than a hand-set flag is what puts them there. Nothing here
-// models the sweep's read pattern: a change to which rows or cells it reaches moves
-// the recorded pairs.
+// The recorded pairs are checked against the form the elided branch would
+// have built (roundValueFirstRows: firstRow.has(value), true throughout for
+// a duplicate-keeping sender) and, as a control, against the form the OTHER
+// side builds (RoundValueParticipation), which must answer no somewhere or
+// the corpus could not tell the two apart.
 //
-// The recorded pairs are then put to the form the elided branch would have built,
-// over the round's REAL first pass (roundValueFirstRows): a sender that keeps its
-// duplicates takes part with every value the round kept, so its answer is
-// `firstRow.has(value)` and must be yes throughout. A control puts the same pairs to
-// the real form the OTHER side does build (RoundValueParticipation), which must
-// answer no somewhere -- a corpus that could not tell the two apart would pass the
-// differential without saying anything.
-//
-// The sides driven are `{localKeepsDuplicates: false, partnerKeepsDuplicates: true}`,
-// the receiver's own label for a sender that keeps its duplicates, which is the one
-// combination the elided branch belongs to. `{true, true}` is not among the
-// combinations left unswept here: it is the many-to-many label, which this strategy
-// refuses before a round begins, so no replay of it runs under those sides.
-// psiLinkManyToOne.test.ts ("single-pass refuses many-to-many"), psiLink.test.ts
-// ("many-to-many pairs in the cascade and is refused by single-pass") and
-// linkageCardinality.test.ts ("single-pass resolves every label except the
-// both-sided one") carry that.
-//
-// A row holding one value twice is in the corpus defensively rather than as a
-// reachable shape: a local cell realizes a ReadonlySet, and a partner's ragged cell
-// is refused unless its indices strictly ascend (singlePassFanOut.test.ts, "the
-// ragged table is refused for repeating a value index inside one cell").
-//
-// The other half -- that the resolved table is what the elided premises imply, over
-// a whole exchange -- is end to end, and psiLinkManyToOne.test.ts and
-// singlePassFanOut.test.ts carry it: their deduplicating-sender cases drive the
-// fixed-width and the ragged layout through the real strategy and pin the table.
+// Driven only under `{localKeepsDuplicates: false, partnerKeepsDuplicates:
+// true}`; `{true, true}` is many-to-many, which single-pass refuses before a
+// round begins, so psiLinkManyToOne.test.ts, psiLink.test.ts, and
+// linkageCardinality.test.ts hold that combination instead. A row holding
+// one value twice sits in the corpus defensively, not as a reachable shape
+// (a partner's ragged cell is refused unless its indices strictly ascend,
+// singlePassFanOut.test.ts). The other half -- that the resolved table
+// matches the elided assumption end to end -- is pinned by
+// psiLinkManyToOne.test.ts and singlePassFanOut.test.ts's
+// deduplicating-sender cases.
 
 // One round's cells for one party: each row's candidate value indices, in the order
 // the round reads them.
@@ -102,15 +87,14 @@ function candidacyFlags(round: Round): Uint8Array {
 const KNOCKOUT_BASE = 1000;
 
 /**
- * Replay `round` as the second round of a real single-pass cascade whose sender
- * keeps its duplicates, and return what the sweep read off the sender's cells.
- *
- * The first round hands each row the corpus wants out of candidacy a value of its
- * own that the receiver also holds, so the sweep pairs it and the cascade's removal
- * step takes it out; a row the corpus leaves in candidacy contributes nothing to
- * that round and survives it. The second round's receiver is empty, so it resolves
- * nothing -- the sweep still walks the sender's rows and reads their cells, which is
- * the whole of what this measures.
+ * Replay `round` as the second round of a real single-pass cascade whose
+ * sender keeps its duplicates, and return what the sweep read off the
+ * sender's cells. The first round hands each row the corpus wants out of
+ * candidacy a value the receiver also holds, so the sweep pairs it and the
+ * cascade's removal step takes it out; a row left in candidacy survives.
+ * The second round's receiver is empty and resolves nothing -- the sweep
+ * still walks the sender's rows and reads their cells, which is what this
+ * measures.
  */
 function sweepReadsOf(round: Round): SweepReads {
   const knocked = new Set(round.outOfCandidacy);
@@ -174,7 +158,7 @@ function randomRounds(count: number): Array<Round> {
 }
 
 const CORPUS: Array<Round> = [
-  // The shapes worth naming, ahead of the generated ones.
+  // Hand-picked shapes, ahead of the generated ones.
   roundOf([[0], [0], [1]]), // a value on two candidate rows
   roundOf([[0, 0]]), // one row holding one value twice
   roundOf([[], [3]]), // a row contributing nothing to the round
@@ -187,10 +171,11 @@ const SWEEPS = CORPUS.map((round) => ({ round, reads: sweepReadsOf(round) }));
 
 describe("the round-value participation question a deduplicating sender does not ask", () => {
   test("the sweep reaches exactly the rows the round leaves in candidacy", () => {
-    // The premise the differential rests on: the candidacy each round below is
-    // measured against is the one the cascade itself resolved, so a sweep that
-    // reached past it -- an out-of-candidacy row's cells, a row list the round did
-    // not put it in -- fails here rather than passing unnoticed.
+    // The assumption the differential rests on: the candidacy each round
+    // below is measured against is the one the cascade itself resolved, so
+    // a sweep that reached past it -- an out-of-candidacy row's cells, a
+    // row list the round did not put it in -- fails here rather than
+    // passing unnoticed.
     const disagreeing: Array<{
       cells: RoundCells;
       inCandidacy: Array<number>;

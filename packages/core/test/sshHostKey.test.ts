@@ -211,7 +211,7 @@ function blobNamingType(keyType: string | Uint8Array): Uint8Array {
 }
 
 // The host-key type names in real-world use: the plain algorithms, the
-// security-key forms, and the certificate forms, which carry the `@` and `.`
+// security-key forms, and the certificate forms, which hold the `@` and `.`
 // the charset exists for. None of them changes on the way through the bound.
 const REAL_WORLD_KEY_TYPES = [
   "ssh-ed25519",
@@ -234,7 +234,7 @@ test("keyTypeFromBlob returns every real-world key type verbatim", () => {
 });
 
 test("keyTypeFromBlob accepts a 64-byte type and replaces a 65-byte one", () => {
-  // The length bound, at its edge: 64 bytes is the longest type carried
+  // The length bound, at its edge: 64 bytes is the longest type kept
   // verbatim, matching the bound a partner parses an advertised type under.
   expect(keyTypeFromBlob(blobNamingType("a".repeat(64)))).toBe("a".repeat(64));
   expect(keyTypeFromBlob(blobNamingType("a".repeat(65)))).toBe(
@@ -279,9 +279,9 @@ test("keyTypeFromBlob collapses rejected types that differ only past those 24 by
 });
 
 test("keyTypeFromBlob's placeholder fits the bound a partner parses under", () => {
-  // The partner reads an advertised key type under z.string().max(64); a longer
-  // placeholder would make this party's advertisement read as malformed and drop
-  // the reconciliation entirely.
+  // The partner reads an advertised key type under z.string().max(64); a
+  // longer placeholder would make this party's advertisement be treated as
+  // malformed and drop the reconciliation entirely.
   for (const type of [
     new Uint8Array(1),
     new Uint8Array(24).fill(0xff),

@@ -1,20 +1,14 @@
-// Every index list a party receives from its exchange partner addresses state the
-// RECEIVING party owns -- its own rows, its own per-round candidate positions, or
-// the partner's rows as counted on the authenticated terms exchange. The shared
-// chokepoint below is where such a list is checked against that state before it
-// indexes anything, drives payload preparation, or reaches the self-attested
-// record, so the whole class is closed in one place rather than per call site.
-//
-// Every bound passed in is derived locally (an array this party built) or from
-// authenticated session state (a count carried on the terms exchange), never from
-// the frame being checked. Where one half of a received table must instead match
-// the length of the other, the two-half form below range-checks the anchoring
-// half first, so the count the second half is held to is pinned to one of those
-// quantities rather than chosen by the partner. The wire schemas upstream
-// (participant.ts associationTableMessage / numberArrayMessage, link.ts
-// associationAndIterationArray) accept any FINITE number, so integrality is
-// checked here too: a fractional index addresses nothing and would read as
-// `undefined`.
+// Every index list a party receives from its exchange partner addresses
+// state the RECEIVING party owns: its own rows or per-round positions, or
+// the partner's rows as counted on the authenticated terms exchange. The
+// chokepoint below checks such a list against that state before it indexes
+// anything or reaches the self-attested record. Every bound passed in is
+// derived locally or from authenticated session state, never from the frame
+// under check; a two-half table range-checks the anchoring half first, so
+// the paired half's count is pinned to a locally held quantity rather than
+// chosen by the partner. The wire schemas upstream accept any FINITE
+// number, so integrality is checked here too: a fractional index addresses
+// nothing and is `undefined`.
 import { ConnectionError } from "../connection/messageConnection";
 
 /**
@@ -41,8 +35,8 @@ function entryCount(count: number): string {
 }
 
 /**
- * Requires a partner-supplied list to carry exactly the number of entries this
- * party's own state implies.
+ * Requires a partner-supplied list to have exactly the number of entries
+ * this party's own state implies.
  *
  * @param participantId - This party's participant id.
  * @param what - Names the list, for the error message.
@@ -69,23 +63,23 @@ export function assertPartnerIndexCount(
 // A V8 Set entry costs about 21 bytes retained and about 40 bytes at the
 // transient rehash peak -- 2M integer entries on the pinned runtime (node
 // v26.7.0) measure ~42 MB retained after a forced gc and ~80 MB at the peak
-// before one -- where a Uint8Array bitmap costs one byte per addressable slot
-// however short the list is. Below this ratio the bitmap allocates less. The
-// constant sits between the retained and the peak cost, so the comparison stays
-// conservative whichever of the two binds, and an error in either direction
-// moves the allocation by a constant factor rather than by the partner's bound.
+// -- where a Uint8Array bitmap costs one byte per addressable slot however
+// short the list is. Below this ratio the bitmap allocates less; the
+// constant sits between the retained and peak cost, so the comparison stays
+// conservative whichever binds, moving the allocation by a constant factor
+// rather than by the partner's bound if it errs.
 const SET_ENTRY_BYTES = 32;
 
-// Duplicate detection over `[0, exclusiveBound)`, backed by whichever of the two
-// forms allocates less for the list at hand: the bitmap wins at the seams whose
-// bound is one of this party's own counts, which are the seams whose honest lists
-// run to millions of entries. The ratio is load-bearing rather than a tuning
-// choice: a bound may be the partner's row count or a per-message element bound,
-// authenticated but as large as MAX_RECORD_COUNT, and a bitmap sized by that
-// unconditionally would let a three-entry frame demand a terabyte -- which V8
-// answers by aborting the process, not by throwing. Choosing by ratio caps the
-// allocation at min(exclusiveBound, SET_ENTRY_BYTES * length) bytes, never more
-// than the frame's own already-materialized entries imply.
+// Duplicate detection over `[0, exclusiveBound)`, backed by whichever of the
+// two forms allocates less for the list at hand: the bitmap wins at the
+// call sites whose bound is one of this party's own counts, where honest
+// lists run to millions of entries. The ratio is critical rather than a
+// tuning choice: a bound may be the partner's row count or a per-message
+// element bound, authenticated but as large as MAX_RECORD_COUNT, and a
+// bitmap sized by that unconditionally would let a three-entry frame demand
+// a terabyte -- which V8 answers by aborting the process, not by throwing.
+// Choosing by ratio caps the allocation at
+// min(exclusiveBound, SET_ENTRY_BYTES * length) bytes.
 function createRepeatDetector(
   length: number,
   exclusiveBound: number,
@@ -137,7 +131,7 @@ export interface PartnerIndexGrouping {
 interface PartnerIndexRunGrouping extends PartnerIndexGrouping {
   /**
    * How many consecutive entries of the list answer each outbound entry. Two
-   * outbound entries this party grouped together carry the same length, both
+   * outbound entries this party grouped together have the same length, both
    * being the size of the one partner group behind the position they named.
    */
   readonly runLengths: ArrayLike<number>;
@@ -146,12 +140,12 @@ interface PartnerIndexRunGrouping extends PartnerIndexGrouping {
 /** Optional per-list rules beyond whole, in-range, and non-repeating. */
 export interface PartnerIndexRules {
   /**
-   * Require the entries to arrive in ascending order. Set only where the order
-   * is a property of the list rather than an incidental one: an association
-   * table's local half is read in that order downstream (the result rows, and
-   * the exchange record's reconstruction of them), so a partner-resolved table
-   * that does not carry it is refused here rather than silently reordering what
-   * those readers reproduce.
+   * Require the entries to arrive in ascending order. Set only where the
+   * order is a property of the list rather than an incidental one: an
+   * association table's local half is read in that order downstream (the
+   * result rows, and the exchange record's reconstruction of them), so a
+   * partner-resolved table that does not have it is refused here rather
+   * than silently reordering what those readers reproduce.
    */
   ascending?: boolean;
   /**
@@ -163,65 +157,69 @@ export interface PartnerIndexRules {
    * (docs/spec/PROTOCOL.md, Deriving one table from the exchanged association
    * maps).
    *
-   * The grouping is what keeps that relaxation from handing the partner the
-   * pairing: flat distinctness is replaced by injectivity modulo the grouping,
-   * so the partner can neither merge two of this party's groups onto one row nor
-   * split one across two. Distinctness is also what otherwise caps a list's
-   * LENGTH at `exclusiveBound`, so a caller setting this must pin the length
-   * against a locally computed count first ({@link assertPartnerIndexCount});
-   * this function then bounds the entries alone.
+   * The grouping keeps that relaxation from handing the partner the pairing:
+   * flat distinctness is replaced by injectivity modulo the grouping, so
+   * the partner can neither merge two of this party's groups onto one row
+   * nor split one across two. Distinctness is also what otherwise caps a
+   * list's LENGTH at `exclusiveBound`, so a caller setting this must pin
+   * the length against a locally computed count first
+   * ({@link assertPartnerIndexCount}); this function then bounds the
+   * entries alone.
    */
   repeatsGroupedBy?: PartnerIndexGrouping;
   /**
-   * Admit a repeated entry between RUNS this party itself grouped together: the
-   * cascade's returned mapped-element list where BOTH parties keep their
-   * within-dataset duplicates, so one outbound entry of this party's comes back
-   * as the whole partner group behind the position it named rather than as one
-   * row (docs/spec/PROTOCOL.md, Deriving one table from the exchanged association
-   * maps).
+   * Admit a repeated entry between RUNS this party itself grouped together:
+   * the cascade's returned mapped-element list where BOTH parties keep
+   * their within-dataset duplicates, so one outbound entry of this party's
+   * comes back as the whole partner group behind the position it named
+   * rather than as one row (docs/spec/PROTOCOL.md, Deriving one table from
+   * the exchanged association maps).
    *
-   * It is what {@link repeatsGroupedBy} becomes once the partner carries
-   * multiplicity too, and it buys the same guarantee: two outbound entries that
-   * named ONE (round, position) must come back with identical runs, element for
-   * element and in order, and entries that named DIFFERENT positions must come
-   * back with disjoint runs, so the partner can neither merge two of this party's
-   * groups nor split one. Distinctness survives within a run, a row named twice
-   * for one of this party's records being a repeated pair no consumer can read.
+   * What {@link repeatsGroupedBy} becomes once the partner has multiplicity
+   * too, buying the same guarantee: two outbound entries that named ONE
+   * (round, position) must come back with identical runs, element for
+   * element and in order, and entries that named DIFFERENT positions must
+   * come back with disjoint runs, so the partner can neither merge two of
+   * this party's groups nor split one. Distinctness survives within a run:
+   * a row named twice for one of this party's records is a repeated pair no
+   * consumer can read.
    *
-   * Distinctness is also what otherwise caps a list's LENGTH at `exclusiveBound`,
-   * so a caller setting this must pin the length against a locally computed count
-   * first ({@link assertPartnerIndexCount}) -- the same count the run lengths sum
-   * to. The three rules here are alternatives; setting more than one is a caller
-   * fault.
+   * Distinctness is also what otherwise caps a list's LENGTH at
+   * `exclusiveBound`, so a caller setting this must pin the length against
+   * a locally computed count first ({@link assertPartnerIndexCount}) -- the
+   * same count the run lengths sum to. The three rules here are
+   * alternatives; setting more than one is a caller fault.
    */
   repeatsGroupedByRuns?: PartnerIndexRunGrouping;
   /**
    * Admit a repeated entry with NO grouping to hold it to: the half of a
    * resolved association table naming the "one" side's rows under a
-   * deduplicating cardinality, where several of the MANY side's records link to
-   * one of them and the resolver -- not this party -- computed the pairing
-   * (docs/spec/PROTOCOL.md, Deriving one table from the exchanged association
-   * maps). There is no counterpart grouping to check against at that seam, which
-   * is what separates this from {@link repeatsGroupedBy}; the three relaxations
-   * here are alternatives and setting more than one is a caller fault.
+   * deduplicating cardinality, where several of the MANY side's records
+   * link to one of them and the resolver -- not this party -- computed the
+   * pairing (docs/spec/PROTOCOL.md, Deriving one table from the exchanged
+   * association maps). There is no counterpart grouping to check against at
+   * that call site, which is what separates this from
+   * {@link repeatsGroupedBy}; the three relaxations here are alternatives
+   * and setting more than one is a caller fault.
    *
-   * Alongside `ascending` it leaves the half NON-DECREASING, the strictness being
-   * exactly what distinctness carried. Distinctness is also what otherwise caps a
-   * list's LENGTH at `exclusiveBound`, so a caller setting this must pin the
-   * length against a count it computed or holds from authenticated session state
-   * first; {@link assertPartnerIndexTable} does that by taking the half that
-   * keeps its distinctness as the anchor.
+   * Alongside `ascending` it leaves the half NON-DECREASING, the strictness
+   * being exactly what distinctness held. Distinctness is also what
+   * otherwise caps a list's LENGTH at `exclusiveBound`, so a caller setting
+   * this must pin the length against a count it computed or holds from
+   * authenticated session state first; {@link assertPartnerIndexTable} does
+   * that by taking the half that keeps its distinctness as the anchor.
    */
   repeats?: boolean;
 }
 
-// Where the group of each run first appears in the list, or -1 for the run that IS
-// that first appearance -- resolved before any entry is read so a later run is
-// compared against its group's first element for element without ever reading past
-// it. Two runs of one group carry the same length by construction, both being the
-// size of the partner group behind the one position they named; a caller breaking
-// that, or handing over runs that do not cover the list it pinned, is stopped here
-// rather than left comparing misaligned entries.
+// Where the group of each run first appears in the list, or -1 for the run
+// that IS that first appearance -- resolved before any entry is read so a
+// later run is compared against its group's first element for element
+// without ever reading past it. Two runs of one group have the same length
+// by construction, both being the size of the partner group behind the one
+// position they named; a caller breaking that, or handing over runs that do
+// not cover the list it pinned, is stopped here rather than left comparing
+// misaligned entries.
 function resolveRunGroups(
   what: string,
   runs: PartnerIndexRunGrouping,
@@ -271,22 +269,23 @@ function resolveRunGroups(
  * Requires every entry of a partner-supplied index list to be a whole number in
  * `[0, exclusiveBound)`, with no entry repeated.
  *
- * Distinctness is the protocol invariant on all three matching paths -- one-to-one
- * matching pairs each row at most once -- and it is what caps the list's LENGTH at
- * `exclusiveBound`, since a longer list cannot hold distinct in-range entries. The
- * length is therefore not a separate argument, except under the three rules that
- * relax distinctness -- `rules.repeatsGroupedBy`, which replaces it with
- * injectivity modulo the grouping it carries, `rules.repeatsGroupedByRuns`, which
- * does the same for a list whose entries answer that grouping in runs, and
- * `rules.repeats`, which drops it for a half whose multiplicity the partner's own
- * side carries -- each of which leaves the length to the caller's own count check.
+ * Distinctness is the protocol invariant on all three matching paths --
+ * one-to-one matching pairs each row at most once -- and it is what caps
+ * the list's LENGTH at `exclusiveBound`, since a longer list cannot hold
+ * distinct in-range entries. The length is therefore not a separate
+ * argument, except under the three rules that relax distinctness --
+ * `rules.repeatsGroupedBy`, which replaces it with injectivity modulo the
+ * grouping it holds, `rules.repeatsGroupedByRuns`, which does the same for
+ * a list whose entries answer that grouping in runs, and `rules.repeats`,
+ * which drops it for a half whose multiplicity the partner's own side
+ * holds -- each leaving the length to the caller's own count check.
  *
  * @param participantId - This party's participant id.
  * @param what - Names the list, for the error message.
  * @param indices - The partner-supplied entries, in received order.
  * @param exclusiveBound - The count of addressable slots on this side. Derived
  *   locally or from authenticated session state, never from the received frame.
- * @param rules - Optional additional properties the list must carry; see
+ * @param rules - Optional additional properties the list must have; see
  *   {@link PartnerIndexRules}.
  * @throws A `"protocol"` {@link ConnectionError} on a non-integer, out-of-range,
  *   or repeated entry, on a descending pair under `rules.ascending`, or on a pair
@@ -352,20 +351,22 @@ export function assertPartnerIndices(
     rules.repeats === true
       ? () => false
       : createRepeatDetector(indices.length, exclusiveBound);
-  // Which index each group has taken so far, by round and then by position. Only
-  // the first entry of a group consults the repeat detector, so a legitimate
-  // repeat within one group never reads as one across groups.
+  // Which index each group has taken so far, by round and then by
+  // position. Only the first entry of a group consults the repeat
+  // detector, so a legitimate repeat within one group is never treated as
+  // one across groups.
   const indexByGroup = new Map<number, Map<number, number>>();
   let previous = -1;
-  // The run form walks the list run by run, at the lengths the caller pinned it to:
-  // `run` is the run the entry at hand falls in and `runStart` where that run
-  // begins. A zero-length run carries no entry and is stepped over.
+  // The run form walks the list run by run, at the lengths the caller
+  // pinned it to: `run` is the run the entry at hand falls in and
+  // `runStart` where that run begins. A zero-length run has no entry and
+  // is stepped over.
   let run = -1;
   let runStart = 0;
   let runEnd = 0;
-  // Each entry is checked in one pass, the repeat before the order, so a list that
-  // both repeats and descends is reported as the repeat -- the narrower of the two
-  // faults, and the one every seam checks.
+  // Each entry is checked in one pass, the repeat before the order, so a
+  // list that both repeats and descends is reported as the repeat -- the
+  // narrower of the two faults, and the one every call site checks.
   for (let entry = 0; entry < indices.length; ++entry) {
     const index = indices[entry];
     if (!Number.isInteger(index))
@@ -386,9 +387,10 @@ export function assertPartnerIndices(
       }
       const firstStart = runGroups.firstStarts[run];
       if (firstStart < 0) {
-        // The first run of its group carries the whole of the distinctness the rule
-        // keeps: its own entries differ from each other, this side's records taking
-        // one partner row once each, and from every other group's.
+        // The first run of its group holds the whole of the distinctness
+        // the rule keeps: its own entries differ from each other, this
+        // side's records taking one partner row once each, and from every
+        // other group's.
         if (repeats(index))
           throw partnerProtocolError(
             participantId,
@@ -436,11 +438,12 @@ export function assertPartnerIndices(
   }
 }
 
-// Neither grouped rule is offered here: each replaces distinctness with a rule read
-// against a grouping, which says nothing about a list's length, where this form
-// needs one half's length pinned before it holds the other to it. A seam whose table
-// admits a GROUPED repeat therefore checks its halves itself, against a count it
-// computed, rather than through this form.
+// Neither grouped rule is offered here: each replaces distinctness with a
+// rule read against a grouping, which says nothing about a list's length,
+// where this form needs one half's length pinned before it holds the other
+// to it. A call site whose table admits a GROUPED repeat therefore checks
+// its halves itself, against a count it computed, rather than through this
+// form.
 /** One half of a partner-supplied association table, with what bounds it. */
 interface PartnerIndexTableHalf extends Omit<
   PartnerIndexRules,
@@ -464,25 +467,26 @@ type PartnerIndexTableAnchorHalf = Omit<PartnerIndexTableHalf, "repeats">;
  * Requires both halves of a partner-supplied association table to hold whole,
  * in-range indices and to pair up, one entry of each half per matched pair.
  *
- * The halves are checked in this order for a reason the callers cannot enforce
- * themselves: the pairing is expressed as the second half carrying as many entries
- * as the first, and that expected count is only a quantity this party holds once
- * the first half has been range-checked -- which caps its length at
- * `anchorHalf.exclusiveBound`, distinctness being what makes a longer list
- * impossible. Running the halves through this one entry point keeps the order out
- * of the callers' hands.
+ * The halves are checked in this order for a reason the callers cannot
+ * enforce themselves: the pairing is expressed as the second half having as
+ * many entries as the first, and that expected count is only a quantity
+ * this party holds once the first half has been range-checked -- which
+ * caps its length at `anchorHalf.exclusiveBound`, distinctness being what
+ * makes a longer list impossible. Running the halves through this one
+ * entry point keeps the order out of the callers' hands.
  *
- * Which half anchors is therefore whichever one keeps its distinctness. That is
- * the half addressing this party's own rows for a table with one entry per matched
- * record; under a deduplicating cardinality it is the half naming the MANY side's
- * rows, whichever party those belong to, since the "one" side's rows are what a
- * group of them repeats (docs/spec/PROTOCOL.md, Deriving one table from the
- * exchanged association maps). Either bound is a quantity this party holds
- * independently of the frame -- one of its own counts, or a record count carried on
- * the authenticated terms exchange.
+ * Which half anchors is therefore whichever one keeps its distinctness.
+ * That is the half addressing this party's own rows for a table with one
+ * entry per matched record; under a deduplicating cardinality it is the
+ * half naming the MANY side's rows, whichever party those belong to, since
+ * the "one" side's rows are what a group of them repeats
+ * (docs/spec/PROTOCOL.md, Deriving one table from the exchanged
+ * association maps). Either bound is a quantity this party holds
+ * independently of the frame -- one of its own counts, or a record count
+ * held on the authenticated terms exchange.
  *
- * Either half may additionally carry the {@link PartnerIndexRules} a seam's own
- * table has to satisfy, applied to that half alone.
+ * Either half may additionally have the {@link PartnerIndexRules} a call
+ * site's own table has to satisfy, applied to that half alone.
  *
  * @param participantId - This party's participant id.
  * @param anchorHalf - The distinct half, whose range-checked length pins the

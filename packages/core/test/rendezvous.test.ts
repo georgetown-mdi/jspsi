@@ -40,10 +40,10 @@ describe("deriveRendezvousPeerId", () => {
     );
   });
 
-  // Independent re-derivation of the exact construction (HKDF-SHA-256, zero salt,
-  // versioned role-specific info, first 16 bytes, lowercase hex). Pins every knob
-  // of the contract, so a change to salt/info/length/encoding fails here even if
-  // someone updates the literal vectors above to match.
+  // Independent re-derivation of the exact construction (HKDF-SHA-256, zero
+  // salt, versioned role-specific info, first 16 bytes, lowercase hex). Pins
+  // every setting of the contract, so a change to salt/info/length/encoding
+  // fails here even if someone updates the literal vectors above to match.
   test("equals an independent HKDF-SHA-256 derivation", async () => {
     const secret = generateSharedSecret();
     for (const role of RENDEZVOUS_ROLES) {

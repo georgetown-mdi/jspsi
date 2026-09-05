@@ -18,9 +18,9 @@ import type {
 } from "../src/config/linkageTerms.js";
 
 // A linkable column set (ssn + names + dob give satisfiable keys) that ALSO
-// carries columns the inferred metadata discloses: `notes` infers as an `other`
-// column (role payload) and `member_id` as a single row-identifier left
-// isPayload, so both are transmitted.
+// includes columns the inferred metadata discloses: `notes` infers as an
+// `other` column (role payload) and `member_id` as a single row-identifier
+// left isPayload, so both are transmitted.
 const DISCLOSING_COLUMNS = [
   "ssn",
   "first_name",
@@ -35,10 +35,10 @@ const LINKAGE_ONLY_COLUMNS = ["ssn", "first_name", "last_name", "dob"];
 describe("the consent summary's payload block", () => {
   test("derives the received set from the carried subset with no payload.send authored", () => {
     // A CLI-style invitation: the terms author no payload block, but the token
-    // carries the disclosed-columns subset. The acceptor's consent display must
-    // derive the columns-it-will-receive from that carried set -- the same
-    // predicate the wire transmits on -- not from the (absent) payload.send. This
-    // is the under-declaration gap the dedicated field closes, and the no-drift
+    // holds the disclosed-columns subset. The acceptor's consent display must
+    // derive the columns-it-will-receive from that subset -- the same predicate
+    // the wire transmits on -- not from the (absent) payload.send. This is the
+    // under-declaration gap the dedicated field closes, and the no-drift
     // invariant: the displayed set equals the transmitted set over one metadata.
     const metadata = inferMetadata(DISCLOSING_COLUMNS);
     const disclosed = disclosedColumnNames(metadata);
@@ -52,9 +52,9 @@ describe("the consent summary's payload block", () => {
   });
 
   test("records which source the displayed send set came from", () => {
-    // Both sources are declarations, and only one of them is a lock-in: an
-    // acceptance writes the CARRIED subset as what it will receive and reconciles
-    // against it, while an authored send with no carried subset leaves nothing to
+    // Both sources are declarations, and only one of them is a commitment: an
+    // acceptance writes the held subset as what it will receive and reconciles
+    // against it, while an authored send with no held subset leaves nothing to
     // reconcile against. A surface classifying the received-columns line reads
     // this narrower flag, so it is pinned apart from sendDeclared.
     const metadata = inferMetadata(DISCLOSING_COLUMNS);
@@ -89,12 +89,12 @@ describe("the consent summary's payload block", () => {
   });
 
   test("surfaces an empty carried subset as a declared 'receive nothing'", () => {
-    // The web inviter always carries the disclosed subset, possibly empty. An empty
-    // carried set is the strict "receive nothing" lock-in (a later non-empty payload
-    // aborts), NOT the lazy case -- so the section is rendered with an empty,
-    // DECLARED send (the renderer shows "(none)"), distinct from a lazy/absent set
-    // which suppresses the section. This keeps the consent surfaces and the runtime
-    // enforcement aligned.
+    // The web inviter always includes the disclosed subset, possibly empty. An
+    // empty held set is the strict "receive nothing" commitment (a later
+    // non-empty payload aborts), NOT the lazy case -- so the section is
+    // rendered with an empty, DECLARED send (the renderer shows "(none)"),
+    // distinct from a lazy/absent set which suppresses the section. This
+    // keeps the consent surfaces and the runtime enforcement aligned.
     const terms = getDefaultLinkageTerms(
       "Inviter",
       inferMetadata(LINKAGE_ONLY_COLUMNS),
@@ -113,11 +113,12 @@ describe("the consent summary's payload block", () => {
   });
 
   test("surfaces an authored empty payload.receive as a declared request", () => {
-    // The receive-side mirror of the declared-empty send case above: an authored
-    // `payload.receive: []` is the strict "the acceptor sends nothing" assertion,
-    // distinct from an absent receive (lazy). It must surface as a DECLARED receive
-    // (receiveDeclared true, receive empty -> the renderer shows "(none)") so a
-    // consent surface does not collapse it with the lazy case.
+    // The receive-side mirror of the declared-empty send case above: an
+    // authored `payload.receive: []` is the strict "the acceptor sends
+    // nothing" assertion, distinct from an absent receive (lazy). It must
+    // show as a DECLARED receive (receiveDeclared true, receive empty -> the
+    // renderer shows "(none)") so a consent surface does not collapse it
+    // with the lazy case.
     const terms = getDefaultLinkageTerms(
       "Inviter",
       inferMetadata(LINKAGE_ONLY_COLUMNS),
@@ -282,9 +283,9 @@ describe("the consent summary's fan-out register", () => {
   test("the deduplicate register carries the strategy's own verdict on the term", () => {
     // The applied flag is the strategy's verdict on the term -- the signal a
     // surface reads to withhold what a deduplicating run discloses for an
-    // invitation acceptance would refuse outright. Both shipped strategies match
-    // one, so both surface the disclosure; the withheld direction is driven over
-    // the whole verdict table by the test below.
+    // invitation acceptance would refuse outright. Both shipped strategies
+    // match one, so both show the disclosure; the withheld direction is
+    // driven over the whole verdict table by the test below.
     const applied = (linkageStrategy: "cascade" | "single-pass"): boolean =>
       summarizeInvitation({
         linkageTerms: { ...baseTerms, deduplicate: true, linkageStrategy },
@@ -334,7 +335,7 @@ describe("the consent summary's date-collapse marker", () => {
   const metadata = inferMetadata(LINKAGE_ONLY_COLUMNS);
   const baseTerms = getDefaultLinkageTerms("Inviter", metadata);
   const LITERAL_REGION_FORMAT = "ACME-YYYYMMDD";
-  // One key over the date field, carrying whatever transform a case declares.
+  // One key over the date field, with whatever transform a case declares.
   const termsWith = (transform: TransformStep[]) => ({
     ...baseTerms,
     linkageKeys: [
@@ -373,22 +374,22 @@ describe("the consent summary's date-collapse marker", () => {
   });
 
   test("a run whose composed window leaves the layout shows no marker at all", () => {
-    // The first link reads the literal region and the second slices out of that
-    // window, so the element matches no record at all. Announcing "any date" for
-    // it would name an element that matches nothing as matching every date, and
-    // "partial" would name a truncation of a value no record ever holds: every
-    // step from the parse_date to the run's end reads the layout rather than the
-    // value, so the drop the probes measure is every record's, and the element
-    // takes the dead-pipeline surface the dead-key advisory speaks for.
+    // The first link reads the literal region and the second slices out of
+    // that window, so the element matches no record. "Any date" would claim
+    // a match that never happens; "partial" would claim a truncation of a
+    // value no record holds. Every step here reads the layout, not the
+    // value, so the drop is universal -- the dead-pipeline surface the
+    // dead-key advisory speaks for.
     expect(
       headerFor([parseDate(LITERAL_REGION_FORMAT), slice(1, 4), slice(5, 2)]),
     ).toEqual(["date of birth"]);
   });
 
   test("a value-dependent drop of every probe keeps the wider word", () => {
-    // The same all-probes drop with a step whose reach is the data's to decide.
-    // The measurement settles nothing there, so the header must not fall to the
-    // milder truncation word, and must not claim the element is dead either.
+    // The same all-probes drop with a step whose reach is the data's to
+    // decide. The measurement decides nothing there, so the header must
+    // not fall to the milder truncation word, and must not claim the
+    // element is dead either.
     expect(
       headerFor([
         parseDate(LITERAL_REGION_FORMAT),
@@ -448,9 +449,9 @@ describe("the consent summary's date-collapse marker", () => {
   });
 
   test("a rescued dead run names the fallback rather than falling silent", () => {
-    // The run drops every date, but the coalesce puts every record back on one
-    // constant, so the element is not dead and the honest marker is the
-    // substitution's.
+    // The run drops every date, but the coalesce puts every record back on
+    // one constant, so the element is not dead and the accurate marker is
+    // the substitution's.
     expect(
       headerFor([
         parseDate(LITERAL_REGION_FORMAT),
@@ -462,8 +463,8 @@ describe("the consent summary's date-collapse marker", () => {
   });
 
   test("a plain reformatting keeps no marker", () => {
-    // Routine canonicalization between equivalent full layouts, deliberately
-    // unflagged, and the slice that reads the date itself is the milder word.
+    // Routine canonicalization between equivalent full layouts, unflagged by
+    // design; the slice that reads the date itself is the milder word.
     expect(headerFor([parseDate("YYYY-MM-DD")])).toEqual(["date of birth"]);
     expect(headerFor([parseDate("YYYY-MM-DD"), slice(1, 4)])).toEqual([
       "date of birth (partial)",

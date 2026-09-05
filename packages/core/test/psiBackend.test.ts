@@ -90,9 +90,9 @@ describe("detectNodeRuntime", () => {
 
   test("reports non-Node when a DOM window is present, even with a process shim", () => {
     // A bundled browser build can shim `process`, so a present `window` is what
-    // disambiguates it from real Node. Stubbing `window` exercises the guard the
-    // node-environment suite otherwise never runs false -- dropping it would let
-    // such a browser misdetect as Node and consult the native loader.
+    // disambiguates it from real Node. Stubbing `window` exercises the guard
+    // the node-environment suite otherwise never runs false -- dropping it
+    // would let such a browser misdetect as Node and consult the native loader.
     vi.stubGlobal("window", {});
     expect(detectNodeRuntime()).toBe(false);
   });

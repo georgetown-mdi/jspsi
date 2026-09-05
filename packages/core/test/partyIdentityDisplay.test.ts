@@ -11,14 +11,11 @@ import { ESC, hostileTerms, RLO } from "../src/displayEscapingFixtures";
 import type { LinkageTerms } from "../src/config/linkageTerms";
 
 /**
- * The absence marker and the one boundary it is produced at.
- *
- * `linkage_terms.identity` is optional, so every surface that shows a party's
- * name meets a party that supplied none. What it must not do is invent one, and
- * what it must not do instead is show nothing: an empty cell reads as a rendering
- * fault, and `undefined` reads as a bug. These pin the third thing -- a marker
- * that states what happened -- and pin that it is one marker, so two surfaces
- * cannot come to disagree about what an unnamed party looks like.
+ * `linkage_terms.identity` is optional, so every surface that shows a
+ * party's name meets a party that supplied none. Neither an empty cell nor
+ * `undefined` marks that state -- both display as a fault rather than an
+ * absence. `UNNAMED_PARTY_LABEL` is the one marker for it, so two surfaces
+ * cannot disagree about what an unnamed party looks like.
  */
 
 const terms: LinkageTerms = {
@@ -45,8 +42,8 @@ describe("a party identity as display text", () => {
     expect(redactAndDisplayPartyIdentity(undefined)).toBe(UNNAMED_PARTY_LABEL);
     // Parenthesized and lower-case so it states an absence rather than filling
     // in a name -- though display cannot separate this marker from a party that
-    // named itself the same text -- and printable ASCII so it cannot itself
-    // carry anything into a terminal.
+    // named itself the same text -- and printable ASCII so it cannot inject
+    // anything into a terminal.
     expect(UNNAMED_PARTY_LABEL).toBe("(no name given)");
     expect(UNNAMED_PARTY_LABEL).toMatch(/^[\x20-\x7e]+$/);
   });
@@ -72,8 +69,8 @@ describe("the invitation consent surface names the inviter", () => {
 
   test("an inviter that named itself none is shown as unnamed", () => {
     // An acceptor consents to terms from a party it can read: an invitation
-    // carrying no identity says so on the consent screen rather than leaving the
-    // heading blank, which would read as a rendering fault.
+    // with no identity says so on the consent screen rather than leaving the
+    // heading blank, which would look like a rendering fault.
     const { identity: _unnamed, ...withoutIdentity } = terms;
     expect(
       summarizeInvitation({ linkageTerms: withoutIdentity }).invitingParty,

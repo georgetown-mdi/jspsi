@@ -20,7 +20,7 @@ import { expectRejectionKind } from "./utils/expectRejection";
 // These tests exercise `fromEventConnection` over the *real* FileSyncConnection
 // transport (driven by an in-memory FileTransportClient), rather than the
 // passthrough double used in messageConnection.test.ts. The point is to confirm
-// the bridge faithfully surfaces the transport's actual behaviours - polled
+// the bridge faithfully exposes the transport's actual behaviours - polled
 // data delivery, asynchronous poll-loop errors, send-time failures, and the
 // pre-attach buffered-error path - through the pull-based interface.
 
@@ -169,7 +169,7 @@ test("fromEventConnection over FileSyncConnection: send() writes the outbound me
 
 test("fromEventConnection over FileSyncConnection: a poll-loop error surfaces as a sticky transport ConnectionError", async () => {
   const peerId = "peer-test";
-  // list() always surfaces a matching file (size matches declared) but get()
+  // list() always reports a matching file (size matches declared) but get()
   // always throws ENOENT: after MAX_CONSECUTIVE_ENOENT cycles the poller emits
   // a terminal error.
   const [{ err, mc }, logs] = await withCapturedLogs(async () => {

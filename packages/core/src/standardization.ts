@@ -228,44 +228,32 @@ function removeAffixes(s: string): string {
 }
 
 /**
- * The date-component tokens a `parse_date` format layout is built from. Exported
- * so the web consent screen can pin its own date-component detection (which
- * decides whether a `parse_date` drops a component and so broadens matching)
- * against this exact set: adding a token here breaks that consumer's build rather
- * than letting it silently miss the new component.
+ * The date-component tokens a `parse_date` format layout is built from. The web
+ * consent screen's date-component detection pins this exact set -- adding a
+ * token here breaks that consumer's build.
  *
- * `YYYY` and `YY` are both INPUT year tokens: a layout supplies the year component
- * for parsing if it carries either. Because `YY` is a prefix of `YYYY`, a consumer
- * detecting tokens must tokenize greedily (longest year token first), never by
- * substring membership, or a four-digit-year layout would false-report a two-digit
- * year. `YY` is a year ONLY when parsing an input value; in an OUTPUT format it is
- * not a substitution target (the factory's output replace fills only `YYYY`, `MM`,
- * `DD`), so it emits literally and collapses the year -- {@link dateFormatComponents}
- * separates those two contexts.
+ * `YY` is a prefix of `YYYY`, so tokenizing must go longest-first, not by
+ * substring membership. `YY` parses a year only on input; in an OUTPUT format
+ * it is not a substitution target and holds no year
+ * ({@link dateFormatComponents} separates the two contexts).
  */
 type DateFormatToken = "YYYY" | "YY" | "MM" | "DD";
 
 /**
- * The year tokens {@link parseDateFormat} recognizes when parsing an INPUT format,
- * longest first so a greedy tokenizer consumes `YYYY` ahead of its `YY` prefix.
- * Both satisfy the factory's year-component requirement; a `YY` value resolves to a
- * four-digit year through the fixed century pivot ({@link resolveTwoDigitYear}).
- * Exported so a component-detection consumer can recover the same year vocabulary
- * rather than re-listing it.
+ * The year tokens {@link parseDateFormat} recognizes when parsing an INPUT
+ * format, longest first so a greedy tokenizer consumes `YYYY` ahead of its `YY`
+ * prefix. Either resolves to a four-digit year through the fixed century pivot
+ * ({@link resolveTwoDigitYear}).
  */
 const YEAR_FORMAT_TOKENS: readonly DateFormatToken[] = ["YYYY", "YY"];
 
 /**
- * The fixed protocol pivot for resolving a two-digit `YY` year to four digits: a
- * two-digit `yy <= 68` resolves into the 2000s, otherwise into the 1900s, so the
- * window is 1969-2068 (the POSIX two-digit-year convention). This is a normative
- * protocol CONSTANT, not a clock read or a per-party value: both parties resolve
- * every `YY` against this same number, so a boundary year cannot split across
- * centuries and silently miss the match (the window's edges are pinned in
- * standardization.test.ts). The trade is a fixed cutoff
- * rather than a moving "not in the future" one -- a value can resolve to a year not
- * yet reached -- which does not affect linkage because both sides resolve it
- * identically. The exact window is specified in PROTOCOL.md.
+ * The protocol pivot for resolving a two-digit `YY` year to four digits: `yy <=
+ * 68` resolves into the 2000s, otherwise the 1900s, giving the window
+ * 1969-2068 (the POSIX two-digit-year convention). A fixed constant, not a
+ * clock read: both parties resolve every `YY` against this same number
+ * (window edges pinned in standardization.test.ts; full window in
+ * PROTOCOL.md).
  */
 const TWO_DIGIT_YEAR_PIVOT = 68;
 
@@ -277,13 +265,9 @@ interface ParsedDateFormat {
 }
 
 /**
- * Resolve a two-digit year to a four-digit year against the fixed
- * {@link TWO_DIGIT_YEAR_PIVOT}: a value at or below the pivot maps to the 2000s,
- * otherwise to the 1900s. With the pivot at 68 the window is 1969-2068, so `68`
- * -> `2068`, `69` -> `1969`, `00` -> `2000`, and `99` -> `1999`. The pivot is a
- * protocol constant read from this module on both parties, so a `YY` value never
- * silently changes century between runs or across parties -- there is no clock
- * read and no per-party reference anywhere in this path.
+ * Resolve a two-digit year to a four-digit year against
+ * {@link TWO_DIGIT_YEAR_PIVOT}: `68` -> `2068`, `69` -> `1969`, `00` -> `2000`,
+ * `99` -> `1999`.
  */
 function resolveTwoDigitYear(twoDigit: string): string {
   const value = Number(twoDigit);
@@ -308,8 +292,8 @@ const DATE_TOKEN_CAPTURE_SOURCES: Readonly<Record<DateFormatToken, string>> = {
   DD: "(\\d{1,2})",
 };
 
-/** One run of a tokenized date format: a recognized date token, or a single
- * character the format carries literally. */
+/** One run of a tokenized date format: a recognized date token, or one
+ * literal character from the format. */
 interface DateFormatSegment {
   /** The token this segment is, or undefined for a literal character. */
   token?: DateFormatToken;
@@ -339,14 +323,11 @@ function tokenizeDateFormat(format: string): DateFormatSegment[] {
 }
 
 // Build the anchored regex source and capture order for a parse_date input
-// format. The format is partner-controlled and its MM/DD tokens EXPAND into
-// adjacent `(\d{1,2})` groups, which catastrophically backtrack on the JavaScript
-// engine; that is why parseDateFactory compiles this source under the linear-time
-// engine (compileLinearRegex), not `new RegExp`, even though the format is not a
-// raw `tier: "regex"` pattern. The expansion is harmless under a non-backtracking
-// engine, so no separate screen is needed: linearRegex.test.ts drives that
-// adjacent-group expansion through compileLinearRegex, which is what this source
-// is compiled with.
+// format. The format is partner-controlled; its MM/DD tokens expand into
+// adjacent `(\d{1,2})` groups, which catastrophically backtrack on the
+// JavaScript engine. parseDateFactory compiles this source under the
+// linear-time engine (compileLinearRegex), not `new RegExp`
+// (linearRegex.test.ts covers the adjacent-group expansion).
 function parseDateFormat(inputFormat: string): ParsedDateFormat {
   const order: DateFormatToken[] = [];
   let regexStr = "";
@@ -365,27 +346,12 @@ function parseDateFormat(inputFormat: string): ParsedDateFormat {
 }
 
 /**
- * The date COMPONENTS a `parse_date` format layout carries, context-aware because
- * `YY` means different things on the two sides of the transform:
- *
- * - `context: "input"` -- the calendar fields the INPUT format PARSES. Both year
- *   tokens ({@link YEAR_FORMAT_TOKENS}) collapse to the single canonical `"YYYY"`
- *   year component, so an input carrying `YY` reports the year exactly as one
- *   carrying `YYYY` does: the factory resolves either to a four-digit year.
- * - `context: "output"` -- the calendar fields the OUTPUT format EMITS. The factory
- *   substitutes only `YYYY`/`MM`/`DD` into the output; a `YY` in the output format
- *   is not a substitution target, so it is emitted as the literal characters "YY"
- *   and carries NO year -- the year has collapsed to a constant. So a `YY`-only
- *   input token maps to `YYYY` here, but a `YY` in the OUTPUT contributes no year
- *   component (it is treated as a literal separator).
- *
- * `MM` and `DD` map to themselves in both contexts. Recovered from core's OWN
- * greedy tokenizer ({@link parseDateFormat}), never a substring scan -- `YY` is a
- * prefix of `YYYY`, so a `String.includes` check would double-count a four-digit
- * year. Exported so a component-detection consumer (the web consent screen's
- * date-collapse marker) shares this tokenization rather than re-deriving it and
- * drifting from the factory. The canonical components are a subset of
- * {@link DateFormatToken}, so the return type stays that set.
+ * The date COMPONENTS a `parse_date` format layout holds. `YY` differs by
+ * context: on `"input"` it parses a year and collapses to `"YYYY"`
+ * ({@link YEAR_FORMAT_TOKENS}); on `"output"` it is not a substitution target,
+ * so it emits literally and holds no year. `MM` and `DD` map to themselves
+ * in both contexts. Tokenized via {@link parseDateFormat}'s own greedy scan,
+ * not a substring check, since `YY` is a prefix of `YYYY`.
  */
 export function dateFormatComponents(
   format: string,
@@ -395,7 +361,7 @@ export function dateFormatComponents(
   for (const token of parseDateFormat(format).order) {
     if (token === "YY") {
       // A YY input token parses a year; a YY output token is an unsubstituted
-      // literal that carries no year and so contributes no component.
+      // literal that holds no year and so contributes no component.
       if (context === "input") components.add("YYYY");
     } else {
       components.add(token);
@@ -427,15 +393,12 @@ function renderDateOutput(
 // string tokens YYYY / YY / MM / DD stay as written; delimiter characters are
 // literal. Params arrive as camelCase after camelizeKeys (e.g. inputFormat).
 function parseDateFactory(params: Params): StandardizingFn {
-  // The wire params are z.unknown() and typed by no per-function shape, so a
-  // partner can declare either format as a non-string. An absent input format
-  // falls back to the complete default; a present non-string is a dead key by
-  // design (the satisfiability pre-flight is pinned to that verdict), realized
-  // here as an empty format that tokenizes to an all-dropping pattern -- a raw
-  // non-string would instead throw in parseDateFormat (`.startsWith` on an
-  // array). Guard the output format by type too: a non-string there reaches
-  // `.replaceAll` on a matched row and throws, so it falls back to the absent
-  // default.
+  // The wire params are z.unknown(), so a partner can declare either format as
+  // a non-string. An absent input format falls back to the default; a present
+  // non-string is a dead key by design, realized as an empty format that
+  // tokenizes to an all-dropping pattern (a raw non-string would instead throw
+  // in parseDateFormat). Guard the output format by type too: a non-string
+  // reaches `.replaceAll` and throws, so it falls back to the absent default.
   const rawInputFormat = params.inputFormat;
   const inputFormat =
     rawInputFormat == null
@@ -490,11 +453,11 @@ function parseDateFactory(params: Params): StandardizingFn {
 }
 
 function substringFactory(params: Params): StandardizingFn {
-  // substringWindow carries the whole convention -- bounds coercion, SQL SUBSTR
+  // substringWindow holds the whole convention -- bounds coercion, SQL SUBSTR
   // indexing, and the clamps -- and needs the length of the value being sliced
-  // to settle either bound, so the window is resolved per value rather than
-  // hoisted out of the returned fn. A window that reads nothing is the drop this
-  // step takes for a degenerate bound.
+  // to fix either bound, so the window is resolved per value rather than
+  // hoisted out of the returned fn. A window that reads nothing is the drop
+  // this step takes for a degenerate bound.
   return (s) => {
     const window = substringWindow(params, s.length);
     if (window === undefined) return null;
@@ -559,14 +522,11 @@ function padLeftFactory(params: Params): StandardizingFn {
   if (typeof length !== "number" || !Number.isInteger(length) || length <= 0)
     throw new Error(`pad_left: "length" must be a positive integer`);
   // Normalize before validating the length, not after: NFC can change the
-  // code-unit count -- a singleton like U+2126 -> U+03A9 stays one unit, but a
-  // combining mark like U+0344 -> U+0308 U+0301 expands to two -- and padStart
-  // treats a multi-unit fill as a cycling pattern, so the one-character contract
-  // must hold on the normalized value that actually pads. Guard by type, not just
-  // nullish: the wire params are z.unknown() and typed by no per-function
-  // shape, so a partner can declare `char` as a non-string, and calling
-  // `.normalize` on it would throw. A non-string falls back to the "0" default,
-  // consistent with the absent default.
+  // code-unit count (a combining mark like U+0344 -> U+0308 U+0301 expands to
+  // two), and padStart treats a multi-unit fill as a cycling pattern, so the
+  // one-character contract must hold on the normalized value. Guard `char` by
+  // type: the wire params are z.unknown(), and a non-string would throw on
+  // `.normalize`; it falls back to the "0" default instead.
   const char = (typeof params.char === "string" ? params.char : "0").normalize(
     "NFC",
   );
@@ -606,12 +566,10 @@ function nullIfFactory(params: Params): StandardizingFn {
 function replaceRegexFactory(params: Params): StandardizingFn {
   const pattern = coerceToPatternString(params.pattern);
   // NFC-normalize the replacement literal so it cannot inject a non-NFC byte
-  // sequence into the key (the pattern itself is matched as authored; author it
-  // in NFC to match NFC runtime values). Guard by type, not just nullish: the
-  // wire params are z.unknown() and typed by no per-function shape, so a
-  // partner can declare `replacement` as a non-string, and calling `.normalize`
-  // on it would throw. A non-string falls back to the empty replacement,
-  // consistent with the absent default.
+  // sequence into the key (the pattern itself is matched as authored; author
+  // it in NFC to match NFC runtime values). Guard by type: the wire params
+  // are z.unknown(), and a non-string `replacement` would throw on
+  // `.normalize`; it falls back to the empty replacement instead.
   const replacement =
     typeof params.replacement === "string"
       ? params.replacement.normalize("NFC")
@@ -664,29 +622,20 @@ function splitOnFactory(params: Params): StandardizingFn {
   };
 }
 
-// Each entry here must also be given a descriptor in
-// STANDARDIZATION_FUNCTION_DESCRIPTORS below -- its drift test fails CI on a
-// function added here without a descriptor, and vice versa -- and be documented
-// in docs/EXCHANGE_REFERENCE.md section "Available functions", which is a prose
-// obligation no test enforces.
+// Each entry here needs a matching descriptor in
+// STANDARDIZATION_FUNCTION_DESCRIPTORS (its drift test fails CI without one)
+// and an entry in docs/EXCHANGE_REFERENCE.md, "Available functions" (no test
+// enforces that).
 //
-// NFC-comparison contract: any step that matches an authored value, pattern, or
-// delimiter against the intermediate value must NFC-normalize that value before
-// matching, because an upstream step such as to_upper_case can emit non-NFC
-// bytes (the six Greek code points U+0390, U+03B0, U+1FD2, U+1FD7, U+1FE2,
-// U+1FE7) even from NFC input -- to_lower_case does not today, but a future
-// case-fold could. The final key-string normalize in buildKeyStrings fixes the
-// EMITTED key, but it runs after these mid-pipeline reads, so each step must
-// normalize the value it inspects itself. The family today is null_if,
-// filter_regex, extract_regex, replace_regex, split_on, and parse_date -- define
-// membership by the property above, not this list, when adding a function. Two
-// return styles: a step that passes the value through on a match/non-match
-// (null_if, filter_regex) returns the ORIGINAL value so downstream bytes are
-// untouched; a step that derives a new value (extract_regex, replace_regex,
-// split_on, parse_date) derives it from the normalized value, since matching one
-// form and slicing the other can misalign offsets. Either way the output for
-// already-canonical (NFC or ASCII) inputs is byte-identical. This is an authoring
-// reminder for new functions, not enforcement.
+// NFC-comparison contract: a step that matches an authored value, pattern, or
+// delimiter against the intermediate value must NFC-normalize that value
+// first -- an upstream step can emit non-NFC bytes even from NFC input, and
+// buildKeyStrings normalizes only the EMITTED key, after these mid-pipeline
+// reads. The family today is null_if, filter_regex, extract_regex,
+// replace_regex, split_on, and parse_date, by this property rather than the
+// list. A pass-through step (null_if, filter_regex) returns the ORIGINAL
+// value; a deriving step (extract_regex, replace_regex, split_on,
+// parse_date) derives from the normalized value.
 const STANDARDIZING_FUNCTIONS: Record<string, StandardizingFnFactory> = {
   remove_non_ascii: noParamFactory(removeNonAscii),
   replace_separators_with_spaces: noParamFactory(replaceSeparatorsWithSpaces),
@@ -709,25 +658,18 @@ const STANDARDIZING_FUNCTIONS: Record<string, StandardizingFnFactory> = {
   split_on: splitOnFactory,
 };
 
-// The functions above whose compiled step can return SEVERAL candidates for ONE
-// input value -- the capability, which is separate from
-// FAN_OUT_FUNCTION_NAMES's POLICY question of whether an expansion by that
-// function is a declared fan-out. Capability decides whether a key can produce
-// multiplicity at all, so it is what {@link keyAccumulationFate} classifies from
-// before a row runs, and it must stay a property of the function rather than of
-// the listing: the unit lever that stands `split_on` in for an unlisted producer
-// (`withNoListedFanOutFunctions`) moves the listing alone, and the step it
-// compiles still expands.
+// The functions above whose compiled step can return SEVERAL candidates for
+// ONE input value -- CAPABILITY, separate from FAN_OUT_FUNCTION_NAMES's
+// POLICY question of whether an expansion is a declared fan-out. Capability
+// must stay a property of the function, not the listing: the lever that
+// stands `split_on` in for an unlisted producer moves only the listing, and
+// the step it compiles still expands.
 //
-// Hand-listed for the same reason the fan-out list is: whether a factory can
-// return a multi-value `Set` is not derivable from the registry, so this entry
-// is what the classification's guarantee rests on. The runtime backstop
-// catches a factory added here without an entry only where its expansion lands
-// before the row's crossing -- {@link accumulationFateAtCharge} takes the
-// recorded unlisted expansion as a classification fault and refuses -- while
-// an expansion after a crossing already resolved to a drop is invisible to it,
-// so the backstop narrows the window a missed entry opens rather than closing
-// it.
+// Hand-listed because whether a factory can return a multi-value `Set` is not
+// derivable from the registry. {@link accumulationFateAtCharge}'s runtime
+// safety check catches a factory added here without an entry only where the
+// expansion lands before the row's crossing; one landing after a crossing
+// already resolved to a drop is invisible to it.
 const MULTI_VALUE_FUNCTION_NAMES: ReadonlySet<string> = new Set(["split_on"]);
 
 /**
@@ -741,13 +683,12 @@ export function canProduceMultipleValues(functionName: string): boolean {
 }
 
 /**
- * The names of every standardization function the library recognizes, including
- * `coalesce` -- which {@link compileStep} handles specially, outside
- * {@link STANDARDIZING_FUNCTIONS}. Exported as the single source of truth for
- * "which function names core knows": {@link validateStandardizationAgainstTerms}
- * checks against it, and the web consent screen's plain-language glossary asserts
- * it covers every name here, so a function added to core cannot ship without a
- * consent-screen description silently falling through to a bare name.
+ * The names of every standardization function the library recognizes,
+ * including `coalesce`, which {@link compileStep} handles specially, outside
+ * {@link STANDARDIZING_FUNCTIONS}. The single source of truth for "which
+ * function names core knows": {@link validateStandardizationAgainstTerms}
+ * checks against it, and the web consent screen's plain-language glossary
+ * asserts it covers every name here.
  */
 export const STANDARDIZATION_FUNCTION_NAMES: readonly string[] = [
   ...Object.keys(STANDARDIZING_FUNCTIONS),
@@ -766,13 +707,13 @@ const FAN_OUT_STRATEGY_RECOVERY =
   `${quotedFanOutFunctionNames} step from the standardization and from every ` +
   "linkage-key element transform.";
 
-// The message both DECLARED-step refusals carry, raised before the exchange
+// The message both DECLARED-step refusals hold, raised before the exchange
 // runs. `functionName` is matched against FAN_OUT_FUNCTION_NAMES before it
-// reaches here, so the message carries a fixed literal, never partner free text;
-// the strategy the terms actually name is deliberately not interpolated, since
-// nothing narrows it to a schema literal at this boundary. The two declaring
-// surfaces share the wording and differ only in error class, because they differ
-// in whose content the fault is -- see assertFanOutImplemented.
+// reaches here, so the message is a fixed literal, never partner free text;
+// the strategy the terms actually name is not interpolated, since nothing
+// narrows it to a schema literal at this boundary. The two refusals share the
+// wording and differ only in error class, by whose content the fault is (see
+// assertFanOutImplemented).
 function fanOutDeclaredMessage(functionName: string): string {
   return (
     "fan-out matching runs under the single-pass linkage strategy only, but " +
@@ -786,23 +727,22 @@ function fanOutDeclaredMessage(functionName: string): string {
 }
 
 /**
- * Refusal for a candidate set that REACHED a seam running one value per record --
- * the point of harm, where the alternative is the silent narrowing itself. Key
- * realization carries every candidate ({@link buildKeyStrings}); the seams that
- * cannot honor them are `linkViaPSI` and `linkViaCountOnlyPSI`, fan-out matching
- * being specified for single-pass alone, plus the single-pass table build of a
- * party that declared NO fan-out, whose fixed-width column carries one value per
- * (key, record). A party that DID declare one builds the ragged table instead and
- * refuses a set its advertisement cannot carry through the single-pass build's own
- * width checks (`link.ts`), which are a different refusal on the same class of
- * fault: an expansion the declared factors do not account for.
+ * Refusal for a candidate set that reached a call site running one value per
+ * record -- the point of harm, since the alternative is silent narrowing.
+ * Key realization holds every candidate ({@link buildKeyStrings}); the call
+ * sites that cannot honor them are `linkViaPSI`, `linkViaCountOnlyPSI` (fan-out
+ * matching runs under single-pass alone), and the single-pass table build
+ * for a party that declared no fan-out (a fixed-width column holds one
+ * value per key, record). A party that DID declare one builds a ragged
+ * table instead and refuses in `link.ts`'s own width checks, a different
+ * refusal on the same fault: an expansion the declared factors do not
+ * account for.
  *
- * Unreachable from a fan-out the terms declare while {@link
- * assertFanOutImplemented} gates every run path off single-pass, and
- * deliberately a check rather than a comment saying so: it also covers a fan-out
- * function that never made it into {@link FAN_OUT_FUNCTION_NAMES}, and the
- * standardization-authored half that gate cannot see on a prepared exchange
- * assembled outside `prepareForExchange`.
+ * Unreachable while {@link assertFanOutImplemented} gates every run path
+ * off single-pass. Encoded as a check, not a comment, since it also covers
+ * a fan-out function missing from {@link FAN_OUT_FUNCTION_NAMES}, and a
+ * standardization-authored path a prepared exchange assembled outside
+ * `prepareForExchange` hides from that gate.
  */
 export function fanOutReachedMatchingRefusal(): UsageError {
   return new UsageError(
@@ -863,7 +803,7 @@ export interface StandardizationFunctionDescriptor {
    *
    * KEYS are camelCase, matching the runtime params each factory reads AFTER
    * {@link camelizeKeys} (e.g. `inputFormat`, `includeOriginal`), not the
-   * snake_case an operator writes in YAML. A defaulted param carries its default
+   * snake_case an operator writes in YAML. A defaulted param's default is set
    * via Zod `.default(...)`, so a parse of omitted params yields the same value
    * the factory falls back to. These schemas describe well-formed editor output
    * (a value, or an omitted default); they are NOT the partner-supplied wire
@@ -898,9 +838,9 @@ const noParams = z.object({});
  * do not abort, so a bare `.max` would still let `.refine` compile an oversized
  * source, and an in-dialect pattern compiles in time super-linear in its length --
  * which a live editor preview must never incur on the main thread for a
- * pathological-length paste. Deliberately stricter than the factory (which compiles
- * any length), like substring's footgun rejections; the descriptor drift test pins
- * only short patterns, so this divergence does not break it.
+ * pathological-length paste. Stricter than the factory (which compiles any
+ * length), by design, like substring's hazard rejections; the descriptor drift
+ * test pins only short patterns, so this divergence does not break it.
  */
 const regexPatternSchema = z
   .string()
@@ -1021,7 +961,7 @@ export const STANDARDIZATION_FUNCTION_DESCRIPTORS: Record<
     tier: "standard",
     // The factory drops a non-integer or 0 bound to an always-null fn, but leaves
     // a negative length (which slices to empty) alone -- so the schema is
-    // deliberately stricter here, rejecting footgun shapes (a fractional position,
+    // stricter here, by design, rejecting hazard shapes (a fractional position,
     // a non-positive length, a 0 start) at parse time with a message rather than
     // silently dropping every row. 0 is rejected because the factory treats it as
     // an always-null no-op; positions are 1-indexed, with a negative start
@@ -1047,12 +987,13 @@ export const STANDARDIZATION_FUNCTION_DESCRIPTORS: Record<
     // token content: a tokenless format is accepted, mirroring the factory, which
     // builds a regex from any string and simply matches little (yielding null)
     // rather than throwing. Requiring a YYYY/MM/DD token would reject a shape the
-    // factory accepts; surfacing tokenless formats is editor guidance, not
-    // validation. The length cap IS enforced here (deliberately stricter than the
-    // factory, like regexPatternSchema): the factory expands the format into a
-    // regex compiled under the linear-time engine, so an over-length format pays a
-    // super-linear compile that a live editor preview must not incur on the main
-    // thread -- the same vector regexPatternSchema bounds, through a sibling param.
+    // factory accepts; flagging a tokenless format is editor guidance, not
+    // validation. The length cap IS enforced here (stricter than the factory,
+    // by design, like regexPatternSchema): the factory expands the format into
+    // a regex compiled under the linear-time engine, so an over-length format
+    // pays a super-linear compile that a live editor preview must not incur on
+    // the main thread -- the same vector regexPatternSchema bounds, through a
+    // sibling param.
     params: z.object({
       inputFormat: z
         .string()
@@ -1240,7 +1181,7 @@ export function describeTransformCoercions(
 // `isListedFanOutFunction` records whether this step's function is one of the
 // declared fan-out producers (FAN_OUT_FUNCTION_NAMES) and
 // `canProduceMultipleValues` whether it can expand one value at all, both
-// captured at compile time because the compiled closure no longer carries its
+// captured at compile time because the compiled closure no longer keeps its
 // name. Together they are what lets a key say which producers its steps can
 // expand it with BEFORE any of them runs, which the width bound binds on
 // (buildKeyStrings).
@@ -1335,7 +1276,7 @@ function pipelineMultiplicitySources(
  *
  * It is an observation of the steps that have already run, so it is what the
  * ASSEMBLED limbs read -- they run once every element exists -- and it is the
- * fail-closed backstop the accumulating bound reads beside its own pre-run
+ * fail-closed safety check the accumulating bound reads beside its own pre-run
  * classification ({@link accumulationFateAtCharge}).
  */
 interface FanOutProvenance {
@@ -1349,9 +1290,9 @@ interface FanOutProvenance {
 // A step that returns several candidates for ONE input value is the producer of
 // that multiplicity, so an unlisted producer is recorded where it expands. The
 // count is read per input value rather than across the whole set because that is
-// what separates producing multiplicity from carrying it: a later step run
-// element-wise over an already-expanded set returns one candidate per value and
-// produces none of it.
+// what separates producing multiplicity from merely passing it along: a later
+// step run element-wise over an already-expanded set returns one candidate per
+// value and produces none of it.
 function noteFanOutProducer(
   result: FieldValue,
   isListedFanOutFunction: boolean,
@@ -1401,7 +1342,7 @@ function applyStep(
     // (applyElementTransform) reads the finished set -- by which point a set N
     // times the ceiling has already been built. Charging each candidate as it
     // lands holds the accumulated set to the same total the assembled key
-    // strings carry, plus the one candidate being produced when the total
+    // strings hold, plus the one candidate being produced when the total
     // crosses.
     let accumulated = 0;
     for (const v of current) {
@@ -1576,7 +1517,7 @@ export class StandardizedField {
    *
    * The width bound's drop is normative for the declared fan-out producers alone
    * (docs/spec/PROTOCOL.md, Fan-out matching), so {@link buildKeyStrings} reads
-   * this to keep multiplicity from any other producer fail-closed: carried
+   * this to keep multiplicity from any other producer fail-closed: passed
    * through to the strategy that refuses it rather than dropped.
    */
   fanOutFromUnlistedFunction(index: number): boolean {
@@ -1700,16 +1641,15 @@ interface FieldColumnResolution {
  * The rules, per field:
  *
  * 1. Explicit standardization preempts the type fallback: if `standardization`
- *    carries a transformation whose `output` is the field name, the field binds
- *    to that transformation's `input` column -- whether or not the column is
- *    present in the data -- UNLESS that column is present and is not
+ *    contains a transformation whose `output` is the field name, the field
+ *    binds to that transformation's `input` column -- whether or not the
+ *    column is present in the data -- UNLESS that column is present and is not
  *    `role: linkage`, in which case the field binds to nothing: matching
  *    participation is the operator's explicit `linkage` role, and that role wins
  *    over a contradictory explicit transform naming an `identifier`, `payload`,
  *    or `ignored` column. (An ABSENT named column still binds, so the field is
- *    surfaced as unsatisfiable by presence, unchanged. When two transformations
- *    name the same output the last wins, matching the builder's field map and the
- *    checker's old mapping.)
+ *    shown as unsatisfiable by presence, unchanged. When two transformations
+ *    name the same output, the last one wins.)
  * 2. Type fallback: otherwise the field binds to the FIRST `metadata` column of
  *    its semantic type that is `role: linkage`
  *    (`metadata.find(c => c.type === field.type && c.role === "linkage")`), or to
@@ -1741,10 +1681,9 @@ export function resolveFieldColumns(
   standardization: Standardization | undefined,
   metadata: ColumnMetadata[],
 ): Map<string, FieldColumnResolution> {
-  // Field output -> its explicit transformation; last wins on a duplicate output,
-  // matching both the builder's StandardizedDataset field map and the checker's
-  // former explicitInput map (the schema forbids duplicates, so this only differs
-  // for terms not built through it).
+  // Field output -> its explicit transformation; last wins on a duplicate
+  // output (the schema forbids duplicates, so this only differs for terms not
+  // built through it).
   const explicit = new Map<string, StandardizationTransformation>();
   for (const t of standardization ?? []) explicit.set(t.output, t);
 
@@ -1758,10 +1697,10 @@ export function resolveFieldColumns(
       // `identifier` (a local row index), `payload` (sent to the partner), or
       // `ignored` (used for nothing) does NOT participate -- and that role wins
       // over a contradictory explicit transform. The field then resolves to no
-      // column (surfacing as unsatisfiable through the shared checker) rather
+      // column (reported as unsatisfiable through the shared checker) rather
       // than silently hashing a column the operator did not designate for
       // matching into a PSI key. An ABSENT named column is not refused here: it
-      // still binds and is surfaced as unsatisfiable by presence downstream
+      // still binds and is reported as unsatisfiable by presence downstream
       // (the documented preempt-the-fallback behavior). "Match and send" stays
       // expressible as a `role: linkage` column with `isPayload: true`.
       const inputColumn = metadata.find((c) => c.name === transform.input);
@@ -1811,7 +1750,7 @@ export function buildStandardizedDataset(
   for (const field of terms.linkageFields) {
     const resolved = resolution.get(field.name);
     if (resolved === undefined || resolved.column === undefined) continue;
-    // Explicit binding carries its own steps; a type-fallback binding is the
+    // Explicit binding has its own steps; a type-fallback binding is the
     // identity transformation (pass the raw column value through unchanged).
     fields.push(
       new StandardizedField(
@@ -1839,9 +1778,10 @@ function cartesianProduct(arrays: string[][]): string[][] {
 // calls applyElementTransform once per value PER ROW with the same `element.transform`
 // array (the parsed LinkageKey is reused for every row), so without this each row
 // would recompile -- and a regex step recompiles its pattern under the linear-time
-// engine. A hostile-but-schema-valid terms set can carry far more distinct patterns
-// than the engine's own compile cache holds, so per-row recompilation would thrash
-// that cache into an unbounded per-row compile cost over a large dataset -- a
+// engine. A hostile-but-schema-valid terms set can contain far more distinct
+// patterns than the engine's own compile cache holds, so per-row recompilation
+// would thrash that cache into an unbounded per-row compile cost over a large
+// dataset -- a
 // fail-open CPU denial of service, the volume sibling of the catastrophic-
 // backtracking vector the linear-time engine closes. Compiling each element
 // transform once bounds total compile work to the (gate-bounded) distinct element
@@ -1884,11 +1824,11 @@ function compiledElementSteps(
  *
  * A legitimate key element is a name, a date, an identifier, or an address --
  * tens of characters, a few hundred at the outside -- so 4096 is far above any
- * honest one while holding the derived value to a size the rest of the row
- * pipeline (`split_on`, the fuzzy expansion, key assembly) can carry. An
+ * legitimate one while holding the derived value to a size the rest of the row
+ * pipeline (`split_on`, the fuzzy expansion, key assembly) can handle. An
  * over-ceiling value is REFUSED, never truncated: both parties must derive
- * byte-identical keys, so a unilateral clamp would break matching and surface as
- * a terms mismatch against the hashed agreement -- the same reason the param
+ * byte-identical keys, so a unilateral clamp would break matching and show up
+ * as a terms mismatch against the hashed agreement -- the same reason the param
  * bounds refuse rather than trim. The recorded rationale and the limits this
  * placement does not reach live in docs/spec/CHANNEL_SECURITY.md.
  */
@@ -1967,7 +1907,7 @@ function transformStepValueTooLongRefusal(
 
 // The first value over the ceiling, if any. A step that expands one value into
 // several candidates is measured candidate by candidate, because a candidate is
-// what the next step is handed and what one key string carries; the row's total
+// what the next step is handed and what one key string holds; the row's total
 // across the candidates is bounded where the key is assembled (buildKeyStrings).
 function valueOverCeiling(result: FieldValue): number | undefined {
   if (result === null) return undefined;
@@ -2005,7 +1945,7 @@ function applyElementTransform(
   columnElementIndex: number,
 ): string[] {
   // The magnitude ceiling's base case, ahead of the no-steps early return so it
-  // also binds an element that declares no transform at all and carries a raw
+  // also binds an element that declares no transform at all and passes a raw
   // cell straight into the key.
   if (value.length > MAX_TRANSFORMED_VALUE_LENGTH)
     throw elementValueTooLongRefusal(
@@ -2099,7 +2039,7 @@ function columnDeclaringElementIndex(
  * terms admit. It
  * bounds the COUNT of key strings, not their bytes: a fuzzy element's value is
  * bounded by MAX_FUZZY_EXPANSION_INPUT_LENGTH, but a non-fuzzy element in the
- * same key carries its full local cell, which the product replicates, so the
+ * same key holds its full local cell, which the product replicates, so the
  * per-row byte total would scale with the operator's own longest cell times
  * this cap. What holds it is the byte limb beside this one,
  * {@link MAX_ASSEMBLED_KEY_LENGTH_PER_ROW}, measured on the same projection.
@@ -2108,7 +2048,7 @@ function columnDeclaringElementIndex(
 const MAX_KEY_STRINGS_PER_ROW = MAX_KEY_CANDIDATE_WIDTH;
 
 /**
- * The hard cap on the total characters one row's key strings may carry for a
+ * The hard cap on the total characters one row's key strings may hold for a
  * single key round -- the byte limb beside {@link MAX_KEY_STRINGS_PER_ROW}'s
  * count limb.
  *
@@ -2116,15 +2056,16 @@ const MAX_KEY_STRINGS_PER_ROW = MAX_KEY_CANDIDATE_WIDTH;
  * are: every combination concatenates one candidate from each element, so a row
  * at the count cap replicates each element's value across all of them. A fuzzy
  * element's own candidates are short ({@link MAX_FUZZY_EXPANSION_INPUT_LENGTH}),
- * but a non-fuzzy sibling in the same key carries its whole transformed value
- * into every combination, and that value is partner-influenced in size
+ * but a non-fuzzy sibling in the same key contributes its whole transformed
+ * value to every combination, and that value is partner-influenced in size
  * ({@link MAX_TRANSFORMED_VALUE_LENGTH}) -- so bytes need a limb of their own.
- * It is set at the count cap times the per-value ceiling: a row may carry the
+ * It is set at the count cap times the per-value ceiling: a row may hold the
  * equivalent of one ceiling-sized element replicated across the full width the
- * count cap allows, which is orders of magnitude above any honest row (a wide
- * fuzzy key over canonical dates and names assembles a few hundred candidates of
- * a few dozen characters). Measured on the PROJECTED total, before the
- * cross-product is materialized, for the same reason the count limb is.
+ * count cap allows, which is orders of magnitude above any legitimate row (a
+ * wide fuzzy key over canonical dates and names assembles a few hundred
+ * candidates of a few dozen characters). Measured on the PROJECTED total,
+ * before the cross-product is materialized, for the same reason the count
+ * limb is.
  */
 const MAX_ASSEMBLED_KEY_LENGTH_PER_ROW =
   MAX_KEY_STRINGS_PER_ROW * MAX_TRANSFORMED_VALUE_LENGTH;
@@ -2265,9 +2206,9 @@ function keyAccumulationFate(
 }
 
 /**
- * @internal exported so the fail-closed backstop below is driven by a test of
- * its own: a correct classification leaves it unreachable, which is what makes
- * it a check rather than a branch a shape can be written for.
+ * @internal exported so the fail-closed safety check below is driven by a test
+ * of its own: a correct classification leaves it unreachable, which is what
+ * makes it a check rather than a branch a shape can be written for.
  *
  * The fate {@link keyAccumulationFate} settled, unless a step expanded a value
  * while unlisted -- which under a `drop` classification is a producer that
@@ -2286,7 +2227,7 @@ export function accumulationFateAtCharge(
  * The key element whose candidates are accumulating, so the bound applied where
  * they are allocated ({@link applyStep}, and the row's candidate accumulation in
  * {@link buildKeyStrings}) can locate its refusal by the same issue path the
- * per-value ceiling uses, carried with the fate a crossing there takes. One per
+ * per-value ceiling uses, paired with the fate a crossing there takes. One per
  * (element, row) on the partner-authored path; the fate is the whole key's.
  */
 interface CandidateAccumulationSite {
@@ -2306,7 +2247,7 @@ interface CandidateAccumulationSite {
 // element.
 //
 // The fate here is the refusal, which is what a key {@link keyAccumulationFate}
-// classifies `refuse` takes at either of its charges: one carrying a producer
+// classifies `refuse` takes at either of its charges: one involving a producer
 // unlisted in FAN_OUT_FUNCTION_NAMES, and one no producer can expand at all.
 // A key classified `drop` takes {@link AccumulatedCandidatesDrop} at both.
 function accumulatedCandidatesTooLongRefusal(
@@ -2331,7 +2272,7 @@ function accumulatedCandidatesTooLongRefusal(
 // The drop a step's own expansion takes when it charges the accumulating total
 // of a key classified `drop` past the cap, raised where the candidates are
 // allocated so the expansion stops at the crossing rather than finishing a row
-// that contributes nothing. It carries the total up to {@link buildKeyStrings},
+// that contributes nothing. It passes the total up to {@link buildKeyStrings},
 // which owns a row's fate for the key round, and it reports no fault of the
 // terms, so it is not a UsageError. That it reaches no operator is pinned by a
 // test rather than asserted here: the class is unexported, and the shapes that
@@ -2349,16 +2290,16 @@ class AccumulatedCandidatesDrop extends Error {
  * How many rows one key round reports in full before it states the rest as a
  * count. The bounds a drop is taken at are crossed by the SHAPE of the terms and
  * the data, so terms that put every row over one of them drop every row: without
- * a ceiling here the operator's log carries one line per row per key, at a volume
+ * a ceiling here the operator's log holds one line per row per key, at a volume
  * the partner's authored terms choose. A handful of lines shows which rows and
  * which bound; the round's closing summary ({@link summarizeKeyRoundDrops})
- * carries the totals the suppressed lines would have counted out one at a time.
+ * states the totals the suppressed lines would have counted out one at a time.
  */
 export const MAX_DROP_LINES_PER_KEY_ROUND = 5;
 
 // What one key round has dropped: every row it dropped, how many of those it
 // named in a line of their own, and the dropped total its last closing line
-// carried. The last two are separate notions -- the individual-line allowance
+// stated. The last two are separate notions -- the individual-line allowance
 // stops at MAX_DROP_LINES_PER_KEY_ROUND while the watermark follows the total --
 // so a round closed twice states each further drop once and against the right
 // number. One tally per ROUND rather than per key, so a sender and a receiver
@@ -2432,7 +2373,7 @@ function summarizeKeyRoundDrops(
  * list this party's role selects (the receiver's swapped one for a key declaring
  * `swap`), the exchanged positions a refusal names, the fuzzy expansion each
  * position applies under that same role, and the fate a crossing of the
- * accumulating bound settles on ({@link keyAccumulationFate}).
+ * accumulating bound determines ({@link keyAccumulationFate}).
  *
  * Nothing here varies with the row, so a caller iterating a key's rows
  * ({@link StandardizedKeyIterable}) reads it once rather than repeating the walk
@@ -2448,7 +2389,7 @@ interface KeyReadPlan {
   readonly fuzzyExpansions: ReadonlyArray<GenerateFuzzyComparisons | undefined>;
   /**
    * Whether this party also assembles the key in the order the terms AUTHOR it,
-   * beside the swapped order {@link KeyReadPlan.elements} carries -- the swap's
+   * beside the swapped order {@link KeyReadPlan.elements} holds -- the swap's
    * full variant, which is what makes a swapped key match the two elements in
    * EITHER order rather than in the exchanged one alone. True on the receiver of
    * a key whose `swap` resolves, and only while
@@ -2459,12 +2400,12 @@ interface KeyReadPlan {
   readonly assemblesSwapVariant: boolean;
   readonly fate: AccumulationFate;
   /**
-   * The candidate values one record may contribute to this key's round: the width
-   * the agreed terms declare ({@link declaredKeyWidth}) times this party's local
-   * fan-out factor, which its declared record count carries the matching multiple
-   * of. The product of the two is exactly this party's share of the key's value
-   * slots per record, so a row within this bound can never outgrow the slot bound
-   * the partner derives.
+   * The candidate values one record may contribute to this key's round: the
+   * width the agreed terms declare ({@link declaredKeyWidth}) times this
+   * party's local fan-out factor -- the multiple by which its declared record
+   * count is scaled. The product of the two is exactly this party's share of
+   * the key's value slots per record, so a row within this bound can never
+   * outgrow the slot bound the partner derives.
    */
   readonly width: number;
   readonly drops: KeyRoundDropTally;
@@ -2493,7 +2434,7 @@ function planFuzzyExpansions(
 // assembled candidate lists, which is the authored order exactly when the pair's
 // two positions declare the same transform and the same expansion -- the shape
 // the terms schema requires (config/linkageTerms.ts). Reading it off the terms
-// again here rather than trusting that rule keeps the premise a check: a key
+// again here rather than trusting that rule keeps the assumption a check: a key
 // assembled outside the schema is refused instead of matching on a set neither
 // order realizes. The key path locates the offender, as the width refusals do,
 // so the message echoes none of the partner's free text.
@@ -2573,7 +2514,7 @@ function planKeyRead(
  * assembling them too would only double the work
  * (docs/notes/one-sided-fuzzy-expansion.md).
  *
- * `keyIndex` is this key's position in the agreed terms' `linkageKeys`, carried
+ * `keyIndex` is this key's position in the agreed terms' `linkageKeys`, kept
  * only so a magnitude refusal ({@link MAX_TRANSFORMED_VALUE_LENGTH},
  * {@link MAX_ASSEMBLED_KEY_LENGTH_PER_ROW}) can locate the offending element by
  * the same issue path the terms-validation refusals use. A caller that holds one
@@ -2686,7 +2627,7 @@ function buildKeyStringsUnderPlan(
     // can share a part. Charging the row's total on what the set RETAINS
     // (addCandidate, the footing the steps inside the element use) is what keeps
     // a collapsing transform -- every value of a multi-value cell mapped to one
-    // candidate -- from being charged once per value for bytes the row carries
+    // candidate -- from being charged once per value for bytes the row holds
     // once.
     const transformed = new Set<string>();
     try {
@@ -2758,7 +2699,7 @@ function buildKeyStringsUnderPlan(
     // Gated on APPLIED_SETTINGS.fuzzyComparisons, the single source of truth both
     // consent surfaces annotate this term from. Flipping the flag belongs with
     // the round that consumes a candidate set: a fuzzy row would otherwise reach
-    // a linkage strategy carrying several candidates, which is refused, turning
+    // a linkage strategy holding several candidates, which is refused, turning
     // the no-op the consent copy describes into an aborted exchange.
     //
     // The expansion is the ROLE-KEYED one the plan resolved, not the element's
@@ -2780,9 +2721,9 @@ function buildKeyStringsUnderPlan(
   // for them alone -- every rule of docs/spec/PROTOCOL.md (Fan-out matching)
   // binds `split_on`. Multiplicity any other function realized is outside that
   // rule and stays fail-closed at both bounds below: it is never traded for a
-  // completed run that matches fewer records than the terms describe, but carried
-  // to the strategy, which refuses it (fanOutReachedMatchingRefusal), or refused
-  // here when the row cannot be assembled at all.
+  // completed run that matches fewer records than the terms describe, but
+  // passed to the strategy, which refuses it (fanOutReachedMatchingRefusal), or
+  // refused here when the row cannot be assembled at all.
   const dropsOnExceedance = fansOut && !provenance.fromUnlistedFunction;
 
   // Bound the cross-product BEFORE materializing it: it multiplies each element's
@@ -2795,8 +2736,8 @@ function buildKeyStringsUnderPlan(
   // could in principle collapse a large product into a small candidate set. That
   // collapse is not measurable without the allocation this cap exists to prevent,
   // so a fan-out row is dropped on the projected count -- the same treatment an
-  // over-width row gets, and never the run refusal, which the fan-out path
-  // deliberately does not take (docs/spec/PROTOCOL.md, The width bound). Fuzzy
+  // over-width row gets, and never the run refusal, which the fan-out path does
+  // not take, by design (docs/spec/PROTOCOL.md, The width bound). Fuzzy
   // expansion keeps the refusal, the fate it takes at the width bound below too,
   // as does multiplicity from a function outside FAN_OUT_FUNCTION_NAMES.
   // The swap's full variant assembles the key twice -- the swapped order and the
@@ -2822,7 +2763,7 @@ function buildKeyStringsUnderPlan(
   }
 
   // The byte limb of the same projection, on the counts and candidate lengths
-  // already in hand: each of the projectedKeyStrings combinations carries one
+  // already in hand: each of the projectedKeyStrings combinations holds one
   // candidate from every element, so element i contributes its whole candidate
   // total once per combination that selects from it -- the exact assembled
   // total, without materializing the product the count limb just bounded (which
@@ -2986,7 +2927,7 @@ export class StandardizedKeyIterable {
       this.keyIndex,
     );
     // An empty set is the record-excluded sentinel like `null`, and a singleton
-    // is unwrapped, so a set that survives to a consumer always carries two or
+    // is unwrapped, so a set that survives to a consumer always holds two or
     // more candidates. `""` is a real value and reaches the round as one.
     if (result === null || result.size === 0) return undefined;
     if (result.size === 1) return result.values().next().value as string;
@@ -3010,7 +2951,7 @@ export class StandardizedKeyIterable {
    * Silent for a round that dropped nothing, or few enough to have reported
    * every one, and idempotent. A round read on past a close covers the rows it
    * drops after it at its next close, counted against the total that line
-   * carried.
+   * stated.
    *
    * The consumer calls it: a round is read by index as well as by iteration
    * (the cascade reads only the rows still unmatched after the previous key), so
@@ -3077,15 +3018,16 @@ export function validateStandardizationAgainstTerms(
  * Both classes the validator reports -- a transform output naming no declared
  * linkage field, and an unknown standardization function -- are structurally fatal
  * for an authoritative config; it reports no advisory class a config might
- * legitimately carry as a note. Callers gate this on `standardization !== undefined`:
- * an absent standardization is the terms-only path, reconstructed FROM the terms
+ * legitimately hold as a note. Callers gate this on
+ * `standardization !== undefined`: an absent standardization is the
+ * terms-only path, reconstructed FROM the terms
  * (via `getDefaultStandardization`) and so unable to contradict them, and is
- * deliberately not gated.
+ * not gated.
  *
  * Throws {@link StandardizationTermsError} (a {@link UsageError} subclass: the CLI
  * classifies it as a configuration error, exit 64; on the web it is the one
  * prepare-time fault whose message -- naming only the authoring party's own outputs
- * and functions -- is safe to surface).
+ * and functions -- is safe to show).
  */
 export function assertStandardizationMatchesTerms(
   standardization: Standardization,
@@ -3131,15 +3073,16 @@ export function assertStandardizationMatchesTerms(
  * declared-width check its table build runs -- both at the point of harm, but
  * after this party's terms have gone on the wire.
  *
- * The asymmetry that half carries is why the local surface is refused here at all
+ * The asymmetry that half holds is why the local surface is refused here at all
  * rather than left to the strategy: an element-transform fan-out rides the agreed
  * terms and both parties refuse it in lockstep, while a standardization is
  * per-party and local, so a partner cannot derive its refusal and would be left
  * waiting on a run this party is about to abort.
  *
- * The two surfaces carry the same message under DIFFERENT error classes, because
- * they differ in whose content the fault is. A `standardization` is only ever this
- * party's own: no invitation carries one (it is per-party and local), and the
+ * The two surfaces share the same message under DIFFERENT error classes,
+ * because they differ in whose content the fault is. A `standardization` is
+ * only ever this party's own: no invitation holds one (it is per-party and
+ * local), and the
  * accept path derives its own from the adopted terms through
  * `getDefaultStandardization`, whose steps come from the fixed per-type pipelines
  * and never include a fan-out function. So that half is an
@@ -3262,8 +3205,8 @@ export function parseDateInputDropsEveryRecord(
  * `coalesce` is ever reached.
  *
  * An ALLOWLIST rather than a list of the emptying functions, so a function added
- * to {@link STANDARDIZING_FUNCTIONS} without a decision here reads as able to
- * empty a value -- as does a name this build does not recognize at all. That
+ * to {@link STANDARDIZING_FUNCTIONS} without a decision here is treated as able
+ * to empty a value -- as does a name this build does not recognize at all. That
  * over-states a `coalesce`'s reach on a consent surface, where understating it is
  * the harmful direction.
  *
@@ -3393,7 +3336,7 @@ function substringWindow(
  * Whether a `substring` step's declared bounds read NOTHING out of a value of
  * ANY length -- the value-INDEPENDENT drop {@link pipelineAlwaysDrops} is built
  * from, as opposed to a window that merely overshoots the values one input
- * happens to carry. The motivating shape is a bound the operator never filled or
+ * happens to hold. The motivating shape is a bound the operator never filled or
  * cleared mid-edit (`substring` with no `start`), which the terms schema admits
  * as well-formed while {@link substringFactory} nulls every row.
  *
@@ -3417,7 +3360,7 @@ function substringWindow(
  * value is long enough (`slice` counts a below-zero end argument back from the
  * end of the value), so it is the data's to decide and is not claimed here.
  * Whether a value is ever that long is the acceptor's data, which the terms do
- * not carry.
+ * not contain.
  *
  * The arithmetic is a second reading of {@link substringWindow}'s, which is what
  * a differential sweep in `standardization.test.ts` exists for: it drives the
@@ -3526,9 +3469,9 @@ function runCompiledSteps(
 }
 
 /**
- * The functions whose effect on a value a `parse_date` rendered is settled by
+ * The functions whose effect on a value a `parse_date` rendered is fixed by
  * the output LAYOUT alone. Every date the factory renders under one output
- * format has the same length and carries the format's own characters in the same
+ * format has the same length, and the format's own characters land in the same
  * places -- only the digits differ ({@link renderDateOutput} substitutes
  * fixed-width components) -- and each function here maps any two such values to
  * values that again share a length and are null together, so a window read after
@@ -3621,7 +3564,7 @@ const CANNOT_MEASURE: ParsedDateRunReading = { kind: "cannotMeasure" };
  * the pipeline still put every other date on one constant. The surviving probes
  * decide instead, and where NONE survives the reading turns on whether the run
  * is layout-determined ({@link LAYOUT_DETERMINED_FUNCTION_NAMES}): a run that
- * reads no content drops every date it will ever see, while one carrying a
+ * reads no content drops every date it will ever see, while one containing a
  * value-dependent step has told the measurement nothing, and the consent
  * direction there is the wider breadth word rather than the narrower one.
  *
@@ -3697,7 +3640,7 @@ function readParsedDateRun(
  * match breadth, not the truncation the step's name suggests. The motivating
  * shape is a window sliced wholly inside an output format's literal region
  * (`ACME-YYYYMMDD` read as `ACME`) or onto a bare separator, where the sliced
- * value carries no character the date supplied.
+ * value holds no character the date supplied.
  *
  * MEASURED, not derived from the step names: the steps between the `parse_date`
  * and the run are compiled and RUN over {@link DATE_COLLAPSE_PROBES}, and the
@@ -3753,17 +3696,17 @@ function readParsedDateRun(
  * word; only a pathological or exchange-time-throwing pipeline takes the wider
  * one.
  *
- * The limit it keeps is a value-DEPENDENT drop the terms cannot settle, and it
- * runs in the over-claiming direction alone. A `filter_regex` or `null_if`
- * between the `parse_date` and the run is measured over the probes alone, so one
- * that passes them and drops a real record leaves the verdict standing; one
- * BEFORE the `parse_date` reads the acceptor's own values, which the terms do
- * not carry, so it is not measured at all; and one that drops every probe hands
- * the run the collapse word outright. Each can leave an element earning "any
- * date" while it in fact drops records it would have collapsed. Reading a drop
- * off such a step instead is the claim {@link pipelineAlwaysDrops} declines for
- * the same reason -- it would flag a legitimate pipeline as dead -- so the
- * residual is kept where it understates nothing.
+ * The limit it keeps is a value-DEPENDENT drop the terms cannot determine, and
+ * it runs in the over-claiming direction alone. A `filter_regex` or `null_if`
+ * between the `parse_date` and the run is measured over the probes alone, so
+ * one that passes them and drops a real record leaves the verdict standing;
+ * one BEFORE the `parse_date` reads the acceptor's own values, which the terms
+ * do not contain, so it is not measured at all; and one that drops every probe
+ * hands the run the collapse word outright. Each can leave an element earning
+ * "any date" while it in fact drops records it would have collapsed. Reading a
+ * drop off such a step instead is the claim {@link pipelineAlwaysDrops}
+ * declines for the same reason -- it would flag a legitimate pipeline as dead
+ * -- so the residual is kept where it understates nothing.
  *
  * Shared so the consent header's collapse marker in `invitationSummary.ts` turns
  * on core's own steps rather than a restated reading of them.
@@ -3808,7 +3751,7 @@ export function substringCollapsesParsedDateToConstant(
  *
  * Claimed only where the measured steps are layout-determined
  * ({@link LAYOUT_DETERMINED_FUNCTION_NAMES}), so what the probes did is what
- * every date does. A run carrying a value-dependent step that happens to drop
+ * every date does. A run containing a value-dependent step that happens to drop
  * all four probes is NOT dead: the data decides it, which is the residual
  * {@link pipelineAlwaysDrops} declines to read from the terms.
  *
@@ -3843,13 +3786,13 @@ export function substringRunDropsEveryParsedDate(
  * `parse_date` and the substring run, so a `null_if`, `filter_regex`, or other
  * content step in that span participates in the reading -- its params (the values
  * a `null_if` drops on) change which probes survive. Those functions are still
- * absent here, and deliberately: such a step can only move the reading toward the
+ * absent here, by design: such a step can only move the reading toward the
  * BROADER word or leave a genuine coarsening, never toward an understatement. The
  * milder-versus-collapse boundary is whether the surviving probes are one value or
  * distinct, which is fixed by the LAYOUT the window reads -- the `parse_date`
  * formats and the `substring` bounds already listed -- and a content step run over
  * an already-identical set cannot manufacture distinct survivors from a collapse.
- * A drop it adds only widens the word (an all-probes drop reads as
+ * A drop it adds only widens the word (an all-probes drop is treated as
  * `valueDependentDrop`, "any date") or narrows real records the acceptor is not
  * harmed by not-seeing. So the ordering guarantee holds where it matters: no param
  * that could hide breadth is droppable. A function whose marker turns on its NAME
@@ -3860,7 +3803,7 @@ export function substringRunDropsEveryParsedDate(
  * the verdict to move with it, so a name listed here names a real verdict. What
  * that cannot see is the other direction -- a NEW param that could move the marker
  * toward the milder word arriving with no entry here -- which is a review call, as
- * the coercion table beside {@link describeTransformCoercions} carries the same
+ * the coercion table beside {@link describeTransformCoercions} has the same
  * shape of gap.
  */
 export const CONSENT_VERDICT_PARAM_NAMES: Readonly<
@@ -3891,9 +3834,9 @@ export const CONSENT_VERDICT_PARAM_NAMES: Readonly<
  * one with no string default, does not rescue.
  *
  * Steps whose drop behavior depends on the VALUE -- a `substring` whose window
- * overshoots the short values one input happens to carry and reads a real one out
- * of longer values, a `filter_regex` no value matches -- are deliberately NOT
- * treated as always-dropping: that is the data-dependent residual the
+ * overshoots the short values one input happens to hold and reads a real one
+ * out of longer values, a `filter_regex` no value matches -- are NOT treated as
+ * always-dropping, by design: that is the data-dependent residual the
  * satisfiability layer leaves to the runtime coverage sweep, and assuming it here
  * could wrongly flag a legitimate pipeline. Each claim above is held to that line:
  * a declared window is claimed only where NO value length opens it, and a run
@@ -4119,22 +4062,14 @@ export function decideLinkageTermsVerdict(
       .map((f) => f.name)
       .filter((name) => !unsatisfiedNames.has(name)),
   );
-  // The dead scan walks a key's element transform steps. Each maximal substring
-  // run reads back to the nearest live parse_date and recompiles and re-runs that
-  // whole prefix, once per DATE_COLLAPSE_PROBES probe, so a chain of substrings
-  // scattered after one parse_date measures a prefix that grows with each run: the
-  // cost is QUADRATIC in an element's step count, not linear in the step total.
-  // It still needs no separate budget, because both bounds it depends on are
-  // capped -- an element's transform at MAX_TRANSFORM_STEPS (256) and the whole
-  // partner-supplied token at MAX_ENCODED_INVITATION_LENGTH (64KB, which the
-  // base64 decode holds the terms JSON to ~48KB, no compression). A token packed
-  // to that cap (a few elements each near the 256-step limit) measures on the
-  // order of tens of milliseconds -- around 15-20 ms for a near-cap token in each
-  // of decideLinkageTermsVerdict and summarizeInvitation, and roughly quadrupling
-  // for each doubling of an element's step count. On the operator's own
-  // committed-config path the terms are self-authored and drive strictly heavier
-  // per-row compile + RE2 work at exchange time, so this scan is never the
-  // dominant cost.
+  // The dead scan walks a key's element transform steps; each maximal substring
+  // run re-measures a growing prefix per DATE_COLLAPSE_PROBES probe, so the
+  // cost is QUADRATIC in an element's step count, not linear. Needs no separate
+  // budget: both bounds it depends on are capped (an element's transform at
+  // MAX_TRANSFORM_STEPS, the whole partner-supplied token at
+  // MAX_ENCODED_INVITATION_LENGTH), and the operator's own committed-config
+  // path already drives heavier per-row compile and RE2 work at exchange time,
+  // so this scan is never the dominant cost.
   // parseDateInputDropsEveryRecord never calls parseDateFormat on a non-string, so
   // a hostile param shape cannot make it throw, and the measured run catches
   // whatever its own compile or run raises.
@@ -4185,7 +4120,7 @@ export type LinkageTermsStanding = "agreed" | "draft";
  * shortfall through this, so the run-boundary refusal and the pre-flight notice
  * ahead of it cannot describe the same fault in different words. Each clause
  * counts against the whole declared set rather than the other clause's remainder,
- * so a refusal carrying one clause reads as well as one carrying both.
+ * so a refusal holding one clause reads as well as one holding both.
  *
  * `standing` is the one thing the fragment takes from its seat: it is required
  * rather than defaulted so a new caller states where its terms stand instead of
@@ -4246,7 +4181,7 @@ export function summarizeLinkageShortfall(
  * The seats that hold terms no partner has yet state the same shortfall in their
  * own first-party copy, ahead of this.
  *
- * The summary carries only fixed copy and counts. The field and key names are
+ * The summary holds only fixed copy and counts. The field and key names are
  * terms content -- partner-authored on every accept path -- so each category rides
  * a labelled cause link of its own, raw: the display boundary that renders the
  * chain caps each link independently and is the one altitude that escapes them, so
@@ -4320,31 +4255,28 @@ export function assertLinkageTermsSatisfiable(
 // standardization outputs map to declared fields, and that step function names are
 // known). The web's constraint badges and the CLI's prepare-path warnings run
 // ONE implementation.
-// Warn-not-enforce throughout, matching the LinkageField constraint contract ("the
-// application warns if violated but does not enforce them", config/linkageTerms.ts):
-// nothing here throws or rejects a value; each surface decides how to present the
-// result (a web badge, a CLI warning line).
+//
+// Advisory throughout, matching the LinkageField constraint contract ("the
+// application warns if violated but does not enforce them",
+// config/linkageTerms.ts): nothing here throws or rejects a value; each
+// surface decides how to present the result (a web badge, a CLI warning line).
 //
 // Coverage is authoritative: every constraint with a CLEAN value-level test is
-// checked, and one that has none is deliberately left UNFLAGGED rather than guessed
-// at, so a warning never fires on a value the check cannot actually judge.
+// checked, and one that has none is left UNFLAGGED rather than guessed at, so
+// a warning never fires on a value the check cannot actually judge.
 //
 //   - exclude (all field types), allowedCharacters (name fields), date_of_birth
-//     validOnly, ssn validOnly: checked (the four the pre-promotion web-local check
-//     covered; their behavior is preserved, not changed).
-//   - ssn4 validOnly: checked for the ONE SSA structural rule a bare last-four can
-//     be judged against -- the serial is not 0000. The last four digits ARE the
-//     serial; the area/group rules and the 9-digit-only checks have no last-four
-//     analogue. The web-local check omitted ssn4; promotion adds this sound test
-//     (see isStructurallyValidSsn4).
-//   - affixesAllowed (name fields): NOT checked, by deliberate decision. Flagging a
-//     residual honorific/suffix would mean re-running remove_affixes' heuristic
-//     token-match over a fixed list (dr, miss, sir, judge, jr, sr, ...) that
-//     collides with legitimate name values -- "Judge" and "Miss" are real surnames
-//     -- so any such test false-positives on real data. Whether affixes were
-//     removed is a pipeline choice, not a defect of the value, so there is no clean
-//     value-level property to flag. This would only need revisiting if affix
-//     membership became an exact, collision-free set.
+//     validOnly, ssn validOnly: checked.
+//   - ssn4 validOnly: checked for the ONE SSA structural rule a bare last-four
+//     can be judged against -- the serial is not 0000. The last four digits ARE
+//     the serial; the area/group rules and the 9-digit-only checks have no
+//     last-four analogue (see isStructurallyValidSsn4).
+//   - affixesAllowed (name fields): NOT checked, by design. Whether affixes
+//     were removed is a pipeline choice, not a defect of the value: a residual-
+//     honorific test would collide with legitimate name values ("Judge" and
+//     "Miss" are real surnames), so there is no clean value-level property to
+//     flag. This would need revisiting only if affix membership became an
+//     exact, collision-free set.
 
 /**
  * The kind of value-level constraint a cleaned value violated. A stable,
@@ -4353,8 +4285,8 @@ export function assertLinkageTermsSatisfiable(
  *
  * - `excluded` -- the value is on the field's agreed `exclude` denylist (any
  *   field type).
- * - `disallowedCharacters` -- a name value carries a character outside the field's
- *   `allowedCharacters` class.
+ * - `disallowedCharacters` -- a name value includes a character outside the
+ *   field's `allowedCharacters` class.
  * - `invalidDate` -- a `date_of_birth` value in canonical YYYYMMDD form names no
  *   real calendar day (under `validOnly`).
  * - `invalidSsn` -- a 9-digit `ssn` value breaks an SSA structural rule (under
@@ -4370,7 +4302,7 @@ type ConstraintViolationKind =
   | "invalidSsn4";
 
 /**
- * A single value-level constraint violation: a warn-not-enforce signal that a
+ * A single value-level constraint violation: an advisory signal that a
  * cleaned value does not meet one of a field's declared constraints. The `kind`
  * is a stable discriminant; `label` and `detail` are FIXED copy keyed off it --
  * never a partner-controlled value -- so a surface may render them verbatim (the
@@ -4389,73 +4321,36 @@ interface ConstraintViolation {
 
 /** Whether `value` contains only characters in the field's `allowedCharacters`
  * class. `allowedCharacters` is partner-controlled (it arrives in the invitation
- * token), and {@link NameConstraintsSchema} only checks that it compiles as the
- * body of a `[...]` class -- NOT that it cannot break out of one. A crafted value
- * can close the class and inject arbitrary regex structure (e.g. `x](a+)+b[y`).
+ * token), and {@link NameConstraintsSchema} only checks that it compiles as
+ * the body of a `[...]` class -- not that it cannot break out of one. A
+ * crafted value can close the class and inject regex structure (e.g.
+ * `x](a+)+b[y`).
  *
- * Hazards follow, each guarded here.
+ * Two hazards, both guarded here:
  *
- * (1) ReDoS: matching against an attacker-chosen pattern on the native `RegExp`
- * engine could backtrack catastrophically and hang the single, non-interruptible
- * thread. The class is compiled under the linear-time engine the transform-regex
- * paths use ({@link compileLinearRegex}, re2js) instead, so no partner pattern
- * reaches the backtracking engine on this path (a crafted breakout is driven
- * through the check in standardization.test.ts)
- * -- and a pattern that engine cannot compile is treated as "cannot check"
- * (no violation, fail-open) rather than throwing. {@link NameConstraintsSchema}
- * validates the class under this SAME engine, so for a decoded token that fail-open
- * is a backstop, not a path: a class that would not compile here is rejected at
- * terms validation.
+ * (1) ReDoS: the class is compiled under the linear-time engine the
+ * transform-regex paths use ({@link compileLinearRegex}, re2js), so no partner
+ * pattern reaches the backtracking native engine. A pattern that engine cannot
+ * compile is treated as uncheckable (no violation, fail-open); {@link
+ * NameConstraintsSchema} validates the class under the same engine, so that
+ * fail-open path is unreachable for a class that passed terms validation.
  *
- * (2) Warning suppression has three sub-cases, handled differently:
+ * (2) Warning suppression, three sub-cases:
+ *   - A breakout that injects a multi-character span or an empty-matchable
+ *     alternation branch (`a]|.*[b`, `(a+)+`) is closed by testing each value
+ *     one code point at a time as a FULL, anchored match (re2js `matches()`),
+ *     not an unanchored find.
+ *   - A leading `^`, which re2js treats as class negation, is closed by
+ *     escaping it (and a following `-`) to a literal. A class that fails to
+ *     compile once escaped is over-flagged rather than failed open.
+ *   - A class or branch that genuinely admits the single code point (a
+ *     shorthand or Unicode property class, or an effective allow-all reached
+ *     via breakout) is accepted as a limit rather than closed: it is
+ *     indistinguishable from a legitimate permissive class, and since this
+ *     check only warns rather than blocking, the consequence is a suppressed
+ *     advisory badge, never a data-filtering or match-correctness effect.
  *
- *   - A breakout closes the class and injects regex structure: a multi-character
- *     span (`a]|.*[b`, `(a+)+`), or an alternation with an empty-matchable branch
- *     (`a]*|` becomes `^[a]*|]$` = `(^[a]*) | (]$)`). Each value is tested one code
- *     point at a time AND as a FULL match (re2js `matches()`, anchored both ends),
- *     not an unanchored find: a multi-character span cannot match a single code
- *     point, and a branch matching only a zero-width or leading span does not satisfy
- *     a full match (an unanchored test would instead let `^[a]*`, which matches the
- *     empty string at the start anchor, pass every value). A breakout branch that
- *     genuinely matches a SINGLE code point is a different case -- see the accepted-
- *     limit sub-case below.
- *
- *   - A leading `^` makes re2js read the class as a NEGATION (`^A-Z` compiles to
- *     `[^A-Z]`), inverting the advisory: the class would admit every character
- *     EXCEPT the listed ones and so suppress the warning on arbitrary disallowed
- *     input, the opposite of a plain reading ("allow `^` and A-Z, flag the rest").
- *     This is CLOSED: a leading `^` is escaped to a literal `\^` before compiling,
- *     and a `-` immediately after it is escaped too (otherwise `\^-X` would read as
- *     a range -- `^-Z` -> `\^-Z` is reversed -- rather than the literal caret the
- *     operator meant). An exotic leading-`^` combination can still escape to a class
- *     re2js cannot compile (e.g. `^]A[`, where the literal `\^` lets a following `]`
- *     close the class): when the raw class compiled but the escaped one does not, the
- *     value is OVER-flagged rather than failed open, so a leading `^` never suppresses
- *     the advisory -- the worst case is the warn-not-enforce safe direction. A literal
- *     caret is otherwise written non-first (`A-Z^`) or escaped (`\^`), so the escape
- *     never narrows a legitimate class.
- *
- *   - A class -- or an injected alternation branch -- that genuinely ADMITS the single
- *     code point is NOT defeated, and is an accepted limit. This covers a character-
- *     class shorthand (`\w`, `\d`, `\s`) or Unicode/POSIX property class, whether or
- *     not dressed up with the leading-`]`-is-literal trick (e.g. `]|\w|[`, one class
- *     admitting every word character); it equally covers an alternation breakout whose
- *     branch admits one code point (`a]|.|[b` compiles to `(^[a]) | (.) | ([b]$)`,
- *     whose `.` branch full-matches any code point, so the class effectively admits
- *     everything). There is no transform or parse-time rule that suppresses these
- *     without rejecting or narrowing a legitimate class: `\p{L}` ("any letter") is the
- *     natural constraint for international names and is indistinguishable at the engine
- *     level from a smuggle, so neutralizing it would false-flag real non-Latin names;
- *     and an effective allow-all reached via breakout is indistinguishable by matching
- *     behavior from a legitimately permissive class such as `[\s\S]` -- only the syntax
- *     (a top-level `|`, which a genuine character class never contains) differs, and
- *     detecting that would take a full class parser, out of proportion to a warn-only
- *     advisory. The class is behaving as a class; because the check is warn-not-enforce
- *     the only consequence is a suppressed advisory badge, never a data-filtering or
- *     match-correctness effect -- so it is an accepted limit, not a hole.
- *
- * Every sub-case is pinned by tests in standardization.test.ts so the boundary
- * between what is closed and what is accepted cannot silently drift. For a
+ * Every sub-case is pinned by tests in standardization.test.ts. For a
  * legitimate class the per-code-point test is exactly `^[allowed]*$` (every
  * character must be in the class). The empty string trivially conforms.
  */
@@ -4475,11 +4370,10 @@ function withinAllowedCharacters(value: string, allowed: string): boolean {
   } catch {
     // The escaped form did not compile. If the raw class does (an exotic leading-`^`
     // combination such as `^]A[`, where the literal `\^` lets a following `]` close
-    // the class), our escape -- not the partner's class -- broke it: over-flag (the
-    // warn-not-enforce safe direction) instead of failing open and suppressing the
-    // advisory on every value, which a leading-`^` negation would otherwise achieve.
-    // A class that compiles neither way is genuinely uncheckable: fail open, as
-    // header (1) describes.
+    // the class), our escape -- not the partner's class -- broke it: over-flag
+    // rather than fail open, which would suppress the advisory on every value,
+    // as a leading-`^` negation would otherwise achieve. A class that compiles
+    // neither way is genuinely uncheckable: fail open, as header (1) describes.
     try {
       compileLinearRegex(`^[${allowed}]$`);
     } catch {
@@ -4558,16 +4452,16 @@ function isExcludedValue(
 /**
  * Report which of a linkage `field`'s declared constraints a single cleaned
  * `value` violates -- the value-level constraint check the web workbench renders
- * as badges and the CLI surfaces as warnings. Returns the violations as
- * warn-not-enforce signals; an empty array means the value conforms to every
- * constraint that has a clean value-level test. Warn, never block (see the
- * section note above): a violation is reported, never thrown.
+ * as badges and the CLI reports as warnings. Returns the violations as advisory
+ * signals; an empty array means the value conforms to every constraint that has
+ * a clean value-level test. Warn, never block (see the section note above): a
+ * violation is reported, never thrown.
  *
  * A constraint with no clean value-level test is intentionally NOT flagged, so a
  * warning never fires on a value the check cannot actually judge: `affixesAllowed`
- * is omitted by deliberate decision, and `date_of_birth` / `ssn` / `ssn4`
- * `validOnly` only judge a value of the constraint's canonical width (see each
- * helper). The copy returned is fixed and keyed off the violated constraint --
+ * is omitted by design, and `date_of_birth` / `ssn` / `ssn4` `validOnly` only
+ * judge a value of the constraint's canonical width (see each helper). The copy
+ * returned is fixed and keyed off the violated constraint --
  * never a partner-controlled value -- so it is safe to render or print verbatim.
  */
 export function checkValueConstraints(
@@ -4652,7 +4546,7 @@ export function checkValueConstraints(
 /**
  * A per-field aggregate of value-level constraint violations across a whole
  * standardized dataset: how many produced values of one linkage field tripped one
- * constraint kind. The CLI's exchange/prepare path surfaces these (one line per
+ * constraint kind. The CLI's exchange/prepare path reports these (one line per
  * entry) where the web workbench shows per-value badges, so it reports a COUNT --
  * not the offending values, which are the operator's own data and are never echoed
  * into a log.
@@ -4679,8 +4573,8 @@ interface ConstraintViolationSummary {
  * implementation, so the two surfaces never disagree on whether a given value
  * violates a constraint (they differ in WHICH fields they cover: the web badges
  * the field being edited, this sweep scopes to key-referenced fields, below).
- * Warn-not-enforce: it only counts; it never throws or rejects a value, and the
- * caller decides how to surface the result (the CLI logs a warning per entry and
+ * Advisory: it only counts; it never throws or rejects a value, and the caller
+ * decides how to report the result (the CLI logs a warning per entry and
  * proceeds). An empty result means every produced value conforms.
  *
  * The sweep is scoped to key-referenced fields because the exchange standardizes
@@ -4713,7 +4607,7 @@ export function summarizeDatasetConstraintViolations(
     // partner-controlled field name ever enters a map key. A field is a single
     // iteration of this loop (names are unique across linkageFields), so its
     // counts cannot be misattributed to or from another field's regardless of
-    // what bytes its name carries.
+    // what bytes its name holds.
     const byKind = new Map<
       ConstraintViolationKind,
       ConstraintViolationSummary

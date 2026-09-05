@@ -144,12 +144,13 @@ describe("RE2 vs JavaScript class semantics", () => {
 });
 
 // --- Replacement-string semantics --------------------------------------------
-// The replacement string is not part of the pattern dialect, so the cross-engine
-// equivalence tests do not cover it, and two of its $-sequences resolve
-// differently here than under String.prototype.replace. Both parties hash the
-// same partner-authored terms into their keys, so a reimplementation that used a
-// JavaScript RegExp here would derive different keys from the same terms rather
-// than fail. PROTOCOL.md carries the normative rule; these hold it.
+// The replacement string is not part of the pattern dialect, so the
+// cross-engine equivalence tests do not cover it, and two of its
+// $-sequences resolve differently here than under String.prototype.replace.
+// Both parties hash the same partner-authored terms into their keys, so a
+// reimplementation that used a JavaScript RegExp here would derive
+// different keys from the same terms rather than fail. PROTOCOL.md states
+// the normative rule; these hold it.
 
 describe("replacement-string $-sequences", () => {
   test("a leading-zero group reference is literal", () => {
@@ -191,21 +192,20 @@ describe("replacement-string $-sequences", () => {
 });
 
 // --- Unicode-property and case-folding semantics -----------------------------
-// PROTOCOL.md admits \p{...} property classes and inline (?i) into the dialect.
-// re2js bakes its Unicode property and case-folding tables into the published
-// build, so a re2js upgrade carrying a newer Unicode database could silently
-// shift which code points these match -- and because both parties hash the same
-// partner pattern into their keys, any shift is a SILENT key divergence. These
-// pin the load-bearing behavior so a drift fails CI instead. (re2js stays on a
-// caret range for security and bug fixes; this is the guard that an upgrade did
-// not move semantics we rely on, which is why pinning the version is unnecessary.)
-// Verified against re2js 2.8.3.
+// PROTOCOL.md admits \p{...} property classes and inline (?i) into the
+// dialect. re2js bakes its Unicode property and case-folding tables into
+// the published build, so an upgrade carrying a newer Unicode database
+// could silently shift which code points match -- a SILENT key divergence,
+// since both parties hash the same partner pattern into their keys. These
+// pin the critical behavior so a drift fails CI instead, which is why
+// re2js can stay on a caret range for security and bug fixes without
+// pinning the exact version. Verified against re2js 2.8.3.
 //
-// Note: the standardization pipeline NFC-normalizes input before the engine sees
-// it, canonicalizing some of these code points (e.g. KELVIN SIGN U+212A -> "K").
-// These pin the engine layer directly (no NFC), covering the dialect's documented
-// surface; the NFC-stable cases (an accented letter, LATIN SMALL LETTER LONG S)
-// are the ones that remain engine-dependent after normalization.
+// The standardization pipeline NFC-normalizes input before the engine sees
+// it, canonicalizing some of these code points (e.g. KELVIN SIGN U+212A ->
+// "K"). These pin the engine layer directly (no NFC), covering the
+// dialect's documented surface; the NFC-stable cases (an accented letter,
+// LATIN SMALL LETTER LONG S) remain engine-dependent after normalization.
 
 describe("Unicode-property and case-folding semantics (pinned vs re2js drift)", () => {
   test("\\p{L} matches ASCII and accented letters, not digits", () => {
@@ -226,11 +226,12 @@ describe("Unicode-property and case-folding semantics (pinned vs re2js drift)", 
   });
 
   test("(?i) applies re2js's Unicode case-folding orbit", () => {
-    // Folds drawn from re2js's bundled CASE_ORBIT table -- the surface a Unicode
-    // database bump in an upgrade would move. LATIN SMALL LETTER LONG S U+017F is
-    // NFC-stable and folds to 's'; KELVIN SIGN U+212A folds to 'k' (NFC also maps
-    // it to 'K', so this matters only for the raw engine); LATIN CAPITAL LETTER I
-    // WITH DOT ABOVE U+0130 deliberately does NOT fold to ASCII 'i'.
+    // Folds drawn from re2js's bundled CASE_ORBIT table -- the surface a
+    // Unicode database bump in an upgrade would move. LATIN SMALL LETTER
+    // LONG S U+017F is NFC-stable and folds to 's'; KELVIN SIGN U+212A
+    // folds to 'k' (NFC also maps it to 'K', so this matters only for the
+    // raw engine); LATIN CAPITAL LETTER I WITH DOT ABOVE U+0130 does NOT
+    // fold to ASCII 'i'.
     expect(compileLinearRegex("(?i)^s$").test("\u017f")).toBe(true);
     expect(compileLinearRegex("(?i)^k$").test("\u212a")).toBe(true);
     expect(compileLinearRegex("(?i)^i$").test("\u0130")).toBe(false);

@@ -30,7 +30,7 @@ function references(key: LinkageKey, fields: ReadonlySet<string>): boolean {
 
 /**
  * How a key treats the date of birth: `full` where every date element it
- * references carries the field's whole canonical value, `coarsened` where any is
+ * references holds the field's whole canonical value, `coarsened` where any is
  * transformed, `absent` where it references no date field at all.
  */
 function dateComponent(key: LinkageKey): "full" | "coarsened" | "absent" {
@@ -42,12 +42,12 @@ function dateComponent(key: LinkageKey): "full" | "coarsened" | "absent" {
 }
 
 /**
- * Everything a key is built from except its date component, as a value two keys
- * can be compared on: the same fields under the same transforms, plus the same
- * swap. Element order is deliberately not part of it -- it decides how the key
- * string is concatenated, not which evidence the key rests on -- so the
- * comparison stays indifferent to a reordered pair should the set ever declare
- * one (today none does).
+ * Everything a key is built from except its date component, as a value two
+ * keys can be compared on: the same fields under the same transforms, plus
+ * the same swap. Element order is not part of it: it decides how the key
+ * string is concatenated, not which evidence the key rests on, so the
+ * comparison stays indifferent to a reordered pair should the set ever
+ * declare one (today none does).
  */
 function nonDateShape(key: LinkageKey): string {
   const elements = key.elements

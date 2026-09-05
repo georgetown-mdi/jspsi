@@ -1,18 +1,18 @@
-// The consent-surface representation check's shared half: which `LinkageTerms`
-// fields an acceptor's consent turns on, and the per-field variants that decide
-// whether a surface represents each one at all.
+// The consent-surface representation check's shared half: which
+// `LinkageTerms` fields an acceptor's consent turns on, and the per-field
+// variants that decide whether a surface represents each one at all. It
+// lives in core, behind the `./testing` subpath, because that judgment is
+// identical for the web consent summary and the CLI consent prompt, and
+// two copies of it would drift. Full rationale:
+// docs/notes/shared-consent-summary.md.
 //
-// It lives in core, behind the `./testing` subpath, because the expensive half --
-// judging which fields consent turns on -- is identical for the web consent
-// summary and the CLI consent prompt. Two copies of that judgment would drift,
-// which is the failure this check exists to remove.
-//
-// The classification below is a table rather than the enumeration itself: the
-// field paths it is keyed by are DERIVED from the `LinkageTerms` declaration with
-// the compiler API (test/linkageTermConsentCoverage.test.ts), and the two are
-// asserted to agree in both directions. A hand-kept list cannot notice a field
-// added to core; a derivation cannot judge whether a field bears on consent. Each
-// half covers what the other cannot.
+// The classification below is a table rather than the enumeration itself:
+// the field paths it is keyed by are DERIVED from the `LinkageTerms`
+// declaration with the compiler API
+// (test/linkageTermConsentCoverage.test.ts), and the two are asserted to
+// agree in both directions. A hand-kept list cannot notice a field added
+// to core; a derivation cannot judge whether a field bears on consent.
+// Each half covers what the other cannot.
 
 import { parseLinkageTerms } from "./config/linkageTerms.js";
 import {
@@ -64,52 +64,48 @@ export interface ConsentRelevantTerm {
    */
   vary: (terms: LinkageTerms) => LinkageTerms;
   /**
-   * Fixed copy every surface MUST render for the variant document and MUST NOT
-   * render for the base -- for a field whose variant turns on a DISCLOSURE the
-   * acceptor is entitled to read in the same words on either surface, not merely
-   * a setting each surface may word for itself.
-   *
-   * The representation check below proves a surface moves when the field does;
-   * it cannot tell a surface stating the disclosure from one stating only that
-   * the setting is on. Pinning the sentence here rather than in each surface's
-   * own test is what keeps a surface from dropping it: the pin is carried on the
-   * probe both surfaces are measured with, so a surface that stops rendering it
+   * Fixed copy every surface MUST render for the variant document and MUST
+   * NOT render for the base -- for a field whose variant turns on a
+   * DISCLOSURE the acceptor is entitled to read in the same words on
+   * either surface, not merely a setting each surface may word for
+   * itself. Pinning the sentence here rather than in each surface's own
+   * test is what keeps a surface from dropping it: the pin is the probe
+   * both surfaces are measured with, so a surface that stops rendering it
    * fails on the same string the other surface is held to.
    *
-   * A list rather than one string, because what an acceptor is entitled to read
-   * about one setting can be more than one sentence: the disclosure a setting
-   * makes and which party's records pay it are separate facts, and a surface
-   * holding only the first leaves a reader unable to tell whose file the cost
-   * lands on. Every entry is held to the same present-for-variant,
-   * absent-for-base rule.
+   * A list rather than one string, since what an acceptor is entitled to
+   * read about one setting can be more than one sentence (e.g. the
+   * disclosure a setting makes and which party's records pay it). Every
+   * entry is held to the same present-for-variant, absent-for-base rule.
    *
-   * Left unset by a field measured under {@link shapes}, which carries its copy
-   * per shape instead. Declaring both is refused rather than merged: the pair
-   * builder resolves one level or the other, so the entry-level list would be
-   * dropped from measurement.
+   * Left unset by a field measured under {@link shapes}, which has its
+   * copy per shape instead; declaring both is refused rather than merged.
+   * Full rationale for the split: docs/notes/shared-consent-summary.md.
    */
   requiredVariantCopy?: ReadonlyArray<string>;
   /**
-   * The surrounding shapes this field is measured under, for a field whose
-   * variant discloses something DIFFERENT depending on the rest of the document.
-   * One probe pair is built per shape, each still differing at this field alone.
+   * The surrounding shapes this field is measured under, for a field
+   * whose variant discloses something DIFFERENT depending on the rest of
+   * the document. One probe pair is built per shape, each still differing
+   * at this field alone.
    *
-   * The pin above cannot express that on its own: it names copy a surface must
-   * render for the variant, so a field with two truthful sentences would have to
-   * pin the one both shapes share -- which is neither -- or pin one and let the
-   * other shape render a sentence for a disclosure its run does not make. Naming
-   * the shapes here holds both surfaces to both sentences, each present for its
-   * own shape and absent for the other.
+   * The pin above cannot express that alone: a field with two truthful
+   * sentences would have to pin the one both shapes share (neither) or
+   * pin one and let the other shape render a sentence for a disclosure
+   * its run does not make. Naming the shapes here holds both surfaces to
+   * both sentences, each present for its own shape and absent for the
+   * other. Full rationale: docs/notes/shared-consent-summary.md.
    */
   shapes?: ReadonlyArray<ConsentProbeShape>;
   /**
-   * Surfaces that do not render this field, each with why it is still absent.
-   * Recorded rather than closed here: surfacing a field changes what an acceptor
-   * sees before consenting, which is a partner-facing consent change and takes
-   * its own change and its own review. Recording it is what keeps the difference
-   * between "we chose not to show this" and "this surface does not show it yet"
-   * legible -- and the per-surface check pins this set exactly, so closing a gap
-   * without striking its entry fails too.
+   * Surfaces that do not render this field, each with why it is still
+   * absent. Recorded rather than closed here: making a field visible
+   * changes what an acceptor sees before consenting, which is a
+   * partner-facing consent change and takes its own change and its own
+   * review. Recording it is what keeps "we chose not to show this" and
+   * "this surface does not show it yet" clear apart -- and the
+   * per-surface check pins this set exactly, so closing a gap without
+   * striking its entry fails too.
    */
   unrepresented?: Partial<Record<ConsentSurfaceName, string>>;
 }
@@ -118,7 +114,7 @@ export interface ConsentRelevantTerm {
  * @internal
  *
  * One surrounding shape a {@link ConsentRelevantTerm} is measured under, with the
- * copy that shape's variant owes a reader and the copy it must not carry.
+ * copy that shape's variant owes a reader and the copy it must not render.
  */
 interface ConsentProbeShape {
   /**
@@ -175,7 +171,7 @@ function edited(
 }
 
 // Every element transform a transform-position variation has to move. The base's
-// swap pair carries one transform across both of its positions, and the terms
+// swap pair has one transform across both of its positions, and the terms
 // refuse a pair whose transforms differ, so a variation that moved one alone
 // would produce a variant no surface can be asked to render.
 function probeTransforms(terms: LinkageTerms): Array<Array<TransformStep>> {
@@ -203,18 +199,18 @@ function fieldOfType<T extends LinkageField["type"]>(
 /**
  * @internal
  *
- * The coherent linkage terms both consent surfaces are rendered from. Every
- * consent-relevant field carries a value, so each variant in
- * {@link LINKAGE_TERM_CONSENT_CLASSIFICATION} can change one in place rather than
- * introducing the structure that holds it -- which would differ at more than the
- * field under test.
+ * The coherent linkage terms both consent surfaces are rendered from.
+ * Every consent-relevant field has a value, so each variant in
+ * {@link LINKAGE_TERM_CONSENT_CLASSIFICATION} can change one in place
+ * rather than introducing the structure that holds it -- which would
+ * differ at more than the field under test.
  *
  * Ordinary, readable terms rather than the web suite's hostile-code-point
- * fixture: that fixture answers whether a partner string reaching a surface is
- * escaped, which is a different question from whether a field reaches the surface
- * at all, and its escaped renderings would obscure the per-field difference this
- * probe reads. It is also shared with the CLI suite, which has no access to the
- * web app's test utilities.
+ * fixture: that fixture asks whether a partner string reaching a surface
+ * is escaped, a different question from whether a field reaches the
+ * surface at all, and its escaped renderings would obscure the per-field
+ * difference this probe reads. It is also shared with the CLI suite, which
+ * has no access to the web app's test utilities.
  */
 export const CONSENT_PROBE_TERMS: LinkageTerms = {
   version: "1.0.0",
@@ -262,7 +258,7 @@ export const CONSENT_PROBE_TERMS: LinkageTerms = {
           ],
         },
         {
-          // The swap pair carries ONE transform across both of its positions,
+          // The swap pair has ONE transform across both of its positions,
           // which is what the terms admit: a swap moves the field references and
           // leaves each transform on its position, so a pair whose transforms
           // differ is refused.
@@ -280,7 +276,7 @@ export const CONSENT_PROBE_TERMS: LinkageTerms = {
   ],
   // A citation of its own rather than the built-in set's: the probe's fields and
   // keys are not the built-in ones, so citing `hmis-keys` here would make the
-  // document claim rules it does not carry.
+  // document claim rules it does not have.
   linkageRuleSet: {
     fieldSet: { name: "probe-pii", version: "1.0.0" },
     keySet: { name: "probe-keys", version: "1.0.0" },
@@ -306,15 +302,16 @@ export const CONSENT_PROBE_TERMS: LinkageTerms = {
 /**
  * @internal
  *
- * {@link CONSENT_PROBE_TERMS} in the shape a count-only exchange accepts: the
- * `psi-c` algorithm over the probe's single cascade key, with no payload in
- * either direction and no deduplication, which is what
+ * {@link CONSENT_PROBE_TERMS} in the shape a count-only exchange accepts:
+ * the `psi-c` algorithm over the probe's single cascade key, with no
+ * payload in either direction and no deduplication, which is what
  * docs/spec/PROTOCOL.md's PSI-C section admits.
  *
  * It is the `algorithm` entry's variant document below, exported so each
- * surface's render test pins the count-only tier against the same terms the
- * coverage probe measures it on -- one document read by both suites, so neither
- * surface's pin can drift onto a shape the other never rendered.
+ * surface's render test pins the count-only tier against the same terms
+ * the coverage probe measures it on -- one document read by both suites,
+ * so neither surface's pin can drift onto a shape the other never
+ * rendered.
  */
 export const COUNT_ONLY_PROBE_TERMS: LinkageTerms = {
   ...CONSENT_PROBE_TERMS,
@@ -325,17 +322,17 @@ export const COUNT_ONLY_PROBE_TERMS: LinkageTerms = {
 /**
  * @internal
  *
- * Every field path the `LinkageTerms` declaration reaches, classified as one an
- * acceptor's consent turns on or one it does not. Keyed by the paths derived from
- * that declaration, with array and tuple indices collapsed to `[]`, so a field
- * added to core has no entry here and fails the derivation check until someone
- * judges it.
+ * Every field path the `LinkageTerms` declaration reaches, classified as
+ * one an acceptor's consent turns on or one it does not. Keyed by the
+ * paths derived from that declaration, with array and tuple indices
+ * collapsed to `[]`, so a field added to core has no entry here and fails
+ * the derivation check until someone judges it.
  *
- * `linkageKeys[].elements[].transform[].params` terminates as a whole rather than
- * expanding: it is a `Record<string, unknown>`, whose index signature declares no
- * property paths to walk. Consent turns on the parameters as a set -- they decide
- * what each transform does to a value -- so classifying the record is the right
- * grain, not a workaround.
+ * `linkageKeys[].elements[].transform[].params` terminates as a whole
+ * rather than expanding: it is a `Record<string, unknown>`, whose index
+ * signature declares no property paths to walk. Consent turns on the
+ * parameters as a set -- they decide what each transform does to a value
+ * -- so classifying the record is the right grain, not a workaround.
  */
 export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
   string,
@@ -375,7 +372,7 @@ export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
     // A count-only exchange accepts no payload in either direction, so the pair
     // is built on a base declaring none: varied against the probe's own payload
     // the psi-c side would be a document psi-c refuses, and what the surfaces
-    // were measured on would not be the count-only tier. Both sides carry the
+    // were measured on would not be the count-only tier. Both sides have the
     // same empty pair, so they still differ at the algorithm alone.
     prepare: (terms) =>
       edited(terms, (draft) => {
@@ -401,7 +398,7 @@ export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
     classification: "consent-relevant",
     reason: "Whether the inviting party receives the intersection result.",
     // A party that receives no output may request no payload, so the pair is
-    // built on a base with no requested columns; both sides carry that same
+    // built on a base with no requested columns; both sides have that same
     // empty request.
     prepare: (terms) =>
       edited(terms, (draft) => {
@@ -464,7 +461,7 @@ export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
         requiredVariantCopy: [
           DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT,
           // The statement's own display limit, split out so its trust-contingent
-          // basis is carried and pinned rather than living inside the sentence.
+          // basis is stated and pinned rather than living inside the sentence.
           // Required beside the statement, at the same level, for the same
           // reason the direction note is: a reader met by the withholding is
           // entitled to what the rounds still reach in the same place.
@@ -492,7 +489,7 @@ export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
     reason:
       "Which category of PII participates in linkage -- a full SSN and its last " +
       "four digits are a real disclosure difference.",
-    // A date-of-birth field becomes an SSN field: the two carry the same
+    // A date-of-birth field becomes an SSN field: the two have the same
     // constraint shape, so the replacement moves the semantic type and nothing
     // else.
     vary: (terms) =>
@@ -768,7 +765,7 @@ interface ConsentRepresentationProbe {
    * {@link label} tells apart.
    */
   path: string;
-  /** {@link path}, with the shape's name where the field carries shapes. */
+  /** {@link path}, with the shape's name where the field has shapes. */
   label: string;
   /** {@link ConsentRelevantTerm.reason} for the field. */
   reason: string;
@@ -793,17 +790,19 @@ interface ConsentRepresentationProbe {
  * @internal
  *
  * The rendering pairs for every consent-relevant entry of
- * {@link LINKAGE_TERM_CONSENT_CLASSIFICATION} -- one per entry, or one per shape
- * for an entry that names {@link ConsentRelevantTerm.shapes}.
+ * {@link LINKAGE_TERM_CONSENT_CLASSIFICATION} -- one per entry, or one per
+ * shape for an entry that names {@link ConsentRelevantTerm.shapes}.
  *
- * Both sides go through `parseLinkageTerms`, so a variant that is not a coherent
- * terms document -- a renamed field with no element updated to reference it, a
- * setting the schema forbids alongside another -- throws here instead of
- * rendering into a difference that would prove nothing about the field.
+ * Both sides go through `parseLinkageTerms`, so a variant that is not a
+ * coherent terms document -- a renamed field with no element updated to
+ * reference it, a setting the schema forbids alongside another -- throws
+ * here instead of rendering into a difference that would prove nothing
+ * about the field.
  *
- * `classification` is the table to build from, the live one unless a caller names
- * another: the structural guards here are what every suite reading the probes
- * runs, so exercising one takes a table that breaks it.
+ * `classification` is the table to build from, the live one unless a
+ * caller names another: the structural guards here are what every suite
+ * reading the probes runs, so exercising one takes a table that breaks
+ * it.
  */
 export function consentRepresentationProbes(
   classification: Record<

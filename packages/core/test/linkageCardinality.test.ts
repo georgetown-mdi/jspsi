@@ -35,13 +35,12 @@ import type { MessageConnection } from "../src/connection/messageConnection";
 import type { LinkageStrategy, LinkageTerms } from "../src/config/linkageTerms";
 import type { CSVRow } from "../src/file";
 
-// The cardinality runExchange passes to the linkage strategies is derived from
-// the two parties' agreed `deduplicate` settings by resolveLinkageCardinality.
-// Both strategies run the one-sided cardinalities and the cascade runs the
-// both-sided one; the pair single-pass cannot match must be refused BEFORE the
-// PSI rounds with the actionable UsageError, never silently collapsed onto a
-// narrower cardinality and never left to the generic mid-run cardinality throw in
-// link.ts.
+// The cardinality runExchange passes to the linkage strategies comes from the
+// agreed `deduplicate` settings. Both strategies run the one-sided
+// cardinalities; only the cascade runs the both-sided one. The pair single-pass
+// cannot match must be refused before the PSI rounds with the actionable
+// UsageError -- never silently collapsed onto a narrower cardinality, and never
+// left to the generic mid-run cardinality throw in link.ts.
 
 // --- resolveLinkageCardinality: the mapping -----------------------------------
 
@@ -81,11 +80,10 @@ test("the agreed deduplicate pair maps to the per-side cardinality label", () =>
   expect(resolveFor(true, true)).toBe("many-to-many");
 });
 
-// The refusal's remedy is assembled from the strategy table, so which clauses it
-// carries varies with that table. Whichever way it comes out, every sentence past
-// the first begins as a sentence: the opening is lowercase by the convention the
-// errors are composed under, and a dropped clause must not leave the sentence
-// behind it starting on a lowercase verb.
+// The refusal's remedy is assembled from the strategy table, so which clauses
+// it holds varies with that table. Every sentence after the first still opens
+// capitalized, by the convention error messages use, so a dropped clause must
+// not leave the next sentence starting on a lowercase verb.
 const sentencesAfterTheFirst = (message: string): Array<string> =>
   message.split(". ").slice(1);
 
@@ -108,7 +106,7 @@ test("the both-sided pair under single-pass is refused, naming the strategy", ()
   expect(message).toMatch(/Set linkage_strategy to cascade to run the pair/);
   expect(message).not.toMatch(/no exchange runs that cardinality/);
   // Not the per-party guard's message either: that one answers `true` for
-  // single-pass, so it is not the seam this refusal comes from.
+  // single-pass, so it is not the boundary this refusal comes from.
   expect(message).not.toMatch(/deduplicated matching is not implemented/);
   // Not the generic mid-run throw from link.ts.
   expect(message).not.toMatch(/psi for cardinality/);
@@ -116,9 +114,9 @@ test("the both-sided pair under single-pass is refused, naming the strategy", ()
 
 test("single-pass resolves every label except the both-sided one", () => {
   // The strategy decides how a cardinality is matched, and for the both-sided
-  // pair whether it is matched at all: single-pass carries the one-sided labels
-  // exactly as the cascade does, and one party's `deduplicate: true` under it
-  // stays runnable whichever way round the pair sits.
+  // pair whether it is matched at all: single-pass resolves the one-sided
+  // labels exactly as the cascade does, and one party's `deduplicate: true`
+  // under it stays runnable whichever way round the pair sits.
   expect(resolveFor(false, false, "single-pass")).toBe("one-to-one");
   expect(resolveFor(true, false, "single-pass")).toBe("many-to-one");
   expect(resolveFor(false, true, "single-pass")).toBe("one-to-many");
@@ -274,11 +272,11 @@ test("resolution is symmetric, so both parties derive the same verdict", () => {
 
 test("an accept-derived pair resolves the one-sided cardinality (hostile flip closed)", () => {
   // Acceptance derives the acceptor's own `deduplicate` as false rather than
-  // adopting the inviter's, so the accepted pair is one-sided whatever the
-  // invitation declares: the inviter is the "many" side and the acceptor the "one".
-  // What that closes is the flip -- an inviter carrying `true` and then presenting
-  // `false` at the terms exchange cannot make the acceptor the "many" side,
-  // because the acceptor's value was never the invitation's to set.
+  // adopting the inviter's, so the pair is one-sided whatever the invitation
+  // declares: the inviter is the "many" side and the acceptor the "one". The
+  // flip that closes: an inviter declaring `true` and then presenting `false`
+  // at the terms exchange cannot make the acceptor the "many" side, since the
+  // acceptor's value was never the invitation's to set.
   for (const declared of [false, true]) {
     const inviter = cardinalityTerms(declared);
     const acceptor = deriveAcceptedLinkageTerms(inviter, "Acceptor");
@@ -382,15 +380,13 @@ test("acceptance derives every strategy-and-deduplicate pair this build runs", (
   }
 });
 
-// --- the table shapes the consuming seam admits and refuses -------------------
-// Everything downstream of the table reads it as matched PAIRS: one payload row
-// per distinct matched record, one result row per pair, and the attested result
-// size the pair count. Which multiplicities those readings admit follows from the
-// cardinality the run resolved, so the seam is given it: a repeated local row is
-// the deduplicating shape and is refused under one-to-one, where each of this
-// party's records stands in exactly one pair. An out-of-order local half and a
-// repeated pair stay refused under every cardinality, neither being a shape any of
-// them produces or any consumer could read.
+// --- the matched-pair table: what it admits and refuses ----------------------
+// Downstream code reads the table as matched PAIRS: one payload row per
+// matched record, one result row per pair, and the attested size the pair
+// count. Which multiplicities it may hold follows from the resolved
+// cardinality: a repeated local row is the deduplicating shape, refused under
+// one-to-one, where each record stands in exactly one pair. An out-of-order
+// local half or a repeated pair is refused under every cardinality.
 
 test("a strictly ascending local half is what the consuming seam accepts", () => {
   expect(() =>
@@ -452,7 +448,7 @@ test("a deduplicating table's repeated local row is admitted at the consuming se
 test("the mirror table's repeated partner row is admitted at the consuming seam", () => {
   // The "many" side: this party's rows 0 and 1 both link to the partner's row 4.
   // Its local half is strictly ascending, so one-to-one admits it too -- the
-  // multiplicity this label carries sits on the partner half.
+  // multiplicity this label holds sits on the partner half.
   for (const cardinality of ["many-to-one", "one-to-one"] as const) {
     expect(() =>
       assertMatchedPairsWellFormed(
@@ -481,7 +477,7 @@ test("a descending local half is refused at the consuming seam", () => {
 });
 
 test("a repeated pair is refused at the consuming seam", () => {
-  // One link written twice: the result file would carry the row twice and the
+  // One link written twice: the result file would hold the row twice and the
   // attested size would count it twice. Checked under the cardinality that admits
   // the repeated local row at all, so the pair check is what refuses these.
   expect(() =>
@@ -531,7 +527,7 @@ test("the attested result size is the pair count, not the matched-record count",
   ];
   expect(matchedPairCount(oneSideTable)).toBe(3);
   expect(new Set(oneSideTable[0]).size).toBe(2);
-  // Its mirror carries the same pair count, which is what makes the two parties'
+  // Its mirror holds the same pair count, which is what makes the two parties'
   // records of one exchange agree on the figure.
   expect(
     matchedPairCount([
@@ -572,7 +568,7 @@ const rowsB: Array<CSVRow> = [{ first_name: "Carol" }, { first_name: "Henry" }];
 
 // The strategy is set after prepareForExchange rather than through it, so the
 // terms it prepares are the same document under both strategies and the only
-// difference between two runs of one pair is which strategy carries it.
+// difference between two runs of one pair is which strategy runs it.
 function preparedWithDeduplicate(
   identity: string,
   rows: Array<CSVRow>,
@@ -771,7 +767,7 @@ test("an accepted deduplicating invitation runs many-to-one end to end", async (
 // Both files hold a duplicated value, so the deduplicating rules apply on BOTH
 // sides: "Carol" stands for a group of two on each, and the pairs it contributes
 // are the two groups' product. "Henry" is the unambiguous shared value beside it,
-// and "Alice" matches nothing -- so one run carries a multi-record cluster, a
+// and "Alice" matches nothing -- so one run holds a multi-record cluster, a
 // single-pair cluster, and an unmatched record at once.
 const mutualRowsA: Array<CSVRow> = [
   { first_name: "Alice" },
@@ -898,13 +894,12 @@ test("a both-sided pair under single-pass is refused by both parties before the 
 });
 
 test("an acceptor declaring the setting in its own config runs the both-sided pair", async () => {
-  // The other route to the pair, and the only one an accepted invitation reaches:
-  // acceptance derives the accepting party's own `deduplicate` as false, so that
-  // party declares its own side afterwards, in its own configuration file. The
-  // config is minted and re-parsed exactly as a later invocation loads it, so
-  // what runs here is a persisted acceptance rather than an in-memory edit -- and
-  // the invitation's declaration rides along with it, still holding the inviting
-  // party to what it declared.
+  // Acceptance's own route to the pair: it derives the accepting party's
+  // `deduplicate` as false, so that party declares its side afterwards in its
+  // own config file. Minted and re-parsed as a later invocation loads it, this
+  // runs a persisted acceptance, not an in-memory edit -- with the invitation's
+  // declaration persisted alongside it, still holding the inviting party to
+  // what it declared.
   const inviterTerms = parseLinkageTerms({
     ...termsBase,
     identity: "A",
@@ -963,7 +958,7 @@ test("an acceptor declaring the setting in its own config runs the both-sided pa
 test("both parties receive the output the both-sided pair produces", async () => {
   // The grouping a deduplicating match produces exists only in the output, so
   // every deduplicating party must receive it. Under the both-sided pair that is
-  // BOTH parties, and no check of its own carries the rule: each party's own
+  // BOTH parties, and no single check holds the rule alone: each party's own
   // schema refines `expects_output` on its own `deduplicate`, and the cross-party
   // output check then forces the partner to share. The two together leave the
   // pair no runnable shape in which either party goes unserved.
@@ -1005,7 +1000,7 @@ test("the same many-to-one pair under single-pass produces the cascade's table",
   // The two-strategy equivalence at the exchange level: one agreed pair, one set
   // of inputs, two strategies, and the table both parties hold is the same one
   // the cascade run above pinned -- down to the result rows and the attested pair
-  // count the surfaces downstream read off it.
+  // count the downstream code reads off it.
   const [initiator, responder] = await runBothWithDeduplicate(
     true,
     false,
@@ -1182,7 +1177,7 @@ test("the one-sided refusal aborts the partner instead of leaving it parked", as
   );
   expect(reason).toBeInstanceOf(InvitationTermDivergenceError);
 
-  // The abort is the last thing this party sends, and it carries fixed literals
+  // The abort is the last thing this party sends, and it holds fixed literals
   // only: no terms, no counts, and nothing the partner authored.
   expect(sentByAcceptor.at(-1)).toStrictEqual({
     decision: "abort",
@@ -1194,16 +1189,12 @@ test("the one-sided refusal aborts the partner instead of leaving it parked", as
     "Presented Partner Identity",
   );
 
-  // The partner's run ends on its own, without this side closing the connection
-  // and without waiting out a receive budget. What ends it is the frame's
-  // arrival: the terms exchange's decision slots are behind both parties by this
-  // point, so nothing on the partner reads the reason it states, and the specific
-  // fault stays with the party that refused. What the partner surfaces instead
-  // is not a refusal: the frame reaches its PSI binary seam still awaiting its
-  // own next round, so its run ends with the PSI library's own "Type not
-  // convertible to a Uint8Array" error, with no psilink framing or cause
-  // attached -- fast-fail without diagnosis. Classifying that seam's decode
-  // failure is follow-on work, not a property this branch claims.
+  // The partner's run ends on its own: the terms exchange's decision slots
+  // already sit behind both parties, so nothing on that side reads the refusal
+  // reason, and the fault stays only with the refusing party. Its own run ends
+  // instead with the PSI library's raw "Type not convertible to a Uint8Array"
+  // error, reaching its binary boundary still awaiting the next round, with no
+  // psilink framing attached.
   expect(await inviterRun).toBeInstanceOf(Error);
   await connAcceptor.close();
 });
@@ -1449,11 +1440,11 @@ async function runAcceptedInvitation(declaredDeduplicate: boolean): Promise<{
 
 test("a sole-receiver deduplicating invitation hands the accepting party no table", async () => {
   // The enforced half of what the consent surfaces state for this shape: the
-  // entitlement gate hands the accepting party no table, so a surface telling it
-  // what it learns about the inviting party's groups would name a disclosure
-  // this client does not make. It is the gate rather than the wire -- the
-  // cascade rounds carry the grouping to that party's process -- which is the
-  // limit the sole-receiver statement goes on to name.
+  // entitlement gate hands the accepting party no table, so a consent surface
+  // telling it what it learns about the inviting party's groups would name a
+  // disclosure this client does not make. It is the gate rather than the wire
+  // -- the cascade rounds still deliver the grouping to that party's process --
+  // which is the limit the sole-receiver statement goes on to name.
   const { inviter, acceptor } = await runAcceptedInvitation(true);
   expect(acceptor.associationTable).toBeUndefined();
   // The run is the deduplicating one all the same: the inviting party's

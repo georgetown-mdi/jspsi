@@ -2,44 +2,39 @@ import { redactAndSanitizeForDisplay } from "./utils/sanitizeErrorForDisplay.js"
 import type { PresentedHostKey } from "./connection/fileSyncConnection.js";
 
 /**
- * Compare the two parties' observed SFTP host keys and, on a divergence, return
- * an operator-facing warning naming both observed values; return `undefined`
- * when there is nothing to flag.
+ * Compare the two parties' observed SFTP host keys and, on a divergence,
+ * return an operator-facing warning naming both observed values; return
+ * `undefined` when there is nothing to flag.
  *
- * Each party pins/observes the rendezvous server's host key independently -- at
- * different times, on different machines -- so nothing otherwise compares the
- * two views. A one-sided interception, where one party trusts an attacker's key
- * while the other trusts the real key, is invisible to both until their observed
- * fingerprints are reconciled. This reconciliation rides the authenticated
- * post-handshake terms exchange (see {@link exchangeTerms}), so the advertised
- * value cannot be forged by an unauthenticated party.
+ * Each party pins or observes the rendezvous server's host key
+ * independently, at different times on different machines, so nothing else
+ * compares the two views: a one-sided interception -- one party trusts an
+ * attacker's key while the other trusts the real one -- is invisible to
+ * both until their fingerprints are reconciled here. Reconciliation rides
+ * the authenticated post-handshake terms exchange (see
+ * {@link exchangeTerms}), so an unauthenticated party cannot forge the
+ * advertised value.
  *
- * Returns `undefined` (no divergence to report) when:
- * - Either side observed no host key. A file-drop mount, the browser/proxy SFTP
- *   path, or an unauthenticated exchange advertises nothing, and there is
- *   nothing to reconcile against -- so a one-sided absence is NOT a divergence.
- * - Both fingerprints are equal: the same key reached both parties.
+ * Returns `undefined` when either side observed no host key (a file-drop
+ * mount, the browser/proxy SFTP path, or an unauthenticated exchange
+ * advertises nothing, so a one-sided absence is not a divergence) or when
+ * both fingerprints are equal. Otherwise returns a warning naming both
+ * observed values and the two honest causes (a server rekey, or a one-sided
+ * interception), noting the benign multiple-host-key case when the key
+ * types also differ. The check never aborts the exchange -- the threat
+ * model is honest-but-curious and the operator disambiguates out-of-band --
+ * it only reports the divergence.
  *
- * Returns a warning string when both parties observed a host key and the
- * fingerprints differ. The message names both observed values and explains the
- * two honest causes (a server rekey between the parties' setups, or a one-sided
- * interception). When the two key TYPES also differ, the message additionally
- * notes the benign multiple-host-key case: a server that presents more than one
- * host key may show each party a different one, so a type difference alone is
- * not evidence of an attack. The check never aborts the exchange -- the threat
- * model is honest-but-curious and the operator disambiguates out-of-band -- it
- * only surfaces the divergence.
- *
- * The fingerprint comparison is a plain string equality, not a constant-time
- * compare: a host key and its fingerprint are both public, and the result drives
- * only a warning, not a trust decision. Both key types and both fingerprints are
+ * The fingerprint comparison is plain string equality, not constant-time: a
+ * host key and its fingerprint are both public, and the result drives only
+ * a warning, not a trust decision. Both key types and both fingerprints are
  * routed through {@link redactAndSanitizeForDisplay} before they enter the
- * message, because the partner's advertised values arrive over the wire under a
- * length bound alone and a server's key type is server-controlled (see
- * {@link PresentedHostKey.keyType}). All four sit AHEAD of the explanation and
- * the out-of-band-confirm step, so the redaction half is what keeps the party
- * this warning is ABOUT from deleting them with a planted `BEGIN` marker at the
- * sink that redacts each whole line.
+ * message -- the partner's values arrive over the wire under a length bound
+ * alone, and a server's key type is server-controlled (see
+ * {@link PresentedHostKey.keyType}) -- and that redaction runs ahead of the
+ * explanation and the out-of-band-confirm step, so the party this warning
+ * is ABOUT cannot delete them with a planted `BEGIN` marker at a sink that
+ * redacts whole lines.
  *
  * @param local   This party's observed host key, or `undefined` if none.
  * @param partner The partner's advertised observed host key, or `undefined`.

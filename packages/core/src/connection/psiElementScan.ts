@@ -1,35 +1,28 @@
-// Wire-format element-count scanner for the PSI decode seams. It counts the
-// encrypted elements a partner-supplied protobuf frame DECLARES, without
-// materializing them, so an over-declared frame is rejected BEFORE
-// `deserializeBinary` allocates one heap object -- measured ~211 bytes -- per
-// declared repeated `bytes` entry. This closes a frame-bytes -> element-count
-// memory amplification: a minimal ~2-byte repeated entry deserializes to ~211
-// resident bytes (~105x), so a within-frame-cap frame packed with empty entries
-// would otherwise exhaust memory (tens of GiB) before any post-deserialize count
-// could read it. It is the raw-protobuf analogue of the WebRTC path's BinaryPack
-// structure scan (connection/binaryPackBounds.ts).
+// Wire-format element-count scanner for the PSI decode call sites: counts the
+// encrypted elements a partner-supplied protobuf frame declares, without
+// materializing them, so an over-declared frame is rejected before
+// `deserializeBinary` allocates its ~211-byte object per declared entry --
+// closing a frame-bytes-to-element-count memory amplification that could
+// otherwise exhaust memory before a post-deserialize count could catch it.
+// Raw-protobuf analogue of the WebRTC BinaryPack scan
+// (connection/binaryPackBounds.ts).
 //
-// The scan reads only the protobuf WIRE FORMAT -- a stable, public specification:
-// varint tags, wire types, length-delimited fields -- never the @openmined/psi.js
-// message API, so a library version bump cannot silently change what it parses. It
-// takes the wire type from the low 3 bits of each field's first tag byte and never
-// computes the field number, so it needs no per-field-number premise. What it DOES
-// assume is the message STRUCTURE: the encrypted-element list is a top-level
-// repeated field on a Request and a Response, and one submessage level deep on a
-// ServerSetup (inside the Raw/GCS/Bloom oneof member). That structural premise, and
-// the scan/library element-count equivalence, are pinned by psiElementScan.test.ts
-// and must be re-verified on an @openmined/psi.js upgrade.
+// Reads only the protobuf wire format (varint tags, wire types,
+// length-delimited fields), never the @openmined/psi.js message API, so a
+// library version bump cannot silently change what it parses. It assumes the
+// message structure -- the encrypted-element list sits at the top level on a
+// Request/Response and one submessage deep on a ServerSetup -- pinned along
+// with the scan/library element-count equivalence by psiElementScan.test.ts;
+// re-verify both on an @openmined/psi.js upgrade.
 //
-// Safety: the scan counts EVERY length-delimited field at the target depth, so it
-// is an upper bound on the elements `deserializeBinary` will actually materialize
-// (the library skips unknown fields without allocating a per-element object). It
-// therefore never under-counts the amplifying allocation. A frame it cannot parse
-// as protobuf (truncated, a group wire type the messages never use) throws, and the
-// caller rejects it -- fail-closed and safe, since a conforming peer serializes the
-// same standard wire format the scan accepts (pinned by the equivalence tests).
+// Counts every length-delimited field at the target depth, an upper bound on
+// what `deserializeBinary` actually materializes, so it never under-counts.
+// An unparseable frame throws and the caller rejects it -- fail closed, since
+// a conforming peer serializes the same wire format the scan accepts.
 
 /**
- * The three partner-supplied PSI message kinds decoded at the participant seams.
+ * The three partner-supplied PSI message kinds decoded at the participant
+ * call sites.
  * @internal
  */
 export type PsiMessageKind = "request" | "response" | "serverSetup";

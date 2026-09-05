@@ -13,8 +13,7 @@ import {
 import type { HandshakeRole } from "../types";
 
 // Leading byte of the binary AEAD envelope: a format/version marker. A frame
-// whose first byte is not this value -- or, with the clean break from the former
-// base64url-in-JSON format, any inbound that is not a Uint8Array at all -- is
+// whose first byte is not this value, or that is not a Uint8Array at all, is
 // rejected as a security failure rather than silently misparsed. Bump it on any
 // change to the envelope layout (the IV/ciphertext/tag order or widths) so a
 // format mismatch fails cleanly instead of being read as an IV.
@@ -53,14 +52,14 @@ export const IV_SEQ_OFFSET = 4;
  * - responder -> initiator: `deriveAeadKey(sessionKey, "responder-to-initiator")`
  *
  * The two keys are kept distinct (never collapsed to one shared key): both
- * directions start their counter at 0 and the nonce carries no direction
+ * directions start their counter at 0 and the nonce includes no direction
  * partition, so a single shared key would encrypt the initiator's seq=0 and the
  * responder's seq=0 under the same key/IV pair, and AES-GCM nonce reuse under
  * one key is catastrophic. One key per direction makes that reuse impossible
  * because each key is used by exactly one sender.
  *
  * Wire format: a binary envelope `version || IV || ciphertext || 16-byte GCM
- * tag`, carried as raw bytes (no base64url, no JSON wrapper) so the transport
+ * tag`, encoded as raw bytes (no base64url, no JSON wrapper) so the transport
  * stores it byte-for-byte. `version` is a single leading format marker
  * ({@link AEAD_ENVELOPE_VERSION}); IV is 12 bytes: 4 leading bytes (zeroed by
  * the sender) followed by an 8-byte big-endian sequence number. Those leading
@@ -77,9 +76,9 @@ export const IV_SEQ_OFFSET = 4;
  * repeats or precedes it (replay/reorder) or skips ahead (a dropped or withheld
  * frame) - or whose GCM authentication tag fails, is rejected: {@link receive}
  * rejects with a {@link ConnectionError} of kind `"security"` and the wrapper is
- * permanently dead. A `"security"` failure is deliberately distinguishable from
- * a plain transport drop so a forged, replayed, or omitted frame is never
- * mistaken for an ordinary disconnect.
+ * permanently dead. A `"security"` failure is distinguishable from a plain
+ * transport drop so a forged, replayed, or omitted frame is never mistaken for
+ * an ordinary disconnect.
  *
  * This layer detects replay, reordering, tampering (a failed GCM tag), and
  * mid-stream omission: a strict gap check rejects any inbound sequence number
@@ -87,18 +86,15 @@ export const IV_SEQ_OFFSET = 4;
  * between two delivered frames is caught here as a `"security"` failure. What it
  * still does NOT detect is a truncated tail: a stream that simply stops is
  * indistinguishable at this layer from a clean end, because no AEAD tag can
- * authenticate the ABSENCE of a frame. That residual is deliberately not closed
- * with an end-of-stream marker, because the PSI protocol above is self-driven
- * lockstep - in the common case the receiver knows from its own message script
- * whether another frame is due, so a missing tail surfaces as a stalled
- * `receive()` (an inactivity timeout) and a marker could only reclassify that
- * timeout, not detect the omission any sooner. That lockstep premise once leaned
- * on a per-party empty-linkage-round skip in the matching loop that could stop
- * the two scripts at different points; that skip has been removed, so both
- * parties now run every agreed key and the premise holds unconditionally within
- * the implemented one-to-one cardinality. Even when the skip
- * desynced the scripts a marker would not have fixed it - a protocol-layer
- * fault, not an absent-frame one. See docs/spec/CHANNEL_SECURITY.md.
+ * authenticate the ABSENCE of a frame. That residual is not closed with an
+ * end-of-stream marker: the PSI protocol above is self-driven lockstep, so in
+ * the common case the receiver knows from its own message script whether
+ * another frame is due, and a missing tail shows up as a stalled `receive()`
+ * (an inactivity timeout). A marker could only reclassify that timeout, not
+ * detect the omission any sooner. This lockstep assumption holds
+ * unconditionally within the implemented one-to-one cardinality: both parties
+ * run every agreed key, so the two scripts cannot diverge. See
+ * docs/spec/CHANNEL_SECURITY.md.
  *
  * This decorator is single-consumer: it assumes at most one send() and one
  * receive() in flight at a time, matching MessageConnection's lockstep usage
@@ -106,9 +102,9 @@ export const IV_SEQ_OFFSET = 4;
  * supported - they would race the per-direction sequence counters - so no
  * failure is ever latched between an await and its continuation, and the sticky
  * `failed` latch only needs to be observed at the start of the next send()/
- * receive(). A deliberate close() concurrent with a parked receive() IS
- * supported: the inner connection cancels the parked receive with kind
- * "closed", which is surfaced unchanged.
+ * receive(). A close() concurrent with a parked receive() IS supported: the
+ * inner connection cancels the parked receive with kind "closed", which
+ * passes through unchanged.
  *
  * Construct via the static {@link EncryptedMessageConnection.create} factory.
  */
@@ -142,7 +138,7 @@ export class EncryptedMessageConnection implements MessageConnection {
    * decorator over `inner`. `role` must be this peer's handshake role; the two
    * peers must pass complementary roles (one "initiator", one "responder") so
    * each side's send key matches the other's receive key. A role mismatch is
-   * not detected here - it surfaces later as a "security" decrypt failure on the
+   * not detected here - it shows up later as a "security" decrypt failure on the
    * first received frame, not as a construction error. `sessionKey` must be 32
    * bytes (the AES-256 key length); a wrong length throws a "usage"
    * {@link ConnectionError}.
@@ -154,7 +150,7 @@ export class EncryptedMessageConnection implements MessageConnection {
   ): Promise<EncryptedMessageConnection> {
     // Validate the session-key length up front. HKDF accepts any-length input,
     // so a wrong-length key would NOT throw - it would silently derive a
-    // different 32-byte AEAD key, and the mismatch would surface only later as
+    // different 32-byte AEAD key, and the mismatch would show up only later as
     // opaque GCM tag failures. The session key is always 32 bytes, so a
     // wrong length is an upstream bug; fail loudly here with a clear "usage"
     // error rather than letting it degrade into a decryption mystery.
@@ -194,9 +190,9 @@ export class EncryptedMessageConnection implements MessageConnection {
   // latch is sticky: a later failure keeps the original error, so every
   // subsequent send/receive rejects with the same value. On the first latch the
   // inner transport is torn down (fire-and-forget), mirroring
-  // QueuedMessageConnection.fail(): a terminal failure - notably a detected
-  // forgery/replay - must not leave the underlying SFTP/filedrop connection live
-  // waiting on the caller to remember to close().
+  // QueuedMessageConnection.fail(): a terminal failure - a detected forgery or
+  // replay above all - must not leave the underlying SFTP/filedrop connection
+  // live waiting on the caller to remember to close().
   private fail(error: ConnectionError): ConnectionError {
     if (this.failed === undefined) {
       this.failed = error;
@@ -230,8 +226,8 @@ export class EncryptedMessageConnection implements MessageConnection {
       // Route through fail() so overflow latches the wrapper like every other
       // terminal failure: every later send/receive then rejects with this same
       // error object. Kept kind "security" - refusing to reuse a nonce is a
-      // deliberate cryptographic safety guard that must never be silently
-      // retried, which is exactly the "security" contract.
+      // cryptographic safety guard that must never be silently retried, which
+      // is exactly the "security" contract.
       throw this.fail(
         new ConnectionError(
           "EncryptedMessageConnection: sequence number overflow; refusing to reuse nonce",
@@ -348,13 +344,14 @@ export class EncryptedMessageConnection implements MessageConnection {
     } catch (err) {
       // Symmetric with send(): a fresh inner transport failure latches the
       // wrapper so every later send/receive fast-fails with the same error. But
-      // if a concurrent path already latched - a deliberate close() sets
+      // if a concurrent path already latched - an explicit close() sets
       // this.failed and then tears the inner connection down - the rejection
       // here is that teardown's cancellation. A receive parked at close() time
-      // carries the inner connection's "closed" kind, so surface it unchanged.
-      // asConnectionError passes an existing ConnectionError through untouched
-      // (preserving that "closed" kind) and wraps anything else, so receive()
-      // always rejects with a ConnectionError per the MessageConnection contract.
+      // has the inner connection's "closed" kind, so it passes through
+      // unchanged. asConnectionError passes an existing ConnectionError through
+      // untouched (preserving that "closed" kind) and wraps anything else, so
+      // receive() always rejects with a ConnectionError per the
+      // MessageConnection contract.
       if (this.failed === undefined)
         throw this.fail(asConnectionError(err, "transport"));
       throw asConnectionError(err, "transport");
@@ -364,7 +361,7 @@ export class EncryptedMessageConnection implements MessageConnection {
 
   // Validates, decrypts, and unwraps one inbound envelope, returning the
   // original message. Any integrity/replay/ordering/format failure latches a
-  // `"security"` ConnectionError and throws it; a transport drop surfaced by
+  // `"security"` ConnectionError and throws it; a transport drop from
   // inner.receive propagates unchanged.
   private async handleInbound(data: unknown): Promise<unknown> {
     if (!(data instanceof Uint8Array)) {
@@ -544,13 +541,13 @@ export class EncryptedMessageConnection implements MessageConnection {
   }
 
   async close(): Promise<void> {
-    // Latch the wrapper as deliberately closed, then await the inner teardown.
-    // A fresh send/receive after close is caller misuse, so the latch is kind
-    // "usage" (mirroring QueuedMessageConnection's post-close throws); the kind
-    // is deliberately not "security", which is reserved for tamper/replay/
-    // ordering failures and must stay distinguishable from a clean shutdown. A
-    // receive that was already parked when close ran is cancelled by the inner
-    // connection with kind "closed", not by this latch. Going through
+    // Latch the wrapper as closed, then await the inner teardown. A fresh
+    // send/receive after close is caller misuse, so the latch is kind "usage"
+    // (mirroring QueuedMessageConnection's post-close throws); the kind is not
+    // "security", which is reserved for tamper/replay/ordering failures and
+    // must stay distinguishable from a clean shutdown. A receive that was
+    // already parked when close ran is cancelled by the inner connection with
+    // kind "closed", not by this latch. Going through
     // closeInner() makes this idempotent and reuses any teardown a prior fail()
     // already started, so inner.close() runs once no matter how this is reached.
     this.fail(

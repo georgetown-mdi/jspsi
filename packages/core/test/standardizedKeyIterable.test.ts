@@ -170,10 +170,9 @@ describe("StandardizedKeyIterable — swap (isReceiver)", () => {
 });
 
 describe("StandardizedKeyIterable — a row whose value fans out", () => {
-  // A row realizing several candidates yields all of them: narrowing to one, or
-  // dropping the row, would match on less than the terms declare, which says each
-  // candidate matches independently. Matching on the set is what is unimplemented
-  // (the strategies refuse it), not realizing it.
+  // A row realizing several candidates yields all of them, never narrowed
+  // to one or dropped. Matching on the set as a whole remains unimplemented
+  // (the strategies refuse it); realizing the candidates is implemented.
   const splittingRows = [
     { ssn: "559811301", last_name: "SMITH-JONES", date_of_birth: "19750716" },
     { ssn: "322842281", last_name: "IORIO", date_of_birth: "19750817" },
@@ -217,9 +216,9 @@ describe("StandardizedKeyIterable — a row whose value fans out", () => {
   });
 
   test("a row over the width bound yields the record-excluded sentinel", () => {
-    // The width-bound drop reaches the surface as `undefined` -- the same
-    // sentinel a NULL realization produces -- so the record sits this key's round
-    // out and stays eligible for later keys.
+    // A row over the width bound yields `undefined`, the same sentinel a
+    // NULL realization produces, so the record sits this key's round out
+    // and stays eligible for later keys.
     const wideRows = [
       {
         ssn: "559811301",
@@ -248,9 +247,9 @@ describe("StandardizedKeyIterable — a row whose value fans out", () => {
 
   test("an over-width row an unlisted producer expanded reaches the strategy", () => {
     // The same row, expanded by a function that is not one of the declared
-    // producers the drop binds: it surfaces as the candidate set rather than the
-    // excluded sentinel, so the strategy consuming it refuses the exchange
-    // instead of matching fewer records than the terms describe.
+    // producers the drop binds, shows up as the candidate set rather than
+    // the excluded sentinel: the strategy consuming it refuses the
+    // exchange rather than matching fewer records than the terms describe.
     const wideIter = withUnlistedFanOutFunctions(() => {
       const wideRows = [
         {
@@ -283,10 +282,9 @@ describe("StandardizedKeyIterable — a row whose value fans out", () => {
 });
 
 describe("StandardizedKeyIterable — drop reporting over a whole round", () => {
-  // A split every row crosses the width bound on. The drop is deterministic and
-  // per (row, key), so uncoalesced it puts one line per row in front of the
-  // operator -- a volume the shape of the agreed terms chooses, over a dataset
-  // of any size.
+  // A split every row crosses the width bound on. The drop is
+  // deterministic per (row, key); uncoalesced, it would put one line per
+  // row in front of the operator, regardless of dataset size.
   const logger = getLogger("cleaning");
   const key = terms.linkageKeys[0];
   const rowCount = MAX_DROP_LINES_PER_KEY_ROUND * 3;
@@ -331,8 +329,8 @@ describe("StandardizedKeyIterable — drop reporting over a whole round", () => 
     expect(summary).toContain(
       `${rowCount - MAX_DROP_LINES_PER_KEY_ROUND} of them beyond`,
     );
-    // The summary names no value, exactly as the individual lines do not: the
-    // rows it stands for carry this party's own data.
+    // The summary names no value, exactly as the individual lines do not:
+    // the rows it stands for hold this party's own data.
     expect(summary).not.toContain("N0x");
     expect(summary).not.toContain("55981130");
   });
@@ -374,11 +372,9 @@ describe("StandardizedKeyIterable — drop reporting over a whole round", () => 
       `${firstBatch - MAX_DROP_LINES_PER_KEY_ROUND} of them beyond the ` +
         `${MAX_DROP_LINES_PER_KEY_ROUND} reported individually`,
     );
-    // The allowance was spent before the second batch, so the second line
-    // counts its rows against the total the first one carried. Measuring the
-    // rows it stands for against the allowance instead would pair a delta with
-    // a clause only the first close can satisfy -- a round dropping 15 behind 5
-    // individual lines would state 5 of them beyond those 5, not 10.
+    // The allowance was spent before the second batch, so the second
+    // summary line counts its rows against the total the first one held,
+    // not against the fixed allowance.
     expect(summaries[1]).toContain(`${rowCount - firstBatch} further rows`);
     expect(summaries[1]).toContain(`${rowCount} in total`);
     expect(summaries[1]).not.toContain("reported individually");
@@ -448,10 +444,11 @@ describe("StandardizedKeyIterable — drop reporting over a whole round", () => 
 });
 
 describe("StandardizedKeyIterable — a key realizing the empty string", () => {
-  // `""` is a present, matchable key value, distinct from the record-excluded
-  // sentinel a NULL/absent realization produces (docs/spec/PROTOCOL.md, Key input
-  // data). The distinction survives the multi-value surface: a singleton {""} is
-  // the string, not `undefined`.
+  // `""` is a present, matchable key value, distinct from the
+  // record-excluded sentinel a NULL/absent realization produces
+  // (docs/spec/PROTOCOL.md, Key input data). The distinction holds for a
+  // multi-candidate result too: a singleton {""} is the string, not
+  // `undefined`.
   const blankRows = [{ last_name: "" }];
   const blankKey = { name: "LN", elements: [{ field: "lastName" }] };
   const blankDataset = new StandardizedDataset(
@@ -497,10 +494,10 @@ describe("StandardizedKeyIterable — field absent from dataset", () => {
 });
 
 describe("StandardizedKeyIterable — an element transform that cannot compile", () => {
-  // The key is read once for the whole run rather than per row, and reading it
-  // compiles every element's transform. That read is deferred to the first row
-  // so terms naming a function this build does not have end the exchange where
-  // the rows are, not where the round's iterables are constructed.
+  // The key compiles once for the whole run, not once per row, and that
+  // compile is deferred to the first row read: a function this build does
+  // not have fails during the exchange's row loop, not at iterable
+  // construction.
   const key = {
     name: "LN",
     elements: [

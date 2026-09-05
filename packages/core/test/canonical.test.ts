@@ -29,10 +29,9 @@ const toHex = (bytes: Uint8Array): string =>
   Array.from(bytes, (b) => b.toString(16).padStart(2, "0")).join("");
 
 // --- Checked-in test vectors -------------------------------------------------
-// These are the cross-implementation contract: any independent implementation
-// (in any language) must reproduce `canonical`, `bytesHex`, and `sha256Hex`
-// from `value`. Asserting them here verifies our implementation against that
-// contract rather than against itself.
+// These are the cross-implementation contract: any independent
+// implementation (in any language) must reproduce `canonical`, `bytesHex`,
+// and `sha256Hex` from `value`.
 
 describe("canonical-vectors.json", () => {
   test("the vector file is non-empty", () => {
@@ -242,10 +241,10 @@ describe("values outside the canonical domain are rejected", () => {
 
 describe("the boundary guard keeps the single-error-type contract", () => {
   test("a throwing enumerable getter surfaces as a CanonicalEncodingError, not the raw error", () => {
-    // Only a non-schema-parsed object can carry this; the traversal in
-    // assertCanonical (and canonicalize) reads the getter, which throws. The
-    // boundary try/catch in canonicalString converts the raw error so callers
-    // still see the module's one error type.
+    // Only a non-schema-parsed object can have a throwing getter here: the
+    // traversal in assertCanonical (and canonicalize) reads the getter,
+    // which throws. The boundary try/catch in canonicalString converts the
+    // raw error so callers still see the module's one error type.
     const value = {
       get boom(): never {
         throw new RangeError("getter blew up");
@@ -289,11 +288,10 @@ describe("the boundary guard keeps the single-error-type contract", () => {
   });
 
   test("a circular reference surfaces as a CanonicalEncodingError, not a raw stack overflow", () => {
-    // assertCanonical recurses into the cycle until the stack overflows; the
-    // boundary guard converts that RangeError. A cyclic object is itself
-    // un-encodable, so a CanonicalEncodingError (a usage error) is the correct
-    // type rather than a raw RangeError escaping. Only non-schema-parsed data can
-    // form a cycle, so this shares the throwing-getter reachability.
+    // assertCanonical recurses into the cycle until the stack overflows;
+    // the boundary guard converts that RangeError to a
+    // CanonicalEncodingError. Only non-schema-parsed data can form a
+    // cycle, so this shares the throwing-getter reachability.
     const value: Record<string, unknown> = {};
     value.self = value;
     expect(() => canonicalString(value)).toThrow(CanonicalEncodingError);

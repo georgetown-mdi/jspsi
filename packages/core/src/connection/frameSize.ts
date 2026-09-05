@@ -11,7 +11,7 @@
  * size. See docs/spec/CHANNEL_SECURITY.md.
  *
  * Value: 536,870,888 bytes (~512 MiB). This is a chosen memory bound, NOT a
- * derived platform ceiling. It is the static backstop for every frame and the
+ * derived platform ceiling. It is the static ceiling for every frame and the
  * upper clamp for the per-exchange single-pass cap below: the single-pass reply
  * read is bounded instead by a
  * tighter cap derived from the exchanged record counts
@@ -29,7 +29,7 @@
  * frame is one party's full encrypted set sent as raw elliptic-curve points
  * (~35 bytes/element serialized on the wire; see docs/spec/PROTOCOL.md). With no
  * base64 expansion the on-wire frame is its raw size plus a small fixed envelope,
- * so 512 MiB carries on the order of 15 million elements -- already more than the
+ * so 512 MiB holds on the order of 15 million elements -- already more than the
  * single-frame single-pass transport practically ships before the separate
  * single-pass dataset ceiling binds.
  */
@@ -43,18 +43,19 @@ export const MAX_FRAME_SIZE_BYTES = 536_870_888;
 const MIN_ENCODED_ELEMENT_BYTES = 32;
 
 /**
- * Absolute ceiling on the number of encrypted elements an inbound PSI frame may
- * DECLARE, enforced by a wire-format scan BEFORE deserialization (see
- * {@link countDeclaredPsiElements} in connection/psiElementScan.ts, called at the
- * participant.ts decode seams). It closes a memory-exhaustion amplification the
- * per-message authenticated bound alone does not: google-protobuf
- * `deserializeBinary` allocates one heap object -- measured ~211 bytes -- per
- * declared repeated `bytes` entry, so a frame packed with minimal ~2-byte entries
- * (within the frame byte cap, yet declaring up to ~frameBytes/2 elements) would
- * deserialize into tens of GiB before any post-deserialize count could run.
+ * Absolute ceiling on the number of encrypted elements an inbound PSI frame
+ * may DECLARE, enforced by a wire-format scan BEFORE deserialization (see
+ * {@link countDeclaredPsiElements} in connection/psiElementScan.ts, called at
+ * the participant.ts decode call sites). It closes a memory-exhaustion
+ * amplification the per-message authenticated bound alone does not:
+ * google-protobuf `deserializeBinary` allocates one heap object -- measured
+ * ~211 bytes -- per declared repeated `bytes` entry, so a frame packed with
+ * minimal ~2-byte entries (within the frame byte cap, yet declaring up to
+ * ~frameBytes/2 elements) would deserialize into tens of GiB before any
+ * post-deserialize count could run.
  *
  * Value: floor(MAX_FRAME_SIZE_BYTES / MIN_ENCODED_ELEMENT_BYTES) = 16,777,215. No
- * legitimate frame within the ~512 MiB frame cap can carry more than this many
+ * legitimate frame within the ~512 MiB frame cap can hold more than this many
  * real (>= ~35-byte) elements, so the ceiling never rejects a legitimate frame; a
  * frame declaring more is necessarily the amplification attack and is refused
  * pre-deserialize. It bounds the worst-case deserialize allocation to about
@@ -158,8 +159,8 @@ export const MAX_SINGLE_PASS_CELLS = 3_000_000;
  *
  * Value: 1,000,000,000,000 (10^12). The effective key count is bounded at
  * MAX_EFFECTIVE_KEY_COUNT (5,120), so `effectiveKeyCount * recordCount` at this
- * ceiling is 5.12 x 10^15, about 1.8x below 2^53 -- still exact, with materially
- * less headroom than the fan-out-free 2.56 x 10^14, which is why the
+ * ceiling is 5.12 x 10^15, about 1.8x below 2^53 -- still exact, with less
+ * headroom than the fan-out-free 2.56 x 10^14, which is why the
  * `frameSize.test.ts` invariant pins it against the EFFECTIVE key count and
  * raising that ceiling re-derives it. It is also astronomically
  * above any legitimate dataset (the static frame cap admits ~15M curve points; the
@@ -170,8 +171,8 @@ export const MAX_SINGLE_PASS_CELLS = 3_000_000;
 export const MAX_RECORD_COUNT = 1_000_000_000_000;
 
 // Per-slot and per-cell byte weights of the single-pass reply frame, used to
-// derive the accepted frame size (singlePassReplyByteCap). Each is a deliberate
-// UPPER bound on the real serialized cost, so the derived cap can never reject a
+// derive the accepted frame size (singlePassReplyByteCap). Each is an UPPER
+// bound on the real serialized cost, so the derived cap can never reject a
 // legitimate frame -- it is a read gate, where undershooting would be a
 // correctness bug, while overshooting only loosens defense-in-depth slightly.
 //   - A masked value (one encrypted curve point) serializes to ~35 bytes in the
@@ -198,13 +199,13 @@ const SINGLE_PASS_REPLY_OVERHEAD_BYTES = 256;
  * One party's authenticated single-pass size, as the two quantities every derived
  * bound below is a function of: the `effectiveKeyCount` both parties derive from
  * the agreed terms (the sum of the per-key declared widths) and the party's
- * declared record count, carried on the terms exchange. Their product is the
+ * declared record count, included in the terms exchange. Their product is the
  * party's **value slot** count -- the worst-case upper bound on its distinct
  * linkage-key value count.
  *
  * Named rather than positional because both parties compute every bound below from
  * the SAME pair in the SAME roles, and a swapped sender/receiver pair silently
- * yields a different cap on one side (the sender carries the index table, so the
+ * yields a different cap on one side (the sender sends the index table, so the
  * two are not interchangeable).
  */
 export interface SinglePassPartySize {
@@ -215,7 +216,7 @@ export interface SinglePassPartySize {
   readonly effectiveKeyCount: number;
   /**
    * The party's declared record count -- its row count times its own local
-   * fan-out factor -- as carried on the terms exchange.
+   * fan-out factor -- as included in the terms exchange.
    */
   readonly recordCount: number;
 }
@@ -239,7 +240,7 @@ export function valueSlots(party: SinglePassPartySize): number {
  * the over-ceiling guidance offers removing a fan-out as a remedy.
  *
  * Written once because a divergence between those is not a cosmetic one: a read
- * gate sized for the fixed-width layout while the frame carries the ragged one
+ * gate sized for the fixed-width layout while the frame holds the ragged one
  * rejects a legitimate reply mid-exchange, and the opposite pairing admits a frame
  * the decoder then reads under the wrong shape. The party is passed as an object
  * rather than a second bare count so the two numbers cannot be transposed at a
@@ -280,7 +281,7 @@ export function singlePassDatasetExceedsCap(
  *
  * The record count and the batching are that party's own to change. The linkage
  * keys are not: they are an agreed term, held identically by both sides, so an
- * acceptor cannot narrow a set its invitation carried and an inviter's own
+ * acceptor cannot narrow a set its invitation held and an inviter's own
  * narrowing is terms the partner has to run under. Naming that as a
  * renegotiation rather than as an edit is what keeps the remedy true on the seat
  * that did not choose the keys.
@@ -381,7 +382,7 @@ export function singlePassExchangeExceedsCap(
  * envelopes (the 256 MiB WebRTC envelope is the nearer one), so the per-transport
  * clamp -- min with {@link MAX_FRAME_SIZE_BYTES} for file-sync, with
  * `MAX_WEBRTC_FRAME_BYTES` (connection/binaryPackBounds.ts) for WebRTC -- is
- * applied by the read gate as a backstop and does not bind at the current
+ * applied by the read gate as a safety check and does not bind at the current
  * ceiling. See
  * docs/spec/PROTOCOL.md (the single-pass dataset ceiling) and
  * docs/spec/CHANNEL_SECURITY.md.
@@ -404,8 +405,8 @@ export function singlePassReplyByteCap(
  * Per-message upper bounds on the encrypted-element count a received PSI frame may
  * declare, one field per message kind a party can receive. Derived only from the
  * two parties' authenticated sizes -- never from the inbound frame's own bytes --
- * and enforced at the `deserializeBinary` seam in participant.ts before the element
- * list drives curve-point materialization in the library. See
+ * and enforced at the `deserializeBinary` call site in participant.ts before
+ * the element list drives curve-point materialization in the library. See
  * {@link psiElementBounds}.
  */
 export interface PsiElementBounds {
@@ -415,7 +416,7 @@ export interface PsiElementBounds {
   readonly request: number;
   /**
    * Max elements a received response (the sender's re-encryption of the receiver's
-   * request, so it carries the receiver's element count) may declare.
+   * request, so it holds the receiver's element count) may declare.
    */
   readonly response: number;
 }
@@ -435,8 +436,8 @@ export interface PsiElementBounds {
  * most its slot count), and the cascade sends one key's values per round (at most
  * `recordCount`, well within the same bound).
  *
- * The setup carries the SENDER's masked set; the request carries the RECEIVER's
- * masked set; the response re-encrypts that request, so it carries the receiver's
+ * The setup holds the SENDER's masked set; the request holds the RECEIVER's
+ * masked set; the response re-encrypts that request, so it holds the receiver's
  * count too. Inputs are non-negative integers well below 2^53 (record counts are
  * bounded by {@link MAX_RECORD_COUNT}, effective key counts by
  * MAX_EFFECTIVE_KEY_COUNT), so the products are exact.

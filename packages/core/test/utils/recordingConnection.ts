@@ -1,8 +1,9 @@
 import type { MessageConnection } from "../../src/connection/messageConnection";
 
 /**
- * Wrap a connection so every frame it sends is also pushed onto `sent`, letting a
- * test assert what went on the wire while the underlying transport still runs.
+ * Wrap a connection so every frame it sends is also pushed onto `sent`, letting
+ * a test assert what went on the wire while the underlying transport still
+ * runs.
  */
 export function recordingConnection(conn: MessageConnection): {
   conn: MessageConnection;

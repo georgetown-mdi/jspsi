@@ -121,7 +121,7 @@ describe("prepareForExchange: authoritative standardization fails closed", () =>
     }
     expect(thrown).toBeInstanceOf(OperatorConfigError);
     expect(thrown).toBeInstanceOf(UsageError);
-    // The failure carries the underlying inconsistency through, so an operator
+    // The failure states the underlying inconsistency, so an operator
     // can see which output is wrong.
     expect(() =>
       prepareForExchange(
@@ -299,14 +299,11 @@ describe("prepareForExchange: an unimplemented algorithm is refused", () => {
 // --- Deduplication prepares under every strategy that matches it --------------
 
 describe("prepareForExchange: a deduplicating term is read against the strategy", () => {
-  // The prepare step refuses a deduplicate: true term the agreed strategy cannot
-  // match, before any connection and with the actionable UsageError (CLI exit 64)
-  // rather than the generic mid-run cardinality throw. Both shipped strategies do
-  // match one, so every case here is the admitted half; that the refusal still
-  // fires for a strategy declaring otherwise is driven in
-  // linkageCardinality.test.ts, which can flip the verdict. The base `terms`
-  // output block already satisfies the schema's deduplicate-requires-output
-  // constraint.
+  // The prepare step refuses a deduplicate: true term the agreed strategy
+  // cannot match, before any connection, with the actionable UsageError (CLI
+  // exit 64) rather than the generic mid-run cardinality throw. Both shipped
+  // strategies match one, so every case here is the admitted half; the
+  // opposite verdict is driven in linkageCardinality.test.ts.
   const prepareDeduplicating = (linkageStrategy: LinkageStrategy) =>
     prepareForExchange(
       {
@@ -393,10 +390,11 @@ describe("prepareForExchange: a fan-out transform is refused off single-pass", (
   });
 
   test("the standardization-declared refusal is an OperatorConfigError", () => {
-    // A standardization is per-party and local -- no invitation carries one, and
-    // the accept path derives its own from the adopted terms -- so this fault is
-    // provably the operator's own authoring, and both front ends surface it as
-    // the actionable config category rather than a generic exchange failure.
+    // A standardization is per-party and local -- no invitation contains one,
+    // and the accept path derives its own from the adopted terms -- so this
+    // fault is provably the operator's own authoring, and both front ends
+    // report it as the actionable config category rather than a generic
+    // exchange failure.
     let thrown: unknown;
     try {
       prepareForExchange(
@@ -439,7 +437,7 @@ describe("prepareForExchange: a fan-out transform is refused off single-pass", (
   // without going through prepareForExchange is refused before its terms reach
   // the partner. Every collaborator the run would touch throws when used, so the
   // refusal is what the rejection can come from -- a connection frame or a PSI
-  // call would surface as its own error, failing these assertions.
+  // call would appear as its own error, failing these assertions.
   const failIfUsed = (what: string) => (): never => {
     throw new Error(`${what} was used past the fan-out refusal`);
   };
@@ -533,8 +531,8 @@ describe("prepareForExchange: a fan-out transform runs under single-pass", () =>
       rawRows,
       columns,
     );
-    // A local fan-out rides no agreed term, so the terms' width is unchanged and
-    // the dataset carries the fan-out the record count is multiplied by.
+    // A local fan-out rides no agreed term, so the terms' width is unchanged
+    // and the dataset holds the fan-out the record count is multiplied by.
     expect(declaredEffectiveKeyCount(singlePassTerms)).toBe(
       singlePassTerms.linkageKeys.length,
     );
@@ -688,12 +686,11 @@ describe("prepareForExchange: the single-pass ceiling pre-flight", () => {
 
   test("a standardization contradicting its terms is refused ahead of the ceiling", () => {
     // A config with both faults meets the standardization refusal, not the
-    // ceiling. Both are fail-closed prepare-time refusals surfaced the same way
-    // (each an OperatorConfigError the front ends render), so an operator meets
-    // exactly one of them and the precedence is the decision: the standardization
-    // fault names a contradiction the operator must fix at any dataset size, while
-    // the ceiling's remedies would send them to shrink a dataset that is not what
-    // stops this run.
+    // ceiling. Both are fail-closed prepare-time refusals reported the same
+    // way (each an OperatorConfigError the front ends render), so an
+    // operator meets exactly one, and precedence decides which: the
+    // standardization fault names a contradiction to fix at any dataset
+    // size, while the ceiling's remedy would wrongly suggest shrinking data.
     const inconsistentStandardization: Standardization = [
       { output: "not_a_field", input: "first_name" },
     ];
@@ -741,8 +738,8 @@ describe("prepareForExchange: an unimplemented signing mode is refused", () => {
     // Only certificate mode signs a receipt, so a session-derived config would
     // otherwise run to completion and leave the operator the unsigned record.
     // An OperatorConfigError, not a plain UsageError: the signing block is only
-    // ever this party's own config, so both front ends surface the message as an
-    // actionable config fault (and the CLI still exits 64 through the base).
+    // ever this party's own config, so both front ends report the message as
+    // an actionable config fault (and the CLI still exits 64 through the base).
     expect(() => prepareWithSigning({ mode: "session-derived" })).toThrow(
       OperatorConfigError,
     );
@@ -777,13 +774,12 @@ describe("prepareForExchange: certificate mode with no partner pin is refused", 
     );
 
   test("an unpinned certificate-mode block is refused before connecting", () => {
-    // The signature swap runs after the payloads have crossed and rejects any
-    // certificate presented against an absent pin, so the run would disclose this
-    // party's data and then terminate with no result and no receipt, leaving the
-    // operator only the record of that disclosure. An
-    // OperatorConfigError for the reason the unimplemented-mode sibling is one:
-    // the signing block is only ever this party's own config (and the CLI still
-    // exits 64 through the base class).
+    // The signature swap runs after the payloads have crossed and rejects
+    // any certificate presented against an absent pin, so the run would
+    // disclose this party's data, then end with no result and no receipt --
+    // leaving only the record of that disclosure. It throws
+    // OperatorConfigError, like the unimplemented-mode sibling, because the
+    // signing block is always this party's own config (CLI exit 64).
     expect(() => prepareWithSigning({ mode: "certificate" })).toThrow(
       OperatorConfigError,
     );
@@ -843,9 +839,9 @@ describe("assertCertificateModePinsPartner", () => {
   test("refuses exactly what the verification-time refusal refuses", async () => {
     // The gate exists to refuse, before any payload crosses, the runs the
     // signature swap would refuse after one has. Both read partnerPinIsPresent,
-    // and this holds the two to the same answer over the pin values a config can
-    // carry -- a gate reading a narrower condition would admit a run that cannot
-    // finish.
+    // and this holds the two to the same answer over the pin values a config
+    // can hold -- a gate reading a narrower condition would admit a run that
+    // cannot finish.
     const { certificate } = await generateSigningIdentity("Partner");
     for (const pin of [undefined, ""]) {
       expect(() =>
@@ -1058,23 +1054,18 @@ describe("assertSigningModeImplemented", () => {
   });
 });
 
-// --- The class every prepare-time refusal carries ----------------------------
+// --- The class every prepare-time refusal holds -----------------------------
 
 // The base terms with their identity dropped, which is what the receipt-naming
 // gate's local half refuses.
 const { identity: _dropped, ...termsWithoutIdentity } = terms;
 
-// The ledger of what each refusal is TYPED as, in one place, because the type is
-// what decides how it is surfaced: an OperatorConfigError has its message
-// rendered to the operator (the web's actionable config alert, the CLI's `config`
-// event category), while every other class is swallowed by the generic alert.
-// Re-typing a refusal is therefore a surfacing change, and pinning the class per
-// check is what makes such a change a test failure rather than a silent one. The
-// per-check rationale lives at each raise site; this table only records the
-// decisions and holds them still.
-//
-// A row's `spec` reaches its own refusal and no earlier one, so the table also
-// pins the order the refusals stand in.
+// The ledger of what each refusal is TYPED as: the type decides whether the
+// message reaches the operator (OperatorConfigError -> the web's actionable
+// config alert, the CLI's `config` event category) or is swallowed by the
+// generic alert. Pinning the class per check turns a re-typed refusal into a
+// test failure instead of a silent visibility change. A row's `spec` also
+// reaches its own refusal and no earlier one, pinning refusal order.
 const refusalCases: Array<{
   what: string;
   spec: ExchangeDataSpec;
@@ -1083,7 +1074,7 @@ const refusalCases: Array<{
   errorClass: new (message: string) => Error;
   // Whether the operator reads this refusal's own message.
   messageRendered: boolean;
-  // A fragment only this refusal's message carries, so a row that reaches an
+  // A fragment only this refusal's message holds, so a row that reaches an
   // earlier check of the same class fails rather than passing on the type alone.
   says: RegExp;
 }> = [
@@ -1296,7 +1287,7 @@ describe("prepareForExchange: the class every refusal carries", () => {
         thrown = err;
       }
       // Every one of them is a configuration error at the CLI's exit boundary
-      // (64, EX_USAGE), whatever a front end surfaces it as.
+      // (64, EX_USAGE), whatever a front end reports it as.
       expect(thrown).toBeInstanceOf(UsageError);
       expect((thrown as Error).message).toMatch(refusal.says);
       // The exact class, not merely a member of its family: `name` is what each
@@ -1350,7 +1341,7 @@ describe("prepareForExchange: the class every refusal carries", () => {
     // The one prepare-time refusal the table cannot drive: every shipped strategy
     // matches a deduplicating term, so no spec reaches assertDeduplicateImplemented.
     // Checked rather than stated, so a strategy that answers otherwise fails here
-    // and is given a row of its own instead of surfacing untyped.
+    // and is given a row of its own instead of appearing untyped.
     expect(
       Object.values(DEDUPLICATE_IMPLEMENTED_BY_STRATEGY).every(Boolean),
     ).toBe(true);

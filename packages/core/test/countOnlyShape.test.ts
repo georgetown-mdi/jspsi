@@ -45,7 +45,7 @@ const inShapeCountOnly: LinkageTerms = {
   linkageKeys: [{ name: "SSN", elements: [{ field: "ssn" }] }],
 };
 
-/** The four terms-carried rules, each as the minimal edit that breaks it. */
+/** The four rules the terms hold, each as the minimal edit that breaks it. */
 const outOfShape: ReadonlyArray<{
   rule: "linkageKeys" | "linkageStrategy" | "deduplicate" | "payload";
   terms: LinkageTerms;
@@ -76,7 +76,7 @@ const outOfShape: ReadonlyArray<{
 
 const VALID_SECRET = "A".repeat(43);
 
-/** Every refusal message a thrown failure carries: a `ZodError` renders its
+/** Every refusal message a thrown failure holds: a `ZodError` renders its
  * issues as an escaped JSON blob, so the messages are read off the issues rather
  * than matched against that rendering. */
 function refusalMessages(thrown: unknown): Array<string> {
@@ -86,7 +86,7 @@ function refusalMessages(thrown: unknown): Array<string> {
 }
 
 /** Assert that `act` refuses with exactly the given message, wherever the
- * failure carries it. */
+ * failure holds it. */
 async function expectRefusal(
   act: () => unknown,
   message: string,
@@ -124,7 +124,7 @@ test.each(outOfShape)(
     expect(parsed.success).toBe(false);
     if (parsed.success) return;
     // One issue, located at the field the operator edits: the import door
-    // surfaces a value-free `custom` refine message verbatim and locates it by
+    // exposes a value-free `custom` refine message verbatim and locates it by
     // path, so both halves have to be right.
     expect(parsed.error.issues).toHaveLength(1);
     expect(parsed.error.issues[0].path).toEqual([rule]);
@@ -185,8 +185,7 @@ test("the accept refusal is fail-closed: nothing is derived and nothing is narro
     deriveAcceptedLinkageTerms(multiKey.terms, "Accepting Org"),
   ).toThrow(UsageError);
   // The refused document is returned to no caller in a narrowed form, and the
-  // input it read is untouched -- the whole point of refusing rather than
-  // trimming to the first key.
+  // input it read stays untouched: refusing does not trim to the first key.
   expect(multiKey.terms).toEqual(before);
 });
 

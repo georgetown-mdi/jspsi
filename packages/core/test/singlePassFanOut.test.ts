@@ -74,7 +74,7 @@ test("an element transform's fan-out raises only its own key's factor", () => {
 test("two elements declaring a fan-out compound across their key", () => {
   // buildKeyStrings crosses each element's candidates into the key, so a key
   // whose elements both expand realizes their product; declaring the larger of
-  // the two would refuse honest rows at the width seam.
+  // the two would refuse legitimate rows at the width bound.
   const terms = termsWith([
     {
       name: "one",
@@ -91,7 +91,7 @@ test("two elements declaring a fan-out compound across their key", () => {
 
 // --- message 2 part (d): the ragged layout's decode guards --------------------
 // Every bound comes from authenticated session state -- the agreed key count, the
-// record count the sender carried on the terms exchange, the normative width
+// record count the sender stated at the terms exchange, the normative width
 // bound, and the sender's declared slot bound -- never from the frame itself. A
 // frame failing any of them is a clean protocol error, not a wrong
 // reconstruction.
@@ -213,9 +213,9 @@ function decodeMixed(words: Array<number>) {
 }
 
 test("a mixed-width table decodes each key's cells at that key's own width", () => {
-  // Key 0 carries a cell of 4, above the 3 key 1 declares; key 1 carries one of
+  // Key 0 holds a cell of 4, above the 3 key 1 declares; key 1 holds one of
   // exactly its own 3. A decode holding every cell to the narrower width refuses
-  // this honest table, and one holding them all to the wider passes the refusal
+  // this valid table, and one holding them all to the wider passes the refusal
   // below.
   const cells = decodeMixed([4, 0, 1, 2, 3, 0, 3, 0, 1, 2, 1, 5]);
   expect(cells).toHaveLength(MIXED_KEY_WIDTHS.length);
@@ -236,11 +236,11 @@ test("a mixed-width table is refused for a cell inside the FIRST key's width and
 });
 
 test("the ragged table is refused for carrying more candidates than the declared width admits", () => {
-  // The running total is bounded by the sender's OWN advertised slot count, so a
-  // frame within the width bound cell by cell is still refused when its cells sum
-  // past what the sender said it would ship. It is the guard bounding the one
-  // allocation the frame's own word count sizes, so its class carries as much as
-  // its wording: a caller reads a partner fault off the class.
+  // The running total is bounded by the sender's OWN advertised slot count, so
+  // a frame within the width bound cell by cell is still refused when its cells
+  // sum past what the sender said it would ship. It is the guard bounding the
+  // one allocation the frame's own word count sizes, so its class matters as
+  // much as its wording: a caller reads a partner fault off the class.
   const words = [2, 0, 1, 2, 2, 3, 2, 4, 5, 2, 6, 7];
   expectProtocolRefusal(
     () =>
@@ -257,17 +257,17 @@ test("the ragged table is refused for carrying more candidates than the declared
 
 // --- the sender's own fan-out factor, recovered from the two counts ----------
 // A sender whose OWN cleaning fans out declares the records that cleaning stands
-// for while its table still carries the rows it holds, so the receiver recovers
+// for while its table still lists the rows it holds, so the receiver recovers
 // the factor as the quotient of the count the sender exchanged and the count its
 // frame declares. Nothing about the fan-out is on the wire, so the quotient is
-// the whole of what the receiver has: it is held to the two an honest local
+// the whole of what the receiver has: it is held to the two a legitimate local
 // fan-out can produce, and every other reading is a protocol refusal.
 
 // The sender and receiver of one recovery fixture, run to settlement. The sender
 // fans out nowhere and ships the rows it holds, so what the recovery reads is
 // the count the receiver was handed for it. The sender's table is WITHHELD so it
 // returns the moment its reply is sent: a receiver that refuses the reply sends
-// no message 3, and an in-memory pipe carries no inactivity deadline for the
+// no message 3, and an in-memory pipe has no inactivity deadline for the
 // sender to give up on.
 function factorRecoveryPair(
   senderData: Array<Column>,
@@ -324,7 +324,7 @@ function expectRecoveryRefusal(
 
 test("an honest fanning sender's ragged table decodes to the pairs its rows hold", async () => {
   // The sender's cleaning splits one of its two rows, so it declares 40 records
-  // for the 2 it ships and its cells carry up to a whole declared step's
+  // for the 2 it ships and its cells hold up to a whole declared step's
   // candidates. The receiver recovers the factor from those two counts alone and
   // reads the ragged table at the widths the agreed terms declare times it.
   const [senderConn, receiverConn] = createMessagePipe();
@@ -615,7 +615,7 @@ test("a record with no candidates for a key sits that round out and stays eligib
 });
 
 test("terms that declare a fan-out no row realizes produce the fan-out-free table", async () => {
-  // The ragged layout carries the same information as the fixed-width one, so the
+  // The ragged layout holds the same information as the fixed-width one, so the
   // declaration changes the bytes and nothing else.
   const senderData: Array<Column> = [["Alice", "Bob", "Carol"]];
   const receiverData: Array<Column> = [["Carol", "Alice", "Dave"]];
@@ -657,11 +657,10 @@ test("terms that declare a fan-out no row realizes produce the fan-out-free tabl
 // --- the two axes composed: a fan-out under a deduplicating cardinality -------
 // The axes are independent and compose (docs/spec/PROTOCOL.md, Matching
 // multiplicity): fan-out gives one record several values for a key, a
-// deduplicating cardinality gives one value several records on the many side, and
-// the round's attribution rule lifts a value-level match through both incidences
-// at once. Nothing new resolves them -- the sweep's own acceptance clause,
-// relaxed on the "one" side, is what the composition comes down to -- so these are
-// the worked cases for the combination an operator can configure.
+// deduplicating cardinality gives one value several records on the many side,
+// and the round's attribution rule lifts a value-level match through both at
+// once. Nothing new resolves them beyond the sweep's own acceptance clause,
+// relaxed on the "one" side -- these are the worked cases for that combination.
 
 test("a fanned-out record on the one side links every group its candidates reach", async () => {
   // The sender fans out and is the "one" side; the receiver deduplicates. Its
@@ -708,18 +707,12 @@ test("a fanned-out record on the many side still takes one link, and its group f
 });
 
 test("a ragged round groups the deduplicating sender's survivors and no others", async () => {
-  // The ragged layout carried across two rounds by a sender that both fans out and
-  // deduplicates, which is the widest cell shape the replay resolves a sender's
-  // side of. Worked through:
-  //
-  //   round 0: the sender's rows 0 and 1 are one entity on "S1" and both pair with
-  //     the receiver's row 0, which leaves all three out of candidacy;
-  //   round 1: the receiver's surviving rows hold "N1" (row 1) and "P" (row 2). All
-  //     four sender rows hold "N1", so a round reading past candidacy would group
-  //     all four onto the receiver's row 1; rows 2 and 3 are the survivors and form
-  //     that group alone. Row 3's second candidate "P" reaches the receiver's row 2
-  //     in the same round, and the clause the many side keeps discards that pair --
-  //     leaving the receiver's row 2 out of candidacy and unmatched.
+  // The ragged layout a sender that fans out and deduplicates produces across
+  // two rounds -- the widest cell shape the replay resolves on a sender's side.
+  // Round 0: rows 0 and 1 ("S1") group onto the receiver's row 0, leaving all
+  // three out of candidacy. Round 1: only the "N1" survivors, rows 2 and 3,
+  // group onto the receiver's row 1; row 3's second candidate "P" meets row 2,
+  // but the many-side clause discards that pair, leaving row 2 unmatched.
   const senderData: Array<Column> = [
     [new Set(["S1"]), new Set(["S1"]), undefined, undefined],
     [new Set(["N1"]), new Set(["N1"]), new Set(["N1"]), new Set(["N1", "P"])],
@@ -849,7 +842,7 @@ test("an over-ceiling fan-out exchange aborts on both sides before any frame mov
   expect(overWithFanOut).toBeLessThan(rowsWithinPlainBudget);
   // Neither role put anything on the wire before aborting: the peer end of the
   // pipe has no frame waiting. A parked receive() cannot show that on its own (an
-  // in-memory pipe carries no inactivity deadline, so it would never settle), so
+  // in-memory pipe has no inactivity deadline, so it would never settle), so
   // race it against a macrotask -- the pipe delivers through queueMicrotask, and
   // both runs above are already settled, so a frame either role sent has landed by
   // the time the timer fires.
@@ -966,8 +959,8 @@ test("a cell wider than the normative width bound is refused as the table is bui
 test("a cell the key beside it would refuse is admitted at its own key's width", async () => {
   // The mirror of the refusal below, and the direction a uniform vector cannot
   // show: the NARROW key is the first one, so a build reading `cellWidths[0]` for
-  // every cell would refuse this honest row rather than let it match. Key 0
-  // carries one value per record and matches nothing; the pair meets on key 1,
+  // every cell would refuse this legitimate row rather than let it match. Key 0
+  // holds one value per record and matches nothing; the pair meets on key 1,
   // whose own width admits the wide cell.
   const wide = new Set(
     Array.from({ length: FAN_OUT_CANDIDATES_PER_ELEMENT }, (_u, i) => `V${i}`),
@@ -1167,7 +1160,7 @@ test("a standardization fan-out matches on each candidate against a plain partne
           linkageTerms: { ...plainExchangeTerms, identity: "Splitting Co" },
           // An explicit transformation replaces the default pipeline for the
           // field it names, so each one restates the upper-casing both sides
-          // must agree on; only the surname's carries the fan-out step.
+          // must agree on; only the surname's holds the fan-out step.
           standardization: [
             {
               output: "last_name",

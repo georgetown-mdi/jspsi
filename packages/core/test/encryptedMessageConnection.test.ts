@@ -457,13 +457,12 @@ test("send refuses to advance past MAX_SAFE_INTEGER and latches the wrapper", as
 
 test("an inbound frame after recvSeq reaches MAX_SAFE_INTEGER is rejected", async () => {
   const [recv, peer] = await makeInjectable("responder");
-  // At a saturated counter the gap guard is degenerate: recvSeq + 1 loses IEEE
-  // 754 precision and equals recvSeq, so `seq > recvSeq + 1` can never fire and
-  // no representable seq is a forward gap. The neighboring guards must hold the
-  // line instead -- the replay guard for any seq <= MAX_SAFE_INTEGER (asserted
-  // here), and the BigInt range guard for any seq above it (rejected before the
-  // counter comparison, independent of recvSeq; see the test above). The stream
-  // is terminal at the top of the counter; saturation opens no hole.
+  // At a saturated counter the gap guard is degenerate: recvSeq + 1 loses
+  // IEEE 754 precision and equals recvSeq, so `seq > recvSeq + 1` never fires
+  // and no representable seq is a forward gap. The neighboring guards hold
+  // the line instead: the replay guard for any seq <= MAX_SAFE_INTEGER
+  // (asserted here), and the BigInt range guard above it (see the test
+  // above). Saturation opens no hole; the stream is terminal at the top.
   (recv as unknown as { recvSeq: number }).recvSeq = Number.MAX_SAFE_INTEGER;
   await peer.send(
     await sealRawBytes(
@@ -480,7 +479,7 @@ test("an inbound frame after recvSeq reaches MAX_SAFE_INTEGER is rejected", asyn
 test("send(undefined) is rejected at the sender as usage, without latching", async () => {
   const [encA, encB] = await makeEncryptedPair();
   // A value with no JSON representation is caller misuse; it must be caught at
-  // the sender with kind "usage", not silently encoded and surfaced at the
+  // the sender with kind "usage", not silently encoded and exposed at the
   // receiver as a misleading "not valid JSON" security failure.
   await expectRejection(
     encA.send(undefined),
@@ -766,7 +765,7 @@ test("a receive parked when close() runs is cancelled with kind closed", async (
   const parked = encA.receive(); // nothing sent -> parks on inner.receive()
   await encA.close();
   // The inner connection cancels the parked receive with "closed"; the
-  // decorator surfaces it unchanged rather than overwriting it with the
+  // decorator exposes it unchanged rather than overwriting it with the
   // "usage" close latch.
   await expectRejection(parked, "closed", /closed/i);
 });
@@ -896,16 +895,12 @@ test("deriveAeadKey rejects a context outside the fixed set", async () => {
 });
 
 // --- AEAD encrypt-path wire vector (end-to-end known-answer) -------------------
-// Distinct from the deriveAeadKey KAT above, which pins only the HKDF key
-// derivation: this pins the full binary envelope the encrypt path emits - the
-// 1-byte version marker, the 12-byte IV layout, the GCM ciphertext, and the
-// 16-byte tag - for both a JSON and a Uint8Array payload. The expected bytes were
-// produced by an independent oracle (Node's crypto.hkdfSync + createCipheriv, a
-// different code path than the decorator's WebCrypto crypto.subtle) and are
-// checked in at test/vectors/aead-envelope-vectors.json for cross-implementation
-// reuse; the wire format is specified in docs/spec/CHANNEL_SECURITY.md. The
-// assertion compares against that recorded literal, never a decrypt/round-trip,
-// so a symmetric encode/decode bug a round-trip would mask is still caught.
+// Distinct from the deriveAeadKey KAT above (HKDF only): this pins the full
+// binary envelope -- version marker, IV, ciphertext, and tag -- for a JSON
+// and a binary payload. Expected bytes came from an independent oracle
+// (Node's crypto.hkdfSync/createCipheriv, not the decorator's WebCrypto),
+// checked in at test/vectors/aead-envelope-vectors.json (wire format:
+// docs/spec/CHANNEL_SECURITY.md), compared as a literal, never a round-trip.
 
 interface AeadEnvelopeVector {
   name: string;

@@ -182,7 +182,7 @@ test("setting only the outbound half of the pair is rejected", () => {
 });
 
 test("setting only one half of the pair is rejected for sftp, naming the constraint", () => {
-  // sftp has no "filedrop requires a directory" backstop (login-home is a valid
+  // sftp has no "filedrop requires a directory" rule (login-home is a valid
   // shared mode), so the half-pair refine is the ONLY rule that can fire here --
   // this isolates it (the filedrop half-pair tests above also satisfy the
   // requires-a-directory rule, so they do not, on their own, prove the half-pair
@@ -203,7 +203,7 @@ test("setting only one half of the pair is rejected for sftp, naming the constra
 // resolves to one directory, using the same rule open() applies -- so a config
 // that would collapse to a single directory fails to parse rather than parsing
 // "valid" and only failing later at connect time. Each case asserts the "must
-// differ" refine is the one that fires (not, say, a half-pair backstop).
+// differ" refine is the one that fires (not, say, a half-pair rule).
 test.each([
   ["a trailing slash (filedrop)", "filedrop", "/x", "/x/"],
   ["a redundant interior slash (filedrop)", "filedrop", "/a//in", "/a/in"],
@@ -316,7 +316,7 @@ test("parses shared options including maxReconnectAttempts on an SFTP config", (
 
 test("an unset server_connect_timeout_ms defaults to 30000 at the schema boundary", () => {
   // The documented 30000 ms per-attempt connect default is applied by the schema,
-  // so a config whose options omit the field still carries it -- the contract the
+  // so a config whose options omit the field still has it -- the contract the
   // JSDoc and EXCHANGE_REFERENCE.md advertise. The default fires whenever the
   // options object is present (here alongside another field).
   const result = safeParseConnectionConfig({
@@ -903,12 +903,10 @@ test("iceProvision with turn is rejected", () => {
 test("file-sync-only options do not survive a webrtc parse", () => {
   // A webrtc connection's `options` parses through SharedOptionsSchema, which
   // declares none of the file-sync fields, so an authored one is dropped rather
-  // than refused -- the same warn-and-ignore treatment the CLI gives the
-  // matching flags (warnUnsupportedFileSyncFlags). This pins that premise: if
-  // the webrtc member of the union ever took FileSyncOptions, these keys would
-  // survive the parse and this fails, so the channel gates that read them
-  // (retain mode, the rendezvous flags) are revisited rather than silently
-  // inheriting a file-sync setting.
+  // than refused -- the same warn-and-ignore treatment the CLI gives matching
+  // flags (warnUnsupportedFileSyncFlags). This pins that assumption: if webrtc
+  // ever took FileSyncOptions, these keys would survive and this test would
+  // fail, prompting a review of the channel gates that read them.
   const result = parseConnectionConfig({
     ...webrtcBase,
     options: {
@@ -1123,7 +1121,7 @@ test("retainFiles is rejected when locklessRendezvous is false", () => {
 
 // The one home for retain mode's implication: every authoring surface -- the
 // CLI's --retain-files and the console's file-handling card -- calls this rather
-// than restating the rule, so the trio a config carries cannot depend on which
+// than restating the rule, so the trio a config holds cannot depend on which
 // surface wrote it.
 test("withRetainModeImplications turns retain alone into all three", () => {
   expect(withRetainModeImplications({ retainFiles: true })).toEqual({
@@ -1240,8 +1238,8 @@ test("connection_per_poll rejects a non-boolean", () => {
 
 test("connection_per_poll is schema-accepted on filedrop (inert; the CLI warns)", () => {
   // The field lives on FileSyncOptions for schema uniformity, so a filedrop
-  // config carrying it parses; it is inert there (filedrop holds no session), and
-  // the CLI surfaces the warning rather than the schema hard-blocking it.
+  // config holding it parses; it is inert there (filedrop holds no session),
+  // and the CLI raises the warning rather than the schema hard-blocking it.
   const result = safeParseConnectionConfig({
     channel: "filedrop",
     path: "/mnt/share",

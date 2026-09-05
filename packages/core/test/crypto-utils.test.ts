@@ -18,7 +18,7 @@ test("bytesEqual returns false for different content, same length", () => {
   expect(bytesEqual(a, b)).toBe(false);
 });
 
-// The seed is load-bearing: without it, [1,2,0] vs [1,2] would XOR
+// The seed is critical: without it, [1,2,0] vs [1,2] would XOR
 // (undefined??0) ^ 0 = 0 for the extra iteration, leaving diff=0 and
 // incorrectly returning true.
 test("bytesEqual returns false when shorter array is a zero-padded prefix", () => {

@@ -20,11 +20,11 @@ import type {
 } from "../src/consentFacts.js";
 
 /**
- * The basis each count-only fact carries, against the per-party learn-basis rows
- * of docs/spec/PROTOCOL.md's PSI-C section rather than against what the table
- * happens to say. Stated as a literal expectation so a row reclassified in the
- * table alone -- an enforced marker put on a half that rests on the partner, the
- * error the vocabulary exists to prevent -- fails here rather than reaching an
+ * The basis each count-only fact has, checked against the per-party
+ * learn-basis rows of docs/spec/PROTOCOL.md's PSI-C section rather than
+ * against what the table happens to say. Stated as a literal expectation
+ * so a row reclassified in the table alone -- an enforced marker put on a
+ * half that rests on the partner -- fails here rather than reaching an
  * acceptor.
  */
 const SPEC_ASSIGNED_BASIS: Partial<Record<ConsentFactId, ConsentFactBasis>> = {
@@ -57,10 +57,10 @@ describe("the count-only consent tier", () => {
   });
 
   test("states every sentence a surface renders, so no surface composes one", () => {
-    // A tier entry with no caveat sentence leaves the surface that needs one to
-    // author it, which is the drift the shared table exists to make
-    // unrepresentable. Every count-only fact is rendered as a sentence, so every
-    // one of them carries it here.
+    // A tier entry with no caveat sentence leaves the surface that needs
+    // one to author it, which is the drift the shared table exists to
+    // make unrepresentable. Every count-only fact is rendered as a
+    // sentence, so every one of them has it here.
     for (const id of Object.keys(SPEC_ASSIGNED_BASIS)) {
       const fact: ConsentFact = CONSENT_FACTS[id as ConsentFactId];
       expect(fact.note, `${id} carries no rendered sentence`).toBeTruthy();

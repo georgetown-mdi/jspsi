@@ -43,7 +43,7 @@ afterEach(() => {
       .setLevel(level as Parameters<typeof logLibrary.setLevel>[0], false);
 });
 
-// Each case names its logger uniquely so one case's level never carries into the
+// Each case names its logger uniquely so one case's level never leaks into the
 // next through loglevel's process-wide registry.
 let nextLoggerId = 0;
 const uniqueName = (prefix: string) => `${prefix}-${nextLoggerId++}`;

@@ -7,12 +7,12 @@ import {
 import { InternalConsistencyError } from "../src/errors";
 import type { AssociationTable } from "../src/types";
 
-// The closure step a party runs locally over the table the cascade left it, and
-// the check that holds its result to the shape the both-sided cardinality actually
-// produces (docs/spec/PROTOCOL.md, The many-to-many entity closure). The runs that
-// drive it through linkViaPSI are in psiLinkManyToMany.test.ts; here the tables are
-// hand-built, so the check can be shown to REFUSE the shapes no run produces --
-// a check that cannot fail pins nothing.
+// The closure step a party runs locally over the table the cascade left
+// it, and the check that holds its result to the shape the both-sided
+// cardinality actually produces (docs/spec/PROTOCOL.md, The many-to-many
+// entity closure). The runs that drive it through linkViaPSI are in
+// psiLinkManyToMany.test.ts; here the tables are hand-built so the check
+// can be shown to REFUSE shapes no real run produces.
 
 describe("entityClusters", () => {
   test("a table with no pairs has no clusters", () => {
@@ -48,11 +48,11 @@ describe("entityClusters", () => {
   });
 
   test("a chain through a shared record is one cluster", () => {
-    // The shape the block claim says a cascade run cannot produce: our rows 0 and
-    // 1 reach each other through the partner's row 0. entityClusters computes the
-    // closure of whatever table it is given, so it groups them -- which is what
-    // makes assertBlockDiagonalClosure's refusal below load-bearing rather than
-    // the closure quietly doing the right thing on a table it should never see.
+    // The shape the block claim says a cascade run cannot produce: our
+    // rows 0 and 1 reach each other through the partner's row 0.
+    // entityClusters computes the closure of whatever table it is given,
+    // so it groups them; assertBlockDiagonalClosure's refusal below is
+    // what catches this shape, since the closure will not.
     expect(
       entityClusters([
         [0, 1],
@@ -143,8 +143,8 @@ describe("assertBlockDiagonalClosure", () => {
   });
 
   test("a cluster that is not the whole product is refused", () => {
-    // One label throughout, so the pairs claim one matched value, but the pair
-    // (1, 1) the block would carry is missing.
+    // One label throughout, so the pairs claim one matched value, but the
+    // pair (1, 1) the block would hold is missing.
     const thrown = refusal(
       [
         [0, 0, 1],
@@ -158,9 +158,9 @@ describe("assertBlockDiagonalClosure", () => {
   });
 
   test("one block split across two clusters is refused", () => {
-    // Both pairs carry one label, so they claim one matched value, yet they share
-    // no record -- the value's block would have to hold every pair between the
-    // two sides.
+    // Both pairs hold one label, so they claim one matched value, yet they
+    // share no record -- the value's block would have to hold every pair
+    // between the two sides.
     const thrown = refusal(
       [
         [0, 1],
@@ -174,9 +174,8 @@ describe("assertBlockDiagonalClosure", () => {
   });
 
   test("a label per record rather than per pair is refused as a miscount", () => {
-    // The labels are per PAIR, which is what keeps a record that ever fell into
-    // two of a round's blocks expressible; a caller passing one per record is
-    // stopped rather than read against the wrong pairs.
+    // Labels are per PAIR, not per record: a caller passing one per
+    // record is stopped rather than read against the wrong pairs.
     expect(() =>
       assertBlockDiagonalClosure("client", blockTable, [0, 0, 1]),
     ).toThrow(/3 block label\(s\) for 5 matched pair\(s\)/);

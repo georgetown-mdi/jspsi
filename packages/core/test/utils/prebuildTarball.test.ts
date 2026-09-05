@@ -7,13 +7,12 @@ import { afterEach, describe, expect, test } from "vitest";
 
 import { readTgz } from "./prebuildTarball";
 
-// readTgz is the manifest guard's parser, and the bytes it reads are the vendored
-// tarball -- which a malicious/compromised re-vendor controls (the sha256 sidecar
-// proves only that the bytes are the committed ones, not that they are honest). A
-// block readTgz mis-reads as a phantom entry is the highest-value bug: it would let
-// a dirty prebuild slip past the guard behind a clean-looking decoy. These pin the
-// fail-loud contract -- readTgz must reject anything that is not well-formed ustar
-// rather than desync its walk onto planted or mis-sized data.
+// readTgz parses the vendored tarball, whose bytes a compromised re-vendor
+// controls -- the sha256 sidecar proves only that the bytes match what was
+// committed, not that they are safe. It must reject anything that is not a
+// well-formed ustar block rather than desync its walk onto planted or
+// mis-sized data: a desync could let a corrupted prebuild pass as a clean
+// one.
 
 // Builds one well-formed ustar header (valid magic + self-checksum) so each case
 // below can corrupt exactly one property and prove readTgz rejects it.

@@ -47,14 +47,12 @@ const countingCauseCycle = (): {
 };
 
 // These assertions guard the operator-facing-error audit: the terminal
-// transport/directory UsageError family carries a recovery-hint tag and a
-// concrete operator next step so the CLI's hint-walker suppresses its generic
-// "retry without re-inviting" advisory (which would contradict a terminal
-// refusal). The step rides a cause link of its own, so each pins the tag, the
-// call site's own message left whole on `.message`, and a stable fragment of the
-// step on the link behind it, not a brittle full-string match -- plus the
-// exit-64 classification (instanceof UsageError) neither may disturb. The
-// budget the step's own link buys it is measured in
+// transport/directory UsageError family holds a recovery-hint tag and a
+// concrete operator next step, so the CLI's hint-walker suppresses its
+// generic "retry without re-inviting" advisory. Each test pins the tag, the
+// call site's own message on `.message`, and a stable fragment of the step
+// on its own cause link, plus the exit-64 classification (instanceof
+// UsageError) neither may disturb -- the link's own budget is measured in
 // test/transportRefusalBudget.test.ts.
 describe("terminal transport/directory error taxonomy", () => {
   test("FrameSizeExceededError tags the recovery hint and puts a next step on its own link", () => {
@@ -89,9 +87,9 @@ describe("terminal transport/directory error taxonomy", () => {
 
 describe("errors deliberately left without a recovery hint", () => {
   test("BilateralModeMismatchError stays untagged and leaves its message intact", () => {
-    // A terminal UsageError that carries its fix in the call-site message ("both
+    // A terminal UsageError that holds its fix in the call-site message ("both
     // parties must use the same setting"), so the constructor appends nothing.
-    // It is deliberately NOT tagged: the tag only suppresses the post-handshake
+    // It is not tagged, by design: the tag only suppresses the post-handshake
     // generic advisory, and a mismatch is detected pre-handshake where that
     // advisory never fires, so a tag would suppress nothing.
     const message =
@@ -123,14 +121,13 @@ describe("errors deliberately left without a recovery hint", () => {
 
 describe("the internal fault's recovery hint", () => {
   test("InternalConsistencyError tags the hint on the class and stays a plain Error", () => {
-    // The tag is what suppresses the CLI's generic "retry the exchange without
-    // re-inviting" advisory, which the raise site -- mid-data-exchange, after the
-    // handshake rotated the secret -- otherwise reaches, printing a retry beneath
-    // a message whose remedy is to report the fault. It sits on the CLASS because
-    // every internal fault takes that same step, and the one raise site's message
-    // states it (pinned in psiLink.test.ts). Not a UsageError: the boundary maps
-    // this class to exit 70, not the 64 that would send the operator to an input
-    // the single-pass ceiling gate has already cleared.
+    // The tag suppresses the CLI's generic "retry the exchange without
+    // re-inviting" advisory at the raise site -- mid-data-exchange, after the
+    // handshake rotated the secret. It sits on the CLASS because every
+    // internal fault takes the same step, and the one raise site's message
+    // states it (pinned in psiLink.test.ts). Not a UsageError: the boundary
+    // maps this class to exit 70, not the 64 that would send the operator to
+    // an input the single-pass ceiling gate already cleared.
     const err = new InternalConsistencyError(
       "server: single-pass built a reply of 4096 byte(s), above the 2048 " +
         "byte(s) both parties derive from their declared sizes. The exchange " +
@@ -145,15 +142,14 @@ describe("the internal fault's recovery hint", () => {
 
 describe("errors whose recovery hint is per instance, not per class", () => {
   test("TransportPublishIndeterminateError sets no class-level tag and is not a UsageError", () => {
-    // Not a UsageError, which the poll loop reads as terminal; what that
-    // distinction does and does not buy is measured in fileSyncConnection.test.ts
-    // rather than argued here. The tag is absent from the CLASS because a
-    // transport raises this for several publishes at once -- a message, an ack, a
-    // rendezvous hello, an abort marker -- which share no recovery, so the
-    // transport's own instance carries no next step and suppresses nothing. The
-    // one caller whose recovery is established re-raises the class tagged and
-    // carrying it; that instance is pinned in fileSyncMessageLoop.test.ts, where
-    // the tagging happens.
+    // Not a UsageError, which the poll loop treats as terminal; what that
+    // distinction buys is measured in fileSyncConnection.test.ts, not argued
+    // here. The tag is absent from the CLASS because a transport raises this
+    // for several publishes at once -- a message, an ack, a rendezvous hello,
+    // an abort marker -- which share no recovery, so the transport's own
+    // instance holds no next step and suppresses nothing. The one caller
+    // whose recovery is established re-raises the class tagged and holding
+    // it; that instance is pinned in fileSyncMessageLoop.test.ts.
     const cause = new Error("_rename: No such file or directory");
     const err = new TransportPublishIndeterminateError("publish torn", {
       cause,
@@ -233,7 +229,7 @@ describe("isPeerWaitTimeout cause-chain walk", () => {
 
     expect(isPeerWaitTimeout(outer)).toBe(true);
     // The tag is the only own enumerable property markPeerWaitTimeout adds, and
-    // it sits on the innermost error alone: neither wrapper carries one, so a
+    // it sits on the innermost error alone: neither wrapper holds one, so a
     // top-level read of the outer error finds nothing to answer with.
     expect(Object.keys(tagged)).toHaveLength(1);
     expect(Object.keys(outer)).toEqual([]);
@@ -263,7 +259,7 @@ describe("isPeerWaitTimeout cause-chain walk", () => {
 
 describe("PeerAbortError exemplar (unchanged)", () => {
   test("still carries the hint and its pinned partner-contact message", () => {
-    // The audit's exemplar: its message is deliberately pinned and must not be
+    // The audit's exemplar: its message is pinned by design and must not be
     // reworded. This guards against an accidental edit to the bar the rest rose
     // to meet.
     const err = new PeerAbortError();

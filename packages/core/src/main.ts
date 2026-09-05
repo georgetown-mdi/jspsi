@@ -119,17 +119,18 @@ export { pathsResolveToSameDir } from "./utils/pathCompare";
 // direction so the read and write paths share one recurse-and-skip traversal;
 // not a stable public API (see the declaration's JSDoc).
 export { snakeizeKeys } from "./utils/camelizeKeys";
-// The scalar half of that direction, for a seam that names ONE key to an
-// operator: a schema error locates its field on the camelized shape, and the
-// operator is reading the snake_case document (see the declaration's JSDoc).
+// The scalar half of that direction, for a call site that names ONE key to
+// an operator: a schema error locates its field on the camelized shape, and
+// the operator is reading the snake_case document (see the declaration's
+// JSDoc).
 export { snakeizeKey } from "./utils/camelizeKeys";
 // The camelize/snakeize nesting-depth discipline. The invitation decode path
-// normalizes transform.params through this bounded camelizeKeys chokepoint (the
-// camelize pre-pass in config/invitation.ts), so a pathologically deep params is
-// rejected at decode like it is on every other parse path; the CLI's
-// invitation-vs-config reconcile (apps/cli/src/config.ts, withoutUndefinedDeep)
-// keeps its own depth guard as a backstop for that independent recursive walk. See
-// docs/spec/CHANNEL_SECURITY.md.
+// normalizes transform.params through this bounded camelizeKeys chokepoint
+// (the camelize pre-pass in config/invitation.ts), so a pathologically deep
+// params is rejected at decode like it is on every other parse path; the CLI's
+// invitation-vs-config reconcile (apps/cli/src/config.ts,
+// withoutUndefinedDeep) keeps its own depth guard as a safety check for that
+// independent recursive walk. See docs/spec/CHANNEL_SECURITY.md.
 export {
   MAX_NESTING_DEPTH,
   NestingDepthExceededError,
@@ -163,12 +164,12 @@ export {
   MAX_ERROR_CAUSE_DEPTH,
   CAUSE_DEPTH_ELISION_MARKER,
 } from "./utils/sanitizeErrorForDisplay";
-// The delimiting seam for a linkage-terms value named in an operator-facing
+// The delimiting grammar for a linkage-terms value named in an operator-facing
 // diagnostic. Exported because the CLI's reconcile refusal and citation-drift
-// warning and both consent surfaces name the same class of partner-chosen value
-// in the same clause structure, and a second delimiting grammar there would be
-// the independent re-implementation the shared-primitive rule exists to
-// prevent.
+// warning and both consent surfaces name the same class of partner-chosen
+// value in the same clause structure, and a second delimiting grammar there
+// would be the independent re-implementation the shared-primitive rule exists
+// to prevent.
 export {
   quoteTermsValue,
   quoteTermsValueList,

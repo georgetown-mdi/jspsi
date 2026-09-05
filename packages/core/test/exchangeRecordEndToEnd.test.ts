@@ -17,11 +17,12 @@ import type { BuiltExchangeRecord } from "../src/exchangeRecord";
 import type { Output } from "../src/config/linkageTerms";
 import type { ExchangeResult } from "../src/exchange";
 
-// End-to-end coverage of the record seam in runExchange: two parties run a full
-// exchange over an in-memory pipe (real PSI), and we assert the record each side
-// produces. This is where the result-size and association-table gating is
-// exercised against the live both-output / single-output cases, complementing
-// the isolated record-build unit tests in exchangeRecord.test.ts.
+// End-to-end coverage of the record boundary in runExchange: two parties run
+// a full exchange over an in-memory pipe (real PSI), and we assert the
+// record each side produces. This is where the result-size and
+// association-table gating is exercised against the live both-output /
+// single-output cases, complementing the isolated record-build unit tests
+// in exchangeRecord.test.ts.
 
 const psiLibrary = await PSI();
 
@@ -94,10 +95,10 @@ function built(result: ExchangeResult): BuiltExchangeRecord {
 
 test("run boundary: an algorithm with no run path is refused before anything goes on the wire", async () => {
   // The run-side half of the record-integrity guarantee: a PreparedExchange
-  // carrying an algorithm outside the implemented allowlist -- constructed here by
-  // overriding the prepared terms, the way a caller that skipped prepareForExchange
-  // and the same guard it drives could -- is refused at the run boundary, so no
-  // round runs under whichever path the dispatch would otherwise fall through to
+  // holding an algorithm outside the implemented allowlist -- constructed
+  // here by overriding the prepared terms, as a caller that skipped
+  // prepareForExchange could -- is refused at the run boundary, so no round
+  // runs under whichever path the dispatch would otherwise fall through to,
   // and no record attests a disclosure the run did not make.
   const both: Output = { expectsOutput: true, shareWithPartner: true };
   const unimplementedPrepared = prepared("Initiator Co", both, clientRows);
@@ -108,8 +109,8 @@ test("run boundary: an algorithm with no run path is refused before anything goe
     algorithm: "psi-x" as Algorithm,
   };
   const [conn] = createMessagePipe();
-  // Every connection call throws, so a frame the refusal failed to stop surfaces
-  // as this distinct error rather than parking on a pipe with no partner.
+  // Every connection call throws, so a frame the refusal failed to stop shows
+  // up as this distinct error rather than parking on a pipe with no partner.
   const unusableConnection = new Proxy(conn, {
     get: () => {
       throw new Error("the connection was used past the algorithm refusal");
@@ -128,14 +129,12 @@ test("run boundary: an algorithm with no run path is refused before anything goe
 });
 
 test("run boundary: a psi-c run whose metadata transmits a column is refused before anything goes on the wire", async () => {
-  // These fixtures' inferred metadata makes the non-linkage `note` column a
-  // disclosed payload column, and a count-only exchange carries no payload in
-  // either direction. A PreparedExchange carrying that pair -- constructed here by
-  // overriding the prepared terms, the way a caller that skipped
-  // prepareForExchange could -- is refused by the metadata rule at the run
-  // boundary, so no linkage runs and no record attesting a count-only run over a
-  // transmitting input is ever produced. The refusal fires before the first await,
-  // so runExchange rejects without a partner on the pipe.
+  // The fixtures' inferred metadata makes the non-linkage `note` column a
+  // disclosed payload column, but a count-only exchange transmits no payload
+  // in either direction. Overriding the prepared terms to pair `psi-c` with
+  // that metadata is refused by the metadata rule at the run boundary: no
+  // linkage runs and no record is produced. The refusal fires before the
+  // first await, so runExchange rejects without a partner on the pipe.
   const both: Output = { expectsOutput: true, shareWithPartner: true };
   const psiCPrepared = prepared("Initiator Co", both, clientRows);
   psiCPrepared.linkageTerms = {
@@ -149,15 +148,12 @@ test("run boundary: a psi-c run whose metadata transmits a column is refused bef
 });
 
 test("terms exchange: an out-of-shape psi-c document is refused on receipt, rejecting both parties' runs with no linkage and no record", async () => {
-  // The same override with the metadata rule out of the way: rows and columns
-  // carrying only the linkage column transmit nothing, so the pre-wire refusal
-  // above does not fire and the out-of-shape document (two linkage keys) reaches
-  // the wire. What refuses it there is the parse of the PARTNER's terms in the
-  // terms exchange, which applies the same count-only shape rules the schema
-  // carries -- upstream of the agreed-terms boundary (resolveCountOnlyRun), which
-  // countOnlyRun.test.ts drives directly. Both parties carry the same document, so
-  // each refuses the other's and the run is rejected whole on both sides rather
-  // than narrowed to the first key.
+  // The same override, minus the metadata rule: rows and columns holding
+  // only the linkage column transmit nothing, so the out-of-shape document
+  // (two linkage keys) reaches the wire, where the terms exchange parses the
+  // PARTNER's terms under the schema's count-only shape rules -- upstream of
+  // the agreed-terms boundary that countOnlyRun.test.ts drives directly.
+  // Both parties hold the same document, so both sides refuse, unnarrowed.
   const both: Output = { expectsOutput: true, shareWithPartner: true };
   const linkageOnly = (identity: string, rows: typeof serverRows) => {
     const spec = prepareForExchange(
@@ -176,8 +172,8 @@ test("terms exchange: an out-of-shape psi-c document is refused on receipt, reje
     };
     return spec;
   };
-  // Every PSI call throws, so any linkage the refusal failed to stop surfaces as
-  // this distinct error rather than the terms refusal asserted below.
+  // Every PSI call throws, so any linkage the refusal failed to stop shows up
+  // as this distinct error rather than the terms refusal asserted below.
   const unusablePsiLibrary = new Proxy(psiLibrary, {
     get: () => {
       throw new Error("the PSI library was used past the terms refusal");
@@ -204,16 +200,16 @@ test("terms exchange: an out-of-shape psi-c document is refused on receipt, reje
   ]);
 
   // Both sides reject, so neither returns an ExchangeResult and neither builds the
-  // record a completed run carries.
+  // record a completed run holds.
   expect(outcomes.map((outcome) => outcome.status)).toEqual([
     "rejected",
     "rejected",
   ]);
   for (const outcome of outcomes) {
     const refusal = (outcome as PromiseRejectedResult).reason as Error;
-    // Each party's failure is the count-only rule the document breaks -- the one
-    // that refuses it, carried across the abort so both ends name it -- and not the
-    // unusable PSI library, so no round ran on either side.
+    // Each party's failure is the count-only rule the document breaks -- the
+    // one that refuses it, preserved through the abort so both ends name it
+    // -- and not the unusable PSI library, so no round ran on either side.
     expect(refusal.message).toMatch(/exactly one linkage key/);
     expect(refusal.message).not.toMatch(/PSI library/);
   }
@@ -253,13 +249,12 @@ test("both-output: both records agree on terms and carry the result size", async
   expect(initiator.associationTable).toBeDefined();
   expect(responder.associationTable).toBeDefined();
 
-  // Governance metadata is derived from the agreed terms on both sides and agrees
-  // on the cross-party-consistent fields. firstNameTerms configure no payload data
-  // dictionary and no legal agreement, but inferred metadata makes the non-linkage
-  // 'note' column a disclosed payload column, so it flows for the two matched rows
-  // and is committed. The payload categories read from the committed disclosure, so
-  // both directions report 'note' -- with a bare name, since no dictionary supplies
-  // a description -- rather than under-reporting it as empty.
+  // Governance metadata is derived from the agreed terms on both sides and
+  // agrees on the cross-party-consistent fields. firstNameTerms configure no
+  // payload dictionary or legal agreement, but inferred metadata makes the
+  // non-linkage 'note' column a disclosed payload column that flows for the
+  // two matched rows and is committed. The payload categories read from that
+  // disclosure, so both sides report a bare 'note' rather than as empty.
   expect(init.record.governance.algorithm).toBe("psi");
   expect(resp.record.governance.algorithm).toBe("psi");
   expect(init.record.governance.matchingBasis).toEqual([
@@ -279,7 +274,7 @@ test("both-output: both records agree on terms and carry the result size", async
   expect(resp.record.governance.payloadReceived).toEqual([{ name: "note" }]);
 
   // Each party's association-table commitment opens against the live returned
-  // table, re-supplied at verify time (the keys carry only salts, never a data
+  // table, re-supplied at verify time (the keys hold only salts, never a data
   // snapshot).
   expect(
     await verifyCommitmentOpening(
@@ -303,7 +298,7 @@ test("both-output: both records agree on terms and carry the result size", async
   // guard: a regression that swapped the sent/received payloads or corrupted the
   // committed rows -- while leaving the column names intact -- would fail here even
   // though the governance-name assertions above would not. localPayloadSent is not
-  // surfaced on the result, so only the received side is checkable live.
+  // exposed on the result, so only the received side is checkable live.
   expect(
     await verifyCommitmentOpening(
       "partnerPayloadReceived",
@@ -369,8 +364,8 @@ test("both-output: a legal-agreement purpose flows end-to-end into both records"
   const init = built(initiator);
   const resp = built(responder);
 
-  // Both parties' agreed terms carry the same legal agreement, so both records
-  // carry the cross-validated reference, purpose, and expiration verbatim.
+  // Both parties' agreed terms hold the same legal agreement, so both records
+  // hold the cross-validated reference, purpose, and expiration verbatim.
   expect(init.record.governance.legalAgreement).toEqual(legalAgreement);
   expect(resp.record.governance.legalAgreement).toEqual(legalAgreement);
   // The agreement is part of the agreed terms, so both parties still hash to one
@@ -381,7 +376,7 @@ test("both-output: a legal-agreement purpose flows end-to-end into both records"
 test("retention/disposition pointer is per-party and self-facing end-to-end", async () => {
   // The pointer is sourced from each party's own exchange config (a sibling of
   // linkageTerms, NOT part of the agreed terms). Only the party that configures
-  // one carries it; it is never exchanged with the partner and never folded into
+  // one holds it; it is never exchanged with the partner and never folded into
   // the agreed-terms hash. Set it on the initiator alone and assert the asymmetry.
   const both: Output = { expectsOutput: true, shareWithPartner: true };
   const note =
@@ -418,7 +413,7 @@ test("retention/disposition pointer is per-party and self-facing end-to-end", as
   const init = built(initiator);
   const resp = built(responder);
 
-  // The configuring party carries its own pointer verbatim...
+  // The configuring party holds its own pointer verbatim...
   expect(init.record.retentionDisposition).toBe(note);
   // ...and the partner, which configured none, omits it entirely -- the pointer is
   // never put on the wire, so it cannot leak into the partner's record.
@@ -444,8 +439,8 @@ test("single-output: result size omitted, but each party records its own exposur
   // parties' terms have them both receive output, and here only the receiver
   // does. The gate is the terms agreement (entitlement), not whether a party can
   // observe the size during the protocol -- the single-output sender does observe
-  // its match count during the clean cascade, but the record deliberately does not
-  // surface it.
+  // its match count during the clean cascade, but by design the record does not
+  // expose it.
   expect("resultSize" in init.record).toBe(false);
   expect("resultSize" in resp.record).toBe(false);
 
@@ -541,7 +536,7 @@ test("single-output: the no-output helper is sent no payload (one-sided disclosu
 // The responder's inferred metadata discloses `note` (role: other -> payload),
 // so for the matched rows it transmits exactly ["note"]. These two tests pin the
 // runtime lock-in end to end: when the initiator has locked in an expected
-// received-column set (a fresh acceptor's carried disclosedPayloadColumns, or a
+// received-column set (a fresh acceptor's disclosedPayloadColumns, or a
 // recurring party's payload.receive, both threaded as prepared.expectedPayload-
 // Columns), runExchange enforces it after the payload exchange.
 
@@ -591,18 +586,12 @@ test("lock-in: a received payload matching the consented set completes", async (
 // --- Universal count exchange: deadlock-free ordering ------------------------
 
 test("the unconditional count exchange composes into a deadlock-free full exchange for every (handshake-role x strategy) combination", async () => {
-  // The record-count exchange runs on every exchange, immediately before
-  // linkage. Verify it composes into a complete, lockstep full exchange for both
-  // linkage strategies and in every output orientation: both-output, each
-  // one-sided direction (which handshake role is the sole output party), and the
-  // equal-count tie. Each Promise.all resolving over the in-memory pipe proves
-  // the receive-side lockstep does not deadlock (a both-parties-parked-on-receive
-  // hang would fail the suite); the role assertions pin the outcome, and the
-  // both-output result assertion pins that single-pass produces the right
-  // intersection end to end, not just the right role. (The in-memory pipe has no
-  // send gate, so this does not exercise the file-sync one-outstanding-per-
-  // direction backpressure; that seam is reasoned about in docs/spec/FILE_SYNC.md,
-  // not covered here.)
+  // The record-count exchange runs immediately before linkage on every
+  // exchange. This verifies it composes into a lockstep full exchange
+  // across both strategies and every output orientation: Promise.all
+  // resolving proves no deadlock, and the role and intersection assertions
+  // pin the outcome. The in-memory pipe has no send gate, so this skips the
+  // file-sync backpressure boundary covered in docs/spec/FILE_SYNC.md.
   const both: Output = { expectsOutput: true, shareWithPartner: true };
   const receiver: Output = { expectsOutput: true, shareWithPartner: false };
   const sender: Output = { expectsOutput: false, shareWithPartner: true };
@@ -664,14 +653,13 @@ test("the unconditional count exchange composes into a deadlock-free full exchan
 });
 
 // --- Terms the input cannot fully satisfy ------------------------------------
-//
-// governance.matchingBasis is derived from the AGREED terms (pinned above), so it
-// names every linkage field those terms declare whatever this party's columns
-// actually supplied. A party whose columns cannot produce one of the agreed keys
-// therefore has to be stopped before the run, or the record it writes names a
-// field it contributed nothing for.
+// governance.matchingBasis is derived from the AGREED terms (pinned above), so
+// it names every linkage field those terms declare, regardless of what this
+// party's columns actually supplied. A party whose columns cannot produce one
+// of the agreed keys must be stopped before the run, or its record would name
+// a field it contributed nothing for.
 
-// clientRows carry first_name and note, never a last_name column, so the second
+// clientRows hold first_name and note, never a last_name column, so the second
 // agreed key here can produce no key string for any of this party's records.
 const partlySatisfiedTerms = {
   ...firstNameTerms,

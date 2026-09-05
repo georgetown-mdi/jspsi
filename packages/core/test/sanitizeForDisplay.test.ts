@@ -194,8 +194,8 @@ describe("replaceControlCharactersForDisplay", () => {
   });
 
   test("a treated value costs the display what the untreated one asked for", () => {
-    // A budget is measured over a fragment after this runs, so parity is not
-    // load-bearing -- but a marker WIDER than the escape's own token would
+    // A budget is measured over a fragment after this runs, so parity is
+    // not critical -- but a marker WIDER than the escape's own token would
     // quietly buy a chooser room in every message that fits one, so it is
     // pinned rather than left to the arithmetic.
     for (const character of CONTROL_CHARACTERS)
@@ -233,11 +233,12 @@ describe("replaceControlCharactersForDisplay", () => {
   });
 
   test("either order against redaction renders the same bytes", () => {
-    // What the treatment's place in the composition order does NOT rest on. The
-    // private-key patterns span every character class and their markers carry no
-    // control character, so neither pass can make or unmake the other's match --
-    // held here rather than by a sentence in the docstring, which could not tell
-    // a real dependency from an assumed one.
+    // What the treatment's place in the composition order does NOT rest on.
+    // The private-key patterns span every character class and their
+    // markers hold no control character, so neither pass can make or
+    // unmake the other's match -- held here rather than by a sentence in
+    // the docstring, which could not tell a real dependency from an
+    // assumed one.
     const body = "MIIByteslookingsecret0123456789ABCDEFabcdef+/wEHEHE";
     const block = `-----BEGIN OPENSSH PRIVATE KEY-----\n${body}\n-----END OPENSSH PRIVATE KEY-----`;
     for (const text of [
@@ -344,17 +345,17 @@ describe("a cut lands outside a control-character marker", () => {
   });
 
   test("a value spelling a marker in its own bytes is backed off over too", () => {
-    // The open class the marker carries: nothing in a treated string tells a
-    // marker from a value that spelled one character by character, so the
-    // back-off reads the shape and moves the cut for either. It costs the same
-    // three characters, and what it cannot do is leave the operator a fragment
-    // whose provenance they would have to guess at.
+    // The marker's shape is an open class: nothing in a treated string
+    // tells a marker from a value that spelled one character by character,
+    // so the back-off reads the shape and moves the cut for either. It
+    // costs the same three characters, and what it cannot do is leave the
+    // operator a fragment whose provenance they would have to guess at.
     const literal = `${LEAD}${MARKER}${TAIL}`;
     expect(replaceControlCharactersForDisplay(literal)).toBe(literal);
     expect(sanitizeForDisplay(literal, { maxLength: LEAD.length + 2 })).toBe(
       LEAD + DISPLAY_TRUNCATION_MARKER,
     );
-    // A `<` the value carries mid-run is not a cut and is left alone.
+    // A `<` the value holds mid-run is not a cut and is left alone.
     expect(sanitizeForDisplay(`a<b${LEAD}`, { maxLength: 4 })).toBe(
       "a<b" + LEAD[0] + DISPLAY_TRUNCATION_MARKER,
     );

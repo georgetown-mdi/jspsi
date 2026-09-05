@@ -7,7 +7,7 @@ import {
 import { STANDARDIZATION_FUNCTION_DESCRIPTORS } from "../src/standardization";
 import type { LinkageTerms } from "../src/config/linkageTerms";
 
-// A terms shape carrying a single element transform, enough for the gate walk.
+// A terms shape holding a single element transform, enough for the gate walk.
 const termsWith = (
   transform: Array<{ function: string; params?: Record<string, unknown> }>,
 ): Pick<LinkageTerms, "linkageKeys"> => ({

@@ -49,13 +49,12 @@ const termsA: LinkageTerms = {
 };
 const termsB: LinkageTerms = { ...termsA, identity: "Party B" };
 
-// What a party retains is a result FILE, so the round trip below goes through
-// one: buildOutputTable emits RFC 4180 escaped cells, every writer only joins
-// them with commas and newlines (the CLI's writeOutput, the web bench's
-// download), and reconstruction consumes the LOGICAL values a reader hands back.
-// Serializing and re-reading here puts the escaper and the parser inside the
-// claim -- handing buildOutputTable's escaped cells straight to reconstruction
-// would verify with a broken escaper on either side.
+// What a party retains is a result FILE, so the round trip below runs through
+// one: buildOutputTable emits RFC 4180 escaped cells, and every writer joins
+// them with commas and newlines alone (the CLI's writeOutput, the web console's
+// download). Serializing and re-reading here keeps the escaper and parser both
+// inside the claim, rather than testing reconstruction against raw escaped
+// cells.
 async function writeAndReadBack(table: {
   headers: string[];
   rows: Array<Array<string>>;
@@ -92,9 +91,9 @@ async function roundTrip(opts: {
     partnerTerms: termsB,
     outcome: "completed",
     recordsExposed: opts.rawRows.length,
-    // The seam's own definition of the attested figure, read here rather than
-    // restated, so a change to what a record attests is a failure in these round
-    // trips too.
+    // matchedPairCount's own definition of the attested figure, read here
+    // rather than restated, so a change to what a record attests is a failure
+    // in these round trips too.
     resultSize: matchedPairCount(opts.associationTable),
     associationTable: opts.associationTable,
     localPayloadSent,
@@ -137,7 +136,7 @@ const idRows: CSVRow[] = [
   { pid: "P2", dose: "30mg" },
 ];
 
-// The characters that make the result file's escaping load-bearing, plus the
+// The characters that make the result file's escaping critical, plus the
 // empty cell. Named so each is visible in a failure's diff.
 const COMMA_VALUE = "Doe, Jane";
 const QUOTE_VALUE = 'she said "hi"';
@@ -399,7 +398,7 @@ describe("reconstructCommittedData round-trips through the real build path", () 
 });
 
 // A deduplicating cardinality repeats a row index on one side of the association
-// table, so the result file carries several rows against one record. The record's
+// table, so the result file holds several rows against one record. The record's
 // commitments still bind one payload row per matched RECORD on each side, and the
 // re-supply path has to collapse the repeated result rows back to it -- on the
 // local side for the sent payload, on the partner side for the received one. Both
@@ -408,7 +407,7 @@ describe("reconstructCommittedData round-trips through the real build path", () 
 describe("reconstructCommittedData round-trips a deduplicating cardinality", () => {
   test("the 'one' side: several partner records against one of ours", async () => {
     // The partner's rows 1 and 0 both link to our row 0, and its row 3 to our
-    // row 2. Its payload carries one row per record IT matched, ascending.
+    // row 2. Its payload holds one row per record IT matched, ascending.
     const partnerPayload: PartnerPayload = {
       columns: ["note"],
       rowIndices: [0, 1, 3],
@@ -449,7 +448,7 @@ describe("reconstructCommittedData round-trips a deduplicating cardinality", () 
 
   test("the 'many' side: several of our records against one partner record", async () => {
     // Our rows 0 and 1 both link to the partner's row 1, and our row 2 to its
-    // row 3. The partner is the "one" side here, so its payload carries one row
+    // row 3. The partner is the "one" side here, so its payload holds one row
     // per record it matched -- two rows against our three pairs.
     const partnerPayload: PartnerPayload = {
       columns: ["note"],
@@ -628,7 +627,7 @@ describe("an edited copy of a repeated result row fails its commitment", () => {
 
   test("a moved pairing column surfaces the divergence on the table instead", async () => {
     // The case the warning's attribution has to stay conditional for. Pointing
-    // the third result row at the partner row the first two already carry makes
+    // the third result row at the partner row the first two already hold makes
     // its value cell a disagreeing copy -- but the collapse then reproduces the
     // two rows the partner sent EXACTLY, so the received-payload commitment
     // opens and the association table is the one that mismatches. A warning
@@ -655,14 +654,11 @@ describe("an edited copy of a repeated result row fails its commitment", () => {
   });
 });
 
-// No commitment covers the recorded result size, so verification recounts it from
-// the pairing the record does commit to. Each case below alters that one cleartext
-// field of an otherwise honest artifact set -- the commitments are untouched, so a
-// verdict that still read "verified" would be telling an auditor the pair count is
-// whatever the holder typed. The wrong figures are the plausible ones: under a
-// deduplicating cardinality the pair count diverges from both parties'
-// matched-record counts, and either of those read into the field is exactly the
-// misstatement the recorded figure is defined against.
+// No commitment covers the recorded result size, so verification recounts it
+// from the pairing the record does commit to. Each case below alters that one
+// cleartext field of an otherwise honest artifact set -- the commitments stay
+// untouched, so a "verified" verdict would mean the pair count is whatever the
+// holder typed.
 describe("a tampered result size fails against the re-supplied pairing", () => {
   // What an auditor verifies is a record FILE, so `viaRecordFile` writes the
   // altered record through the record's own serializer and reads it back through
@@ -792,7 +788,7 @@ describe("reconstructCommittedData round-trips a live PSI exchange", () => {
     linkageFields: [{ name: "firstName", type: "first_name" as const }],
     linkageKeys: [{ name: "firstName", elements: [{ field: "firstName" }] }],
   };
-  // Deliberately different row orders on the two sides, so the partner send order
+  // Different row orders on the two sides, by design, so the partner send order
   // and our association order genuinely diverge (exercising the sort).
   const serverRows: CSVRow[] = [
     { first_name: "Elizabeth", note: "s-e" },

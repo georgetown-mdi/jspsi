@@ -13,12 +13,12 @@ import type { Metadata } from "../src/config/metadata";
 import type { LinkageTerms, Output } from "../src/config/linkageTerms";
 import type { OutboundPayloadConsent } from "../src/config/outboundPayloadConsent";
 
-// The acceptor shape this whole mechanism exists for: an invitation authors the
-// inviter's send and no receive, so the mirror leaves the acceptor's own
-// `payload.send` ABSENT and its outbound set comes from its own CSV header, where
-// every unrecognized column is transmitted by default. The consent record is what
-// makes that set chosen rather than inferred, so these fixtures deliberately carry
-// no payload block at all.
+// The acceptor shape this whole mechanism exists for: an invitation authors
+// the inviter's send and no receive, so the mirror leaves the acceptor's
+// own `payload.send` ABSENT and its outbound set comes from its own CSV
+// header, where every unrecognized column is transmitted by default. The
+// consent record is what makes that set chosen rather than inferred, so
+// these fixtures hold no payload block at all.
 
 const acceptorTerms: LinkageTerms = {
   version: "1.0.0",
@@ -117,9 +117,9 @@ test("deriveOutboundPayloadConsent: what it writes, the run-time read finds curr
 // --- assessOutboundPayloadConsent --------------------------------------------
 
 test("assessOutboundPayloadConsent: no record leaves the party lazy, as every non-acceptor is", () => {
-  // An inviter, a zero-setup run, and a hand-authored config carry no record: the
-  // field's absence is the whole of the backwards-compatible path, so it must not
-  // be readable as anything else.
+  // An inviter, a zero-setup run, and a hand-authored config hold no record:
+  // the field's absence is the whole of the backwards-compatible path, so
+  // it must not be readable as anything else.
   expect(
     assessOutboundPayloadConsent(
       undefined,
@@ -144,8 +144,9 @@ test("assessOutboundPayloadConsent: nothing transmitted needs no confirmation, e
 });
 
 test("assessOutboundPayloadConsent: a pending record names the set it would send", () => {
-  // The accept-with-no-input case. The verdict carries the resolved set so the
-  // surface that asks can show what it is asking about, not merely that it must.
+  // The accept-with-no-input case. The verdict holds the resolved set so
+  // the surface that asks can show what it is asking about, not merely
+  // that it must.
   const verdict = assessOutboundPayloadConsent(
     { status: "pending" },
     metadataDisclosing(["diagnosis", "notes"]),
@@ -330,10 +331,11 @@ test("assertOutboundPayloadConsented: the passing cases throw nothing", () => {
 
 // --- prepareForExchange wiring -----------------------------------------------
 
-// The run-boundary backstop: whatever front end prepared the exchange, a set this
-// party never confirmed does not reach a connection. These drive the CSV-header
-// path (no metadata in the spec), which is the acceptor's own -- an unrecognized
-// column becomes transmitted payload with no operator choice involved.
+// The run-boundary safety check: whatever front end prepared the exchange,
+// a set this party never confirmed does not reach a connection. These
+// drive the CSV-header path (no metadata in the spec), which is the
+// acceptor's own -- an unrecognized column becomes transmitted payload
+// with no operator choice involved.
 
 const acceptorRows = [{ first_name: "Alice", diagnosis: "A" }];
 const acceptorColumns = ["first_name", "diagnosis"];
@@ -421,9 +423,10 @@ test("prepareForExchange: a party with no consent record is untouched", () => {
 // --- resolveExchangeInputs ---------------------------------------------------
 
 test("resolveExchangeInputs: resolves what prepareForExchange resolves", () => {
-  // The confirmation asks about the set a front end resolved BEFORE preparing, so
-  // the two resolutions have to be the same one. This pins that on both branches:
-  // a spec that carries metadata, and one whose metadata comes from the header.
+  // The confirmation asks about the set a front end resolved BEFORE
+  // preparing, so the two resolutions have to be the same one. This pins
+  // that on both branches: a spec that holds metadata, and one whose
+  // metadata comes from the header.
   for (const spec of [
     { linkageTerms: acceptorTerms },
     {

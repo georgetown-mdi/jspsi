@@ -6,12 +6,11 @@ import PSI from "@openmined/psi.js";
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 
 // Byte-for-byte interop anchor for the native N-API addon: the vendored WASM
-// engine must reproduce the exact serialized bytes committed in
-// psi-engine-wire-vectors.json for the four operations, so the addon -- which
-// wraps the same private-join-and-compute P-256 curve and wire format -- has a
-// concrete target and a fork re-roll that changes the bytes fails here. See
-// generate-psi-engine-wire-vectors.mjs to regenerate. This pins raw wire bytes;
-// the resolved intersection/association KATs live elsewhere.
+// engine must reproduce the bytes in psi-engine-wire-vectors.json for the four
+// operations, so a fork re-roll that changes them fails here (the addon shares
+// the same private-join-and-compute P-256 curve and wire format). Regenerate
+// via generate-psi-engine-wire-vectors.mjs. This pins raw wire bytes; the
+// resolved intersection/association KATs live elsewhere.
 
 interface WireVectors {
   revealIntersection: boolean;

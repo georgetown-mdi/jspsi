@@ -18,15 +18,15 @@ const MAX_KEY_TYPE_BYTES = 64;
  */
 const PLACEHOLDER_SOURCE_BYTES = 24;
 
-/** What a blob carrying no readable type at all yields. */
+/** What a blob holding no readable type at all yields. */
 const UNREADABLE_KEY_TYPE = "(unknown)";
 
 /**
  * Whether a byte may appear in a host-key type returned verbatim: the charset
  * `[A-Za-z0-9._@-]`, which covers the SSH algorithm names (`ssh-ed25519`,
- * `ecdsa-sha2-nistp256`, `rsa-sha2-512`) plus the `@` and `.` a certificate type
- * carries (`ssh-ed25519-cert-v01@openssh.com`). Every accepted byte is below
- * 0x80, so an accepted sequence is its own UTF-8 encoding.
+ * `ecdsa-sha2-nistp256`, `rsa-sha2-512`) plus the `@` and `.` a certificate
+ * type has (`ssh-ed25519-cert-v01@openssh.com`). Every accepted byte is
+ * below 0x80, so an accepted sequence is its own UTF-8 encoding.
  */
 function isAcceptedKeyTypeByte(byte: number): boolean {
   return (
@@ -56,17 +56,16 @@ function acceptedKeyType(typeBytes: Uint8Array): string | undefined {
 }
 
 /**
- * The stand-in for a type the charset or length bound rejects: `(unknown:` plus
- * the lowercase hex of the type's first {@link PLACEHOLDER_SOURCE_BYTES} bytes,
- * plus `)`. Encoding the offending bytes rather than discarding them keeps two
- * rejected types that differ within those bytes distinguishable, which is what
- * the cross-party reconciliation compares; two that share a
- * {@link PLACEHOLDER_SOURCE_BYTES}-byte prefix do collapse to one placeholder,
- * a limit stated in docs/spec/CHANNEL_SECURITY.md (SFTP host-key verification)
- * rather than a defect, since an adversary who wants two observed types to
- * compare equal can present `ssh-ed25519`. The parentheses lie outside the
- * accepted charset, so a server cannot name its key type a string that passes
- * for one of these.
+ * The stand-in for a type the charset or length bound rejects: `(unknown:`
+ * plus the lowercase hex of the type's first {@link PLACEHOLDER_SOURCE_BYTES}
+ * bytes, plus `)`. Encoding the offending bytes rather than discarding them
+ * keeps two rejected types that differ within those bytes distinguishable,
+ * which is what the cross-party reconciliation compares. Two types sharing a
+ * {@link PLACEHOLDER_SOURCE_BYTES}-byte prefix collapse to one placeholder;
+ * that is a documented limit, not a defect (docs/spec/CHANNEL_SECURITY.md,
+ * SFTP host-key verification). The parentheses lie outside the accepted
+ * charset, so a server cannot name its key type a string that passes for
+ * one of these.
  */
 function placeholderKeyType(typeBytes: Uint8Array): string {
   let hex = "";
@@ -77,7 +76,7 @@ function placeholderKeyType(typeBytes: Uint8Array): string {
 
 /**
  * Parse the SSH key-type string from a raw OpenSSH host-key blob, bounded so an
- * operator-facing identifier taken off the wire carries neither arbitrary bytes
+ * operator-facing identifier taken off the wire has neither arbitrary bytes
  * nor arbitrary length.
  *
  * The blob wire format is a sequence of length-prefixed strings; the first
@@ -90,7 +89,7 @@ function placeholderKeyType(typeBytes: Uint8Array): string {
  * - Any other non-empty type: `(unknown:<hex>)`, encoding the type's leading
  *   bytes (see {@link placeholderKeyType}). At most 58 characters, so it fits
  *   the bound a partner parses an advertised key type under.
- * - A blob carrying no type at all -- too short to hold a length prefix, or a
+ * - A blob holding no type at all -- too short to hold a length prefix, or a
  *   zero, oversized, or past-the-end one: `"(unknown)"` rather than a throw, so
  *   a partial packet does not break the verifier's error message.
  */
@@ -148,7 +147,7 @@ function fromBase64Unpadded(b64: string): Uint8Array {
  * what OpenSSH displays and what operators paste into configs.
  *
  * @param keyBlob - raw host-key blob as received from ssh2's `hostVerifier`
- *   callback (no `hostHash` must be set -- `hostHash` causes ssh2 to
+ *   callback (`hostHash` must not be set -- `hostHash` causes ssh2 to
  *   pre-hash the key before passing it here, destroying the raw bytes needed
  *   for this computation).
  */
@@ -160,22 +159,21 @@ export async function computeHostKeyFingerprint(
 }
 
 /**
- * Return the first fingerprint in `pins` that the raw SSH host-key blob matches,
- * or `undefined` when it matches none. The blob is hashed once and its digest
- * compared against each pin, so a server presenting a host key matching ANY pin
- * is accepted. This is what lets a rotated host key be staged alongside the
- * current one during a rekey window -- pin both and either is accepted, with no
- * failed exchange in between -- then the old entry dropped once the cutover is
- * complete.
+ * Return the first fingerprint in `pins` that the raw SSH host-key blob
+ * matches, or `undefined` when it matches none. The blob is hashed once
+ * and compared against each pin, so a key matching ANY pin is accepted --
+ * this is what lets a rotated host key be staged alongside the current one
+ * during a rekey window (pin both, then drop the old entry once cutover
+ * completes) with no failed exchange in between.
  *
  * Returns the MATCHED pin verbatim (canonical, format-validated at config
- * parse), so the caller can record exactly which pinned key the server
- * presented; iteration stops at the first match. A malformed pin (a body `atob`
- * cannot decode) is skipped rather than throwing, so one bad entry fails closed
- * (never matches) without breaking matching against the rest. Nothing secret is
- * compared (a host key and its fingerprint are both public), so the
- * short-circuit on the first match is not a timing concern; the per-pin compare
- * is {@link bytesEqual} for digest-comparison hygiene.
+ * parse) so the caller can record which pinned key the server presented;
+ * iteration stops at the first match. A malformed pin (one `atob` cannot
+ * decode) is skipped rather than thrown, so one bad entry fails closed
+ * without blocking a match against the rest. Nothing secret is compared --
+ * a host key and its fingerprint are both public -- so the first-match
+ * short-circuit is not a timing concern; the per-pin compare is {@link
+ * bytesEqual} for digest-comparison hygiene.
  *
  * @param keyBlob - raw host-key blob from ssh2's `hostVerifier`
  * @param pins - pinned fingerprints in OpenSSH SHA256 format

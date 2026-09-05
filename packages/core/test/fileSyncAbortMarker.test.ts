@@ -27,17 +27,14 @@ const TOKEN_PEER = new Uint8Array(32).fill(0x22);
 
 const TEST_DIR = "/test";
 
-// In-memory FileTransportClient instrumented for the teardown-sequencing tests:
-//   - records an op log so a test can assert ordering (e.g. the abort marker's
-//     rename completed BEFORE the transport was ended);
-//   - models a real transport where end() destroys the channel: once end() runs,
-//     a put/rename that is still in flight rejects. This is what makes the
-//     sequencing test a genuine falsifier -- if close() ended the transport
-//     before awaiting the marker write, the write would reject and the marker
-//     would never land, so the test would go red;
-//   - optionally delays writes (so the fire-and-forget close() has a real window
-//     to race ahead of the write if the decision-await were missing) or hangs
-//     them forever (to exercise the short write budget).
+// In-memory FileTransportClient instrumented for the teardown-sequencing
+// tests: records an op log so a test can assert ordering (e.g. the abort
+// marker's rename completed BEFORE the transport was ended); models a real
+// transport where end() destroys the channel, so a put/rename still in
+// flight after it rejects -- making the sequencing test a genuine falsifier,
+// since an early end() would reject the marker write and redden the test;
+// and optionally delays writes (to give a missing decision-await a real
+// window to race ahead) or hangs them forever (to exercise the write budget).
 function makeAbortTestClient(opts?: {
   writeDelayMs?: number;
   hangWrite?: boolean;
@@ -92,12 +89,11 @@ function makeAbortTestClient(opts?: {
       if (ended) throw new Error(`${dest}: transport ended mid-write`);
       // Match the real adapter contract: put() takes a Buffer or a
       // [header, payload] chunk list (or a stream) body, never a string --
-      // LocalFSClient throws on a string src and ssh2-sftp-client treats a string
-      // as a local file PATH to copy from. The mock must reject a string too, or
-      // it silently masks a marker-body regression that would be swallowed by the
-      // best-effort write in production. The abort marker is always a single
-      // Buffer, but join a chunk list defensively so the mock stores the same
-      // on-disk bytes a real transport would.
+      // LocalFSClient throws on a string src, and ssh2-sftp-client reads a
+      // string as a local file PATH. The mock rejects a string too, or it
+      // would mask a marker-body regression the production best-effort
+      // write would swallow. Join a chunk list defensively so the mock
+      // stores the same on-disk bytes a real transport would.
       if (typeof src === "string")
         throw new Error(
           `${dest}: put expects a Buffer body, not a string (real adapters ` +
@@ -329,8 +325,8 @@ test("the echo path seals without writing a marker (the waiting party does not e
   const { client, files, ops } = makeAbortTestClient({ writeDelayMs: 20 });
   const conn = await makeArmedConn(client);
 
-  // The read side surfaced a verified PeerAbortError; the bridge fire-and-forgets
-  // close(), which parks on the decision.
+  // The read side raised a verified PeerAbortError; the bridge
+  // fire-and-forgets close(), which parks on the decision.
   const mc = driveFault(conn, new PeerAbortError());
 
   // The catch gate sees a PeerAbortError (errIsPeerAbort) and does NOT write.
@@ -466,8 +462,9 @@ test("a malformed (non-JSON / wrong-version) marker is ignored", async () => {
 // --- reflection: a captured marker renamed to the other name does not validate
 
 test("a self-role token presented as the peer marker does not validate (reflection)", async () => {
-  // A `<self>-abort.json` captured and renamed to `<peerId>-abort.json` carries
-  // the self-role token; the reader expects the peer-role token, so it rejects.
+  // A `<self>-abort.json` captured and renamed to `<peerId>-abort.json`
+  // holds the self-role token; the reader expects the peer-role token, so
+  // it rejects.
   const { client, files } = makeAbortTestClient();
   const conn = await makeArmedConn(client, { peerId: PEER_ID });
   plantPeerMarker(files, TOKEN_SELF);

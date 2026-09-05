@@ -3,71 +3,51 @@ import { exceedsOwnKeyCount } from "./objectKeyCount.js";
 
 /**
  * Maximum object/array nesting depth {@link transformKeysDeep} will descend
- * through before rejecting the input. The walker recurses once per level with
- * native recursion, so an untrusted payload nested past the call-stack limit
- * (empirically a few thousand levels, and lower on a smaller stack) would
- * otherwise overflow with a `RangeError` BEFORE any schema validation runs --
- * `parseLinkageTerms` camelizes ahead of Zod, so a deeply-nested partner payload
- * (a few tens of KB of JSON, trivially within the invitation and frame caps)
- * reaches this walker first. 256 is far above any real config or exchange message
- * -- the deepest schema path is under a dozen levels, and a `transform.params`
- * value (the deepest partner-controlled spot, typed `z.unknown()`) holds shallow
- * scalars -- yet well below the overflow threshold on any stack, so the guard
- * fires as a clean bounded rejection long before native recursion would fault.
- * Rejecting here, at the single shared camelize/snakeize chokepoint and ahead of
- * Zod, also keeps a deep value from surviving validation (under `z.unknown()`)
- * only to overflow a later recursive consumer such as `canonicalString`.
+ * before rejecting the input. The walker recurses once per level with native
+ * recursion, so an untrusted payload nested past the call-stack limit
+ * (empirically a few thousand levels) would otherwise overflow with a
+ * `RangeError` before schema validation runs (`parseLinkageTerms` camelizes
+ * ahead of Zod). 256 is far above any real config or exchange message (the
+ * deepest schema path is under a dozen levels) yet well below the overflow
+ * threshold, so the guard fires as a clean bounded rejection first --
+ * protecting a later recursive consumer such as `canonicalString` too.
  */
 export const MAX_NESTING_DEPTH = 256;
 
 /**
  * Maximum total node count {@link transformKeysDeep} will rewrite before
- * rejecting the input -- the WIDTH analogue of the {@link MAX_NESTING_DEPTH}
- * depth bound. A "node" is one object member or one array element; the budget is
- * a single running total threaded across the WHOLE walk (every object and every
- * array), not a per-container cap.
+ * rejecting the input -- the WIDTH analogue of {@link MAX_NESTING_DEPTH}. A
+ * "node" is one object member or array element, counted as a single running
+ * total across the whole walk, not per container.
  *
- * The snake->camel rewrite is O(total nodes), and `camelizeKeys` runs ahead of
- * all Zod validation on partner input (`parseLinkageTerms` off the post-handshake
- * wire and the invitation token), so without this bound an authenticated peer can
- * drive a one-shot multi-second CPU burn before validation rejects -- or, worse,
- * silently accepts -- the payload. Two unbounded shapes motivate it: (a) a
- * multi-million-key object placed under an UNKNOWN top-level key is fully
- * camelized and then SILENTLY STRIPPED by the non-strict schema, so the parse
- * SUCCEEDS after the burn rather than rejecting; (b) a count-gated partner array
- * (linkageFields, linkageKeys, exclude, transform steps, elements, payload
- * columns) is walked in full by the pre-pass before its `boundedArray` count
- * refine can reject it. A running total catches both -- path (a)'s single wide
- * object AND path (b)'s width spread across many small ones -- where a per-object
- * cap alone would miss the latter.
+ * `camelizeKeys` runs ahead of Zod on partner input, so without this bound a
+ * peer can drive a multi-second CPU burn before validation rejects the
+ * payload -- or, worse, have it silently accepted: a huge object nested
+ * under an unknown key is fully camelized and then silently stripped by the
+ * non-strict schema, and a count-gated array is walked in full by the
+ * pre-pass before its own count bound can reject it. A running total catches
+ * both the wide-object case and width spread across many small arrays.
  *
- * 262144 (2^18) is far above any realistic operator `ExchangeSpec` -- low tens of
- * thousands of nodes at most (its single widest object is a `transform.params`
- * record at `MAX_PARAMS_ENTRIES` = 256, its collections cap at 256 to 4096
- * entries) -- and far below the burn: the rewrite reaches a multi-second cost only
- * past ~1M nodes (measured), whereas rejecting at this budget caps the wasted walk
- * well under a second. Like the rest of the parsed-input-bounds family it is
- * defense-in-depth, not a semantic limit: the per-collection caps DO compose to a
- * schema-valid maximum above this budget (256 `linkageFields`, each carrying a
- * 4096-entry `exclude`, is ~1M nodes), so a pathological-but-schema-valid config
- * could trip it -- but no config a real operator writes comes within an order of
- * magnitude, and a tripped one fails as the same clean bounded rejection. It also
- * sits above the decode layer's per-object key ceiling
- * (`MAX_JSON_OBJECT_KEYS` = 65536, boundedJson.ts), so any single object that
- * layer admits still camelizes. The two compose: the decode budget bounds each
- * CONTAINER's width before `JSON.parse`; this bounds the TOTAL the walker
- * rewrites. See docs/spec/CHANNEL_SECURITY.md.
+ * 262144 (2^18) sits far above any realistic `ExchangeSpec` (low tens of
+ * thousands of nodes) and far below the burn threshold (~1M nodes,
+ * measured). Defense-in-depth, not a semantic limit: the per-collection caps
+ * compose to a schema-valid maximum above this budget, so a
+ * pathological-but-valid config could still trip it and fail the same clean
+ * rejection. Sits above the decode layer's per-object key ceiling
+ * (`MAX_JSON_OBJECT_KEYS` = 65536, boundedJson.ts), which bounds each
+ * container's width before `JSON.parse`; this bounds the walker's total. See
+ * docs/spec/CHANNEL_SECURITY.md.
  */
 export const MAX_NODE_COUNT = 262144;
 
 /**
  * Thrown by {@link transformKeysDeep} (and so by {@link camelizeKeys} /
- * {@link snakeizeKeys}) when input nesting exceeds {@link MAX_NESTING_DEPTH}. A
- * {@link UsageError} subclass, like the transport input-bound errors and
- * `CanonicalEncodingError`: a payload too deep to walk is a bounded rejection of
- * untrusted input, terminal and (at the CLI) exit 64, not an internal fault. Its
- * message is fixed text carrying no input bytes, so the parse-error relay
- * (`describeDecodeError`) can surface it verbatim.
+ * {@link snakeizeKeys}) when input nesting exceeds {@link MAX_NESTING_DEPTH}.
+ * A {@link UsageError} subclass, like the transport input-bound errors and
+ * `CanonicalEncodingError`: a payload too deep to walk is a bounded
+ * rejection, terminal and exit 64 at the CLI, not an internal fault. Its
+ * message is fixed text holding no input bytes, so the parse-error relay
+ * (`describeDecodeError`) can show it verbatim.
  */
 export class NestingDepthExceededError extends UsageError {
   constructor() {
@@ -79,10 +59,11 @@ export class NestingDepthExceededError extends UsageError {
 /**
  * Thrown by {@link transformKeysDeep} (and so by {@link camelizeKeys} /
  * {@link snakeizeKeys}) when the input's total node count exceeds
- * {@link MAX_NODE_COUNT}. The width counterpart of {@link NestingDepthExceededError}:
- * same {@link UsageError} contract (terminal, exit 64 at the CLI, fixed message
- * carrying no input bytes so `describeDecodeError` surfaces it verbatim), for a
- * payload too WIDE to rewrite rather than too deep.
+ * {@link MAX_NODE_COUNT}. The width counterpart of
+ * {@link NestingDepthExceededError}: same {@link UsageError} contract
+ * (terminal, exit 64 at the CLI, fixed message holding no input bytes so
+ * `describeDecodeError` shows it verbatim), for a payload too WIDE to
+ * rewrite rather than too deep.
  */
 export class NodeCountExceededError extends UsageError {
   constructor() {
@@ -93,28 +74,25 @@ export class NodeCountExceededError extends UsageError {
 
 /**
  * Field names whose value is an opaque map passed verbatim to an external
- * library, and whose keys must therefore NOT be case-transformed. Currently
- * only `connection.provider_options` / `providerOptions`, which is spread
- * directly into the `ssh2-sftp-client` connect options -- a namespace defined by
- * that library, whose keys are camelCase (e.g. `readyTimeout`, `algorithms`) and
- * are not psilink's to normalize. Every other map in the exchange schema is
- * psilink's own vocabulary and follows the snake_case-in-YAML <-> camelCase-in-TS
- * convention (this includes the function-specific `params` blocks, which feed
- * psilink's own standardizing-function library and are read as camelCase keys).
+ * library, whose keys must therefore NOT be case-transformed. Currently only
+ * `connection.provider_options` / `providerOptions`, spread directly into
+ * the `ssh2-sftp-client` connect options -- a namespace defined by that
+ * library (camelCase keys like `readyTimeout`, `algorithms`), not psilink's
+ * to normalize. Every other map in the exchange schema, including the
+ * function-specific `params` blocks, is psilink's own vocabulary and
+ * follows the snake_case-in-YAML <-> camelCase-in-TS convention.
  *
- * The set is keyed by canonical camelCase name and is the single source of truth
- * baked into the shared recurse-and-skip walker ({@link transformKeysDeep}), so
- * the read (`camelizeKeys`) and write (`snakeizeKeys`) directions skip exactly
- * the same subtrees and the write -> read round-trip stays byte-stable.
+ * Keyed by canonical camelCase name and baked into the shared
+ * recurse-and-skip walker ({@link transformKeysDeep}), so the read
+ * (`camelizeKeys`) and write (`snakeizeKeys`) directions skip exactly the
+ * same subtrees and the write -> read round-trip stays byte-stable.
  *
- * This is a key-NAME match, not a path match: a key named `provider_options`
- * (snake) / `providerOptions` (camel) at any depth is treated as opaque. No
- * other schema field uses that name, and the contents of an opaque map are
- * themselves opaque, so a nested occurrence is correctly left verbatim too.
+ * A key-NAME match, not a path match: `provider_options` / `providerOptions`
+ * at any depth is opaque, since no other schema field uses that name and a
+ * nested opaque map's own contents are opaque too.
  *
- * Exported (not a stable public API) so the structural-invariant test can drive
- * its assertion from this same source of truth; consumers outside the workspace
- * should not depend on its contents.
+ * Exported (not a stable public API) so the structural-invariant test can
+ * drive its assertion from this same source of truth.
  *
  * @internal
  */
@@ -127,24 +105,23 @@ function snakeToCamel(s: string): string {
 }
 
 /**
- * Rewrite ONE camelCase key to the snake_case spelling the user-facing document
- * writes, the scalar half of {@link snakeizeKeys} and the exact inverse of the
- * read direction for the keys the exchange schema uses.
+ * Rewrite ONE camelCase key to the snake_case spelling the user-facing
+ * document writes: the scalar half of {@link snakeizeKeys}, and the exact
+ * inverse of the read direction for the keys the exchange schema uses.
  *
- * Exported for the schema-error render seams: validation runs on the camelized
- * shape ({@link camelizeKeys} before Zod), so a Zod issue locates its field by
- * the camelCase name, while the operator is reading a document that writes the
- * key in snake_case. A seam that names a key to a human passes each path segment
- * through this, so it names the key as the file spells it -- and as psilink's own
- * writer would spell it, since that writer is {@link snakeizeKeys} over this same
- * function.
+ * Exported for the schema-error render call sites: validation runs on the
+ * camelized shape ({@link camelizeKeys} before Zod), so a Zod issue locates
+ * its field by the camelCase name while the operator reads a document that
+ * writes the key in snake_case. A call site naming a key to a human passes
+ * each path segment through this, so it names the key as the file -- and
+ * psilink's own writer, {@link snakeizeKeys} -- would spell it.
  *
- * It carries {@link snakeizeKeys}'s limit: not a general camelCase inverse, so a
- * key with an embedded acronym (`URL`) renders `u_r_l`. Every key the exchange
- * schema defines is lowercase words, so the inverse is exact for them; a key from
- * a free-form record (a transform's `params`) is the operator's own and can be
- * spelled outside that convention. Not a stable public API for consumers outside
- * the workspace, exactly as {@link snakeizeKeys} is not.
+ * It has {@link snakeizeKeys}'s limit: not a general camelCase inverse, so a
+ * key with an embedded acronym (`URL`) renders `u_r_l`. Every schema-defined
+ * key is lowercase words, so the inverse is exact for them; a free-form
+ * record's key (a transform's `params`) is the operator's own and can fall
+ * outside that convention. Not a stable public API, exactly as
+ * {@link snakeizeKeys} is not.
  *
  * @internal
  */
@@ -154,68 +131,55 @@ export function snakeizeKey(key: string): string {
 
 /**
  * Shared recurse-and-skip walker behind both {@link camelizeKeys} (read) and
- * {@link snakeizeKeys} (write). It recurses through arrays and objects rewriting
- * every object key with `transformKey`, except that an opaque key's value
- * (`OPAQUE_VALUE_KEYS`) is left verbatim: the key itself is still rewritten, but
- * its subtree is not entered, so a user-authored key (snake or camel) survives
- * byte-for-byte in both directions. String values are never touched, only keys.
+ * {@link snakeizeKeys} (write). Recurses through arrays and objects
+ * rewriting every object key with `transformKey`, except that an opaque
+ * key's value (`OPAQUE_VALUE_KEYS`) is left verbatim: the key itself is
+ * rewritten, but its subtree is not entered, so a user-authored key survives
+ * byte-for-byte in both directions. String values are never touched, only
+ * keys.
  *
- * Opacity is decided on the canonical camelCase form of the *input* key
- * (`snakeToCamel(k)`), independent of the output transform. snakeToCamel is a
- * no-op on a key that is already camelCase, so it canonicalizes a snake_case
- * read key and a camelCase write key alike. Because the skip predicate is this
- * one fixed expression rather than a per-direction check, the read and write
- * directions provably skip the identical set of subtrees -- the structural
- * guarantee (asserted directly by a unit test driven from OPAQUE_VALUE_KEYS)
- * that keeps the write -> read round-trip byte-stable, rather than two
- * independent recursions held in agreement by prose.
+ * Opacity is decided on the canonical camelCase form of the INPUT key
+ * (`snakeToCamel(k)`), independent of the output transform, so a snake_case
+ * read key and a camelCase write key canonicalize alike. Because the skip
+ * predicate is this one fixed expression rather than a per-direction check,
+ * the read and write directions provably skip the identical set of
+ * subtrees -- asserted directly by a unit test driven from
+ * OPAQUE_VALUE_KEYS -- rather than two independent recursions held in
+ * agreement by prose.
  *
- * `depth` bounds the native recursion against an untrusted deeply-nested payload:
- * the root value is at depth 0, so a value at depth {@link MAX_NESTING_DEPTH} or
- * deeper -- past the documented {@link MAX_NESTING_DEPTH} levels -- is rejected
- * with a clean {@link NestingDepthExceededError} before the recursion can
- * overflow the call stack with a `RangeError`; values shallower than that are
- * walked normally. The opaque-key skip does not recurse, so an opaque subtree's
- * own depth never counts toward the bound.
+ * `depth` bounds the native recursion against an untrusted deeply-nested
+ * payload: the root is depth 0, and a value at {@link MAX_NESTING_DEPTH} or
+ * deeper is rejected with {@link NestingDepthExceededError} before the
+ * recursion can overflow the call stack. An opaque subtree's own depth
+ * never counts toward the bound, since it is not recursed into.
  *
- * `budget` is a single mutable node counter threaded across the WHOLE walk (one
- * is created per top-level {@link camelizeKeys} / {@link snakeizeKeys} call),
- * bounding the total rewrite width against an untrusted wide payload -- the
- * counterpart of the `depth` bound above. Each array element and each object
- * member counts one node; crossing {@link MAX_NODE_COUNT} throws a clean
- * {@link NodeCountExceededError} before the rewrite burns. An over-wide array is
- * refused by its O(1) length before `.map`, and an over-wide object by a
- * streaming own-key count before `Object.entries` materializes it, so neither the
- * burn nor the materialization happens. Like the depth bound, a SKIPPED subtree
- * (an opaque value, or a width-bounded over-count value below) is not recursed
- * into and so never counts toward this budget -- which is how the two width
- * mechanisms compose without double-counting: the per-key skip hands one bounded
- * record straight to the schema for the cost of a key count, and this budget
- * bounds everything the walk actually rewrites.
+ * `budget` is a single mutable node counter threaded across the whole walk
+ * (one per top-level call), bounding the total rewrite width against an
+ * untrusted wide payload -- the width counterpart of `depth`. Each array
+ * element and object member counts one node; crossing
+ * {@link MAX_NODE_COUNT} throws {@link NodeCountExceededError} before the
+ * rewrite burns. An over-wide array is refused by its O(1) length before
+ * `.map`, and an over-wide object by a streaming own-key count before
+ * `Object.entries` materializes it. A skipped subtree (opaque, or
+ * width-bounded below) is not recursed into and so never counts toward
+ * this budget.
  *
  * `widthBoundedKeys` is an optional caller-supplied map from a (canonical
- * camelCase) key name to the maximum key count its object value may carry. When
- * a key matches and its object value exceeds that count -- decided by a key count
- * (see {@link exceedsOwnKeyCount}; O(n) in keys, but the cheapest such pass) --
- * the value is left verbatim instead of being recursed into and rewritten key by
- * key, exactly as an opaque subtree is. This is a defense against a
- * pathological-key-count partner record (the `transform.params` map) whose
- * snake->camel rewrite would otherwise burn multiple seconds
- * before the schema's own count bound could reject it: leaving it verbatim hands
- * the over-count record to the matching schema (which rejects it with a single
- * clean issue) for the cost of one key count instead of the far more expensive
- * rewrite. A within-bound value is recursed into and rewritten as normal, so a
- * legitimate record is unaffected; like the opaque skip, only the value is left
- * verbatim, the key itself is still rewritten.
+ * camelCase) key name to the maximum key count its object value may hold.
+ * When a key matches and its value exceeds that count (see
+ * {@link exceedsOwnKeyCount}), the value is left verbatim instead of being
+ * recursed into, exactly as an opaque subtree is -- a defense against a
+ * pathological-key-count partner record (`transform.params`) whose rewrite
+ * would otherwise burn multiple seconds before the schema's own count
+ * bound could reject it. A within-bound value is recursed and rewritten as
+ * normal.
  *
  * Also like the opaque skip, this is a key-NAME match, not a path match: a
- * matching name at any depth is width-checked. A nested over-count value sharing
- * a bounded name (e.g. a key literally named `params` inside another `params`
- * value, which is `z.unknown()` content) is therefore left verbatim too -- inert,
- * because such a value is opaque content no consumer reads as camelCase, and a
- * legitimate config never nests an over-count map under that name. The effect is
- * version-deterministic (both parties on the same code skip identically), so it
- * cannot diverge a cross-party canonical encoding within a version.
+ * matching name at any depth is width-checked, so a nested over-count
+ * value under a bounded name is left verbatim too -- inert, since such a
+ * value is opaque content no consumer treats as camelCase. The effect is
+ * version-deterministic, so it cannot diverge a cross-party canonical
+ * encoding within a version.
  */
 function transformKeysDeep(
   value: unknown,
@@ -237,10 +201,11 @@ function transformKeysDeep(
     );
   }
   if (value !== null && typeof value === "object") {
-    // Reject a single over-wide object before `Object.entries` MATERIALIZES it
-    // (path a) -- a cheap streaming own-key count (the same early-exit pass the
-    // params skip uses) against the budget still left, so a multi-million-key
-    // object under an unknown key is refused rather than rewritten then stripped.
+    // Reject a single over-wide object before `Object.entries` MATERIALIZES
+    // it (path a) -- a cheap streaming own-key count (the same early-exit
+    // pass the params skip uses) against the budget still left, so a
+    // multi-million-key object under an unknown key is refused rather than
+    // rewritten then stripped.
     if (exceedsOwnKeyCount(value, MAX_NODE_COUNT - budget.nodes))
       throw new NodeCountExceededError();
     return Object.fromEntries(
@@ -277,24 +242,24 @@ function transformKeysDeep(
 }
 
 /**
- * Recursively rewrites object keys from snake_case to camelCase: the read path
- * that normalizes user-facing YAML/JSON (conventionally snake_case) into the
- * camelCase TypeScript sees before Zod parsing. Opaque-value maps
- * (`OPAQUE_VALUE_KEYS`) are left verbatim -- see {@link transformKeysDeep}.
+ * Recursively rewrites object keys from snake_case to camelCase: the read
+ * path that normalizes user-facing YAML/JSON into the camelCase TypeScript
+ * sees before Zod parsing. Opaque-value maps (`OPAQUE_VALUE_KEYS`) are left
+ * verbatim -- see {@link transformKeysDeep}.
  *
- * Runs ahead of the schema in the `parseX`/`safeParseX` config helpers, so on a
- * pathologically deep or wide input it throws BEFORE the schema. The throwing
- * `parseX` helpers propagate that throw (their partner-wire call sites catch it);
- * the `safeParseX` helpers route through `safeParseCamelized`, which converts the
- * bound into a `{ success: false }` result so their "safe" contract holds. No
- * real config or exchange message reaches either bound.
+ * Runs ahead of the schema in the `parseX`/`safeParseX` config helpers, so
+ * on a pathologically deep or wide input it throws before the schema. The
+ * throwing `parseX` helpers propagate that throw; the `safeParseX` helpers
+ * route through `safeParseCamelized`, which converts it into a
+ * `{ success: false }` result. No real config or exchange message reaches
+ * either bound.
  *
  * `widthBoundedKeys` (see {@link transformKeysDeep}) lets a caller name keys
- * whose object value is left verbatim once it exceeds a given key count, so a
- * pathological-count partner record is not rewritten key by key before the
- * schema's own count bound rejects it. Callers that parse partner-controlled
- * input with a bounded record (`parseLinkageTerms`, for `transform.params`) pass
- * it; the rest omit it and the pre-pass is unchanged.
+ * whose object value is left verbatim once it exceeds a given key count, so
+ * a pathological-count partner record is not rewritten key by key before
+ * the schema's own count bound rejects it. Callers parsing
+ * partner-controlled input with a bounded record (`parseLinkageTerms`, for
+ * `transform.params`) pass it; the rest omit it.
  *
  * @throws {NestingDepthExceededError} if input nesting reaches
  *   {@link MAX_NESTING_DEPTH} levels.
@@ -315,20 +280,19 @@ export function camelizeKeys(
 }
 
 /**
- * Recursively rewrites object keys from camelCase to snake_case: the write path
- * and exact inverse of {@link camelizeKeys} for the keys the exchange schema
- * uses, so a write-then-read round-trips unchanged. Both directions are produced
- * from the one {@link transformKeysDeep} walker, so the opaque-value skip cannot
- * diverge between them. Only keys are rewritten; string values (e.g. the
- * `firstName` in a `name: firstName` label) are left verbatim, matching the read
- * path.
+ * Recursively rewrites object keys from camelCase to snake_case: the write
+ * path and exact inverse of {@link camelizeKeys} for the keys the exchange
+ * schema uses, so a write-then-read round-trips unchanged. Both directions
+ * are produced from the one {@link transformKeysDeep} walker, so the
+ * opaque-value skip cannot diverge between them. Only keys are rewritten;
+ * string values are left verbatim, matching the read path.
  *
- * It is not a general camelCase inverse -- an embedded acronym such as `URL`
- * would snakeize to `u_r_l` -- but no such key occurs in the schema. Used by the
+ * Not a general camelCase inverse -- an embedded acronym such as `URL` would
+ * snakeize to `u_r_l` -- but no such key occurs in the schema. Used by the
  * CLI config writer (`saveConfig`) to serialize a typed `ExchangeSpec` to
- * snake_case YAML; not a stable public API for consumers outside the workspace.
- * Its input is the operator's own typed `ExchangeSpec`, never this deep, so the
- * shared depth bound below is incidental here.
+ * snake_case YAML; not a stable public API. Its input is the operator's own
+ * typed `ExchangeSpec`, never this deep, so the shared depth bound below is
+ * incidental here.
  *
  * @throws {NestingDepthExceededError} if input nesting reaches
  *   {@link MAX_NESTING_DEPTH} levels.

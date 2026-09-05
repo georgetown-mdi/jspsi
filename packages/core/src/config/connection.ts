@@ -67,13 +67,12 @@ interface WebRTCServer {
   /** PeerJS API key for private servers; omit for public PeerJS servers. */
   key?: string;
   /**
-   * Whether the signaling socket is opened over TLS (`wss:`) rather than plain
-   * `ws:`. Defaults to `true` when unset: signaling carries the derived
-   * rendezvous ids and both parties' candidate addresses, so plaintext is a
-   * deliberate choice an operator makes for a broker they reach without a
-   * network in between (a loopback or test broker), never a default they get by
-   * omission. A browser peer has no equivalent field because it takes the
-   * scheme from the page it was served over.
+   * Whether the signaling socket uses TLS (`wss:`) rather than plain `ws:`.
+   * Defaults to `true` when unset. Signaling sends the derived rendezvous ids
+   * and both parties' candidate addresses, so set this to `false` only for a
+   * broker reached with no network in between (a loopback or test broker),
+   * never by leaving it unset. A browser peer has no equivalent field: it takes
+   * the scheme from the page it was served over.
    */
   secure?: boolean;
   provision?: ServerProvision;
@@ -90,13 +89,11 @@ const WebRTCServerSchema: z.ZodType<WebRTCServer> = z.object({
 });
 
 /**
- * Regex matching a valid SSH host-key fingerprint in OpenSSH SHA256 format:
- * the `SHA256:` prefix followed by 43 unpadded standard base64 characters
- * (alphabet `[A-Za-z0-9+/]`, NOT base64url `[A-Za-z0-9_-]`). The final
- * character is constrained to the 16 values whose low 2 bits are zero
- * (32 bytes * 8 = 256 bits / 6 = 42 full characters + 4 remaining data bits;
- * the last character's two unused low bits must be zero in the canonical
- * encoding). A bare base64url value -- the shape of a signing
+ * Regex matching a valid SSH host-key fingerprint in OpenSSH SHA256 format: the
+ * `SHA256:` prefix followed by 43 unpadded standard base64 characters (alphabet
+ * `[A-Za-z0-9+/]`, not base64url `[A-Za-z0-9_-]`). The final character encodes
+ * the last 4 of 256 data bits plus 2 zero padding bits, so it is limited to a
+ * 16-value set. A bare base64url value -- the shape of a signing
  * `partner_fingerprint` -- is detected separately to name the confusion.
  */
 export const HOST_KEY_FINGERPRINT_REGEX =
@@ -136,30 +133,21 @@ interface SFTPServer {
    */
   privateKeyPassphrase?: string;
   /**
-   * Answer the server's `keyboard-interactive` authentication prompts with the
-   * configured `password`, in addition to offering the direct `password`
-   * method. Only valid with `password`; a `boolean` defaulting to `false`.
-   *
-   * Enable this for a server that disables the SSH `password` authentication
-   * method but accepts `keyboard-interactive` -- the same password, collected
-   * over a different SSH auth method (the server sends a prompt the client
-   * answers, rather than the client offering the password directly). Every
-   * prompt the server sends is answered with the same configured password, so it
-   * does not satisfy a multi-prompt or one-time-code challenge; those cannot be
-   * answered from a single stored secret. See docs/EXCHANGE_REFERENCE.md
-   * (connection.server).
+   * Answers the server's `keyboard-interactive` prompts with the configured
+   * `password`, in addition to the direct `password` method. Only valid with
+   * `password`; boolean, default `false`. Use for a server that accepts
+   * `keyboard-interactive` but not direct `password` auth. Every prompt gets
+   * the same stored password, so it cannot satisfy a multi-prompt or
+   * one-time-code challenge. See docs/EXCHANGE_REFERENCE.md.
    */
   keyboardInteractive?: boolean;
   /**
-   * Expected server host-key fingerprint(s) in OpenSSH SHA256 format
-   * (`SHA256:<43 standard base64 chars>`): a single fingerprint, or a non-empty
-   * list of them. When set, every SFTP connection on the CLI `sftp` channel
-   * verifies the server presents a host key matching ANY listed fingerprint
-   * before authentication; a key matching none aborts the connection. A list
-   * gives zero-downtime host-key rotation -- stage the incoming key alongside
-   * the current one during the rekey window so either is accepted with no failed
-   * exchange in between, then drop the old entry after the cutover. Each entry is
-   * validated to canonical OpenSSH SHA256 form. @-file supported (per entry).
+   * Expected server host-key fingerprint(s), OpenSSH SHA256 format (`SHA256:<43
+   * base64 chars>`): a fingerprint or non-empty list. When set, every SFTP
+   * connection on the CLI `sftp` channel requires the server's key to match one
+   * of them or aborts. A list supports zero-downtime rotation: stage the new
+   * key alongside the old, then drop the old entry after cutover. Each entry is
+   * validated to canonical form; @-file supported per entry.
    */
   hostKeyFingerprint?: string | string[];
   provision?: ServerProvision;
@@ -245,7 +233,8 @@ const SFTPServerSchema: z.ZodType<SFTPServer> = z
     if (fp === undefined) return;
     const list = Array.isArray(fp) ? fp : [fp];
     // An empty list pins no key and would refuse every connection -- a config
-    // mistake to surface at parse, not a silent no-pin posture at connect time.
+    // mistake better caught at parse than left as a silent no-pin posture at
+    // connect time.
     if (list.length === 0) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -268,7 +257,7 @@ const SFTPServerSchema: z.ZodType<SFTPServer> = z
       // resolveConnectionAtSignRefs): the `@path` cannot match the SHA256:
       // format, so it is exempt here and the resolved file contents are
       // format-checked at resolution instead. The sibling @-file fields
-      // (password, privateKey) carry no format refine, so they pass parse the
+      // (password, privateKey) have no format refine, so they pass parse the
       // same way.
       if (entry.startsWith("@")) return;
       if (SIGNING_FINGERPRINT_SHAPE.test(entry)) {
@@ -293,9 +282,10 @@ const SFTPServerSchema: z.ZodType<SFTPServer> = z
     });
   })
   .transform(
-    // Strip the detected-but-rejected fields so the output matches SFTPServer,
-    // which no longer declares them. The refines above ensure neither reaches
-    // here with a non-undefined value; the transform only runs on a valid parse.
+    // Strip the detected-but-rejected fields so the output matches the
+    // SFTPServer type, which does not declare them. The refines above ensure
+    // neither field is set when the transform runs, since only a valid parse
+    // reaches it.
     ({ certificate: _cert, knownHosts: _kh, ...rest }) => rest,
   );
 
@@ -310,17 +300,12 @@ const SFTPServerSchema: z.ZodType<SFTPServer> = z
 export const SHARED_SECRET_REGEX = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/;
 
 /**
- * Generate a fresh shared secret: 32 cryptographically random bytes
- * (`crypto.getRandomValues`) encoded as base64url, always matching
- * {@link SHARED_SECRET_REGEX}. Co-located with that regex so the producer and
- * the format contract stay in sync.
- *
- * This is the single definition of secret generation, shared by the CLI
- * invitation flow and the web inviter rather than re-implemented in each. The
- * value it produces is the 256-bit short-lived setup secret the P-256 key
- * exchange consumes and, in the web rendezvous flow, the seed for the derived
- * peer id; it is rotated to a persistent secret on the first successful
- * handshake.
+ * Generates a fresh shared secret: 32 cryptographically random bytes
+ * (`crypto.getRandomValues`) encoded as base64url, matching
+ * {@link SHARED_SECRET_REGEX}. The single definition of secret generation,
+ * shared by the CLI and web inviters. It is the 256-bit short-lived setup
+ * secret the P-256 key exchange consumes, and in the web flow the seed for
+ * the derived peer id, rotated to a persistent secret at first handshake.
  */
 export function generateSharedSecret(): string {
   return toBase64Url(randomBytes(32));
@@ -338,81 +323,64 @@ const sharedSecretSchema = z
   .optional();
 
 /**
- * Shared secret for mutual authentication via the P-256 key exchange. The
- * secret and its expiration are stored in `.psilink.key` and injected at
- * runtime; they never appear in `psilink.yaml`. This is the type of the
- * channel-agnostic top-level `authentication` block of an {@link ExchangeSpec}
- * (a sibling of `signing`); see exchangeSpec.ts and EXCHANGE_REFERENCE.md.
- *
- * IMPORTANT: This type is the parse-time representation. `sharedSecret` is
- * optional because a configuration file parsed in isolation may not yet
- * include a secret. Before calling {@link authenticateConnection}, the caller
- * MUST populate `sharedSecret` with a value matching {@link SHARED_SECRET_REGEX};
- * the runtime check there rejects missing or malformed secrets with a tagged
- * recovery error, but the compile-time type does not enforce this.
+ * Shared secret for mutual authentication via the P-256 key exchange, stored
+ * with expiration in `.psilink.key`, injected at runtime -- never in
+ * `psilink.yaml` (the top-level `authentication` block on
+ * {@link ExchangeSpec}). `sharedSecret` is optional: a config parsed alone may
+ * lack one. Before calling {@link authenticateConnection}, populate it with a
+ * value matching {@link SHARED_SECRET_REGEX} -- enforced there at runtime, not
+ * by this type.
  */
 export interface Authentication {
   /**
-   * Shared secret; loaded from `.psilink.key` at runtime and injected
-   * into the `authentication` block. Never written to `psilink.yaml`.
-   *
-   * Must be a base64url-encoded 32-byte value (exactly 43 characters from
-   * `[A-Za-z0-9_-]`, with the final character constrained to
-   * `[AEIMQUYcgkosw048]`).  Both invitation secrets and persistent (rotation)
-   * secrets use this format; they differ only in the {@link expires} that
-   * accompanies them (see that field for how its two sources are treated).
+   * Shared secret; loaded from `.psilink.key` at runtime and injected into the
+   * `authentication` block, never written to `psilink.yaml`. Must be a
+   * base64url-encoded 32-byte value (43 characters from `[A-Za-z0-9_-]`, final
+   * character in `[AEIMQUYcgkosw048]`). Invitation secrets and persistent
+   * (rotation) secrets share this format, differing only in the accompanying
+   * {@link expires}.
    */
   sharedSecret?: string;
   /**
    * Expiration for this token (ISO 8601 datetime), or absent for a persistent
-   * token with no maximum age. The exchange is aborted before the key exchange
-   * -- and again after it, catching a lapse during the round-trip -- if the
-   * current time is past this value. This one field is written by two sources,
-   * an invitation's bounded lifetime (default 1 hour) and a
-   * {@link tokenMaxAgeDays} stamp on a rotated token, which core deliberately
-   * does not distinguish: expiry means the same thing, and recovers the same
-   * way (re-invite), for both. See docs/SECURITY_DESIGN.md ("Token age and
-   * rotation policy").
+   * token with no maximum age. The exchange aborts before the key exchange, and
+   * again after it (catching a lapse during the round-trip), once the current
+   * time passes this value. Written by two sources -- an invitation's bounded
+   * lifetime (default 1 hour) or a {@link tokenMaxAgeDays} stamp on a rotated
+   * token -- which core does not distinguish: both mean the same expiry and
+   * recover the same way (re-invite).
    */
   expires?: string;
   /**
-   * Operator-policy: maximum age, in days, to stamp onto a rotated token. When
-   * set, a successful exchange records `expires` = (rotation time) +
-   * `tokenMaxAgeDays` days into `.psilink.key`, so a dormant partnership cannot
-   * hold a valid token indefinitely between exchanges; when omitted, rotated
-   * tokens carry no expiry (the default). Unlike `sharedSecret`/`expires` this
-   * is operator-authored in `psilink.yaml`, not key-file-injected. A positive
-   * integer, bounded above by {@link MAX_TOKEN_MAX_AGE_DAYS}; the expiry stamp is
-   * computed at rotation time (in the CLI), not at config-parse time.
+   * Operator policy: maximum age, in days, to stamp onto a rotated token. A
+   * successful exchange records `expires` = rotation time + `tokenMaxAgeDays`
+   * days into `.psilink.key`, so a dormant partnership cannot hold a valid
+   * token indefinitely; omitted means no expiry (the default). Unlike
+   * `sharedSecret`/`expires`, this is operator-authored in `psilink.yaml`. A
+   * positive integer bounded by {@link MAX_TOKEN_MAX_AGE_DAYS}, computed at
+   * rotation time (in the CLI), not at parse time.
    */
   tokenMaxAgeDays?: number;
 }
 
 /**
  * Upper bound on {@link Authentication.tokenMaxAgeDays} (~100 years). Not a
- * policy statement -- any realistic max-age is far smaller (the sibling
- * invitation lifetime is capped at 1 year) -- but a sanity ceiling: it keeps the
- * rotation-time stamp `now + tokenMaxAgeDays` days within the representable
- * `Date` range (and a 4-digit ISO year), so a value large enough to overflow that
- * range cannot reach the rotation write path and throw there, after a handshake
- * the partner has already completed, with no clear cause.
+ * policy statement -- realistic max-age is far smaller (the sibling invitation
+ * lifetime caps at 1 year) -- but a sanity ceiling: it keeps `now +
+ * tokenMaxAgeDays` days within the representable `Date` range (a 4-digit ISO
+ * year), so an overflowing value cannot reach the rotation write path and throw
+ * there, after the partner has already completed the handshake.
  */
 export const MAX_TOKEN_MAX_AGE_DAYS = 36500;
 
 /**
- * Schema for the top-level `authentication` block, exported so
- * {@link ExchangeSpecSchema} can embed it as a sibling of `signing`. Field-shape
- * validation only; the injected fields (`sharedSecret`/`expires`) come from
- * `.psilink.key` and are warn-and-stripped if set in YAML (see the CLI loader).
- *
- * `strictObject` (unlike the sibling spec blocks, which strip): a misspelled
- * operator-policy key here is rejected at parse time rather than silently
- * dropped. `tokenMaxAgeDays` is a security control, and a typo that strip would
- * discard would silently disable max-age enforcement with no signal; failing
- * closed forces the operator to fix the key before any exchange runs. The
- * injected fields are removed by the loader's warn-and-strip before this schema
- * sees them, so strictness never rejects a key-file value. See EXCHANGE_REFERENCE.md
- * ("Authentication").
+ * Schema for the top-level `authentication` block, embedded by
+ * {@link ExchangeSpecSchema} as a sibling of `signing`. The injected fields
+ * (`sharedSecret`/`expires`) come from `.psilink.key` and are warn-and-stripped
+ * if set in YAML by the CLI loader, which strips them before this schema runs.
+ * `strictObject`, unlike the sibling spec blocks: a misspelled
+ * `tokenMaxAgeDays` -- a security control -- must reject at parse, not silently
+ * drop and disable itself.
  */
 export const AuthenticationSchema: z.ZodType<Authentication> = z.strictObject({
   sharedSecret: sharedSecretSchema,
@@ -502,21 +470,19 @@ interface SharedOptions {
   peerTimeoutMs?: number;
   /**
    * Milliseconds to wait per connection attempt to the primary exchange server;
-   * default: 30000. Must be a positive integer: a zero is not a meaningful
-   * "no timeout" sentinel here -- on `filedrop` it makes the local-FS connect
-   * probe time out immediately against a healthy mount, and on `sftp` it
-   * disables ssh2's connect-establishment timeout entirely (it arms only when
-   * positive). For channels that retry (e.g. `sftp` and `filedrop`), this limit
-   * applies to each attempt individually, not to the total across all attempts.
-   * Retry delays between attempts are not counted against this budget.
+   * default 30000. Must be a positive integer: zero is not a meaningful "no
+   * timeout" here -- on `filedrop` it times out the local-FS connect probe
+   * immediately against a healthy mount, and on `sftp` it disables ssh2's
+   * connect-establishment timeout (which arms only when positive). For a
+   * retrying channel (`sftp`, `filedrop`) this applies per attempt, not to the
+   * total, and retry delays are not counted against it.
    *
-   * Stays optional despite the schema applying {@link DEFAULT_SERVER_CONNECT_TIMEOUT_MS}
-   * as a `.default()`: this type is both the caller-supplied input shape (where
-   * the field may be omitted) and the parsed output, and an entirely omitted
-   * `options` block leaves it `undefined` regardless of the field default. The
-   * `z.ZodType<SharedOptions>` annotation therefore does not narrow it to a
-   * required `number`; consumers treat it as possibly-unset and apply the same
-   * constant at the connect sites (see fileSyncConnection).
+   * Stays optional in the type despite the schema's
+   * {@link DEFAULT_SERVER_CONNECT_TIMEOUT_MS} `.default()`: this type covers
+   * both the caller-supplied input (field may be omitted) and the parsed
+   * output, and an omitted `options` block leaves it `undefined` regardless of
+   * the default. Consumers treat it as possibly unset and apply the same
+   * constant themselves at the connect sites (see fileSyncConnection).
    */
   serverConnectTimeoutMs?: number;
   /** Maximum reconnect attempts before giving up; default: 3. */
@@ -525,13 +491,11 @@ interface SharedOptions {
 
 /**
  * Default per-attempt connect timeout (30000 ms) applied to
- * {@link SharedOptions.serverConnectTimeoutMs} when the operator leaves it
- * unset. Applied at the schema boundary (so the parsed config carries the value
- * uniformly across channels) and reused as the fallback at the SFTP and filedrop
- * connect sites for a config built without an `options` block at all, so the
- * documented 30000 ms per-attempt deadline always holds rather than the `sftp`
- * path silently falling back to ssh2's shorter (~20s) internal `readyTimeout`.
- * See docs/EXCHANGE_REFERENCE.md and docs/spec/CHANNEL_SECURITY.md.
+ * {@link SharedOptions.serverConnectTimeoutMs} when unset -- at the schema
+ * boundary, and reused as the fallback at the SFTP and filedrop connect sites
+ * for a config with no `options` block at all, so the documented 30000 ms
+ * deadline always holds rather than `sftp` silently falling back to ssh2's
+ * shorter (~20s) `readyTimeout`.
  */
 export const DEFAULT_SERVER_CONNECT_TIMEOUT_MS = 30000;
 
@@ -545,57 +509,27 @@ export const DEFAULT_MAX_RECONNECT_ATTEMPTS = 3;
 
 /**
  * Sanity ceiling, in seconds, for a coordination timeout an operator states:
- * seven days. A timeout is a coordination window, and even a generous async setup
- * waits hours, not days, for a connection, a peer, or a partner to accept -- so a
- * value past a week is a typo or a misunderstanding, not an intent. The CLI's
- * human-readable `<int><unit>` duration syntax makes a value like `30d` trivially
- * typeable, so each capped flag (`--connection-timeout`, `--peer-timeout`,
- * `--accept-timeout`) rejects an over-ceiling value with a flag-named usage error
- * before any side effect, mirroring the `--expires-in` ceiling
- * (`MAX_INVITATION_LIFETIME_SECONDS`, 365d) that bounds the invitation lifetime.
- * This is a deliberately lower, product-level sanity bound layered on top of the
- * duration parser's safe-integer overflow guard, not a replacement for it, and a
- * usability cap rather than a security control: the accept window is
- * independently bounded by the invitation token's lifetime, and an over-long
- * connect/peer wait only makes the operator's own exchange hang longer.
- *
- * Defined in core, as {@link MAX_RECONNECT_ATTEMPTS} is and for the same reason:
- * two authoring boundaries must agree on it -- the CLI's duration-flag parse
- * guard, and the console's zero-setup authoring surface, whose timeout fields
- * become those very flags on the child's argv. A console value past this ceiling
- * would be accepted into a job whose spawned CLI then exits 64, so the console
- * refuses it while the operator can still change it.
+ * seven days. Each capped flag (`--connection-timeout`, `--peer-timeout`,
+ * `--accept-timeout`) rejects an over-ceiling value with a flag-named usage
+ * error before any side effect. A usability cap, not a security control: the
+ * accept window is independently bounded by the invitation token's own
+ * lifetime. Defined in core, like {@link MAX_RECONNECT_ATTEMPTS}, because both
+ * the CLI's duration-flag parser and the console's authoring surface must agree
+ * on it.
  */
 export const MAX_TIMEOUT_SECONDS = 7 * 24 * 60 * 60;
 
 /**
- * Upper bound on {@link SharedOptions.maxReconnectAttempts}: 604800 attempts.
- * Derived, not arbitrary -- it is the connect-retry phase's existing wall-clock
- * ceiling expressed as a count. The connect-retry loop (`retryPromise` at every
- * connect site) spaces attempts with a fixed 1-second inter-attempt delay --
- * `maxReconnectAttempts` delays across `maxReconnectAttempts + 1` attempts -- so
- * against an endpoint that refuses fast the attempts themselves are ~instant and
- * the wall clock is essentially the delay total, about `maxReconnectAttempts`
- * seconds. The largest count whose delay total stays within the 7-day timeout
- * ceiling ({@link MAX_TIMEOUT_SECONDS} = 604800 s, the sanity cap the duration
- * flags already enforce) is therefore `604800 s / 1 s = 604800`. Bounding the
- * count here bounds the fast-fail connect phase to that same ~7-day wall clock
- * the timeouts speak, instead of letting a fat-fingered value near
- * `Number.MAX_SAFE_INTEGER` become a linear self-inflicted hang against an
- * endpoint that refuses fast (ECONNREFUSED on sftp, EACCES/ENOENT on filedrop --
- * exactly the fast transients the retry budget exists to ride out).
- *
- * This bounds a proxy: it caps the count, which equals wall-clock only at the
- * 1-second inter-attempt floor (the fast-fail case this footgun is about). It
- * does NOT tightly bound a slow-but-answering endpoint, whose attempts each run
- * up to `serverConnectTimeoutMs`; that case is already held per-attempt by
- * `serverConnectTimeoutMs` and is left to a wall-clock deadline should it ever
- * prove to matter. Defined in core because both validation boundaries that must
- * agree on this field consume it -- the schema `.max()` below and the CLI's
- * `nonNegativeIntFlag` parse guard, which imports it -- and core cannot import
- * from the CLI. An over-ceiling value is rejected with a flag-named `UsageError`
- * (exit 64) whether it arrives from `psilink.yaml` or
- * `--max-reconnect-attempts`. See docs/spec/CHANNEL_SECURITY.md.
+ * Upper bound on {@link SharedOptions.maxReconnectAttempts}: 604800 attempts --
+ * the connect-retry loop's 1-second inter-attempt delay times
+ * {@link MAX_TIMEOUT_SECONDS} (604800 s), so the count cannot outlast that same
+ * ~7-day wall clock against a fast-refusing endpoint (ECONNREFUSED on sftp,
+ * EACCES/ENOENT on filedrop). Bounds only that fast-fail case: a
+ * slow-but-answering endpoint is already held per-attempt by
+ * `serverConnectTimeoutMs`. Defined in core because both the schema's `.max()`
+ * and the CLI's `nonNegativeIntFlag` parse guard must agree on it. An
+ * over-ceiling value is rejected as a `UsageError` (exit 64) from either
+ * `psilink.yaml` or `--max-reconnect-attempts`.
  */
 export const MAX_RECONNECT_ATTEMPTS = 7 * 24 * 60 * 60;
 
@@ -605,27 +539,22 @@ const sharedOptionsFields = {
   // liveness control (the CLI's --peer-timeout already rejects zero; this closes
   // the same hole on the config/programmatic path).
   peerTimeoutMs: z.int().positive().optional(),
-  // positive for the same reason: a zero serverConnectTimeoutMs is not a
-  // meaningful "no timeout" -- it times out the filedrop local-FS connect probe
-  // immediately and disables ssh2's connect readyTimeout (armed only when > 0).
-  // The CLI's --connection-timeout already rejects zero. Defaulted (not just
-  // optional) so an unset value resolves to DEFAULT_SERVER_CONNECT_TIMEOUT_MS at
-  // the schema boundary -- the documented 30000 ms deadline -- carried uniformly
-  // for sftp and filedrop instead of leaving the sftp path on ssh2's ~20s
-  // default. The default fires only when the options object is present but the
-  // field is absent; an entirely omitted options block is covered by the same
+  // positive for the same reason: zero disables the filedrop connect probe and
+  // ssh2's readyTimeout (armed only when > 0); --connection-timeout already
+  // rejects zero. Defaulted (not just optional) so an unset value resolves to
+  // DEFAULT_SERVER_CONNECT_TIMEOUT_MS at the schema boundary, applied uniformly
+  // for sftp and filedrop. Fires only when the options object is present but
+  // the field is absent; an omitted options block is covered by the same
   // constant at the connect sites in fileSyncConnection.
   serverConnectTimeoutMs: z
     .int()
     .positive()
     .default(DEFAULT_SERVER_CONNECT_TIMEOUT_MS),
-  // nonnegative, NOT positive: zero is meaningful here -- "connect once, do not
-  // reconnect" -- so it stays a valid value. Capped above by
-  // MAX_RECONNECT_ATTEMPTS: the connect-retry loop paces at a fixed 1s floor, so
-  // an unbounded count is a wall-clock self-DoS; the cap bounds it to the same
-  // 7-day ceiling the timeout flags enforce (see MAX_RECONNECT_ATTEMPTS). The CLI
-  // boundary (nonNegativeIntFlag) applies the same ceiling, so the parse guard
-  // and this merged-options re-validation agree, as they do on the floor.
+  // nonnegative, not positive: zero is meaningful here -- "connect once, do not
+  // reconnect" -- so it stays valid. Capped by MAX_RECONNECT_ATTEMPTS: the
+  // connect-retry loop paces at a fixed 1s floor, so an unbounded count is a
+  // wall-clock self-DoS. The CLI boundary (nonNegativeIntFlag) applies the same
+  // ceiling, so the parse guard and this re-validation agree.
   maxReconnectAttempts: z
     .int()
     .nonnegative()
@@ -640,12 +569,11 @@ const SharedOptionsSchema: z.ZodType<SharedOptions> =
 export interface FileSyncOptions extends SharedOptions {
   /**
    * Milliseconds between checks for the partner's uploaded file. Must be a
-   * positive integer: `0` is not "as fast as possible" but a `setTimeout(0)` hot
-   * poll that busy-loops directory listings against the server (a self-inflicted
-   * flood), so the schema rejects it. When unset, the connection applies
-   * `DEFAULT_POLLING_FREQUENCY_MS` (5000) -- a conservative default that stays
-   * within SFTP servers' anti-flood limits; see that constant in
-   * `fileSyncConnection.ts` for the rationale.
+   * positive integer: `0` is not "as fast as possible" but a `setTimeout(0)`
+   * hot poll that busy-loops directory listings (a self-inflicted flood), so
+   * the schema rejects it. When unset, the connection applies
+   * `DEFAULT_POLLING_FREQUENCY_MS` (5000); see that constant in
+   * `fileSyncConnection.ts`.
    */
   pollIntervalMs?: number;
   /**
@@ -653,165 +581,137 @@ export interface FileSyncOptions extends SharedOptions {
    * and a per-session sequence number, so filename-based logging can capture
    * when a file was written even in sync-mediated environments where the sync
    * tool stamps files with the transfer time rather than the original creation
-   * time; default: `false`. With it unset, message filenames carry only the
+   * time; default: `false`. With it unset, message filenames have only the
    * declared byte count (`<id>-<byteCount>.json`).
    */
   timestampInFilename?: boolean;
   /**
-   * When `true`, the rendezvous handshake uses an ack-handshake barrier
-   * instead of the atomic-exclusive-create lock-file race. Both parties must
-   * set this identically; the value is advertised in the hello payload and a
-   * mismatch fails fast at rendezvous, symmetrically on both parties, with a
-   * usage error naming each side's setting (rather than stalling until the
-   * peer timeout).
+   * When `true`, the rendezvous handshake uses an ack-handshake barrier instead
+   * of the atomic-exclusive-create lock-file race. Both parties must set this
+   * identically: it is advertised in the hello payload, and a mismatch fails
+   * fast at rendezvous with a usage error naming each side's setting, rather
+   * than stalling until the peer timeout.
    *
    * Intended for sync-mediated transports (e.g. a cloud-sync service
-   * reconciling two local directories) where `createExclusive` lacks
-   * atomicity or deletion has high propagation latency. Delete still works
-   * on these transports -- cleanup via `safeDelete` succeeds eventually --
-   * but arrival order cannot be determined by an atomic exclusive-create.
-   * This option is **not** intended for transports that genuinely cannot
-   * delete; handshake files must be removable at `close()` time or they
-   * accumulate and block future sessions.
-   *
-   * Default: `false`.
+   * reconciling two local directories) where `createExclusive` lacks atomicity
+   * or deletion has high propagation latency; delete still works eventually via
+   * `safeDelete`, but arrival order cannot be determined from an atomic
+   * exclusive-create. Not for a transport that cannot delete at all: handshake
+   * files must be removable at `close()` or they accumulate and block future
+   * sessions. Default `false`.
    */
   locklessRendezvous?: boolean;
   /**
    * A stable, human-readable identifier for this party on the file-sync
    * transport. Appears in every filename this party writes (hello, message,
-   * ack) and in server-side logs and transcripts. When unset, a UUID is
-   * generated at construction time.
-   *
-   * Requires `timestampInFilename: true`. A reused stable id across sessions
-   * in the same directory (without a timestamp segment) could collide with a
-   * leftover file from a crashed prior session, causing phantom message
-   * detection via `hasOutstandingMessage`.
+   * ack) and in server-side logs and transcripts. Requires
+   * `timestampInFilename: true`: a reused stable id across sessions could
+   * otherwise collide with a leftover file from a crashed prior session,
+   * causing phantom message detection via `hasOutstandingMessage`. Unset
+   * generates a UUID at construction time.
    *
    * The two parties must use distinct ids, and neither may be the other's id
-   * extended by `-` (e.g. `"site"` and `"site-2"` are rejected at rendezvous
-   * because `"site-2".startsWith("site-")` breaks prefix routing). Spaces
-   * and `-` are permitted within an id. The value `"temp"` is reserved.
-   * Filesystem-unsafe characters (`/` and NUL on all platforms; `<`, `>`,
-   * `:`, `"`, `\`, `|`, `?`, `*` on Windows NTFS) are not validated but may
-   * cause errors at the transport layer.
+   * extended by `-` (`"site"` and `"site-2"` are rejected:
+   * `"site-2".startsWith("site-")` breaks prefix routing). Spaces and `-` are
+   * otherwise permitted; `"temp"` is reserved. Filesystem-unsafe characters
+   * (`/` and NUL everywhere; `<>:"\|?*` on Windows NTFS) are not validated but
+   * may error at the transport layer.
    */
   peerId?: string;
   /**
    * When `true`, the receiver writes a zero-length acknowledgment marker after
    * consuming each message, and the sender gates its next `send()` on that
-   * marker rather than waiting for its own file to be deleted. No exchange file
-   * is deleted as a protocol step; the shared directory becomes a permanent
-   * transcript. Default: `false`.
+   * marker rather than on its own file's deletion. No exchange file is deleted
+   * as a protocol step, so the shared directory becomes a permanent transcript.
+   * Default `false`. Intended for sync-mediated transports that do not
+   * propagate deletions, and for audit/transcript retention.
    *
-   * Intended for sync-mediated transports that do not propagate deletions
-   * (where the delete-as-signal protocol would stall indefinitely) and for
-   * audit/transcript retention use cases.
+   * Both parties must set this identically: advertised in the hello payload, a
+   * mismatch fails fast at rendezvous with a usage error naming each side's
+   * setting. Requires `timestampInFilename: true` (otherwise same-party
+   * messages collide on filename and overwrite the transcript) and
+   * `locklessRendezvous: true` (lock rendezvous is delete-based and cannot
+   * produce a no-delete transcript).
    *
-   * Both parties must set this flag identically; the value is advertised in
-   * the hello payload and a mismatch fails fast at rendezvous, symmetrically
-   * on both parties, with a usage error naming each side's setting (rather
-   * than stalling until the peer timeout). Requires
-   * `timestampInFilename: true` -- without it, every message from the same
-   * party collides on filename and a retained transcript would overwrite
-   * itself. Also requires `locklessRendezvous: true` -- lock rendezvous is
-   * delete-based and cannot produce the whole-directory no-delete transcript
-   * retain mode guarantees.
-   *
-   * A fresh directory is required for each exchange and is enforced:
-   * `synchronize()` throws a `UsageError` if any message or ack-marker files
-   * from a prior session are present in the directory.
+   * A fresh directory is required per exchange: `synchronize()` throws a
+   * `UsageError` if a message or ack-marker file from a prior session is
+   * present.
    */
   retainFiles?: boolean;
   /**
    * How to handle a file that appears in the shared directory *during* the
-   * message loop and is neither recognized as part of this exchange nor a
-   * known transient (an in-flight `temp-*.tmp` write). Directory exclusivity
-   * is a stated precondition (see EXCHANGE_REFERENCE.md "Directory exclusivity"),
-   * so such a file usually means the directory is being shared with another
-   * process or session, or a sync tool produced a conflict copy or partial
-   * download.
+   * message loop and is neither part of this exchange nor a known transient (an
+   * in-flight `temp-*.tmp` write). Directory exclusivity is a stated
+   * precondition (EXCHANGE_REFERENCE.md, "Directory exclusivity"), so such a
+   * file usually means another process or session is sharing the directory, or
+   * a sync tool produced a conflict copy or partial download.
    *
    * - `error`: fail the exchange with a usage error (exit 64) naming the file
    *   and the directory path.
    * - `warn`: log the file once per distinct name and continue.
-   * - `ignore`: skip silently (the pre-existing behavior).
+   * - `ignore`: skip silently.
    *
    * **Local, not bilateral.** Detecting a foreign file is a local observation
-   * of one's own directory view; it needs no peer agreement and carries none
-   * of the mismatch-stall risk of `lockless_rendezvous`/`retain_files`. The
-   * two parties may run different values.
+   * of one's own directory view; it needs no peer agreement and has none of
+   * the mismatch-stall risk of `lockless_rendezvous`/`retain_files`. The two
+   * parties may run different values.
    *
-   * When unset, the effective default is mode-coupled: `error` on plain
-   * delete-mode transports (ordinary `sftp`/`filedrop`), and `warn` when
-   * `retain_files` or `lockless_rendezvous` is set -- those flags signal a
-   * sync-mediated transport that legitimately produces transient conflict
-   * copies and partial downloads mid-session, where a hard fail would abort
-   * exactly the exchanges retain mode targets. An explicit value always
-   * overrides the mode-coupled default.
+   * When unset, the default is mode-coupled: `error` on a plain delete-mode
+   * transport (`sftp`/`filedrop`), `warn` when `retain_files` or
+   * `lockless_rendezvous` is set (those flags signal a sync-mediated transport
+   * that legitimately produces transient conflicts and partial downloads
+   * mid-session). An explicit value overrides the default.
    *
-   * This setting governs foreign-file detection only. A peer-prefixed file
-   * that is a malformed *protocol* file (a message-shaped name a correctly
-   * configured peer cannot produce) is always reported, regardless of this
-   * setting.
-   *
-   * Default: `error` (plain) / `warn` (sync-mediated), as above.
+   * Governs foreign-file detection only: a peer-prefixed file that is a
+   * malformed *protocol* file (a message-shaped name a correctly configured
+   * peer cannot produce) is always reported, regardless of this setting.
    */
   unexpectedFiles?: "error" | "warn" | "ignore";
   /**
    * When `true`, the SFTP transport opens a fresh SFTP session at the start of
    * each poll cycle and releases it before the loop goes idle again, instead of
-   * holding one session for the whole exchange. A session then needs only survive
-   * one cycle's seconds, so it never reaches a server's maximum-session-duration
-   * or idle cap. Use it when the partner's SFTP server caps session lifetime and
-   * a single exchange spans many idle poll gaps (a slow, once-an-hour-reconciling
-   * peer); pair it with a long `poll_interval_ms`, since a full SSH handshake per
-   * cycle is wasteful at a seconds-scale interval. Default: `false`.
+   * holding one for the whole exchange. Use it when the partner's server caps
+   * session lifetime and the exchange spans many idle poll gaps; pair it with a
+   * long `poll_interval_ms`, since a full SSH handshake per cycle is wasteful
+   * at a seconds-scale interval. Default `false`.
    *
-   * **Local, not bilateral.** How one party dials changes nothing on the wire or
-   * in the shared directory state machine, so the peer neither observes nor cares:
-   * it is NOT advertised in the hello and cannot trigger a mismatch. One party may
-   * cycle its session while the other holds one, with no rendezvous fast-fail. It
-   * is in the family of the unilateral `unexpected_files` policy, not the bilateral
-   * `retain_files`/`lockless_rendezvous` axes.
+   * **Local, not bilateral.** How one party dials changes nothing on the wire
+   * or in the shared directory state machine: it is not advertised in the hello
+   * and cannot trigger a mismatch. One party may cycle its session while the
+   * other holds one.
    *
-   * **SFTP-only.** Only the SFTP adapter holds a socket; the file-drop client is
-   * already connectionless, so the flag has no effect there. It stays a
-   * FileSyncOptions field for schema uniformity; a filedrop config carrying it is
-   * accepted but inert, and the CLI warns that it is ignored off `sftp`.
+   * **SFTP-only.** Only the SFTP adapter holds a socket; the file-drop client
+   * is already connectionless, so the flag has no effect there. A filedrop
+   * config holding it is accepted but inert; the CLI warns it is ignored off
+   * `sftp`.
    */
   connectionPerPoll?: boolean;
 }
 
 /**
  * Millisecond threshold below which a {@link FileSyncOptions.pollIntervalMs}
- * draws the anti-flood advisory. One second: at or above it a poll cadence stays
- * within the anti-flood budgets commercial SFTP servers enforce; below it a
- * sub-second poll hammers the shared directory with listings and can trip a
- * server's anti-flood/DoS protection and drop the connection (the
- * partner-deployment failure that motivated the conservative default).
+ * draws the anti-flood advisory. One second: below it a sub-second poll hammers
+ * the shared directory with listings and can trip a server's anti-flood/DoS
+ * protection and drop the connection.
  *
  * Advisory, never a bound: {@link FileSyncOptionsSchema} floors the field at 1,
- * not here, because a demo against a controlled server legitimately polls at
- * ~100ms. Defined in core rather than at either authoring boundary because both
- * consume it -- the CLI's `--polling-frequency` warning and the console's
- * authoring-time advisory must name the same threshold, and core cannot import
- * from either app.
+ * not here, since a demo against a controlled server may legitimately poll at
+ * ~100ms. Defined in core because both the CLI's `--polling-frequency` warning
+ * and the console's authoring-time advisory must name the same threshold.
  */
 export const LOW_POLLING_FREQUENCY_WARN_MS = 1000;
 
 /**
- * Millisecond threshold below which pairing {@link FileSyncOptions.connectionPerPoll}
- * with the effective poll interval draws the wasteful-dialing advisory. One
- * minute: connection-per-poll pays a full SSH handshake every cycle, which is
- * negligible at the minutes-scale interval the mode is meant for but wasteful at
- * a seconds-scale one (the `DEFAULT_POLLING_FREQUENCY_MS` default included) --
- * the mode exists to survive a server session-lifetime cap across long idle gaps,
- * so it is only sane paired with a long interval (see
- * docs/notes/connection-per-poll-sftp.md).
+ * Millisecond threshold below which pairing
+ * {@link FileSyncOptions.connectionPerPoll} with the effective poll interval
+ * draws the wasteful-dialing advisory. One minute: a full SSH handshake per
+ * cycle is negligible at the minutes-scale interval the mode is meant for, but
+ * wasteful at a seconds-scale one; the mode exists to survive a server
+ * session-lifetime cap across long idle gaps, so it is only sane paired with a
+ * long interval (docs/notes/connection-per-poll-sftp.md).
  *
  * Higher than {@link LOW_POLLING_FREQUENCY_WARN_MS}, which flags an
- * aggressively-low poll for anti-flood reasons; this flags a poll merely too
+ * aggressively low poll for anti-flood reasons; this flags a poll merely too
  * short to justify per-cycle dialing. Advisory and shared for the same reasons.
  */
 export const CONNECTION_PER_POLL_SHORT_INTERVAL_WARN_MS = 60_000;
@@ -869,12 +769,11 @@ export interface WebRTCConnectionConfig {
   server: WebRTCServer;
   /**
    * `inviter` | `acceptor`. Derives this party's deterministic PeerJS peer ID
-   * from the shared secret so both parties reach each other without an
-   * out-of-band address exchange. A peer-addressing/transport concern -- hence
-   * its home on the WebRTC connection config rather than the channel-agnostic
-   * top-level `authentication` block -- and orthogonal to the PSI
-   * sender/receiver roles. The CLI transport reads it: the two parties must
-   * disagree on it, since each registers under the id the other dials.
+   * from the shared secret, so both parties reach each other with no
+   * out-of-band address exchange. A peer-addressing concern, not a PSI
+   * sender/receiver role, hence its home here rather than the top-level
+   * `authentication` block. The CLI transport reads it: the two parties must
+   * disagree, since each registers under the id the other dials.
    */
   role?: "inviter" | "acceptor";
   /**
@@ -1171,20 +1070,16 @@ export function safeParseFileSyncOptions(raw: unknown) {
 }
 
 /**
- * Resolve retain mode's implications on a {@link FileSyncOptions} block:
+ * Resolves retain mode's implications on a {@link FileSyncOptions} block:
  * `retainFiles: true` turns on `locklessRendezvous` and `timestampInFilename`
- * when the caller left either unset, so stating retain alone is enough on any
- * surface that authors these options.
+ * when the caller left either unset, so stating retain alone is enough. An
+ * explicit `false` is left untouched, so the contradiction reaches
+ * {@link FileSyncOptionsSchema}'s refines rather than being silently corrected;
+ * callers still validate the result.
  *
- * An EXPLICIT `false` is left untouched rather than overwritten, so the
- * contradiction reaches {@link FileSyncOptionsSchema}'s refines and surfaces as
- * their message instead of being silently corrected into a setting nobody asked
- * for. Callers still validate the result: this resolves defaults, it does not
- * certify a combination.
- *
- * The single home for the implication -- the CLI's `--retain-files` and the
+ * The single home for the implication: the CLI's `--retain-files` and the
  * console's authoring surface both call it rather than restating the rule, so
- * the trio a composed config carries cannot depend on which surface wrote it.
+ * the trio a composed config holds does not depend on which surface wrote it.
  * Returns the argument unchanged when retain mode is off or both implications
  * are already stated.
  */

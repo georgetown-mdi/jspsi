@@ -155,13 +155,12 @@ test("no hostKey field is put on the wire when none is observed", async () => {
 });
 
 test("responder flags a present-but-malformed partner hostKey without aborting", async () => {
-  // Fail-soft contract: the reconciliation only ever warns, so a malformed or
-  // over-bound advertisement (a non-conforming or future-versioned peer) must
-  // degrade to "no reconciliation" rather than abort the linkage and blame the
-  // (valid) terms. Inject an over-bound fingerprint on the initiator's frame and
-  // drive the responder to completion by hand. The value is still dropped (read
-  // as no host key), but the present-but-malformed case is surfaced separately
-  // from a genuine absence so the CLI can log it.
+  // Fail-soft: the reconciliation only ever warns, so a malformed or over-bound
+  // advertisement degrades to "no reconciliation" rather than aborting the
+  // linkage or blaming the (valid) terms. Inject an over-bound fingerprint on
+  // the initiator's frame and drive the responder by hand: the value is still
+  // dropped (treated as no host key), but the present-but-malformed case is
+  // exposed separately from a genuine absence so the CLI can log it.
   const [connA, connB] = makeConnections();
   const responder = exchangeTerms(connB, "responder", termsB, 200);
   await connA.send({
@@ -223,9 +222,9 @@ test("initiator flags a present-but-malformed partner hostKey without aborting",
 // --- Protocol-version reconcile ----------------------------------------------
 
 test("both parties advertise the protocol version on their terms messages", async () => {
-  // The forward-looking clean check: both terms messages carry this build's
+  // The forward-looking clean check: both terms messages hold this build's
   // PROTOCOL_VERSION so a future wire-format boundary fails cleanly the moment
-  // the two versions differ. Message 3 (the bare final decision) does not carry
+  // the two versions differ. Message 3 (the bare final decision) does not hold
   // it -- each party already read the other's version off message 1 / message 2.
   const [connA, connB] = makeConnections();
   const { conn: recordingA, sent: initiatorSent } = recordingConnection(connA);
@@ -245,11 +244,11 @@ test("both parties advertise the protocol version on their terms messages", asyn
 // --- Payload-intent advertisement (single-pass table withholding) ------------
 
 test("both parties advertise disclosesPayload on their terms messages, read back the partner's", async () => {
-  // The single-pass association-table withhold gate reads the SENDER's advertised
-  // payload intent, so both terms messages (message 1 for the initiator, message 2
-  // for the responder) carry disclosesPayload when the caller supplies it, and each
-  // party reads the other's back. Message 3 -- the bare final decision -- does not
-  // carry it.
+  // The single-pass association-table withhold gate reads the SENDER's
+  // advertised payload intent, so both terms messages (message 1 for the
+  // initiator, message 2 for the responder) hold disclosesPayload when the
+  // caller supplies it, and each party reads the other's back. Message 3 -- the
+  // bare final decision -- does not hold it.
   const [connA, connB] = makeConnections();
   const { conn: recordingA, sent: initiatorSent } = recordingConnection(connA);
   const { conn: recordingB, sent: responderSent } = recordingConnection(connB);
@@ -559,13 +558,12 @@ test("a non-object terms frame degrades cleanly (probe returns no version, recon
 });
 
 test("a throwing protocolVersion getter degrades to no readable version", () => {
-  // The hardened edge of the probe's "no readable version" contract, fed to the
-  // probe directly because it is the one frame shape a real transport's
-  // deserialized wire data can never carry: a frame whose `protocolVersion` read
-  // THROWS (a throwing getter) must degrade to `undefined` -- the same refused-shape
-  // outcome as a garbled, absent, or non-object version -- rather than escaping the
-  // schema's `.catch`. Without the hardening the read throws instead of returning
-  // undefined, so this check fails loudly if a future change removes it.
+  // The hardened edge of the probe's "no readable version" contract, fed to it
+  // directly because a real transport's deserialized wire data can never take
+  // this shape: a frame whose `protocolVersion` read THROWS (a throwing getter)
+  // must degrade to `undefined`, the same outcome as a garbled, absent, or
+  // non-object version, rather than escaping the schema's `.catch`. Removing
+  // the hardening makes this check fail loudly, not silently drift.
   const frame = {
     linkageTerms: termsA,
     recordCount: 100,
@@ -577,16 +575,12 @@ test("a throwing protocolVersion getter degrades to no readable version", () => 
 });
 
 test("initiator fails fast (and sends an abort) on message 2 versions it cannot read or reconcile", async () => {
-  // The initiator-side legs of the refusal symmetry the spec states across both
-  // message paths and both directions (docs/spec/PROTOCOL.md): two of these frame
-  // shapes -- a non-object frame and a `protocolVersion` read that throws -- carry no
-  // readable version and probe to `undefined`; the third, an explicit null, probes to
-  // `null`, a PRESENT-but-garbled value (see the responder-side case above). All
-  // three are refused on message 2 by the same reconcile with the same fixed
-  // reason, exactly as message 1 refuses them, and the initiator still SENDS its
-  // abort (message 3) rather than stranding the responder on its receive timeout.
-  // The throwing getter survives only because the in-process pipe passes the frame
-  // by reference; a real transport's deserialized wire data cannot carry that shape.
+  // The initiator-side mirror of message 1's refusal symmetry: a non-object
+  // frame, a throwing `protocolVersion` getter, and an explicit null are all
+  // refused on message 2 by the same reconcile and fixed reason. The initiator
+  // still SENDS its abort (message 3) rather than stranding the responder. The
+  // throwing getter survives only because the in-process pipe passes frames by
+  // reference; a real transport never produces that shape.
   const refusedVersionFrames: Array<[string, unknown]> = [
     ["non-object frame", "not an object"],
     [
@@ -651,16 +645,12 @@ test("a version mismatch is diagnosed ahead of a simultaneous terms mismatch", a
 });
 
 test("initiator: a version skew on an abort frame wins over the peer's abort reason", async () => {
-  // Precedence pin for the reconcile-before-abort-check ordering (the initiator
-  // branch runs reconcileProtocolVersion before the decision === "abort" check): a
-  // message 2 that BOTH aborts AND carries a SKEWED protocolVersion is diagnosed as
-  // the version skew -- the root cause -- rather than relaying the peer's stated abort
-  // reason. A conforming responder's abort carries this build's own version (see
-  // sendAbort), so the reconcile no-ops on it and the peer's stated reason surfaces
-  // (pinned by the abort-relay test above); the foreign version this fixture carries
-  // is reachable only from a non-conforming or malicious peer, and the reconcile --
-  // which runs before the decision is read -- reports the skew instead. This guards the
-  // ordering against a refactor that put the abort check first and re-buried the skew.
+  // Precedence pin: reconcileProtocolVersion runs before the abort-decision
+  // check, so a message 2 that both aborts AND holds a SKEWED version is
+  // diagnosed as the skew, not the peer's stated reason. A conforming abort
+  // holds this build's own version, so the reconcile no-ops and the peer's
+  // reason shows instead -- a skewed version here is reachable only from a
+  // non-conforming or malicious peer.
   const [connA, connB] = makeConnections();
   const initiator = exchangeTerms(connA, "initiator", termsA, 100);
   await connB.receive(); // msg 1: initiator's terms
@@ -772,7 +762,7 @@ test("neither terms message carries a width field", async () => {
 test("a terms frame still carrying the retired width field is ignored", async () => {
   // The envelope schemas are non-strict, so a peer that still declares a width
   // has it stripped at the parse and the exchange proceeds on the widths both
-  // parties derive. Deliberate rather than incidental: the field carried nothing
+  // parties derive. Deliberate rather than incidental: the field held nothing
   // the agreed terms do not, so there is nothing for a refusal to protect.
   const [connA, connB] = makeConnections();
   const responder = exchangeTerms(connB, "responder", termsB, 200);
@@ -809,7 +799,7 @@ test("initiator aborts when a proceed frame omits the record count", async () =>
     protocolVersion: PROTOCOL_VERSION,
   }); // no recordCount
   // The initiator sends an abort (msg 3) and then throws; drain the abort so
-  // connB does not dangle, and confirm it carries the reason.
+  // connB does not dangle, and confirm it holds the reason.
   const abort = await connB.receive();
   expect(abort).toMatchObject({
     decision: "abort",
@@ -854,15 +844,12 @@ test("an incompatibility rejects both parties with a message identifying the cau
 });
 
 test("responder neutralizes partner bytes in a linkage-terms parse error", async () => {
-  // End-to-end wiring guard for the source sanitization. The per-call-site unit
-  // pin lives in linkageTerms.test.ts (it exercises describeDecodeError on the
-  // ZodError directly); this proves protocolSetup actually ROUTES the relayed
-  // parse error through it. A partner whose terms fail to parse with bytes in
-  // the issue PATH -- an over-long transform.params key (the invalid_key code)
-  // leading with a bidi override and an ANSI escape -- must have those bytes
-  // neutralized in the rejection the responder relays, never surfaced raw.
-  // Reverting the call site to a raw ZodError.message regresses this (the JSON
-  // dump leaks U+202E verbatim).
+  // End-to-end guard for the source sanitization: the per-call-site pin lives
+  // in linkageTerms.test.ts; this proves protocolSetup ROUTES the relayed parse
+  // error through it. A partner whose terms fail to parse with a bidi override
+  // and an ANSI escape in the issue PATH must have those bytes neutralized in
+  // the rejection the responder relays, never exposed raw: reverting to a raw
+  // ZodError.message regresses this, leaking U+202E verbatim in the JSON dump.
   const evilKey = "\x1b[31m\u202e" + "x".repeat(MAX_NAME_LENGTH);
   const [connA, connB] = makeConnections();
   const responder = exchangeTerms(connB, "responder", termsB, 200);
@@ -898,16 +885,16 @@ test("responder neutralizes partner bytes in a linkage-terms parse error", async
 });
 
 test("initiator: a pathological-count abortReasons fails cleanly, not with a RangeError", async () => {
-  // The partner's decision frame (termsWithDecisionMessage, message 2) carries an
+  // The partner's decision frame (termsWithDecisionMessage, message 2) holds an
   // optional abortReasons list. A pathological count there made Zod throw
   // `Invalid string length` building its error from one issue per entry; the
   // boundedArray gate turns it into one clean count issue, so receiveParsed
-  // surfaces a ConnectionError("protocol") with a non-RangeError cause.
+  // raises a ConnectionError("protocol") with a non-RangeError cause.
   const [connA, connB] = makeConnections();
   const initiator = exchangeTerms(connA, "initiator", termsA, 100);
   await connB.receive(); // consume the initiator's terms (message 1)
-  // An abort frame carries no recordCount (like save, role metadata is not spread
-  // onto an abort) but does carry the protocol version, as a conforming
+  // An abort frame holds no recordCount (like save, role metadata is not spread
+  // onto an abort) but does hold the protocol version, as a conforming
   // responder's does; the initiator throws on the abort before it would read a
   // count.
   await connB.send({

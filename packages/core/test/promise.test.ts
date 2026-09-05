@@ -23,9 +23,10 @@ describe("withTimeout", () => {
 
   test("propagates the operation's own rejection unchanged when the deadline does not fire", async () => {
     const original = new Error("real failure");
-    // The loser of the race is the deadline; the rejection that surfaces is the
-    // operation's own error, NOT a TimeoutError -- this is what lets a caller's
-    // shouldRetry predicate distinguish a transient failure from a deadline.
+    // The loser of the race is the deadline; the rejection reaching the caller
+    // is the operation's own error, not a TimeoutError -- this is what lets a
+    // caller's shouldRetry predicate distinguish a transient failure from a
+    // deadline.
     await expect(
       withTimeout(Promise.reject(original), 1_000, "deadline"),
     ).rejects.toBe(original);

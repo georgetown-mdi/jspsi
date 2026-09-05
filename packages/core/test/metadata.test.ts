@@ -251,7 +251,7 @@ test("safeParseMetadata rejects duplicate column names", () => {
 });
 
 test("safeParseMetadata does not echo a duplicated name in the error", () => {
-  // The name is operator-authored and may carry control/ANSI/bidi bytes; the
+  // The name is operator-authored and may hold control/ANSI/bidi bytes; the
   // uniqueness refine reports a static message, never the offending name.
   const evil = "\x1b[31mDUP\x1b[0m\u202e";
   const result = safeParseMetadata([
@@ -300,7 +300,7 @@ test("safeParseMetadata accepts a column name at the length bound", () => {
 });
 
 test("safeParseMetadata does not echo an over-long name in the error", () => {
-  // The name is operator-authored and may carry control/ANSI/bidi bytes; the
+  // The name is operator-authored and may hold control/ANSI/bidi bytes; the
   // length bound reports a static message, never the offending name.
   const evil = "\x1b[31m" + "D".repeat(300) + "\x1b[0m\u202e";
   const result = safeParseMetadata([
@@ -400,7 +400,7 @@ test("a rejected metadata type is not echoed in the parse error", () => {
   // path (loadConfigLinkageSource), which relays the Zod issue message verbatim.
   // Like the linkage-terms discriminator, the z.enum mismatch reports only the
   // expected options and the issue path, never the received value -- pin that so
-  // an offending value carrying control/ANSI/bidi bytes cannot leak through.
+  // an offending value holding control/ANSI/bidi bytes cannot leak through.
   const evil = "\x1b[31mfirstName\x1b[0m\u202e";
   const result = safeParseMetadata([
     { name: "c", type: evil, role: "linkage", is_payload: false },

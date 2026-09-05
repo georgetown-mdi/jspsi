@@ -2,50 +2,37 @@ import { z } from "zod";
 import { camelizeKeys } from "../utils/camelizeKeys.js";
 import { safeParseCamelized } from "./safeParseCamelized.js";
 
-// Signing configuration for exchange receipts. Lives as an optional `signing`
-// block on the ExchangeSpec (psilink.yaml); see EXCHANGE_REFERENCE.md. It carries
-// only non-secret references: the path to this party's signing identity file
-// (the private key lives there, NOT here), the receipt signing mode, the pinned
-// partner certificate fingerprint (a public value exchanged out-of-band), and
-// where signed receipts are written. The signing private key is deliberately
-// kept out of the config and out of the rotating key file; see
+// Signing configuration for exchange receipts: the optional `signing` block
+// on the ExchangeSpec (psilink.yaml); see EXCHANGE_REFERENCE.md. Carries only
+// non-secret references -- signing identity file path, receipt mode, pinned
+// partner certificate fingerprint, and receipt output location. The signing
+// private key stays out of the config and the rotating key file; see
 // docs/SECURITY_DESIGN.md.
 
 /**
- * Canonical form of a certificate fingerprint: an unpadded base64url SHA-256
- * digest, which is exactly 43 characters (32 bytes). This is the stable string a
- * party shares with its partner out-of-band and the partner pins here. Sharing
- * the precise length lets a truncated or mistyped paste fail with a clear error
- * rather than silently never matching.
+ * Canonical form of a certificate fingerprint: an unpadded base64url
+ * SHA-256 digest, exactly 43 characters (32 bytes). The stable string a
+ * party shares with its partner out-of-band and pins here; the exact
+ * length lets a truncated or mistyped paste fail with a clear error.
  *
- * The final character is constrained to the canonical set (those whose base64url
- * value is a multiple of 4: A E I M Q U Y c g k o s w 0 4 8). A 43-character
- * base64url string carries 258 bits but a SHA-256 digest is only 256, so the
- * last character's low 2 bits are unused and are zero in the encoding `psilink
- * fingerprint` emits. Without this constraint several distinct 43-character
- * strings decode to the same 32 bytes; because pinning compares the decoded
- * digest, a non-canonical variant would still match its certificate (so this is
- * not a forgery vector), but the pin string would no longer be a 1:1 image of
- * the digest. Requiring canonical form keeps that correspondence exact and
- * rejects a near-miss paste outright rather than silently accepting a value
- * `psilink` would never print.
+ * The final character is constrained to the canonical set (base64url
+ * values that are a multiple of 4: A E I M Q U Y c g k o s w 0 4 8), since
+ * a 43-character base64url string carries 258 bits but a SHA-256 digest is
+ * only 256 -- the last character's low 2 bits are unused and zero in what
+ * `psilink fingerprint` emits. This keeps the pin string a 1:1 image of the
+ * digest and rejects a near-miss paste rather than silently accepting one.
  */
 export const FINGERPRINT_REGEX = /^[A-Za-z0-9_-]{42}[AEIMQUYcgkosw048]$/;
 
 /**
- * Receipt signing mode. Mirrors the two modes described in
- * docs/spec/PROTOCOL.md#third-party-verifiable-proof-of-a-data-flow, plus an
- * explicit `none`:
+ * Receipt signing mode. Mirrors the two modes in
+ * docs/spec/PROTOCOL.md#third-party-verifiable-proof-of-a-data-flow, plus
+ * an explicit `none`:
  * - `none` -- no receipt is signed (only the unsigned self-attested record).
- * - `session-derived` -- a MAC under the shared session key; tamper-evident
- *   but not non-repudiation and not third-party verifiable.
- * - `certificate` -- a signature under this party's long-lived signing identity,
- *   the only mode that yields third-party-verifiable non-repudiation. This is the
- *   mode this provisioning work supports.
- *
- * The enum is the extensibility seam for the trust model: a future
- * authority-backed (X.509/CA) mode layers on as an additional value without
- * changing the ones above.
+ * - `session-derived` -- a MAC under the shared session key: tamper-evident,
+ *   not non-repudiation, not third-party verifiable.
+ * - `certificate` -- a signature under this party's long-lived signing
+ *   identity: the only mode with third-party-verifiable non-repudiation.
  */
 export type SigningMode = "none" | "session-derived" | "certificate";
 
@@ -66,28 +53,23 @@ export interface SigningConfig {
   mode: SigningMode;
   /**
    * Path to this party's signing identity file (private key + self-signed
-   * certificate). Owner-read-only; created and read by the CLI, which resolves
-   * no path of its own when this is omitted -- the identity is a credential, and
-   * where it lives is the operator's custody decision.
-   *
-   * Optional in the SHAPE, and required in `certificate` mode: that is a
-   * cross-field rule, kept out of the schema alongside the partner-fingerprint
-   * one below so a partially-authored config still parses, and enforced at the
-   * CLI's certificate-mode pre-flight instead.
-   *
-   * Stored verbatim. A leading `~` is NOT resolved here -- the config layer does
-   * not resolve home directories (a host concern). Any CLI consumer that opens
-   * this path must tilde-expand it at use time, as `psilink fingerprint` does
-   * via `expandTilde`.
+   * certificate). Owner-read-only; the identity is a credential, so the CLI
+   * resolves no path of its own when this is omitted. Optional in shape but
+   * required in `certificate` mode -- a cross-field rule enforced at the
+   * CLI's certificate-mode pre-flight, not in this schema, so a
+   * partially-authored config still parses. Stored verbatim: a leading `~`
+   * is not resolved here (a host concern); a consumer that opens this path
+   * must tilde-expand it at use time (`expandTilde`), as `psilink
+   * fingerprint` does.
    */
   identityFile?: string;
   /**
-   * The partner's pinned certificate fingerprint (unpadded base64url SHA-256),
-   * exchanged out-of-band at setup. A presented partner certificate is trusted
-   * only if its fingerprint matches this value; an absent value means no partner
-   * certificate can be trusted yet (verification is rejected with a clear
-   * error). Long-lived: it stays valid until the partner deliberately
-   * regenerates its identity.
+   * The partner's pinned certificate fingerprint (unpadded base64url
+   * SHA-256), exchanged out-of-band at setup. A presented partner
+   * certificate is trusted only if its fingerprint matches this value; an
+   * absent value means no partner certificate can be trusted yet
+   * (verification is rejected with a clear error). Long-lived: valid until
+   * the partner regenerates its identity.
    */
   partnerFingerprint?: string;
   /**
@@ -113,35 +95,28 @@ const SigningConfigSchema: z.ZodType<SigningConfig> = z.object({
 });
 
 /**
- * Schema for the optional `signing` block, exported so {@link ExchangeSpecSchema}
- * can embed it. Field-shape validation only: cross-field requirements -- that
- * certificate mode needs a pinned partner fingerprint before a partner
- * certificate can be verified, and that it needs an `identity_file` to sign with
- * -- are enforced at the pre-exchange gate, with the partner-fingerprint
- * requirement enforced again at the verification call site, so a
- * partially-authored config still parses wherever this schema is used. A reader
- * that needs only `identity_file`, such as `psilink fingerprint`, reads it from
- * the raw config text rather than through this schema, so it never needs the
- * partner's fingerprint to exist.
+ * Schema for the optional `signing` block, exported so
+ * {@link ExchangeSpecSchema} can embed it. Field-shape validation only:
+ * `certificate` mode's cross-field requirements -- a pinned partner
+ * fingerprint to verify against, an `identity_file` to sign with -- are
+ * enforced at the pre-exchange gate instead, so a partially-authored
+ * config still parses. `psilink fingerprint`, which needs only
+ * `identity_file`, reads it from the raw config text rather than this
+ * schema.
  */
 export { SigningConfigSchema };
 
 /**
- * Whether a partner certificate fingerprint is pinned at all. Its absence is the
- * one state in which no presented partner certificate can be trusted, whatever
- * that certificate carries.
+ * Whether a partner certificate fingerprint is pinned at all; its absence
+ * is the one state in which no presented certificate can be trusted.
+ * Shared by two refusals that must agree: the verification-time rejection
+ * of a certificate against no pin (`assertPartnerCertificateTrusted`), and
+ * the pre-exchange gate refusing such a run before any payload crosses
+ * (`assertCertificateModePinsPartner`).
  *
- * Held here, beside the field, because two refusals turn on it and they must
- * refuse the same set: the verification-time rejection of a certificate
- * presented against no pin (`assertPartnerCertificateTrusted`), and the
- * pre-exchange gate that refuses such a run before any payload crosses
- * (`assertCertificateModePinsPartner`). A gate reading a narrower condition than
- * the runtime's would admit exactly the runs that cannot finish.
- *
- * An empty string counts as no pin alongside `undefined`: the schema's
- * {@link FINGERPRINT_REGEX} cannot produce one, so it arrives only from a
- * {@link SigningConfig} assembled in code, where it is a pin nobody set rather
- * than a value that could ever match a digest.
+ * An empty string counts as no pin alongside `undefined`: {@link
+ * FINGERPRINT_REGEX} cannot produce one, so it arrives only from a
+ * {@link SigningConfig} assembled in code, as a pin nobody set.
  */
 export function partnerPinIsPresent(
   pinnedFingerprint: string | undefined,

@@ -1,15 +1,13 @@
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 
-// PSI crypto backend selection. participant.ts consumes a PSILibrary that a
-// caller injects (see RunExchangeOptions.psiLibrary in exchange.ts); this picks
-// which implementation of that same interface to inject. The node path prefers a
-// native N-API addon (faster EC, parallelizable) and falls back to the portable
-// WebAssembly build; the browser always uses WASM. The native addon wraps the
-// SAME private-join-and-compute P-256 curve and wire format as WASM, so the two
-// interoperate byte-for-byte (the psi-engine-wire-vectors.json fixture pins that
-// contract). This selector is the seam the native addon plugs into. Correctness
-// must never depend on the addon being present -- WASM is the default-correct
-// fallback.
+// PSI crypto backend selection: participant.ts consumes a PSILibrary a
+// caller injects (see RunExchangeOptions.psiLibrary in exchange.ts), and
+// this picks which implementation to inject. Node prefers the native
+// N-API addon (faster EC, parallelizable) and falls back to the portable
+// WebAssembly build; the browser always uses WASM. The addon wraps the
+// same private-join-and-compute P-256 curve and wire format as WASM, so
+// the two interoperate byte-for-byte -- pinned by the
+// psi-engine-wire-vectors.json fixture.
 
 /**
  * Which PSI crypto engine {@link loadPsiBackend} resolved: the native N-API

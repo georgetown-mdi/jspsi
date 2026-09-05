@@ -93,7 +93,7 @@ const baseInputs: ExchangeRecordInputs = {
   createdAt: "2026-01-02T03:04:05.000Z",
 };
 
-// Terms carrying the optional governance inputs: a legal agreement, several
+// Terms holding the optional governance inputs: a legal agreement, several
 // linkage fields (out of name order, to exercise the matchingBasis sort) all
 // referenced by one key, and payload columns with and without a description.
 const termsWithGovernance: LinkageTerms = {
@@ -158,7 +158,7 @@ describe("commitments", () => {
       baseInputs,
       fixedRandomness,
     );
-    // The keys carry only salts; verification re-supplies the committed data.
+    // The keys hold only salts; verification re-supplies the committed data.
     const { verdicts, allValid } = await verifyRecordCommitments(record, keys, {
       localPayloadSent,
       partnerPayloadReceived,
@@ -337,7 +337,7 @@ describe("records exposed", () => {
 
   test("accepts zero (a party that contributed no records)", async () => {
     // Zero is the lower bound of the valid range: an empty input still produces
-    // a record, and its outbound exposure is honestly zero rather than absent.
+    // a record, and its outbound exposure is zero rather than absent.
     const { record } = await buildExchangeRecord(
       { ...baseInputs, recordsExposed: 0 },
       fixedRandomness,
@@ -524,14 +524,14 @@ describe("governance metadata", () => {
       payloadReceived: [{ name: "status" }],
     });
     // A column the data dictionary does not describe omits the key rather than
-    // carrying an undefined one -- a distinction the structural equality above
+    // including an undefined one -- a distinction the structural equality above
     // does not make, and one the canonical encoding does.
     expect("description" in record.governance.payloadReceived[0]).toBe(false);
   });
 
   test("omits the legal agreement when the terms have none", async () => {
     // baseInputs.localTerms (termsA) has no legalAgreement and no payload data
-    // dictionary, yet the committed payloads carry columns: the payload categories
+    // dictionary, yet the committed payloads hold columns: the payload categories
     // are read from the committed disclosure, not the (absent) dictionary, so they
     // report the committed columns -- here with bare names, since there is no
     // dictionary to attach descriptions from.
@@ -682,9 +682,10 @@ describe("governance metadata", () => {
   });
 
   test("rejects an over-long payload column name on parse (read path)", async () => {
-    // The on-disk read backstop: a record whose payloadReceived name exceeds the
-    // bound is rejected by parseExchangeRecord, so an over-long name an older or
-    // hand-edited file might carry cannot be admitted. A name at the bound parses.
+    // The on-disk read safety check: a record whose payloadReceived name
+    // exceeds the bound is rejected by parseExchangeRecord, so an over-long
+    // name an older or hand-edited file might hold cannot be admitted. A
+    // name at the bound parses.
     const { record } = await buildExchangeRecord(
       {
         ...baseInputs,
@@ -706,20 +707,19 @@ describe("governance metadata", () => {
     expect(() => parseExchangeRecord(overLong)).toThrow();
   });
 
-  // The privacy invariant on the record body: it carries only readable governance
+  // The privacy invariant on the record body: it holds only readable governance
   // metadata (names, types, descriptions, references) and never value-level data
   // (payload row values, linkage-field values, the matched-identifier table),
   // which are committed, never embedded. The next two tests guard that invariant
   // from opposite directions over `governanceInputs`, which populates every
   // governance channel.
   test("governance exposes only allow-listed metadata keys (a new value-bearing field would fail)", async () => {
-    // Positive, structural guard: assert governance is a CLOSED allow-list of keys
-    // at every level. The realistic regression -- governanceFromTerms (and its
-    // schema) growing a field that carries a value -- fails here because the new
-    // key is not permitted, without the test having to name a forbidden value. The
-    // allow-list is declared independently of the schema on purpose: adding a
-    // governance field forces a deliberate update here, and with it a fresh "is
-    // this value-level data?" judgement.
+    // Positive, structural guard: assert governance is a CLOSED allow-list of
+    // keys at every level. The realistic regression -- governanceFromTerms
+    // (and its schema) growing a field that holds a value -- fails here
+    // because the new key is not permitted, without naming a forbidden
+    // value. The allow-list is declared independently of the schema on
+    // purpose, so adding a governance field forces a fresh judgement here.
     const { record } = await buildExchangeRecord(
       governanceInputs,
       fixedRandomness,
@@ -759,7 +759,7 @@ describe("governance metadata", () => {
       ...localPayloadSent.rows.flat(),
       ...partnerPayloadReceived.rows.flat(),
     ].filter((cell): cell is string => typeof cell === "string");
-    // Fail loudly if the fixture ever stops carrying committed values, which would
+    // Fail loudly if the fixture ever stops holding committed values, which would
     // turn the loop below into a silent no-op.
     expect(committedValues.length).toBeGreaterThan(0);
     for (const value of committedValues) {
@@ -774,7 +774,7 @@ describe("governance metadata", () => {
     // Out of reach by construction: legalAgreement.purpose is operator-supplied
     // free text, copied verbatim and not cross-validated, so a value an operator
     // smuggles into it cannot be detected here. Purpose-text hygiene is an operator
-    // responsibility, outside this automated invariant -- named, not papered over.
+    // responsibility, outside this automated invariant -- named, not hidden.
   });
 });
 
@@ -850,7 +850,7 @@ describe("receipt binder", () => {
 
 describe("parse input bounds (untrusted read path)", () => {
   // parseExchangeRecord's first production caller ingests a record supplied by
-  // another party, so every partner-controlled string and array carries a
+  // another party, so every partner-controlled string and array has a
   // generous length / element-count cap. These reject an oversized hostile record
   // at parse -- a string field and an array field each pushed one past its cap --
   // without changing what a legitimate record parses to.
@@ -923,7 +923,7 @@ describe("serialize / parse", () => {
     // above never exercises the parser against a record with a purpose. Build
     // from the governance-bearing terms so parseExchangeRecord validates the
     // mandatory purpose -- a regression dropping it from RecordLegalAgreementSchema
-    // would surface here.
+    // would appear here.
     const { record } = await buildExchangeRecord(
       { ...baseInputs, localTerms: termsWithGovernance },
       fixedRandomness,
@@ -986,7 +986,7 @@ describe("serialize / parse", () => {
   });
 
   test("a terminated run's record states its outcome and round-trips", async () => {
-    // The record a swap failure leaves behind: it carries the run's binder (the
+    // The record a swap failure leaves behind: it holds the run's binder (the
     // partner may hold a receipt bearing it) while stating that this party
     // exchanged no receipt, so a reader tells it from a completed run's without
     // consulting anything outside the artifact.
@@ -1042,7 +1042,7 @@ describe("serialize / parse", () => {
   });
 
   test("parseExchangeRecord refuses a record written before the citation verdict", async () => {
-    // The v3 shape: a governance block that could carry a citation but never a
+    // The v3 shape: a governance block that could hold a citation but never a
     // verdict on it. A reader of this version takes a citation with no verdict
     // beside it as a writer that checked and reached nothing, where a v3 writer
     // ran no check at all -- so it is refused on the version discriminant, like
@@ -1135,7 +1135,7 @@ describe("serialize / parse", () => {
     });
 
     // A set name this build does not ship resolves to nothing, so nothing is
-    // compared: the citation is carried exactly as before and reported unchecked,
+    // compared: the citation is held exactly as before and reported unchecked,
     // never contradicted. Nothing here resolves a partner's set name.
     const foreign = await buildExchangeRecord(
       {
@@ -1162,8 +1162,8 @@ describe("serialize / parse", () => {
 
   test("the acceptor's record verdict is reached on the same rule as the inviter's", async () => {
     // Both parties' record writes read this party's OWN agreed terms, so the
-    // acceptor -- whose terms carry the inviter's citation as adopted -- reaches
-    // the verdict the inviter's own record carries for the same document.
+    // acceptor -- whose terms hold the inviter's citation as adopted -- reaches
+    // the verdict the inviter's own record holds for the same document.
     const inviterTerms: LinkageTerms = {
       ...baseInputs.localTerms,
       linkageRuleSet: {

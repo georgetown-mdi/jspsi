@@ -13,24 +13,23 @@ import {
 
 // snakeize a camelCase key the way the production walker's inverse transform
 // does, so each opaque key can be exercised in its snake_case spelling on input.
-// Test-only; deliberately not imported from production (camelToSnake is private)
-// so this test does not re-couple to the very helper it is guarding.
+// Test-only; not imported from production (camelToSnake is private) so this
+// test does not re-couple to the very helper it is guarding.
 function toSnake(s: string): string {
   return s.replace(/[A-Z]/g, (c) => `_${c.toLowerCase()}`);
 }
 
-// A probe subtree whose two marker keys change under different directions:
-// `snake_marker` is rewritten by camelize (-> snakeMarker) but is a fixed point
-// for snakeize; `camelMarker` is rewritten by snakeize (-> camel_marker) but is
-// a fixed point for camelize. So whether a direction descended into a subtree is
-// read off the surviving marker: camelize-skipped iff `snake_marker` survives,
-// snakeize-skipped iff `camelMarker` survives. `id` is a fixed point for both
-// directions, so it labels the subtree stably across the transform.
+// A probe subtree whose two marker keys move in opposite directions:
+// `snake_marker` changes under camelize but is fixed under snakeize;
+// `camelMarker` changes under snakeize but is fixed under camelize. The
+// surviving marker shows which direction skipped the subtree -- `snake_marker`
+// surviving means camelize skipped it, `camelMarker` surviving means snakeize
+// did. `id` is fixed under both, so it labels the subtree across the transform.
 function probeSubtree(id: string): Record<string, unknown> {
   return { id, snake_marker: 1, camelMarker: 2 };
 }
 
-/** Collect every object carrying a string `id`, keyed by that id, from a walked
+/** Collect every object holding a string `id`, keyed by that id, from a walked
  *  output -- so a subtree can be located after the transform regardless of depth. */
 function indexById(
   value: unknown,
@@ -130,9 +129,9 @@ test("the depth guard fires at exactly MAX_NESTING_DEPTH", () => {
 });
 
 test("a pathologically-deep payload fails cleanly, not with a RangeError", () => {
-  // ~5000 levels overflowed camelizeKeys's native recursion before the guard;
-  // it must now reject with the bounded UsageError. The guard fires at the bound,
-  // so the native stack overflow is never reached.
+  // 5000 levels of nesting is deep enough to overflow camelizeKeys's native
+  // recursion absent a guard. The guard rejects it first, with the bounded
+  // UsageError, so the native stack overflow is never reached.
   let err: unknown;
   try {
     camelizeKeys(nestedToDepth(5000));
@@ -164,11 +163,11 @@ test("snakeizeKeys is the inverse of camelizeKeys for schema keys", () => {
   expect(snakeizeKeys(camelizeKeys(onDisk))).toEqual(onDisk);
 });
 
-// The scalar half of the write direction, which the schema-error render seams
-// name ONE key with: validation runs on the camelized shape, so an issue path
-// carries the camelCase name while the operator is reading the snake_case
-// document. What holds it to the document is that the deep writer is this same
-// function, so a key it names is spelled as psilink's own writer spells it.
+// The scalar half of the write direction: the schema-error render names one key
+// through this function. Validation runs on the camelized shape, so an issue
+// path holds the camelCase name while the operator reads the snake_case
+// document. The deep writer is the same function, so a name it produces matches
+// how psilink's own writer spells the document's keys.
 test("snakeizeKey names a key exactly as the deep writer spells it", () => {
   const onDisk = {
     linkage_fields: [{ affixes_allowed: true }],
@@ -209,11 +208,11 @@ test("only keys are rewritten; string values are left verbatim, both directions"
 });
 
 test("snakeizeKeys skips an opaque subtree even given raw snake_case keys", () => {
-  // The latent hazard the co-location removes: opacity is decided on the
-  // canonicalized key, not the raw one, so a snake_case `provider_options` key
-  // routed DIRECTLY through snakeizeKeys -- not the typed camelCase ExchangeSpec
-  // saveConfig feeds -- is still skipped. Non-opaque camelCase siblings are
-  // snakeized as usual, proving the walker is active rather than short-circuited.
+  // Opacity is decided on the canonicalized key, not the raw one, so a
+  // snake_case `provider_options` key routed DIRECTLY through snakeizeKeys --
+  // not the typed camelCase ExchangeSpec saveConfig feeds -- is still skipped.
+  // Non-opaque camelCase siblings are snakeized as usual, proving the walker is
+  // active rather than short-circuited.
   const snakeized = snakeizeKeys({
     provider_options: { ready_timeout: 5000, keepAlive: true },
     someCamelKey: { innerCamel: 1 },
@@ -226,13 +225,12 @@ test("snakeizeKeys skips an opaque subtree even given raw snake_case keys", () =
 });
 
 test("an opaque map is verbatim all the way down (nested objects, arrays), both directions", () => {
-  // The walker skips an opaque value by not recursing into it AT ALL, so opacity
-  // holds at every depth -- a nested object and an array of objects with
-  // case-bearing keys must survive byte-for-byte through both directions. This
-  // pins the "opaque all the way down" promise that a future "recurse one more
-  // level" change could otherwise break with no test noticing. The probe carries
-  // both a snake_case key (would change if camelized) and a camelCase key (would
-  // change if snakeized) at depth, so a regression in either direction is caught.
+  // The walker skips an opaque value by not recursing into it AT ALL, so
+  // opacity holds at every depth -- a nested object and an array of objects
+  // with case-bearing keys survive byte-for-byte through both directions. This
+  // pins the "opaque all the way down" behavior against a future
+  // partial-recursion change. The probe holds both a snake_case key and a
+  // camelCase key at depth, so a regression in either direction is caught.
   const opaque = {
     ready_timeout: 5000,
     algorithms: { server_host_key: ["ssh-ed25519"], readyDeep: true },
@@ -304,13 +302,12 @@ test("the width bound does not skip a non-object value", () => {
 });
 
 // --- Node-count (width) budget -----------------------------------------------
-// camelizeKeys runs BEFORE Zod on partner-controlled input, and the snake->camel
-// rewrite is O(total nodes), so a wide untrusted payload -- within the frame and
-// decode-layer caps -- would otherwise burn multiple seconds before validation
-// rejects (and, for a wide object under an UNKNOWN key, the non-strict schema then
-// SILENTLY strips it, so the parse succeeds after the burn). A single running
-// node budget across the whole walk -- the width analogue of the depth bound --
-// rejects it cleanly first. A "node" is one array element or one object member.
+// camelizeKeys runs BEFORE Zod on partner-controlled input; the snake->camel
+// rewrite is O(total nodes), so a wide payload within the frame and
+// decode-layer caps could otherwise burn multiple seconds before validation
+// rejects it. A single node budget across the walk -- the width analogue of the
+// depth bound -- rejects it cleanly first. A "node" is one array element or one
+// object member.
 
 // A flat array of `n` scalars is exactly `n` nodes and rewrites no keys, so it is
 // the cheapest way to land the budget on an exact boundary.

@@ -16,21 +16,18 @@ import {
 import type { KeyCells, LocalKeyColumn } from "../src/link";
 
 /**
- * Conformance replay of test/vectors/index-table-vectors.json: the wire layout of
- * the single-pass distinct-value index table, part (d) of message 2, in both the
- * forms a sender ships -- fixed-width from a sender declaring no fan-out, ragged
- * from one that declares one (docs/spec/PROTOCOL.md, Linkage strategies and
- * Wire-format deltas). The layout is chosen by authenticated per-party session
- * state with no wire flag, so a delta in either -- the -1 marker, the key-major
- * word order, the count prefix, the remap into the setup message's sorted order,
- * or the frame's part boundaries -- is one a partner on another build misreads.
- *
- * The guards that REFUSE a malformed table are driven from their own words in
- * singlePassFanOut.test.ts; what is pinned here is the conforming bytes.
- * Regenerate with vectors/generate-index-table-vectors.mjs.
+ * Conformance replay of test/vectors/index-table-vectors.json: the wire
+ * layout of the single-pass distinct-value index table, part (d) of
+ * message 2, in both forms a sender ships -- fixed-width (no fan-out) and
+ * ragged (fan-out) (docs/spec/PROTOCOL.md, Linkage strategies and
+ * Wire-format deltas). The layout is chosen by per-party session state
+ * with no wire flag, so its byte-level details -- the -1 marker, word
+ * order, count prefix, remap, and part boundaries -- are all wire format.
+ * Malformed-table guards are in singlePassFanOut.test.ts. Regenerate with
+ * vectors/generate-index-table-vectors.mjs.
  */
 
-/** Per key, per record, the value indices that cell carries. */
+/** Per key, per record, the value indices that cell holds. */
 type Cells = Array<Array<Array<number>>>;
 
 interface FixedWidthTable {
@@ -166,8 +163,8 @@ describe("single-pass index-table layout vectors", () => {
   });
 
   test("both layouts are pinned, as a table and inside a whole reply frame", () => {
-    // A layout that fell out of the file would be one nothing here holds, which
-    // is the hole these vectors close.
+    // A layout dropped from the file would go unchecked by every test
+    // below.
     const layouts = new Set(vectors.tables.map((table) => table.layout));
     expect([...layouts].sort()).toEqual(["fixed-width", "ragged"]);
     const framed = new Set(
@@ -215,10 +212,11 @@ describe("single-pass index-table layout vectors", () => {
     "%s: the decoded cells are the sender's own values under the permutation",
     (_name, table) => {
       // The independent half: the words above are what the implementation
-      // produces, and this is what they have to MEAN. The setup message carries
-      // permutation[sortedPosition] = buildOrderValueId, so inverting it gives
-      // the sorted position of each value the sender built, and a cell is the
-      // ids it holds under that inverse, ascending.
+      // produces, and this is what they have to MEAN. The setup message
+      // states `permutation[sortedPosition] = buildOrderValueId`;
+      // inverting it gives the sorted position of each value the sender
+      // built, and a cell is the ids it holds under that inverse,
+      // ascending.
       const sortedPosOf = new Array<number>(table.permutation.length);
       table.permutation.forEach((buildId, sortedPosition) => {
         sortedPosOf[buildId] = sortedPosition;

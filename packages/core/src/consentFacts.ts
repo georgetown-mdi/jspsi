@@ -2,7 +2,7 @@
 // surface states, and the fixed caveat copy each surface renders for them.
 //
 // It lives beside the shared invitation summary rather than in either renderer
-// for the reason the summary itself does: a fact both surfaces state must carry
+// for the reason the summary itself does: a fact both surfaces state must hold
 // ONE classification and ONE caveat sentence. A renderer that authored its own
 // could classify the same fact differently from the other surface, or attach a
 // caveat that contradicts it. The consent-coverage check cannot see that class of
@@ -10,11 +10,12 @@
 // the two say the same thing.
 //
 // A table keyed by a fact identifier, not a field on `InvitationSummary`. Two
-// properties a per-field flag cannot carry force it: not every classified fact is
-// a summary field (the acceptor's own outbound columns come from its own resolved
-// metadata, never from the partner's token), and one underlying field carries two
-// classifications at once (the viewer's own non-receipt is enforced while the
-// partner's non-receipt, off the same `output` pair, rests on the partner's word).
+// properties a per-field flag cannot hold force it: not every classified fact
+// is a summary field (the acceptor's own outbound columns come from its own
+// resolved metadata, never from the partner's token), and one underlying
+// field holds two classifications at once (the viewer's own non-receipt is
+// enforced while the partner's non-receipt, off the same `output` pair,
+// rests on the partner's word).
 // `linkageTermConsentCoverage.ts` is the repo's precedent for the shape.
 //
 // One tier here states facts about the count-only (`psi-c`) run alone, which both
@@ -42,7 +43,7 @@ export interface ConsentFact {
   /** Which of the two registers this fact belongs to. */
   basis: ConsentFactBasis;
   /**
-   * Why the fact carries that basis. Read by a person auditing the table, not by
+   * Why the fact holds that basis. Read by a person auditing the table, not by
    * a renderer: it is where the judgment behind a row is recorded, so a row
    * cannot be reclassified without the reason being restated alongside it.
    */
@@ -63,7 +64,7 @@ export interface ConsentFact {
  * exclusive cases of a single line: the two `output` receipts, whose bases and
  * caveats differ by value, and the acceptor's received columns, whose basis
  * differs by where the displayed set came from -- the disclosed subset the
- * invitation carried, or the inviter's authored declaration. A renderer looks a
+ * invitation held, or the inviter's authored declaration. A renderer looks a
  * fact up here for both the basis marker and the caveat; one that spells either
  * out inline has re-created the divergence this removes.
  */
@@ -419,13 +420,14 @@ export const CONSENT_FACTS = {
       "Re-checked before and after the key exchange; an expired invitation is " +
       "refused.",
   },
-  // The note's "what you send stays encrypted there" is true of every path that
-  // renders this fact, and only because they are all authenticated accepts: the
-  // zero-setup exchange takes --retain-files too and runs its PSI frames over the
-  // bare transport, with no application-layer encryption to promise. It renders
-  // no consent fact at all, which is what keeps the sentence honest -- pinned by
-  // a test rather than by this comment (apps/cli/test/unit/zeroSetup.test.ts), so
-  // wiring consent facts into that path fails until the claim is re-examined.
+  // The note's "what you send stays encrypted there" is true of every path
+  // that renders this fact, and only because they are all authenticated
+  // accepts: the zero-setup exchange takes --retain-files too and runs its
+  // PSI frames over the bare transport, with no application-layer encryption
+  // to promise. It renders no consent fact at all, which is what keeps the
+  // sentence accurate -- pinned by a test rather than by this comment
+  // (apps/cli/test/unit/zeroSetup.test.ts), so wiring consent facts into that
+  // path fails until the claim is re-examined.
   retainedFiles: {
     basis: "enforced",
     reason:
@@ -471,9 +473,9 @@ export type ConsentFactId = keyof typeof CONSENT_FACTS;
 
 /**
  * The terse marker a surface with no styling budget puts on a fact's own label to
- * carry its {@link ConsentFactBasis}. It lives here rather than in the renderer
+ * hold its {@link ConsentFactBasis}. It lives here rather than in the renderer
  * that needs it so a further surface inherits the vocabulary instead of coining a
- * third one; the web carries the same distinction through its tiering and the
+ * third one; the web holds the same distinction through its tiering and the
  * caveat copy, so it renders no marker.
  */
 export const CONSENT_BASIS_MARKERS: Record<ConsentFactBasis, string> = {
@@ -499,11 +501,11 @@ const CONTRADICTED_RULES_GOVERN =
  * rule set, keyed by this build's verdict on that half
  * ({@link LinkageRuleSetCitationVerdict}).
  *
- * Keyed by verdict rather than carried on the `linkageRuleSet` fact because the
- * caveat is exactly what the verdict changes. The fixed sentence that fact used
- * to carry asserted psilink had checked nothing, which is false of a half whose
- * name this build resolves and compares -- and the two halves are decided
- * independently, so one document can need two different sentences at once.
+ * Keyed by verdict rather than held on the `linkageRuleSet` fact, because the
+ * caveat is exactly what the verdict changes: a single fixed sentence there
+ * would be false of a half whose name this build resolves and compares, and
+ * the two halves are decided independently, so one document can need two
+ * different sentences at once.
  *
  * The marker goes on the half's own first-party LABEL, in place of the basis
  * marker, for two reasons. The basis vocabulary answers a different question
@@ -615,7 +617,7 @@ const LINKAGE_RULE_SET_CITING_PARTY_NOTES: Partial<
 };
 
 /**
- * The caveat `verdict` carries for a reader the citation was made TO:
+ * The caveat `verdict` holds for a reader the citation was made TO:
  * {@link LINKAGE_RULE_SET_VERDICT_COPY}'s own sentence, which every verdict has.
  *
  * The selection lives here rather than in a renderer for the reason the copy
@@ -629,7 +631,7 @@ export function linkageRuleSetVerdictNote(
   reader: "recipient",
 ): string;
 /**
- * The caveat `verdict` carries for a reader that may have WRITTEN the citation:
+ * The caveat `verdict` holds for a reader that may have WRITTEN the citation:
  * {@link LINKAGE_RULE_SET_CITING_PARTY_NOTES}'s substitute where the verdict has
  * one, the recipient's sentence for a reader that is not the citing party, and
  * `undefined` where a citing party has none.
@@ -655,10 +657,10 @@ export function linkageRuleSetVerdictNote(
 
 /**
  * The caveat a surface reading a FILED exchange record renders beside the
- * rule-set citation it carries: the disclosure accounting's screen and the CSV it
+ * rule-set citation it holds: the disclosure accounting's screen and the CSV it
  * exports.
  *
- * The same classification {@link LINKAGE_RULE_SET_VERDICT_COPY} carries, stated
+ * The same classification {@link LINKAGE_RULE_SET_VERDICT_COPY} holds, stated
  * for a reader who is holding the verdict rather than being shown it. A record's
  * citation is always paired with the writing party's verdict on it
  * (docs/spec/EXCHANGE_RECORD.md, "The writing party's verdict"), so a caveat
@@ -667,10 +669,10 @@ export function linkageRuleSetVerdictNote(
  * the verdict instead of restating its value: the accounting presents the
  * citation, and the record beside it is where the finding is read.
  *
- * Deliberately says what a check could and could not establish rather than
- * summarizing an outcome, because one sentence serves all three verdicts here:
- * silence must not read as verification, and a name this build cannot resolve
- * must not read as one it checked.
+ * States what a check could and could not establish rather than summarizing an
+ * outcome, because one sentence serves all three verdicts here: silence must
+ * not be treated as verification, and a name this build cannot resolve must
+ * not be treated as one it checked.
  *
  * Fixed first-party copy naming no set, version, or party, so a surface renders
  * it verbatim beside the escaped names it qualifies.
@@ -700,7 +702,7 @@ export const RECORDED_LINKAGE_RULE_SET_CAVEAT =
  * acceptor, which receives when `output.shareWithPartner` is set (acceptance
  * mirrors the pair). Each surface resolves that fact for its own viewer and
  * renders this; a surface that composes its own sentence is a second account of
- * the fact, which is the drift carrying the copy here removes.
+ * the fact -- the divergence risk that keeping the copy here removes.
  *
  * Fixed first-party copy, naming no column: no partner-controlled value reaches
  * it, so a surface may render it verbatim.
@@ -714,12 +716,12 @@ export const OUTBOUND_SEND_NO_PAYLOAD_SENTENCE =
  * count-only (`psi-c`) exchange: what such a run reveals, in one line.
  *
  * The headline of the count-only tier, whose remaining facts are the
- * `countOnly*` entries of {@link CONSENT_FACTS} -- the enforced half this line
- * states, what the rounds disclose beside the count, who takes whose word for
- * the number, and the bound a partner's choice of input puts on all of it. Read
- * from here by both surfaces so neither states the guarantee in words of its
- * own; the count-only tier is exactly where a second account would cost most,
- * since a reader takes "only a number" for the safe option.
+ * `countOnly*` entries of {@link CONSENT_FACTS}: what the rounds disclose
+ * beside the count, who takes whose word for the number, and the bound a
+ * partner's input choice puts on all of it. Read from here by both surfaces
+ * so neither states the guarantee in its own words -- the count-only tier is
+ * where a second account would cost most, since a reader takes "only a
+ * number" for the safe option.
  *
  * Shared wording, not a shared placement: the web consent screen renders it as
  * its matching-method headline, where the CLI accept prompt names the algorithm
@@ -738,31 +740,31 @@ export const COUNT_ONLY_DISCLOSURE_STATEMENT =
  * party: what a deduplicating match reveals to that party that a one-to-one match
  * does not.
  *
- * One of the two statements the same headline takes, selected by the invitation's
- * output shape, since which party reads the grouping is what the shape decides.
- * The axis is `output.shareWithPartner` alone: a deduplicating document must
- * declare `output.expectsOutput` (the schema refines it, since a "many" party
- * entitled to nothing would widen its own match and take nothing back), so the
- * two shapes a deduplicating invitation can have are exactly this one -- both
- * parties receive -- and the inviting party as sole receiver, whose statement is
- * {@link DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT}. Rendering this one for
- * a sole-receiver invitation would state a disclosure this client does not make:
- * the accepting party is handed no result, so no grouping reaches its operator.
+ * One of the two statements the same headline takes, selected by the
+ * invitation's output shape, since which party reads the grouping is what
+ * the shape decides. The axis is `output.shareWithPartner` alone: a
+ * deduplicating document must declare `output.expectsOutput`, so the two
+ * shapes it can have are exactly this one (both parties receive) and the
+ * inviting party as sole receiver, whose statement is
+ * {@link DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT}. Rendering this one
+ * for a sole-receiver invitation would state a disclosure this client does
+ * not make: the accepting party is handed no result, so no grouping reaches
+ * its operator.
  *
- * Drafted from the disclosure rows of docs/spec/PROTOCOL.md (The disclosure delta
- * a deduplicating match pays) rather than composed here, and it states three
- * things those rows fix. The party learning it is the "one" side -- the ACCEPTING
- * party, since the declaring inviter is the "many" one -- and what it learns is
- * per matched record of its OWN. What it learns is a count and a set of the
- * inviting party's row indices, the same opaque row-index layer a one-to-one
- * association table already carries, never the linkage-key value behind them. And
- * the disclosure is bounded to MATCHED groups: a group whose value the partner
- * does not hold matches nothing and is never counted.
+ * Drafted from the disclosure rows of docs/spec/PROTOCOL.md (The disclosure
+ * delta a deduplicating match pays), and states three things those rows fix:
+ * the party learning it is the ACCEPTING party (the "one" side, since the
+ * declaring inviter is the "many" one), and per matched record of its own it
+ * learns a count and a set of the inviting party's row indices -- the same
+ * opaque row-index layer a one-to-one association table already holds, never
+ * the linkage-key value behind them. The disclosure is bounded to MATCHED
+ * groups: a group whose value the partner does not hold matches nothing and
+ * is never counted.
  *
- * The last clause is the integrity limit, and it must not be dropped or softened.
- * The spec binds the aggregate and the positions but not the size of the group
- * standing behind any one of them (The many side's per-value multiplicity is not
- * independently bound), so a surface stating the count as a fact about the
+ * The last clause is the integrity limit and must not be dropped or softened:
+ * the spec binds the aggregate and the positions but not the size of the group
+ * standing behind any one of them (the many side's per-value multiplicity is
+ * not independently bound), so a surface stating the count as a fact about the
  * inviting party's file would state a guarantee no check makes.
  *
  * Written in party names rather than "you", like the headline it sits with, so
@@ -789,26 +791,27 @@ export const DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT =
  * something real, so it takes a statement rather than silence: the result the
  * inviting party takes away links several of its own records to one of the
  * accepting party's, which is the grouping evidence a deduplicating run exists to
- * produce. What it must not carry is either half of
+ * produce. What it must not hold is either half of
  * {@link DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT}'s account. The accepting
  * party is presented no count and no row positions, so stating them would name a
  * disclosure this client does not make; and the unverified-count limit that
  * statement ends on has nothing to bound here, since the party reading the count
  * is the one that declared it.
  *
- * The non-receipt half this statement carries is the DISPLAY half, which is the
- * altitude that holds it: {@link runExchange} gates the association table it
- * returns on this party's own output entitlement, so a sole-receiver acceptance
- * is handed none (pinned in packages/core/test/linkageCardinality.test.ts). The
- * statement therefore says what this client presents and stops there. What the
- * wire does NOT withhold is a fact of its own, carried by the
- * `duplicateGroupingDisplayLimit` entry of {@link CONSENT_FACTS} and rendered
- * beside this statement: it belongs to the partner's register rather than the
- * run's, and a sentence folding it in would leave a trust-contingent fact
- * unclassified inside a sentence under an enforced headline.
+ * The non-receipt half this statement holds is the DISPLAY half:
+ * {@link runExchange} gates the association table it returns on this
+ * party's own output entitlement, so a sole-receiver acceptance is handed
+ * none (pinned in packages/core/test/linkageCardinality.test.ts). The
+ * statement therefore says what this client presents and stops there. What
+ * the wire does NOT withhold is a fact of its own, held by the
+ * `duplicateGroupingDisplayLimit` entry of {@link CONSENT_FACTS} and
+ * rendered beside this statement: it belongs to the partner's register
+ * rather than the run's, so folding it in here would leave a
+ * trust-contingent fact unclassified inside a sentence under an enforced
+ * headline.
  *
  * That split is what keeps the `duplicateMatches` marker at `enforced` while the
- * limit is marked for what it is. The marker carries its headline's own fact --
+ * limit is marked for what it is. The marker states its headline's own fact --
  * matching multiplicity, which the run does hold -- and the limit sitting past
  * what that marker holds is a classified fact beside it rather than an unmarked
  * clause within it. Reclassifying the headline instead would understate
@@ -816,7 +819,7 @@ export const DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT =
  * standing beside it.
  *
  * What the accepting party does pay under either shape is the widening
- * {@link DEDUPLICATE_ACCEPTOR_SIDE_NOTE} carries, which is why that note renders
+ * {@link DEDUPLICATE_ACCEPTOR_SIDE_NOTE} holds, which is why that note renders
  * beside both statements rather than beside one.
  *
  * Written in party names rather than "you", and fixed first-party copy naming no
@@ -836,36 +839,27 @@ export const DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT =
  * deduplicating invitation: whose records the setting groups, and what it still
  * costs the party whose records it does not group.
  *
- * The two are separate facts and a reader is entitled to both. The statement says
- * what a deduplicating match discloses; this says whose records are grouped to
- * disclose it. Accepting does NOT turn the setting on for the accepting party:
- * `deriveAcceptedLinkageTerms` derives that party's own `deduplicate` as false
- * rather than adopting the invitation's, so the agreed pair is one-sided by
- * construction and the accepting party's rows are never grouped. Without this
- * note a reader meeting a headline about grouping, and a statement about what
- * grouping discloses, would have no way to tell whether their own file is the one
- * being grouped.
+ * The two are separate facts and a reader is entitled to both: the statement
+ * says what a deduplicating match discloses, this says whose records are
+ * grouped to disclose it. Accepting does NOT turn the setting on for the
+ * accepting party -- `deriveAcceptedLinkageTerms` derives that party's own
+ * `deduplicate` as false rather than adopting the invitation's, so the
+ * accepting party's rows are never grouped -- and without this note a reader
+ * would have no way to tell whether their own file is the one being grouped.
  *
- * What the derivation closes is the grouping direction, and NOT the accepting
- * party's outbound disclosure, which the setting does move: more of that party's
- * records can match than in a one-to-one run of the same two files, each one
- * disclosing its membership and any payload columns that party sends, on the
- * inviting party's declaration alone. That is the second fact this note carries,
- * and a reader told only that their records are not grouped would read it as no
- * consequence at all.
+ * What the derivation closes is the grouping direction, not the accepting
+ * party's outbound disclosure, which the setting does move: more of that
+ * party's records can match than in a one-to-one run of the same two files,
+ * each one disclosing its membership and any payload columns it sends, on
+ * the inviting party's declaration alone. A reader told only that their
+ * records are not grouped would take that as no consequence at all.
  *
- * The note states that OUTCOME and not the mechanism behind it. The mechanism --
- * a value the inviting party holds on several rows is ambiguous under
- * `one-to-one` and drops out of the round, while a deduplicating run contributes
- * it once and matches -- is what makes the outcome true, and it is recorded here
- * and in docs/notes/deduplicate-matching-semantics.md rather than in the copy: a
- * reader deciding whether to accept needs what changes about their own
- * disclosure, and a clause about dropped ambiguous values asks them to derive it.
- * It is a widening rather than a new capability: an inviting party that collapsed
- * its own duplicate rows before the exchange would match exactly the same records
- * one-to-one, so the setting buys a hostile inviter nothing it could not do
- * locally. That is why the note discloses the widening rather than refusing it,
- * and it is a fact about the design rather than a sentence the copy owes.
+ * The note states that OUTCOME, not the mechanism behind it (recorded
+ * instead in docs/notes/deduplicate-matching-semantics.md). It is a
+ * widening rather than a new capability: an inviting party that collapsed
+ * its own duplicate rows before the exchange would match exactly the same
+ * records one-to-one, so the setting buys a hostile inviter nothing it
+ * could not do locally.
  *
  * It names the way to the other direction rather than leaving it unsaid, because
  * the invitation path offers no control for it: each party's own `deduplicate`
@@ -911,14 +905,14 @@ export const PROPOSED_NOT_APPLIED_NOTES = {
  * The function name is partner free text: an invitation may declare any name the
  * schema admits, so a surface that renders the name inside a sentence of its own
  * ("applies <name>") states an effect on matching that this version cannot know
- * and does not perform, and a name chosen to read as an effect is then indistinguishable
- * from one. The name still belongs on the surface as technical identity; what it
- * must not do is stand where the consequence goes.
+ * and does not perform, and a name chosen to look like an effect is then
+ * indistinguishable from one. The name still belongs on the surface as
+ * technical identity; what it must not do is stand where the consequence goes.
  *
  * Shared so the two consent surfaces state the same thing about the same
- * invitation: a rule this version cannot explain reads as explicitly unexplained
- * on the CLI accept prompt and on the web consent screen alike. Fixed first-party
- * copy naming no value, so a surface may render it verbatim.
+ * invitation: a rule this version cannot explain is stated as explicitly
+ * unexplained on the CLI accept prompt and on the web consent screen alike.
+ * Fixed first-party copy naming no value, so a surface may render it verbatim.
  */
 export const UNRECOGNIZED_TRANSFORM_NOTE =
   "Not recognized by this version; its effect on matching is not shown.";

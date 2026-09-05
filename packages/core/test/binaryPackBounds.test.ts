@@ -61,12 +61,9 @@ function fixstr(s: string): Array<number> {
 
 /** One mapped-element record `{theirIndex, iteration}` as BinaryPack: a `fixmap`
  * of two pairs with the real string keys, a small (fixint) `iteration`, and
- * `theirIndex` under one of the two index widths the budget derivation uses -- a
- * fixint at 127 and below, a `uint32` above it. Those two are the only widths this
- * helper emits, which is what its call sites here need; it does not reproduce the
- * packer's own `uint8`/`uint16` choices in between, and the width the real packer
- * gives an index at scale is pinned against the packer itself in the differential
- * suite. Exactly the shape `conn.send` serializes for the largest legitimate
+ * `theirIndex` under one of two widths -- a fixint at 127 and below, a `uint32`
+ * above it (the differential suite checks the real packer's width choices at
+ * scale). Exactly the shape `conn.send` serializes for the largest legitimate
  * inbound frame. */
 function mappedRecord(theirIndex: number, iteration: number): Array<number> {
   const index =
@@ -209,8 +206,8 @@ describe("scanFrameStructure: the per-value cost model", () => {
 
   test("charges every wide number marker the boxed weight above its slot", () => {
     // A number the container's slot cannot hold is boxed on the heap, so each
-    // marker wide enough to carry such a value is charged that box on top of the
-    // slot -- whatever value the marker actually carries, so the charge reads the
+    // marker wide enough to hold such a value is charged that box on top of the
+    // slot -- whatever value the marker actually holds, so the charge reads the
     // wire alone rather than the engine's small-integer range.
     const payload = (n: number): Array<number> => new Array<number>(n).fill(0);
     for (const marker of [
@@ -364,7 +361,7 @@ describe("scanFrameStructure: the per-value cost model", () => {
     // headroom relation between them -- this pins the mapped cost of a
     // 4.19M-record (2^22) frame against the structure budget alone, at the
     // conservative per-record weight a multi-million-record frame's wide indices
-    // carry.
+    // hold.
     expect(expectedMappedCost(4_194_304, true)).toBeLessThan(
       MAX_WEBRTC_FRAME_STRUCTURE_BYTES,
     );
@@ -395,7 +392,7 @@ describe("scanFrameStructure: the map-key rule", () => {
   // spends declaring them, so no charge taken during the walk can bound it. The
   // real packer emits a map only for a plain JS object, whose keys are strings, so
   // no legitimate frame is refused here -- the differential suite holds that
-  // premise to the real packer.
+  // assumption to the real packer.
   const refuses = (frame: Uint8Array): boolean =>
     scanRefuses(frame, Number.MAX_SAFE_INTEGER, 256, 1 << 20);
 
@@ -478,12 +475,11 @@ function nestedArrays(levels: number): Packable {
 
 describe("scanFrameStructure: the rule a refusal names", () => {
   // A refusal names the rule that fired, so an operator (and any support thread
-  // reading the failure) sees the control that refused the frame rather than one
-  // standing in for the rest. Each rule is driven by a frame the REAL packer
-  // produced, bar the two whose shapes it never emits -- a container declaring more
-  // elements than the bytes behind it, and a non-string map key -- which are
-  // assembled here, the concession the differential suite makes for the markers the
-  // packer never reaches.
+  // reading the failure) sees the control that refused the frame rather than a
+  // stand-in. Each rule is driven by a frame the REAL packer produced, except
+  // the two whose shapes it never emits -- a container declaring more elements
+  // than its backing bytes, and a non-string map key -- assembled here as the
+  // differential suite's concession for markers the packer never reaches.
   const wideBudget = Number.MAX_SAFE_INTEGER;
   const wideStringCap = 1 << 20;
 

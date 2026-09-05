@@ -9,18 +9,18 @@ const PREFIXED = Symbol("prefixed");
 const logLevels = logLibrary.levels;
 
 /**
- * A sink an application installs (via {@link setDiagnosticSink}) to take over
- * where prefixed loggers send their diagnostic output -- the CLI routes it to
- * stderr, or to a `--log-file`. It receives the loglevel method name (so a sink
- * may route by level), the assembled `[ISO] [LEVEL] [CONTEXT]` prefix, and the
- * message arguments -- unformatted, and with private-key blocks stripped out of
- * the string ones (see {@link setLogPrefixer}); the sink owns formatting (e.g.
- * Node's `util.format`),
- * which keeps core free of any runtime-specific formatting or stream API and so
- * safe to import in the browser. Left unset -- the default -- diagnostic output
- * keeps loglevel's per-level `console` routing, the behavior the web app relies
- * on (the browser console's per-level styling carries meaning) and the reason
- * this policy is injected by the consumer rather than hard-coded here.
+ * A sink an application installs (via {@link setDiagnosticSink}) to take
+ * over where prefixed loggers send their diagnostic output -- the CLI routes
+ * it to stderr, or to a `--log-file`. It receives the loglevel method name
+ * (so a sink may route by level), the assembled `[ISO] [LEVEL] [CONTEXT]`
+ * prefix, and the message arguments -- unformatted, and with private-key
+ * blocks stripped out of the string ones (see {@link setLogPrefixer});
+ * the sink owns formatting (e.g. Node's `util.format`), which keeps core
+ * free of any runtime-specific formatting or stream API and so safe to
+ * import in the browser. Left unset -- the default -- diagnostic output
+ * keeps loglevel's per-level `console` routing, the behavior the web app
+ * relies on (the browser console's per-level styling has meaning) and the
+ * reason this policy is injected by the consumer rather than hard-coded here.
  */
 export type DiagnosticSink = (
   methodName: logLibrary.LogLevelNames,
@@ -28,13 +28,13 @@ export type DiagnosticSink = (
   args: unknown[],
 ) => void;
 
-// The process-wide sink, resolved by every prefixed logger at EMIT time (see
-// setLogPrefixer). A module-level variable rather than a per-logger binding is
-// deliberate: loglevel freezes a logger's method to the factory live at its
-// creation, so a creation-time mechanism cannot reroute a logger that already
-// exists. Resolving here, per call, reroutes every logger -- including the ones
-// built at import time before a command installs its sink -- the moment the sink
-// changes.
+// The process-wide sink, resolved by every prefixed logger at EMIT time
+// (see setLogPrefixer). A module-level variable rather than a per-logger
+// binding, because loglevel freezes a logger's method to the factory live
+// at its creation, so a creation-time mechanism cannot reroute a logger
+// that already exists. Resolving here, per call, reroutes every logger --
+// including the ones built at import time before a command installs its
+// sink -- the moment the sink changes.
 let diagnosticSink: DiagnosticSink | undefined;
 
 /**
@@ -60,34 +60,32 @@ export const getDiagnosticSink = (): DiagnosticSink | undefined =>
   diagnosticSink;
 
 /**
- * Apply `level` as the diagnostic log level for EVERY logger -- the ones that
- * already exist as well as the ones built later. This is the level counterpart of
- * {@link setDiagnosticSink}: an application's logging bootstrap (the CLI's
- * `configureLogging`) resolves the operator's requested level and installs it
- * here, so a `silent` run is silent and a `debug` run is detailed no matter when
- * a logger was constructed.
+ * Apply `level` as the diagnostic log level for EVERY logger -- one that
+ * already exists and one built later. The level counterpart of {@link
+ * setDiagnosticSink}: an application's logging bootstrap (the CLI's
+ * `configureLogging`) resolves the operator's requested level and installs
+ * it here, so a `silent` run stays silent and a `debug` run stays detailed
+ * no matter when a logger was constructed.
  *
- * The sweep over loglevel's registry is what makes it reach backwards.
- * `setDefaultLevel` alone governs only the root logger and the loggers built
- * after it, so a module-scope logger materialized when its module was imported
- * -- before any flag was parsed -- would keep loglevel's `warn` default for the
- * whole run. Setting each existing logger's level explicitly closes that, and
- * `setDefaultLevel` still carries the level to loggers created later. The
- * registry is enumerated with `Reflect.ownKeys`, not `Object.values`: this
- * module's own logger names are `string | symbol` (see
- * {@link getLoggerForVerbosity}), and a symbol-named logger is invisible to
- * string enumeration, which would leave it at its prior level. Each sweep
- * assignment passes `persist: false`, so a browser consumer's level is not
- * written to web storage behind its back.
+ * The registry sweep is what reaches backward: `setDefaultLevel` alone
+ * governs only the root logger and loggers built after it, so a
+ * module-scope logger materialized at import time -- before any flag is
+ * parsed -- would keep loglevel's `warn` default for the whole run. Setting
+ * each existing logger's level explicitly closes that gap; `setDefaultLevel`
+ * still applies the level to loggers created later. The registry is
+ * enumerated with `Reflect.ownKeys`, not `Object.values`, because this
+ * module's logger names are `string | symbol` (see
+ * {@link getLoggerForVerbosity}) and a symbol-named logger is invisible to
+ * string enumeration. Each sweep assignment passes `persist: false` so a
+ * browser consumer's level is not written to web storage behind its back.
  *
- * A limit of resting on `setDefaultLevel` for the root: in a browser consumer
- * where the operator has persisted a root level, loglevel skips a persisted root,
- * so the root keeps that level and the loggers {@link getLoggerForVerbosity}
- * builds afterwards floor against it rather than against `level`. The registry
- * sweep still reaches every logger that already exists. A persisted per-logger
- * key has the same effect one level down: a logger built after the sweep whose
- * name carries a persisted level comes up at that level rather than the swept
- * default.
+ * A known limit: in a browser consumer where the operator has persisted a
+ * root level, loglevel skips a persisted root, so it keeps that level and
+ * the loggers {@link getLoggerForVerbosity} builds afterward floor against
+ * it rather than against `level`. The registry sweep still reaches every
+ * logger that already exists. A persisted per-logger key has the same
+ * effect one level down: a logger built after the sweep whose name holds
+ * a persisted level comes up at that level rather than the swept default.
  *
  * Call this at bootstrap, before any per-logger level is chosen: it overwrites
  * the level of every logger that exists, including one
@@ -160,21 +158,21 @@ const setLogPrefixer = (logger: logLibrary.Logger) => {
 
       const prefix = `[${timestamp}] [${levelLabel}] [${context}]`;
 
-      // Private-key redaction backstop for every diagnostic line, applied here
-      // rather than in a consumer's sink so it covers both routings below: the
-      // CLI's stderr and --log-file, and the browser console the web app keeps.
-      // A line logged before a consumer installs its sink takes the rawMethod
-      // branch, which a sink-side pass would miss entirely.
+      // Redact private-key material from every diagnostic line here rather
+      // than in a consumer's sink, so it covers both routings below: the
+      // CLI's stderr and --log-file, and the browser console the web app
+      // keeps. A line logged before a consumer installs its sink takes the
+      // rawMethod branch, which a sink-side pass would miss entirely.
       //
-      // Per ARGUMENT, and only where the argument is a string: the sink receives
-      // raw `unknown[]` and owns its own formatting, so an object argument is
-      // passed through by reference and prints exactly as it would without this.
-      // The per-argument boundary is also the reach limit -- key material split
-      // across two arguments of one call is not seen here, just as the per-link
-      // pass does not see one split across two cause-chain links. Joining the
-      // arguments first would close that at the cost of letting a dangling
-      // marker in one argument consume every argument behind it, which is the
-      // suppression this pass must not introduce.
+      // Per ARGUMENT, and only where the argument is a string: the sink
+      // receives raw `unknown[]` and owns its own formatting, so an object
+      // argument is passed through by reference and prints exactly as it would
+      // without this. The per-argument boundary is also the reach limit --
+      // key material split across two arguments of one call is not seen
+      // here, just as the per-link pass does not see one split across two
+      // cause-chain links. Joining the arguments first would close that gap,
+      // at the cost of letting a dangling marker in one argument consume every
+      // argument behind it -- the suppression this pass must not introduce.
       const redactedArgs = messageArgs.map((arg) =>
         typeof arg === "string" ? redactPrivateKeyMaterial(arg) : arg,
       );

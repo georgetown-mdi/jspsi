@@ -155,11 +155,11 @@ test("a deduplicating cardinality leaves an unmatched duplicate group's table un
 
 // many-to-many applies the "many" side's rules to both parties, so a matched value
 // stands for a group on each side and contributes the two groups' product. The
-// cascade pairs that; the single-pass seam holds the resolved table to a length
-// taken from the half that keeps its distinctness, and neither half does here, so
-// it refuses. This is the one label at which the two strategies part company, which
-// is why it sits beside the parity block below rather than inside it.
-// psiLinkManyToMany.test.ts carries the cascade's own behavior at length.
+// cascade pairs that; single-pass reconstruction holds the resolved table to a
+// length taken from the half that keeps its distinctness, and neither half does
+// here, so it refuses -- the one label at which the two strategies part
+// company. psiLinkManyToMany.test.ts holds the cascade's own behavior at
+// length.
 test("many-to-many pairs in the cascade and is refused by single-pass", async () => {
   const bothSided = [["E1", "E1"]];
   const [starterConn, joinerConn] = createMessagePipe();
@@ -349,8 +349,8 @@ test("single-pass reproduces the cascade's survivor-relative uniqueness", async 
   expect(singlePassReceiver).toStrictEqual(cascadeReceiver);
 });
 
-// --- the cascade: a record carrying several candidates is refused ------------
-// Key realization carries every candidate a record realizes (buildKeyStrings).
+// --- the cascade: a record holding several candidates is refused -------------
+// Key realization holds every candidate a record realizes (buildKeyStrings).
 // Fan-out matching is specified for single-pass and for it alone, so the cascade
 // refuses the record where it would consume it rather than narrowing to one
 // candidate or dropping the record, either of which matches on less than the terms
@@ -391,7 +391,7 @@ test("single-pass refuses a candidate set wider than its declaration admits", as
   // from this party's advertised effective key count, so a row realizing more
   // candidates than that advertisement accounts for is refused as the table is
   // built rather than shipped under a bound it exceeds. Here the declaration is
-  // the plain key count -- the fan-out-free advertisement -- and the row carries
+  // the plain key count -- the fan-out-free advertisement -- and the row holds
   // two candidates.
   const withCandidateSet: Array<Array<string | Set<string> | undefined>> = [
     ["A", new Set(["B", "C"])],
@@ -586,7 +586,7 @@ test("single-pass withholding keeps a blind helper's table off the wire; the rec
   expect(base.senderInbound.some((f) => Array.isArray(f))).toBe(true);
   expect(base.receiverOutbound.some((f) => Array.isArray(f))).toBe(true);
 
-  // Withheld: the helper is genuinely blind -- it returns an empty table and its
+  // Withheld: the helper is blind -- it returns an empty table and its
   // process never receives message 3. Its only inbound frame is the receiver's
   // request (a Uint8Array); no association-table frame ever reaches it. The run
   // completed (Promise.all resolved), proving neither side hung on the skipped frame.
@@ -693,7 +693,7 @@ test("single-pass withholding does not leak the match count by frame presence or
 // issue per element (a ~4.5s CPU burn). The single-issue validator caps that at
 // one clean issue. The frame is read two ways -- via receiveParsed (sendFirst)
 // and via a direct `parseOrProtocolError` (the !sendFirst send-before-parse
-// path) -- and both must surface a clean ConnectionError("protocol").
+// path) -- and both must raise a clean ConnectionError("protocol").
 const pathologicalPairs = () => Array.from({ length: 4_000_000 }, () => 1);
 
 test("receiveParsed: a pathological-count mapped-elements frame fails cleanly", async () => {
@@ -733,10 +733,10 @@ test("a legitimately large mapped-elements frame parses", async () => {
 });
 
 test("a mapped-elements element that is an array (not a plain object) is rejected", () => {
-  // z.object rejects an array outright, even one carrying theirIndex/iteration
+  // z.object rejects an array outright, even one holding theirIndex/iteration
   // own-properties; the single-issue predicate must too, so the set of accepted
   // messages is exactly the one the replaced `z.object` schema accepted. This is
-  // unreachable over the JSON transport (an array cannot carry named own-
+  // unreachable over the JSON transport (an array cannot hold named own-
   // properties through serialization), but the exact-mirror contract holds
   // regardless -- it guards against the `!Array.isArray` check being dropped.
   const arrayElement = [] as unknown as Record<string, unknown>;
@@ -834,12 +834,12 @@ test("singlePassReplyByteCap weights the sender heavier and charges the ragged t
   expect(singlePassReplyByteCap(2, size(10, 2), size(5, 2))).toBe(
     (40 + 4) * (2 * 10) + 40 * (2 * 5) + 4 * (2 * 10) + 256,
   );
-  // The two arguments are NOT interchangeable: the sender carries the index table
-  // (+4/slot), so swapping the sender and receiver sizes changes the value. This
-  // is why both parties must agree on which size is the sender's -- the role
-  // mapping in linkViaSinglePassPSI feeds (sender, receiver) in the same order on
-  // both sides, so they compute the identical cap from swapped local inputs (own
-  // vs partner size).
+  // The two arguments are NOT interchangeable: the sender includes the index
+  // table (+4/slot), so swapping the sender and receiver sizes changes the
+  // value. This is why both parties must agree on which size is the sender's --
+  // the role mapping in linkViaSinglePassPSI feeds (sender, receiver) in the
+  // same order on both sides, so they compute the identical cap from swapped
+  // local inputs (own vs partner size).
   expect(singlePassReplyByteCap(3, size(100, 3), size(200, 3))).not.toBe(
     singlePassReplyByteCap(3, size(200, 3), size(100, 3)),
   );
@@ -925,7 +925,7 @@ test("singlePassReplyByteCap stays below both transport envelopes at its maximum
   // The whole-MiB figure frameSize.ts's own docstring states for the slot
   // ceiling, derived from the searched maximum rather than restated there.
   expect(Math.floor(worst.bytes / 1024 / 1024)).toBe(251);
-  // The file-sync backstop, a core constant.
+  // The file-sync ceiling, a core constant.
   expect(worst.bytes).toBeLessThan(MAX_FRAME_SIZE_BYTES);
   // The nearer constraint: the WebRTC data channel's fixed browser-tab envelope.
   // The coupling is bidirectional -- lowering MAX_WEBRTC_FRAME_BYTES below this
@@ -999,11 +999,11 @@ test("the single-pass sender refuses a built reply above the derived cap", async
   // Driven by a client request over far more values than the partner's declared
   // size accounts for: the response the sender doubly-encrypts grows with the
   // request, so the built reply outgrows a cap derived from the declared sizes.
-  // Production reaches this backstop only on such an inconsistency between the
-  // reply builder and the shared derivation -- a real PsiElementBounds refuses an
-  // over-wide request at the deserialize seam first (pinned in
-  // psiParticipant.test.ts), and the inert test bounds are what leave the backstop
-  // reachable here.
+  // Production reaches this safety check only on such an inconsistency between
+  // the reply builder and the shared derivation -- a real PsiElementBounds
+  // refuses an over-wide request at the deserialize boundary first (pinned in
+  // psiParticipant.test.ts), and the inert test bounds are what leave the
+  // safety check reachable here.
   const keyCount = 1;
   const localRows = 1;
   const partnerRows = 1;

@@ -113,7 +113,7 @@ describe("bilateralMismatch", () => {
     // flag: it is never advertised in the hello, so one party may dial per-poll
     // while the other holds a session with no fast-fail. Both sides' lockless and
     // retain match here, so the mismatch check must return undefined regardless of
-    // how either side dials. Built through helloEnvelope from options that carry
+    // how either side dials. Built through helloEnvelope from options that hold
     // connectionPerPoll to prove the flag is dropped before the comparison.
     const dialsPerPoll = helloEnvelope({
       locklessRendezvous: false,
@@ -140,10 +140,10 @@ describe("helloEnvelope", () => {
   });
 
   test("advertises only lockless and retain, never connection_per_poll", () => {
-    // The party's own options carry connection_per_poll, but the advertised hello
-    // must exclude it: it is a local dialing choice the peer neither observes nor
-    // agrees on. A regression that added it to the envelope would let it drive a
-    // spurious mismatch.
+    // The party's own options hold connection_per_poll, but the advertised
+    // hello must exclude it: it is a local dialing choice the peer neither
+    // observes nor agrees on. A regression that added it to the envelope
+    // would let it drive a spurious mismatch.
     const advertised = helloEnvelope({
       locklessRendezvous: true,
       retainFiles: false,
@@ -266,7 +266,7 @@ describe("readControlFileWithGate", () => {
     expect(calls).toBe(1);
   });
 
-  // The control file's path carries a partner-chosen filename, and both
+  // The control file's path holds a partner-chosen filename, and both
   // malformed-payload refusals put the diagnosis BEHIND it in the same link.
   test.each([
     [
@@ -323,8 +323,8 @@ describe("readControlFileWithGate", () => {
     expect(thrown).toBeInstanceOf(Error);
     // Must NOT be a UsageError: the pre-sweep retain inspection treats a
     // UsageError from this gate as terminal and anything else as
-    // retain-uncertain, so promoting this throw would turn its deliberately
-    // bounded read into a hard refusal.
+    // retain-uncertain, so promoting this throw would turn its bounded read
+    // into a hard refusal.
     expect(thrown).not.toBeInstanceOf(UsageError);
     expect((thrown as Error).message).toContain("residue");
     // The re-run comes first and the removal is conditioned: the window is
@@ -769,7 +769,7 @@ describe("FileSyncRendezvous commit values", () => {
     const flags = { locklessRendezvous: false, retainFiles: false };
     placePeerHello(files, "zzz", flags);
     // Peer hello absent at entry (hello-exchange path); during the barrier the
-    // listing surfaces the peer hello but never this party's own hello (as if a
+    // listing shows the peer hello but never this party's own hello (as if a
     // lock joiner deleted it), so the theseFiles.length === 0 responder branch
     // is taken.
     const p = makeParty("aaa", flags, files, {
@@ -1039,7 +1039,7 @@ describe("FileSyncRendezvous joiner-recovery window", () => {
   });
 
   test("a different sentinel name restarts the window (never fires early)", async () => {
-    // Each poll after entry surfaces a differently-named joining sentinel, so
+    // Each poll after entry shows a differently-named joining sentinel, so
     // the window restarts every cycle and the recovery abort never elapses --
     // the run instead exits at the TTL with the sentinel-preference timeout.
     const listScript: ListScript = (entries, call) =>
@@ -1243,7 +1243,7 @@ describe("FileSyncRendezvous entry scan and sweep contract", () => {
     );
     // Not a peer-wait timeout, so a consumer cannot offer the both-parties-swept
     // retry advice here: this directory may be only partly cleared, so the
-    // advice's premise -- that it is now empty -- does not hold.
+    // advice's assumption -- that it is now empty -- does not hold.
     expect(isPeerWaitTimeout(err)).toBe(false);
   });
 });
@@ -1281,14 +1281,14 @@ describe("FileSyncRendezvous entry-guard refusals at the display boundary", () =
     dirsDisplay: composeDirsDisplay(SPLIT_INBOUND, SPLIT_OUTBOUND),
   });
 
-  // The cause link carrying the scope and the filenames. The renderer caps it
+  // The cause link holding the scope and the filenames. The renderer caps it
   // independently of the leading refusal, so it is the string the budget
   // arithmetic has to land inside.
   const detailLink = (rendered: string): string =>
     rendered.split("\ncaused by: ")[1];
 
   // The enumeration itself, after the `<count> <kind> in <scope>: ` prefix. The
-  // scope may carry the truncation marker (it is fitted last); a filename never
+  // scope may hold the truncation marker (it is fitted last); a filename never
   // may, which is what this slice lets a test assert.
   const enumeration = (rendered: string): string => {
     const detail = detailLink(rendered);
@@ -1670,7 +1670,7 @@ describe("FileSyncRendezvous entry-guard refusals at the display boundary", () =
   // The same shape at the other composed enumeration: `<name> (<transport
   // error>)` joined with `"; "`, and the sentence that tells the operator the
   // directory is only partly swept composed after the join. This one message
-  // carries the whole report, so it is measured on names short enough that the
+  // holds the whole report, so it is measured on names short enough that the
   // per-link cap is not what decides the outcome -- suppression is.
   test("a private-key-shaped name in a sweep failure does not take the rest of the report", async () => {
     const files = new Map<string, Buffer>();
@@ -1825,11 +1825,11 @@ function installSessionBoundaries(
 }
 
 // Fails when the fresh session would find a protocol file that is not yet
-// complete: a hello or joining sentinel must carry a parseable envelope, an ack
+// complete: a hello or joining sentinel must hold a parseable envelope, an ack
 // marker and a lock must be zero-length. A `temp-*.tmp` is the in-flight half of
 // a temp-then-rename publish and is expected -- the property it exists to give
 // is that the FINAL name never appears before the file is committed. Non-`.json`
-// names are foreign files and carry no protocol shape to check; a `.json` name
+// names are foreign files and hold no protocol shape to check; a `.json` name
 // outside the grammar fails closed rather than passing unexamined.
 function expectNoHalfPublishedFile(
   contents: Array<{ name: string; body: Buffer }>,
@@ -1866,21 +1866,21 @@ describe("FileSyncRendezvous across connection-per-poll session boundaries", () 
 
   // The peer budget the lockless sweep below owns instead of baseOptions'
   // shared 2 s. Every assertion in that sweep is about what the directory
-  // holds, never how long a step took, so this is a backstop for a peer ack
+  // holds, never how long a step took, so this is a fallback for a peer ack
   // that never arrives -- and, since the entry-present window is not armed on a
   // budget it cannot fit strictly inside, it is also what the entry-present peer
   // hello gets to answer in. The shared 2 s is a thousand times an idle
   // position and inside one descheduling stall on a starved one: at nice 19
   // against 40 nice-0 CPU hogs on a ten-core container the sweep aborts partway
-  // with "synchronization has timed out", settling the outcome by the scheduler
+  // with "synchronization has timed out", deciding the outcome by the scheduler
   // rather than by the boundary that position placed. Both bounds here were
   // verified green under that same regime, so a later tightening has one to
   // measure against.
   //
-  // The sweep's own timeout is this backstop plus one more of it: the sweep
+  // The sweep's own timeout is this fallback plus one more of it: the sweep
   // spends every position's wall clock in a single test -- 20 ms idle, seven to
   // ten seconds under that regime, already past vitest's 5 s default -- and a
-  // position that burns the whole rendezvous bound must still surface that
+  // position that burns the whole rendezvous bound must still report that
   // bound's diagnosable error rather than a generic timeout.
   const SWEEP_RENDEZVOUS_HANG_BACKSTOP_MS = 30_000;
 
@@ -2140,7 +2140,7 @@ describe("FileSyncRendezvous across connection-per-poll session boundaries", () 
       expectNoHalfPublishedFile(boundary.contents);
     expect(listings.length).toBeGreaterThan(1);
     // The entry scan ran against a directory holding only the peer hello; every
-    // later listing carries the self-hello the control run above rejects, and
+    // later listing holds the self-hello the control run above rejects, and
     // none of them re-applies the guard to it.
     expect(listings[0]).not.toContain(helloName("aaa"));
     for (const listing of listings.slice(1))
@@ -2298,10 +2298,11 @@ describe("FileSyncRendezvous hello publish discipline", () => {
   });
 
   test("writes nothing to the directory before the entry scan has listed it", async () => {
-    // The premise licensing the unconditional sweep of a message/ack temp: those
-    // are written only after the peer has seen this party's hello, which is
-    // published only after this listing. Both parties run this same ordering, so
-    // no such temp of theirs can be in flight while this party scans.
+    // The assumption licensing the unconditional sweep of a message/ack temp:
+    // those are written only after the peer has seen this party's hello, which
+    // is published only after this listing. Both parties run this same
+    // ordering, so no such temp of theirs can be in flight while this party
+    // scans.
     const files = new Map<string, Buffer>();
     const p = makeParty(
       "aaa",
@@ -2431,11 +2432,11 @@ describe("FileSyncRendezvous bounded hello read", () => {
   });
 
   // The budget for a test that drives the read to SUCCEED rather than to
-  // expiry, where the bound is a backstop for a hello that never becomes
+  // expiry, where the bound is a fallback for a hello that never becomes
   // readable and no assertion is a duration. The floor is sized well past the
   // machine's scheduling: under longBudget's 60 ms floor a pair of injected
   // read failures costs a third of the bound on an idle container and the whole
-  // of it on a loaded one, which settles the outcome by how promptly a 10 ms
+  // of it on a loaded one, which decides the outcome by how promptly a 10 ms
   // timer fires rather than by whether the retry works.
   const readSucceedsBudget = () => ({
     timeToLive: new Date(Date.now() + 60_000),
@@ -2527,7 +2528,7 @@ describe("FileSyncRendezvous bounded hello read", () => {
   );
 
   // rendezvousBoundMs floors the read bound at joinerRecoveryMs, so six cycles
-  // of a fast poll no longer abandons a hello that a slow transport has simply
+  // of a fast poll do not abandon a hello that a slow transport has simply
   // not finished propagating -- six cycles at 10 ms is 60 ms, which is not a
   // round trip anywhere. The floor is still capped at the peer budget, so the
   // run ends there rather than running past what the operator asked for.
@@ -2637,7 +2638,7 @@ describe("FileSyncRendezvous entry-present peer hello window", () => {
     expect((err as Error).message).toContain(helloName(LEFTOVER_ID));
     expect(elapsed).toBeLessThan(2000);
     // Not a peer-wait timeout: this party did not wait its full budget, so a
-    // consumer must not offer the advice that failure carries.
+    // consumer must not offer the advice that failure holds.
     expect(isPeerWaitTimeout(err)).toBe(false);
     // Asserted through the rendering path, which truncates each cause-chain
     // link: the diagnosis, the recovery step, and the filename all survive it.
@@ -2767,7 +2768,7 @@ describe("FileSyncRendezvous entry-present peer hello window", () => {
   // way -- a later reading only shrinks the remaining budget the window is
   // checked against -- so the split reading discriminates nothing here: it
   // exercises the path, and the boundary outcome asserted below (the window
-  // does not fire, the run reports the ordinary peer timeout) carries the
+  // does not fire, the run reports the ordinary peer timeout) holds the
   // coverage. The clock spends the skew exactly where such a reading would
   // take it: the first read of timeToLive after this party's hello is on
   // disk -- the read any derivation of the remaining budget must make --

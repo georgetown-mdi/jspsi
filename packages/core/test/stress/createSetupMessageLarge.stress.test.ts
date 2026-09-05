@@ -2,13 +2,12 @@ import { expect, test } from "vitest";
 
 import PSI from "@openmined/psi.js";
 
-// Regression for the seclink fork's Server#createSetupMessage. It populated the
-// caller's sorting permutation with `permutation.push(...Permutation)`; once the
-// input set passed V8's spread-argument limit (~125k) that threw
-// "RangeError: Maximum call stack size exceeded", crashing any starter whose
-// deduplicated key set was that large (e.g. a health-plan member roster). The
-// fork now pre-sizes and index-assigns instead. Run comfortably past the cliff;
-// PSI_STRESS_N lets a heavier run (e.g. nightly) push it higher.
+// Regression for the seclink fork's Server#createSetupMessage, which filled the
+// caller's permutation via `permutation.push(...Permutation)`; an input set
+// past V8's spread-argument limit (~125k) threw "RangeError: Maximum call stack
+// size exceeded", crashing any starter with a deduplicated key set that large
+// (e.g. a health-plan member roster). It now pre-sizes and index-assigns
+// instead; PSI_STRESS_N raises N for a heavier run past this cliff.
 const N = Number(process.env.PSI_STRESS_N ?? 200_000);
 
 const psi = await PSI();

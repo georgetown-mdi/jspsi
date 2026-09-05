@@ -14,22 +14,13 @@ import { UsageError } from "../src/errors";
 import type { LinkageTerms } from "../src/config/linkageTerms";
 import type { MessageConnection } from "../src/connection/messageConnection";
 
-// An inviter that declares `payload.receive: []` is stating "send me no payload
-// columns", and deriveAcceptedLinkageTerms mirrors that to a present, empty
-// `payload.send` on the acceptor -- the strict reading of that direction. The
-// acceptor's own metadata, meanwhile, may be INFERRED from its CSV header, where
-// every column that is not a linkage or PII alias defaults to isPayload: true with
-// no operator choice involved. These tests hold the two together at the altitude
-// where it counts: with both parties' terms declaring that no payload column
-// crosses, none may leave the acceptor's machine. The partner's runtime
-// reconciliation is not the control here -- it fires only after the values have
-// arrived, and by then the disclosure has happened.
-//
-// The refusal is the answer only where the payload would actually cross. Three
-// configurations differing solely in that respect are covered below: the same
-// empty `send` with the inviting party entitled to the result (refused), with it
-// entitled to none (runs, sends nothing), and an absent `send` (lazy, compared
-// against nothing).
+// An inviter that declares `payload.receive: []` mirrors to a present, empty
+// `payload.send` on the acceptor. The acceptor's own metadata, meanwhile, may
+// be INFERRED from its CSV header, where every column that is not a linkage
+// or PII alias defaults to isPayload: true with no operator choice involved.
+// These tests assert that no payload column leaves the acceptor's machine
+// before the partner's runtime reconciliation would catch it, which fires
+// only after the values have already arrived.
 
 const psiLibrary = await PSI();
 
@@ -111,7 +102,7 @@ function recordSends(conn: MessageConnection): {
 
 /**
  * Assert that no message the acceptor put on the wire names a payload column or
- * carries one of its values.
+ * holds one of its values.
  */
 function expectNoPayloadOnWire(sent: unknown[]): void {
   const payloadColumnsOnWire = sent.flatMap((message) =>
@@ -151,8 +142,9 @@ test("no payload column reaches the wire from an acceptor declaring it sends not
     inviterRows,
     inviterColumns,
   );
-  // What the CLI derives for this config: an authored `payload.receive: []` and no
-  // separate lock-in falls back to the receive names, a strict "receive nothing".
+  // What the CLI derives for this config: an authored `payload.receive: []` and
+  // no separate commitment falls back to the receive names, a strict "receive
+  // nothing".
   inviterPrepared.expectedPayloadColumns = [];
 
   const acceptorRun = (async () =>
@@ -165,7 +157,7 @@ test("no payload column reaches the wire from an acceptor declaring it sends not
     acceptorRun,
   ]);
 
-  // Nothing the acceptor put on the wire carries a payload column or a payload
+  // Nothing the acceptor put on the wire holds a payload column or a payload
   // value. A regression that let the empty declaration through would transmit
   // {columns: [diagnosis, notes]} here, and these three assertions catch it even
   // though the partner-side reconciliation would still abort afterwards.

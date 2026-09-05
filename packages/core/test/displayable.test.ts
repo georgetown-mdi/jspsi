@@ -8,9 +8,9 @@ import {
 import type { Displayable } from "../src/utils/sanitizeForDisplay";
 
 // Stands in for any partner-controlled value: typed as the wide `string`, which
-// is what an un-sanitized value is typed as everywhere it is carried. The
+// is what an un-sanitized value is typed as everywhere it is held. The
 // right-to-left override is built from its code point so the source itself
-// carries no raw deceptive byte.
+// contains no raw deceptive byte.
 const partnerControlled: string = `Acme${String.fromCodePoint(0x202e)}org`;
 const sanitized = "Acme\\u202eorg";
 

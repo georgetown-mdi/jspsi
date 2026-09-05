@@ -92,13 +92,11 @@ function recording(
   };
 }
 
-// Swaps this party's own outbound no-data payload frame ({hasData: false} --
-// the only frame a genuine count-only run ever builds, since associationTable
-// stays undefined under countOnly regardless of entitlement) for a hostile
-// non-empty one, leaving every other frame (terms exchange, PSI round, count
-// report) untouched. What a partner that does not honor the send-gate at all --
-// reaching the wire directly rather than through this codebase's own
-// prepareForExchange/runExchange path -- can put on it.
+// Swaps this party's outbound no-data payload frame ({hasData: false}, the
+// only frame a genuine count-only run builds, since associationTable stays
+// undefined under countOnly) for a hostile non-empty one; every other frame
+// is untouched. Models a partner that reaches the wire directly instead of
+// through prepareForExchange/runExchange, bypassing the send-gate.
 function withHostilePayload(
   conn: MessageConnection,
   hostilePayload: unknown,
@@ -211,7 +209,7 @@ test("both entitled: the count reaches both parties and no pairing reaches eithe
 
   // Both expect output, so the smaller dataset is the receiver: the initiator, which
   // is therefore the party that reports. Exactly one count-report frame exists, it
-  // travels receiver -> sender, and it carries the tally.
+  // travels receiver -> sender, and it holds the tally.
   expect(initiator.resolvedRole).toBe("receiver");
   expect(responder.resolvedRole).toBe("sender");
   expect(countReports(initiatorSent)).toEqual([
@@ -300,15 +298,15 @@ test("a psi run over the same terms and data still reveals identifiers", async (
   expect(initiator.intersectionCount).toBeUndefined();
   expect(responder.intersectionCount).toBeUndefined();
 
-  // The record attests the identifier-revealing algorithm, and carries the
+  // The record attests the identifier-revealing algorithm, and holds the
   // association-table commitment that marks this party as having received the
-  // pairing -- the row a count-only record is required not to carry.
+  // pairing -- the row a count-only record is required not to contain.
   expect(initiator.audit!.record.governance.algorithm).toBe("psi");
   expect(responder.audit!.record.governance.algorithm).toBe("psi");
   expect(initiator.audit!.record.commitments.associationTable).toBeDefined();
   expect(responder.audit!.record.commitments.associationTable).toBeDefined();
 
-  // The count-report leg is psi-c's alone: a psi run carries none in either
+  // The count-report leg is psi-c's alone: a psi run includes none in either
   // direction, so admitting psi-c added no frame to the revealing exchange.
   expect(countReports(initiatorSent)).toEqual([]);
   expect(countReports(responderSent)).toEqual([]);
@@ -353,9 +351,10 @@ test("the record attests the count-only run truthfully", async () => {
   expect(init.resultSize).toBe(expectedCount);
   expect(resp.resultSize).toBe(expectedCount);
 
-  // No association-table commitment on either side, whatever the entitlement: its
-  // presence is the record's marker that this party received the matched pairing, so
-  // a count-only record carrying one would assert a disclosure the run did not make.
+  // No association-table commitment on either side, whatever the entitlement:
+  // its presence is the record's marker that this party received the matched
+  // pairing, so a count-only record holding one would assert a disclosure the
+  // run did not make.
   expect(init.commitments.associationTable).toBeUndefined();
   expect(resp.commitments.associationTable).toBeUndefined();
 
@@ -399,12 +398,12 @@ const withSecondKey = (terms: LinkageTerms): LinkageTerms => ({
 });
 
 test("an over-broad count-only run is refused before any round, never narrowed", async () => {
-  // Both parties carry the same out-of-shape terms, mutated past their own prepare
-  // step. Each copy still travels to the other party on the terms exchange, whose
-  // parse carries these same shape rules, so that parse is what refuses a live
-  // two-party round -- upstream of the agreed-terms boundary, which sees a partner's
-  // terms only once they have passed it. The round is refused whole rather than
-  // narrowed to the first of the two keys.
+  // Both parties hold the same out-of-shape terms, mutated past their own
+  // prepare step. Each copy still travels to the other party on the terms
+  // exchange, whose parse applies these same shape rules, so that parse is what
+  // refuses a live two-party round -- upstream of the agreed-terms boundary,
+  // which sees a partner's terms only once they have passed it. The round is
+  // refused whole rather than narrowed to the first of the two keys.
   const refusal = await runBoth(both, both, "psi-c", (p) => {
     p.linkageTerms = withSecondKey(p.linkageTerms);
   }).then(
@@ -510,12 +509,12 @@ test("an algorithm divergence is refused at the agreed-terms run boundary", () =
 });
 
 // --- The agreed-terms boundary's own guards ----------------------------------
-// The refusals the boundary carries besides resolving which run this is, driven
-// through the exported seam because a two-party round does not reach them: a
-// partner's terms arrive through the terms-exchange parse and this party's own
-// through prepareForExchange, both of which apply the same rules first. What the
-// boundary covers alone is a PreparedExchange assembled or mutated past that
-// prepare step, which is what these hand it (docs/spec/PROTOCOL.md, PSI-C).
+// The refusals the boundary enforces besides resolving which run this is,
+// driven directly through resolveCountOnlyRun because a two-party round does
+// not reach them: a partner's terms arrive through the terms-exchange parse and
+// this party's own through prepareForExchange, both applying the same rules
+// first. What the boundary covers alone is a PreparedExchange assembled or
+// mutated past that prepare step (docs/spec/PROTOCOL.md, PSI-C).
 
 const agreedCountOnlyTerms = prepared(
   "Initiator Co",
@@ -560,9 +559,9 @@ test("an unimplemented algorithm is refused whichever party's terms name it", ()
 });
 
 test("an out-of-shape count-only pair is refused whichever party's terms carry it", () => {
-  // The shape rules over the agreed pair, in both orientations: a pair carrying an
-  // out-of-shape document is refused here rather than run over the first of its two
-  // keys, whether the document is this party's own or the partner's.
+  // The shape rules over the agreed pair, in both orientations: a pair holding
+  // an out-of-shape document is refused here rather than run over the first of
+  // its two keys, whether the document is this party's own or the partner's.
   const overBroadTerms = withSecondKey(agreedCountOnlyTerms);
 
   expect(() =>
@@ -575,10 +574,10 @@ test("an out-of-shape count-only pair is refused whichever party's terms carry i
 
 test("a count-only exchange whose input metadata would transmit a column is refused at prepare", async () => {
   // The fifth shape rule, over the metadata RESOLVED from this run's own input
-  // columns: an unnamed extra column is inferred as a disclosed payload column, and a
-  // count-only exchange carries none in either direction. Refused before any
-  // credential, terms, or data are sent, rather than dropping the marked column to
-  // bring the run into shape.
+  // columns: an unnamed extra column is inferred as a disclosed payload column,
+  // and a count-only exchange includes none in either direction. Refused before
+  // any credential, terms, or data are sent, rather than dropping the marked
+  // column to bring the run into shape.
   expect(() =>
     prepareForExchange(
       {
@@ -597,15 +596,12 @@ test("a count-only exchange whose input metadata would transmit a column is refu
 });
 
 test("a count-only run refuses an inbound payload column from a non-conforming partner", async () => {
-  // docs/spec/PROTOCOL.md (PSI-C, Refusals) refuses payload in EITHER direction,
-  // and the record's payload commitments are fixed present-and-empty
-  // (docs/spec/EXCHANGE_RECORD.md, Count-only records) -- normative regardless of
-  // what a partner actually transmits. The outbound leg is closed structurally
-  // (associationTable stays undefined under countOnly, so this codebase's own
-  // send-gate never builds a non-empty payload); this pins the INBOUND leg,
-  // which a partner not honoring that gate could otherwise cross, refusing
-  // through the run's expectedReceive lock-in rather than accepting whatever
-  // columns arrive.
+  // docs/spec/PROTOCOL.md (PSI-C, Refusals) refuses payload in either
+  // direction; the record's payload commitments are fixed present-and-empty
+  // (docs/spec/EXCHANGE_RECORD.md, Count-only records) regardless of what a
+  // partner transmits. The outbound leg is closed structurally
+  // (associationTable stays undefined under countOnly); this pins the inbound
+  // leg through the run's expectedReceive enforcement instead.
   const [connInitiator, connResponder] = createMessagePipe();
   const hostilePayload = {
     hasData: true,
@@ -649,9 +645,8 @@ test("a count-only run refuses an inbound payload column from a non-conforming p
 // The one figure a partner supplies on a count-only run: the receiver's tally,
 // which the sender takes on trust as a NUMBER but not as an arbitrary value
 // (docs/spec/PROTOCOL.md, PSI-C). The bound is the smaller of the two exchanged
-// record counts, authenticated session state on both sides. These drive the parse
-// itself with the shapes a non-conforming or hostile receiver can put on the frame:
-// each is refused as a protocol violation on receipt, and none resolves a count the
+// record counts, authenticated session state on both sides. Each shape below is
+// refused as a protocol violation on receipt, and none resolves a count the
 // sender would go on to report as the run's result.
 describe("a hostile count-report frame", () => {
   const maxCount = Math.min(initiatorRows.length, responderRows.length);
