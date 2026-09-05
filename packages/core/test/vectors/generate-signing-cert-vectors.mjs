@@ -19,12 +19,12 @@
 //     to parse: the canonical signed-byte layout, and the fixed-length raw r||s
 //     signature encoding. Both the Node suite and the browser suite (real
 //     Chromium, a different crypto implementation) load these certificates, so
-//     the vector is what carries interop with an implementation outside this
+//     the vector is what provides interop with an implementation outside this
 //     codebase.
 //
-// The `domain` labels and body shape below are a deliberate second statement of
-// docs/spec/PROTOCOL.md, not an import from signingIdentity.ts: a divergence
-// between the two shows up as a checked-in certificate that no longer parses.
+// The `domain` labels and body shape below restate docs/spec/PROTOCOL.md by
+// design, not import it from signingIdentity.ts: a divergence between the two
+// shows up as a checked-in certificate that no longer parses.
 
 import { execFileSync } from "node:child_process";
 import { createPrivateKey } from "node:crypto";

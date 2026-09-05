@@ -15,7 +15,7 @@
 //   - A verify-only signature produced by OPENSSL over signed bytes this script
 //     assembles from the spec rather than from signedReceipt.ts. Both the Node
 //     suite and the browser suite (real Chromium, a different crypto
-//     implementation) must accept it, so the vector carries interop with an
+//     implementation) must accept it, so the vector provides interop with an
 //     implementation outside this codebase AND pins the signed-byte layout: a
 //     divergence in either shows up as a signature that stops verifying.
 //   - A whole dual-signed record assembled from the two vectors, every signature
@@ -24,7 +24,7 @@
 //
 // This regenerator preserves each vector's hand-authored name, description,
 // identity, private key, session key, role, and content, and recomputes the
-// binder (which the content carries) and the `expected` block, so a deliberate
+// binder (which the content holds) and the `expected` block, so a by-design
 // format change is re-pinned by re-running it and reviewing the diff.
 
 import { execFileSync } from "node:child_process";
@@ -150,14 +150,12 @@ for (const vector of data.vectors) {
     fromBase64Url(vector.sessionKey),
     vector.role,
   );
-  // Keep the vector a realistic receipt: the content's binder IS the derived
-  // binder both parties fold in, so the signed content is exactly what the step
-  // produces. (The role here is the vector's own role; a real exchange always
-  // derives the initiator-role binder, but the vector pins the derivation for
-  // whichever role it names. The responder-role binder vector pins a derivation
-  // not produced in a live exchange, since both parties fold in the
-  // initiator-role binder.) The signature binds the signer's fingerprint and
-  // role, so it is made for the vector's own role.
+  // Keep the vector a realistic receipt: the content's binder is the derived
+  // binder both parties fold in, so the signed content matches what the step
+  // produces. A real exchange always derives the initiator-role binder; this
+  // vector derives it for whichever role it names, so the responder-role
+  // vector's binder is not one a live exchange produces. The signature binds
+  // the signer's fingerprint and role, made for the vector's own role.
   vector.content.binder = binder;
   const signature = signWithOpenssl(
     vector.privateKey,
@@ -167,7 +165,7 @@ for (const vector of data.vectors) {
 }
 
 // The whole dual-signed record, assembled from the two vectors above: both
-// parties sign ONE shared content (carrying the initiator-role binder, as a live
+// parties sign ONE shared content (holding the initiator-role binder, as a live
 // exchange does), and every signature in it -- each certificate's self-signature
 // and each party's receipt signature -- comes from openssl. The verification
 // consumer therefore has a bundle no part of which this codebase signed.

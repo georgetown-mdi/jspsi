@@ -15,7 +15,7 @@
 // byte-identical to the previous engine, and the CLI (Node) and web (browser)
 // builds derive identical values. The vectors cover the domain where re2js and
 // `new RegExp` agree: in-dialect patterns on BMP inputs that JS `RegExp` can
-// evaluate without catastrophic backtracking. They deliberately exclude the one
+// evaluate without catastrophic backtracking. They exclude the one
 // known divergence -- `.` matches a code point under RE2 but a UTF-16 code unit
 // under JS, so the two differ on a non-BMP input (documented in PROTOCOL.md) --
 // and the linear-time behavior on the former-ReDoS patterns, checked separately

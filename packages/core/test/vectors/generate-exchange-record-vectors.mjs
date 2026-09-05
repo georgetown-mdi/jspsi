@@ -12,7 +12,7 @@
 // (apps/web/test/browser/exchangeRecord.test.ts) reproducing the same vectors
 // against the web build, not from an independent oracle here. This regenerator
 // preserves each vector's hand-authored name/description/inputs/randomness and
-// recomputes only the derived `record` and `keys`, so a deliberate format change
+// recomputes only the derived `record` and `keys`, so a by-design format change
 // (such as the committed-payload shape) is re-pinned by re-running it and
 // reviewing the diff.
 

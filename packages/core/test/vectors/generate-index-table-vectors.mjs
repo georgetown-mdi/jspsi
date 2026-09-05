@@ -29,15 +29,15 @@
 // the conforming bytes. This file is those bytes, and
 // packages/core/test/indexTableVectors.test.ts replays them.
 //
-// Deliberately not here: the refusal corpus. A refused frame is not a wire format,
+// Not here, by design: the refusal corpus. A refused frame is not a wire format,
 // and singlePassFanOut.test.ts already drives each ragged guard from its own
 // words; a second copy here would pin diagnostics rather than a layout.
 //
-// The reply frames below carry SYNTHETIC setup and response bytes. Those two parts
+// The reply frames below contain SYNTHETIC setup and response bytes. Those two parts
 // are the PSI engine's own serialization, whose byte stability is pinned by
 // psi-engine-wire-vectors.json, and a real pair is not reproducible here anyway --
 // the engine draws a fresh key per exchange. What this file pins about them is
-// where they sit in the frame and how their lengths are carried, which the
+// where they sit in the frame and how their lengths are included, which the
 // synthetic bytes exercise exactly.
 
 import {
@@ -56,7 +56,7 @@ const fromHex = (text) => Uint8Array.from(Buffer.from(text, "hex"));
 
 // Every table is described in BUILD order -- the order the sender assigned value
 // ids while walking its own records -- plus the sorting permutation the setup
-// message carries internally. The remap into sorted order is the thing under
+// message holds internally. The remap into sorted order is the thing under
 // test, so neither side of it is pre-baked.
 const tables = [
   {

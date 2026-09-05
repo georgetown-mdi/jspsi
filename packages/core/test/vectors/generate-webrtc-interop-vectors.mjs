@@ -16,7 +16,7 @@
 // order it must match. Agreement is therefore a cross-implementation check of
 // the construction, not a self-test.
 //
-// The fixed inputs are deliberately boring: a shared secret of the bytes
+// The fixed inputs are boring by design: a shared secret of the bytes
 // 0x00..0x1f, a signaling location on an example host, and an invitation whose
 // `expires` is far enough out that encodeInvitation's "must be in the future"
 // check keeps passing. Nothing here is a credential.
