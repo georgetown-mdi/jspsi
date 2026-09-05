@@ -16,6 +16,8 @@ import {
   fetchSlotOccupancy,
 } from "@psi/serverJobExchangeDriver";
 
+import { appendSanitizedRunWarning } from "@psi/runWarnings";
+
 import {
   initialRun,
   runWithCompletion,
@@ -38,7 +40,6 @@ import { ReceiptDownload } from "./ReceiptDownload";
 import { RecordDownload } from "./RecordDownload";
 import { RecurringHandoff } from "./RecurringHandoff";
 import { StatusPanel } from "./StatusPanel";
-import { appendSanitizedRunWarning } from "./runWarnings";
 import { reattachedRunState } from "./reattachedRunState";
 import styles from "./bench.module.css";
 import { useJobExchangeRecordOffer } from "./useJobExchangeRecordOffer";
@@ -48,7 +49,7 @@ import type { ExchangeRun } from "./exchangeRun";
 import type { JobRunStatus } from "@psi/serverJobExchangeDriver";
 import type { ReattachedRunState } from "./BenchRunSurface";
 import type { RunFailure } from "./useInviterExchange";
-import type { RunOutputs } from "./runOutputs";
+import type { RunOutputs } from "@psi/runOutputs";
 
 /**
  * The exchange the panel recovers: the job id to re-attach to and the seat that

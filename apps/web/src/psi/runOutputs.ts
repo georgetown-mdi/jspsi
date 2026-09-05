@@ -6,7 +6,7 @@ import {
 } from "@psilink/core";
 
 import type { ExchangeResult, PreparedExchange } from "@psilink/core";
-import type { ExchangeOutputs } from "@psi/exchangeLifecycle";
+import type { ExchangeOutputs } from "./exchangeLifecycle";
 
 /** The console run's downloadable artifacts: the lifecycle's outputs widened with
  * the matched-record count the completion header states. It counts the ROWS of a

@@ -12,6 +12,12 @@ import { fetchSftpConnection } from "@psi/serverJobExchangeDriver";
 import { isConsoleBuild } from "@utils/clientConfig";
 
 import {
+  RUN_DIAGNOSTICS_DEFAULT,
+  runDiagnosticsAfterRetarget,
+  runDiagnosticsIntentFields,
+} from "@psi/runDiagnosticsModel";
+
+import {
   CONNECTION_TUNING_DEFAULT,
   FILEDROP_CONNECTION_TUNING,
   SFTP_CONNECTION_TUNING,
@@ -28,11 +34,6 @@ import {
   ZERO_SETUP_EXCHANGE_FILES,
   exchangeFilesOptions,
 } from "./exchangeFilesModel";
-import {
-  RUN_DIAGNOSTICS_DEFAULT,
-  runDiagnosticsAfterRetarget,
-  runDiagnosticsIntentFields,
-} from "./runDiagnosticsModel";
 import { BenchPage } from "./BenchPage";
 import { BenchShell } from "./BenchShell";
 import { DirectConfirmSection } from "./DirectConfirmSection";
@@ -57,8 +58,8 @@ import type { AlertContent } from "@components/csvIntake";
 import type { ConnectionTuningDraft } from "./connectionTuningModel";
 import type { ExchangeFilesDraft } from "./exchangeFilesModel";
 import type { LinkageStrategy } from "@psilink/core";
-import type { RailStep } from "./inviterModel";
-import type { RunDiagnosticsDraft } from "./runDiagnosticsModel";
+import type { RailStep } from "@psi/inviterModel";
+import type { RunDiagnosticsDraft } from "@psi/runDiagnosticsModel";
 import type { SftpConnectionProjection } from "@jobs/jobManager";
 
 const TRANSPORT_NOTES: Record<DirectTransport, string> = {

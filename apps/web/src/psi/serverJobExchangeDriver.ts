@@ -30,9 +30,9 @@ import type {
 } from "@jobs/intent";
 import type { LinkageTerms, Metadata, Standardization } from "@psilink/core";
 import type { RelayEvent, RelayEventType } from "@jobs/cliDriver";
-import type { ReceiptsIntentFields } from "@bench/receiptsModel";
-import type { RunDiagnosticsIntentFields } from "@bench/runDiagnosticsModel";
-import type { RunOutputs } from "@bench/runOutputs";
+import type { ReceiptsIntentFields } from "./receiptsModel";
+import type { RunDiagnosticsIntentFields } from "./runDiagnosticsModel";
+import type { RunOutputs } from "./runOutputs";
 import type { SftpConnectionProjection } from "@jobs/jobManager";
 
 const log = getLogger("serverJobExchangeDriver");

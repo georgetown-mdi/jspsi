@@ -27,7 +27,7 @@ import {
 } from "@psi/jobApiBody";
 import { delayUntilAborted } from "@psi/delayUntilAborted";
 
-import { recordFileStamp } from "@bench/runOutputs";
+import { recordFileStamp } from "./runOutputs";
 
 import type { ExchangeRecordOutcome } from "@psilink/core";
 import type { RecordDownloads } from "./exchangeLifecycle";
@@ -49,7 +49,7 @@ export function jobKeysUrl(jobId: string): string {
 /**
  * The record pair's console download hrefs and save names for a run, stamped
  * from the record's own `createdAt` exactly as the in-browser path stamps its
- * blobs ({@link @bench/runOutputs}), so a console run and a browser run file one
+ * blobs ({@link @psi/runOutputs}), so a console run and a browser run file one
  * exchange's artifacts under one convention.
  */
 export function jobRecordDownloads(

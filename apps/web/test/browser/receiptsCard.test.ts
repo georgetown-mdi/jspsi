@@ -12,14 +12,14 @@ import "@mantine/core/styles.css";
 import {
   IDENTITY_LABEL_REQUIRED_REASON,
   RECEIPTS_DEFAULT,
-} from "@bench/receiptsModel";
+} from "@psi/receiptsModel";
 import { ReceiptsCard } from "@bench/ReceiptsCard";
 
 import { createAppMount, flushPendingUpdates } from "./renderApp";
 
 import type { JobRendezvousConfig } from "@psi/workInputClient";
 import type { ReactElement } from "react";
-import type { ReceiptsDraft } from "@bench/receiptsModel";
+import type { ReceiptsDraft } from "@psi/receiptsModel";
 
 // The console's receipts card against a stubbed signing endpoint. What
 // `receiptsModel` decides is pinned by the unit suite; what this one covers is the

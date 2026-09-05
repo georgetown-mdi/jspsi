@@ -43,7 +43,7 @@ import type {
 } from "@psilink/core";
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 import type { PeerCloseOutcome } from "../../src/psi/waitForPeerClose.js";
-import type { RunOutputs } from "@bench/runOutputs";
+import type { RunOutputs } from "@psi/runOutputs";
 
 /**
  * The browser wiring of a managed re-run, every platform boundary mocked
@@ -105,7 +105,7 @@ vi.mock("../../src/psi/managedPreparedExchange.js", () => ({
 vi.mock("../../src/psi/authenticateExchange.js", () => ({
   authenticateExchange: vi.fn(() => Promise.resolve({ rotatedSecret: "next" })),
 }));
-vi.mock("@bench/runOutputs", () => ({
+vi.mock("@psi/runOutputs", () => ({
   buildRunOutputs: vi.fn(() => OUTPUTS),
 }));
 // The WASM library the driver loads for the exchange: mocked at both ends (the

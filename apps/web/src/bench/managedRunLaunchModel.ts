@@ -20,7 +20,7 @@ import {
 } from "@psi/managedFailureTiers";
 import { canReinviteFromRecord } from "@psi/managedReinvite";
 
-import { dateTimeLabel } from "./inviterModel";
+import { dateTimeLabel } from "@psi/inviterModel";
 
 import type { ManagedExchangeRecord } from "@psi/managedExchangeRecord";
 import type { ManagedFailureTier } from "@psi/managedFailureTiers";

@@ -7,6 +7,8 @@ import {
   sanitizeForDisplay,
 } from "@psilink/core";
 
+import { isolatedColumnName } from "@components/ColumnName";
+
 import {
   draftFromTerms,
   draftWithFieldAdded,
@@ -17,18 +19,16 @@ import {
   setDraftMetadata,
   setDraftMetadataKeepingKeys,
   validateAdvancedInvite,
-} from "@psi/advancedInvite";
+} from "./advancedInvite";
 
 import {
   SEMANTIC_TYPE_LABELS,
   hasMultipleIdentifiers,
   setColumnDisclosure,
   setColumnType,
-} from "@psi/metadataEditing";
+} from "./metadataEditing";
 
-import { isSilentEmpty } from "@psi/nonEmptyAggregate";
-
-import { isolatedColumnName } from "@components/ColumnName";
+import { isSilentEmpty } from "./nonEmptyAggregate";
 
 import { OFFLINE_EXCHANGE_REASON } from "./offlineExchangeGate";
 import { selectExchangeDriver } from "./exchangeDriverSelection";
@@ -40,7 +40,7 @@ import type {
   AdvancedValidation,
   DraftLegalAgreement,
   OutputDirection,
-} from "@psi/advancedInvite";
+} from "./advancedInvite";
 import type {
   CSVRow,
   LinkageField,
@@ -51,9 +51,9 @@ import type {
   SemanticType,
 } from "@psilink/core";
 import type { DeploymentProfile } from "@utils/clientConfig";
-import type { DisclosureChoice } from "@psi/metadataEditing";
+import type { DisclosureChoice } from "./metadataEditing";
 import type { ExchangeDriverSelection } from "./exchangeDriverSelection";
-import type { FieldValueCoverage } from "@psi/nonEmptyAggregate";
+import type { FieldValueCoverage } from "./nonEmptyAggregate";
 import type { RunOutputs } from "./runOutputs";
 
 /**

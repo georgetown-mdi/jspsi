@@ -16,6 +16,8 @@ import { isInstalledRuntime } from "@utils/installedRuntime";
 import { storedInputHandleUsable } from "@psi/managedInputHandle";
 import { triggerBlobDownload } from "@components/blobDownload";
 
+import { dateLabel } from "@psi/inviterModel";
+
 import {
   DISCLOSURE_EXPORT_MIME,
   DISCLOSURE_STORED_EXPORT_MIME,
@@ -55,7 +57,6 @@ import {
   scheduleView,
 } from "./managedDetailModel";
 import { REPEATED_MISS_TITLE } from "./scheduleSurfacingModel";
-import { dateLabel } from "./inviterModel";
 import styles from "./bench.module.css";
 
 import type {

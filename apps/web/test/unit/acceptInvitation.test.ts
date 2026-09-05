@@ -12,7 +12,7 @@ import {
   acceptorExchangeDataSpec,
   prepareAcceptedInvitation,
 } from "../../src/psi/acceptInvitation.js";
-import { selectExchangeDriver } from "../../src/bench/exchangeDriverSelection.js";
+import { selectExchangeDriver } from "../../src/psi/exchangeDriverSelection.js";
 
 import type {
   ConnectionEndpoint,

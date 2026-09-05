@@ -1,6 +1,8 @@
 import { Alert, Button, TextInput } from "@mantine/core";
 import { IconAlertCircle } from "@tabler/icons-react";
 
+import { dateTimeLabel } from "@psi/inviterModel";
+
 import {
   credentialAlertCopy,
   runCommand,
@@ -10,7 +12,6 @@ import {
   saveLeadCopy,
 } from "./saveExchangeModel";
 import { CopyRow } from "./BenchRunSurface";
-import { dateTimeLabel } from "./inviterModel";
 import styles from "./bench.module.css";
 
 import type { CliTransport, SaveExchangeFields } from "./saveExchangeModel";

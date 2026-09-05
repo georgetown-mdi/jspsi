@@ -7,7 +7,7 @@ import { readAttachment, writeAttachment } from "@psi/consoleJobAttachment";
 import type { JobApiClient, JobRunStatus } from "@psi/serverJobExchangeDriver";
 import type { ConsoleJobSeat } from "@psi/consoleJobAttachment";
 import type { ExchangeDriverEvents } from "@psi/exchangeDriver";
-import type { RunOutputs } from "./runOutputs";
+import type { RunOutputs } from "@psi/runOutputs";
 
 /** Whether an error is a busy (409) job-create rejection -- the console's
  * single exchange slot is already occupied. Only this drives a re-attach; every

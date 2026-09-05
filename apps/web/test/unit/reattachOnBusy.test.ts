@@ -15,7 +15,7 @@ import type {
 import type { ExchangeDriverEvents } from "@psi/exchangeDriver";
 import type { ExchangeErrorCategory } from "@psi/exchangeLifecycle";
 import type { RelayEvent } from "@jobs/cliDriver";
-import type { RunOutputs } from "@bench/runOutputs";
+import type { RunOutputs } from "@psi/runOutputs";
 
 const STORAGE_KEY = "psilink-console-last-job";
 

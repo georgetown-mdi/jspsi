@@ -18,8 +18,9 @@ import { sanitizeForDisplay } from "@psilink/core";
 
 import { fetchJobInputProfile, fetchJobInputs } from "@psi/workInputClient";
 
+import { byteSizeLabel, dateTimeLabel } from "@psi/inviterModel";
+
 import { MountLoading, MountStateNotice, RefreshButton } from "./mountListing";
-import { byteSizeLabel, dateTimeLabel } from "./inviterModel";
 import styles from "./bench.module.css";
 
 import type {

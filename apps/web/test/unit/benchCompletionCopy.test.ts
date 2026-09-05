@@ -28,7 +28,7 @@ import {
   RECEIPT_UNANSWERED_NOTICE,
 } from "@bench/ReceiptDownload";
 
-import type { RunOutputs } from "@bench/runOutputs";
+import type { RunOutputs } from "@psi/runOutputs";
 
 const matched = (matchedRecordCount?: number): RunOutputs => ({
   kind: "matched",

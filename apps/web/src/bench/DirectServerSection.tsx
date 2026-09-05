@@ -3,6 +3,8 @@ import { useId } from "react";
 import { Alert, Button, Group, Radio, Stack, Text } from "@mantine/core";
 import { IconAlertCircle, IconAlertTriangle } from "@tabler/icons-react";
 
+import { runDiagnosticsProblems } from "@psi/runDiagnosticsModel";
+
 import {
   FILEDROP_CONNECTION_TUNING,
   SFTP_CONNECTION_TUNING,
@@ -17,7 +19,6 @@ import { ExchangeFilesCard } from "./ExchangeFilesCard";
 import { RunDiagnosticsCard } from "./RunDiagnosticsCard";
 import { SftpConnectionCard } from "./SftpConnectionCard";
 import { directServerBlockedReason } from "./directExchangeModel";
-import { runDiagnosticsProblems } from "./runDiagnosticsModel";
 import { splitDirectoryRetainProblem } from "./sftpConnectionChoice";
 import { splitRendezvousRetainProblem } from "./filedropRendezvousChoice";
 import styles from "./bench.module.css";
@@ -26,7 +27,7 @@ import type { ConnectionTuningDraft } from "./connectionTuningModel";
 import type { DirectTransport } from "./directExchangeModel";
 import type { ExchangeFilesDraft } from "./exchangeFilesModel";
 import type { JobRendezvousConfig } from "@psi/workInputClient";
-import type { RunDiagnosticsDraft } from "./runDiagnosticsModel";
+import type { RunDiagnosticsDraft } from "@psi/runDiagnosticsModel";
 import type { SftpConnectionProjection } from "@jobs/jobManager";
 
 /**

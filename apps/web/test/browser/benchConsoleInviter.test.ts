@@ -27,7 +27,7 @@ import {
 import {
   SWEEP_CONFIRMATION_LABEL,
   SWEEP_CONTROL_LABEL,
-} from "@bench/runDiagnosticsModel";
+} from "@psi/runDiagnosticsModel";
 import { InviterBench } from "@bench/InviterBench";
 import { RECEIPT_MISSING_LEAD } from "@bench/ReceiptDownload";
 import { RETAIN_MODE_BILATERAL_NOTICE } from "@bench/exchangeFilesModel";

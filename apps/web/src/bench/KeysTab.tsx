@@ -34,16 +34,17 @@ import {
 import { ExpertKeyEditor } from "@components/ExpertKeyEditor";
 import { TermsImportExport } from "@components/TermsImportExport";
 
-import { CITATION_DROP_TITLE, CitationDropNotice } from "./CitationDropNotice";
-
 import {
   declaredFieldsFor,
   keySatisfiabilityFor,
   seedRows,
-} from "./inviterModel";
+} from "@psi/inviterModel";
+
+import { CITATION_DROP_TITLE, CitationDropNotice } from "./CitationDropNotice";
+
 import styles from "./bench.module.css";
 
-import type { AcquiredCsv, InviterEditor, KeyVerdict } from "./inviterModel";
+import type { AcquiredCsv, InviterEditor, KeyVerdict } from "@psi/inviterModel";
 import type { Algorithm, LinkageStrategy, LinkageTerms } from "@psilink/core";
 import type { AdvancedInviteDraft } from "@psi/advancedInvite";
 

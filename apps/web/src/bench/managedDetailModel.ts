@@ -22,6 +22,8 @@ import {
   sanitizeForDisplay,
 } from "@psilink/core";
 
+import { dateTimeLabel } from "@psi/inviterModel";
+
 import {
   SCHEDULE_INPUT_RESELECTION_NOTE,
   repeatedMissCoordination,
@@ -30,7 +32,6 @@ import {
   scheduleDueLine,
   scheduleDueness,
 } from "./scheduleSurfacingModel";
-import { dateTimeLabel } from "./inviterModel";
 
 import type { Displayable, ExchangeSpec } from "@psilink/core";
 import type {

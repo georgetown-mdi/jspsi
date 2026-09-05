@@ -32,13 +32,14 @@ import {
 } from "@psi/linkageStrategyChoice";
 import { overlongColumnsAlert } from "@psi/columnNames";
 
+import { OFFLINE_EXCHANGE_REASON } from "@psi/offlineExchangeGate";
+
 import {
   DEFAULT_PREVIEW_IDENTITY,
   DIRECT_LINKAGE_STRATEGY_AGREEMENT_NOTICE,
   previewInferredTerms,
 } from "./directExchangeModel";
 import { FileProfileSummary } from "./ServerFilePicker";
-import { OFFLINE_EXCHANGE_REASON } from "./offlineExchangeGate";
 import styles from "./bench.module.css";
 
 import type { LinkageStrategy } from "@psilink/core";

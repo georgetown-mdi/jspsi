@@ -39,39 +39,12 @@ import { CONSOLE_COVERAGE_PENDING_LABEL } from "@components/FieldCoverage";
 import { triggerBlobDownload } from "@components/blobDownload";
 import { unlinkableFileAlert } from "@components/UnlinkableFileAlert";
 
-import {
-  CONFIG_EXCHANGE_FILES,
-  EXCHANGE_FILES_DEFAULT,
-  exchangeFilesOptions,
-} from "./exchangeFilesModel";
-import {
-  CONNECTION_TUNING_DEFAULT,
-  FILEDROP_CONNECTION_TUNING,
-  SFTP_CONNECTION_TUNING,
-  withConnectionTuning,
-} from "./connectionTuningModel";
-import {
-  EMPTY_SAVE_FIELDS,
-  endpointRequestFor,
-  exchangeFileInputFor,
-  exchangeFileName,
-  liveRunLedgerFooter,
-  saveExchangeError,
-  saveRailNote,
-  saveTrustFooter,
-} from "./saveExchangeModel";
-import { RECEIPTS_DEFAULT, receiptsIntentFields } from "./receiptsModel";
+import { RECEIPTS_DEFAULT, receiptsIntentFields } from "@psi/receiptsModel";
 import {
   RUN_DIAGNOSTICS_DEFAULT,
   runDiagnosticsAfterRetarget,
   runDiagnosticsIntentFields,
-} from "./runDiagnosticsModel";
-import {
-  acceptKitEndpointForRendezvous,
-  filedropEndpointForRendezvous,
-  splitRendezvousRetainProblem,
-} from "./filedropRendezvousChoice";
-import { acceptKitFileName, buildAcceptKit } from "./acceptKit";
+} from "@psi/runDiagnosticsModel";
 import {
   availableTransports,
   cleaningCoverageProblems,
@@ -108,7 +81,35 @@ import {
   spineProblems,
   transportRunMode,
   unsealEditor,
-} from "./inviterModel";
+} from "@psi/inviterModel";
+
+import {
+  CONFIG_EXCHANGE_FILES,
+  EXCHANGE_FILES_DEFAULT,
+  exchangeFilesOptions,
+} from "./exchangeFilesModel";
+import {
+  CONNECTION_TUNING_DEFAULT,
+  FILEDROP_CONNECTION_TUNING,
+  SFTP_CONNECTION_TUNING,
+  withConnectionTuning,
+} from "./connectionTuningModel";
+import {
+  EMPTY_SAVE_FIELDS,
+  endpointRequestFor,
+  exchangeFileInputFor,
+  exchangeFileName,
+  liveRunLedgerFooter,
+  saveExchangeError,
+  saveRailNote,
+  saveTrustFooter,
+} from "./saveExchangeModel";
+import {
+  acceptKitEndpointForRendezvous,
+  filedropEndpointForRendezvous,
+  splitRendezvousRetainProblem,
+} from "./filedropRendezvousChoice";
+import { acceptKitFileName, buildAcceptKit } from "./acceptKit";
 import {
   buildManagedDeposit,
   webrtcLocatorFromEndpoint,
@@ -140,7 +141,7 @@ import { useInviterExchange } from "./useInviterExchange";
 import { useStepHistory } from "./useStepHistory";
 
 import type { AcceptKitEndpoint, AcceptKitExchange } from "./acceptKit";
-import type { AcquiredCsv, InviterEditor, RailStep } from "./inviterModel";
+import type { AcquiredCsv, InviterEditor, RailStep } from "@psi/inviterModel";
 import type { CliTransport, SaveExchangeFields } from "./saveExchangeModel";
 import type {
   ConnectionEndpointRequest,
@@ -163,8 +164,8 @@ import type { DisclosureChoice } from "@psi/metadataEditing";
 import type { ExchangeFilesDraft } from "./exchangeFilesModel";
 import type { ManageOfferChoices } from "./manageOfferModel";
 import type { ManageOfferStatus } from "./ManageExchangeOffer";
-import type { ReceiptsDraft } from "./receiptsModel";
-import type { RunDiagnosticsDraft } from "./runDiagnosticsModel";
+import type { ReceiptsDraft } from "@psi/receiptsModel";
+import type { RunDiagnosticsDraft } from "@psi/runDiagnosticsModel";
 import type { SavedExchange } from "./SaveExchangeSection";
 import type { Section } from "./stepRestore";
 import type { SftpConnectionProjection } from "@jobs/jobManager";

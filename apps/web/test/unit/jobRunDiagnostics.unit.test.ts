@@ -21,7 +21,7 @@ import {
   runDiagnosticsIntentFields,
   runDiagnosticsProblems,
   runDiagnosticsWithControl,
-} from "@bench/runDiagnosticsModel";
+} from "@psi/runDiagnosticsModel";
 import { RelayedTerminalError } from "@psi/serverJobExchangeDriver";
 import { failureFor } from "@bench/useInviterExchange";
 import { resolveWorkdirFile } from "@jobs/workdir";

@@ -19,7 +19,11 @@ import { dialAsAcceptor } from "@psi/rendezvous";
 import { deploymentProfile } from "@utils/clientConfig";
 import { whenDiagnostic } from "@utils/diagnostics";
 
-import { selectExchangeDriver } from "./exchangeDriverSelection";
+import { selectExchangeDriver } from "@psi/exchangeDriverSelection";
+
+import { appendSanitizedRunWarning } from "@psi/runWarnings";
+import { buildRunOutputs } from "@psi/runOutputs";
+import { invitationUsable } from "@psi/inviterModel";
 
 import {
   WAITING_STAGE_ID,
@@ -31,10 +35,7 @@ import {
   stagesFor,
 } from "./exchangeRun";
 import { isExchangeBusyError, reattachOnBusy } from "./reattachOnBusy";
-import { appendSanitizedRunWarning } from "./runWarnings";
-import { buildRunOutputs } from "./runOutputs";
 import { failureFor } from "./useInviterExchange";
-import { invitationUsable } from "./inviterModel";
 import { prepareAcceptorExchange } from "./acceptorExchange";
 
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
@@ -58,11 +59,11 @@ import type {
 } from "@psi/serverJobExchangeDriver";
 import type { ExchangeRun } from "./exchangeRun";
 import type { JobExchangeOptions } from "@jobs/intent";
-import type { ReceiptsIntentFields } from "./receiptsModel";
-import type { RunDiagnosticsIntentFields } from "./runDiagnosticsModel";
+import type { ReceiptsIntentFields } from "@psi/receiptsModel";
+import type { RunDiagnosticsIntentFields } from "@psi/runDiagnosticsModel";
 import type { RunFailure } from "./useInviterExchange";
-import type { RunOutputs } from "./runOutputs";
-import type { Transport } from "./inviterModel";
+import type { RunOutputs } from "@psi/runOutputs";
+import type { Transport } from "@psi/inviterModel";
 
 /** The connection-endpoint channels the acceptor can drive, narrowed from the
  * token by {@link prepareAcceptedInvitation}: WebRTC always, file-drop or SFTP on

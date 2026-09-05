@@ -2,7 +2,7 @@ import { useEffect, useRef } from "react";
 
 import { Button } from "@mantine/core";
 
-import { dateTimeLabel, invitationUsable } from "./inviterModel";
+import { dateTimeLabel, invitationUsable } from "@psi/inviterModel";
 import { awaitingPartner } from "./exchangeRun";
 
 import {
@@ -35,7 +35,7 @@ import type { ExchangeRun } from "./exchangeRun";
 import type { GeneratedInvitation } from "@psi/invitation";
 import type { JobRunStatus } from "@psi/serverJobExchangeDriver";
 import type { RunFailure } from "./useInviterExchange";
-import type { RunOutputs } from "./runOutputs";
+import type { RunOutputs } from "@psi/runOutputs";
 
 /**
  * The inviter's post-create work column, through the run's three phases: the

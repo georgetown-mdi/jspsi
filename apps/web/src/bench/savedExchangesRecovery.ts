@@ -13,8 +13,9 @@
  * entries hold display essentials only.
  */
 
+import { dateLabel } from "@psi/inviterModel";
+
 import { SIDE_LABEL } from "./savedExchangesModel";
-import { dateLabel } from "./inviterModel";
 
 import type { ManagedExchangeDiagnosticEntry } from "@psi/managedExchangeStore";
 

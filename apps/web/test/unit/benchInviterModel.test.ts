@@ -46,9 +46,9 @@ import {
   transportChooserCopy,
   transportRunMode,
   unsealEditor,
-} from "@bench/inviterModel";
+} from "@psi/inviterModel";
 
-import { OFFLINE_EXCHANGE_REASON } from "@bench/offlineExchangeGate";
+import { OFFLINE_EXCHANGE_REASON } from "@psi/offlineExchangeGate";
 import { SPLIT_RENDEZVOUS_RETAIN_REQUIREMENT } from "@bench/filedropRendezvousChoice";
 
 // The send-row expectation derives its form from this function, so it pins that
@@ -61,7 +61,7 @@ import type {
   AcquiredCsv,
   InviterCreateGates,
   Transport,
-} from "@bench/inviterModel";
+} from "@psi/inviterModel";
 import type { FieldValueCoverage } from "@psi/nonEmptyAggregate";
 
 // A right-to-left override, written as an escape so the source holds no raw

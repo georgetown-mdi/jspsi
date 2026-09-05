@@ -60,7 +60,7 @@ const rawRowsAccessBan = {
 };
 
 // Every seat that hands the exchange driver an `onWarning` slot must fold the
-// message through `appendSanitizedRunWarning` (src/bench/runWarnings.ts), the one
+// message through `appendSanitizedRunWarning` (src/psi/runWarnings.ts), the one
 // display boundary the console's run surfaces share. The manager's own preflight
 // warnings are composed RAW precisely because that boundary escapes them exactly
 // once: a seat that escaped again would show one backslash in a partner filename as
@@ -91,7 +91,7 @@ const seatWarningSinkBan = {
     "[value.type=/^(ArrowFunctionExpression|FunctionExpression|Identifier|MemberExpression)$/]" +
     ":not(:has(CallExpression[callee.name='appendSanitizedRunWarning']))",
   message:
-    "Fold an onWarning message through appendSanitizedRunWarning (src/bench/runWarnings.ts): it is the one display boundary the run surfaces share, and the manager composes its warnings raw because that boundary escapes them exactly once.",
+    "Fold an onWarning message through appendSanitizedRunWarning (src/psi/runWarnings.ts): it is the one display boundary the run surfaces share, and the manager composes its warnings raw because that boundary escapes them exactly once.",
 };
 
 // The files that legitimately read `.rawRows`: the hosted file-intake and draft
@@ -99,13 +99,13 @@ const seatWarningSinkBan = {
 // non-acquired shapes (a prepared/minted invitation, a worker request, the
 // controller's own field).
 const rawRowsConsumers = [
-  "src/bench/inviterModel.ts",
   "src/bench/AcceptorBench.tsx",
   "src/bench/InviterBench.tsx",
-  "src/bench/runOutputs.ts",
   "src/bench/useInviterExchange.ts",
+  "src/psi/inviterModel.ts",
   "src/psi/nonEmptyAggregate.worker.ts",
   "src/psi/nonEmptyAggregateController.ts",
+  "src/psi/runOutputs.ts",
 ];
 
 export default [

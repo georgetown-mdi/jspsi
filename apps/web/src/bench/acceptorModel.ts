@@ -14,11 +14,11 @@ import {
   TRANSPORT_LEDGER_LABELS,
   dateTimeLabel,
   settledReceiveValue,
-} from "./inviterModel";
+} from "@psi/inviterModel";
 import { saveRailNote } from "./saveExchangeModel";
 
 import type { InvitationToken, LinkageTerms, Metadata } from "@psilink/core";
-import type { LedgerOutcome, RailFact, RailStepState } from "./inviterModel";
+import type { LedgerOutcome, RailFact, RailStepState } from "@psi/inviterModel";
 import type { AcceptableInvitation } from "@psi/acceptInvitation";
 
 /**

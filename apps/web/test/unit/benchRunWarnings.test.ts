@@ -5,7 +5,7 @@ import {
   WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
 } from "@psilink/core";
 
-import { appendSanitizedRunWarning } from "@bench/runWarnings";
+import { appendSanitizedRunWarning } from "@psi/runWarnings";
 
 // What the console's rendezvous preflight puts in front of an operator when the
 // mount is not empty: the entry names are the PARTNER's, since the partner syncs

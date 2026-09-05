@@ -14,8 +14,8 @@ import {
 } from "@psilink/core";
 
 import { MAX_INPUT_NAME_LENGTH } from "@jobs/workInputName";
-import { SWEEP_CONTROL_LABEL } from "@bench/runDiagnosticsModel";
-import { appendSanitizedRunWarning } from "@bench/runWarnings";
+import { SWEEP_CONTROL_LABEL } from "@psi/runDiagnosticsModel";
+import { appendSanitizedRunWarning } from "@psi/runWarnings";
 
 import {
   MAX_NAMED_RENDEZVOUS_ENTRIES,

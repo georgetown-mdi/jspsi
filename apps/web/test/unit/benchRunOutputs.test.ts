@@ -1,9 +1,9 @@
 import { describe, expect, test } from "vitest";
 
-import { buildRunOutputs } from "@bench/runOutputs";
+import { buildRunOutputs } from "@psi/runOutputs";
 
 import type { ExchangeResult, PreparedExchange } from "@psilink/core";
-import type { ObjectUrls } from "@bench/runOutputs";
+import type { ObjectUrls } from "@psi/runOutputs";
 
 // A recording ObjectUrls fake: each create hands out a distinct url (or throws
 // on the configured call), and both sides log what they were given, so the

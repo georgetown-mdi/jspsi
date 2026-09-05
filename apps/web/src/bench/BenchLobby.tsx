@@ -13,9 +13,10 @@ import { tokenFromInput } from "@psi/invitation";
 import { isConsoleBuild } from "@utils/clientConfig";
 import { useOnlineStatus } from "@components/useOnlineStatus";
 
+import { OFFLINE_EXCHANGE_REASON } from "@psi/offlineExchangeGate";
+
 import { BenchPage } from "./BenchPage";
 import { FILE_ASSURANCE_LINE } from "./fileAssurance";
-import { OFFLINE_EXCHANGE_REASON } from "./offlineExchangeGate";
 import { downloadSampleCsvs } from "./sampleData";
 import { loadSavedExchanges } from "./savedExchangesLoad";
 import styles from "./bench.module.css";

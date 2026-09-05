@@ -16,8 +16,6 @@ import { IconAlertTriangle, IconInfoCircle } from "@tabler/icons-react";
 
 import { resolveSigningFingerprint } from "@psi/signingIdentityClient";
 
-import { DisclosureSection } from "../components/DisclosureSection";
-
 import {
   CERTIFICATE_EXPORT_NOTICE,
   IDENTITY_REGENERATION_NOTICE,
@@ -27,10 +25,12 @@ import {
   receiptsProblems,
   receiptsSummary,
   receiptsWithField,
-} from "./receiptsModel";
+} from "@psi/receiptsModel";
+import { DisclosureSection } from "../components/DisclosureSection";
+
 import styles from "./bench.module.css";
 
-import type { ReceiptsDraft, ReceiptsSigningMode } from "./receiptsModel";
+import type { ReceiptsDraft, ReceiptsSigningMode } from "@psi/receiptsModel";
 import type { JobRendezvousConfig } from "@psi/workInputClient";
 import type { SigningFingerprintOutcome } from "@psi/signingIdentityClient";
 

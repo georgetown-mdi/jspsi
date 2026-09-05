@@ -13,7 +13,7 @@
  * mounting either console.
  */
 
-import type { SpineTarget } from "./inviterModel";
+import type { SpineTarget } from "@psi/inviterModel";
 
 /** The inviter console's work-column sections: the required spine, the Customize
  * tabs, and the two terminal surfaces. */

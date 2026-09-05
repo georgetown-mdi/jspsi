@@ -1,8 +1,6 @@
 import { Alert, Checkbox, Stack, Text } from "@mantine/core";
 import { IconAlertTriangle, IconInfoCircle } from "@tabler/icons-react";
 
-import { DisclosureSection } from "../components/DisclosureSection";
-
 import {
   DIAGNOSTIC_LOG_NOTICE,
   SWEEP_CONFIRMATION_LABEL,
@@ -11,9 +9,10 @@ import {
   SWEEP_RETAIN_ESCALATION_NOTICE,
   runDiagnosticsProblems,
   runDiagnosticsWithControl,
-} from "./runDiagnosticsModel";
+} from "@psi/runDiagnosticsModel";
+import { DisclosureSection } from "../components/DisclosureSection";
 
-import type { RunDiagnosticsDraft } from "./runDiagnosticsModel";
+import type { RunDiagnosticsDraft } from "@psi/runDiagnosticsModel";
 
 /** The collapsed summary, so a closed card is not a blind box: it names whichever
  * of the two controls is on, since either changes what this run does. */

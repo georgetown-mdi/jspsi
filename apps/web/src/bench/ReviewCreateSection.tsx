@@ -19,6 +19,19 @@ import { isConsoleBuild } from "@utils/clientConfig";
 import { useDeferredAnnouncement } from "@components/useDeferredAnnouncement";
 import { useOnlineStatus } from "@components/useOnlineStatus";
 
+import {
+  LIFETIME_CHOICES,
+  RESULTS_DIRECTION_LABELS,
+  answersRows,
+  availableTransports,
+  expiryLabel,
+  inviterCreateStatus,
+  transportChooserCopy,
+  transportRunMode,
+} from "@psi/inviterModel";
+import { receiptsProblems } from "@psi/receiptsModel";
+import { runDiagnosticsProblems } from "@psi/runDiagnosticsModel";
+
 import { CitationDropNotice } from "./CitationDropNotice";
 
 import {
@@ -30,23 +43,11 @@ import {
   SFTP_CONNECTION_TUNING,
   connectionTuningProblems,
 } from "./connectionTuningModel";
-import {
-  LIFETIME_CHOICES,
-  RESULTS_DIRECTION_LABELS,
-  answersRows,
-  availableTransports,
-  expiryLabel,
-  inviterCreateStatus,
-  transportChooserCopy,
-  transportRunMode,
-} from "./inviterModel";
 import { ConnectionTuningCard } from "./ConnectionTuningCard";
 import { ExchangeFilesCard } from "./ExchangeFilesCard";
 import { ReceiptsCard } from "./ReceiptsCard";
 import { RunDiagnosticsCard } from "./RunDiagnosticsCard";
 import { SftpConnectionCard } from "./SftpConnectionCard";
-import { receiptsProblems } from "./receiptsModel";
-import { runDiagnosticsProblems } from "./runDiagnosticsModel";
 import { splitDirectoryRetainProblem } from "./sftpConnectionChoice";
 import { splitRendezvousRetainProblem } from "./filedropRendezvousChoice";
 import styles from "./bench.module.css";
@@ -57,13 +58,13 @@ import type {
   SpineProblem,
   SpineTarget,
   Transport,
-} from "./inviterModel";
+} from "@psi/inviterModel";
 import type { ConnectionTuningDraft } from "./connectionTuningModel";
 import type { ExchangeFilesDraft } from "./exchangeFilesModel";
 import type { JobRendezvousConfig } from "@psi/workInputClient";
 import type { OutputDirection } from "@psi/advancedInvite";
-import type { ReceiptsDraft } from "./receiptsModel";
-import type { RunDiagnosticsDraft } from "./runDiagnosticsModel";
+import type { ReceiptsDraft } from "@psi/receiptsModel";
+import type { RunDiagnosticsDraft } from "@psi/runDiagnosticsModel";
 import type { SftpConnectionProjection } from "@jobs/jobManager";
 
 const DIRECTION_CHOICES: ReadonlyArray<{

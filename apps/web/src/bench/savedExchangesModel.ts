@@ -16,7 +16,7 @@ import { deriveManagedBackupState } from "@psi/managedBackupState";
 import { deriveManagedFailureTier } from "@psi/managedFailureTiers";
 import { managedExchangeLapsed } from "@psi/managedExpiry";
 
-import { dateLabel, dateTimeLabel } from "./inviterModel";
+import { dateLabel, dateTimeLabel } from "@psi/inviterModel";
 import {
   repeatedMissCoordination,
   scheduleDueLine,

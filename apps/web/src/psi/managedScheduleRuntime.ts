@@ -28,7 +28,7 @@
 
 import log from "loglevel";
 
-import { appendSanitizedRunWarning } from "@bench/runWarnings";
+import { appendSanitizedRunWarning } from "./runWarnings";
 
 import {
   listReadableManagedExchanges,
@@ -40,7 +40,7 @@ import { listManagedLocalState } from "./managedLocalState";
 import { runManagedExchangeInBrowser } from "./managedRunDriver";
 import { tickManagedSchedules } from "./managedScheduleRunner";
 
-import type { ObjectUrls } from "@bench/runOutputs";
+import type { ObjectUrls } from "./runOutputs";
 
 import type {
   ManagedScheduleAttempt,

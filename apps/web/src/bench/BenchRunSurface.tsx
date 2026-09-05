@@ -6,10 +6,10 @@ import { Link } from "@tanstack/react-router";
 
 import { DEFAULT_PEER_TIMEOUT_MS } from "@psilink/core";
 
-import { dateTimeLabel } from "./inviterModel";
+import { dateTimeLabel } from "@psi/inviterModel";
 import styles from "./bench.module.css";
 
-import type { NoResultFileOutputs, RunOutputs } from "./runOutputs";
+import type { NoResultFileOutputs, RunOutputs } from "@psi/runOutputs";
 import type { JobExchangeRecordOfferState } from "./useJobExchangeRecordOffer";
 import type { ReactNode } from "react";
 import type { RunFailure } from "./useInviterExchange";

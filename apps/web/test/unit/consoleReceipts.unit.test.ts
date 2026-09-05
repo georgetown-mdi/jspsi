@@ -32,7 +32,7 @@ import {
   receiptsProblems,
   receiptsSummary,
   receiptsWithField,
-} from "@bench/receiptsModel";
+} from "@psi/receiptsModel";
 import {
   JOB_FILE_NAMES,
   composeConfigDocument,
@@ -67,7 +67,7 @@ import {
 import type { JobRendezvousConfig } from "@psi/workInputClient";
 import type { JobSigningPaths } from "@jobs/intent";
 import type { LinkageTerms } from "@psilink/core";
-import type { ReceiptsDraft } from "@bench/receiptsModel";
+import type { ReceiptsDraft } from "@psi/receiptsModel";
 
 // The console's receipt-signing and retention authoring surface, end to end: what
 // the boundary schema admits, what the two composers emit per mode, what the

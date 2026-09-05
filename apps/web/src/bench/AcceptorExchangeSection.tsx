@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "react";
 
-import { invitationUsable } from "./inviterModel";
+import { invitationUsable } from "@psi/inviterModel";
 
 import {
   AnotherExchangeFoot,
@@ -31,7 +31,7 @@ import type { AcceptableInvitation } from "@psi/acceptInvitation";
 import type { ExchangeRun } from "./exchangeRun";
 import type { JobRunStatus } from "@psi/serverJobExchangeDriver";
 import type { RunFailure } from "./useInviterExchange";
-import type { RunOutputs } from "./runOutputs";
+import type { RunOutputs } from "@psi/runOutputs";
 
 /**
  * The acceptor's run/completion work column, re-using the shared run furniture

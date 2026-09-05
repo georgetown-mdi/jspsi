@@ -3,7 +3,7 @@ import { Stepper } from "@mantine/core";
 import styles from "./bench.module.css";
 import { useNarrowBench } from "./narrowViewport";
 
-import type { RailStep } from "./inviterModel";
+import type { RailStep } from "@psi/inviterModel";
 
 /**
  * The Stepper's active index for {@link RailStep} steps that hold no

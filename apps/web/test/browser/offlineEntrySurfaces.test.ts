@@ -18,7 +18,7 @@ import { BenchLobby } from "@bench/BenchLobby";
 import { DIRECT_LINKAGE_STRATEGY_DEFAULT } from "@bench/directExchangeModel";
 import { DirectConfirmSection } from "@bench/DirectConfirmSection";
 import { InviterBench } from "@bench/InviterBench";
-import { OFFLINE_EXCHANGE_REASON } from "@bench/offlineExchangeGate";
+import { OFFLINE_EXCHANGE_REASON } from "@psi/offlineExchangeGate";
 import styles from "@bench/bench.module.css";
 
 import { restoreConnectivity, setConnectivity } from "./connectivity";

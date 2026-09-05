@@ -23,7 +23,7 @@ import { defaultStandardizationForRows } from "@psi/advancedInvite";
 
 import { isSilentEmpty } from "@psi/nonEmptyAggregate";
 
-import { OFFLINE_EXCHANGE_REASON } from "./offlineExchangeGate";
+import { OFFLINE_EXCHANGE_REASON } from "@psi/offlineExchangeGate";
 
 import type {
   CSVRow,

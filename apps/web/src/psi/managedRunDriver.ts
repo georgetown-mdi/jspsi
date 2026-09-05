@@ -34,7 +34,7 @@ import {
   runExchange,
 } from "@psilink/core";
 
-import { buildRunOutputs } from "@bench/runOutputs";
+import { buildRunOutputs } from "./runOutputs";
 
 import { CLOSE_OUTCOME_WARNINGS } from "./exchangeLifecycle";
 import { HANDSHAKE_ROLE_FOR_SIDE } from "./handshakeRole";
@@ -54,7 +54,7 @@ import type { DataConnection } from "peerjs";
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 import type Peer from "peerjs";
 
-import type { ObjectUrls, RunOutputs } from "@bench/runOutputs";
+import type { ObjectUrls, RunOutputs } from "./runOutputs";
 
 import type { ManagedExchangeRecord } from "./managedExchangeRecord";
 import type { ManagedExchangeRunResult } from "./managedExchangeRun";

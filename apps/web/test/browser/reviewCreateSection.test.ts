@@ -6,19 +6,19 @@ import { page } from "vitest/browser";
 
 import { createElement } from "react";
 
-import { editorFromCsv, editorWithAuthoredDraft } from "@bench/inviterModel";
+import { editorFromCsv, editorWithAuthoredDraft } from "@psi/inviterModel";
 
 import { buildAdvancedTerms, draftFromTerms } from "@psi/advancedInvite";
 
 import { CONNECTION_TUNING_DEFAULT } from "@bench/connectionTuningModel";
 import { EXCHANGE_FILES_DEFAULT } from "@bench/exchangeFilesModel";
-import { RECEIPTS_DEFAULT } from "@bench/receiptsModel";
-import { RUN_DIAGNOSTICS_DEFAULT } from "@bench/runDiagnosticsModel";
+import { RECEIPTS_DEFAULT } from "@psi/receiptsModel";
+import { RUN_DIAGNOSTICS_DEFAULT } from "@psi/runDiagnosticsModel";
 import { ReviewCreateSection } from "@bench/ReviewCreateSection";
 
 import { createAppMount } from "./renderApp";
 
-import type { AcquiredCsv, InviterEditor } from "@bench/inviterModel";
+import type { AcquiredCsv, InviterEditor } from "@psi/inviterModel";
 import type { AdvancedInviteDraft } from "@psi/advancedInvite";
 
 const CITATION_DROP_NOTICE_NAME =

@@ -8,6 +8,8 @@ import { discardServerJob, writeAttachment } from "@psi/consoleJobAttachment";
 
 import { whenDiagnostic } from "@utils/diagnostics";
 
+import { appendSanitizedRunWarning } from "@psi/runWarnings";
+
 import {
   initialRun,
   runWithCompletion,
@@ -16,7 +18,6 @@ import {
   runWithStages,
 } from "./exchangeRun";
 import { isExchangeBusyError, reattachOnBusy } from "./reattachOnBusy";
-import { appendSanitizedRunWarning } from "./runWarnings";
 import { failureFor } from "./useInviterExchange";
 
 import type {
@@ -31,9 +32,9 @@ import type { DirectTransport } from "./directExchangeModel";
 import type { ExchangeDriverEvents } from "@psi/exchangeDriver";
 import type { ExchangeErrorCategory } from "@psi/exchangeLifecycle";
 import type { ExchangeRun } from "./exchangeRun";
-import type { RunDiagnosticsIntentFields } from "./runDiagnosticsModel";
+import type { RunDiagnosticsIntentFields } from "@psi/runDiagnosticsModel";
 import type { RunFailure } from "./useInviterExchange";
-import type { RunOutputs } from "./runOutputs";
+import type { RunOutputs } from "@psi/runOutputs";
 
 /**
  * The run half of the direct-exchange console. Unlike the inviter console, which

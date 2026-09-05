@@ -9,16 +9,17 @@ import { MAX_CSV_FILE_BYTES } from "@components/csvIntake";
 
 import { isConsoleBuild } from "@utils/clientConfig";
 
+import { fileCardMeta } from "@psi/inviterModel";
+
 import { APPLIANCE_FILE_ASSURANCE, FILE_ASSURANCE_LINE } from "./fileAssurance";
 import { ServerFilePicker } from "./ServerFilePicker";
-import { fileCardMeta } from "./inviterModel";
 import styles from "./bench.module.css";
 
 import type {
   ProfiledJobInput,
   WorkInputReference,
 } from "@psi/workInputClient";
-import type { AcquiredCsv } from "./inviterModel";
+import type { AcquiredCsv } from "@psi/inviterModel";
 import type { AlertContent } from "@components/csvIntake";
 import type { FileRejection } from "@mantine/dropzone";
 

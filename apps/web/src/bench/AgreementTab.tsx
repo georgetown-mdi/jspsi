@@ -10,7 +10,7 @@ import type {
   AdvancedValidation,
   DraftLegalAgreement,
 } from "@psi/advancedInvite";
-import type { InviterEditor } from "./inviterModel";
+import type { InviterEditor } from "@psi/inviterModel";
 
 const EMPTY_AGREEMENT: DraftLegalAgreement = {
   reference: "",

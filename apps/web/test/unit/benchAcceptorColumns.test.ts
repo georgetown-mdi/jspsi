@@ -37,7 +37,7 @@ import {
   splitRendezvousRetainProblem,
 } from "@bench/filedropRendezvousChoice";
 
-import { OFFLINE_EXCHANGE_REASON } from "@bench/offlineExchangeGate";
+import { OFFLINE_EXCHANGE_REASON } from "@psi/offlineExchangeGate";
 
 import {
   setColumnDisclosure,

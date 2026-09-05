@@ -30,7 +30,7 @@ import {
   resolveLocalCadenceAnchor,
 } from "@psi/managedSchedule";
 
-import { dateTimeLabel } from "./inviterModel";
+import { dateTimeLabel } from "@psi/inviterModel";
 
 import type { ManagedExchangeSchedule } from "@psi/managedExchangeRecord";
 

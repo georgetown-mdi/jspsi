@@ -8,7 +8,7 @@ import { DisclosureSection } from "../components/DisclosureSection";
 import styles from "./bench.module.css";
 import { useNarrowBench } from "./narrowViewport";
 
-import type { RailFact } from "./inviterModel";
+import type { RailFact } from "@psi/inviterModel";
 import type { ReactNode } from "react";
 
 /** The narrow share bar's rows in ledger order: the headline disclosure facts

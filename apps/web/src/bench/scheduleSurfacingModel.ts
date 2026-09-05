@@ -36,7 +36,7 @@ import {
   nextManagedScheduleWindowAfter,
 } from "@psi/managedSchedule";
 
-import { dateTimeLabel, lifetimeNoun } from "./inviterModel";
+import { dateTimeLabel, lifetimeNoun } from "@psi/inviterModel";
 
 import type { ManagedExchangeSchedule } from "@psi/managedExchangeRecord";
 

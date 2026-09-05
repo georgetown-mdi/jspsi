@@ -31,6 +31,13 @@ import { waitForIncomingConnection } from "@psi/waitForConnection";
 import { isConsoleBuild } from "@utils/clientConfig";
 import { whenDiagnostic } from "@utils/diagnostics";
 
+import { appendSanitizedRunWarning } from "@psi/runWarnings";
+import { buildRunOutputs } from "@psi/runOutputs";
+import { invitationUsable } from "@psi/inviterModel";
+import { selectExchangeDriver } from "@psi/exchangeDriverSelection";
+
+import { isExchangeBusyError, reattachOnBusy } from "./reattachOnBusy";
+
 import {
   WAITING_STAGE_ID,
   initialRun,
@@ -40,11 +47,6 @@ import {
   runWithStages,
   stagesFor,
 } from "./exchangeRun";
-import { isExchangeBusyError, reattachOnBusy } from "./reattachOnBusy";
-import { appendSanitizedRunWarning } from "./runWarnings";
-import { buildRunOutputs } from "./runOutputs";
-import { invitationUsable } from "./inviterModel";
-import { selectExchangeDriver } from "./exchangeDriverSelection";
 
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 
@@ -63,10 +65,10 @@ import type {
 } from "@psi/serverJobExchangeDriver";
 import type { GeneratedInvitation } from "@psi/invitation";
 import type { JobExchangeOptions } from "@jobs/intent";
-import type { ReceiptsIntentFields } from "./receiptsModel";
-import type { RunDiagnosticsIntentFields } from "./runDiagnosticsModel";
-import type { RunOutputs } from "./runOutputs";
-import type { Transport } from "./inviterModel";
+import type { ReceiptsIntentFields } from "@psi/receiptsModel";
+import type { RunDiagnosticsIntentFields } from "@psi/runDiagnosticsModel";
+import type { RunOutputs } from "@psi/runOutputs";
+import type { Transport } from "@psi/inviterModel";
 
 /** A failed run, ready to render: the lifecycle's category (which decides the
  * recovery the alert offers) and the operator-facing alert content, composed

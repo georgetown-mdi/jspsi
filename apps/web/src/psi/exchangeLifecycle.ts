@@ -31,7 +31,7 @@ const log = getLogger("exchangeLifecycle");
  * waited for the peer up to the ceiling without the peer's take signal
  * arriving: this side's exchange finished, but the partner's may not have.
  * Composed raw and escaped once at the display boundary
- * (`apps/web/src/bench/runWarnings.ts`). Names no duration -- the operator
+ * (`apps/web/src/psi/runWarnings.ts`). Names no duration -- the operator
  * does not set or see the ceiling -- and directs the operator to confirm with
  * the partner, since only the partner's result is in doubt.
  */

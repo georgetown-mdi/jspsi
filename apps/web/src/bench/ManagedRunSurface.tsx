@@ -37,6 +37,10 @@ import { runManagedExchangeInBrowser } from "@psi/managedRunDriver";
 import { storedInputHandleUsable } from "@psi/managedInputHandle";
 import { whenDiagnostic } from "@utils/diagnostics";
 
+import { dateLabel, dateTimeLabel } from "@psi/inviterModel";
+import { OFFLINE_EXCHANGE_REASON } from "@psi/offlineExchangeGate";
+import { appendSanitizedRunWarning } from "@psi/runWarnings";
+
 import {
   CopyRow,
   DonePanel,
@@ -58,13 +62,10 @@ import {
   managedRunReinvites,
   managedRunRetryable,
 } from "./managedRunLaunchModel";
-import { dateLabel, dateTimeLabel } from "./inviterModel";
 import { BenchPage } from "./BenchPage";
 import { DeleteExchangeButton } from "./SavedExchanges";
 import { ManagedCronExportPanel } from "./ManagedCronExportPanel";
 import { ManagedExchangeDetail } from "./ManagedExchangeDetail";
-import { OFFLINE_EXCHANGE_REASON } from "./offlineExchangeGate";
-import { appendSanitizedRunWarning } from "./runWarnings";
 import styles from "./bench.module.css";
 import { useBeforeUnloadPrompt } from "./useUnloadGuard";
 import { useManagedRunInFlight } from "./useManagedRunInFlight";
@@ -85,7 +86,7 @@ import type { ManagedInputSource } from "@psi/managedInputHandle";
 import type { ManagedReinvite } from "@psi/managedReinvite";
 import type { ManagedRunFailureAlert } from "./managedRunLaunchModel";
 import type { ManagedSpentState } from "@psi/managedLocalState";
-import type { RunOutputs } from "./runOutputs";
+import type { RunOutputs } from "@psi/runOutputs";
 
 /**
  * The attended re-run surface: open a stored managed exchange, confirm the input,
