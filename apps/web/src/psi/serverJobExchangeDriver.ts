@@ -201,7 +201,7 @@ export type JobStatusProbe =
  * create includes {@link activeJobId}, the id of the exchange occupying the
  * console's single slot, parsed from the response body -- the browser
  * re-attaches to it rather than surfacing the "already running" alert (see
- * `bench/reattachOnBusy`). Present only on a 409 whose body held one. */
+ * `exchange/reattachOnBusy`). Present only on a 409 whose body held one. */
 export class JobApiRequestError extends Error {
   constructor(
     readonly status: number,

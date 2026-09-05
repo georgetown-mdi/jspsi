@@ -20,7 +20,7 @@ import type { ChildProcess } from "node:child_process";
 // PapaParse's `worker: true` self-hosted worker corrupted the CSV parse once
 // Vite bundled and minified the app; only a production build catches it, since
 // dev and Vitest's real-Chromium tests both passed with the broken worker. This
-// drives the real inviter bench flow against a `vite build` (.output), with a
+// drives the real inviter screen flow against a `vite build` (.output), with a
 // CSV sized above CSV_WORKER_FILE_BYTE_THRESHOLD so parsing routes off-thread.
 // Rebuild (`npm run build -w apps/web`) before re-running; CI always rebuilds
 // first.

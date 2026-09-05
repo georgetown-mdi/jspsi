@@ -32,7 +32,7 @@ import { isConsoleBuild, psilinkVersion } from "@utils/clientConfig";
 import { whenDiagnostic } from "@utils/diagnostics";
 
 import {
-  benchCoverageProvider,
+  coverageProvider,
   useNonEmptyRates,
 } from "@components/useNonEmptyRates";
 import { CONSOLE_COVERAGE_PENDING_LABEL } from "@components/FieldCoverage";
@@ -159,7 +159,8 @@ import type {
   ProfiledJobInput,
 } from "@psi/workInputClient";
 import type { AlertContent } from "@components/csvIntake";
-import type { BenchCoverageInput } from "@components/useNonEmptyRates";
+import type { CoverageInput } from "@components/useNonEmptyRates";
+
 import type { ColumnSamples } from "@psi/columnSamples";
 import type { ConnectionTuningDraft } from "@console/connectionTuningModel";
 import type { DisclosureChoice } from "@psi/metadataEditing";
@@ -186,7 +187,7 @@ const EMPTY_STANDARDIZATION: Standardization = [];
  * provider is not rebuilt every render on a fresh identity before a file is
  * acquired. The empty-rows coverage input drives the hosted worker provider over no
  * rows (an empty coverage), never a console fetch. */
-const EMPTY_COVERAGE_INPUT: BenchCoverageInput = {
+const EMPTY_COVERAGE_INPUT: CoverageInput = {
   kind: "rows",
   rows: EMPTY_ROWS,
 };
@@ -442,7 +443,7 @@ export function InviterScreen() {
   // not parsed rows). Memoized so a standardization edit reuses the provider and
   // only a new file rebuilds it. The console reads no rows -- `acquired.rawRows` is a
   // throwing getter there -- so this never touches it on that path.
-  const coverageInput = useMemo<BenchCoverageInput>(() => {
+  const coverageInput = useMemo<CoverageInput>(() => {
     if (consoleSource !== undefined)
       return { kind: "workFile", reference: { name: consoleSource.name } };
     if (!isConsoleBuild() && acquired !== undefined)
@@ -473,7 +474,7 @@ export function InviterScreen() {
   } = useNonEmptyRates(
     coverageInput,
     editor?.draft.standardization ?? EMPTY_STANDARDIZATION,
-    benchCoverageProvider,
+    coverageProvider,
   );
   const cleaningAttention = inviterCleaningAttention(
     editor,

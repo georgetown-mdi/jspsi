@@ -366,7 +366,7 @@ export type BenignRerunOutcome =
  * This guard classifies off THIS run's live error. A surface classifying off
  * the record's stored bookkeeping instead ({@link ./managedFailureTiers.ts})
  * applies the same boundary at its own read site
- * ({@link ../bench/managedRunLaunchModel.ts}).
+ * ({@link ../recurring/managedRunLaunchModel.ts}).
  */
 export function benignRerunOutcome(
   error: unknown,

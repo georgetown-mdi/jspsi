@@ -1,6 +1,6 @@
 /**
  * The one contract for an operator's `--identity` label, shared by the client-side
- * confirm-screen guard ({@link ../bench/DirectConfirmSection}), the server intent
+ * confirm-screen guard ({@link ../exchange/DirectConfirmSection}), the server intent
  * schema ({@link ../jobs/intent}), and the signing-fingerprint route
  * ({@link ../routes/api/jobs/signing/fingerprint}), which binds the label into a
  * long-lived certificate. Extracted so the browser guard and the server validators

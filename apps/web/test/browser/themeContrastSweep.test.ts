@@ -38,9 +38,9 @@ import type { ReactNode } from "react";
 // second colour engine as a dev dependency).
 //
 // Swept routes (extend this set when a top-level screen is added):
-//   /         bench lobby     -> Lobby
-//   /exchange inviter bench   -> InviterScreen (initial "Your file" step)
-//   /accept   acceptor bench  -> AcceptorScreen (review step, a valid token in
+//   /         lobby     -> Lobby
+//   /exchange inviter screen   -> InviterScreen (initial "Your file" step)
+//   /accept   acceptor screen  -> AcceptorScreen (review step, a valid token in
 //                                the hash -- the route's real initial state)
 //   /verify   verify receipt  -> VerifyReceiptScreen (initial mount)
 // Each renders through renderApp (the app's real MantineProvider + resolver

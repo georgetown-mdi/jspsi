@@ -16,12 +16,12 @@ import {
 } from "@mantine/core";
 import { IconCheck, IconCopy } from "@tabler/icons-react";
 
-// tokens.css defines the --bench-* custom properties bench.module.css reads
-// (--bench-accent among them); AppPage.tsx imports it as a side effect in
+// tokens.css defines the --app-* custom properties app.module.css reads
+// (--app-accent among them); AppPage.tsx imports it as a side effect in
 // the real app, so the anchor-inside-.page case below needs it too, or
-// --bench-accent resolves to nothing and masks the rule this test targets.
+// --app-accent resolves to nothing and masks the rule this test targets.
 import "@styles/tokens.css";
-import benchStyles from "@styles/app.module.css";
+import appStyles from "@styles/app.module.css";
 
 import { createAppMount } from "./renderApp";
 
@@ -275,16 +275,16 @@ describe("rendered filled-primary contrast (WCAG 2.1 AA)", () => {
   });
 
   // A filled-primary Button rendered as an anchor (component={Link} in the
-  // app; component="a" here) inside the console's `.page` wrapper.
-  // bench.module.css's `.page a` rule can outrank Mantine's --button-color on
-  // specificity and repaint the label --bench-accent, close enough to the
+  // app; component="a" here) inside the app's `.page` wrapper.
+  // app.module.css's `.page a` rule can outrank Mantine's --button-color on
+  // specificity and repaint the label --app-accent, close enough to the
   // cyan-9 background to be unreadable. This proves the label and background
   // are distinguishable colors, not just that each clears its own floor.
   test("a Button rendered as an anchor inside .page keeps its filled label legible", async () => {
     app.render(
       createElement(
         "div",
-        { className: benchStyles.page },
+        { className: appStyles.page },
         createElement(
           LinkRenderedButton,
           { component: "a", href: "/exchange" },

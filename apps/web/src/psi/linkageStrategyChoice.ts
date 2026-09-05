@@ -1,8 +1,8 @@
 /**
  * The one copy for a linkage-strategy authoring control, shared by the two
  * surfaces that offer the choice: the invitation flow's key editor
- * ({@link ../bench/KeysTab}) and the console's Direct-exchange confirm screen
- * ({@link ../bench/DirectConfirmSection}).
+ * ({@link ../exchange/KeysTab}) and the console's Direct-exchange confirm screen
+ * ({@link ../exchange/DirectConfirmSection}).
  *
  * Separate for the same reason as {@link ./identityLabel}: the disclosure note
  * is the consent-critical half of the choice -- the browser's wording of the

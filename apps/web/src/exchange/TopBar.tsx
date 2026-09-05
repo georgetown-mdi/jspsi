@@ -29,7 +29,7 @@ function activeIndex(steps: ReadonlyArray<RailStep>): number {
  * checkmark for done, an accent-ringed number for current (its label
  * emboldened as well), a muted number for pending.
  */
-function BenchStepper({ steps }: { steps: ReadonlyArray<RailStep> }) {
+function StepRail({ steps }: { steps: ReadonlyArray<RailStep> }) {
   return (
     <Stepper
       size="xs"
@@ -103,7 +103,7 @@ export function TopBar({
     <div className={styles.topBar}>
       <div className={styles.wordmark}>psilink</div>
       <nav aria-label={navLabel} className={styles.topBarNav}>
-        {narrow ? <StepStrip steps={steps} /> : <BenchStepper steps={steps} />}
+        {narrow ? <StepStrip steps={steps} /> : <StepRail steps={steps} />}
       </nav>
       {transportNote !== undefined && (
         <p className={styles.topBarNote}>{transportNote}</p>

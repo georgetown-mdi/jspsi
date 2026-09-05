@@ -1183,7 +1183,7 @@ describe("the receipts card's model", () => {
 
   test("the receipt notice names where the download appears, not this screen", () => {
     // It renders on the authoring screens (review & create, and the acceptor
-    // bench) while the download control renders on the run screen once the run
+    // screen) while the download control renders on the run screen once the run
     // settles -- disjoint surfaces, so copy pointing at "here" would send the
     // operator looking for a control that is not on the screen they are reading.
     // That control is offered on any settled run, so the sentence names failure
@@ -1274,7 +1274,7 @@ describe("the receipts card's model", () => {
   });
 });
 
-describe("the verify bench reads a config the way --config-file does", () => {
+describe("the verify screen reads a config the way --config-file does", () => {
   test("a whole exchange configuration is accepted for its linkage_terms", () => {
     const yaml = composeConfigDocument(
       validIntent(),

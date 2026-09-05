@@ -7,16 +7,16 @@ import { page, userEvent } from "vitest/browser";
 import { createElement } from "react";
 
 // Load Mantine's stylesheet so components render with their real geometry
-// (the console browser suites' shared discipline).
+// (the exchange browser suites' shared discipline).
 import "@mantine/core/styles.css";
 
 // The REAL router history -- not mocked here. createBrowserHistory
 // is what the app router runs on (router.tsx -> createRouter): it patches
 // window.history.pushState/replaceState and classifies every popstate as
-// BACK/FORWARD/GO from the __TSR_index delta. This suite pins the console's
+// BACK/FORWARD/GO from the __TSR_index delta. This suite pins the screen's
 // history writes against that patched implementation; mounting a full
 // RouterProvider is not possible in this harness (it trips a duplicate-React
-// dispatcher error, the reason the other console suites stub the router), but the
+// dispatcher error, the reason the other exchange suites stub the router), but the
 // history layer is plain JS and holds the whole index contract.
 import { createBrowserHistory } from "@tanstack/react-router";
 
@@ -46,9 +46,9 @@ function routerKey(): string {
   return (window.history.state as { __TSR_key: string }).__TSR_key;
 }
 
-describe("console steps under the router's patched history", () => {
+describe("exchange steps under the router's patched history", () => {
   test("pushes advance the router index and pops classify as BACK/FORWARD, not GO", async () => {
-    // Production ordering: the router history exists before the console mounts,
+    // Production ordering: the router history exists before the screen mounts,
     // has patched window.history, and has seeded __TSR_index on the current
     // entry. destroy() unpatches, so a failure cannot leak the patch into
     // other tests.
@@ -89,7 +89,7 @@ describe("console steps under the router's patched history", () => {
         .element(page.getByRole("heading", { level: 1 }))
         .toHaveTextContent("Review & create");
 
-      // Each console push advanced the router's index by one and minted a fresh
+      // Each step push advanced the router's index by one and minted a fresh
       // entry key, exactly as the router's own pushes do, and the router
       // history's tracked location agrees with the browser's.
       expect(routerIndex()).toBe(baseIndex + 2);
@@ -98,7 +98,7 @@ describe("console steps under the router's patched history", () => {
 
       // Browser Back is classified BACK (delta -1) -- a frozen index would
       // classify it GO(0) and desync the router's position tracking -- and the
-      // console still restores the step in place.
+      // screen still restores the step in place.
       actions.length = 0;
       window.history.back();
       await expect

@@ -940,7 +940,7 @@ describe("what a mint over an offered column hands the surfaces that keep it", (
     port: "",
   };
 
-  /** The invitation the console mints for a draft, taken over profiled columns (the
+  /** The invitation the screen mints for a draft, taken over profiled columns (the
    * console's mint source) so no CSV file is parsed here. */
   function mintFor(draft: AdvancedInviteDraft) {
     return generateInvitation({

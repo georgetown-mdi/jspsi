@@ -210,7 +210,7 @@ async function uploadTo(label: string, file: File): Promise<void> {
 
 // The page mounts its dropzones after the first render; wait for the heading so
 // the file inputs exist before the first upload.
-async function mountVerifyBench() {
+async function mountVerifyScreen() {
   app.render(createElement(VerifyReceiptScreen));
   await expect
     .element(page.getByRole("heading", { level: 1 }))
@@ -229,7 +229,7 @@ async function verifyRecordAndSignedRecord(): Promise<{
   const { record, keys } = await buildFixture();
   const { signed, ourCertificate, partnerFingerprint } =
     await buildSignedFixture(record);
-  await mountVerifyBench();
+  await mountVerifyScreen();
 
   await uploadAt(0, jsonFile("rec.json", serializeExchangeRecord(record)));
   await uploadAt(1, jsonFile("rec.keys.json", serializeVerificationKeys(keys)));
@@ -279,10 +279,10 @@ async function expectBothVerdictsGone() {
     .not.toBeInTheDocument();
 }
 
-describe("verify receipt bench", () => {
+describe("verify receipt screen", () => {
   test("full happy path: record + keys + re-supplied files reach a verified verdict", async () => {
     const { record, keys } = await buildFixture();
-    await mountVerifyBench();
+    await mountVerifyScreen();
 
     // Load the record and its keys.
     await uploadAt(
@@ -352,7 +352,7 @@ describe("verify receipt bench", () => {
         localPayloadSent: altered,
       },
     };
-    await mountVerifyBench();
+    await mountVerifyScreen();
 
     await uploadAt(0, jsonFile("rec.json", serializeExchangeRecord(tampered)));
     await uploadAt(
@@ -404,7 +404,7 @@ describe("verify receipt bench", () => {
       createdAt: "2026-01-02T03:04:05.000Z",
       receiptBinder: RECEIPT_BINDER,
     });
-    await mountVerifyBench();
+    await mountVerifyScreen();
 
     await uploadAt(0, jsonFile("rec.json", serializeExchangeRecord(record)));
     await uploadAt(
@@ -451,7 +451,7 @@ describe("verify receipt bench", () => {
     // -- no cell involved is ever empty, so the null explanation is impossible
     // and must not appear beside it.
     const { record, keys } = await buildFixture();
-    await mountVerifyBench();
+    await mountVerifyScreen();
 
     await uploadAt(0, jsonFile("rec.json", serializeExchangeRecord(record)));
     await uploadAt(
@@ -501,7 +501,7 @@ describe("verify receipt bench", () => {
       ...keys,
       salts: { ...keys.salts, associationTable: undefined },
     };
-    await mountVerifyBench();
+    await mountVerifyScreen();
 
     await uploadAt(0, jsonFile("rec.json", serializeExchangeRecord(record)));
     await uploadAt(
@@ -521,7 +521,7 @@ describe("verify receipt bench", () => {
 
   test("a malformed record lands on a designed alert without clearing the input", async () => {
     const { record, keys } = await buildFixture();
-    await mountVerifyBench();
+    await mountVerifyScreen();
 
     // Load valid keys first, then a malformed record.
     await uploadAt(
@@ -553,7 +553,7 @@ describe("verify receipt bench", () => {
 
   test("re-supplying only one of the input/result CSVs disables the top Verify button and warns", async () => {
     const { record, keys } = await buildFixture();
-    await mountVerifyBench();
+    await mountVerifyScreen();
 
     await uploadAt(0, jsonFile("rec.json", serializeExchangeRecord(record)));
     await uploadAt(
@@ -606,7 +606,7 @@ describe("verify receipt bench", () => {
 
   test("loading different partner terms after a verdict clears the stale verdict", async () => {
     const { record, keys } = await buildFixture();
-    await mountVerifyBench();
+    await mountVerifyScreen();
 
     await uploadAt(0, jsonFile("rec.json", serializeExchangeRecord(record)));
     await uploadAt(
@@ -664,7 +664,7 @@ describe("verify receipt bench", () => {
 
   test("loading a new record file clears previously re-supplied files and terms", async () => {
     const { record, keys } = await buildFixture();
-    await mountVerifyBench();
+    await mountVerifyScreen();
 
     await uploadAt(0, jsonFile("rec.json", serializeExchangeRecord(record)));
     await uploadAt(
@@ -688,7 +688,7 @@ describe("verify receipt bench", () => {
 
   test("loading a new record file empties the terms paste buffers", async () => {
     const { record, keys } = await buildFixture();
-    await mountVerifyBench();
+    await mountVerifyScreen();
 
     await uploadAt(0, jsonFile("rec.json", serializeExchangeRecord(record)));
     await uploadAt(
@@ -726,7 +726,7 @@ describe("verify receipt bench", () => {
 
   test("editing a terms buffer after a verdict withdraws that parse and the verdict", async () => {
     const { record, keys } = await buildFixture();
-    await mountVerifyBench();
+    await mountVerifyScreen();
 
     await uploadAt(0, jsonFile("rec.json", serializeExchangeRecord(record)));
     await uploadAt(
@@ -780,7 +780,7 @@ describe("verify receipt bench", () => {
     const { record, keys } = await buildFixture();
     const { signed, ourCertificate, partnerFingerprint } =
       await buildSignedFixture(record);
-    await mountVerifyBench();
+    await mountVerifyScreen();
 
     // The exchange record states who this exchange was between and what terms
     // it agreed, which the signature checks are held against.
@@ -831,7 +831,7 @@ describe("verify receipt bench", () => {
   test("an unanchored partner leaves the signed verdict incomplete, naming the slot", async () => {
     const { record, keys } = await buildFixture();
     const { signed, ourCertificate } = await buildSignedFixture(record);
-    await mountVerifyBench();
+    await mountVerifyScreen();
 
     await uploadAt(0, jsonFile("rec.json", serializeExchangeRecord(record)));
     await uploadAt(
@@ -871,7 +871,7 @@ describe("verify receipt bench", () => {
   test("the signing identity file is refused where the exported certificate belongs", async () => {
     const { record } = await buildFixture();
     const { ourIdentity } = await buildSignedFixture(record);
-    await mountVerifyBench();
+    await mountVerifyScreen();
 
     await userEvent.click(
       page.getByRole("button", {
@@ -897,7 +897,7 @@ describe("verify receipt bench", () => {
 
   test("a fingerprint that is not a fingerprint gates the run rather than reaching it", async () => {
     const { record, keys } = await buildFixture();
-    await mountVerifyBench();
+    await mountVerifyScreen();
 
     await uploadAt(0, jsonFile("rec.json", serializeExchangeRecord(record)));
     await uploadAt(
@@ -1013,7 +1013,7 @@ describe("verify receipt bench", () => {
     const { record } = await buildFixture();
     const { signed, ourCertificate, partnerFingerprint } =
       await buildSignedFixture(record);
-    await mountVerifyBench();
+    await mountVerifyScreen();
 
     // Neither the record nor its keys is loaded, so nothing this run does
     // reads the re-supplied CSVs -- one of them dropped must not block it.
@@ -1063,7 +1063,7 @@ describe("verify receipt bench", () => {
   test("one re-supplied CSV gates the signed section's run once the record is loaded", async () => {
     const { record, keys } = await buildFixture();
     const { signed, partnerFingerprint } = await buildSignedFixture(record);
-    await mountVerifyBench();
+    await mountVerifyScreen();
 
     await uploadAt(0, jsonFile("rec.json", serializeExchangeRecord(record)));
     await uploadAt(

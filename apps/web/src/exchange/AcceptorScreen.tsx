@@ -24,7 +24,7 @@ import { deploymentProfile, isConsoleBuild } from "@utils/clientConfig";
 import { whenDiagnostic } from "@utils/diagnostics";
 
 import {
-  benchCoverageProvider,
+  coverageProvider,
   useNonEmptyRates,
 } from "@components/useNonEmptyRates";
 import { CONSOLE_COVERAGE_PENDING_LABEL } from "@components/FieldCoverage";
@@ -138,7 +138,8 @@ import type {
 import type { AcceptorLaunchSource } from "./useAcceptorExchange";
 import type { AcceptorStep } from "./acceptorModel";
 import type { AlertContent } from "@components/csvIntake";
-import type { BenchCoverageInput } from "@components/useNonEmptyRates";
+import type { CoverageInput } from "@components/useNonEmptyRates";
+
 import type { ColumnSamples } from "@psi/columnSamples";
 import type { ConnectionTuningDraft } from "@console/connectionTuningModel";
 import type { ExchangeFilesDraft } from "@console/exchangeFilesModel";
@@ -162,7 +163,7 @@ const EMPTY_STANDARDIZATION: Standardization = [];
  * provider is not rebuilt every render on a fresh identity before a file is acquired.
  * The empty-rows coverage input drives the hosted worker provider over no rows, never
  * a console fetch (mirrors {@link InviterScreen}). */
-const EMPTY_COVERAGE_INPUT: BenchCoverageInput = {
+const EMPTY_COVERAGE_INPUT: CoverageInput = {
   kind: "rows",
   rows: EMPTY_ROWS,
 };
@@ -821,7 +822,7 @@ export function AcceptorScreen() {
   // there). Memoized so a standardization edit reuses the provider and
   // only a new file rebuilds it. The console reads no rows -- `acquired.rawRows` is a
   // throwing getter there -- so this never touches it on that path.
-  const coverageInput = useMemo<BenchCoverageInput>(() => {
+  const coverageInput = useMemo<CoverageInput>(() => {
     if (consoleSource !== undefined)
       return { kind: "workFile", reference: { name: consoleSource.name } };
     if (!consoleBuild && acquired !== undefined)
@@ -849,7 +850,7 @@ export function AcceptorScreen() {
   } = useNonEmptyRates(
     coverageInput,
     editorState?.standardization ?? EMPTY_STANDARDIZATION,
-    benchCoverageProvider,
+    coverageProvider,
   );
   const cleaningAttention =
     editorState !== undefined && verdict !== undefined

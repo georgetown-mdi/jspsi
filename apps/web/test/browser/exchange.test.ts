@@ -13,7 +13,8 @@ import "@mantine/core/styles.css";
 
 import { decodeInvitation } from "@psilink/core";
 
-import { BENCH_STEP_STATE_KEY } from "@exchange/stepHistory";
+import { STEP_STATE_KEY } from "@exchange/stepHistory";
+
 import { Lobby } from "@exchange/Lobby";
 
 import { InvitationFileError } from "@psi/invitation";
@@ -38,8 +39,8 @@ import type { PreparedExchange } from "@psilink/core";
 const typeLabel = (name: string) => `Type for ${isolatedColumnName(name)}`;
 const usedLabel = (name: string) => `How ${isolatedColumnName(name)} is used`;
 
-// The console components touch the router boundary (the lobby's Links). This
-// suite asserts the console's structure, landmarks, and tokens, not navigation.
+// The exchange screens touch the router boundary (the lobby's Links). This
+// suite asserts the screen's structure, landmarks, and tokens, not navigation.
 vi.mock("@tanstack/react-router", async () =>
   (await import("./moduleMocks")).reactRouterMock(),
 );
@@ -109,7 +110,7 @@ vi.mock("@psi/rendezvous", async () =>
 // Stub the run lifecycle so creating an invitation never dials: record each
 // invocation's options so a test can drive the captured onStages/onStage/
 // onResult/onError callbacks -- the same callbacks the real lifecycle fires --
-// and assert the console's post-create screens against them.
+// and assert the post-create screens against them.
 interface CapturedLifecycle {
   exchangeRole: "initiator" | "responder";
   sharedSecret: string;
@@ -161,7 +162,7 @@ afterEach(async () => {
   csvLoadHarness.lastSignal = undefined;
   csvLoadHarness.resolve = undefined;
   lifecycleHarness.calls.length = 0;
-  // The console reads the viewport width to choose its wide vs narrow layout, so
+  // The screen reads the viewport width to choose its wide vs narrow layout, so
   // a test that narrows the page must not leak that width into the next:
   // restore the browser project's configured wide default (vite.config.ts).
   await page.viewport(1280, 800);
@@ -250,7 +251,7 @@ function preparedWith(
   } as unknown as PreparedExchange;
 }
 
-describe("console quick path", () => {
+describe("quick path", () => {
   test("renders the quick-path structure with one main and one h1", async () => {
     app.render(createElement(Lobby));
 
@@ -287,7 +288,7 @@ describe("console quick path", () => {
     await expect.element(page.getByLabelText("Invitation")).toBeInTheDocument();
   });
 
-  test("applies the bench surface tokens", async () => {
+  test("applies the app surface tokens", async () => {
     app.render(createElement(Lobby));
 
     await expect
@@ -296,7 +297,7 @@ describe("console quick path", () => {
 
     const surface = document.querySelector(`.${styles.page}`);
     expect(surface).not.toBeNull();
-    // Light-scheme --bench-surface (#f6f5f1): the warm paper ground. Proves
+    // Light-scheme --app-surface (#f6f5f1): the warm paper ground. Proves
     // tokens.css is wired through the module, not just present on disk.
     expect(getComputedStyle(surface as Element).backgroundColor).toBe(
       "rgb(246, 245, 241)",
@@ -324,7 +325,7 @@ describe("console quick path", () => {
   });
 });
 
-describe("inviter bench", () => {
+describe("inviter screen", () => {
   test("renders the empty spine: landmarks, placeholder ledger, quiet facts", async () => {
     app.render(createElement(InviterScreen));
 
@@ -620,7 +621,7 @@ describe("inviter bench", () => {
     expect(expiresRow?.querySelector("dd")?.textContent).toMatch(/20\d\d/);
   });
 
-  test("a silent-empty cleaning field shows up from anywhere on the bench", async () => {
+  test("a silent-empty cleaning field shows up from anywhere on the screen", async () => {
     app.render(createElement(InviterScreen));
 
     await expect.element(page.getByLabelText("Your name")).toBeInTheDocument();
@@ -703,7 +704,7 @@ describe("inviter bench", () => {
     ).toContain("Coverage warning: Date of birth");
   });
 
-  test("browser Back walks bench steps in place, preserving the file and terms", async () => {
+  test("browser Back walks exchange steps in place, preserving the file and terms", async () => {
     app.render(createElement(InviterScreen));
 
     await expect.element(page.getByLabelText("Your name")).toBeInTheDocument();
@@ -739,7 +740,7 @@ describe("inviter bench", () => {
       .element(page.getByRole("heading", { level: 1 }))
       .toHaveTextContent("Review & create");
 
-    // Browser Back moves to the previous bench step in place -- the bench never
+    // Browser Back moves to the previous step in place -- the screen never
     // unmounts, so the file and the step-2 edit are intact.
     window.history.back();
     await expect
@@ -773,7 +774,7 @@ describe("inviter bench", () => {
   });
 
   test("navigation never writes the file to storage or disk", async () => {
-    // The participant CSV is memory-only by design; walking the bench steps
+    // The participant CSV is memory-only by design; walking the exchange steps
     // (including the History-integrated Back) must not spill it to IndexedDB,
     // localStorage, or a network write. Assert the runtime invariant rather
     // than trust a comment.
@@ -826,7 +827,7 @@ describe("inviter bench", () => {
       expect(localWrites.some(carries)).toBe(false);
       expect(sessionWrites.some(carries)).toBe(false);
       expect(indexedDbOpened).toBe(0);
-      // The bench pushes only its own marked step entries; none holds the
+      // The screen pushes only its own marked step entries; none holds the
       // file's contents in the serialized history state.
       expect(JSON.stringify(window.history.state ?? {})).not.toContain(
         SENTINEL,
@@ -857,12 +858,12 @@ describe("inviter bench", () => {
       .element(page.getByRole("heading", { level: 1 }))
       .toHaveTextContent("Matching & sharing");
 
-    // A popstate into a bench entry whose step no build knows (a tab surviving
+    // A popstate into a step entry whose step no build knows (a tab surviving
     // a deploy that renamed a section) must not clear the work column: the
     // restore is refused and the current section keeps rendering.
     window.dispatchEvent(
       new PopStateEvent("popstate", {
-        state: { [BENCH_STEP_STATE_KEY]: "retired-section" },
+        state: { [STEP_STATE_KEY]: "retired-section" },
       }),
     );
     await expect
@@ -958,7 +959,7 @@ describe("inviter bench", () => {
     // The mint releases this guard -- the file's terms are sealed into an
     // invitation -- and in the same moment starts the browser listening for the
     // partner, which the live run's own guard covers
-    // (test/browser/benchRunUnloadGuard.test.ts). So the release shows once that
+    // (test/browser/runUnloadGuard.test.ts). So the release shows once that
     // run is over: nothing re-arms over the loaded file (again polled past the
     // commit, for the detach effect).
     await vi.waitFor(() => expect(lifecycleHarness.calls).toHaveLength(1));
@@ -1238,7 +1239,7 @@ describe("inviter bench", () => {
       "MOU-2025-0042",
     );
 
-    // The ported input contracts survive the console: the expiry is a real
+    // The ported input contracts survive the screen: the expiry is a real
     // date input and the reference keeps its length bound.
     const expiration = document.querySelector('input[type="date"]');
     expect(expiration).not.toBeNull();
@@ -2283,7 +2284,7 @@ describe("inviter bench", () => {
   });
 });
 
-describe("console at a narrow viewport", () => {
+describe("exchange screen at a narrow viewport", () => {
   const SAMPLE_CSV = new File(
     [
       "client_id,first_name,last_name,dob,program_code\n" +
@@ -2473,7 +2474,7 @@ describe("console at a narrow viewport", () => {
   test("a live breakpoint crossing preserves the work column's state", async () => {
     // Mounted wide (the project's default viewport) and sealed, with
     // component-local state armed in the work column: the reveal toggle's
-    // open textarea, whose state lives inside the copy row, not the bench.
+    // open textarea, whose state lives inside the copy row, not the screen.
     await createSealedInvitation();
     const reveal = page.getByRole("button", { name: "Show full link" });
     await reveal.click();

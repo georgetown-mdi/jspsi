@@ -432,7 +432,7 @@ export function AcceptorColumnsStep({
                     with the names -- separators and full stop -- so the isolate
                     class's residual reaches something here (what the isolation
                     does not contain is stated on ColumnName); the reordering is
-                    driven in benchAccept's panel measurement. */}
+                    driven in accept.test.ts's panel measurement. */}
                 For each matched row:{" "}
                 {disclosed.map((column, index) => (
                   <Fragment key={column}>

@@ -9,7 +9,7 @@
  * Pure and platform-free: it reads a record and its import marker and returns a
  * tier. The confirmation MESSAGE and the two-outcome GATE are composed in the
  * sibling modules {@link ./managedFailureConfirmation.ts} and the display copy
- * in {@link ../bench/managedRunLaunchModel.ts}; this module decides only which
+ * in {@link ../recurring/managedRunLaunchModel.ts}; this module decides only which
  * tier.
  */
 

@@ -893,7 +893,7 @@ describe("accept kit invariants", () => {
 
   test("has the paste placeholder and no invitation token or secret", async () => {
     // Mint through the real invitation flow, then build the kit from the same
-    // locator that mint held, exactly as the console does.
+    // locator that mint held, exactly as the screen does.
     const endpoint = { channel: "filedrop" as const, path: "psilink" };
     const minted = await generateInvitation({
       inviterName: "County Health Dept",

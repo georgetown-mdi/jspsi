@@ -474,7 +474,7 @@ describe("buildManagedDeposit (acceptor)", () => {
 // A deposit whose stored side disagrees with the side its document was composed
 // for stores an acceptor record holding no consent record -- the silent pass the
 // field exists to prevent. The record's side and the document both come from the
-// one `side` in the deposit's parts, which is the single statement each console
+// one `side` in the deposit's parts, which is the single statement each screen
 // makes at its deposit call.
 describe("the deposit's side and its document", () => {
   const connection = webrtcLocatorFromEndpoint(invitationEndpoint);

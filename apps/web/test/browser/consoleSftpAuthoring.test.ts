@@ -18,7 +18,7 @@ import { createAppMount, flushPendingUpdates } from "./renderApp";
 
 // The console SFTP connection-authoring flow: the operator drives PUT /api/jobs/sftp
 // from a file-reference credential (a secrets-mount locator or a typed @path). This
-// suite exercises the console build; the hosted behaviors stay pinned by bench.test.ts.
+// suite exercises the console build; the hosted behaviors stay pinned by exchange.test.ts.
 vi.mock("@tanstack/react-router", async () =>
   (await import("./moduleMocks")).reactRouterMock(),
 );
@@ -221,7 +221,7 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
-/** From an already-mounted bench: fill the name, pick a file, walk to Review. */
+/** From an already-mounted screen: fill the name, pick a file, walk to Review. */
 async function reachReviewCreate() {
   await expect.element(page.getByLabelText("Your name")).toBeInTheDocument();
   await userEvent.fill(page.getByLabelText("Your name"), "Dana Okafor");
@@ -252,7 +252,7 @@ async function openAndFillForm() {
   );
 }
 
-/** Mount the bench, walk to the authoring form, and run one probe the console
+/** Mount the screen, walk to the authoring form, and run one probe the console
  * diagnoses as a non-SSH answer holding `excerpt`. Returns the field the peer's
  * bytes render in. */
 async function probeWithExcerpt(excerpt: string): Promise<HTMLTextAreaElement> {
@@ -282,7 +282,7 @@ async function probeWithExcerpt(excerpt: string): Promise<HTMLTextAreaElement> {
 
 /** The teardown the afterEach performs, run mid-test, so one test can drive the
  * whole flow a second time against a different stubbed answer. */
-async function resetMountedBench(): Promise<void> {
+async function resetMountedScreen(): Promise<void> {
   await flushPendingUpdates();
   app.unmount();
   window.localStorage.clear();
@@ -1145,7 +1145,7 @@ describe("console SFTP connection authoring", () => {
         .query(),
     ).toBeNull();
 
-    await resetMountedBench();
+    await resetMountedScreen();
     const otherBytes = await probeWithExcerpt("HTTP/1.1 403 Forbidden");
     expect(
       page

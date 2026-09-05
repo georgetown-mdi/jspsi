@@ -87,7 +87,7 @@ function boundedName(name: string): string {
  * arrangement rather than the wrapper: a name given a block of its own has no
  * copy beside it for the leak to run over, while a sink that puts literal copy in
  * one text block with a wrapped name can have that copy reordered.
- * test/browser/benchInviterSharing.test.ts and test/browser/benchAccept.test.ts
+ * test/browser/inviterSharing.test.ts and test/browser/accept.test.ts
  * measure which sinks are of which shape; a sink no check drives is not asserted
  * to contain the residual. The trust basis is the module note above: these are
  * the operator's own CSV headers.

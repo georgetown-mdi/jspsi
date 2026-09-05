@@ -43,7 +43,7 @@ vi.mock("@tanstack/react-router", async () =>
   (await import("./moduleMocks")).reactRouterMock(),
 );
 
-// The inviter bench transitively imports the rendezvous module, whose top-level
+// The inviter screen transitively imports the rendezvous module, whose top-level
 // config load reads `process`; nothing here opens a transport.
 vi.mock("@psi/rendezvous", async () =>
   (await import("./moduleMocks")).rendezvousMock(),

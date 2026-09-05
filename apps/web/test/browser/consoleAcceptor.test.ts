@@ -49,7 +49,7 @@ import type { JobHandoff } from "@jobs/handoff";
 // review with an accurate state naming where the operator CAN run the exchange.
 // The hosted acceptor journey stays pinned by acceptJourney.test.ts.
 
-// The bench and its recovery links touch the router boundary.
+// The exchange screens and their recovery links touch the router boundary.
 vi.mock("@tanstack/react-router", async () =>
   (await import("./moduleMocks")).reactRouterMock(),
 );
@@ -135,7 +135,7 @@ afterEach(async () => {
   app.unmount();
   window.location.hash = "";
   // A server-job accept persists a strand-recovery record; clear it so the next
-  // test's idle bench does not re-attach to a prior run's id.
+  // test's idle screen does not re-attach to a prior run's id.
   window.localStorage.clear();
   vi.unstubAllGlobals();
 });
@@ -552,7 +552,7 @@ function stubServerJobAccept(options: AcceptStubOptions = {}): {
   };
 }
 
-// From an already-mounted acceptor bench with a rendezvous mount: consent to the
+// From an already-mounted acceptor screen with a rendezvous mount: consent to the
 // terms, then pick and confirm the mounted file, landing on the confirm-columns
 // step that holds the launch action.
 async function reachAcceptColumns() {

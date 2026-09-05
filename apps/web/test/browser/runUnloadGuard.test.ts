@@ -20,7 +20,7 @@ import { createAppMount } from "./renderApp";
 
 import type { InvitationToken, LinkageTerms } from "@psilink/core";
 
-// A console seat hosts the live WebRTC exchange itself, so unloading mid-run
+// A run seat hosts the live WebRTC exchange itself, so unloading mid-run
 // with nothing asking first would end the session for both parties. The
 // unsaved-work guard disarms when the invitation is minted or the launch
 // commits, which is when the run begins; this suite covers the guard from that
@@ -41,7 +41,7 @@ vi.mock("@psi/rendezvous", async () =>
 // captured so a test can end the run through the same onResult/onError call
 // sites the real lifecycle fires, with the seat still mounted -- which is what
 // makes the disarm assertion meaningful rather than a by-product of unmounting
-// (the bench.test.ts pattern).
+// (the exchange.test.ts pattern).
 interface CapturedLifecycle {
   onResult: (outputs: {
     kind: "counted";
@@ -116,7 +116,7 @@ afterEach(() => {
   window.location.hash = "";
 });
 
-describe("leaving the page during a live console exchange", () => {
+describe("leaving the page during a live browser exchange", () => {
   test("the inviting seat confirms while the run is live, and not once it completes", async () => {
     app.render(createElement(InviterScreen));
     await expect.element(page.getByLabelText("Your name")).toBeInTheDocument();

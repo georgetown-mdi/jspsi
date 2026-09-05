@@ -556,8 +556,8 @@ describe("the escalation is stated before the run, not composed from its failure
 //
 // These pins exercise failureFor, the one composition point all three seats
 // share, and say nothing about what a seat does with the result afterward --
-// that half is covered by scripts/bench-failure-passthrough.test.mjs, which
-// walks the bench tree and fails any call site that does something with the
+// that half is covered by scripts/run-failure-passthrough.test.mjs, which
+// walks the exchange tree and fails any call site that does something with the
 // result besides handing it to setFailure.
 describe("relayed terminal text never retitles a failure", () => {
   /** The CLI's own refusal wording, planted inside a filename an untrusted party

@@ -32,7 +32,7 @@ import { createAppMount, flushPendingUpdates } from "./renderApp";
 
 import type { JobHandoff } from "@jobs/handoff";
 
-// The bench components touch the router boundary.
+// The exchange screens touch the router boundary.
 vi.mock("@tanstack/react-router", async () =>
   (await import("./moduleMocks")).reactRouterMock(),
 );

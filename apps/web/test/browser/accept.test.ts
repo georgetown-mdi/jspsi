@@ -26,7 +26,8 @@ import { ACCEPTOR_NAME_CONTROL_CHAR_PROBLEM } from "@exchange/acceptorModel";
 import { AcceptorScreen } from "@exchange/AcceptorScreen";
 
 import { AcceptorColumnsStep } from "@exchange/AcceptorColumnsStep";
-import { BENCH_STEP_STATE_KEY } from "@exchange/stepHistory";
+import { STEP_STATE_KEY } from "@exchange/stepHistory";
+
 import { Lobby } from "@exchange/Lobby";
 import { stagesFor } from "@exchange/exchangeRun";
 import styles from "@styles/app.module.css";
@@ -105,7 +106,7 @@ vi.mock("@psi/rendezvous", async () =>
 // invocation's options so a test can drive the captured onStages/onStage/
 // onResult/onError callbacks -- the same callbacks the real lifecycle fires --
 // and assert the acceptor's run/completion screens against them (the
-// bench.test.ts pattern).
+// exchange.test.ts pattern).
 interface CapturedLifecycle {
   exchangeRole: "initiator" | "responder";
   sharedSecret: string;
@@ -275,8 +276,8 @@ async function consentAndName() {
   await userEvent.fill(page.getByLabelText("Your name"), "Sam Alvarez");
 }
 
-describe("bench lobby: review invitation", () => {
-  test("a pasted token navigates to the accept bench with the token in the hash", async () => {
+describe("lobby: review invitation", () => {
+  test("a pasted token navigates to the acceptor screen with the token in the hash", async () => {
     app.render(createElement(Lobby));
     await expect.element(page.getByLabelText("Invitation")).toBeInTheDocument();
 
@@ -318,7 +319,7 @@ describe("bench lobby: review invitation", () => {
   });
 });
 
-describe("acceptor bench: decode gate", () => {
+describe("acceptor screen: decode gate", () => {
   test("an expired invitation renders the focused cannot-accept alert", async () => {
     window.location.hash = await encodeExpiredToken();
     app.render(createElement(AcceptorScreen));
@@ -392,7 +393,7 @@ describe("acceptor bench: decode gate", () => {
   });
 });
 
-describe("acceptor bench: review terms", () => {
+describe("acceptor screen: review terms", () => {
   test("renders the full expanded terms with the unverified-name note and no condensation toggle", async () => {
     window.location.hash = await encodeAcceptToken();
     app.render(createElement(AcceptorScreen));
@@ -453,7 +454,7 @@ describe("acceptor bench: review terms", () => {
   });
 });
 
-describe("acceptor bench: consent gate and parse-behind-consent", () => {
+describe("acceptor screen: consent gate and parse-behind-consent", () => {
   async function reachConsent() {
     window.location.hash = await encodeAcceptToken();
     app.render(createElement(AcceptorScreen));
@@ -593,7 +594,7 @@ describe("acceptor bench: consent gate and parse-behind-consent", () => {
   });
 });
 
-describe("acceptor bench: consent-step legal-agreement display", () => {
+describe("acceptor screen: consent-step legal-agreement display", () => {
   // acceptorTerms has no agreement, so the display tests mint their own
   // agreement-bearing terms; the shared fixture keeps the no-fieldset case.
   const agreementTerms: LinkageTerms = {
@@ -676,7 +677,7 @@ describe("acceptor bench: consent-step legal-agreement display", () => {
   });
 });
 
-describe("acceptor bench: confirm your columns (verdict, mapper, launch)", () => {
+describe("acceptor screen: confirm your columns (verdict, mapper, launch)", () => {
   // Consent, name, choose a file, and press Accept to land on the columns step.
   async function reachColumns(content: string) {
     window.location.hash = await encodeAcceptToken();
@@ -1275,7 +1276,7 @@ describe("acceptor columns step: one column name across the screen", () => {
   test("a header behind an unmatched PDI reorders the panel's own sentence", async () => {
     // The isolate class is the isolation's residual (UAX #9 BD9/X6a); this panel's
     // copy sits in one text block with the names, so the residual is reachable here
-    // (other sinks of that shape are measured in benchInviterSharing). The unmatched
+    // (other sinks of that shape are measured in inviterSharing). The unmatched
     // PDI ends the <bdi>'s isolation after "pre", so the override written after that
     // break moves the name's tail past the name listed after it -- within the trust
     // basis @components/ColumnName records: these are the operator's own headers.
@@ -1628,7 +1629,7 @@ describe("acceptor columns step: the columns the invitation will not accept", ()
   });
 });
 
-describe("acceptor bench: run and completion", () => {
+describe("acceptor screen: run and completion", () => {
   // Consent, name, a fully-covered file, then Start the exchange -- the columns
   // step's launch, which auto-starts the run. The run token has a future expiry
   // and an empty disclosed set (the commitment the hook threads in). Returns
@@ -2193,7 +2194,7 @@ describe("acceptor bench: run and completion", () => {
     window.history.back();
     await vi.waitFor(() => {
       expect(
-        (window.history.state as Record<string, unknown>)[BENCH_STEP_STATE_KEY],
+        (window.history.state as Record<string, unknown>)[STEP_STATE_KEY],
       ).toBe("columns");
     });
     await expect

@@ -7,8 +7,8 @@ import { Route as BenchExchangeRoute } from "../../src/routes/bench/exchange.tsx
 import { Route as BenchIndexRoute } from "../../src/routes/bench/index.tsx";
 import { Route as BenchVerifyRoute } from "../../src/routes/bench/verify.tsx";
 
-// The cutover moved the console onto the primary routes, turning every
-// /bench/* path into a redirect to its primary path. The invitation token
+// Every /bench/* path is a redirect to its primary path, kept so links
+// issued before the primary routes existed still resolve. The invitation token
 // rides only in the URL fragment and never reaches the server, so the
 // redirect must preserve it: `hash: true` is the router's
 // preserve-current-hash sentinel (buildLocation reads currentLocation.hash

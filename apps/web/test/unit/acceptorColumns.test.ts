@@ -495,7 +495,7 @@ describe("acceptor launch gates", () => {
     // Both cards sit in the one section below the columns, so a shared flag would
     // send the operator to the wrong one -- and each is a collapsed disclosure
     // whose own problem notice is invisible until it is opened. Driven through
-    // both cards' models exactly as the console drives them, rather than by setting
+    // both cards' models exactly as the screen drives them, rather than by setting
     // the flags by hand.
     const stepBlocks = {
       offline: false,

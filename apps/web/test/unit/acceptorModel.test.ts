@@ -34,7 +34,7 @@ import type {
   WebRTCEndpoint,
 } from "@psilink/core";
 
-/** The "How it runs" label the ledger tests pass through; the acceptor's console
+/** The "How it runs" label the ledger tests pass through; the acceptor screen
  * computes it from the endpoint and consults the ledger with it. */
 const HOW_IT_RUNS = "Browser";
 

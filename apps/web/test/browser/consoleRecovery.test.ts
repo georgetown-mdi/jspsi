@@ -17,7 +17,7 @@ import { createAppMount, flushPendingUpdates } from "./renderApp";
 
 import type { JobHandoff } from "@jobs/handoff";
 
-// The bench components touch the router boundary.
+// The exchange screens touch the router boundary.
 vi.mock("@tanstack/react-router", async () =>
   (await import("./moduleMocks")).reactRouterMock(),
 );
@@ -76,7 +76,7 @@ const RECOVERY_HANDOFF = {
 } satisfies JobHandoff;
 
 /** The same-origin job API stubbed at the global fetch boundary, tailored to the
- * recovery panel: the inputs/sftp/rendezvous the idle bench reads, plus the
+ * recovery panel: the inputs/sftp/rendezvous the idle screen reads, plus the
  * status / events / cancel / delete routes the panel drives for one job id. */
 function stubRecoveryApi(options: RecoveryStubOptions = {}): {
   captured: Array<CapturedRequest>;

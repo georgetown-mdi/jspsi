@@ -756,7 +756,7 @@ describe("InvitationTerms: the condensed reference view folds the lower tiers", 
   // reference tiers (what you receive, how records are matched, the legal agreement,
   // and "Other details") fold behind one "See the full terms" disclosure. The
   // acceptor's PRE-CONSENT review screen never passes condensed -- guarded directly
-  // in benchAccept.test.ts, and here by every other test rendering without it.
+  // in accept.test.ts, and here by every other test rendering without it.
   const FOLD = "See the full terms";
   function renderCondensed(overrides?: Partial<LinkageTerms>) {
     renderTerms(
@@ -2096,7 +2096,7 @@ describe("InvitationTerms: every labelled tier is announced through one shared b
   });
 
   test("every tier caption follows the terms heading level together", async () => {
-    // headingOrder 1 is the console review step, where the terms heading is the page's
+    // headingOrder 1 is the review step, where the terms heading is the page's
     // own h1: every tier caption moves with it, so the outline nests rather than
     // skipping a level -- and moves together, since one component sets them all.
     renderTerms(everyTier, { headingOrder: 1 });

@@ -546,7 +546,7 @@ describe("run seam composition: the input guard gates the handshake", () => {
 });
 
 describe("capturedInputHandle", () => {
-  // The console's Dropzone (over file-selector) attaches a `handle` to a dropped
+  // The screen's Dropzone (over file-selector) attaches a `handle` to a dropped
   // File in a secure context on Chromium; capturedInputHandle reads it back so a
   // deposit persists a reusable pointer without a second picker dialog. Here the
   // handle is a real OPFS FileSystemFileHandle attached the same way file-selector

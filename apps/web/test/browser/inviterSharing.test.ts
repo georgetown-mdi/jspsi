@@ -165,7 +165,7 @@ describe("column-name isolation: what the wrapper does not contain", () => {
   // Guard versus document: every "does not contain" case here is a measurement
   // and passes with or without the wrapper, since the residual survives it. What
   // guards the isolation is the form assertions -- the toContain of the wrapped
-  // name here and in the ledger case below, plus bench.test.ts's rendered-notice
+  // name here and in the ledger case below, plus exchange.test.ts's rendered-notice
   // expectation -- each of which fails on a sink composing raw names.
   //
   // Three further sinks put literal copy in one text block with a wrapped name
@@ -348,7 +348,7 @@ describe("column-name isolation: what the wrapper does not contain", () => {
     // The standing ledger's "You will send" row joins the disclosed names with
     // literal separators into one string value, so it is a sink of the shape the
     // residual reaches. Driven through the shipped composer and the shipped
-    // Ledger rather than a hand-built row, so what is measured is what the console
+    // Ledger rather than a hand-built row, so what is measured is what the screen
     // renders beside step 2.
     const acquired = csvOf([
       "client_id",

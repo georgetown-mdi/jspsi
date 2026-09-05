@@ -212,7 +212,7 @@ export function availableTransports(
 /** The run mode of a chosen transport in an {@link AvailableTransports} matrix;
  * `browser` when the matrix does not model the transport, which keeps callers
  * total. That every build models all three -- so this answer is the matrix's own
- * and never the fallback -- is checked in benchInviterModel.test.ts. */
+ * and never the fallback -- is checked in inviterModel.test.ts. */
 export function transportRunMode(
   available: AvailableTransports,
   transport: Transport,
@@ -821,7 +821,7 @@ export function editorWithColumnDisclosure(
  * column-name sink on the step gives them. Displacing more than one column puts
  * the names in one text block with the separators and the sentence after them;
  * what the isolation does not contain there is stated on `@components/ColumnName`
- * and driven in test/browser/benchInviterSharing.test.ts.
+ * and driven in test/browser/inviterSharing.test.ts.
  */
 export function demotionNotice(demoted: ReadonlyArray<string>): string {
   if (demoted.length === 0) return "";

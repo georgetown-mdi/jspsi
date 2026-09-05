@@ -7,7 +7,7 @@ import { page } from "vitest/browser";
 import { createElement } from "react";
 
 // Load Mantine's stylesheet so components render with their real geometry, as the
-// other console component suites do.
+// other exchange component suites do.
 import "@mantine/core/styles.css";
 
 import {
@@ -43,7 +43,7 @@ import type { LinkageTerms } from "@psilink/core";
 
 // The confirm-columns step under an invitation whose declared payload set for this
 // party is NON-EMPTY and disagrees with the operator's marks. The empty-declaration
-// notice on the same screen has its own coverage in benchAccept.test.ts; what is
+// notice on the same screen has its own coverage in accept.test.ts; what is
 // asserted here is the half that only rendering can show -- that both directions
 // reach the operator in one statement, and that the two provenances of the names in
 // it are treated differently at this sink.

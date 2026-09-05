@@ -40,13 +40,13 @@ import { captureDownloads } from "./captureDownloads";
 import type { CapturedDownload } from "./captureDownloads";
 import type { JobHandoff } from "@jobs/handoff";
 
-// The bench components touch the router boundary.
+// The exchange screens touch the router boundary.
 vi.mock("@tanstack/react-router", async () =>
   (await import("./moduleMocks")).reactRouterMock(),
 );
 
 // This suite exercises the CONSOLE build; the hosted-profile behaviors stay pinned
-// by bench.test.ts, which runs on the real default profile.
+// by exchange.test.ts, which runs on the real default profile.
 vi.mock("@utils/clientConfig", () => ({
   deploymentProfile: () => "console" as const,
   isConsoleBuild: () => true,
@@ -314,12 +314,12 @@ afterEach(async () => {
   await flushPendingUpdates();
   app.unmount();
   // A server-job run persists a strand-recovery record; clear it so the next
-  // test's idle bench does not re-attach to a prior run's id.
+  // test's idle screen does not re-attach to a prior run's id.
   window.localStorage.clear();
   vi.unstubAllGlobals();
 });
 
-/** From an already-mounted bench: fill the name, pick and confirm a file from the
+/** From an already-mounted screen: fill the name, pick and confirm a file from the
  * mounted directory (the two-stage commit), then walk to Review & create. */
 async function reachReviewCreate() {
   await expect.element(page.getByLabelText("Your name")).toBeInTheDocument();
@@ -484,7 +484,7 @@ describe("console inviter two-stage pick", () => {
     await userEvent.fill(page.getByLabelText("Your name"), "Dana Okafor");
     await page.getByRole("button", { name: "Select clients.csv" }).click();
 
-    // The confirm panel appears BEFORE the file becomes the bench's acquired file.
+    // The confirm panel appears BEFORE the file becomes the screen's acquired file.
     await expect
       .element(page.getByText("Confirm this file"))
       .toBeInTheDocument();
@@ -495,7 +495,7 @@ describe("console inviter two-stage pick", () => {
       .element(page.getByText("01/02/1990", { exact: false }))
       .toBeInTheDocument();
 
-    // Committing seeds the bench: the row is marked Selected and Continue enables.
+    // Committing seeds the screen: the row is marked Selected and Continue enables.
     await page.getByRole("button", { name: "Use this file" }).click();
     await expect.element(page.getByText("Selected")).toBeInTheDocument();
     await expect
@@ -948,7 +948,7 @@ describe("console inviter mint and run", () => {
     await page.getByRole("button", { name: "Use this file" }).click();
     await expect.element(page.getByText("Selected")).toBeInTheDocument();
 
-    // The bench's coverage provider posts to the console sweep with the file's
+    // The screen's coverage provider posts to the console sweep with the file's
     // name (the CLI reads it in place; no freshness pair, no inline content).
     await vi.waitFor(() => {
       expect(
@@ -1251,7 +1251,7 @@ describe("console inviter picker re-profile", () => {
       .toBeInTheDocument();
   });
 
-  test("a profile with a blank header cell is refused without unmounting the bench", async () => {
+  test("a profile with a blank header cell is refused without unmounting the screen", async () => {
     stubJobApi({
       profile: {
         ...CLIENTS_PROFILE,
@@ -1267,7 +1267,7 @@ describe("console inviter picker re-profile", () => {
     await userEvent.fill(page.getByLabelText("Your name"), "Dana Okafor");
     await page.getByRole("button", { name: "Select clients.csv" }).click();
     await page.getByRole("button", { name: "Use this file" }).click();
-    // The shared unnameable-column alert, not a bench crash from core's throwing
+    // The shared unnameable-column alert, not a screen crash from core's throwing
     // inferMetadata: the name field is still on screen.
     await expect
       .element(page.getByText("This file has an unnamed column"))

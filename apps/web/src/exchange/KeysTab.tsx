@@ -185,11 +185,11 @@ export function KeysTab({
       </button>
       <p className={styles.eyebrow}>Customize</p>
       <h1 tabIndex={-1}>Matching keys</h1>
-      <p id="bench-key-order-help">
+      <p id="key-order-help">
         Records are matched on these keys, tried in order. Earlier keys match
         first, so order the most precise keys first.
       </p>
-      <ol className={styles.guidedKeys} aria-describedby="bench-key-order-help">
+      <ol className={styles.guidedKeys} aria-describedby="key-order-help">
         {editor.draft.keys.map((entry, index) => {
           const displayName = sanitizeForDisplay(entry.key.name);
           const badge = KEY_VERDICT_BADGES[keyVerdict(index)];

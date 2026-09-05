@@ -77,7 +77,7 @@ afterEach(() => {
 // pasted link is (tokenFromInput), decodes on the AcceptorScreen the /accept route
 // mounts. The fragment is the only carrier of the token, so this also proves the
 // fragment survives from the minted link to the acceptor's decode.
-describe("deep-link landing on the bench acceptor", () => {
+describe("deep-link landing on the acceptor screen", () => {
   test("a minted deep link's fragment decodes on the acceptor screen", async () => {
     const encoded = await mintInvitation();
     // Build the deep link the inviter shares, then take its fragment exactly as

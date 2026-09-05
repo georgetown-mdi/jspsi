@@ -207,7 +207,7 @@ export interface ManagedExchangeRecord {
  *
  * Within these bounds, the next window off any anchor the schema admits lands on
  * a calendar `Intl` can format, so no display has a fallback for a recurrence
- * whose instants no calendar has (see {@link ../bench/scheduleSurfacingModel.ts}).
+ * whose instants no calendar has (see {@link ../recurring/scheduleSurfacingModel.ts}).
  */
 export const scheduleSchema: ZodType<ManagedExchangeSchedule> = z.object({
   anchor: z.iso.datetime(),

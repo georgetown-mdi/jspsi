@@ -159,7 +159,7 @@ describe("importManagedExchange", () => {
   });
 
   test("has a backed-up schedule but still no handle, so no import can run unattended", async () => {
-    // The converse of the deposit path (test/unit/benchManageOfferModel.test.ts,
+    // The converse of the deposit path (test/unit/manageOfferModel.test.ts,
     // which writes a handle and no schedule): an import can have a schedule and
     // reconstructs no handle, so neither path on its own assembles the pair the
     // unattended runner fires on. The source record here HELD a handle, so what

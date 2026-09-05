@@ -307,7 +307,7 @@ describe("reattachOnBusy", () => {
 // can hold text an untrusted party chose. This pins that the replay's failure
 // reaches the operator through the same failureFor composition path any other
 // run uses -- the re-attach adds nothing of its own. The class-kill pins in
-// jobRunDiagnostics.unit.test.ts and scripts/bench-failure-passthrough.test.mjs
+// jobRunDiagnostics.unit.test.ts and scripts/run-failure-passthrough.test.mjs
 // hold the same invariant elsewhere.
 describe("a re-attached run's terminal shows as it arrived", () => {
   /** A terminal the CLI never composed as a refusal: the CLI's own refusal

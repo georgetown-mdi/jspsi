@@ -31,7 +31,7 @@ import type {
 // Mounts the acceptor route tree and drives it end to end through the UI a
 // user touches (file select, consent action, Start), checking the handoff
 // between the acquire phase, the consent gate, the columns step, and the
-// run/completion screen. Per-screen behavior lives in benchAccept.test.ts;
+// run/completion screen. Per-screen behavior lives in accept.test.ts;
 // PSI mechanics live in invitedPSI.test.ts. This file checks only that the
 // screens hand off correctly for a full UI journey to Done with a
 // downloadable result.
@@ -66,7 +66,7 @@ function preparedWith(keyCount: number): PreparedExchange {
   } as unknown as PreparedExchange;
 }
 
-// The lifecycle stub for this journey: unlike benchAccept.test.ts, which records
+// The lifecycle stub for this journey: unlike accept.test.ts, which records
 // the call and fires the callbacks by hand afterward, this stub settles the run
 // itself. On invocation it captures the owner's AbortController (the run's
 // `signal`), emits the real stage tree, walks the pre-run stages, then delivers

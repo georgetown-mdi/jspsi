@@ -1,6 +1,6 @@
 /**
  * The one contract for a file-sync exchange's `peer_id` label, shared by the
- * console's authoring guard ({@link ../bench/exchangeFilesModel}) and the server
+ * console's authoring guard ({@link ../console/exchangeFilesModel}) and the server
  * intent schema ({@link ../jobs/intent}). Extracted for the reason
  * {@link ./identityLabel} is: the browser guard and the server validator must not
  * drift, and the guard must not pull the server-only intent module (and its

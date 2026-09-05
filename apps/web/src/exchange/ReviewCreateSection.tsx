@@ -468,7 +468,7 @@ export function ReviewCreateSection({
         </Alert>
       )}
       <div className={styles.tableScroll}>
-        <table className={`${styles.benchTable} ${styles.answers}`}>
+        <table className={`${styles.dataTable} ${styles.answers}`}>
           <caption className={styles.visuallyHidden}>
             Check your answers before creating the invitation
           </caption>

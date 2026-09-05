@@ -39,7 +39,7 @@ const SEMANTIC_TYPES = Object.keys(SEMANTIC_TYPE_LABELS) as Array<SemanticType>;
  * here that puts literal copy in one text block with the names -- the notice's
  * separators and its trailing sentence, the summary the live region speaks -- is
  * where the residual lands, and the notice is driven in
- * test/browser/benchInviterSharing.test.ts.
+ * test/browser/inviterSharing.test.ts.
  */
 export function MatchingSharingSection({
   metadata,
@@ -92,7 +92,7 @@ export function MatchingSharingSection({
       <h1 tabIndex={-1}>Matching &amp; sharing</h1>
       <p>Confirm what each column is and what it is used for.</p>
       <div className={styles.tableScroll}>
-        <table className={styles.benchTable}>
+        <table className={styles.dataTable}>
           <caption className={styles.visuallyHidden}>
             Your columns: type and use
           </caption>

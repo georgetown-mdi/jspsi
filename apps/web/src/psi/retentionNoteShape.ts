@@ -1,6 +1,6 @@
 /**
  * The one contract for a retention note's control-character refusal, shared by
- * the console's authoring guard ({@link ../bench/receiptsModel}) and the server
+ * the console's authoring guard ({@link ../psi/receiptsModel}) and the server
  * intent schema ({@link ../jobs/intent}). Separate for the same reason as
  * {@link ./identityLabel}: the browser guard and the server validator must not
  * drift, and the guard must not pull the server-only intent module (and its

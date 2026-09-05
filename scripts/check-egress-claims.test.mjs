@@ -900,7 +900,7 @@ describe("literal extraction", () => {
   it("reads a URL inside a quoted CSS data URI", () => {
     const path = "apps/web/src/styles/tokens.css";
     const source =
-      "  --bench-check: url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\"/>');\n";
+      "  --app-check: url('data:image/svg+xml;utf8,<svg xmlns=\"http://www.w3.org/2000/svg\"/>');\n";
     expect(urlsIn(source, path)).toEqual(["http://www.w3.org/2000/svg"]);
     expect(fileViolations(path, source)).toEqual([]);
   });

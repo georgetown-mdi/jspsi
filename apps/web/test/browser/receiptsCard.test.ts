@@ -115,7 +115,7 @@ function stubSigningApi(options: StubOptions = {}): { bodies: Array<string> } {
   return { bodies };
 }
 
-/** The draft the harness last held, so a test can assert on the value a bench
+/** The draft the harness last held, so a test can assert on the value a screen
  * would include in the run intent as well as on what is rendered. */
 let latestDraft: ReceiptsDraft = RECEIPTS_DEFAULT;
 
@@ -130,7 +130,7 @@ const SINGLE_MOUNT_RENDEZVOUS: JobRendezvousConfig = {
 };
 
 /**
- * The card wired the way both benches wire it -- `AcceptorScreen` directly and
+ * The card wired the way both screens wire it -- `AcceptorScreen` directly and
  * `InviterScreen` through `ReviewCreateSection` -- with a bare `useState` setter as
  * `onChange`. That is the contract the concurrent-edit tests turn on: the setter
  * REPLACES the whole draft, so whatever the card passes is the whole of what

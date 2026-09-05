@@ -106,7 +106,7 @@ export const consoleCoverageProvider: CoverageProviderFactory<
 
 /** The coverage input, unifying the hosted browser rows and the console's
  * mounted-file reference so one {@link useNonEmptyRates} call serves both builds. */
-export type BenchCoverageInput =
+export type CoverageInput =
   | { kind: "rows"; rows: ReadonlyArray<CSVRow> }
   | { kind: "workFile"; reference: WorkInputReference };
 
@@ -114,9 +114,9 @@ export type BenchCoverageInput =
  * worker-backed provider and a `workFile` input to the console fetch-backed sweep.
  * A stable module-level factory so the hook rebuilds the provider only when the
  * coverage input identity changes. */
-export const benchCoverageProvider: CoverageProviderFactory<
-  BenchCoverageInput
-> = (input) =>
+export const coverageProvider: CoverageProviderFactory<CoverageInput> = (
+  input,
+) =>
   input.kind === "rows"
     ? rowsCoverageProvider(input.rows)
     : consoleCoverageProvider(input.reference);

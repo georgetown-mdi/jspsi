@@ -18,7 +18,7 @@
  * `state.__TSR_index`, keying scroll restoration on `__TSR_key`/`key`. A
  * console push advances that index and mints a fresh key, matching the
  * router's own push bookkeeping. Pinned against the real patched history in
- * `benchRouterHistory.test.ts`.
+ * `routerHistory.test.ts`.
  */
 
 /** Marks a `history.state` entry as one the console wrote, containing the step
@@ -26,14 +26,14 @@
  * entry the console did not create (an unrelated app route, or the
  * pre-console entry Back from the first step lands on) is distinguishable
  * from an in-console step move. */
-export const BENCH_STEP_STATE_KEY = "psilinkBenchStep";
+export const STEP_STATE_KEY = "psilinkExchangeStep";
 
 /** The router history's entry-index field (see the module header). */
 const ROUTER_INDEX_KEY = "__TSR_index";
 
 /** The `history.state` payload an in-console step writes. */
-export interface BenchStepState {
-  [BENCH_STEP_STATE_KEY]: string;
+export interface StepHistoryState {
+  [STEP_STATE_KEY]: string;
 }
 
 function markedState(step: string, existing: unknown): Record<string, unknown> {
@@ -41,18 +41,18 @@ function markedState(step: string, existing: unknown): Record<string, unknown> {
     typeof existing === "object" && existing !== null
       ? (existing as Record<string, unknown>)
       : {};
-  return { ...base, [BENCH_STEP_STATE_KEY]: step };
+  return { ...base, [STEP_STATE_KEY]: step };
 }
 
 /** Build the `history.state` payload for `step`, merging over any existing state
  * so an unrelated entry's fields (including the router's) survive unchanged --
  * the replace form: the router's index and entry key are kept as-is, matching
  * replace semantics. */
-export function benchStepState(
+export function stepHistoryState(
   step: string,
   existing?: unknown,
-): BenchStepState {
-  return markedState(step, existing) as unknown as BenchStepState;
+): StepHistoryState {
+  return markedState(step, existing) as unknown as StepHistoryState;
 }
 
 /** Build the `history.state` payload for pushing `step` as a NEW entry: the
@@ -60,20 +60,20 @@ export function benchStepState(
  * key minted -- the router's own push bookkeeping (see the module header). When
  * no router index is present (no router history is attached, as in the bare
  * component tests), the marker state alone is returned. */
-export function benchStepStateForPush(
+export function stepHistoryStateForPush(
   step: string,
   existing?: unknown,
-): BenchStepState {
+): StepHistoryState {
   const merged = markedState(step, existing);
   const index = merged[ROUTER_INDEX_KEY];
-  if (typeof index !== "number") return merged as unknown as BenchStepState;
+  if (typeof index !== "number") return merged as unknown as StepHistoryState;
   const freshKey = (Math.random() + 1).toString(36).substring(7);
   return {
     ...merged,
     [ROUTER_INDEX_KEY]: index + 1,
     __TSR_key: freshKey,
     key: freshKey,
-  } as unknown as BenchStepState;
+  } as unknown as StepHistoryState;
 }
 
 /** Read the console step a `popstate` event's `state` contains, or `undefined`
@@ -82,7 +82,7 @@ export function benchStepStateForPush(
  * first step) and the caller must let ordinary browser navigation proceed. */
 export function stepFromPopState(state: unknown): string | undefined {
   if (typeof state !== "object" || state === null) return undefined;
-  const step = (state as Record<string, unknown>)[BENCH_STEP_STATE_KEY];
+  const step = (state as Record<string, unknown>)[STEP_STATE_KEY];
   return typeof step === "string" ? step : undefined;
 }
 

@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useRef } from "react";
 
 import {
-  benchStepState,
-  benchStepStateForPush,
   stepFromPopState,
+  stepHistoryState,
+  stepHistoryStateForPush,
 } from "./stepHistory";
 
 /**
@@ -54,14 +54,14 @@ export function useStepHistory(
   // double-mount replays this idempotently on the same entry.
   useEffect(() => {
     window.history.replaceState(
-      benchStepState(initialStepRef.current, window.history.state),
+      stepHistoryState(initialStepRef.current, window.history.state),
       "",
     );
   }, []);
 
   const pushStep = useCallback((step: string) => {
     window.history.pushState(
-      benchStepStateForPush(step, window.history.state),
+      stepHistoryStateForPush(step, window.history.state),
       "",
     );
   }, []);
@@ -76,7 +76,7 @@ export function useStepHistory(
       const settled = restoreRef.current(step);
       if (settled !== undefined && settled !== step)
         window.history.replaceState(
-          benchStepState(settled, window.history.state),
+          stepHistoryState(settled, window.history.state),
           "",
         );
     }
