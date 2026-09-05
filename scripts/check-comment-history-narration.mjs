@@ -23,8 +23,9 @@
 //      to the working tree, plus the untracked files. Uncommitted work is in
 //      scope because the rule is a pre-commit sweep -- a contributor running
 //      `npm run check:all` before committing is the run this is written for. The
-//      base comes from baseCandidates below; nothing here reaches the network,
-//      so the ref has to be in the checkout already.
+//      base comes from baseCandidates below -- in CI the pull request event's
+//      own base sha, handed in by static_checks.yaml. Nothing here reaches the
+//      network, so the base has to be in the checkout already.
 //
 //   B. THE COMMENT LINES. Comments are read out of the TypeScript parse rather
 //      than matched out of the raw text, so a `//` inside a string or a regular
@@ -100,13 +101,17 @@ export const SCANNED_EXTENSIONS = [
 export const OVERRIDE_MARKER = "allow-history-narration";
 
 /**
- * The base-branch candidates, in order; the first that resolves in the checkout
- * is what the range is measured from. `PSILINK_NARRATION_BASE` is the override
- * -- a ref or a sha -- for a branch cut from something other than staging.
+ * The base candidates, in order; the first that resolves in the checkout is what
+ * the range is measured from. `PSILINK_NARRATION_BASE` -- a ref or a sha -- is
+ * the primary base: static_checks.yaml sets it to the pull request event's base
+ * sha, and a local run sets it for a branch cut from something other than
+ * staging. An empty value is no value, so a run outside a pull request falls
+ * through to the refs below.
  */
 export function baseCandidates(env) {
   const candidates = [];
-  if (env.PSILINK_NARRATION_BASE) candidates.push(env.PSILINK_NARRATION_BASE);
+  const named = env.PSILINK_NARRATION_BASE?.trim();
+  if (named) candidates.push(named);
   if (env.GITHUB_BASE_REF) {
     candidates.push(`origin/${env.GITHUB_BASE_REF}`, env.GITHUB_BASE_REF);
   }

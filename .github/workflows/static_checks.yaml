@@ -65,11 +65,12 @@ jobs:
       - uses: actions/checkout@v7
         with:
           # The comment history-narration check reads the comment lines the pull
-          # request adds against its base branch, which it finds through `git
+          # request adds against its base, which it reaches through `git
           # merge-base` in the checkout. The default single-commit fetch carries
-          # no base branch to find, and the check fails rather than passing an
-          # empty range, so this job takes the full history. The job beside it
-          # keeps the default.
+          # neither the base sha the step below hands it nor a base branch to
+          # fall back to, and the check fails rather than passing an empty
+          # range, so this job takes the full history. The job beside it keeps
+          # the default.
           fetch-depth: 0
       # Pins Node, installs from the lockfile, and builds @psilink/core. Most of
       # the checks below read their parsers and fixtures out of the install; the
@@ -89,6 +90,11 @@ jobs:
       - name: Repository checks
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # The base the comment history-narration check measures its range
+          # from, taken from the event rather than left to a ref resolving in
+          # the checkout. On any event that is not a pull request this is empty
+          # and the check falls back to its ref candidates.
+          PSILINK_NARRATION_BASE: ${{ github.event.pull_request.base.sha || '' }}
         run: npm run check:all
       # Blocking half of the dependency audit, over the production tree the
       # shipped image runs: the release SBOM's scope -- the two workspaces the

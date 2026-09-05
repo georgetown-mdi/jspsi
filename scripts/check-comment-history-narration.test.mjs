@@ -257,6 +257,12 @@ describe("the range", () => {
     expect(baseCandidates({})).toEqual(["origin/staging", "staging"]);
   });
 
+  it("takes an empty base sha as no base", () => {
+    expect(
+      baseCandidates({ PSILINK_NARRATION_BASE: "", GITHUB_BASE_REF: "main" }),
+    ).toEqual(["origin/main", "main", "origin/staging", "staging"]);
+  });
+
   it("reports the lines a commit adds, not the ones it leaves alone", () => {
     withRepository({ [FIXTURE]: "const a = 1;\nconst b = 2;\n" }, (dir) => {
       write(dir, { [FIXTURE]: "const a = 1;\nconst b = 3;\nconst c = 4;\n" });
@@ -281,6 +287,14 @@ describe("the range", () => {
         stdio: "ignore",
       });
       expect(() => resolveBase(dir, {})).toThrow(/PSILINK_NARRATION_BASE/);
+    });
+  });
+
+  it("falls through to the base branch when the base sha is empty", () => {
+    withRepository({ [FIXTURE]: "const a = 1;\n" }, (dir) => {
+      expect(resolveBase(dir, { PSILINK_NARRATION_BASE: "" }).ref).toBe(
+        "staging",
+      );
     });
   });
 
@@ -358,7 +372,7 @@ describe("the wiring", () => {
     expect(isScannedFile("a.yaml")).toBe(false);
   });
 
-  it("gives the guard job a history deep enough to find the base in", () => {
+  it("gives the guard job the base sha and a history deep enough to hold it", () => {
     const job = workflowDocument(ROOT, `${WORKFLOW_DIR}/static_checks.yaml`)
       .jobs["repo-guards"];
     const checkout = job.steps.find((step) =>
@@ -366,7 +380,14 @@ describe("the wiring", () => {
     );
     expect(
       checkout.with?.["fetch-depth"],
-      "the comment history-narration check resolves its base branch out of the checkout, which a single-commit fetch does not carry",
+      "the comment history-narration check reaches its base out of the checkout, which a single-commit fetch does not carry",
     ).toBe(0);
+    const checks = job.steps.find(
+      (step) => step.run?.trim() === "npm run check:all",
+    );
+    expect(
+      checks.env?.PSILINK_NARRATION_BASE,
+      "the comment history-narration check takes the pull request event's base sha as its base; a ref resolving in the checkout is the fallback",
+    ).toContain("github.event.pull_request.base.sha");
   });
 });
