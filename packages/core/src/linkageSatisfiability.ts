@@ -389,10 +389,10 @@ export function coalesceSubstitutesConstant(
  * not contain.
  *
  * The arithmetic is a second reading of {@link substringWindow}'s, which is what
- * a differential sweep in `standardization.test.ts` exists for: it drives the
- * shipped key builder over every bound pair in a grid and every value length a
- * window could open at, and fails on any pair where this verdict and the
- * measured one disagree in either direction.
+ * a differential sweep in `linkageSatisfiability.test.ts` exists for: it drives
+ * the shipped key builder over every bound pair in a grid and every value
+ * length a window could open at, and fails on any pair where this verdict and
+ * the measured one disagree in either direction.
  *
  * @internal exported so that sweep can compare the two readings, and so the
  * rescue-equivalence sweep can model the same drop source the shipped predicate
@@ -716,8 +716,8 @@ function readParsedDateRun(
  * understating it is the only harmful direction on a consent surface. That closes
  * the milder-word evasion -- an inviter cannot make one probe unmeasurable to
  * drop the marker while every real date still collapses onto one constant (a
- * probe inflated past the ceiling is driven in standardization.test.ts). A
- * legitimate partial-date transform does not cross the ceiling and is not an
+ * probe inflated past the ceiling is driven in linkageSatisfiability.test.ts).
+ * A legitimate partial-date transform does not cross the ceiling and is not an
  * unknown function, so it still measures cleanly and keeps its true milder
  * word; only a pathological or exchange-time-throwing pipeline takes the wider
  * one.
@@ -882,7 +882,7 @@ export function pipelineAlwaysDrops(
       // an undefined or non-string default leaves a dropped value dropped. The
       // shared predicate also tests a position half this loop's own reasoning does
       // not need; that it withholds no rescue here is held by the differential
-      // sweep in standardization.test.ts ("pipelineAlwaysDrops rescue
+      // sweep in linkageSatisfiability.test.ts ("pipelineAlwaysDrops rescue
       // equivalence") rather than asserted in this comment.
       if (dropped && coalesceSubstitutesConstant(step, steps.slice(0, index)))
         dropped = false;

@@ -1207,7 +1207,7 @@ describe.each(SWEPT)("$id", (diagnostic) => {
         // the escape on the errors route. That doubling is reachable here
         // because validateCompatibility's signature admits terms no schema
         // parsed; a date that came through the terms schema has no byte the
-        // escape rewrites at all, which linkageTerms.test.ts pins.
+        // escape rewrites at all, which linkageTermsSchema.test.ts pins.
         if (routed.route === "errors") {
           expect(rendered).toContain(ONCE_ESCAPED_NON_ASCII);
           expect(rendered).not.toContain(TWICE_ESCAPED_NON_ASCII);

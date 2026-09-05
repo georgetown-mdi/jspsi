@@ -254,8 +254,8 @@ describe("the width an element's transforms bound its value to", () => {
     // one character. `parse_date` with an empty output layout is the one shape
     // whose params fix the width at zero, declaring a key narrower than the
     // single candidate the row builder emits for it. The terms schema already
-    // refuses the shape (linkageTerms.test.ts); this floor covers a chain
-    // reaching the derivation another way.
+    // refuses the shape (linkageTermsSchema.test.ts); this floor covers a
+    // chain reaching the derivation another way.
     expect(
       elementValueWidthBound([
         { function: "parse_date", params: { outputFormat: "" } },

@@ -558,8 +558,8 @@ interface AcceptorPayloadDeclarationConflict {
  * accuracy control over a dictionary that is exchanged and written into the
  * exchange record regardless of output direction; `LinkageTermsSchema` refuses a
  * non-empty `payload.receive` alongside `expectsOutput: false`
- * (packages/core/test/linkageTerms.test.ts), so that combination never reaches
- * this step.
+ * (packages/core/test/linkageTermsSchema.test.ts), so that combination never
+ * reaches this step.
  */
 export function acceptorPayloadDeclarationConflict(
   invitationTerms: LinkageTerms,
