@@ -209,7 +209,10 @@ string, which is what RFC 8785 requires:
   since both are serialized as JSON strings. The `lone-surrogate`,
   `lone-surrogate-low`, and `lone-surrogate-object-key` test vectors fix the
   refusal; a well-formed surrogate pair is unaffected and emits its raw UTF-8
-  bytes, as the `astral-emoji` vector fixes.
+  bytes, as the `astral-emoji` vector fixes. A record or receipt an earlier
+  build produced over such a value does not verify: the recomputation refuses
+  where that build emitted escaped bytes, which `psilink verify-receipt`
+  reports as a terms-hash mismatch.
 
 A linkage terms document MUST be well-formed UTF-16 throughout -- every string
 value, every array element, and every object key, the partner-named
