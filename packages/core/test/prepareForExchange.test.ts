@@ -30,10 +30,8 @@ import {
   declaredEffectiveKeyCount,
   FAN_OUT_CANDIDATES_PER_ELEMENT,
 } from "../src/fanOutFunctions";
-import {
-  DEDUPLICATE_IMPLEMENTED_BY_STRATEGY,
-  MAX_NAME_LENGTH,
-} from "../src/config/linkageTerms";
+import { DEDUPLICATE_IMPLEMENTED_BY_STRATEGY } from "../src/linkageTermsPolicy";
+import { MAX_NAME_LENGTH } from "../src/config/linkageTerms";
 
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 

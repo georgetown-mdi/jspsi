@@ -8,7 +8,7 @@ import {
   assertBothSidedDeduplicateImplemented,
   assertCountOnlyTermsShape,
   assertDeduplicateImplemented,
-} from "./config/linkageTerms.js";
+} from "./linkageTermsPolicy.js";
 import { getDefaultLinkageTerms } from "./defaults/linkageTerms.js";
 import { getDefaultStandardization } from "./defaults/standardization.js";
 import {
@@ -95,10 +95,6 @@ import type { CertificateBody, SigningIdentity } from "./signingIdentity.js";
 import { partnerPinIsPresent } from "./config/signing.js";
 import type { SigningConfig, SigningMode } from "./config/signing.js";
 import type { DualSignedRecord, ReceiptContent } from "./signedReceipt.js";
-
-// Defined in config/linkageTerms.ts, which cannot import this module without
-// a cycle; re-exported here at the run boundary that applies them.
-export { assertBothSidedDeduplicateImplemented, assertDeduplicateImplemented };
 
 /**
  * The subset of an exchange specification that governs data preparation.

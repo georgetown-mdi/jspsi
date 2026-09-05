@@ -5,7 +5,9 @@ import {
   COUNT_ONLY_SHAPE_REFUSALS,
   assertCountOnlyTermsShape,
   countOnlyShapeViolation,
-  deriveAcceptedLinkageTerms,
+} from "../src/linkageTermsPolicy";
+import { deriveAcceptedLinkageTerms } from "../src/linkageTermsNegotiation";
+import {
   parseLinkageTerms,
   safeParseLinkageTerms,
 } from "../src/config/linkageTerms";

@@ -33,7 +33,7 @@ import {
 import {
   COUNT_ONLY_SHAPE_REFUSALS,
   manyToManyIsImplementedForStrategy,
-} from "./config/linkageTerms";
+} from "./linkageTermsPolicy";
 import { InternalConsistencyError, UsageError } from "./errors";
 import { receiveCountReport, sendCountReport } from "./protocolSetup";
 

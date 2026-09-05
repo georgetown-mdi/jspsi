@@ -8,21 +8,25 @@ import {
   prepareForExchange,
   runExchange,
   resolveLinkageCardinality,
-  assertBothSidedDeduplicateImplemented,
-  assertDeduplicateImplemented,
   assertMatchedPairsWellFormed,
   matchedPairCount,
   InvitationTermDivergenceError,
 } from "../src/exchange";
+import {
+  assertBothSidedDeduplicateImplemented,
+  assertDeduplicateImplemented,
+} from "../src/linkageTermsPolicy.js";
 import { createMessagePipe } from "../src/connection/messageConnection";
 import {
   DEDUPLICATE_IMPLEMENTED_BY_STRATEGY,
   MANY_TO_MANY_IMPLEMENTED_BY_STRATEGY,
-  deriveAcceptedLinkageTerms,
   manyToManyIsImplementedForStrategy,
-  parseLinkageTerms,
+} from "../src/linkageTermsPolicy";
+import {
+  deriveAcceptedLinkageTerms,
   validateCompatibility,
-} from "../src/config/linkageTerms";
+} from "../src/linkageTermsNegotiation";
+import { parseLinkageTerms } from "../src/config/linkageTerms";
 import { entityClusters } from "../src/entityClosure";
 import { inferMetadata } from "../src/config/metadata";
 import { mintExchangeFile } from "../src/config/exchangeFile";

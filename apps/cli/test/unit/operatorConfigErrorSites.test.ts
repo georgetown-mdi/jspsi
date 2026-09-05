@@ -141,8 +141,8 @@ const RECORDED_SITES: readonly ConfigErrorSite[] = [
       "assertSignedReceiptNamesBothParties's `local`, which is " +
       "localTerms.identity -- and an acceptor's prepared terms replace that " +
       "field with the accepting operator's own name rather than adopting the " +
-      "inviter's (deriveAcceptorLinkageTerms in config/linkageTerms.ts), so the " +
-      "value is local on the accept path too.",
+      "inviter's (deriveAcceptedLinkageTerms in linkageTermsNegotiation.ts), " +
+      "so the value is local on the accept path too.",
   },
   {
     file: "packages/core/src/exchange.ts",

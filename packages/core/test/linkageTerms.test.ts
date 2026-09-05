@@ -3,10 +3,12 @@ import { describe, expect, test } from "vitest";
 
 import {
   deriveAcceptedLinkageTerms,
+  validateCompatibility,
+} from "../src/linkageTermsNegotiation";
+import {
   parseLinkageTerms,
   referencedLinkageFieldNames,
   safeParseLinkageTerms,
-  validateCompatibility,
   MAX_NAME_LENGTH,
   MAX_TEXT_LENGTH,
   TEXT_CONTROL_CHAR_MESSAGE,

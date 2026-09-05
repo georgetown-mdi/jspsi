@@ -2,7 +2,8 @@ import { z } from "zod";
 
 import { UsageError } from "../errors.js";
 import { SEMANTIC_TYPES } from "../types";
-import { COUNT_ONLY_SHAPE_REFUSALS, MAX_NAME_LENGTH } from "./linkageTerms.js";
+import { COUNT_ONLY_SHAPE_REFUSALS } from "../linkageTermsPolicy.js";
+import { MAX_NAME_LENGTH } from "./linkageTerms.js";
 import { safeParseCamelized } from "./safeParseCamelized.js";
 
 import type { Algorithm, SemanticType } from "../types";

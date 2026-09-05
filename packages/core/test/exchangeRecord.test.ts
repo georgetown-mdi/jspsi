@@ -30,8 +30,8 @@ import {
   MAX_NAME_LENGTH,
   MAX_PAYLOAD_ENTRIES,
   MAX_TEXT_LENGTH,
-  deriveAcceptedLinkageTerms,
 } from "../src/config/linkageTerms";
+import { deriveAcceptedLinkageTerms } from "../src/linkageTermsNegotiation";
 import {
   DEFAULT_LINKAGE_RULE_SET,
   getDefaultLinkageTerms,

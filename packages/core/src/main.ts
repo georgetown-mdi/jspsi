@@ -236,6 +236,11 @@ export {
 export type { ExchangeSpec } from "./config/exchangeSpec";
 export {
   DEDUPLICATE_IMPLEMENTED_BY_STRATEGY,
+  assertDeduplicateImplemented,
+  countOnlyShapeViolation,
+  swapPairTransformsDiffer,
+} from "./linkageTermsPolicy";
+export {
   LinkageStrategySchema,
   LinkageTermsSchema,
   MAX_NAME_LENGTH,
@@ -244,16 +249,15 @@ export {
   MAX_TRANSFORM_PATTERN_LENGTH,
   TEXT_CONTROL_CHAR_MESSAGE,
   TEXT_CONTROL_CHAR_PATTERN,
-  assertDeduplicateImplemented,
-  countOnlyShapeViolation,
-  deriveAcceptedLinkageTerms,
   referencedLinkageFieldNames,
   safeParseLinkageTerms,
-  swapPairTransformsDiffer,
-  validateCompatibility,
 } from "./config/linkageTerms";
+export {
+  deriveAcceptedLinkageTerms,
+  validateCompatibility,
+} from "./linkageTermsNegotiation";
+export type { CountOnlyShapeViolation } from "./linkageTermsPolicy";
 export type {
-  CountOnlyShapeViolation,
   LinkageField,
   LinkageKey,
   LinkageKeyElement,

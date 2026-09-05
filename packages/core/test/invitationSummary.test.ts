@@ -9,7 +9,7 @@ import { disclosedColumnNames, inferMetadata } from "../src/config/metadata.js";
 import {
   assertDeduplicateImplemented,
   DEDUPLICATE_IMPLEMENTED_BY_STRATEGY,
-} from "../src/config/linkageTerms.js";
+} from "../src/linkageTermsPolicy.js";
 
 import type { ConnectionEndpoint } from "../src/config/invitation.js";
 import type {

@@ -23,9 +23,11 @@ import {
   MAX_DATE_FORMAT_LENGTH,
   MAX_TRANSFORM_PATTERN_LENGTH,
   referencedLinkageFieldNames,
+} from "./config/linkageTerms.js";
+import {
   swapPairFuzzyComparisonsDiffer,
   swapPairTransformsDiffer,
-} from "./config/linkageTerms.js";
+} from "./linkageTermsPolicy.js";
 import type { ColumnMetadata } from "./config/metadata.js";
 import { readRowColumn } from "./file.js";
 import type { CSVRow } from "./file.js";

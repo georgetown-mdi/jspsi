@@ -6,7 +6,7 @@ import { prepareForExchange, runExchange } from "../src/exchange";
 import {
   deriveAcceptedLinkageTerms,
   validateCompatibility,
-} from "../src/config/linkageTerms";
+} from "../src/linkageTermsNegotiation";
 import { disclosedColumnNames, inferMetadata } from "../src/config/metadata";
 import { createMessagePipe } from "../src/connection/messageConnection";
 import { UsageError } from "../src/errors";
