@@ -7,9 +7,9 @@ import {
   DEFAULT_MAX_DISPLAY_LENGTH,
   DISPLAY_TRUNCATION_MARKER,
   WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
-  reconcileHostKeyFingerprints,
   redactAndSanitizeForDisplay,
 } from "@psilink/core";
+import { reconcileHostKeyFingerprints } from "@psilink/core/testing";
 
 import {
   createFetchJobApiClient,

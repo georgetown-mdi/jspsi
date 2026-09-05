@@ -4,8 +4,9 @@ import path from "node:path";
 
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import logLibrary from "loglevel";
-import { getLogger, reconcileHostKeyFingerprints } from "@psilink/core";
+import { getLogger } from "@psilink/core";
 import type { PresentedHostKey } from "@psilink/core";
+import { reconcileHostKeyFingerprints } from "@psilink/core/testing";
 
 import { EVENT_STREAM_FD, type WarningEvent } from "../../../src/eventStream";
 import { openEventStreamWithFdWired } from "../../eventStreamTestSupport";

@@ -210,6 +210,13 @@ none of them belongs on the main entry; they are on `./testing`, which states
 what they are. `withSuppressedLogs` went the other way: nothing called it, so it
 is deleted rather than published.
 
+`reconcileHostKeyFingerprints` is on the channel for the same reason
+`computeKexKeys` is, and is the second inhabitant of that class: product code
+whose only consumers outside `packages/core` are the two apps' test trees, each
+holding the divergence warning it composes to that app's own display budget,
+while the exchange itself calls it from `runExchange` and hands the caller the
+result.
+
 One subject arrived that is neither a fixture nor a codec:
 `withNoListedFanOutFunctions`, the lever that stands a listed fan-out producer
 in for an unlisted one. It rewrites module state, so it carries a build

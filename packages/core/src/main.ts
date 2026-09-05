@@ -190,7 +190,6 @@ export {
   ruleSetCitation,
 } from "./config/compatibilityMessage";
 export type { CompatibilityMessageFragment } from "./config/compatibilityMessage";
-export { reconcileHostKeyFingerprints } from "./hostKeyReconciliation";
 export { describeDecodeError } from "./utils/describeDecodeError";
 
 export { StandardizationSchema } from "./config/standardizationSchema";

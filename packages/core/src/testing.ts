@@ -25,6 +25,12 @@ export {
 // callers conduct a handshake with runKex, never by composing the schedule.
 export { computeKexKeys } from "./kex.js";
 
+// The cross-party host-key fingerprint comparison, so each app's test tree can
+// hold the warning it composes to that app's own display budget. It stays out
+// of the main entry point: runExchange calls it and hands the result to the
+// caller, who never composes the notice.
+export { reconcileHostKeyFingerprints } from "./hostKeyReconciliation.js";
+
 // The wire pieces the known-answer vector generators under test/vectors build
 // their documents from. Those generators are plain Node scripts, so they read
 // the built package rather than this source tree, and each of these encodes or
