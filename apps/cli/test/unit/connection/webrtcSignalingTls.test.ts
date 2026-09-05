@@ -212,3 +212,31 @@ test("an aborted probe is answered without dialing", async () => {
     probeSignalingCertificate(LOCATION, AbortSignal.abort()),
   ).resolves.toBeUndefined();
 });
+
+test("a probe that fails reports the socket failure it was asked about", async () => {
+  // The probe is an option a caller supplies, so its own failure is one the
+  // registration has to settle on: without it the socket failure is never
+  // reported and the rejection is unhandled.
+  for (const probe of [
+    () => Promise.reject(new Error("the probe itself failed")),
+    () => {
+      throw new Error("the probe itself failed");
+    },
+  ] satisfies Array<SignalingCertificateProbe>) {
+    const socket = new FakeSocket();
+    const failure = await connectToBroker({
+      location: LOCATION,
+      id: LOCAL_ID,
+      handlers: { onMessage: () => {}, onClose: () => {} },
+      socketFactory: () => {
+        queueMicrotask(() => socket.fail());
+        return socket as unknown as WebSocket;
+      },
+      certificateProbe: probe,
+    }).then(
+      () => new Error("the registration was expected to fail"),
+      (err: unknown) => err as Error,
+    );
+    expect(failure.message).toBe(SIGNALING_SOCKET_FAILED_MESSAGE);
+  }
+});

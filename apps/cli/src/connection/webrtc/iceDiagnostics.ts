@@ -1,5 +1,3 @@
-import { withTimeout } from "@psilink/core";
-
 import { fittedCauseLink } from "../causeLink";
 
 import type { RTCPeerConnection } from "werift";
@@ -238,6 +236,36 @@ export function iceFailureDetails(
 export const ICE_STATS_TIMEOUT_MS = 2_000;
 
 /**
+ * `read` answered as soon as it settles, and `undefined` once
+ * {@link ICE_STATS_TIMEOUT_MS} elapses or `signal` aborts.
+ *
+ * Neither bound can wait for `read`: a `getStats` that never settles is left
+ * pending, so the ceiling's timer is unreferenced and the abort is answered
+ * without one. A referenced timer would hold the process for the full bound
+ * after an interrupt had already decided the outcome this read only describes.
+ */
+function boundedStatsRead(
+  read: Promise<unknown>,
+  signal: AbortSignal | undefined,
+): Promise<unknown> {
+  if (signal?.aborted === true) return Promise.resolve(undefined);
+  return new Promise<unknown>((resolve) => {
+    const timer = setTimeout(() => settle(undefined), ICE_STATS_TIMEOUT_MS);
+    timer.unref();
+    function settle(stats: unknown): void {
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      resolve(stats);
+    }
+    function onAbort(): void {
+      settle(undefined);
+    }
+    signal?.addEventListener("abort", onAbort);
+    read.then(settle, () => settle(undefined));
+  });
+}
+
+/**
  * Read a peer connection's ICE stats, or `undefined` when they cannot be read.
  *
  * Absorbing the failure is the point: this runs on the path where a rendezvous
@@ -245,15 +273,19 @@ export const ICE_STATS_TIMEOUT_MS = 2_000;
  * turn on a diagnostic. A peer connection already torn down, a stand-in that
  * implements no `getStats`, and a collection that overruns
  * {@link ICE_STATS_TIMEOUT_MS} all land here.
+ *
+ * `signal` is the run's own: an interrupt waits out none of this transport's
+ * budgets (docs/spec/WEBRTC_TRANSPORT.md, Budgets), and the description this
+ * collects is worth nothing to a run that has been told to stop.
  */
 export async function readIceStats(
   peer: RTCPeerConnection,
+  signal?: AbortSignal,
 ): Promise<IceCandidateReport | undefined> {
   try {
-    const stats = (await withTimeout(
+    const stats = (await boundedStatsRead(
       Promise.resolve(peer.getStats()),
-      ICE_STATS_TIMEOUT_MS,
-      "collecting WebRTC ICE statistics timed out",
+      signal,
     )) as IceStatsReport | undefined;
     if (stats === undefined || typeof stats.values !== "function")
       return undefined;

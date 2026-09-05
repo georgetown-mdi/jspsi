@@ -1,6 +1,11 @@
+import { execFile } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { promisify } from "node:util";
+
 import { expect, test } from "vitest";
 
 import {
+  ICE_STATS_TIMEOUT_MS,
   MAX_REPORTED_CANDIDATE_TYPES,
   UNREPORTED_CANDIDATE_TYPE,
   describeSelectedCandidatePair,
@@ -207,4 +212,40 @@ test("stats that cannot be read are reported as none rather than thrown", async 
     getStats: () => Promise.resolve({}),
   } as unknown as RTCPeerConnection;
   await expect(readIceStats(wrongShape)).resolves.toBeUndefined();
+});
+
+/** A peer whose stats collection never answers. */
+function neverSettlingPeer(): RTCPeerConnection {
+  return {
+    getStats: () => new Promise<never>(() => {}),
+  } as unknown as RTCPeerConnection;
+}
+
+test("an interrupt is not made to wait for a stats collection", async () => {
+  // The report describes an outcome an interrupt has already decided, so the
+  // run stops waiting for it at once rather than at the ceiling.
+  const controller = new AbortController();
+  const startedAt = Date.now();
+  const answered = readIceStats(neverSettlingPeer(), controller.signal);
+  controller.abort();
+  await expect(answered).resolves.toBeUndefined();
+  expect(Date.now() - startedAt).toBeLessThan(ICE_STATS_TIMEOUT_MS);
+
+  await expect(
+    readIceStats(neverSettlingPeer(), AbortSignal.abort()),
+  ).resolves.toBeUndefined();
+});
+
+test("a stats collection that never answers does not hold the process", async () => {
+  // Measured in a child process, since it is the process exiting that is under
+  // test: the ceiling's timer must not be what a finished run waits on.
+  const probe = fileURLToPath(
+    new URL("../../iceStatsExitProbe.ts", import.meta.url),
+  );
+  const { stdout } = await promisify(execFile)(
+    process.execPath,
+    ["--import=tsx", probe],
+    { cwd: fileURLToPath(new URL("../../..", import.meta.url)) },
+  );
+  expect(Number(stdout)).toBeLessThan(ICE_STATS_TIMEOUT_MS);
 });

@@ -588,7 +588,7 @@ export async function openWebRtcPeerSession(
     });
     const channel = await negotiation.run(broker);
     assertSctpDrainSupported(peer);
-    await logSelectedCandidatePair(peer);
+    await logSelectedCandidatePair(peer, signal);
     // Take the state hook back off the negotiation, whose interest in it ended
     // when the channel opened.
     let onLost: (() => void) | undefined;
@@ -627,9 +627,10 @@ export async function openWebRtcPeerSession(
  */
 async function logSelectedCandidatePair(
   peer: RTCPeerConnection,
+  signal: AbortSignal | undefined,
 ): Promise<void> {
   if (log.getLevel() > logLibrary.levels.DEBUG) return;
-  const report = await readIceStats(peer);
+  const report = await readIceStats(peer, signal);
   if (report === undefined) {
     log.debug("the data channel opened; no ICE statistics were available");
     return;
@@ -711,7 +712,7 @@ class Negotiation {
    */
   private async failWithIceDiagnosis(summary: string): Promise<void> {
     if (this.failure !== undefined) return;
-    const report = await readIceStats(this.options.peer);
+    const report = await readIceStats(this.options.peer, this.options.signal);
     this.fail(
       new ConnectionError(
         summary,

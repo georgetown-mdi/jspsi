@@ -731,16 +731,28 @@ export function connectToBroker(
     // the failure precedes registration. A socket that registered completed
     // that handshake, so an answer about it would name a check that had passed,
     // and waiting for one would hold the report for the probe's ceiling.
+    // The probe may be the caller's own, so its failing is one more thing the
+    // answer can be: a rejection reports the socket failure it was asked about
+    // rather than leaving the registration unsettled and the rejection
+    // unhandled.
+    const askAboutCertificate = async (): Promise<string | undefined> => {
+      try {
+        return await (certificateProbe ?? probeSignalingCertificate)(
+          location,
+          signal,
+        );
+      } catch {
+        return undefined;
+      }
+    };
+
     const onSocketError = (): void => {
       if (opened) {
         end(signalingSocketError(undefined));
         return;
       }
       if (!claimTerminal()) return;
-      void (certificateProbe ?? probeSignalingCertificate)(
-        location,
-        signal,
-      ).then((certificateProblem) =>
+      void askAboutCertificate().then((certificateProblem) =>
         settle(signalingSocketError(certificateProblem)),
       );
     };
