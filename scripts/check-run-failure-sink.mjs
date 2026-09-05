@@ -26,17 +26,25 @@
 // claim.
 //
 // HOW A BINDING IS FOUND, without a type checker. Every `RunFailure` type
-// reference in the file is walked up to the nearest declaration that names
-// something, and that name is taken as a `RunFailure`-valued binding for the
-// rest of the file:
+// reference in the file is walked up to the declaration it annotates, and the
+// LOCAL name that declaration binds the annotated value under is taken as a
+// `RunFailure`-valued binding for the rest of the file:
 //
-//   - a property signature or declaration -- `{ failure: RunFailure }` in a
-//     destructured parameter, or the same member on a named props interface the
-//     component destructures by that name;
-//   - a parameter -- `(failure: RunFailure)`;
-//   - a variable declaration -- `const failure: RunFailure = ...`, and the
-//     `useState<RunFailure>()` shape, where the type rides the initializer's
-//     type argument and the state binding is the array pattern's first element.
+//   - a parameter or variable annotated whole -- `(failure: RunFailure)`,
+//     `const failure: RunFailure = ...`, and the `useState<RunFailure>()`
+//     shape, where the type rides the initializer's type argument and the state
+//     binding is the array pattern's first element;
+//   - a member of the type literal annotating one -- `{ failure: RunFailure }`
+//     on a destructured parameter -- read through the destructuring to the name
+//     the binding element introduces, which in `{ failure: renamedFailure }` is
+//     the renamed local and not the property key, and through a nested pattern
+//     the same way. A parameter bound whole (`props: { failure: RunFailure }`)
+//     keeps the key, the name the member is read by there;
+//   - a member of a named props interface, by the key alone: the interface and
+//     the component destructuring it are two declarations this single-file scan
+//     does not link, so the member is found under the key a component that
+//     destructures it unrenamed binds, and a component renaming it
+//     (`{ failure: renamed }: Props`) binds nothing here -- a stated limit.
 //
 // Matching by NAME within one file is what stands in for resolution. A file
 // that binds an unrelated value under a name it also annotates as `RunFailure`
@@ -93,31 +101,65 @@ export const SINK_COMPONENT_FILE = "apps/web/src/exchange/RunSurface.tsx";
 /** The sink's prop the message is passed as. */
 const SINK_MESSAGE_PROP = "message";
 
-/** The nearest ancestor of `node` a name can be read off, or undefined. */
-function namingDeclaration(node) {
+/**
+ * The declaration `node` annotates, with the property key path from that
+ * declaration's type down to `node` -- empty when the annotation is the
+ * declaration's own type. `declaration` is undefined for a member of a named
+ * type, which annotates no declaration of its own.
+ */
+function annotatedDeclaration(node) {
+  const keys = [];
   for (let current = node.parent; current; current = current.parent) {
-    if (
-      ts.isPropertySignature(current) ||
-      ts.isPropertyDeclaration(current) ||
-      ts.isParameter(current) ||
-      ts.isVariableDeclaration(current)
-    )
-      return current;
+    if (ts.isPropertySignature(current) || ts.isPropertyDeclaration(current)) {
+      if (!ts.isIdentifier(current.name) && !ts.isStringLiteral(current.name))
+        return undefined;
+      keys.unshift(current.name.text);
+      continue;
+    }
+    if (ts.isParameter(current) || ts.isVariableDeclaration(current))
+      return { declaration: current, keys };
     // A function boundary ends the walk: a type reference in a return type or a
     // nested signature names nothing the body binds.
     if (ts.isFunctionLike(current)) return undefined;
   }
-  return undefined;
+  return keys.length > 0 ? { declaration: undefined, keys } : undefined;
 }
 
 /**
- * The names a declaration binds a value under: its own identifier, or -- for the
- * `useState<RunFailure>()` shape -- the first element of an array pattern, which
- * is the state value while the second is its setter.
+ * The local name an object binding `pattern` gives the value at property path
+ * `keys`, as a one-element array -- none when the path reaches no plain name,
+ * because it is destructured further, taken by a rest element, or left
+ * unbound.
  */
-function boundNames(declaration) {
+function destructuredNames(pattern, [key, ...rest]) {
+  for (const element of pattern.elements) {
+    const bound = element.propertyName ?? element.name;
+    if (element.dotDotDotToken || !ts.isIdentifier(bound) || bound.text !== key)
+      continue;
+    if (rest.length > 0)
+      return ts.isObjectBindingPattern(element.name)
+        ? destructuredNames(element.name, rest)
+        : [];
+    return ts.isIdentifier(element.name) ? [element.name.text] : [];
+  }
+  return [];
+}
+
+/**
+ * The names an annotation binds its value under, by the walk the module header
+ * describes: the local a destructuring introduces for an annotated member, and
+ * otherwise the declaration's own identifier or the member's key.
+ */
+function boundNames({ declaration, keys }) {
+  if (!declaration) return keys.slice(-1);
   const { name } = declaration;
+  if (keys.length > 0)
+    return ts.isObjectBindingPattern(name)
+      ? destructuredNames(name, keys)
+      : keys.slice(-1);
   if (ts.isIdentifier(name)) return [name.text];
+  // The `useState<RunFailure>()` shape: the state value is the array pattern's
+  // first element, the second being its setter.
   if (ts.isArrayBindingPattern(name)) {
     const [first] = name.elements;
     if (first && ts.isBindingElement(first) && ts.isIdentifier(first.name))
@@ -140,9 +182,8 @@ export function failureBindingNames(sourceFile) {
       node.typeName.text !== FAILURE_TYPE_NAME
     )
       continue;
-    const declaration = namingDeclaration(node);
-    if (declaration)
-      for (const name of boundNames(declaration)) names.add(name);
+    const annotation = annotatedDeclaration(node);
+    if (annotation) for (const name of boundNames(annotation)) names.add(name);
   }
   return [...names].sort();
 }

@@ -129,6 +129,46 @@ describe("RunFailure display-sink check", () => {
     ).toMatchObject([{ text: "failure.message", throughSink: false }]);
   });
 
+  it("follows a renamed destructure to the local name it binds", () => {
+    const source = `
+      export function Alerted({ failure: renamedFailure }: { failure: RunFailure }) {
+        return <span style={{ whiteSpace: "pre-line" }}>{renamedFailure.message}</span>;
+      }
+    `;
+    expect(bindingsIn(source)).toEqual(["renamedFailure"]);
+    expect(rendersIn(source)).toMatchObject([
+      { text: "renamedFailure.message", throughSink: false },
+    ]);
+  });
+
+  it("allows a renamed destructure rendered through the sink", () => {
+    expect(
+      rendersIn(`
+        export function Alerted({ failure: renamedFailure }: { failure: RunFailure }) {
+          return <FailureMessage message={renamedFailure.message} />;
+        }
+      `),
+    ).toMatchObject([{ text: "renamedFailure.message", throughSink: true }]);
+  });
+
+  it("follows a renamed destructure nested one pattern deep", () => {
+    expect(
+      rendersIn(`
+        function Alerted({ run: { failure: renamedFailure } }: { run: { failure: RunFailure } }) {
+          return <span>{renamedFailure.message}</span>;
+        }
+      `),
+    ).toMatchObject([{ text: "renamedFailure.message", throughSink: false }]);
+  });
+
+  it("keeps the member's key for a props object bound whole", () => {
+    expect(
+      bindingsIn(
+        "function Alerted(props: { failure: RunFailure }) { return props; }\n",
+      ),
+    ).toEqual(["failure"]);
+  });
+
   it("passes over a file annotating no name as the failure type", () => {
     expect(
       rendersIn(`
