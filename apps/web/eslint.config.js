@@ -192,11 +192,16 @@ export default [
     // parseBoundedJson; its bound and the rationale for it are in
     // packages/core/src/utils/boundedJson.ts and docs/spec/CHANNEL_SECURITY.md.
     // A parse of a value this process serialized itself opts out with an
-    // eslint-disable-next-line carrying a one-line why. The ban is a
-    // property-access ban on JSON.parse only, so a body read through
-    // Response.json() is outside it; apps/web/src has such sites (fetches of the
-    // console server's own job API), which stay unbounded and are left to
-    // review.
+    // eslint-disable-next-line carrying a one-line why.
+    //
+    // Beside it, the `json` ban closes the same gap for a body read off a
+    // `Response`: a JSON.parse ban alone does not reach one, since the parse
+    // happens inside the platform method. It is a property ban with no object
+    // name, because the receiver of a `.json()` is a variable a selector cannot
+    // resolve -- so it also matches `Response.json()` the response builder,
+    // which this app does not use (it builds responses through
+    // `jobJsonResponse`). Nothing under src/ or server/ reads a `.json`
+    // property for any other reason, so the ban has no standing exemption.
     files: ["src/**/*.{ts,tsx}", "server/**/*.ts"],
     // Fail CI on a stray or rule-silencing disable so an untrusted parse cannot
     // be quietly exempted (a bare `eslint .` only warns). The sibling block above
@@ -211,6 +216,11 @@ export default [
           property: "parse",
           message:
             "Parse JSON this app did not produce -- a request body, a relayed CLI line, a persisted record -- through @psilink/core's parseBoundedJson (a secret-bearing document through parseSensitiveJson); a raw JSON.parse is unbounded and can echo a leading span of the source. A value this process serialized itself: eslint-disable-next-line with a one-line justification.",
+        },
+        {
+          property: "json",
+          message:
+            "Read a fetched body through the bounded read in src/psi/jobApiBody.ts (readBoundedJson / readJsonOrNull, under the cap the endpoint's answer needs); Response.json() buffers whatever the server sends and hands it to a raw JSON.parse. A read that genuinely needs neither: eslint-disable-next-line with a one-line justification.",
         },
       ],
     },

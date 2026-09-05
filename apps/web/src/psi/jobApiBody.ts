@@ -10,7 +10,10 @@ import { readBoundedJsonBody } from "@utils/boundedJsonBody";
  * to catch a hostile answer: it is there so an answer that is not the one this
  * endpoint returns -- a proxy's error page, a truncated stream, a console at a
  * different version -- costs a bounded read and a clean failure state rather
- * than an unbounded buffer in the operator's tab.
+ * than an unbounded buffer in the operator's tab. `Response.json()` is banned
+ * across src/ and server/ so a new client cannot read one unbounded; the ban and
+ * its reach are in apps/web/eslint.config.js and
+ * scripts/eslint-web-json-parse-ban.test.mjs.
  */
 
 /**
