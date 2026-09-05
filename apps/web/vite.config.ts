@@ -276,7 +276,7 @@ export default defineConfig((_configEnv) => {
               headless: true,
               enabled: true,
               // Vitest's default viewport is phone-sized (414x896), below the
-              // bench's narrow cut-over (NARROW_VIEWPORT_MAX_WIDTH), which would
+              // app's narrow cut-over (NARROW_VIEWPORT_MAX_WIDTH), which would
               // silently flip every suite into the narrow layout. Pin the
               // project to a wide desktop viewport so the wide layout is the
               // deterministic default; a narrow-layout test opts in with

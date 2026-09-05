@@ -19,10 +19,10 @@ import { classifyInboundValue, concatChunks, unpackFrame } from "./peerjsWire";
  * process toward memory exhaustion by choosing what it sends. It is the CLI half
  * of the control specified in docs/spec/CHANNEL_SECURITY.md ("WebRTC data-channel
  * inbound bound"); the web half wraps PeerJS's own reassembly internals
- * (apps/web/src/psi/boundedReassembly.ts). Both enforce the SAME constants and
- * the SAME BinaryPack structural pre-scan, which is why those live once in
- * `@psilink/core` (connection/binaryPackBounds.ts) rather than beside either
- * transport.
+ * (apps/web/src/psi/transport/boundedReassembly.ts). Both enforce the SAME
+ * constants and the SAME BinaryPack structural pre-scan, which is why those
+ * live once in `@psilink/core` (connection/binaryPackBounds.ts) rather than
+ * beside either transport.
  *
  * Where this differs from the web half, and why: the CLI owns its reassembler
  * outright instead of wrapping PeerJS's, so it can be stricter in two places

@@ -8,7 +8,7 @@
 // The half that is NOT here is the part bound to a specific reassembler: the
 // web app wraps PeerJS's `_handleChunk`/`_handleDataMessage` internals to
 // apply these constants at its unpack chokepoint
-// (apps/web/src/psi/boundedReassembly.ts).
+// (apps/web/src/psi/transport/boundedReassembly.ts).
 //
 // The scan reads only the BinaryPack wire format -- the marker dispatch in
 // `peerjs-js-binarypack`'s `Unpacker.unpack` -- never the library's API, so
@@ -71,10 +71,11 @@ export const MAX_WEBRTC_FRAME_BYTES = 256 * 1024 * 1024;
  * contiguously, so at most one frame is ever mid-reassembly on an honest
  * exchange. This cap is generous headroom above that maximum of one; beyond
  * it the oldest incomplete partial is evicted (`boundChunkReassembly` in
- * apps/web/src/psi/boundedReassembly.ts), bounding a flood of never-completed
- * partials from distinct message ids -- the case PeerJS leaves unbounded,
- * retaining a partial keyed by message id indefinitely. Fixed, not
- * configurable, for the same reason as the byte bound.
+ * apps/web/src/psi/transport/boundedReassembly.ts), bounding a flood
+ * of never-completed partials from distinct message ids -- the case
+ * PeerJS leaves unbounded, retaining a partial keyed by message id
+ * indefinitely. Fixed, not configurable, for the same reason as the byte
+ * bound.
  */
 export const MAX_CONCURRENT_REASSEMBLIES = 8;
 

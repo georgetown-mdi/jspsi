@@ -75,7 +75,7 @@ export const MAX_TEXT_LENGTH = 1024;
  * Letters outside ASCII are untouched: the ranges stop below U+00A0.
  *
  * The web console applies these same ranges to an operator's `--identity`
- * label (`IDENTITY_CONTROL_CHAR_PATTERN`, apps/web/src/psi/identityLabel.ts,
+ * label (`IDENTITY_CONTROL_CHAR_PATTERN`, apps/web/src/jobs/intentSchemas.ts,
  * held equal by apps/web/test/unit/identityLabelParity.test.ts) and is
  * stricter, also refusing a leading `-`.
  */
