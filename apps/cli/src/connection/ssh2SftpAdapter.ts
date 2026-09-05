@@ -58,6 +58,7 @@ import {
   isPreIdentificationDialFailure,
   peerProbeTargetFromConnectOptions,
 } from "./sftpPeerIdentification";
+import { sshWireTraceCallback } from "./sftpWireTrace";
 import {
   SubsystemOpenTimeoutError,
   subsystemOpenTimeoutMs,
@@ -409,6 +410,12 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // release reading stands where a session is live.
   private sessionBoundary: SessionBoundary = "notReleased";
   private log: ReturnType<typeof getLoggerForVerbosity>;
+  // Where the SSH stack's own diagnostics go, or undefined when this adapter's
+  // logger is not at the trace level (see ./sftpWireTrace). Resolved from the
+  // logger built below rather than per dial: an application applies the
+  // operator's level before it builds a connection, so the level a dial would
+  // read is the one already read here.
+  private readonly wireTrace: ((line: string) => void) | undefined;
   // The raw SFTPWrapper this adapter has already attached its fatal-'error'
   // listener to, so connect() attaches exactly once per wrapper instance (see
   // attachFatalErrorListener). Stored as the wrapper object identity, not a
@@ -478,6 +485,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     } = {},
   ) {
     this.log = getLoggerForVerbosity("sftp-adapter", options.verbosity ?? 1);
+    this.wireTrace = sshWireTraceCallback(this.log);
     // ssh2-sftp-client's bare constructor installs default callbacks that
     // console.error/console.log the underlying ssh2 Client's error/end/close
     // events whenever they fire outside a high-level operation it initiated.
@@ -1511,6 +1519,13 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     // transport-agnostic; cast here is intentional.
     const { maxReconnectAttempts: _, ...rest } = options;
     const connectOptions = rest as Ssh2SftpClient.ConnectOptions;
+    // Route the SSH stack's own diagnostics into this adapter's logger for the
+    // life of the connection this dial opens, at the trace level and nowhere
+    // else (see ./sftpWireTrace). Seated on the per-dial options rather than the
+    // retained ones, so no callback is stored on what a recovery re-dial reads
+    // back, and every dial path -- the first connect, a recovery re-dial, a
+    // connection-per-poll cycle start -- passes here.
+    if (this.wireTrace !== undefined) connectOptions.debug = this.wireTrace;
     this.options = connectOptions;
     // Watch the transport lifecycle from the first dial on, so the reading a later
     // recovery re-dial takes covers every transport this adapter establishes.
