@@ -31,7 +31,7 @@ import type { WebRTCEndpoint } from "./invitation.js";
  * (`username`) with an obvious `REPLACE_WITH_...` placeholder for the operator
  * to fill in (see {@link mintExchangeFile}).
  */
-export interface SftpExchangeLocator {
+interface SftpExchangeLocator {
   channel: "sftp";
   /** Non-empty hostname of the SFTP server. */
   host: string;
@@ -57,7 +57,7 @@ export interface SftpExchangeLocator {
  * the directory locator and optional {@link FileSyncOptions} -- a credential is
  * unrepresentable here too (see {@link SftpExchangeLocator}).
  */
-export interface FiledropExchangeLocator {
+interface FiledropExchangeLocator {
   channel: "filedrop";
   /** Shared directory (shared mode). Mutually exclusive with the split
    * `inboundPath`/`outboundPath` pair. */
@@ -164,7 +164,7 @@ export interface ExchangeFileInput {
  * (file-sync for the downloadable mint, webrtc for the managed record) and the
  * one assembly rule they share.
  */
-export interface ExchangeSpecAssembly {
+interface ExchangeSpecAssembly {
   connection: ConnectionConfig;
   linkageTerms: LinkageTerms;
   metadata?: Metadata;

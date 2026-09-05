@@ -11,7 +11,7 @@ import type { AssociationTable } from "./types";
  * vertex reaching the graph through a pair (docs/spec/PROTOCOL.md, The
  * `many-to-many` entity closure).
  */
-export interface EntityCluster {
+interface EntityCluster {
   readonly localRows: ReadonlyArray<number>;
   readonly partnerRows: ReadonlyArray<number>;
 }

@@ -149,7 +149,7 @@ export const hostileTerms: LinkageTerms = {
  * branch, so one terms document cannot reach both and a second one is what
  * reaches the donor.
  */
-export const swapDonorTerms: LinkageTerms = {
+const swapDonorTerms: LinkageTerms = {
   ...hostileTerms,
   linkageKeys: [
     {
@@ -176,7 +176,7 @@ export const swapDonorTerms: LinkageTerms = {
  * partner-controlled values the terms themselves do not hold -- the invitation's
  * expiry instant and a file-drop endpoint's advisory path.
  */
-export type HostileSource = Pick<
+type HostileSource = Pick<
   InvitationToken,
   "linkageTerms" | "expires" | "disclosedPayloadColumns" | "connectionEndpoint"
 >;
@@ -197,7 +197,7 @@ export const hostileSource: HostileSource = {
  *
  * {@link swapDonorTerms} as the decoded-token subset.
  */
-export const swapDonorSource: HostileSource = {
+const swapDonorSource: HostileSource = {
   ...hostileSource,
   linkageTerms: swapDonorTerms,
 };

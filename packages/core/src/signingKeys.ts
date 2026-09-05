@@ -23,7 +23,7 @@ import { UsageError } from "./errors.js";
 
 /** P-256 field element width: the fixed byte length of a JWK `x`, `y`, or `d`
  * (RFC 7518 section 6.2, left-padded to the field size). */
-export const P256_COORDINATE_BYTES = 32;
+const P256_COORDINATE_BYTES = 32;
 
 /** Byte length of an ECDSA P-256 signature in the fixed-length raw `r || s`
  * encoding (IEEE P1363) that `crypto.subtle` emits and accepts. It is never a
@@ -32,10 +32,10 @@ export const P256_COORDINATE_BYTES = 32;
 export const ECDSA_P256_SIGNATURE_BYTES = 64;
 
 /** Key-import parameters for ECDSA over P-256. */
-export const ECDSA_P256 = { name: "ECDSA", namedCurve: "P-256" } as const;
+const ECDSA_P256 = { name: "ECDSA", namedCurve: "P-256" } as const;
 
 /** Sign/verify parameters: ECDSA over P-256 with SHA-256. */
-export const ECDSA_P256_SHA256 = { name: "ECDSA", hash: "SHA-256" } as const;
+const ECDSA_P256_SHA256 = { name: "ECDSA", hash: "SHA-256" } as const;
 
 /**
  * Thrown for any signing-identity or certificate problem: a malformed or

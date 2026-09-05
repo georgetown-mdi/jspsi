@@ -226,7 +226,7 @@ async function deriveDirectionalPayloadMacKey(
  * no-data case an empty value). Reproduces across implementations under the fixed
  * canonical rules.
  */
-export async function macCommittedPayload(
+async function macCommittedPayload(
   macKey: Uint8Array<ArrayBuffer>,
   payload: CommittedPayload,
 ): Promise<string> {

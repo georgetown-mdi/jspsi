@@ -56,12 +56,12 @@ export const REGEX_STEP_PATTERN_PARAM: Readonly<Record<string, string>> = {
  * bounding total validation cost regardless of pattern count. A legitimate terms
  * set holds a handful of short patterns and finishes in well under a millisecond.
  */
-export const REGEX_DIALECT_TOTAL_BUDGET_MS = 2000;
+const REGEX_DIALECT_TOTAL_BUDGET_MS = 2000;
 
 /** Optional overrides for the conformance walk; both defaulted. Exposed so tests
  * can drive the budget-exhaustion path deterministically, and so the schema can
  * pass the source-length bound the gate rejects at. */
-export interface RegexDialectBudget {
+interface RegexDialectBudget {
   /** Total wall-clock budget across all patterns; see
    * {@link REGEX_DIALECT_TOTAL_BUDGET_MS}. */
   totalBudgetMs?: number;

@@ -125,7 +125,7 @@ const ZIP_CODE_STEPS: StandardizationStep[] = [
 
 // --- Default standardization -------------------------------------------------
 
-export interface DefaultStandardizationOptions {
+interface DefaultStandardizationOptions {
   /**
    * Input date format for the `date_of_birth` pipeline, passed as `inputFormat`
    * to `parse_date`. Defaults to `"MM/DD/YYYY"` when omitted. Pair with

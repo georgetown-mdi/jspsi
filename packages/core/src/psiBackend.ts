@@ -15,7 +15,7 @@ import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
  * Which PSI crypto engine {@link loadPsiBackend} resolved: the native N-API
  * addon, or the portable WebAssembly build.
  */
-export type PsiBackendKind = "native" | "wasm";
+type PsiBackendKind = "native" | "wasm";
 
 /**
  * Loaders the environment supplies to {@link loadPsiBackend}. The selector owns
@@ -24,7 +24,7 @@ export type PsiBackendKind = "native" | "wasm";
  * decision -- and a browser bundle pulls in neither the node WASM entry nor the
  * native addon.
  */
-export interface PsiBackendLoaders {
+interface PsiBackendLoaders {
   /**
    * Loads the native addon backend, or resolves `null` when no prebuild is
    * available for this platform. Consulted only under Node. A throw is treated

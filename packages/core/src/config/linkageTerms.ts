@@ -1074,7 +1074,7 @@ const PayloadSchema: z.ZodType<Payload> = z.object({
  * cross-checked: any mismatch, or an `expirationDate` that has passed, fails
  * the exchange before any data is transmitted.
  */
-export interface LegalAgreement {
+interface LegalAgreement {
   /** Identifier of the legal agreement (e.g. "MOU-2025-0042"). */
   reference: string;
   /**
@@ -2234,7 +2234,7 @@ export function deriveAcceptedLinkageTerms(
 
 // --- Compatibility -----------------------------------------------------------
 
-export interface CompatibilityResult {
+interface CompatibilityResult {
   errors: string[];
   warnings: string[];
 }

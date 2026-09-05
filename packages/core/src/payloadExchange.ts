@@ -652,7 +652,7 @@ export function deriveOutboundPayloadConsent(
  * the set, and {@link assertOutboundPayloadConsented} turns the one blocking case
  * into a refusal.
  */
-export type OutboundPayloadConsentVerdict =
+type OutboundPayloadConsentVerdict =
   | {
       /** Nothing to check: no consent record, or nothing is transmitted at all. */
       status: "not-required";

@@ -142,7 +142,7 @@ export const getLogger = (name: string | symbol) => {
   return result;
 };
 
-export const setLogPrefixer = (logger: logLibrary.Logger) => {
+const setLogPrefixer = (logger: logLibrary.Logger) => {
   if ((logger as unknown as Record<symbol, boolean>)[PREFIXED]) return;
   (logger as unknown as Record<symbol, boolean>)[PREFIXED] = true;
   const originalFactory = logger.methodFactory;

@@ -75,7 +75,7 @@ const ELISION_SUFFIX = ` ${CAUSE_DEPTH_ELISION_MARKER}`;
  * a rendered chain can carry is the one this constant put there. A link whose own
  * text reads `caused by:` therefore cannot forge a link boundary.
  */
-export const ERROR_CAUSE_SEPARATOR = "\ncaused by: ";
+const ERROR_CAUSE_SEPARATOR = "\ncaused by: ";
 
 /**
  * Fallback emitted for a cause-chain link whose message cannot be read -- a

@@ -128,7 +128,7 @@ export function composeDirsDisplay(
 // can have left behind, so it is the only one an operator-facing message may
 // attribute to residue.
 /** @internal */
-export type PeerHelloProvenance = "presentAtEntry" | "appearedAfterEntry";
+type PeerHelloProvenance = "presentAtEntry" | "appearedAfterEntry";
 
 // Reads the hello control file through the I5 partial-sync gate. Retries on a
 // transient get() failure or a JSON parse failure (indicating the sync tool has

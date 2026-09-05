@@ -147,7 +147,7 @@ export interface TransportControls {
 }
 
 /** The transport-specific operations the queue drives. */
-export interface TransportHooks {
+interface TransportHooks {
   /**
    * Hands a message to the transport. Resolution means the message has been
    * accepted locally for delivery (buffered, or durably written), NOT that the
@@ -687,7 +687,7 @@ export function fromEventConnection(
  * schemas and hand-written validators satisfy it, so this helper does not pin a
  * specific Zod version.
  */
-export interface ParseSchema<T> {
+interface ParseSchema<T> {
   parse(value: unknown): T;
 }
 

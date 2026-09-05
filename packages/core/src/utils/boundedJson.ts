@@ -25,7 +25,7 @@ import { exceedsJsonStructureBound } from "./jsonStructureBound";
 /** @internal */
 export const MAX_JSON_OBJECT_KEYS = 65536;
 /** @internal */
-export const MAX_JSON_ARRAY_ELEMENTS = 16_777_216;
+const MAX_JSON_ARRAY_ELEMENTS = 16_777_216;
 /** @internal */
 export const MAX_JSON_NESTING_DEPTH = 4096;
 

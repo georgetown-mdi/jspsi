@@ -79,7 +79,7 @@ export const associationAndIterationArray =
 type IndexIterationMap = Array<IndexIterationPair | undefined>;
 type IterationMap = Array<IndexIterationPair>;
 
-export interface IndexableIterable<T> extends Iterable<T> {
+interface IndexableIterable<T> extends Iterable<T> {
   [index: number]: T | undefined;
 }
 
@@ -172,7 +172,7 @@ export function removeDuplicatesAndUndefineds(
  *
  * @internal exported for the round-construction tests.
  */
-export interface RoundCandidates {
+interface RoundCandidates {
   readonly rows: Array<number>;
   readonly groupStarts?: Array<number>;
 }

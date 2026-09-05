@@ -33,11 +33,8 @@ import { SftpSession } from "./sftpSession";
 export type { PresentedHostKey } from "./sftpConnect";
 export {
   MESSAGE_ENVELOPE_VERSION,
-  MESSAGE_TYPE_OBJECT,
   MESSAGE_TYPE_BINARY,
   MESSAGE_HEADER_BYTES,
-  serializeFileSyncMessageHeader,
-  serializeFileSyncMessage,
 } from "./fileSyncFraming";
 import {
   composeDirsDisplay,
@@ -673,7 +670,7 @@ export class FileSyncConnection extends EventEmitter<Events, never> {
     this.client = this.boundTransport(client);
     // No peerId validation here: Options is an internal type, not the public
     // FileSyncOptions. The validation boundary is FileSyncOptionsSchema
-    // (enforced by parseFileSyncOptions / applyConnectionOverrides). All
+    // (enforced by safeParseFileSyncOptions / applyConnectionOverrides). All
     // production callers go through that path before reaching this constructor.
     this.id = options?.peerId ?? uuidv4();
     this.role = "unknown role";

@@ -40,7 +40,7 @@ export interface PsiWorkerInit {
  * A host -> worker request body, one variant per {@link PsiEngine} method. The
  * enclosing {@link PsiWorkerRequest} adds the correlation id.
  */
-export type PsiWorkerRequestBody =
+type PsiWorkerRequestBody =
   | { method: "createServerSetup"; values: ReadonlyArray<string> }
   | { method: "processClientRequest"; requestBytes: Uint8Array }
   | { method: "createClientRequest"; values: ReadonlyArray<string> }

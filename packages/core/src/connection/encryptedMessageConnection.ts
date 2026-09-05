@@ -31,7 +31,7 @@ export const AEAD_ENVELOPE_VERSION = 1;
 /** @internal */
 export const TYPE_JSON = 0;
 /** @internal */
-export const TYPE_BINARY = 1;
+const TYPE_BINARY = 1;
 
 // Byte offset within the 12-byte IV where the 8-byte big-endian sequence
 // number is written (preceded by 4 zero bytes the sender writes and GCM

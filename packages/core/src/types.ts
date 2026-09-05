@@ -103,7 +103,7 @@ export type Connection = {
   setInboundFrameCap?: (maxBytes: number | undefined) => void;
 };
 
-export type Role = "starter" | "joiner" | "either";
+type Role = "starter" | "joiner" | "either";
 export type HandshakeRole = "initiator" | "responder";
 
 export interface Config {
@@ -114,8 +114,7 @@ export interface Config {
 export const AlgorithmSchema = z.enum(["psi", "psi-c"]);
 export type Algorithm = z.infer<typeof AlgorithmSchema>;
 
-export const PsiRoleSchema = z.enum(["sender", "receiver"]);
-export type PsiRole = z.infer<typeof PsiRoleSchema>;
+export type PsiRole = "sender" | "receiver";
 
 export const SEMANTIC_TYPES = [
   "ssn",

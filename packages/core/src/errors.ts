@@ -70,7 +70,7 @@ export class UsageError extends Error {
  * @see {@link DirectoryListingBoundsError}
  * @see {@link TransportOperationStalledError}
  */
-export interface TransportRefusalOptions {
+interface TransportRefusalOptions {
   /**
    * Ordered detail fragments, each rendered as a capped cause link of its own:
    * one per party that chose the bytes in it, carrying its own first-party label

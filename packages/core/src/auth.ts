@@ -126,7 +126,7 @@ export const ABORT_TOKEN_ROLES = Object.freeze([
 ] as const);
 
 /** An abort-token role. One of the fixed {@link ABORT_TOKEN_ROLES}. */
-export type AbortTokenRole = (typeof ABORT_TOKEN_ROLES)[number];
+type AbortTokenRole = (typeof ABORT_TOKEN_ROLES)[number];
 
 /**
  * Derive a 32-byte per-direction abort token from the session key using HKDF.

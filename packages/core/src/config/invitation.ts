@@ -906,7 +906,7 @@ export async function decodeInvitation(
  * belongs to what the bound governs, not to the comparison, so a caller states
  * one explicitly.
  */
-export type UnparseableExpiryVerdict = "fail-closed" | "fail-open";
+type UnparseableExpiryVerdict = "fail-closed" | "fail-open";
 
 /**
  * Whether the ISO 8601 instant `expires` has passed as of `now`: `true` when

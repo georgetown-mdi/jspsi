@@ -195,7 +195,7 @@ export interface InvitationLegalAgreementSummary {
  * cannot resolve is `unchecked` -- carried and caveated exactly as before, since
  * nothing here resolves a partner's set name.
  */
-export interface InvitationRuleSetIdentitySummary {
+interface InvitationRuleSetIdentitySummary {
   /** The set's declared name, sanitized for display. */
   name: Displayable;
   /** The set's declared content version, sanitized for display. */
@@ -218,7 +218,7 @@ export interface InvitationRuleSetSummary {
 }
 
 /** The optional data columns the inviter declares, with names sanitized. */
-export interface InvitationPayloadSummary {
+interface InvitationPayloadSummary {
   /** Columns the inviter will send for matched records (what the acceptor
    * receives), in the inviter's namespace, each sanitized for display. Empty when
    * the declared set is empty; read {@link sendDeclared} to tell that apart from
@@ -277,7 +277,7 @@ export interface InvitationPayloadSummary {
  * its parameters -- which determine what the function does, and so what
  * matches.
  */
-export interface InvitationTransformSummary {
+interface InvitationTransformSummary {
   /** Sanitized name of the transform function. */
   function: Displayable;
   /**
@@ -336,7 +336,7 @@ export interface InvitationTransformSummary {
  * match on it: the field it derives from and any non-default matching rule it
  * carries (a value transform or a fuzzy-comparison expansion).
  */
-export interface InvitationKeyElementSummary {
+interface InvitationKeyElementSummary {
   /**
    * Human-readable label for the field this element derives from: the fixed
    * label for its semantic type, or the sanitized raw field name when the
@@ -455,7 +455,7 @@ export interface InvitationKeySummary {
  * application warns rather than enforces), surfaced so the acceptor sees every
  * rule attached to the matched data.
  */
-export interface InvitationFieldSummary {
+interface InvitationFieldSummary {
   /** Human-readable label for the field's semantic type. */
   label: string;
   /**

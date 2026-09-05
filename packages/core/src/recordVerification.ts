@@ -123,7 +123,7 @@ export interface RecordVerificationReport {
  * terms hash. Every field is optional: an omitted data set leaves its commitment
  * unopened (`not-supplied`), and omitting either party's terms leaves the terms
  * hash `not-checked`. */
-export interface RecordVerificationInputs {
+interface RecordVerificationInputs {
   /** The committed data sets, keyed by {@link CommitmentName}, re-supplied from the
    * holder's retained input and result and re-canonicalized to the exact bytes the
    * commit used (the {@link CanonicalValue} domain). */
@@ -378,7 +378,7 @@ export interface RetainedResult {
 
 /** The retained artifacts a holder re-supplies to reconstruct the committed data
  * for {@link verifyExchangeRecord}. */
-export interface ReconstructionSources {
+interface ReconstructionSources {
   /** The parsed record being verified -- its governance carries the committed
    * column names, so the reconstruction does not have to un-prefix the result's
    * `their_`-disambiguated headers. */
@@ -396,7 +396,7 @@ export interface ReconstructionSources {
 
 /** The reconstructed committed data plus any non-fatal caveats a caller should
  * surface (e.g. a duplicate-identifier ambiguity). */
-export interface ReconstructedData {
+interface ReconstructedData {
   data: Partial<Record<CommitmentName, CanonicalValue>>;
   warnings: string[];
 }

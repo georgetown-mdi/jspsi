@@ -37,13 +37,13 @@
 // PROTOCOL_VERSION (docs/spec/PROTOCOL.md, Protocol-version reconcile at the terms
 // exchange), so this file pins the ENVELOPE around it.
 
+import { createMessagePipe } from "../../dist/core.esm.js";
 import {
   PROTOCOL_VERSION,
   TERMS_ENVELOPE_FIELDS,
-  createMessagePipe,
   exchangeTerms,
   sendAbort,
-} from "../../dist/core.esm.js";
+} from "../../dist/testing.esm.js";
 
 // A compatible pair of minimal terms: two linkage keys, so the effective key
 // count the envelope carries is legibly the key count rather than colliding with
