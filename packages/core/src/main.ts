@@ -1,3 +1,15 @@
+// The supported entry point of @psilink/core: the names a consumer of the
+// published package may import from "@psilink/core". They are listed one at a
+// time rather than re-exported by module, so publishing a name is a decision
+// made here rather than a side effect of exporting it somewhere under src/.
+//
+// A name belongs here when production code outside packages/core calls it, or
+// when a comment beside it states why the package publishes it anyway.
+// Anything else stays module-internal, and product code exposed only so a test
+// outside packages/core can drive it goes on the ./testing subpath
+// (src/testing.ts). Which channel shared test material takes: docs/TESTING.md,
+// Shared test material.
+
 export {
   DirectoryListingBoundsError,
   FrameSizeExceededError,
