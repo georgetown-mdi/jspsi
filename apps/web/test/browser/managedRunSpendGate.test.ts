@@ -32,7 +32,7 @@ import { managedExchangeLockName } from "@psi/managed/managedExchangeLock";
 import { captureDownloads } from "./captureDownloads";
 import { createAppMount } from "./renderApp";
 
-import type { CapturedDownload } from "./captureDownloads";
+import type { DownloadCapture } from "./captureDownloads";
 import type { NewManagedExchange } from "@psi/managed/managedExchangeRecord";
 
 // A spend must never hand over a copy of the shared secret that a run's rotation
@@ -55,9 +55,12 @@ vi.mock("@psi/transport/rendezvous", async () =>
 // (managedExchangeRun.ts, "Persist-before-success"), which is what makes an
 // artifact downloaded earlier stale. It ends by rejecting, so the operator stays on
 // the surface holding the confirmation instead of a completion screen replacing it.
-const liveRun = vi.hoisted(() => ({
-  end: undefined as (() => void) | undefined,
-}));
+
+// The helper is imported inside the hoisted block: vitest runs that block above
+// the file's own imports.
+const liveRun = await vi.hoisted(async () =>
+  (await import("./liveRunSignal")).createLiveRunSignal(),
+);
 vi.mock("@psi/managed/managedRunDriver", () => ({
   runManagedExchangeInBrowser: async ({
     record,
@@ -77,7 +80,7 @@ vi.mock("@psi/managed/managedRunDriver", () => ({
       { ifAvailable: true },
     );
     return new Promise((_resolve, reject) => {
-      liveRun.end = () => reject(new Error("the test ended the run"));
+      liveRun.announceStart(() => reject(new Error("the test ended the run")));
     });
   },
 }));
@@ -147,10 +150,10 @@ const recordGoneNotice = () =>
 // because there is no live copy left for "keep it here" to describe.
 const closeButton = () => page.getByRole("button", { name: "Close" });
 
-// The in-flight reading behind the gate is a poll of the record's run lock, so an
-// assertion on a state a lock change produces waits out one poll interval rather
-// than the locator default.
-const afterPoll = { timeout: 4000 };
+// An assertion on a state the run lock's 400 ms poll produces takes no timeout of
+// its own: an un-timed `expect.element` polls for what is left of the test's own
+// timeout, so a constant here would only narrow the budget every other wait in the
+// file already runs under.
 
 /** Start a run and wait until it is in flight PAST its rotation: the stub publishes
  * its end handle only once the rotated secret is durably persisted, which is the
@@ -162,35 +165,35 @@ async function startRun(): Promise<void> {
   await expect
     .element(page.getByText(/Connecting to your partner/))
     .toBeInTheDocument();
-  await vi.waitFor(() => {
-    expect(liveRun.end).toBeDefined();
-  });
+  await liveRun.started;
 }
 
 /** End the stubbed run and wait for the surface to come out of its running state. */
 async function endRun(): Promise<void> {
-  liveRun.end?.();
+  (await liveRun.started)();
   await expect
-    .element(page.getByText(/Connecting to your partner/), afterPoll)
+    .element(page.getByText(/Connecting to your partner/))
     .not.toBeInTheDocument();
 }
 
 /** Open the collapsed command-line panel and take its two downloads, leaving the
- * hand-off confirmation on screen awaiting the operator's attestation. */
+ * hand-off confirmation on screen awaiting the operator's attestation. The
+ * confirmation renders only from a dispatch that resolved, so it is the panel's own
+ * signal that both anchors fired -- the click lands a store round trip ahead of
+ * them, which no constant here should have to bound. */
 async function dispatchCommandLineExport(
-  captured: Array<CapturedDownload>,
+  downloads: DownloadCapture,
 ): Promise<void> {
-  const before = captured.length;
+  const before = downloads.captured.length;
   await expect.element(exportToggle()).toBeInTheDocument();
   if (exportToggle().element().getAttribute("aria-expanded") === "false")
     await exportToggle().click();
   await downloadButton().click();
-  await vi.waitFor(() => {
-    expect(captured).toHaveLength(before + 2);
-  });
   await expect
     .element(page.getByText("Confirm the hand-off."))
     .toBeInTheDocument();
+  await downloads.settled();
+  expect(downloads.captured).toHaveLength(before + 2);
 }
 
 /**
@@ -271,7 +274,7 @@ async function holdRunLockElsewhere(id: string): Promise<() => void> {
 }
 
 beforeEach(async () => {
-  liveRun.end = undefined;
+  liveRun.reset();
   await clearManagedExchanges();
 });
 
@@ -288,7 +291,7 @@ describe("a hand-off across a run of the same exchange", () => {
     const downloads = captureDownloads();
     try {
       app.render(createElement(ManagedRunSurface, { id: created.id }));
-      await dispatchCommandLineExport(downloads.captured);
+      await dispatchCommandLineExport(downloads);
 
       // With no run in flight the attestation is the operator's to give.
       await expect.element(cronConfirm()).toBeEnabled();
@@ -296,7 +299,7 @@ describe("a hand-off across a run of the same exchange", () => {
 
       await startRun();
 
-      await expect.element(cronConfirm(), afterPoll).toBeDisabled();
+      await expect.element(cronConfirm()).toBeDisabled();
       await expect.element(waitNotice()).toBeInTheDocument();
       await expect
         .element(page.getByText(RUN_IN_FLIGHT_HANDOFF_REASON).first())
@@ -308,7 +311,7 @@ describe("a hand-off across a run of the same exchange", () => {
 
       // The wait is over, but the files on the operator's disk are not this
       // exchange's any more: attesting to them is refused, and spends nothing.
-      await expect.element(cronConfirm(), afterPoll).toBeEnabled();
+      await expect.element(cronConfirm()).toBeEnabled();
       await cronConfirm().click();
 
       await expect.element(supersededNotice()).toBeInTheDocument();
@@ -338,8 +341,8 @@ describe("a hand-off across a run of the same exchange", () => {
 
       // The download reads the record the run left behind, so the attestation is
       // measured against the secret those files actually hold.
-      await dispatchCommandLineExport(downloads.captured);
-      await expect.element(cronConfirm(), afterPoll).toBeEnabled();
+      await dispatchCommandLineExport(downloads);
+      await expect.element(cronConfirm()).toBeEnabled();
       await cronConfirm().click();
 
       await expect
@@ -391,7 +394,7 @@ describe("a hand-off across a run of the same exchange", () => {
         .getByRole("button", { name: "Keep it on this device" })
         .click();
       await migrateButton().click();
-      await expect.element(migrationConfirm(), afterPoll).toBeEnabled();
+      await expect.element(migrationConfirm()).toBeEnabled();
       await migrationConfirm().click();
 
       await expect
@@ -450,7 +453,7 @@ describe("a hand-off whose record is gone", () => {
     const downloads = captureDownloads();
     try {
       app.render(createElement(ManagedRunSurface, { id: created.id }));
-      await dispatchCommandLineExport(downloads.captured);
+      await dispatchCommandLineExport(downloads);
 
       await deleteManagedExchange(created.id);
       await expect.element(cronConfirm()).toBeEnabled();
@@ -512,7 +515,7 @@ describe("a confirmation clicked between two readings of the run lock", () => {
       release = undefined;
       // The confirmation is intact once the run releases: the refused click
       // consumed nothing.
-      await expect.element(migrationConfirm(), afterPoll).toBeEnabled();
+      await expect.element(migrationConfirm()).toBeEnabled();
       await migrationConfirm().click();
       await expect
         .element(page.getByText("Handed off to another device"))
@@ -534,7 +537,7 @@ describe("a confirmation clicked between two readings of the run lock", () => {
     let release: (() => void) | undefined;
     try {
       app.render(createElement(ManagedRunSurface, { id: created.id }));
-      await dispatchCommandLineExport(downloads.captured);
+      await dispatchCommandLineExport(downloads);
       await expect.element(cronConfirm()).toBeEnabled();
 
       restorePoll = stalePollUntilClick(created.id);
@@ -550,7 +553,7 @@ describe("a confirmation clicked between two readings of the run lock", () => {
 
       release();
       release = undefined;
-      await expect.element(cronConfirm(), afterPoll).toBeEnabled();
+      await expect.element(cronConfirm()).toBeEnabled();
       await cronConfirm().click();
       await expect
         .element(page.getByText("Handed off to the command line"))
@@ -583,7 +586,7 @@ describe("a confirmation the run lock refuses at the write", () => {
     let release: (() => void) | undefined;
     try {
       app.render(createElement(ManagedRunSurface, { id: created.id }));
-      await dispatchCommandLineExport(downloads.captured);
+      await dispatchCommandLineExport(downloads);
       await expect.element(cronConfirm()).toBeEnabled();
 
       // A run takes the lock and nothing on this surface ever sees it: neither the
@@ -621,7 +624,7 @@ describe("a confirmation the run lock refuses at the write", () => {
       expect((await getManagedExchange(created.id))?.sharedSecret).toBe(
         created.sharedSecret,
       );
-      await expect.element(cronConfirm(), afterPoll).toBeEnabled();
+      await expect.element(cronConfirm()).toBeEnabled();
       await cronConfirm().click();
 
       await expect
@@ -668,7 +671,7 @@ describe("a confirmation the run lock refuses at the write", () => {
       release = undefined;
       readings.restore();
       readings = undefined;
-      await expect.element(migrationConfirm(), afterPoll).toBeEnabled();
+      await expect.element(migrationConfirm()).toBeEnabled();
       await migrationConfirm().click();
 
       await expect
@@ -695,14 +698,14 @@ describe("a run held in another context", () => {
 
       const release = await holdRunLockElsewhere(created.id);
       try {
-        await expect.element(migrationConfirm(), afterPoll).toBeDisabled();
+        await expect.element(migrationConfirm()).toBeDisabled();
         await expect.element(waitNotice()).toBeInTheDocument();
         expect((await getManagedLocalState(created.id))?.spent).toBeUndefined();
       } finally {
         release();
       }
 
-      await expect.element(migrationConfirm(), afterPoll).toBeEnabled();
+      await expect.element(migrationConfirm()).toBeEnabled();
       await expect.element(waitNotice()).not.toBeInTheDocument();
     } finally {
       downloads.restore();
@@ -714,12 +717,12 @@ describe("a run held in another context", () => {
     const downloads = captureDownloads();
     try {
       app.render(createElement(ManagedRunSurface, { id: created.id }));
-      await dispatchCommandLineExport(downloads.captured);
+      await dispatchCommandLineExport(downloads);
       await expect.element(cronConfirm()).toBeEnabled();
 
       const release = await holdRunLockElsewhere(created.id);
       try {
-        await expect.element(cronConfirm(), afterPoll).toBeDisabled();
+        await expect.element(cronConfirm()).toBeDisabled();
         await expect.element(waitNotice()).toBeInTheDocument();
         // Creating a dispatch mid-run only manufactures the artifact the
         // confirmation would refuse, so both dispatches are withheld too.
@@ -732,7 +735,7 @@ describe("a run held in another context", () => {
         release();
       }
 
-      await expect.element(cronConfirm(), afterPoll).toBeEnabled();
+      await expect.element(cronConfirm()).toBeEnabled();
       await expect.element(migrateButton()).toBeEnabled();
       await expect.element(downloadButton()).toBeEnabled();
       await expect.element(waitNotice()).not.toBeInTheDocument();
