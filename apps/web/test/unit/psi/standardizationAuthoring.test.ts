@@ -4,6 +4,7 @@ import {
   FAN_OUT_FUNCTION_NAMES,
   MAX_TRANSFORM_PATTERN_LENGTH,
   STANDARDIZATION_FUNCTION_DESCRIPTORS,
+  UnknownStandardizationFunctionError,
   getDefaultStandardization,
   prepareForExchange,
   runPipeline,
@@ -288,13 +289,11 @@ describe("descriptor-driven typed param fields", () => {
 });
 
 describe("every reachable pipeline function is descriptor-backed", () => {
-  // `isStepValid` treats a step whose function has no descriptor as valid (it is
-  // not authored through this surface). That is only safe because no descriptor-
-  // less function can reach the gate: the add menu offers only standard-tier
-  // descriptors (parity-tested above) and the recommended default pipelines use
-  // only catalogued functions. Pin the second half so a future default step that
-  // referenced an uncatalogued function (which would slip the gate and throw at
-  // compile) is caught here instead.
+  // `isStepValid` refuses a step whose function has no descriptor, so a default
+  // pipeline that named an uncatalogued function would block its own launch. The
+  // add menu offers only standard-tier descriptors (parity-tested above); pin the
+  // other source of steps, the recommended defaults, so such a function is caught
+  // here rather than at the gate an operator meets.
   test("every function a default standardization emits has a descriptor", () => {
     const fieldTypes = [
       "first_name",
@@ -473,8 +472,16 @@ describe("isStepValid (the launch gate's basis)", () => {
     expect(isStepValid({ function: "filter_regex" })).toBe(false);
   });
 
-  test("a function core does not recognize is treated as valid", () => {
-    expect(isStepValid({ function: "totally_unknown" })).toBe(true);
+  test("a function core does not recognize is invalid", () => {
+    // The descriptor table is core's own registry, so a name absent from it is
+    // one `compileSteps` throws on -- the whole pipeline, before the first row.
+    // Refusing it here is what keeps such a step out of a launched exchange and
+    // out of a minted invitation's cleaning.
+    expect(isStepValid({ function: "totally_unknown" })).toBe(false);
+    expect(descriptorFor("totally_unknown")).toBeUndefined();
+    expect(() =>
+      runPipeline("VALUE", [{ function: "totally_unknown" }]),
+    ).toThrow(UnknownStandardizationFunctionError);
   });
 });
 

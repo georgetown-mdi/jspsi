@@ -520,6 +520,35 @@ describe("a key-element transform core cannot build", () => {
     expect(result.errors.keys).toBeUndefined();
   });
 
+  test.each(uncompilable)(
+    "blocks Generate on %j in an authored cleaning step",
+    (step) => {
+      // The other surface, and the reason the pass needs no compile of its own
+      // for it: an authored cleaning step takes the descriptor gate, which
+      // refuses every one of these shapes -- an unrecognized function name
+      // included, since the descriptor table is core's own registry -- and marks
+      // the field the operator edits.
+      const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
+      expect(isStepValid(step)).toBe(false);
+      const authored = {
+        ...draft,
+        standardization: draft.standardization.map((transformation, index) =>
+          index === 0
+            ? {
+                ...transformation,
+                steps: [...(transformation.steps ?? []), step],
+              }
+            : transformation,
+        ),
+      };
+      const result = validateAdvancedInvite(authored, seed, now);
+      expect(result.canGenerate).toBe(false);
+      expect(result.errors.standardization).toMatch(
+        /Finish or fix the highlighted cleaning steps/,
+      );
+    },
+  );
+
   test("costs a fraction of compiling the transforms the document declares", () => {
     // A document at the schema's key cap whose every element declares its own
     // `parse_date` format: each one generates a distinct pattern, so the
