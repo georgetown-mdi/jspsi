@@ -1,6 +1,6 @@
 import { spawn } from "node:child_process";
 import { createRequire } from "node:module";
-import { createServer } from "node:net";
+import { connect, createServer } from "node:net";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -24,6 +24,13 @@ import type { AddressInfo } from "node:net";
  * Stops at the HTTP surface: the signaling wire is broker.test.ts's.
  */
 
+/** Longest a socket owing the runner a request is given before the measurement
+ * gives up on it. Well above the runner's own 10-second idle bound
+ * (packages/peerjs-broker/src/standaloneUpgradeBounds.ts), so a slow machine
+ * does not fail the check, and well under the test timeout, so a runner that
+ * went back to holding such a socket fails here rather than hanging. */
+const PRE_HANDSHAKE_HOLD_LIMIT_MS = 25_000;
+
 let broker: BrokerProcess | undefined;
 
 afterEach(async () => {
@@ -45,6 +52,50 @@ async function releasedPort(): Promise<number> {
   });
   return port;
 }
+
+/** How long the broker holds a socket that connects and then owes it a request,
+ * measured from the connect to the close. Resolves at
+ * {@link PRE_HANDSHAKE_HOLD_LIMIT_MS} if the broker has not closed it by then.
+ * A reap that destroys a socket with unread bytes on it reaches the client as a
+ * reset rather than a clean shutdown, so the error is read as the close it is
+ * and `close` is what the measurement waits on. */
+async function msBeforeCloseOf(
+  port: number,
+  firstBytes?: string,
+): Promise<number> {
+  const socket = connect(port, "127.0.0.1");
+  const openedAt = Date.now();
+  try {
+    return await new Promise<number>((resolve) => {
+      const giveUp = setTimeout(
+        () => resolve(Date.now() - openedAt),
+        PRE_HANDSHAKE_HOLD_LIMIT_MS,
+      );
+      socket.on("error", () => {});
+      socket.on("connect", () => {
+        if (firstBytes !== undefined) socket.write(firstBytes);
+      });
+      socket.on("close", () => {
+        clearTimeout(giveUp);
+        resolve(Date.now() - openedAt);
+      });
+    });
+  } finally {
+    socket.destroy();
+  }
+}
+
+test("closes a socket that owes it a request rather than holding it", async () => {
+  broker = await startBrokerProcess();
+  // Both sockets are opened against the one broker at once: each is a wait on
+  // the same bound, and running them in series would double it.
+  const [sentNothing, sentHalfARequestLine] = await Promise.all([
+    msBeforeCloseOf(broker.port),
+    msBeforeCloseOf(broker.port, "GET /api/hea"),
+  ]);
+  expect(sentNothing).toBeLessThan(PRE_HANDSHAKE_HOLD_LIMIT_MS);
+  expect(sentHalfARequestLine).toBeLessThan(PRE_HANDSHAKE_HOLD_LIMIT_MS);
+}, 60_000);
 
 test("the readiness probe answers on the mount once the broker is listening", async () => {
   broker = await startBrokerProcess();

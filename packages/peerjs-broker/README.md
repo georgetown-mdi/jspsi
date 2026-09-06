@@ -24,7 +24,7 @@ By default it listens on `127.0.0.1` on an ephemeral port, mounts the signaling 
 
 A flag takes precedence over the environment variable beside it, and an environment variable set to an empty value counts as unset. A port that is not a whole number from 0 to 65535, a blank value, a repeated flag, a flag with no value, a mount that does not begin with `/`, and any unrecognized argument are each refused before the broker starts, with a message naming the flag or the variable the value came from; the process exits 64, the same usage exit the CLI uses. A bind the operating system refuses -- an address that is not this host's, a port already taken -- is reported the same way and exits 69, as is a later fault on the listening socket.
 
-The runner terminates no TLS and applies none of the HTTP upgrade-surface timeouts the web app installs on its own server (`apps/web/server/upgradeHardening.ts`), so a deployment reachable off the host puts it behind a front that does both.
+The runner bounds the window before it has a request in hand: a 10-second header timeout, a 15-second request timeout, and a 10-second idle bound on a socket that has not begun -- or has stopped part-way through -- its request. A peer that connects and sends nothing, or dribbles its headers, is closed rather than held; an established WebSocket is outside all three, governed by the liveness reaper instead. The values are the ones [docs/spec/CHANNEL_SECURITY.md](../../docs/spec/CHANNEL_SECURITY.md) states for the signaling upgrade surface, held in `src/standaloneUpgradeBounds.ts`. The runner terminates no TLS, so a deployment reachable off the host still puts it behind a front that does.
 
 ## Readiness
 

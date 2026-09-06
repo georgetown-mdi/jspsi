@@ -8,6 +8,7 @@ import {
   resolveStandaloneOptions,
   StandaloneOptionError,
 } from "./standaloneOptions.ts";
+import { applyStandaloneUpgradeBounds } from "./standaloneUpgradeBounds.ts";
 
 import type { StandaloneOptions } from "./standaloneOptions.ts";
 
@@ -43,9 +44,9 @@ import type { AddressInfo } from "node:net";
  * and the readiness endpoint -- is resolved in `standaloneOptions.ts` and stated
  * in this workspace's README.
  *
- * It terminates no TLS and applies none of the HTTP upgrade-surface timeouts
- * the web app installs on its own server (apps/web/server/upgradeHardening.ts),
- * so a deployment reachable off the host puts it behind a front that does both.
+ * It bounds the window before it has a request in hand
+ * (`standaloneUpgradeBounds.ts`) but terminates no TLS, so a deployment
+ * reachable off the host puts it behind a front that does.
  */
 
 /** The line the parent matches to learn the port. */
@@ -107,6 +108,8 @@ const options = readOptions();
 const server = createServer(
   createStandaloneRequestHandler(options.readinessPath),
 );
+
+applyStandaloneUpgradeBounds(server);
 
 CreatePeerServerWSOnly(server, writeDiagnostic, {
   path: options.path,
