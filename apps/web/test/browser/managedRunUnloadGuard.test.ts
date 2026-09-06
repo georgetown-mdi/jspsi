@@ -39,13 +39,28 @@ vi.mock("@psi/transport/rendezvous", async () =>
 // exactly as long as the assertions need and nothing dials a partner. It ends by
 // rejecting -- a run that fails still leaves the surface, which is what makes the
 // disarm assertion meaningful rather than a by-product of unmounting.
-const liveRun = vi.hoisted(() => ({
-  end: undefined as (() => void) | undefined,
-}));
+//
+// `started` resolves WITH the function that ends the run, and only once the
+// surface has reached the driver. The surface renders its running state before
+// then (it reads the record out of IndexedDB first), so a test that ended the run
+// off that render alone would call nothing and wait out a run that never ends.
+const liveRun = vi.hoisted(() => {
+  const state = {
+    started: undefined as unknown as Promise<() => void>,
+    announceStart: undefined as unknown as (end: () => void) => void,
+    reset: () => {
+      state.started = new Promise<() => void>((resolve) => {
+        state.announceStart = resolve;
+      });
+    },
+  };
+  state.reset();
+  return state;
+});
 vi.mock("@psi/managed/managedRunDriver", () => ({
   runManagedExchangeInBrowser: () =>
     new Promise((_resolve, reject) => {
-      liveRun.end = () => reject(new Error("the test ended the run"));
+      liveRun.announceStart(() => reject(new Error("the test ended the run")));
     }),
 }));
 
@@ -85,7 +100,7 @@ function unloadWouldBeConfirmed(): boolean {
 const app = createAppMount();
 
 beforeEach(async () => {
-  liveRun.end = undefined;
+  liveRun.reset();
   await clearManagedExchanges();
 });
 
@@ -112,7 +127,8 @@ describe("leaving the page during a managed re-run", () => {
       .toBeInTheDocument();
     expect(unloadWouldBeConfirmed()).toBe(true);
 
-    liveRun.end?.();
+    const endRun = await liveRun.started;
+    endRun();
 
     await expect
       .element(page.getByText(/Connecting to your partner/))
