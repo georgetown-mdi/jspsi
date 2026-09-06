@@ -28,7 +28,7 @@ import { MetadataGrid } from "@components/MetadataGrid";
 import { useDeferredAnnouncement } from "@components/useDeferredAnnouncement";
 import { useOnlineStatus } from "@components/useOnlineStatus";
 
-import { overlongColumnsAlert } from "@psi/columnNames";
+import { overlongColumnsAlert, sanitizedColumnsAlert } from "@psi/columnNames";
 
 import styles from "@styles/app.module.css";
 
@@ -88,6 +88,7 @@ function MarkedColumnList({ names }: { names: Array<string> }) {
 export function AcceptorColumnsStep({
   linkageTerms,
   columns,
+  bidiStrippedColumns,
   columnsState,
   editorState,
   verdict,
@@ -112,6 +113,10 @@ export function AcceptorColumnsStep({
   linkageTerms: LinkageTerms;
   /** The acceptor's own CSV column names. */
   columns: Array<string>;
+  /** The 1-based positions of the columns whose name lost bidi control characters
+   * at the parse, from core's `CSVParseMeta.bidiStrippedColumns`. Empty for a
+   * header that held none. */
+  bidiStrippedColumns: Array<number>;
   columnsState: AcceptorColumnsState;
   /** The effective `{ metadata, standardization }` the verdict and launch consume. */
   editorState: { metadata: Metadata; standardization: Standardization };
@@ -229,6 +234,10 @@ export function AcceptorColumnsStep({
   const overlongAlert =
     overlongDisclosed.length > 0
       ? overlongColumnsAlert(overlongDisclosed)
+      : undefined;
+  const sanitizedNotice =
+    bidiStrippedColumns.length > 0
+      ? sanitizedColumnsAlert(bidiStrippedColumns)
       : undefined;
   const standardizationValid = acceptorStandardizationValid(
     editorState.standardization,
@@ -569,6 +578,22 @@ export function AcceptorColumnsStep({
             title={overlongAlert.title}
           >
             {overlongAlert.message}
+          </Alert>
+        )}
+
+        {/* What the parse removed from the operator's own header, stated where
+            they confirm the columns: this is the screen the names they are about
+            to match and send are read off. Located by position rather than named,
+            since echoing the name would put the removed characters back into the
+            notice. */}
+        {sanitizedNotice !== undefined && (
+          <Alert
+            role="note"
+            color="yellow"
+            icon={<IconAlertCircle aria-hidden />}
+            title={sanitizedNotice.title}
+          >
+            {sanitizedNotice.message}
           </Alert>
         )}
 

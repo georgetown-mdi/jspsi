@@ -212,6 +212,12 @@ export interface JobInputProfile {
   modifiedAt: number;
   rowCount: number;
   columns: Array<string>;
+  /** The 1-based positions of the columns whose name lost bidi control
+   * characters at the parse (core's `CSVParseMeta.bidiStrippedColumns`). The
+   * console's intake seats read the file through this profile rather than
+   * parsing it themselves, so the positions ride the wire for the notice they
+   * show; `columns` already holds the stripped names. */
+  bidiStrippedColumns: Array<number>;
   dateInputFormat?: string;
   columnSamples: Array<ColumnSample>;
 }
@@ -238,31 +244,40 @@ export async function profileJobInput(
   let dobResolved = false;
   let rowCount = 0;
   let columns: Array<string>;
+  let bidiStrippedColumns: Array<number>;
   try {
-    columns = await streamCSVRows(stream, (rows, cols) => {
-      if (!dobResolved && cols.length > 0) {
-        dobColumn = inferDateOfBirthColumn(cols);
-        dobResolved = true;
-      }
-      for (const row of rows) {
-        rowCount++;
-        for (const col of cols) {
-          let bucket = samples.get(col);
-          if (bucket === undefined) {
-            bucket = [];
-            samples.set(col, bucket);
+    ({ columns, bidiStrippedColumns } = await streamCSVRows(
+      stream,
+      (rows, cols) => {
+        if (!dobResolved && cols.length > 0) {
+          dobColumn = inferDateOfBirthColumn(cols);
+          dobResolved = true;
+        }
+        for (const row of rows) {
+          rowCount++;
+          for (const col of cols) {
+            let bucket = samples.get(col);
+            if (bucket === undefined) {
+              bucket = [];
+              samples.set(col, bucket);
+            }
+            if (bucket.length < PREVIEW_SAMPLE_SIZE) {
+              const value = readRowColumn(row, col);
+              if (value !== undefined && value.trim() !== "")
+                bucket.push(value);
+            }
           }
-          if (bucket.length < PREVIEW_SAMPLE_SIZE) {
-            const value = readRowColumn(row, col);
-            if (value !== undefined && value.trim() !== "") bucket.push(value);
+          if (
+            dobColumn !== undefined &&
+            dobSample.length < INFER_DATE_SCAN_CAP
+          ) {
+            const value = readRowColumn(row, dobColumn);
+            if (value !== undefined && value.trim() !== "")
+              dobSample.push(value);
           }
         }
-        if (dobColumn !== undefined && dobSample.length < INFER_DATE_SCAN_CAP) {
-          const value = readRowColumn(row, dobColumn);
-          if (value !== undefined && value.trim() !== "") dobSample.push(value);
-        }
-      }
-    });
+      },
+    ));
   } catch (error) {
     // Classify the fault into a closed code; the underlying error (a read fault
     // embedding the mounted path, or a parser error holding cell bytes) is never
@@ -286,6 +301,7 @@ export async function profileJobInput(
     modifiedAt: mtimeMsInt(stat.mtimeMs),
     rowCount,
     columns,
+    bidiStrippedColumns,
     ...(dateInputFormat !== undefined ? { dateInputFormat } : {}),
     columnSamples,
   };

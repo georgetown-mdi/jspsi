@@ -171,18 +171,17 @@ describe("column-name isolation: what the wrapper does not contain", () => {
   // name here and in the ledger case below, plus exchange.test.ts's rendered-notice
   // expectation -- each of which fails on a sink composing raw names.
   //
-  // Three further sinks put literal copy in one text block with a wrapped name
-  // and stay undriven here, the same limit class as the two below, measured
-  // 2026-09-01: the check-your-answers "Columns shared" row, the acceptor
-  // ledger's send row, and the visually-hidden live regions on both steps.
-  //
-  // Four more sinks of the same string-composition shape stay undriven here
-  // too, measured 2026-09-01: the accessible-name compositions in
-  // MatchingSharingSection.tsx ("Type for <name>", "How <name> is used") and
-  // MetadataGrid.tsx ("Type for column <name>", "How column <name> is used").
-  // They fall outside the "one text block" wording above because they compose
-  // an attribute string, not element copy, but the residual reaches them the
-  // same way.
+  // Which sinks share the residual no longer decides what an operator's header
+  // can do to their screen: every name below is composed here as a prop, while a
+  // name read from a CSV loses all nine bidi control characters at core's parse
+  // boundary (`bidiStrippingHeaderTransform`, packages/core/src/file.ts), so
+  // neither the unmatched PDI nor the open override this measures survives to any
+  // sink. What remains for the sinks that were left undriven -- the
+  // check-your-answers "Columns shared" row, the acceptor ledger's send row, the
+  // visually-hidden live regions, and the accessible-name compositions in
+  // MatchingSharingSection and MetadataGrid -- is a name entering by some route
+  // other than a CSV header, which is the terms schema's bound rather than this
+  // wrapper's.
   //
   // Written as escapes, never as raw bytes, so the source of a test about
   // invisible characters is itself readable.

@@ -134,6 +134,7 @@ function mountAcceptorColumnsStep() {
     createElement(AcceptorColumnsStep, {
       linkageTerms: acceptorTerms,
       columns,
+      bidiStrippedColumns: [],
       columnsState,
       editorState,
       verdict: acceptorVerdict(columns, acceptorTerms, editorState),
@@ -154,6 +155,7 @@ const directProfile: ProfiledJobInput = {
   modifiedAt: 1_700_000_000_000,
   rowCount: 2,
   columns: ["client_id", "first_name", "last_name", "dob", "program_code"],
+  bidiStrippedColumns: [],
   columnSamples: new Map([
     ["client_id", ["1", "2"]],
     ["first_name", ["Ann", "Bo"]],

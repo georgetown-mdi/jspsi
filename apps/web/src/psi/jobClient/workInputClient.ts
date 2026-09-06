@@ -125,6 +125,19 @@ function isStringArray(value: unknown): value is Array<string> {
   );
 }
 
+/** A 1-based column-position list as the profile reports it. Positive integers
+ * only, so a malformed body degrades to the unavailable state rather than
+ * putting a fraction or a negative index into the operator's notice. */
+function isColumnPositionArray(value: unknown): value is Array<number> {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (entry) =>
+        typeof entry === "number" && Number.isInteger(entry) && entry > 0,
+    )
+  );
+}
+
 /** Validate a listing response body, returning null when any field is malformed so
  * a bad body degrades to the error state rather than rendering a partial list. */
 function jobInputListingOf(body: unknown): JobInputListing | null {
@@ -166,6 +179,7 @@ function jobInputProfileOf(body: unknown): ProfiledJobInput | null {
     return null;
   if (typeof rowCount !== "number" || !Number.isInteger(rowCount)) return null;
   if (!isStringArray(columns)) return null;
+  if (!isColumnPositionArray(body.bidiStrippedColumns)) return null;
   if (!Array.isArray(columnSamples)) return null;
   const samples = new Map<string, Array<string>>();
   for (const entry of columnSamples) {
@@ -184,6 +198,7 @@ function jobInputProfileOf(body: unknown): ProfiledJobInput | null {
     modifiedAt,
     rowCount,
     columns,
+    bidiStrippedColumns: body.bidiStrippedColumns,
     columnSamples: samples,
     ...(dateInputFormat !== undefined ? { dateInputFormat } : {}),
   };

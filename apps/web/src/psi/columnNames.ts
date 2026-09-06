@@ -48,6 +48,42 @@ export function unnameableColumnsAlert(positions: ReadonlyArray<number>): {
 }
 
 /**
+ * The operator-facing notice for a file whose header held bidi control
+ * characters, shared by every intake seat so the wording cannot drift. Core's
+ * CSV parse removes them from the name before anything matches on it or sends
+ * it, and reports the 1-based positions it changed (`meta.bidiStrippedColumns`,
+ * `packages/core/src/file.ts`); this is how the operator is told.
+ *
+ * A notice, not a refusal: the header is the operator's own, an operator who
+ * cannot edit a vendor export would lose the exchange over it, and the removal
+ * has already made the name safe to show and to send. `positions` are not
+ * operator-controlled content and are shown directly, while the offending name
+ * never is -- echoing it would put the reordering characters back into the copy
+ * the notice is written to keep readable.
+ */
+export function sanitizedColumnsAlert(positions: ReadonlyArray<number>): {
+  title: string;
+  message: string;
+} {
+  const plural = positions.length > 1;
+  return {
+    title: plural
+      ? "Formatting characters removed from column names"
+      : "A formatting character was removed from a column name",
+    message:
+      `Column${plural ? "s" : ""} ${positions.join(", ")} in your CSV ` +
+      `${plural ? "had names that held" : "had a name that held"} invisible ` +
+      `text-direction characters. They were removed, so the ` +
+      `name${plural ? "s" : ""} used for matching, shown on this screen, and ` +
+      `sent to your partner ${plural ? "are" : "is"} the rest of the header. ` +
+      `Check that ${plural ? "those columns" : "that column"} still ` +
+      `${plural ? "read" : "reads"} the way your file names ` +
+      `${plural ? "them" : "it"}; if not, edit the header row and choose the ` +
+      `file again.`,
+  };
+}
+
+/**
  * The operator-facing alert for a file marked to send a column whose name is
  * longer than {@link MAX_NAME_LENGTH}, shared by every seat that gates on it -- the
  * acceptor's confirm-columns notice, the inviter's create/save surfaces (rendered
