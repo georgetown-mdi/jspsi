@@ -271,6 +271,20 @@ in exact integer arithmetic. The last term is the per-cell candidate-count prefi
 
 **The exact-integer assumption holds where it was.** The cell-count gate's soundness depends on its product being exact ([the ceiling section](#the-single-pass-dataset-ceiling-receiver-memory-and-masking-compute)). The ceiling binds the sum of the per-key widths at `MAX_EFFECTIVE_KEY_COUNT` = 5,120, so the product with `MAX_RECORD_COUNT` (10^12) is 5.12 x 10^15, still below 2^53 (about 9.01 x 10^15) and so still exact, with about 1.8x headroom. Bounding the per-key width alone would not do: 256 keys at `MAX_KEY_CANDIDATE_WIDTH` would be 262,144, whose product with `MAX_RECORD_COUNT` is 2.6 x 10^17 and loses precision. The invariant that pins the headroom is therefore pinned against the effective key count, and raising `MAX_EFFECTIVE_KEY_COUNT` requires re-deriving it.
 
+#### Where the expansion runs: after the element transform, into the cross-product
+
+Both parties MUST derive byte-identical key strings from the agreed terms, so the order in which a key's steps compose is normative rather than an implementation choice. For one (record, key), the order is:
+
+1. The record's own value for each element's field, as this party's local standardization realized it -- one value, or several where a fan-out realized several ([Key input data](#key-input-data)).
+2. That element's `transform` pipeline, applied to each realized value in turn, its outputs collected into the element's deduplicated candidate list.
+3. The element's `generate_fuzzy_comparisons` expansion, applied to each candidate in that list, where this party is the one that expands the declared kind ([Which party expands](#which-party-expands-full-variant-and-deletion-neighbourhood-expansions)). The expansion's output leads with the candidate it was handed, so the exact value matches whether or not the expansion widens it.
+4. The cross-product across the key's elements, one candidate from each, concatenated in the elements' declared order -- both orders on the receiver of a key declaring `swap` ([Swapped keys](../EXCHANGE_REFERENCE.md#swapped-keys)).
+5. One NFC normalization of each assembled string, and the deduplicating set that yields the record's candidate values for the round.
+
+**The expansion runs on the transformed value, not the raw one.** The transform is what puts a value in the canonical space the partner's own value occupies, and a candidate can match only there: `adjacent_years` and `day_month_swaps` locate a year, month, and day at fixed offsets, which only a `parse_date` output layout guarantees. The reverse order would also feed each candidate back through a pipeline free to collapse several of them onto one string or to filter one to `null`, silently narrowing the candidate set the terms declare and the consent surface states. It is the order the width derivation assumes as well: an element's fuzzy ceiling is taken at the width its own transforms bound its value to ([The width bound](#the-width-bound-a-per-key-candidate-cap-the-terms-declare)), which is the width of the value step 3 is handed.
+
+**The final normalization is on the assembled string.** Each part is already NFC, but NFC is not closed under concatenation -- joining two normalized parts can cross a base plus combining-mark boundary that itself composes -- so the pass in step 5 is what makes the key string canonical, and it covers every candidate an expansion produced.
+
 #### Which party expands: full-variant and deletion-neighbourhood expansions
 
 A `generate_fuzzy_comparisons` kind, and the `swap` directive beside it, are one of two mathematically distinct expansions, and which of the two a kind is decides how many parties execute it. The classification is total over the kinds, a function of the kind alone, and identical on both parties (`expandsOnReceiverOnly`, `packages/core/src/fuzzyComparisons.ts`). The model, the alternatives weighed, and the involution argument in full are in [one-sided-fuzzy-expansion.md](../notes/one-sided-fuzzy-expansion.md).
