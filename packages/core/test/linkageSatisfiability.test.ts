@@ -5,6 +5,7 @@ import {
   buildStandardizedDataset,
   buildKeyStrings,
   compileSteps,
+  hasMemoizedCompiledSteps,
   FAN_OUT_FUNCTION_NAMES,
   StandardizedField,
   StandardizedDataset,
@@ -1671,6 +1672,117 @@ describe("assertTransformsCompile", () => {
     ).toThrow(/did not finish within the 0 ms allowed/);
     // Not vacuous: the same terms pass under the budget the mint runs with.
     expect(() => assertTransformsCompile(terms)).not.toThrow();
+  });
+
+  test("a walk the budget stops commits none of what it compiled", () => {
+    // What the walk compiled before the budget was spent is dropped, so the
+    // next walk over the same document starts where this one did rather than
+    // resuming past what it paid for -- which is what let the same document be
+    // refused over and over and then admitted with nothing edited. The formats
+    // are unique to this test so the engine's own pattern cache is cold here.
+    const elements: LinkageKeyElement[] = Array.from(
+      { length: 32 },
+      (_, index) => ({
+        field: "last_name",
+        transform: [
+          {
+            function: "parse_date",
+            params: {
+              inputFormat: `BUDGET-${index}-${"MM/DD/YYYY".repeat(26)}`.slice(
+                0,
+                256,
+              ),
+            },
+          },
+        ],
+      }),
+    );
+    const memoized = (): number =>
+      elements.filter((element) =>
+        hasMemoizedCompiledSteps(element.transform as TransformStep[]),
+      ).length;
+    const terms: LinkageTerms = {
+      ...minimalTerms,
+      linkageKeys: [{ name: "LN", elements }],
+    };
+    expect(() =>
+      assertTransformsCompile(terms, undefined, { totalBudgetMs: 1 }),
+    ).toThrow(/did not finish within the 1 ms allowed/);
+    expect(memoized()).toBe(0);
+    // Not vacuous: a walk that reaches the end does commit what it compiled,
+    // which is what makes a repeated mint of one document pay for it once.
+    expect(() => assertTransformsCompile(terms)).not.toThrow();
+    expect(memoized()).toBe(elements.length);
+  });
+
+  test("refuses a document over the count bound on every mint", () => {
+    // The count bound is the deterministic half: the same document declares the
+    // same steps whatever the machine or the attempt, so a mint repeated after
+    // no edit gets the same refusal rather than eventually going through.
+    const terms: LinkageTerms = {
+      ...minimalTerms,
+      linkageKeys: keysWithTransform(
+        Array.from({ length: 5 }, () => ({ function: "to_upper_case" })),
+      ),
+    };
+    for (let attempt = 0; attempt < 20; attempt += 1)
+      expect(
+        () => assertTransformsCompile(terms, undefined, { maxSteps: 4 }),
+        `attempt ${attempt}`,
+      ).toThrow(/5 steps, against a limit of 4/);
+  });
+
+  test("refuses a document declaring more steps than the count bound", () => {
+    // The deterministic bound the budget cannot be: a count of what the
+    // document declares, answered before anything compiles, so the same
+    // document gets the same answer on any machine. Each surface keeps the
+    // error class it keeps for the compile refusals, by whose content the
+    // fault is.
+    const steps = (count: number): TransformStep[] =>
+      Array.from({ length: count }, () => ({ function: "to_upper_case" }));
+    const overCount: LinkageTerms = {
+      ...minimalTerms,
+      linkageKeys: keysWithTransform(steps(5)),
+    };
+    expect(() =>
+      assertTransformsCompile(overCount, undefined, { maxSteps: 4 }),
+    ).toThrow(UsageError);
+    expect(() =>
+      assertTransformsCompile(overCount, undefined, { maxSteps: 4 }),
+    ).toThrow(/5 steps, against a limit of 4/);
+    expect(() =>
+      assertTransformsCompile(
+        minimalTerms,
+        [{ output: "last_name", input: "LN", steps: steps(5) }],
+        { maxSteps: 4 },
+      ),
+    ).toThrow(OperatorConfigError);
+    // The two surfaces are counted together, and the class follows the one
+    // whose steps take the total past the bound.
+    expect(() =>
+      assertTransformsCompile(
+        { ...minimalTerms, linkageKeys: keysWithTransform(steps(3)) },
+        [{ output: "last_name", input: "LN", steps: steps(3) }],
+        { maxSteps: 4 },
+      ),
+    ).toThrow(UsageError);
+    // Refused on the count alone, before a step is compiled: an uncompilable
+    // step in an over-count document is not what the message names.
+    expect(() =>
+      assertTransformsCompile(
+        { ...minimalTerms, linkageKeys: keysWithTransform(steps(4)) },
+        [
+          {
+            output: "last_name",
+            input: "LN",
+            steps: [uncompilableSteps[0], ...steps(1)],
+          },
+        ],
+        { maxSteps: 4 },
+      ),
+    ).toThrow(/6 steps, against a limit of 4/);
+    // Not vacuous: the same shapes pass under the bound the mint runs with.
+    expect(() => assertTransformsCompile(overCount)).not.toThrow();
   });
 
   test("compiles a document's transforms once across repeated checks", () => {
