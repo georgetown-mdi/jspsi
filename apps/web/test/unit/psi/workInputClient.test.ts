@@ -181,8 +181,9 @@ describe("fetchJobInputProfile", () => {
 
   test("rejects a bidiStrippedColumns that is not a 1-based position list", async () => {
     // The positions go straight into the operator's notice, so a body that is not
-    // a list of positive integers degrades to unavailable rather than composing a
-    // sentence naming column 0 or column -1.
+    // a list of positive integers within the header it reports degrades to
+    // unavailable rather than composing a sentence naming column 0, column -1,
+    // a column past the last one, or more positions than the file has columns.
     for (const bad of [
       { ...PROFILE_WIRE, bidiStrippedColumns: undefined },
       { ...PROFILE_WIRE, bidiStrippedColumns: 2 },
@@ -190,6 +191,8 @@ describe("fetchJobInputProfile", () => {
       { ...PROFILE_WIRE, bidiStrippedColumns: [0] },
       { ...PROFILE_WIRE, bidiStrippedColumns: [-1] },
       { ...PROFILE_WIRE, bidiStrippedColumns: [1.5] },
+      { ...PROFILE_WIRE, bidiStrippedColumns: [3] },
+      { ...PROFILE_WIRE, bidiStrippedColumns: [1, 2, 2] },
     ]) {
       expect(
         await fetchJobInputProfile("x", () =>
