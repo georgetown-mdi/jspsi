@@ -476,6 +476,27 @@ jobs:
       - name: Smoke the file-drop probe tooling
         run: docker run --rm --entrypoint sh ${{ matrix.tag }} -c 'command -v smbclient'
 
+      # The other half of that reading: what the image must NOT answer to. Both
+      # runtime stages take the base image's npm CLI and corepack shim out, so a
+      # shipped image installs and resolves nothing, and the vulnerability scan
+      # below has no finding this repository cannot remedy. The Dockerfile text
+      # is frozen by scripts/dockerfile-freeze.test.mjs; this reads the built
+      # image, which is what catches a base that puts a manager back on a path
+      # the removal does not name. It inverts the step above, which is also what
+      # stands behind it: the same invocation against a tool the image does
+      # have, so a probe that could resolve nothing at all fails there rather
+      # than passing here.
+      - name: Assert the image ships no package manager
+        run: |
+          set -euo pipefail
+          for tool in npm npx corepack; do
+            if docker run --rm --entrypoint sh ${{ matrix.tag }} -c "command -v $tool"; then
+              echo "$tool resolves inside the ${{ matrix.variant }} image; take it out in the runtime stage of that image's Dockerfile" >&2
+              exit 1
+            fi
+          done
+          echo "the ${{ matrix.variant }} image resolves neither npm, npx nor corepack"
+
       # Everything else those setup scripts ask of the image, read out of the
       # scripts rather than listed beside them: the psilink argument vectors they
       # hand a container, and the helper scripts they pipe into a shell in it.
@@ -719,12 +740,13 @@ jobs:
           echo "the ${{ matrix.variant }} image's setuid/setgid files are the recorded inventory"
 
       # Every package the image ships: the base image's system packages, and the
-      # language packages inside it -- the production npm tree the builder
-      # installs, and the npm CLI's bundled dependencies the base bundles. The
-      # Node binary itself is not a component Trivy catalogs, so a CVE in the
-      # Node runtime is outside this gate and moves only when the pinned base
-      # image's Node version does. Dependabot, the dependency review gate and
-      # the release `npm audit` all read this repository's own dependency
+      # language packages inside it, which are the production npm tree the
+      # builder installs and nothing else -- the package-manager assertion above
+      # holds the image to none, so no bundled npm CLI tree stands beside it.
+      # The Node binary itself is not a component Trivy catalogs, so a CVE in
+      # the Node runtime is outside this gate and moves only when the pinned
+      # base image's Node version does. Dependabot, the dependency review gate
+      # and the release `npm audit` all read this repository's own dependency
       # declarations, so nothing else reaches what a base image brought in. The
       # base is pinned by digest, which is why the weekly schedule above exists
       # -- a vulnerability published against a pin nothing has touched has no
@@ -747,9 +769,8 @@ jobs:
       #     acceptance: an entry in force keeps this gate green whether
       #     or not the condition it was written for still holds.
       #
-      # A finding the base image brought in -- a system package, or the npm
-      # CLI's bundled dependencies under /usr/local -- is a prompt to bump the
-      # pinned base:
+      # A finding has two remedies, and the package path in the report says
+      # which. A system package is a prompt to bump the pinned base:
       # the digest in the Dockerfile, and on the variant the Amazon Linux release
       # snapshot its dnf transactions resolve against as well. The pins are
       # deliberate, so nothing on the npm side resolves them. For the default
