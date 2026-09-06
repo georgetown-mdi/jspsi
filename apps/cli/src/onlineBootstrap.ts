@@ -437,7 +437,7 @@ function warnBidiStrippedColumns(positions: ReadonlyArray<number>): void {
       `text-direction characters. They were removed, so the ` +
       `name${plural ? "s" : ""} used for matching and sent to your partner ` +
       `${plural ? "are" : "is"} the rest of the header. Check that ` +
-      `${plural ? "those columns" : "that column"} still ` +
+      `${plural ? "those columns" : "the column"} still ` +
       `${plural ? "read" : "reads"} the way your file names ` +
       `${plural ? "them" : "it"}; if not, edit the header row and run again.`,
   );

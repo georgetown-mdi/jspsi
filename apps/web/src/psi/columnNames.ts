@@ -76,7 +76,7 @@ export function sanitizedColumnsAlert(positions: ReadonlyArray<number>): {
       `text-direction characters. They were removed, so the ` +
       `name${plural ? "s" : ""} used for matching, shown on this screen, and ` +
       `sent to your partner ${plural ? "are" : "is"} the rest of the header. ` +
-      `Check that ${plural ? "those columns" : "that column"} still ` +
+      `Check that ${plural ? "those columns" : "the column"} still ` +
       `${plural ? "read" : "reads"} the way your file names ` +
       `${plural ? "them" : "it"}; if not, edit the header row and choose the ` +
       `file again.`,
