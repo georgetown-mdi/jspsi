@@ -252,10 +252,6 @@ const JOB_ROUTE_REQUESTS: ReadonlyArray<[string, string]> = REFUSED.filter(
   (row) => row[2] === "jobRoute",
 ).map(([method, path]) => [method, path]);
 
-/** The broker's own route, in the spellings a client writes it: the peer server
- * attaches its WebSocket upgrade listener on the first GET under this subtree
- * (src/peerServer.ts), so a refusal reaching it would stop public signaling
- * rather than harden anything. */
 /** Paths the refusal does not reach, each held to the answer it has with no
  * refusal installed: a page outside the namespace, a path whose decoded form
  * leaves it, and one whose first segment is `api` only as written -- `%20`
@@ -282,6 +278,10 @@ const RAW_TARGETS: ReadonlyArray<string> = [
  * matched inside the body rather than as the whole of it. */
 const SLOT_FREE = '{"occupied":false}';
 
+/** The broker's own route, in the spellings a client writes it: the peer server
+ * attaches its WebSocket upgrade listener on the first GET under this subtree
+ * (src/peerServer.ts), so a refusal reaching it would stop public signaling
+ * rather than harden anything. */
 const BROKER_PATHS: ReadonlyArray<string> = [
   "/api/peerjs/id",
   "/api/peerjs/id/",
