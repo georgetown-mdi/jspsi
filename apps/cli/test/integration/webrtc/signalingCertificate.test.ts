@@ -38,9 +38,9 @@ import type { Server as TcpServer } from "node:net";
  * an untrusted proxy's would.
  *
  * The last test measures something else against a real proxy: which
- * environment routes a `wss://` dial away from the endpoint the probe reaches
- * altogether, holding the answer the client reports such a failure on to what
- * Node actually does.
+ * environment and which command line route a `wss://` dial away from the
+ * endpoint the probe reaches altogether, holding the answer the client reports
+ * such a failure on to what Node actually does.
  */
 
 let tlsServer: TlsServer | undefined;
@@ -356,6 +356,7 @@ const CHILD_DIAL_SCRIPT = `
 
 /** Every variable either the routing or the client's answer reads. */
 const PROXY_VARIABLES = [
+  "NODE_OPTIONS",
   "NODE_USE_ENV_PROXY",
   "HTTPS_PROXY",
   "https_proxy",
@@ -364,31 +365,102 @@ const PROXY_VARIABLES = [
   "ALL_PROXY",
 ];
 
-/** Dial `url` from a process started with `environment`, and wait it out. */
+/**
+ * Dial `url` from a process started with `nodeArgs` and `environment`, and
+ * wait it out.
+ */
 function dialFromProcess(
   url: string,
   environment: Record<string, string>,
+  nodeArgs: Array<string>,
 ): Promise<void> {
   return new Promise((resolve) => {
-    const child = spawn(process.execPath, ["-e", CHILD_DIAL_SCRIPT], {
-      env: {
-        PATH: process.env.PATH ?? "",
-        PSILINK_DIAL_URL: url,
-        ...environment,
+    const child = spawn(
+      process.execPath,
+      [...nodeArgs, "-e", CHILD_DIAL_SCRIPT],
+      {
+        env: {
+          PATH: process.env.PATH ?? "",
+          PSILINK_DIAL_URL: url,
+          ...environment,
+        },
+        stdio: "ignore",
       },
-      stdio: "ignore",
-    });
+    );
     child.on("exit", () => resolve());
     child.on("error", () => resolve());
   });
 }
 
+/**
+ * One run of the matrix below: the proxy variable the proxy's URL is written
+ * to, the `NODE_USE_ENV_PROXY` value, the `NODE_OPTIONS` value and the command
+ * line the run starts under, and whether Node routes its `wss://` dial through
+ * the proxy.
+ */
+type RoutingRow = {
+  proxied: boolean;
+  variable?: string;
+  optIn?: string;
+  nodeOptions?: string;
+  nodeArgs?: Array<string>;
+};
+
+/**
+ * Every environment and command line the routing is driven under. A run whose
+ * `variable` is absent configures no proxy at all, which is the one thing
+ * neither opt-in route can proxy a dial without.
+ */
+const ROUTING_ROWS: Array<RoutingRow> = [
+  { proxied: true, optIn: "1", variable: "HTTPS_PROXY" },
+  { proxied: true, optIn: "1", variable: "https_proxy" },
+  { proxied: true, optIn: "1", variable: "HTTP_PROXY" },
+  { proxied: true, optIn: "1", variable: "http_proxy" },
+  { proxied: false, optIn: "1", variable: "ALL_PROXY" },
+  { proxied: false, optIn: "true", variable: "HTTPS_PROXY" },
+  { proxied: false, optIn: "0", variable: "HTTPS_PROXY" },
+  { proxied: false, variable: "HTTPS_PROXY" },
+  { proxied: true, variable: "HTTPS_PROXY", nodeArgs: ["--use-env-proxy"] },
+  { proxied: true, variable: "HTTPS_PROXY", nodeOptions: "--use-env-proxy" },
+  {
+    proxied: true,
+    variable: "HTTPS_PROXY",
+    nodeArgs: ["--use-env-proxy=false"],
+  },
+  {
+    proxied: false,
+    variable: "HTTPS_PROXY",
+    nodeArgs: ["--use-env-proxy", "--no-use-env-proxy"],
+  },
+  {
+    proxied: false,
+    variable: "HTTPS_PROXY",
+    nodeOptions: "--use-env-proxy",
+    nodeArgs: ["--no-use-env-proxy"],
+  },
+  {
+    proxied: false,
+    optIn: "1",
+    variable: "HTTPS_PROXY",
+    nodeArgs: ["--no-use-env-proxy"],
+  },
+  { proxied: true, variable: "HTTPS_PROXY", nodeArgs: ["--use_env_proxy"] },
+  { proxied: true, variable: "HTTPS_PROXY", nodeOptions: '"--use-env-proxy"' },
+  {
+    proxied: false,
+    variable: "HTTPS_PROXY",
+    nodeArgs: ["--use-env-proxy", "--no-use-env-proxy=true"],
+  },
+  { proxied: false, nodeArgs: ["--use-env-proxy"] },
+];
+
 test("which environment routes a signaling dial through a proxy", async () => {
   // What the client answers a proxied failure with rests on which environment
-  // Node itself routes the dial through, so that is driven here rather than
-  // modelled: a variable Node starts reading, or an opt-in spelling it starts
-  // accepting, would otherwise leave an operator told about a certificate
-  // their dial never reached.
+  // and command line Node itself routes the dial through, so that is driven
+  // here rather than modelled: a variable Node starts reading, an opt-in
+  // spelling it starts accepting, or a change to how the flag and the variable
+  // resolve against each other would otherwise leave an operator told about a
+  // certificate their dial never reached.
   //
   // The endpoint is a released port, so the dial fails at once either way and
   // what separates the two paths is whether the proxy was asked to reach it.
@@ -407,26 +479,26 @@ test("which environment routes a signaling dial through a proxy", async () => {
   proxy.on("error", () => {});
   await new Promise<void>((resolve) => proxy.listen(0, "127.0.0.1", resolve));
   const proxyUrl = `http://127.0.0.1:${boundPort(proxy)}`;
+  const startedUnder = process.execArgv;
 
   try {
-    for (const [proxied, optIn, variable] of [
-      [true, "1", "HTTPS_PROXY"],
-      [true, "1", "https_proxy"],
-      [true, "1", "HTTP_PROXY"],
-      [true, "1", "http_proxy"],
-      [false, "1", "ALL_PROXY"],
-      [false, "true", "HTTPS_PROXY"],
-      [false, "0", "HTTPS_PROXY"],
-      [false, undefined, "HTTPS_PROXY"],
-    ] satisfies Array<[boolean, string | undefined, string]>) {
-      const environment: Record<string, string> = { [variable]: proxyUrl };
-      if (optIn !== undefined) environment.NODE_USE_ENV_PROXY = optIn;
+    for (const row of ROUTING_ROWS) {
+      const environment: Record<string, string> = {};
+      if (row.variable !== undefined) environment[row.variable] = proxyUrl;
+      if (row.optIn !== undefined) environment.NODE_USE_ENV_PROXY = row.optIn;
+      if (row.nodeOptions !== undefined)
+        environment.NODE_OPTIONS = row.nodeOptions;
+      const nodeArgs = row.nodeArgs ?? [];
       reached.length = 0;
-      await dialFromProcess(`wss://${endpoint}/`, environment);
+      await dialFromProcess(`wss://${endpoint}/`, environment, nodeArgs);
 
       for (const cleared of PROXY_VARIABLES) vi.stubEnv(cleared, "");
       for (const [name, value] of Object.entries(environment))
         vi.stubEnv(name, value);
+      // The flags a run started under are read off `process.execArgv`, which
+      // this process has its own, so the child's command line is put there for
+      // the answer to be asked under the environment that just drove the dial.
+      process.execArgv = nodeArgs;
       // The probe is scripted, so what the decision is measured on is which
       // dials reach it and what a failed one is told, against the routing the
       // child just drove. One assertion over all of it, so the answer the
@@ -441,23 +513,22 @@ test("which environment routes a signaling dial through a proxy", async () => {
         },
       );
       expect({
-        optIn,
-        variable,
+        row,
         routedTo: reached,
         configured: environmentProxyingConfigured(),
         probed,
         answer,
       }).toEqual({
-        optIn,
-        variable,
-        routedTo: proxied ? [endpoint] : [],
-        configured: proxied,
-        probed: proxied ? 0 : 1,
-        answer: proxied ? { kind: "not-checked-proxied" } : undefined,
+        row,
+        routedTo: row.proxied ? [endpoint] : [],
+        configured: row.proxied,
+        probed: row.proxied ? 0 : 1,
+        answer: row.proxied ? { kind: "not-checked-proxied" } : undefined,
       });
     }
   } finally {
+    process.execArgv = startedUnder;
     vi.unstubAllEnvs();
     proxy.close();
   }
-}, 60_000);
+}, 120_000);

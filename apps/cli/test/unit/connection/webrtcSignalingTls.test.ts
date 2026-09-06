@@ -27,9 +27,9 @@ import type { SignalingCertificateProbe } from "../../../src/connection/webrtc/s
  *
  * The certificate answer itself is measured against a real TLS listener in
  * test/integration/webrtc/signalingCertificate.test.ts, and which environment
- * a `wss://` dial is proxied on against a real CONNECT proxy in the same file;
- * here the probe is scripted and the environment stubbed, so the answers and a
- * hostile one can each be driven.
+ * and command line a `wss://` dial is proxied on against a real CONNECT proxy
+ * in the same file; here the probe is scripted and the environment stubbed, so
+ * the answers and a hostile one can each be driven.
  */
 
 /**
@@ -37,6 +37,7 @@ import type { SignalingCertificateProbe } from "../../../src/connection/webrtc/s
  * developer's own shell exports must not decide which message these assert.
  */
 const PROXY_VARIABLES = [
+  "NODE_OPTIONS",
   "NODE_USE_ENV_PROXY",
   "HTTPS_PROXY",
   "https_proxy",
@@ -44,11 +45,20 @@ const PROXY_VARIABLES = [
   "http_proxy",
 ];
 
+/**
+ * The command line this run started under, restored after each test: the
+ * proxy answer reads `process.execArgv`, and the flags the test runner itself
+ * was started with must not decide which message these assert either.
+ */
+const STARTED_UNDER = process.execArgv;
+
 beforeEach(() => {
   for (const variable of PROXY_VARIABLES) vi.stubEnv(variable, "");
+  process.execArgv = [];
 });
 
 afterEach(() => {
+  process.execArgv = STARTED_UNDER;
   vi.unstubAllEnvs();
 });
 
@@ -333,25 +343,54 @@ test("which environment configures a proxy for the dial", () => {
   // is that the answer follows it, an opt-in spelling that does not opt in
   // and an empty value included.
   const proxy = "http://proxy.invalid:8080";
-  for (const [configured, environment] of [
-    [true, { NODE_USE_ENV_PROXY: "1", HTTPS_PROXY: proxy }],
-    [true, { NODE_USE_ENV_PROXY: "1", https_proxy: proxy }],
-    [true, { NODE_USE_ENV_PROXY: "1", HTTP_PROXY: proxy }],
-    [true, { NODE_USE_ENV_PROXY: "1", http_proxy: proxy }],
-    [false, { NODE_USE_ENV_PROXY: "1" }],
-    [false, { NODE_USE_ENV_PROXY: "1", HTTPS_PROXY: "" }],
-    [false, { NODE_USE_ENV_PROXY: "true", HTTPS_PROXY: proxy }],
-    [false, { NODE_USE_ENV_PROXY: "yes", HTTPS_PROXY: proxy }],
-    [false, { NODE_USE_ENV_PROXY: "0", HTTPS_PROXY: proxy }],
-    [false, { HTTPS_PROXY: proxy }],
-  ] satisfies Array<[boolean, Record<string, string>]>) {
+  for (const [configured, environment, nodeArgs] of [
+    [true, { NODE_USE_ENV_PROXY: "1", HTTPS_PROXY: proxy }, []],
+    [true, { NODE_USE_ENV_PROXY: "1", https_proxy: proxy }, []],
+    [true, { NODE_USE_ENV_PROXY: "1", HTTP_PROXY: proxy }, []],
+    [true, { NODE_USE_ENV_PROXY: "1", http_proxy: proxy }, []],
+    [false, { NODE_USE_ENV_PROXY: "1" }, []],
+    [false, { NODE_USE_ENV_PROXY: "1", HTTPS_PROXY: "" }, []],
+    [false, { NODE_USE_ENV_PROXY: "true", HTTPS_PROXY: proxy }, []],
+    [false, { NODE_USE_ENV_PROXY: "yes", HTTPS_PROXY: proxy }, []],
+    [false, { NODE_USE_ENV_PROXY: "0", HTTPS_PROXY: proxy }, []],
+    [false, { HTTPS_PROXY: proxy }, []],
+    [true, { HTTPS_PROXY: proxy }, ["--use-env-proxy"]],
+    [true, { HTTPS_PROXY: proxy }, ["--use_env_proxy"]],
+    [true, { HTTPS_PROXY: proxy }, ["--use-env-proxy=false"]],
+    [true, { HTTPS_PROXY: proxy, NODE_OPTIONS: "--use-env-proxy" }, []],
+    [true, { HTTPS_PROXY: proxy, NODE_OPTIONS: '"--use-env-proxy"' }, []],
+    [
+      true,
+      { HTTPS_PROXY: proxy, NODE_OPTIONS: "--no-use-env-proxy" },
+      ["--use-env-proxy"],
+    ],
+    [false, { HTTPS_PROXY: "" }, ["--use-env-proxy"]],
+    [false, { HTTPS_PROXY: proxy }, ["--use-env-proxy", "--no-use-env-proxy"]],
+    [
+      false,
+      { HTTPS_PROXY: proxy },
+      ["--use-env-proxy", "--no-use-env-proxy=true"],
+    ],
+    [
+      false,
+      { HTTPS_PROXY: proxy, NODE_OPTIONS: "--use-env-proxy" },
+      ["--no-use-env-proxy"],
+    ],
+    [
+      false,
+      { NODE_USE_ENV_PROXY: "1", HTTPS_PROXY: proxy },
+      ["--no-use-env-proxy"],
+    ],
+  ] satisfies Array<[boolean, Record<string, string>, Array<string>]>) {
     for (const variable of PROXY_VARIABLES) vi.stubEnv(variable, "");
     for (const [variable, value] of Object.entries(environment))
       vi.stubEnv(variable, value);
+    process.execArgv = nodeArgs;
     expect({
       environment,
+      nodeArgs,
       configured: environmentProxyingConfigured(),
-    }).toEqual({ environment, configured });
+    }).toEqual({ environment, nodeArgs, configured });
   }
 });
 
