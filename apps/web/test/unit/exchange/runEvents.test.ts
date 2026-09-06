@@ -120,6 +120,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  vi.unstubAllEnvs();
   vi.unstubAllGlobals();
   vi.restoreAllMocks();
   vi.clearAllMocks();
@@ -172,6 +173,23 @@ describe("buildRunEvents", () => {
     // The raw error object reaches devtools, where a developer can expand its
     // cause chain; the operator's alert is composed separately at the seat.
     expect(devtoolsSink).toHaveBeenCalledWith(error);
+  });
+
+  test("a production build with diagnostics off puts no raw error on the console", () => {
+    // The suite otherwise runs under vitest's dev-true default, which is why
+    // the test above sees the raw error at devtools; a deployed client with no
+    // diagnostics toggle set is the disclosure property this pins; only the
+    // diagnostics gate's own test (utils/diagnostics.test.ts) covered the
+    // sink's off behavior before this, never a real onError call.
+    vi.stubEnv("DEV", false);
+    vi.stubGlobal("localStorage", { getItem: () => null });
+    const { events, raiseFailure } = seat();
+    const error = new Error("transport died, partner said: attacker payload");
+
+    events.onError({ category: "exchange", error });
+
+    expect(raiseFailure).toHaveBeenCalledWith("exchange", error);
+    expect(devtoolsSink).not.toHaveBeenCalled();
   });
 
   test("a busy create re-attaches onto the same callbacks instead of alerting", async () => {

@@ -454,11 +454,20 @@ describe("the script as an agent runs it", () => {
     }
   });
 
-  it("exits 2 when a ref does not resolve, rather than reporting a verdict", () => {
-    const result = runScript(["HEAD", "HEAD", "HEAD", "no-such-ref-9f3c1a"]);
-    expect(result.status).toBe(2);
-    expect(result.stdout).not.toMatch(/HOLDS|VIOLATES/);
-  });
+  // Measured alone at 360-490ms across repeated runs, and past vitest's 5s
+  // default -- an outright timeout -- once under contention with the full
+  // `npm test` fan-out. Sized at roughly five times that default.
+  const SOUNDNESS_PROBE_TIMEOUT_MS = 30_000;
+
+  it(
+    "exits 2 when a ref does not resolve, rather than reporting a verdict",
+    { timeout: SOUNDNESS_PROBE_TIMEOUT_MS },
+    () => {
+      const result = runScript(["HEAD", "HEAD", "HEAD", "no-such-ref-9f3c1a"]);
+      expect(result.status).toBe(2);
+      expect(result.stdout).not.toMatch(/HOLDS|VIOLATES/);
+    },
+  );
 
   it("reports HOLDS in the tree it was run from, naming that tree", () => {
     const fixture = rebaseFixture({

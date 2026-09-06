@@ -1066,15 +1066,24 @@ describe("the script as an agent runs it", () => {
     expect(result.stdout).not.toMatch(/HOLDS|VIOLATED/);
   });
 
-  it("passes its probes and exits 0 over a ref compared with itself", () => {
-    const result = runScript(["HEAD", "HEAD"]);
-    expect(result.status).toBe(0);
-    expect(result.stdout).toMatch(
-      /soundness probes: (\d+)\/\1 passed on typescript /,
-    );
-    expect(result.stdout).toContain("(none)");
-    expect(result.stdout).toMatch(/non-executable-delta property: HOLDS/);
-  });
+  // Measured alone at 350-490ms across repeated runs, and past vitest's 5s
+  // default -- an outright timeout -- once under contention with the full
+  // `npm test` fan-out. Sized at roughly five times that default.
+  const SOUNDNESS_PROBE_TIMEOUT_MS = 30_000;
+
+  it(
+    "passes its probes and exits 0 over a ref compared with itself",
+    { timeout: SOUNDNESS_PROBE_TIMEOUT_MS },
+    () => {
+      const result = runScript(["HEAD", "HEAD"]);
+      expect(result.status).toBe(0);
+      expect(result.stdout).toMatch(
+        /soundness probes: (\d+)\/\1 passed on typescript /,
+      );
+      expect(result.stdout).toContain("(none)");
+      expect(result.stdout).toMatch(/non-executable-delta property: HOLDS/);
+    },
+  );
 });
 
 // Which tree a verdict is about, driven rather than modelled: the script sits in
