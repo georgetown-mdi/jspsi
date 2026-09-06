@@ -470,15 +470,16 @@ export async function generateInvitation(params: {
    * accept side.
    *
    * Passed only for a file-sync exchange whose options the caller has
-   * resolved. Omitted (or false) declares nothing rather than declaring
-   * delete mode; a webrtc mint (no retain mode) leaves it alone, and the
-   * token schema refuses the pair outright.
+   * resolved. On a shared-directory or webrtc endpoint, omitted (or false)
+   * declares nothing rather than declaring delete mode; a webrtc mint (no
+   * retain mode) leaves it alone, and the token schema refuses the pair
+   * outright.
    *
    * This flag ADDS to the resolved endpoint's own shape, which is the other
    * ground for the declaration: a split `inbound_path`/`outbound_path`
    * endpoint puts every connection built from it in retain mode
-   * (`endpointRequiresRetainedFiles`), so the mint declares the retention
-   * whether or not the caller passed the flag.
+   * ({@link invitationDeclaresRetainedFiles}), so the mint declares the
+   * retention whether or not the caller passed the flag.
    */
   retainsFiles?: boolean;
 }): Promise<GeneratedInvitation> {
