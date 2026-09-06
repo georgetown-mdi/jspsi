@@ -127,13 +127,15 @@ const SSH_FX_FAILURE = 4;
 // operator-configurable: a liveness safety check, not a tunable.
 const CLIENT_CLOSE_TIMEOUT_MS = 5_000;
 
-// Upper bound (ms) on how long either forced close (see
+// Upper bound (ms) on a wait that runs over a socket this side may already have
+// destroyed: either forced close (see
 // {@link SSH2SFTPClientAdapter.forceCloseEndedTransport} and
-// {@link SSH2SFTPClientAdapter.forceCloseTerminalTransport}) waits out teardown
-// after destroying the socket beneath the ssh2 Client. The one bound armed on a
-// REF'D timer (see awaitBoundedTeardown), because the destroyed socket it waits
-// on leaves no ref'd handle of its own. Not operator-configurable, like every
-// other SFTP liveness bound.
+// {@link SSH2SFTPClientAdapter.forceCloseTerminalTransport}) waiting out
+// teardown after destroying the socket beneath the ssh2 Client, and the wire
+// trace's drain ({@link SSH2SFTPClientAdapter.drainWireTrace}). The one bound
+// armed on a REF'D timer (see awaitBoundedTeardown), because the destroyed
+// socket it waits on leaves no ref'd handle of its own. Not
+// operator-configurable, like every other SFTP liveness bound.
 const FORCED_CLOSE_TIMEOUT_MS = 1_000;
 
 // Upper bound (ms) on a queued session transition's wait for the transition
@@ -1999,6 +2001,12 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // still to come: a socket this side has not destroyed, or a destroyed one
   // whose 'close' the transport still owes. An unavailable subscription leaves
   // the detach in end() the whole answer.
+  //
+  // The bound holds the process alive, per the destroyed-socket rule in {@link
+  // awaitBoundedTeardown}: this wait runs over a socket that may already be
+  // destroyed -- the state a refused dial leaves -- and nothing ref'd stands
+  // behind it there, so an unref'd bound would let a run whose partner withholds
+  // the 'close' exit 0 with everything after end() unrun.
   private async drainWireTrace(held: HeldSessionTransition): Promise<void> {
     if (this.wireTrace === undefined) return;
     const seams = resolveForcedCloseSeams(
@@ -2016,7 +2024,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
       seams.removeListener,
       FORCED_CLOSE_TIMEOUT_MS,
       undefined,
-      false,
+      true,
     );
   }
 

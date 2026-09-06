@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import fs from "node:fs";
 import net from "node:net";
 import os from "node:os";
@@ -17,15 +18,16 @@ import { serverAuth, sftpServer } from "../sftpServer/testContext";
 
 // What a dial reports about its own SSH handshake, driven against the real
 // stack rather than modeled from ssh2's callback contract (CLAUDE.md,
-// settle-by-driving-the-tool). Five things are held here: that `--log-level
+// settle-by-driving-the-tool). Six things are held here: that `--log-level
 // trace` alone answers "did the handshake complete, and on what" from one run;
 // that no credential the dial sends is among what it reports; that every level
 // below trace emits not one line of it, whatever the `-v` count; that a
 // peer's own bytes reach the operator escaped, since a name-list the peer chose
 // arrives verbatim from ssh2 (docs/spec/DEPENDENCY_PINS.md, "Upgrading the SFTP
-// Stack"); and that the lines the stack renders as the transport drains reach
-// the operator's --log-file rather than the console it would fall through to
-// once a command has closed its sink.
+// Stack"); that the lines the stack renders as the transport drains reach the
+// operator's --log-file rather than the console it would fall through to once a
+// command has closed its sink; and that the wait which keeps those lines is a
+// bound the process cannot exit out from under.
 
 const TEST_TIMEOUT_MS = 60_000;
 const DIAL_BUDGET_MS = 5_000;
@@ -505,6 +507,108 @@ describe("a trace at the root level with a --log-file", () => {
       } finally {
         peer.close();
       }
+    },
+  );
+});
+
+// The adapter's forced-close bound is 1 s (its FORCED_CLOSE_TIMEOUT_MS, which is
+// not exported). The drain's wait is held between these rather than to a
+// millisecond: what is asserted is that the wait ran and ended, not when.
+const DRAIN_BOUND_FLOOR_MS = 500;
+const DRAIN_BOUND_CEILING_MS = 5_000;
+// How long after end() settles the child may still take to run its event loop
+// dry. Anything longer is a handle the wait left behind.
+const QUIESCE_MS = 500;
+const CHILD_BUDGET_MS = 30_000;
+
+/**
+ * Run the drain child at `logLevel` and hand back what it reported: the
+ * milliseconds `end()` took to settle, the milliseconds to the child's last
+ * event-loop turn, and its exit code. `endedMs` is undefined where the child
+ * exited with `end()` still pending, which is the failure this exists for.
+ */
+async function drainChild(logLevel: string): Promise<{
+  endedMs: number | undefined;
+  drainedAtMs: number | undefined;
+  code: number | null;
+  out: string;
+}> {
+  const child = spawn(
+    process.execPath,
+    [
+      "--import",
+      "tsx",
+      path.join(import.meta.dirname, "wireTraceDrainChild.ts"),
+    ],
+    {
+      cwd: path.join(import.meta.dirname, "..", ".."),
+      env: { ...process.env, PSILINK_TEST_LOG_LEVEL: logLevel },
+      stdio: ["ignore", "pipe", "pipe"],
+    },
+  );
+  let out = "";
+  child.stdout.on("data", (chunk) => {
+    out += String(chunk);
+  });
+  child.stderr.on("data", (chunk) => {
+    out += String(chunk);
+  });
+  const code = await new Promise<number | null>((resolve) => {
+    const giveUp = setTimeout(() => {
+      child.kill("SIGKILL");
+      resolve(null);
+    }, CHILD_BUDGET_MS);
+    child.on("exit", (exitCode) => {
+      clearTimeout(giveUp);
+      resolve(exitCode);
+    });
+  });
+  const ended = /^ENDED (\d+)$/m.exec(out);
+  const drained = /^DRAINED settled=\S+ at=(\d+)$/m.exec(out);
+  return {
+    endedMs: ended === null ? undefined : Number(ended[1]),
+    drainedAtMs: drained === null ? undefined : Number(drained[1]),
+    code,
+    out,
+  };
+}
+
+describe("the drain over a transport this side destroyed", () => {
+  test(
+    "holds the process to end() and lets it go once the bound expires",
+    { timeout: TEST_TIMEOUT_MS },
+    async () => {
+      // The state the drain waits in with nothing ref'd behind it: the socket
+      // destroyed and the ssh2 Client's 'close' still owed. An unref'd bound
+      // there is no bound at all -- the run exits 0 with end() pending and
+      // everything after it unrun -- so this is a child process with nothing
+      // else on its event loop.
+      const run = await drainChild("trace");
+
+      expect({ code: run.code, ended: run.endedMs !== undefined }).toEqual({
+        code: 0,
+        ended: true,
+      });
+      expect(run.endedMs).toBeGreaterThanOrEqual(DRAIN_BOUND_FLOOR_MS);
+      expect(run.endedMs).toBeLessThan(DRAIN_BOUND_CEILING_MS);
+      // Nothing the wait installed outlives it: the child's last event-loop turn
+      // follows the settle rather than a second bound.
+      expect(
+        (run.drainedAtMs as number) - (run.endedMs as number),
+      ).toBeLessThan(QUIESCE_MS);
+    },
+  );
+
+  test(
+    "is not entered at all below the trace level",
+    { timeout: TEST_TIMEOUT_MS },
+    async () => {
+      const run = await drainChild("info");
+      expect({ code: run.code, ended: run.endedMs !== undefined }).toEqual({
+        code: 0,
+        ended: true,
+      });
+      expect(run.endedMs).toBeLessThan(DRAIN_BOUND_FLOOR_MS);
     },
   );
 });
