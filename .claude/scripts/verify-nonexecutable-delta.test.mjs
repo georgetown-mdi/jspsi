@@ -1066,13 +1066,9 @@ describe("the script as an agent runs it", () => {
     expect(result.stdout).not.toMatch(/HOLDS|VIOLATED/);
   });
 
-  // This is the one case here that runs the probes (the usage and bad-ref cases
-  // above exit before reaching them), so it is the one that pays for a
-  // TypeScript program: measured alone at 350-490ms across repeated runs, and
-  // at over vitest's 5s default -- an outright timeout -- once during a run
-  // sharing the machine's cores with the full `npm test` fan-out. Sized at
-  // roughly five times that failure, not the passing runs beside it, which
-  // stayed under 1.2s under the same contention.
+  // Measured alone at 350-490ms across repeated runs, and past vitest's 5s
+  // default -- an outright timeout -- once under contention with the full
+  // `npm test` fan-out. Sized at roughly five times that default.
   const SOUNDNESS_PROBE_TIMEOUT_MS = 30_000;
 
   it(
