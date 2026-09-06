@@ -10,6 +10,7 @@ import {
   assertFanOutImplemented,
   assertPayloadSendDisclosed,
   assertStandardizationMatchesTerms,
+  assertTransformsCompile,
   DEFAULT_PEER_TIMEOUT_MS,
   disclosedColumnNames,
   inferMetadata,
@@ -747,6 +748,14 @@ export async function validateInvite(params: {
     // standardization from columns, which declare none). See
     // assertFanOutImplemented.
     assertFanOutImplemented(configTerms, configSource.standardization);
+
+    // And fail closed pre-mint on a step whose compile throws -- a `pad_left`
+    // with no length, a multi-character fill, an unrecognized function name.
+    // The pipeline is built before the first row, so such a step aborts the
+    // run this invitation sets up only after the partner has accepted it. Same
+    // two pipelines, same reason only this config-as-source path can declare
+    // one by hand. See assertTransformsCompile.
+    assertTransformsCompile(configTerms, configSource.standardization);
 
     // Include the disclosed-columns subset only when the config declares an
     // explicit metadata block: without one the run infers metadata from the

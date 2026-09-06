@@ -689,6 +689,63 @@ describe("generateInvitation", () => {
     );
   });
 
+  // The mint-boundary compile safety check, the sibling of the fan-out one
+  // above and reached by the same callers: a step whose factory refuses its
+  // parameters is built nowhere until the exchange runs, which is after the
+  // partner has accepted the invitation and set up against it. `pad_left` with
+  // no length stands in for the family; core's own suite drives the rest.
+  const uncompilableStep = { function: "pad_left", params: {} };
+
+  test("refuses to mint when a linkage-key element transform cannot be built", async () => {
+    const metadata = inferMetadata(["ssn", "first_name", "last_name", "dob"]);
+    const base = getDefaultLinkageTerms("Org", metadata);
+    const uncompilable = {
+      ...base,
+      linkageKeys: base.linkageKeys.map((key, i) =>
+        i === 0
+          ? {
+              ...key,
+              elements: key.elements.map((element, j) =>
+                j === 0
+                  ? { ...element, transform: [uncompilableStep] }
+                  : element,
+              ),
+            }
+          : key,
+      ),
+    };
+
+    await expect(
+      generateInvitation({
+        inviterName: "Org",
+        file: csvStream(PARTIAL_CSV),
+        location,
+        linkageTerms: uncompilable,
+        metadata,
+      }),
+    ).rejects.toThrow(/a transform step cannot be built from the parameters/);
+  });
+
+  test("refuses to mint when the authored standardization cannot be built", async () => {
+    const metadata = inferMetadata(["ssn", "first_name", "last_name", "dob"]);
+    await expect(
+      generateInvitation({
+        inviterName: "Org",
+        file: csvStream(PARTIAL_CSV),
+        location,
+        linkageTerms: getDefaultLinkageTerms("Org", metadata),
+        metadata,
+        standardization: [
+          {
+            output: "last_name",
+            input: "last_name",
+            steps: [uncompilableStep],
+          },
+        ],
+      }),
+    ).rejects.toThrow(/a transform step cannot be built from the parameters/);
+  });
+
   // A linkable CSV (ssn + names + dob give satisfiable keys) that ALSO contains
   // columns the quick path discloses: `notes` infers as an `other` column (role
   // payload), and `member_id` infers as a single row-identifier left isPayload, so

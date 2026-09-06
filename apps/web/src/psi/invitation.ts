@@ -4,6 +4,7 @@ import {
   assertFanOutImplemented,
   assertPayloadSendDisclosed,
   assertStandardizationMatchesTerms,
+  assertTransformsCompile,
   assessLinkageSatisfiability,
   decideLinkageTermsVerdict,
   disclosedColumnNames,
@@ -633,6 +634,16 @@ export async function generateInvitation(params: {
   // quick path and any non-editor caller reach, covering the embedded terms'
   // element transforms and this party's own authored cleaning.
   assertFanOutImplemented(linkageTerms, params.standardization);
+
+  // Fail closed, before the token is minted, on a transform step whose compile
+  // throws -- a `pad_left` with no length, a multi-character fill, a function
+  // name this build does not recognize. The pipeline is built before the first
+  // row, so such a step aborts both parties' runs after the invitation has been
+  // accepted, with only out-of-band renegotiation left as the remedy. Covering
+  // the same two pipelines the fan-out check above does, and reached by the same
+  // callers: the quick path, and any caller that mints without the editor's
+  // Generate gate.
+  assertTransformsCompile(linkageTerms, params.standardization);
 
   // The per-party cleaning this mint stands behind, reconciled ONCE to the
   // terms it embeds: every surface that keeps a copy of a mint -- the

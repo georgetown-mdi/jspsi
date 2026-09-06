@@ -2500,6 +2500,77 @@ test("validateInvite: offline config-source mints a fan-out under single-pass", 
   }
 });
 
+test("validateInvite: offline config-source refuses a standardization step it cannot build", async () => {
+  // The mint-boundary compile refusal, the sibling of the fan-out one above: a
+  // step whose factory refuses its parameters is built nowhere until the run,
+  // so a config holding one must be refused BEFORE the token is disclosed. An
+  // OperatorConfigError, since a standardization is only this party's own.
+  const terms = defaultTerms();
+  const { dir, configPath, keyPath } = withConfig(terms, [
+    {
+      output: "last_name",
+      input: "last_name",
+      steps: [{ function: "pad_left", params: {} }],
+    },
+  ]);
+  try {
+    const invite = () =>
+      validateInvite({
+        resolved: { mode: "offline" },
+        options: testOptions({ configFile: configPath, keyFile: keyPath }),
+        acceptTimeout: 900,
+        log: silentLog,
+      });
+    await expect(invite()).rejects.toBeInstanceOf(OperatorConfigError);
+    await expect(invite()).rejects.toThrow(
+      /a transform step cannot be built from the parameters/,
+    );
+    await expect(invite()).rejects.toThrow(/pad_left/);
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("validateInvite: offline config-source refuses an element transform it cannot build", async () => {
+  // The second authoring surface, refused at the same boundary. A plain
+  // UsageError, not an OperatorConfigError, for the same reason the fan-out
+  // element arm is: an acceptor adopts element transforms verbatim from the
+  // partner's invitation.
+  const base = defaultTerms();
+  const [firstKey, ...restKeys] = base.linkageKeys;
+  const terms: LinkageTerms = {
+    ...base,
+    linkageKeys: [
+      {
+        ...firstKey,
+        elements: firstKey.elements.map((element, i) =>
+          i === 0
+            ? { ...element, transform: [{ function: "pad_left", params: {} }] }
+            : element,
+        ),
+      },
+      ...restKeys,
+    ],
+  };
+  const { dir, configPath, keyPath } = withConfig(terms);
+  try {
+    const invite = () =>
+      validateInvite({
+        resolved: { mode: "offline" },
+        options: testOptions({ configFile: configPath, keyFile: keyPath }),
+        acceptTimeout: 900,
+        log: silentLog,
+      });
+    await expect(invite()).rejects.toBeInstanceOf(UsageError);
+    await expect(invite()).rejects.not.toBeInstanceOf(OperatorConfigError);
+    await expect(invite()).rejects.toThrow(
+      /a transform step cannot be built from the parameters/,
+    );
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("validateInvite: a config's explicit metadata lets an otherwise-unsatisfying input pass", async () => {
   const terms = defaultTerms();
   // The config's metadata types tax_id as ssn; the input has tax_id, which

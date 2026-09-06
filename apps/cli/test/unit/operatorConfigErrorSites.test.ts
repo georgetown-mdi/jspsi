@@ -196,6 +196,21 @@ const RECORDED_SITES: readonly ConfigErrorSite[] = [
       "correctly absent from this ledger.",
   },
   {
+    file: "packages/core/src/linkageSatisfiability.ts",
+    anchor: "assertTransformsCompile",
+    raises: "OperatorConfigError",
+    interpolates: ["stepCompileRefusalMessage(label)"],
+    provenance:
+      "`label` is read off this party's own standardization argument and is " +
+      "narrowed by transformFunctionLabel before it reaches the message, so " +
+      "what the callee interpolates is either a build literal from " +
+      "STANDARDIZATION_FUNCTION_NAMES or the fixed stand-in for a name this " +
+      "build does not recognize. The sibling arm over the agreed terms' " +
+      "element transforms, which the accept path adopts wholesale, raises a " +
+      "plain UsageError instead and is correctly absent from this ledger -- " +
+      "the same split assertFanOutImplemented above keeps.",
+  },
+  {
     file: "apps/cli/src/commands/exchange.ts",
     anchor: "certificateModeIdentityPath",
     raises: "OperatorConfigError",
