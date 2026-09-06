@@ -33,6 +33,7 @@ import {
   persistOutboundPayloadConsent,
   warnOnLinkageRuleSetCitationDrift,
 } from "../config";
+import { CONNECTION_BLOCK_NOTICE } from "../connectionGuidance";
 import { detectFileConflicts } from "../fileUtils";
 import { resolveIdentity, resolveInvitationIdentity } from "../partyIdentity";
 import { resolveRecordOutput } from "../recordFile";
@@ -1018,7 +1019,7 @@ export async function handler(argv: Arguments): Promise<void> {
         log.info(offlineAbandonNotice(keyPath));
         log.info(
           `ensure the connection block in ${ready.configPath} is filled in ` +
-            "before running 'psilink exchange'.",
+            `before running 'psilink exchange'. ${CONNECTION_BLOCK_NOTICE}`,
         );
         return;
       }
@@ -1038,7 +1039,7 @@ export async function handler(argv: Arguments): Promise<void> {
       log.info(offlineAbandonNotice(keyPath));
       log.info(
         `fill in the connection block in ${configPath} before running ` +
-          "'psilink exchange'.",
+          `'psilink exchange'. ${CONNECTION_BLOCK_NOTICE}`,
       );
     });
   } finally {

@@ -33,6 +33,7 @@ import {
   warnOnLinkageRuleSetCitationDrift,
   type ReconcileDiff,
 } from "../config";
+import { CONNECTION_BLOCK_NOTICE } from "../connectionGuidance";
 import { detectFileConflicts } from "../fileUtils";
 import {
   ACCEPT_IDENTITY_QUESTION,
@@ -1254,12 +1255,12 @@ export async function handler(argv: Arguments): Promise<void> {
         log.info(
           `wrote config to ${configPath}, seeding the connection block from the ` +
             "invitation's endpoint; review it and add your own credentials " +
-            "before running 'psilink exchange'.",
+            `before running 'psilink exchange'. ${CONNECTION_BLOCK_NOTICE}`,
         );
       else
         log.info(
           `wrote config to ${configPath}; fill in the connection block before ` +
-            "running 'psilink exchange'.",
+            `running 'psilink exchange'. ${CONNECTION_BLOCK_NOTICE}`,
         );
       log.info(`wrote key file to ${keyPath}. Keep it private.`);
     });

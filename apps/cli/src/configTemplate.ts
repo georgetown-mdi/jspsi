@@ -9,6 +9,8 @@ import {
 } from "@psilink/core";
 import type { LinkageTerms, Metadata, Standardization } from "@psilink/core";
 
+import { CONNECTION_BLOCK_DOC_URL } from "./connectionGuidance";
+
 // Placeholder server fields the operator must replace before the first exchange.
 // Kept identical in spirit to the offline-invite placeholder connection
 // (bootstrap.ts) so a config written by `init` and one written by `invite` both
@@ -63,8 +65,8 @@ export const FIELD_DOCS: Array<{ path: Array<string>; lines: Array<string> }> =
       lines: [
         "How to reach your exchange partner. channel is sftp here (the primary CLI",
         "transport); filedrop (a shared mounted directory) and webrtc are also",
-        "supported. To switch, see",
-        "https://github.com/georgetown-mdi/jspsi/blob/main/docs/COMMUNICATION.md",
+        "supported. The block each one takes is at",
+        CONNECTION_BLOCK_DOC_URL,
       ],
     },
     {
@@ -110,7 +112,12 @@ export const FIELD_DOCS: Array<{ path: Array<string>; lines: Array<string> }> =
     },
     {
       path: ["connection", "options", "poll_interval_ms"],
-      lines: ["How often to check for the partner's file, in ms."],
+      lines: [
+        "How often to check for the partner's file, in ms. Every wait for the next",
+        "one costs up to this long, and an exchange makes many, so on a small",
+        "dataset the polling, not the PSI masking, is most of its wall-clock time.",
+        "Lower it on a directory or a server you control.",
+      ],
     },
     {
       path: ["connection", "options", "max_reconnect_attempts"],

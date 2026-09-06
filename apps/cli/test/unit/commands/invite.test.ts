@@ -9,6 +9,7 @@ import YAML from "yaml";
 import {
   decodeInvitation,
   DEFAULT_PEER_TIMEOUT_MS,
+  DEFAULT_POLLING_FREQUENCY_MS,
   disclosedColumnNames,
   getDefaultLinkageTerms,
   getLogger,
@@ -65,6 +66,10 @@ import {
   validateInvite,
 } from "../../../src/commands/invite";
 import { loadConfigLinkageSource, saveConfig } from "../../../src/config";
+import {
+  CONNECTION_BLOCK_DOC_URL,
+  CONNECTION_BLOCK_NOTICE,
+} from "../../../src/connectionGuidance";
 import { DEFAULT_WEBRTC_INACTIVITY_TIMEOUT_MS } from "../../../src/connection/webrtc/webrtcMessageConnection";
 import {
   DEFAULT_CHANNEL_OPEN_TIMEOUT_MS,
@@ -3255,6 +3260,46 @@ test("handler: an offline invitation's placeholder connection has no role", asyn
     logSpy.mockRestore();
     exit.mockRestore();
     fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("handler: the offline notice and the written config point at the block", async () => {
+  // The durable path's only guidance: an offline invite writes an SFTP
+  // placeholder, so both the notice and the file itself have to say where the
+  // block for each channel is and that the tuning exists, or the operator never
+  // learns filedrop, webrtc, or poll_interval_ms are available.
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-guidance-"));
+  tmpDirs.push(dir);
+  const configFile = path.join(dir, "psilink.yaml");
+  const keyFile = path.join(dir, ".psilink.key");
+  const input = writeCsv(dir, "first_name,last_name,dob,ssn");
+  const exit = vi
+    .spyOn(process, "exit")
+    .mockImplementation((() => undefined) as never);
+  const stdio = captureStdio();
+  try {
+    await inviteHandler({
+      _: [],
+      $0: "psilink",
+      identity: "Agency A",
+      args: [input],
+      "config-file": configFile,
+      "key-file": keyFile,
+      "log-level": "info",
+      record: false,
+    } as unknown as Arguments);
+    const stderr = stdio.stderrWrites.join("");
+    expect(exit).not.toHaveBeenCalledWith(64);
+    expect(stderr).toContain("fill in the connection block");
+    expect(stderr).toContain(CONNECTION_BLOCK_NOTICE);
+    const raw = fs.readFileSync(configFile, "utf8");
+    expect(raw).toContain(CONNECTION_BLOCK_DOC_URL);
+    expect(raw).toContain(
+      `#   poll_interval_ms: ${DEFAULT_POLLING_FREQUENCY_MS}`,
+    );
+  } finally {
+    stdio.restore();
+    exit.mockRestore();
   }
 });
 

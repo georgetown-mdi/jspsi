@@ -43,6 +43,7 @@ import {
   withRetainModeImplications,
 } from "@psilink/core";
 
+import { annotateConnectionGuidance } from "./connectionGuidance";
 import { writeFileOwnerOnly } from "./fileUtils";
 import { parseSensitiveYaml, editSensitiveYamlDocument } from "./sensitiveFile";
 
@@ -1305,6 +1306,12 @@ export function reconcileConflictMessage(params: {
  * caller left them populated, so the secret cannot be duplicated onto disk.
  * The caller's spec is not mutated.
  *
+ * The `connection` block is annotated with the operator guidance
+ * {@link annotateConnectionGuidance} attaches -- the channel alternatives, where
+ * each channel's block is documented, and the connection tuning as a commented
+ * example -- since a config written by `invite`, `accept`, or a saved zero-setup
+ * exchange is one the operator edits by hand from here on.
+ *
  * Does not guard against overwriting an existing file; callers provision
  * through `provisionConfigAndKey`, which runs the conflict gate first.
  */
@@ -1319,7 +1326,9 @@ export function saveConfig(configPath: string, spec: ExchangeSpec): void {
     // token_max_age_days) keep it non-empty when present.
     if (Object.keys(auth).length === 0) delete sanitized.authentication;
   }
-  writeFileOwnerOnly(configPath, YAML.stringify(snakeizeKeys(sanitized)));
+  const doc = new YAML.Document(snakeizeKeys(sanitized));
+  annotateConnectionGuidance(doc);
+  writeFileOwnerOnly(configPath, doc.toString());
 }
 
 /**
