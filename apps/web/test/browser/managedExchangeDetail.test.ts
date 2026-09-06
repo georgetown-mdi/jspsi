@@ -1506,10 +1506,11 @@ describe("recovering an accounting this version cannot read", () => {
         .getByRole("button", { name: /Download the stored records/ })
         .click();
 
-      await vi.waitFor(() => {
-        expect(downloads.captured).toHaveLength(1);
-        expect(downloads.captured[0].text).not.toBe("");
-      });
+      // The click's handler downloads inside the event dispatch, so the anchor
+      // has fired by the time it resolves; only the capture's read of the blob
+      // is still outstanding, and it is awaited rather than polled for.
+      await downloads.settled();
+      expect(downloads.captured).toHaveLength(1);
       expect(downloads.captured[0].fileName).toMatch(
         /^psilink-disclosures-stored-.*\.json$/,
       );
@@ -1879,10 +1880,11 @@ describe("an accounting a newer version of the app filed", () => {
         .getByRole("button", { name: /Download the stored records/ })
         .click();
 
-      await vi.waitFor(() => {
-        expect(downloads.captured).toHaveLength(1);
-        expect(downloads.captured[0].text).not.toBe("");
-      });
+      // The click's handler downloads inside the event dispatch, so the anchor
+      // has fired by the time it resolves; only the capture's read of the blob
+      // is still outstanding, and it is awaited rather than polled for.
+      await downloads.settled();
+      expect(downloads.captured).toHaveLength(1);
       // The same stored-form export the other direction hands over: verbatim, so
       // it asserts nothing about entries this build cannot read.
       expect(JSON.parse(downloads.captured[0].text)).toEqual({

@@ -32,7 +32,7 @@ import { dispatchManagedCronExport } from "@psi/managed/managedExchangeExport";
 import { captureDownloads } from "./captureDownloads";
 import { createAppMount } from "./renderApp";
 
-import type { CapturedDownload } from "./captureDownloads";
+import type { DownloadCapture } from "./captureDownloads";
 import type { NewManagedExchange } from "@psi/managed/managedExchangeRecord";
 
 // The command-line export panel on the run surface, against real Chromium: real
@@ -85,33 +85,23 @@ async function openExportPanel(): Promise<void> {
   expect(exportToggle().element().getAttribute("aria-expanded")).toBe("true");
 }
 
-/** Budget for the export dispatch: the click resolves before the dispatch reads
- * the record back out of IndexedDB, so the two anchor clicks land a store round
- * trip after the click, not with it. Bounded higher than `vi.waitFor`'s 1s
- * default, which is too tight for a store round trip while this project's files
- * run in parallel with the integration suites in CI. */
-const EXPORT_DISPATCH_TIMEOUT_MS = 10_000;
-/** Budget for the capture to read each downloaded blob back off its object URL,
- * the phase after the anchors are clicked. It is waited on separately so a
- * download that never fired and bytes that never came back name themselves apart,
- * rather than arriving as one empty-capture assertion. */
-const DOWNLOAD_READ_BACK_TIMEOUT_MS = 10_000;
-
 /** Click the panel's download action and wait for both files' bytes to be read
- * back off their object URLs. */
-async function downloadBothFiles(
-  captured: Array<CapturedDownload>,
-): Promise<void> {
+ * back off their object URLs. The two phases name themselves apart: the
+ * confirmation renders only from a dispatch that resolved, so it is the panel's
+ * own signal that both anchors fired, and the capture's reads are then awaited
+ * rather than polled for. Neither phase takes a budget of its own -- the click
+ * resolves before the dispatch reads the record back out of IndexedDB, and a
+ * constant shorter than the test's own timeout fails that store round trip with
+ * the test's budget still unspent. */
+async function downloadBothFiles(downloads: DownloadCapture): Promise<void> {
   await page
     .getByRole("button", { name: "Download psilink.yaml and .psilink.key" })
     .click();
-  await vi.waitFor(() => expect(captured).toHaveLength(2), {
-    timeout: EXPORT_DISPATCH_TIMEOUT_MS,
-  });
-  await vi.waitFor(
-    () => expect(captured.every((file) => file.text !== "")).toBe(true),
-    { timeout: DOWNLOAD_READ_BACK_TIMEOUT_MS },
-  );
+  await expect
+    .element(page.getByText("Confirm the hand-off."))
+    .toBeInTheDocument();
+  await downloads.settled();
+  expect(downloads.captured).toHaveLength(2);
 }
 
 beforeEach(async () => {
@@ -130,7 +120,7 @@ describe("the command-line export hands over two files", () => {
     try {
       app.render(createElement(ManagedRunSurface, { id: created.id }));
       await openExportPanel();
-      await downloadBothFiles(downloads.captured);
+      await downloadBothFiles(downloads);
 
       expect(downloads.captured.map((file) => file.fileName)).toEqual([
         "psilink.yaml",
@@ -191,11 +181,7 @@ describe("the source is spent only on the operator's attestation", () => {
     try {
       app.render(createElement(ManagedRunSurface, { id: created.id }));
       await openExportPanel();
-      await downloadBothFiles(downloads.captured);
-
-      await expect
-        .element(page.getByText("Confirm the hand-off."))
-        .toBeInTheDocument();
+      await downloadBothFiles(downloads);
       await page
         .getByRole("button", { name: "Keep it in this browser" })
         .click();
@@ -216,7 +202,7 @@ describe("the source is spent only on the operator's attestation", () => {
     try {
       app.render(createElement(ManagedRunSurface, { id: created.id }));
       await openExportPanel();
-      await downloadBothFiles(downloads.captured);
+      await downloadBothFiles(downloads);
 
       expect((await getManagedLocalState(created.id))?.spent).toBeUndefined();
       await page
@@ -255,7 +241,7 @@ describe("the export leaves the backup indicator exactly where it was", () => {
     try {
       app.render(createElement(ManagedRunSurface, { id: created.id }));
       await openExportPanel();
-      await downloadBothFiles(downloads.captured);
+      await downloadBothFiles(downloads);
       await page
         .getByRole("button", { name: "Keep it in this browser" })
         .click();
@@ -277,7 +263,7 @@ describe("the export leaves the backup indicator exactly where it was", () => {
     try {
       app.render(createElement(ManagedRunSurface, { id: created.id }));
       await openExportPanel();
-      await downloadBothFiles(downloads.captured);
+      await downloadBothFiles(downloads);
       await page
         .getByRole("button", {
           name: "I saved both files; hand off this exchange",
@@ -304,7 +290,7 @@ describe("the export leaves the backup indicator exactly where it was", () => {
     try {
       app.render(createElement(ManagedRunSurface, { id: created.id }));
       await openExportPanel();
-      await downloadBothFiles(downloads.captured);
+      await downloadBothFiles(downloads);
 
       expect((await getManagedLocalState(created.id))?.backup).toEqual({
         backedUpAt: "2026-07-14T12:00:00.000Z",
@@ -373,7 +359,7 @@ describe("the durable spent surface names the hand-off that spent it", () => {
     try {
       app.render(createElement(ManagedRunSurface, { id: created.id }));
       await openExportPanel();
-      await downloadBothFiles(downloads.captured);
+      await downloadBothFiles(downloads);
       await page
         .getByRole("button", {
           name: "I saved both files; hand off this exchange",
