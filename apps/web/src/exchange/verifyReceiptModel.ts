@@ -5,8 +5,8 @@ import {
   SIGNED_RECEIPT_VERSION,
   SIGNING_CERTIFICATE_VERSION,
   SIGNING_IDENTITY_VERSION,
+  anchorsPhrase,
   computeCertificateFingerprint,
-  computeTermsHash,
   decideSignedReceiptVerdict,
   parseCertificate,
   parseDualSignedRecord,
@@ -17,21 +17,19 @@ import {
   recordedVersionMatches,
   sanitizeErrorForDisplay,
   sanitizeForDisplay,
+  signedRecordExpectations,
   verifyDualSignedRecord,
 } from "@psilink/core";
 
 import type {
-  AnchoredCertificateSlot,
   AnchoredCertificateStatus,
   AssertedIdentityStatus,
   CertificateBindingStatus,
   CommitmentName,
   CommitmentStatus,
   DualSignedRecord,
-  DualSignedRecordVerificationInputs,
   DualSignedRecordVerificationReport,
   ExchangeRecord,
-  LinkageTerms,
   ReceiptSignatureStatus,
   RecordVerificationReport,
   ResultSizeStatus,
@@ -42,6 +40,7 @@ import type {
   SignedReceiptVerdictHeadline,
   SignedReceiptVerdictParty,
   SignedReceiptVerdictRunBinding,
+  SignedRecordExpectationSources,
   SigningCertificate,
   TermsHashStatus,
   UnanchoredCertificateClause,
@@ -606,64 +605,6 @@ interface SignedRecordAnchors {
 }
 
 /**
- * Where the two identities the certificates must authorize, the agreed-terms hash
- * the receipt content must contain, and the run binder that pairs the receipt to one
- * exchange come from. The exchange record holds all three already, so a party
- * checking its own exchange supplies them by loading it; a verifier without the
- * record restates the first two from both parties' linkage terms, and pairs
- * nothing -- terms belong to a partnership, not to one run of it. With neither,
- * every check is reported as not performed rather than assumed -- which also holds
- * the verdict short of verified.
- */
-interface SignedRecordExpectationSources {
-  record?: ExchangeRecord;
-  localTerms?: LinkageTerms;
-  partnerTerms?: LinkageTerms;
-}
-
-async function signedRecordExpectations(
-  sources: SignedRecordExpectationSources,
-): Promise<
-  Pick<
-    DualSignedRecordVerificationInputs,
-    "expectedIdentities" | "expectedTermsHash" | "recordReceiptBinder"
-  >
-> {
-  const { record, localTerms, partnerTerms } = sources;
-  if (record !== undefined)
-    return {
-      ...namedPair(record.localIdentity, record.partnerIdentity),
-      expectedTermsHash: record.termsHash,
-      // An explicit null for a record that holds no run binder, so a record of
-      // an exchange that produced no receipt is reported as contradicting the
-      // receipt loaded beside it rather than as a pairing nobody could check.
-      recordReceiptBinder: record.receiptBinder ?? null,
-    };
-  if (localTerms === undefined || partnerTerms === undefined) return {};
-  return {
-    ...namedPair(localTerms.identity, partnerTerms.identity),
-    expectedTermsHash: await computeTermsHash(localTerms, partnerTerms),
-  };
-}
-
-/**
- * The `expectedIdentities` pair, present only where both parties named
- * themselves. `linkage_terms.identity` is optional, and an unnamed party has
- * nothing a certificate could be authorized against -- which is why an exchange
- * with one produces no receipt at all (core's `runExchange`). A half-pair would
- * anchor one signer while the other's identity check still read as performed, so
- * the check is reported as not performed instead.
- */
-function namedPair(
-  local: string | undefined,
-  partner: string | undefined,
-): Pick<DualSignedRecordVerificationInputs, "expectedIdentities"> {
-  return local === undefined || partner === undefined
-    ? {}
-    : { expectedIdentities: [local, partner] };
-}
-
-/**
  * Verify a parsed dual-signed record against what the verifier holds outside it.
  * The verdict is core's: this assembles the anchoring values and the expected
  * identities/terms hash and returns
@@ -803,9 +744,9 @@ const ASSERTED_IDENTITY_COPY: Record<AssertedIdentityStatus, RowCopy> = {
   // Two states reach this row, and the copy has to hold for both: nothing was
   // loaded to state who the exchange was between, or something was and it names
   // fewer than two parties -- `linkage_terms.identity` is optional, so a loaded
-  // record or terms document legitimately holds none (see `namedPair`). Naming
-  // only the first would send an operator who already loaded their files back
-  // after them.
+  // record or terms document legitimately holds none (see core's
+  // `signedRecordExpectations`). Naming only the first would send an operator
+  // who already loaded their files back after them.
   "not-checked": {
     status: "Not checked",
     explanation:
@@ -897,8 +838,8 @@ const UNANCHORED_CLAUSE_COPY: Record<UnanchoredCertificateClause, string> = {
     "it is not the certificate you supplied as your own",
 };
 
-// How the verified verdict's sentence names each anchor. That verdict holds
-// only slots something anchored, so there is no unanchored case to leave unnamed.
+// This page's words for each anchoring source, for the sentence `anchorsPhrase`
+// assembles them into.
 const ANCHOR_SOURCE_PHRASES: Record<AnchoredCertificateStatus, string> = {
   "partner-pin": "a fingerprint you pinned out-of-band",
   "local-identity": "the certificate you supplied as your own",
@@ -961,14 +902,6 @@ function signedPartyViewModel(
   };
 }
 
-function anchorsPhrase(slots: ReadonlyArray<AnchoredCertificateSlot>): string {
-  return slots
-    .map(
-      (slot) => `the ${slot.role}'s by ${ANCHOR_SOURCE_PHRASES[slot.anchor]}`,
-    )
-    .join(", and ");
-}
-
 function signedHeadline(
   headline: SignedReceiptVerdictHeadline,
 ): VerdictHeadline {
@@ -995,7 +928,7 @@ function signedHeadline(
     title: "Signed receipt verified",
     detail:
       "Both signatures verify, and both certificates are anchored outside the " +
-      `record -- ${anchorsPhrase(headline.anchoredSlots)}.`,
+      `record -- ${anchorsPhrase(headline.anchoredSlots, ANCHOR_SOURCE_PHRASES)}.`,
   };
 }
 

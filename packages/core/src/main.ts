@@ -514,7 +514,9 @@ export type {
   TermsHashStatus,
 } from "./records/recordVerification";
 export {
+  anchorsPhrase,
   decideSignedReceiptVerdict,
+  signedRecordExpectations,
   verifyDualSignedRecord,
 } from "./records/signedReceiptVerification";
 export type {
@@ -535,6 +537,7 @@ export type {
   SignedReceiptVerdictHeadline,
   SignedReceiptVerdictParty,
   SignedReceiptVerdictRunBinding,
+  SignedRecordExpectationSources,
   UnanchoredCertificateClause,
 } from "./records/signedReceiptVerification";
 export {

@@ -8,9 +8,16 @@ import {
   signReceiptContent,
 } from "../../src/records/signedReceipt";
 import {
+  anchorsPhrase,
   decideSignedReceiptVerdict,
+  signedRecordExpectations,
   verifyDualSignedRecord,
 } from "../../src/records/signedReceiptVerification";
+import {
+  SALT_BYTES,
+  buildExchangeRecord,
+  computeTermsHash,
+} from "../../src/records/exchangeRecord";
 import {
   computeCertificateFingerprint,
   generateSigningIdentity,
@@ -27,6 +34,12 @@ import type {
   SignedReceiptPartyReport,
   SignedReceiptVerdict,
 } from "../../src/records/signedReceiptVerification";
+import type {
+  ExchangeRecord,
+  ExchangeRecordInputs,
+  ExchangeRecordRandomness,
+} from "../../src/records/exchangeRecord";
+import type { LinkageTerms } from "../../src/config/linkageTermsSchema";
 import type {
   P256PrivateJwk,
   SigningIdentity,
@@ -631,6 +644,133 @@ describe("verifyDualSignedRecord", () => {
     expect(report.outcome).toBe("failed");
     expect(report.termsHash).toBe("mismatch");
     expect(report.initiator.signature).toBe("verified");
+  });
+});
+
+// --- Verification inputs from the artifacts in hand ---------------------------
+
+// What every surface anchors the signature checks to besides the certificates,
+// assembled once from whichever artifacts the verifier loaded. A surface that
+// derived these itself could reach a different verdict on the same record.
+
+describe("signedRecordExpectations", () => {
+  const termsA: LinkageTerms = {
+    version: "1.0.0",
+    identity: "Party A",
+    date: "2025-01-01",
+    algorithm: "psi",
+    linkageStrategy: "cascade",
+    output: { expectsOutput: true, shareWithPartner: true },
+    deduplicate: false,
+    linkageFields: [{ name: "ssn", type: "ssn" }],
+    linkageKeys: [{ name: "SSN", elements: [{ field: "ssn" }] }],
+  };
+  const termsB: LinkageTerms = { ...termsA, identity: "Party B" };
+  const { identity: _unnamed, ...unnamedTerms } = termsA;
+
+  const salt = (b: number): Uint8Array<ArrayBuffer> =>
+    new Uint8Array(SALT_BYTES).fill(b);
+  const randomness: ExchangeRecordRandomness = {
+    bindingNonce: salt(0),
+    salts: {
+      localPayloadSent: salt(1),
+      partnerPayloadReceived: salt(2),
+      associationTable: salt(3),
+    },
+  };
+  const recordInputs: ExchangeRecordInputs = {
+    localTerms: termsA,
+    partnerTerms: termsB,
+    outcome: "completed",
+    recordsExposed: 5,
+    resultSize: 1,
+    associationTable: [[0], [0]],
+    localPayloadSent: { columns: ["dose"], rows: [["10mg"]] },
+    partnerPayloadReceived: { columns: ["status"], rows: [["active"]] },
+    createdAt: "2026-01-02T03:04:05.000Z",
+  };
+  const BINDER = "Zm9yLXRoaXMtb25lLXJ1bi1vbmx5LWJpbmRlci12YWx1ZXM";
+
+  const recordFor = async (
+    inputs: Partial<ExchangeRecordInputs> = {},
+  ): Promise<ExchangeRecord> =>
+    (await buildExchangeRecord({ ...recordInputs, ...inputs }, randomness))
+      .record;
+
+  test("takes both identities, the hash, and the binder from the record", async () => {
+    const record = await recordFor({ receiptBinder: BINDER });
+    expect(await signedRecordExpectations({ record })).toEqual({
+      expectedIdentities: ["Party A", "Party B"],
+      expectedTermsHash: record.termsHash,
+      recordReceiptBinder: BINDER,
+    });
+  });
+
+  test("pairs a record of an exchange that produced no receipt to nothing", async () => {
+    // An explicit null, not an omission: the record states that no receipt
+    // belongs to it, which contradicts one loaded beside it rather than leaving
+    // the pairing unchecked.
+    const expectations = await signedRecordExpectations({
+      record: await recordFor(),
+    });
+    expect(expectations.recordReceiptBinder).toBeNull();
+  });
+
+  test("restates the identities and the hash from both parties' terms", async () => {
+    // Terms belong to a partnership rather than to one run of it, so a verifier
+    // holding them and no record pairs nothing.
+    expect(
+      await signedRecordExpectations({
+        localTerms: termsA,
+        partnerTerms: termsB,
+      }),
+    ).toEqual({
+      expectedIdentities: ["Party A", "Party B"],
+      expectedTermsHash: await computeTermsHash(termsA, termsB),
+    });
+  });
+
+  test("supplies no identity pair when either party is unnamed", async () => {
+    // A half-pair would anchor one signer while the other's identity check was
+    // still reported as performed, so neither name is supplied and the hash
+    // beside it still is.
+    const fromTerms = await signedRecordExpectations({
+      localTerms: unnamedTerms,
+      partnerTerms: termsB,
+    });
+    expect(fromTerms.expectedIdentities).toBeUndefined();
+    expect(fromTerms.expectedTermsHash).toBeDefined();
+
+    const fromRecord = await signedRecordExpectations({
+      record: await recordFor({ partnerTerms: unnamedTerms }),
+    });
+    expect(fromRecord.expectedIdentities).toBeUndefined();
+    expect(fromRecord.expectedTermsHash).toBeDefined();
+  });
+
+  test("supplies nothing when neither artifact is in hand", async () => {
+    expect(await signedRecordExpectations({})).toEqual({});
+    expect(await signedRecordExpectations({ localTerms: termsA })).toEqual({});
+  });
+});
+
+describe("anchorsPhrase", () => {
+  test("names each anchored slot in the words the surface supplied", () => {
+    expect(
+      anchorsPhrase(
+        [
+          { role: "initiator", anchor: "local-identity" },
+          { role: "responder", anchor: "partner-pin" },
+        ],
+        {
+          "local-identity": "your own signing identity",
+          "partner-pin": "a fingerprint you pinned out-of-band",
+        },
+      ),
+    ).toBe(
+      "the initiator's by your own signing identity, and the responder's by " +
+        "a fingerprint you pinned out-of-band",
+    );
   });
 });
 

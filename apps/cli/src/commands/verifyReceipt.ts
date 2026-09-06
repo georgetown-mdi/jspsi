@@ -2,8 +2,8 @@ import type { Argv, Arguments } from "yargs";
 import fs from "node:fs";
 
 import {
+  anchorsPhrase,
   computeCertificateFingerprint,
-  computeTermsHash,
   decideSignedReceiptVerdict,
   deriveOurIdColumn,
   EXCHANGE_KEYS_VERSION,
@@ -20,19 +20,18 @@ import {
   sanitizeErrorForDisplay,
   sanitizeForDisplay,
   SIGNED_RECEIPT_VERSION,
+  signedRecordExpectations,
   toRetainedResult,
   UsageError,
   verifyDualSignedRecord,
   verifyExchangeRecord,
 } from "@psilink/core";
 import type {
-  AnchoredCertificateSlot,
   AnchoredCertificateStatus,
   AssertedIdentityStatus,
   CertificateBindingStatus,
   CommitmentStatus,
   DualSignedRecord,
-  DualSignedRecordVerificationInputs,
   DualSignedRecordVerificationReport,
   ExchangeRecord,
   LinkageTerms,
@@ -534,9 +533,8 @@ function unanchoredCertificateWord(
   return `not anchored (nothing you supplied anchors it${supported})`;
 }
 
-// How the verdict's own sentence names each anchor. The verdict's verified
-// headline includes only slots something anchored, so there is no unanchored case
-// to leave unnamed.
+// This command's words for each anchoring source, for the sentence
+// `anchorsPhrase` assembles them into.
 const ANCHOR_SOURCE_PHRASE: Record<AnchoredCertificateStatus, string> = {
   "partner-pin": "a fingerprint you pinned out-of-band",
   "local-identity": "your own signing identity",
@@ -627,13 +625,6 @@ function signedPartyLines(
   ];
 }
 
-/** Name what anchored each certificate, for the verified verdict's sentence. */
-function anchorsPhrase(slots: readonly AnchoredCertificateSlot[]): string {
-  return slots
-    .map((slot) => `the ${slot.role}'s by ${ANCHOR_SOURCE_PHRASE[slot.anchor]}`)
-    .join(", and ");
-}
-
 // What to do about a certificate nothing outside the record vouches for, and what
 // a supplied anchor that reached neither certificate means, in this command's
 // vocabulary. Which of them a run has earned, and in what order, is the verdict's
@@ -707,7 +698,7 @@ export function formatSignedRecordReport(
     lines.push(
       "SIGNED RECEIPT VERIFIED: both signatures verify, and both certificates " +
         "are anchored outside the record -- " +
-        `${anchorsPhrase(headline.anchoredSlots)}.`,
+        `${anchorsPhrase(headline.anchoredSlots, ANCHOR_SOURCE_PHRASE)}.`,
     );
 
   for (const party of verdict.parties)
@@ -896,50 +887,6 @@ function signingIdentityPathFrom(
   const identityFile =
     signing.fields["identity_file"] ?? signing.fields["identityFile"];
   return typeof identityFile === "string" ? identityFile : undefined;
-}
-
-/**
- * What the signature checks are anchored to besides the certificates: both
- * parties' identities, the agreed-terms hash, and the run binder. Supplied
- * from the exchange record when named; without it, an auditor restates
- * identities and the hash from both parties' terms and supplies no run
- * binder. A record with no run binder is passed as explicit `null`, not
- * omitted. Identities are unordered (the per-signer signature binding fixes
- * a certificate to its role) and are supplied only when both parties are
- * named -- a half-pair would leave one identity check appearing performed.
- */
-async function signedRecordExpectations(
-  record: ExchangeRecord | undefined,
-  localTerms: LinkageTerms | undefined,
-  partnerTerms: LinkageTerms | undefined,
-): Promise<
-  Pick<
-    DualSignedRecordVerificationInputs,
-    "expectedIdentities" | "expectedTermsHash" | "recordReceiptBinder"
-  >
-> {
-  if (record !== undefined)
-    return {
-      ...namedPair(record.localIdentity, record.partnerIdentity),
-      expectedTermsHash: record.termsHash,
-      recordReceiptBinder: record.receiptBinder ?? null,
-    };
-  if (localTerms === undefined || partnerTerms === undefined) return {};
-  return {
-    ...namedPair(localTerms.identity, partnerTerms.identity),
-    expectedTermsHash: await computeTermsHash(localTerms, partnerTerms),
-  };
-}
-
-/** The `expectedIdentities` pair, present only where both parties named
- * themselves; see {@link signedRecordExpectations}. */
-function namedPair(
-  local: string | undefined,
-  partner: string | undefined,
-): Pick<DualSignedRecordVerificationInputs, "expectedIdentities"> {
-  return local === undefined || partner === undefined
-    ? {}
-    : { expectedIdentities: [local, partner] };
 }
 
 /**
@@ -1200,11 +1147,11 @@ export async function handler(argv: Arguments): Promise<void> {
         configFile,
         configFile !== undefined,
       );
-      const expectations = await signedRecordExpectations(
-        artifact.kind === "record" ? artifact.record : undefined,
+      const expectations = await signedRecordExpectations({
+        record: artifact.kind === "record" ? artifact.record : undefined,
         localTerms,
         partnerTerms,
-      );
+      });
       const report = await verifyDualSignedRecord(signedRecord, {
         pinnedFingerprints: resolvePinnedFingerprints(
           partnerFingerprintArgs,
