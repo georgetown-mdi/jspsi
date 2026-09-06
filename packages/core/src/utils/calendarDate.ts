@@ -7,8 +7,10 @@
  * round-tripped against the input to catch the rollover.
  *
  * Shared by the `parse_date` standardization step, which rejects a row whose
- * components do not form a date, and by the `adjacent_years` fuzzy expansion,
- * which drops a shifted year that lands on Feb 29 of a non-leap year.
+ * components do not form a date, and by the two date fuzzy expansions, which
+ * drop a candidate that is not a real date: a shifted year landing on Feb 29 of
+ * a non-leap year for `adjacent_years`, and a day above 12 becoming a month for
+ * `day_month_swaps`.
  *
  * Each component is the plain decimal string the caller already holds; `month`
  * and `day` are expected zero-padded to two digits, `year` to four.

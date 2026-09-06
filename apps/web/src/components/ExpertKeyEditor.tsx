@@ -86,6 +86,7 @@ const FUZZY_OPTIONS: Array<{ value: FuzzyComparison; label: string }> = [
   { value: "transpositions", label: "Two-digit transpositions" },
   { value: "edit_distances", label: "Single-character edits" },
   { value: "adjacent_years", label: "Adjacent years (+/- 1)" },
+  { value: "day_month_swaps", label: "Day and month exchanged" },
 ];
 
 /** The effective identifier of an element within its key -- its alias if set,

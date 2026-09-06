@@ -519,11 +519,12 @@ describe("summarizeInvitation", () => {
         }),
       ).linkageKeys[0].elements[0].fuzzyComparison;
 
-    // All three enum values map to a distinct plain-language label, so a typo
+    // Every enum value maps to a distinct plain-language label, so a typo
     // or swapped entry in the lookup cannot ship unnoticed.
     expect(fuzzyLabelFor("transpositions")).toBe("two-digit transpositions");
     expect(fuzzyLabelFor("edit_distances")).toBe("single-character edits");
     expect(fuzzyLabelFor("adjacent_years")).toBe("adjacent years");
+    expect(fuzzyLabelFor("day_month_swaps")).toBe("day and month exchanged");
   });
 
   // The per-step detail summaries an element with `transform` produces, in
