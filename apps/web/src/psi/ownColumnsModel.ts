@@ -100,9 +100,9 @@ export function ownColumnsPreview(
  * than left to the reference: the operator is choosing beside a grid whose
  * every other row governs what the partner sees. */
 export const OWN_COLUMNS_LOCAL_NOTICE =
-  "This choice changes only the result file you download. Your partner is " +
-  "sent nothing extra, sees no change in what they agree to, and their own " +
-  "result file is untouched.";
+  "This choice changes only the result file this run writes for you. Your " +
+  "partner is sent nothing extra, sees no change in what they agree to, " +
+  "and their own result file is untouched.";
 
 /** What the control says where `all` resolves to no column: every column the
  * file has is the identifier the result already begins with. */
