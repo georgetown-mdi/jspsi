@@ -108,9 +108,19 @@ describe("sanitizedColumnsAlert", () => {
 
   test("states what was done and how to act on it", () => {
     const alert = sanitizedColumnsAlert([1]);
-    expect(alert.message).toContain("removed");
-    expect(alert.message).toContain("sent to your partner");
+    expect(alert.message).toContain("are gone from");
     expect(alert.message).toContain("edit the header row");
+  });
+
+  test("conditions the disclosure claim on what the exchange sends", () => {
+    // A column that is neither a linkage field nor a marked payload column has
+    // its name transmitted nowhere, so the copy states the names this removal
+    // reaches rather than asserting the changed name went to the partner.
+    const alert = sanitizedColumnsAlert([1]);
+    expect(alert.message).toContain(
+      "from any name this exchange sends your partner",
+    );
+    expect(alert.message).not.toContain("and sent to your partner");
   });
 
   test("states the numbering instead of claiming the name is the rest of the header", () => {

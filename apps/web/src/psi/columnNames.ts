@@ -96,6 +96,11 @@ export function unnameableColumnsAlert(
  * rest of the header: where the removal leaves two columns sharing one name, the
  * parser numbers the later one (`name`, `name_1`), which is neither position's
  * header and can be the untouched column's.
+ *
+ * What it says about disclosure is conditioned on the exchange: a column that is
+ * neither a linkage field nor a marked payload column has its name transmitted
+ * nowhere. The copy states the matching name, the name this screen shows, and
+ * any name the exchange sends.
  */
 export function sanitizedColumnsAlert(positions: ReadonlyArray<number>): {
   title: string;
@@ -109,9 +114,10 @@ export function sanitizedColumnsAlert(positions: ReadonlyArray<number>): {
     message:
       `Column${plural ? "s" : ""} ${positions.join(", ")} in your CSV ` +
       `${plural ? "had names that held" : "had a name that held"} invisible ` +
-      `text-direction characters. The characters were removed from the ` +
-      `name${plural ? "s" : ""} used for matching, shown on this screen, and ` +
-      `sent to your partner. Where that left two columns with the same name, ` +
+      `text-direction characters. The characters are gone from the ` +
+      `name${plural ? "s" : ""} used for matching and shown on this screen, ` +
+      `and from any name this exchange sends your partner. Where that left ` +
+      `two columns with the same name, ` +
       `the later one was numbered to keep the two apart. Check that ` +
       `${plural ? "those columns" : "the column"} still ` +
       `${plural ? "read" : "reads"} the way your file names ` +

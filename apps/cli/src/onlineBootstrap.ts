@@ -442,6 +442,11 @@ export async function loadInputRows(
  * rest of the header: where the removal leaves two columns sharing one name, the
  * parser numbers the later one (`name`, `name_1`), which is neither position's
  * header and can be the untouched column's.
+ *
+ * What it says about disclosure is conditioned on the run: this loader serves
+ * every CLI read, including an exchange whose config makes that column neither a
+ * linkage field nor a payload column, in which case its name is transmitted
+ * nowhere. The line states the matching name and any name the run sends.
  */
 export function warnBidiStrippedColumns(
   positions: ReadonlyArray<number>,
@@ -451,8 +456,9 @@ export function warnBidiStrippedColumns(
   getLogger("input").warn(
     `column${plural ? "s" : ""} ${positions.join(", ")} of your CSV input ` +
       `had ${plural ? "names that held" : "a name that held"} invisible ` +
-      `text-direction characters. The characters were removed from the ` +
-      `name${plural ? "s" : ""} used for matching and sent to your partner. ` +
+      `text-direction characters. The characters are gone from the ` +
+      `name${plural ? "s" : ""} used for matching and from any name this ` +
+      `exchange sends your partner. ` +
       `Where that left two columns with the same name, the later one was ` +
       `numbered to keep the two apart. Check that ` +
       `${plural ? "those columns" : "the column"} still ` +

@@ -62,6 +62,7 @@ import {
   parseLinkageStrategyFlag,
   runOnlineBootstrap,
   singlePassDisclosureNotice,
+  warnBidiStrippedColumns,
 } from "../../src/onlineBootstrap";
 import { redactUrlCredentials } from "../../src/util/connectionUrl";
 import { openInputSource } from "../../src/util/dataIo";
@@ -4064,6 +4065,31 @@ test("loadInputRows: a header that collides after the strip is warned by positio
   expect(line).toContain("two columns with the same name");
   expect(line).toContain("the later one was numbered");
   expect(line).not.toContain("rest of the header");
+});
+
+test("the strip warning conditions the disclosure claim on what the run sends", () => {
+  // This loader serves every CLI read, including an exchange whose config makes
+  // the changed column neither a linkage field nor a payload column -- its name
+  // is transmitted nowhere. The line states the names the removal reaches
+  // rather than asserting the changed name went to the partner.
+  const logged: Array<string> = [];
+  const previousSink = getDiagnosticSink();
+  const log = getLogger("input");
+  const previousLevel = log.getLevel();
+  try {
+    setDiagnosticSink((_method, _prefix, args) => {
+      logged.push(args.map((arg) => String(arg)).join(" "));
+    });
+    log.setLevel("warn");
+    warnBidiStrippedColumns([2]);
+  } finally {
+    setDiagnosticSink(previousSink);
+    log.setLevel(previousLevel);
+  }
+
+  const line = logged.find((entry) => entry.includes("text-direction"));
+  expect(line).toContain("from any name this exchange sends your partner");
+  expect(line).not.toContain("and sent to your partner");
 });
 
 test("the empty-name refusal blames the removal when the strip emptied the name", async () => {
