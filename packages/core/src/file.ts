@@ -3,6 +3,7 @@ import Papa from "papaparse";
 import type { LocalFile } from "papaparse";
 
 import { UsageError } from "./errors.js";
+import { stripBidiControls } from "./utils/bidiControls.js";
 
 /**
  * Per-logical-line byte ceiling for the streamed CSV reads ({@link loadCSVFile}
@@ -278,6 +279,21 @@ function releaseSource(detachGuard: () => void, source: StreamSource): void {
 export type CSVRow = Record<string, string | undefined>;
 
 /**
+ * The parse metadata every read in this module resolves: PapaParse's own
+ * {@link Papa.ParseMeta} plus the 1-based positions, in column order, of the
+ * header columns whose name lost a bidi control character at ingestion
+ * ({@link bidiStrippingHeaderTransform}). Empty for a header that held none.
+ *
+ * Carried on `meta` rather than beside it so it rides every hop the header
+ * already rides -- the web app's parse worker posts `meta` back to the main
+ * thread untouched -- and so a consumer reads the positions from the same
+ * object as the names they index.
+ */
+export interface CSVParseMeta extends Papa.ParseMeta {
+  bidiStrippedColumns: Array<number>;
+}
+
+/**
  * Read one column's value from a parsed {@link CSVRow} by name, returning
  * `undefined` when the row omits that column.
  *
@@ -344,12 +360,51 @@ function normalizeCSVRow(row: unknown): CSVRow {
  * once-per-exchange invite/accept file. Under Node, PapaParse never honored
  * the worker anyway (`WORKERS_SUPPORTED` is `!!global.Worker`, false there),
  * so this changes only the web build.
+ *
+ * The header transform is not here because it records per-parse state; every
+ * read composes this object with one from
+ * {@link bidiStrippingHeaderTransform}.
  */
 const SHARED_CSV_PARSE_CONFIG = {
   worker: false,
   header: true,
   skipEmptyLines: true,
 } as const;
+
+/**
+ * The header transform every CSV read in this module applies: each column name
+ * goes through {@link stripBidiControls}, and the 1-based position of a name
+ * that lost a character is appended to `strippedPositions`.
+ *
+ * At the PARSE boundary rather than after it, for two reasons. PapaParse keys
+ * each row object by the header string it ends with (verified by driving it
+ * under `header: true`: `meta.fields` and the row keys both hold the
+ * transformed name), so a name changed after the parse would need every row
+ * re-keyed or its values are lost. And this is the one boundary the browser
+ * parse, the console server's profiling pass, and the CLI's own read all cross,
+ * so the name each of them matches on, discloses, and sends to the partner is
+ * the same string -- both parties describe a column the same way, whichever
+ * seat read the file.
+ *
+ * Removing rather than refusing the file: the header is the operator's own, and
+ * an operator who cannot edit a vendor export would lose the exchange over a
+ * character that carries no meaning in a name. The seats report what was
+ * removed and where (see the web app's `sanitizedColumnsAlert`).
+ *
+ * A name stripped to empty, or onto another column's name, is not special-cased
+ * here: the empty name meets the unnamed-column refusal every intake already
+ * applies, and a collision meets PapaParse's own duplicate-header renaming,
+ * which a header holding two identical names already reaches.
+ */
+function bidiStrippingHeaderTransform(
+  strippedPositions: Array<number>,
+): (header: string, index: number) => string {
+  return (header, index) => {
+    const stripped = stripBidiControls(header);
+    if (stripped !== header) strippedPositions.push(index + 1);
+    return stripped;
+  };
+}
 
 /**
  * Drive a PapaParse read of `file` under {@link SHARED_CSV_PARSE_CONFIG} and the
@@ -378,9 +433,10 @@ const SHARED_CSV_PARSE_CONFIG = {
  * attaches to an over-long row, so both drivers see the accurate row type
  * without a per-site cast.
  *
- * Caveat on `meta`: only `meta.fields` (the header) is whole-file-stable; the rest
- * (`cursor`, `truncated`, `aborted`, ...) is the FINAL chunk's, so a consumer must
- * not read whole-file position or truncation state off it.
+ * Caveat on `meta`: only `meta.fields` (the header) and `bidiStrippedColumns`
+ * are whole-file-stable; the rest (`cursor`, `truncated`, `aborted`, ...) is the
+ * FINAL chunk's, so a consumer must not read whole-file position or truncation
+ * state off it.
  */
 async function runSharedCSVParse(
   file: LocalFile,
@@ -390,7 +446,7 @@ async function runSharedCSVParse(
     errors: Array<Papa.ParseError>,
     meta: Papa.ParseMeta,
   ) => void,
-): Promise<Papa.ParseMeta> {
+): Promise<CSVParseMeta> {
   // Bound the non-stream (browser File) path's leading line before parsing: a File
   // exposes no `data` events for the stream guard below to scan, since PapaParse
   // reads it whole through FileReader. A Node stream or string is a no-op here.
@@ -398,6 +454,7 @@ async function runSharedCSVParse(
   return new Promise((resolve, reject) => {
     let meta: Papa.ParseMeta | undefined;
     let faulted = false;
+    const bidiStrippedColumns: Array<number> = [];
 
     // Bound a single logical line on the Node stream path (CLI file/stdin, or the
     // server's opened input file): the guard scans the source's own `data` events
@@ -410,6 +467,7 @@ async function runSharedCSVParse(
 
     Papa.parse(file, {
       ...SHARED_CSV_PARSE_CONFIG,
+      transformHeader: bidiStrippingHeaderTransform(bidiStrippedColumns),
       chunk: (results, parser) => {
         // Refuse the whole read on the first row-level fault, BEFORE the chunk
         // reaches the consumer. PapaParse reports an unterminated quote or a
@@ -472,7 +530,7 @@ async function runSharedCSVParse(
           );
           return;
         }
-        resolve(meta);
+        resolve(Object.assign(meta, { bidiStrippedColumns }));
       },
       error: (error) => {
         // The guard's ceiling trip surfaces here -- it destroys the source with
@@ -503,13 +561,14 @@ async function runSharedCSVParse(
  * pathological line, not a memory saving for well-formed input. The whole-file
  * streaming counterpart that retains NOTHING is {@link streamCSVRows}.
  *
- * Caveat on `meta`: only `meta.fields` is whole-file-stable (see the runner);
- * every current consumer reads only `data` and `meta.fields`.
+ * Caveat on `meta`: only `meta.fields` and `meta.bidiStrippedColumns` are
+ * whole-file-stable (see the runner); every current consumer reads only `data`
+ * and those two.
  */
 export async function loadCSVFile(
   file: LocalFile,
   byteCeiling: number = CSV_LINE_BYTE_CEILING,
-): Promise<Papa.ParseResult<CSVRow>> {
+): Promise<Omit<Papa.ParseResult<CSVRow>, "meta"> & { meta: CSVParseMeta }> {
   const data: Array<CSVRow> = [];
   const errors: Array<Papa.ParseError> = [];
   const meta = await runSharedCSVParse(
@@ -536,8 +595,9 @@ export async function loadCSVFile(
  * Shares {@link runSharedCSVParse}'s config, single-line byte ceiling, row
  * normalization, and row-level fault gate with {@link loadCSVFile} -- one
  * config, two drivers -- so a streaming server pass and a browser worker
- * wrapping loadCSVFile parse identically. Resolves with the header column
- * list once the parse settles; rejects the same way as loadCSVFile: a
+ * wrapping loadCSVFile parse identically. Resolves with the header column list
+ * and the positions the header transform stripped ({@link CSVParseMeta}) once
+ * the parse settles; rejects the same way as loadCSVFile: a
  * ceiling trip with {@link CsvLineByteCeilingError}, a row-level fault with
  * {@link CsvRowParseError}. The fault gate refuses the read before the
  * faulting chunk reaches `consumeChunk`, so a consumer never accumulates rows
@@ -549,13 +609,16 @@ export async function streamCSVRows(
   file: LocalFile,
   consumeChunk: (rows: Array<CSVRow>, columns: Array<string>) => void,
   byteCeiling: number = CSV_LINE_BYTE_CEILING,
-): Promise<Array<string>> {
+): Promise<{ columns: Array<string>; bidiStrippedColumns: Array<number> }> {
   const meta = await runSharedCSVParse(
     file,
     byteCeiling,
     (rows, _errors, chunkMeta) => consumeChunk(rows, chunkMeta.fields ?? []),
   );
-  return meta.fields ?? [];
+  return {
+    columns: meta.fields ?? [],
+    bidiStrippedColumns: meta.bidiStrippedColumns,
+  };
 }
 
 /**
@@ -624,6 +687,11 @@ export function loadCSVColumnSample(
       worker: false,
       header: true,
       skipEmptyLines: true,
+      // The same header transform the shared runner applies, so the column names
+      // this read hands to config authoring are the names the exchange's own read
+      // of the file will key its rows by. The stripped positions are dropped: this
+      // read has no operator-facing notice to compose them into.
+      transformHeader: bidiStrippingHeaderTransform([]),
       chunk: (results, parser) => {
         if (target === undefined) {
           // Fix the header and the column to sample as soon as a non-empty
