@@ -151,10 +151,50 @@ describe("resolveStandaloneOptions", () => {
     );
   });
 
-  test("keeps the probe beside the mount when the mount is the root", () => {
-    expect(resolveStandaloneOptions(["--path", "/"], {}).readinessPath).toBe(
-      "/health",
+  // The probe path is derived from the mount and compared against a request
+  // target with nothing decoded and nothing resolved, so a mount holding any of
+  // these would put the probe somewhere other than a literal child of the
+  // literal mount -- unreachable, or answering outside the mount a route rule in
+  // front of the broker was written for.
+  test.each([
+    ["/api?x", "a query delimiter"],
+    ["/api#x", "a fragment delimiter"],
+    ["/api/%68ealth", "a percent escape"],
+    ["/api/../secret", "a parent segment"],
+    ["/./api", "a current-directory segment"],
+    ["/..", "a parent segment alone"],
+    ["//api", "a doubled leading slash"],
+    ["/api//v1", "a doubled inner slash"],
+    ["//", "a doubled slash alone"],
+  ])("refuses the mount %s (%s)", (mount) => {
+    expect(() => resolveStandaloneOptions(["--path", mount], {})).toThrow(
+      StandaloneOptionError,
     );
+    expect(() => resolveStandaloneOptions(["--path", mount], {})).toThrow(
+      /--path/,
+    );
+  });
+
+  test.each([
+    ["/api", "/api", "/api/health"],
+    ["/signal", "/signal", "/signal/health"],
+    ["/api/v1", "/api/v1", "/api/v1/health"],
+  ])("keeps the mount %s", (mount, path, readinessPath) => {
+    const options = resolveStandaloneOptions(["--path", mount], {});
+    expect(options.path).toBe(path);
+    expect(options.readinessPath).toBe(readinessPath);
+  });
+
+  test("drops a trailing slash rather than refusing the mount", () => {
+    const options = resolveStandaloneOptions(["--path", "/api/"], {});
+    expect(options.path).toBe("/api");
+    expect(options.readinessPath).toBe("/api/health");
+  });
+
+  test("keeps the probe beside the mount when the mount is the root", () => {
+    const options = resolveStandaloneOptions(["--path", "/"], {});
+    expect(options.path).toBe("/");
+    expect(options.readinessPath).toBe("/health");
   });
 });
 

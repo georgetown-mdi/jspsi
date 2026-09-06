@@ -147,6 +147,53 @@ function requireNonEmpty(raw: string, source: string): string {
   return trimmed;
 }
 
+/** Characters a mount may not hold. A request target's path ends at `?` or `#`,
+ * so a mount holding one names a path no request can reach; a `%` is matched
+ * only by its own spelling, since the handler decodes nothing. */
+const MOUNT_REFUSED_CHARACTERS = /[?#%]/;
+
+/**
+ * The mount the signaling server is built under, from the `--path` value or the
+ * default.
+ *
+ * Held to a literal path, so the readiness endpoint derived from it is a literal
+ * child of the literal mount: one route rule written for the mount in front of
+ * the broker then covers the probe as well. A mount that would leave the probe
+ * unreachable, or put it outside the mount an operator wrote, is refused rather
+ * than started on.
+ *
+ * @throws StandaloneOptionError naming `--path`.
+ */
+function resolveMountPath(givenPath: string | undefined): string {
+  if (givenPath === undefined) return DEFAULT_MOUNT_PATH;
+  const mountPath = requireNonEmpty(givenPath, "--path");
+  if (!mountPath.startsWith("/"))
+    throw new StandaloneOptionError(
+      `--path must begin with "/"; got ${JSON.stringify(givenPath)}`,
+    );
+  if (MOUNT_REFUSED_CHARACTERS.test(mountPath))
+    throw new StandaloneOptionError(
+      `--path must not contain "?", "#" or "%"; got ${JSON.stringify(givenPath)}`,
+    );
+  if (mountPath.includes("//"))
+    throw new StandaloneOptionError(
+      `--path must not contain an empty segment; got ${JSON.stringify(givenPath)}`,
+    );
+  // A single trailing slash is the same mount written two ways, so it is
+  // normalized away rather than refused; the root mount is that slash and keeps
+  // it.
+  const mount =
+    mountPath.length > 1 && mountPath.endsWith("/")
+      ? mountPath.slice(0, -1)
+      : mountPath;
+  const segments = mount === "/" ? [] : mount.slice(1).split("/");
+  if (segments.some((segment) => segment === "." || segment === ".."))
+    throw new StandaloneOptionError(
+      `--path must not contain a "." or ".." segment; got ${JSON.stringify(givenPath)}`,
+    );
+  return mount;
+}
+
 /**
  * Resolve where the runner listens and what it serves, from an argument vector
  * and an environment map. A flag beats the environment, and the defaults are
@@ -155,7 +202,8 @@ function requireNonEmpty(raw: string, source: string): string {
  * The address itself is not parsed here: `listen` resolves a hostname and an
  * address alike, and an address it cannot bind raises an `error` the runner
  * reports. What is checked is what would otherwise fail silently -- a port that
- * is not a port, a blank value, and a mount a request path can never match.
+ * is not a port, a blank value, and a mount that would strand the readiness
+ * endpoint or move it out from under itself ({@link resolveMountPath}).
  *
  * @throws StandaloneOptionError on any of those, naming the flag or the
  * environment variable the value came from.
@@ -179,17 +227,7 @@ export function resolveStandaloneOptions(
     BIND_PORT_ENV,
   );
 
-  const givenPath = flags.get("path");
-  const mountPath =
-    givenPath === undefined
-      ? DEFAULT_MOUNT_PATH
-      : requireNonEmpty(givenPath, "--path");
-  // A mount that does not open with a slash can match no request path, so the
-  // signaling endpoint and the probe alike would answer nothing.
-  if (!mountPath.startsWith("/"))
-    throw new StandaloneOptionError(
-      `--path must begin with "/"; got ${JSON.stringify(givenPath)}`,
-    );
+  const mountPath = resolveMountPath(flags.get("path"));
 
   return {
     host:
