@@ -124,40 +124,58 @@ function refusalFor(method: string): ResponseShape {
  * - a query string on a declared route, which the path the refusal reads
  *   excludes,
  * - methods other than GET, HEAD and OPTIONS among them.
+ *
+ * A row tagged `jobRoute` is one the router resolves to a job route that
+ * answers `200` where the API is enabled. The console arm re-drives exactly
+ * those, so a row whose spelling the router stops resolving fails there instead
+ * of passing here over nothing.
  */
-const REFUSED: ReadonlyArray<[string, string]> = [
-  ["GET", "/api/jobs/slot"],
+const REFUSED: ReadonlyArray<
+  readonly [method: string, path: string, resolvesTo?: "jobRoute"]
+> = [
+  ["GET", "/api/jobs/slot", "jobRoute"],
   ["GET", "/api/jobs"],
   ["GET", "/api/jobs/inputs/coverage"],
   ["GET", "/api/nothing-here"],
   ["GET", "/api/jobs/nothing-here"],
   ["GET", "/api"],
   ["GET", "/api/"],
-  ["GET", "/api/jobs/slot/"],
+  ["GET", "/api/jobs/slot/", "jobRoute"],
   ["GET", "/api/nothing-here/"],
   ["GET", "/api//jobs/slot"],
   ["GET", "/api//nothing-here"],
-  ["GET", "/API/jobs/slot"],
-  ["GET", "/Api/jobs/slot"],
+  ["GET", "/API/jobs/slot", "jobRoute"],
+  ["GET", "/Api/jobs/slot", "jobRoute"],
   ["GET", "/API/nothing-here"],
-  ["GET", "/%61pi/jobs/slot"],
-  ["GET", "/%41PI/jobs/slot"],
+  ["GET", "/%61pi/jobs/slot", "jobRoute"],
+  ["GET", "/%41PI/jobs/slot", "jobRoute"],
   ["GET", "/%61pi/nothing-here"],
-  ["GET", "/api/%6aobs/slot"],
-  ["GET", "/api/jobs/%73lot"],
+  ["GET", "/api/%6aobs/slot", "jobRoute"],
+  ["GET", "/api/jobs/%73lot", "jobRoute"],
   ["GET", "/api%2Fjobs/slot"],
-  ["GET", "/api/peerjs/%2e%2e/jobs/slot"],
-  ["GET", "/api/jobs/slot%20"],
+  ["GET", "/api/peerjs/%2e%2e/jobs/slot", "jobRoute"],
+  ["GET", "/api/jobs/slot%20", "jobRoute"],
   ["GET", "/api/%20jobs/slot"],
   ["GET", "/api/jobs%20/slot"],
-  ["GET", "/api/jobs/slot?x=1"],
+  ["GET", "/api/jobs/slot?x=1", "jobRoute"],
   ["POST", "/api/nothing-here"],
   ["POST", "/api/jobs/slot"],
   ["DELETE", "/api/jobs/slot"],
   ["PATCH", "/api/jobs/inputs/coverage"],
   ["OPTIONS", "/api/nothing-here"],
-  ["HEAD", "/api/jobs/slot"],
+  ["HEAD", "/api/jobs/slot", "jobRoute"],
 ];
+
+/** The matrix's rows as a request each arm drives. */
+const REFUSED_REQUESTS: ReadonlyArray<[string, string]> = REFUSED.map(
+  ([method, path]) => [method, path],
+);
+
+/** The rows the console arm re-drives: every one the hosted matrix reads as a
+ * spelling of a job route. */
+const JOB_ROUTE_REQUESTS: ReadonlyArray<[string, string]> = REFUSED.filter(
+  (row) => row[2] === "jobRoute",
+).map(([method, path]) => [method, path]);
 
 /** The broker's own route, in the spellings a client writes it: the peer server
  * attaches its WebSocket upgrade listener on the first GET under this subtree
@@ -226,7 +244,7 @@ describe.skipIf(!hasBuild)("the /api namespace's refusal", () => {
   });
 
   describe.each(ACCEPT_VALUES)("under Accept: %s", (_name, accept) => {
-    test.each(REFUSED)(
+    test.each(REFUSED_REQUESTS)(
       "a hosted probe reads the one refusal for %s %s",
       async (method, path) => {
         expect(await shapeOf(hostedBase, method, path, accept)).toEqual(
@@ -254,23 +272,38 @@ describe.skipIf(!hasBuild)("the /api namespace's refusal", () => {
     );
   });
 
-  test("the job API answers its own routes where it is enabled", async () => {
-    // The refusal reads the same enablement the per-route gate reads, so a
-    // mis-keyed one would dark the console's own API rather than fail silently.
-    const live = await shapeOf(
-      consoleBase,
-      "GET",
-      "/api/jobs/slot",
-      ACCEPT_VALUES[1][1],
+  // Two claims. The refusal reads the same enablement the per-route gate reads,
+  // so a mis-keyed one darkens the console's own API here rather than failing
+  // silently. And each hosted row above means nothing unless the router
+  // resolves that spelling to a route, so the job-route rows are re-driven
+  // against the profile where nothing refuses them.
+  describe("where the job API is enabled", () => {
+    test("the matrix names the spellings this arm re-drives", () => {
+      expect(JOB_ROUTE_REQUESTS.length).toBeGreaterThan(0);
+    });
+
+    test.each(JOB_ROUTE_REQUESTS)(
+      "the job route answers %s %s",
+      async (method, path) => {
+        const answered = await shapeOf(
+          consoleBase,
+          method,
+          path,
+          ACCEPT_VALUES[1][1],
+        );
+        expect(answered.status).toBe(200);
+        if (method !== "HEAD") expect(answered.bodyLength).toBeGreaterThan(0);
+      },
     );
-    expect(live.status).toBe(200);
-    expect(live.bodyLength).toBeGreaterThan(0);
-    const broker = await shapeOf(
-      consoleBase,
-      "GET",
-      "/api/peerjs/id",
-      ACCEPT_VALUES[1][1],
-    );
-    expect(broker.status).toBe(200);
+
+    test("the broker answers GET /api/peerjs/id", async () => {
+      const broker = await shapeOf(
+        consoleBase,
+        "GET",
+        "/api/peerjs/id",
+        ACCEPT_VALUES[1][1],
+      );
+      expect(broker.status).toBe(200);
+    });
   });
 });
