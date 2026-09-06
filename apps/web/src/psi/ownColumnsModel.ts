@@ -111,12 +111,13 @@ export const OWN_COLUMNS_EMPTY_ALL_NOTICE =
   "identifier, and this file has no other column to write beside it.";
 
 /** What the control says where `disclosed` resolves to no column: the file may
- * hold plenty of columns, but the disclosure choices mark none of them as sent,
- * and matching columns are not sent. */
+ * hold plenty of columns, but none beside the record identifier is marked as
+ * sent, and the identifier already heads the result on its own. */
 export const OWN_COLUMNS_EMPTY_DISCLOSED_NOTICE =
-  "No column is left to add: your file has no column marked as sent to your " +
-  "partner, so this choice selects none. Mark one as sent to keep it in your " +
-  "result file.";
+  "No column is left to add: no column other than your record identifier is " +
+  "marked as sent to your partner, so this choice adds nothing. The " +
+  "identifier already begins your result file; mark another column as sent " +
+  "to keep it in your result file.";
 
 /** The notice for a selection that resolves to no column, so the operator is
  * not left reading a chosen setting with nothing under it. Which one applies is
