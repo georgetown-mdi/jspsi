@@ -11,6 +11,8 @@ import "@mantine/core/styles.css";
 import { inferMetadata } from "@psilink/core";
 
 import {
+  OWN_COLUMNS_EMPTY_ALL_NOTICE,
+  OWN_COLUMNS_EMPTY_DISCLOSED_NOTICE,
   OWN_COLUMNS_LABELS,
   OWN_COLUMNS_LOCAL_NOTICE,
 } from "@psi/ownColumnsModel";
@@ -18,6 +20,7 @@ import { MatchingSharingSection } from "@exchange/MatchingSharingSection";
 
 import { createAppMount, flushPendingUpdates } from "./renderApp";
 
+import type { Metadata } from "@psilink/core";
 import type { OwnColumnsChoice } from "@psi/ownColumnsModel";
 
 // The own-columns control as the operator meets it on step 2: its three states,
@@ -37,11 +40,27 @@ const metadata = inferMetadata([
   "program_code",
 ]);
 
-async function mount(ownColumns: OwnColumnsChoice | undefined) {
+// A file whose only column is the record identifier: the result already begins
+// with it, so `all` selects nothing.
+const identifierOnlyMetadata = inferMetadata(["client_id"]);
+
+// A file of matching columns and nothing else: the columns are there, but they
+// are role linkage rather than payload, so `disclosed` selects nothing.
+const linkageOnlyMetadata = inferMetadata([
+  "client_id",
+  "first_name",
+  "last_name",
+  "dob",
+]);
+
+async function mount(
+  ownColumns: OwnColumnsChoice | undefined,
+  columns: Metadata = metadata,
+) {
   const chosen: Array<OwnColumnsChoice> = [];
   app.render(
     createElement(MatchingSharingSection, {
-      metadata,
+      metadata: columns,
       onColumnType: () => undefined,
       onColumnDisclosure: () => undefined,
       ownColumns,
@@ -118,6 +137,31 @@ describe("the own-columns control's states", () => {
   test("the control says the choice is local, where it is made", async () => {
     await mount("none");
     expect(app.container.textContent).toContain(OWN_COLUMNS_LOCAL_NOTICE);
+  });
+
+  test("`all` over an identifier-only file says the file holds nothing else", async () => {
+    await mount("all", identifierOnlyMetadata);
+    expect(app.container.textContent).not.toContain(
+      "your result file will also hold these columns of your own",
+    );
+    expect(app.container.textContent).toContain("No column left to add");
+    expect(app.container.textContent).toContain(OWN_COLUMNS_EMPTY_ALL_NOTICE);
+  });
+
+  test("`disclosed` over a linkage-only file says none is marked as sent", async () => {
+    // The file has three columns beside the identifier; matching is what they
+    // are for, so none of them is sent and the selection names none.
+    await mount("disclosed", linkageOnlyMetadata);
+    expect(app.container.textContent).not.toContain(
+      "your result file will also hold these columns of your own",
+    );
+    expect(app.container.textContent).toContain("No column left to add");
+    expect(app.container.textContent).toContain(
+      OWN_COLUMNS_EMPTY_DISCLOSED_NOTICE,
+    );
+    expect(app.container.textContent).not.toContain(
+      OWN_COLUMNS_EMPTY_ALL_NOTICE,
+    );
   });
 
   test("an exchange with no result table for this party offers no control", async () => {

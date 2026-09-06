@@ -10,9 +10,12 @@ import {
 
 import {
   OWN_COLUMNS_DEFAULT,
+  OWN_COLUMNS_EMPTY_ALL_NOTICE,
+  OWN_COLUMNS_EMPTY_DISCLOSED_NOTICE,
   OWN_COLUMNS_LABELS,
   OWN_COLUMNS_ORDER,
   ownColumnsActionable,
+  ownColumnsEmptySelectionNotice,
   ownColumnsField,
   ownColumnsPreview,
 } from "@psi/ownColumnsModel";
@@ -99,6 +102,43 @@ describe("the control's three states", () => {
       "dob",
       "program_code",
     ]);
+  });
+});
+
+describe("a selection that resolves to no column", () => {
+  // A file whose only column is the record identifier the result already begins
+  // with, and a file of matching columns and nothing else.
+  const identifierOnly = inferMetadata(["client_id"]);
+  const linkageOnly = inferMetadata([
+    "client_id",
+    "first_name",
+    "last_name",
+    "dob",
+  ]);
+
+  test("`all` finds nothing where the identifier is the only column", () => {
+    expect(ownColumnsPreview(identifierOnly, "all")).toEqual([]);
+    expect(ownColumnsEmptySelectionNotice("all")).toBe(
+      OWN_COLUMNS_EMPTY_ALL_NOTICE,
+    );
+  });
+
+  test("`disclosed` finds nothing where no column is marked as sent", () => {
+    // The columns are there; matching is what they are for, so none of them is
+    // sent -- a different reason than the file having no other column, and the
+    // notice says so.
+    expect(ownColumnsPreview(linkageOnly, "all")).toEqual([
+      "first_name",
+      "last_name",
+      "dob",
+    ]);
+    expect(ownColumnsPreview(linkageOnly, "disclosed")).toEqual([]);
+    expect(ownColumnsEmptySelectionNotice("disclosed")).toBe(
+      OWN_COLUMNS_EMPTY_DISCLOSED_NOTICE,
+    );
+    expect(OWN_COLUMNS_EMPTY_DISCLOSED_NOTICE).not.toBe(
+      OWN_COLUMNS_EMPTY_ALL_NOTICE,
+    );
   });
 });
 
