@@ -5,7 +5,7 @@ import {
   type PsiEngine,
   type PsiEngineMode,
 } from "./psiEngine";
-import type { Config } from "../types";
+import type { PSIParticipant } from "./participant";
 
 // The runtime-agnostic PSI worker boundary. It moves the
 // blocking elliptic-curve masking off the thread that owns the network transport
@@ -20,12 +20,18 @@ import type { Config } from "../types";
 // handle and never the secret key, which is generated and stays inside the worker),
 // so the same message protocol serves both structured-clone transports.
 
+// The role an engine is built for. Named through the participant config field
+// that holds it rather than through the Config interface itself, which the
+// package entry does not re-export: a declaration naming Config leaves the built
+// index.d.ts referencing a type a consumer cannot import.
+type PsiWorkerRole = PSIParticipant["config"]["role"];
+
 /**
  * Seed the worker with once, before any request: the role, id, and mode an engine
  * needs.
  */
 export interface PsiWorkerInit {
-  role: Config["role"];
+  role: PsiWorkerRole;
   id: string;
   /**
    * The disclosure the worker's engine is built for. It seeds the key the worker
