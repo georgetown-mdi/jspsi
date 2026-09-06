@@ -3,8 +3,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { vi, test, expect, beforeEach, afterEach } from "vitest";
-import { getDefaultLinkageTerms, StandardizedDataset } from "@psilink/core";
-import type { PreparedExchange } from "@psilink/core";
+import { minimalPreparedExchange } from "@psilink/core/testing";
 
 // This test lives in its own file because it mocks process.exit to a no-op
 // and delivers a real process.emit("SIGINT") while a live filedrop exchange
@@ -46,13 +45,7 @@ import { runProtocol } from "../../src/protocol";
 const TOKEN_A = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
 
 // Unused: the exchange this value feeds is never reached.
-const minimalPrepared = {
-  metadata: [],
-  linkageTerms: getDefaultLinkageTerms("Interrupt-events fixture"),
-  dataset: new StandardizedDataset([], []),
-  rawRows: [],
-  rowCount: 0,
-} satisfies PreparedExchange;
+const minimalPrepared = minimalPreparedExchange();
 
 // fd-3 sentinel and capture: wrap writeSync so a write to the machine-interface
 // descriptor (EVENT_STREAM_FD = 3) lands in a buffer -- never on the real

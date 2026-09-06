@@ -12,12 +12,12 @@ import { createElement } from "react";
 import "@mantine/core/styles.css";
 
 import {
-  StandardizedDataset,
   encodeInvitation,
   generateSharedSecret,
   getDefaultLinkageTerms,
   sanitizeForDisplay,
 } from "@psilink/core";
+import { minimalPreparedExchange } from "@psilink/core/testing";
 
 import {
   acceptorColumnsEditorState,
@@ -151,8 +151,7 @@ function preparedWith(
   linkageStrategy: "cascade" | "single-pass",
   keyCount: number,
 ): PreparedExchange {
-  return {
-    metadata: [],
+  return minimalPreparedExchange({
     linkageTerms: {
       ...getDefaultLinkageTerms("Accept-screen fixture"),
       linkageStrategy,
@@ -161,10 +160,7 @@ function preparedWith(
         elements: [],
       })),
     },
-    dataset: new StandardizedDataset([], []),
-    rawRows: [],
-    rowCount: 0,
-  } satisfies PreparedExchange;
+  });
 }
 
 // Two single-element keys, one per name field, plus a payload the inviter sends

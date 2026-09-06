@@ -2,9 +2,9 @@ import { describe, expect, test } from "vitest";
 
 import {
   CONFIRMING_PROTOCOL_STAGE_ID,
-  StandardizedDataset,
   getDefaultLinkageTerms,
 } from "@psilink/core";
+import { minimalPreparedExchange } from "@psilink/core/testing";
 
 import {
   BEFORE_START_STAGE_ID,
@@ -34,8 +34,7 @@ function preparedWith(
   linkageStrategy: "cascade" | "single-pass",
   keyCount: number,
 ): PreparedExchange {
-  return {
-    metadata: [],
+  return minimalPreparedExchange({
     linkageTerms: {
       ...getDefaultLinkageTerms("Exchange-run fixture"),
       linkageStrategy,
@@ -44,10 +43,7 @@ function preparedWith(
         elements: [],
       })),
     },
-    dataset: new StandardizedDataset([], []),
-    rawRows: [],
-    rowCount: 0,
-  } satisfies PreparedExchange;
+  });
 }
 
 function states(run: ExchangeRun): Array<string> {

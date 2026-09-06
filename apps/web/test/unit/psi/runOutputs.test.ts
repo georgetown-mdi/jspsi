@@ -1,9 +1,13 @@
 import { describe, expect, test } from "vitest";
 
-import { StandardizedDataset, getDefaultLinkageTerms } from "@psilink/core";
+import {
+  minimalExchangeResult,
+  minimalPreparedExchange,
+} from "@psilink/core/testing";
 import { buildRunOutputs } from "@psi/runOutputs";
+import { getDefaultLinkageTerms } from "@psilink/core";
 
-import type { ExchangeResult, PreparedExchange } from "@psilink/core";
+import type { ExchangeResult } from "@psilink/core";
 import type { ObjectUrls } from "@psi/runOutputs";
 
 // A recording ObjectUrls fake: each create hands out a distinct url (or throws
@@ -30,7 +34,7 @@ function recordingUrls(options?: { failOnCall?: number }) {
 // The smallest inputs buildOutputTable accepts: one matched pair (our row 0 to
 // the partner's row 5) with one payload column, and an identifier column so
 // the CSV's first header is real.
-const prepared = {
+const prepared = minimalPreparedExchange({
   metadata: [
     {
       name: "client_id",
@@ -41,10 +45,9 @@ const prepared = {
     { name: "program_code", type: "other", role: "payload", isPayload: true },
   ],
   linkageTerms: getDefaultLinkageTerms("Run-outputs fixture"),
-  dataset: new StandardizedDataset([], []),
   rawRows: [{ client_id: "17", program_code: "A" }],
   rowCount: 1,
-} satisfies PreparedExchange;
+});
 
 const PARTNER_TERMS = getDefaultLinkageTerms("Run-outputs partner fixture");
 
@@ -54,39 +57,32 @@ const audit = {
 } as unknown as NonNullable<ExchangeResult["audit"]>;
 
 function receivedResult(withAudit: boolean): ExchangeResult {
-  return {
+  return minimalExchangeResult({
     associationTable: [[0], [5]],
-    intersectionCount: undefined,
     partnerTerms: PARTNER_TERMS,
-    resolvedRole: "receiver",
     partnerPayload: { columns: ["program"], rowIndices: [5], rows: [["B"]] },
     audit: withAudit ? audit : undefined,
-  } satisfies ExchangeResult;
+  });
 }
 
 function withheldResult(): ExchangeResult {
-  return {
-    associationTable: undefined,
-    intersectionCount: undefined,
+  return minimalExchangeResult({
     partnerTerms: PARTNER_TERMS,
     resolvedRole: "sender",
-    partnerPayload: { columns: [], rowIndices: [], rows: [] },
     audit,
-  } satisfies ExchangeResult;
+  });
 }
 
 // A count-only (psi-c) run: no matched pairing for anyone, and the intersection size
 // as the party's whole result. The PSI seat decides whether the count was computed
 // here (the receiver) or arrived as the partner's report (the sender).
 function countOnlyResult(resolvedRole: "receiver" | "sender"): ExchangeResult {
-  return {
-    associationTable: undefined,
+  return minimalExchangeResult({
     intersectionCount: 4,
     partnerTerms: PARTNER_TERMS,
     resolvedRole,
-    partnerPayload: { columns: [], rowIndices: [], rows: [] },
     audit,
-  } satisfies ExchangeResult;
+  });
 }
 
 describe("buildRunOutputs", () => {

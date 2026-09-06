@@ -1,6 +1,10 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { ProcessState, StandardizedDataset } from "@psilink/core";
+import {
+  minimalExchangeResult,
+  minimalPreparedExchange,
+} from "@psilink/core/testing";
+import { ProcessState } from "@psilink/core";
 
 import {
   JobApiRequestError,
@@ -18,12 +22,7 @@ import {
   validLinkageTerms,
 } from "../../utils/jobFixtures";
 
-import type {
-  ExchangeResult,
-  Metadata,
-  PreparedExchange,
-  Standardization,
-} from "@psilink/core";
+import type { ExchangeResult, Metadata, Standardization } from "@psilink/core";
 import type {
   JobApiClient,
   RecordAvailability,
@@ -608,21 +607,8 @@ describe("createServerJobExchangeDriver record downloads", () => {
       keys: { salts: {} },
     } as unknown as NonNullable<ExchangeResult["audit"]>;
     const inBrowser = buildRunOutputs(
-      {
-        associationTable: undefined,
-        intersectionCount: undefined,
-        partnerTerms: validLinkageTerms(),
-        resolvedRole: "receiver",
-        partnerPayload: { columns: [], rowIndices: [], rows: [] },
-        audit,
-      } satisfies ExchangeResult,
-      {
-        metadata: [],
-        linkageTerms: validLinkageTerms(),
-        dataset: new StandardizedDataset([], []),
-        rawRows: [],
-        rowCount: 0,
-      } satisfies PreparedExchange,
+      minimalExchangeResult({ partnerTerms: validLinkageTerms(), audit }),
+      minimalPreparedExchange({ linkageTerms: validLinkageTerms() }),
       urls,
     );
 
