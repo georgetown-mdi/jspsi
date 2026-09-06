@@ -238,3 +238,170 @@ test("a swapped key still matches nothing the arrangements do not reach", async 
   expect(matchedPairs(authored)).toEqual([]);
   expect(matchedPairs(reversed)).toEqual([]);
 });
+
+// The same pair, with the deletion expansion on both of its positions. Unlike
+// `transpositions` this kind expands on BOTH parties regardless of which one
+// role resolution designates the receiver (fuzzyComparisons.ts,
+// expandsOnReceiverOnly). Its own candidate count grows with the value's
+// width rather than its square, but the declared ceiling an unbounded element
+// is charged (MAX_FUZZY_EXPANSION_INPUT_LENGTH, not the short value this test
+// actually hands it) still multiplies across the key's two elements and the
+// swap's two orders, so a transform bounds it the same way the transposed key
+// above bounds its own pair.
+const BOUND_TO_SIX_CHARACTERS: TransformStep[] = [
+  { function: "substring", params: { start: 1, length: 6 } },
+];
+
+const editDistanceSwappedKey: LinkageKey = {
+  name: "FN3 + LN3",
+  elements: [
+    {
+      field: "firstName",
+      transform: BOUND_TO_SIX_CHARACTERS,
+      generateFuzzyComparisons: "edit_distances",
+    },
+    {
+      field: "lastName",
+      transform: BOUND_TO_SIX_CHARACTERS,
+      generateFuzzyComparisons: "edit_distances",
+    },
+  ],
+  swap: ["firstName", "lastName"],
+};
+
+// One record entered the other way round AND with one leading character of one
+// of its values dropped, so meeting it needs the swap's second arrangement and
+// the deletion expansion at once.
+const REVERSED_AND_SHORTENED: {
+  authored: NameRow[];
+  reversed: NameRow[];
+} = {
+  authored: [{ first_name: "ABEL", last_name: "CDIXON" }],
+  reversed: [{ first_name: "DIXON", last_name: "ABEL" }],
+};
+
+for (const receiver of ["authored", "reversed"] as const) {
+  test(`a swapped key with a shortened pair matches with the ${receiver} party as receiver`, async () => {
+    const { authored, reversed } = await runSwapExchange(
+      editDistanceSwappedKey,
+      REVERSED_AND_SHORTENED.authored,
+      REVERSED_AND_SHORTENED.reversed,
+      receiver,
+    );
+
+    // Both parties expand a deletion kind, so the shortened value meets the
+    // other's exact one whichever side role resolution designates the
+    // receiver.
+    expect(matchedPairs(authored)).toEqual([[0, 0]]);
+    expect(matchedPairs(reversed)).toEqual([[0, 0]]);
+  });
+}
+
+// The date kinds (`adjacent_years`, `day_month_swaps`) expand a single
+// canonical-date element rather than a swapped pair, so they are driven over
+// their own single-element key and a `date_of_birth` field instead of
+// `swappedKey`'s name pair. Raw values are MM/DD/YYYY, the default
+// `date_of_birth` input format `prepareForExchange` infers absent an explicit
+// standardization (exchange.ts).
+type DobRow = { date_of_birth: string };
+
+const dobTerms = {
+  version: "1.0.0",
+  date: "2026-01-01",
+  algorithm: "psi" as const,
+  linkageStrategy: "single-pass" as const,
+  deduplicate: false,
+  linkageFields: [{ name: "dob", type: "date_of_birth" as const }],
+};
+
+function preparedDob(key: LinkageKey, identity: string, rows: DobRow[]) {
+  return prepareForExchange(
+    {
+      linkageTerms: {
+        ...dobTerms,
+        linkageKeys: [key],
+        identity,
+        output: both,
+      },
+    },
+    identity,
+    rows,
+    ["date_of_birth"],
+  );
+}
+
+// Padding rows for role resolution, dated well outside either test pair so
+// none of them collides with a candidate either kind's expansion realizes.
+// Only one side is ever padded in a given run (the receiver keeps its own row
+// count), so the two calls below never share an exchange.
+const dobFiller = (count: number): DobRow[] =>
+  Array.from({ length: count }, (_unused, i) => ({
+    date_of_birth: `06/15/19${20 + i}`,
+  }));
+
+async function runDobExchange(
+  key: LinkageKey,
+  authoredRows: DobRow[],
+  reversedRows: DobRow[],
+  receiver: "authored" | "reversed",
+): Promise<{ authored: ExchangeResult; reversed: ExchangeResult }> {
+  const padding = 3;
+  const [connAuthored, connReversed] = createMessagePipe();
+  const [authored, reversed] = await Promise.all([
+    runExchange(
+      connAuthored,
+      "initiator",
+      preparedDob(key, "Authored Co", [
+        ...authoredRows,
+        ...(receiver === "authored" ? [] : dobFiller(padding)),
+      ]),
+      { psiLibrary },
+    ),
+    runExchange(
+      connReversed,
+      "responder",
+      preparedDob(key, "Reversed Co", [
+        ...reversedRows,
+        ...(receiver === "reversed" ? [] : dobFiller(padding)),
+      ]),
+      { psiLibrary },
+    ),
+  ]);
+  return { authored, reversed };
+}
+
+const adjacentYearsKey: LinkageKey = {
+  name: "DOB adjacent years",
+  elements: [{ field: "dob", generateFuzzyComparisons: "adjacent_years" }],
+};
+
+for (const receiver of ["authored", "reversed"] as const) {
+  test(`a date one year off matches with the ${receiver} party as receiver`, async () => {
+    const { authored, reversed } = await runDobExchange(
+      adjacentYearsKey,
+      [{ date_of_birth: "01/15/1990" }],
+      [{ date_of_birth: "01/15/1991" }],
+      receiver,
+    );
+    expect(matchedPairs(authored)).toEqual([[0, 0]]);
+    expect(matchedPairs(reversed)).toEqual([[0, 0]]);
+  });
+}
+
+const dayMonthSwapsKey: LinkageKey = {
+  name: "DOB day-month swap",
+  elements: [{ field: "dob", generateFuzzyComparisons: "day_month_swaps" }],
+};
+
+for (const receiver of ["authored", "reversed"] as const) {
+  test(`a date with its day and month exchanged matches with the ${receiver} party as receiver`, async () => {
+    const { authored, reversed } = await runDobExchange(
+      dayMonthSwapsKey,
+      [{ date_of_birth: "03/07/1990" }],
+      [{ date_of_birth: "07/03/1990" }],
+      receiver,
+    );
+    expect(matchedPairs(authored)).toEqual([[0, 0]]);
+    expect(matchedPairs(reversed)).toEqual([[0, 0]]);
+  });
+}
