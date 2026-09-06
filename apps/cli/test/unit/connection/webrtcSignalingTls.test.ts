@@ -272,6 +272,56 @@ test("a run configured for an environment proxy is asked nothing", async () => {
   expect(rendered).not.toContain("certificate check reported");
 });
 
+/**
+ * Fail a `wss://` registration before the broker confirms it, on a run the
+ * caller has configured a proxy for, and report what the operator is told and
+ * whether the probe was asked anything.
+ */
+async function proxiedRegistrationFailure(): Promise<{
+  dials: number;
+  failure: Error;
+}> {
+  const socket = new FakeSocket();
+  const { probe, dials } = countingProbe(
+    Promise.resolve("DEPTH_ZERO_SELF_SIGNED_CERT"),
+  );
+  const failure = await connectToBroker({
+    location: LOCATION,
+    id: LOCAL_ID,
+    handlers: { onMessage: () => {}, onClose: () => {} },
+    socketFactory: () => {
+      queueMicrotask(() => socket.fail());
+      return socket as unknown as WebSocket;
+    },
+    certificateProbe: probe,
+  }).then(
+    () => new Error("the registration was expected to fail"),
+    (err: unknown) => err as Error,
+  );
+  return { dials: dials(), failure };
+}
+
+test("a run started with the proxy flag is asked nothing", async () => {
+  // The flag opts proxying in where `NODE_USE_ENV_PROXY` is unset, so this
+  // run's dial went through the proxy as the variable's run did, and its
+  // failure is answered the same way.
+  vi.stubEnv("HTTPS_PROXY", "http://proxy.invalid:8080");
+  process.execArgv = ["--use-env-proxy"];
+  const { dials, failure } = await proxiedRegistrationFailure();
+  expect(dials).toBe(0);
+  expect(failure.message).toBe(SIGNALING_PROXIED_FAILED_MESSAGE);
+});
+
+test("a run flagged through NODE_OPTIONS is asked nothing", async () => {
+  // Node reads the same flag from `NODE_OPTIONS`, which is how a container or a
+  // service manager sets it where the command line is not theirs to write.
+  vi.stubEnv("HTTPS_PROXY", "http://proxy.invalid:8080");
+  vi.stubEnv("NODE_OPTIONS", "--use-env-proxy");
+  const { dials, failure } = await proxiedRegistrationFailure();
+  expect(dials).toBe(0);
+  expect(failure.message).toBe(SIGNALING_PROXIED_FAILED_MESSAGE);
+});
+
 test("a plaintext dial is told of no certificate, proxied or not", async () => {
   // A `ws://` dial presents no certificate on either path, so neither the
   // verification failure nor the skipped check applies to it: both would name

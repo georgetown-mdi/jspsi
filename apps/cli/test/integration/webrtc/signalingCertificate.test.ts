@@ -37,10 +37,11 @@ import type { Server as TcpServer } from "node:net";
  * and nothing here trusts it, so the handshake fails verification exactly as
  * an untrusted proxy's would.
  *
- * The last test measures something else against a real proxy: which
+ * The last two tests measure something else against a real proxy: which
  * environment and which command line route a `wss://` dial away from the
  * endpoint the probe reaches altogether, holding the answer the client reports
- * such a failure on to what Node actually does.
+ * such a failure on to what Node actually does, and that the probe on such a
+ * run still handshakes with the endpoint itself.
  */
 
 let tlsServer: TlsServer | undefined;
@@ -542,3 +543,169 @@ test("which environment routes a signaling dial through a proxy", async () => {
     proxy.close();
   }
 }, 120_000);
+
+/**
+ * The probe, run in a child process for the reason the dial above is: the
+ * environment and the flags Node routes by are read as a process starts, so an
+ * environment assembled inside this one routes nothing.
+ */
+const CHILD_PROBE_SCRIPT = `
+  const answer = {};
+  import(process.env.PSILINK_PROBE_MODULE)
+    .then(async (module) => {
+      answer.configured = module.environmentProxyingConfigured();
+      answer.verdict =
+        (await module.probeSignalingCertificate({
+          host: process.env.PSILINK_PROBE_HOST,
+          port: Number(process.env.PSILINK_PROBE_PORT),
+          path: "/",
+          key: "peerjs",
+          secure: true,
+        })) ?? null;
+    })
+    .catch((error) => {
+      answer.failed = String(error);
+    })
+    .finally(() => {
+      process.stdout.write(JSON.stringify(answer));
+      process.exit(0);
+    });
+`;
+
+/**
+ * The module the child probes with, resolved relative to this file so it moves
+ * with it, and read as TypeScript by Node's own loader.
+ */
+const PROBE_MODULE = new URL(
+  "../../../src/connection/webrtc/signalingTls.ts",
+  import.meta.url,
+).href;
+
+/**
+ * What the child reported: how it read the run it was started under, what the
+ * probe answered, and any failure that stopped it before either.
+ */
+type ChildProbeAnswer = {
+  configured?: boolean;
+  verdict?: string | null;
+  failed?: string;
+};
+
+/**
+ * Probe `host:port` from a process started with `nodeArgs` and `environment`,
+ * and report what that process answered.
+ */
+function probeFromProcess(
+  host: string,
+  port: number,
+  environment: Record<string, string>,
+  nodeArgs: Array<string>,
+): Promise<ChildProbeAnswer> {
+  return new Promise((resolve) => {
+    let reported = "";
+    const child = spawn(
+      process.execPath,
+      [...nodeArgs, "-e", CHILD_PROBE_SCRIPT],
+      {
+        env: {
+          PATH: process.env.PATH ?? "",
+          PSILINK_PROBE_MODULE: PROBE_MODULE,
+          PSILINK_PROBE_HOST: host,
+          PSILINK_PROBE_PORT: String(port),
+          ...environment,
+        },
+        stdio: ["ignore", "pipe", "ignore"],
+      },
+    );
+    child.stdout.on("data", (chunk: Buffer) => {
+      reported += chunk.toString("utf8");
+    });
+    const answer = (): void => {
+      resolve(
+        reported === "" ? {} : (JSON.parse(reported) as ChildProbeAnswer),
+      );
+    };
+    // `exit` can arrive before what the child wrote has been read here, so
+    // the answer is collected on `close`, which follows both.
+    child.on("close", () => answer());
+    child.on("error", () => answer());
+  });
+}
+
+/** The two routes a run turns Node's environment proxying on by. */
+const DIRECT_PROBE_ROWS: Array<{
+  optIn?: string;
+  nodeArgs?: Array<string>;
+}> = [{ optIn: "1" }, { nodeArgs: ["--use-env-proxy"] }];
+
+test.skipIf(loopbackTlsCert === null)(
+  "a proxied run's probe reaches the endpoint rather than the proxy",
+  async () => {
+    // A proxied run is told no certificate verdict because the probe's dial is
+    // not the dial that failed: the `WebSocket` went through the proxy and the
+    // probe goes to the endpoint. The routing test above measures the first
+    // half; this measures the second, against the same kind of proxy and a real
+    // handshake, on both routes a run opts proxying in by.
+    const credentials = loopbackTlsCert;
+    if (credentials === null) return;
+    let originConnections = 0;
+    const origin = tls.createServer(
+      { key: credentials.key, cert: credentials.cert },
+      (socket) => socket.on("error", () => {}),
+    );
+    origin.on("error", () => {});
+    origin.on("connection", () => {
+      originConnections += 1;
+    });
+    await new Promise<void>((resolve) =>
+      origin.listen(0, "127.0.0.1", resolve),
+    );
+    const originPort = boundPort(origin);
+
+    const reached: Array<string> = [];
+    const proxy = http.createServer((_request, response) => response.end());
+    proxy.on("connect", (request, socket) => {
+      reached.push(request.url ?? "");
+      socket.end("HTTP/1.1 502 Bad Gateway\r\n\r\n");
+    });
+    proxy.on("error", () => {});
+    await new Promise<void>((resolve) => proxy.listen(0, "127.0.0.1", resolve));
+    const proxyUrl = `http://127.0.0.1:${boundPort(proxy)}`;
+
+    try {
+      for (const row of DIRECT_PROBE_ROWS) {
+        const environment: Record<string, string> = { HTTPS_PROXY: proxyUrl };
+        if (row.optIn !== undefined) environment.NODE_USE_ENV_PROXY = row.optIn;
+        reached.length = 0;
+        originConnections = 0;
+        const answer = await probeFromProcess(
+          "127.0.0.1",
+          originPort,
+          environment,
+          row.nodeArgs ?? [],
+        );
+        // The listener serves a self-signed certificate nothing here trusts,
+        // so a handshake that reached it reports a verification failure. The
+        // token is OpenSSL's, matched on its shape as in the first test above.
+        expect({
+          row,
+          routedTo: reached,
+          originConnections,
+          configured: answer.configured,
+          failed: answer.failed,
+        }).toEqual({
+          row,
+          routedTo: [],
+          originConnections: 1,
+          configured: true,
+          failed: undefined,
+        });
+        expect(answer.verdict).toMatch(/CERT|SIGN/);
+      }
+    } finally {
+      origin.close();
+      proxy.close();
+    }
+  },
+  60_000,
+);
