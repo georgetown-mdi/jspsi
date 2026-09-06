@@ -322,9 +322,10 @@ export default [
     // bans but are exempt from the rawRows-access ban. A separate block (not an
     // `ignores`) because flat config replaces a rule's whole options across blocks:
     // re-setting no-restricted-syntax to a subset drops the other selectors for these
-    // files while the broad block above still applies them everywhere else. One of
-    // these files (useInviterExchange.ts) is a warning seat, so dropping the
-    // warning-sink ban here would leave a quarter of the seats uncovered.
+    // files while the broad block above still applies them everywhere else. None of
+    // these files is a warning seat today (the hooks' run events are built in
+    // src/exchange/runEvents.ts), and the warning-sink ban stays on them so a seat
+    // written here later is covered without a config edit.
     files: rawRowsConsumers,
     rules: {
       "no-restricted-syntax": [
