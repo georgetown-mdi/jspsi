@@ -1,9 +1,12 @@
-import { afterAll, afterEach, beforeAll, expect, test } from "vitest";
+import { afterAll, afterEach, beforeAll, expect, test, vi } from "vitest";
 
 import {
   ConnectionError,
   deriveRendezvousPeerId,
   generateSharedSecret,
+  getDiagnosticSink,
+  getLogger,
+  setDiagnosticSink,
 } from "@psilink/core";
 
 import {
@@ -45,6 +48,35 @@ async function freshIds(): Promise<{ inviterId: string; acceptorId: string }> {
     deriveRendezvousPeerId(secret, "acceptor"),
   ]);
   return { inviterId, acceptorId };
+}
+
+/** The logger name the broker's reports are written under, in the runner
+ * (packages/peerjs-broker/src/standalone.ts) and in the web app's mount alike. */
+const BROKER_LOG_CONTEXT = "peerjs-broker";
+
+/**
+ * The prefix core's prefixed logger builds for a warning from the broker at
+ * `at`, read off the sink a consumer installs. The clock is fixed to the
+ * instant the line under test was written, so what is left to compare is the
+ * prefix itself.
+ */
+function corePrefixAt(at: Date): string {
+  const previousSink = getDiagnosticSink();
+  let captured: string | undefined;
+  setDiagnosticSink((_methodName, prefix) => {
+    captured = prefix;
+  });
+  vi.useFakeTimers({ toFake: ["Date"] });
+  try {
+    vi.setSystemTime(at);
+    getLogger(BROKER_LOG_CONTEXT).warn("");
+  } finally {
+    vi.useRealTimers();
+    setDiagnosticSink(previousSink);
+  }
+  if (captured === undefined)
+    throw new Error("core's prefixed logger wrote no warning to the sink");
+  return captured;
 }
 
 function location(overrides?: Partial<BrokerLocation>): BrokerLocation {
@@ -266,6 +298,53 @@ test("a broker diagnostic reaches stderr, leaving the ready-line stdout alone", 
     broker.stderr().slice(stderrBefore).includes("[client-frame]"),
   );
   expect(broker.stdout()).toMatch(/^psilink-broker \d+\n$/);
+}, 60_000);
+
+test("a broker diagnostic opens with the prefix core would have written", async () => {
+  // The runner writes its stderr lines itself rather than through core's
+  // logger, so one embedding's line shape can move without the other's. The
+  // web app hands the same reports to a prefixed core logger under the same
+  // context (apps/web/src/signalingDiagnostics.ts), and an operator reading a
+  // stream both write to sees one line shape, so the two are held equal here.
+  const { inviterId } = await freshIds();
+  let socket: WebSocket | undefined;
+  const client = await connectToBroker({
+    location: location(),
+    id: inviterId,
+    handlers: { onMessage: () => {}, onClose: () => {} },
+    socketFactory: (url) => (socket = new WebSocket(url)),
+  });
+  opened.push(client);
+
+  const stderrBefore = broker.stderr().length;
+  const sentAt = Date.now();
+  socket?.send("not json at all");
+  await waitFor(() =>
+    broker.stderr().slice(stderrBefore).includes("[client-frame]"),
+  );
+  const observedAt = Date.now();
+
+  const line = broker
+    .stderr()
+    .slice(stderrBefore)
+    .split("\n")
+    .find((written) => written.includes("[client-frame]"));
+  const opening = /^\[([^\]]+)\] /.exec(line ?? "");
+  if (opening === null)
+    throw new Error(
+      `the diagnostic opened with no bracketed field: ${JSON.stringify(line)}`,
+    );
+
+  // The timestamp is read off the line so the rest can be compared byte for
+  // byte; that it is the instant of the write, in the ISO form core renders,
+  // is what the two assertions below hold.
+  const timestamp = opening[1];
+  expect(new Date(timestamp).toISOString()).toBe(timestamp);
+  expect(Date.parse(timestamp)).toBeGreaterThanOrEqual(sentAt);
+  expect(Date.parse(timestamp)).toBeLessThanOrEqual(observedAt);
+
+  const prefix = corePrefixAt(new Date(timestamp));
+  expect(line?.slice(0, prefix.length + 1)).toBe(`${prefix} `);
 }, 60_000);
 
 test("a registered peer stays registered past the broker's silent-socket reaper", async () => {
