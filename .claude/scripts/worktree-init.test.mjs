@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import {
   chmodSync,
+  copyFileSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -17,16 +18,21 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 // worktree-init.sh decides what it does from what git and npm report, and CLAUDE.md
 // determines a question about an external tool by driving the tool. So each case here
 // builds a real repository in a temp directory -- a bare origin holding main,
-// staging and two branches past it, a primary clone with a real install, worktrees
+// staging and the branches past it, a primary clone with a real install, worktrees
 // cut from that clone -- and runs the script itself against it. The packages are
 // local tarballs packed by `npm pack`, so the suite needs no network and no
 // registry. Nothing here touches this repository or its worktrees.
 
 const SCRIPT = fileURLToPath(new URL("./worktree-init.sh", import.meta.url));
+const DRIFT_CHECK = fileURLToPath(
+  new URL("../../scripts/check-node-modules-drift.mjs", import.meta.url),
+);
+const SCRIPT_IN_TREE = join(".claude", "scripts", "worktree-init.sh");
 
 let root;
 let cache;
 let vendor;
+let seed;
 let originRepo;
 let primary;
 
@@ -90,8 +96,57 @@ function worktree(name, start) {
   return path;
 }
 
+// The two revisions have to disagree about where each later line sits, and the
+// shell has to still have bytes of the file unread when the re-point lands. The
+// header block does the first, the block after the line the re-point is triggered
+// from the second.
+function padded(text) {
+  const shebang = "#!/usr/bin/env bash\n";
+  const trigger = "\nreconcile_base\n";
+  if (!text.startsWith(shebang) || !text.includes(trigger)) {
+    throw new Error(
+      "worktree-init.sh no longer opens with a shebang and calls reconcile_base at top level",
+    );
+  }
+  const block = (lines, tag) =>
+    `${Array.from({ length: lines }, (_, i) => `# ${tag} ${i + 1} ${"-".repeat(60)}`).join("\n")}\n`;
+  return text
+    .replace(shebang, `${shebang}${block(200, "header padding")}`)
+    .replace(trigger, `${trigger}${block(600, "tail padding")}`);
+}
+
+/**
+ * Two commits whose only difference is the bytes of worktree-init.sh, so a
+ * worktree on the first is re-pointed onto the second while the shell is running
+ * the very file the re-point rewrites.
+ */
+function pushScriptSwapPair(from, to, scriptText) {
+  git(["checkout", "-q", "staging"], seed);
+  git(["checkout", "-q", "-b", from], seed);
+  mkdirSync(join(seed, ".claude", "scripts"), { recursive: true });
+  mkdirSync(join(seed, "scripts"), { recursive: true });
+  copyFileSync(
+    DRIFT_CHECK,
+    join(seed, "scripts", "check-node-modules-drift.mjs"),
+  );
+  writeFileSync(join(seed, SCRIPT_IN_TREE), padded(scriptText));
+  commitAll(seed, `Add the padded worktree-init.sh for ${from}`);
+  git(["push", "-q", "origin", from], seed);
+
+  git(["checkout", "-q", "-b", to], seed);
+  writeFileSync(join(seed, SCRIPT_IN_TREE), scriptText);
+  // A drift check that refuses to verify sends the run down the `npm ci` route, so
+  // the drive covers the longer of the two paths the script takes after a re-point.
+  writeFileSync(
+    join(seed, "scripts", "check-node-modules-drift.mjs"),
+    "#!/usr/bin/env node\nprocess.exit(2);\n",
+  );
+  commitAll(seed, `Drop the padding for ${to}`);
+  git(["push", "-q", "origin", to], seed);
+}
+
 /** The script's own run: stderr folded into stdout, in the order it printed. */
-function runInit(cwd, env = {}) {
+function runInit(cwd, env = {}, script = SCRIPT) {
   const options = {
     cwd,
     encoding: "utf8",
@@ -106,7 +161,7 @@ function runInit(cwd, env = {}) {
   try {
     return {
       status: 0,
-      output: execFileSync("bash", ["-c", `bash "${SCRIPT}" 2>&1`], options),
+      output: execFileSync("bash", ["-c", `bash "${script}" 2>&1`], options),
     };
   } catch (error) {
     return { status: error.status, output: `${error.stdout}${error.stderr}` };
@@ -121,7 +176,7 @@ beforeAll(() => {
   pack("1.0.0");
   pack("2.0.0");
 
-  const seed = join(root, "seed");
+  seed = join(root, "seed");
   mkdirSync(join(seed, "packages", "core"), { recursive: true });
   writeRootManifest(seed, "1.0.0");
   writeFileSync(
@@ -131,8 +186,9 @@ beforeAll(() => {
       version: "0.0.0",
       private: true,
       scripts: {
-        build:
-          "node -e \"const fs=require('node:fs');fs.mkdirSync('dist',{recursive:true});fs.writeFileSync('dist/built.txt','built')\"",
+        // The build records whether the run that reached it was the script's own
+        // in-memory re-execution, which is the only place that shows from outside.
+        build: `node -e "const fs=require('node:fs');fs.mkdirSync('dist',{recursive:true});fs.writeFileSync('dist/built.txt',process.env.PSILINK_WORKTREE_INIT_IN_MEMORY?'built in memory':'built from disk')"`,
       },
     }),
   );
@@ -180,6 +236,8 @@ beforeAll(() => {
   }
   commitAll(seed, "Pin widget to a version that cannot be fetched");
   git(["push", "-q", "origin", "unservable"], seed);
+
+  pushScriptSwapPair("swapped", "swapped-base", readFileSync(SCRIPT, "utf8"));
 
   primary = join(root, "primary");
   git(["clone", "-q", originRepo, primary], root);
@@ -356,5 +414,26 @@ describe("installing a branch whose lockfile the primary's install does not matc
     expect(output).toContain("rewrote package-lock.json");
     expect(readLock(tree)).toBe(before);
     expect(git(["status", "--porcelain"], tree)).toBe("");
+  }, 180_000);
+});
+
+describe("a re-point that replaces the script the shell is running", () => {
+  it("provisions the tree to the end, out of memory", () => {
+    const tree = worktree("swapped", "origin/swapped");
+    const base = git(["rev-parse", "origin/swapped-base"], primary);
+
+    const { status, output } = runInit(
+      tree,
+      { PSILINK_WORKTREE_BASE_REF: "origin/swapped-base" },
+      join(tree, SCRIPT_IN_TREE),
+    );
+
+    expect(output).toContain("re-pointing");
+    expect(head(tree)).toBe(base);
+    expect(status).toBe(0);
+    expect(output).toContain("worktree-init: done");
+    expect(
+      readFileSync(join(tree, "packages", "core", "dist", "built.txt"), "utf8"),
+    ).toBe("built in memory");
   }, 180_000);
 });

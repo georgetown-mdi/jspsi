@@ -52,7 +52,15 @@
 set -euo pipefail
 shopt -s dotglob nullglob
 
-DRIFT_CHECK="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/scripts/check-node-modules-drift.mjs"
+# The base-ref re-point below replaces this file while bash is still reading the
+# rest of the run out of it, which ends the run partway through. Run the program
+# from memory instead, where the re-point cannot reach it. `bash -c` leaves
+# BASH_SOURCE unset, so paths resolve from $0.
+if [ -z "${PSILINK_WORKTREE_INIT_IN_MEMORY:-}" ]; then
+  PSILINK_WORKTREE_INIT_IN_MEMORY=1 exec bash -c "$(cat "$0")" "$0" "$@"
+fi
+
+DRIFT_CHECK="$(cd "$(dirname "$0")/../.." && pwd)/scripts/check-node-modules-drift.mjs"
 WORKTREE="$(git rev-parse --show-toplevel)"
 PRIMARY="$(cd "$(dirname "$(git rev-parse --git-common-dir)")" && pwd)"
 BASE_REF="${PSILINK_WORKTREE_BASE_REF:-origin/staging}"
