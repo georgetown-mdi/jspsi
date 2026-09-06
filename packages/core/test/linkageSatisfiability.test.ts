@@ -1610,6 +1610,65 @@ describe("assertTransformsCompile", () => {
     ).not.toThrow();
     expect(() => assertTransformsCompile(minimalTerms)).not.toThrow();
   });
+
+  test("refuses closed on each surface when the compile budget runs out", () => {
+    // The walk cannot be interrupted mid-compile, so it checks the clock between
+    // steps and refuses what it has not checked -- the shape the dialect walk
+    // takes. Each surface keeps its own error class through the exhaustion path.
+    const compilable: TransformStep[] = [
+      { function: "pad_left", params: { length: 9, char: "0" } },
+    ];
+    const terms: LinkageTerms = {
+      ...minimalTerms,
+      linkageKeys: keysWithTransform(compilable),
+    };
+    expect(() =>
+      assertTransformsCompile(
+        terms,
+        [{ output: "last_name", input: "LN", steps: compilable }],
+        { totalBudgetMs: 0 },
+      ),
+    ).toThrow(OperatorConfigError);
+    expect(() =>
+      assertTransformsCompile(terms, undefined, { totalBudgetMs: 0 }),
+    ).toThrow(UsageError);
+    expect(() =>
+      assertTransformsCompile(terms, undefined, { totalBudgetMs: 0 }),
+    ).toThrow(/did not finish within the 0 ms allowed/);
+    // Not vacuous: the same terms pass under the budget the mint runs with.
+    expect(() => assertTransformsCompile(terms)).not.toThrow();
+  });
+
+  test("compiles a document's transforms once across repeated checks", () => {
+    // The check shares the run's compile memo, which is what lets a mint that
+    // repeats -- a retried Generate, an exchange file saved after the code --
+    // cost nothing the first one already paid. Measured rather than claimed:
+    // each step below compiles a pattern of its own, so a second uncached walk
+    // would cost what the first did.
+    const distinctSteps = (count: number): TransformStep[] =>
+      Array.from({ length: count }, (_, index) => ({
+        function: "parse_date",
+        params: {
+          inputFormat: `-${index}-${"MM/DD/YYYY".repeat(26)}`.slice(0, 256),
+        },
+      }));
+    const terms: LinkageTerms = {
+      ...minimalTerms,
+      linkageKeys: keysWithTransform(distinctSteps(512)),
+    };
+    const elapsed = (run: () => void): number => {
+      const startedAt = performance.now();
+      run();
+      return performance.now() - startedAt;
+    };
+    const first = elapsed(() => {
+      assertTransformsCompile(terms);
+    });
+    const second = elapsed(() => {
+      assertTransformsCompile(terms);
+    });
+    expect(second * 10).toBeLessThan(first);
+  });
 });
 
 // --- unsatisfiedLinkageFields ------------------------------------------------

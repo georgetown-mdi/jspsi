@@ -199,6 +199,18 @@ const RECORDED_SITES: readonly ConfigErrorSite[] = [
     file: "packages/core/src/linkageSatisfiability.ts",
     anchor: "assertTransformsCompile",
     raises: "OperatorConfigError",
+    interpolates: ["stepCompileBudgetRefusalMessage(totalBudgetMs)"],
+    provenance:
+      "the only value the callee interpolates is the budget the walk ran " +
+      "under -- a build constant, or the number the caller passed -- and no " +
+      "step is named, the refusal being that none was checked. The sibling " +
+      "arm over the agreed terms' element transforms raises a plain " +
+      "UsageError on the same exhaustion and is correctly absent here.",
+  },
+  {
+    file: "packages/core/src/linkageSatisfiability.ts",
+    anchor: "assertTransformsCompile",
+    raises: "OperatorConfigError",
     interpolates: ["stepCompileRefusalMessage(label)"],
     provenance:
       "`label` is read off this party's own standardization argument and is " +

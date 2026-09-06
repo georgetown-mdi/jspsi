@@ -6,11 +6,11 @@ import {
   DEDUPLICATE_IMPLEMENTED_BY_STRATEGY,
   FAN_OUT_FUNCTION_NAMES,
   MAX_INVITATION_LIFETIME_SECONDS,
+  StandardizedField,
   authoredLinkageFields,
   canonicalString,
   pipelineAlwaysDrops,
   safeParseLinkageTerms,
-  uncompilableStepLabel,
 } from "@psilink/core";
 
 import {
@@ -36,6 +36,61 @@ import type {
 import type { AdvancedInviteDraft } from "../../../src/psi/authoring/advancedInviteTypes.js";
 
 const ALL_COLUMNS = ["ssn", "ssn4", "first_name", "last_name", "dob"];
+
+/** Keys in the imported document the cost test builds, at the schema's cap, and
+ * elements in each: their product is the transform steps one pass walks. */
+const IMPORTED_KEY_COUNT = 256;
+const IMPORTED_ELEMENTS_PER_KEY = 10;
+const IMPORTED_STEP_COUNT = IMPORTED_KEY_COUNT * IMPORTED_ELEMENTS_PER_KEY;
+
+/** {@link IMPORTED_STEP_COUNT} parse_date steps numbered from `offset` on, each
+ * with an input format of its own -- so every step generates a distinct pattern,
+ * which no earlier compile can be reused for -- and each format token-dense and
+ * within the schema's format bound, as a document the editor accepts must be. */
+function importedTransformSteps(offset: number): Array<TransformStep> {
+  return Array.from({ length: IMPORTED_STEP_COUNT }, (_, index) => ({
+    function: "parse_date",
+    params: { inputFormat: `-${offset + index}-${"MM/DD/YYYY".repeat(24)}` },
+  }));
+}
+
+/** `draft` with its key list replaced by an imported document's shape: every key
+ * at the element cap this test uses, every element carrying one parse_date step
+ * of its own. The elements are copies of a key the seed already offers, so each
+ * still references a field the draft's columns supply. */
+function importedDocument(
+  draft: AdvancedInviteDraft,
+  offset: number,
+): AdvancedInviteDraft {
+  const template = draft.keys[0].key.elements[0];
+  const steps = importedTransformSteps(offset);
+  return {
+    ...draft,
+    keys: Array.from({ length: IMPORTED_KEY_COUNT }, (_unused, keyIndex) => ({
+      enabled: true,
+      key: {
+        name: `imported_key_${keyIndex}`,
+        elements: Array.from(
+          { length: IMPORTED_ELEMENTS_PER_KEY },
+          (_unusedElement, elementIndex) => ({
+            ...template,
+            name: `element_${keyIndex}_${elementIndex}`,
+            transform: [
+              steps[keyIndex * IMPORTED_ELEMENTS_PER_KEY + elementIndex],
+            ],
+          }),
+        ),
+      },
+    })),
+  };
+}
+
+/** Wall-clock milliseconds `run` takes. */
+function elapsedMs(run: () => void): number {
+  const startedAt = performance.now();
+  run();
+  return performance.now() - startedAt;
+}
 
 /** `draft` with `transform` on the first element of its first key, enabled. */
 function withFirstElementTransform(
@@ -430,12 +485,14 @@ describe("the canonical-encode gate (the byte form both parties hash)", () => {
   });
 });
 
-describe("the compile gate on a key-element transform core cannot build", () => {
-  // The sibling of the encode gate above: the encoder asks whether a param can be
-  // RECORDED, this asks whether the step it sits in can be BUILT. A pipeline is
-  // built once, before the first row, so a step the factory refuses aborts both
-  // parties' runs -- and without this gate only after the invitation has been
-  // minted, accepted, and set up against.
+describe("a key-element transform core cannot build", () => {
+  // The pass leaves the compile question to the mint (core's
+  // `assertTransformsCompile`, driven in invitation.test.ts and core's own
+  // suite): compiling a document's transforms costs seconds at the schema's caps
+  // and this pass runs several times per render, so an imported document would
+  // freeze the editor. These pin both halves of that split -- the pass admits
+  // what only the mint refuses, and its cost does not follow what the document's
+  // transforms cost to compile.
   const now = new Date("2026-01-01T00:00:00Z");
 
   // One step per shape a factory refuses: an absent required param, a param the
@@ -448,64 +505,48 @@ describe("the compile gate on a key-element transform core cannot build", () => 
     { function: "no_such_function", params: {} },
   ];
 
-  test.each(uncompilable)("refuses %j, with the authoring remedy", (step) => {
+  test.each(uncompilable)("passes %j through to the mint", (step) => {
     const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
     const authored = withFirstElementTransform(draft, [step]);
-    // The assumptions: the terms schema admits the step (a transform param is
-    // `z.unknown()` there) and the encoder does too, so the message below is this
-    // gate's answer rather than one either of those would have given.
+    // Nothing else here answers the question either: the terms schema admits the
+    // step (a transform param is `z.unknown()` there) and the encoder does too,
+    // so Generate stays open and the refusal is the mint's alone.
     const terms = buildAdvancedTerms(authored);
     expect(safeParseLinkageTerms(terms).success).toBe(true);
     expect(() => canonicalString(terms)).not.toThrow();
-    expect(uncompilableStepLabel([step])).toBeDefined();
 
     const result = validateAdvancedInvite(authored, seed, now);
-    expect(result.canGenerate).toBe(false);
-    expect(result.terms).toBeUndefined();
-    expect(result.errors.keys).toMatch(/cannot run with the parameters/);
-    expect(result.errors.keys).toMatch(
-      /correct that step's parameters, or remove the step/,
+    expect(result.canGenerate).toBe(true);
+    expect(result.errors.keys).toBeUndefined();
+  });
+
+  test("costs a fraction of compiling the transforms the document declares", () => {
+    // A document at the schema's key cap whose every element declares its own
+    // `parse_date` format: each one generates a distinct pattern, so the
+    // linear-time engine's compile cache cannot absorb them and a pass that
+    // compiled them would pay the full price every time.
+    const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    const reference = importedTransformSteps(2 * IMPORTED_STEP_COUNT);
+    const compileMs = elapsedMs(() => {
+      for (const step of reference)
+        new StandardizedField("field", "field", [step], []);
+    });
+
+    // Warm the pass's own code paths on a document built the same way, so the
+    // measured pass below is not paying for a first call through them.
+    validateAdvancedInvite(importedDocument(draft, 0), seed, now);
+    const measured = importedDocument(draft, IMPORTED_STEP_COUNT);
+    // Not vacuous: the document is one the editor takes all the way through
+    // its pass, rather than one the schema rejects on the way in.
+    expect(safeParseLinkageTerms(buildAdvancedTerms(measured)).success).toBe(
+      true,
     );
-    // The remedy it must not be: the out-of-band renegotiation the accept and
-    // exchange paths offer once an invitation is already in a partner's hands.
-    expect(result.errors.keys).not.toMatch(/partner/i);
-  });
+    const passMs = elapsedMs(() => {
+      validateAdvancedInvite(measured, seed, now);
+    });
 
-  test("a step every factory builds keeps generating", () => {
-    // Not vacuous: the well-formed counterparts of the refused steps above.
-    const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
-    const authored = withFirstElementTransform(draft, [
-      { function: "pad_left", params: { length: 9, char: "0" } },
-      { function: "phonetic", params: { algorithm: "soundex" } },
-    ]);
-    expect(validateAdvancedInvite(authored, seed, now).canGenerate).toBe(true);
-  });
-
-  test("a disabled key's uncompilable transform does not block Generate", () => {
-    // A disabled key is dropped from the built terms, so nothing compiles it and
-    // it blocks nothing -- the same rule the fan-out and encode gates keep.
-    const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
-    const parked = {
-      ...draft,
-      keys: draft.keys.map((entry, index) =>
-        index === draft.keys.length - 1
-          ? {
-              ...entry,
-              enabled: false,
-              key: {
-                ...entry.key,
-                elements: entry.key.elements.map((element, position) =>
-                  position === 0
-                    ? { ...element, transform: [uncompilable[0]] }
-                    : element,
-                ),
-              },
-            }
-          : entry,
-      ),
-    };
-    expect(validateAdvancedInvite(parked, seed, now).canGenerate).toBe(true);
-  });
+    expect(passMs * 5).toBeLessThan(compileMs);
+  }, 60_000);
 });
 
 describe("the swap pair whose two elements clean differently", () => {

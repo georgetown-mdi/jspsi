@@ -14,7 +14,6 @@ import {
   safeParseLinkageTerms,
   summarizeLinkageShortfall,
   swapPairTransformsDiffer,
-  uncompilableStepLabel,
 } from "@psilink/core";
 
 import {
@@ -151,22 +150,6 @@ const UNENCODABLE_TERMS_MESSAGE =
   "parties agree on. Import them again from a corrected document, or rebuild the " +
   "key list from your columns.";
 
-/** Shown when a key element's transform holds a step whose parameters the
- * function cannot be built from -- a `pad_left` with no length or a
- * multi-character fill, a `phonetic` naming an unimplemented algorithm, a
- * function name this build does not recognize. The step editor marks such a
- * parameter on the input that has to change, so this is the safety check behind
- * that marking rather than the primary account: it reaches an imported
- * document's transform, whose parameters the operator cannot edit one by one and
- * whose function may be one no descriptor types. Without it the step compiles
- * nowhere until the exchange runs, which is after the partner has accepted.
- * Names neither the key nor the parameter, the same reason
- * {@link UNENCODABLE_KEY_TRANSFORM_MESSAGE} names none. */
-const UNCOMPILABLE_KEY_TRANSFORM_MESSAGE =
-  "A linkage key's transform has a step that cannot run with the parameters it " +
-  "declares, so an exchange on these terms would stop before matching anything. " +
-  "Open that key and correct that step's parameters, or remove the step.";
-
 /** The control each count-only shape rule reports against. Every rule but the
  * payload one is a property of the matching arrangement the key list holds, which
  * is also where the fan-out and satisfiability messages land. */
@@ -262,8 +245,7 @@ function shortfallRemedy(verdict: LinkageTermsVerdict): string {
  * (identity/legal-text presence, date format, referential integrity); this adds
  * only the gates the schema does not express: the invitation-lifetime bounds, a
  * not-yet-passed legal-agreement expiry, at least one column-satisfiable linkage
- * key, a canonical-encode dry run (the byte form both parties hash), a compile
- * dry run over the key element transforms, and the two
+ * key, a canonical-encode dry run (the byte form both parties hash), and the two
  * pairings the schema admits but the run refuses (a declared fan-out step, and a
  * deduplicating term under a linkage strategy that matches one value per record).
  *
@@ -346,30 +328,6 @@ export function validateAdvancedInvite(
       ? UNENCODABLE_KEY_TRANSFORM_MESSAGE
       : UNENCODABLE_TERMS_MESSAGE;
   }
-
-  // Compile dry run over the key element transforms, the sibling of the encode
-  // dry run above: the encoder answers whether a param can be RECORDED, this
-  // answers whether the step it sits in can be BUILT. A pipeline is built once,
-  // before the first row, so a step the factory refuses (a `pad_left` with no
-  // length, a function name this build does not recognize) aborts both parties'
-  // runs -- and only after the invitation has been minted, accepted, and set up
-  // against. Placed after the encode run because an un-encodable param fails to
-  // compile too, and that fault has the more precise remedy.
-  //
-  // Scoped to the key elements: an authored cleaning step takes the descriptor
-  // gate below, which refuses the same shapes earlier and marks the offending
-  // input, while a key element takes no descriptor gate (see the note there).
-  // The mint runs core's own check over both pipelines
-  // ({@link assertTransformsCompile}) for a caller that never passes here.
-  if (
-    errors.keys === undefined &&
-    terms.linkageKeys.some((key) =>
-      key.elements.some(
-        (element) => uncompilableStepLabel(element.transform) !== undefined,
-      ),
-    )
-  )
-    errors.keys = UNCOMPILABLE_KEY_TRANSFORM_MESSAGE;
 
   // A swap pair whose two elements have different transforms, which the schema
   // refuses on the linkageKeys path, needs its own message ahead of the mapping
@@ -492,9 +450,10 @@ export function validateAdvancedInvite(
   // a second door -- an imported partner document whose params the operator
   // cannot edit one by one. A descriptor-shaped refusal there would hard-block a
   // document core runs benignly (e.g. a `coalesce` whose `default` is not text is
-  // a harmless pass-through), so on a key element the gates are core's own: the
-  // encoder, and the compile dry run above, which refuses exactly the steps core
-  // cannot build.
+  // a harmless pass-through), so on a key element the encoder is the gate, not
+  // the descriptors. A step core cannot compile at all is refused at the mint
+  // (`assertTransformsCompile`), which walks a whole document once per Generate
+  // rather than on every pass through here.
   //
   // The exception is a param the pipeline drops value-INDEPENDENTLY -- a key that
   // matches nothing for BOTH parties, refused in core instead: `pipelineAlwaysDrops`

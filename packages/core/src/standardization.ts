@@ -1326,19 +1326,31 @@ export function compileSteps(
  * so an element transform's partner-authored `function` never reaches a message
  * through it.
  *
- * Read by `assertTransformsCompile` in `linkageSatisfiability.ts`, and by the
- * web editor's Generate gate, which asks the same question ahead of the mint.
+ * Answered out of the memo the run itself reads
+ * ({@link compiledElementTransforms}) and filled into it: a compile is the
+ * expensive part of the question -- a partner-authored pattern compiles under
+ * the linear-time engine -- so a second pass over the same step array pays
+ * nothing, and the run reuses what this compiled. The memo is keyed on the
+ * array's identity, so a document rebuilt from its source is a fresh compile;
+ * the caller that walks a whole document (`assertTransformsCompile`) bounds
+ * that walk in wall-clock time.
+ *
+ * Read by `assertTransformsCompile` in `linkageSatisfiability.ts`.
  */
 export function uncompilableStepLabel(
-  steps: ReadonlyArray<{ function: string; params?: Params }> | undefined,
+  steps: TransformStep[] | undefined,
 ): string | undefined {
-  for (const step of steps ?? []) {
+  if (steps === undefined || steps.length === 0) return undefined;
+  if (compiledElementTransforms.has(steps)) return undefined;
+  const compiled: CompiledStep[] = [];
+  for (const step of steps) {
     try {
-      compileStep(step);
+      compiled.push(compileStep(step));
     } catch {
       return transformFunctionLabel(step.function);
     }
   }
+  compiledElementTransforms.set(steps, compiled);
   return undefined;
 }
 
@@ -1364,6 +1376,24 @@ export function stepCompileRefusalMessage(label: string): string {
     "an exchange on these transforms would stop before it matched anything. " +
     "It is refused up front instead. Correct that step's parameters, or " +
     "remove the step."
+  );
+}
+
+/**
+ * The message the compile check holds when its wall-clock budget runs out
+ * before every step has been compiled -- the fail-closed half of
+ * `assertTransformsCompile`, whose budget is the value interpolated here. The
+ * terms are refused rather than admitted unchecked, so the remedy is a smaller
+ * document; no step is named, because none was found at fault.
+ *
+ * @internal composed by `assertTransformsCompile` in `linkageSatisfiability.ts`.
+ */
+export function stepCompileBudgetRefusalMessage(budgetMs: number): string {
+  return (
+    "checking that every transform step can be built did not finish within " +
+    `the ${budgetMs} ms allowed, so these transforms are refused rather than ` +
+    "accepted unchecked. Reduce the number of linkage keys, key elements, or " +
+    "transform steps they declare."
   );
 }
 
@@ -1920,6 +1950,9 @@ function cartesianProduct(arrays: string[][]): string[][] {
 // released with the terms; the swap path preserves the array reference, so a swapped
 // element still hits. The compiled steps are stateless (each factory closure builds a
 // fresh matcher per call), so reuse across rows is safe.
+//
+// `uncompilableStepLabel` reads and fills the same entries, so the mint-boundary
+// compile check and the run compile one document's transforms once between them.
 const compiledElementTransforms = new WeakMap<
   TransformStep[],
   CompiledStep[]
