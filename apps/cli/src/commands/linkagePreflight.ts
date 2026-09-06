@@ -109,14 +109,12 @@ function declaredNameDiffersOnlyByBidiControls(
 }
 
 /**
- * The sentence a refusal adds when a declared name holds those characters. Fixed
- * copy interpolating only the terms' origin noun: the name itself is terms
- * content, partner-authored on the accept path, and stays on the cause links
- * that carry names.
- *
- * The rename is addressed to whoever can perform it. Where this operator wrote
- * the names, that is them; where the partner did, the invitation is their
- * document and a corrected one has to come from them.
+ * The sentence a refusal adds when a declared name holds those characters,
+ * addressed to whoever can rename it: `declaredNamesAuthor` selects between this
+ * operator, who wrote the names, and the partner, whose invitation is their own
+ * document and has to be sent again corrected. Both interpolate the terms' origin
+ * noun and nothing else -- the name itself is terms content, partner-authored on
+ * the accept path, and stays on the cause links that state names.
  */
 function bidiDeclaredNameNote(messaging: LinkagePreflightMessaging): string {
   if (messaging.declaredNamesAuthor === "the partner")

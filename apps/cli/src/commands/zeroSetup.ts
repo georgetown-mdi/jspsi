@@ -4,7 +4,6 @@ import fs from "node:fs";
 import {
   getLogger,
   prepareForExchange,
-  resolveExchangeInputs,
   sanitizeErrorForDisplay,
   UsageError,
 } from "@psilink/core";
@@ -285,17 +284,16 @@ async function prepareDataset(
     input,
     { allowStdin: true },
   );
-  // Resolve the metadata at the seat that read the header, where this read's
-  // own positions are: a header the removal emptied is then refused naming it
-  // rather than the header-row causes. prepareForExchange resolves the same
-  // metadata from the spec it is handed, so nothing else about the run changes.
-  const { metadata } = resolveExchangeInputs(
+  // The prepare resolves the metadata from this read's own columns, so it takes
+  // this read's changed positions with them: a header the removal emptied is
+  // refused naming the removal rather than the header-row causes.
+  const prepared = prepareForExchange(
     {},
     identity,
+    rawRows,
     columns,
     sanitizedColumnPositions,
   );
-  const prepared = prepareForExchange({ metadata }, identity, rawRows, columns);
   // Apply the operator's --linkage-strategy onto the terms prepareForExchange
   // authored (a no-op for cascade), so it rides into the exchange and the
   // --save spec; it never touches the standardization/dataset already built.

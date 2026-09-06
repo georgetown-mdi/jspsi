@@ -101,7 +101,10 @@ export function unnameableColumnsAlert(
  * it derives from the header, which are the matching name, the name this screen
  * shows, and the sent name where the exchange takes that from the header. A name
  * the linkage terms declare is not read from the header at all and keeps these
- * characters; refusing that one is the terms rule's, not this read's.
+ * characters, so the copy states what that costs -- the name is used as declared
+ * and reaches the partner wherever the exchange sends it -- and names the edit
+ * that fixes it, this exchange's terms rather than any file on disk. Refusing
+ * such a name is the terms rule's, not this read's.
  */
 export function sanitizedColumnsAlert(positions: ReadonlyArray<number>): {
   title: string;
@@ -120,8 +123,10 @@ export function sanitizedColumnsAlert(positions: ReadonlyArray<number>): {
       `on, the name${plural ? "s" : ""} shown on this screen, and the ` +
       `name${plural ? "s" : ""} sent to your partner where the exchange takes ` +
       `${plural ? "them" : "it"} from the header. This read does not change a ` +
-      `name the linkage terms declare. Where that left ` +
-      `two columns with the same name, ` +
+      `name the linkage terms declare; one that holds these characters is ` +
+      `used as declared and reaches your partner wherever the exchange sends ` +
+      `it, so change the terms for this exchange to declare it without them. ` +
+      `Where that left two columns with the same name, ` +
       `the later one was numbered to keep the two apart. Check that ` +
       `${plural ? "those columns" : "the column"} still ` +
       `${plural ? "read" : "reads"} the way your file names ` +

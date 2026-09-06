@@ -458,6 +458,46 @@ test("resolveExchangeInputs: derives default terms for a spec that holds none", 
   expect(resolved.metadata.map((c) => c.name)).toEqual(acceptorColumns);
 });
 
+test("prepareForExchange: positions name the removal for an emptied header", () => {
+  // The zero-setup seat prepares straight from its own read, so that read's
+  // changed positions reach the metadata resolution: a name the removal emptied
+  // is refused as that, and not as the trailing comma its header did not have.
+  let message = "";
+  try {
+    prepareForExchange(
+      {},
+      "Acceptor",
+      [{ first_name: "Alice", diagnosis: "A" }],
+      ["first_name", "", "diagnosis"],
+      [2],
+    );
+  } catch (err) {
+    message = err instanceof Error ? err.message : String(err);
+  }
+  expect(message).toContain("input column 2 has an empty name");
+  expect(message).toContain("invisible text-direction characters");
+  expect(message).not.toContain("trailing comma");
+});
+
+test("prepareForExchange: a caller passing no positions states the header causes", () => {
+  // The default every caller handed a column list rather than a read of its own
+  // takes, which has no removal to blame.
+  let message = "";
+  try {
+    prepareForExchange(
+      {},
+      "Acceptor",
+      [{ first_name: "Alice", diagnosis: "A" }],
+      ["first_name", "", "diagnosis"],
+    );
+  } catch (err) {
+    message = err instanceof Error ? err.message : String(err);
+  }
+  expect(message).toContain("input column 2 has an empty name");
+  expect(message).toContain("trailing comma");
+  expect(message).not.toContain("text-direction");
+});
+
 // --- Schema ------------------------------------------------------------------
 
 test("parseExchangeSpec: reads the snake_case consent record off disk", () => {

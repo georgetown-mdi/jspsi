@@ -663,12 +663,19 @@ export function resolveExchangeInputs(
  * @param rawRows Parsed CSV rows as plain string maps.
  * @param columnNames Column names from the CSV header (used when `metadata` is
  *                absent from `params`).
+ * @param sanitizedColumnPositions The 1-based positions the read that produced
+ *                `columnNames` removed bidi control characters from, so a header
+ *                the removal emptied is refused naming the removal rather than
+ *                the header-row causes. Defaults to none for a caller handed a
+ *                column list rather than a read of its own, which then states
+ *                those causes.
  */
 export function prepareForExchange(
   exchangeDataSpec: ExchangeDataSpec,
   identity: string | undefined,
   rawRows: Array<CSVRow>,
   columnNames: Array<string>,
+  sanitizedColumnPositions: ReadonlyArray<number> = [],
 ): PreparedExchange {
   const log = getLogger("exchange");
 
@@ -676,10 +683,7 @@ export function prepareForExchange(
     exchangeDataSpec,
     identity,
     columnNames,
-    // A column list this is handed, not a read of its own: the seat that read
-    // the header resolves the metadata there, where it holds the positions the
-    // removal changed, so an emptied name is refused naming it before here.
-    [],
+    sanitizedColumnPositions,
   );
 
   // Fail closed on an algorithm with no run path before any credential,

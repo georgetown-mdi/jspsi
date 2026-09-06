@@ -129,6 +129,20 @@ describe("sanitizedColumnsAlert", () => {
     );
   });
 
+  test("states what an untouched declared name costs and what to edit", () => {
+    // The bound is only half the operator's answer: a declared name holding
+    // these characters is sent as declared, and the remedy is the terms this
+    // browser holds, not a file on disk the web operator does not have.
+    const alert = sanitizedColumnsAlert([1]);
+    expect(alert.message).toContain(
+      "reaches your partner wherever the exchange sends it",
+    );
+    expect(alert.message).toContain(
+      "change the terms for this exchange to declare it without them",
+    );
+    expect(alert.message).not.toContain("configuration");
+  });
+
   test("states the numbering instead of claiming the name is the rest of the header", () => {
     // Measured on the real parser in packages/core/test/file.test.ts: a header
     // whose two names differ only by a removed character comes back as `name`
