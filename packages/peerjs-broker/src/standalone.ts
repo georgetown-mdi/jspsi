@@ -117,12 +117,20 @@ CreatePeerServerWSOnly(server, writeDiagnostic, {
 // to this one, so what reaches here is the HTTP server's: a bind the operating
 // system refused, and an accept-side fault. An `error` with no listener at all
 // is thrown, which ends the process either way; this states what happened first.
-server.on("error", (error: Error) =>
+// A fault after `listen` resolved an ephemeral port reports the bound address,
+// not the port-0 request that produced it; a pre-bind refusal has no bound
+// address yet, so it falls back to what was requested.
+server.on("error", (error: Error) => {
+  const bound = server.address();
+  const host =
+    typeof bound === "object" && bound !== null ? bound.address : options.host;
+  const port =
+    typeof bound === "object" && bound !== null ? bound.port : options.port;
   refuseToStart(
-    `the signaling broker could not serve ${options.host} port ${options.port}: ${error.message}`,
+    `the signaling broker could not serve ${host} port ${port}: ${error.message}`,
     UNAVAILABLE_EXIT_CODE,
-  ),
-);
+  );
+});
 
 server.listen(options.port, options.host, () => {
   const address = server.address() as AddressInfo;
