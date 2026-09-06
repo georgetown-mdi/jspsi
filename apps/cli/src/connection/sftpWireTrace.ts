@@ -30,10 +30,11 @@ export const SSH_WIRE_TRACE_LOGGER_NAME = "ssh";
  * per-value default `sanitizeForDisplay` would apply. A traced line is not a
  * value interpolated into a sentence but a whole rendering the stack composed,
  * and the algorithm name-lists that make the trace worth reading are its
- * longest emissions: measured against the pinned stack, one dial's longest line
- * is the 669-character version banner and its longest name-list line 361, so
- * the default would cut the negotiated offer out of the answer the operator
- * dialed for.
+ * longest emissions: measured against the pinned stack, one dial's longest
+ * first-party line is ssh2-sftp-client's version banner, whose length tracks
+ * the Node build it runs on but stays well under the cap, and its longest
+ * name-list line is 361, so the default would cut the negotiated offer out of
+ * the answer the operator dialed for.
  *
  * The cap still binds a server that pads its name-lists: the lists arrive
  * verbatim (see the module header), so without one a peer could spend an

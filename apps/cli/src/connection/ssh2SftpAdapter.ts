@@ -1531,10 +1531,11 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     const connectOptions = rest as Ssh2SftpClient.ConnectOptions;
     // Route the SSH stack's own diagnostics into psilink's logger for the
     // life of the connection this dial opens, at the trace level and nowhere
-    // else (see ./sftpWireTrace). Seated on the per-dial options rather than the
-    // retained ones, so no callback is stored on what a recovery re-dial reads
-    // back, and every dial path -- the first connect, a recovery re-dial, a
-    // connection-per-poll cycle start -- passes here.
+    // else (see ./sftpWireTrace). A recovery re-dial and a connection-per-poll
+    // cycle start read connectOptions back from originalConnectOptions, set
+    // before this destructure and never carrying debug, so no callback
+    // survives to them; every dial path -- the first connect, a recovery
+    // re-dial, a connection-per-poll cycle start -- passes here.
     if (this.wireTrace !== undefined)
       connectOptions.debug = this.wireTrace.emit;
     this.options = connectOptions;
