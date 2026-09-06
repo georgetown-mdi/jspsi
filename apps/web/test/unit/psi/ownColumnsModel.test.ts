@@ -38,7 +38,7 @@ const columns = ["client_id", "first_name", "last_name", "dob", "program_code"];
 // client_id/first_name/last_name/dob infer matching roles; program_code is not
 // in the alias map, so it infers a disclosed payload column -- the one column
 // that separates the `disclosed` selection from `all`.
-const metadata = inferMetadata(columns);
+const metadata = inferMetadata(columns, []);
 
 const BOTH_RECEIVE: Output = { expectsOutput: true, shareWithPartner: true };
 const PARTNER_ONLY: Output = { expectsOutput: false, shareWithPartner: true };
@@ -108,13 +108,11 @@ describe("the control's three states", () => {
 describe("a selection that resolves to no column", () => {
   // A file whose only column is the record identifier the result already begins
   // with, and a file of matching columns and nothing else.
-  const identifierOnly = inferMetadata(["client_id"]);
-  const linkageOnly = inferMetadata([
-    "client_id",
-    "first_name",
-    "last_name",
-    "dob",
-  ]);
+  const identifierOnly = inferMetadata(["client_id"], []);
+  const linkageOnly = inferMetadata(
+    ["client_id", "first_name", "last_name", "dob"],
+    [],
+  );
 
   test("`all` finds nothing where the identifier is the only column", () => {
     expect(ownColumnsPreview(identifierOnly, "all")).toEqual([]);

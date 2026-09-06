@@ -43,7 +43,7 @@ import type { GeneratedInvitation } from "@psi/invitation";
 // depends on.
 
 const columns = ["client_id", "first_name", "last_name", "dob", "program_code"];
-const metadata = inferMetadata(columns);
+const metadata = inferMetadata(columns, []);
 const terms = getDefaultLinkageTerms("County Health Dept", metadata);
 
 const rows: Array<CSVRow> = [
