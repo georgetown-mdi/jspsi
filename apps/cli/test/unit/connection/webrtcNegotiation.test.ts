@@ -1,4 +1,4 @@
-import { afterEach, expect, test } from "vitest";
+import { afterEach, expect, test, vi } from "vitest";
 import logLibrary from "loglevel";
 
 import {
@@ -1066,17 +1066,62 @@ test("a failed connection whose statistics throw reports the failure alone", asy
   expect(elapsedMs).toBeLessThan(ICE_STATS_TIMEOUT_MS);
 });
 
-test("a failed connection whose statistics never arrive fails on the ICE ceiling", async () => {
-  const { error, elapsedMs } = await failureWithUnreadableStats({
-    statsAnswer: "never-settles",
-    path: "connection-failed",
+/**
+ * Drive one of the two diagnosed failures against a peer whose statistics
+ * never settle, under fake timers: {@link ICE_STATS_TIMEOUT_MS} is a
+ * `setTimeout` a test can advance deterministically, unlike a `Date.now()`
+ * measurement, which a real timer can fire a millisecond ahead of on a
+ * loaded runner.
+ */
+async function neverSettlingStatsFailure(options: {
+  path: "connection-failed" | "channel-open-ceiling";
+}): Promise<ConnectionError> {
+  const { socket, peer, session, inviterId } = await startRendezvous({
+    role: "acceptor",
+    channelOpenTimeoutMs: 100,
+    rendezvousTimeoutMs: 30_000,
   });
+  peer.statsAnswer = "never-settles";
+  const settlement = session.then(
+    () => new Error("the rendezvous was expected to fail"),
+    (err: unknown) => err,
+  );
+  let settled = false;
+  void settlement.then(() => {
+    settled = true;
+  });
+  vi.useFakeTimers();
+  try {
+    if (options.path === "connection-failed") peer.failConnection();
+    else
+      socket.deliver({
+        type: BROKER_MESSAGE.answer,
+        src: inviterId,
+        payload: { sdp: { type: "answer", sdp: "v=0\r\nanswer\r\n" } },
+      });
+    const ceilingMs =
+      (options.path === "channel-open-ceiling" ? 100 : 0) +
+      ICE_STATS_TIMEOUT_MS;
+    // One ms short of the ceiling must still be pending, and the ceiling
+    // itself must settle: fake time has none of a real timer's early-fire
+    // slack, so this pins the ceiling exactly instead of a lower bound.
+    await vi.advanceTimersByTimeAsync(ceilingMs - 1);
+    expect(settled).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);
+    expect(settled).toBe(true);
+  } finally {
+    vi.useRealTimers();
+  }
+  return (await settlement) as ConnectionError;
+}
+
+test("a failed connection whose statistics never arrive fails on the ICE ceiling", async () => {
+  const error = await neverSettlingStatsFailure({ path: "connection-failed" });
   expectUndiagnosedFailure(
     error,
     "no network path between the two parties could be established",
   );
-  expect(elapsedMs).toBeGreaterThanOrEqual(ICE_STATS_TIMEOUT_MS);
-}, 15_000);
+});
 
 test("a channel-open ceiling whose statistics throw reports the failure alone", async () => {
   const { error, elapsedMs } = await failureWithUnreadableStats({
@@ -1088,10 +1133,8 @@ test("a channel-open ceiling whose statistics throw reports the failure alone", 
 });
 
 test("a channel-open ceiling whose statistics never arrive still reports", async () => {
-  const { error, elapsedMs } = await failureWithUnreadableStats({
-    statsAnswer: "never-settles",
+  const error = await neverSettlingStatsFailure({
     path: "channel-open-ceiling",
   });
   expectUndiagnosedFailure(error, "did not open within 100ms");
-  expect(elapsedMs).toBeGreaterThanOrEqual(ICE_STATS_TIMEOUT_MS);
-}, 15_000);
+});
