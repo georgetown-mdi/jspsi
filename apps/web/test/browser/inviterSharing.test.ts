@@ -180,8 +180,9 @@ describe("column-name isolation: what the wrapper does not contain", () => {
   // check-your-answers "Columns shared" row, the acceptor ledger's send row, the
   // visually-hidden live regions, and the accessible-name compositions in
   // MatchingSharingSection and MetadataGrid -- is a name entering by some route
-  // other than a CSV header, which is the terms schema's bound rather than this
-  // wrapper's.
+  // other than a CSV header. Nothing bounds that today: the terms schema's
+  // name-class fields are length-bounded strings, and adding the bound is the
+  // next change's work rather than this wrapper's.
   //
   // Written as escapes, never as raw bytes, so the source of a test about
   // invisible characters is itself readable.
