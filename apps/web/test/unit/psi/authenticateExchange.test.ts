@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { ConnectionError, createMessagePipe, runKex } from "@psilink/core";
+import { ConnectionError, runKex } from "@psilink/core";
+import { createMessagePipe } from "@psilink/core/testing";
 
 import { authenticateExchange } from "../../../src/psi/authenticateExchange.js";
 

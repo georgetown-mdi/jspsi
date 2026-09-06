@@ -37,10 +37,10 @@
 // PROTOCOL_VERSION (docs/spec/PROTOCOL.md, Protocol-version reconcile at the terms
 // exchange), so this file pins the ENVELOPE around it.
 
-import { createMessagePipe } from "../../dist/core.esm.js";
 import {
   PROTOCOL_VERSION,
   TERMS_ENVELOPE_FIELDS,
+  createMessagePipe,
   exchangeTerms,
   sendAbort,
 } from "../../dist/testing.esm.js";
