@@ -185,8 +185,9 @@ function installLogSink(
  *
  * {@link LogSink.close} restores the prior sink before closing the descriptor,
  * so a log emitted after `close()` routes to the restored sink -- stderr, when
- * this was the only sink -- never to the closed descriptor. The write path guards a failed `fs.writeSync` (a full
- * disk) and reports it on stderr rather than throwing back into the log call.
+ * this was the only sink -- never to the closed descriptor. The write path
+ * guards a failed `fs.writeSync` (a full disk) and reports it on stderr rather
+ * than throwing back into the log call.
  *
  * The file is opened synchronously (`openSync` with `"a"`) so a missing parent
  * directory or other open failure shows up here, as a {@link UsageError}
@@ -326,7 +327,8 @@ export interface ConfiguredLogging {
    */
   writePlainLine(line: string): void;
   /**
-   * Restore the diagnostic sink in place before the redirect and, for the file
+   * Restore the diagnostic sink in place before the redirect -- or
+   * {@link stderrSinkAfterClose} when there was none -- and, for the file
    * sink, close the underlying descriptor; best-effort and idempotent. A handler
    * calls this in its `finally`; the error path's `process.exit` bypasses it, but
    * the sink's writes are synchronous and already durable, so nothing is lost.
