@@ -15,6 +15,7 @@ import {
   getManagedExchange,
   spendManagedExchangeIfCurrent,
 } from "@psi/managed/managedExchangeStore";
+import { MANAGED_RUN_HANDED_OFF_ATTESTATION } from "@recurring/managedRunLaunchModel";
 import { ManagedRunSurface } from "@recurring/ManagedRunSurface";
 import { composeManagedExchangeFile } from "@psi/managed/managedExchangeRecord";
 
@@ -177,9 +178,13 @@ describe("a run pressed after the hand-off landed", () => {
       .element(page.getByText(/handed this exchange to the command line/))
       .toBeInTheDocument();
     // The run this operator started is accounted for beside it: they pressed Run,
-    // and the standing state alone cannot say what became of that run.
+    // and the standing state alone cannot say what became of that run. Matched
+    // against the exported line rather than a phrase, so the hand-off tier's
+    // non-disclosure gate stays held to the words this surface renders.
     await expect
-      .element(page.getByText(/nothing left this device/))
+      .element(
+        page.getByText(MANAGED_RUN_HANDED_OFF_ATTESTATION, { exact: true }),
+      )
       .toBeInTheDocument();
     // Nothing here offers the copy again: the run controls are gone with the load
     // state, and no retry stands in their place.
@@ -226,7 +231,9 @@ describe("a run pressed after the hand-off landed", () => {
     // The run this operator started is still accounted for: that much is the
     // refusal's own, and it needs no stored entry to be true.
     await expect
-      .element(page.getByText(/nothing left this device/))
+      .element(
+        page.getByText(MANAGED_RUN_HANDED_OFF_ATTESTATION, { exact: true }),
+      )
       .toBeInTheDocument();
     // Neither hand-off is named on evidence the surface does not hold.
     expect(app.container.textContent).not.toContain("Import the backup");

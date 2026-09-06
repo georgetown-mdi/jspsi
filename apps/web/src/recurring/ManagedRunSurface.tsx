@@ -52,6 +52,13 @@ import styles from "@styles/app.module.css";
 import { useBeforeUnloadPrompt } from "@exchange/useUnloadGuard";
 
 import {
+  MANAGED_RUN_HANDED_OFF_ATTESTATION,
+  classifyManagedRunFailure,
+  managedReinviteRecoveryCopy,
+  managedRunReinvites,
+  managedRunRetryable,
+} from "./managedRunLaunchModel";
+import {
   RECORD_GONE_HANDOFF_REASON,
   RECORD_GONE_HANDOFF_TITLE,
   RUN_IN_FLIGHT_HANDOFF_REASON,
@@ -59,12 +66,6 @@ import {
   SUPERSEDED_HANDOFF_TITLE,
   supersededHandoffReason,
 } from "./managedHandoffGate";
-import {
-  classifyManagedRunFailure,
-  managedReinviteRecoveryCopy,
-  managedRunReinvites,
-  managedRunRetryable,
-} from "./managedRunLaunchModel";
 import { DeleteExchangeButton } from "./SavedExchanges";
 import { ManagedCronExportPanel } from "./ManagedCronExportPanel";
 import { ManagedExchangeDetail } from "./ManagedExchangeDetail";
@@ -1236,7 +1237,9 @@ function BackupPanel({
  * `refusedRun` is set when this surface arrived here from a run the hand-off
  * refused rather than from a load, and adds that run's own account above the
  * durable copy: an operator who just pressed Run is owed what became of the run
- * they started, which the standing state cannot say. */
+ * they started, which the standing state cannot say. That account is the
+ * hand-off tier's non-disclosure attestation, so its words are held beside the
+ * gate resting on them ({@link MANAGED_RUN_HANDED_OFF_ATTESTATION}). */
 function SpentSurface({
   spent,
   refusedRun = false,
@@ -1245,10 +1248,7 @@ function SpentSurface({
   refusedRun?: boolean;
 }) {
   const refused = refusedRun ? (
-    <p className={styles.small}>
-      The run you started stopped before reading your file and before
-      connecting, and nothing left this device.
-    </p>
+    <p className={styles.small}>{MANAGED_RUN_HANDED_OFF_ATTESTATION}</p>
   ) : null;
   if (spent === undefined)
     return (

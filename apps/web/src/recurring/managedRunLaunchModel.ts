@@ -326,8 +326,9 @@ const UNEXPLAINED_FAILURE: ManagedRunFailureAlert = {
  *
  * `"none"` and `"missed"` are handled explicitly even though {@link
  * managedRunFailureFromRecord} filters both before a record reaches this
- * function; {@link classifyManagedRunFailure} can still route either tier here. */
-function tierFailure(
+ * function; {@link classifyManagedRunFailure} can still route either tier here.
+ * @internal exported for the unit test. */
+export function managedRunTierFailure(
   tier: ManagedFailureTier,
   record: ManagedExchangeRecord,
 ): ManagedRunFailure {
@@ -367,7 +368,12 @@ function tierFailure(
  * signals the record already holds as the run launches, each recovered by
  * re-invite (see docs/MANAGED_EXCHANGE.md, "A missed window is neither desync
  * nor attack"). The Tier-2 unexplained framing is not here: no handshake ran,
- * so nothing failed closed. */
+ * so nothing failed closed.
+ *
+ * Hand-maintained, and unlike {@link MANAGED_RUN_NON_DISCLOSURE_ATTESTATION} not
+ * bound to any tier's copy: this list rests on a ranking claim about which
+ * framing outranks the no-show reading, and no tier's copy states that claim, so
+ * there is no phrase for a check to hold it to. */
 const MISSED_OUTRANKED_BY: ReadonlyArray<ManagedFailureTier> = [
   "expired",
   "storage",
@@ -392,26 +398,70 @@ function missedFailure(
   now: number,
 ): ManagedRunFailure {
   const tier = deriveManagedFailureTier(atLaunch, local, now);
-  if (MISSED_OUTRANKED_BY.includes(tier)) return tierFailure(tier, atLaunch);
+  if (MISSED_OUTRANKED_BY.includes(tier))
+    return managedRunTierFailure(tier, atLaunch);
   if (importedSinceLastSuccess(local)) return IMPORTED_FAILURE;
   return MISSED_FAILURE;
 }
 
-/** The record-derived tiers that attest THIS run's non-disclosure -- that it
- * stopped before reading the input file and before connecting, so nothing left
- * this device -- and so give way to the generic tier once this run's data
- * exchange has started ({@link classifyManagedRunFailure}'s `dataExchangeStarted`
- * boundary). The hand-off tier is included for the same claim the surface reads
- * to settle onto the stored spent state ({@link ./ManagedRunSurface.tsx}).
- * `"missed"` is absent: its no-show copy is issued from the live error, not this
- * boundary ({@link missedFailure}). The re-invite, input, and unexplained tiers
- * are absent because none of their copy asserts non-disclosure. */
-const NON_DISCLOSURE_ATTESTING_TIERS: ReadonlyArray<ManagedFailureTier> = [
-  "handed-off",
-  "custody-unreadable",
-  "consent",
-  "terms-shortfall",
-];
+/** The hand-off state's non-disclosure attestation: the line the stored spent
+ * state adds for a run the hand-off refused ({@link ./ManagedRunSurface.tsx}).
+ * The hand-off state has no alert copy of its own -- reaching it settles the
+ * whole surface onto that stored state -- so the claim its gating rests on is
+ * written here, beside the gate. The unit test holds the gate to these words,
+ * and the browser test holds the rendered line to them. */
+export const MANAGED_RUN_HANDED_OFF_ATTESTATION =
+  "The run you started stopped before reading your file and before " +
+  "connecting, and nothing left this device.";
+
+/** Where a tier's non-disclosure attestation -- the claim that THIS run stopped
+ * before reading the input file and before connecting, so nothing left this
+ * device -- is written for the operator to read.
+ *
+ * - `"alert-copy"` -- in the tier's own {@link ManagedRunFailureAlert} title and
+ *   message.
+ * - `"spent-state"` -- in {@link MANAGED_RUN_HANDED_OFF_ATTESTATION}, the one
+ *   state whose claim is not alert copy.
+ * - `"none"` -- the tier states nothing about what this run disclosed. */
+type NonDisclosureAttestationSite = "alert-copy" | "spent-state" | "none";
+
+/** Where each record-derived tier attests THIS run's non-disclosure, and so which
+ * tiers give way to the generic tier once this run's data exchange has started
+ * ({@link classifyManagedRunFailure}'s `dataExchangeStarted` boundary): a tier
+ * attesting anywhere is gated, a `"none"` tier keeps its reading.
+ *
+ * Exhaustive over {@link ManagedFailureTier} rather than a list of the gated
+ * tiers alone: a tier added to the union does not typecheck until it is
+ * classified here, so copy attesting non-disclosure cannot arrive ungated. The
+ * unit test holds every entry to the tier's rendered copy.
+ *
+ * `"missed"` is `"none"` because the recorded tier renders the generic transport
+ * copy; the no-show copy that does attest is issued from the live error instead
+ * ({@link missedFailure}). The re-invite, input, and unexplained tiers state
+ * nothing about this run's disclosure.
+ * @internal exported for the unit test. */
+export const MANAGED_RUN_NON_DISCLOSURE_ATTESTATION: Readonly<
+  Record<ManagedFailureTier, NonDisclosureAttestationSite>
+> = {
+  "handed-off": "spent-state",
+  "custody-unreadable": "alert-copy",
+  consent: "alert-copy",
+  "terms-shortfall": "alert-copy",
+  expired: "none",
+  input: "none",
+  missed: "none",
+  storage: "none",
+  imported: "none",
+  transport: "none",
+  unexplained: "none",
+  none: "none",
+};
+
+/** Whether a derived tier attests THIS run's non-disclosure, and so gives way to
+ * the generic tier past the data-exchange boundary. */
+function attestsNonDisclosure(tier: ManagedFailureTier): boolean {
+  return MANAGED_RUN_NON_DISCLOSURE_ATTESTATION[tier] !== "none";
+}
 
 /**
  * Classify a launch failure into the surface's {@link ManagedRunFailure}. The
@@ -420,8 +470,8 @@ const NON_DISCLOSURE_ATTESTING_TIERS: ReadonlyArray<ManagedFailureTier> = [
  * one non-fixed value, and it is the record's own local `expires`, never
  * partner-influenced. Any other failure is tiered from the record's own
  * bookkeeping: {@link deriveManagedFailureTier} reads the tier and {@link
- * tierFailure} maps it to copy. `now` and `local` feed that derivation (expiry
- * and the import marker).
+ * managedRunTierFailure} maps it to copy. `now` and `local` feed that
+ * derivation (expiry and the import marker).
  *
  * A derived tier reads the record reloaded after the run (`records.afterRun`),
  * since it rests on what THIS run stamped. The no-show rests on what stood
@@ -433,7 +483,7 @@ const NON_DISCLOSURE_ATTESTING_TIERS: ReadonlyArray<ManagedFailureTier> = [
  * `onDataExchangeStart` option, passed to {@link benignRerunOutcome}): a benign
  * state whose copy claims nothing left this device is read off the error only
  * from before it, and a derived tier making the same claim is gated by it too
- * ({@link NON_DISCLOSURE_ATTESTING_TIERS}).
+ * ({@link MANAGED_RUN_NON_DISCLOSURE_ATTESTATION}).
  */
 export function classifyManagedRunFailure(
   error: unknown,
@@ -453,10 +503,8 @@ export function classifyManagedRunFailure(
   if (benign === "missed") return missedFailure(records.atLaunch, local, now);
   const { afterRun } = records;
   const tier = deriveManagedFailureTier(afterRun, local, now);
-  return tierFailure(
-    dataExchangeStarted && NON_DISCLOSURE_ATTESTING_TIERS.includes(tier)
-      ? "transport"
-      : tier,
+  return managedRunTierFailure(
+    dataExchangeStarted && attestsNonDisclosure(tier) ? "transport" : tier,
     afterRun,
   );
 }
@@ -476,7 +524,7 @@ export function managedRunFailureFromRecord(
 ): ManagedRunFailure | undefined {
   const tier = deriveManagedFailureTier(record, local, now);
   if (tier === "none" || tier === "missed") return undefined;
-  return tierFailure(tier, record);
+  return managedRunTierFailure(tier, record);
 }
 
 /** Whether a classified failure is retryable in place: the input and transport
