@@ -11,7 +11,11 @@ import { createElement } from "react";
 // bound and blankets the top bar, intercepting unrelated clicks.
 import "@mantine/core/styles.css";
 
-import { decodeInvitation } from "@psilink/core";
+import {
+  StandardizedDataset,
+  decodeInvitation,
+  getDefaultLinkageTerms,
+} from "@psilink/core";
 
 import { STEP_STATE_KEY } from "@exchange/stepHistory";
 
@@ -242,13 +246,19 @@ function preparedWith(
   keyCount: number,
 ): PreparedExchange {
   return {
+    metadata: [],
     linkageTerms: {
+      ...getDefaultLinkageTerms("Exchange-page fixture"),
       linkageStrategy,
       linkageKeys: Array.from({ length: keyCount }, (_, i) => ({
         name: `key ${i + 1}`,
+        elements: [],
       })),
     },
-  } as unknown as PreparedExchange;
+    dataset: new StandardizedDataset([], []),
+    rawRows: [],
+    rowCount: 0,
+  } satisfies PreparedExchange;
 }
 
 describe("quick path", () => {

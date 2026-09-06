@@ -12,8 +12,10 @@ import { createElement } from "react";
 import "@mantine/core/styles.css";
 
 import {
+  StandardizedDataset,
   encodeInvitation,
   generateSharedSecret,
+  getDefaultLinkageTerms,
   sanitizeForDisplay,
 } from "@psilink/core";
 
@@ -150,13 +152,19 @@ function preparedWith(
   keyCount: number,
 ): PreparedExchange {
   return {
+    metadata: [],
     linkageTerms: {
+      ...getDefaultLinkageTerms("Accept-screen fixture"),
       linkageStrategy,
       linkageKeys: Array.from({ length: keyCount }, (_, i) => ({
         name: `key ${i + 1}`,
+        elements: [],
       })),
     },
-  } as unknown as PreparedExchange;
+    dataset: new StandardizedDataset([], []),
+    rawRows: [],
+    rowCount: 0,
+  } satisfies PreparedExchange;
 }
 
 // Two single-element keys, one per name field, plus a payload the inviter sends

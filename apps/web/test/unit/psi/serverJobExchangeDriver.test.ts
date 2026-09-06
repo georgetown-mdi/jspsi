@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { ProcessState } from "@psilink/core";
+import { ProcessState, StandardizedDataset } from "@psilink/core";
 
 import {
   JobApiRequestError,
@@ -600,13 +600,29 @@ describe("createServerJobExchangeDriver record downloads", () => {
       },
       revoke: () => {},
     };
+    // Only createdAt drives the filenames under test; the rest of the record and
+    // its keys are never read, so they stay the smallest cast fixture rather than
+    // an authored ExchangeRecord.
+    const audit = {
+      record: { createdAt: CREATED_AT },
+      keys: { salts: {} },
+    } as unknown as NonNullable<ExchangeResult["audit"]>;
     const inBrowser = buildRunOutputs(
       {
         associationTable: undefined,
+        intersectionCount: undefined,
+        partnerTerms: validLinkageTerms(),
+        resolvedRole: "receiver",
         partnerPayload: { columns: [], rowIndices: [], rows: [] },
-        audit: { record: { createdAt: CREATED_AT }, keys: { salts: {} } },
-      } as unknown as ExchangeResult,
-      {} as unknown as PreparedExchange,
+        audit,
+      } satisfies ExchangeResult,
+      {
+        metadata: [],
+        linkageTerms: validLinkageTerms(),
+        dataset: new StandardizedDataset([], []),
+        rawRows: [],
+        rowCount: 0,
+      } satisfies PreparedExchange,
       urls,
     );
 

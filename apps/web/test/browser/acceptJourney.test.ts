@@ -13,8 +13,10 @@ import "@mantine/core/styles.css";
 
 import {
   CONFIRMING_PROTOCOL_STAGE_ID,
+  StandardizedDataset,
   encodeInvitation,
   generateSharedSecret,
+  getDefaultLinkageTerms,
 } from "@psilink/core";
 
 import { WAITING_STAGE_ID, stagesFor } from "@exchange/exchangeRun";
@@ -57,13 +59,19 @@ vi.mock("@psi/transport/rendezvous", async () =>
 // timeline the stub emits.
 function preparedWith(keyCount: number): PreparedExchange {
   return {
+    metadata: [],
     linkageTerms: {
+      ...getDefaultLinkageTerms("Accept-journey fixture"),
       linkageStrategy: "cascade",
       linkageKeys: Array.from({ length: keyCount }, (_, i) => ({
         name: `key ${i + 1}`,
+        elements: [],
       })),
     },
-  } as unknown as PreparedExchange;
+    dataset: new StandardizedDataset([], []),
+    rawRows: [],
+    rowCount: 0,
+  } satisfies PreparedExchange;
 }
 
 // The lifecycle stub for this journey: unlike accept.test.ts, which records
