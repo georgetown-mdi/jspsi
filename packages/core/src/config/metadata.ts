@@ -88,6 +88,44 @@ export function disclosedColumnNames(metadata: Metadata): Array<string> {
 }
 
 /**
+ * Which of this party's own input columns its result file holds beside the
+ * partner's values, as the local `include_own_columns` config key selects
+ * them: `disclosed` for the columns transmitted to the partner
+ * ({@link isDisclosedToPartner}), `all` for every column the metadata
+ * declares. The key's absence selects nothing and is not a value here.
+ */
+export const OwnColumnSelectionSchema = z.enum(["disclosed", "all"]);
+
+/** See {@link OwnColumnSelectionSchema}. */
+export type OwnColumnSelection = z.infer<typeof OwnColumnSelectionSchema>;
+
+/**
+ * The names of this party's own input columns to write into its result
+ * file under `selection`, in metadata order.
+ *
+ * The identifier column is left out of both selections: the result's first
+ * column already holds its value for every row ({@link buildOutputTable}),
+ * so writing it again would head one input column twice. Only the FIRST
+ * `role: identifier` column is left out, since that is the one the result's
+ * first column holds.
+ */
+export function ownResultColumnNames(
+  metadata: Metadata,
+  selection: OwnColumnSelection,
+): Array<string> {
+  const identifierIndex = metadata.findIndex(
+    (column) => column.role === "identifier",
+  );
+  return metadata
+    .filter(
+      (column, index) =>
+        index !== identifierIndex &&
+        (selection === "all" || isDisclosedToPartner(column)),
+    )
+    .map((column) => column.name);
+}
+
+/**
  * Whether this party's input metadata would transmit a column under a
  * count-only (`psi-c`) algorithm -- the fifth count-only shape rule
  * (docs/spec/PROTOCOL.md, PSI-C), the one no linkage-terms document

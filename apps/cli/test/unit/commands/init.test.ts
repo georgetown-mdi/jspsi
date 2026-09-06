@@ -202,7 +202,7 @@ test("the commented metadata/standardization hint is valid when uncommented", ()
 });
 
 test("every commented OPTIONAL section is valid when uncommented", async () => {
-  // The four opt-in sections are documented as commented YAML; an operator who
+  // The opt-in sections are documented as commented YAML; an operator who
   // enables one must get a loadable config. Un-comment each example, merge it
   // onto the active base, and validate against the production schema -- the same
   // guard the metadata/standardization hint has, extended to these so a future
@@ -215,6 +215,7 @@ test("every commented OPTIONAL section is valid when uncommented", async () => {
     "authentication",
     "signing",
     "retention_disposition",
+    "include_own_columns",
     "expected_payload_columns",
   ]) {
     const section = YAML.parse(

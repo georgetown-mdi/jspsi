@@ -3,10 +3,13 @@ import { expect, test } from "vitest";
 import {
   inferMetadata,
   ALIAS_TYPE_META_MAP,
+  ownResultColumnNames,
   safeParseMetadata,
   disclosedColumnNames,
 } from "../../src/config/metadata";
 import { UsageError } from "../../src/errors";
+
+import type { Metadata } from "../../src/config/metadata";
 
 // --- inferMetadata: linkage columns ------------------------------------------
 
@@ -411,4 +414,37 @@ test("a rejected metadata type is not echoed in the parse error", () => {
     expect(result.error.message).not.toContain("\x1b");
     expect(result.error.message).not.toContain("\u202e");
   }
+});
+
+// --- ownResultColumnNames ----------------------------------------------------
+
+const ownColumnsMeta: Metadata = [
+  { name: "ssn", type: "ssn", role: "linkage", isPayload: false },
+  { name: "pid", type: "identifier", role: "identifier", isPayload: true },
+  { name: "dose", type: "other", role: "payload", isPayload: true },
+  { name: "internal", type: "other", role: "ignored", isPayload: true },
+];
+
+test("ownResultColumnNames: 'disclosed' is the transmitted set less the identifier", () => {
+  // pid is transmitted (is_payload with role identifier) but heads the result's
+  // first column already; internal is ignored, so it is never transmitted.
+  expect(ownResultColumnNames(ownColumnsMeta, "disclosed")).toEqual(["dose"]);
+});
+
+test("ownResultColumnNames: 'all' is every declared column less the identifier, in metadata order", () => {
+  expect(ownResultColumnNames(ownColumnsMeta, "all")).toEqual([
+    "ssn",
+    "dose",
+    "internal",
+  ]);
+});
+
+test("ownResultColumnNames: with no identifier column every declared column stands", () => {
+  // The result's first column is then the row index, which no input column is.
+  const meta = ownColumnsMeta.filter((column) => column.name !== "pid");
+  expect(ownResultColumnNames(meta, "all")).toEqual([
+    "ssn",
+    "dose",
+    "internal",
+  ]);
 });

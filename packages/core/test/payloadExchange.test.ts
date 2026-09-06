@@ -17,6 +17,7 @@ import { OutboundDisclosureRefusalError, UsageError } from "../src/errors";
 import { sanitizeErrorForDisplay } from "../src/utils/sanitizeErrorForDisplay";
 import { readMessage } from "./utils/compatibilityMessageReader";
 
+import type { CSVRow } from "../src/file";
 import type { Metadata } from "../src/config/metadata";
 import type {
   LinkageTerms,
@@ -2246,4 +2247,202 @@ test("buildOutputTable: a partner payload missing a row grouped onto several of 
   expect(() =>
     buildOutputTable(MANY_SIDE_TABLE, rawRows, metaNoId, partnerPayload),
   ).toThrow("association table indices: 1");
+});
+
+// --- buildOutputTable: this party's own columns ------------------------------
+
+const notePayload: PartnerPayload = {
+  columns: ["note"],
+  rowIndices: [0, 1],
+  rows: [["n-0"], ["n-1"]],
+};
+
+test("buildOutputTable: 'disclosed' writes the columns sent to the partner, after the partner's", () => {
+  const { headers, rows } = buildOutputTable(
+    [
+      [0, 1],
+      [0, 1],
+    ],
+    rawRows,
+    metaWithId,
+    notePayload,
+    "disclosed",
+  );
+  // patient_id is disclosed too, but the first column already holds it.
+  expect(headers).toEqual(["patient_id", "row_id", "note", "diagnosis"]);
+  expect(rows).toEqual([
+    ["P0", "0", "n-0", "A"],
+    ["P1", "1", "n-1", "B"],
+  ]);
+});
+
+test("buildOutputTable: 'all' writes every declared column but the identifier", () => {
+  const { headers, rows } = buildOutputTable(
+    [
+      [0, 1],
+      [0, 1],
+    ],
+    rawRows,
+    metaWithId,
+    notePayload,
+    "all",
+  );
+  // ssn is matched on and never sent; it reaches the result under "all" alone.
+  expect(headers).toEqual(["patient_id", "row_id", "note", "ssn", "diagnosis"]);
+  expect(rows).toEqual([
+    ["P0", "0", "n-0", "001", "A"],
+    ["P1", "1", "n-1", "002", "B"],
+  ]);
+});
+
+test("buildOutputTable: an own column's value repeats once per pair under a deduplicating match", () => {
+  // Our row 1 stands in two pairs, so its carried values are written twice --
+  // as its identifier already is -- and the row count is the pair count.
+  const partnerPayload: PartnerPayload = {
+    columns: ["note"],
+    rowIndices: [0, 1, 2],
+    rows: [["n-0"], ["n-1"], ["n-2"]],
+  };
+  const { headers, rows } = buildOutputTable(
+    ONE_SIDE_TABLE,
+    rawRows,
+    metaWithId,
+    partnerPayload,
+    "all",
+  );
+  expect(headers).toEqual(["patient_id", "row_id", "note", "ssn", "diagnosis"]);
+  expect(rows).toEqual([
+    ["P1", "0", "n-0", "002", "B"],
+    ["P1", "1", "n-1", "002", "B"],
+    ["P3", "2", "n-2", "004", "D"],
+  ]);
+  expect(rows.length).toBe(ONE_SIDE_TABLE[0].length);
+});
+
+test("buildOutputTable: a partner column colliding with an own column takes their_", () => {
+  const partnerPayload: PartnerPayload = {
+    columns: ["diagnosis"],
+    rowIndices: [0],
+    rows: [["X"]],
+  };
+  const { headers, rows } = buildOutputTable(
+    [[0], [0]],
+    rawRows,
+    metaWithId,
+    partnerPayload,
+    "disclosed",
+  );
+  expect(headers).toEqual([
+    "patient_id",
+    "row_id",
+    "their_diagnosis",
+    "diagnosis",
+  ]);
+  expect(rows).toEqual([["P0", "0", "X", "A"]]);
+});
+
+test("buildOutputTable: a partner column falls past a header another partner column took", () => {
+  // The partner sends both the own column's name and its their_ form. The
+  // first takes their_diagnosis, so the second falls past it rather than
+  // repeating the header.
+  const partnerPayload: PartnerPayload = {
+    columns: ["diagnosis", "their_diagnosis"],
+    rowIndices: [0],
+    rows: [["X", "Y"]],
+  };
+  const { headers } = buildOutputTable(
+    [[0], [0]],
+    rawRows,
+    metaWithId,
+    partnerPayload,
+    "disclosed",
+  );
+  expect(headers).toEqual([
+    "patient_id",
+    "row_id",
+    "their_diagnosis",
+    "their_their_diagnosis",
+    "diagnosis",
+  ]);
+  expect(new Set(headers).size).toBe(headers.length);
+});
+
+test("buildOutputTable: an own column named row_id takes own_ against the first column", () => {
+  // With no identifier column the first column is headed row_id, so an input
+  // column of that name cannot keep it. The partner row-index column then falls
+  // past both.
+  const meta: Metadata = [
+    { name: "row_id", type: "other", role: "payload", isPayload: true },
+  ];
+  const rows: Array<CSVRow> = [{ row_id: "local-0" }];
+  const partnerPayload: PartnerPayload = {
+    columns: ["note"],
+    rowIndices: [4],
+    rows: [["n-4"]],
+  };
+  const table = buildOutputTable([[0], [4]], rows, meta, partnerPayload, "all");
+  expect(table.headers).toEqual([
+    "row_id",
+    "their_row_id",
+    "note",
+    "own_row_id",
+  ]);
+  expect(table.rows).toEqual([["0", "4", "n-4", "local-0"]]);
+  expect(new Set(table.headers).size).toBe(table.headers.length);
+});
+
+test("buildOutputTable: an own column is written even when the partner sent no payload", () => {
+  const empty: PartnerPayload = { columns: [], rowIndices: [], rows: [] };
+  const { headers, rows } = buildOutputTable(
+    [[2], [0]],
+    rawRows,
+    metaWithId,
+    empty,
+    "all",
+  );
+  expect(headers).toEqual(["patient_id", "row_id", "ssn", "diagnosis"]);
+  expect(rows).toEqual([["P2", "0", "003", "C"]]);
+});
+
+test("buildOutputTable: an own value is RFC 4180 escaped and a missing one is an empty cell", () => {
+  const meta: Metadata = [
+    { name: "pid", type: "identifier", role: "identifier", isPayload: true },
+    { name: "note", type: "other", role: "payload", isPayload: true },
+  ];
+  const rows: Array<CSVRow> = [
+    { pid: "P0", note: 'a, b "c"\nd' },
+    // A short row: the column the metadata declares is absent from this row.
+    { pid: "P1" },
+  ];
+  const empty: PartnerPayload = { columns: [], rowIndices: [], rows: [] };
+  const table = buildOutputTable(
+    [
+      [0, 1],
+      [0, 1],
+    ],
+    rows,
+    meta,
+    empty,
+    "all",
+  );
+  expect(table.rows).toEqual([
+    ["P0", "0", '"a, b ""c""' + "\nd" + '"'],
+    ["P1", "1", ""],
+  ]);
+});
+
+test("buildOutputTable: an ignored column reaches the result under 'all' but not 'disclosed'", () => {
+  const meta: Metadata = [
+    { name: "pid", type: "identifier", role: "identifier", isPayload: true },
+    { name: "internal", type: "other", role: "ignored", isPayload: true },
+  ];
+  const rows: Array<CSVRow> = [{ pid: "P0", internal: "keep" }];
+  const empty: PartnerPayload = { columns: [], rowIndices: [], rows: [] };
+  expect(
+    buildOutputTable([[0], [0]], rows, meta, empty, "disclosed").headers,
+  ).toEqual(["pid", "row_id"]);
+  expect(buildOutputTable([[0], [0]], rows, meta, empty, "all")).toEqual({
+    headers: ["pid", "row_id", "internal"],
+    rows: [["P0", "0", "keep"]],
+  });
 });
