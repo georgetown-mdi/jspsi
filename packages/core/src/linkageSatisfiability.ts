@@ -26,6 +26,7 @@ import { inferMetadata } from "./config/metadata.js";
 import type { ColumnMetadata } from "./config/metadata.js";
 import { DEFAULT_DATE_OUTPUT_FORMAT } from "./keyElementWidth.js";
 import { declaredFanOutFunction } from "./fanOutFunctions.js";
+import { redactPrivateKeyMaterial } from "./utils/sanitizeErrorForDisplay.js";
 import {
   applyStep,
   compileSteps,
@@ -1213,7 +1214,9 @@ export function summarizeLinkageShortfall(
  * chain caps each link independently and is the one altitude that escapes them, so
  * a name can only ever spend the budget of the link it shares with its own kind,
  * and the count leads each link so a truncated one still reports how much is
- * unread.
+ * unread. Each name is also redacted ({@link redactPrivateKeyMaterial}) where it
+ * is composed into its link, so a marker planted in one name cannot take the
+ * names enumerated after it.
  */
 export function assertLinkageTermsSatisfiable(
   columns: string[],
@@ -1238,25 +1241,36 @@ export function assertLinkageTermsSatisfiable(
         "partner and run the exchange under those.",
     );
 
+  // Every name below is agreed-terms content -- partner-authored on every
+  // accept path -- redacted where it is composed into its link so a planted
+  // marker's fail-closed reach stays inside that name's own run rather than
+  // taking the names behind it with it (see redactPrivateKeyMaterial).
   const details: string[] = [];
   if (verdict.unsatisfiedFields.length > 0)
     details.push(
       `unsatisfied linkage fields (${verdict.unsatisfiedFields.length}): ` +
         verdict.unsatisfiedFields
-          .map((field) => `${field.name} (${field.type})`)
+          .map(
+            (field) =>
+              `${redactPrivateKeyMaterial(field.name)} (${field.type})`,
+          )
           .join(", "),
     );
   if (verdict.deadKeys.length > 0)
     details.push(
       `linkage keys whose cleaning drops every record ` +
         `(${verdict.deadKeys.length}): ` +
-        verdict.deadKeys.map((key) => key.name).join(", "),
+        verdict.deadKeys
+          .map((key) => redactPrivateKeyMaterial(key.name))
+          .join(", "),
     );
   if (verdict.unsatisfiableKeys.length > 0)
     details.push(
       `linkage keys this input cannot produce ` +
         `(${verdict.unsatisfiableKeys.length}): ` +
-        verdict.unsatisfiableKeys.map((key) => key.name).join(", "),
+        verdict.unsatisfiableKeys
+          .map((key) => redactPrivateKeyMaterial(key.name))
+          .join(", "),
     );
 
   throw new LinkageTermsUnsatisfiableError(

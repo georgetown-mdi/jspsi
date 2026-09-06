@@ -2462,6 +2462,77 @@ describe("assertLinkageTermsSatisfiable", () => {
     expect(rendered).toContain("out of band");
     expect(rendered).toContain("unsatisfied linkage fields (1)");
   });
+
+  // A key name is agreed-terms content, partner-authored on every accept
+  // path, so it is redacted where the enumeration composes it: the display
+  // boundary's dangling rule is fail-closed forward -- everything after a
+  // BEGIN with no END -- so an unredacted marker in one name would take the
+  // names enumerated behind it. Two unsatisfiable keys put the second name
+  // behind the marker in the same link.
+  const REDACTED_PRIVATE_KEY = "[redacted private key]";
+  const twoUnsatisfiableKeyTerms = (
+    firstName: string,
+    secondName: string,
+  ): LinkageTerms => ({
+    version: "1.0.0",
+    identity: "Party",
+    date: "2025-01-01",
+    algorithm: "psi",
+    linkageStrategy: "cascade",
+    output: { expectsOutput: true, shareWithPartner: false },
+    deduplicate: false,
+    linkageFields: [{ name: "ssn", type: "ssn" }],
+    linkageKeys: [
+      { name: firstName, elements: [{ field: "ssn" }] },
+      { name: secondName, elements: [{ field: "ssn" }] },
+    ],
+  });
+
+  const shortfallRender = (firstName: string): string => {
+    let raised: unknown;
+    try {
+      assertLinkageTermsSatisfiable(
+        ["other"],
+        twoUnsatisfiableKeyTerms(firstName, "SSN2"),
+      );
+    } catch (err) {
+      raised = err;
+    }
+    return sanitizeErrorForDisplay(raised);
+  };
+
+  test("a key name holding a planted BEGIN marker leaves the other name standing", () => {
+    const marker = "-----BEGIN OPENSSH PRIVATE KEY-----";
+    const rendered = shortfallRender(marker);
+    expect(rendered).toContain("linkage keys this input cannot produce (2): ");
+    expect(rendered).toContain(REDACTED_PRIVATE_KEY);
+    expect(rendered).toContain("SSN2");
+    expect(rendered).not.toContain(marker);
+  });
+
+  test("a key name that is a lone END marker deletes nothing", () => {
+    // The rule reaches forward only, so an END marker with no BEGIN of its
+    // own is ordinary text: it renders whole and takes no neighbour.
+    const marker = "-----END OPENSSH PRIVATE KEY-----";
+    const rendered = shortfallRender(marker);
+    expect(rendered).toContain(
+      `linkage keys this input cannot produce (2): ${marker}, SSN2`,
+    );
+    expect(rendered).not.toContain(REDACTED_PRIVATE_KEY);
+  });
+
+  test("a plain key name renders byte-for-byte as before", () => {
+    let raised: unknown;
+    try {
+      assertLinkageTermsSatisfiable(["other"], oneKeyTerms("SSN"));
+    } catch (err) {
+      raised = err;
+    }
+    const rendered = sanitizeErrorForDisplay(raised);
+    expect(rendered).toContain(
+      "linkage keys this input cannot produce (1): SSN",
+    );
+  });
 });
 
 // --- summarizeLinkageShortfall: the wording both refusals state --------------
