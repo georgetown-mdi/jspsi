@@ -23,11 +23,11 @@ import type { ManagedLocalState } from "@psi/managed/managedLocalState";
 // must give way to the generic tier once the data exchange has started, and a
 // tier stating nothing about it must keep its own reading and recovery.
 //
-// The limit: the scan knows the phrasings today's copy uses and nothing more, so
-// a future tier attesting in new words passes it. What catches that tier is the
-// table the scan checks -- MANAGED_RUN_NON_DISCLOSURE_ATTESTATION is a Record
-// over the tier union, so a new tier does not typecheck until it is classified
-// by hand, and the scan then holds that classification to the words it knows.
+// The limit: the scan holds only the phrasings it knows. The exhaustive record
+// forces a new tier through hand classification, but that classification
+// is never checked against unfamiliar wording -- an existing tier reworded
+// to attest in words the scan does not know passes all three sweeps. The
+// mitigation is adding the new phrasing to the scan when the copy changes.
 
 const NOW = Date.parse("2026-07-14T12:00:00.000Z");
 
