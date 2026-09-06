@@ -1309,6 +1309,65 @@ export function compileSteps(
 }
 
 /**
+ * The label of the first step in `steps` whose compile throws, or `undefined`
+ * when every step compiles. A pipeline is compiled once, before the first row is
+ * read, so a step the factory refuses -- a `pad_left` with no `length`, a
+ * multi-character fill, a `phonetic` naming an algorithm this build does not
+ * implement, a function name it does not recognize -- aborts the run before it
+ * matches anything.
+ *
+ * Total over what a compile throws, by class as well as by cause: the question
+ * asked is whether compiling this step throws, and the answer must not depend on
+ * which error the factory chose. Each step is compiled ALONE, which asks the same
+ * question the pipeline compile does -- {@link compileStep} reads one step and
+ * holds no state across the list -- and is what lets the offending step be named.
+ *
+ * The name is narrowed to a literal this build recognizes before it is returned,
+ * so an element transform's partner-authored `function` never reaches a message
+ * through it.
+ *
+ * Read by `assertTransformsCompile` in `linkageSatisfiability.ts`, and by the
+ * web editor's Generate gate, which asks the same question ahead of the mint.
+ */
+export function uncompilableStepLabel(
+  steps: ReadonlyArray<{ function: string; params?: Params }> | undefined,
+): string | undefined {
+  for (const step of steps ?? []) {
+    try {
+      compileStep(step);
+    } catch {
+      return transformFunctionLabel(step.function);
+    }
+  }
+  return undefined;
+}
+
+/**
+ * The message both compile refusals hold, raised where terms are authored or
+ * minted. `label` comes from {@link uncompilableStepLabel}, which narrows the
+ * function name to a fixed literal, so no partner free text reaches the message;
+ * the offending parameter is not named, since its name and value are
+ * partner-controlled on the element-transform half. The two refusals share the
+ * wording and differ only in error class, by whose content the fault is (see
+ * `assertTransformsCompile`).
+ *
+ * The remedy is the author's own -- correct the parameters or remove the step --
+ * because this refusal is raised only where the party still holds the document
+ * it is refusing, never after an invitation has gone out.
+ *
+ * @internal composed by `assertTransformsCompile` in `linkageSatisfiability.ts`.
+ */
+export function stepCompileRefusalMessage(label: string): string {
+  return (
+    "a transform step cannot be built from the parameters it declares " +
+    `(${label}): a pipeline is built once, before the first row is read, so ` +
+    "an exchange on these transforms would stop before it matched anything. " +
+    "It is refused up front instead. Correct that step's parameters, or " +
+    "remove the step."
+  );
+}
+
+/**
  * Where a compiled pipeline can realize multiplicity: through a step that is a
  * declared fan-out producer, through one that is not, or neither.
  *

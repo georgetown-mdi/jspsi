@@ -352,10 +352,12 @@ export {
   buildKeyStrings,
   buildStandardizedDataset,
   runPipeline,
+  uncompilableStepLabel,
 } from "./standardization";
 export {
   assertFanOutImplemented,
   assertStandardizationMatchesTerms,
+  assertTransformsCompile,
   assessLinkageSatisfiability,
   coalesceSubstitutesConstant,
   decideLinkageTermsVerdict,
