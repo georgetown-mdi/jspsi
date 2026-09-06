@@ -594,6 +594,28 @@ describe("generateInvitation", () => {
     expect((error as InvitationFileError).failure).toEqual({
       kind: "unnameable",
       positions: [5],
+      sanitizedPositions: [],
+    });
+  });
+
+  test("an unnamed column the strip produced reports its sanitized position", async () => {
+    // The mint's own re-parse is a refusal seat too: a header made only of
+    // text-direction characters strips to the empty name, and the failure carries
+    // the sanitation positions so the alert states that cause rather than a
+    // trailing comma.
+    const STRIPPED_TO_EMPTY_CSV =
+      "ssn,first_name,last_name,dob,\u202e\u2069\n" +
+      "123456789,Alice,Smith,1990-01-02,x\n";
+    const error = await generateInvitation({
+      inviterName: "Org",
+      file: csvStream(STRIPPED_TO_EMPTY_CSV),
+      location,
+    }).catch((e: unknown) => e);
+    expect(error).toBeInstanceOf(InvitationFileError);
+    expect((error as InvitationFileError).failure).toEqual({
+      kind: "unnameable",
+      positions: [5],
+      sanitizedPositions: [5],
     });
   });
 

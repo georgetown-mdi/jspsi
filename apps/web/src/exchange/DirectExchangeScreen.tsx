@@ -205,7 +205,9 @@ export function DirectExchangeScreen() {
     const emptyPositions = emptyColumnPositions(profile.columns);
     if (emptyPositions.length > 0) {
       setConsoleSource(undefined);
-      setIntakeAlert(unnameableColumnsAlert(emptyPositions));
+      setIntakeAlert(
+        unnameableColumnsAlert(emptyPositions, profile.bidiStrippedColumns),
+      );
       return;
     }
     setIntakeAlert(undefined);

@@ -39,6 +39,29 @@ describe("unnameableColumnsAlert", () => {
     expect(alert.message).toContain("Columns 2, 4");
     expect(alert.message).toContain("have no name");
   });
+
+  test("blames the removal, not a blank cell, when the read emptied the name", () => {
+    // A header made only of text-direction characters is neither a trailing
+    // comma nor a blank cell, so the stated cause and remedy must not be those.
+    const alert = unnameableColumnsAlert([2], [2]);
+    expect(alert.message).toContain("invisible text-direction characters");
+    expect(alert.message).toContain("ordinary characters");
+    expect(alert.message).not.toContain("trailing comma");
+  });
+
+  test("states both causes when only some empty names came from the removal", () => {
+    const alert = unnameableColumnsAlert([2, 5], [2]);
+    expect(alert.message).toContain("Columns 2, 5");
+    expect(alert.message).toContain("Column 2 held");
+    expect(alert.message).toContain("invisible text-direction characters");
+    expect(alert.message).toContain("trailing comma");
+  });
+
+  test("keeps the blank-cell cause when the removal touched other columns only", () => {
+    const alert = unnameableColumnsAlert([4], [2]);
+    expect(alert.message).toContain("trailing comma");
+    expect(alert.message).not.toContain("text-direction");
+  });
 });
 
 describe("overlongColumnsAlert", () => {

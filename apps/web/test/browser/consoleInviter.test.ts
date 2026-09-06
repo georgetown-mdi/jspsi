@@ -1300,6 +1300,38 @@ describe("console inviter picker re-profile", () => {
       .element(page.getByRole("button", { name: "Continue" }))
       .toBeEnabled();
   });
+
+  test("a header the strip emptied is refused by that cause, notice still shown", async () => {
+    // The column whose name held nothing but text-direction characters comes back
+    // unnamed, so the file is refused -- but by the removal, not by the trailing
+    // comma the generic copy offers, and the notice for the columns the read also
+    // changed stays on the screen beside it.
+    stubJobApi({
+      profile: {
+        ...CLIENTS_PROFILE,
+        columns: ["client_id", "first_name", "", "dob", "program_code"],
+        bidiStrippedColumns: [2, 3],
+      },
+    });
+    app.render(createElement(InviterScreen));
+    await userEvent.fill(page.getByLabelText("Your name"), "Dana Okafor");
+    await page.getByRole("button", { name: "Select clients.csv" }).click();
+    await page.getByRole("button", { name: "Use this file" }).click();
+    await expect
+      .element(page.getByText("This file has an unnamed column"))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("That name held nothing but", { exact: false }))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("trailing comma", { exact: false }))
+      .not.toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText("Formatting characters removed from column names"),
+      )
+      .toBeInTheDocument();
+  });
 });
 
 describe("console inviter sample-data copy", () => {

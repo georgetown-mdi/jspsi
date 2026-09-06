@@ -402,11 +402,18 @@ export function expiresFromNow(durationSeconds: number): string {
  * web intake seats tell theirs. The line names the 1-based column positions and
  * never the header itself: printing the name would put the removed characters
  * back into the diagnostic.
+ * Those positions are returned as `sanitizedColumnPositions` too: the empty-name
+ * refusal downstream (`inferMetadata`) states the removal as the cause of a name
+ * the removal emptied only when the caller hands it this list.
  */
 export async function loadInputRows(
   input: string,
   { allowStdin = false }: { allowStdin?: boolean } = {},
-): Promise<{ rawRows: Array<CSVRow>; columns: string[] }> {
+): Promise<{
+  rawRows: Array<CSVRow>;
+  columns: string[];
+  sanitizedColumnPositions: Array<number>;
+}> {
   const csvResult = await loadCSVFile(openInputSource(input, { allowStdin }));
   if (csvResult.data.length === 0)
     throw new UsageError(
@@ -419,6 +426,7 @@ export async function loadInputRows(
   return {
     rawRows: csvResult.data,
     columns: csvResult.meta.fields ?? [],
+    sanitizedColumnPositions: csvResult.meta.bidiStrippedColumns,
   };
 }
 
@@ -548,7 +556,11 @@ export function singlePassDisclosureNotice(): string {
 export function buildDataSpec(args: {
   terms?: LinkageTerms;
   identity: string;
-  rows?: { rawRows: Array<CSVRow>; columns: string[] };
+  rows?: {
+    rawRows: Array<CSVRow>;
+    columns: string[];
+    sanitizedColumnPositions?: Array<number>;
+  };
   dateInputFormat?: string;
   linkageStrategy?: LinkageStrategy;
 }): ResolvedDataSpec {
@@ -564,7 +576,7 @@ export function buildDataSpec(args: {
     return { linkageTerms: terms };
   }
 
-  const metadata = inferMetadata(rows.columns);
+  const metadata = inferMetadata(rows.columns, rows.sanitizedColumnPositions);
   const linkageTerms =
     terms ??
     withLinkageStrategy(

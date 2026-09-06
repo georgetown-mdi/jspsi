@@ -4027,6 +4027,72 @@ test("loadInputRows: a bidi-stripped header is reported by position, never by na
   expect(clean).toEqual([]);
 });
 
+test("the empty-name refusal blames the removal when the strip emptied the name", async () => {
+  // Driven through the real parser and the real refusal: a header made only of
+  // text-direction characters strips to the empty name inferMetadata refuses, and
+  // the operator's header was neither a trailing comma nor a blank cell, so the
+  // stated cause and remedy must not be those. The strip warning lands ahead of it.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-loadrows-empty-"));
+  const logged: Array<string> = [];
+  const previousSink = getDiagnosticSink();
+  const log = getLogger("input");
+  const previousLevel = log.getLevel();
+  let message = "";
+  let thrown: unknown;
+  try {
+    // U+202E RLO then U+2069 PDI, written as escapes so a fixture about
+    // invisible characters is readable.
+    const onlyControls = path.join(dir, "only-controls.csv");
+    fs.writeFileSync(onlyControls, "id,\u202e\u2069,city\n1,x,Rome\n");
+    setDiagnosticSink((_method, _prefix, args) => {
+      logged.push(args.map((arg) => String(arg)).join(" "));
+    });
+    log.setLevel("warn");
+    const rows = await loadInputRows(onlyControls, { allowStdin: true });
+    expect(rows.sanitizedColumnPositions).toEqual([2]);
+    try {
+      buildDataSpec({ identity: "Org", rows });
+    } catch (err) {
+      thrown = err;
+      message = err instanceof Error ? err.message : String(err);
+    }
+  } finally {
+    setDiagnosticSink(previousSink);
+    log.setLevel(previousLevel);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+
+  expect(thrown).toBeInstanceOf(UsageError);
+  expect(message).toContain("input column 2 has an empty name");
+  expect(message).toContain("invisible text-direction characters");
+  expect(message).not.toContain("trailing comma");
+  expect(
+    logged.some((entry) => entry.includes("text-direction characters")),
+  ).toBe(true);
+});
+
+test("the empty-name refusal keeps the blank-cell cause for a blank header cell", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-loadrows-blank-"));
+  let message = "";
+  try {
+    const blank = path.join(dir, "blank.csv");
+    fs.writeFileSync(blank, "id,,city\n1,x,Rome\n");
+    const rows = await loadInputRows(blank, { allowStdin: true });
+    expect(rows.sanitizedColumnPositions).toEqual([]);
+    try {
+      buildDataSpec({ identity: "Org", rows });
+    } catch (err) {
+      message = err instanceof Error ? err.message : String(err);
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+
+  expect(message).toContain("input column 2 has an empty name");
+  expect(message).toContain("trailing comma");
+  expect(message).not.toContain("text-direction");
+});
+
 // --- init's bounded inference read (inferDateInputFormatFromSource) -----------
 
 // A column set where date_of_birth joins a satisfiable default linkage key (a

@@ -557,7 +557,9 @@ export function AcceptorScreen() {
   function commitConsoleAcceptFile(profile: ProfiledJobInput) {
     const emptyPositions = emptyColumnPositions(profile.columns);
     if (emptyPositions.length > 0) {
-      setParseAlert(unnameableColumnsAlert(emptyPositions));
+      setParseAlert(
+        unnameableColumnsAlert(emptyPositions, profile.bidiStrippedColumns),
+      );
       return;
     }
     setParseAlert(undefined);
@@ -638,12 +640,13 @@ export function AcceptorScreen() {
       });
       if (id !== parseId.current) return;
       const columns = result.meta.fields ?? [];
+      const stripped = result.meta.bidiStrippedColumns;
       const emptyPositions = emptyColumnPositions(columns);
       if (emptyPositions.length > 0) {
-        setParseAlert(unnameableColumnsAlert(emptyPositions));
+        setParseAlert(unnameableColumnsAlert(emptyPositions, stripped));
         return;
       }
-      setBidiStrippedColumns(result.meta.bidiStrippedColumns);
+      setBidiStrippedColumns(stripped);
       // Store the parsed CSV (not discard it) and seed the columns-step editor from
       // its columns; the verdict and launch payload derive from this state. Commit
       // the gate-checked name here so the run records it even if the input is later

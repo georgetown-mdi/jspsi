@@ -229,7 +229,10 @@ function invitationFileAlert(failure: InvitationFileFailure): AlertContent {
         message: sanitizeErrorForDisplay(failure.cause),
       };
     case "unnameable":
-      return unnameableColumnsAlert(failure.positions);
+      return unnameableColumnsAlert(
+        failure.positions,
+        failure.sanitizedPositions,
+      );
     case "overlong":
       return overlongColumnsAlert(failure.positions);
     case "unlinkable":
@@ -745,12 +748,16 @@ export function InviterScreen() {
       });
       if (id !== parseId.current) return;
       const columns = result.meta.fields ?? [];
+      const stripped = result.meta.bidiStrippedColumns;
       const emptyPositions = emptyColumnPositions(columns);
       if (emptyPositions.length > 0) {
-        discardRead(unnameableColumnsAlert(emptyPositions));
+        // Set after discardRead clears it: the refusal names the columns the
+        // removal left unnamed, the notice every position the read changed.
+        discardRead(unnameableColumnsAlert(emptyPositions, stripped));
+        if (stripped.length > 0)
+          setSanitizedNotice(sanitizedColumnsAlert(stripped));
         return;
       }
-      const stripped = result.meta.bidiStrippedColumns;
       if (stripped.length > 0)
         setSanitizedNotice(sanitizedColumnsAlert(stripped));
       const csv: AcquiredCsv = {
@@ -792,15 +799,16 @@ export function InviterScreen() {
   // keeps the authored draft when its columns are unchanged and only refreshes
   // the profile-derived facts; otherwise it reseeds from the profile.
   function commitConsoleFile(profile: ProfiledJobInput) {
+    const stripped = profile.bidiStrippedColumns;
     const emptyPositions = emptyColumnPositions(profile.columns);
     if (emptyPositions.length > 0) {
-      discardRead(unnameableColumnsAlert(emptyPositions));
+      discardRead(unnameableColumnsAlert(emptyPositions, stripped));
+      if (stripped.length > 0)
+        setSanitizedNotice(sanitizedColumnsAlert(stripped));
       return;
     }
     setSanitizedNotice(
-      profile.bidiStrippedColumns.length > 0
-        ? sanitizedColumnsAlert(profile.bidiStrippedColumns)
-        : undefined,
+      stripped.length > 0 ? sanitizedColumnsAlert(stripped) : undefined,
     );
     const csv = consoleAcquiredCsv({
       fileName: profile.name,

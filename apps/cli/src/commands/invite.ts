@@ -491,7 +491,8 @@ export async function validateInvite(params: {
     // prepareForExchange uses (dataSpec.metadata, or inferred from the input
     // columns).
     const disclosureMetadata =
-      builtDataSpec.metadata ?? inferMetadata(rows.columns);
+      builtDataSpec.metadata ??
+      inferMetadata(rows.columns, rows.sanitizedColumnPositions);
 
     // Fail closed, before the token is minted or any file is written, on a
     // disclosed column whose name is too long to hold. This path infers its
@@ -810,7 +811,8 @@ export async function validateInvite(params: {
   // The metadata the inferred terms (and the eventual exchange) read this party's
   // disclosure from.
   const disclosureMetadata =
-    builtDataSpec.metadata ?? inferMetadata(rows.columns);
+    builtDataSpec.metadata ??
+    inferMetadata(rows.columns, rows.sanitizedColumnPositions);
 
   // Fail closed pre-mint on a disclosed column name too long to hold, for the
   // reason the online path above does: this path's metadata comes from the input
