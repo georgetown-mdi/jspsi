@@ -547,12 +547,15 @@ Three things make that the cheap posture rather than an expensive one:
   reddens when they go stale, so the obligation travels with whoever takes the
   bump. Which measurements a move disturbs is enumerated in the same procedure.
 
-The cost is that nothing files a reminder. The signals that do show a base
+The cost is that nothing files a pull request. The signals that do show a base
 worth moving to are listed in
-[the procedure in DEPENDENCY_PINS.md](../spec/DEPENDENCY_PINS.md#bumping-the-fips-base-image);
-the variant leg's pull-request-time scan is scoped out while its pinned rootfs
-has findings no pin movement can reach, so that gate is at release rather
-than continuous.
+[the procedure in DEPENDENCY_PINS.md](../spec/DEPENDENCY_PINS.md#bumping-the-fips-base-image),
+and one of them arrives weekly rather than filed: `image_smoke.yaml`'s scheduled
+run scans the built variant and reports what it finds as code-scanning alerts.
+That scan reports rather than gates, and no pull request runs one over the
+variant at all, because the pinned rootfs has findings no pin movement can reach
+and a check red on every run is one reviewers learn to ignore. So the gate is at
+release while the signal is weekly.
 
 ## What it costs
 
