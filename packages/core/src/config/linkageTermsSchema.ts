@@ -10,7 +10,7 @@ import {
 } from "../utils/linearRegex.js";
 import {
   linkageTermsHaveNonConformantTransformRegex,
-  REGEX_STEP_PATTERN_PARAM,
+  regexStepPatternParam,
 } from "./transformRegexDialect.js";
 import { exceedsOwnKeyCount } from "../utils/objectKeyCount.js";
 import { loneSurrogateIndex } from "../utils/wellFormedString.js";
@@ -697,7 +697,7 @@ const TransformStepSchema: z.ZodType<TransformStep> = TransformStepBaseSchema
   // dialect".
   .refine(
     (step) => {
-      const paramKey = REGEX_STEP_PATTERN_PARAM[step.function];
+      const paramKey = regexStepPatternParam(step.function);
       if (paramKey === undefined) return true;
       const value = step.params?.[paramKey];
       if (value === undefined) return true;
