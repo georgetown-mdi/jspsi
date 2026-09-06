@@ -7,6 +7,7 @@ import {
   LinkageTermsUnsatisfiableError,
   MAX_ERROR_CAUSE_DEPTH,
   redactAndSanitizeForDisplay,
+  stripBidiControls,
   summarizeLinkageShortfall,
 } from "@psilink/core";
 import type {
@@ -79,6 +80,41 @@ function fitDetailLinks(details: string[], overflowNoun: string): string[] {
     `and ${details.length - shown} more ${overflowNoun} ` +
       `(${details.length} in total)`,
   ];
+}
+
+/**
+ * Whether a name the terms or the committed metadata declare matches a column of
+ * this input only once the bidi control characters the CSV read removes are
+ * taken out of it.
+ *
+ * The read strips those characters from the header before anything matches on
+ * it, so a document naming a column by the header as typed declares a name no
+ * column has -- a shortfall whose stated causes (a column the file lacks,
+ * cleaning that drops every record) are all wrong for it. True here is what
+ * lets the refusal say so.
+ */
+function declaredNameDiffersOnlyByBidiControls(
+  columns: ReadonlyArray<string>,
+  declaredNames: ReadonlyArray<string>,
+): boolean {
+  const present = new Set(columns);
+  return declaredNames.some(
+    (name) => !present.has(name) && present.has(stripBidiControls(name)),
+  );
+}
+
+/**
+ * The sentence a refusal adds when a declared name holds those characters. Fixed
+ * copy interpolating only the terms' origin noun: the name itself is terms
+ * content, partner-authored on the accept path, and stays on the cause links
+ * that carry names.
+ */
+function bidiDeclaredNameNote(source: string): string {
+  return (
+    ` A name the ${source} declares holds invisible text-direction characters, ` +
+    `which this read removes from the CSV header, so it matches no column of ` +
+    `this input and has to be declared without them.`
+  );
 }
 
 /**
@@ -169,10 +205,18 @@ export function checkLinkageSatisfiability(
     remedyLeads.push("correct the cleaning steps those keys declare");
   const remedy = remedyLeads.join(" and ");
 
+  const bidiNote = declaredNameDiffersOnlyByBidiControls(columns, [
+    ...verdict.unsatisfiedFields.map((field) => field.name),
+    ...(metadata ?? []).map((column) => column.name),
+  ])
+    ? bidiDeclaredNameNote(messaging.source)
+    : "";
+
   throw new LinkageTermsUnsatisfiableError(
     `this CSV cannot satisfy every linkage key the ${messaging.source} ` +
       `declares: ${summarizeLinkageShortfall(verdict, messaging.termsStanding)}. ` +
-      messaging.blockConsequence,
+      messaging.blockConsequence +
+      bidiNote,
     {
       cause: chainDetailCauses([
         `${remedy.charAt(0).toUpperCase()}${remedy.slice(1)}, ${messaging.blockRemedy}`,
