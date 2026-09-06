@@ -4067,11 +4067,11 @@ test("loadInputRows: a header that collides after the strip is warned by positio
   expect(line).not.toContain("rest of the header");
 });
 
-test("the strip warning conditions the disclosure claim on what the run sends", () => {
-  // This loader serves every CLI read, including an exchange whose config makes
-  // the changed column neither a linkage field nor a payload column -- its name
-  // is transmitted nowhere. The line states the names the removal reaches
-  // rather than asserting the changed name went to the partner.
+test("the strip warning bounds the removal to the names this read derives", () => {
+  // The read reaches the names it takes from the header and nothing else: a
+  // name the configuration declares keeps these characters and rides into the
+  // invitation as declared, so the line claims no more than the derived names
+  // and names the edit that fixes the declared one.
   const logged: Array<string> = [];
   const previousSink = getDiagnosticSink();
   const log = getLogger("input");
@@ -4088,8 +4088,13 @@ test("the strip warning conditions the disclosure claim on what the run sends", 
   }
 
   const line = logged.find((entry) => entry.includes("text-direction"));
-  expect(line).toContain("from any name this exchange sends your partner");
+  expect(line).toContain(
+    "gone from every name this read takes from the header",
+  );
+  expect(line).toContain("does not change a name your configuration declares");
+  expect(line).toContain("rewrite it in the configuration without them");
   expect(line).not.toContain("and sent to your partner");
+  expect(line).not.toContain("from any name this exchange sends your partner");
 });
 
 test("the empty-name refusal blames the removal when the strip emptied the name", async () => {

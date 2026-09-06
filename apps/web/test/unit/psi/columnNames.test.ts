@@ -112,15 +112,21 @@ describe("sanitizedColumnsAlert", () => {
     expect(alert.message).toContain("edit the header row");
   });
 
-  test("conditions the disclosure claim on what the exchange sends", () => {
-    // A column that is neither a linkage field nor a marked payload column has
-    // its name transmitted nowhere, so the copy states the names this removal
-    // reaches rather than asserting the changed name went to the partner.
+  test("bounds the removal to the names this read takes from the header", () => {
+    // The read reaches the names it derives from the header and nothing else: a
+    // name the linkage terms declare keeps these characters, so the copy claims
+    // no more than the derived names and says the declared one is untouched.
     const alert = sanitizedColumnsAlert([1]);
     expect(alert.message).toContain(
-      "from any name this exchange sends your partner",
+      "gone from every name this read takes from the header",
+    );
+    expect(alert.message).toContain(
+      "does not change a name the linkage terms declare",
     );
     expect(alert.message).not.toContain("and sent to your partner");
+    expect(alert.message).not.toContain(
+      "from any name this exchange sends your partner",
+    );
   });
 
   test("states the numbering instead of claiming the name is the rest of the header", () => {
