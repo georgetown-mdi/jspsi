@@ -28,7 +28,7 @@ The runner bounds the window before it has a request in hand: a 10-second header
 
 ## Readiness
 
-The runner answers `GET` and `HEAD` on `<mount>/health` -- `/api/health` under the default mount -- with `200` and the body `ready`. It sits under the mount rather than at the root so one route rule in front of the broker covers the probe and the signaling endpoint together. Any other request, including another method on that path, is refused with `404`: the broker handles WebSocket upgrades and this one endpoint, and nothing else is part of any wire it serves.
+The runner answers `GET` and `HEAD` on `<mount>/health` -- `/api/health` under the default mount -- with `200` and the body `ready`. It sits under the mount rather than at the root so one route rule in front of the broker covers the probe and the signaling endpoint together. A query string or fragment on that path is ignored, so a probe that appends one -- `/api/health?x=1` -- is answered `200` as well; the comparison runs on the path the request target names, decoding nothing. Any other path, and any other method on the probe path, is refused with `404`: the broker handles WebSocket upgrades and this one endpoint, and nothing else is part of any wire it serves.
 
 The handler is installed and the signaling server mounted before the runner listens, so an answer means this process is accepting connections with its upgrade route attached. That is the whole of what the answer states: the body is a fixed line, since reporting registered peers or queued frames would put rendezvous metadata on an unauthenticated endpoint. What the probe does disclose -- that a broker is running here -- anyone who can reach the port already learns by opening a WebSocket, so it needs no gate of its own.
 
