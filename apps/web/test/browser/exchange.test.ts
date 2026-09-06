@@ -1370,6 +1370,51 @@ describe("inviter screen", () => {
       .toHaveTextContent("Your invitation is ready");
   });
 
+  test("a header the strip emptied is refused by that cause, notice beside it", async () => {
+    // The inviter's own browser read, driven through the real parser. A refused
+    // file never reaches the terms step, so the notice for what that read
+    // changed has to stand beside the refusal the same read caused -- and the
+    // refusal names the removal, not the trailing comma, which is not what
+    // happened to this header.
+    app.render(createElement(InviterScreen));
+    await expect.element(page.getByLabelText("Your name")).toBeInTheDocument();
+    await userEvent.fill(page.getByLabelText("Your name"), "Dana");
+    await userEvent.upload(
+      page.elementLocator(
+        document.querySelector('input[type="file"]') as HTMLElement,
+      ),
+      // U+202E RLO then U+2069 PDI: the whole of column 2's name, so the strip
+      // leaves it unnamed. Written as escapes so a fixture about invisible
+      // characters is itself readable.
+      new File(
+        ["id,\u202E\u2069,city\n1,x,Springfield\n"],
+        "only-controls.csv",
+        { type: "text/csv" },
+      ),
+    );
+    await expect
+      .element(page.getByText("This file has an unnamed column"))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("That name held nothing but", { exact: false }))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("trailing comma", { exact: false }))
+      .not.toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText("A formatting character was removed from a column name"),
+      )
+      .toBeInTheDocument();
+    // The read is discarded with it: no file card, and no way forward.
+    expect(document.querySelector(`.${styles.fileCard}`)).toBeNull();
+    await expect
+      .element(
+        page.getByRole("button", { name: "Continue to matching & sharing" }),
+      )
+      .toBeDisabled();
+  });
+
   test("a failed re-read discards the prior file; a good re-read swaps it", async () => {
     app.render(createElement(InviterScreen));
 
