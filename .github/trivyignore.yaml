@@ -1,12 +1,15 @@
 # Accepted exceptions to the container image vulnerability scan that
-# .github/workflows/image_smoke.yaml runs on a pull request and against the
-# published tag, and .github/workflows/release.yaml runs ahead of a publish.
+# .github/workflows/image_smoke.yaml runs on a pull request, on its weekly
+# schedule and against the published tag, and .github/workflows/release.yaml
+# runs ahead of a publish.
 #
 # That scan fails on a vulnerability in one of the image's OS or language
-# packages that is HIGH or CRITICAL and has a fix available. An entry here
-# exempts one vulnerability id from it, and is a reviewed decision rather than
-# a way to quiet a build: write the reason it was accepted in `statement`, so a
-# reader can tell an assessed exception from a forgotten one.
+# packages that is HIGH or CRITICAL and has a fix available; the one leg that
+# reports such a finding without failing its run, image_smoke.yaml's scheduled
+# scan of the FIPS variant, reads this same list. An entry here exempts one
+# vulnerability id from every one of them, and is a reviewed decision rather
+# than a way to quiet a build: write the reason it was accepted in `statement`,
+# so a reader can tell an assessed exception from a forgotten one.
 #
 # Every entry carries an `expired_at`. Trivy stops applying an entry on that
 # date and the finding returns, which is the only thing that would ever prompt
