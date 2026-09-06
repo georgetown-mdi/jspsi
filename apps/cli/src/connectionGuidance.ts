@@ -53,20 +53,24 @@ export const POLL_INTERVAL_LINES = [
 const POLL_INTERVAL_KEY = "poll_interval_ms";
 
 /**
- * The tuning fields shown as a commented example, in render order.
- * `poll_interval_ms` applies to the file-based channels only (`sftp` and
- * `filedrop`), so a `webrtc` block omits it: that channel's options schema
- * strips the key on parse, and an operator who uncommented it would get no
- * effect and no error.
+ * The tuning fields shown as a commented example, in render order. A `webrtc`
+ * block shows only `peer_timeout_ms`, the one option that channel reads: its
+ * options schema strips `poll_interval_ms` on parse, and the connect timeout and
+ * reconnect budget are read by the file-based channels alone, so an operator who
+ * uncommented any of the three on webrtc would get no effect and no error.
  */
 function tuningDefaults(channel: unknown): Array<[string, number]> {
-  const shared: Array<[string, number]> = [
+  const peerTimeout: [string, number] = [
+    "peer_timeout_ms",
+    DEFAULT_PEER_TIMEOUT_MS,
+  ];
+  if (channel === "webrtc") return [peerTimeout];
+  return [
+    [POLL_INTERVAL_KEY, DEFAULT_POLLING_FREQUENCY_MS],
     ["server_connect_timeout_ms", DEFAULT_SERVER_CONNECT_TIMEOUT_MS],
-    ["peer_timeout_ms", DEFAULT_PEER_TIMEOUT_MS],
+    peerTimeout,
     ["max_reconnect_attempts", DEFAULT_MAX_RECONNECT_ATTEMPTS],
   ];
-  if (channel === "webrtc") return shared;
-  return [[POLL_INTERVAL_KEY, DEFAULT_POLLING_FREQUENCY_MS], ...shared];
 }
 
 /**
