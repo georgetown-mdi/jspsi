@@ -128,8 +128,8 @@ describe("unloadGuardArmed", () => {
   });
 
   test("stays disarmed once finalized even for a console server-job run", () => {
-    // A finalized console exchange runs on the console; leaving no longer
-    // abandons it (the recovery panel re-attaches), so the guard does not re-arm.
+    // A finalized exchange keeps running on the console, so leaving does not
+    // abandon it (the recovery panel re-attaches) and the guard stays disarmed.
     expect(unloadGuardArmed({ hasFile: true, finalized: true })).toBe(false);
   });
 });

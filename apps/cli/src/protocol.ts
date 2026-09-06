@@ -1114,15 +1114,17 @@ interface RunLifecycle {
  * layer this run opened, innermost first. Each close is idempotent and its
  * failure is caught, so cleanup runs to completion whether the exchange
  * finished, failed, or was interrupted mid-open.
+ *
+ * Reads the {@link RunLifecycle} itself rather than a copy of its flags, so an
+ * open that completes while an earlier layer's close is still being awaited
+ * counts as opened for the layers below it.
  */
 async function closeRunLayers(params: {
   build: PreparedTransport;
-  secure: EncryptedMessageConnection | undefined;
-  opened: boolean;
-  started: boolean;
+  run: RunLifecycle;
   log: ReturnType<typeof getLogger>;
 }): Promise<void> {
-  const { build, secure, opened, started, log } = params;
+  const { build, run, log } = params;
   // Seal the abort decision before the first layer-close drives the real
   // conn.close() cascade (secure.close() -> mc.close() -> conn.close()):
   // on the clean-completion, signal, and echo paths no writeAbortMarker()
@@ -1132,8 +1134,8 @@ async function closeRunLayers(params: {
   // and side-effect free, so hoisting it here is safe, and a no-op on the
   // unauthenticated path and on webrtc, neither of which has a marker.
   build.fileSync?.sealAbort();
-  if (started) log.info("stopping polling");
-  if (opened) log.info("closing connection");
+  if (run.started) log.info("stopping polling");
+  if (run.opened) log.info("closing connection");
   // When the AEAD decorator was built (encryption negotiated), close it:
   // its close() delegates to mc.close(), detaching the bridge's
   // data/error listeners and closing the underlying FileSyncConnection.
@@ -1141,8 +1143,8 @@ async function closeRunLayers(params: {
   // negotiated false, and in the window where a signal arrived between
   // authenticateConnection returning and create resolving -- in each case
   // mc.close() below closes the transport directly. All idempotent.
-  if (secure !== undefined) {
-    await secure.close().catch((err: unknown) => {
+  if (run.secure !== undefined) {
+    await run.secure.close().catch((err: unknown) => {
       log.debug("secure.close() during cleanup:", sanitizeErrorForDisplay(err));
     });
   }
@@ -1168,7 +1170,7 @@ async function closeRunLayers(params: {
     // transport may not have terminated cleanly (e.g. SSH session timeout).
     // close() is idempotent and does not throw on an unopened instance, so
     // the else branch is only a defensive fallback for an unexpected error.
-    if (opened) {
+    if (run.opened) {
       log.warn(
         "failed to close connection during cleanup:",
         sanitizeErrorForDisplay(err),
@@ -1700,8 +1702,11 @@ export interface RunProtocolOptions {
   auth: AuthPersist | null;
   /** This party's standardized dataset and the terms it was prepared under. */
   prepared: PreparedExchange;
-  /** Where to write the result CSV; `undefined` writes it to stdout. */
-  output?: string;
+  /**
+   * Where to write the result CSV; `undefined` writes it to stdout. There is
+   * no omitted state: every caller states which it means.
+   */
+  output: string | undefined;
   /** The `-v` count, forwarded to the transport's own diagnostics. */
   verbosity: number;
   /** The name of the logger this run's diagnostics are written through. */
@@ -1914,13 +1919,7 @@ export async function runProtocol(
   async function doCleanup() {
     if (cleaned) return;
     cleaned = true;
-    await closeRunLayers({
-      build,
-      secure: run.secure,
-      opened: run.opened,
-      started: run.started,
-      log,
-    });
+    await closeRunLayers({ build, run, log });
     logTransportCounters(build.client, log);
     process.off("SIGINT", onSigint);
     process.off("SIGTERM", onSigterm);
