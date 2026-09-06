@@ -3472,14 +3472,9 @@ describe("displayInvitation: the declared terms it discloses (columns, citations
     expect(out).toContain(
       "          also matches approximate variants (adjacent years) (proposed; not yet applied)",
     );
-    // The swap, and the cross-application of the transform-carrier's rules onto the
-    // other element's value that the generic swap note alone does not convey.
+    // The swap the two elements are matched under.
     expect(out).toContain(
       "      swap: First name and Last name may be matched in either order",
-    );
-    expect(out).toContain(
-      "note: when matched in that order, the transforms shown for First name are " +
-        "applied to Last name's value",
     );
     // The per-field data standards, under a heading marking them as the inviter's
     // own undertaking rather than rules the exchange applies, with the

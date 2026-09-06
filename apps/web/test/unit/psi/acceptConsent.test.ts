@@ -397,10 +397,6 @@ describe("summarizeInvitation", () => {
       // ... but the specific labels are withheld, so the renderer falls back to
       // a generic note rather than a duplicated or raw-identifier one.
       expect(key.swap).toBeUndefined();
-      // ... and an alias or dangling (unresolved) swap never spuriously sets the
-      // marker re-attribution flags, which require a distinct-label resolution.
-      expect(key.swapTransformInterchange).toBe(false);
-      expect(key.swapTransformDonor).toBeUndefined();
     }
   });
 
@@ -807,60 +803,10 @@ describe("summarizeInvitation", () => {
     expect(swap?.[1]).not.toContain(BEL);
   });
 
-  test("depicts the transformed-value interchange only when both swapped elements transform", () => {
-    // The summary for a two-element key swapped on its elements, with the given
-    // transforms on each.
-    const keyFor = (
-      firstTransform: LinkageKeyElement["transform"],
-      secondTransform: LinkageKeyElement["transform"],
-    ) =>
-      summarizeInvitation(
-        makeToken({
-          linkageFields: [
-            { name: "first_name", type: "first_name" },
-            { name: "last_name", type: "last_name" },
-          ],
-          linkageKeys: [
-            {
-              name: "Name",
-              elements: [
-                {
-                  field: "first_name",
-                  ...(firstTransform && { transform: firstTransform }),
-                },
-                {
-                  field: "last_name",
-                  ...(secondTransform && { transform: secondTransform }),
-                },
-              ],
-              swap: ["first_name", "last_name"],
-            },
-          ],
-        }),
-      ).linkageKeys[0];
-
-    const upper: LinkageKeyElement["transform"] = [
-      { function: "to_upper_case" },
-    ];
-
-    // Both swapped elements have a transform: on the receiver side each keeps
-    // its transforms but reads the other's field value, so the interchange is
-    // depicted, named in terms of the two resolved field labels.
-    const both = keyFor(upper, upper);
-    expect(both.swap).toEqual(["First name", "Last name"]);
-    expect(both.swapTransformInterchange).toBe(true);
-
-    // Only one side (or neither) has a transform: nothing cross-applies both
-    // ways, so the generic swap note stands and the interchange is not depicted.
-    expect(keyFor(upper, undefined).swapTransformInterchange).toBe(false);
-    expect(keyFor(undefined, undefined).swapTransformInterchange).toBe(false);
-  });
-
-  test("withholds the interchange when both swapped elements share a field label", () => {
+  test("withholds the swap labels when both swapped elements share a field label", () => {
     // Two firstName fields resolve to the same "First name" label, so the note
-    // could not name the two sides distinctly. The interchange is suppressed even
-    // though both elements have a transform -- the distinct-label gate wins over
-    // the both-transform gate, falling back to the generic swap note.
+    // could not name the two sides distinctly. The labels are withheld and the
+    // renderer falls back to the generic swap note.
     const key = summarizeInvitation(
       makeToken({
         linkageFields: [
@@ -889,7 +835,6 @@ describe("summarizeInvitation", () => {
     ).linkageKeys[0];
     expect(key.hasSwap).toBe(true);
     expect(key.swap).toBeUndefined();
-    expect(key.swapTransformInterchange).toBe(false);
   });
 
   // A first_name/last_name swap key with the given overrides on each element.
@@ -928,55 +873,44 @@ describe("summarizeInvitation", () => {
     // One transform: on the receiver the first element reads the SECOND element's
     // field value (core's `swapElements`), so the truncation runs on last name's
     // value. "(partial)" therefore shows on "last name", not the declared "first
-    // name", and a one-directional donor note (first name -> last name) anchors it.
+    // name".
     const single = swapKey({ transform: partial }, {});
     expect(single.headerFields).toEqual(["first name", "last name (partial)"]);
     expect(single.swap).toEqual(["First name", "Last name"]);
-    expect(single.swapTransformInterchange).toBe(false);
-    expect(single.swapTransformDonor).toEqual(["First name", "Last name"]);
 
-    // Symmetric: a transform on the second element re-points to the first, and the
-    // donor note names the element with the transform (last name) first.
+    // Symmetric: a transform on the second element re-points to the first.
     const singleB = swapKey({}, { transform: partial });
     expect(singleB.headerFields).toEqual(["first name (partial)", "last name"]);
-    expect(singleB.swapTransformDonor).toEqual(["Last name", "First name"]);
 
     // Both sides have transforms with DIFFERENT markers: each marker moves to the
     // partner's field (substring truncates last name's value -> "partial" on last
-    // name; phonetic recodes first name's value -> "sound-alike" on first name),
-    // and the bidirectional interchange note fires. Leaving the markers on their
-    // declared fields would mis-state which of the acceptor's fields each rule hits.
+    // name; phonetic recodes first name's value -> "sound-alike" on first name).
+    // Leaving the markers on their declared fields would mis-state which of the
+    // acceptor's fields each rule hits.
     const bothDiff = swapKey({ transform: partial }, { transform: soundAlike });
     expect(bothDiff.headerFields).toEqual([
       "first name (sound-alike)",
       "last name (partial)",
     ]);
-    expect(bothDiff.swapTransformInterchange).toBe(true);
-    expect(bothDiff.swapTransformDonor).toBeUndefined();
 
-    // Both have the SAME marker: the swap is a visual no-op, interchange still
-    // fires (the cross-apply is real even when the markers coincide).
+    // Both have the SAME marker, so the swap is a visual no-op.
     const bothSame = swapKey({ transform: partial }, { transform: partial });
     expect(bothSame.headerFields).toEqual([
       "first name (partial)",
       "last name (partial)",
     ]);
-    expect(bothSame.swapTransformInterchange).toBe(true);
 
-    // Neither has a transform: bare labels, no interchange, no donor note.
+    // Neither has a transform: bare labels.
     const neither = swapKey({}, {});
     expect(neither.headerFields).toEqual(["first name", "last name"]);
-    expect(neither.swapTransformInterchange).toBe(false);
-    expect(neither.swapTransformDonor).toBeUndefined();
   });
 
   test("swaps a header marker to the partner's field whatever its source", () => {
     // A transform on one side, a fuzzy comparison on the other: each marker lands on
     // the field the receiver applies it to. The substring truncates last name's value
     // ("partial" -> last name); the fuzzy moves with its element, which reads first
-    // name's value, so it expands first name ("fuzzy" -> first name). The applied
-    // transform is anchored by the donor note; the fuzzy axis has its own
-    // not-applied caveat in the detail.
+    // name's value, so it expands first name ("fuzzy" -> first name). The fuzzy
+    // axis has its own not-applied caveat in the detail.
     const txAndFuzzy = swapKey(
       { transform: partial },
       { generateFuzzyComparisons: "edit_distances" },
@@ -985,20 +919,15 @@ describe("summarizeInvitation", () => {
       "first name (fuzzy)",
       "last name (partial)",
     ]);
-    expect(txAndFuzzy.swapTransformInterchange).toBe(false);
-    expect(txAndFuzzy.swapTransformDonor).toEqual(["First name", "Last name"]);
 
     // A fuzzy marker moves with its element even when no transform earns a marker:
     // the whole element reads the partner's value on the receiver, so "fuzzy" shows
-    // on the partner's field. With no transform on either side there is no donor
-    // note; the generic "matched in either order" note bridges it.
+    // on the partner's field, under the generic "matched in either order" note.
     const fuzzyOnly = swapKey(
       { generateFuzzyComparisons: "edit_distances" },
       {},
     );
     expect(fuzzyOnly.headerFields).toEqual(["first name", "last name (fuzzy)"]);
-    expect(fuzzyOnly.swapTransformInterchange).toBe(false);
-    expect(fuzzyOnly.swapTransformDonor).toBeUndefined();
   });
 
   test("keeps a refused rule on the element that declares it, across a swap", () => {
@@ -1006,8 +935,7 @@ describe("summarizeInvitation", () => {
     // step the operator has to find and remove, and that step sits in the element
     // that declares it. Re-attributing it would put it on a field with no such
     // step, so the pair keeps its own markers -- the refused key has no run whose
-    // per-field effect the swap could describe. The interchange note still fires:
-    // the terms do interchange the two elements' rules.
+    // per-field effect the swap could describe.
     const lastNameFansOut = swapKey(
       { transform: soundAlike },
       { transform: fanOut },
@@ -1016,7 +944,6 @@ describe("summarizeInvitation", () => {
       "first name (sound-alike)",
       "last name (not supported)",
     ]);
-    expect(lastNameFansOut.swapTransformInterchange).toBe(true);
 
     // Symmetric: declared on the first element, shown on the first element.
     const firstNameFansOut = swapKey(
@@ -1160,8 +1087,6 @@ describe("summarizeInvitation", () => {
       }),
     ).linkageKeys[0];
     expect(key.swap).toBeUndefined();
-    expect(key.swapTransformInterchange).toBe(false);
-    expect(key.swapTransformDonor).toBeUndefined();
     expect(key.headerFields).toEqual([
       "first name (partial)",
       "first name (sound-alike)",

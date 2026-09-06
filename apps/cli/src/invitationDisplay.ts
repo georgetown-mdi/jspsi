@@ -392,24 +392,6 @@ function displayLinkageKey(
         ? `      swap: ${key.swap[0]} and ${key.swap[1]} may be matched in either order`
         : "      swap: two of these elements may be matched in either order",
     );
-  // On the receiving side a swap moves each element's field reference to
-  // the other element while its transforms stay put, so each element's
-  // rules run against the OTHER element's value. The generic swap note
-  // above does not say that, so the interchange (both sides have
-  // transforms) or the one-directional donor (exactly one does) is stated
-  // outright.
-  if (key.swapTransformInterchange && key.swap !== undefined)
-    emit(
-      `      note: when matched in that order, the transforms shown for ` +
-        `${key.swap[0]} are applied to ${key.swap[1]}'s value, and those for ` +
-        `${key.swap[1]} to ${key.swap[0]}'s value`,
-    );
-  if (key.swapTransformDonor !== undefined)
-    emit(
-      `      note: when matched in that order, the transforms shown for ` +
-        `${key.swapTransformDonor[0]} are applied to ` +
-        `${key.swapTransformDonor[1]}'s value`,
-    );
 }
 
 /**
