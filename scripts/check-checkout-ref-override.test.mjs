@@ -195,6 +195,8 @@ jobs:
     );
     expect(violations).toHaveLength(1);
     expect(violations[0]).toContain("triggered by pull_request_target");
+    expect(violations[0]).not.toContain("defaults to the head merged");
+    expect(violations[0]).toContain("gate on pull_request instead");
   });
 
   it("reads the list and the single-name trigger forms", () => {

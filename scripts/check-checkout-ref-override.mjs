@@ -78,7 +78,14 @@ function describeOverride(path, location, triggers, key, value) {
     key === "sha"
       ? " actions/checkout has no `sha` input, so the key supplies the action nothing; it is refused for the override it states."
       : "";
-  return `${path} (${location}): actions/checkout sets \`${key}: ${render(value)}\` in a workflow triggered by ${triggers.join(" and ")}. On a pull request the action defaults to the head merged with the base tip, and the rebase re-attestation route in .claude/commands/assess-review.md rests on a gate having run that merge; a step naming its own ref runs something else.${inert} Remove the key to take the default, or move the step into a workflow with no pull-request trigger.`;
+  const coversMerge = triggers.includes("pull_request");
+  const rationale = coversMerge
+    ? "On a pull request the action defaults to the head merged with the base tip, and the rebase re-attestation route in .claude/commands/assess-review.md rests on a gate having run that merge; a step naming its own ref runs something else."
+    : "Under pull_request_target the action defaults to the base branch, so no run there covers the head merged with the base tip, and a step naming its own ref makes it look as though one might.";
+  const remedy = coversMerge
+    ? "Remove the key to take the default, or move the step into a workflow with no pull-request trigger."
+    : "Move the step into a workflow with no pull-request trigger, or gate on pull_request instead.";
+  return `${path} (${location}): actions/checkout sets \`${key}: ${render(value)}\` in a workflow triggered by ${triggers.join(" and ")}. ${rationale}${inert} ${remedy}`;
 }
 
 /**
