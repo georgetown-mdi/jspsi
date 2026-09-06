@@ -1348,3 +1348,26 @@ describe("prepareForExchange: the class every refusal holds", () => {
     ).toBe(true);
   });
 });
+
+// --- Local output composition ------------------------------------------------
+
+test("prepareForExchange: includeOwnColumns rides the config through to the prepared exchange", () => {
+  // The link between the local config key and the result formatter: prepare
+  // passes it through untouched, and its absence stays absent rather than
+  // becoming a default selection.
+  const prepared = prepareForExchange(
+    { linkageTerms: terms, metadata, includeOwnColumns: "all" },
+    "Tester",
+    rawRows,
+    columns,
+  );
+  expect(prepared.includeOwnColumns).toBe("all");
+  expect(
+    prepareForExchange(
+      { linkageTerms: terms, metadata },
+      "Tester",
+      rawRows,
+      columns,
+    ).includeOwnColumns,
+  ).toBeUndefined();
+});

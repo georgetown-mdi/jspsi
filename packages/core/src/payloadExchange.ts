@@ -1,11 +1,12 @@
 import * as z from "zod";
 
 import type { HandshakeRole, AssociationTable } from "./types.js";
-import type { Metadata } from "./config/metadata.js";
+import type { Metadata, OwnColumnSelection } from "./config/metadata.js";
 import {
   isDisclosedToPartner,
   disclosedColumnNames,
   overlongDisclosedColumnPositions,
+  ownResultColumnNames,
 } from "./config/metadata.js";
 import type { Output, Payload } from "./config/linkageTermsSchema.js";
 import { MAX_NAME_LENGTH } from "./config/linkageTermsSchema.js";
@@ -953,12 +954,19 @@ function quoteCsvField(value: string): string {
 }
 
 // Pick a column name not already taken, starting from `base` and falling back to
-// a `their_`-prefixed (then numbered) variant. Used for the partner row-index
-// column so it never collides with our identifier column or a partner payload
-// column, mirroring the their_-prefix disambiguation the payload columns use.
-function uniqueColumnName(base: string, taken: ReadonlySet<string>): string {
+// a prefixed (then numbered) variant. Every result header goes through here
+// against the headers already assigned, so no two columns of the file share a
+// name. The prefix is a collision fallback, not a whose-column label: it renames
+// the column assigned LATER and leaves the earlier one's name intact, so a
+// partner column literally named own_x or their_x keeps that name unless a
+// later column collides with it.
+function uniqueColumnName(
+  base: string,
+  taken: ReadonlySet<string>,
+  prefix = "their_",
+): string {
   if (!taken.has(base)) return base;
-  const prefixed = `their_${base}`;
+  const prefixed = `${prefix}${base}`;
   if (!taken.has(prefixed)) return prefixed;
   let n = 2;
   while (taken.has(`${prefixed}_${n}`)) n++;
@@ -987,20 +995,35 @@ function uniqueColumnName(base: string, taken: ReadonlySet<string>): string {
  * no payload -- so the result stays self-sufficient for later verification:
  * it is the partner side of the association table the record's commitments
  * bind, and (once the payload commitment stopped binding the partner's row
- * indices) it is not otherwise recoverable from the payload values. The
- * remaining columns are the partner's payload columns, each using its
- * original name, prefixed with `their_` only when it collides with our
- * identifier column. All values are RFC 4180 escaped. Null cells in the
+ * indices) it is not otherwise recoverable from the payload values. Then come
+ * the partner's payload columns, each using its original name. All values are
+ * RFC 4180 escaped. Null cells in the
  * partner's payload are emitted as empty strings; a payload collection that
  * is not an array, a row that is not an array or whose width disagrees with
  * the declared columns, and a cell that is neither a string nor null, are
  * each refused.
+ *
+ * `includeOwnColumns` adds this party's own input columns after the
+ * partner's, valued from the matched record each result row addresses and
+ * repeating with it under a deduplicating cardinality. It selects them
+ * rather than listing them ({@link ownResultColumnNames}); undefined adds
+ * none, and the file is then the one the partner's values alone compose.
+ * These columns are local: no frame, consent display, or commitment holds
+ * them, and the partner's own result is untouched by them.
+ *
+ * Every header is assigned against those already taken, so no two share a
+ * name: our first column takes its name first, then the own columns keep
+ * their input names, then each partner payload column takes its own name
+ * unless something already holds it, and last the partner row-index column.
+ * A name already taken falls back to a prefixed then numbered variant --
+ * `their_` for one of the partner's columns, `own_` for one of ours.
  */
 export function buildOutputTable(
   associationTable: AssociationTable,
   rawRows: Array<CSVRow>,
   metadata: Metadata,
   partnerPayload: PartnerPayload,
+  includeOwnColumns?: OwnColumnSelection,
 ): { headers: string[]; rows: Array<Array<string>> } {
   if (associationTable[0].length !== associationTable[1].length) {
     throw new Error(
@@ -1075,20 +1098,32 @@ export function buildOutputTable(
   const hasPartnerCols = partnerPayload.columns.length > 0;
   const ourBaseName = ourIdCol ? ourIdCol.name : "row_id";
 
-  const valueHeaders = partnerPayload.columns.map((c) =>
-    c !== ourBaseName ? c : `their_${c}`,
-  );
-  // The partner row-index column sits between our column and the payload columns,
-  // made unique against both.
-  const partnerIndexHeader = uniqueColumnName(
-    "row_id",
-    new Set([ourBaseName, ...valueHeaders]),
-  );
+  const ownColumns =
+    includeOwnColumns === undefined
+      ? []
+      : ownResultColumnNames(metadata, includeOwnColumns);
+
+  // Our first column's name is taken before any other, then our own columns,
+  // then the partner's payload columns, and the partner row-index column last:
+  // a collision is resolved in favor of the column named earlier in that order.
+  const taken = new Set([ourBaseName]);
+  const ownHeaders = ownColumns.map((name) => {
+    const header = uniqueColumnName(name, taken, "own_");
+    taken.add(header);
+    return header;
+  });
+  const valueHeaders = partnerPayload.columns.map((name) => {
+    const header = uniqueColumnName(name, taken);
+    taken.add(header);
+    return header;
+  });
+  const partnerIndexHeader = uniqueColumnName("row_id", taken);
 
   const headers = [
     quoteCsvField(ourBaseName),
     quoteCsvField(partnerIndexHeader),
     ...valueHeaders.map(quoteCsvField),
+    ...ownHeaders.map(quoteCsvField),
   ];
 
   const theirIdxToPayloadPos = new Map(
@@ -1131,9 +1166,14 @@ export function buildOutputTable(
       ourIdCol && ourRow ? readRowColumn(ourRow, ourIdCol.name) : undefined;
     const ourId = quoteCsvField(ourIdValue ?? String(ourIdx));
     const partnerIndexCell = quoteCsvField(String(theirIdx));
+    // A column the matched row does not hold -- a short row in an
+    // operator-local CSV -- writes an empty cell, as a null partner cell does.
+    const ownValues = ownColumns.map((name) =>
+      quoteCsvField((ourRow ? readRowColumn(ourRow, name) : undefined) ?? ""),
+    );
 
     if (!hasPartnerCols) {
-      return [ourId, partnerIndexCell];
+      return [ourId, partnerIndexCell, ...ownValues];
     }
 
     const partnerRow = partnerPayload.rows[theirIdxToPayloadPos.get(theirIdx)!];
@@ -1141,7 +1181,7 @@ export function buildOutputTable(
       quoteCsvField(partnerRow[colIdx] ?? ""),
     );
 
-    return [ourId, partnerIndexCell, ...theirValues];
+    return [ourId, partnerIndexCell, ...theirValues, ...ownValues];
   });
 
   return { headers, rows };

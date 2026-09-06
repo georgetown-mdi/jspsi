@@ -382,3 +382,49 @@ test("rejects an unrecognized key in the authentication block (strict)", () => {
   });
   expect(result.success).toBe(false);
 });
+
+// --- include_own_columns -----------------------------------------------------
+
+test("includeOwnColumns: both selections parse from the disk spelling, and the key stays optional", () => {
+  // A local top-level key, snake_case on disk and camelCase after the parse,
+  // like every other per-party field here.
+  for (const value of ["disclosed", "all"]) {
+    const parsed = parseExchangeSpec({
+      ...minimalSpec,
+      include_own_columns: value,
+    });
+    expect(parsed.includeOwnColumns).toBe(value);
+  }
+  expect(parseExchangeSpec(minimalSpec).includeOwnColumns).toBeUndefined();
+});
+
+test("includeOwnColumns: a value outside the two selections is refused", () => {
+  // No explicit column list is accepted: the key selects a set, so a column
+  // name -- or any other string -- is not a value it takes.
+  for (const value of ["", "payload", "pid", true, ["pid"]])
+    expect(
+      safeParseExchangeSpec({ ...minimalSpec, include_own_columns: value })
+        .success,
+    ).toBe(false);
+});
+
+test("includeOwnColumns: a count-only exchange refuses the key at parse", () => {
+  // A psi-c run reports a size and writes no result file, so there is no table
+  // for the columns to reach. Refused where the config is read, before any
+  // credential, terms, or data moves.
+  const countOnly = {
+    ...minimalSpec,
+    linkageTerms: { ...minimalLinkageTerms, algorithm: "psi-c" },
+  };
+  // The count-only terms themselves are valid, so a failure below is the key's.
+  expect(safeParseExchangeSpec(countOnly).success).toBe(true);
+  const result = safeParseExchangeSpec({
+    ...countOnly,
+    include_own_columns: "all",
+  });
+  expect(result.success).toBe(false);
+  const issue = result.error?.issues[0];
+  expect(issue?.message).toContain("include_own_columns");
+  expect(issue?.message).toContain("count-only");
+  expect(issue?.path).toEqual(["includeOwnColumns"]);
+});

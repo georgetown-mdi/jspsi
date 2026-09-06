@@ -307,15 +307,21 @@ export type {
 } from "./config/exchangeFile";
 export {
   MetadataSchema,
+  OwnColumnSelectionSchema,
   assertCountOnlyTransmitsNoColumn,
   countOnlyTransmitsColumn,
   disclosedColumnNames,
   inferMetadata,
   isDisclosedToPartner,
   overlongDisclosedColumnPositions,
+  ownResultColumnNames,
   safeParseMetadata,
 } from "./config/metadata";
-export type { ColumnMetadata, Metadata } from "./config/metadata";
+export type {
+  ColumnMetadata,
+  Metadata,
+  OwnColumnSelection,
+} from "./config/metadata";
 export type { OutboundPayloadConsent } from "./config/outboundPayloadConsent";
 export { FINGERPRINT_REGEX } from "./config/signing";
 export type { SigningConfig } from "./config/signing";

@@ -19,7 +19,7 @@ An exchange specification has four top-level components:
 | `metadata` | no | Descriptions of input fields and their roles |
 | `standardization` | no | Data cleaning and standardizing transformations applied before linkage |
 
-Beside them sit the optional top-level blocks documented below -- [`authentication`](#authentication), [`signing`](#signing), [`retention_disposition`](#retention_disposition) -- the three payload enforcement records (`outbound_payload_consent`, `disclosed_payload_columns`, `expected_payload_columns`), under the rules in [`linkage_terms.payload`](#linkage_termspayload), and the terms enforcement record [`expected_partner_deduplicate`](#expected_partner_deduplicate). psilink writes and refreshes all four for you on an online invite or accept, and you may also author them by hand in a recurring configuration. Any other top-level key is rejected at config-parse time with a user-facing error naming it, and no exchange runs until it is corrected: those enforcement records are optional, and an absent one means "nothing to enforce", so a misspelling that was quietly dropped would disable a consent or disclosure check with no signal. Unrecognized keys *inside* `linkage_terms`, `connection`, `metadata`, and `standardization` are dropped instead -- see [EXCHANGE_FILE.md](spec/EXCHANGE_FILE.md) for what each behavior means when a file minted by a newer web application is loaded by an older CLI.
+Beside them sit the optional top-level blocks documented below -- [`authentication`](#authentication), [`signing`](#signing), [`retention_disposition`](#retention_disposition), [`include_own_columns`](#include_own_columns) -- the three payload enforcement records (`outbound_payload_consent`, `disclosed_payload_columns`, `expected_payload_columns`), under the rules in [`linkage_terms.payload`](#linkage_termspayload), and the terms enforcement record [`expected_partner_deduplicate`](#expected_partner_deduplicate). psilink writes and refreshes all four for you on an online invite or accept, and you may also author them by hand in a recurring configuration. Any other top-level key is rejected at config-parse time with a user-facing error naming it, and no exchange runs until it is corrected: those enforcement records are optional, and an absent one means "nothing to enforce", so a misspelling that was quietly dropped would disable a consent or disclosure check with no signal. Unrecognized keys *inside* `linkage_terms`, `connection`, `metadata`, and `standardization` are dropped instead -- see [EXCHANGE_FILE.md](spec/EXCHANGE_FILE.md) for what each behavior means when a file minted by a newer web application is loaded by an older CLI.
 
 ## File references
 
@@ -1068,6 +1068,46 @@ A free-text pointer recorded verbatim in the exchange record, so an auditor can 
 ```yaml
 retention_disposition: "Filed in Agency A association DB (links.prod); retained 6 years per records schedule RM-7, then purged."
 ```
+
+---
+
+## Your own columns in the result
+
+Optional. The result file holds your matched record's identifier, your partner's row index, and the payload columns your partner sent ([PROTOCOL.md](spec/PROTOCOL.md#output)). This key adds columns of your own input beside them, so you do not have to join the result back to your input by hand.
+
+Purely local, like [`retention_disposition`](#retention_disposition): it is not a linkage term, it is never swapped or cross-checked with your partner, and it is not folded into the agreed-terms hash. Nothing extra is sent, the disclosure and consent displays are unchanged, and your partner's own result file is untouched. With the key absent the result is the file the partner's values alone compose.
+
+### `include_own_columns`
+
+*Type:* string (`disclosed` or `all`)  
+*Required:* no  
+*Consistency:* none (per-party; not exchanged)
+
+The key selects a set of your columns rather than listing them, so there is no column name to keep in step with your input:
+
+| Value | Columns written |
+|-------|-----------------|
+| `disclosed` | The columns you send to your partner -- the ones your metadata marks `is_payload: true` with a role other than `ignored` |
+| `all` | Every column your `metadata` block declares, matching, payload, and ignored alike (with no `metadata` block, every column of your input file, since the inferred block declares them all) |
+
+Your identifier column is left out of both: the result's first column already holds its value for every row, and writing it again would head one input column twice.
+
+```yaml
+include_own_columns: all
+```
+
+The values are read from the matched record each result row addresses, and they are written after your partner's payload columns. Under a [deduplicating cardinality](spec/PROTOCOL.md#deduplicating-cardinalities-many-to-x-matching), where one of your records stands in several pairs, they repeat once per pair exactly as your identifier already does; the number of result rows does not change. A value holding a comma, a double quote, or a newline is escaped like every other result cell, so it re-reads unchanged.
+
+Two exchanges have no result table for the columns to reach, and they are treated differently:
+
+- A **count-only (`psi-c`)** exchange is refused at config-parse time (exit 64), naming the key: it reports the size of the intersection and writes no result file at all, so the key cannot mean anything on it. Remove the key, or set the algorithm to `psi`.
+- A party whose agreed [`output`](#linkage_termsoutput) gives it **no result** ignores the key silently. Which party receives the result is settled at the terms exchange, so a configuration that sets the key can be entirely correct on a party that turns out to receive nothing.
+
+The result's headers stay distinct: a partner payload column whose name collides with one already written takes a `their_` prefix. The full header-assignment order and fallback rule are in [PROTOCOL.md](spec/PROTOCOL.md#output).
+
+The key is read by the CLI and by the console when it runs a config file; the web app's authoring surface does not yet offer a control for it.
+
+Your own columns are not covered by the exchange record's commitments, which bind what was exchanged rather than what you filed beside it; verification of a result written with the key is unaffected ([EXCHANGE_RECORD.md](spec/EXCHANGE_RECORD.md#commitment-scheme)).
 
 ---
 

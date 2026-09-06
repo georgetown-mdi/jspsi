@@ -28,7 +28,7 @@ import {
 import { createMessagePipe } from "../../src/connection/messageConnection";
 
 import type { LinkageTerms, Output } from "../../src/config/linkageTermsSchema";
-import type { Metadata } from "../../src/config/metadata";
+import type { Metadata, OwnColumnSelection } from "../../src/config/metadata";
 import type { PartnerPayload } from "../../src/payloadExchange";
 import type { RetainedResult } from "../../src/records/recordVerification";
 import type { AssociationTable } from "../../src/types";
@@ -77,6 +77,10 @@ async function roundTrip(opts: {
   associationTable: AssociationTable;
   partnerPayload: PartnerPayload;
   ourIdColumn?: string;
+  // The local output-composition setting the result was written under, so a
+  // result holding this party's own columns reaches the re-supply path as the
+  // exchange wrote it.
+  includeOwnColumns?: OwnColumnSelection;
   // Applied to the parsed result rows between the write and the reconstruction:
   // a retained result file edited after the exchange wrote it, reaching the
   // re-supply path exactly as an unedited one does.
@@ -106,6 +110,7 @@ async function roundTrip(opts: {
       opts.rawRows,
       opts.metadata,
       opts.partnerPayload,
+      opts.includeOwnColumns,
     ),
   );
   opts.editRetainedResult?.(result.rows);
@@ -394,6 +399,69 @@ describe("reconstructCommittedData round-trips through the real build path", () 
     const report = await verifyExchangeRecord(record, keys, { data });
     expect(report.outcome).toBe("failed");
     expect(report.commitments.localPayloadSent).toBe("mismatch");
+  });
+
+  test("a result written with this party's own columns opens every commitment", async () => {
+    // The whole re-supply path over a result the option composed: the own
+    // columns sit past the received values, are covered by no commitment, and
+    // the record still verifies from the file as written.
+    const { report, warnings, result } = await roundTrip({
+      rawRows: idRows,
+      metadata: idMeta,
+      associationTable: [
+        [0, 2],
+        [1, 0],
+      ],
+      partnerPayload: {
+        columns: ["note"],
+        rowIndices: [0, 1],
+        rows: [["q-0"], ["q-1"]],
+      },
+      ourIdColumn: "pid",
+      includeOwnColumns: "all",
+    });
+    expect(result.headers).toEqual(["pid", "row_id", "note", "dose"]);
+    expect(result.rows).toEqual([
+      ["P0", "1", "q-1", "10mg"],
+      ["P2", "0", "q-0", "30mg"],
+    ]);
+    expect(warnings).toEqual([]);
+    expect(report.outcome).toBe("verified");
+    expect(report.commitments).toEqual({
+      localPayloadSent: "verified",
+      partnerPayloadReceived: "verified",
+      associationTable: "verified",
+    });
+  });
+
+  test("a result column past the received payload leaves every commitment open", async () => {
+    // The received values are the record's own governance width, read from the
+    // third column, not everything to the end of the row: a result holding this
+    // party's own columns after the partner's still reproduces the received
+    // payload the partner sent.
+    const { report, warnings, data } = await roundTrip({
+      rawRows: idRows,
+      metadata: idMeta,
+      associationTable: [
+        [0, 2],
+        [1, 0],
+      ],
+      partnerPayload: {
+        columns: ["note"],
+        rowIndices: [0, 1],
+        rows: [["q-0"], ["q-1"]],
+      },
+      ourIdColumn: "pid",
+      editRetainedResult: (rows) => {
+        for (const row of rows) row.push("own value");
+      },
+    });
+    expect(data.partnerPayloadReceived).toEqual({
+      columns: ["note"],
+      rows: [["q-0"], ["q-1"]],
+    });
+    expect(warnings).toEqual([]);
+    expect(report.outcome).toBe("verified");
   });
 });
 

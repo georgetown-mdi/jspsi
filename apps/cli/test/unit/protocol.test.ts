@@ -721,6 +721,48 @@ test("authentication=null runs the exchange without authentication and without e
   // No assertion on key files: no rotation occurs when auth is null.
 }, 20_000);
 
+test("the local own-columns selection reaches the result formatter", async () => {
+  // The config key changes only what this party writes for itself, so the one
+  // thing the CLI owes it is the hand-off: the selection prepareForExchange
+  // carried must reach buildOutputTable, which composes the file.
+  vi.mocked(buildOutputTable).mockClear();
+  const carrying = { includeOwnColumns: "all" } as unknown as PreparedExchange;
+  await Promise.all([
+    runProtocol({
+      connection: {
+        channel: "filedrop",
+        path: dropDir,
+        options: TWO_PARTY_OPTIONS,
+      },
+      auth: null,
+      prepared: carrying,
+      output: undefined,
+      verbosity: -1,
+      loggerName: "test-a",
+    }),
+    runProtocol({
+      connection: {
+        channel: "filedrop",
+        path: dropDir,
+        options: TWO_PARTY_OPTIONS,
+      },
+      auth: null,
+      prepared: minimalPrepared,
+      output: undefined,
+      verbosity: -1,
+      loggerName: "test-b",
+    }),
+  ]);
+  const selections = vi
+    .mocked(buildOutputTable)
+    .mock.calls.map((call) => call[4]);
+  // One party set the key and the other did not, and neither answer is the
+  // other's: an absent key composes the result the partner's values alone make.
+  expect(selections).toContain("all");
+  expect(selections).toContain(undefined);
+  expect(selections).toHaveLength(2);
+}, 20_000);
+
 // --- The resolved run shape, named at the pre-round boundary ---------------------
 
 // A runExchange that fires the pre-round boundary with one resolved shape and then

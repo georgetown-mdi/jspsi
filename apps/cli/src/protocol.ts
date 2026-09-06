@@ -1571,6 +1571,7 @@ async function writeExchangeOutputs(params: {
       prepared.rawRows,
       prepared.metadata,
       partnerPayload,
+      prepared.includeOwnColumns,
     );
     try {
       await writeOutput(output, headers, rows, log);

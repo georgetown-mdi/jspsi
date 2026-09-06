@@ -76,7 +76,7 @@ import {
   ReceiptVerificationError,
 } from "./records/signedReceipt.js";
 import { OperatorConfigError, UsageError, causeChainSome } from "./errors.js";
-import type { Metadata } from "./config/metadata.js";
+import type { Metadata, OwnColumnSelection } from "./config/metadata.js";
 import type { LinkageTerms } from "./config/linkageTermsSchema.js";
 import type { StandardizedDataset } from "./standardization.js";
 import type {
@@ -153,6 +153,15 @@ export interface PreparedExchange {
    * differ.
    */
   expectedPartnerDeduplicate?: boolean;
+  /**
+   * Which of this party's own input columns its result file holds beside
+   * the partner's values, passed through from the local config's
+   * `include_own_columns` to {@link buildOutputTable}. Undefined writes the
+   * result the partner's values alone compose. Nothing about the exchange
+   * itself reads it: no frame, no consent display, and no commitment
+   * changes with it.
+   */
+  includeOwnColumns?: OwnColumnSelection;
   dataset: StandardizedDataset;
   /**
    * The original parsed CSV rows, retained for payload extraction after
@@ -861,6 +870,9 @@ export function prepareForExchange(
     // A self-facing operator note, passed through untouched from the local
     // config to the record builder; absent when the config omits it.
     retentionDisposition: exchangeDataSpec.retentionDisposition,
+    // A local output-composition setting, passed through untouched from the
+    // local config to the result formatter; absent when the config omits it.
+    includeOwnColumns: exchangeDataSpec.includeOwnColumns,
     // The two invitation commitments -- expectedPayloadColumns (the
     // received-payload set) and expectedPartnerDeduplicate (the partner's
     // declared cardinality side) -- are NOT threaded here, unlike
