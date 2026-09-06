@@ -10,7 +10,7 @@ Fuzzy linkage keys were described in one breath -- "generate the variants of the
 
 ## The two shapes
 
-A **full-variant** expansion enumerates the entire set of values at a stated distance from the record's own: every two-position transposition, the year either side of a date, the two orders of a swapped element pair. Because the set is complete, a partner holding any value in it meets this record on the partner's own exact value. One party enumerating is sufficient.
+A **full-variant** expansion enumerates the entire set of values at a stated distance from the record's own: every two-position transposition, the year either side of a date, the day and month of a date exchanged, the two orders of a swapped element pair. Because the set is complete, a partner holding any value in it meets this record on the partner's own exact value. One party enumerating is sufficient.
 
 A **deletion neighbourhood** enumerates the single-character deletions of the value. That is not the set of values one edit away -- it is the shorter half of it. A substitution or an insertion between two records is reached only where the two parties' deletions land on the same shorter string, so both parties must expand. The full variant set for edit distance 1 is not an alternative at any width: it is the alphabet times the length, over an alphabet the terms do not bound.
 
