@@ -1,6 +1,15 @@
 import path from "node:path";
 
 import {
+  DEFAULT_MAX_DISPLAY_LENGTH,
+  DISPLAY_TRUNCATION_MARKER,
+  redactPrivateKeyMaterial,
+  renderedDisplayCost,
+} from "@psilink/core";
+
+import { ERROR_MESSAGE_CHAIN_FIELD } from "@psi/relayErrorChain";
+
+import {
   zeroSetupFiledropArgv,
   zeroSetupOptionsArgv,
   zeroSetupSftpArgv,
@@ -45,6 +54,7 @@ import type {
   CliDriverHandle,
   CliDriverHandlers,
   CliRunControls,
+  CliRunDiagnostics,
   JobTerminalState,
   RelayEvent,
 } from "./cliDriver";
@@ -789,7 +799,8 @@ export class JobManager {
           message,
           degraded: true,
         }),
-      onTerminal: (state) => this.reconcileTerminal(record, state),
+      onTerminal: (state, diagnostics) =>
+        this.reconcileTerminal(record, state, diagnostics),
     };
 
     record.handle = this.spawnForMode(intent, {
@@ -1069,12 +1080,23 @@ export class JobManager {
    * the loss named on `terminal.outcome`; with no terminal event at all the
    * status is `failed` and nothing is offered.
    *
+   * A synthesized failure names what the CLI printed on stderr
+   * ({@link diagnosedTerminal}): that terminal stands in for the diagnosis the
+   * run never emitted, and the tail is the only account of it the console
+   * holds. An interrupt takes none -- the operator asked for the exit -- and a
+   * run that emitted its own terminal event is synthesized nothing at all, so
+   * no diagnosis reaches the operator twice.
+   *
    * The only slot-release point besides the pre-spawn create failure: fires
    * on the child's `close` (or a spawn `error`), so a killed child is
    * confirmed dead before {@link maybeFreeSlot} frees the slot for a
    * successor.
    */
-  private reconcileTerminal(record: JobRecord, state: JobTerminalState): void {
+  private reconcileTerminal(
+    record: JobRecord,
+    state: JobTerminalState,
+    diagnostics: CliRunDiagnostics,
+  ): void {
     record.terminal = state;
     this.clearCancelTimers(record);
 
@@ -1105,25 +1127,27 @@ export class JobManager {
           resultWritten: true,
         });
       else if (state.outcome === "completedWithPersistenceLoss")
-        this.synthesizeTerminal(record, {
-          v: 1,
-          type: "error",
-          category: "output",
-          message:
+        this.synthesizeTerminal(
+          record,
+          diagnosedTerminal(
+            "output",
             "the run reported a lost local write and its event stream broke " +
-            "before naming which one, so this console cannot confirm which " +
-            "files reached disk; look in the folder it writes its exchange " +
-            "files to",
-        });
+              "before naming which one, so this console cannot confirm which " +
+              "files reached disk; look in the folder it writes its exchange " +
+              "files to",
+            diagnostics.stderrTail,
+          ),
+        );
       else
-        this.synthesizeTerminal(record, {
-          v: 1,
-          type: "error",
-          category: "exchange",
-          message:
+        this.synthesizeTerminal(
+          record,
+          diagnosedTerminal(
+            "exchange",
             "CLI exited without a terminal event; the event stream broke" +
-            (state.exitCode !== null ? ` (exit ${state.exitCode})` : ""),
-        });
+              (state.exitCode !== null ? ` (exit ${state.exitCode})` : ""),
+            diagnostics.stderrTail,
+          ),
+        );
     }
 
     this.maybeFreeSlot(record);
@@ -1326,6 +1350,89 @@ function liveRecordAvailability(record: JobRecord):
     recordCreatedAt: summary.createdAt,
     recordOutcome: summary.outcome,
   };
+}
+
+/** How the cause link naming the child's stderr introduces it. */
+const STDERR_CAUSE_LABEL = "the CLI last wrote on stderr: ";
+
+/**
+ * What one such link may render to at the seat that shows it: the per-value
+ * display budget, label included, the same budget every other labelled cause
+ * link charges a chooser's value at (`fittedCauseLink` in
+ * apps/cli/src/connection/causeLink.ts).
+ */
+const STDERR_CAUSE_BUDGET = DEFAULT_MAX_DISPLAY_LENGTH;
+
+/**
+ * A synthesized terminal naming what the CLI printed on stderr, so an operator
+ * whose run emitted no terminal event reads the cause rather than only that the
+ * stream broke.
+ *
+ * The tail rides a LABELLED CAUSE LINK of its own rather than being
+ * interpolated into the first-party message: a chooser's bytes composed into
+ * that sentence can spell whatever delimiter closes them and read on as console
+ * copy, which on the persistence-loss terminal is a do-not-repeat instruction
+ * the operator must not misread. The flat `message` field stays this console's
+ * own text at every width of tail, and a run whose child wrote nothing carries
+ * no chain at all, which the seat reads as the flat field.
+ */
+function diagnosedTerminal(
+  category: "output" | "exchange",
+  message: string,
+  stderrTail: string,
+): RelayEvent {
+  const link = stderrCauseLink(stderrTail);
+  return {
+    v: 1,
+    type: "error",
+    category,
+    message,
+    ...(link === null ? {} : { [ERROR_MESSAGE_CHAIN_FIELD]: [message, link] }),
+  };
+}
+
+/**
+ * The cause link for a retained stderr tail, or null when the child wrote none.
+ *
+ * The tail is redacted and then fitted, in that order: fitting first could leave
+ * a `BEGIN` marker in what is kept for the fail-closed dangling rule to consume.
+ * What is kept is RAW, since the seat rendering the chain escapes each link once
+ * ({@link CliRunDiagnostics}), and it is fitted by RENDERED cost, so
+ * the budget bounds what that seat displays rather than what the child wrote.
+ */
+function stderrCauseLink(stderrTail: string): string | null {
+  const tail = redactPrivateKeyMaterial(stderrTail.trim());
+  if (tail.length === 0) return null;
+  return `${STDERR_CAUSE_LABEL}${lastRenderedWindow(
+    tail,
+    STDERR_CAUSE_BUDGET - renderedDisplayCost(STDERR_CAUSE_LABEL),
+  )}`;
+}
+
+/**
+ * Longest SUFFIX of `value` whose rendered cost fits `budget`, with
+ * {@link DISPLAY_TRUNCATION_MARKER} in FRONT of it -- and paid for out of that
+ * same budget -- when anything was dropped.
+ *
+ * The suffix, not the prefix `clipToRenderedCost` keeps: a run writes its
+ * diagnosis last, so a verbose failure's final line is exactly what a cut taken
+ * from the front deletes. A code point is kept only when its whole rendered cost
+ * fits, so the cut falls on a code-point boundary and the budget is an upper
+ * bound rather than a width the result meets.
+ */
+function lastRenderedWindow(value: string, budget: number): string {
+  if (renderedDisplayCost(value) <= budget) return value;
+  const room = budget - DISPLAY_TRUNCATION_MARKER.length;
+  const points = Array.from(value);
+  let kept = "";
+  let cost = 0;
+  for (let index = points.length - 1; index >= 0; index -= 1) {
+    const next = cost + renderedDisplayCost(points[index]);
+    if (next > room) break;
+    kept = `${points[index]}${kept}`;
+    cost = next;
+  }
+  return `${DISPLAY_TRUNCATION_MARKER}${kept}`;
 }
 
 /**

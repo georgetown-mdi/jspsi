@@ -4,6 +4,14 @@ import { pathToFileURL } from "node:url";
 
 import { afterEach, describe, expect, test, vi } from "vitest";
 
+import {
+  DEFAULT_MAX_DISPLAY_LENGTH,
+  DISPLAY_TRUNCATION_MARKER,
+  renderedDisplayCost,
+} from "@psilink/core";
+
+import { ERROR_MESSAGE_CHAIN_FIELD } from "@psi/relayErrorChain";
+
 import * as cliDriver from "@jobs/cliDriver";
 import {
   ExchangeBusyError,
@@ -67,6 +75,7 @@ function makeManager(options: {
   raw?: string;
   exitCode?: number;
   outputFile?: string;
+  stderr?: string;
   delayMs?: number;
   ignoreSigint?: boolean;
   ignoreSigterm?: boolean;
@@ -90,6 +99,7 @@ function makeManager(options: {
     childEnv.STUB_EXIT_CODE = String(options.exitCode);
   if (options.outputFile !== undefined)
     childEnv.STUB_OUTPUT_FILE = options.outputFile;
+  if (options.stderr !== undefined) childEnv.STUB_STDERR = options.stderr;
   if (options.recordJson !== undefined)
     childEnv.STUB_RECORD_JSON = options.recordJson;
   if (options.delayMs !== undefined)
@@ -261,6 +271,104 @@ describe("JobManager end-to-end via the stub CLI", () => {
     expect(String(terminal.message)).toContain("stream broke");
   });
 
+  test("a non-zero exit with no terminal event reports the retained stderr", async () => {
+    // What the CLI printed is the only account of the failure the console holds
+    // when fd 3 stayed empty, so the synthesized terminal has to name it -- on a
+    // cause link of its own, leaving the flat message this console's own text.
+    const manager = makeManager({
+      exitCode: 64,
+      stderr: "no linkage key satisfied the configured terms\n",
+    });
+    const id = await manager.createJob(validIntent());
+    const record = manager.getJob(id)!;
+    await waitForTerminal(record);
+    const terminal = record.events[record.events.length - 1].event;
+    expect(String(terminal.message)).toContain("stream broke");
+    expect(String(terminal.message)).not.toContain("no linkage key");
+    const chain = terminal[ERROR_MESSAGE_CHAIN_FIELD] as Array<string>;
+    expect(chain[0]).toBe(terminal.message);
+    expect(chain[1]).toBe(
+      "the CLI last wrote on stderr: no linkage key satisfied the " +
+        "configured terms",
+    );
+  });
+
+  test("a run that emitted its own terminal event repeats no stderr", async () => {
+    // The CLI named the failure itself, so the terminal it sent stands alone:
+    // appending the same text off stderr would show the operator the diagnosis
+    // twice.
+    const manager = makeManager({
+      events: [
+        {
+          v: 1,
+          type: "error",
+          category: "exchange",
+          message: "the partner aborted the exchange",
+        },
+      ],
+      exitCode: 64,
+      stderr: "the partner aborted the exchange\n",
+    });
+    const id = await manager.createJob(validIntent());
+    const record = manager.getJob(id)!;
+    await waitForTerminal(record);
+    await vi.waitFor(() => expect(record.terminal).not.toBeNull());
+    const terminal = record.events[record.events.length - 1].event;
+    expect(String(terminal.message)).toBe("the partner aborted the exchange");
+    expect(
+      record.events.every(
+        (entry) => !JSON.stringify(entry.event).includes("wrote on stderr"),
+      ),
+    ).toBe(true);
+  });
+
+  test("a hostile stderr tail crosses raw on its own link, fitted to the seat's budget", async () => {
+    // The tail is child output, not first-party copy. It stays RAW here -- the
+    // seat that renders the chain is the one altitude that escapes it (the
+    // end-to-end escape count is pinned by stderrTailBudget.test.ts) -- so what
+    // this holds is that it rides its own link and costs the seat no more than
+    // one value's budget.
+    const manager = makeManager({
+      exitCode: 64,
+      stderr: "\u001b[2J\u0007\u202eevil\r\nconfig load failed",
+    });
+    const id = await manager.createJob(validIntent());
+    const record = manager.getJob(id)!;
+    await waitForTerminal(record);
+    const terminal = record.events[record.events.length - 1].event;
+    const chain = terminal[ERROR_MESSAGE_CHAIN_FIELD] as Array<string>;
+    expect(chain[1]).toBe(
+      "the CLI last wrote on stderr: \u001b[2J\u0007\u202eevil\r\n" +
+        "config load failed",
+    );
+    expect(renderedDisplayCost(chain[1])).toBeLessThanOrEqual(
+      DEFAULT_MAX_DISPLAY_LENGTH,
+    );
+  });
+
+  test("a flooding stderr tail is cut back to the END of what the CLI wrote", async () => {
+    // A verbose run writes its diagnosis LAST, so a cut taken from the front
+    // deletes the cause this terminal exists to deliver.
+    const manager = makeManager({
+      exitCode: 64,
+      stderr: `HEADMARKER${"Z".repeat(20000)}TAILMARKER`,
+    });
+    const id = await manager.createJob(validIntent());
+    const record = manager.getJob(id)!;
+    await waitForTerminal(record);
+    const terminal = record.events[record.events.length - 1].event;
+    const link = (terminal[ERROR_MESSAGE_CHAIN_FIELD] as Array<string>)[1];
+    expect(link.endsWith("TAILMARKER")).toBe(true);
+    expect(link).not.toContain("HEADMARKER");
+    expect(link).toContain(DISPLAY_TRUNCATION_MARKER);
+    expect(link.indexOf(DISPLAY_TRUNCATION_MARKER)).toBe(
+      "the CLI last wrote on stderr: ".length,
+    );
+    expect(renderedDisplayCost(link)).toBeLessThanOrEqual(
+      DEFAULT_MAX_DISPLAY_LENGTH,
+    );
+  });
+
   test("exit 73 beside the CLI's result terminal completes with a persistence loss", async () => {
     const manager = makeManager({
       events: [
@@ -326,7 +434,10 @@ describe("JobManager end-to-end via the stub CLI", () => {
   });
 
   test("exit 73 without a terminal event synthesizes an output terminal", async () => {
-    const manager = makeManager({ exitCode: 73 });
+    const manager = makeManager({
+      exitCode: 73,
+      stderr: "ENOSPC: no space left on device\n",
+    });
     const id = await manager.createJob(validIntent());
     const record = manager.getJob(id)!;
     await waitForTerminal(record);
@@ -340,6 +451,13 @@ describe("JobManager end-to-end via the stub CLI", () => {
     // exists to prevent.
     expect(terminal.category).toBe("output");
     expect(String(terminal.message)).toContain("lost local write");
+    // The do-not-repeat instruction is this console's own text at every width
+    // of tail: what the CLI printed rides a cause link beside it.
+    expect(String(terminal.message)).not.toContain("ENOSPC");
+    expect(terminal[ERROR_MESSAGE_CHAIN_FIELD]).toEqual([
+      terminal.message,
+      "the CLI last wrote on stderr: ENOSPC: no space left on device",
+    ]);
   });
 
   test("an interrupt without a terminal event synthesizes a cancelled error", async () => {
@@ -564,7 +682,10 @@ describe("event cap fails the job", () => {
       });
     expect(record.status).toBe("failed");
 
-    handlers.onTerminal({ outcome: "succeeded", exitCode: 0, signal: null });
+    handlers.onTerminal(
+      { outcome: "succeeded", exitCode: 0, signal: null },
+      { stderrTail: "" },
+    );
     expect(record.status).toBe("failed");
     const terminal = record.events[record.events.length - 1].event;
     expect(terminal.type).toBe("error");
@@ -1663,11 +1784,10 @@ describe("the single exchange slot", () => {
     );
 
     // The child's close frees the slot; a successor create then succeeds.
-    handlersRef.current!.onTerminal({
-      outcome: "failed",
-      exitCode: null,
-      signal: "SIGKILL",
-    });
+    handlersRef.current!.onTerminal(
+      { outcome: "failed", exitCode: null, signal: "SIGKILL" },
+      { stderrTail: "" },
+    );
     const secondId = await manager.createJob(validIntent());
     expect(secondId).not.toBe(firstId);
   });
@@ -1733,11 +1853,10 @@ describe("occupiedSlotId reports the slot occupant", () => {
     expect(manager.occupiedSlotId()).toBe(id);
 
     // The child's close frees the slot; the probe then reads free.
-    handlersRef.current!.onTerminal({
-      outcome: "failed",
-      exitCode: null,
-      signal: "SIGKILL",
-    });
+    handlersRef.current!.onTerminal(
+      { outcome: "failed", exitCode: null, signal: "SIGKILL" },
+      { stderrTail: "" },
+    );
     expect(manager.occupiedSlotId()).toBeNull();
   });
 });

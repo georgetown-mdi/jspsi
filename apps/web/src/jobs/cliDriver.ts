@@ -69,6 +69,21 @@ export interface JobTerminalState {
   signal: NodeJS.Signals | null;
 }
 
+/**
+ * What the run left behind besides its exit, delivered with the terminal state
+ * so a run whose fd-3 stream said nothing still has a cause to report.
+ */
+export interface CliRunDiagnostics {
+  /**
+   * The child's retained stderr tail, RAW and bounded to the retention cap; the
+   * empty string when it wrote none. Raw because its sink is the console seat,
+   * which escapes the cause link it rides once as it renders it: escaping here
+   * as well would double every literal backslash on its way to the operator
+   * (CONTRIBUTING.md, Operator-facing escaping).
+   */
+  stderrTail: string;
+}
+
 /** Callbacks the job manager wires into a driven run. */
 export interface CliDriverHandlers {
   /** A validated, sanitized fd-3 event. */
@@ -79,7 +94,7 @@ export interface CliDriverHandlers {
    */
   onDegraded: (message: string) => void;
   /** The run's reconciled terminal state, delivered exactly once. */
-  onTerminal: (state: JobTerminalState) => void;
+  onTerminal: (state: JobTerminalState, diagnostics: CliRunDiagnostics) => void;
 }
 
 /** A handle on a running CLI child, exposing only signal delivery. */
@@ -130,8 +145,8 @@ export function resolveCliBinaryPath(
 /**
  * The maximum length of child stderr retained as a diagnostic tail, in UTF-16
  * code units. Bounded so a chatty or hostile child cannot grow server memory
- * without limit; the tail is sanitized before it is exposed and is never
- * streamed to the client raw.
+ * without limit, and bounded again -- to a display budget, from its END -- where
+ * the manager composes what it shows.
  */
 const STDERR_TAIL_CAP = 8192;
 
@@ -514,7 +529,11 @@ function sanitizeValue(value: unknown): unknown {
   return value;
 }
 
-/** Retain a bounded, sanitized tail of the child's stderr for diagnostics. */
+/**
+ * Retain a bounded tail of the child's stderr for diagnostics: the last
+ * {@link STDERR_TAIL_CAP} code units it wrote, raw. A rolling window, so the
+ * bytes a failing run wrote LAST are the ones kept.
+ */
 function attachStderrTail(child: ChildProcess): { get: () => string } {
   let tail = "";
   const stderr = child.stderr;
@@ -524,7 +543,7 @@ function attachStderrTail(child: ChildProcess): { get: () => string } {
       tail = (tail + chunk).slice(-STDERR_TAIL_CAP);
     });
   }
-  return { get: () => sanitizeForDisplay(tail) };
+  return { get: () => tail };
 }
 
 /**
@@ -539,7 +558,11 @@ function attachStderrTail(child: ChildProcess): { get: () => string } {
  *
  * Whether the CLI emitted its own terminal fd-3 event is the manager's concern
  * (it synthesizes one when a non-interrupt exit produced none); this layer only
- * classifies the exit.
+ * classifies the exit and hands the retained stderr tail along with it, so the
+ * manager can name the cause in a terminal it had to synthesize. The tail rides
+ * the terminal delivery on every path, the spawn-failure one included, so it
+ * reaches the operator through one sink and a run that emitted its own terminal
+ * event does not read its diagnosis twice.
  */
 function attachTerminalReconciliation(
   child: ChildProcess,
@@ -550,7 +573,9 @@ function attachTerminalReconciliation(
   const deliver = (exitCode: number | null, signal: NodeJS.Signals | null) => {
     if (delivered) return;
     delivered = true;
-    handlers.onTerminal(classifyExit(exitCode, signal));
+    handlers.onTerminal(classifyExit(exitCode, signal), {
+      stderrTail: stderrTail.get(),
+    });
   };
   // "close", not "exit": close fires only after every stdio stream has drained,
   // so the CLI's own terminal fd-3 event is always parsed before the exit is
@@ -561,9 +586,7 @@ function attachTerminalReconciliation(
     // The child could not be spawned or died abnormally; report a diagnostic and
     // classify as a failure so the manager always reaches a terminal state.
     handlers.onDegraded(
-      `CLI process error: ${sanitizeForDisplay(error.message)}${
-        stderrTail.get().length > 0 ? ` (stderr: ${stderrTail.get()})` : ""
-      }`,
+      `CLI process error: ${sanitizeForDisplay(error.message)}`,
     );
     deliver(1, null);
   });
