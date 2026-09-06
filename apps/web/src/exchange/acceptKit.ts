@@ -71,10 +71,12 @@ export interface AcceptKitExchange {
   /** The rendezvous locator minted into the invitation. */
   endpoint: AcceptKitEndpoint;
   /**
-   * Whether the inviter turned retain mode on. Bilateral and non-negotiated:
-   * the partner's own run must hold it or the two sides stop at rendezvous,
-   * and it leaves every protocol file in place afterwards. Selects fixed
-   * text and contributes no value of its own.
+   * The retain declaration the minted token carries, derived from the
+   * inviter's toggle and the endpoint's shape, so it can be true with the
+   * toggle off. Bilateral and non-negotiated: the partner's own run must
+   * hold it or the two sides stop at rendezvous, and it leaves every
+   * protocol file in place afterwards. Selects fixed text and contributes no
+   * value of its own.
    */
   retainFiles: boolean;
   /**
