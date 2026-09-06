@@ -3,7 +3,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import logLibrary from "loglevel";
-import { getDiagnosticSink, UsageError } from "@psilink/core";
+import {
+  type DiagnosticSink,
+  getDiagnosticSink,
+  setDiagnosticSink,
+  UsageError,
+} from "@psilink/core";
 
 import { configureLogging } from "../../../src/util/logging";
 import {
@@ -166,25 +171,52 @@ test("configureLogging: an unopenable logFile throws UsageError and installs no 
 // --- the closer's factory-restore --------------------------------------------
 
 test("configureLogging: close() restores the diagnostic sink in place before it (file sink)", () => {
-  const before = getDiagnosticSink();
+  const outerSink: DiagnosticSink = () => {};
+  setDiagnosticSink(outerSink);
   const { close } = configureLogging({
     logLevel: logLibrary.levels.INFO,
     logFile: path.join(tmpDir, "restore.log"),
     name: "configlog-restore-file",
   });
-  expect(getDiagnosticSink()).not.toBe(before);
+  expect(getDiagnosticSink()).not.toBe(outerSink);
   close();
-  expect(getDiagnosticSink()).toBe(before);
+  expect(getDiagnosticSink()).toBe(outerSink);
 });
 
 test("configureLogging: close() restores the diagnostic sink in place before it (stderr sink)", () => {
-  const before = getDiagnosticSink();
+  const outerSink: DiagnosticSink = () => {};
+  setDiagnosticSink(outerSink);
   const { close } = configureLogging({
     logLevel: logLibrary.levels.INFO,
     logFile: undefined,
     name: "configlog-restore-stderr",
   });
-  expect(getDiagnosticSink()).not.toBe(before);
+  expect(getDiagnosticSink()).not.toBe(outerSink);
   close();
-  expect(getDiagnosticSink()).toBe(before);
+  expect(getDiagnosticSink()).toBe(outerSink);
+});
+
+test("configureLogging: a diagnostic logged after close() still lands on stderr", () => {
+  // The window a handler opens when its finally closes logging: with no earlier
+  // sink to hand back, close() keeps the stderr routing rather than returning to
+  // loglevel's per-level console leaves, where trace prints a stack of install
+  // paths and info and debug print on stdout among the result data.
+  setDiagnosticSink(undefined);
+  const { log, close } = configureLogging({
+    logLevel: logLibrary.levels.TRACE,
+    logFile: undefined,
+    name: "configlog-after-close",
+  });
+  close();
+
+  const { stdoutWrites, stderrWrites, restore } = captureStdio();
+  try {
+    log.trace("a late diagnostic line");
+  } finally {
+    restore();
+  }
+  expect(stderrWrites.join("")).toMatch(
+    /^\[[^\]]+\] \[TRACE\] \[configlog-after-close\] a late diagnostic line\n$/,
+  );
+  expect(stdoutWrites.join("")).toBe("");
 });

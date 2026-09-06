@@ -122,6 +122,29 @@ test("redacts key material on the console path after a sweep", () => {
   expect(line).not.toContain("MIGkAgEA");
 });
 
+test("with no sink, each level keeps loglevel's own console routing", () => {
+  // The routing a browser consumer relies on: loglevel sends each level to the
+  // console method of that name, whose per-level styling -- and, for trace, the
+  // console's own expandable stack -- is what the web app shows. Only a consumer
+  // that installs a sink leaves it.
+  setDiagnosticSink(undefined);
+  const consoleTrace = vi.spyOn(console, "trace").mockImplementation(() => {});
+  const consoleWarn = vi.spyOn(console, "warn").mockImplementation(() => {});
+  const name = uniqueName("console-per-level");
+  const log = getLogger(name);
+  setLogLevel(logLibrary.levels.TRACE);
+
+  log.trace("a trace line");
+  log.warn("a warn line");
+
+  expect(
+    consoleTrace.mock.calls.map((args) => args.join(" ")).join("\n"),
+  ).toContain(`[TRACE] [${name}] a trace line`);
+  expect(
+    consoleWarn.mock.calls.map((args) => args.join(" ")).join("\n"),
+  ).toContain(`[WARN] [${name}] a warn line`);
+});
+
 test("leaves a browser consumer's stored level untouched", () => {
   // loglevel writes a level to web storage unless the assignment opts out, so
   // every one on this path -- the sweep's, and the one the prefixer makes to

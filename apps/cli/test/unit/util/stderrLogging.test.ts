@@ -8,6 +8,7 @@ import {
 } from "@psilink/core";
 
 import { configureStderrLogging } from "../../../src/util/logging";
+import { captureStdio } from "../../loggingTestSupport";
 
 // configureStderrLogging installs core's process-wide diagnostic sink, which core
 // resolves at each log call (not when a logger is built). These tests snapshot and
@@ -120,11 +121,42 @@ test("configureStderrLogging: keeps the [ISO] [LEVEL] [CONTEXT] prefix", () => {
 });
 
 test("configureStderrLogging: close() restores the diagnostic sink in place before it", () => {
-  const before = getDiagnosticSink();
+  // A sink installed over an existing one hands that one back, so a redirect
+  // nested inside another leaves the outer routing as it found it.
+  const outerSink: DiagnosticSink = () => {};
+  setDiagnosticSink(outerSink);
   const sink = configureStderrLogging();
-  expect(getDiagnosticSink()).not.toBe(before);
+  expect(getDiagnosticSink()).not.toBe(outerSink);
   sink.close();
-  expect(getDiagnosticSink()).toBe(before);
+  expect(getDiagnosticSink()).toBe(outerSink);
+});
+
+test("configureStderrLogging: a trace line logged after close() is a plain stderr line", () => {
+  // With no earlier sink to hand back, close() leaves stderr routing in place
+  // rather than clearing the sink: loglevel's own trace leaf is console.trace,
+  // which prints a stack of install paths, and its info/debug leaves are stdout.
+  const consoleTrace = vi.spyOn(console, "trace").mockImplementation(() => {});
+  const { stdoutWrites, stderrWrites, restore } = captureStdio();
+  const name = `stderr-after-close-${uid++}`;
+  try {
+    setDiagnosticSink(undefined);
+    const sink = configureStderrLogging();
+    logLibrary.setDefaultLevel(logLibrary.levels.TRACE);
+    sink.close();
+    getLogger(name).trace("a late diagnostic line");
+  } finally {
+    restore();
+    consoleTrace.mockRestore();
+  }
+  // The whole of what stderr received: one prefixed line, no stack frames after
+  // it and nothing ahead of it.
+  expect(stderrWrites.join("")).toMatch(
+    new RegExp(
+      `^\\[[^\\]]+\\] \\[TRACE\\] \\[${name}\\] a late diagnostic line\\n$`,
+    ),
+  );
+  expect(stdoutWrites.join("")).toBe("");
+  expect(consoleTrace).not.toHaveBeenCalled();
 });
 
 test("configureStderrLogging: reroutes a logger created BEFORE the sink was installed", () => {

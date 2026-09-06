@@ -3,7 +3,13 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import logLibrary from "loglevel";
-import { getDiagnosticSink, getLogger, UsageError } from "@psilink/core";
+import {
+  type DiagnosticSink,
+  getDiagnosticSink,
+  getLogger,
+  setDiagnosticSink,
+  UsageError,
+} from "@psilink/core";
 
 import { configureLogFile } from "../../../src/util/logging";
 import { parseCommonBootstrapArgs } from "../../../src/optionDefinitions";
@@ -124,11 +130,12 @@ test("configureLogFile: a Windows-style backslash path is normalized before open
 test("configureLogFile: close() restores the diagnostic sink in place before it", () => {
   // The install/restore is bracketed, so core's diagnostic sink is left as it was
   // found and a log emitted after close() routes to the restored sink, not the fd.
-  const before = getDiagnosticSink();
+  const outerSink: DiagnosticSink = () => {};
+  setDiagnosticSink(outerSink);
   const sink = configureLogFile(path.join(tmpDir, "restore.log"));
-  expect(getDiagnosticSink()).not.toBe(before);
+  expect(getDiagnosticSink()).not.toBe(outerSink);
   sink.close();
-  expect(getDiagnosticSink()).toBe(before);
+  expect(getDiagnosticSink()).toBe(outerSink);
 });
 
 test("configureLogFile: close() is idempotent", () => {
@@ -139,22 +146,35 @@ test("configureLogFile: close() is idempotent", () => {
   expect(() => sink.close()).not.toThrow();
 });
 
-test("configureLogFile: after close(), logging detaches from the file and does not throw", () => {
-  // close() restores the prior sink and then closes the fd. Because core resolves
-  // the diagnostic sink per log call, a log emitted after close() routes to the
-  // restored sink (the default console routing here), never to the closed
-  // descriptor -- so it neither throws nor appends to the file.
+test("configureLogFile: after close(), logging detaches from the file onto stderr", () => {
+  // close() hands core back the sink it found -- stderr, when this redirect was
+  // the only one installed -- and then closes the fd. Because core resolves the
+  // sink per log call, a line emitted after close() never reaches the closed
+  // descriptor: it neither throws nor appends to the file, and it keeps its
+  // prefix instead of taking loglevel's console leaves, where trace prints a
+  // stack and info and debug print on stdout.
   const logPath = path.join(tmpDir, "closed.log");
+  setDiagnosticSink(undefined);
   const sink = configureLogFile(logPath);
-  logLibrary.setDefaultLevel(logLibrary.levels.INFO);
+  logLibrary.setDefaultLevel(logLibrary.levels.TRACE);
   const log = getLogger("logfile-test-closed");
   log.info("before close");
   sink.close();
 
   const afterCloseContents = fs.readFileSync(logPath, "utf8");
   expect(afterCloseContents).toContain("before close");
-  expect(() => log.info("after close")).not.toThrow();
-  // The file did not grow: the post-close log went to the restored sink, not the fd.
+
+  const { stdoutWrites, stderrWrites, restore } = captureStdio();
+  try {
+    expect(() => log.trace("after close")).not.toThrow();
+  } finally {
+    restore();
+  }
+  expect(stderrWrites.join("")).toMatch(
+    /^\[[^\]]+\] \[TRACE\] \[logfile-test-closed\] after close\n$/,
+  );
+  expect(stdoutWrites.join("")).toBe("");
+  // The file did not grow: the post-close line went to stderr, not the fd.
   expect(fs.readFileSync(logPath, "utf8")).toBe(afterCloseContents);
 });
 

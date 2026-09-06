@@ -9,6 +9,7 @@ import logLibrary from "loglevel";
 import type { Arguments } from "yargs";
 
 import {
+  type DiagnosticSink,
   getDiagnosticSink,
   getLogger,
   sanitizeErrorForDisplay,
@@ -68,8 +69,9 @@ export function logLevelFlag(argv: Arguments): logLibrary.LogLevelNumbers {
  */
 export interface LogSink {
   /**
-   * Restore the diagnostic sink in place before the redirect and, for the file
-   * sink, close the underlying descriptor; best-effort and idempotent.
+   * Restore the diagnostic sink in place before the redirect -- or
+   * {@link stderrSinkAfterClose} when there was none -- and, for the file sink,
+   * close the underlying descriptor; best-effort and idempotent.
    */
   close(): void;
   /**
@@ -88,6 +90,31 @@ export interface LogSink {
    */
   writePlain(line: string): void;
 }
+
+function writeStderrLine(line: string): void {
+  try {
+    process.stderr.write(line);
+  } catch {
+    // process.stderr is the only sink here, so a wedged stderr leaves nowhere
+    // to report the failure; drop the line rather than let a write error throw
+    // back out of a log call into the exchange.
+  }
+}
+
+/**
+ * The diagnostic sink left in place when a {@link LogSink} closes with no
+ * earlier sink to restore: every level as a plain `[ISO] [LEVEL] [CONTEXT]`
+ * line on stderr, the same routing {@link configureStderrLogging} gives a run.
+ *
+ * Clearing the sink instead would hand a line emitted after teardown back to
+ * loglevel's per-level `console` routing, where `trace` is `console.trace` --
+ * a stack dump naming install paths -- and `info`/`debug` are stdout, among
+ * the result data a command reserves it for. The browser keeps that per-level
+ * routing, which is core's default with no sink installed; this replaces it
+ * for the CLI process only.
+ */
+const stderrSinkAfterClose: DiagnosticSink = (_methodName, prefix, args) =>
+  writeStderrLine(util.format(prefix, ...args) + "\n");
 
 /**
  * Install `writeLine` as core's process-wide {@link DiagnosticSink}, returning a
@@ -108,6 +135,10 @@ export interface LogSink {
  * ones. It does NOT pass through core's prefixer, so the private-key strip
  * above does not run on it: a caller composing a fragment someone else chose
  * redacts it at the composition site or not at all.
+ *
+ * Closing hands core back the sink this found installed, or
+ * {@link stderrSinkAfterClose} when it found none, so the CLI never returns to
+ * core's per-level `console` routing.
  */
 function installLogSink(
   writeLine: (line: string) => void,
@@ -125,9 +156,9 @@ function installLogSink(
       // Restore the prior sink first, then run onClose (the file sink closes its
       // descriptor there). Because core resolves the sink per log call, restoring
       // it detaches this sink from every logger at once -- a log emitted after
-      // close() goes to the restored sink (or the default console routing), never
-      // to a descriptor onClose has already closed.
-      setDiagnosticSink(previousSink);
+      // close() goes to the restored sink, never to a descriptor onClose has
+      // already closed.
+      setDiagnosticSink(previousSink ?? stderrSinkAfterClose);
       onClose?.();
     },
   };
@@ -153,8 +184,8 @@ function installLogSink(
  * `process.exit` cannot truncate it.
  *
  * {@link LogSink.close} restores the prior sink before closing the descriptor,
- * so a log emitted after `close()` routes to the restored sink, never to the
- * closed descriptor. The write path guards a failed `fs.writeSync` (a full
+ * so a log emitted after `close()` routes to the restored sink -- stderr, when
+ * this was the only sink -- never to the closed descriptor. The write path guards a failed `fs.writeSync` (a full
  * disk) and reports it on stderr rather than throwing back into the log call.
  *
  * The file is opened synchronously (`openSync` with `"a"`) so a missing parent
@@ -275,15 +306,7 @@ export function configureLogFile(logFilePath: string): LogSink {
  * import time (`file-utils`, `cleaning`).
  */
 export function configureStderrLogging(): LogSink {
-  return installLogSink((line) => {
-    try {
-      process.stderr.write(line);
-    } catch {
-      // process.stderr is the only sink here, so a wedged stderr leaves nowhere
-      // to report the failure; drop the line rather than let a write error throw
-      // back out of a log call into the exchange.
-    }
-  });
+  return installLogSink(writeStderrLine);
 }
 
 /**
