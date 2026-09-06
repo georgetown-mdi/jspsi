@@ -45,6 +45,11 @@ export interface LinkagePreflightMessaging {
    * and exchange hold terms a partner is held to as well; the mint holds none
    * until the invitation it is about to generate is sent. */
   termsStanding: LinkageTermsStanding;
+  /** Who wrote the names these terms declare, selecting who the declared-name
+   * sentence addresses its rename to ({@link bidiDeclaredNameNote}). The accept
+   * path reads the partner's invitation, a document this operator cannot edit,
+   * so telling them to declare the name differently names the wrong party. */
+  declaredNamesAuthor: "this party" | "the partner";
 }
 
 /**
@@ -108,12 +113,23 @@ function declaredNameDiffersOnlyByBidiControls(
  * copy interpolating only the terms' origin noun: the name itself is terms
  * content, partner-authored on the accept path, and stays on the cause links
  * that carry names.
+ *
+ * The rename is addressed to whoever can perform it. Where this operator wrote
+ * the names, that is them; where the partner did, the invitation is their
+ * document and a corrected one has to come from them.
  */
-function bidiDeclaredNameNote(source: string): string {
+function bidiDeclaredNameNote(messaging: LinkagePreflightMessaging): string {
+  if (messaging.declaredNamesAuthor === "the partner")
+    return (
+      ` The ${messaging.source} names a column with invisible text-direction ` +
+      `characters, which this read removes from the CSV header, so no column ` +
+      `of this input matches it. Your partner has to declare that name ` +
+      `without them and send a new ${messaging.source}.`
+    );
   return (
-    ` A name the ${source} declares holds invisible text-direction characters, ` +
-    `which this read removes from the CSV header, so it matches no column of ` +
-    `this input and has to be declared without them.`
+    ` A name the ${messaging.source} declares holds invisible text-direction ` +
+    `characters, which this read removes from the CSV header, so it matches ` +
+    `no column of this input and has to be declared without them.`
   );
 }
 
@@ -209,7 +225,7 @@ export function checkLinkageSatisfiability(
     ...verdict.unsatisfiedFields.map((field) => field.name),
     ...(metadata ?? []).map((column) => column.name),
   ])
-    ? bidiDeclaredNameNote(messaging.source)
+    ? bidiDeclaredNameNote(messaging)
     : "";
 
   throw new LinkageTermsUnsatisfiableError(
