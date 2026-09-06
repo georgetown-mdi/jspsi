@@ -17,6 +17,7 @@ import {
 import { declaredEffectiveKeyCount } from "../src/fanOutFunctions";
 import { APPLIED_SETTINGS } from "../src/consent/appliedSettings";
 import { UsageError } from "../src/errors";
+import { isCalendarDateValid } from "../src/utils/calendarDate";
 import type {
   GenerateFuzzyComparisons,
   LinkageKey,
@@ -203,6 +204,38 @@ describe("dayMonthSwapCandidates", () => {
   test("emits nothing for a date whose day and month agree", () => {
     expect(dayMonthSwapCandidates("19900101")).toEqual([]);
     expect(dayMonthSwapCandidates("19901212")).toEqual([]);
+  });
+
+  test("emits nothing when the input's own month and day are not a real calendar date", () => {
+    // Month 13 names no real date, even though the exchanged reading
+    // ("19000113") would be one.
+    expect(dayMonthSwapCandidates("19001301")).toEqual([]);
+  });
+
+  test("the exchange is symmetric over every eight-digit string in a year", () => {
+    // For every YYYYMMDD in one year, whatever a candidate it emits emits
+    // back, and nothing it emits is itself calendar-invalid -- the relation
+    // an emitted pair forms is checked to hold in both directions rather
+    // than assumed from the single-direction cases above.
+    const year = "1990";
+    for (let month = 0; month < 100; month++) {
+      for (let day = 0; day < 100; day++) {
+        const value = `${year}${String(month).padStart(2, "0")}${String(
+          day,
+        ).padStart(2, "0")}`;
+        const candidates = dayMonthSwapCandidates(value);
+        for (const candidate of candidates) {
+          expect(
+            isCalendarDateValid(
+              candidate.slice(0, 4),
+              candidate.slice(4, 6),
+              candidate.slice(6, 8),
+            ),
+          ).toBe(true);
+          expect(dayMonthSwapCandidates(candidate)).toEqual([value]);
+        }
+      }
+    }
   });
 
   test("refuses a value that is not a canonical YYYYMMDD date", () => {

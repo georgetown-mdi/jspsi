@@ -153,8 +153,9 @@ export function adjacentYearCandidates(value: string): string[] {
  *
  * A day above 12 names no month, so an exchanged date that is not a real
  * calendar date emits no candidate -- the impossible-date refusal `parse_date`
- * standardization already carries. A date whose day and month are equal
- * exchanges to itself and emits none.
+ * standardization already carries. An input whose own day and month are not a
+ * real calendar date emits no candidate either, for the same reason. A date
+ * whose day and month are equal exchanges to itself and emits none.
  *
  * Throws when `value` is not a canonical `YYYYMMDD` date, rather than returning
  * the value unexpanded -- see {@link expandFuzzyComparisons}.
@@ -163,9 +164,12 @@ export function dayMonthSwapCandidates(value: string): string[] {
   if (!CANONICAL_DATE_PATTERN.test(value))
     throw nonCanonicalDateRefusal("day_month_swaps");
   const year = value.slice(0, 4);
-  const exchangedMonth = value.slice(6, 8);
-  const exchangedDay = value.slice(4, 6);
+  const month = value.slice(4, 6);
+  const day = value.slice(6, 8);
+  const exchangedMonth = day;
+  const exchangedDay = month;
   if (exchangedMonth === exchangedDay) return [];
+  if (!isCalendarDateValid(year, month, day)) return [];
   if (!isCalendarDateValid(year, exchangedMonth, exchangedDay)) return [];
   return [`${year}${exchangedMonth}${exchangedDay}`];
 }
