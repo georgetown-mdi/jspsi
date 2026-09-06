@@ -12,6 +12,13 @@ import { generateInvitation } from "@psi/invitation";
 import { loadCSVFileOffMainThread } from "@psi/workers/csvParseController";
 import { profileJobInput } from "@jobs/workInputs";
 
+import {
+  BLANK_HEADER_CELL_CSV,
+  BLANK_HEADER_CELL_PROFILE,
+  CONTROLS_ONLY_HEADER_CSV,
+  CONTROLS_ONLY_HEADER_PROFILE,
+} from "../../utils/unnamedColumnProfiles";
+
 /**
  * Every web intake seat reads its CSV through core's parse boundary, which
  * removes the nine bidi control characters from each column name and reports the
@@ -124,6 +131,39 @@ describe("the console's profile behind the direct-exchange and picker seats", ()
     // The per-column samples are keyed by the same stripped name the seat marks.
     expect(profile.columnSamples.map((entry) => entry.column)).toEqual(
       SANITIZED,
+    );
+  });
+});
+
+describe("a header that leaves a column unnamed", () => {
+  /** Profile `content` as a mounted input, returning the fields the console
+   * seats' stubs fix. */
+  async function profileOf(content: string) {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-bidi-"));
+    dirs.push(dir);
+    fs.writeFileSync(path.join(dir, "input.csv"), content, "utf8");
+    const profile = await profileJobInput(dir, "input.csv");
+    return {
+      columns: profile.columns,
+      bidiStrippedColumns: profile.bidiStrippedColumns,
+      columnSamples: profile.columnSamples,
+    };
+  }
+
+  test("a column that is only direction characters profiles, not fails", async () => {
+    // The strip leaves that column no name, and the profile is what the console
+    // seats read the file through: it has to reach them holding the empty name
+    // and the position that emptied it, so the seat states the removal as the
+    // cause. A refusal raised inside the profiling read instead reaches the
+    // operator as "Could not read this file as a CSV" for a valid CSV.
+    expect(await profileOf(CONTROLS_ONLY_HEADER_CSV)).toEqual(
+      CONTROLS_ONLY_HEADER_PROFILE,
+    );
+  });
+
+  test("a blank header cell profiles with no stripped position", async () => {
+    expect(await profileOf(BLANK_HEADER_CELL_CSV)).toEqual(
+      BLANK_HEADER_CELL_PROFILE,
     );
   });
 });

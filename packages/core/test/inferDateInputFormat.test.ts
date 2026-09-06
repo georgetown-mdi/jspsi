@@ -41,6 +41,27 @@ test("inferDateOfBirthColumn resolves the date_of_birth column via inferMetadata
   expect(inferDateOfBirthColumn(["a", "b"])).toBeUndefined();
 });
 
+test("a header column emptied by the strip is skipped, not refused here", () => {
+  // The selection runs inside the read, which holds no sanitized positions, so
+  // it leaves the empty name to the caller's positions-aware refusal instead of
+  // raising the wrong cause from under the parse.
+  expect(inferDateOfBirthColumn(["id", "", "dob"])).toBe("dob");
+  expect(inferDateOfBirthColumn(["id", "", "city"])).toBeUndefined();
+});
+
+test("a header that is only direction characters reaches the caller whole", async () => {
+  // U+202E (right-to-left override) then U+2069 (pop directional isolate): the
+  // strip leaves the column no name. The read resolves rather than throwing, so
+  // the caller warns by position and refuses with the removal as the cause.
+  const inferred = await inferDateInputFormatFromSource(
+    streamOf("id,\u202e\u2069,dob\n1,x,1990-01-02\n"),
+  );
+  expect(inferred.columns).toEqual(["id", "", "dob"]);
+  expect(inferred.bidiStrippedColumns).toEqual([2]);
+  expect(inferred.dobColumn).toBe("dob");
+  expect(inferred.dateInputFormat).toBe("YYYY-MM-DD");
+});
+
 test("the inferred format equals inferDateFormat over the full date column", async () => {
   const csv = csvWithRows(40);
   const full = await loadCSVFile(streamOf(csv));

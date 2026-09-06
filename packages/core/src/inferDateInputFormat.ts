@@ -11,11 +11,21 @@ import { INFER_DATE_SCAN_CAP, inferDateFormat } from "./utils/date.js";
  * that needs to locate the DOB column for date-format inference -- the CLI's init
  * path, the shared {@link inferDateInputFormatFromSource} below, and the web
  * server's streaming file profile -- picks the same column and cannot drift.
+ *
+ * An empty column name is dropped rather than handed to {@link inferMetadata}:
+ * this selection runs inside the read -- `loadCSVColumnSample`'s chunk handler
+ * and the web server's stream consumer -- which holds no sanitized-position
+ * list, so its empty-name refusal would state the wrong cause for a name the
+ * bidi strip emptied, ahead of the caller's own warning. The one refusal stays
+ * with that caller, which passes the positions
+ * (`CSVParseMeta.bidiStrippedColumns`) and names the removal. A type is resolved
+ * per name, so dropping one changes no other column's type.
  */
 export function inferDateOfBirthColumn(
   columns: Array<string>,
 ): string | undefined {
-  return inferMetadata(columns).find((c) => c.type === "date_of_birth")?.name;
+  const named = columns.filter((name) => name.length > 0);
+  return inferMetadata(named).find((c) => c.type === "date_of_birth")?.name;
 }
 
 /** The header columns plus the inferred date-input format of a source's
