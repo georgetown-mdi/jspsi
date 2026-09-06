@@ -1101,7 +1101,7 @@ Two exchanges have no result table for the columns to reach, and they are treate
 - A **count-only (`psi-c`)** exchange is refused at config-parse time (exit 64), naming the key: it reports the size of the intersection and writes no result file at all, so the key cannot mean anything on it. Remove the key, or set the algorithm to `psi`.
 - A party whose agreed [`output`](#linkage_termsoutput) gives it **no result** ignores the key silently. Which party receives the result is settled at the terms exchange, so a configuration that sets the key can be entirely correct on a party that turns out to receive nothing.
 
-The result's headers stay distinct. Your first column takes its name first, then your own columns keep their input names, then each partner payload column takes its own name unless something already holds it, and the partner row-index column takes what is left. A name already taken falls back to a prefixed then numbered variant -- `their_` for one of your partner's columns, `own_` for one of yours. So a partner column whose name matches one of your own columns is written `their_<name>`, and (with no identifier column, where your first column is headed `row_id`) an input column of your own named `row_id` is written `own_row_id`.
+The result's headers stay distinct: a partner payload column whose name collides with one already written takes a `their_` prefix. The full header-assignment order and fallback rule are in [PROTOCOL.md](spec/PROTOCOL.md#output).
 
 Your own columns are not covered by the exchange record's commitments, which bind what was exchanged rather than what you filed beside it; verification of a result written with the key is unaffected ([EXCHANGE_RECORD.md](spec/EXCHANGE_RECORD.md#commitment-scheme)).
 
