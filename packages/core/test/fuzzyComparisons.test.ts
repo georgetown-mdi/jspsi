@@ -171,6 +171,40 @@ describe("adjacentYearCandidates", () => {
     expect(adjacentYearCandidates("99991231")).toEqual(["99981231"]);
   });
 
+  test("emits nothing when the input is not a real calendar date", () => {
+    // Feb 29 1999 names no real date, even though the shift into 2000 would
+    // be one. Emitting it would leave a pair that meets only when the 1999
+    // row's party resolves as receiver, since 2000's own shifts are dropped.
+    expect(adjacentYearCandidates("19990229")).toEqual([]);
+  });
+
+  test("the shift is symmetric over every eight-digit string in a leap span", () => {
+    // For every YYYYMMDD across a leap year and the years either side of it,
+    // whatever a candidate it emits emits back, and nothing it emits is
+    // itself calendar-invalid -- the relation an emitted pair forms is
+    // checked to hold in both directions, so the pair meets whichever party
+    // role resolution designates as receiver.
+    for (const year of ["1999", "2000", "2001"]) {
+      for (let month = 0; month < 100; month++) {
+        for (let day = 0; day < 100; day++) {
+          const value = `${year}${String(month).padStart(2, "0")}${String(
+            day,
+          ).padStart(2, "0")}`;
+          for (const candidate of adjacentYearCandidates(value)) {
+            expect(
+              isCalendarDateValid(
+                candidate.slice(0, 4),
+                candidate.slice(4, 6),
+                candidate.slice(6, 8),
+              ),
+            ).toBe(true);
+            expect(adjacentYearCandidates(candidate)).toContain(value);
+          }
+        }
+      }
+    }
+  });
+
   test("refuses a value that is not a canonical YYYYMMDD date", () => {
     for (const value of ["1990-01-15", "01/15/1990", "SMITH", "199001150"]) {
       expect(() => adjacentYearCandidates(value)).toThrow(UsageError);

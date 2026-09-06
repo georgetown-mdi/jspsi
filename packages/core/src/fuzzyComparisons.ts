@@ -117,10 +117,14 @@ export function deletionCandidates(value: string): string[] {
  * The calendar-valid dates one year either side of a canonical
  * `YYYYMMDD` value, excluding the value itself.
  *
- * Feb 29 has no counterpart in an adjacent non-leap year, so a shifted date
- * that is not a real calendar date emits no candidate; the surviving side (or
- * neither) is returned. A shift off the four-digit year range is dropped the
- * same way.
+ * Both the input and the shifted date must be real calendar dates. Feb 29 has
+ * no counterpart in an adjacent non-leap year, so a shifted date that is not
+ * one emits no candidate; the surviving side (or neither) is returned. An
+ * input that is not one emits none either, which is what keeps the relation
+ * symmetric -- without that guard "19990229" would expand to "20000229",
+ * which does not expand back, and the pair would meet under one role
+ * resolution and not the other. A shift off the four-digit year range is
+ * dropped the same way.
  *
  * Throws when `value` is not a canonical `YYYYMMDD` date, rather than returning
  * the value unexpanded -- see {@link expandFuzzyComparisons}.
@@ -128,11 +132,12 @@ export function deletionCandidates(value: string): string[] {
 export function adjacentYearCandidates(value: string): string[] {
   if (!CANONICAL_DATE_PATTERN.test(value))
     throw nonCanonicalDateRefusal("adjacent_years");
-  const year = Number(value.slice(0, 4));
+  const year = value.slice(0, 4);
   const month = value.slice(4, 6);
   const day = value.slice(6, 8);
+  if (!isCalendarDateValid(year, month, day)) return [];
   const candidates: string[] = [];
-  for (const shifted of [year - 1, year + 1]) {
+  for (const shifted of [Number(year) - 1, Number(year) + 1]) {
     if (shifted < 0 || shifted > 9999) continue;
     const shiftedYear = String(shifted).padStart(4, "0");
     if (!isCalendarDateValid(shiftedYear, month, day)) continue;
