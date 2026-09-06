@@ -2446,3 +2446,114 @@ test("buildOutputTable: an ignored column reaches the result under 'all' but not
     rows: [["P0", "0", "keep"]],
   });
 });
+
+test("buildOutputTable: a partner column repeating a plain name is uniquified for each occurrence", () => {
+  // The partner sends "note" twice: a repeat, not merely a name that collides
+  // with one of ours, and the fallback chain must resolve it the same way.
+  const partnerPayload: PartnerPayload = {
+    columns: ["note", "note"],
+    rowIndices: [0],
+    rows: [["n0", "m0"]],
+  };
+  const noOwn = buildOutputTable(
+    [[0], [0]],
+    rawRows,
+    metaWithId,
+    partnerPayload,
+  );
+  expect(noOwn.headers).toEqual(["patient_id", "row_id", "note", "their_note"]);
+  expect(new Set(noOwn.headers).size).toBe(noOwn.headers.length);
+  expect(noOwn.rows).toEqual([["P0", "0", "n0", "m0"]]);
+
+  const withOwn = buildOutputTable(
+    [[0], [0]],
+    rawRows,
+    metaWithId,
+    partnerPayload,
+    "all",
+  );
+  expect(withOwn.headers).toEqual([
+    "patient_id",
+    "row_id",
+    "note",
+    "their_note",
+    "ssn",
+    "diagnosis",
+  ]);
+  expect(new Set(withOwn.headers).size).toBe(withOwn.headers.length);
+  expect(withOwn.rows).toEqual([["P0", "0", "n0", "m0", "001", "A"]]);
+});
+
+test("buildOutputTable: a partner column repeating the local first column's name is uniquified for each occurrence", () => {
+  const meta: Metadata = [
+    { name: "pid", type: "identifier", role: "identifier", isPayload: true },
+    { name: "diagnosis", type: "other", role: "payload", isPayload: true },
+  ];
+  const rows: Array<CSVRow> = [{ pid: "P0", diagnosis: "A" }];
+  const partnerPayload: PartnerPayload = {
+    columns: ["pid", "pid"],
+    rowIndices: [0],
+    rows: [["Q0", "R0"]],
+  };
+  const noOwn = buildOutputTable([[0], [0]], rows, meta, partnerPayload);
+  expect(noOwn.headers).toEqual(["pid", "row_id", "their_pid", "their_pid_2"]);
+  expect(new Set(noOwn.headers).size).toBe(noOwn.headers.length);
+  expect(noOwn.rows).toEqual([["P0", "0", "Q0", "R0"]]);
+
+  const withOwn = buildOutputTable(
+    [[0], [0]],
+    rows,
+    meta,
+    partnerPayload,
+    "all",
+  );
+  expect(withOwn.headers).toEqual([
+    "pid",
+    "row_id",
+    "their_pid",
+    "their_pid_2",
+    "diagnosis",
+  ]);
+  expect(new Set(withOwn.headers).size).toBe(withOwn.headers.length);
+  expect(withOwn.rows).toEqual([["P0", "0", "Q0", "R0", "A"]]);
+});
+
+test("buildOutputTable: a partner column repeating 'row_id' is uniquified for each occurrence", () => {
+  const partnerPayload: PartnerPayload = {
+    columns: ["row_id", "row_id"],
+    rowIndices: [3],
+    rows: [["A", "B"]],
+  };
+  const noOwn = buildOutputTable(
+    [[0], [3]],
+    rawRows,
+    metaWithId,
+    partnerPayload,
+  );
+  expect(noOwn.headers).toEqual([
+    "patient_id",
+    "their_row_id_2",
+    "row_id",
+    "their_row_id",
+  ]);
+  expect(new Set(noOwn.headers).size).toBe(noOwn.headers.length);
+  expect(noOwn.rows).toEqual([["P0", "3", "A", "B"]]);
+
+  const withOwn = buildOutputTable(
+    [[0], [3]],
+    rawRows,
+    metaWithId,
+    partnerPayload,
+    "all",
+  );
+  expect(withOwn.headers).toEqual([
+    "patient_id",
+    "their_row_id_2",
+    "row_id",
+    "their_row_id",
+    "ssn",
+    "diagnosis",
+  ]);
+  expect(new Set(withOwn.headers).size).toBe(withOwn.headers.length);
+  expect(withOwn.rows).toEqual([["P0", "3", "A", "B", "001", "A"]]);
+});
