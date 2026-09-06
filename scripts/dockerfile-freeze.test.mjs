@@ -349,7 +349,8 @@ const IMAGES = [
     packageManagerRemoval:
       "rm -rf /usr/local/lib/node_modules/npm " +
       "/usr/local/lib/node_modules/corepack /usr/local/bin/npm " +
-      "/usr/local/bin/npx /usr/local/bin/corepack",
+      "/usr/local/bin/npx /usr/local/bin/corepack /usr/local/bin/yarn " +
+      "/usr/local/bin/yarnpkg /opt/yarn-v*",
     modeChangesOutside: [
       "chmod g-s /usr/sbin/unix_chkpwd",
       "chmod +x /app/docker-entrypoint.sh",

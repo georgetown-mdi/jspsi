@@ -682,7 +682,10 @@ corepack shim in their runtime stage -- `lib/node_modules/npm`,
 `lib/node_modules/corepack`, and the `bin/npm`, `bin/npx` and `bin/corepack`
 links -- under `/usr/local` on the default image and under `/opt/node` on the
 variant, where the runtime comes from the official tarball rather than from a
-package. The builder stages keep theirs, `npm ci` being what resolves the tree
+package, and the default image's runtime stage also takes out the base's
+bundled Yarn classic install -- the `bin/yarn` and `bin/yarnpkg` links and the
+`/opt/yarn-v*` directory -- which the tarball-installed variant never ships.
+The builder stages keep theirs, `npm ci` being what resolves the tree
 the runtime stage copies in, so this is a property of the shipped image and not
 of the build.
 

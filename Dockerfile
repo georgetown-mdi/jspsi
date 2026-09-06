@@ -134,20 +134,24 @@ RUN apk add --no-cache samba-client
 RUN chmod g-s /usr/sbin/unix_chkpwd
 
 # The base image's package manager, taken out of the runtime stage. Neither role
-# runs npm, npx or corepack -- the entrypoint execs node directly, and the
-# console server spawns the CLI entry the same way -- while the npm CLI brings a
-# bundled dependency tree of its own that the image vulnerability scan reads and
-# that no pin in this repository moves. Taking it out leaves that scan two
-# remedies, both of them this repository's: a system package moves with the base
-# digest, a package under /app with the lockfile. `rm -rf` on a path the base
-# does not hold is a no-op, so this stands whichever of these the pinned base
-# ships; image_smoke.yaml asserts none of the three resolves in the built image.
+# runs npm, npx, corepack or yarn -- the entrypoint execs node directly, and the
+# console server spawns the CLI entry the same way -- while the npm CLI and the
+# Yarn classic install the base bundles bring a dependency tree of their own
+# that the image vulnerability scan reads and that no pin in this repository
+# moves. Taking it out leaves that scan two remedies, both of them this
+# repository's: a system package moves with the base digest, a package under
+# /app with the lockfile. `rm -rf` on a path the base does not hold is a no-op,
+# so this stands whichever of these the pinned base ships; image_smoke.yaml
+# asserts none of the five resolves in the built image.
 RUN rm -rf \
   /usr/local/lib/node_modules/npm \
   /usr/local/lib/node_modules/corepack \
   /usr/local/bin/npm \
   /usr/local/bin/npx \
-  /usr/local/bin/corepack
+  /usr/local/bin/corepack \
+  /usr/local/bin/yarn \
+  /usr/local/bin/yarnpkg \
+  /opt/yarn-v*
 
 WORKDIR /app
 # npm links the workspaces its install names, so the tree copied here carries

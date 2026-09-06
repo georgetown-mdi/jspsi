@@ -489,13 +489,13 @@ jobs:
       - name: Assert the image ships no package manager
         run: |
           set -euo pipefail
-          for tool in npm npx corepack; do
+          for tool in npm npx corepack yarn yarnpkg; do
             if docker run --rm --entrypoint sh ${{ matrix.tag }} -c "command -v $tool"; then
               echo "$tool resolves inside the ${{ matrix.variant }} image; take it out in the runtime stage of that image's Dockerfile" >&2
               exit 1
             fi
           done
-          echo "the ${{ matrix.variant }} image resolves neither npm, npx nor corepack"
+          echo "the ${{ matrix.variant }} image resolves none of npm, npx, corepack, yarn or yarnpkg"
 
       # Everything else those setup scripts ask of the image, read out of the
       # scripts rather than listed beside them: the psilink argument vectors they
