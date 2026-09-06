@@ -4,7 +4,12 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import log from "loglevel";
 
-import { describeResolvedRunShape, runExchange } from "@psilink/core";
+import {
+  StandardizedDataset,
+  describeResolvedRunShape,
+  getDefaultLinkageTerms,
+  runExchange,
+} from "@psilink/core";
 
 import {
   DISCLOSURE_NOT_FILED_WARNING,
@@ -34,8 +39,8 @@ import type * as PsilinkCore from "@psilink/core";
 import type {
   ExchangeResult,
   HandshakeRole,
-  LinkageTerms,
   MessageConnection,
+  PreparedExchange,
   PsiBackendSelection,
   RendezvousRole,
   ResolvedRunShape,
@@ -103,7 +108,16 @@ vi.mock("../../../src/psi/disclosureAccountingStore.js", () => ({
   appendDisclosureRecordToStore: vi.fn(() => Promise.resolve()),
 }));
 vi.mock("../../../src/psi/managed/managedPreparedExchange.js", () => ({
-  prepareManagedRerunExchange: vi.fn(() => ({})),
+  prepareManagedRerunExchange: vi.fn(
+    () =>
+      ({
+        metadata: [],
+        linkageTerms: getDefaultLinkageTerms("Managed re-run fixture"),
+        dataset: new StandardizedDataset([], []),
+        rawRows: [],
+        rowCount: 0,
+      }) satisfies PreparedExchange,
+  ),
 }));
 vi.mock("../../../src/psi/authenticateExchange.js", () => ({
   authenticateExchange: vi.fn(() => Promise.resolve({ rotatedSecret: "next" })),
@@ -119,6 +133,9 @@ vi.mock("@openmined/psi.js/psi_wasm_web", () => ({
 }));
 vi.mock("@psilink/core", async (importOriginal) => {
   const actual = await importOriginal<typeof PsilinkCore>();
+  const stubPartnerTerms = actual.getDefaultLinkageTerms(
+    "Managed re-run partner fixture",
+  );
   return {
     ...actual,
     loadPsiBackend: vi.fn(() =>
@@ -127,7 +144,15 @@ vi.mock("@psilink/core", async (importOriginal) => {
         backend: "wasm",
       } satisfies PsiBackendSelection),
     ),
-    runExchange: vi.fn(() => Promise.resolve({})),
+    runExchange: vi.fn(() =>
+      Promise.resolve({
+        associationTable: undefined,
+        intersectionCount: undefined,
+        partnerTerms: stubPartnerTerms,
+        resolvedRole: "receiver",
+        partnerPayload: { columns: [], rowIndices: [], rows: [] },
+      } satisfies ExchangeResult),
+    ),
   };
 });
 
@@ -599,6 +624,9 @@ describe("naming what the agreed terms resolved to", () => {
    * run. `runExchange` is mocked here, so this is the call site a real run
    * fires after the terms exchange completes. */
   function exchangeConfirming(runShape: ResolvedRunShape) {
+    const partnerTerms = getDefaultLinkageTerms(
+      "Confirmed-terms partner fixture",
+    );
     mockedRunExchange.mockImplementationOnce(
       (
         _conn: unknown,
@@ -608,8 +636,14 @@ describe("naming what the agreed terms resolved to", () => {
           onProtocolConfirmed?: RunExchangeOptions["onProtocolConfirmed"];
         },
       ) => {
-        options.onProtocolConfirmed?.({} as LinkageTerms, "receiver", runShape);
-        return Promise.resolve({} as ExchangeResult);
+        options.onProtocolConfirmed?.(partnerTerms, "receiver", runShape);
+        return Promise.resolve({
+          associationTable: undefined,
+          intersectionCount: undefined,
+          partnerTerms,
+          resolvedRole: "receiver",
+          partnerPayload: { columns: [], rowIndices: [], rows: [] },
+        } satisfies ExchangeResult);
       },
     );
   }
@@ -691,11 +725,22 @@ describe("filing the run's disclosure", () => {
   async function exchangeYieldsRecord() {
     const record = await disclosureRecord();
     mockedRunExchange.mockResolvedValueOnce({
+      associationTable: undefined,
+      intersectionCount: undefined,
+      partnerTerms: getDefaultLinkageTerms("Disclosure-record partner fixture"),
+      resolvedRole: "receiver",
+      partnerPayload: { columns: [], rowIndices: [], rows: [] },
       audit: {
         record,
-        keys: { version: "psilink-exchange-keys/v1", salts: {} },
+        keys: {
+          version: "psilink-exchange-keys/v1",
+          salts: {
+            localPayloadSent: "local-payload-salt",
+            partnerPayloadReceived: "partner-payload-salt",
+          },
+        },
       },
-    } as unknown as Awaited<ReturnType<typeof runExchange>>);
+    } satisfies ExchangeResult);
     return record;
   }
 
