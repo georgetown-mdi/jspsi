@@ -476,6 +476,27 @@ jobs:
       - name: Smoke the file-drop probe tooling
         run: docker run --rm --entrypoint sh ${{ matrix.tag }} -c 'command -v smbclient'
 
+      # The other half of that reading: what the image must NOT answer to. Both
+      # runtime stages take the base image's npm CLI and corepack shim out, so a
+      # shipped image installs and resolves nothing, and the vulnerability scan
+      # below has no finding this repository cannot remedy. The Dockerfile text
+      # is frozen by scripts/dockerfile-freeze.test.mjs; this reads the built
+      # image, which is what catches a base that puts a manager back on a path
+      # the removal does not name. It inverts the step above, which is also what
+      # stands behind it: the same invocation against a tool the image does
+      # have, so a probe that could resolve nothing at all fails there rather
+      # than passing here.
+      - name: Assert the image ships no package manager
+        run: |
+          set -euo pipefail
+          for tool in npm npx corepack yarn yarnpkg; do
+            if docker run --rm --entrypoint sh ${{ matrix.tag }} -c "command -v $tool"; then
+              echo "$tool resolves inside the ${{ matrix.variant }} image; take it out in the runtime stage of that image's Dockerfile" >&2
+              exit 1
+            fi
+          done
+          echo "the ${{ matrix.variant }} image resolves none of npm, npx, corepack, yarn or yarnpkg"
+
       # Everything else those setup scripts ask of the image, read out of the
       # scripts rather than listed beside them: the psilink argument vectors they
       # hand a container, and the helper scripts they pipe into a shell in it.
@@ -718,17 +739,23 @@ jobs:
           fi
           echo "the ${{ matrix.variant }} image's setuid/setgid files are the recorded inventory"
 
-      # The OS package layer, which nothing else covers: Dependabot, the
-      # dependency review gate and the release `npm audit` all stop at the npm
-      # tree, so a vulnerability in the base image or one of its system packages
-      # would otherwise reach an operator unflagged. The base is pinned by
-      # digest, which is why the weekly schedule above exists -- a vulnerability
-      # published against a pin nothing has touched has no other trigger.
+      # Every package the image ships: the base image's system packages, and the
+      # language packages inside it, which are the production npm tree the
+      # builder installs and nothing else -- the package-manager assertion above
+      # holds the image to none, so no bundled npm CLI tree stands beside it.
+      # The Node binary itself is not a component Trivy catalogs, so a CVE in
+      # the Node runtime is outside this gate and moves only when the pinned
+      # base image's Node version does. Dependabot, the dependency review gate
+      # and the release `npm audit` all read this repository's own dependency
+      # declarations, so nothing else reaches what a base image brought in. The
+      # base is pinned by digest, which is why the weekly schedule above exists
+      # -- a vulnerability published against a pin nothing has touched has no
+      # other trigger.
       #
       # The scope and the threshold, set here rather than left to a default:
-      #   - `vuln-type: os` keeps this to the layer the npm-side gates do not
-      #     reach; a second gate over the npm tree would answer to a different
-      #     threshold from the first and disagree with it.
+      #   - `vuln-type: os,library` is both halves of the image. Trivy reads the
+      #     system package database for the first and the package manifests on
+      #     the filesystem for the second, so a finding names which half it is in.
       #   - `scanners: vuln` keeps a secret or misconfiguration finding from
       #     failing a step whose threshold is written for vulnerabilities.
       #   - `severity` and `ignore-unfixed` are the threshold: HIGH and above,
@@ -742,16 +769,18 @@ jobs:
       #     acceptance: an entry in force keeps this gate green whether
       #     or not the condition it was written for still holds.
       #
-      # A finding is a prompt to bump the pinned base -- the digest in the
-      # Dockerfile, and on the variant the Amazon Linux release snapshot its dnf
-      # transactions resolve against as well: the pins are deliberate, so nothing
-      # on the npm side resolves them. For the default image the docker ecosystem
-      # in .github/dependabot.yml opens that bump on its own weekly schedule
-      # rather than in answer to this. The variant's base is ignored by that
-      # block and moves as a coordinated human-reviewed change instead, so on
-      # that leg a finding here is one of the signals the move answers to; the
-      # procedure and the rest of them are in "Bumping the FIPS base image" in
-      # docs/spec/DEPENDENCY_PINS.md.
+      # A finding has two remedies, and the package path in the report says
+      # which. A system package is a prompt to bump the pinned base:
+      # the digest in the Dockerfile, and on the variant the Amazon Linux release
+      # snapshot its dnf transactions resolve against as well. The pins are
+      # deliberate, so nothing on the npm side resolves them. For the default
+      # image the docker ecosystem in .github/dependabot.yml opens that bump on
+      # its own weekly schedule rather than in answer to this. The variant's base
+      # is ignored by that block and moves as a coordinated human-reviewed change
+      # instead, so on that leg a finding here is one of the signals the move
+      # answers to; the procedure and the rest of them are in "Bumping the FIPS
+      # base image" in docs/spec/DEPENDENCY_PINS.md. A finding under /app is in
+      # this repository's own production tree, which the lockfile moves.
       #
       # Temporarily scoped to the default leg. Both images are published and
       # the release workflow gates each one's push on this same scanner at this
@@ -764,7 +793,7 @@ jobs:
       # still gates BOTH images ahead of its registry login. Re-widen to both
       # legs in the same diff as the base digest + AL2023_RELEASEVER bump that
       # clears the findings.
-      - name: Scan the image for OS-layer vulnerabilities
+      - name: Scan the image for vulnerable packages
         id: vulnerability_scan
         if: ${{ matrix.fips == 'false' }}
         uses: aquasecurity/trivy-action@v0.36.0
@@ -772,7 +801,7 @@ jobs:
           scan-type: image
           image-ref: ${{ matrix.tag }}
           scanners: vuln
-          vuln-type: os
+          vuln-type: os,library
           severity: HIGH,CRITICAL
           ignore-unfixed: true
           trivyignores: .github/trivyignore.yaml
@@ -1166,20 +1195,22 @@ jobs:
           sudo rm -f "/var/run/netns/$ENDPOINT_NETNS"
           exit 0
 
-  # The other half of the capability gate, and the only one that observes what an
-  # operator's setup run really reaches. Setup-PsilinkFileDrop.ps1 is fetched off
-  # the default branch on its own and runs the floating `vdorie/psi-link:latest`,
-  # which is published only from a version tag: nothing locks the script to any
-  # image, so a capability can be on the default branch and absent from the tag
-  # the script pulls for as long as no release has been cut.
+  # What `vdorie/psi-link:latest` -- the image an operator's launcher pulls --
+  # answers, and what it ships. Setup-PsilinkFileDrop.ps1 is fetched off the
+  # default branch on its own and runs that floating tag, which is published only
+  # from a version tag: nothing locks the script to any image, so a capability can
+  # be on the default branch and absent from the tag the script pulls for as long
+  # as no release has been cut. The scan is the same question about the same lag:
+  # the smoke job above reads an image built from the branch, and a base bump that
+  # has not reached a release tag leaves the published image on the older packages.
   #
   # Deliberately off the pull-request trigger, and therefore never a merge gate:
   # the remedy for the commonest red here is a release, which is the maintainer's
-  # to cut and no reason to hold a merge. It shares the weekly schedule with the
-  # vulnerability scan above, which re-runs against a moving world for the same
-  # reason -- the subject changes with nothing in this repository changing.
+  # to cut and no reason to hold a merge. Both steps re-run against a moving world
+  # on the weekly schedule -- the subject changes with nothing in this repository
+  # changing.
   published_image:
-    name: Assert the published image answers what the setup scripts invoke
+    name: Assert and scan the published image
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 20
@@ -1225,3 +1256,52 @@ jobs:
             echo "its remedy (docs/RELEASES.md). This leg runs on the schedule and on"
             echo "demand only, never on a pull request, so it gates no merge either way."
           } >> "$GITHUB_STEP_SUMMARY"
+
+      # The scanner, threshold and exception list the pull-request gate above sets,
+      # which states why each input is set the way it is. Kept off that gate's
+      # outcome so a capability failure and a vulnerability are reported together
+      # rather than one run apart. The report goes to a table rather than SARIF:
+      # the job holds `contents: read`, and a code-scanning upload here would be
+      # a second set of alerts over an image no commit in this repository builds.
+      - name: Scan the published image for vulnerable packages
+        id: published_vulnerability_scan
+        if: ${{ !cancelled() }}
+        uses: aquasecurity/trivy-action@v0.36.0
+        with:
+          scan-type: image
+          image-ref: vdorie/psi-link:latest
+          scanners: vuln
+          vuln-type: os,library
+          severity: HIGH,CRITICAL
+          ignore-unfixed: true
+          trivyignores: .github/trivyignore.yaml
+          exit-code: "1"
+          format: table
+          output: trivy-published-image.txt
+
+      # The scan writes its report to a file, so a failing gate would otherwise
+      # show nothing it found. This puts it on the run's summary page and states
+      # the remedy, which is not the same one a pull-request finding takes.
+      - name: Record the published image's scan in the run summary
+        if: ${{ !cancelled() }}
+        env:
+          SCAN_OUTCOME: ${{ steps.published_vulnerability_scan.outcome }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## Published image vulnerability scan"
+            echo
+            echo "Gate outcome: **$SCAN_OUTCOME**. Fixable HIGH and CRITICAL vulnerabilities in the OS and language packages of \`vdorie/psi-link:latest\`, with the exceptions in \`.github/trivyignore.yaml\` applied."
+            echo
+            if [ -s trivy-published-image.txt ]; then
+              echo '```'
+              cat trivy-published-image.txt
+              echo '```'
+            else
+              echo "The scanner left no report."
+            fi
+            echo
+            echo "The tag is published only from a version tag, so a finding a base or"
+            echo "lockfile bump on the default branch has already cleared stands here"
+            echo "until a release is cut (docs/RELEASES.md)."
+          } | tee -a "$GITHUB_STEP_SUMMARY"

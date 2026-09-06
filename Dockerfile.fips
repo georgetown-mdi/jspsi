@@ -226,6 +226,20 @@ RUN chmod u-s,g-s \
   /usr/sbin/pam_timestamp_check \
   /usr/sbin/unix_chkpwd
 
+# The package manager taken out of the final stage, as in the root Dockerfile:
+# neither role runs npm, npx or corepack, and the npm CLI's bundled dependency
+# tree is one no pin in this repository moves. The paths are under /opt/node,
+# the runtime here coming from the official tarball rather than from a package,
+# and this stage is the only one they leave -- the builder shares the `nodebase`
+# stage and installs with the npm this would take from it. `rm -rf` on a path
+# the tarball does not hold is a no-op.
+RUN rm -rf \
+  /opt/node/lib/node_modules/npm \
+  /opt/node/lib/node_modules/corepack \
+  /opt/node/bin/npm \
+  /opt/node/bin/npx \
+  /opt/node/bin/corepack
+
 # Activates the FIPS and base providers and NOT the default provider, with
 # fips=yes as the default property, so an algorithm the certified module does
 # not carry fails rather than falling back to an uncertified implementation.

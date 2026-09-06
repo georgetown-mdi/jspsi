@@ -38,6 +38,18 @@ const normalize = (rest) => rest.trim().replace(/[ \t]+/g, " ");
 // as docs/spec/DEPENDENCY_PINS.md records.
 const OS_PACKAGE_MANAGER = /\b(apk|apt|apt-get|dnf|microdnf|yum|pip|pip3)\b/;
 
+// npm reached as an invocation: its name as a command's leading word, which is
+// what splitCommands() leaves at the start of each command it returns, so `RUN
+// npm ci`, `... && npm ci` and `...; npm ci` all read alike. A match against
+// the whole RUN text cannot tell an invocation from the same name as a path
+// operand, and the runtime stages delete the package manager by path.
+const NPM_INVOCATION = /^(?:npm|npx)(?:\s|$)/;
+// The same two names anywhere in a command, which the removal freeze below
+// reads: it holds the whole set of runtime commands naming either, so npm
+// reached by a route the leading word does not show -- `sh -c 'npm ci'`, `xargs
+// npm` -- has to be read rather than sitting under a passing assertion.
+const NPM_NAMED = /\b(?:npm|npx)\b/;
+
 // The instruction classes this file reads. Every other class is refused rather
 // than modeled, because ownership and content both ride only the instructions
 // parsed below: ADD names itself here, since it takes the same --chown and
@@ -314,7 +326,13 @@ const FIPS_BASE =
 // one of these lines, ships unreviewed while the sentence still displays as the
 // reviewed set.
 //
-// `modeChangesOutside` is the other per-image literal: every mode change the
+// `packageManagerRemoval` is the command each runtime stage runs to take the
+// base image's npm CLI and corepack shim out, whose paths differ with where
+// each base puts the Node runtime. A shipped image has no package manager, so
+// the vulnerability scan's findings are ones a base digest or the lockfile
+// moves; docs/spec/DEPENDENCY_PINS.md records the policy.
+//
+// `modeChangesOutside` is the third per-image literal: every mode change the
 // runtime stage makes outside the writable trees, in the order the stage runs
 // them. Neither image's list says anything about who owns a path -- the
 // entrypoint scripts have to be executable, and each image takes off the
@@ -328,6 +346,11 @@ const IMAGES = [
     // pin can move.
     externalBases: [DEFAULT_BASE, DEFAULT_BASE],
     osInstalls: ["RUN apk add --no-cache samba-client"],
+    packageManagerRemoval:
+      "rm -rf /usr/local/lib/node_modules/npm " +
+      "/usr/local/lib/node_modules/corepack /usr/local/bin/npm " +
+      "/usr/local/bin/npx /usr/local/bin/corepack /usr/local/bin/yarn " +
+      "/usr/local/bin/yarnpkg /opt/yarn-v*",
     modeChangesOutside: [
       "chmod g-s /usr/sbin/unix_chkpwd",
       "chmod +x /app/docker-entrypoint.sh",
@@ -341,6 +364,9 @@ const IMAGES = [
       "RUN dnf -y --releasever=${AL2023_RELEASEVER} install samba-client openssl && dnf clean all",
       "RUN dnf -y --releasever=${AL2023_RELEASEVER} swap openssl-fips-provider-latest ${FIPS_PROVIDER_PACKAGE}-${FIPS_PROVIDER_VERSION} && dnf clean all",
     ],
+    packageManagerRemoval:
+      "rm -rf /opt/node/lib/node_modules/npm /opt/node/lib/node_modules/corepack " +
+      "/opt/node/bin/npm /opt/node/bin/npx /opt/node/bin/corepack",
     // Ten files against the default image's one: the Amazon Linux 2023 base and
     // the samba-client closure have account, mount and PAM helpers Alpine's
     // busybox userland does not.
@@ -380,7 +406,13 @@ function dispatchChain(image) {
   return { entrypointArgv, chain, script };
 }
 
-for (const { file, externalBases, osInstalls, image } of IMAGES) {
+for (const {
+  file,
+  externalBases,
+  osInstalls,
+  packageManagerRemoval,
+  image,
+} of IMAGES) {
   describe(`${file} dependency freeze`, () => {
     it("uses ADD nowhere, nor any other instruction class this file does not parse", () => {
       expect(
@@ -479,9 +511,24 @@ for (const { file, externalBases, osInstalls, image } of IMAGES) {
     });
 
     it("runs no npm in the runtime stage, so the copied tree is what ships", () => {
-      expect(image.runtimeRuns.filter((run) => /\bnpm\b/.test(run))).toEqual(
-        [],
-      );
+      expect(
+        image.runtimeShellCommands
+          .filter(({ command }) => NPM_INVOCATION.test(command))
+          .map(({ command }) => command),
+      ).toEqual([]);
+    });
+
+    it("takes the base image's package manager out of the runtime stage", () => {
+      // A shipped image resolves and installs nothing, so an npm CLI in it is
+      // only a dependency tree the vulnerability scan reads and no pin here
+      // moves. Frozen as the WHOLE set of runtime commands naming npm or npx,
+      // so a second one fails this whatever form it takes -- including the
+      // forms the leading-word refusal above does not see.
+      expect(
+        image.runtimeShellCommands
+          .filter(({ command }) => NPM_NAMED.test(command))
+          .map(({ command }) => command),
+      ).toEqual([packageManagerRemoval]);
     });
 
     it("installs exactly the reviewed OS packages", () => {
@@ -741,6 +788,21 @@ describe("the ownership-verb predicate the refusals above share", () => {
       "--home-dir",
     ]);
     expect(read("useradd /app").unreadTokens).toEqual(["/app"]);
+  });
+});
+
+describe("the npm-invocation predicate the runtime-stage refusal reads", () => {
+  it("reads the leading word, not the name anywhere in the command", () => {
+    expect(NPM_INVOCATION.test("npm ci --omit=dev --omit=optional")).toBe(true);
+    expect(NPM_INVOCATION.test("npx psilink --help")).toBe(true);
+    expect(NPM_INVOCATION.test("npm")).toBe(true);
+    // The removal the runtime stages run, which names npm as a path operand.
+    expect(
+      NPM_INVOCATION.test(
+        "rm -rf /usr/local/lib/node_modules/npm /usr/local/bin/npx",
+      ),
+    ).toBe(false);
+    expect(NPM_INVOCATION.test("npmrc-lint /app")).toBe(false);
   });
 });
 

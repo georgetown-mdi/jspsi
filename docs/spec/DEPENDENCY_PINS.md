@@ -675,6 +675,37 @@ That endpoint is a confidentiality statement an operator reads before handing a 
 - Confirm the install stays clean: werift declares no `preinstall`/`install`/`postinstall` script and ships no native or compiled content, so nothing compiles at install and no `allowScripts` verdict is needed (see [The install-script policy](#the-install-script-policy-allowscripts)). `mediabunny` (MPL-2.0) is installed as a transitive but never loaded by a datachannel-only peer.
 - TURN's relayed connectivity remains unverified by these suites. The relay transports are present in the published API, the URL parser resolves the port-443 TLS case, and an allocation has been driven against a real relay for the refresh-timer assumption above, but no exchange here runs over a relayed candidate pair; drive one before any deployment relies on relayed connectivity.
 
+## The shipped images hold no package manager
+
+Both `Dockerfile` and `Dockerfile.fips` delete the base image's npm CLI and
+corepack shim in their runtime stage -- `lib/node_modules/npm`,
+`lib/node_modules/corepack`, and the `bin/npm`, `bin/npx` and `bin/corepack`
+links -- under `/usr/local` on the default image and under `/opt/node` on the
+variant, where the runtime comes from the official tarball rather than from a
+package, and the default image's runtime stage also takes out the base's
+bundled Yarn classic install -- the `bin/yarn` and `bin/yarnpkg` links and the
+`/opt/yarn-v*` directory -- which the tarball-installed variant never ships.
+The builder stages keep theirs, `npm ci` being what resolves the tree
+the runtime stage copies in, so this is a property of the shipped image and not
+of the build.
+
+What it is for: the image vulnerability scan reads every language package in
+the image, and an npm CLI in one brings a bundled dependency tree that no pin in
+this repository moves. Without a package manager that scan has exactly two
+remedies, and the package path in the report says which. A system package moves
+with the base pin, by the procedure in the two sections below. A package under
+`/app` moves with `package-lock.json`. A finding in a tree neither reaches is
+one this repository cannot clear at all, which leaves exempting it or switching
+the gate off as the only ways past it.
+
+What holds it: `scripts/dockerfile-freeze.test.mjs` freezes each image's removal
+command and refuses any other runtime-stage command naming npm or npx, and
+`image_smoke.yaml` asserts that none of `npm`, `npx`, `corepack`, `yarn` and
+`yarnpkg` resolves in either built image -- the half that catches a base image
+putting one back on a path the removal does not name. Nothing in either role
+needs one: both entrypoints exec `node` directly, and the console server spawns
+the CLI entry the same way (`apps/web/src/jobs/cliDriver.ts`).
+
 ## Bumping the FIPS base image
 
 `Dockerfile.fips` pins its Amazon Linux 2023 rootfs by multi-arch index digest,
@@ -719,7 +750,7 @@ what holds the base either way.
 
 **What shows a base worth moving to**, in the absence of a filed bump:
 
-- The OS-layer Trivy scan the release workflow runs over the built variant,
+- The Trivy scan the release workflow runs over the built variant,
   which gates every publish, so a snapshot with fixable high or critical
   findings blocks a release rather than shipping. `image_smoke.yaml`'s weekly
   build does not answer this for the variant while its scan is scoped out
@@ -790,15 +821,15 @@ step, and the inventory is re-recorded in the same diff.
 
 Two limits sit between a green run there and a bump being proved:
 
-- **The variant's PR-time scan is temporarily scoped out.** The Trivy OS-layer
-  scan in that workflow runs on the default leg only (`matrix.fips == 'false'`)
-  while the variant's pinned base rootfs has fixable findings no pin
-  movement can reach -- a check red on every product PR for weeks teaches
+- **The variant's PR-time scan is temporarily scoped out.** The Trivy scan in
+  that workflow runs on the default leg only (`matrix.fips == 'false'`) while
+  the variant's pinned base rootfs has fixable findings no pin movement can
+  reach -- a check red on every product PR for weeks teaches
   reviewers to ignore it. The release workflow still gates both images on the
   same scanner ahead of publishing, so nothing unscanned ships. A base bump
-  taken in order to clear an OS-layer finding is therefore confirmed at pull
-  request time by scanning the built variant by hand -- OS-layer, `vuln`
-  scanner, high and above, fixable only, against
+  taken in order to clear a scan finding is therefore confirmed at pull
+  request time by scanning the built variant by hand -- OS and language
+  packages, `vuln` scanner, high and above, fixable only, against
   `.github/trivyignore.yaml` -- and the re-widening to both legs travels in
   the bump's own diff.
 - **The build is single-arch.** That workflow builds native `amd64` with no
@@ -856,13 +887,13 @@ not a defect in the pull request.
 **What re-proves the result.** `image_smoke.yaml`'s pull-request path filter
 lists `Dockerfile`, so the pull request runs the full matrix: both the
 default and the FIPS legs rebuild, even though only the default base moved.
-The default leg's OS-layer Trivy scan (`vuln`, high/CRITICAL, fixable
-findings only, against `.github/trivyignore.yaml`) is not scoped out the way
-the FIPS leg's currently is
+The default leg's Trivy scan (`vuln`, OS and language packages,
+high/CRITICAL, fixable findings only, against `.github/trivyignore.yaml`) is
+not scoped out the way the FIPS leg's currently is
 (see [Bumping the FIPS base image](#bumping-the-fips-base-image)),
 so it runs on this pull request as it does on every other -- a new snapshot
-with a fixable OS-layer finding fails the pull request rather than
-shipping. The same job also drives the assertions the freeze test cannot
+with a fixable finding fails the pull request rather than shipping. The same
+job also drives the assertions the freeze test cannot
 reach, because they read a running container rather than the Dockerfile text.
 Those are the account the image runs as and its writable set and symlink
 containment, the headless CLI invocation, a real file-drop exchange between
