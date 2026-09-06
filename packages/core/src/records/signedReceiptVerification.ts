@@ -5,12 +5,15 @@ import {
   verifyCertificateSelfSignature,
 } from "./signingIdentity.js";
 import { verifyReceiptSignature } from "./signedReceipt.js";
+import { computeTermsHash } from "./exchangeRecord.js";
 
+import type { ExchangeRecord } from "./exchangeRecord.js";
 import type {
   RecordVerificationOutcome,
   TermsHashStatus,
 } from "./recordVerification.js";
 import type { DualSignedRecord, SignedReceiptParty } from "./signedReceipt.js";
+import type { LinkageTerms } from "../config/linkageTermsSchema.js";
 import type { HandshakeRole } from "../types.js";
 
 // The verification consumer for the DUAL-SIGNED record (the signed evidence
@@ -238,6 +241,72 @@ export interface DualSignedRecordVerificationInputs {
    * terms belong to a partnership, not to one run of it.
    */
   recordReceiptBinder?: string | null;
+}
+
+/**
+ * Where the two identities the certificates must authorize, the agreed-terms hash
+ * the receipt content must contain, and the run binder that pairs the receipt to
+ * one exchange come from. The exchange record holds all three already, so a party
+ * checking its own exchange supplies them by loading it; a verifier without the
+ * record restates the first two from both parties' linkage terms, and pairs
+ * nothing -- terms belong to a partnership, not to one run of it. With neither,
+ * every check is reported as not performed rather than assumed -- which also holds
+ * the verdict short of verified. A record is taken as the caller's own copy: every
+ * anchor drawn from it makes the checks it feeds self-confirming when the record
+ * arrived with the receipt, and the verdict then states only that the two
+ * artifacts describe one run, the model docs/spec/EXCHANGE_RECORD.md sets out.
+ */
+export interface SignedRecordExpectationSources {
+  record?: ExchangeRecord;
+  localTerms?: LinkageTerms;
+  partnerTerms?: LinkageTerms;
+}
+
+/**
+ * The {@link DualSignedRecordVerificationInputs} fields a verifier draws from the
+ * artifacts it already holds, so every surface anchors the signature checks to
+ * the same values for one record rather than deriving them apiece.
+ */
+export async function signedRecordExpectations(
+  sources: SignedRecordExpectationSources,
+): Promise<
+  Pick<
+    DualSignedRecordVerificationInputs,
+    "expectedIdentities" | "expectedTermsHash" | "recordReceiptBinder"
+  >
+> {
+  const { record, localTerms, partnerTerms } = sources;
+  if (record !== undefined)
+    return {
+      ...namedPair(record.localIdentity, record.partnerIdentity),
+      expectedTermsHash: record.termsHash,
+      // An explicit null for a record that holds no run binder, so a record of
+      // an exchange that produced no receipt is reported as contradicting the
+      // receipt loaded beside it rather than as a pairing nobody could check.
+      recordReceiptBinder: record.receiptBinder ?? null,
+    };
+  if (localTerms === undefined || partnerTerms === undefined) return {};
+  return {
+    ...namedPair(localTerms.identity, partnerTerms.identity),
+    expectedTermsHash: await computeTermsHash(localTerms, partnerTerms),
+  };
+}
+
+/**
+ * The `expectedIdentities` pair, present only where both parties named
+ * themselves. `linkage_terms.identity` is optional, and an unnamed party has
+ * nothing a certificate could be authorized against -- which is why an exchange
+ * with one produces no receipt at all (`runExchange`). A half-pair would anchor
+ * one signer while the other's identity check would still be reported as
+ * performed, so the check is reported as not performed instead.
+ */
+function namedPair(
+  local: string | undefined,
+  partner: string | undefined,
+): Pick<DualSignedRecordVerificationInputs, "expectedIdentities"> {
+  return local === undefined || partner === undefined
+    ? {}
+    : { expectedIdentities: [local, partner] };
 }
 
 // A per-party evaluation that could not be completed at all -- a certificate whose
@@ -982,4 +1051,22 @@ export function decideSignedReceiptVerdict(
     guidance: decideGuidance(report, parties, unanchored),
     binder: report.binder,
   };
+}
+
+/**
+ * The verified verdict's clause naming what anchored each certificate --
+ * "the initiator's by X, and the responder's by Y". A surface supplies the words
+ * for each anchoring source, which name that surface's own way of supplying one;
+ * the sentence they are assembled into is the same on all of them.
+ *
+ * The verified verdict holds only slots something anchored, so there is no
+ * unanchored case to leave unnamed.
+ */
+export function anchorsPhrase(
+  slots: readonly AnchoredCertificateSlot[],
+  sourcePhrases: Record<AnchoredCertificateStatus, string>,
+): string {
+  return slots
+    .map((slot) => `the ${slot.role}'s by ${sourcePhrases[slot.anchor]}`)
+    .join(", and ");
 }
