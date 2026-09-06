@@ -31,9 +31,9 @@ const API_PATH_ROOT = "/api";
  * upgrade listener on the first `GET` under it (src/peerServer.ts), so refusing
  * it would stop signaling rather than harden it.
  *
- * scripts/api-namespace-allowlist.test.mjs holds this list against the route
- * tree, so a route directory that is neither listed here nor behind the job
- * gate cannot land unnoticed.
+ * scripts/api-namespace-allowlist.test.mjs holds this list against the
+ * generated route tree, so a path the router serves under the namespace that is
+ * neither listed here nor behind the job gate cannot land unnoticed.
  */
 export const HOSTED_API_PREFIXES: ReadonlyArray<string> = ["/api/peerjs"];
 
