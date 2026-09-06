@@ -686,9 +686,24 @@ export async function prepareDataset(
 ): Promise<PreparedExchange> {
   const log = getLogger("exchange");
 
-  const { rawRows, columns } = await loadInputRows(input, {
-    allowStdin: true,
-  });
+  const { rawRows, columns, sanitizedColumnPositions } = await loadInputRows(
+    input,
+    { allowStdin: true },
+  );
+
+  // Resolve the metadata this run transmits, carrying the positions this read
+  // removed direction characters from: a header the removal emptied is refused
+  // here, naming the removal rather than the header-row causes, and ahead of the
+  // linkage grading below, whose own resolution is handed a column list and so
+  // states those causes. Resolved through the same resolveExchangeInputs call
+  // prepareForExchange itself uses, so what is confirmed below is what the run
+  // would transmit.
+  const resolved = resolveExchangeInputs(
+    exchangeDataSpec,
+    identity,
+    columns,
+    sanitizedColumnPositions,
+  );
 
   // Pre-flight this run's CSV against the committed linkage terms before any
   // exchange work -- the same satisfiability gate accept applies, in
@@ -714,13 +729,10 @@ export async function prepareDataset(
 
   // Show and confirm this party's OWN outbound columns before any credential,
   // terms, or data are sent, when the exchange has a consent record its current
-  // set does not satisfy. Resolved through the same resolveExchangeInputs call
-  // prepareForExchange itself uses, so what is confirmed is what the run would
-  // transmit; the confirmation is recorded in the config, and an unconfirmable or
-  // declined set refuses here -- ahead of prepareForExchange's fail-closed safety
-  // check (assertOutboundPayloadConsented). A party with no consent record --
-  // every non-acceptor -- passes through untouched.
-  const resolved = resolveExchangeInputs(exchangeDataSpec, identity, columns);
+  // set does not satisfy. The confirmation is recorded in the config, and an
+  // unconfirmable or declined set refuses here -- ahead of prepareForExchange's
+  // fail-closed safety check (assertOutboundPayloadConsented). A party with no
+  // consent record -- every non-acceptor -- passes through untouched.
   await confirmOutboundPayloadConsent({
     spec: exchangeDataSpec,
     metadata: resolved.metadata,

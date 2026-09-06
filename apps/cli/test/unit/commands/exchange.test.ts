@@ -2181,6 +2181,37 @@ function consentContext(): { configPath: string; logFile: string | undefined } {
   return { configPath: configFile, logFile: undefined };
 }
 
+test("prepareDataset: a header the strip emptied names the removal, not the trailing comma", async () => {
+  // This seat resolves its metadata from the columns loadInputRows returned, so
+  // the same read's changed positions have to travel with them: the operator's
+  // header held neither a trailing comma nor a blank cell, and the remedy for a
+  // name the removal emptied is a different one. Both committed shapes are
+  // driven -- terms in the config (the recurring one, whose linkage grading is
+  // handed a column list and would state the header-row causes) and none.
+  // U+202E RLO then U+2069 PDI, written as escapes so a fixture about invisible
+  // characters is itself readable.
+  const input = writeInput("id,\u202e\u2069,city\n1,x,Springfield\n");
+  for (const spec of [{}, { linkageTerms: nameDobTerms }]) {
+    mockState.warnings.length = 0;
+    const err = await prepareDataset(
+      spec,
+      "Test Party",
+      input,
+      consentContext(),
+    ).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(UsageError);
+    const message = (err as Error).message;
+    expect(message).toContain("input column 2 has an empty name");
+    expect(message).toContain(
+      "nothing but invisible text-direction characters",
+    );
+    expect(message).not.toContain("trailing comma");
+    expect(
+      mockState.warnings.find((line) => line.includes("text-direction")),
+    ).toContain("column 2");
+  }
+});
+
 test("prepareDataset: refuses (UsageError) naming the field when the CSV satisfies no linkage key", async () => {
   // A first_name-only CSV cannot produce the ssn field the lone key needs, so the
   // run must stop with a usage error rather than reach a silent empty exchange.

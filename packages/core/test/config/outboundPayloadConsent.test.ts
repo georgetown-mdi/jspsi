@@ -434,7 +434,12 @@ test("resolveExchangeInputs: resolves what prepareForExchange resolves", () => {
       metadata: metadataDisclosing(["diagnosis"]),
     },
   ]) {
-    const resolved = resolveExchangeInputs(spec, "Acceptor", acceptorColumns);
+    const resolved = resolveExchangeInputs(
+      spec,
+      "Acceptor",
+      acceptorColumns,
+      [],
+    );
     const prepared = prepareForExchange(
       spec,
       "Acceptor",
@@ -448,7 +453,7 @@ test("resolveExchangeInputs: resolves what prepareForExchange resolves", () => {
 
 test("resolveExchangeInputs: derives default terms for a spec that holds none", () => {
   // The zero-setup shape, where the terms themselves come from the header.
-  const resolved = resolveExchangeInputs({}, "Acceptor", acceptorColumns);
+  const resolved = resolveExchangeInputs({}, "Acceptor", acceptorColumns, []);
   expect(resolved.linkageTerms.identity).toBe("Acceptor");
   expect(resolved.metadata.map((c) => c.name)).toEqual(acceptorColumns);
 });
