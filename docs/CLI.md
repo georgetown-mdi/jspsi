@@ -521,7 +521,7 @@ The failure states whether a relay candidate was gathered, how many remote candi
 
 **A failure against the signaling server names a certificate problem when that is what it was.** A `wss://` socket that fails before the server confirms the registration is checked once more against the same endpoint, and a certificate that does not verify on this host is reported as such rather than as a generic connection failure. A socket that drops later already completed that handshake, so its failure is reported at once and names no certificate. On a network that intercepts TLS, the remedy is to trust that network's certificate authority -- add it to the host's trust store, or name a file holding it in `NODE_EXTRA_CA_CERTS`.
 
-**A run that proxies its connections is told no certificate was checked.** The check dials the signaling server itself, which is not the path a proxied connection takes, so a run with `NODE_USE_ENV_PROXY` set to `1` and a proxy in `HTTP_PROXY` or `HTTPS_PROXY` gets no certificate verdict at all: the failure states that, and names the same remedy, since an intercepting proxy is the likely cause there too.
+**A run that proxies its connections is told no certificate was checked.** The check dials the signaling server itself, which is not the path a proxied connection takes, so a `wss://` run with `NODE_USE_ENV_PROXY` set to `1` and a proxy in `HTTP_PROXY` or `HTTPS_PROXY` gets no certificate verdict at all: the failure states that, and names the same remedy, since an intercepting proxy is the likely cause there too.
 
 ### Sweeping a stale exchange directory
 

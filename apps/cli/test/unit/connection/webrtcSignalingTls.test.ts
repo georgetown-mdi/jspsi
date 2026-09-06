@@ -259,6 +259,44 @@ test("a run configured for an environment proxy is asked nothing", async () => {
   expect(rendered).not.toContain("certificate check reported");
 });
 
+test("a plaintext dial is told of no certificate, proxied or not", async () => {
+  // A `ws://` dial presents no certificate on either path, so neither the
+  // verification failure nor the skipped check applies to it: both would name
+  // a check that was never going to run and a trust store nothing consults.
+  for (const proxied of [true, false]) {
+    if (proxied) {
+      vi.stubEnv("NODE_USE_ENV_PROXY", "1");
+      vi.stubEnv("HTTPS_PROXY", "http://proxy.invalid:8080");
+    }
+    const socket = new FakeSocket();
+    const { probe, dials } = countingProbe(
+      Promise.resolve("DEPTH_ZERO_SELF_SIGNED_CERT"),
+    );
+    const failure = await connectToBroker({
+      location: { ...LOCATION, secure: false },
+      id: LOCAL_ID,
+      handlers: { onMessage: () => {}, onClose: () => {} },
+      socketFactory: () => {
+        queueMicrotask(() => socket.fail());
+        return socket as unknown as WebSocket;
+      },
+      certificateProbe: probe,
+    }).then(
+      () => new Error("the registration was expected to fail"),
+      (err: unknown) => err as Error,
+    );
+    expect({ proxied, dials: dials(), message: failure.message }).toEqual({
+      proxied,
+      dials: 0,
+      message: SIGNALING_SOCKET_FAILED_MESSAGE,
+    });
+    const rendered = sanitizeErrorForDisplay(failure);
+    expect(rendered).not.toContain("TLS certificate");
+    expect(rendered).not.toContain("was not checked");
+    expect(rendered).not.toContain("NODE_EXTRA_CA_CERTS");
+  }
+});
+
 test("a proxied run's drop after registering reports the plain failure", async () => {
   // The registered socket completed its handshake through whatever path it
   // took, so a drop after it is not a certificate question on a proxied run

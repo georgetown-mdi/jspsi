@@ -27,9 +27,10 @@ import type { TLSSocket } from "node:tls";
  * The probe dials the configured endpoint's own host and port directly, so
  * what it answers is about that connection. A run with Node's environment
  * proxying configured dials the `WebSocket` through the proxy instead, which
- * is a different path and can present a different certificate, so a caller
- * asks {@link environmentProxyingConfigured} first and reports such a failure
- * without a certificate verdict rather than with one about the origin.
+ * is a different path and can present a different certificate, so
+ * {@link askSignalingCertificate} -- the one place that decides which of the
+ * two a failed dial is told about -- answers such a failure with no
+ * certificate verdict rather than one about the origin.
  */
 
 /**
@@ -49,6 +50,20 @@ export type SignalingCertificateProbe = (
   location: BrokerLocation,
   signal?: AbortSignal,
 ) => Promise<string | undefined>;
+
+/**
+ * What a failed signaling dial is told about the endpoint's certificate.
+ *
+ * `undefined` adds nothing to the failure the caller already has: the
+ * certificate verified, the check reached no verdict, or the dial was one no
+ * check applies to.
+ */
+export type SignalingCertificateAnswer =
+  /** The certificate did not verify, under this verification failure code. */
+  | { kind: "verification-failed"; code: string }
+  /** No check was made: the dial this run makes is not the one a check makes. */
+  | { kind: "not-checked-proxied" }
+  | undefined;
 
 /**
  * The one value `NODE_USE_ENV_PROXY` opts in with: measured on Node 26 against
@@ -73,7 +88,9 @@ const PROXY_ENVIRONMENT_VARIABLES = [
 
 /**
  * Whether this run has the environment proxying configured that a `wss://`
- * dial follows and {@link probeSignalingCertificate} does not.
+ * dial follows and {@link probeSignalingCertificate} does not. Read through
+ * {@link askSignalingCertificate}, which holds the scheme this question is
+ * asked under.
  *
  * It answers for the run, not for one endpoint: `NO_PROXY` excludes hosts from
  * the proxy per dial, which is Node's resolution to make rather than one to
@@ -178,3 +195,25 @@ export const probeSignalingCertificate: SignalingCertificateProbe = (
     socket.on("secureConnect", () => settle(undefined));
     socket.on("error", () => settle(verificationFailureCode(socket)));
   });
+
+/**
+ * What to tell a failed signaling dial to `location` about the endpoint's
+ * certificate: what `probe` found, or that no check was made.
+ *
+ * This is the one place the question is decided, so every condition that
+ * settles it is here. A `ws://` dial has no certificate on any path, and a run
+ * whose environment routes the dial through a proxy reaches an endpoint the
+ * probe does not, so neither is asked and neither is told about a certificate
+ * -- the second says so, because there the check is the thing an operator
+ * would otherwise expect to have run.
+ */
+export async function askSignalingCertificate(
+  location: BrokerLocation,
+  probe: SignalingCertificateProbe,
+  signal?: AbortSignal,
+): Promise<SignalingCertificateAnswer> {
+  if (!location.secure) return undefined;
+  if (environmentProxyingConfigured()) return { kind: "not-checked-proxied" };
+  const code = await probe(location, signal);
+  return code === undefined ? undefined : { kind: "verification-failed", code };
+}

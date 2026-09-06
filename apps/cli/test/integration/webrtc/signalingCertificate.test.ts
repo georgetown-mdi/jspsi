@@ -10,6 +10,7 @@ import { loopbackTlsCert } from "@psilink/testkit/loopbackTlsCert";
 
 import {
   SIGNALING_TLS_PROBE_TIMEOUT_MS,
+  askSignalingCertificate,
   environmentProxyingConfigured,
   probeSignalingCertificate,
 } from "../../../src/connection/webrtc/signalingTls";
@@ -393,7 +394,8 @@ test("which environment routes a signaling dial through a proxy", async () => {
   // what separates the two paths is whether the proxy was asked to reach it.
   const idle = net.createServer();
   await new Promise<void>((resolve) => idle.listen(0, "127.0.0.1", resolve));
-  const endpoint = `127.0.0.1:${boundPort(idle)}`;
+  const endpointPort = boundPort(idle);
+  const endpoint = `127.0.0.1:${endpointPort}`;
   await new Promise<void>((resolve) => idle.close(() => resolve()));
 
   const reached: Array<string> = [];
@@ -425,18 +427,33 @@ test("which environment routes a signaling dial through a proxy", async () => {
       for (const cleared of PROXY_VARIABLES) vi.stubEnv(cleared, "");
       for (const [name, value] of Object.entries(environment))
         vi.stubEnv(name, value);
-      // One assertion over both, so the answer the client acts on cannot drift
-      // from the routing without the case that moved being named.
+      // The probe is scripted, so what the decision is measured on is which
+      // dials reach it and what a failed one is told, against the routing the
+      // child just drove. One assertion over all of it, so the answer the
+      // client acts on cannot drift from the routing without the case that
+      // moved being named.
+      let probed = 0;
+      const answer = await askSignalingCertificate(
+        location(endpointPort),
+        () => {
+          probed += 1;
+          return Promise.resolve(undefined);
+        },
+      );
       expect({
         optIn,
         variable,
         routedTo: reached,
-        answered: environmentProxyingConfigured(),
+        configured: environmentProxyingConfigured(),
+        probed,
+        answer,
       }).toEqual({
         optIn,
         variable,
         routedTo: proxied ? [endpoint] : [],
-        answered: proxied,
+        configured: proxied,
+        probed: proxied ? 0 : 1,
+        answer: proxied ? { kind: "not-checked-proxied" } : undefined,
       });
     }
   } finally {

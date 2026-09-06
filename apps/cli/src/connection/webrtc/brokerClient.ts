@@ -9,11 +9,14 @@ import {
 
 import { fittedCauseLink } from "../causeLink";
 import {
-  environmentProxyingConfigured,
+  askSignalingCertificate,
   probeSignalingCertificate,
 } from "./signalingTls";
 
-import type { SignalingCertificateProbe } from "./signalingTls";
+import type {
+  SignalingCertificateAnswer,
+  SignalingCertificateProbe,
+} from "./signalingTls";
 
 /**
  * The PeerJS broker signaling client, written against the broker's WebSocket
@@ -164,10 +167,10 @@ export interface BrokerConnectOptions {
   socketFactory?: (url: string) => WebSocket;
   /**
    * Asks what the certificate check said once a socket has failed, before it
-   * registered and on a run no environment proxy is configured for; injected so
-   * a unit test can drive both answers without a server. Defaults to
-   * {@link probeSignalingCertificate}, and is handed `signal` so an interrupt
-   * releases the handshake it holds open.
+   * registered; injected so a unit test can drive both answers without a
+   * server. Defaults to {@link probeSignalingCertificate}, is asked only where
+   * {@link askSignalingCertificate} decides a check applies, and is handed
+   * `signal` so an interrupt releases the handshake it holds open.
    */
   certificateProbe?: SignalingCertificateProbe;
 }
@@ -210,8 +213,8 @@ export const SIGNALING_CERTIFICATE_FAILED_MESSAGE =
   "server's own certificate is current and issued for the configured `host`.";
 
 /**
- * What a failed signaling socket reports on a run that configures Node's
- * environment proxying, where no certificate check is made at all: the check
+ * What a failed `wss://` signaling socket reports on a run that configures
+ * Node's environment proxying, where no check is made at all: the check
  * dials the signaling server itself, which is not the path such a dial takes,
  * so its answer would be about a connection the run never made. It names the
  * same remedy as its sibling above -- an intercepting proxy is at least as
@@ -229,24 +232,26 @@ export const SIGNALING_PROXIED_FAILED_MESSAGE =
 const CERTIFICATE_PROBLEM_LINK_LABEL = "certificate check reported: ";
 
 /**
- * The error a failed signaling socket reports, given what the certificate
- * check said about the same endpoint.
+ * The error a failed signaling socket reports, given what it was told about
+ * the same endpoint's certificate.
  *
  * The code is a fixed OpenSSL or Node token, but it is reached through a
  * certificate the far end chose, so it takes a labelled cause link of its own
  * rather than the summary, and is escaped where the chain is rendered.
  */
 function signalingSocketError(
-  certificateProblem: string | undefined,
+  certificate: SignalingCertificateAnswer,
 ): ConnectionError {
-  if (certificateProblem === undefined)
+  if (certificate === undefined)
     return new ConnectionError(SIGNALING_SOCKET_FAILED_MESSAGE, "transport");
+  if (certificate.kind === "not-checked-proxied")
+    return new ConnectionError(SIGNALING_PROXIED_FAILED_MESSAGE, "transport");
   return new ConnectionError(
     SIGNALING_CERTIFICATE_FAILED_MESSAGE,
     "transport",
     {
       cause: chainDetailCauses([
-        fittedCauseLink(CERTIFICATE_PROBLEM_LINK_LABEL, certificateProblem),
+        fittedCauseLink(CERTIFICATE_PROBLEM_LINK_LABEL, certificate.code),
       ]),
     },
   );
@@ -747,25 +752,27 @@ export function connectToBroker(
 
     // The socket's `error` event has no detail worth exposing (and in Node its
     // message can embed the URL, which holds the peer id), so what failed is
-    // asked of the endpoint instead -- for a `wss://` location, and only where
-    // the failure precedes registration and no environment proxy stands between
-    // the two. A socket that registered completed that handshake, so an answer
-    // about it would name a check that had passed, and waiting for one would
-    // hold the report for the probe's ceiling.
+    // asked of the endpoint instead, and only where the failure precedes
+    // registration. A socket that registered completed that handshake, so an
+    // answer about it would name a check that had passed, and waiting for one
+    // would hold the report for the probe's ceiling. Which dials a check is
+    // made for at all, and what a dial it is not made for is told, is
+    // `askSignalingCertificate`'s decision.
     // The probe may be the caller's own, so its failing is one more thing the
     // answer can be: a rejection reports the socket failure it was asked about
     // rather than leaving the registration unsettled and the rejection
     // unhandled.
-    const askAboutCertificate = async (): Promise<string | undefined> => {
+    async function askAboutCertificate(): Promise<SignalingCertificateAnswer> {
       try {
-        return await (certificateProbe ?? probeSignalingCertificate)(
+        return await askSignalingCertificate(
           location,
+          certificateProbe ?? probeSignalingCertificate,
           signal,
         );
       } catch {
         return undefined;
       }
-    };
+    }
 
     const onSocketError = (): void => {
       if (opened) {
@@ -773,14 +780,8 @@ export function connectToBroker(
         return;
       }
       if (!claimTerminal()) return;
-      if (environmentProxyingConfigured()) {
-        settle(
-          new ConnectionError(SIGNALING_PROXIED_FAILED_MESSAGE, "transport"),
-        );
-        return;
-      }
-      void askAboutCertificate().then((certificateProblem) =>
-        settle(signalingSocketError(certificateProblem)),
+      void askAboutCertificate().then((certificate) =>
+        settle(signalingSocketError(certificate)),
       );
     };
 
