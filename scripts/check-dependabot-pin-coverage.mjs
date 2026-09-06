@@ -130,7 +130,7 @@ import { parse } from "yaml";
 // syntax, so the ignore-shape check's matcher serves both rather than being
 // written twice.
 import { coversAction as coversName } from "./check-dependabot-ignore-shape.mjs";
-import { stripFences } from "./lib/markdownFences.mjs";
+import { stripFences, UnterminatedFenceError } from "./lib/markdownFences.mjs";
 
 const PINS_DOC = "docs/spec/DEPENDENCY_PINS.md";
 const CONFIG_FILE = ".github/dependabot.yml";
@@ -159,10 +159,12 @@ const HEADING_FORM =
  * The upgrade checklists in the pins document, as `{heading, packages}` in
  * document order. `packages` is the parenthesised, " / "-separated list the
  * heading ends with; an empty one means the heading named no package in that
- * form.
+ * form. Throws UnterminatedFenceError when the document opens a fenced code
+ * block that never closes: which headings are the document's own, rather than
+ * a code sample's, is then unknown.
  */
 export function upgradeSections(source) {
-  return stripFences(source)
+  return stripFences(source, PINS_DOC)
     .split("\n")
     .flatMap((line) => {
       const heading = UPGRADE_HEADING.exec(line);
@@ -386,9 +388,16 @@ export function versionAgreementViolations(packages, declarations) {
 // functions without the process.exit.
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-  const sections = upgradeSections(
-    readFileSync(resolve(root, PINS_DOC), "utf8"),
-  );
+  let sections;
+  try {
+    sections = upgradeSections(readFileSync(resolve(root, PINS_DOC), "utf8"));
+  } catch (error) {
+    if (!(error instanceof UnterminatedFenceError)) throw error;
+    console.error(
+      `Dependabot checklist-pin coverage check failed: ${error.message}`,
+    );
+    process.exit(1);
+  }
   if (sections.length === 0) {
     console.error(
       `${PINS_DOC}: no "Upgrading ..." heading matched -- either the upgrade checklists were removed, in which case delete this check, or the extraction rotted; fix scripts/check-dependabot-pin-coverage.mjs`,

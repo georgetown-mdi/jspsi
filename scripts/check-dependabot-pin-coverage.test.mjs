@@ -16,6 +16,7 @@ import {
   upgradeSections,
   versionAgreementViolations,
 } from "./check-dependabot-pin-coverage.mjs";
+import { UnterminatedFenceError } from "./lib/markdownFences.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..");
@@ -108,6 +109,36 @@ describe("reading the upgrade checklists out of the pins document", () => {
     ).toEqual([
       { heading: "Upgrading the real one (werift)", packages: ["werift"] },
     ]);
+  });
+
+  it("ignores a heading inside a code sample that itself shows a fence", () => {
+    expect(
+      upgradeSections(`\`\`\`\`md
+\`\`\`
+## Upgrading the example (left-pad)
+\`\`\`
+~~~
+## Upgrading the other example (right-pad)
+~~~
+\`\`\`\`
+
+## Upgrading the real one (werift)
+`),
+    ).toEqual([
+      { heading: "Upgrading the real one (werift)", packages: ["werift"] },
+    ]);
+  });
+
+  it("reports an unterminated fence instead of reading a mis-split document", () => {
+    const source = `# Pinned dependency internals
+
+\`\`\`md
+## Upgrading the example (left-pad)
+`;
+    expect(() => upgradeSections(source)).toThrow(UnterminatedFenceError);
+    expect(() => upgradeSections(source)).toThrow(
+      "docs/spec/DEPENDENCY_PINS.md:3 opens a fenced code block that never closes",
+    );
   });
 });
 

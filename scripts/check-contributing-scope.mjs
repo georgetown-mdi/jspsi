@@ -29,7 +29,9 @@ import { readFileSync } from "node:fs";
 import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { stripFences } from "./lib/markdownFences.mjs";
+import { stripFences, UnterminatedFenceError } from "./lib/markdownFences.mjs";
+
+const DOC = "CONTRIBUTING.md";
 
 /** The `##`/`###` sections a pre-contribution quickstart is expected to hold. */
 export const ALLOWED_HEADINGS = [
@@ -59,10 +61,15 @@ export const ALLOWED_HEADINGS = [
 // command (`node_modules/ssh2`).
 const SOURCE_PATH = /node_modules\/[\w@.-]+\//;
 
-/** Return the list of scope violations in CONTRIBUTING.md `text` (empty = clean). */
+/**
+ * Return the list of scope violations in CONTRIBUTING.md `text` (empty =
+ * clean). Throws UnterminatedFenceError when the document opens a fenced code
+ * block that never closes: which lines are prose is then unknown, and the
+ * headings and paths read out of them would be too.
+ */
 export function scopeViolations(text) {
   const violations = [];
-  const lines = stripFences(text).split("\n");
+  const lines = stripFences(text, DOC).split("\n");
 
   const seen = new Set();
   lines.forEach((line, i) => {
@@ -97,14 +104,20 @@ export function scopeViolations(text) {
 // CLI entry: only runs when invoked directly, so the test can import the pure
 // function without the process.exit.
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const file = "CONTRIBUTING.md";
-  const abs = resolve(dirname(fileURLToPath(import.meta.url)), "..", file);
-  const violations = scopeViolations(readFileSync(abs, "utf8"));
+  const abs = resolve(dirname(fileURLToPath(import.meta.url)), "..", DOC);
+  let violations;
+  try {
+    violations = scopeViolations(readFileSync(abs, "utf8"));
+  } catch (error) {
+    if (!(error instanceof UnterminatedFenceError)) throw error;
+    console.error(`CONTRIBUTING.md scope check failed: ${error.message}`);
+    process.exit(1);
+  }
   if (violations.length > 0) {
     console.error(
       `CONTRIBUTING.md scope check failed (${violations.length} issue${violations.length === 1 ? "" : "s"}):\n`,
     );
-    for (const v of violations) console.error("  " + file + ":" + v);
+    for (const v of violations) console.error("  " + DOC + ":" + v);
     console.error('\nSee CONTRIBUTING.md, "Scope of this document".');
     process.exit(1);
   }

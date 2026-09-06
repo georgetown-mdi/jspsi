@@ -1,7 +1,10 @@
-import { dirname, resolve } from "node:path";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { findFailures } from "./check-doc-links.mjs";
+import { UnterminatedFenceError } from "./lib/markdownFences.mjs";
 
 // findFailures resolves relative targets against dirname(absPath), so a fixed
 // absPath inside this directory is enough -- the fixture doc never needs to
@@ -47,5 +50,56 @@ describe("check-doc-links inline code spans", () => {
       "<!-- example [link](syntax.md) lives here\nacross\nseveral\nlines -->\nline5\n[broken](missing5.md)\n";
     const failures = findFailures(file, absPath, raw);
     expect(failures).toEqual([`${file}:6  dead path -> missing5.md`]);
+  });
+});
+
+describe("check-doc-links fenced code blocks", () => {
+  const scratch = [];
+  const fixtureDir = () => {
+    const dir = mkdtempSync(join(tmpdir(), "psilink-doc-links-"));
+    scratch.push(dir);
+    return dir;
+  };
+
+  afterEach(() => {
+    while (scratch.length > 0) {
+      rmSync(scratch.pop(), { recursive: true, force: true });
+    }
+  });
+
+  it("does not read a link out of a block that shows a tilde fence", () => {
+    const raw = "```md\n~~~\n[example](missing6.md)\n~~~\n```\n";
+    expect(findFailures(file, absPath, raw)).toEqual([]);
+  });
+
+  it("does not read a link out of a shorter fence inside a longer one", () => {
+    const raw = "````md\n```\n[example](missing7.md)\n```\n````\n";
+    expect(findFailures(file, absPath, raw)).toEqual([]);
+  });
+
+  it("reports an unterminated fence instead of scanning a mis-split document", () => {
+    const raw = "```sh\nls\n```\n\n```sh\n[broken](missing8.md)\n";
+    expect(() => findFailures(file, absPath, raw)).toThrow(
+      UnterminatedFenceError,
+    );
+    expect(() => findFailures(file, absPath, raw)).toThrow(`${file}:5`);
+  });
+
+  it("reports an unterminated fence in the document an anchor points into", () => {
+    const dir = fixtureDir();
+    writeFileSync(join(dir, "target.md"), "# Title\n\n```sh\nls\n");
+    const raw = "[x](target.md#title)\n";
+    expect(() =>
+      findFailures("fixture.md", join(dir, "fixture.md"), raw),
+    ).toThrow(UnterminatedFenceError);
+  });
+
+  it("does not take a heading inside a target's fenced block as an anchor", () => {
+    const dir = fixtureDir();
+    writeFileSync(join(dir, "target.md"), "# Title\n\n```md\n## Sample\n```\n");
+    const raw = "[x](target.md#sample)\n";
+    expect(findFailures("fixture.md", join(dir, "fixture.md"), raw)).toEqual([
+      "fixture.md:1  dead anchor -> target.md#sample",
+    ]);
   });
 });
