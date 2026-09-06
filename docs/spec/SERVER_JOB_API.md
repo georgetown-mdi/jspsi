@@ -16,7 +16,7 @@ Every job response has `Cache-Control: no-store` and no CORS headers -- the API 
 
 ### The `/api` namespace's refusal
 
-On a deployment where the job API is not enabled, no request under `/api` reaches the router unless it addresses the peer-coordination broker. The server entry (`apps/web/src/server.ts`) answers every other path there with the feature gate's own empty `404` -- `Cache-Control: no-store`, no content type, no body -- before the framework's handler runs.
+On a deployment where the job API is not enabled, no request the server entry (`apps/web/src/server.ts`) handles reaches the router under `/api` unless it addresses the peer-coordination broker. The entry answers every other path there with the feature gate's own empty `404` -- `Cache-Control: no-store`, no content type, no body -- before the framework's handler runs. A request form that is answered without the entry running is outside this and is listed below.
 
 What that settles:
 
@@ -39,6 +39,10 @@ Three checks hold it, none standing in for another. `scripts/api-namespace-allow
 - **Timing is leveled in process only.** It was measured single-client over loopback against the built server, where the refused paths sit within the run-to-run spread of each other. Behavior under load, behind the load balancer, and on the dev server is not measured.
 - **The server entry as the sole HTTP ingress is upstream's documented design, not a measurement made here.** Nitro's static asset handler is a documented bypass of that entry (`apps/web/src/utils/securityHeaders.ts`), which is why the allowlist check holds the public asset tree empty under `/api`; a future framework or Nitro path answering ahead of the entry would bypass the refusal, and would do so silently.
 - **The console profile itself is enumerable.** With the API enabled the refusal does not apply and the router answers as it otherwise would. That is accepted under the single-operator trust boundary ([SECURITY_DESIGN.md](../SECURITY_DESIGN.md#single-party-console-trust-boundary)).
+- **A path whose first segment is `api` only as written is outside the namespace.** `/api%20/jobs/slot` decodes that segment to `api `, so no spelling of it lands under `/api`; it resolves to no route on either deployment profile and answers the site's ordinary shapes. The matrix pins it there rather than to the refusal.
+- **Overlong UTF-8 and mixed-encoding spellings are not measured.** The spellings the matrix drives are case-varied, percent-encoded, dot-segment, and encoded-space forms. How the entry and the router each read a path spelled with an overlong UTF-8 sequence, or with more than one encoding layered, is not measured here.
+- **A front end may rewrite the path before the entry reads it.** The refusal decides over the request target the entry receives. The Elastic Beanstalk proxy in front of the hosted deployment, and an HTTP/2 client's `:path` pseudo-header, can normalize or rewrite a target on the way in, so what the entry reads is not always what the client wrote.
+- **Two request forms are answered without the entry running, and the matrix drives neither.** A `TRACE` request is answered with the framework's `500` before the `Request` is constructed (undici forbids the method). An absolute-form request target (`GET http://host/api/jobs/slot HTTP/1.1`) reaches h3's router and is answered with its own `404`. Neither tells a probe whether a route exists: each answers a declared job route, an unknown path under `/api`, and a path outside the namespace with the same status and body shape, differing only in the request URL the body echoes. Both answer past the refusal, though, so a change in that layer would go unnoticed here.
 
 ### Browser-CSRF gate
 
