@@ -138,16 +138,22 @@ test("the child's stderr reaches a retained tail through no other reader", () =>
   // stderr in the server's job code is one of those two, and the retaining one
   // fills its window from what the redactor emitted.
   const jobsDir = fileURLToPath(new URL("../../../src/jobs/", import.meta.url));
-  const reads = /\bstderr[.?]|child\.stderr/;
+  // `child.stdio[2]` is the same stream under another name, and the index
+  // survives destructuring or an alias where the word `stderr` does not, so
+  // the scan takes the indexing idiom the driver already uses for fd 3.
+  const reads = /\bstderr[.?]|child\.stderr|\bstdio\s*\[/;
   const readers = new Map<string, Array<string>>();
+  const code = new Map<string, Array<string>>();
   const entries = fs.readdirSync(jobsDir, { recursive: true }) as Array<string>;
   for (const entry of entries) {
     if (!entry.endsWith(".ts")) continue;
     const source = fs.readFileSync(path.join(jobsDir, entry), "utf8");
     const lines = source
       .split("\n")
-      .filter((line) => reads.test(line) && !/^\s*(?:\*|\/\/|\/\*)/.test(line));
-    if (lines.length > 0) readers.set(entry, lines);
+      .filter((line) => !/^\s*(?:\*|\/\/|\/\*)/.test(line));
+    code.set(entry, lines);
+    const reading = lines.filter((line) => reads.test(line));
+    if (reading.length > 0) readers.set(entry, reading);
   }
   expect([...readers.keys()].sort()).toEqual([
     "capturedCliChild.ts",
@@ -167,4 +173,11 @@ test("the child's stderr reaches a retained tail through no other reader", () =>
   expect(driver.match(/\btail = \(tail \+ /g)).toHaveLength(1);
   expect(driver).toContain("retain(redactor.push(chunk));");
   expect(driver).toContain("retain(redactor.close());");
+
+  // The index reaches fd 2 without naming a stream the scan above can key on,
+  // so every stdio mention in the tree is pinned to one of two shapes: the
+  // spawn options, or the fd-3 event stream the driver parses.
+  for (const [entry, lines] of code)
+    for (const stdioLine of lines.filter((line) => /\bstdio\b/.test(line)))
+      expect(`${entry}: ${stdioLine}`).toMatch(/stdio: \[|child\.stdio\[3\]/);
 });
