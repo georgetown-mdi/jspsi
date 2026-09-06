@@ -8,6 +8,7 @@
   "exports": {
     ".": "./src/contrib/index.ts",
     "./standalone": "./src/standalone.ts",
+    "./standaloneOptions": "./src/standaloneOptions.ts",
     "./diagnostics": "./src/diagnostics.ts",
     "./*": "./src/contrib/*.ts"
   },

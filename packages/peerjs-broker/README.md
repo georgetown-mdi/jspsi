@@ -10,9 +10,27 @@ The package ships TypeScript source and has no build step of its own, though it 
 
 ```sh
 npm start -w packages/peerjs-broker
+npm start -w packages/peerjs-broker -- --host 0.0.0.0 --port 9000
 ```
 
-It listens on an ephemeral loopback port and prints `psilink-broker <port>` once ready. `--path <mount>` and `--key <api-key>` override the mount path and the accepted API key.
+By default it listens on `127.0.0.1` on an ephemeral port, mounts the signaling server at `/api`, and accepts the PeerJS protocol's well-known `peerjs` realm key. It prints one line, `psilink-broker <port>`, on stdout once it is listening, then stays up until it is signalled; nothing else reaches stdout, so a parent process reads the port with a single match. That line reports the port alone -- the address is the operator's own instruction, while an ephemeral port is not known until the bind returns.
+
+| Setting      | Flag               | Environment           | Default         |
+| ------------ | ------------------ | --------------------- | --------------- |
+| Bind address | `--host <address>` | `PSILINK_BROKER_HOST` | `127.0.0.1`     |
+| Port         | `--port <number>`  | `PSILINK_BROKER_PORT` | `0` (ephemeral) |
+| Mount path   | `--path <mount>`   | --                    | `/api`          |
+| Realm key    | `--key <api-key>`  | --                    | `peerjs`        |
+
+A flag takes precedence over the environment variable beside it, and an environment variable set to an empty value counts as unset. A port that is not a whole number from 0 to 65535, a blank value, a repeated flag, a flag with no value, a mount that does not begin with `/` or that holds `?`, `#`, `%`, an empty segment, or a `.` or `..` segment, and any unrecognized argument are each refused before the broker starts, with a message naming the flag or the variable the value came from; the process exits 64, the same usage exit the CLI uses. A mount is held to a literal path so the readiness endpoint below is a literal child of it; a trailing slash on the mount is dropped rather than refused. A bind the operating system refuses -- an address that is not this host's, a port already taken -- is reported the same way and exits 69, as is a later fault on the listening socket.
+
+The runner bounds the window before it has a request in hand: a 10-second header timeout, a 15-second request timeout, and a 10-second idle bound on a socket that has not begun -- or has stopped part-way through -- its request. Node enforces the header timeout on a periodic sweep rather than a per-connection clock, so a client dribbling headers is closed at up to roughly 30 seconds, not 10 -- the figure to size a front proxy's timeout against. A peer that connects and sends nothing, or dribbles its headers, is closed rather than held; an established WebSocket is outside all three, governed by the liveness reaper instead. The values are the ones [docs/spec/CHANNEL_SECURITY.md](../../docs/spec/CHANNEL_SECURITY.md) states for the signaling upgrade surface, held in `src/standaloneUpgradeBounds.ts`. The runner terminates no TLS, so a deployment reachable off the host still puts it behind a front that does.
+
+## Readiness
+
+The runner answers `GET` and `HEAD` on `<mount>/health` -- `/api/health` under the default mount -- with `200` and the body `ready` followed by a newline: the runner sends `ready\n`, so an operator matching on the exact body should account for the trailing newline rather than mis-configure a probe. It sits under the mount rather than at the root so one route rule in front of the broker covers the probe and the signaling endpoint together. A query string or fragment on that path is ignored, so a probe that appends one -- `/api/health?x=1` -- is answered `200` as well; the comparison runs on the path the request target names, decoding nothing. Any other path, and any other method on the probe path, is refused with `404`: the broker handles WebSocket upgrades and this one endpoint, and nothing else is part of any wire it serves.
+
+The handler is installed and the signaling server mounted before the runner listens, so an answer means this process is accepting connections with its upgrade route attached. That is the whole of what the answer states: the body is a fixed line, since reporting registered peers or queued frames would put rendezvous metadata on an unauthenticated endpoint. What the probe does disclose -- that a broker is running here -- anyone who can reach the port already learns by opening a WebSocket, so it needs no gate of its own.
 
 ## Diagnostics
 

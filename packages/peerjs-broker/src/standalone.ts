@@ -1,13 +1,23 @@
 import { createServer } from "node:http";
 
+import { redactAndSanitizeForDisplay } from "@psilink/core/untrusted-text";
+
 import { CreatePeerServerWSOnly } from "./contrib/index.ts";
+import {
+  createStandaloneRequestHandler,
+  resolveStandaloneOptions,
+  StandaloneOptionError,
+} from "./standaloneOptions.ts";
+import { applyStandaloneUpgradeBounds } from "./standaloneUpgradeBounds.ts";
+
+import type { StandaloneOptions } from "./standaloneOptions.ts";
 
 import type { Displayable } from "@psilink/core/untrusted-text";
 import type { AddressInfo } from "node:net";
 
 /**
- * The vendored PeerJS broker on a loopback HTTP server of its own, as a process
- * entry point: `npm start -w packages/peerjs-broker`, or spawned under `tsx`.
+ * The vendored PeerJS broker on an HTTP server of its own, as a process entry
+ * point: `npm start -w packages/peerjs-broker`, or spawned under `tsx`.
  *
  * It is what makes the broker startable without an application around it, so a
  * consumer outside the web app drives the REAL signaling wire rather than a
@@ -19,17 +29,24 @@ import type { AddressInfo } from "node:net";
  *
  * In-process consumers inside the web app want its
  * `test/utils/signalingHarness.ts` instead: it builds the `WebSocketServer`
- * directly and hands back the realm. This runner deliberately goes through
+ * directly and hands back the realm. This runner goes through
  * `CreatePeerServerWSOnly`, the same entry point the web app's
  * `src/peerServer.ts` mounts, so what a spawning test sees is the wiring the
  * deployed app has rather than a subset of it.
  *
  * Protocol with the parent process: it prints one `psilink-broker <port>` line
  * on stdout once listening, then stays up until it is signalled. Nothing else
- * goes to stdout, so the parent can read the port with a single match.
+ * goes to stdout, so the parent can read the port with a single match. The line
+ * reports the port alone -- the address is the operator's own instruction, while
+ * the port is what an ephemeral bind leaves for the parent to learn.
  *
- * Arguments: `--path <mount>` and `--key <api-key>` override the defaults, so a
- * test can exercise a non-root mount or a wrong-key refusal.
+ * Its operator surface -- the bind address, the port, the mount, the realm key,
+ * and the readiness endpoint -- is resolved in `standaloneOptions.ts` and stated
+ * in this workspace's README.
+ *
+ * It bounds the window before it has a request in hand
+ * (`standaloneUpgradeBounds.ts`) but terminates no TLS, so a deployment
+ * reachable off the host puts it behind a front that does.
  */
 
 /** The line the parent matches to learn the port. */
@@ -43,38 +60,82 @@ const READY_PREFIX = "psilink-broker";
  * prefix with what core's prefixer writes for the same instant. */
 const DIAGNOSTIC_CONTEXT = "peerjs-broker";
 
-function readFlag(name: string, fallback: string): string {
-  const index = process.argv.indexOf(`--${name}`);
-  return index >= 0 && index + 1 < process.argv.length
-    ? process.argv[index + 1]
-    : fallback;
+/** Exit code for an option the runner cannot act on, matching the CLI's usage
+ * exit (docs/CLI.md). */
+const USAGE_EXIT_CODE = 64;
+
+/** Exit code for a bind the operating system refused -- an address that is not
+ * this host's, a port already taken, or one this process may not have -- and for
+ * a later fault on the listening socket. */
+const UNAVAILABLE_EXIT_CODE = 69;
+
+/** Write one line to stderr under this process's context. Diagnostics go to
+ * stderr because stdout carries the ready-line protocol above and nothing else;
+ * the text arrives escaped and capped, so this writes it as it stands. */
+function writeLine(level: "WARN" | "ERROR", message: Displayable): void {
+  const timestamp = new Date().toISOString();
+  process.stderr.write(
+    `[${timestamp}] [${level}] [${DIAGNOSTIC_CONTEXT}] ${message}\n`,
+  );
 }
 
 /** This runner's diagnostic sink, wired below with no flag in front of it: a
  * broker left unwatched is the case the reports exist for, so there is nothing
- * to switch on. Diagnostics go to stderr because stdout carries the ready-line
- * protocol above and nothing else. The text arrives escaped, capped and rate
- * limited from the diagnostics module, so this writes it as it stands. */
+ * to switch on. The text arrives escaped, capped and rate limited from the
+ * diagnostics module. */
 function writeDiagnostic(message: Displayable): void {
-  const timestamp = new Date().toISOString();
-  process.stderr.write(
-    `[${timestamp}] [WARN] [${DIAGNOSTIC_CONTEXT}] ${message}\n`,
-  );
+  writeLine("WARN", message);
 }
 
-const server = createServer((_request, response) => {
-  // The broker itself only handles WebSocket upgrades; a plain request is not
-  // part of any wire this serves, so it is refused rather than 404'd silently.
-  response.writeHead(404);
-  response.end();
-});
+/** Report a refusal to start and leave with `code`. The message composes an
+ * operator-supplied value raw, so it is escaped once here, at the sink. */
+function refuseToStart(message: string, code: number): never {
+  writeLine("ERROR", redactAndSanitizeForDisplay(message));
+  process.exit(code);
+}
+
+function readOptions(): StandaloneOptions {
+  try {
+    return resolveStandaloneOptions(process.argv.slice(2), process.env);
+  } catch (error) {
+    if (!(error instanceof StandaloneOptionError)) throw error;
+    refuseToStart(error.message, USAGE_EXIT_CODE);
+  }
+}
+
+const options = readOptions();
+
+const server = createServer(
+  createStandaloneRequestHandler(options.readinessPath),
+);
+
+applyStandaloneUpgradeBounds(server);
 
 CreatePeerServerWSOnly(server, writeDiagnostic, {
-  path: readFlag("path", "/api"),
-  key: readFlag("key", "peerjs"),
+  path: options.path,
+  key: options.key,
 });
 
-server.listen(0, "127.0.0.1", () => {
+// The signaling server's own reports are attached to its WebSocket server, not
+// to this one, so what reaches here is the HTTP server's: a bind the operating
+// system refused, and an accept-side fault. An `error` with no listener at all
+// is thrown, which ends the process either way; this states what happened first.
+// A fault after `listen` resolved an ephemeral port reports the bound address,
+// not the port-0 request that produced it; a pre-bind refusal has no bound
+// address yet, so it falls back to what was requested.
+server.on("error", (error: Error) => {
+  const bound = server.address();
+  const host =
+    typeof bound === "object" && bound !== null ? bound.address : options.host;
+  const port =
+    typeof bound === "object" && bound !== null ? bound.port : options.port;
+  refuseToStart(
+    `the signaling broker could not serve ${host} port ${port}: ${error.message}`,
+    UNAVAILABLE_EXIT_CODE,
+  );
+});
+
+server.listen(options.port, options.host, () => {
   const address = server.address() as AddressInfo;
   process.stdout.write(`${READY_PREFIX} ${address.port}\n`);
 });

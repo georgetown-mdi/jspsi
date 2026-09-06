@@ -115,19 +115,45 @@ export interface BrokerProcess {
   stop: () => Promise<void>;
 }
 
+/** What a caller can vary about the spawn, for a suite driving the runner's
+ * operator surface rather than the signaling wire. */
+export interface BrokerProcessOptions {
+  /** Further runner arguments, appended after the mount and key below. */
+  args?: ReadonlyArray<string>;
+  /** Environment entries added to the child's inherited environment. */
+  env?: NodeJS.ProcessEnv;
+}
+
 /**
  * Spawn the broker and resolve once it reports its port. Rejects (after killing
  * the child) if it exits first or does not report within
  * {@link START_TIMEOUT_MS}, so a failed start never leaves an orphan.
  */
-export function startBrokerProcess(): Promise<BrokerProcess> {
+export function startBrokerProcess(
+  options: BrokerProcessOptions = {},
+): Promise<BrokerProcess> {
   // The runner's own mount path and API key.
   const mountPath = "/api";
   const key = "peerjs";
   const child = spawn(
     process.execPath,
-    [require.resolve("tsx/cli"), runner, "--path", mountPath, "--key", key],
-    { cwd: brokerRoot, stdio: ["ignore", "pipe", "pipe"] },
+    [
+      require.resolve("tsx/cli"),
+      runner,
+      "--path",
+      mountPath,
+      "--key",
+      key,
+      ...(options.args ?? []),
+    ],
+    {
+      cwd: brokerRoot,
+      stdio: ["ignore", "pipe", "pipe"],
+      env:
+        options.env === undefined
+          ? process.env
+          : { ...process.env, ...options.env },
+    },
   );
 
   return new Promise<BrokerProcess>((resolve, reject) => {

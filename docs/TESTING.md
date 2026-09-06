@@ -199,6 +199,15 @@ broker and the real `peerjs`/`peerjs-js-binarypack` packages, and the
 assumptions that follow are held as checks -- see
 [docs/spec/DEPENDENCY_PINS.md](spec/DEPENDENCY_PINS.md#upgrading-the-cli-webrtc-peer-werift).
 
+The harness takes further runner arguments and environment entries, which is
+what `brokerStandaloneSurface.test.ts` beside it uses to drive the runner's
+operator surface -- the address and port it binds, the readiness probe a
+deployment reads, and the refusal an option it cannot act on produces. What each
+setting resolves to from an argument vector and an environment is checked
+without a process in `apps/web/test/unit/signalingStandaloneOptions.test.ts`,
+where the broker's other unit coverage sits: the package ships no test project
+of its own.
+
 One assumption the live suite cannot hold, and where it lives instead: werift
 inlines its ICE candidates in the SDP, so two peers connect on loopback even
 when every trickled candidate is discarded. The candidate-queue rule the
