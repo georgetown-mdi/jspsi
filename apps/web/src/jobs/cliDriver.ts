@@ -551,6 +551,10 @@ function sanitizeValue(value: unknown): unknown {
  * The redactor holds back part of each delivery until the next one arrives,
  * so `end` flushes the remainder into the window rather than leaving the
  * child's last line short of what it wrote.
+ *
+ * A caller that reads `get` before stderr's `end` -- the spawn-error path in
+ * {@link attachTerminalReconciliation} -- is short by up to a marker's
+ * lookahead (`PRIVATE_KEY_MARKER_LOOKAHEAD` code units) of the last delivery.
  */
 function attachStderrTail(child: ChildProcess): { get: () => string } {
   let tail = "";
@@ -610,6 +614,9 @@ function attachTerminalReconciliation(
   child.on("error", (error: Error) => {
     // The child could not be spawned or died abnormally; report a diagnostic and
     // classify as a failure so the manager always reaches a terminal state.
+    // It delivers before stderr's `end`, so the tail can be short by a marker's
+    // lookahead of the child's last delivery: diagnostic fidelity only, on a
+    // path that rarely has stderr at all.
     handlers.onDegraded(
       `CLI process error: ${sanitizeForDisplay(error.message)}`,
     );
