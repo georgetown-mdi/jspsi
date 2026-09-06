@@ -395,7 +395,7 @@ export function acceptorLaunchBlockedReason(
   if (hasMultipleIdentifiers(editorState.metadata))
     return "Choose a single record identifier column above before you can start.";
   if (!acceptorStandardizationValid(editorState.standardization))
-    return "Finish or fix the highlighted cleaning steps above before you can start.";
+    return "Finish, fix, or remove the highlighted cleaning steps above before you can start.";
   if (stepBlocks.connectionBlocked)
     return "Set up the SFTP connection above before you can start.";
   if (stepBlocks.splitDirectoryProblem !== undefined)
