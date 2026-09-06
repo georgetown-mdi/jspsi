@@ -1,6 +1,7 @@
 import { execFileSync } from "node:child_process";
 import {
   chmodSync,
+  copyFileSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -17,18 +18,31 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 // worktree-init.sh decides what it does from what git and npm report, and CLAUDE.md
 // determines a question about an external tool by driving the tool. So each case here
 // builds a real repository in a temp directory -- a bare origin holding main,
-// staging and two branches past it, a primary clone with a real install, worktrees
+// staging and the branches past it, a primary clone with a real install, worktrees
 // cut from that clone -- and runs the script itself against it. The packages are
 // local tarballs packed by `npm pack`, so the suite needs no network and no
 // registry. Nothing here touches this repository or its worktrees.
 
 const SCRIPT = fileURLToPath(new URL("./worktree-init.sh", import.meta.url));
+const DRIFT_CHECK = fileURLToPath(
+  new URL("../../scripts/check-node-modules-drift.mjs", import.meta.url),
+);
+const SCRIPT_IN_TREE = ".claude/scripts/worktree-init.sh";
+const REPO = fileURLToPath(new URL("../..", import.meta.url));
+
+// The control the fixture below is measured against: a revision of
+// worktree-init.sh whose run continues out of the bytes it started on after the
+// base-ref re-point. It is a pinned commit rather than a branch name, so what the
+// fixture distinguishes does not depend on where a branch tip stands.
+const CONTROL_REV = "24bd6975cb7b970b8d4a4b5d16bbeca03349fb83";
 
 let root;
 let cache;
 let vendor;
+let seed;
 let originRepo;
 let primary;
+let inPlaceResetGit;
 
 const npm = (args, cwd) =>
   execFileSync(
@@ -90,8 +104,140 @@ function worktree(name, start) {
   return path;
 }
 
+const SHEBANG = "#!/usr/bin/env bash\n";
+const TAIL_ANCHOR = '\nif [ ! -d "$PRIMARY/node_modules" ]; then\n';
+const DONE_ANCHOR = '\necho "worktree-init: done.';
+
+// A padding line is a fixed width so the two revisions' disagreement about where
+// the tail sits is a known byte count, and that count is not a whole number of
+// tail lines: a run that resumes at its old offset in the other revision's bytes
+// therefore resumes mid-line, which is a shell error rather than a comment.
+const headerPadding = (lines) =>
+  `${Array.from(
+    { length: lines },
+    (_, index) =>
+      `# header padding ${`${index}`.padStart(6, "0")} ${"-".repeat(40)}`,
+  ).join("\n")}\n`;
+const tailPadding = (lines) =>
+  `${Array.from(
+    { length: lines },
+    (_, index) =>
+      `# tail padding ${`${index}`.padStart(6, "0")} ${"-".repeat(48)}`,
+  ).join("\n")}\n`;
+
+/**
+ * One revision's copy of the script: padded at the head so two revisions disagree
+ * about where every later line sits, padded after the base-ref reconciliation so
+ * bytes are still unread when the re-point lands, and holding a marker of its own
+ * so the output names the revision that ran the tail.
+ */
+function revisionCopy(text, headerLines, marker) {
+  for (const anchor of [SHEBANG, TAIL_ANCHOR, DONE_ANCHOR]) {
+    if (text.split(anchor).length !== 2) {
+      throw new Error(
+        `worktree-init.sh no longer holds exactly one ${JSON.stringify(anchor)}, which this fixture pads around`,
+      );
+    }
+  }
+  return text
+    .replace(SHEBANG, `${SHEBANG}${headerPadding(headerLines)}`)
+    .replace(TAIL_ANCHOR, `\n${tailPadding(600)}${TAIL_ANCHOR.slice(1)}`)
+    .replace(DONE_ANCHOR, `\necho "worktree-init: ${marker}"${DONE_ANCHOR}`);
+}
+
+/** The bytes of worktree-init.sh at a revision of this repository. */
+function scriptAt(revision) {
+  try {
+    return execFileSync("git", ["show", `${revision}:${SCRIPT_IN_TREE}`], {
+      cwd: REPO,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "pipe"],
+    });
+  } catch (error) {
+    throw new Error(
+      `this suite drives ${SCRIPT_IN_TREE} as of ${revision}, and this clone cannot read it: ${error.stderr || error.message}`,
+    );
+  }
+}
+
+/**
+ * Three revisions of one script text: the one a worktree is cut on, the base ref
+ * it is re-pointed onto, and a base ref whose tree holds no script at all.
+ */
+function pushScriptRevisions(name, scriptText) {
+  git(["checkout", "-q", "main"], seed);
+  git(["checkout", "-q", "-b", name], seed);
+  mkdirSync(join(seed, ".claude", "scripts"), { recursive: true });
+  mkdirSync(join(seed, "scripts"), { recursive: true });
+  copyFileSync(
+    DRIFT_CHECK,
+    join(seed, "scripts", "check-node-modules-drift.mjs"),
+  );
+  writeFileSync(
+    join(seed, SCRIPT_IN_TREE),
+    revisionCopy(scriptText, 200, `${name} started-on marker`),
+  );
+  commitAll(seed, `Add the fixture worktree-init.sh on ${name}`);
+  git(["push", "-q", "origin", name], seed);
+
+  git(["checkout", "-q", "-b", `${name}-base`], seed);
+  writeFileSync(
+    join(seed, SCRIPT_IN_TREE),
+    revisionCopy(scriptText, 20, `${name} base-ref marker`),
+  );
+  // A drift check that refuses to verify sends the run down the `npm ci` route, so
+  // the drive covers the longer of the two paths the script takes after a re-point.
+  writeFileSync(
+    join(seed, "scripts", "check-node-modules-drift.mjs"),
+    "#!/usr/bin/env node\nprocess.exit(2);\n",
+  );
+  commitAll(seed, `Shorten the fixture worktree-init.sh on ${name}-base`);
+  git(["push", "-q", "origin", `${name}-base`], seed);
+
+  git(["checkout", "-q", "-b", `${name}-scriptless`], seed);
+  rmSync(join(seed, SCRIPT_IN_TREE));
+  commitAll(seed, `Hold no worktree-init.sh on ${name}-scriptless`);
+  git(["push", "-q", "origin", `${name}-scriptless`], seed);
+}
+
+/**
+ * A `git` whose `reset --hard` replaces the script's bytes without replacing the
+ * file: the hard link holds the inode a running shell has open, and the
+ * redirection truncates and refills that same inode. `git reset --hard` itself
+ * unlinks and recreates, which leaves a running shell reading the file it opened.
+ */
+function writeInPlaceResetGit() {
+  const dir = join(root, "in-place-reset-git");
+  mkdirSync(dir, { recursive: true });
+  const real = execFileSync("bash", ["-c", "command -v git"], {
+    encoding: "utf8",
+  }).trim();
+  const shim = join(dir, "git");
+  writeFileSync(
+    shim,
+    [
+      "#!/usr/bin/env bash",
+      "set -uo pipefail",
+      "is_reset=0",
+      'for arg in "$@"; do [ "$arg" = "reset" ] && is_reset=1; done',
+      'if [ "$is_reset" = 1 ] && [ -n "${IN_PLACE_RESET_TARGET:-}" ] && [ -f "${IN_PLACE_RESET_TARGET}" ]; then',
+      '  keep="${IN_PLACE_RESET_TARGET}.inode"',
+      '  ln "$IN_PLACE_RESET_TARGET" "$keep"',
+      `  ${JSON.stringify(real)} "$@" || exit $?`,
+      '  cat "$IN_PLACE_RESET_TARGET" > "$keep"',
+      '  rm -f "$keep"',
+      "  exit 0",
+      "fi",
+      `exec ${JSON.stringify(real)} "$@"`,
+      "",
+    ].join("\n"),
+  );
+  chmodSync(shim, 0o755);
+  return dir;
+}
+
 /** The script's own run: stderr folded into stdout, in the order it printed. */
-function runInit(cwd, env = {}) {
+function runInit(cwd, env = {}, script = SCRIPT) {
   const options = {
     cwd,
     encoding: "utf8",
@@ -106,7 +252,7 @@ function runInit(cwd, env = {}) {
   try {
     return {
       status: 0,
-      output: execFileSync("bash", ["-c", `bash "${SCRIPT}" 2>&1`], options),
+      output: execFileSync("bash", ["-c", `bash "${script}" 2>&1`], options),
     };
   } catch (error) {
     return { status: error.status, output: `${error.stdout}${error.stderr}` };
@@ -121,7 +267,7 @@ beforeAll(() => {
   pack("1.0.0");
   pack("2.0.0");
 
-  const seed = join(root, "seed");
+  seed = join(root, "seed");
   mkdirSync(join(seed, "packages", "core"), { recursive: true });
   writeRootManifest(seed, "1.0.0");
   writeFileSync(
@@ -131,8 +277,9 @@ beforeAll(() => {
       version: "0.0.0",
       private: true,
       scripts: {
-        build:
-          "node -e \"const fs=require('node:fs');fs.mkdirSync('dist',{recursive:true});fs.writeFileSync('dist/built.txt','built')\"",
+        // The build records which pass of the script reached it, which is the
+        // only place the handover after a re-point shows from outside.
+        build: `node -e "const fs=require('node:fs');fs.mkdirSync('dist',{recursive:true});fs.writeFileSync('dist/built.txt',process.env.PSILINK_WORKTREE_INIT_REPOINTED?'built after the re-point':'built in the first pass')"`,
       },
     }),
   );
@@ -180,6 +327,10 @@ beforeAll(() => {
   }
   commitAll(seed, "Pin widget to a version that cannot be fetched");
   git(["push", "-q", "origin", "unservable"], seed);
+
+  pushScriptRevisions("swap", readFileSync(SCRIPT, "utf8"));
+  pushScriptRevisions("control", scriptAt(CONTROL_REV));
+  inPlaceResetGit = writeInPlaceResetGit();
 
   primary = join(root, "primary");
   git(["clone", "-q", originRepo, primary], root);
@@ -356,5 +507,112 @@ describe("installing a branch whose lockfile the primary's install does not matc
     expect(output).toContain("rewrote package-lock.json");
     expect(readLock(tree)).toBe(before);
     expect(git(["status", "--porcelain"], tree)).toBe("");
+  }, 180_000);
+});
+
+describe("a re-point that replaces the script the shell is running", () => {
+  const repoint = (tree, name, env = {}) =>
+    runInit(
+      tree,
+      { PSILINK_WORKTREE_BASE_REF: `origin/${name}-base`, ...env },
+      join(tree, SCRIPT_IN_TREE),
+    );
+
+  const inPlaceReset = (tree) => ({
+    PATH: `${inPlaceResetGit}:${process.env.PATH}`,
+    IN_PLACE_RESET_TARGET: join(tree, SCRIPT_IN_TREE),
+  });
+
+  const built = (tree) =>
+    readFileSync(join(tree, "packages", "core", "dist", "built.txt"), "utf8");
+
+  it("provisions the tree from the base ref's own copy of the script", () => {
+    const tree = worktree("handover", "origin/swap");
+
+    const { status, output } = repoint(tree, "swap");
+
+    expect(status).toBe(0);
+    expect(head(tree)).toBe(git(["rev-parse", "origin/swap-base"], primary));
+    expect(output).toContain("swap base-ref marker");
+    expect(output).not.toContain("swap started-on marker");
+    expect(output).toContain("worktree-init: done");
+    expect(built(tree)).toBe("built after the re-point");
+  }, 180_000);
+
+  it("provisions from the revision it started on without the handover", () => {
+    const tree = worktree("no-handover", "origin/control");
+
+    const { output } = repoint(tree, "control");
+
+    expect(head(tree)).toBe(git(["rev-parse", "origin/control-base"], primary));
+    expect(output).toContain("control started-on marker");
+    expect(output).not.toContain("control base-ref marker");
+    expect(built(tree)).toBe("built in the first pass");
+  }, 180_000);
+
+  it("provisions across a reset that rewrites the running file in place", () => {
+    const tree = worktree("in-place", "origin/swap");
+
+    const { status, output } = repoint(tree, "swap", inPlaceReset(tree));
+
+    expect(status).toBe(0);
+    expect(head(tree)).toBe(git(["rev-parse", "origin/swap-base"], primary));
+    expect(output).toContain("swap base-ref marker");
+    expect(output).not.toContain("swap started-on marker");
+    expect(output).toContain("worktree-init: done");
+    expect(built(tree)).toBe("built after the re-point");
+  }, 180_000);
+
+  it("breaks on that in-place rewrite without the handover", () => {
+    const tree = worktree("in-place-control", "origin/control");
+
+    const { status, output } = repoint(tree, "control", inPlaceReset(tree));
+
+    expect(status).not.toBe(0);
+    expect(output).not.toContain("worktree-init: done");
+    expect(
+      existsSync(join(tree, "packages", "core", "dist", "built.txt")),
+    ).toBe(false);
+  }, 180_000);
+
+  it("re-points once and reconciles nothing on the second pass", () => {
+    const tree = worktree("bounded", "origin/swap");
+
+    const { status, output } = repoint(tree, "swap");
+
+    expect(status).toBe(0);
+    expect(output.match(/so re-pointing/g)).toHaveLength(1);
+    expect(output.match(/fetching origin/g)).toHaveLength(1);
+    expect(output).toContain("taking over after the re-point");
+  }, 180_000);
+
+  it("hands over nothing when the tree is already at the base ref", () => {
+    const tree = worktree("already-based", "origin/swap-base");
+
+    const { status, output } = repoint(tree, "swap");
+
+    expect(status).toBe(0);
+    expect(output).toContain("is at origin/swap-base");
+    expect(output).not.toContain("taking over after the re-point");
+    expect(output).toContain("swap base-ref marker");
+    expect(built(tree)).toBe("built in the first pass");
+  }, 180_000);
+
+  it("stops with its own message when the base ref holds no script", () => {
+    const tree = worktree("scriptless", "origin/swap");
+
+    const { status, output } = runInit(
+      tree,
+      { PSILINK_WORKTREE_BASE_REF: "origin/swap-scriptless" },
+      join(tree, SCRIPT_IN_TREE),
+    );
+
+    expect(status).toBe(1);
+    expect(output).toContain("no script is left to provision this tree with");
+    expect(output).not.toContain("error reading input file");
+    expect(head(tree)).toBe(
+      git(["rev-parse", "origin/swap-scriptless"], primary),
+    );
+    expect(existsSync(join(tree, SCRIPT_IN_TREE))).toBe(false);
   }, 180_000);
 });

@@ -27,6 +27,27 @@
 # teach agents to skip the script. Set PSILINK_WORKTREE_BASE_REF to work from
 # another base. The check binds only a tree that runs this script.
 #
+# Continuing across the re-point. `git reset --hard` replaces this file, and bash
+# re-reads a script around every fork: it seeks its descriptor back to the
+# parser's offset and refills from there, so every command from the reset onward
+# would be read out of bytes that no longer describe this program. So the moment
+# the reset succeeds the run re-execs the base revision's own copy of this
+# script -- only shell builtins run in between, and bash has the whole function
+# body in memory, so no byte of the file is read between the two -- and
+# PSILINK_WORKTREE_INIT_REPOINTED tells the second pass to skip reconciliation.
+# Provisioning is then performed entirely by the revision the tree holds, so a
+# fix landed on the base ref binds the run that adopts it.
+#
+# The hazard has two forms. An in-place rewrite that shifts the file's length
+# makes bash resume mid-line at a stale offset on any filesystem; that form is
+# deterministic, and the tests drive it. Replacement by unlink-and-create, which
+# is what `git reset --hard` does, ran to completion in hand probes on overlayfs
+# and on this container's FUSE-backed mount, yet three real runs ended just after
+# the re-point with "error reading input file: No such file or directory", exit
+# 2, on the FUSE mount. That trigger has not been reproduced on demand: the
+# re-exec removes the dependency it needs, so a recurrence would place the cause
+# elsewhere.
+#
 # The mirroring trick: external deps are shared from the primary by absolute
 # symlink, but a workspace package's own RELATIVE symlink (e.g. @psilink/core ->
 # ../../packages/core) is copied verbatim, so it resolves to the worktree's own
@@ -52,6 +73,7 @@
 set -euo pipefail
 shopt -s dotglob nullglob
 
+SELF="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/$(basename "${BASH_SOURCE[0]}")"
 DRIFT_CHECK="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)/scripts/check-node-modules-drift.mjs"
 WORKTREE="$(git rev-parse --show-toplevel)"
 PRIMARY="$(cd "$(dirname "$(git rev-parse --git-common-dir)")" && pwd)"
@@ -73,7 +95,7 @@ tree_holds_work() {
 }
 
 reconcile_base() {
-  local base head behind ref
+  local base head behind ref short
   echo "worktree-init: fetching origin to place this tree against $BASE_REF ..."
   if ! git_here fetch --quiet origin; then
     echo "worktree-init: 'git fetch origin' failed; reading the $BASE_REF this clone already has, which may be behind origin's." >&2
@@ -96,11 +118,18 @@ reconcile_base() {
   fi
 
   if ! tree_holds_work "$base"; then
+    short="$(git_here rev-parse --short "$base")"
     echo "worktree-init: this tree sits at $(git_here rev-parse --short HEAD), $behind commit(s) behind $BASE_REF -- the harness cuts a worktree from the default branch, and this repo branches from staging."
     echo "worktree-init: it holds no commits or edits of its own, so re-pointing $ref onto $BASE_REF. Set PSILINK_WORKTREE_BASE_REF (e.g. to HEAD) to keep another base."
+    # Only builtins may stand between the reset and the exec: running an
+    # external command sends bash back to a file the reset has replaced.
     git_here reset --hard --quiet "$base"
-    echo "worktree-init: $ref is now at $(git_here rev-parse --short HEAD)."
-    return 0
+    if [ ! -r "$SELF" ]; then
+      echo "worktree-init: $ref is at $short, whose tree has no readable $SELF, so no script is left to provision this tree with. Re-point it onto a revision that has the script, or provision it by hand." >&2
+      exit 1
+    fi
+    echo "worktree-init: $ref is at $short; handing the rest of the run to that revision's own copy of this script."
+    PSILINK_WORKTREE_INIT_REPOINTED=1 exec bash "$SELF" "$@"
   fi
 
   {
@@ -177,7 +206,11 @@ install_from_lockfile() {
   echo "worktree-init: npm ci done; these deps are this branch's lockfile, not $PRIMARY's install."
 }
 
-reconcile_base
+if [ -n "${PSILINK_WORKTREE_INIT_REPOINTED:-}" ]; then
+  echo "worktree-init: this run is $BASE_REF's own copy of the script, taking over after the re-point; not reconciling again."
+else
+  reconcile_base "$@"
+fi
 
 if [ ! -d "$PRIMARY/node_modules" ]; then
   echo "worktree-init: $PRIMARY/node_modules does not exist; run 'npm install' in $PRIMARY first." >&2
