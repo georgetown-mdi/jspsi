@@ -366,7 +366,7 @@ describe("acceptor launch gates", () => {
     expect(
       acceptorLaunchBlockedReason(verdict, withInvalid.editorState, dobTerms),
     ).toBe(
-      "Finish or fix the highlighted cleaning steps above before you can start.",
+      "Finish, fix, or remove the highlighted cleaning steps above before you can start.",
     );
   });
 

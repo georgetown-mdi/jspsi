@@ -153,3 +153,57 @@ describe("StepListEditor: a bound left unfilled is marked on its own input", () 
     expect(page.getByRole("alert").elements()).toHaveLength(0);
   });
 });
+
+// A step naming a function this build has no descriptor for reaches the editor
+// only through an imported document or a step another build authored -- the add
+// menu and the defaults are descriptor-backed. `isStepValid` grades it invalid,
+// so the host's gate points at the highlighted step; without a mark of its own
+// the row it points at looks like any other read-only step.
+describe("StepListEditor: an unrecognized function marks the step", () => {
+  const unknownStep: EditableStep = {
+    function: "zz_not_a_function",
+    params: { window: "ZZTOPMARK" },
+  };
+
+  test("the step says the function is unrecognized and must be removed", async () => {
+    app.render(
+      createElement(StepListEditor, {
+        steps: [unknownStep],
+        onStepsChange: () => {},
+        addStepLabel: "Add a transform",
+      }),
+    );
+
+    const alerts = page.getByRole("alert");
+    await expect.element(alerts).toBeInTheDocument();
+    expect(alerts.elements()).toHaveLength(1);
+    await expect
+      .element(alerts)
+      .toHaveTextContent(
+        /psilink does not recognize this step's function.*Remove the step\./,
+      );
+    // Its params still show, read-only: the operator sees what the step
+    // declares, with no editable field for a param nothing here can type.
+    await expect
+      .element(page.getByText(/window: ZZTOPMARK/))
+      .toBeInTheDocument();
+    expect(page.getByRole("textbox").elements()).toHaveLength(0);
+    // The "advanced" badge is the raw-pattern family's; this step is not one of
+    // them, and the alert is what marks it.
+    expect(page.getByText("advanced").elements()).toHaveLength(0);
+  });
+
+  test("a recognized step beside it is not marked", async () => {
+    // Not vacuous: the mark is the unrecognized step's, not every step's.
+    app.render(
+      createElement(StepListEditor, {
+        steps: [{ function: "to_upper_case" }, unknownStep],
+        onStepsChange: () => {},
+        addStepLabel: "Add a transform",
+      }),
+    );
+
+    await expect.element(page.getByRole("alert")).toBeInTheDocument();
+    expect(page.getByRole("alert").elements()).toHaveLength(1);
+  });
+});

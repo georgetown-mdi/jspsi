@@ -470,7 +470,7 @@ export function validateAdvancedInvite(
     )
   ) {
     errors.standardization =
-      "Finish or fix the highlighted cleaning steps before generating.";
+      "Finish, fix, or remove the highlighted cleaning steps before generating.";
   }
 
   // The fan-out gate, read from the same list core's own refusal
@@ -602,7 +602,7 @@ function messageForField(field: AdvancedField): string {
     case "standardization":
       // Set directly in validateAdvancedInvite (not via a schema-path mapping); this
       // keeps the switch exhaustive over AdvancedField.
-      return "Finish or fix the highlighted cleaning steps before generating.";
+      return "Finish, fix, or remove the highlighted cleaning steps before generating.";
   }
 }
 

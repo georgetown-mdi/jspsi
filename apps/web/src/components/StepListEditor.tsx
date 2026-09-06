@@ -221,14 +221,35 @@ function StepRow({
             <Text size="sm" fw={500}>
               {label}
             </Text>
-            {/* The "advanced" badge marks a raw-pattern step as a risk surface even
-                when editable, and marks an unrecognized (read-only) step. */}
-            {(isRegexTier || editableDescriptor === undefined) && (
+            {/* The "advanced" badge marks a raw-pattern step as a risk surface
+                even when editable. An unrecognized step takes the alert below
+                instead, which says what the operator has to do about it. */}
+            {isRegexTier && (
               <Badge size="xs" variant="light" color="gray">
                 advanced
               </Badge>
             )}
           </Group>
+          {/* A step whose function has no descriptor names a function this
+              build does not have: its params can be neither checked nor
+              edited here, and `isStepValid` holds the host's gate shut on it,
+              so removing it is the only way out. Marked as a malformed param
+              is, since the gate that blocks points at what is marked. */}
+          {descriptor === undefined && (
+            <Alert
+              role="alert"
+              color="red"
+              variant="light"
+              p="xs"
+              icon={<IconAlertTriangle size={16} aria-hidden />}
+              data-testid="unrecognized-step-alert"
+            >
+              <Text size="xs">
+                psilink does not recognize this step&apos;s function, so its
+                settings cannot be checked or edited. Remove the step.
+              </Text>
+            </Alert>
+          )}
           {editableDescriptor !== undefined
             ? describeParamFields(editableDescriptor).map((paramField) => (
                 <ParamInput

@@ -544,7 +544,7 @@ describe("a key-element transform core cannot build", () => {
       const result = validateAdvancedInvite(authored, seed, now);
       expect(result.canGenerate).toBe(false);
       expect(result.errors.standardization).toMatch(
-        /Finish or fix the highlighted cleaning steps/,
+        /Finish, fix, or remove the highlighted cleaning steps/,
       );
     },
   );
