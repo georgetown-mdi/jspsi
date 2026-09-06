@@ -1,27 +1,54 @@
+import fs from "node:fs";
 import net from "node:net";
+import os from "node:os";
+import path from "node:path";
 
 import logLibrary from "loglevel";
 import ssh2 from "ssh2";
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 import { setLogLevel } from "@psilink/core";
 import { withCapturedLogs } from "@psilink/core/testing";
 
+import { probeHostKeyLines } from "../../src/commands/probeHostKey";
 import { SSH2SFTPClientAdapter } from "../../src/connection/ssh2SftpAdapter";
 import { SSH_WIRE_TRACE_LOGGER_NAME } from "../../src/connection/sftpWireTrace";
+import { configureLogging } from "../../src/util/logging";
 import { serverAuth, sftpServer } from "../sftpServer/testContext";
 
 // What a dial reports about its own SSH handshake, driven against the real
 // stack rather than modeled from ssh2's callback contract (CLAUDE.md,
-// settle-by-driving-the-tool). Four things are held here: that `--log-level
+// settle-by-driving-the-tool). Five things are held here: that `--log-level
 // trace` alone answers "did the handshake complete, and on what" from one run;
 // that no credential the dial sends is among what it reports; that every level
-// below trace emits not one line of it, whatever the `-v` count; and that a
+// below trace emits not one line of it, whatever the `-v` count; that a
 // peer's own bytes reach the operator escaped, since a name-list the peer chose
 // arrives verbatim from ssh2 (docs/spec/DEPENDENCY_PINS.md, "Upgrading the SFTP
-// Stack").
+// Stack"); and that the lines the stack renders as the transport drains reach
+// the operator's --log-file rather than the console it would fall through to
+// once a command has closed its sink.
 
 const TEST_TIMEOUT_MS = 60_000;
 const DIAL_BUDGET_MS = 5_000;
+
+/** One SSH name-list, length-prefixed as the wire format frames it. */
+function nameList(value: string): Buffer {
+  const body = Buffer.from(value, "utf8");
+  const framed = Buffer.alloc(4 + body.length);
+  framed.writeUInt32BE(body.length, 0);
+  body.copy(framed, 4);
+  return framed;
+}
+
+/** One binary packet: the length, the padding byte, the payload, the padding. */
+function packet(payload: Buffer): Buffer {
+  let padding = 8 - ((payload.length + 5) % 8);
+  if (padding < 4) padding += 8;
+  const framed = Buffer.alloc(4 + 1 + payload.length + padding);
+  framed.writeUInt32BE(1 + payload.length + padding, 0);
+  framed[4] = padding;
+  payload.copy(framed, 5);
+  return framed;
+}
 
 /**
  * A listener that answers the SSH identification string and one KEXINIT of its
@@ -40,13 +67,6 @@ function hostilePeer(
   let resolvePort!: (port: number) => void;
   const port = new Promise<number>((resolve) => (resolvePort = resolve));
 
-  const nameList = (value: string): Buffer => {
-    const body = Buffer.from(value, "utf8");
-    const framed = Buffer.alloc(4 + body.length);
-    framed.writeUInt32BE(body.length, 0);
-    body.copy(framed, 4);
-    return framed;
-  };
   const kexinit = (): Buffer => {
     // SSH_MSG_KEXINIT: the message number, a 16-byte cookie, the ten
     // name-lists, then the first-packet-follows flag and the reserved word.
@@ -65,15 +85,6 @@ function hostilePeer(
       "",
     ].map(nameList);
     return Buffer.concat([head, ...lists, Buffer.alloc(5)]);
-  };
-  const packet = (payload: Buffer): Buffer => {
-    let padding = 8 - ((payload.length + 5) % 8);
-    if (padding < 4) padding += 8;
-    const framed = Buffer.alloc(4 + 1 + payload.length + padding);
-    framed.writeUInt32BE(1 + payload.length + padding, 0);
-    framed[4] = padding;
-    payload.copy(framed, 5);
-    return framed;
   };
 
   const server = net.createServer((socket) => {
@@ -143,6 +154,41 @@ function keyboardInteractivePeer(password: string): {
 }
 
 /**
+ * A listener that identifies itself and then refuses the connection with an
+ * SSH_MSG_DISCONNECT of its own wording, the shape of a server turning a client
+ * away. ssh2's `Server` sends no disconnect a test can word, and the client's
+ * rendering of the one it receives is what is under test.
+ */
+function disconnectingPeer(description: string): {
+  port: Promise<number>;
+  close: () => void;
+} {
+  let resolvePort!: (port: number) => void;
+  const port = new Promise<number>((resolve) => (resolvePort = resolve));
+  const disconnect = (): Buffer => {
+    // SSH_MSG_DISCONNECT: the message number, the reason code, the description
+    // and its language tag.
+    const head = Buffer.alloc(5);
+    head[0] = 1;
+    head.writeUInt32BE(11, 1);
+    return packet(Buffer.concat([head, nameList(description), nameList("")]));
+  };
+  const server = net.createServer((socket) => {
+    socket.on("error", () => {});
+    socket.end(
+      Buffer.concat([
+        Buffer.from("SSH-2.0-psilink-refusing-peer\r\n", "utf8"),
+        disconnect(),
+      ]),
+    );
+  });
+  server.listen(0, "127.0.0.1", () => {
+    resolvePort((server.address() as net.AddressInfo).port);
+  });
+  return { port, close: () => server.close() };
+}
+
+/**
  * Dial `options` with an adapter built at `verbosity` -- the `-v` count -- under
  * a root log level of `rootLevel`, and hand back every diagnostic line the run
  * emitted. The root level is applied before the adapter is constructed because
@@ -167,11 +213,6 @@ async function dialCapturingLogs(
           return err;
         } finally {
           await adapter.end().catch(() => {});
-          // The stack emits its last transport lines after end() resolves, and
-          // a line landing outside this capture reaches the console, where the
-          // sentinel reads console.trace's stack as unescaped output. Lower the
-          // levels here, with no await between, so nothing more can be emitted.
-          setLogLevel(previousLevel);
         }
       },
       () => true,
@@ -350,6 +391,117 @@ describe("a peer's own bytes", () => {
           expect(line).not.toContain("\x1b");
           expect(line).not.toContain("\x07");
         }
+      } finally {
+        peer.close();
+      }
+    },
+  );
+});
+
+/**
+ * Run `probe` through the CLI's own logging bootstrap at the trace level with a
+ * `--log-file`, close that sink where a command handler closes it, and hand back
+ * the file's content and every byte the run put on stderr. The stderr capture
+ * outlives the close by a beat, so a line the stack emits once the sink is gone
+ * -- which reaches the console with a stack dump rather than the file -- is
+ * caught here rather than only by the console sentinel.
+ */
+async function traceToLogFile(probe: () => Promise<unknown>): Promise<{
+  logged: string[];
+  stderr: string;
+  failure: unknown;
+}> {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-wire-trace-"));
+  const logFile = path.join(dir, "trace.log");
+  const previousLevel = logLibrary.getLevel();
+  const stderr: string[] = [];
+  const stderrWrite = vi
+    .spyOn(process.stderr, "write")
+    .mockImplementation((chunk: string | Uint8Array): boolean => {
+      stderr.push(
+        typeof chunk === "string" ? chunk : Buffer.from(chunk).toString("utf8"),
+      );
+      return true;
+    });
+  let failure: unknown;
+  try {
+    const logging = configureLogging({
+      logLevel: logLibrary.levels.TRACE,
+      logFile,
+      name: "probe-host-key",
+    });
+    try {
+      await probe();
+    } catch (err) {
+      failure = err;
+    } finally {
+      logging.close();
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  } finally {
+    setLogLevel(previousLevel);
+    stderrWrite.mockRestore();
+  }
+  return {
+    logged: fs.readFileSync(logFile, "utf8").split("\n"),
+    stderr: stderr.join(""),
+    failure,
+  };
+}
+
+describe("a trace at the root level with a --log-file", () => {
+  test(
+    "puts a completed dial's last lines in the file and nothing on stderr",
+    { timeout: TEST_TIMEOUT_MS },
+    async () => {
+      const server = sftpServer();
+      const { logged, stderr, failure } = await traceToLogFile(() =>
+        probeHostKeyLines({
+          sftpUrl: `sftp://${server.host}:${server.port}`,
+          connectTimeoutSeconds: DIAL_BUDGET_MS / 1000,
+          json: false,
+          verbosity: 0,
+        }),
+      );
+      expect(failure).toBeUndefined();
+
+      const trace = wireTraceOf(logged);
+      expect(holds(trace, /Outbound: Sending DISCONNECT/)).toBe(true);
+      expect(holds(trace, /Socket ended/)).toBe(true);
+      expect(holds(trace, /Socket closed/)).toBe(true);
+      expect(holds(trace, /Global close event/)).toBe(true);
+      expect(stderr).toBe("");
+    },
+  );
+
+  test(
+    "puts a refused dial's last lines there too, the peer's reason included",
+    { timeout: TEST_TIMEOUT_MS },
+    async () => {
+      const peer = disconnectingPeer("this test's own refusal");
+      try {
+        const port = await peer.port;
+        const { logged, stderr, failure } = await traceToLogFile(() =>
+          probeHostKeyLines({
+            sftpUrl: `sftp://127.0.0.1:${port}`,
+            connectTimeoutSeconds: DIAL_BUDGET_MS / 1000,
+            json: false,
+            verbosity: 0,
+          }),
+        );
+        expect(failure).toBeDefined();
+
+        const trace = wireTraceOf(logged);
+        expect(
+          holds(
+            trace,
+            /Inbound: Received DISCONNECT \(11, "this test's own refusal"\)/,
+          ),
+        ).toBe(true);
+        expect(holds(trace, /Socket ended/)).toBe(true);
+        expect(holds(trace, /Socket closed/)).toBe(true);
+        expect(holds(trace, /Global close event/)).toBe(true);
+        expect(stderr).toBe("");
       } finally {
         peer.close();
       }

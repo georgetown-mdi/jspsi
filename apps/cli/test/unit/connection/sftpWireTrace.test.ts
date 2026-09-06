@@ -11,7 +11,7 @@ import {
 import {
   SSH_WIRE_TRACE_LOGGER_NAME,
   SSH_WIRE_TRACE_MAX_DISPLAY_LENGTH,
-  sshWireTraceCallback,
+  sshWireTrace,
   sshWireTraceLine,
 } from "../../../src/connection/sftpWireTrace";
 import type { WireTraceLogger } from "../../../src/connection/sftpWireTrace";
@@ -83,7 +83,7 @@ describe("sshWireTraceLine", () => {
   });
 });
 
-describe("sshWireTraceCallback", () => {
+describe("sshWireTrace", () => {
   test("installs nothing below the trace level", () => {
     for (const level of [
       logLibrary.levels.DEBUG,
@@ -92,19 +92,30 @@ describe("sshWireTraceCallback", () => {
       logLibrary.levels.ERROR,
       logLibrary.levels.SILENT,
     ])
-      expect(sshWireTraceCallback(recordingLogger(level))).toBeUndefined();
+      expect(sshWireTrace(recordingLogger(level))).toBeUndefined();
   });
 
   test("traces every line escaped at the trace level", () => {
     const log = recordingLogger(logLibrary.levels.TRACE);
-    const debug = sshWireTraceCallback(log);
-    expect(debug).toBeDefined();
-    debug!("Remote ident: 'SSH-2.0-\x1b[31mred'");
-    debug!("Handshake completed");
+    const trace = sshWireTrace(log);
+    expect(trace).toBeDefined();
+    trace!.emit("Remote ident: 'SSH-2.0-\x1b[31mred'");
+    trace!.emit("Handshake completed");
     expect(log.traced).toEqual([
       "Remote ident: 'SSH-2.0-\\x1b[31mred'",
       "Handshake completed",
     ]);
+  });
+
+  test("traces nothing once detached, however often it is called", () => {
+    const log = recordingLogger(logLibrary.levels.TRACE);
+    const trace = sshWireTrace(log)!;
+    trace.emit("Handshake completed");
+    trace.detach();
+    trace.emit("Socket ended");
+    trace.detach();
+    trace.emit("Socket closed");
+    expect(log.traced).toEqual(["Handshake completed"]);
   });
 });
 
@@ -125,7 +136,7 @@ describe("the logger the trace rides", () => {
     setLogLevel(level);
     const log = getLogger(SSH_WIRE_TRACE_LOGGER_NAME);
     expect(log.getLevel()).toBe(level);
-    expect(sshWireTraceCallback(log) !== undefined).toBe(
+    expect(sshWireTrace(log) !== undefined).toBe(
       level === logLibrary.levels.TRACE,
     );
   });
@@ -137,7 +148,7 @@ describe("the logger the trace rides", () => {
       const log = getLogger(SSH_WIRE_TRACE_LOGGER_NAME);
       expect(adapterLog.getLevel()).toBeGreaterThan(logLibrary.levels.TRACE);
       expect(log.getLevel()).toBe(logLibrary.levels.TRACE);
-      expect(sshWireTraceCallback(log)).toBeDefined();
+      expect(sshWireTrace(log)).toBeDefined();
     }
   });
 
@@ -146,6 +157,6 @@ describe("the logger the trace rides", () => {
     getLoggerForVerbosity("sftp-adapter", 2);
     const log = getLogger(SSH_WIRE_TRACE_LOGGER_NAME);
     expect(log.getLevel()).toBe(logLibrary.levels.DEBUG);
-    expect(sshWireTraceCallback(log)).toBeUndefined();
+    expect(sshWireTrace(log)).toBeUndefined();
   });
 });

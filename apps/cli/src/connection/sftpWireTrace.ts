@@ -42,7 +42,7 @@ export const SSH_WIRE_TRACE_LOGGER_NAME = "ssh";
 export const SSH_WIRE_TRACE_MAX_DISPLAY_LENGTH = 1024;
 
 /**
- * What {@link sshWireTraceCallback} needs of a logger: its level, and the trace
+ * What {@link sshWireTrace} needs of a logger: its level, and the trace
  * sink it emits on. Structural rather than loglevel's `Logger`, so a caller can
  * hold it to what this module uses.
  */
@@ -64,9 +64,26 @@ export const sshWireTraceLine = (line: string): string =>
   });
 
 /**
- * The `debug` callback to hand the SSH stack, or `undefined` when `log` is not
- * at the trace level -- which is what installs nothing at all, leaving a dial
- * below that level byte-identical to one made without this module. It is
+ * A trace installed on one connection: the `debug` callback the SSH stack calls,
+ * and the detach that ends it.
+ */
+export interface SshWireTrace {
+  /** The `debug` connect option, one call per line the stack renders. */
+  emit: (line: string) => void;
+  /**
+   * Emit nothing further; idempotent. The caller detaches where the connection
+   * is done, because an application's diagnostic sink does not outlive its
+   * command: a line emitted past that sink falls through to the logger's raw
+   * console method, which for a trace-level logger prints a stack dump the
+   * `--log-file` never sees.
+   */
+  detach: () => void;
+}
+
+/**
+ * The trace to install on a connection, or `undefined` when `log` is not at the
+ * trace level -- which is what installs nothing at all, leaving a dial below
+ * that level byte-identical to one made without this module. The callback is
  * withheld rather than installed and dropped at the logger because the stack
  * renders every line before calling back, so a no-op sink would still pay the
  * per-packet formatting on every run.
@@ -74,9 +91,17 @@ export const sshWireTraceLine = (line: string): string =>
  * `log`'s level decides once, where the caller resolves this: the trace rides
  * the level the caller's logger held then, not one applied later.
  */
-export const sshWireTraceCallback = (
+export const sshWireTrace = (
   log: WireTraceLogger,
-): ((line: string) => void) | undefined =>
-  log.getLevel() <= logLibrary.levels.TRACE
-    ? (line: string) => log.trace(sshWireTraceLine(line))
-    : undefined;
+): SshWireTrace | undefined => {
+  if (log.getLevel() > logLibrary.levels.TRACE) return undefined;
+  let attached = true;
+  return {
+    emit: (line: string) => {
+      if (attached) log.trace(sshWireTraceLine(line));
+    },
+    detach: () => {
+      attached = false;
+    },
+  };
+};
