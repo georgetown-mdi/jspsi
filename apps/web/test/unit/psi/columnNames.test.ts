@@ -112,4 +112,15 @@ describe("sanitizedColumnsAlert", () => {
     expect(alert.message).toContain("sent to your partner");
     expect(alert.message).toContain("edit the header row");
   });
+
+  test("states the numbering instead of claiming the name is the rest of the header", () => {
+    // Measured on the real parser in packages/core/test/file.test.ts: a header
+    // whose two names differ only by a removed character comes back as `name`
+    // and `name_1`, so the name a collided column keeps is not its own header
+    // and can be the untouched column's.
+    const alert = sanitizedColumnsAlert([2]);
+    expect(alert.message).toContain("two columns with the same name");
+    expect(alert.message).toContain("the later one was numbered");
+    expect(alert.message).not.toContain("rest of the header");
+  });
 });

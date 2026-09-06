@@ -4027,6 +4027,44 @@ test("loadInputRows: a bidi-stripped header is reported by position, never by na
   expect(clean).toEqual([]);
 });
 
+test("loadInputRows: a header that collides after the strip is warned by position, and the parser numbers the later column", async () => {
+  // Driven through the real parser: `name,na<RLO>me` strips to two `name`
+  // columns, which PapaParse renames to `name` and `name_1`. The warn line must
+  // not tell the operator the name kept is the rest of the header -- the later
+  // column's name is in neither the file nor the line -- so it states the
+  // numbering instead.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-loadrows-clash-"));
+  const logged: Array<string> = [];
+  const previousSink = getDiagnosticSink();
+  const log = getLogger("input");
+  const previousLevel = log.getLevel();
+  let columns: Array<string> = [];
+  let positions: Array<number> = [];
+  try {
+    const clash = path.join(dir, "clash.csv");
+    fs.writeFileSync(clash, "name,na\u202eme\n alice,bob\n");
+    setDiagnosticSink((_method, _prefix, args) => {
+      logged.push(args.map((arg) => String(arg)).join(" "));
+    });
+    log.setLevel("warn");
+    const rows = await loadInputRows(clash, { allowStdin: true });
+    columns = rows.columns;
+    positions = rows.sanitizedColumnPositions;
+  } finally {
+    setDiagnosticSink(previousSink);
+    log.setLevel(previousLevel);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+
+  expect(columns).toEqual(["name", "name_1"]);
+  expect(positions).toEqual([2]);
+  const line = logged.find((entry) => entry.includes("text-direction"));
+  expect(line).toContain("column 2");
+  expect(line).toContain("two columns with the same name");
+  expect(line).toContain("the later one was numbered");
+  expect(line).not.toContain("rest of the header");
+});
+
 test("the empty-name refusal blames the removal when the strip emptied the name", async () => {
   // Driven through the real parser and the real refusal: a header made only of
   // text-direction characters strips to the empty name inferMetadata refuses, and
