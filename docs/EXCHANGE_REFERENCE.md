@@ -1316,6 +1316,8 @@ A `substring` step whose declared window reads nothing is dead the same way, and
 
 The browser editor applies the same grading to both shapes when an invitation is CREATED, badging the key and holding Generate shut, so a key that matches nothing does not reach a partner as an invitation minted there.
 
+A step the function cannot be built from at all is refused where the terms are authored or minted, for a related reason: a pipeline is built once, before the first row is read, so a `pad_left` with no `length` or a fill longer than one character, a `phonetic` naming an algorithm this build does not implement, or a `function` it does not recognize stops the exchange before it matches anything -- on both parties, and only once the invitation has been accepted and set up against. A config-source `psilink invite` is refused at mint time, before the token is disclosed, as it is for a standardization that contradicts the terms; the browser editor holds Generate shut and refuses at its own mint. The refusal names the offending step's function, where the name is one this build recognizes, and the two remedies: correct that step's parameters, or remove the step.
+
 #### Null-producing (filter) functions
 
 | Function | Description | Parameters |
