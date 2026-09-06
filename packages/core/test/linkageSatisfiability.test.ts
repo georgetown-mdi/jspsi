@@ -1676,10 +1676,10 @@ describe("assertTransformsCompile", () => {
 
   test("a walk the budget stops commits none of what it compiled", () => {
     // What the walk compiled before the budget was spent is dropped, so the
-    // next walk over the same document starts where this one did rather than
-    // resuming past what it paid for -- which is what let the same document be
-    // refused over and over and then admitted with nothing edited. The formats
-    // are unique to this test so the engine's own pattern cache is cold here.
+    // memo holds nothing a later walk over the same document resumes past. That
+    // bounds each attempt without making a budget refusal repeatable: the
+    // engine's own pattern cache is process-global and outlives it. The formats
+    // are unique to this test so that cache is cold here.
     const elements: LinkageKeyElement[] = Array.from(
       { length: 32 },
       (_, index) => ({
@@ -1800,7 +1800,7 @@ describe("assertTransformsCompile", () => {
       }));
     const terms: LinkageTerms = {
       ...minimalTerms,
-      linkageKeys: keysWithTransform(distinctSteps(512)),
+      linkageKeys: keysWithTransform(distinctSteps(256)),
     };
     const elapsed = (run: () => void): number => {
       const startedAt = performance.now();

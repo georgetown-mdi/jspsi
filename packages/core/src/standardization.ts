@@ -1394,8 +1394,9 @@ export function hasMemoizedCompiledSteps(steps: TransformStep[]): boolean {
 /**
  * Move a completed walk's compiled steps into the memo the run reads, so the
  * run pays for them once between them. Called only where the walk finished:
- * a refused document leaves its buffer to be dropped, which is what makes the
- * refusal repeatable.
+ * a refused document leaves its buffer to be dropped, so no later walk resumes
+ * past what this one paid for. What makes a refusal repeatable is the step
+ * count bound instead, since the engine's pattern cache is process-global.
  *
  * @internal called by `assertTransformsCompile` in `linkageSatisfiability.ts`.
  */

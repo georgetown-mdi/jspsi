@@ -206,20 +206,14 @@ export function assertFanOutImplemented(
  * its standardization and every linkage-key element, checked by
  * {@link assertTransformsCompile} before anything is compiled.
  *
- * This is the bound an author acts on, because it is a property of the document
- * alone: the wall-clock budget below answers differently on a fast machine than
- * on a loaded one, so it cannot be what a refusal's "declare fewer steps" remedy
- * refers to. 1024 is far above what a party mints (the bundled terms declare
- * steps in the tens across every key) and far below what the wire schema admits,
- * which is `MAX_TRANSFORM_STEPS` steps per element over `MAX_KEY_ELEMENTS`
- * elements per key (`config/linkageTermsSchema.ts`). Measured on the most
- * expensive step this build compiles, a `parse_date` with a distinct
- * 256-character format: 1024 of them compile in about 0.7 s on an idle
- * container against the 2 s budget, and 2560 -- which this bound refuses
- * outright -- in about 1.96 s, close enough to the budget that the same
- * document minted on a loaded machine is refused instead.
+ * The count, not the clock, is the verdict a document gets on any machine. It
+ * is half the count measured against the budget below: 1024 `parse_date` steps
+ * with distinct 256-character formats, the most expensive shape this build
+ * compiles, took 0.7 s on an idle container and up to 1.9 s under its ordinary
+ * load, against 2 s. The budget can still refuse a within-cap document on a
+ * slower machine, where retrying is legitimate: each attempt was bounded.
  */
-const TRANSFORM_COMPILE_MAX_STEPS = 1024;
+const TRANSFORM_COMPILE_MAX_STEPS = 512;
 
 /**
  * Total wall-clock budget, in milliseconds, for compiling every declared step of
@@ -325,7 +319,7 @@ function stepCountRefusal(
  * behind it for a document under the count whose steps are expensive. The
  * compiles are memoized ({@link uncompilableStepLabel}) once the walk has
  * finished, so a repeated mint of one document pays for them once, while a
- * refused one leaves nothing behind for a retry to build on.
+ * refused one leaves the memo as it found it.
  */
 export function assertTransformsCompile(
   terms: LinkageTerms,
@@ -341,10 +335,11 @@ export function assertTransformsCompile(
   );
   if (overCount !== undefined) throw overCount;
   // Compiled steps are held aside and committed only where the whole walk
-  // finished, so a refused document is refused again unchanged. Committing them
-  // as the walk went would let the next walk over the same arrays resume past
-  // what this one paid for, admitting after enough retries a document no edit
-  // had touched.
+  // finished, so the next walk over the same arrays cannot resume past what
+  // this one paid for. That bounds each attempt rather than making a budget
+  // refusal repeatable: the engine's pattern cache is process-global
+  // (`utils/linearRegex.ts`) and outlives the refusal, so the count bound above
+  // is the verdict that repeats.
   const pending: PendingCompiledTransforms = new Map();
   // performance.now() rather than the wall clock: a backward clock step during
   // the walk (an NTP correction, a container resuming) makes the difference
