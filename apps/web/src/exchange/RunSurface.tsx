@@ -173,8 +173,9 @@ export function CopyRow({
 }
 
 /**
- * The role-neutral run/completion furniture the console's run surfaces share:
- * the download rows and the block a completed run offers them in, the
+ * The role-neutral run/completion furniture every surface that reports a run
+ * shares, the console's run columns and the hosted build's managed run surface
+ * alike: the download rows and the block a completed run offers them in, the
  * completion panel, the withheld-result inset, the failure alert block, and
  * the "set up another exchange" workfoot. Nothing here is role-aware -- the
  * run's own outputs decide which downloads exist, and the calling section
