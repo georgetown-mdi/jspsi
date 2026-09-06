@@ -2877,14 +2877,6 @@ describe("InvitationTerms: no partner-controlled byte reaches the screen", () =>
     "title",
   ];
 
-  // The one code point outside printable ASCII the component's OWN fixed copy
-  // puts on the screen: the apostrophe in its swap notes ("...applied to Last
-  // name&rsquo;s value"). Allowed by name, and only this one, so the walk below
-  // still fails on every other non-ASCII byte -- sanitizeForDisplay escapes
-  // U+2019 like any other non-ASCII code point, so no partner string can reach
-  // the DOM containing one.
-  const FIRST_PARTY_APOSTROPHE = /\u2019/g;
-
   // Every string the mounted tree presents: each text node, plus the readable
   // attributes above, tagged with where it sits so a failure names the node. A
   // <style> or <script> element's text is program text the browser consumes, not
@@ -2930,11 +2922,11 @@ describe("InvitationTerms: no partner-controlled byte reaches the screen", () =>
 
   /**
    * Mount the hostile fixture with the given props, open every disclosure, and
-   * require that every string the screen presents is printable ASCII (bar the
-   * first-party apostrophe above). `reachedScreen` names raw partner strings
-   * whose escaped form must be on screen, so the walk cannot pass over a render
-   * that never included the fixture's partner text -- the vacuity guard, with no
-   * per-field enumeration behind it.
+   * require that every string the screen presents is printable ASCII.
+   * `reachedScreen` names raw partner strings whose escaped form must be on
+   * screen, so the walk cannot pass over a render that never included the
+   * fixture's partner text -- the vacuity guard, with no per-field enumeration
+   * behind it.
    */
   async function expectEveryPresentedStringEscaped(
     props: ComponentProps<typeof InvitationTerms>,
@@ -2951,13 +2943,10 @@ describe("InvitationTerms: no partner-controlled byte reaches the screen", () =>
 
     const presented = presentedStrings(app.container);
     expect(
-      presented.filter(
-        (entry) =>
-          !PRINTABLE_ASCII.test(entry.text.replace(FIRST_PARTY_APOSTROPHE, "")),
-      ),
+      presented.filter((entry) => !PRINTABLE_ASCII.test(entry.text)),
     ).toEqual([]);
-    // The property the allowance above may never soften: not one of the
-    // fixture's hostile code points is on the screen, raw.
+    // Stated on its own so a failure names the code point: not one of the
+    // fixture's hostile bytes is on the screen, raw.
     for (const hostile of [ESC, RLO, BEL])
       expect(presented.filter((entry) => entry.text.includes(hostile))).toEqual(
         [],

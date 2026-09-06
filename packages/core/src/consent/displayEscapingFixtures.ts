@@ -143,36 +143,6 @@ export const hostileTerms: LinkageTerms = {
 /**
  * @internal
  *
- * {@link hostileTerms} with a swap whose transforms sit on ONE side only. The
- * swap in those terms holds a transform on both of its elements, which
- * summarizes as the bidirectional interchange; a single transform-carrier
- * summarizes as the one-directional donor instead -- the other arm of the same
- * branch, so one terms document cannot reach both and a second one is what
- * reaches the donor.
- */
-const swapDonorTerms: LinkageTerms = {
-  ...hostileTerms,
-  linkageKeys: [
-    {
-      name: `key${BEL}two`,
-      elements: [
-        {
-          field: "first_name",
-          name: `donor${RLO}elem`,
-          transform: [
-            { function: "substring", params: { start: 2, length: 4 } },
-          ],
-        },
-        { field: `last${BEL}name` },
-      ],
-      swap: [`donor${RLO}elem`, `last${BEL}name`],
-    },
-  ],
-};
-
-/**
- * @internal
- *
  * The decoded-token subset `summarizeInvitation` takes: linkage terms plus the
  * partner-controlled values the terms themselves do not hold -- the invitation's
  * expiry instant and a file-drop endpoint's advisory path.
@@ -196,16 +166,6 @@ export const hostileSource: HostileSource = {
 /**
  * @internal
  *
- * {@link swapDonorTerms} as the decoded-token subset.
- */
-const swapDonorSource: HostileSource = {
-  ...hostileSource,
-  linkageTerms: swapDonorTerms,
-};
-
-/**
- * @internal
- *
  * Every hostile variant the display-escaping halves run over, named for the
  * failure message. Both walk this list -- the unit walk summarizes each and the
  * browser walk mounts each -- so a variant added to reach a summary position one
@@ -215,7 +175,4 @@ const swapDonorSource: HostileSource = {
 export const hostileVariants: ReadonlyArray<{
   name: string;
   source: HostileSource;
-}> = [
-  { name: "transforms on both swapped elements", source: hostileSource },
-  { name: "a transform on one swapped element", source: swapDonorSource },
-];
+}> = [{ name: "transforms on both swapped elements", source: hostileSource }];

@@ -383,30 +383,6 @@ export interface InvitationKeySummary {
    */
   swap?: [Displayable, Displayable];
   /**
-   * True when the two swapped elements (resolved in {@link swap}) BOTH hold a
-   * transform. On the receiver a swap moves each element's field reference to
-   * the other element while its transforms stay put (core's `swapElements`),
-   * so each element's transforms apply to the OTHER element's field value.
-   * When both sides hold transforms, the generic "matched in either order"
-   * note understates this interchange, so the renderer states it
-   * bidirectionally; implies {@link swap} is present. Mutually exclusive with
-   * {@link swapTransformDonor}: false unless both elements hold a transform
-   * and the labels resolved distinctly.
-   */
-  swapTransformInterchange: boolean;
-  /**
-   * `[donor, recipient]` field labels when EXACTLY ONE swapped element holds
-   * a transform, else undefined. The receiver applies the donor's transforms
-   * to the recipient's field value (core's `swapElements`), so the
-   * recipient's header slot shows the donor's breadth marker (see
-   * {@link headerFields}); the renderer states this cross-application in the
-   * detail so the re-attributed marker is anchored. Mutually exclusive with
-   * {@link swapTransformInterchange} (the both-transform case); implies
-   * {@link swap} is present, using the same resolved labels, never the raw
-   * swap-reference identifier.
-   */
-  swapTransformDonor?: [Displayable, Displayable];
-  /**
    * The always-visible one-liner of the fields this key matches on: one entry
    * per element, each a COMPACT semantic-type label plus a terse breadth
    * marker when its element loosens matching ("last name (partial)", "date
@@ -421,9 +397,7 @@ export interface InvitationKeySummary {
    * A swap re-attributes markers to the receiver's terms: each swapped
    * element keeps its own rules but reads the OTHER element's field value on
    * the receiver (core's `swapElements`), so its breadth marker is shown on
-   * its swapped PARTNER's field here, not the field it is declared on. The
-   * cross-application the detail lists is anchored by
-   * {@link swapTransformInterchange} / {@link swapTransformDonor}.
+   * its swapped PARTNER's field here, not the field it is declared on.
    */
   headerFields: Array<Displayable>;
 }
@@ -1168,8 +1142,6 @@ function summarizeKey(
 
   const hasSwap = key.swap !== undefined;
   let swap: [Displayable, Displayable] | undefined;
-  let swapTransformInterchange = false;
-  let swapTransformDonor: [Displayable, Displayable] | undefined;
   // Header-marker re-attribution across a swap: maps each swapped element
   // to the breadth marker its header entry should show INSTEAD of its own
   // (an explicit `undefined` blanks the marker). Empty for a non-swap, a
@@ -1183,13 +1155,12 @@ function summarizeKey(
   if (key.swap !== undefined) {
     // A swap names two elements by their effective identifier (element
     // `name` if present, otherwise `field`); resolve each to its element so
-    // the note reads in the same field-label terms as the element list and
-    // can see whether each holds a transform. The schema enforces that
-    // `name ?? field` is unique within a key, so this Map never drops an
-    // element. The note names the two fields only when both references
-    // resolve to elements with distinct labels; otherwise `swap` stays
-    // undefined and the renderer shows a generic note (see the `swap`
-    // field doc).
+    // the note reads in the same field-label terms as the element list. The
+    // schema enforces that `name ?? field` is unique within a key, so this
+    // Map never drops an element. The note names the two fields only when
+    // both references resolve to elements with distinct labels; otherwise
+    // `swap` stays undefined and the renderer shows a generic note (see the
+    // `swap` field doc).
     const elementByIdentifier = new Map(
       key.elements.map((element) => [element.name ?? element.field, element]),
     );
@@ -1226,23 +1197,6 @@ function summarizeKey(
             elementBreadthMarker(first, fanOutMatches),
           );
         }
-        // The expanded detail lists each element's transforms under its
-        // DECLARED field, so a re-attributed header marker needs the detail
-        // to also state the cross-application. Flag it for the renderer: a
-        // bidirectional interchange when both swapped elements hold
-        // transforms, else a one-directional donor -> recipient note when
-        // exactly one does (`swapTransformDonor` names the donor first).
-        // Keyed on transforms, not on fuzzy comparisons: a not-yet-applied
-        // fuzzy expansion has its own "(proposed)" caveat in the detail
-        // and needs no separate note here.
-        const firstTransforms = (first.transform?.length ?? 0) > 0;
-        const secondTransforms = (second.transform?.length ?? 0) > 0;
-        if (firstTransforms && secondTransforms)
-          swapTransformInterchange = true;
-        else if (firstTransforms)
-          swapTransformDonor = [firstLabel, secondLabel];
-        else if (secondTransforms)
-          swapTransformDonor = [secondLabel, firstLabel];
       }
     }
   }
@@ -1273,8 +1227,6 @@ function summarizeKey(
     headerFields,
     hasSwap,
     swap,
-    swapTransformInterchange,
-    swapTransformDonor,
   };
 }
 
