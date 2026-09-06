@@ -66,18 +66,30 @@ export function descendants(node) {
 }
 
 /**
- * Every TypeScript source under a repository-relative `dir`, itself
- * repository-relative and sorted. Which tree to walk, and what else to fold into
- * the reading, is the calling check's own claim.
+ * Every file under a repository-relative `dir`, whatever its extension, itself
+ * repository-relative and sorted -- the whole tree {@link sourceModules}
+ * filters. A check that reads one extension holds that scope against the tree it
+ * was pointed at by comparing the two, rather than stating in a comment which
+ * extensions the tree holds. An absolute `dir` is taken as it stands, so a
+ * fixture can point the same walk at a temporary tree.
  */
-export function sourceModules(dir) {
+export function filesUnder(dir) {
   const found = [];
   for (const entry of readdirSync(resolve(root, dir), {
     withFileTypes: true,
   })) {
     const path = posix.join(dir, entry.name);
-    if (entry.isDirectory()) found.push(...sourceModules(path));
-    else if (/\.tsx?$/.test(entry.name)) found.push(path);
+    if (entry.isDirectory()) found.push(...filesUnder(path));
+    else found.push(path);
   }
   return found.sort();
+}
+
+/**
+ * Every TypeScript source under a repository-relative `dir`, itself
+ * repository-relative and sorted. Which tree to walk, and what else to fold into
+ * the reading, is the calling check's own claim.
+ */
+export function sourceModules(dir) {
+  return filesUnder(dir).filter((path) => /\.tsx?$/.test(path));
 }

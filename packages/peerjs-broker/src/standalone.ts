@@ -38,7 +38,9 @@ const READY_PREFIX = "psilink-broker";
 /** What marks this process's lines for an operator reading a stream several
  * processes write to. The same context `@psilink/core`'s prefixed loggers give
  * the broker's diagnostics in the web app, so one line shape serves both
- * embeddings. */
+ * embeddings -- an equality apps/cli/test/integration/webrtc/broker.test.ts
+ * holds by reading a diagnostic off this runner's stderr and comparing its
+ * prefix with what core's prefixer writes for the same instant. */
 const DIAGNOSTIC_CONTEXT = "peerjs-broker";
 
 function readFlag(name: string, fallback: string): string {

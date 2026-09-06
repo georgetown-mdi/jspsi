@@ -1,18 +1,24 @@
 import {
+  mkdirSync,
   mkdtempSync,
   readFileSync,
-  readdirSync,
   rmSync,
   statSync,
   writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
-import { dirname, join, resolve } from "node:path";
+import { dirname, join, posix, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 import ts from "typescript";
 import { ESLint } from "eslint";
 import { afterAll, describe, expect, it } from "vitest";
+
+import {
+  filesUnder,
+  parseFile,
+  sourceModules,
+} from "./lib/typeScriptSources.mjs";
 
 // What the standalone signaling broker can reach at run time. It is the one
 // process here that listens on the internet with no application around it, so
@@ -34,7 +40,8 @@ import { afterAll, describe, expect, it } from "vitest";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..");
-const brokerSrc = join(repoRoot, "packages/peerjs-broker/src");
+const BROKER_SRC = "packages/peerjs-broker/src";
+const brokerSrc = join(repoRoot, BROKER_SRC);
 const coreDir = join(repoRoot, "packages/core");
 const coreDist = join(coreDir, "dist");
 
@@ -60,26 +67,25 @@ const eslint = new ESLint({
   overrideConfigFile: join(repoRoot, "eslint.config.mjs"),
 });
 
-/** Files the walk below reads. `.ts` is the whole of this workspace's source. */
-function sourceFilesUnder(root) {
-  const found = [];
-  const visit = (path) => {
-    for (const entry of readdirSync(path)) {
-      const full = join(path, entry);
-      if (statSync(full).isDirectory()) visit(full);
-      else if (full.endsWith(".ts")) found.push(full);
-    }
-  };
-  visit(root);
-  return found;
-}
+/**
+ * Files a source tree may hold that can hold no import: the license text
+ * vendored beside the server source. Every other file under the broker's source
+ * directory is one the guards below have to have read.
+ */
+const NON_SOURCE_FILE_NAMES = ["LICENSE"];
 
-function parse(path) {
-  return ts.createSourceFile(
-    path,
-    readFileSync(path, "utf8"),
-    ts.ScriptTarget.Latest,
-    true,
+/**
+ * Every file under `dir` the scan does not read -- the whole tree, less the
+ * TypeScript sources the shared walk finds and the names above. What the two
+ * guards below conclude about this workspace holds only over the files they
+ * read, so a source of another extension added here is a route around them.
+ */
+function unreadFilesUnder(dir) {
+  const scanned = new Set(sourceModules(dir));
+  return filesUnder(dir).filter(
+    (file) =>
+      !scanned.has(file) &&
+      !NON_SOURCE_FILE_NAMES.includes(posix.basename(file)),
   );
 }
 
@@ -120,7 +126,7 @@ function specifiersOf(path) {
     }
     ts.forEachChild(node, visit);
   };
-  visit(parse(path));
+  visit(parseFile(path));
   return found;
 }
 
@@ -214,11 +220,23 @@ describe("specifiersOf", () => {
 });
 
 describe("the broker's own source", { timeout: 60_000 }, () => {
-  const files = sourceFilesUnder(brokerSrc);
+  const files = sourceModules(BROKER_SRC);
 
   it("scans every file in the workspace", () => {
     // A walk that found nothing would pass every assertion below.
     expect(files.length).toBeGreaterThan(10);
+  });
+
+  it("leaves no file of the workspace unread", () => {
+    const unread = unreadFilesUnder(BROKER_SRC);
+    expect(
+      unread,
+      `${unread.length} file(s) under ${BROKER_SRC} are read by neither guard ` +
+        `below. The scan walks this workspace's TypeScript sources, so a ` +
+        `source of any other extension takes its imports past both. Widen the ` +
+        `walk in scripts/lib/typeScriptSources.mjs to cover the file, or add ` +
+        `its name to NON_SOURCE_FILE_NAMES when it can hold no import at all.`,
+    ).toEqual([]);
   });
 
   it("names no package outside its declared runtime set", () => {
@@ -231,7 +249,7 @@ describe("the broker's own source", { timeout: 60_000 }, () => {
             !isBuiltin(text) &&
             !BROKER_RUNTIME_PACKAGES.includes(text),
         )
-        .map(({ text }) => `${path.slice(repoRoot.length + 1)}: ${text}`),
+        .map(({ text }) => `${path}: ${text}`),
     );
     expect(offenders).toEqual([]);
   });
@@ -243,7 +261,7 @@ describe("the broker's own source", { timeout: 60_000 }, () => {
     const offenders = files.flatMap((path) =>
       specifiersOf(path)
         .filter(({ text }) => text === "@psilink/core")
-        .map(() => path.slice(repoRoot.length + 1)),
+        .map(() => path),
     );
     expect(offenders).toEqual([]);
   });
@@ -270,6 +288,37 @@ describe("the broker's own source", { timeout: 60_000 }, () => {
         (message) => message.ruleId === "no-restricted-imports",
       ),
     ).toEqual([]);
+  });
+});
+
+describe("what the scan reads of a workspace tree", () => {
+  const roots = [];
+
+  afterAll(() => {
+    for (const root of roots) rmSync(root, { recursive: true, force: true });
+  });
+
+  /** A tree shaped like the broker's own -- nested TypeScript beside the
+   * vendored license text -- with `extras` planted in its root. */
+  function plantedTree(extras) {
+    const root = mkdtempSync(resolve(tmpdir(), "broker-source-tree-"));
+    roots.push(root);
+    mkdirSync(join(root, "contrib"));
+    writeFileSync(join(root, "standalone.ts"), 'import "ws";\n');
+    writeFileSync(join(root, "contrib/index.ts"), 'import "ws";\n');
+    writeFileSync(join(root, "contrib/LICENSE"), "MIT\n");
+    for (const [name, text] of Object.entries(extras))
+      writeFileSync(join(root, name), text);
+    return root;
+  }
+
+  it("reads a tree of TypeScript and its license text whole", () => {
+    expect(unreadFilesUnder(plantedTree({}))).toEqual([]);
+  });
+
+  it("reports a source of an extension the scan does not read", () => {
+    const root = plantedTree({ "relay.mjs": 'import "zod";\n' });
+    expect(unreadFilesUnder(root)).toEqual([posix.join(root, "relay.mjs")]);
   });
 });
 

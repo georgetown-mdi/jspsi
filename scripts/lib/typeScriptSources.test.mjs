@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   descendants,
+  filesUnder,
   parseFile,
   parseSource,
   readSource,
@@ -96,5 +97,19 @@ describe("reading a repository-relative source", () => {
     // test_data ships the practice CSVs and nothing else, so an entry here
     // would be the extension filter having stopped filtering.
     expect(sourceModules("test_data")).toEqual([]);
+  });
+
+  it("lists what that filter dropped, so a check can compare the two", () => {
+    // The pair a check reads to hold its extension scope against the tree it was
+    // pointed at: the same CSVs the filter above drops are what the tree holds.
+    const files = filesUnder("test_data");
+    expect(files.length).toBeGreaterThan(0);
+    expect(files).toEqual([...files].sort());
+    expect(files.filter((file) => !file.endsWith(".csv"))).toEqual([]);
+  });
+
+  it("drops nothing from a tree that is TypeScript throughout", () => {
+    const dir = "apps/web/src/routes/api/jobs";
+    expect(filesUnder(dir)).toEqual(sourceModules(dir));
   });
 });
