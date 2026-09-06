@@ -19,6 +19,7 @@ import {
   safeParseConnectionConfig,
   setDiagnosticSink,
   SHARED_SECRET_REGEX,
+  StandardizedDataset,
   UsageError,
 } from "@psilink/core";
 import { CSV_LINE_BYTE_CEILING } from "@psilink/core/testing";
@@ -2050,7 +2051,13 @@ function onlineBootstrapParams(
   return {
     connection,
     dataSpec,
-    prepared: {} as unknown as PreparedExchange,
+    prepared: {
+      metadata: dataSpec.metadata ?? [],
+      linkageTerms: dataSpec.linkageTerms,
+      dataset: new StandardizedDataset([], []),
+      rawRows: [],
+      rowCount: 0,
+    } satisfies PreparedExchange,
     sharedSecret: generateSharedSecret(),
     expires: undefined,
     keyPath: path.join(path.dirname(configPath), ".psilink.key"),
