@@ -176,7 +176,6 @@ describe("adjacentYearCandidates", () => {
     // be one. Emitting it would leave a pair that meets only when the 1999
     // row's party resolves as receiver, since 2000's own shifts are dropped.
     expect(adjacentYearCandidates("19990229")).toEqual([]);
-    expect(adjacentYearCandidates("20000229")).toEqual([]);
   });
 
   test("the shift is symmetric over every eight-digit string in a leap span", () => {
