@@ -6,6 +6,7 @@ import {
   ALLOWED_HEADINGS,
   scopeViolations,
 } from "./check-contributing-scope.mjs";
+import { UnterminatedFenceError } from "./lib/markdownFences.mjs";
 
 const here = dirname(fileURLToPath(import.meta.url));
 
@@ -54,6 +55,26 @@ describe("CONTRIBUTING scope guard", () => {
       m.includes("dependency source-path citation"),
     );
     expect(sourceHits).toEqual([]);
+  });
+
+  it("does not flag a dependency path in a block that shows a tilde fence", () => {
+    const text = fullDoc + "\n```md\n~~~\nls node_modules/ssh2/lib\n~~~\n```\n";
+    const sourceHits = scopeViolations(text).filter((m) =>
+      m.includes("dependency source-path citation"),
+    );
+    expect(sourceHits).toEqual([]);
+  });
+
+  it("does not take a heading inside a block that shows a tilde fence", () => {
+    const text =
+      fullDoc + "\n```md\n~~~\n## Upgrading the SFTP Stack\n~~~\n```\n";
+    expect(scopeViolations(text)).toEqual([]);
+  });
+
+  it("reports an unterminated fence instead of checking a mis-split document", () => {
+    const text = fullDoc + "\n```sh\nls node_modules/ssh2/lib\n";
+    expect(() => scopeViolations(text)).toThrow(UnterminatedFenceError);
+    expect(() => scopeViolations(text)).toThrow("CONTRIBUTING.md:");
   });
 
   it("flags an allowlist entry that no longer appears (cannot rot)", () => {

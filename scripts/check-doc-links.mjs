@@ -14,10 +14,14 @@
 
 import { execSync } from "node:child_process";
 import { readFileSync, existsSync, statSync } from "node:fs";
-import { dirname, resolve } from "node:path";
+import { dirname, relative, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { stripCodeSpans, stripFences } from "./lib/markdownFences.mjs";
+import {
+  stripCodeSpans,
+  stripFences,
+  UnterminatedFenceError,
+} from "./lib/markdownFences.mjs";
 
 // Tracked + untracked-but-not-gitignored .md files (so newly added docs are
 // checked before they are committed, while node_modules/.worktrees/scratch
@@ -47,6 +51,10 @@ function slugify(text) {
     .replace(/\s/g, "-"); // each whitespace char -> hyphen, runs not collapsed
 }
 
+// A fence error names the document it read, so a target reached by absolute
+// path is named the way a reader would type it.
+const relativeToCwd = (absPath) => relative(process.cwd(), absPath) || absPath;
+
 // Map of file path -> Set of available anchor slugs (with GitHub's -1/-2
 // disambiguation suffixes for repeated headings).
 const anchorCache = new Map();
@@ -54,15 +62,12 @@ function anchorsFor(absPath) {
   if (anchorCache.has(absPath)) return anchorCache.get(absPath);
   const anchors = new Set();
   if (existsSync(absPath) && statSync(absPath).isFile()) {
-    const lines = readFileSync(absPath, "utf8").split("\n");
-    let inFence = false;
+    const lines = stripFences(
+      readFileSync(absPath, "utf8"),
+      relativeToCwd(absPath),
+    ).split("\n");
     const counts = new Map();
     for (const line of lines) {
-      if (/^\s*(```|~~~)/.test(line)) {
-        inFence = !inFence;
-        continue;
-      }
-      if (inFence) continue;
       const m = /^(#{1,6})\s+(.*?)\s*#*\s*$/.exec(line);
       if (!m) continue;
       const base = slugify(m[2]);
@@ -78,7 +83,10 @@ function anchorsFor(absPath) {
 /**
  * Scan `raw` (the content of `file`, read from `absPath`) for dead relative
  * link targets and dead in-file/cross-file anchors. Returns an array of
- * "file:line  reason" strings, empty when the document is clean.
+ * "file:line  reason" strings, empty when the document is clean. Throws
+ * UnterminatedFenceError when this document, or one it links an anchor into,
+ * opens a fenced code block that never closes: which lines are prose is then
+ * unknown, and the links read out of them would be too.
  */
 export function findFailures(file, absPath, raw) {
   const failures = [];
@@ -89,6 +97,7 @@ export function findFailures(file, absPath, raw) {
   const text = stripCodeSpans(
     stripFences(
       raw.replace(/<!--[\s\S]*?-->/g, (m) => m.replace(/[^\n]/g, " ")),
+      file,
     ),
   );
   const linkRe = /\]\(([^)]+)\)/g;
@@ -143,7 +152,13 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   for (const file of mdFiles) {
     const abs = resolve(root, file);
     const raw = readFileSync(abs, "utf8");
-    failures.push(...findFailures(file, abs, raw));
+    try {
+      failures.push(...findFailures(file, abs, raw));
+    } catch (error) {
+      if (!(error instanceof UnterminatedFenceError)) throw error;
+      console.error(`Markdown link check failed: ${error.message}`);
+      process.exit(1);
+    }
   }
 
   if (failures.length > 0) {
