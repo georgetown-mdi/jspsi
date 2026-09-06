@@ -12,13 +12,12 @@ import {
   AnotherExchangeFoot,
   CopyRow,
   DonePanel,
-  DownloadRow,
   FailureAlert,
   FailureRecoveryButton,
-  NoResultFileInset,
   RECONNECTING_HEADING,
   ReattachedRunNotice,
   ReattachingNotice,
+  RunDownloads,
   RunWarningsAlert,
   SERVER_JOB_KEEP_OPEN_BODY,
   SERVER_JOB_PEER_WINDOW_BODY,
@@ -312,33 +311,7 @@ export function InviterExchangeSection({
         halted={failure !== undefined}
       />
       {phase === "done" && outputs !== undefined && (
-        <>
-          <h2>Downloads</h2>
-          {outputs.kind === "matched" ? (
-            <DownloadRow
-              label="Download result"
-              href={outputs.resultsUrl}
-              fileName="results.csv"
-            />
-          ) : (
-            <NoResultFileInset outputs={outputs} />
-          )}
-          {outputs.record !== undefined && (
-            <>
-              <DownloadRow
-                label="Download record (safe to share)"
-                href={outputs.record.recordUrl}
-                fileName={outputs.record.recordFileName}
-              />
-              <DownloadRow
-                label="Download verification keys"
-                caveat="keep private"
-                href={outputs.record.keysUrl}
-                fileName={outputs.record.keysFileName}
-              />
-            </>
-          )}
-        </>
+        <RunDownloads outputs={outputs} heading="h2" />
       )}
       <RecordDownload offer={recordOffer} />
       {serverJob && jobId !== undefined && (

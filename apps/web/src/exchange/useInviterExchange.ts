@@ -34,20 +34,16 @@ import { waitForIncomingConnection } from "@psi/transport/waitForConnection";
 import { isConsoleBuild } from "@utils/clientConfig";
 import { whenDiagnostic } from "@utils/diagnostics";
 
-import { appendSanitizedRunWarning } from "@psi/runWarnings";
 import { buildRunOutputs } from "@psi/runOutputs";
 import { invitationUsable } from "@psi/formatting";
 import { selectExchangeDriver } from "@psi/exchangeDriverSelection";
 
-import { isExchangeBusyError, reattachOnBusy } from "./reattachOnBusy";
+import { buildRunEvents } from "./runEvents";
 
 import {
   WAITING_STAGE_ID,
   initialRun,
-  runWithCompletion,
   runWithFailure,
-  runWithStage,
-  runWithStages,
   stagesFor,
 } from "./exchangeRun";
 
@@ -58,7 +54,6 @@ import type {
   ExchangeErrorCategory,
   GenerateOutput,
 } from "@psi/exchangeLifecycle";
-import type { ExchangeDriver, ExchangeDriverEvents } from "@psi/exchangeDriver";
 import type { ExchangeRun, ExchangeSeat } from "./exchangeRun";
 import type {
   JobInputSource,
@@ -66,6 +61,7 @@ import type {
   ServerJobExchangeDriverConfig,
   ServerJobExchangeTransport,
 } from "@psi/jobClient/serverJobExchangeDriver";
+import type { ExchangeDriver } from "@psi/exchangeDriver";
 import type { GeneratedInvitation } from "@psi/invitation";
 import type { JobExchangeOptions } from "@jobs/intentSchemas";
 import type { ReceiptsIntentFields } from "@psi/receiptsModel";
@@ -585,63 +581,28 @@ export function useInviterExchange({
     ).kind;
 
     // Raise a failure's alert and freeze the run: the terminal path for every
-    // error except a busy (409) create, which re-attaches below instead.
+    // error except a busy (409) create, which re-attaches instead.
     const raiseFailure = (category: ExchangeErrorCategory, error: unknown) => {
       setFailure(failureFor(category, error, inputSource, channel));
       setRun((current) => runWithFailure(current));
     };
 
-    // The run's lifecycle callbacks, built once so a busy (409) re-attach folds
-    // the already-running exchange's stream onto the SAME surface. A busy create
-    // at start re-attaches to the exchange holding the console's single slot
-    // (recovery-style copy, `reattached`) rather than dead-ending on the "already
-    // running" alert; every other failure raises its alert.
-    const runEvents: ExchangeDriverEvents<RunOutputs> = {
+    const runEvents = buildRunEvents({
       signal: controller.signal,
-      onStages: (stages) => setRun((current) => runWithStages(current, stages)),
-      onStage: (stageId) =>
-        setRun((current) => runWithStage(current, stageId, new Date())),
-      onResult: (generated) => {
-        setOutputs(generated);
-        setRun((current) => runWithCompletion(current, new Date()));
+      seat: "inviter",
+      channel,
+      client: jobApiClient,
+      raiseFailure,
+      setRun,
+      setOutputs,
+      setWarnings,
+      setReattached,
+      setReattaching,
+      setJobId: (id) => {
+        currentJobIdRef.current = id;
+        setCurrentJobId(id);
       },
-      onWarning: (message) =>
-        setWarnings((current) => appendSanitizedRunWarning(current, message)),
-      onError: ({ category, error }) => {
-        // Dev-gated: the raw Error object's message/cause can embed partner-/
-        // server-controlled bytes, so a production console holds none of it,
-        // while a developer (or a deployed client with the diagnostics toggle
-        // on) keeps the full object. The user-facing alert is separately
-        // sanitized in failureFor.
-        whenDiagnostic(() => console.error(error));
-        if (isExchangeBusyError(error)) {
-          // Enter the reconnecting interim the instant the 409 is known, before
-          // the liveness probe round trip -- this suppresses the fresh-run share
-          // block (which would otherwise flash) and announces the reconnect.
-          setReattaching(true);
-          void reattachOnBusy({
-            error,
-            client: jobApiClient,
-            seat: "inviter",
-            channel,
-            events: runEvents,
-            onReattaching: (id, status) => {
-              currentJobIdRef.current = id;
-              setCurrentJobId(id);
-              setReattaching(false);
-              setReattached(status);
-            },
-          }).then((didReattach) => {
-            if (!didReattach) {
-              setReattaching(false);
-              raiseFailure(category, error);
-            }
-          });
-          return;
-        }
-        raiseFailure(category, error);
-      },
-    };
+    });
 
     void (async () => {
       let driver: ExchangeDriver<RunOutputs>;

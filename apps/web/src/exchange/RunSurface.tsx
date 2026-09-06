@@ -173,12 +173,13 @@ export function CopyRow({
 }
 
 /**
- * The role-neutral run/completion furniture shared by both console seats'
- * run columns: the download rows, the completion panel, the withheld-result
- * inset, the failure alert block, and the "set up another exchange"
- * workfoot. Nothing here is role-aware -- the calling section decides which
- * downloads exist, what the failure recoveries are, and what the panel
- * says.
+ * The role-neutral run/completion furniture every surface that reports a run
+ * shares, the console's run columns and the hosted build's managed run surface
+ * alike: the download rows and the block a completed run offers them in, the
+ * completion panel, the withheld-result inset, the failure alert block, and
+ * the "set up another exchange" workfoot. Nothing here is role-aware -- the
+ * run's own outputs decide which downloads exist, and the calling section
+ * decides what the failure recoveries are and what the panel says.
  */
 
 /** A labelled download link. The accessible name includes the caveat as
@@ -377,6 +378,59 @@ export function NoResultFileInset({
       count={outputs.intersectionCount}
       countReportedByPartner={outputs.countReportedByPartner}
     />
+  );
+}
+
+/**
+ * Everything a completed run offers for download: the result file, or the inset
+ * standing in its place for a run that produced none, followed by the disclosure
+ * record and its verification keys when the run wrote them. Every surface that
+ * reports a completed run renders this, so all of them offer the same set under
+ * the same labels and caveats.
+ *
+ * `heading` names the level this block's own "Downloads" heading takes in the
+ * calling surface's heading order; a surface whose downloads sit directly under
+ * its completion heading passes none and gets no heading. The caller decides
+ * WHEN the block appears -- each surface reads completion off its own state.
+ */
+export function RunDownloads({
+  outputs,
+  heading,
+}: {
+  outputs: RunOutputs;
+  heading?: "h2" | "h3";
+}) {
+  // Capitalized so JSX reads the tag from this value rather than as an
+  // intrinsic element literally named `heading`.
+  const Heading = heading;
+  return (
+    <>
+      {Heading !== undefined && <Heading>Downloads</Heading>}
+      {outputs.kind === "matched" ? (
+        <DownloadRow
+          label="Download result"
+          href={outputs.resultsUrl}
+          fileName="results.csv"
+        />
+      ) : (
+        <NoResultFileInset outputs={outputs} />
+      )}
+      {outputs.record !== undefined && (
+        <>
+          <DownloadRow
+            label="Download record (safe to share)"
+            href={outputs.record.recordUrl}
+            fileName={outputs.record.recordFileName}
+          />
+          <DownloadRow
+            label="Download verification keys"
+            caveat="keep private"
+            href={outputs.record.keysUrl}
+            fileName={outputs.record.keysFileName}
+          />
+        </>
+      )}
+    </>
   );
 }
 

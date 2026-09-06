@@ -31,9 +31,8 @@ import {
 import { failureFor } from "./useInviterExchange";
 
 import {
-  DownloadRow,
   FailureMessage,
-  NoResultFileInset,
+  RunDownloads,
   RunWarningsAlert,
   recoveredExchangeHeading,
   untakenRecordConfirm,
@@ -325,35 +324,7 @@ export function RecoveredExchangePanel() {
         done={outputs !== undefined}
         halted={failure !== undefined}
       />
-      {outputs !== undefined && (
-        <>
-          <h3>Downloads</h3>
-          {outputs.kind === "matched" ? (
-            <DownloadRow
-              label="Download result"
-              href={outputs.resultsUrl}
-              fileName="results.csv"
-            />
-          ) : (
-            <NoResultFileInset outputs={outputs} />
-          )}
-          {outputs.record !== undefined && (
-            <>
-              <DownloadRow
-                label="Download record (safe to share)"
-                href={outputs.record.recordUrl}
-                fileName={outputs.record.recordFileName}
-              />
-              <DownloadRow
-                label="Download verification keys"
-                caveat="keep private"
-                href={outputs.record.keysUrl}
-                fileName={outputs.record.keysFileName}
-              />
-            </>
-          )}
-        </>
-      )}
+      {outputs !== undefined && <RunDownloads outputs={outputs} heading="h3" />}
       <RecordDownload offer={recordOffer} />
       <ReceiptDownload jobId={attachment.jobId} settled={!running} />
       {/* Available for as long as the console holds the job, collapsed
