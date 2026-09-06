@@ -1,6 +1,10 @@
 import { describe, expect, test } from "vitest";
 
-import { CONFIRMING_PROTOCOL_STAGE_ID } from "@psilink/core";
+import {
+  CONFIRMING_PROTOCOL_STAGE_ID,
+  StandardizedDataset,
+  getDefaultLinkageTerms,
+} from "@psilink/core";
 
 import {
   BEFORE_START_STAGE_ID,
@@ -31,13 +35,19 @@ function preparedWith(
   keyCount: number,
 ): PreparedExchange {
   return {
+    metadata: [],
     linkageTerms: {
+      ...getDefaultLinkageTerms("Exchange-run fixture"),
       linkageStrategy,
       linkageKeys: Array.from({ length: keyCount }, (_, i) => ({
         name: `key ${i + 1}`,
+        elements: [],
       })),
     },
-  } as unknown as PreparedExchange;
+    dataset: new StandardizedDataset([], []),
+    rawRows: [],
+    rowCount: 0,
+  } satisfies PreparedExchange;
 }
 
 function states(run: ExchangeRun): Array<string> {

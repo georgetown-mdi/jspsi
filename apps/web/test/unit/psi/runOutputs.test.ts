@@ -1,5 +1,6 @@
 import { describe, expect, test } from "vitest";
 
+import { StandardizedDataset, getDefaultLinkageTerms } from "@psilink/core";
 import { buildRunOutputs } from "@psi/runOutputs";
 
 import type { ExchangeResult, PreparedExchange } from "@psilink/core";
@@ -33,13 +34,28 @@ function recordingUrls(options?: { failOnCall?: number }) {
 // the CSV's first header is real. `case_worker` is declared but not sent, so
 // the two own-column selections resolve to different sets.
 const prepared = {
-  rawRows: [{ client_id: "17", case_worker: "Ng", program_code: "A" }],
   metadata: [
-    { name: "client_id", role: "identifier", isPayload: false },
-    { name: "case_worker", role: "linkage", isPayload: false },
-    { name: "program_code", role: "payload", isPayload: true },
+    {
+      name: "client_id",
+      type: "identifier",
+      role: "identifier",
+      isPayload: false,
+    },
+    {
+      name: "case_worker",
+      type: "other",
+      role: "linkage",
+      isPayload: false,
+    },
+    { name: "program_code", type: "other", role: "payload", isPayload: true },
   ],
-} as unknown as PreparedExchange;
+  linkageTerms: getDefaultLinkageTerms("Run-outputs fixture"),
+  dataset: new StandardizedDataset([], []),
+  rawRows: [{ client_id: "17", case_worker: "Ng", program_code: "A" }],
+  rowCount: 1,
+} satisfies PreparedExchange;
+
+const PARTNER_TERMS = getDefaultLinkageTerms("Run-outputs partner fixture");
 
 /** The same prepared exchange with the local own-column selection set, the one
  * field the results CSV composition reads beyond the pairing itself. */
@@ -57,19 +73,23 @@ const audit = {
 function receivedResult(withAudit: boolean): ExchangeResult {
   return {
     associationTable: [[0], [5]],
+    intersectionCount: undefined,
+    partnerTerms: PARTNER_TERMS,
     resolvedRole: "receiver",
     partnerPayload: { columns: ["program"], rowIndices: [5], rows: [["B"]] },
     audit: withAudit ? audit : undefined,
-  } as unknown as ExchangeResult;
+  } satisfies ExchangeResult;
 }
 
 function withheldResult(): ExchangeResult {
   return {
     associationTable: undefined,
+    intersectionCount: undefined,
+    partnerTerms: PARTNER_TERMS,
     resolvedRole: "sender",
     partnerPayload: { columns: [], rowIndices: [], rows: [] },
     audit,
-  } as unknown as ExchangeResult;
+  } satisfies ExchangeResult;
 }
 
 // A count-only (psi-c) run: no matched pairing for anyone, and the intersection size
@@ -79,10 +99,11 @@ function countOnlyResult(resolvedRole: "receiver" | "sender"): ExchangeResult {
   return {
     associationTable: undefined,
     intersectionCount: 4,
+    partnerTerms: PARTNER_TERMS,
     resolvedRole,
     partnerPayload: { columns: [], rowIndices: [], rows: [] },
     audit,
-  } as unknown as ExchangeResult;
+  } satisfies ExchangeResult;
 }
 
 describe("buildRunOutputs", () => {
