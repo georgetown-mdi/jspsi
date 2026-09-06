@@ -332,6 +332,34 @@ function resolveConnectionEndpoint(
 }
 
 /**
+ * Whether an invitation minted from these inputs declares
+ * `inviterRetainsFiles`. Two grounds, ORed: the caller's resolved
+ * `retain_files`, and the endpoint's own shape -- a split
+ * `inbound_path`/`outbound_path` rendezvous runs in retain mode whatever the
+ * caller passed ({@link endpointRequiresRetainedFiles}), and
+ * `encodeInvitation` refuses a mint emitting one that leaves the retention
+ * undeclared.
+ *
+ * {@link generateInvitation} applies this to the token. A caller that shows
+ * the same retention on a second partner-facing surface -- the accept kit's
+ * file-handling disclosure -- reads it from here and feeds both from the one
+ * value, so the token and the sheet cannot state different modes.
+ *
+ * The webrtc request has no directory to split, so the shape ground never
+ * fires on it; a `true` flag beside it is passed through to the token
+ * schema's refusal rather than silenced here.
+ */
+export function invitationDeclaresRetainedFiles(params: {
+  connectionEndpoint?: ConnectionEndpointRequest;
+  retainsFiles?: boolean;
+}): boolean {
+  const { connectionEndpoint = { channel: "webrtc" }, retainsFiles = false } =
+    params;
+  if (connectionEndpoint.channel === "webrtc") return retainsFiles;
+  return retainsFiles || endpointRequiresRetainedFiles(connectionEndpoint);
+}
+
+/**
  * Generate a fresh single-use invitation from the inviter's CSV: a new shared
  * secret, the linkage terms derived from the file, and this app's PeerJS
  * endpoint, encoded to a string and also wrapped as a deep-link URL. Each call
@@ -666,24 +694,16 @@ export async function generateInvitation(params: {
   // check.
   const expires = new Date(Date.now() + lifetimeSeconds * 1000).toISOString();
   const sharedSecret = generateSharedSecret();
-  const resolvedEndpoint = resolveConnectionEndpoint(
+  const declaresRetainedFiles = invitationDeclaresRetainedFiles({
     connectionEndpoint,
-    location,
-  );
-  // Two grounds, ORed so the declaration cannot contradict the endpoint the
-  // token holds: the caller's resolved `retain_files`, and the endpoint's own
-  // shape -- a split inbound/outbound rendezvous runs in retain mode whatever
-  // the caller passed, and `encodeInvitation` refuses a mint emitting one that
-  // leaves the retention undeclared. The shape ground never fires on webrtc,
-  // which has no directory to split.
-  const declaresRetainedFiles =
-    retainsFiles || endpointRequiresRetainedFiles(resolvedEndpoint);
+    retainsFiles,
+  });
   const token: InvitationToken = {
     version: "1",
     linkageTerms,
     sharedSecret,
     expires,
-    connectionEndpoint: resolvedEndpoint,
+    connectionEndpoint: resolveConnectionEndpoint(connectionEndpoint, location),
     disclosedPayloadColumns,
     ...(declaresRetainedFiles ? { inviterRetainsFiles: true } : {}),
   };

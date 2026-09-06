@@ -12,6 +12,7 @@ import {
 import {
   InvitationFileError,
   generateInvitation,
+  invitationDeclaresRetainedFiles,
   webrtcEndpointFromLocation,
 } from "@psi/invitation";
 import {
@@ -971,6 +972,17 @@ export function InviterScreen() {
       // asking the partner to match a name that is not the folder's.
       kitEndpoint = acceptKitEndpointForRendezvous(rendezvous);
     }
+    // One value behind both partner-facing statements of the mode -- the
+    // token's declaration and the accept kit's file-handling disclosure --
+    // derived by the rule the mint applies: the options block the run itself
+    // holds, ORed with the endpoint's own shape. Gated on a file-sync endpoint
+    // because retain mode is a file-sync setting; a webrtc mint declares
+    // nothing.
+    const declaresRetainedFiles = invitationDeclaresRetainedFiles({
+      connectionEndpoint,
+      retainsFiles:
+        connectionEndpoint !== undefined && runOptions?.retainFiles === true,
+    });
     setMinting(true);
     setCreateAlert(undefined);
     try {
@@ -983,26 +995,21 @@ export function InviterScreen() {
         metadata: editor.draft.metadata,
         standardization: editor.draft.standardization,
         ...(connectionEndpoint !== undefined ? { connectionEndpoint } : {}),
-        // Declared on the token from the options block the run itself holds, the
-        // same source the accept kit's disclosure reads, so the sheet and the
-        // partner's consent display state one mode. Gated on a file-sync endpoint
-        // because retain mode is a file-sync setting; a webrtc mint declares
-        // nothing.
-        retainsFiles:
-          connectionEndpoint !== undefined && runOptions?.retainFiles === true,
+        retainsFiles: declaresRetainedFiles,
       });
       setEditor(sealEditor(editor));
       setInvitation(minted);
-      // The bilateral file-handling choices are captured beside the locator,
-      // taken from the options block the run itself holds rather than from
-      // the raw toggles, so the sheet states the settings as the run resolved
-      // them -- retain mode's implication of the lockless rendezvous included.
+      // The bilateral file-handling choices are captured beside the locator:
+      // the lockless rendezvous from the options block the run itself holds
+      // rather than from the raw toggles -- retain mode's implication of it
+      // included -- and retain mode from the value the token declares, so the
+      // sheet cannot state a mode the partner's invitation does not.
       setAcceptKitExchange(
         kitEndpoint === undefined
           ? undefined
           : {
               endpoint: kitEndpoint,
-              retainFiles: runOptions?.retainFiles === true,
+              retainFiles: declaresRetainedFiles,
               locklessRendezvous: runOptions?.locklessRendezvous === true,
             },
       );
