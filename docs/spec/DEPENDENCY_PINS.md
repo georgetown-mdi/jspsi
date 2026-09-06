@@ -700,11 +700,11 @@ the gate off as the only ways past it.
 
 What holds it: `scripts/dockerfile-freeze.test.mjs` freezes each image's removal
 command and refuses any other runtime-stage command naming npm or npx, and
-`image_smoke.yaml` asserts that `npm`, `npx` and `corepack` resolve in neither
-built image -- the half that catches a base image putting one back on a path the
-removal does not name. Nothing in either role needs one: both entrypoints exec
-`node` directly, and the console server spawns the CLI entry the same way
-(`apps/web/src/jobs/cliDriver.ts`).
+`image_smoke.yaml` asserts that none of `npm`, `npx`, `corepack`, `yarn` and
+`yarnpkg` resolves in either built image -- the half that catches a base image
+putting one back on a path the removal does not name. Nothing in either role
+needs one: both entrypoints exec `node` directly, and the console server spawns
+the CLI entry the same way (`apps/web/src/jobs/cliDriver.ts`).
 
 ## Bumping the FIPS base image
 
