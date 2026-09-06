@@ -30,12 +30,15 @@ import type { ChildProcess } from "node:child_process";
 // framework, so nothing here enumerates them -- every request below is required
 // to answer the one refusal, whatever the framework would have answered.
 //
-// Two targets are written on the wire verbatim instead of driven through
-// `fetch`, which resolves a dot segment against the base URL before the request
-// leaves. Sent raw, a dot segment reaches the server as written, and where the
-// stack resolves it is not this suite's claim: what is required is that the
-// hosted build answers the one refusal for it and the console build answers the
-// job route.
+// Two dot-segment targets are written on the wire verbatim instead of driven
+// through `fetch`, which resolves a dot segment against the base URL before
+// the request leaves. Sent raw, a dot segment reaches the server as written,
+// and where the stack resolves it is not this suite's claim: what is required
+// is that the hosted build answers the one refusal for it and the console
+// build answers the job route. A third, doubly percent-encoded target is
+// written the same way to reach the guard's own dot resolution rather than the
+// URL parser's; its console answer is pinned rather than asserted as the job
+// route, since the router does not resolve that spelling to one.
 
 /** The whole observable shape of a response. Date and the connection headers
  * are dropped: they vary per request rather than per path, and a probe reads
@@ -273,6 +276,13 @@ const RAW_TARGETS: ReadonlyArray<string> = [
   "/api/peerjs/%2e%2e/jobs/slot",
 ];
 
+/** A double-encoded dot segment: `%25` decodes to `%`, so neither the URL
+ * parser nor `fetch` resolves it the way they resolve `..` and `%2e%2e`, and
+ * it reaches the entry as written. Written on the wire alongside
+ * {@link RAW_TARGETS} to exercise the guard's own dot resolution, which
+ * refuses it once its own percent-decoding rounds reach `..`. */
+const DOUBLE_ENCODED_DOT_TARGET = "/api/peerjs/%252e%252e/jobs/slot";
+
 /** What the job route answers for a free slot, as it appears in the raw
  * response body: the probe reads chunk framing around it, so the payload is
  * matched inside the body rather than as the whole of it. */
@@ -351,6 +361,16 @@ describe.skipIf(!hasBuild)("the /api namespace's refusal", () => {
       },
     );
 
+    test("a hosted probe reads the one refusal for a verbatim double-encoded dot segment", async () => {
+      const { body, ...shape } = await rawShapeOf(
+        hostedBase,
+        DOUBLE_ENCODED_DOT_TARGET,
+        accept,
+      );
+      expect(shape).toEqual(REFUSAL);
+      expect(body).toBe("");
+    });
+
     test.each(BROKER_PATHS)(
       "the broker still answers GET %s on the hosted build",
       async (path) => {
@@ -406,6 +426,17 @@ describe.skipIf(!hasBuild)("the /api namespace's refusal", () => {
         expect(answered.body).toContain(SLOT_FREE);
       },
     );
+
+    test("a verbatim GET double-encoded dot segment on the console profile", async () => {
+      // Pins the router's own resolution of a double-encoded segment, whatever it answers today.
+      const answered = await rawShapeOf(
+        consoleBase,
+        DOUBLE_ENCODED_DOT_TARGET,
+        ACCEPT_VALUES[1][1],
+      );
+      expect(answered.status).toBe(500);
+      expect(answered.body).toContain("Only HTML requests are supported here");
+    });
 
     test("the broker answers GET /api/peerjs/id", async () => {
       const broker = await shapeOf(

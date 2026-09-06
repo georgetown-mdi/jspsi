@@ -122,6 +122,10 @@ describe("the /api refusal on a deployment without the job API", () => {
     // so this row pins the resolved form. The target as written reaches the
     // entry only over a raw socket, which the integration matrix drives.
     ["GET", "/api/peerjs/%2e%2e/jobs/slot"],
+    // Unlike the row above, the URL parser leaves this one alone (`%25`
+    // decodes to `%`, not to a dot), so it reaches the guard as written; the
+    // guard's own decode-and-resolve rounds reduce it to `..` and refuse it.
+    ["GET", "/api/peerjs/%252e%252e/jobs/slot"],
     ["GET", "/api/%2570eerjs/id"],
     ["GET", "/api/PEERJS/id"],
     ["GET", "/api/%70eerjs/id"],
@@ -132,6 +136,19 @@ describe("the /api refusal on a deployment without the job API", () => {
     expect(response.headers.get("content-type")).toBeNull();
     expect(response.headers.get("cache-control")).toBe("no-store");
     expect(await response.text()).toBe("");
+  });
+
+  test("refuses a double-encoded dot segment past the broker's subtree, which the guard's own resolution catches", async () => {
+    // Measured: replacing the guard's dot resolution with the identity turns
+    // this refusal into a pass-through, since neither the URL parser nor a
+    // single decode round reduces `%252e%252e` to `..` -- only the guard's own
+    // repeated decode-and-resolve does.
+    const { response, reached } = await answer(
+      "GET",
+      "/api/peerjs/%252e%252e/jobs/slot",
+    );
+    expect(reached).toEqual([]);
+    expect(response.status).toBe(404);
   });
 
   test.each([
