@@ -207,6 +207,39 @@ describe("read through the handle at run start", () => {
     expect(second.rows).toEqual([{ email_address: "ada@example.org" }]);
   });
 
+  test("the header transform reaches the run's own read", async () => {
+    // The managed run re-reads the operator's file at each run start, through a
+    // real File the platform hands back. The names it acquires are the ones core's
+    // parse boundary stripped, so a run keys on -- and sends -- the same names the
+    // seat that authored the standing terms saw. Written as escapes, never as raw
+    // bytes, so the source is readable.
+    const RLO = "\u202e";
+    const PDI = "\u2069";
+    const handle = await trackedOpfsFile(
+      "managed-input-bidi.csv",
+      `ssn,first_name,la${RLO}st_name${PDI},date_of_birth\n` + CONFORMING_ROW,
+    );
+    const acquired = await acquireManagedInput({
+      kind: "handle",
+      handle,
+      attendance: "unattended",
+    });
+    expect(acquired.columns).toEqual([
+      "ssn",
+      "first_name",
+      "last_name",
+      "date_of_birth",
+    ]);
+    expect(acquired.rows).toEqual([
+      {
+        ssn: "123456789",
+        first_name: "ADA",
+        last_name: "LOVELACE",
+        date_of_birth: "01/01/1990",
+      },
+    ]);
+  });
+
   test("a missing file fails as a benign acquire rejection", async () => {
     const handle = await trackedOpfsFile(
       "managed-input.csv",

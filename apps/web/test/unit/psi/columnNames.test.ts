@@ -5,6 +5,7 @@ import { MAX_NAME_LENGTH } from "@psilink/core";
 import {
   emptyColumnPositions,
   overlongColumnsAlert,
+  sanitizedColumnsAlert,
   unnameableColumnsAlert,
 } from "../../../src/psi/columnNames.js";
 
@@ -62,5 +63,30 @@ describe("overlongColumnsAlert", () => {
     const alert = overlongColumnsAlert([2]);
     expect(alert.message).toContain("Shorten the header");
     expect(alert.message).toContain("not sent");
+  });
+});
+
+describe("sanitizedColumnsAlert", () => {
+  test("names a single column position in the singular", () => {
+    const alert = sanitizedColumnsAlert([3]);
+    expect(alert.title).toBe(
+      "A formatting character was removed from a column name",
+    );
+    expect(alert.message).toContain("Column 3");
+    expect(alert.message).toContain("had a name that held");
+  });
+
+  test("pluralizes the title and message for multiple positions", () => {
+    const alert = sanitizedColumnsAlert([2, 5]);
+    expect(alert.title).toBe("Formatting characters removed from column names");
+    expect(alert.message).toContain("Columns 2, 5");
+    expect(alert.message).toContain("had names that held");
+  });
+
+  test("states what was done and how to act on it", () => {
+    const alert = sanitizedColumnsAlert([1]);
+    expect(alert.message).toContain("removed");
+    expect(alert.message).toContain("sent to your partner");
+    expect(alert.message).toContain("edit the header row");
   });
 });

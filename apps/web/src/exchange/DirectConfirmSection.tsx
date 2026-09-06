@@ -30,7 +30,7 @@ import {
   SINGLE_PASS_DISCLOSURE_BODY,
   SINGLE_PASS_DISCLOSURE_TITLE,
 } from "@psi/linkageStrategyChoice";
-import { overlongColumnsAlert } from "@psi/columnNames";
+import { overlongColumnsAlert, sanitizedColumnsAlert } from "@psi/columnNames";
 
 import { OFFLINE_EXCHANGE_REASON } from "@psi/offlineExchangeGate";
 
@@ -138,6 +138,14 @@ export function DirectConfirmSection({
       ? overlongColumnsAlert(preview.overlongDisclosedColumns)
       : undefined;
 
+  // What the parse removed from this file's header, stated on the screen the
+  // operator confirms the run from: the names below are the stripped ones, and
+  // this spine has no earlier surface that outlives the file step.
+  const sanitizedNotice =
+    profile.bidiStrippedColumns.length > 0
+      ? sanitizedColumnsAlert(profile.bidiStrippedColumns)
+      : undefined;
+
   // Client-side guard mirroring the intent schema's identity contract, validated
   // on the value the run actually sends (the trimmed label; a blank field omits
   // identity and the run names no party, so it is not an error). Naming the fault
@@ -228,6 +236,16 @@ export function DirectConfirmSection({
           title={overlongAlert.title}
         >
           {overlongAlert.message}
+        </Alert>
+      )}
+
+      {sanitizedNotice !== undefined && (
+        <Alert
+          color="yellow"
+          icon={<IconAlertCircle aria-hidden />}
+          title={sanitizedNotice.title}
+        >
+          {sanitizedNotice.message}
         </Alert>
       )}
 

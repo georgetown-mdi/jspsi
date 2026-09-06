@@ -69,6 +69,7 @@ const CLIENTS_PROFILE = {
   ...CLIENTS_FILE,
   rowCount: 2,
   columns: ["client_id", "first_name", "last_name", "dob", "program_code"],
+  bidiStrippedColumns: [],
   dateInputFormat: "%m/%d/%Y",
   columnSamples: [
     { column: "client_id", values: ["1", "2"] },
@@ -1273,6 +1274,31 @@ describe("console inviter picker re-profile", () => {
       .element(page.getByText("This file has an unnamed column"))
       .toBeInTheDocument();
     await expect.element(page.getByLabelText("Your name")).toBeInTheDocument();
+  });
+
+  test("a profile reporting a sanitized header names the columns it changed", async () => {
+    // The console never reads the file in the browser, so the positions the
+    // server's parse stripped ride the profile; the seat states them where the
+    // operator can act on them, and the notice never echoes the header.
+    stubJobApi({
+      profile: { ...CLIENTS_PROFILE, bidiStrippedColumns: [2, 4] },
+    });
+    app.render(createElement(InviterScreen));
+    await userEvent.fill(page.getByLabelText("Your name"), "Dana Okafor");
+    await page.getByRole("button", { name: "Select clients.csv" }).click();
+    await page.getByRole("button", { name: "Use this file" }).click();
+    await expect
+      .element(
+        page.getByText("Formatting characters removed from column names"),
+      )
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("Columns 2, 4", { exact: false }))
+      .toBeInTheDocument();
+    // The file is usable: this is a notice, not a refusal.
+    await expect
+      .element(page.getByRole("button", { name: "Continue" }))
+      .toBeEnabled();
   });
 });
 

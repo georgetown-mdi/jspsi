@@ -272,6 +272,12 @@ export function AcceptorScreen() {
   // columns step and its verdict derive from it; and the layered column-step editor
   // state (metadata + override layers), seeded once from the acquired columns.
   const [acquired, setAcquired] = useState<AcceptorAcquiredCsv>();
+  // The 1-based positions the parse stripped bidi control characters from, held
+  // beside the acquired file so the confirm-columns step states what was removed
+  // on the screen where the names are read and marked.
+  const [bidiStrippedColumns, setBidiStrippedColumns] = useState<Array<number>>(
+    [],
+  );
   // The original file whose parse produced `acquired`, captured at the same commit
   // so the server-job path submits the exact bytes the browser path parsed (no
   // re-serialization of rawRows). Fixed alongside `acquired` and the committed name.
@@ -504,6 +510,7 @@ export function AcceptorScreen() {
   function selectFile(chosen: File) {
     setRejectionMessage(undefined);
     setParseAlert(undefined);
+    setBidiStrippedColumns([]);
     setFieldErrors((current) => ({ ...current, file: false }));
     setFile(chosen);
   }
@@ -554,6 +561,7 @@ export function AcceptorScreen() {
       return;
     }
     setParseAlert(undefined);
+    setBidiStrippedColumns(profile.bidiStrippedColumns);
     setFieldErrors((current) => ({ ...current, file: false }));
     const columnsUnchanged =
       consoleSource !== undefined &&
@@ -635,6 +643,7 @@ export function AcceptorScreen() {
         setParseAlert(unnameableColumnsAlert(emptyPositions));
         return;
       }
+      setBidiStrippedColumns(result.meta.bidiStrippedColumns);
       // Store the parsed CSV (not discard it) and seed the columns-step editor from
       // its columns; the verdict and launch payload derive from this state. Commit
       // the gate-checked name here so the run records it even if the input is later
@@ -1433,6 +1442,7 @@ export function AcceptorScreen() {
             <AcceptorColumnsStep
               linkageTerms={linkageTerms}
               columns={acquired.columns}
+              bidiStrippedColumns={bidiStrippedColumns}
               columnsState={columnsState}
               editorState={editorState}
               verdict={verdict}
