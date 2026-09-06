@@ -24,20 +24,16 @@ import { whenDiagnostic } from "@utils/diagnostics";
 
 import { selectExchangeDriver } from "@psi/exchangeDriverSelection";
 
-import { appendSanitizedRunWarning } from "@psi/runWarnings";
 import { buildRunOutputs } from "@psi/runOutputs";
 import { invitationUsable } from "@psi/formatting";
 
 import {
   WAITING_STAGE_ID,
   initialRun,
-  runWithCompletion,
   runWithFailure,
-  runWithStage,
-  runWithStages,
   stagesFor,
 } from "./exchangeRun";
-import { isExchangeBusyError, reattachOnBusy } from "./reattachOnBusy";
+import { buildRunEvents } from "./runEvents";
 import { failureFor } from "./useInviterExchange";
 import { prepareAcceptorExchange } from "./acceptorExchange";
 
@@ -53,13 +49,13 @@ import type {
   GenerateOutput,
 } from "@psi/exchangeLifecycle";
 import type { CSVRow, InvitationToken } from "@psilink/core";
-import type { ExchangeDriver, ExchangeDriverEvents } from "@psi/exchangeDriver";
 import type {
   JobInputSource,
   JobRunStatus,
   ServerJobExchangeDriverConfig,
   ServerJobExchangeTransport,
 } from "@psi/jobClient/serverJobExchangeDriver";
+import type { ExchangeDriver } from "@psi/exchangeDriver";
 import type { ExchangeRun } from "./exchangeRun";
 import type { JobExchangeOptions } from "@jobs/intentSchemas";
 import type { ReceiptsIntentFields } from "@psi/receiptsModel";
@@ -267,8 +263,8 @@ export function useAcceptorExchange({
   run: ExchangeRun;
   outputs: RunOutputs | undefined;
   failure: RunFailure | undefined;
-  /** The run's non-fatal warnings in arrival order, each already escaped at this
-   * hook's display boundary ({@link appendSanitizedRunWarning}). The console's
+  /** The run's non-fatal warnings in arrival order, each already escaped at the
+   * run callbacks' display boundary ({@link buildRunEvents}). The console's
    * rendezvous preflight raises these before the exchange starts -- a non-empty
    * mount, an overlap with the input directory or the data root -- and the accepting
    * seat is the one most likely to launch into a mount the partner has been syncing
@@ -505,7 +501,7 @@ export function useAcceptorExchange({
     }
 
     // Raise a failure's alert and freeze the run: the terminal path for every
-    // error except a busy (409) create, which re-attaches below instead.
+    // error except a busy (409) create, which re-attaches instead.
     const raiseFailure = (category: ExchangeErrorCategory, error: unknown) => {
       setFailure(
         failureFor(category, error, jobInputSource, channel, "acceptor"),
@@ -513,57 +509,22 @@ export function useAcceptorExchange({
       setRun((prev) => runWithFailure(prev));
     };
 
-    // The run's lifecycle callbacks, built once so a busy (409) re-attach folds
-    // the already-running exchange's stream onto the SAME surface. A busy create
-    // at start re-attaches to the exchange holding the console's single slot
-    // (recovery-style copy, `reattached`) rather than dead-ending on the "already
-    // running" alert; every other failure raises its alert.
-    const runEvents: ExchangeDriverEvents<RunOutputs> = {
+    const runEvents = buildRunEvents({
       signal: controller.signal,
-      onStages: (stages) => setRun((prev) => runWithStages(prev, stages)),
-      onStage: (stageId) =>
-        setRun((prev) => runWithStage(prev, stageId, new Date())),
-      onResult: (generated) => {
-        setOutputs(generated);
-        setRun((prev) => runWithCompletion(prev, new Date()));
+      seat: "acceptor",
+      channel,
+      client: jobApiClient,
+      raiseFailure,
+      setRun,
+      setOutputs,
+      setWarnings,
+      setReattached,
+      setReattaching,
+      setJobId: (id) => {
+        currentJobIdRef.current = id;
+        setCurrentJobId(id);
       },
-      onWarning: (message) =>
-        setWarnings((prev) => appendSanitizedRunWarning(prev, message)),
-      onError: ({ category, error }) => {
-        // Dev-gated: the raw Error object's message/cause can embed partner-/
-        // server-controlled bytes, so a production console has none of it,
-        // while a developer (or a deployed client with the diagnostics toggle
-        // on) keeps the full object. The user-facing alert is separately
-        // sanitized in failureFor.
-        whenDiagnostic(() => console.error(error));
-        if (isExchangeBusyError(error)) {
-          // Enter the reconnecting interim the instant the 409 is known, before
-          // the liveness probe round trip -- this suppresses the fresh-run framing
-          // (which would otherwise flash) and announces the reconnect.
-          setReattaching(true);
-          void reattachOnBusy({
-            error,
-            client: jobApiClient,
-            seat: "acceptor",
-            channel,
-            events: runEvents,
-            onReattaching: (id, status) => {
-              currentJobIdRef.current = id;
-              setCurrentJobId(id);
-              setReattaching(false);
-              setReattached(status);
-            },
-          }).then((didReattach) => {
-            if (!didReattach) {
-              setReattaching(false);
-              raiseFailure(category, error);
-            }
-          });
-          return;
-        }
-        raiseFailure(category, error);
-      },
-    };
+    });
 
     void (async () => {
       let driver: ExchangeDriver<RunOutputs>;

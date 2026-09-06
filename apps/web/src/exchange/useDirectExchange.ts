@@ -9,18 +9,8 @@ import {
   writeAttachment,
 } from "@psi/jobClient/consoleJobAttachment";
 
-import { whenDiagnostic } from "@utils/diagnostics";
-
-import { appendSanitizedRunWarning } from "@psi/runWarnings";
-
-import {
-  initialRun,
-  runWithCompletion,
-  runWithFailure,
-  runWithStage,
-  runWithStages,
-} from "./exchangeRun";
-import { isExchangeBusyError, reattachOnBusy } from "./reattachOnBusy";
+import { initialRun, runWithFailure } from "./exchangeRun";
+import { buildRunEvents } from "./runEvents";
 import { failureFor } from "./useInviterExchange";
 
 import type {
@@ -32,7 +22,6 @@ import type {
   JobRunStatus,
 } from "@psi/jobClient/serverJobExchangeDriver";
 import type { DirectTransport } from "./directExchangeModel";
-import type { ExchangeDriverEvents } from "@psi/exchangeDriver";
 import type { ExchangeErrorCategory } from "@psi/exchangeLifecycle";
 import type { ExchangeRun } from "./exchangeRun";
 import type { RunDiagnosticsIntentFields } from "@psi/runDiagnosticsModel";
@@ -187,61 +176,28 @@ export function useDirectExchange({
     });
 
     // Raise a failure's alert and freeze the run: the terminal path for every
-    // error except a busy (409) create, which re-attaches below instead.
+    // error except a busy (409) create, which re-attaches instead.
     const raiseFailure = (category: ExchangeErrorCategory, error: unknown) => {
       setFailure(failureFor(category, error, inputSource, channel));
       setRun((current) => runWithFailure(current));
     };
 
-    // The run's lifecycle callbacks, built once so a busy (409) re-attach folds
-    // the already-running exchange's stream onto the SAME surface. A busy create
-    // at start re-attaches to the exchange holding the console's single slot
-    // (recovery-style copy, `reattached`) rather than dead-ending on the "already
-    // running" alert; every other failure raises its alert.
-    const runEvents: ExchangeDriverEvents<RunOutputs> = {
+    const runEvents = buildRunEvents({
       signal: controller.signal,
-      onStages: (stages) => setRun((current) => runWithStages(current, stages)),
-      onStage: (stageId) =>
-        setRun((current) => runWithStage(current, stageId, new Date())),
-      onResult: (generated) => {
-        setOutputs(generated);
-        setRun((current) => runWithCompletion(current, new Date()));
+      seat: "inviter",
+      channel,
+      client: jobApiClient,
+      raiseFailure,
+      setRun,
+      setOutputs,
+      setWarnings,
+      setReattached,
+      setReattaching,
+      setJobId: (id) => {
+        currentJobIdRef.current = id;
+        setCurrentJobId(id);
       },
-      onWarning: (message) =>
-        setWarnings((current) => appendSanitizedRunWarning(current, message)),
-      onError: ({ category, error }) => {
-        // Dev-gated: the raw error can embed server/CLI-controlled bytes, so a
-        // production console holds none of it; the user-facing alert is
-        // separately sanitized in failureFor.
-        whenDiagnostic(() => console.error(error));
-        if (isExchangeBusyError(error)) {
-          // Enter the reconnecting interim the instant the 409 is known, before
-          // the liveness probe round trip -- this suppresses the fresh-run framing
-          // (which would otherwise flash) and announces the reconnect.
-          setReattaching(true);
-          void reattachOnBusy({
-            error,
-            client: jobApiClient,
-            seat: "inviter",
-            channel,
-            events: runEvents,
-            onReattaching: (id, status) => {
-              currentJobIdRef.current = id;
-              setCurrentJobId(id);
-              setReattaching(false);
-              setReattached(status);
-            },
-          }).then((didReattach) => {
-            if (!didReattach) {
-              setReattaching(false);
-              raiseFailure(category, error);
-            }
-          });
-          return;
-        }
-        raiseFailure(category, error);
-      },
-    };
+    });
 
     void driver.run(runEvents);
   }

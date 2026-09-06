@@ -44,8 +44,7 @@ import { appendSanitizedRunWarning } from "@psi/runWarnings";
 import {
   CopyRow,
   DonePanel,
-  DownloadRow,
-  NoResultFileInset,
+  RunDownloads,
   RunWarningsAlert,
 } from "@exchange/RunSurface";
 import { AppPage } from "@components/AppPage";
@@ -655,30 +654,7 @@ export function ManagedRunSurface({ id }: { id: string }) {
             <h1>Run complete</h1>
             <DonePanel outputs={outputs} finishedAt={finishedAt} />
             <RunWarningsAlert warnings={runWarnings} />
-            {outputs.kind === "matched" ? (
-              <DownloadRow
-                label="Download result"
-                href={outputs.resultsUrl}
-                fileName="results.csv"
-              />
-            ) : (
-              <NoResultFileInset outputs={outputs} />
-            )}
-            {outputs.record !== undefined && (
-              <>
-                <DownloadRow
-                  label="Download record (safe to share)"
-                  href={outputs.record.recordUrl}
-                  fileName={outputs.record.recordFileName}
-                />
-                <DownloadRow
-                  label="Download verification keys"
-                  caveat="keep private"
-                  href={outputs.record.keysUrl}
-                  fileName={outputs.record.keysFileName}
-                />
-              </>
-            )}
+            <RunDownloads outputs={outputs} />
             {completion.backupHook !== undefined && (
               <div className={styles.callout}>
                 <p className={styles.calloutLead}>Back up this exchange.</p>

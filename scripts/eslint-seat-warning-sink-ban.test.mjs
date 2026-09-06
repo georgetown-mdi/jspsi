@@ -64,9 +64,9 @@ async function banHits(filePath, source) {
 // lints the text it hands in, which the canary proves.
 const SEAT_FILE = resolve(repoRoot, "apps/web/src/psi/runWarnings.ts");
 
-// A real seat that also sits in the rawRows allowlist block, whose separate
+// A guarded file that also sits in the rawRows allowlist block, whose separate
 // `no-restricted-syntax` options REPLACE (not merge with) the broad src block's.
-// Without the ban restated there, a quarter of the console's seats would be
+// Without the ban restated there, a seat written in one of those files would be
 // silently uncovered.
 const RAW_ROWS_SEAT_FILE = resolve(
   repoRoot,
@@ -94,9 +94,7 @@ const SEAT_FILE_FIRST_PARSE = resolve(
 // that stops offering the slot, fails here rather than leaving a short list
 // reporting zero.
 const APP_SEAT_FILES = [
-  "apps/web/src/exchange/useDirectExchange.ts",
-  "apps/web/src/exchange/useAcceptorExchange.ts",
-  "apps/web/src/exchange/useInviterExchange.ts",
+  "apps/web/src/exchange/runEvents.ts",
   "apps/web/src/exchange/RecoveredExchangePanel.tsx",
 ].map((seat) => resolve(repoRoot, seat));
 
