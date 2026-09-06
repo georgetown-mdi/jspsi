@@ -104,8 +104,28 @@ export const OWN_COLUMNS_LOCAL_NOTICE =
   "sent nothing extra, sees no change in what they agree to, and their own " +
   "result file is untouched.";
 
-/** What the control says where the selection resolves to no column at all, so
- * the operator is not left reading a chosen setting with nothing under it. */
-export const OWN_COLUMNS_EMPTY_SELECTION_NOTICE =
+/** What the control says where `all` resolves to no column: every column the
+ * file has is the identifier the result already begins with. */
+export const OWN_COLUMNS_EMPTY_ALL_NOTICE =
   "No column is left to add: your result file already begins with your record " +
   "identifier, and this file has no other column to write beside it.";
+
+/** What the control says where `disclosed` resolves to no column: the file may
+ * hold plenty of columns, but the disclosure choices mark none of them as sent,
+ * and matching columns are not sent. */
+export const OWN_COLUMNS_EMPTY_DISCLOSED_NOTICE =
+  "No column is left to add: your file has no column marked as sent to your " +
+  "partner, so this choice selects none. Mark one as sent to keep it in your " +
+  "result file.";
+
+/** The notice for a selection that resolves to no column, so the operator is
+ * not left reading a chosen setting with nothing under it. Which one applies is
+ * the selection's: a file with columns to spare still selects none under
+ * `disclosed` when its disclosure choices mark none as sent. */
+export function ownColumnsEmptySelectionNotice(
+  selection: OwnColumnSelection,
+): string {
+  return selection === "disclosed"
+    ? OWN_COLUMNS_EMPTY_DISCLOSED_NOTICE
+    : OWN_COLUMNS_EMPTY_ALL_NOTICE;
+}

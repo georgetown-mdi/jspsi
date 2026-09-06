@@ -4,10 +4,10 @@ import { ColumnName, isolatedColumnName } from "@components/ColumnName";
 import { useDeferredAnnouncement } from "@components/useDeferredAnnouncement";
 
 import {
-  OWN_COLUMNS_EMPTY_SELECTION_NOTICE,
   OWN_COLUMNS_LABELS,
   OWN_COLUMNS_LOCAL_NOTICE,
   OWN_COLUMNS_ORDER,
+  ownColumnsEmptySelectionNotice,
   ownColumnsPreview,
 } from "@psi/ownColumnsModel";
 
@@ -94,7 +94,7 @@ export function OwnColumnsChoiceField({
           <div className={styles.stateInset}>
             <p className={styles.stateLabel}>No column left to add</p>
             <p className={styles.small} style={{ margin: 0 }}>
-              {OWN_COLUMNS_EMPTY_SELECTION_NOTICE}
+              {ownColumnsEmptySelectionNotice(choice)}
             </p>
           </div>
         ))}
