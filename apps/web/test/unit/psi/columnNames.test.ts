@@ -27,14 +27,14 @@ describe("emptyColumnPositions", () => {
 
 describe("unnameableColumnsAlert", () => {
   test("names a single column position in the singular", () => {
-    const alert = unnameableColumnsAlert([3]);
+    const alert = unnameableColumnsAlert([3], []);
     expect(alert.title).toBe("This file has an unnamed column");
     expect(alert.message).toContain("Column 3");
     expect(alert.message).toContain("has no name");
   });
 
   test("pluralizes the title and message for multiple positions", () => {
-    const alert = unnameableColumnsAlert([2, 4]);
+    const alert = unnameableColumnsAlert([2, 4], []);
     expect(alert.title).toBe("This file has unnamed columns");
     expect(alert.message).toContain("Columns 2, 4");
     expect(alert.message).toContain("have no name");

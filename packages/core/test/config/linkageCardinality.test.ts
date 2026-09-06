@@ -675,7 +675,7 @@ test("an agreed many-to-one pair runs end to end and groups the many side's rows
     buildOutputTable(
       many.associationTable!,
       rowsA,
-      inferMetadata(["first_name"]),
+      inferMetadata(["first_name"], []),
       many.partnerPayload,
     ).rows,
   ).toStrictEqual([
@@ -687,7 +687,7 @@ test("an agreed many-to-one pair runs end to end and groups the many side's rows
     buildOutputTable(
       one.associationTable!,
       rowsB,
-      inferMetadata(["first_name"]),
+      inferMetadata(["first_name"], []),
       one.partnerPayload,
     ).rows,
   ).toStrictEqual([
@@ -828,7 +828,7 @@ test("an agreed both-sided pair runs end to end and groups both parties' rows", 
     buildOutputTable(
       a.associationTable!,
       mutualRowsA,
-      inferMetadata(["first_name"]),
+      inferMetadata(["first_name"], []),
       a.partnerPayload,
     ).rows,
   ).toStrictEqual([
@@ -842,7 +842,7 @@ test("an agreed both-sided pair runs end to end and groups both parties' rows", 
     buildOutputTable(
       b.associationTable!,
       mutualRowsB,
-      inferMetadata(["first_name"]),
+      inferMetadata(["first_name"], []),
       b.partnerPayload,
     ).rows,
   ).toStrictEqual([
@@ -1027,7 +1027,7 @@ test("the same many-to-one pair under single-pass produces the cascade's table",
     buildOutputTable(
       one.associationTable!,
       rowsB,
-      inferMetadata(["first_name"]),
+      inferMetadata(["first_name"], []),
       one.partnerPayload,
     ).rows,
   ).toStrictEqual([

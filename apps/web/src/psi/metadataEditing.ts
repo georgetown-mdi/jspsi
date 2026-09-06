@@ -271,7 +271,9 @@ export function hasMultipleIdentifiers(metadata: Metadata): boolean {
 export function quickInviteDisclosedColumns(
   columns: Array<string>,
 ): Array<string> {
-  return disclosedColumnNames(inferMetadata(columns));
+  // A column list this is handed, not a read of its own: the seat that read the
+  // header refuses an empty name before offering these columns.
+  return disclosedColumnNames(inferMetadata(columns, []));
 }
 
 /**

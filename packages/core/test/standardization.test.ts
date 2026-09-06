@@ -3998,7 +3998,7 @@ describe("resolveFieldColumns", () => {
     const resolution = resolveFieldColumns(
       terms,
       [{ output: "ssn", input: "tax_id" }],
-      inferMetadata(["ssn", "last_name"]),
+      inferMetadata(["ssn", "last_name"], []),
     );
     expect(resolution.get("ssn")?.column).toBe("tax_id");
     expect(resolution.get("ssn")?.transform).toEqual({
@@ -4039,7 +4039,7 @@ describe("resolveFieldColumns", () => {
     const resolution = resolveFieldColumns(
       terms,
       undefined,
-      inferMetadata(["last_name"]),
+      inferMetadata(["last_name"], []),
     );
     expect(resolution.get("ssn")?.column).toBeUndefined();
     expect(resolution.get("lastName")?.column).toBe("last_name");
@@ -4049,7 +4049,7 @@ describe("resolveFieldColumns", () => {
     const resolution = resolveFieldColumns(
       terms,
       undefined,
-      inferMetadata(["ssn", "last_name"]),
+      inferMetadata(["ssn", "last_name"], []),
     );
     expect(resolution.get("ssn")?.column).toBe("ssn");
   });

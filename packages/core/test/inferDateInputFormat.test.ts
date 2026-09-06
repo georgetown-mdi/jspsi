@@ -37,7 +37,9 @@ test("inferDateOfBirthColumn resolves the date_of_birth column via inferMetadata
   expect(
     inferDateOfBirthColumn(COLUMNS),
     // The one definition every caller shares.
-  ).toBe(inferMetadata(COLUMNS).find((c) => c.type === "date_of_birth")?.name);
+  ).toBe(
+    inferMetadata(COLUMNS, []).find((c) => c.type === "date_of_birth")?.name,
+  );
   expect(inferDateOfBirthColumn(["a", "b"])).toBeUndefined();
 });
 

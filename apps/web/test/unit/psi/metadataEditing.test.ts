@@ -68,7 +68,7 @@ describe("normalizeForEditor collapses off-diagonal inferred metadata", () => {
     // inferMetadata marks a sole `_id` column role:identifier yet isPayload:true --
     // an off-diagonal state preparePayload would transmit. Normalizing collapses it
     // to identifier + not-sent.
-    const inferred = inferMetadata(["patient_id", "first_name", "notes"]);
+    const inferred = inferMetadata(["patient_id", "first_name", "notes"], []);
     expect(disclosedColumnNames(inferred)).toContain("patient_id");
 
     const normalized = normalizeForEditor(inferred);
@@ -80,7 +80,7 @@ describe("normalizeForEditor collapses off-diagonal inferred metadata", () => {
 
   test("an inferred payload (other) column stays sent, a linkage column does not", () => {
     const normalized = normalizeForEditor(
-      inferMetadata(["first_name", "notes"]),
+      inferMetadata(["first_name", "notes"], []),
     );
     // `notes` -> other/payload: still sent (and now visible). `first_name`: matched,
     // not sent.
@@ -88,7 +88,7 @@ describe("normalizeForEditor collapses off-diagonal inferred metadata", () => {
   });
 
   test("normalization is idempotent (already on the diagonal)", () => {
-    const once = normalizeForEditor(inferMetadata(["patient_id", "ssn"]));
+    const once = normalizeForEditor(inferMetadata(["patient_id", "ssn"], []));
     expect(normalizeForEditor(once)).toEqual(once);
   });
 });
@@ -131,7 +131,7 @@ describe("quickInviteDisclosedColumns mirrors the quick path's wire", () => {
     // a hand-rolled second list. Pinned over a fuller column mix.
     const mixed = ["first_name", "record_id", "notes", "email", "extra_id"];
     expect(quickInviteDisclosedColumns(mixed)).toEqual(
-      disclosedColumnNames(inferMetadata(mixed)),
+      disclosedColumnNames(inferMetadata(mixed, [])),
     );
   });
 
@@ -141,7 +141,10 @@ describe("quickInviteDisclosedColumns mirrors the quick path's wire", () => {
     // and preparePayload gathers exactly the isDisclosedToPartner columns, so the
     // statement and the transmitted column set are one and the same.
     const rawRows = [{ first_name: "Alice", record_id: "1", notes: "vip" }];
-    const sent = preparePayload(rawRows, inferMetadata(columns), [[0], [0]]);
+    const sent = preparePayload(rawRows, inferMetadata(columns, []), [
+      [0],
+      [0],
+    ]);
     expect(sent.hasData).toBe(true);
     if (sent.hasData)
       expect(sent.columns).toEqual(quickInviteDisclosedColumns(columns));
@@ -150,7 +153,7 @@ describe("quickInviteDisclosedColumns mirrors the quick path's wire", () => {
 
 describe("payloadSendForMetadata authors the shared send declaration", () => {
   test("send equals disclosedColumnNames; receive is never authored", () => {
-    const metadata = inferMetadata(["first_name", "record_id", "notes"]);
+    const metadata = inferMetadata(["first_name", "record_id", "notes"], []);
     const payload = payloadSendForMetadata(metadata);
     expect(payload?.send?.map((c) => c.name)).toEqual(
       disclosedColumnNames(metadata),
@@ -161,15 +164,18 @@ describe("payloadSendForMetadata authors the shared send declaration", () => {
   });
 
   test("returns undefined (no empty block) when nothing is disclosed", () => {
-    expect(payloadSendForMetadata(inferMetadata(["first_name", "ssn"]))).toBe(
-      undefined,
-    );
+    expect(
+      payloadSendForMetadata(inferMetadata(["first_name", "ssn"], [])),
+    ).toBe(undefined);
   });
 
   test("the authored send can never over-declare what metadata transmits", () => {
     // Derived from the disclosed set, so it is a subset of (equal to) what
     // preparePayload sends -- core's over-declaration reject accepts it.
-    const metadata = inferMetadata(["ssn", "first_name", "notes", "member_id"]);
+    const metadata = inferMetadata(
+      ["ssn", "first_name", "notes", "member_id"],
+      [],
+    );
     const payload = payloadSendForMetadata(metadata);
     expect(() =>
       assertPayloadSendDisclosed(payload, metadata, {

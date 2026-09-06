@@ -292,7 +292,9 @@ export function warnColumnsTheInvitationWillNotAccept(params: {
   if (!terms.output.shareWithPartner) return;
   const resolved =
     metadata ??
-    (columnNames !== undefined ? inferMetadata(columnNames) : undefined);
+    // A column list this is handed, not a read of its own: the loader that read
+    // the header holds the sanitized positions and refuses an empty name there.
+    (columnNames !== undefined ? inferMetadata(columnNames, []) : undefined);
   if (resolved === undefined) return;
   const disclosed = disclosedColumnNames(resolved);
   if (disclosed.length === 0) return;

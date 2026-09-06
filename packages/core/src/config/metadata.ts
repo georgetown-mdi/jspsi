@@ -311,8 +311,8 @@ export const ALIAS_TYPE_META_MAP = DEFAULT_COLUMN_TYPES_AND_ALIASES.reduce(
  * `sanitizedPositions` are the 1-based positions the parse removed bidi control
  * characters from (`CSVParseMeta.bidiStrippedColumns`, `packages/core/src/file.ts`).
  * An empty position among them held nothing but those characters, so the
- * trailing-comma cause is wrong for it and the removal is stated instead; a
- * caller with no such list gets the trailing-comma cause for every position.
+ * trailing-comma cause is wrong for it and the removal is stated instead; an
+ * empty list gives the trailing-comma cause for every position.
  */
 function assertColumnNamesNonEmpty(
   columnNames: ReadonlyArray<string>,
@@ -362,9 +362,11 @@ function assertColumnNamesNonEmpty(
  * `identifier` gets that role; otherwise no identifier role is assigned.
  *
  * `sanitizedPositions` are the 1-based positions the CSV parse removed bidi
- * control characters from, passed by a caller that read the header itself so the
- * empty-name refusal below can name the removal as the cause. A caller with no
- * such list omits it.
+ * control characters from, so the empty-name refusal below can name the removal
+ * as the cause. Required rather than defaulted: an omitted list means "blame the
+ * trailing comma", and a read that forgot to thread its own positions would
+ * state that wrong cause silently. A caller holding a column list rather than a
+ * read of its own passes an empty list, saying so at the call site.
  *
  * @throws {UsageError} when any column name is empty. Downstream name
  *   fields (metadata, payload, wire, exchange-record schemas) all floor at
@@ -377,7 +379,7 @@ function assertColumnNamesNonEmpty(
  */
 export function inferMetadata(
   columnNames: Array<string>,
-  sanitizedPositions: ReadonlyArray<number> = [],
+  sanitizedPositions: ReadonlyArray<number>,
 ): Metadata {
   assertColumnNamesNonEmpty(columnNames, sanitizedPositions);
 

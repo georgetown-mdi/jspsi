@@ -1979,6 +1979,7 @@ const ROWS = {
     },
   ],
   columns: COLUMNS,
+  sanitizedColumnPositions: [],
 };
 
 test("buildDataSpec: infers linkage terms, metadata, and standardization from input (invite)", () => {
@@ -4169,7 +4170,11 @@ async function inferInitDataSpec(
   );
   const dataSpec = buildDataSpec({
     identity: "Org",
-    rows: { rawRows: [], columns: inferred.columns },
+    rows: {
+      rawRows: [],
+      columns: inferred.columns,
+      sanitizedColumnPositions: inferred.bidiStrippedColumns,
+    },
     ...(inferred.dateInputFormat !== undefined
       ? { dateInputFormat: inferred.dateInputFormat }
       : {}),
@@ -4365,6 +4370,7 @@ const STRATEGY_ROWS = {
     },
   ],
   columns: ["first_name", "last_name", "dob", "ssn"],
+  sanitizedColumnPositions: [],
 };
 
 test("buildDataSpec: --linkage-strategy single-pass authors single-pass terms", () => {

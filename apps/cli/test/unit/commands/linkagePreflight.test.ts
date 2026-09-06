@@ -415,7 +415,7 @@ test("the disclosed set is resolved from the column names when no metadata is su
   // Same set, same message, whichever half of the pair holds it.
   const supplied = makeLogger();
   warnColumnsTheInvitationWillNotAccept({
-    metadata: inferMetadata(columnNames),
+    metadata: inferMetadata(columnNames, []),
     columnNames,
     terms: refusingTerms(),
     mode: "offline",
@@ -605,7 +605,7 @@ test("a declared name the read strips from the header says so in the refusal", (
     linkageFields: [{ name: declared, type: "date_of_birth" }],
     linkageKeys: [{ name: "DOB", elements: [{ field: declared }] }],
   };
-  const metadata = inferMetadata(["dob"]).map((column) => ({
+  const metadata = inferMetadata(["dob"], []).map((column) => ({
     ...column,
     name: declared,
   }));

@@ -138,9 +138,10 @@ describe("the guided key list offers the non-default matchable types", () => {
         .filter((entry) => !isOptInLinkageKey(entry.key))
         .map((entry) => entry.key.name),
     ).toEqual(
-      getDefaultLinkageTerms("Inviter", inferMetadata(COLUMNS)).linkageKeys.map(
-        (key) => key.name,
-      ),
+      getDefaultLinkageTerms(
+        "Inviter",
+        inferMetadata(COLUMNS, []),
+      ).linkageKeys.map((key) => key.name),
     );
   });
 
@@ -191,7 +192,7 @@ describe("an offer left alone changes nothing", () => {
     const terms = buildAdvancedTerms(guidedDraft());
     expect(canonicalString(terms)).toEqual(
       canonicalString({
-        ...getDefaultLinkageTerms("Inviter", inferMetadata(COLUMNS)),
+        ...getDefaultLinkageTerms("Inviter", inferMetadata(COLUMNS, [])),
         date: terms.date,
       }),
     );
@@ -206,7 +207,10 @@ describe("an offer left alone changes nothing", () => {
   test("zero-setup over the same columns declares no offered key or field", () => {
     // `getDefaultLinkageTerms` is the zero-setup emitter; the offer is beside it,
     // never inside it.
-    const zeroSetup = getDefaultLinkageTerms("Inviter", inferMetadata(COLUMNS));
+    const zeroSetup = getDefaultLinkageTerms(
+      "Inviter",
+      inferMetadata(COLUMNS, []),
+    );
     for (const key of zeroSetup.linkageKeys)
       expect(isOptInLinkageKey(key)).toBe(false);
     expect(zeroSetup.linkageFields.map((field) => field.type)).not.toContain(
@@ -276,7 +280,7 @@ describe("turning an offer on", () => {
       standardization: draft.standardization,
     }).standardization;
     const partnerSide = getDefaultStandardization(
-      inferMetadata(COLUMNS),
+      inferMetadata(COLUMNS, []),
       deriveAcceptedLinkageTerms(terms, "Acceptor"),
     );
     const stepsFor = (standardization: typeof committed, output: string) =>
@@ -530,9 +534,10 @@ describe("an offer re-added over a key of its own name arrives off", () => {
 
   /** The offered shape of the named built-in key over {@link COLUMNS}. */
   const offeredShape = (name: string) =>
-    getDefaultLinkageTerms("Inviter", inferMetadata(COLUMNS)).linkageKeys.find(
-      (key) => key.name === name,
-    )?.elements;
+    getDefaultLinkageTerms(
+      "Inviter",
+      inferMetadata(COLUMNS, []),
+    ).linkageKeys.find((key) => key.name === name)?.elements;
 
   test("a key the operator turned off does not come back on under its name", () => {
     const stale = withPermutedKey(guidedDraft(), BACKBONE_KEY, false);
@@ -763,7 +768,7 @@ describe("a key stating its optional properties as undefined is the same key", (
   test("an imported document's citation is re-emitted over the same rules", () => {
     // The imported branch decides the citation against the set the DOCUMENT
     // cited, so it is its own compare and answers for its own draft.
-    const metadata = inferMetadata(COLUMNS);
+    const metadata = inferMetadata(COLUMNS, []);
     const seed: AdvancedInviteSeed = {
       terms: getDefaultLinkageTerms("Inviter", metadata),
       metadata,
@@ -865,7 +870,7 @@ describe("turning an offer on and off again", () => {
     const terms = buildAdvancedTerms(on);
     expect(stepsFor(on)).toEqual(
       getDefaultStandardization(
-        inferMetadata(COLUMNS),
+        inferMetadata(COLUMNS, []),
         deriveAcceptedLinkageTerms(terms, "Acceptor"),
       ).find((t) => t.output === "zip_code")?.steps,
     );
@@ -919,7 +924,7 @@ describe("turning an offer on and off again", () => {
     )?.steps;
     expect(steps).toEqual(
       getDefaultStandardization(
-        inferMetadata(COLUMNS),
+        inferMetadata(COLUMNS, []),
         deriveAcceptedLinkageTerms(buildAdvancedTerms(back), "Acceptor"),
       ).find((t) => t.output === "zip_code")?.steps,
     );

@@ -569,7 +569,10 @@ export function buildDataSpec(args: {
   rows?: {
     rawRows: Array<CSVRow>;
     columns: string[];
-    sanitizedColumnPositions?: Array<number>;
+    /** The 1-based positions this read removed bidi control characters from
+     * ({@link loadInputRows}'s own field), so the empty-name refusal below names
+     * the removal. Required: an omitted list states the trailing-comma cause. */
+    sanitizedColumnPositions: Array<number>;
   };
   dateInputFormat?: string;
   linkageStrategy?: LinkageStrategy;

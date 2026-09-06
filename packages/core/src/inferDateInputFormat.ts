@@ -25,7 +25,9 @@ export function inferDateOfBirthColumn(
   columns: Array<string>,
 ): string | undefined {
   const named = columns.filter((name) => name.length > 0);
-  return inferMetadata(named).find((c) => c.type === "date_of_birth")?.name;
+  // No name is empty past that filter, so no refusal can fire and there is no
+  // cause to state; the read's caller raises the one that names the removal.
+  return inferMetadata(named, []).find((c) => c.type === "date_of_birth")?.name;
 }
 
 /** The header columns plus the inferred date-input format of a source's

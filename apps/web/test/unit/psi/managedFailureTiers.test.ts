@@ -261,7 +261,7 @@ describe("deriveManagedFailureTier: the terms-shortfall tier, from the real refu
       connection: { channel: "webrtc", host: "signaling.example.org" },
       linkageTerms: getDefaultLinkageTerms(
         "County Health Dept",
-        inferMetadata(agreedColumns),
+        inferMetadata(agreedColumns, []),
       ),
     });
   }

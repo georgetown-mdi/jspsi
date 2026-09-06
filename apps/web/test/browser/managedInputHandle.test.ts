@@ -56,7 +56,7 @@ const webrtcLocator: WebRTCExchangeLocator = {
 // (which keep the whole built-in set) would refuse the conforming file too.
 const linkageTerms = getDefaultLinkageTerms(
   "County Health Dept",
-  inferMetadata(["ssn", "first_name", "last_name", "date_of_birth"]),
+  inferMetadata(["ssn", "first_name", "last_name", "date_of_birth"], []),
 );
 
 /** The standing exchange-file document a managed record persists. */

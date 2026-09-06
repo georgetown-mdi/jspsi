@@ -108,7 +108,7 @@ describe("gated settings cannot reach the built terms", () => {
   });
 
   test("gatedActiveSettingMessage refuses an import that turns a held-back setting on", () => {
-    const base = getDefaultLinkageTerms("Org", inferMetadata(ALL_COLUMNS));
+    const base = getDefaultLinkageTerms("Org", inferMetadata(ALL_COLUMNS, []));
     expect(gatedActiveSettingMessage(base)).toBeUndefined();
     // The algorithm is not held back at all: an imported count-only document is
     // judged by the count-only shape rules, which validateAdvancedInvite applies.

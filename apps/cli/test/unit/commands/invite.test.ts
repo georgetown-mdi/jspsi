@@ -915,14 +915,10 @@ test("validateInvite: online includes the disclosed-columns subset from the infe
   const token = await decodeInvitation(ready.invitation);
   expect(token.disclosedPayloadColumns).toEqual(
     disclosedColumnNames(
-      inferMetadata([
-        "first_name",
-        "last_name",
-        "dob",
-        "ssn",
-        "notes",
-        "member_id",
-      ]),
+      inferMetadata(
+        ["first_name", "last_name", "dob", "ssn", "notes", "member_id"],
+        [],
+      ),
     ),
   );
   expect(token.disclosedPayloadColumns).toEqual(["notes", "member_id"]);
@@ -1485,7 +1481,7 @@ test("validateInvite: an offline invitation has no endpoint (field stays optiona
 function defaultTerms(): LinkageTerms {
   return getDefaultLinkageTerms(
     "Agency A",
-    inferMetadata(["first_name", "last_name", "dob", "ssn"]),
+    inferMetadata(["first_name", "last_name", "dob", "ssn"], []),
   );
 }
 
@@ -1563,7 +1559,7 @@ test("validateInvite: a reused config supplies the identity, so no flag is neede
   // unset): nothing was named, and nothing is reported.
   const terms = getDefaultLinkageTerms(
     "Agency Config",
-    inferMetadata(["first_name", "last_name", "dob", "ssn"]),
+    inferMetadata(["first_name", "last_name", "dob", "ssn"], []),
   );
   const log = getLogger("invite-identity-from-config-test");
   log.setLevel("silent");
@@ -1605,7 +1601,7 @@ test("validateInvite: --identity over a reused config is reported, not applied",
   // invitation. Named as ignored, like --linkage-strategy on the same path.
   const terms = getDefaultLinkageTerms(
     "Agency Config",
-    inferMetadata(["first_name", "last_name", "dob", "ssn"]),
+    inferMetadata(["first_name", "last_name", "dob", "ssn"], []),
   );
   const { dir, configPath, keyPath } = withConfig(terms);
   const log = getLogger("invite-identity-ignored-test");
@@ -1653,7 +1649,7 @@ test("validateInvite: a config still holding the init placeholder is refused, mi
   const { dir, configPath, keyPath } = withConfig(
     getDefaultLinkageTerms(
       PLACEHOLDER_IDENTITY,
-      inferMetadata(["first_name", "last_name", "dob", "ssn"]),
+      inferMetadata(["first_name", "last_name", "dob", "ssn"], []),
     ),
   );
   const log = getLogger("invite-identity-placeholder-test");
@@ -1686,7 +1682,7 @@ test("validateInvite: a config holding no identity is refused, flag or not", asy
   // it. Refuse, naming the field to set, whether or not --identity was typed.
   const named = getDefaultLinkageTerms(
     "Agency Config",
-    inferMetadata(["first_name", "last_name", "dob", "ssn"]),
+    inferMetadata(["first_name", "last_name", "dob", "ssn"], []),
   );
   const { identity: _dropped, ...unnamed } = named;
   const { dir, configPath, keyPath } = withConfig(unnamed as LinkageTerms);
@@ -1721,7 +1717,7 @@ test("validateInvite: --identity over a reused config redacts a planted key mark
   // the line -- the config label, path, and remedy -- behind it.
   const terms = getDefaultLinkageTerms(
     "Agency Config",
-    inferMetadata(["first_name", "last_name", "dob", "ssn"]),
+    inferMetadata(["first_name", "last_name", "dob", "ssn"], []),
   );
   const { dir, configPath, keyPath } = withConfig(terms);
   const log = getLogger("invite-identity-key-marker-test");
@@ -1830,13 +1826,10 @@ test("validateInvite: config-as-source threads the disclosed subset for the send
   // the reused config's disclosed_payload_columns (closing the init-config gap and
   // refreshing a stale prior commitment on re-invite).
   const terms = defaultTerms();
-  const metadata = inferMetadata([
-    "first_name",
-    "last_name",
-    "dob",
-    "ssn",
-    "notes",
-  ]);
+  const metadata = inferMetadata(
+    ["first_name", "last_name", "dob", "ssn", "notes"],
+    [],
+  );
   const { dir, configPath, keyPath } = withConfig(terms, undefined, metadata);
   try {
     const ready = await validateInvite({
@@ -2285,13 +2278,10 @@ test("validateInvite: offline config-source refuses a count-only config whose me
   // for. Refused before the token is minted, and ahead of the algorithm gate, so
   // the operator is told which marking to clear rather than only that the
   // algorithm is not runnable yet.
-  const metadata = inferMetadata([
-    "first_name",
-    "last_name",
-    "dob",
-    "ssn",
-    "notes",
-  ]);
+  const metadata = inferMetadata(
+    ["first_name", "last_name", "dob", "ssn", "notes"],
+    [],
+  );
   expect(disclosedColumnNames(metadata)).toEqual(["notes"]);
   const { dir, configPath, keyPath } = withConfig(
     countOnlyTerms(),
@@ -2323,13 +2313,10 @@ test("validateInvite: an explicit empty payload pair still names the count-only 
   // output.shareWithPartner: false, and these terms have shareWithPartner:
   // true (the default), so metadata marking a column disclosed falls through
   // to the generic disclosure message unless the count-only check runs first.
-  const metadata = inferMetadata([
-    "first_name",
-    "last_name",
-    "dob",
-    "ssn",
-    "notes",
-  ]);
+  const metadata = inferMetadata(
+    ["first_name", "last_name", "dob", "ssn", "notes"],
+    [],
+  );
   expect(disclosedColumnNames(metadata)).toEqual(["notes"]);
   const terms: LinkageTerms = {
     ...countOnlyTerms(),
@@ -2357,13 +2344,10 @@ test("validateInvite: an explicit empty payload pair still names the count-only 
 test("validateInvite: a psi config with the same metadata and shape still mints", async () => {
   // The narrowing claim at this boundary: every refusal above reads the
   // algorithm first, so the identical document under `psi` is untouched.
-  const metadata = inferMetadata([
-    "first_name",
-    "last_name",
-    "dob",
-    "ssn",
-    "notes",
-  ]);
+  const metadata = inferMetadata(
+    ["first_name", "last_name", "dob", "ssn", "notes"],
+    [],
+  );
   const { dir, configPath, keyPath } = withConfig(
     { ...defaultTerms(), deduplicate: false },
     undefined,
@@ -3127,13 +3111,10 @@ test("handler: offline-from-config persists the disclosed subset into the reused
   // exchange has the commitment to check. validateInvite is tested above; this
   // proves the handler actually calls persistDisclosedPayloadColumns on the reused
   // config (the offlineFromConfig branch), not merely that the value is threaded.
-  const metadata = inferMetadata([
-    "first_name",
-    "last_name",
-    "dob",
-    "ssn",
-    "notes",
-  ]);
+  const metadata = inferMetadata(
+    ["first_name", "last_name", "dob", "ssn", "notes"],
+    [],
+  );
   const { dir, configPath, keyPath } = withConfig(
     defaultTerms(),
     undefined,
@@ -3178,7 +3159,7 @@ test("handler: offline-from-config removes an acceptor-era outbound consent reco
   // would go stale against re-edited metadata and refuse a later unattended run
   // with remedy text about re-accepting. Same no-field-lags-this-mint rule as the
   // commitment refresh proven above.
-  const metadata = inferMetadata(["first_name", "last_name", "dob", "ssn"]);
+  const metadata = inferMetadata(["first_name", "last_name", "dob", "ssn"], []);
   const { dir, configPath, keyPath } = withConfig(
     defaultTerms(),
     undefined,

@@ -118,7 +118,7 @@ test("an acceptor declaring it sends nothing is refused before anything is sent 
   // Inferred, not chosen: neither `diagnosis` nor `notes` is a linkage or PII
   // alias, so both default to transmitted.
   expect(
-    inferMetadata(acceptorColumns)
+    inferMetadata(acceptorColumns, [])
       .filter((column) => column.isPayload)
       .map((column) => column.name),
   ).toEqual(["diagnosis", "notes"]);

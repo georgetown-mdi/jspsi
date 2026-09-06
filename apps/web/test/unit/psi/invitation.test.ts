@@ -280,7 +280,7 @@ describe("generateInvitation", () => {
     // ssn4-keyed combination.
     const expected = getDefaultLinkageTerms(
       inviterName,
-      inferMetadata(["ssn", "first_name", "last_name", "dob"]),
+      inferMetadata(["ssn", "first_name", "last_name", "dob"], []),
     );
     const token = await decodeInvitation(result.encoded);
     expect(token.linkageTerms).toStrictEqual(expected);
@@ -324,12 +324,10 @@ describe("generateInvitation", () => {
   test("threads the inviter's edited metadata to the result, never into the token", async () => {
     // The Advanced editor passes its edited metadata alongside the authored terms;
     // marking first_name as sent makes the metadata distinctive.
-    const metadata = inferMetadata([
-      "ssn",
-      "first_name",
-      "last_name",
-      "dob",
-    ]).map((c) =>
+    const metadata = inferMetadata(
+      ["ssn", "first_name", "last_name", "dob"],
+      [],
+    ).map((c) =>
       c.name === "first_name"
         ? { ...c, role: "payload" as const, isPayload: true }
         : c,
@@ -382,7 +380,7 @@ describe("generateInvitation", () => {
     // consulted for the terms' identity.
     const base = getDefaultLinkageTerms(
       "Authored Org",
-      inferMetadata(["ssn", "ssn4", "first_name", "last_name", "dob"]),
+      inferMetadata(["ssn", "ssn4", "first_name", "last_name", "dob"], []),
     );
     const authored = { ...base, linkageKeys: base.linkageKeys.slice(0, 1) };
 
@@ -403,7 +401,7 @@ describe("generateInvitation", () => {
     expect(token.linkageTerms.linkageKeys.length).toBeLessThan(
       getDefaultLinkageTerms(
         "ignored-name",
-        inferMetadata(["ssn", "ssn4", "first_name", "last_name", "dob"]),
+        inferMetadata(["ssn", "ssn4", "first_name", "last_name", "dob"], []),
       ).linkageKeys.length,
     );
     // inviterName is not consulted for the identity when terms are authored.
@@ -418,7 +416,7 @@ describe("generateInvitation", () => {
     // column.
     const base = getDefaultLinkageTerms(
       "Org",
-      inferMetadata(["ssn", "ssn4", "first_name", "last_name", "dob"]),
+      inferMetadata(["ssn", "ssn4", "first_name", "last_name", "dob"], []),
     );
     const ssn4Key = base.linkageKeys.find((k) =>
       k.elements.some((e) => e.field === "ssn4"),
@@ -443,7 +441,7 @@ describe("generateInvitation", () => {
     // settled. The full default set needs ssn4; PARTIAL_CSV covers everything else.
     const full = getDefaultLinkageTerms(
       "Org",
-      inferMetadata(["ssn", "ssn4", "first_name", "last_name", "dob"]),
+      inferMetadata(["ssn", "ssn4", "first_name", "last_name", "dob"], []),
     );
     const error = await generateInvitation({
       inviterName: "Org",
@@ -479,7 +477,7 @@ describe("generateInvitation", () => {
     // says so before a partner has accepted anything.
     const base = getDefaultLinkageTerms(
       "Org",
-      inferMetadata(["first_name", "last_name", "dob"]),
+      inferMetadata(["first_name", "last_name", "dob"], []),
     );
     const deadTerms = {
       ...base,
@@ -524,7 +522,7 @@ describe("generateInvitation", () => {
     // is the last point either party holds a control over it.
     const base = getDefaultLinkageTerms(
       "Org",
-      inferMetadata(["first_name", "last_name", "dob"]),
+      inferMetadata(["first_name", "last_name", "dob"], []),
     );
     const keyedOnWindow = (params: Record<string, unknown>) => ({
       ...base,
@@ -683,13 +681,10 @@ describe("generateInvitation", () => {
   test("mints an over-long column name the metadata does not send", async () => {
     // The scope of the bound: an oversized header is fully usable for matching and
     // ignoring, so only a name that is actually disclosed refuses the mint.
-    const metadata = inferMetadata([
-      "ssn",
-      "first_name",
-      "last_name",
-      "dob",
-      PAST_CEILING,
-    ]).map((column) =>
+    const metadata = inferMetadata(
+      ["ssn", "first_name", "last_name", "dob", PAST_CEILING],
+      [],
+    ).map((column) =>
       column.name === PAST_CEILING
         ? { ...column, role: "ignored" as const, isPayload: false }
         : column,
@@ -712,7 +707,10 @@ describe("generateInvitation", () => {
     // token and the partner's consent screen hold a column the metadata gates
     // off. `ssn` is a linkage column (isPayload:false), so it is not disclosed
     // and may not be declared.
-    const metadata = inferMetadata(["ssn", "first_name", "last_name", "dob"]);
+    const metadata = inferMetadata(
+      ["ssn", "first_name", "last_name", "dob"],
+      [],
+    );
     const authored = {
       ...getDefaultLinkageTerms("Org", metadata),
       payload: { send: [{ name: "ssn" }] },
@@ -739,7 +737,10 @@ describe("generateInvitation", () => {
   const fanOutStep = { function: fanOutFunction, params: { delimiter: "-" } };
 
   test("refuses to mint when a linkage-key element transform fans out", async () => {
-    const metadata = inferMetadata(["ssn", "first_name", "last_name", "dob"]);
+    const metadata = inferMetadata(
+      ["ssn", "first_name", "last_name", "dob"],
+      [],
+    );
     const base = getDefaultLinkageTerms("Org", metadata);
     const fanning = {
       ...base,
@@ -769,7 +770,10 @@ describe("generateInvitation", () => {
   });
 
   test("refuses to mint when the authored standardization fans out", async () => {
-    const metadata = inferMetadata(["ssn", "first_name", "last_name", "dob"]);
+    const metadata = inferMetadata(
+      ["ssn", "first_name", "last_name", "dob"],
+      [],
+    );
     await expect(
       generateInvitation({
         inviterName: "Org",
@@ -805,7 +809,9 @@ describe("generateInvitation", () => {
 
   test("quick path authors payload.send equal to the inferred metadata's disclosed columns", async () => {
     const inviterName = "County Health Dept";
-    const disclosed = disclosedColumnNames(inferMetadata(DISCLOSING_COLUMNS));
+    const disclosed = disclosedColumnNames(
+      inferMetadata(DISCLOSING_COLUMNS, []),
+    );
     // An inferred "other" column (notes) and an _id row-identifier (member_id),
     // both still transmitted by the quick path.
     expect(disclosed).toEqual(["notes", "member_id"]);
@@ -833,7 +839,7 @@ describe("generateInvitation", () => {
     expect(() =>
       assertPayloadSendDisclosed(
         token.linkageTerms.payload,
-        inferMetadata(DISCLOSING_COLUMNS),
+        inferMetadata(DISCLOSING_COLUMNS, []),
         token.linkageTerms.output,
       ),
     ).not.toThrow();
@@ -850,7 +856,9 @@ describe("generateInvitation", () => {
   });
 
   test("quick path holds the disclosed-columns subset on the token", async () => {
-    const disclosed = disclosedColumnNames(inferMetadata(DISCLOSING_COLUMNS));
+    const disclosed = disclosedColumnNames(
+      inferMetadata(DISCLOSING_COLUMNS, []),
+    );
     const result = await generateInvitation({
       inviterName: "Org",
       file: csvStream(DISCLOSING_CSV),
@@ -885,7 +893,7 @@ describe("generateInvitation", () => {
     // nothing, so no (empty) payload block is authored.
     expect(
       disclosedColumnNames(
-        inferMetadata(["ssn", "ssn4", "first_name", "last_name", "dob"]),
+        inferMetadata(["ssn", "ssn4", "first_name", "last_name", "dob"], []),
       ),
     ).toEqual([]);
     const { encoded, linkageTerms } = await generateInvitation({

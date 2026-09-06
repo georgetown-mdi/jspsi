@@ -109,7 +109,7 @@ describe("sample data", () => {
   });
 
   test("the header infers the default matching columns with zero customization", async () => {
-    const metadata = inferMetadata(EXPECTED_COLUMNS);
+    const metadata = inferMetadata(EXPECTED_COLUMNS, []);
     const byName = new Map(metadata.map((column) => [column.name, column]));
     expect(byName.get("first_name")?.type).toBe("first_name");
     expect(byName.get("last_name")?.type).toBe("last_name");

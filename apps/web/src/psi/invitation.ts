@@ -636,10 +636,11 @@ export async function generateInvitation(params: {
         params.metadata,
         linkageTerms.output,
       );
-    disclosureMetadata = params.metadata ?? inferMetadata(columns);
+    disclosureMetadata =
+      params.metadata ?? inferMetadata(columns, sanitizedPositions);
     disclosedPayloadColumns = disclosedColumnNames(disclosureMetadata);
   } else {
-    const metadata = inferMetadata(columns);
+    const metadata = inferMetadata(columns, sanitizedPositions);
     disclosureMetadata = metadata;
     linkageTerms = getDefaultLinkageTerms(inviterName, metadata);
 

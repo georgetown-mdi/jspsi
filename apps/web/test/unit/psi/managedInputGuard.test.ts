@@ -39,7 +39,7 @@ function standingExchangeFile(): ExchangeSpec {
     connection: connectionFromLocator(webrtcLocator),
     linkageTerms: getDefaultLinkageTerms(
       "County Health Dept",
-      inferMetadata(standingColumns),
+      inferMetadata(standingColumns, []),
     ),
   });
 }

@@ -33,11 +33,13 @@ export function emptyColumnPositions(
  * characters from (`meta.bidiStrippedColumns`). An unnamed position among them
  * held nothing but those characters, so the trailing-comma cause is wrong for it
  * and the removal is stated instead -- the operator's header was neither blank
- * nor trailing, and the remedy differs.
+ * nor trailing, and the remedy differs. Required rather than defaulted: an
+ * omitted list means "blame the trailing comma", and a seat that forgot to
+ * thread its parse's positions would state that wrong cause silently.
  */
 export function unnameableColumnsAlert(
   positions: ReadonlyArray<number>,
-  sanitizedPositions: ReadonlyArray<number> = [],
+  sanitizedPositions: ReadonlyArray<number>,
 ): {
   title: string;
   message: string;
