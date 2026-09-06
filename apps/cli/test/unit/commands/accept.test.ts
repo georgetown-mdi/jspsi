@@ -5810,15 +5810,33 @@ describe("handler: the prompt's copy has the redaction on its own", () => {
     try {
       // Unlike the render-boundary walk, this route goes through the token's own
       // validation, so the hostile code points ride the fields a decoded token can
-      // still hold: the key name takes the two control characters, since the terms'
-      // free text is refused one at parse, and the identity takes the bidi
-      // override, which is not a control character.
+      // still hold: a transform param value takes the two control characters,
+      // being a data value the schema length-bounds and holds to no character
+      // rule, and the identity takes the bidi override, which the free-text rule
+      // does not refuse. The names are out -- every one of them is held to
+      // NAME_SHAPE_PATTERN, which refuses both classes.
       const encoded = await encodeInvitation({
         ...sampleToken(FUTURE()),
         linkageTerms: {
           ...sampleTerms(`InviterOrg${RLO}`),
           linkageKeys: [
-            { name: `ssn${BEL}${ESC}[31m`, elements: [{ field: "ssn" }] },
+            {
+              name: "ssn",
+              elements: [
+                {
+                  field: "ssn",
+                  transform: [
+                    {
+                      function: "replace_regex",
+                      params: {
+                        pattern: "-",
+                        replacement: `${BEL}${ESC}[31m`,
+                      },
+                    },
+                  ],
+                },
+              ],
+            },
           ],
         },
       });

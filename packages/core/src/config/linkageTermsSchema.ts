@@ -44,6 +44,9 @@ import {
  * a payload column `name`, a legal-agreement `reference`, the `version`
  * string, and a name-constraint `allowedCharacters` class. Also reused by the
  * operator-local metadata `ColumnMetadata.name` (config/metadata.ts).
+ *
+ * Most of that list holds a character shape beside this length cap; which do
+ * and which do not is {@link NAME_SHAPE_PATTERN}'s to state.
  */
 export const MAX_NAME_LENGTH = 256;
 
@@ -91,6 +94,67 @@ export const TEXT_CONTROL_CHAR_PATTERN = /[\u0000-\u001f\u007f-\u009f]/;
  */
 export const TEXT_CONTROL_CHAR_MESSAGE =
   "a linkage terms free-text value must not contain control characters";
+
+/**
+ * The shape a name-class value of a terms document must match, beyond its
+ * {@link MAX_NAME_LENGTH} cap: a linkage field, key, or element `name`, an
+ * element `field` reference, an element-`swap` reference, a transform
+ * `function` name, a payload column `name`, a legal-agreement `reference`, and
+ * a rule-set set `name`. It admits everything but two classes -- the control
+ * characters {@link TEXT_CONTROL_CHAR_PATTERN} refuses in a free-text field
+ * (C0 with NUL, DEL, C1, tab, line feed and carriage return included), and the
+ * nine Unicode bidirectional formatting characters `BIDI_CONTROL_PATTERN`
+ * (utils/bidiControls.ts) names. Letters are untouched, so a name written in
+ * any script passes.
+ *
+ * Applied at each FIELD, as the `version` semver regex below is, rather than as
+ * a pass over the class: every field named above holds it in its own string
+ * schema, so a document is refused at parse on every seat that reads one -- the
+ * operator's own config load, the post-handshake wire re-parse
+ * (`parseLinkageTerms`), the invitation-token decode, and the exchange-file and
+ * job-intent schemas that embed {@link LinkageTermsSchema}.
+ *
+ * One anchored literal rather than a composition of those two patterns, so
+ * source about invisible characters stays readable. The union is held exact by
+ * a sweep over every BMP code point
+ * (packages/core/test/config/nameShapeParity.test.ts),
+ * which fails if either class moves without this one.
+ *
+ * The bidi half is what keeps this schema's notion of a name and the CSV read's
+ * in agreement: a header loses those characters at ingestion (`file.ts`), so a
+ * name they would have reordered is not one this schema accepts whole either.
+ *
+ * What stays outside the rule, and why:
+ * - A transform `params` string value and a name-constraint
+ *   `allowedCharacters` class are length-bounded only. Each is data a step
+ *   matches or substitutes with rather than a name -- a tab is a plausible
+ *   delimiter and a line feed a plausible replacement -- so a character rule
+ *   there would refuse legitimate terms.
+ * - A `params` record KEY keeps its length bound alone, as the value it names
+ *   does.
+ * - `version` needs nothing: its semver regex admits neither class already, and
+ *   a second check on it could never fire.
+ * - A reader of an already-recorded value -- the exchange-record reader
+ *   (exchangeRecord.ts) and the wire-certificate schema (signedReceipt.ts) --
+ *   stays permissive toward what a possibly different-version writer recorded
+ *   and relies on display escaping at its render sites.
+ *
+ * The rule is not redundant with that escaping. A name reaches each party's
+ * exchange record verbatim -- the matching-basis account names each field, the
+ * payload accounts each column -- and a record is read by tooling that is not
+ * psilink, where no display boundary of ours stands.
+ */
+export const NAME_SHAPE_PATTERN =
+  /^[^\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]*$/u;
+
+/**
+ * Shared refusal message for every name-class shape rejection, so the document
+ * reports the same thing about the same class of value wherever it fires. A
+ * fixed literal naming no submitted value, for the reason
+ * {@link TEXT_CONTROL_CHAR_MESSAGE} gives.
+ */
+export const NAME_SHAPE_MESSAGE =
+  "a linkage terms name must not contain a control or text-direction character";
 
 /**
  * Shared refusal message for a terms string -- a member value, an array
@@ -234,6 +298,16 @@ const freeTextValue = (schema: z.ZodString) =>
   schema.refine((value) => !TEXT_CONTROL_CHAR_PATTERN.test(value), {
     message: TEXT_CONTROL_CHAR_MESSAGE,
   });
+
+/**
+ * One name-class value of a terms document, holding the caller's own length
+ * floor and ceiling to {@link NAME_SHAPE_PATTERN}. The regex goes on the
+ * field's own string schema -- what the caller declares is the whole shape the
+ * field has -- rather than a check layered over the class from above, and it is
+ * written once so the name fields cannot drift apart.
+ */
+const nameValue = (schema: z.ZodString) =>
+  schema.regex(NAME_SHAPE_PATTERN, NAME_SHAPE_MESSAGE);
 
 /**
  * What the well-formedness walk refused, and where: a string -- a member value,
@@ -428,7 +502,7 @@ const AnyConstraintsSchema: z.ZodType<AnyConstraints> = z.object({
 
 // Shared fields for all linkage field variants.
 const linkageFieldBase = <C>(constraints: z.ZodType<C>) => ({
-  name: z.string().min(1).max(MAX_NAME_LENGTH),
+  name: nameValue(z.string().min(1).max(MAX_NAME_LENGTH)),
   constraints: constraints.optional(),
 });
 
@@ -582,10 +656,10 @@ const TransformParamValueSchema = z
 // Not annotated as ZodType<TransformStep> because the concrete ZodObject is the
 // base the pad_left refine below chains onto (mirrors LinkageTermsBaseSchema).
 const TransformStepBaseSchema = z.object({
-  function: z.string().min(1).max(MAX_NAME_LENGTH),
-  // The record's keys (parameter names) are length-bounded like every other
-  // free-text string, and each string value is length-bounded by
-  // TransformParamValueSchema above. The entry count is bounded at
+  function: nameValue(z.string().min(1).max(MAX_NAME_LENGTH)),
+  // The record's keys (parameter names) are length-bounded only -- left out of
+  // the name shape for the reason NAME_SHAPE_PATTERN records -- and each string
+  // value is length-bounded by TransformParamValueSchema above. The entry count is bounded at
   // MAX_PARAMS_ENTRIES by a bare key count (exceedsOwnKeyCount) that runs
   // before the per-key length check -- the same permissive-stage +
   // count-refine + pipe shape as boundedArray, so an over-count record is
@@ -763,8 +837,8 @@ export interface LinkageKeyElement {
 }
 
 const LinkageKeyElementSchema: z.ZodType<LinkageKeyElement> = z.object({
-  field: z.string().min(1).max(MAX_NAME_LENGTH),
-  name: z.string().max(MAX_NAME_LENGTH).optional(),
+  field: nameValue(z.string().min(1).max(MAX_NAME_LENGTH)),
+  name: nameValue(z.string().max(MAX_NAME_LENGTH)).optional(),
   generateFuzzyComparisons: GenerateFuzzyComparisonsSchema.optional(),
   // The step COUNT is bounded at MAX_TRANSFORM_STEPS before per-element
   // validation; see boundedArray and the untrusted-input bounds note.
@@ -800,7 +874,7 @@ export interface LinkageKey {
 }
 
 const LinkageKeySchema: z.ZodType<LinkageKey> = z.object({
-  name: z.string().min(1).max(MAX_NAME_LENGTH),
+  name: nameValue(z.string().min(1).max(MAX_NAME_LENGTH)),
   // The element COUNT is bounded at MAX_KEY_ELEMENTS before per-element
   // validation, with the existing .min(1) floor preserved; see boundedArray and
   // the untrusted-input bounds note.
@@ -811,7 +885,10 @@ const LinkageKeySchema: z.ZodType<LinkageKey> = z.object({
     1,
   ),
   swap: z
-    .tuple([z.string().max(MAX_NAME_LENGTH), z.string().max(MAX_NAME_LENGTH)])
+    .tuple([
+      nameValue(z.string().max(MAX_NAME_LENGTH)),
+      nameValue(z.string().max(MAX_NAME_LENGTH)),
+    ])
     .optional(),
 });
 
@@ -858,7 +935,7 @@ export interface PayloadColumn {
 }
 
 const PayloadColumnSchema: z.ZodType<PayloadColumn> = z.object({
-  name: z.string().min(1).max(MAX_NAME_LENGTH),
+  name: nameValue(z.string().min(1).max(MAX_NAME_LENGTH)),
   description: freeTextValue(z.string().max(MAX_TEXT_LENGTH)).optional(),
 });
 
@@ -922,7 +999,7 @@ interface LegalAgreement {
 }
 
 const LegalAgreementSchema: z.ZodType<LegalAgreement> = z.object({
-  reference: z.string().min(1).max(MAX_NAME_LENGTH),
+  reference: nameValue(z.string().min(1).max(MAX_NAME_LENGTH)),
   purpose: freeTextValue(z.string().min(1).max(MAX_TEXT_LENGTH)),
   expirationDate: z.iso.date(),
 });
@@ -967,7 +1044,7 @@ export interface LinkageSetIdentity {
 }
 
 const LinkageSetIdentitySchema: z.ZodType<LinkageSetIdentity> = z.object({
-  name: z.string().min(1).max(MAX_NAME_LENGTH),
+  name: nameValue(z.string().min(1).max(MAX_NAME_LENGTH)),
   version: z
     .string()
     .max(MAX_NAME_LENGTH)

@@ -24,6 +24,7 @@ import {
   MAX_LINKAGE_ENTRIES,
   MAX_DATE_FORMAT_LENGTH,
   MAX_TRANSFORM_PARAM_LENGTH,
+  NAME_SHAPE_MESSAGE,
 } from "../../src/config/linkageTermsSchema";
 import { summarizeInvitation } from "../../src/consent/invitationSummary";
 import { NestingDepthExceededError } from "../../src/utils/camelizeKeys";
@@ -417,6 +418,24 @@ test("decodeInvitation refuses a transform param over the content bound", async 
   };
   await expect(decodeInvitation(await encodeRaw(token))).rejects.toThrow(
     /transform param must not exceed/,
+  );
+});
+
+test("decodeInvitation refuses a bidi override in a name", async () => {
+  // The name shape sits on LinkageTermsSchema, so the invitation-token decode --
+  // a partner's document, checksum-verified but not authenticated -- refuses a
+  // reordering character in a name before the token reaches a consent surface.
+  // It is the same character a CSV header loses at ingestion, so the two
+  // boundaries agree on what a column may be called.
+  const token = {
+    ...baseToken,
+    linkageTerms: {
+      ...baseTerms,
+      payload: { send: [{ name: "risk\u202escore" }] },
+    },
+  };
+  await expect(decodeInvitation(await encodeRaw(token))).rejects.toThrow(
+    NAME_SHAPE_MESSAGE,
   );
 });
 

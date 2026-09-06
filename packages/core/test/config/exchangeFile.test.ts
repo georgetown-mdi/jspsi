@@ -261,6 +261,21 @@ test("mintExchangeFile: an invalid locator fails loudly with a ZodError at mint"
   ).toThrow(ZodError);
 });
 
+test("mintExchangeFile: a control character in a name fails loudly at mint", () => {
+  // The exchange-file schema embeds LinkageTermsSchema, so the name shape reaches
+  // the artifact a browser composes and the CLI later loads: a name the CLI's own
+  // config load would refuse cannot be written into the file at all.
+  expect(() =>
+    mintExchangeFile({
+      connection: { channel: "sftp", host: "h.example.org", path: "/drop" },
+      linkageTerms: {
+        ...baseTerms,
+        payload: { send: [{ name: "risk\u0007score" }] },
+      },
+    }),
+  ).toThrow(ZodError);
+});
+
 test("mintExchangeFile: an empty sftp host fails loudly at mint", () => {
   expect(() =>
     mintExchangeFile({
