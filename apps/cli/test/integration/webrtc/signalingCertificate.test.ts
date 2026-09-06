@@ -1,13 +1,16 @@
+import { spawn } from "node:child_process";
+import http from "node:http";
 import net from "node:net";
 import os from "node:os";
 import tls from "node:tls";
 
-import { afterAll, beforeAll, expect, test } from "vitest";
+import { afterAll, beforeAll, expect, test, vi } from "vitest";
 
 import { loopbackTlsCert } from "@psilink/testkit/loopbackTlsCert";
 
 import {
   SIGNALING_TLS_PROBE_TIMEOUT_MS,
+  environmentProxyingConfigured,
   probeSignalingCertificate,
 } from "../../../src/connection/webrtc/signalingTls";
 import {
@@ -32,6 +35,11 @@ import type { Server as TcpServer } from "node:net";
  * The listener presents the throwaway certificate `@psilink/testkit` mints,
  * and nothing here trusts it, so the handshake fails verification exactly as
  * an untrusted proxy's would.
+ *
+ * The last test measures something else against a real proxy: which
+ * environment routes a `wss://` dial away from the endpoint the probe reaches
+ * altogether, holding the answer the client reports such a failure on to what
+ * Node actually does.
  */
 
 let tlsServer: TlsServer | undefined;
@@ -331,3 +339,108 @@ test.skipIf(sniVhostCertificates === null)(
   },
   20_000,
 );
+
+/**
+ * The dial, run in a child process because that is the only place it can be
+ * measured: Node reads `NODE_USE_ENV_PROXY` as a process starts, so an
+ * environment assembled inside this one routes nothing.
+ */
+const CHILD_DIAL_SCRIPT = `
+  const socket = new WebSocket(process.env.PSILINK_DIAL_URL);
+  const done = () => process.exit(0);
+  socket.addEventListener("open", done, { once: true });
+  socket.addEventListener("error", done, { once: true });
+  setTimeout(done, 5000);
+`;
+
+/** Every variable either the routing or the client's answer reads. */
+const PROXY_VARIABLES = [
+  "NODE_USE_ENV_PROXY",
+  "HTTPS_PROXY",
+  "https_proxy",
+  "HTTP_PROXY",
+  "http_proxy",
+  "ALL_PROXY",
+];
+
+/** Dial `url` from a process started with `environment`, and wait it out. */
+function dialFromProcess(
+  url: string,
+  environment: Record<string, string>,
+): Promise<void> {
+  return new Promise((resolve) => {
+    const child = spawn(process.execPath, ["-e", CHILD_DIAL_SCRIPT], {
+      env: {
+        PATH: process.env.PATH ?? "",
+        PSILINK_DIAL_URL: url,
+        ...environment,
+      },
+      stdio: "ignore",
+    });
+    child.on("exit", () => resolve());
+    child.on("error", () => resolve());
+  });
+}
+
+test("which environment routes a signaling dial through a proxy", async () => {
+  // What the client answers a proxied failure with rests on which environment
+  // Node itself routes the dial through, so that is driven here rather than
+  // modelled: a variable Node starts reading, or an opt-in spelling it starts
+  // accepting, would otherwise leave an operator told about a certificate
+  // their dial never reached.
+  //
+  // The endpoint is a released port, so the dial fails at once either way and
+  // what separates the two paths is whether the proxy was asked to reach it.
+  const idle = net.createServer();
+  await new Promise<void>((resolve) => idle.listen(0, "127.0.0.1", resolve));
+  const endpoint = `127.0.0.1:${boundPort(idle)}`;
+  await new Promise<void>((resolve) => idle.close(() => resolve()));
+
+  const reached: Array<string> = [];
+  const proxy = http.createServer((_request, response) => response.end());
+  proxy.on("connect", (request, socket) => {
+    reached.push(request.url ?? "");
+    socket.end("HTTP/1.1 502 Bad Gateway\r\n\r\n");
+  });
+  proxy.on("error", () => {});
+  await new Promise<void>((resolve) => proxy.listen(0, "127.0.0.1", resolve));
+  const proxyUrl = `http://127.0.0.1:${boundPort(proxy)}`;
+
+  try {
+    for (const [proxied, optIn, variable] of [
+      [true, "1", "HTTPS_PROXY"],
+      [true, "1", "https_proxy"],
+      [true, "1", "HTTP_PROXY"],
+      [true, "1", "http_proxy"],
+      [false, "1", "ALL_PROXY"],
+      [false, "true", "HTTPS_PROXY"],
+      [false, "0", "HTTPS_PROXY"],
+      [false, undefined, "HTTPS_PROXY"],
+    ] satisfies Array<[boolean, string | undefined, string]>) {
+      const environment: Record<string, string> = { [variable]: proxyUrl };
+      if (optIn !== undefined) environment.NODE_USE_ENV_PROXY = optIn;
+      reached.length = 0;
+      await dialFromProcess(`wss://${endpoint}/`, environment);
+
+      for (const cleared of PROXY_VARIABLES) vi.stubEnv(cleared, "");
+      for (const [name, value] of Object.entries(environment))
+        vi.stubEnv(name, value);
+      // One assertion over both, so the answer the client acts on cannot drift
+      // from the routing without the case that moved being named.
+      expect({
+        optIn,
+        variable,
+        routedTo: reached,
+        answered: environmentProxyingConfigured(),
+      }).toEqual({
+        optIn,
+        variable,
+        routedTo: proxied ? [endpoint] : [],
+        answered: proxied,
+      });
+    }
+  } finally {
+    vi.unstubAllEnvs();
+    proxy.close();
+  }
+}, 60_000);

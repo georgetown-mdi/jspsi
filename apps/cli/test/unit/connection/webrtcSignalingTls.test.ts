@@ -1,13 +1,17 @@
-import { expect, test, vi } from "vitest";
+import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import { sanitizeErrorForDisplay } from "@psilink/core";
 
 import {
   SIGNALING_CERTIFICATE_FAILED_MESSAGE,
+  SIGNALING_PROXIED_FAILED_MESSAGE,
   SIGNALING_SOCKET_FAILED_MESSAGE,
   connectToBroker,
 } from "../../../src/connection/webrtc/brokerClient";
-import { probeSignalingCertificate } from "../../../src/connection/webrtc/signalingTls";
+import {
+  environmentProxyingConfigured,
+  probeSignalingCertificate,
+} from "../../../src/connection/webrtc/signalingTls";
 
 import type {
   BrokerLocation,
@@ -17,12 +21,36 @@ import type { SignalingCertificateProbe } from "../../../src/connection/webrtc/s
 
 /**
  * What a failed signaling socket tells the operator about the certificate, and
- * which failures are asked about at all.
+ * which failures are asked about at all -- a run whose dial the environment
+ * routes through a proxy among them, where the answer would be about a
+ * connection that run never made and so is not asked for.
  *
  * The certificate answer itself is measured against a real TLS listener in
- * test/integration/webrtc/signalingCertificate.test.ts; here the probe is
- * scripted, so the two answers and a hostile one can each be driven.
+ * test/integration/webrtc/signalingCertificate.test.ts, and which environment
+ * a `wss://` dial is proxied on against a real CONNECT proxy in the same file;
+ * here the probe is scripted and the environment stubbed, so the answers and a
+ * hostile one can each be driven.
  */
+
+/**
+ * Every variable the proxy answer reads, cleared before each test: what the
+ * developer's own shell exports must not decide which message these assert.
+ */
+const PROXY_VARIABLES = [
+  "NODE_USE_ENV_PROXY",
+  "HTTPS_PROXY",
+  "https_proxy",
+  "HTTP_PROXY",
+  "http_proxy",
+];
+
+beforeEach(() => {
+  for (const variable of PROXY_VARIABLES) vi.stubEnv(variable, "");
+});
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
 
 const LOCATION: BrokerLocation = {
   host: "signal.example",
@@ -199,6 +227,94 @@ test("a socket that fails after registering reports at once, asking nothing", as
   // once.
   client.close();
   await vi.waitFor(() => expect(closes).toHaveLength(1));
+});
+
+test("a run configured for an environment proxy is asked nothing", async () => {
+  vi.stubEnv("NODE_USE_ENV_PROXY", "1");
+  vi.stubEnv("HTTPS_PROXY", "http://proxy.invalid:8080");
+  const socket = new FakeSocket();
+  const { probe, dials } = countingProbe(
+    Promise.resolve("DEPTH_ZERO_SELF_SIGNED_CERT"),
+  );
+  const failure = await connectToBroker({
+    location: LOCATION,
+    id: LOCAL_ID,
+    handlers: { onMessage: () => {}, onClose: () => {} },
+    socketFactory: () => {
+      queueMicrotask(() => socket.fail());
+      return socket as unknown as WebSocket;
+    },
+    certificateProbe: probe,
+  }).then(
+    () => new Error("the registration was expected to fail"),
+    (err: unknown) => err as Error,
+  );
+  expect(dials()).toBe(0);
+  expect(failure.message).toBe(SIGNALING_PROXIED_FAILED_MESSAGE);
+  const rendered = sanitizeErrorForDisplay(failure);
+  // The operator is told the check was not made, and still given the remedy
+  // for the interception a proxy is where they would have needed it.
+  expect(rendered).toContain("was not checked");
+  expect(rendered).toContain("NODE_EXTRA_CA_CERTS");
+  expect(rendered).not.toContain("certificate check reported");
+});
+
+test("a proxied run's drop after registering reports the plain failure", async () => {
+  // The registered socket completed its handshake through whatever path it
+  // took, so a drop after it is not a certificate question on a proxied run
+  // either, and saying a check was skipped would name one that had passed.
+  vi.stubEnv("NODE_USE_ENV_PROXY", "1");
+  vi.stubEnv("HTTPS_PROXY", "http://proxy.invalid:8080");
+  const socket = new FakeSocket();
+  const closes: Array<Error> = [];
+  const { probe, dials } = countingProbe(
+    new Promise<string | undefined>(() => {}),
+  );
+  const client = await connectToBroker({
+    location: LOCATION,
+    id: LOCAL_ID,
+    handlers: {
+      onMessage: () => {},
+      onClose: (error) => closes.push(error),
+    },
+    socketFactory: () => {
+      queueMicrotask(() => socket.register());
+      return socket as unknown as WebSocket;
+    },
+    certificateProbe: probe,
+  });
+  socket.fail();
+  expect(dials()).toBe(0);
+  expect(closes[0]?.message).toBe(SIGNALING_SOCKET_FAILED_MESSAGE);
+  client.close();
+});
+
+test("which environment configures a proxy for the dial", () => {
+  // The routing these mirror is measured against a real CONNECT proxy in
+  // test/integration/webrtc/signalingCertificate.test.ts; what is pinned here
+  // is that the answer follows it, an opt-in spelling that does not opt in
+  // and an empty value included.
+  const proxy = "http://proxy.invalid:8080";
+  for (const [configured, environment] of [
+    [true, { NODE_USE_ENV_PROXY: "1", HTTPS_PROXY: proxy }],
+    [true, { NODE_USE_ENV_PROXY: "1", https_proxy: proxy }],
+    [true, { NODE_USE_ENV_PROXY: "1", HTTP_PROXY: proxy }],
+    [true, { NODE_USE_ENV_PROXY: "1", http_proxy: proxy }],
+    [false, { NODE_USE_ENV_PROXY: "1" }],
+    [false, { NODE_USE_ENV_PROXY: "1", HTTPS_PROXY: "" }],
+    [false, { NODE_USE_ENV_PROXY: "true", HTTPS_PROXY: proxy }],
+    [false, { NODE_USE_ENV_PROXY: "yes", HTTPS_PROXY: proxy }],
+    [false, { NODE_USE_ENV_PROXY: "0", HTTPS_PROXY: proxy }],
+    [false, { HTTPS_PROXY: proxy }],
+  ] satisfies Array<[boolean, Record<string, string>]>) {
+    for (const variable of PROXY_VARIABLES) vi.stubEnv(variable, "");
+    for (const [variable, value] of Object.entries(environment))
+      vi.stubEnv(variable, value);
+    expect({
+      environment,
+      configured: environmentProxyingConfigured(),
+    }).toEqual({ environment, configured });
+  }
 });
 
 test("a plaintext location is answered without opening a socket", async () => {

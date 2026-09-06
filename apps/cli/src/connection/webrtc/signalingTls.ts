@@ -24,12 +24,12 @@ import type { TLSSocket } from "node:tls";
  * `authorizationError`). The socket is destroyed as soon as either outcome is
  * known and nothing is ever written to it.
  *
- * The probe dials the configured endpoint's own host and port directly. When
- * Node's opt-in environment proxying (`NODE_USE_ENV_PROXY` with `HTTPS_PROXY`
- * set) routes the `WebSocket` dial through a proxy instead, the probe's
- * verdict describes the origin's certificate rather than the proxy's, and the
- * failure the operator hit at the proxy is reported as the generic signaling
- * failure.
+ * The probe dials the configured endpoint's own host and port directly, so
+ * what it answers is about that connection. A run with Node's environment
+ * proxying configured dials the `WebSocket` through the proxy instead, which
+ * is a different path and can present a different certificate, so a caller
+ * asks {@link environmentProxyingConfigured} first and reports such a failure
+ * without a certificate verdict rather than with one about the origin.
  */
 
 /**
@@ -49,6 +49,44 @@ export type SignalingCertificateProbe = (
   location: BrokerLocation,
   signal?: AbortSignal,
 ) => Promise<string | undefined>;
+
+/**
+ * The one value `NODE_USE_ENV_PROXY` opts in with: measured on Node 26 against
+ * a CONNECT proxy, "true", "yes" and "0" all leave a `wss://` dial direct.
+ */
+const ENVIRONMENT_PROXY_OPT_IN = "1";
+
+/**
+ * The variables the proxy for a `wss://` dial is read from. Measured on the
+ * same run: each of the four routes the dial, the `http` pair included, and
+ * `ALL_PROXY` routes nothing. Both measurements are held against a real proxy
+ * by test/integration/webrtc/signalingCertificate.test.ts, so a Node upgrade
+ * that moves either is a failing test rather than an operator told about a
+ * certificate their dial never reached.
+ */
+const PROXY_ENVIRONMENT_VARIABLES = [
+  "HTTPS_PROXY",
+  "https_proxy",
+  "HTTP_PROXY",
+  "http_proxy",
+];
+
+/**
+ * Whether this run has the environment proxying configured that a `wss://`
+ * dial follows and {@link probeSignalingCertificate} does not.
+ *
+ * It answers for the run, not for one endpoint: `NO_PROXY` excludes hosts from
+ * the proxy per dial, which is Node's resolution to make rather than one to
+ * reproduce here, so a run excluding the signaling host is still answered yes.
+ * Node reads the opt-in as the process starts, so a value written into
+ * `process.env` after that changes this answer without changing the dial.
+ */
+export function environmentProxyingConfigured(): boolean {
+  if (process.env.NODE_USE_ENV_PROXY !== ENVIRONMENT_PROXY_OPT_IN) return false;
+  return PROXY_ENVIRONMENT_VARIABLES.some(
+    (variable) => (process.env[variable] ?? "") !== "",
+  );
+}
 
 /**
  * The host to hand `tls.connect`: the URL parser's, with an IPv6 literal's

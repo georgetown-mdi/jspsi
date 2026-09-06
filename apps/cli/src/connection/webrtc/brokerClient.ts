@@ -8,7 +8,10 @@ import {
 } from "@psilink/core";
 
 import { fittedCauseLink } from "../causeLink";
-import { probeSignalingCertificate } from "./signalingTls";
+import {
+  environmentProxyingConfigured,
+  probeSignalingCertificate,
+} from "./signalingTls";
 
 import type { SignalingCertificateProbe } from "./signalingTls";
 
@@ -161,9 +164,10 @@ export interface BrokerConnectOptions {
   socketFactory?: (url: string) => WebSocket;
   /**
    * Asks what the certificate check said once a socket has failed, before it
-   * registered; injected so a unit test can drive both answers without a
-   * server. Defaults to {@link probeSignalingCertificate}, and is handed
-   * `signal` so an interrupt releases the handshake it holds open.
+   * registered and on a run no environment proxy is configured for; injected so
+   * a unit test can drive both answers without a server. Defaults to
+   * {@link probeSignalingCertificate}, and is handed `signal` so an interrupt
+   * releases the handshake it holds open.
    */
   certificateProbe?: SignalingCertificateProbe;
 }
@@ -204,6 +208,22 @@ export const SIGNALING_CERTIFICATE_FAILED_MESSAGE =
   "certificate authority to this machine's trust store, or name a file " +
   "holding it in NODE_EXTRA_CA_CERTS; otherwise check that the signaling " +
   "server's own certificate is current and issued for the configured `host`.";
+
+/**
+ * What a failed signaling socket reports on a run that configures Node's
+ * environment proxying, where no certificate check is made at all: the check
+ * dials the signaling server itself, which is not the path such a dial takes,
+ * so its answer would be about a connection the run never made. It names the
+ * same remedy as its sibling above -- an intercepting proxy is at least as
+ * likely the cause here -- and the one thing the operator can check instead.
+ */
+export const SIGNALING_PROXIED_FAILED_MESSAGE =
+  "the connection to the signaling server failed, and its TLS certificate " +
+  "was not checked: this run sets NODE_USE_ENV_PROXY with a proxy variable, " +
+  "so the check would describe a direct connection rather than the proxied " +
+  "one. If the proxy intercepts TLS, add its certificate authority to this " +
+  "machine's trust store, or name a file holding it in NODE_EXTRA_CA_CERTS; " +
+  "otherwise check that the proxy reaches the configured `host` and `port`.";
 
 /** Label the verification failure's code takes a cause link of its own under. */
 const CERTIFICATE_PROBLEM_LINK_LABEL = "certificate check reported: ";
@@ -728,9 +748,10 @@ export function connectToBroker(
     // The socket's `error` event has no detail worth exposing (and in Node its
     // message can embed the URL, which holds the peer id), so what failed is
     // asked of the endpoint instead -- for a `wss://` location, and only where
-    // the failure precedes registration. A socket that registered completed
-    // that handshake, so an answer about it would name a check that had passed,
-    // and waiting for one would hold the report for the probe's ceiling.
+    // the failure precedes registration and no environment proxy stands between
+    // the two. A socket that registered completed that handshake, so an answer
+    // about it would name a check that had passed, and waiting for one would
+    // hold the report for the probe's ceiling.
     // The probe may be the caller's own, so its failing is one more thing the
     // answer can be: a rejection reports the socket failure it was asked about
     // rather than leaving the registration unsettled and the rejection
@@ -752,6 +773,12 @@ export function connectToBroker(
         return;
       }
       if (!claimTerminal()) return;
+      if (environmentProxyingConfigured()) {
+        settle(
+          new ConnectionError(SIGNALING_PROXIED_FAILED_MESSAGE, "transport"),
+        );
+        return;
+      }
       void askAboutCertificate().then((certificateProblem) =>
         settle(signalingSocketError(certificateProblem)),
       );
