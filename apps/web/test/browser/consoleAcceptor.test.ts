@@ -402,6 +402,9 @@ const ACCEPT_PROFILE = {
 };
 
 interface AcceptStubOptions {
+  /** The body `GET /api/jobs/inputs/profile` serves. Defaults to
+   * {@link ACCEPT_PROFILE}. */
+  profile?: unknown;
   /** When set, `POST /api/jobs` returns a busy (409) holding this id (the slot is
    * occupied), and the id's status/events routes are served so the accept can
    * re-attach to it. `holdProbe` withholds the FIRST status GET (the liveness
@@ -484,7 +487,7 @@ function stubServerJobAccept(options: AcceptStubOptions = {}): {
           jsonResponse({ configured: true, files: [ACCEPT_FILE] }),
         );
       if (url.startsWith("/api/jobs/inputs/profile"))
-        return Promise.resolve(jsonResponse(ACCEPT_PROFILE));
+        return Promise.resolve(jsonResponse(options.profile ?? ACCEPT_PROFILE));
       if (url === "/api/jobs/inputs/coverage")
         return Promise.resolve(jsonResponse({ rates: [] }));
       if (url === "/api/jobs")
@@ -576,6 +579,34 @@ async function reachAcceptStart() {
   await reachAcceptColumns();
   await page.getByRole("button", { name: "Start the exchange" }).click();
 }
+
+describe("console acceptor sanitized-header notice", () => {
+  test("names the header positions the console's parse stripped", async () => {
+    // The console reads the file on the server, so the positions ride the
+    // profile the file step commits; the confirm-columns step states them, where
+    // the names are read and marked. Positions only -- echoing the header would
+    // put the removed characters back into the notice.
+    stubServerJobAccept({
+      profile: { ...ACCEPT_PROFILE, bidiStrippedColumns: [2] },
+    });
+    window.location.hash = await encodeToken(FILEDROP_ENDPOINT);
+    app.render(createElement(AcceptorScreen));
+    await reachAcceptColumns();
+
+    await expect
+      .element(
+        page.getByText("A formatting character was removed from a column name"),
+      )
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("Column 2", { exact: false }))
+      .toBeInTheDocument();
+    // A notice, not a refusal: the launch is still offered.
+    await expect
+      .element(page.getByRole("button", { name: "Start the exchange" }))
+      .toBeEnabled();
+  });
+});
 
 describe("console acceptor file-handling gate", () => {
   /** Reach the confirm-columns step of a runnable console accept and open the

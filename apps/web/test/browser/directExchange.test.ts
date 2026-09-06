@@ -82,6 +82,9 @@ interface CapturedRequest {
 interface StubOptions {
   sftp?: unknown;
   rendezvous?: unknown;
+  /** The body `GET /api/jobs/inputs/profile` serves. Defaults to
+   * {@link CLIENTS_PROFILE}. */
+  profile?: unknown;
   /** The run status a `GET /api/jobs/job-7` reports. Defaults to `running`; a
    * terminal value (`failed`) lets a discard skip the cancel-and-poll wait and DELETE
    * at once, so a start-over test does not sit through the 15 s discard budget. */
@@ -155,7 +158,9 @@ function stubJobApi(options: StubOptions = {}): {
           jsonResponse({ configured: true, files: [CLIENTS_FILE] }),
         );
       if (url.startsWith("/api/jobs/inputs/profile"))
-        return Promise.resolve(jsonResponse(CLIENTS_PROFILE));
+        return Promise.resolve(
+          jsonResponse(options.profile ?? CLIENTS_PROFILE),
+        );
       if (url === "/api/jobs/sftp/probe") {
         const probe = options.probe ?? {
           status: 200,
@@ -400,6 +405,34 @@ describe("direct exchange confirm and run", () => {
     await expect
       .element(page.getByRole("heading", { level: 1 }))
       .toHaveTextContent("Exchange complete");
+  });
+
+  test("names the header positions the console's parse stripped", async () => {
+    // The console reads the file on the server, so the positions ride the
+    // profile; this spine states them on the confirm screen, the last one before
+    // the run, since the file step it came through does not outlive the choice.
+    // Positions only -- echoing the header would put the removed characters back
+    // into the notice.
+    stubJobApi({
+      sftp: CONFIGURED_SFTP,
+      profile: { ...CLIENTS_PROFILE, bidiStrippedColumns: [2, 5] },
+    });
+    app.render(createElement(DirectExchangeScreen));
+    await reachConfirm();
+
+    await expect
+      .element(
+        page.getByText("Formatting characters removed from column names"),
+      )
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("Columns 2, 5", { exact: false }))
+      .toBeInTheDocument();
+    // A notice, not a refusal: the run is still reachable behind its affirmation.
+    await page.getByRole("checkbox").click();
+    await expect
+      .element(page.getByRole("button", { name: "Run the exchange" }))
+      .toBeEnabled();
   });
 
   test("a terms mismatch shows clearly through the job-error path", async () => {
