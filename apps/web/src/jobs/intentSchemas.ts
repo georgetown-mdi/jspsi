@@ -17,6 +17,7 @@ import {
   MAX_TEXT_LENGTH,
   MAX_TIMEOUT_SECONDS,
   MetadataSchema,
+  OwnColumnSelectionSchema,
   SHARED_SECRET_REGEX,
   StandardizationSchema,
   safeParseFileSyncOptions,
@@ -30,6 +31,7 @@ import type {
   FileSyncOptions,
   LinkageTerms,
   Metadata,
+  OwnColumnSelection,
   SigningConfig,
   Standardization,
 } from "@psilink/core";
@@ -467,6 +469,9 @@ export type JobExchangeSide = "inviter" | "acceptor";
  *   the field doc for the empty-vs-absent semantics.
  * - `expectedPartnerDeduplicate` is the acceptor's terms-side enforcement: a
  *   schema boolean, contributing one YAML `true`/`false` and no free text.
+ * - `includeOwnColumns` is this party's local output-composition setting: a
+ *   closed two-value enum naming no column, contributing one YAML string that
+ *   changes only the result file the console writes for this operator.
  * - `side` is a closed two-value enum selecting which composition rules apply
  *   to this party; it contributes no value to the composed config.
  * - `diagnosticRun` and `sweepExchangeFiles` are the per-run controls
@@ -526,6 +531,16 @@ interface JobExchangeIntentBase {
    * present, including `false`, a real declaration.
    */
   expectedPartnerDeduplicate?: boolean;
+  /**
+   * Which of this party's own input columns the composed config writes into
+   * its result file beside the partner's values -- core's local
+   * `include_own_columns`. A closed two-value enum selecting a set of the
+   * operator's own columns; it names no column, so it holds no free text, no
+   * path, and nothing of the partner's namespace. Local: it changes only the
+   * result file the console writes for this operator, and contributes nothing
+   * the partner sees. Absent composes no key.
+   */
+  includeOwnColumns?: OwnColumnSelection;
   /**
    * Which side of the partnership this party runs. The composers read it for
    * one decision: only an acceptance derives an `outbound_payload_consent`
@@ -797,6 +812,7 @@ const jobExchangeIntentCommonFields = {
     .max(MAX_EXPECTED_PAYLOAD_COLUMNS)
     .optional(),
   expectedPartnerDeduplicate: z.boolean().optional(),
+  includeOwnColumns: OwnColumnSelectionSchema.optional(),
   side: z.enum(["inviter", "acceptor"]).optional(),
   eventStream: z.boolean().optional(),
   signing: jobSigningChoiceSchema.optional(),

@@ -82,6 +82,8 @@ function mountMetadata(metadata: Metadata, announcement: string) {
       metadata,
       onColumnType: noop,
       onColumnDisclosure: noop,
+      ownColumns: "none" as const,
+      onOwnColumns: noop,
       announcement,
       onContinue: noop,
     }),
@@ -175,12 +177,12 @@ describe("column-name isolation: what the wrapper does not contain", () => {
   // ledger's send row, and the visually-hidden live regions on both steps.
   //
   // Four more sinks of the same string-composition shape stay undriven here
-  // too, measured 2026-09-01: the accessible-name compositions at
-  // MatchingSharingSection.tsx:117 and :133 ("Type for <name>", "How <name>
-  // is used") and MetadataGrid.tsx:225 and :244 ("Type for column <name>",
-  // "How column <name> is used"). They fall outside the "one text block"
-  // wording above because they compose an attribute string, not element
-  // copy, but the residual reaches them the same way.
+  // too, measured 2026-09-01: the accessible-name compositions in
+  // MatchingSharingSection.tsx ("Type for <name>", "How <name> is used") and
+  // MetadataGrid.tsx ("Type for column <name>", "How column <name> is used").
+  // They fall outside the "one text block" wording above because they compose
+  // an attribute string, not element copy, but the residual reaches them the
+  // same way.
   //
   // Written as escapes, never as raw bytes, so the source of a test about
   // invisible characters is itself readable.

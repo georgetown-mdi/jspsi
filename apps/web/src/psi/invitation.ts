@@ -19,6 +19,7 @@ import {
 import { emptyColumnPositions } from "./columnNames";
 import { linkageRefusalFor } from "./linkageRefusal";
 import { loadCSVFileOffMainThread } from "./workers/csvParseController";
+import { ownColumnsField } from "./ownColumnsModel";
 import { payloadSendForMetadata } from "./metadataEditing";
 import { standardizationForTerms } from "./authoring/advancedInviteTerms";
 
@@ -29,12 +30,14 @@ import type {
   InvitationToken,
   LinkageTerms,
   Metadata,
+  OwnColumnSelection,
   SFTPEndpoint,
   Standardization,
   WebRTCEndpoint,
 } from "@psilink/core";
 
 import type { LinkageRefusal } from "./linkageRefusal";
+import type { OwnColumnsChoice } from "./ownColumnsModel";
 
 /**
  * The CSV input {@link generateInvitation} parses: exactly what
@@ -171,6 +174,18 @@ export interface GeneratedInvitation {
    * docs/spec/FILE_SYNC.md, "Which mint paths persist disclosedPayloadColumns".
    */
   disclosedPayloadColumns: Array<string>;
+  /**
+   * Which of the inviter's own input columns its result file holds beside the
+   * partner's values -- the local `include_own_columns` key, narrowed at the
+   * mint to terms that give this party a result table to write into. Every
+   * surface keeping a copy of a mint -- the exchange this browser runs, the CLI
+   * exchange file the save path writes, the console's server-job config, the
+   * managed-exchange record a scheduled re-run replays -- reads it from here,
+   * so one decision governs them all. Absent where the operator chose nothing
+   * or the terms leave nothing for it to act on. Local-only: never encoded in
+   * the token, and no part of what the partner agrees to.
+   */
+  includeOwnColumns?: OwnColumnSelection;
 }
 
 /** Why {@link generateInvitation} refused to mint an invitation for the given
@@ -482,6 +497,16 @@ export async function generateInvitation(params: {
    * retention whether or not the caller passed the flag.
    */
   retainsFiles?: boolean;
+  /**
+   * Which of the inviter's own input columns its result file holds beside the
+   * partner's values, as the Matching & sharing control offers it. Narrowed
+   * here against the terms this mint emits and returned on
+   * {@link GeneratedInvitation} already decided, so every surface holding a
+   * copy of the mint reads one value; never embedded in the token, and no part
+   * of what the partner agrees to. Omitted on the quick path, where the result
+   * is the file the partner's values alone make up.
+   */
+  includeOwnColumns?: OwnColumnsChoice;
 }): Promise<GeneratedInvitation> {
   const {
     inviterName,
@@ -491,6 +516,7 @@ export async function generateInvitation(params: {
     lifetimeSeconds = INVITATION_LIFETIME_SECONDS,
     connectionEndpoint = { channel: "webrtc" },
     retainsFiles = false,
+    includeOwnColumns = "none",
   } = params;
 
   // Exactly one input source: a browser File to parse, or the console's
@@ -721,5 +747,10 @@ export async function generateInvitation(params: {
     metadata: params.metadata,
     standardization,
     disclosedPayloadColumns,
+    // Decided ONCE against the terms this mint emits: a count-only exchange
+    // writes no result file for anyone, and terms that hand the result to the
+    // partner alone leave this party none of its own, so neither can reach a
+    // surface that keeps a copy of this mint.
+    ...ownColumnsField(includeOwnColumns, linkageTerms),
   };
 }

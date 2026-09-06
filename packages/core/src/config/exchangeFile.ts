@@ -4,7 +4,7 @@ import { ExchangeSpecSchema } from "./exchangeSpec.js";
 import type { ExchangeSpec } from "./exchangeSpec.js";
 import type { ConnectionConfig, FileSyncOptions } from "./connection.js";
 import type { LinkageTerms } from "./linkageTermsSchema.js";
-import type { Metadata } from "./metadata.js";
+import type { Metadata, OwnColumnSelection } from "./metadata.js";
 import type { OutboundPayloadConsent } from "./outboundPayloadConsent.js";
 import type { SigningConfig } from "./signing.js";
 import type { Standardization } from "./standardizationSchema.js";
@@ -154,6 +154,8 @@ export interface ExchangeFileInput {
   signing?: SigningConfig;
   /** See {@link ExchangeSpecAssembly.retentionDisposition}. */
   retentionDisposition?: string;
+  /** See {@link ExchangeSpecAssembly.includeOwnColumns}. */
+  includeOwnColumns?: OwnColumnSelection;
 }
 
 /**
@@ -207,6 +209,18 @@ interface ExchangeSpecAssembly {
    * bounded by the spec schema; omit the field to record no pointer.
    */
   retentionDisposition?: string;
+  /**
+   * Which of this party's own input columns its result file holds beside the
+   * partner's values (`config/metadata.ts`, `ownResultColumnNames`). Per-party
+   * and local like {@link retentionDisposition}: never swapped,
+   * cross-validated, or folded into the agreed-terms hash. Omit the field to
+   * compose the result the partner's values alone make up.
+   *
+   * The spec schema refuses it beside a count-only (`psi-c`) algorithm, which
+   * writes no result file, so an assembly pairing the two throws here rather
+   * than at the run.
+   */
+  includeOwnColumns?: OwnColumnSelection;
 }
 
 /**
@@ -251,6 +265,9 @@ export function assembleExchangeSpec(
     ...(input.signing !== undefined ? { signing: input.signing } : {}),
     ...(input.retentionDisposition !== undefined
       ? { retentionDisposition: input.retentionDisposition }
+      : {}),
+    ...(input.includeOwnColumns !== undefined
+      ? { includeOwnColumns: input.includeOwnColumns }
       : {}),
   };
   return ExchangeSpecSchema.parse(assembled);

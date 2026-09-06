@@ -25,6 +25,7 @@ import type {
   LinkageKeyElement,
   LinkageTerms,
   Metadata,
+  OwnColumnSelection,
   Standardization,
   StandardizationStep,
 } from "@psilink/core";
@@ -1042,13 +1043,18 @@ function standardizationForImportedTerms(
  * against the inviter's columns ({@link standardizationForImportedTerms});
  * a field no column can satisfy stays undeclared rather than silently
  * mis-bound. The caller refuses a gated-active import first (see
- * {@link gatedActiveSettingMessage}). */
+ * {@link gatedActiveSettingMessage}).
+ *
+ * `includeOwnColumns` is passed in like `lifetimeSeconds`: both are per-party
+ * and local, held by no terms document, so an import keeps the operator's own
+ * setting instead of resetting it. */
 export function draftFromTerms(
   terms: LinkageTerms,
   seed: AdvancedInviteSeed,
   lifetimeSeconds: number = INVITATION_LIFETIME_SECONDS,
   rawRows: ReadonlyArray<CSVRow> = [],
   dateInputFormat?: string,
+  includeOwnColumns?: OwnColumnSelection,
 ): AdvancedInviteDraft {
   const standardization = standardizationForImportedTerms(
     seed.metadata,
@@ -1087,6 +1093,7 @@ export function draftFromTerms(
         : undefined,
     metadata: seed.metadata,
     standardization,
+    ...(includeOwnColumns !== undefined ? { includeOwnColumns } : {}),
     // Hold the imported field declaration so buildAdvancedTerms re-emits it
     // faithfully (order + declared-but-unreferenced fields + a benign empty
     // `constraints: {}`); see AdvancedInviteDraft.importedLinkageFields.

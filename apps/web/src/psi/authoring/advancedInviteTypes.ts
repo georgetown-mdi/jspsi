@@ -8,6 +8,7 @@ import type {
   LinkageTerms,
   Metadata,
   Output,
+  OwnColumnSelection,
   Standardization,
 } from "@psilink/core";
 
@@ -182,6 +183,16 @@ export interface AdvancedInviteDraft {
    * into the inviter's own `prepareForExchange`, never the token. Reconciled
    * against a metadata edit by {@link setDraftMetadata}. */
   standardization: Standardization;
+  /**
+   * Which of this party's OWN input columns its result file holds beside the
+   * partner's values -- the local `include_own_columns` key, whose absence is
+   * the default (the file the partner's values alone make up). Per-party and
+   * local like {@link metadata}: never embedded in the token, never compared
+   * with the partner, and no part of what either party consents to. Emitted
+   * only where the built terms give this party a result table to write into
+   * (`ownColumnsField`, `@psi/ownColumnsModel`).
+   */
+  includeOwnColumns?: OwnColumnSelection;
   keys: Array<DraftKey>;
   /**
    * The `linkageFields` declaration of an IMPORTED terms document, held verbatim

@@ -28,7 +28,12 @@ import type {
   JobZeroSetupIntent,
   JobZeroSetupLinkageStrategy,
 } from "@jobs/intentSchemas";
-import type { LinkageTerms, Metadata, Standardization } from "@psilink/core";
+import type {
+  LinkageTerms,
+  Metadata,
+  OwnColumnSelection,
+  Standardization,
+} from "@psilink/core";
 import type { RelayEvent, RelayEventType } from "@jobs/cliDriver";
 import type { ReceiptsIntentFields } from "../receiptsModel";
 import type { RunDiagnosticsIntentFields } from "../runDiagnosticsModel";
@@ -102,6 +107,13 @@ export interface ServerJobExchangeDriverConfig {
    * inviter path leaves it undefined -- the commitment is the acceptor's, and
    * an absent field binds nothing. */
   expectedPartnerDeduplicate?: boolean;
+  /** Which of this party's own input columns the console's composed config
+   * writes into its result file beside the partner's values -- the local
+   * `include_own_columns` key, decided at the mint. Local: it changes only the
+   * file the console writes for this operator, and nothing about it reaches the
+   * partner. Absent where the operator chose nothing, or the terms leave it
+   * nothing to act on. */
+  includeOwnColumns?: OwnColumnSelection;
   options?: JobExchangeOptions;
   /** The operator's per-run diagnostic and recovery choices, forwarded to the
    * intent unchanged ({@link RunDiagnosticsIntentFields}). Absent for a run
@@ -856,6 +868,7 @@ function intentFor(config: ServerJobExchangeDriverConfig): JobExchangeIntent {
     standardization,
     expectedPayloadColumns,
     expectedPartnerDeduplicate,
+    includeOwnColumns,
     options,
     runDiagnostics,
     receipts,
@@ -873,6 +886,7 @@ function intentFor(config: ServerJobExchangeDriverConfig): JobExchangeIntent {
     ...(expectedPartnerDeduplicate !== undefined
       ? { expectedPartnerDeduplicate }
       : {}),
+    ...(includeOwnColumns !== undefined ? { includeOwnColumns } : {}),
     ...(options !== undefined ? { options } : {}),
     ...runDiagnostics,
     ...receipts,

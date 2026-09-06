@@ -292,7 +292,11 @@ export function inviterServerJobConfig({
 }: {
   minted: Pick<
     GeneratedInvitation,
-    "linkageTerms" | "sharedSecret" | "metadata" | "standardization"
+    | "linkageTerms"
+    | "sharedSecret"
+    | "metadata"
+    | "standardization"
+    | "includeOwnColumns"
   >;
   inputSource: JobInputSource;
   transport: ServerJobExchangeTransport;
@@ -316,6 +320,9 @@ export function inviterServerJobConfig({
     ...(minted.metadata !== undefined ? { metadata: minted.metadata } : {}),
     ...(minted.standardization !== undefined
       ? { standardization: minted.standardization }
+      : {}),
+    ...(minted.includeOwnColumns !== undefined
+      ? { includeOwnColumns: minted.includeOwnColumns }
       : {}),
     ...(options !== undefined ? { options } : {}),
     ...(runDiagnostics !== undefined ? { runDiagnostics } : {}),
@@ -501,6 +508,7 @@ export function useInviterExchange({
         inviterExchangeDataSpec(minted.linkageTerms, {
           metadata: minted.metadata,
           standardization: minted.standardization,
+          includeOwnColumns: minted.includeOwnColumns,
         }),
         inviterName,
         minted.rawRows,

@@ -156,6 +156,7 @@ function maximalExchangeIntent(): JobSftpExchangeIntent {
     sweepExchangeFiles: true,
     signing: { mode: "certificate", partnerFingerprint: PARTNER_FINGERPRINT },
     retentionDisposition: "Filed with the 2026 intake, kept seven years.",
+    includeOwnColumns: "all",
   });
 }
 
@@ -234,6 +235,7 @@ const EXCHANGE_INTENT_ROUTES: Record<
   },
   signing: { carries: "configKey", key: "signing" },
   retentionDisposition: { carries: "configKey", key: "retention_disposition" },
+  includeOwnColumns: { carries: "configKey", key: "include_own_columns" },
 };
 
 /** Every field of an sftp zero-setup intent, and where it graduates. */

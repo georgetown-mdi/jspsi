@@ -11,31 +11,43 @@ import type { ObjectUrls } from "@psi/runOutputs";
 function recordingUrls(options?: { failOnCall?: number }) {
   const created: Array<string> = [];
   const revoked: Array<string> = [];
+  const blobs: Array<Blob> = [];
   const urls: ObjectUrls = {
     create: (blob) => {
       if (created.length + 1 === options?.failOnCall)
         throw new Error("createObjectURL refused");
       const url = `blob:test-${created.length + 1}-${blob.type}`;
       created.push(url);
+      blobs.push(blob);
       return url;
     },
     revoke: (url) => {
       revoked.push(url);
     },
   };
-  return { urls, created, revoked };
+  return { urls, created, revoked, blobs };
 }
 
 // The smallest inputs buildOutputTable accepts: one matched pair (our row 0 to
 // the partner's row 5) with one payload column, and an identifier column so
-// the CSV's first header is real.
+// the CSV's first header is real. `case_worker` is declared but not sent, so
+// the two own-column selections resolve to different sets.
 const prepared = {
-  rawRows: [{ client_id: "17", program_code: "A" }],
+  rawRows: [{ client_id: "17", case_worker: "Ng", program_code: "A" }],
   metadata: [
-    { name: "client_id", role: "identifier" },
-    { name: "program_code", role: "payload" },
+    { name: "client_id", role: "identifier", isPayload: false },
+    { name: "case_worker", role: "linkage", isPayload: false },
+    { name: "program_code", role: "payload", isPayload: true },
   ],
 } as unknown as PreparedExchange;
+
+/** The same prepared exchange with the local own-column selection set, the one
+ * field the results CSV composition reads beyond the pairing itself. */
+function preparedKeeping(
+  includeOwnColumns: "disclosed" | "all",
+): PreparedExchange {
+  return { ...prepared, includeOwnColumns };
+}
 
 const audit = {
   record: { createdAt: "2026-07-08T14:32:00.000Z" },
@@ -142,6 +154,34 @@ describe("buildRunOutputs", () => {
     );
     expect(created).toHaveLength(1);
     expect(revoked).toEqual([created[0]]);
+  });
+
+  test("no own-column selection writes the partner's values alone", async () => {
+    const { urls, blobs } = recordingUrls();
+    buildRunOutputs(receivedResult(false), prepared, urls);
+
+    expect(await blobs[0].text()).toBe("client_id,row_id,program\n17,5,B\n");
+  });
+
+  test("a selection adds this party's own columns after the partner's", async () => {
+    const { urls, blobs } = recordingUrls();
+    buildRunOutputs(receivedResult(false), preparedKeeping("all"), urls);
+
+    // The identifier heads the row already, so `all` adds the two columns after
+    // it, and they land after the partner's payload column.
+    expect(await blobs[0].text()).toBe(
+      "client_id,row_id,program,case_worker,program_code\n17,5,B,Ng,A\n",
+    );
+  });
+
+  test("the disclosed selection adds only the columns this party sends", async () => {
+    const { urls, blobs } = recordingUrls();
+    buildRunOutputs(receivedResult(false), preparedKeeping("disclosed"), urls);
+
+    // case_worker is declared but not sent, so it is outside this selection.
+    expect(await blobs[0].text()).toBe(
+      "client_id,row_id,program,program_code\n17,5,B,A\n",
+    );
   });
 
   test("a result without an audit pair omits the record downloads", () => {

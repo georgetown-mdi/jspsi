@@ -24,6 +24,7 @@ import type {
   LinkageRuleSetReference,
   LinkageTerms,
   Metadata,
+  OwnColumnSelection,
   Standardization,
 } from "@psilink/core";
 
@@ -421,6 +422,15 @@ export function standardizationForTerms(
 export interface InviterDataEdits {
   metadata?: Metadata;
   standardization?: Standardization;
+  /**
+   * Which of this party's own input columns its result file holds beside the
+   * partner's values, already narrowed to terms that give it a result table to
+   * write into -- the mint decides that once (`generateInvitation`), and every
+   * surface holding a copy of a mint reads the decided value rather than
+   * re-deciding it. Absent composes the result the partner's values alone make
+   * up.
+   */
+  includeOwnColumns?: OwnColumnSelection;
 }
 
 /**
@@ -436,9 +446,9 @@ export interface InviterDataEdits {
  * contradiction this filter does not cover. See {@link standardizationForTerms}
  * for why the drop is lossless.
  *
- * The metadata and standardization are per-party and local; the terms are
- * pinned to the invitation. Each is included only when present, so the quick
- * path (no authored cleaning) leaves core to infer them.
+ * The metadata, standardization, and own-column selection are per-party and
+ * local; the terms are pinned to the invitation. Each is included only when
+ * present, so the quick path (no authored cleaning) leaves core to infer them.
  */
 export function inviterExchangeDataSpec(
   linkageTerms: LinkageTerms,
@@ -452,6 +462,9 @@ export function inviterExchangeDataSpec(
         edits.standardization,
         linkageTerms,
       ),
+    }),
+    ...(edits?.includeOwnColumns !== undefined && {
+      includeOwnColumns: edits.includeOwnColumns,
     }),
   };
 }

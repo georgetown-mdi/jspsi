@@ -50,7 +50,12 @@ export function recordFileStamp(createdAt: string): string {
 /**
  * Build the run's downloadable artifacts from the exchange result: the results
  * CSV (unless the terms withheld it) with its matched-row count, plus the
- * record pair when the audit exists. If anything throws after a URL was
+ * record pair when the audit exists. The results CSV holds this party's own
+ * input columns beside the partner's where the prepared exchange selects them
+ * (`include_own_columns`), which changes only this file: the exchange sent
+ * nothing extra, and nothing here reaches the partner.
+ *
+ * If anything throws after a URL was
  * created, every already-created URL is revoked before the error propagates:
  * the results blob is matched-record PII, and a stranded object URL would keep
  * it alive until page unload.
@@ -94,6 +99,7 @@ export function buildRunOutputs(
                 prepared.rawRows,
                 prepared.metadata,
                 result.partnerPayload,
+                prepared.includeOwnColumns,
               );
               const csv =
                 headers.join(",") +

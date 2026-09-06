@@ -61,6 +61,7 @@ import {
   editorWithFieldSteps,
   editorWithIdentity,
   editorWithImportedTerms,
+  editorWithIncludeOwnColumns,
   editorWithKeyEnabled,
   editorWithKeyMoved,
   editorWithLegalAgreement,
@@ -82,6 +83,8 @@ import {
   spineProblems,
 } from "@psi/inviterModel";
 import { inviterLedgerRows, ledgerOutcomeOf } from "@psi/ledger";
+import { outputForDirection } from "@psi/authoring/advancedInvite";
+import { ownColumnsActionable } from "@psi/ownColumnsModel";
 
 import {
   availableTransports,
@@ -559,6 +562,9 @@ export function InviterScreen() {
               // so the persisted send-side commitment is the one the partner
               // locked in -- never a re-derivation that could drift from it.
               disclosedPayloadColumns: invitation.disclosedPayloadColumns,
+              ...(invitation.includeOwnColumns !== undefined
+                ? { includeOwnColumns: invitation.includeOwnColumns }
+                : {}),
             },
             connection,
             sharedSecret: invitation.sharedSecret,
@@ -994,6 +1000,7 @@ export function InviterScreen() {
         linkageTerms: validation.terms,
         metadata: editor.draft.metadata,
         standardization: editor.draft.standardization,
+        includeOwnColumns: editor.draft.includeOwnColumns ?? "none",
         ...(connectionEndpoint !== undefined ? { connectionEndpoint } : {}),
         retainsFiles: declaresRetainedFiles,
       });
@@ -1070,6 +1077,7 @@ export function InviterScreen() {
         linkageTerms: validation.terms,
         metadata: editor.draft.metadata,
         standardization: editor.draft.standardization,
+        includeOwnColumns: editor.draft.includeOwnColumns ?? "none",
         connectionEndpoint: endpointRequestFor(cliTransport, saveFields),
       });
       // Mint the config from the SAME invitation the code came from; a
@@ -1300,6 +1308,17 @@ export function InviterScreen() {
                     choice,
                   ),
                 )
+              }
+              ownColumns={
+                ownColumnsActionable({
+                  algorithm: editor.draft.algorithm,
+                  output: outputForDirection(editor.draft.outputDirection),
+                })
+                  ? (editor.draft.includeOwnColumns ?? "none")
+                  : undefined
+              }
+              onOwnColumns={(choice) =>
+                applyEditor(editorWithIncludeOwnColumns(editor, choice))
               }
               announcement={announcement}
               onContinue={() => goTo("review")}

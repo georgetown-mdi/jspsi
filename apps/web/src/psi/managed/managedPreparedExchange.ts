@@ -32,6 +32,11 @@
  * (`assertOutboundPayloadConsented`). Absent on every other party, where it is a
  * no-op.
  *
+ * The document's `includeOwnColumns` rides into `prepareForExchange` beside the
+ * metadata, so a re-run's result file holds the same own columns the operator
+ * chose when the exchange was authored. A record holding no such key composes
+ * the result the partner's values alone make up.
+ *
  * Pure and exported so the terms binding and the enforcement are the tested
  * boundary, pinned without a connection.
  */
@@ -69,6 +74,9 @@ export function prepareManagedRerunExchange(
         : {}),
       ...(exchangeFile.outboundPayloadConsent !== undefined
         ? { outboundPayloadConsent: exchangeFile.outboundPayloadConsent }
+        : {}),
+      ...(exchangeFile.includeOwnColumns !== undefined
+        ? { includeOwnColumns: exchangeFile.includeOwnColumns }
         : {}),
     },
     exchangeFile.linkageTerms.identity,

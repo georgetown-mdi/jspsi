@@ -448,6 +448,11 @@ export interface ManagedExchangeFileComposition {
    * that records none -- every side but the acceptor, whose record the console's
    * deposit builder derives at composition. */
   outboundPayloadConsent?: OutboundPayloadConsent;
+  /** Which of this party's own input columns its result file holds beside the
+   * partner's values, decided at the mint and held verbatim so a scheduled
+   * re-run writes the same file the one-shot run did. Absent where the
+   * operator chose nothing, or the terms leave it nothing to act on. */
+  includeOwnColumns?: ExchangeSpec["includeOwnColumns"];
 }
 
 /**

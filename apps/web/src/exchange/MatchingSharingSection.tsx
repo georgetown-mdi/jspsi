@@ -17,8 +17,11 @@ import { disclosedColumnNames } from "@psilink/core";
 
 import styles from "@styles/app.module.css";
 
+import { OwnColumnsChoiceField } from "./OwnColumnsChoiceField";
+
 import type { Metadata, SemanticType } from "@psilink/core";
 import type { DisclosureChoice } from "@psi/metadataEditing";
+import type { OwnColumnsChoice } from "@psi/ownColumnsModel";
 
 const SEMANTIC_TYPES = Object.keys(SEMANTIC_TYPE_LABELS) as Array<SemanticType>;
 
@@ -40,17 +43,33 @@ const SEMANTIC_TYPES = Object.keys(SEMANTIC_TYPE_LABELS) as Array<SemanticType>;
  * separators and its trailing sentence, the summary the live region speaks -- is
  * where the residual lands, and the notice is driven in
  * test/browser/inviterSharing.test.ts.
+ *
+ * The own-columns choice ({@link OwnColumnsChoiceField}) closes the step: this
+ * is the one step about columns, and it is the only one every build and every
+ * transport shows, so a choice about which columns the operator KEEPS belongs
+ * beside the choice of which ones they SEND. It sits after the send summary
+ * rather than inside the grid, since it is one file-level choice and not a
+ * third value on the per-column disclosure axis.
  */
 export function MatchingSharingSection({
   metadata,
   onColumnType,
   onColumnDisclosure,
+  ownColumns,
+  onOwnColumns,
   announcement,
   onContinue,
 }: {
   metadata: Metadata;
   onColumnType: (columnName: string, type: SemanticType) => void;
   onColumnDisclosure: (columnName: string, choice: DisclosureChoice) => void;
+  /** Which of this party's own columns its result file holds beside the
+   * partner's values, or undefined where these terms give it no result table to
+   * write into -- a count-only exchange, or one handing the result to the
+   * partner alone. The control is then not rendered: there is nothing for the
+   * choice to act on ({@link ownColumnsActionable}). */
+  ownColumns: OwnColumnsChoice | undefined;
+  onOwnColumns: (choice: OwnColumnsChoice) => void;
   /** The demotion notice from the last edit, announced politely and rendered
    * under the table; empty when the last edit displaced nothing. */
   announcement: string;
@@ -200,6 +219,13 @@ export function MatchingSharingSection({
             used only to find matches.
           </p>
         </div>
+      )}
+      {ownColumns !== undefined && (
+        <OwnColumnsChoiceField
+          metadata={metadata}
+          choice={ownColumns}
+          onChange={onOwnColumns}
+        />
       )}
       <div className={styles.workFoot}>
         <Button onClick={onContinue}>Continue to review &amp; create</Button>
