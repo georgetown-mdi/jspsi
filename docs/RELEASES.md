@@ -46,7 +46,7 @@ The two tags differ in one thing: what serves the cryptography underneath `crypt
 **What the FIPS variant does and does not support a claim of** is in [COMPLIANCE.md](COMPLIANCE.md#fips-140), which is the single place this project states it: the certificate, the module version, the environments that certificate covers, and what stays outside the module either way. Two bounds matter here as well, because they decide whether pulling this tag is worth anything to a given deployment:
 
 - The image does not put the host in FIPS mode and cannot. The operational environment is the host plus the runtime plus the image together, and supplying a host in FIPS mode is the operator's.
-- The PSI masking itself runs in BoringSSL inside a vendored WebAssembly module, which no OpenSSL provider reaches. That is permanent rather than a gap this image closes.
+- The PSI masking itself runs in BoringSSL, inside a vendored WebAssembly module or the native addon the CLI loads where a prebuild ships for the platform, neither of which an OpenSSL provider reaches. That is permanent rather than a gap this image closes.
 
 The variant reports both facts it can observe -- whether its own crypto is being served by that module, and what the host kernel's FIPS mode is -- on stderr at every container start, and warns rather than refusing when either answer is not what a claim needs.
 

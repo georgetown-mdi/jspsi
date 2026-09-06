@@ -130,6 +130,7 @@ test("a SIGINT interrupt under --event-stream emits no terminal event", async ()
     },
     auth: { sharedSecret: TOKEN_A, keyFilePath: keyFile },
     prepared: minimalPrepared,
+    output: undefined,
     verbosity: -1,
     loggerName: "test-a",
     fileSyncRuntime: { eventStream: true },
