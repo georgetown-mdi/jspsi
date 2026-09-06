@@ -86,13 +86,10 @@ async function openExportPanel(): Promise<void> {
 }
 
 /** Click the panel's download action and wait for both files' bytes to be read
- * back off their object URLs. The two phases name themselves apart: the
- * confirmation renders only from a dispatch that resolved, so it is the panel's
- * own signal that both anchors fired, and the capture's reads are then awaited
- * rather than polled for. Neither phase takes a budget of its own -- the click
- * resolves before the dispatch reads the record back out of IndexedDB, and a
- * constant shorter than the test's own timeout fails that store round trip with
- * the test's budget still unspent. */
+ * back off their object URLs. The confirmation renders only from a dispatch that
+ * resolved, so it is the panel's own signal that both anchors fired. Neither
+ * phase takes a budget of its own: an un-timed `expect.element` polls for what is
+ * left of the test's own timeout, and `settled()` awaits the capture's reads. */
 async function downloadBothFiles(downloads: DownloadCapture): Promise<void> {
   await page
     .getByRole("button", { name: "Download psilink.yaml and .psilink.key" })

@@ -55,24 +55,12 @@ vi.mock("@psi/transport/rendezvous", async () =>
 // (managedExchangeRun.ts, "Persist-before-success"), which is what makes an
 // artifact downloaded earlier stale. It ends by rejecting, so the operator stays on
 // the surface holding the confirmation instead of a completion screen replacing it.
-//
-// `started` resolves WITH the function that ends the run, and only once the
-// rotation is durably persisted. The surface renders its running state well before
-// then, so a test that ended the run off that render alone would call nothing and
-// wait out a run that never ends.
-const liveRun = vi.hoisted(() => {
-  const state = {
-    started: undefined as unknown as Promise<() => void>,
-    announceStart: undefined as unknown as (end: () => void) => void,
-    reset: () => {
-      state.started = new Promise<() => void>((resolve) => {
-        state.announceStart = resolve;
-      });
-    },
-  };
-  state.reset();
-  return state;
-});
+
+// The helper is imported inside the hoisted block: vitest runs that block above
+// the file's own imports.
+const liveRun = await vi.hoisted(async () =>
+  (await import("./liveRunSignal")).createLiveRunSignal(),
+);
 vi.mock("@psi/managed/managedRunDriver", () => ({
   runManagedExchangeInBrowser: async ({
     record,
