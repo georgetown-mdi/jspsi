@@ -706,6 +706,28 @@ describe("signedRecordExpectations", () => {
     });
   });
 
+  test("the record wins when a caller supplies both it and both parties' terms", async () => {
+    // A caller holding an exchange record from one run may also hold the
+    // partnership's linkage terms (a config file it never deleted); only the
+    // record is per-run, so it is the one that must anchor the checks below --
+    // not silently restated from terms that could belong to a different run
+    // of the same partnership. `unnamedTerms` is also picked to make a
+    // fall-through to the terms branch loud: it would report no identity pair
+    // at all rather than merely a different one.
+    const record = await recordFor({ receiptBinder: BINDER });
+    expect(
+      await signedRecordExpectations({
+        record,
+        localTerms: unnamedTerms,
+        partnerTerms: termsB,
+      }),
+    ).toEqual({
+      expectedIdentities: ["Party A", "Party B"],
+      expectedTermsHash: record.termsHash,
+      recordReceiptBinder: BINDER,
+    });
+  });
+
   test("pairs a record of an exchange that produced no receipt to nothing", async () => {
     // An explicit null, not an omission: the record states that no receipt
     // belongs to it, which contradicts one loaded beside it rather than leaving
