@@ -1,0 +1,112 @@
+import YAML from "yaml";
+
+import {
+  DEFAULT_MAX_RECONNECT_ATTEMPTS,
+  DEFAULT_PEER_TIMEOUT_MS,
+  DEFAULT_POLLING_FREQUENCY_MS,
+  DEFAULT_SERVER_CONNECT_TIMEOUT_MS,
+} from "@psilink/core";
+
+import { commentBlock, commentKey } from "./yamlComments";
+
+/**
+ * The documentation section holding one runnable `connection` block per channel.
+ * `invite` and `accept` write a connection block the operator still has to
+ * complete, so the notice they print and the comment in the file they write both
+ * name this section rather than a document that only describes the channels.
+ */
+export const CONNECTION_BLOCK_DOC_URL =
+  "https://github.com/georgetown-mdi/jspsi/blob/main/docs/" +
+  "EXCHANGE_REFERENCE.md#connection-blocks-by-channel";
+
+/**
+ * The sentence the `invite` and `accept` notices end with, pointing at the block
+ * for whichever channel the operator picks.
+ */
+export const CONNECTION_BLOCK_NOTICE =
+  "The block each channel takes -- sftp, filedrop (a shared mounted " +
+  `directory), or webrtc -- is at ${CONNECTION_BLOCK_DOC_URL}`;
+
+const CONNECTION_LINES = [
+  "How to reach your exchange partner. channel is one of sftp, filedrop (a",
+  "shared mounted directory), or webrtc; the block each one takes is at",
+  CONNECTION_BLOCK_DOC_URL,
+];
+
+const TUNING_LINES = [
+  "Connection tuning, all optional; the defaults are shown below. Uncomment",
+  "and edit to change one.",
+];
+
+/**
+ * What the poll interval costs, for both config sites that document it: the
+ * guidance attached to a written connection block and the `init` template's
+ * entry for the field. What the PSI masking costs beside it is the spec's to
+ * state (docs/spec/PROTOCOL.md), so neither site states it.
+ */
+export const POLL_INTERVAL_LINES = [
+  "Every wait for the partner's next file costs up to one poll_interval_ms, and",
+  "an exchange makes many, so the interval adds up across a run. Lower it on a",
+  "directory or a server you control.",
+];
+
+const POLL_INTERVAL_KEY = "poll_interval_ms";
+
+/**
+ * The tuning fields shown as a commented example, in render order. A `webrtc`
+ * block shows only `peer_timeout_ms`, the one option that channel reads: its
+ * options schema strips `poll_interval_ms` on parse, and the connect timeout and
+ * reconnect budget are read by the file-based channels alone, so an operator who
+ * uncommented any of the three on webrtc would get no effect and no error.
+ */
+function tuningDefaults(channel: unknown): Array<[string, number]> {
+  const peerTimeout: [string, number] = [
+    "peer_timeout_ms",
+    DEFAULT_PEER_TIMEOUT_MS,
+  ];
+  if (channel === "webrtc") return [peerTimeout];
+  return [
+    [POLL_INTERVAL_KEY, DEFAULT_POLLING_FREQUENCY_MS],
+    ["server_connect_timeout_ms", DEFAULT_SERVER_CONNECT_TIMEOUT_MS],
+    peerTimeout,
+    ["max_reconnect_attempts", DEFAULT_MAX_RECONNECT_ATTEMPTS],
+  ];
+}
+
+/**
+ * Attach the operator guidance to a saved config's `connection` block: what the
+ * channel alternatives are and where each one's block is documented, plus the
+ * connection tuning as a commented example at its defaults.
+ *
+ * The tuning is commented rather than written active so the config keeps taking
+ * whatever the running version's defaults are; a field the block already sets is
+ * left out of the example instead of being shown twice. A no-op when the
+ * document holds no `connection` mapping, a shape this CLI does not write -- the
+ * comment is guidance, so a miss must not fail the write.
+ */
+export function annotateConnectionGuidance(doc: YAML.Document): void {
+  const connection = doc.get("connection", true);
+  if (!YAML.isMap(doc.contents) || !YAML.isMap(connection)) return;
+  commentKey(doc, ["connection"], CONNECTION_LINES);
+
+  const options = connection.get("options", true);
+  const alreadySet = YAML.isMap(options) ? options : undefined;
+  const shown = tuningDefaults(connection.get("channel")).filter(
+    ([key]) => alreadySet === undefined || alreadySet.get(key) === undefined,
+  );
+  if (shown.length === 0) return;
+
+  const intro = shown.some(([key]) => key === POLL_INTERVAL_KEY)
+    ? [...TUNING_LINES, ...POLL_INTERVAL_LINES]
+    : TUNING_LINES;
+  const example = shown.map(([key, value]) => `${key}: ${value}`);
+  if (alreadySet !== undefined) {
+    alreadySet.comment = commentBlock([...intro, ...example]);
+    return;
+  }
+  connection.comment = commentBlock([
+    ...intro,
+    "options:",
+    ...example.map((line) => `  ${line}`),
+  ]);
+}

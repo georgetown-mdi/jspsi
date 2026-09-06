@@ -13,6 +13,7 @@ import {
   DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,
   DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT,
   DEFAULT_MAX_DISPLAY_LENGTH,
+  DEFAULT_POLLING_FREQUENCY_MS,
   DISPLAY_TRUNCATION_MARKER,
   encodeInvitation,
   getDefaultLinkageTerms,
@@ -107,6 +108,10 @@ import {
   PLACEHOLDER_IDENTITY,
 } from "../../../src/partyIdentity";
 import { saveConfig } from "../../../src/config";
+import {
+  CONNECTION_BLOCK_DOC_URL,
+  CONNECTION_BLOCK_NOTICE,
+} from "../../../src/connectionGuidance";
 import { exitCodeForError } from "../../../src/util/exit";
 import { promptConfirm, promptFreeText } from "../../../src/util/prompt";
 import { captureStdio } from "../../loggingTestSupport";
@@ -4761,6 +4766,53 @@ describe("handler: '--consent-to-terms' gates the confirmation prompt", () => {
         "Run 'psilink exchange' with your input file to conduct the exchange.",
       );
       expect(stderr).not.toContain("accept' to accept and run it in one");
+    } finally {
+      stdio.restore();
+      exit.mockRestore();
+      acceptLog.setLevel(priorLevel, false);
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("handler: a seeded sftp acceptance names where each channel's block is", async () => {
+    // The acceptor's seeded block still needs a credential, and it is the block
+    // the operator edits from here on, so the notice names the reference section
+    // holding one runnable block per channel and the written file repeats it
+    // beside the tuning defaults.
+    const { dir, configFile, keyFile } = offlineAcceptFixture();
+    const acceptLog = getLogger("accept");
+    const priorLevel = acceptLog.getLevel();
+    acceptLog.setLevel("info", false);
+    const exit = vi
+      .spyOn(process, "exit")
+      .mockImplementation((() => undefined) as never);
+    const stdio = captureStdio();
+    try {
+      const encoded = await encodeInvitation(
+        sampleToken(new Date(Date.now() + 3_600_000).toISOString(), {
+          channel: "sftp",
+          host: "sftp.example.org",
+          path: "/drop",
+        }),
+      );
+      await acceptHandler({
+        _: [],
+        $0: "psilink",
+        identity: "Agency B",
+        args: [encoded],
+        "consent-to-terms": true,
+        "config-file": configFile,
+        "key-file": keyFile,
+        "log-level": "info",
+        record: false,
+      } as unknown as Arguments);
+      expect(exit).not.toHaveBeenCalled();
+      expect(stdio.stderrWrites.join("")).toContain(CONNECTION_BLOCK_NOTICE);
+      const raw = fs.readFileSync(configFile, "utf8");
+      expect(raw).toContain(CONNECTION_BLOCK_DOC_URL);
+      expect(raw).toContain(
+        `#   poll_interval_ms: ${DEFAULT_POLLING_FREQUENCY_MS}`,
+      );
     } finally {
       stdio.restore();
       exit.mockRestore();

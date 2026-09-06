@@ -490,6 +490,50 @@ The runtime enforcement mechanism, the wire field an invitation holds, the accep
 
 Specifies the communication channel and server addresses. The partner shared secret is configured separately, in the top-level [`authentication`](#authentication) block; for WebRTC, the inviter/acceptor peer-addressing role is [`connection.role`](#connectionrole).
 
+### Connection blocks by channel
+
+The smallest block each channel takes, to paste into `psilink.yaml` in place of the placeholder `psilink invite` and `psilink accept` write. Every field is described in the sections below; the tuning under [`connection.options`](#connectionoptions) is optional everywhere.
+
+**SFTP** -- both parties connect to one SFTP server and exchange files in a directory there:
+
+```yaml
+connection:
+  channel: sftp
+  server:
+    host: sftp.example.org
+    port: 22
+    path: /exchanges/agency-a-agency-b/
+    username: psilink
+    private_key: "@/run/secrets/id_ed25519"
+```
+
+Supply exactly one credential beside `username` -- `password` or `private_key`, each best written as an [`@`-file reference](#file-references) so the secret stays out of the config. The server's host key is pinned in [`host_key_fingerprint`](#sftp-server-authentication), which an interactive first run records for you.
+
+**File-drop** -- both parties read and write one directory each has mounted (a network share, or a folder a sync tool keeps in step with the partner's):
+
+```yaml
+connection:
+  channel: filedrop
+  path: /mnt/sftp-share/exchanges/agency-a-agency-b
+```
+
+There is no server and no credential: access to the directory is the access control. Where the deployment gives you separate drop and pickup folders instead of one shared directory, use the [`inbound_path`/`outbound_path`](#connectioninbound_path--connectionoutbound_path) pair.
+
+**WebRTC** -- both parties connect through a peer-coordination server and exchange data over a direct peer-to-peer channel:
+
+```yaml
+connection:
+  channel: webrtc
+  server:
+    host: api.peerjs.com
+    port: 443
+  role: inviter
+```
+
+The peer addresses are derived from the shared secret, so there is nothing to fill in beyond the coordination server; [`connection.role`](#connectionrole) is `inviter` on the party that issued the invitation and `acceptor` on the party that accepted it. `psilink accept` seeds this block whole from the invitation, so it usually needs no edit at all.
+
+**Which to pick.** [COMMUNICATION.md](COMMUNICATION.md#channels) describes what each channel needs from the network and [DEPLOYMENT.md](DEPLOYMENT.md) how to operate it. The two parties need not name the same file-based channel: one party's `filedrop` mount can be a directory the other reaches over `sftp`, as long as both see the same files. WebRTC is the exception -- it is a direct connection between the two, so both parties must be on it.
+
 ### `connection.channel`
 
 *Type:* enum: `webrtc` | `sftp` | `filedrop`  
@@ -588,30 +632,9 @@ SFTP requires at most one primary authentication method alongside `username`. `p
 | `keyboard_interactive` | boolean | Answer the server's `keyboard-interactive` authentication prompts with `password`, in addition to offering the direct `password` method; only valid with `password`. Enable this for a server that disables the SSH `password` method but accepts the same password over `keyboard-interactive`. Every prompt is answered with the same configured password, so it cannot satisfy a multi-prompt or one-time-code challenge. Default `false`. Applies to the CLI `sftp` channel only. |
 | `host_key_fingerprint` | string or list | OpenSSH SHA256 host-key fingerprint (`SHA256:<43 standard base64 chars>`, the `+`/`/` alphabet OpenSSH emits, not base64url), or a non-empty list of them. When set, the server's host key is verified before authentication and the connection is rejected unless it matches one of the listed fingerprints. A list gives zero-downtime host-key rotation: pin the incoming key alongside the current one during the rekey window so either is accepted with no failed exchange in between, then drop the old entry after the cutover. When absent, the connection is **refused** (fail-closed): an interactive run instead establishes the pin on first use -- any command that opens the SFTP connection (`exchange`, an online `invite`/`accept`, or a zero-setup exchange) prompts with the presented fingerprint and, on confirmation, records it -- while a non-interactive run fails closed. So this field is typically pinned out-of-band or populated automatically on the first interactive run; see [CLI.md](CLI.md#sftp-host-key-trust). `@`-file supported (per entry). Applies to the CLI `sftp` channel only. |
 
+A whole `sftp` block with a credential in it, and the block each other channel takes, is under [Connection blocks by channel](#connection-blocks-by-channel).
+
 ```yaml
-# WebRTC example
-connection:
-  channel: webrtc
-  server:
-    host: api.peerjs.com
-    port: 443
-
-# SFTP example
-connection:
-  channel: sftp
-  server:
-    host: sftp.example.org
-    port: 22
-    path: /exchanges/agency-a-agency-b/
-    username: psilink
-    private_key: "@/run/secrets/id_ed25519"
-    host_key_fingerprint: "SHA256:uNiVztksCsDhcc0u9e8BujQXVUpKZIDTMczCvj3tD2s"
-
-# File-drop example (network-mounted folder)
-connection:
-  channel: filedrop
-  path: /mnt/sftp-share/exchanges/agency-a-agency-b
-
 # SFTP host-key rotation: pin the incoming key alongside the current one for the
 # rekey window so either is accepted, then drop the old entry after the cutover.
 connection:
@@ -802,7 +825,7 @@ These options apply to both `sftp` and `filedrop` channels.
 
 | Field | Type | Default | Description |
 |-------|------|---------|-------------|
-| `poll_interval_ms` | integer | 5000 | Milliseconds between checks for the partner's uploaded file. The default is conservative so it stays within SFTP servers' anti-flood/DoS limits; because per-round encryption dominates an exchange's wall-clock time, a multi-second interval adds negligible latency. Lower it (for example to 100 ms) only for a local mount, CI, or a demo against a controlled server. The `--polling-frequency` CLI flag overrides this at runtime and accepts a sub-second value such as `100ms` (see [CLI configuration](CLI.md#configuration)). |
+| `poll_interval_ms` | integer | 5000 | Milliseconds between checks for the partner's uploaded file. The default is conservative so it stays within SFTP servers' anti-flood/DoS limits, and it is not free: every wait for the partner's next file costs up to one interval, and an exchange makes many, so the interval adds up across a run. What the PSI masking beside it costs is in [PROTOCOL.md](spec/PROTOCOL.md), "Masking compute is a wall-clock expectation". Lower it (for example to 100 ms) for a local mount, CI, or a demo against a controlled server. The `--polling-frequency` CLI flag overrides this at runtime and accepts a sub-second value such as `100ms` (see [CLI configuration](CLI.md#configuration)). |
 | `timestamp_in_filename` | boolean | false | When `true`, each outgoing message filename also encodes a UTC timestamp and a per-session sequence number (see [Message filenames](#message-filenames)). Useful for filename-based logging in sync-mediated environments where the sync tool stamps files with the transfer time rather than the original creation time. |
 | `lockless_rendezvous` | boolean | false | When `true`, the rendezvous handshake uses an ack-handshake barrier (`<id>-hello.json` plus a zero-length acknowledgment marker `<myId>-<peerId>-hello-ack.json` named after the peer hello it acknowledges) instead of the default atomic lock-file race (`<id>-hello.json` + `<peer1>-<peer2>-lock.json`). Required on sync-mediated transports that lack atomic exclusive-create or deletion visibility during rendezvous (e.g. a cloud sync service reconciling two local mirrors where both sides "win" a local create). Both parties must set this identically. The setting is advertised in the hello payload, and a mismatch fails fast at rendezvous with a clear error naming each side's setting, rather than stalling until the peer timeout. The detection mechanism, including its best-effort symmetric guarantee, is specified in [FILE_SYNC.md](spec/FILE_SYNC.md#bilateral-configuration-detect-and-fail-never-negotiate). The operational sync glob in lockless mode is `<myId>-*` (upload) / `<partnerId>-*` (download), which covers hello, ack, and message files while excluding in-flight `temp-*.tmp` writes. |
 | `peer_id` | string | - | A stable, human-readable identifier for this party. Appears in every filename this party writes (hello, message, ack) and in server-side logs and transcripts. When unset, a UUID is generated at construction time. **Recommended for unattended and scheduled runs**, where it turns the leftover a killed run leaves into an immediate start-up refusal naming the file rather than a failed run (see [Directory exclusivity](#directory-exclusivity)); note that a stable id also makes this party's runs linkable to each other in the partner's logs. Requires `timestamp_in_filename: true`; a reused stable id without a timestamp segment can collide with a leftover file from a crashed prior session. The two parties must use distinct ids, and neither may be the other's id extended by `-` (e.g. `"site"` and `"site-2"` are rejected at rendezvous; see [FILE_SYNC.md preconditions](spec/FILE_SYNC.md#preconditions-for-a-correct-exchange)). Spaces and `-` are permitted within a `peer_id`. The value `"temp"` is reserved. Filesystem-unsafe characters (`/` and NUL on all platforms; `<`, `>`, `:`, `"`, `\`, `|`, `?`, `*` on Windows NTFS) are not validated but may cause errors at the transport layer. |
