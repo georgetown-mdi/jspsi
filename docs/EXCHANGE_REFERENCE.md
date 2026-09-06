@@ -1105,7 +1105,7 @@ Two exchanges have no result table for the columns to reach, and they are treate
 
 The result's headers stay distinct: a partner payload column whose name collides with one already written takes a `their_` prefix. The full header-assignment order and fallback rule are in [PROTOCOL.md](spec/PROTOCOL.md#output).
 
-The key is read by the CLI and by the console when it runs a config file; the web app's authoring surface does not yet offer a control for it.
+The key is read by the CLI and by the console when it runs a config file. The web application sets it from its "Matching & sharing" step, beside the per-column sharing choices, and writes it into every artifact that step's exchange produces: the result the browser downloads, the exchange file the save path writes, the config the console runs, and the stored record a recurring exchange re-runs from. The control is offered only where the exchange gives you a result table to write into, so it does not appear on a count-only exchange or on one whose `output` hands the result to your partner alone.
 
 Your own columns are not covered by the exchange record's commitments, which bind what was exchanged rather than what you filed beside it; verification of a result written with the key is unaffected ([EXCHANGE_RECORD.md](spec/EXCHANGE_RECORD.md#commitment-scheme)).
 
