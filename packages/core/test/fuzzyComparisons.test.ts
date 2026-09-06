@@ -2,6 +2,7 @@ import { expect, test, describe } from "vitest";
 
 import {
   adjacentYearCandidates,
+  dayMonthSwapCandidates,
   deletionCandidates,
   expandFuzzyComparisons,
   expandsOnReceiverOnly,
@@ -16,6 +17,7 @@ import {
 import { declaredEffectiveKeyCount } from "../src/fanOutFunctions";
 import { APPLIED_SETTINGS } from "../src/consent/appliedSettings";
 import { UsageError } from "../src/errors";
+import { isCalendarDateValid } from "../src/utils/calendarDate";
 import type {
   GenerateFuzzyComparisons,
   LinkageKey,
@@ -26,6 +28,7 @@ const FUZZY_KINDS: readonly GenerateFuzzyComparisons[] = [
   "transpositions",
   "edit_distances",
   "adjacent_years",
+  "day_month_swaps",
 ];
 
 // The one-key terms a width assertion reads: the key declares the expansion and
@@ -183,6 +186,73 @@ describe("adjacentYearCandidates", () => {
   });
 });
 
+describe("dayMonthSwapCandidates", () => {
+  test("emits the date read the other way round, keeping the year", () => {
+    expect(dayMonthSwapCandidates("19900112")).toEqual(["19901201"]);
+    expect(dayMonthSwapCandidates("19901201")).toEqual(["19900112"]);
+  });
+
+  test("drops an exchange that is not a real calendar date", () => {
+    // A day above 12 names no month, so the exchange is dropped rather than
+    // emitted as a month-15 or month-31 candidate no partner's date can hold.
+    expect(dayMonthSwapCandidates("19900115")).toEqual([]);
+    expect(dayMonthSwapCandidates("19901231")).toEqual([]);
+    // Feb 29 of a leap year is a real date, and 29 is still no month.
+    expect(dayMonthSwapCandidates("20000229")).toEqual([]);
+  });
+
+  test("emits nothing for a date whose day and month agree", () => {
+    expect(dayMonthSwapCandidates("19900101")).toEqual([]);
+    expect(dayMonthSwapCandidates("19901212")).toEqual([]);
+  });
+
+  test("emits nothing when the input's own month and day are not a real calendar date", () => {
+    // Month 13 names no real date, even though the exchanged reading
+    // ("19000113") would be one.
+    expect(dayMonthSwapCandidates("19001301")).toEqual([]);
+  });
+
+  test("the exchange is symmetric over every eight-digit string in a year", () => {
+    // For every YYYYMMDD in one year, whatever a candidate it emits emits
+    // back, and nothing it emits is itself calendar-invalid -- the relation
+    // an emitted pair forms is checked to hold in both directions rather
+    // than assumed from the single-direction cases above.
+    const year = "1990";
+    for (let month = 0; month < 100; month++) {
+      for (let day = 0; day < 100; day++) {
+        const value = `${year}${String(month).padStart(2, "0")}${String(
+          day,
+        ).padStart(2, "0")}`;
+        const candidates = dayMonthSwapCandidates(value);
+        for (const candidate of candidates) {
+          expect(
+            isCalendarDateValid(
+              candidate.slice(0, 4),
+              candidate.slice(4, 6),
+              candidate.slice(6, 8),
+            ),
+          ).toBe(true);
+          expect(dayMonthSwapCandidates(candidate)).toEqual([value]);
+        }
+      }
+    }
+  });
+
+  test("refuses a value that is not a canonical YYYYMMDD date", () => {
+    for (const value of ["1990-01-12", "12/01/1990", "SMITH", "199001120"]) {
+      expect(() => dayMonthSwapCandidates(value)).toThrow(UsageError);
+      expect(() => dayMonthSwapCandidates(value)).toThrow(/day_month_swaps/);
+    }
+  });
+
+  test("the refusal names neither the value nor a partner string", () => {
+    // The standardized value is the local PII the exchange keeps local.
+    expect(() => dayMonthSwapCandidates("19900112X")).toThrow(
+      /^(?!.*19900112).*$/s,
+    );
+  });
+});
+
 describe("expandFuzzyComparisons", () => {
   test("leads with the value itself for every kind", () => {
     expect(expandFuzzyComparisons("19900115", "transpositions")[0]).toBe(
@@ -194,6 +264,9 @@ describe("expandFuzzyComparisons", () => {
     expect(expandFuzzyComparisons("19900115", "adjacent_years")[0]).toBe(
       "19900115",
     );
+    expect(expandFuzzyComparisons("19900112", "day_month_swaps")[0]).toBe(
+      "19900112",
+    );
   });
 
   test("adjacent_years yields the value and one year either side", () => {
@@ -204,9 +277,19 @@ describe("expandFuzzyComparisons", () => {
     ]);
   });
 
+  test("day_month_swaps yields the value and the exchanged reading", () => {
+    expect(expandFuzzyComparisons("19900112", "day_month_swaps")).toEqual([
+      "19900112",
+      "19901201",
+    ]);
+  });
+
   test("a value whose expansion is empty is still its own candidate", () => {
     expect(expandFuzzyComparisons("20000229", "adjacent_years")).toEqual([
       "20000229",
+    ]);
+    expect(expandFuzzyComparisons("19900115", "day_month_swaps")).toEqual([
+      "19900115",
     ]);
     expect(expandFuzzyComparisons("AAAA", "transpositions")).toEqual(["AAAA"]);
   });
@@ -224,11 +307,7 @@ describe("expandFuzzyComparisons", () => {
 
   test("refuses a value above the length cap rather than passing it through", () => {
     const value = "A".repeat(MAX_FUZZY_EXPANSION_INPUT_LENGTH + 1);
-    for (const kind of [
-      "transpositions",
-      "edit_distances",
-      "adjacent_years",
-    ] as const) {
+    for (const kind of FUZZY_KINDS) {
       expect(() => expandFuzzyComparisons(value, kind)).toThrow(UsageError);
       expect(() => expandFuzzyComparisons(value, kind)).toThrow(
         new RegExp(`${MAX_FUZZY_EXPANSION_INPUT_LENGTH}-character limit`),
@@ -243,6 +322,7 @@ describe("expandsOnReceiverOnly", () => {
     // pins that each existing one is classified rather than defaulted.
     expect(expandsOnReceiverOnly("transpositions")).toBe(true);
     expect(expandsOnReceiverOnly("adjacent_years")).toBe(true);
+    expect(expandsOnReceiverOnly("day_month_swaps")).toBe(true);
     expect(expandsOnReceiverOnly("edit_distances")).toBe(false);
   });
 
@@ -284,6 +364,7 @@ describe("what each side's expansion buys, as an intersection", () => {
   test.each([
     { kind: "transpositions" as const, mine: "123456789", theirs: "923456781" },
     { kind: "adjacent_years" as const, mine: "19900115", theirs: "19910115" },
+    { kind: "day_month_swaps" as const, mine: "19900112", theirs: "19901201" },
   ])(
     "$kind meets on ONE side's expansion, whichever side that is",
     ({ kind, mine, theirs }) => {
@@ -295,6 +376,7 @@ describe("what each side's expansion buys, as an intersection", () => {
   test.each([
     { kind: "transpositions" as const, mine: "123456789", theirs: "923456781" },
     { kind: "adjacent_years" as const, mine: "19900115", theirs: "19910115" },
+    { kind: "day_month_swaps" as const, mine: "19900112", theirs: "19901201" },
   ])(
     "$kind on both sides adds candidates and no match the one side missed",
     ({ kind, mine, theirs }) => {

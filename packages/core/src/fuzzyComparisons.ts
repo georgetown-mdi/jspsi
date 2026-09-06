@@ -22,7 +22,7 @@ import type { GenerateFuzzyComparisons } from "./config/linkageTermsSchema.js";
  */
 export const MAX_FUZZY_EXPANSION_INPUT_LENGTH = 128;
 
-/** The canonical date layout `adjacent_years` expands, the `parse_date` default. */
+/** The canonical date layout the date kinds expand, the `parse_date` default. */
 const CANONICAL_DATE_LAYOUT = "YYYYMMDD";
 
 const CANONICAL_DATE_PATTERN = /^[0-9]{8}$/;
@@ -44,15 +44,16 @@ function fuzzyValueTooLongRefusal(kind: GenerateFuzzyComparisons): UsageError {
   );
 }
 
-function nonCanonicalDateRefusal(): UsageError {
+function nonCanonicalDateRefusal(kind: GenerateFuzzyComparisons): UsageError {
   return new UsageError(
-    'a linkage-key element declares "adjacent_years" fuzzy comparisons, but a ' +
-      "row's standardized value is not a canonical " +
-      `${CANONICAL_DATE_LAYOUT} date: the year cannot be located, so the ` +
-      "element would match on its exact value alone rather than on the " +
-      "adjacent years the terms declare. The exchange is refused instead. " +
-      `Add a "parse_date" element transform emitting ${CANONICAL_DATE_LAYOUT}, ` +
-      "or remove the fuzzy comparison from the element.",
+    `a linkage-key element declares "${kind}" fuzzy comparisons, but a row's ` +
+      "standardized value is not a canonical " +
+      `${CANONICAL_DATE_LAYOUT} date: its year, month, and day cannot be ` +
+      "located, so the element would match on its exact value alone rather " +
+      "than on the candidates the terms declare. The exchange is refused " +
+      `instead. Add a "parse_date" element transform emitting ` +
+      `${CANONICAL_DATE_LAYOUT}, or remove the fuzzy comparison from the ` +
+      "element.",
   );
 }
 
@@ -125,7 +126,8 @@ export function deletionCandidates(value: string): string[] {
  * the value unexpanded -- see {@link expandFuzzyComparisons}.
  */
 export function adjacentYearCandidates(value: string): string[] {
-  if (!CANONICAL_DATE_PATTERN.test(value)) throw nonCanonicalDateRefusal();
+  if (!CANONICAL_DATE_PATTERN.test(value))
+    throw nonCanonicalDateRefusal("adjacent_years");
   const year = Number(value.slice(0, 4));
   const month = value.slice(4, 6);
   const day = value.slice(6, 8);
@@ -140,6 +142,41 @@ export function adjacentYearCandidates(value: string): string[] {
 }
 
 /**
+ * The canonical `YYYYMMDD` value with its day and month exchanged, when that
+ * exchange is itself a real calendar date, and nothing otherwise.
+ *
+ * A FULL-VARIANT enumeration, like {@link adjacentYearCandidates}: the one
+ * exchanged reading is the whole set of values a day/month transposition
+ * relates the date to, so one party enumerating it suffices for a record
+ * entered under the other field order to meet it
+ * (docs/notes/one-sided-fuzzy-expansion.md).
+ *
+ * Both readings must be real calendar dates: an exchanged reading that is not
+ * one (a day above 12 names no month) emits no candidate, and an input that is
+ * not one emits none either. The second guard is what makes the relation an
+ * involution -- without it "19901301" would expand to "19900113", which does
+ * not expand back, and the pair would meet under one role resolution and not
+ * the other. A date whose day and month are equal exchanges to itself and
+ * emits none.
+ *
+ * Throws when `value` is not a canonical `YYYYMMDD` date, rather than returning
+ * the value unexpanded -- see {@link expandFuzzyComparisons}.
+ */
+export function dayMonthSwapCandidates(value: string): string[] {
+  if (!CANONICAL_DATE_PATTERN.test(value))
+    throw nonCanonicalDateRefusal("day_month_swaps");
+  const year = value.slice(0, 4);
+  const month = value.slice(4, 6);
+  const day = value.slice(6, 8);
+  const exchangedMonth = day;
+  const exchangedDay = month;
+  if (exchangedMonth === exchangedDay) return [];
+  if (!isCalendarDateValid(year, month, day)) return [];
+  if (!isCalendarDateValid(year, exchangedMonth, exchangedDay)) return [];
+  return [`${year}${exchangedMonth}${exchangedDay}`];
+}
+
+/**
  * Whether `kind`'s candidates are built by the resolved PSI RECEIVER alone
  * rather than by both parties.
  *
@@ -150,10 +187,11 @@ export function adjacentYearCandidates(value: string): string[] {
  * protocolSetup.ts). It moves no term, no terms hash, and no wire byte.
  *
  * What separates the two is the shape of the expansion, not the field it
- * reads. `transpositions` and `adjacent_years` are FULL-VARIANT
- * enumerations -- the whole set of values one transposition, or one year,
- * away from the value -- so one party enumerating suffices for two records
- * that far apart to meet. `edit_distances` is a deletion NEIGHBOURHOOD:
+ * reads. `transpositions`, `adjacent_years`, and `day_month_swaps` are
+ * FULL-VARIANT enumerations -- the whole set of values one transposition,
+ * one year, or one day/month exchange away from the value -- so one party
+ * enumerating suffices for two records that far apart to meet.
+ * `edit_distances` is a deletion NEIGHBOURHOOD:
  * each side's own deletions are what let a substitution or insertion
  * between the two values meet in the middle (see
  * {@link deletionCandidates}), so expanding one side alone would match on
@@ -169,6 +207,7 @@ export function expandsOnReceiverOnly(kind: GenerateFuzzyComparisons): boolean {
   switch (kind) {
     case "transpositions":
     case "adjacent_years":
+    case "day_month_swaps":
       return true;
     case "edit_distances":
       return false;
@@ -188,8 +227,10 @@ export function expandsOnReceiverOnly(kind: GenerateFuzzyComparisons): boolean {
  *
  * Each kind's count grows with the WIDTH of the value it is handed:
  * `adjacent_years` emits the year either side of a canonical date, so
- * three with the value, whatever the value's width; `edit_distances`
- * emits one deletion per code point, so the width plus the value;
+ * three with the value, whatever the value's width; `day_month_swaps`
+ * emits at most the one date whose day and month are exchanged, so two
+ * with the value, whatever its width; `edit_distances` emits one
+ * deletion per code point, so the width plus the value;
  * `transpositions` emits one swap per PAIR of positions, so the pair
  * count with the value -- quadratic in the width, which is why the
  * per-key ceiling refuses an element whose value is bounded to more than
@@ -219,6 +260,8 @@ export function fuzzyCandidateCeiling(
   switch (kind) {
     case "adjacent_years":
       return 3;
+    case "day_month_swaps":
+      return 2;
     case "edit_distances":
       return width + 1;
     case "transpositions":
@@ -244,7 +287,8 @@ export function fuzzyCandidateCeiling(
  *
  * @throws {UsageError} if the declared expansion cannot be applied to this
  * value -- a value above {@link MAX_FUZZY_EXPANSION_INPUT_LENGTH}, or an
- * `adjacent_years` element whose value is not a canonical `YYYYMMDD` date.
+ * `adjacent_years` or `day_month_swaps` element whose value is not a
+ * canonical `YYYYMMDD` date.
  * Returning the bare value instead would match the row on its exact value
  * while the consent surface states each candidate matches independently,
  * which is the silent narrowing this refusal exists to prevent.
@@ -266,6 +310,9 @@ export function expandFuzzyComparisons(
       break;
     case "adjacent_years":
       candidates = adjacentYearCandidates(value);
+      break;
+    case "day_month_swaps":
+      candidates = dayMonthSwapCandidates(value);
       break;
   }
 

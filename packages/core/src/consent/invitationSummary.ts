@@ -87,6 +87,7 @@ const FUZZY_COMPARISON_LABELS: Record<
   transpositions: "two-digit transpositions",
   edit_distances: "single-character edits",
   adjacent_years: "adjacent years",
+  day_month_swaps: "day and month exchanged",
 };
 
 /**

@@ -1524,23 +1524,25 @@ test.each([
   expect(result.success).toBe(false);
 });
 
-test.each(["transpositions", "edit_distances", "adjacent_years"] as const)(
-  'fuzzy-comparison method "%s" parses',
-  (method) => {
-    const result = safeParseLinkageTerms({
-      ...base,
-      linkageKeys: [
-        {
-          name: "K",
-          elements: [{ field: "ssn", generateFuzzyComparisons: method }],
-        },
-      ],
-    });
-    expect(result.success).toBe(true);
-  },
-);
+test.each([
+  "transpositions",
+  "edit_distances",
+  "adjacent_years",
+  "day_month_swaps",
+] as const)('fuzzy-comparison method "%s" parses', (method) => {
+  const result = safeParseLinkageTerms({
+    ...base,
+    linkageKeys: [
+      {
+        name: "K",
+        elements: [{ field: "ssn", generateFuzzyComparisons: method }],
+      },
+    ],
+  });
+  expect(result.success).toBe(true);
+});
 
-test.each(["editDistances", "adjacentYears"] as const)(
+test.each(["editDistances", "adjacentYears", "dayMonthSwaps"] as const)(
   'the old camelCase fuzzy-comparison method "%s" is rejected',
   (method) => {
     const result = safeParseLinkageTerms({

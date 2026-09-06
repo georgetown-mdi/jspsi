@@ -438,6 +438,13 @@ describe("buildKeyStrings: the expanding side", () => {
       value: "19900115",
       onReceiver: ["19900115", "19890115", "19910115"],
     },
+    {
+      kind: "day_month_swaps" as const,
+      field: "date_of_birth",
+      transform: undefined,
+      value: "19900112",
+      onReceiver: ["19900112", "19901201"],
+    },
   ])(
     "$kind expands on the receiver and not on the sender",
     ({ kind, field, transform, value, onReceiver }) => {
@@ -467,6 +474,13 @@ describe("buildKeyStrings: the expanding side", () => {
       transform: undefined,
       mine: "19900115",
       theirs: "19910115",
+    },
+    {
+      kind: "day_month_swaps" as const,
+      field: "date_of_birth",
+      transform: undefined,
+      mine: "19900112",
+      theirs: "19901201",
     },
   ])(
     "$kind meets the partner's exact value whichever party is the receiver",
