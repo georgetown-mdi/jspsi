@@ -742,6 +742,24 @@ test("a name stripped to nothing reaches the unnamed-column refusal", async () =
   expect(result.meta.bidiStrippedColumns).toEqual([2]);
 });
 
+test("a name stripped onto another column keeps both columns' values", async () => {
+  // Not special-cased by the transform either: the collision meets PapaParse's
+  // own duplicate-header renaming, so the second column's values stay reachable
+  // under the renamed name rather than overwriting the first column's. `name_1`
+  // is the pinned PapaParse's own rename, measured by driving it, and a header
+  // holding two identical names to begin with reaches the same one.
+  const collided = await loadCSVFile(streamOf(`na${RLO}me,name\nalice,bob\n`));
+  expect(collided.meta.fields).toEqual(["name", "name_1"]);
+  expect(collided.data).toEqual([{ name: "alice", name_1: "bob" }]);
+  expect(collided.meta.bidiStrippedColumns).toEqual([1]);
+
+  const alreadyDuplicate = await loadCSVFile(
+    streamOf("name,name\nalice,bob\n"),
+  );
+  expect(alreadyDuplicate.meta.fields).toEqual(collided.meta.fields);
+  expect(alreadyDuplicate.data).toEqual(collided.data);
+});
+
 test("both drivers strip the same header and report the same positions", async () => {
   const csv = `id,na${RLO}me,dob\n1,alice,1990-01-02\n`;
   const full = await loadCSVFile(streamOf(csv));
