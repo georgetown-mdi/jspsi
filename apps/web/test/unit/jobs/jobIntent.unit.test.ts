@@ -111,6 +111,31 @@ describe("jobExchangeIntentSchema validates metadata and standardization", () =>
     expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(false);
   });
 
+  test("rejects a control character or a bidi override in a terms name", () => {
+    // The intent embeds core's LinkageTermsSchema, so the name shape reaches the
+    // console's own boundary: a name the CLI would refuse at its config load is
+    // refused before the child is spawned rather than after.
+    for (const name of ["risk\u0007score", "risk\u202escore"]) {
+      const intent = validIntent({
+        linkageTerms: {
+          ...validLinkageTerms(),
+          payload: { send: [{ name }] },
+        },
+      });
+      expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(false);
+    }
+    expect(
+      jobExchangeIntentSchema.safeParse(
+        validIntent({
+          linkageTerms: {
+            ...validLinkageTerms(),
+            payload: { send: [{ name: "risk_score" }] },
+          },
+        }),
+      ).success,
+    ).toBe(true);
+  });
+
   test("still rejects an unknown top-level key alongside the new fields", () => {
     const intent = {
       ...validIntent({ metadata: editedMetadata }),

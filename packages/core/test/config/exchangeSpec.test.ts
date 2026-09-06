@@ -8,6 +8,7 @@ import {
 import {
   MAX_TEXT_LENGTH,
   MAX_TRANSFORM_PARAM_LENGTH,
+  NAME_SHAPE_MESSAGE,
 } from "../../src/config/linkageTermsSchema";
 
 // Minimal valid components used as a base.
@@ -200,6 +201,25 @@ test("a transform param over the content bound is rejected through this spec pat
       /transform param must not exceed/.test(i.message),
     ),
   ).toBe(true);
+});
+
+test("a name-class control character is rejected through this spec path", () => {
+  // The name shape lives on LinkageTermsSchema, so the operator's own config
+  // load inherits it: the terms a party keeps on disk are held to the rule a
+  // partner's are, and the refusal names the field rather than the value.
+  const result = safeParseExchangeSpec({
+    ...minimalSpec,
+    linkageTerms: {
+      ...minimalLinkageTerms,
+      payload: { send: [{ name: "risk\u0007score" }] },
+    },
+  });
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  expect(result.error.issues.map((issue) => issue.path.join("."))).toContain(
+    "linkageTerms.payload.send.0.name",
+  );
+  expect(JSON.stringify(result.error.issues)).toContain(NAME_SHAPE_MESSAGE);
 });
 
 // --- parse vs safeParse ------------------------------------------------------

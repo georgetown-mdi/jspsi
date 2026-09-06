@@ -522,7 +522,11 @@ export interface VerificationKeys {
 // allocation. Array counts use boundedArray (a count refine BEFORE per-element
 // validation) for the same Zod issue-accumulation reason the linkage-terms
 // bounds document. The bounds reject; they do not reshape a valid record --
-// defense-in-depth ceilings, not semantic limits.
+// defense-in-depth ceilings, not semantic limits. The name shape the
+// linkage-terms schema applies (NAME_SHAPE_PATTERN) is not applied here, for
+// the reason `type` and a citation `version` are open strings below: the record
+// is a frozen log, and its reader accepts what a possibly different-version
+// writer recorded. Display escaping at the render site neutralizes such a value.
 
 // Length cap for the fixed-size base64url crypto values a record and its keys
 // hold (termsHash, bindingNonce, receiptBinder, each commitment, each salt):
