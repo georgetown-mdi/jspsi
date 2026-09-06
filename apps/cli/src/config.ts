@@ -487,15 +487,12 @@ export interface ReconcileSideFit {
 export const RECONCILE_UNSET = compatibilityMessage`(unset)`;
 
 /**
- * One value somebody else chose, treated for a reconcile conflict line:
- * redacted as private-key material, then delimited as one run through core's
- * terms-value grammar. Redaction runs on the individual value, before
- * composition: the display boundary's private-key rule is fail-closed from a
- * `BEGIN` marker to the end of the whole composed link, so redacting only the
- * final message would let one marker consume every line behind it. Delimiting
- * keeps a value from forging the line's own structure or line breaks; neither
- * pass is the display escape itself, which the sink still applies once where
- * the message is shown.
+ * One value somebody else chose, treated for a reconcile conflict line and
+ * delimited as one run through core's terms-value grammar by
+ * {@link quoteTermsValue}, which redacts the value itself before delimiting
+ * it. This wrapper's own redaction ahead of that call is defense in depth:
+ * {@link redactPrivateKeyMaterial} is idempotent, so a second pass over a
+ * value {@link quoteTermsValue} already redacts is inert.
  */
 export function reconcileDiffValue(
   value: string,
@@ -505,10 +502,11 @@ export function reconcileDiffValue(
 
 /**
  * The same treatment for a value the linkage-terms schema constrains to a shape
- * no clause boundary is made of -- a semver string, an ISO date -- which core's
- * checked bare form renders undelimited so the common line displays as prose. The
- * check runs on the value in hand, so a value that does not meet the shape falls
- * back to the delimited form rather than being trusted for its field's sake.
+ * no clause boundary is made of -- a semver string, an ISO date -- rendered
+ * undelimited by {@link bareTermsValue}, which redacts the value itself before
+ * checking that shape. This wrapper's own redaction ahead of that call is
+ * defense in depth, and a second pass over a value {@link bareTermsValue}
+ * already redacts is inert.
  */
 function reconcileDiffBareValue(value: string): CompatibilityMessageFragment {
   return bareTermsValue(redactPrivateKeyMaterial(value));
