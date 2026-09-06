@@ -56,6 +56,20 @@ function tokenFromDeepLink(deepLink: string): string {
   return new URL(deepLink).hash.slice(1);
 }
 
+/** The two split inbound/outbound rendezvous shapes, whose own shape puts every
+ * connection built from them in retain mode whatever the caller's flag says. */
+const SPLIT_FILEDROP_ENDPOINT = {
+  channel: "filedrop",
+  inboundPath: "/mnt/share/in",
+  outboundPath: "/mnt/share/out",
+} as const;
+const SPLIT_SFTP_ENDPOINT = {
+  channel: "sftp",
+  host: "sftp.example.org",
+  inboundPath: "/exchanges/in",
+  outboundPath: "/exchanges/out",
+} as const;
+
 describe("generateInvitation", () => {
   test("round-trips through decodeInvitation with secret, terms, and endpoint intact", async () => {
     const inviterName = "County Health Dept";
@@ -166,21 +180,12 @@ describe("generateInvitation", () => {
   test.each([
     {
       label: "a split filedrop endpoint",
-      endpoint: {
-        channel: "filedrop",
-        inboundPath: "/mnt/share/in",
-        outboundPath: "/mnt/share/out",
-      },
+      endpoint: SPLIT_FILEDROP_ENDPOINT,
       declaration: true,
     },
     {
       label: "a split sftp endpoint",
-      endpoint: {
-        channel: "sftp",
-        host: "sftp.example.org",
-        inboundPath: "/exchanges/in",
-        outboundPath: "/exchanges/out",
-      },
+      endpoint: SPLIT_SFTP_ENDPOINT,
       declaration: true,
     },
     {
@@ -208,6 +213,28 @@ describe("generateInvitation", () => {
       });
       const token = await decodeInvitation(encoded);
       expect(token.inviterRetainsFiles).toBe(declaration);
+    },
+  );
+
+  test.each([
+    { label: "filedrop", endpoint: SPLIT_FILEDROP_ENDPOINT },
+    { label: "sftp", endpoint: SPLIT_SFTP_ENDPOINT },
+  ] as const)(
+    "declares retention for a split $label endpoint minted with the flag false",
+    async ({ endpoint }) => {
+      // The shape wins over the flag: a caller stating delete mode beside a
+      // rendezvous no run of it can be in delete mode for still mints the
+      // declaration, rather than the token stating a mode the endpoint
+      // contradicts.
+      const { encoded } = await generateInvitation({
+        inviterName: "County Health Dept",
+        file: csvStream(),
+        location,
+        connectionEndpoint: endpoint,
+        retainsFiles: false,
+      });
+      const token = await decodeInvitation(encoded);
+      expect(token.inviterRetainsFiles).toBe(true);
     },
   );
 
