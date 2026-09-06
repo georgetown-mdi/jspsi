@@ -7,9 +7,9 @@ import {
   FileSyncConnection,
   fromEventConnection,
   authenticateConnection,
-  createMessagePipe,
   SHARED_SECRET_REGEX,
 } from "@psilink/core";
+import { createMessagePipe } from "@psilink/core/testing";
 import type { HandshakeRole, MessageConnection } from "@psilink/core";
 
 import { LocalFSClient } from "../../../src/connection/localFSClient";

@@ -227,6 +227,12 @@ suite builds a frame or drives a bound at its edge, and the capabilities their
 neighbours on the main entry publish -- the codecs, the parsers, the display
 renderers -- stayed.
 
+`createMessagePipe` reached the same channel from a different starting point.
+It sits in a product module, `connection/messageConnection.ts`, but nothing in
+production builds one: outside `packages/core` its only callers are the two
+apps' test trees, and what a caller does is open a connection over a transport.
+It is on `./testing` beside the codecs.
+
 One subject arrived that is neither a fixture nor a codec:
 `withNoListedFanOutFunctions`, the lever that stands a listed fan-out producer
 in for an unlisted one. It rewrites module state, so it carries a build

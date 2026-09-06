@@ -3,8 +3,8 @@
 
 import { describe, expect, test } from "vitest";
 
-import { createMessagePipe, runKex } from "@psilink/core";
-import { computeKexKeys } from "@psilink/core/testing";
+import { computeKexKeys, createMessagePipe } from "@psilink/core/testing";
+import { runKex } from "@psilink/core";
 
 import vectorsRaw from "../../../../packages/core/test/vectors/kex-vectors.json?raw";
 

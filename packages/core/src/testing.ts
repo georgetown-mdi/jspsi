@@ -68,6 +68,11 @@ export {
 } from "./connection/fileSyncConnection.js";
 export { AEAD_ENVELOPE_VERSION } from "./connection/encryptedMessageConnection.js";
 
+// The connected in-memory MessageConnection pair a suite drives a protocol
+// round over. It stays out of the main entry point: a caller opens a connection
+// over a transport, and only a test needs a pair with no transport under it.
+export { createMessagePipe } from "./connection/messageConnection.js";
+
 // The input bounds a suite drives at their edge: the invitation decode's host,
 // path, and whole-token limits, the WebRTC frame pre-scan's per-kind weights,
 // and the CSV line ceiling. They stay out of the main entry point: core's own

@@ -72,7 +72,6 @@ export {
   ConnectionError,
   QueuedMessageConnection,
   asConnectionError,
-  createMessagePipe,
   errorMessage,
   fromEventConnection,
 } from "./connection/messageConnection";
