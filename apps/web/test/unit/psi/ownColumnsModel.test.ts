@@ -16,7 +16,11 @@ import {
   ownColumnsField,
   ownColumnsPreview,
 } from "@psi/ownColumnsModel";
-import { editorFromCsv, editorWithIncludeOwnColumns } from "@psi/inviterEditor";
+import {
+  editorFromCsv,
+  editorWithImportedTerms,
+  editorWithIncludeOwnColumns,
+} from "@psi/inviterEditor";
 import { generateInvitation } from "@psi/invitation";
 
 import type { LinkageTerms, Output } from "@psilink/core";
@@ -165,6 +169,26 @@ describe("editorWithIncludeOwnColumns", () => {
       sealed: true,
     };
     expect(editorWithIncludeOwnColumns(sealed, "all")).toBe(sealed);
+  });
+
+  test("importing a terms document keeps the choice the operator set", () => {
+    // The choice is per-party and local -- no terms document states it -- so an
+    // import rebuilds the draft around it rather than over it.
+    const chosen = editorWithIncludeOwnColumns(
+      editorFromCsv("County Health", acquired()),
+      "disclosed",
+    );
+    const imported = editorWithImportedTerms(chosen, acquired(), termsWith({}));
+    expect(imported.draft.includeOwnColumns).toBe("disclosed");
+  });
+
+  test("importing over an untouched control leaves the field absent", () => {
+    const imported = editorWithImportedTerms(
+      editorFromCsv("County Health", acquired()),
+      acquired(),
+      termsWith({}),
+    );
+    expect(imported.draft).not.toHaveProperty("includeOwnColumns");
   });
 });
 

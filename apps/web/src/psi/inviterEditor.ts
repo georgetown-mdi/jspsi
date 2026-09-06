@@ -234,7 +234,9 @@ export function editorWithLegalAgreement(
 }
 
 /** Load an imported, validated terms document into the session, keeping the
- * inviter's own columns and lifetime -- an unsupplyable imported key arrives
+ * inviter's own columns, lifetime, and own-columns choice -- all three are
+ * per-party and local, so no terms document states them and an import leaves
+ * them where the operator set them. An unsupplyable imported key arrives
  * disabled with its badge, never dropped ({@link draftFromTerms}). Imported
  * keys are author-controlled. */
 export function editorWithImportedTerms(
@@ -251,6 +253,7 @@ export function editorWithImportedTerms(
       editor.draft.lifetimeSeconds,
       seedRows(csv),
       csv.dateInputFormat,
+      editor.draft.includeOwnColumns,
     ),
     keysAuthored: true,
   };
