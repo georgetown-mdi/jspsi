@@ -197,6 +197,20 @@ const RECORDED_SITES: readonly ConfigErrorSite[] = [
   },
   {
     file: "packages/core/src/linkageSatisfiability.ts",
+    anchor: "stepCountRefusal",
+    raises: "OperatorConfigError",
+    interpolates: ["stepCountRefusalMessage(declaredSteps, maxSteps)"],
+    provenance:
+      "both values the callee interpolates are counts -- how many steps the " +
+      "document declares, and the build's own limit -- and no step, function, " +
+      "or param is named. The count spans both surfaces, and the class " +
+      "follows the one whose steps take the total past the limit: this arm " +
+      "is reached only where this party's own standardization exceeds it " +
+      "alone, and the agreed terms' element transforms take the plain " +
+      "UsageError arm beside it, correctly absent from this ledger.",
+  },
+  {
+    file: "packages/core/src/linkageSatisfiability.ts",
     anchor: "assertTransformsCompile",
     raises: "OperatorConfigError",
     interpolates: ["stepCompileBudgetRefusalMessage(totalBudgetMs)"],

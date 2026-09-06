@@ -1338,21 +1338,28 @@ export function compileSteps(
  * through it.
  *
  * Answered out of the memo the run itself reads
- * ({@link compiledElementTransforms}) and filled into it: a compile is the
- * expensive part of the question -- a partner-authored pattern compiles under
- * the linear-time engine -- so a second pass over the same step array pays
- * nothing, and the run reuses what this compiled. The memo is keyed on the
- * array's identity, so a document rebuilt from its source is a fresh compile;
- * the caller that walks a whole document (`assertTransformsCompile`) bounds
- * that walk in wall-clock time.
+ * ({@link compiledElementTransforms}): a compile is the expensive part of the
+ * question -- a partner-authored pattern compiles under the linear-time
+ * engine -- so a second pass over the same step array pays nothing, and the run
+ * reuses what this compiled. The memo is keyed on the array's identity, so a
+ * document rebuilt from its source is a fresh compile.
+ *
+ * What this compiles is held in `pending` rather than written to the memo, and
+ * the caller commits it ({@link commitCompiledTransforms}) once its whole walk
+ * has finished. A walk that refuses part way -- the caller bounds its own cost
+ * in wall-clock time -- must leave the memo as it found it, or the next walk
+ * over the same arrays would resume where this one stopped and admit, unedited,
+ * a document this one refused.
  *
  * Read by `assertTransformsCompile` in `linkageSatisfiability.ts`.
  */
 export function uncompilableStepLabel(
   steps: TransformStep[] | undefined,
+  pending: PendingCompiledTransforms,
 ): string | undefined {
   if (steps === undefined || steps.length === 0) return undefined;
-  if (compiledElementTransforms.has(steps)) return undefined;
+  if (compiledElementTransforms.has(steps) || pending.has(steps))
+    return undefined;
   const compiled: CompiledStep[] = [];
   for (const step of steps) {
     try {
@@ -1361,8 +1368,42 @@ export function uncompilableStepLabel(
       return transformFunctionLabel(step.function);
     }
   }
-  compiledElementTransforms.set(steps, compiled);
+  pending.set(steps, compiled);
   return undefined;
+}
+
+/**
+ * The steps one walk of {@link uncompilableStepLabel} has compiled and not yet
+ * committed to the memo, keyed by the step array's identity as the memo is.
+ *
+ * @internal held by `assertTransformsCompile` in `linkageSatisfiability.ts`.
+ */
+export type PendingCompiledTransforms = Map<TransformStep[], CompiledStep[]>;
+
+/**
+ * Whether `steps` already has compiled steps in the memo the run reads.
+ *
+ * @internal pins where the compile walk commits, in
+ * `linkageSatisfiability.test.ts`: a refused walk must leave the memo as it
+ * found it, which nothing else observes.
+ */
+export function hasMemoizedCompiledSteps(steps: TransformStep[]): boolean {
+  return compiledElementTransforms.has(steps);
+}
+
+/**
+ * Move a completed walk's compiled steps into the memo the run reads, so the
+ * run pays for them once between them. Called only where the walk finished:
+ * a refused document leaves its buffer to be dropped, which is what makes the
+ * refusal repeatable.
+ *
+ * @internal called by `assertTransformsCompile` in `linkageSatisfiability.ts`.
+ */
+export function commitCompiledTransforms(
+  pending: PendingCompiledTransforms,
+): void {
+  for (const [steps, compiled] of pending)
+    compiledElementTransforms.set(steps, compiled);
 }
 
 /**
@@ -1391,11 +1432,32 @@ export function stepCompileRefusalMessage(label: string): string {
 }
 
 /**
+ * The message the compile check holds for a document declaring more transform
+ * steps than it checks. Both values are counts -- what the document declares and
+ * the build's own limit -- so no partner text reaches it, and both are stated
+ * because the remedy is to get from the one to the other.
+ *
+ * @internal composed by `assertTransformsCompile` in `linkageSatisfiability.ts`.
+ */
+export function stepCountRefusalMessage(
+  declaredSteps: number,
+  maxSteps: number,
+): string {
+  return (
+    "these transforms declare more steps than one set of terms may hold: " +
+    `${declaredSteps} steps, against a limit of ${maxSteps}. Reduce the ` +
+    "number of linkage keys, key elements, or transform steps they declare."
+  );
+}
+
+/**
  * The message the compile check holds when its wall-clock budget runs out
  * before every step has been compiled -- the fail-closed half of
  * `assertTransformsCompile`, whose budget is the value interpolated here. The
  * terms are refused rather than admitted unchecked, so the remedy is a smaller
- * document; no step is named, because none was found at fault.
+ * document; no step is named, because none was found at fault. The count limit
+ * above is what an author acts on; this fires only for a document under that
+ * limit whose steps are individually expensive.
  *
  * @internal composed by `assertTransformsCompile` in `linkageSatisfiability.ts`.
  */

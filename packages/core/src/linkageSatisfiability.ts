@@ -29,6 +29,7 @@ import { declaredFanOutFunction } from "./fanOutFunctions.js";
 import { redactPrivateKeyMaterial } from "./utils/sanitizeErrorForDisplay.js";
 import {
   applyStep,
+  commitCompiledTransforms,
   compileSteps,
   fanOutDeclaredMessage,
   parseDateFormat,
@@ -37,11 +38,17 @@ import {
   STANDARDIZATION_FUNCTION_NAMES,
   stepCompileBudgetRefusalMessage,
   stepCompileRefusalMessage,
+  stepCountRefusalMessage,
   uncompilableStepLabel,
   valueOverCeiling,
   YEAR_FORMAT_TOKENS,
 } from "./standardization.js";
-import type { CompiledStep, FieldValue, Params } from "./standardization.js";
+import type {
+  CompiledStep,
+  FieldValue,
+  Params,
+  PendingCompiledTransforms,
+} from "./standardization.js";
 
 /**
  * Validate that every standardization transformation output name corresponds to
@@ -195,23 +202,83 @@ export function assertFanOutImplemented(
 }
 
 /**
+ * Upper bound on the transform steps one document may declare in total, across
+ * its standardization and every linkage-key element, checked by
+ * {@link assertTransformsCompile} before anything is compiled.
+ *
+ * This is the bound an author acts on, because it is a property of the document
+ * alone: the wall-clock budget below answers differently on a fast machine than
+ * on a loaded one, so it cannot be what a refusal's "declare fewer steps" remedy
+ * refers to. 1024 is far above what a party mints (the bundled terms declare
+ * steps in the tens across every key) and far below what the wire schema admits,
+ * which is `MAX_TRANSFORM_STEPS` steps per element over `MAX_KEY_ELEMENTS`
+ * elements per key (`config/linkageTermsSchema.ts`). Measured on the most
+ * expensive step this build compiles, a `parse_date` with a distinct
+ * 256-character format: 1024 of them compile in about 0.7 s on an idle
+ * container against the 2 s budget, and 2560 -- which this bound refuses
+ * outright -- in about 1.96 s, close enough to the budget that the same
+ * document minted on a loaded machine is refused instead.
+ */
+const TRANSFORM_COMPILE_MAX_STEPS = 1024;
+
+/**
  * Total wall-clock budget, in milliseconds, for compiling every declared step of
- * one document in {@link assertTransformsCompile}. Both collections cap at 256
- * entries, so a schema-valid document can declare thousands of steps, and a
- * partner-authored `parse_date` format or raw pattern compiles under the
- * linear-time engine at a cost the wire bounds do not hold down. Once the budget
- * is spent the remaining steps are refused unchecked (fail closed), the same
- * shape the dialect walk takes (`config/transformRegexDialect.ts`). A document a
- * party would actually mint finishes in single-digit milliseconds.
+ * one document in {@link assertTransformsCompile}. The count bound above holds
+ * how many steps reach the walk; this holds the walk's cost for a document under
+ * that bound whose steps are individually expensive, a partner-authored
+ * `parse_date` format or raw pattern compiling under the linear-time engine at a
+ * cost the wire bounds do not hold down. Once the budget is spent the remaining
+ * steps are refused unchecked (fail closed), the same shape the dialect walk
+ * takes (`config/transformRegexDialect.ts`). A document a party would actually
+ * mint finishes in single-digit milliseconds.
  */
 const TRANSFORM_COMPILE_TOTAL_BUDGET_MS = 2000;
 
-/** Optional override for the compile walk's budget. Exposed so tests can drive
- * the exhaustion path deterministically. */
+/** Optional overrides for the compile walk's bounds; both defaulted. Exposed so
+ * tests can drive the two refusal paths deterministically. */
 interface TransformCompileBudget {
   /** Total wall-clock budget across all steps; see
    * {@link TRANSFORM_COMPILE_TOTAL_BUDGET_MS}. */
   totalBudgetMs?: number;
+  /** Total declared steps the document may hold; see
+   * {@link TRANSFORM_COMPILE_MAX_STEPS}. */
+  maxSteps?: number;
+}
+
+/**
+ * The refusal for a document declaring more than `maxSteps` transform steps in
+ * total, or `undefined` for one within the bound. Counted before any step is
+ * compiled, so what it answers is the document's own shape and nothing about the
+ * machine it is minted on.
+ *
+ * The class follows the surface whose steps take the total past the bound, in
+ * the order {@link assertTransformsCompile} walks them -- whose content the
+ * fault is, the split the compile refusals keep. The message states the whole
+ * document's count, since the remedy spans both surfaces.
+ */
+function stepCountRefusal(
+  terms: LinkageTerms,
+  standardization: Standardization | undefined,
+  maxSteps: number,
+): Error | undefined {
+  const standardizationSteps = (standardization ?? []).reduce(
+    (total, transformation) => total + (transformation.steps ?? []).length,
+    0,
+  );
+  const elementSteps = terms.linkageKeys.reduce(
+    (total, key) =>
+      total +
+      key.elements.reduce(
+        (keyTotal, element) => keyTotal + (element.transform ?? []).length,
+        0,
+      ),
+    0,
+  );
+  const declaredSteps = standardizationSteps + elementSteps;
+  if (declaredSteps <= maxSteps) return undefined;
+  return standardizationSteps > maxSteps
+    ? new OperatorConfigError(stepCountRefusalMessage(declaredSteps, maxSteps))
+    : new UsageError(stepCountRefusalMessage(declaredSteps, maxSteps));
 }
 
 /**
@@ -249,10 +316,16 @@ interface TransformCompileBudget {
  * (`StepListEditor`). What reaches here is what that does not cover -- an
  * imported document, or a caller that mints without the editor. It runs once
  * per mint rather than on every editor pass, because compiling a whole
- * document's transforms costs enough to need a budget
- * ({@link TRANSFORM_COMPILE_TOTAL_BUDGET_MS}); the compiles are memoized
- * ({@link uncompilableStepLabel}), so a repeated mint of one document pays for
- * them once.
+ * document's transforms costs enough to need bounding.
+ *
+ * Two bounds hold that cost. The declared step count
+ * ({@link TRANSFORM_COMPILE_MAX_STEPS}) is checked before anything compiles, so
+ * a document over it takes the same refusal on every machine and every retry;
+ * the wall-clock budget ({@link TRANSFORM_COMPILE_TOTAL_BUDGET_MS}) stands
+ * behind it for a document under the count whose steps are expensive. The
+ * compiles are memoized ({@link uncompilableStepLabel}) once the walk has
+ * finished, so a repeated mint of one document pays for them once, while a
+ * refused one leaves nothing behind for a retry to build on.
  */
 export function assertTransformsCompile(
   terms: LinkageTerms,
@@ -261,13 +334,25 @@ export function assertTransformsCompile(
 ): void {
   const totalBudgetMs =
     budget.totalBudgetMs ?? TRANSFORM_COMPILE_TOTAL_BUDGET_MS;
+  const overCount = stepCountRefusal(
+    terms,
+    standardization,
+    budget.maxSteps ?? TRANSFORM_COMPILE_MAX_STEPS,
+  );
+  if (overCount !== undefined) throw overCount;
+  // Compiled steps are held aside and committed only where the whole walk
+  // finished, so a refused document is refused again unchanged. Committing them
+  // as the walk went would let the next walk over the same arrays resume past
+  // what this one paid for, admitting after enough retries a document no edit
+  // had touched.
+  const pending: PendingCompiledTransforms = new Map();
   const startedAt = Date.now();
   for (const transformation of standardization ?? []) {
     if (Date.now() - startedAt >= totalBudgetMs)
       throw new OperatorConfigError(
         stepCompileBudgetRefusalMessage(totalBudgetMs),
       );
-    const label = uncompilableStepLabel(transformation.steps);
+    const label = uncompilableStepLabel(transformation.steps, pending);
     if (label !== undefined)
       throw new OperatorConfigError(stepCompileRefusalMessage(label));
   }
@@ -275,11 +360,12 @@ export function assertTransformsCompile(
     for (const element of key.elements) {
       if (Date.now() - startedAt >= totalBudgetMs)
         throw new UsageError(stepCompileBudgetRefusalMessage(totalBudgetMs));
-      const label = uncompilableStepLabel(element.transform);
+      const label = uncompilableStepLabel(element.transform, pending);
       if (label !== undefined)
         throw new UsageError(stepCompileRefusalMessage(label));
     }
   }
+  commitCompiledTransforms(pending);
 }
 
 /**
