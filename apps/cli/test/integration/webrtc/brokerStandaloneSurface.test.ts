@@ -19,7 +19,7 @@ import type { AddressInfo } from "node:net";
  * (test/unit/signalingStandaloneOptions.test.ts, where the broker's other unit
  * coverage sits); what this file adds is that the resolved values reach
  * `listen`, that the probe answers on the running server, and that an option
- * the runner cannot act on stops it with a legible failure.
+ * the runner cannot act on stops it with a clear failure.
  *
  * Stops at the HTTP surface: the signaling wire is broker.test.ts's.
  */
