@@ -24,8 +24,14 @@ import {
 // public deployment, which is not. This is that obligation as a check.
 //
 // It is an INCLUSION check over the route tree: the entries are found by
-// reading apps/web/src/routes/api rather than a maintained list, so one nobody
-// thought to list is covered the day it lands. There is no allowance list.
+// reading apps/web/src/routes rather than a maintained list, so one nobody
+// thought to list is covered the day it lands. There is no allowance list. The
+// whole tree is read, not the api directory alone, because a route's path comes
+// from its file NAME as much as its directory: the router generator serves
+// api.telemetry.ts at /api/telemetry, the flat style this repo already uses for
+// saved.$id.tsx. The generator itself maps a name to its path here rather than
+// a rule copied out of it, and a name reaching an api segment only past a
+// parenthesized one is reported as undecided rather than passed over.
 //
 // What it decides is SYNTACTIC and coarse, and it owns only the accounting.
 // "Gated" here means every module under the entry imports the job gate by name
@@ -45,7 +51,7 @@ const SELF = "scripts/api-namespace-allowlist.test.mjs";
 // the public assets that bypass it, all repository-relative.
 const GUARD_MODULE = "apps/web/src/utils/apiNamespace.ts";
 const SERVER_ENTRY = "apps/web/src/server.ts";
-const ROUTES_DIR = "apps/web/src/routes/api";
+const ROUTES_ROOT = "apps/web/src/routes";
 const PUBLIC_DIR = "apps/web/public";
 
 /** The exported names the refusal declares: the wrapper the server entry
@@ -124,32 +130,89 @@ function isUnderPrefix(path, prefix) {
   return path === prefix || path.startsWith(`${prefix}/`);
 }
 
-/** The path a module directly under the routes tree is served at. */
-function routeOfModule(name) {
-  const stem = name.replace(/\.tsx?$/, "");
-  return stem === "index" ? API_PATH_ROOT : `${API_PATH_ROOT}/${stem}`;
+/**
+ * The path the router generator serves a route file at, from that file's path
+ * under the routes tree with its extension removed -- the dot-separated flat
+ * name and the trailing-underscore form among them.
+ */
+const routePathOf = await (async () => {
+  try {
+    const { determineInitialRoutePath, removeUnderscores } =
+      await import("@tanstack/router-generator");
+    return (stem) =>
+      removeUnderscores(determineInitialRoutePath(stem).routePath);
+  } catch {
+    // Without the generator installed this reads the dot-to-slash rule alone,
+    // so an underscore or bracket-escaped name is read as it is written.
+    return (stem) => `/${stem.replaceAll(".", "/")}`;
+  }
+})();
+
+/** The route path {@link routePathOf} reads a route file at. */
+function routePathOfFile(file) {
+  return routePathOf(posix.relative(ROUTES_ROOT, file).replace(/\.tsx?$/, ""));
+}
+
+/** Where in the tree a route file's entry comes from: the directory or module
+ * directly under the routes tree, or under its api directory, that holds it. */
+function locationOf(file) {
+  const segments = posix.relative(ROUTES_ROOT, file).split("/");
+  const depth = segments[0] === "api" && segments.length > 1 ? 2 : 1;
+  return posix.join(ROUTES_ROOT, ...segments.slice(0, depth));
 }
 
 /**
- * The route entries directly under the routes tree: one per directory or module
- * there, with the path it is served at and the TypeScript modules it holds. A
- * directory entry is a whole subtree; `index.ts` is the namespace root itself.
- * An entry holding no module this check can read stays in the reading, with an
- * empty module list, so it is reported rather than passed over.
+ * The route entries the namespace holds: one per path segment directly under
+ * it, with the path it is served at, where in the tree it comes from, and the
+ * TypeScript modules behind it. A directory entry is a whole subtree, and a
+ * file named `api.<segment>...` joins the same entry the directory
+ * `api/<segment>/` would. An entry holding no module this check can read stays
+ * in the reading, with an empty module list, so it is reported rather than
+ * passed over.
+ *
+ * A route path reaching the namespace only past a parenthesized segment is not
+ * decided here; {@link undecidedRoutes} reports it.
  */
 function routeEntries() {
-  const byName = new Map();
-  for (const path of filesUnder(ROUTES_DIR)) {
-    const [name, ...rest] = posix.relative(ROUTES_DIR, path).split("/");
-    const entry = byName.get(name) ?? {
-      route: rest.length > 0 ? `${API_PATH_ROOT}/${name}` : routeOfModule(name),
-      path: posix.join(ROUTES_DIR, name),
+  const byRoute = new Map();
+  for (const path of filesUnder(ROUTES_ROOT)) {
+    const routePath = routePathOfFile(path);
+    if (!isUnderPrefix(routePath, API_PATH_ROOT)) continue;
+    const [segment] = routePath.slice(API_PATH_ROOT.length + 1).split("/");
+    const route =
+      segment === "" || segment === "index"
+        ? API_PATH_ROOT
+        : `${API_PATH_ROOT}/${segment}`;
+    const entry = byRoute.get(route) ?? {
+      route,
+      locations: new Set(),
       modules: [],
     };
+    entry.locations.add(locationOf(path));
     if (/\.tsx?$/.test(path)) entry.modules.push(path);
-    byName.set(name, entry);
+    byRoute.set(route, entry);
   }
-  return [...byName.values()];
+  return [...byRoute.values()].map((entry) => ({
+    ...entry,
+    where: [...entry.locations].sort().join(", "),
+  }));
+}
+
+/**
+ * The route files whose served path this check does not decide: one whose route
+ * path reaches an `api` segment only past a parenthesized one, which this check
+ * reads as written while the router may not serve it as a path segment at all.
+ */
+function undecidedRoutes() {
+  return filesUnder(ROUTES_ROOT).filter((file) => {
+    const routePath = routePathOfFile(file);
+    const segments = routePath.split("/");
+    return (
+      !isUnderPrefix(routePath, API_PATH_ROOT) &&
+      segments.includes(API_PATH_ROOT.slice(1)) &&
+      segments.some((segment) => /^\(.*\)$/.test(segment))
+    );
+  });
 }
 
 const guardSource = parseFile(GUARD_MODULE);
@@ -196,6 +259,19 @@ describe("every /api route is accounted for by the namespace refusal", () => {
     ).toEqual([]);
   });
 
+  it("reads every route file that could be served under /api", () => {
+    const undecided = undecidedRoutes();
+    expect(
+      undecided,
+      `${undecided.length} route file(s) in ${ROUTES_ROOT} reach an ` +
+        `"${API_PATH_ROOT.slice(1)}" path segment only past a parenthesized ` +
+        `one, which ${SELF} reads as a path segment and the router may not ` +
+        `serve as one, so whether ${API_PATH_ROOT} is where they answer is ` +
+        `undecided here. Teach ${SELF} that naming rule, or name the file so ` +
+        `its served path is the one it reads.`,
+    ).toEqual([]);
+  });
+
   it("holds every route directory to the allowlist or the job gate", () => {
     const unaccounted = [];
     for (const entry of entries) {
@@ -203,7 +279,7 @@ describe("every /api route is accounted for by the namespace refusal", () => {
         continue;
       if (entry.modules.length === 0) {
         unaccounted.push(
-          `${entry.path}: no TypeScript module this check can read`,
+          `${entry.where}: no TypeScript module this check can read`,
         );
         continue;
       }
@@ -212,13 +288,13 @@ describe("every /api route is accounted for by the namespace refusal", () => {
       );
       if (ungated.length > 0)
         unaccounted.push(
-          `${entry.route} (${entry.path}): ${ungated.join(", ")} ` +
+          `${entry.route} (${entry.where}): ${ungated.join(", ")} ` +
             `${ungated.length === 1 ? "does" : "do"} not import ${GATE}`,
         );
     }
     expect(
       unaccounted,
-      `${unaccounted.length} route(s) under ${ROUTES_DIR} are neither in ` +
+      `${unaccounted.length} route(s) under ${API_PATH_ROOT} are neither in ` +
         `${GUARD_MODULE}'s ${ALLOWLIST} nor gated by ${GATE}, so what a public ` +
         `deployment answers for them is whatever the allowlist happens to say ` +
         `and nothing fails when it is wrong. Add the route to ${ALLOWLIST} if ` +
@@ -236,7 +312,7 @@ describe("every /api route is accounted for by the namespace refusal", () => {
     expect(
       stale,
       `${stale.length} ${ALLOWLIST} entr(y/ies) in ${GUARD_MODULE} name no ` +
-        `route under ${ROUTES_DIR}, or reach past ${API_PATH_ROOT} itself. An ` +
+        `route in ${ROUTES_ROOT}, or reach past ${API_PATH_ROOT} itself. An ` +
         `entry that matches nothing is dead, and one naming ` +
         `"${API_PATH_ROOT}" admits the whole namespace. Remove it, or point ` +
         `it at the route it was meant for.`,
