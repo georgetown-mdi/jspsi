@@ -4,6 +4,7 @@ import {
   runPipeline,
   buildStandardizedDataset,
   buildKeyStrings,
+  compileSteps,
   FAN_OUT_FUNCTION_NAMES,
   StandardizedField,
   StandardizedDataset,
@@ -1590,6 +1591,39 @@ describe("assertTransformsCompile", () => {
       ]),
     };
     expect(() => assertTransformsCompile(terms)).toThrow(/"pad_left"/);
+  });
+
+  test("refuses every Object.prototype name on both surfaces", () => {
+    // The registry is read by an own-property lookup, so a name that reaches
+    // only Object.prototype is a name this build does not recognize. Under a
+    // bare index `constructor` and `toString` answer with an inherited member,
+    // which is not a factory: the step compiles to a non-callable, is admitted
+    // here, and throws at the first row -- after the invitation was accepted,
+    // the abort this check exists to prevent. Held over the whole prototype
+    // rather than those two names, so a future engine's addition is covered.
+    for (const name of Object.getOwnPropertyNames(Object.prototype)) {
+      const step = { function: name, params: {} };
+      const terms: LinkageTerms = {
+        ...minimalTerms,
+        linkageKeys: keysWithTransform([step]),
+      };
+      expect(() => assertTransformsCompile(terms), name).toThrow(UsageError);
+      expect(() => assertTransformsCompile(terms), name).toThrow(
+        /a function this build does not recognize/,
+      );
+      expect(
+        () =>
+          assertTransformsCompile(minimalTerms, [
+            { output: "last_name", input: "LN", steps: [step] },
+          ]),
+        name,
+      ).toThrow(OperatorConfigError);
+      // The run's own compile agrees, so the mint refuses what the run would
+      // refuse rather than what it would crash on.
+      expect(() => compileSteps([step]), name).toThrow(
+        UnknownStandardizationFunctionError,
+      );
+    }
   });
 
   test("admits a pipeline every step of which compiles, both surfaces", () => {

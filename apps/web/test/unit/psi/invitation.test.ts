@@ -746,6 +746,47 @@ describe("generateInvitation", () => {
     ).rejects.toThrow(/a transform step cannot be built from the parameters/);
   });
 
+  test("refuses to mint a step named after an Object.prototype member", async () => {
+    // `constructor` and `toString` are the names a bare registry index answers
+    // with an inherited member rather than a factory: the step would compile to
+    // a non-callable, mint clean, and throw on the first row of a run the
+    // partner had already accepted. Every own property of the prototype is
+    // driven, so the mint's answer does not depend on which two names today's
+    // engine puts there.
+    const metadata = inferMetadata(["ssn", "first_name", "last_name", "dob"]);
+    const base = getDefaultLinkageTerms("Org", metadata);
+    for (const name of Object.getOwnPropertyNames(Object.prototype)) {
+      const terms = {
+        ...base,
+        linkageKeys: base.linkageKeys.map((key, i) =>
+          i === 0
+            ? {
+                ...key,
+                elements: key.elements.map((element, j) =>
+                  j === 0
+                    ? {
+                        ...element,
+                        transform: [{ function: name, params: {} }],
+                      }
+                    : element,
+                ),
+              }
+            : key,
+        ),
+      };
+      await expect(
+        generateInvitation({
+          inviterName: "Org",
+          file: csvStream(PARTIAL_CSV),
+          location,
+          linkageTerms: terms,
+          metadata,
+        }),
+        name,
+      ).rejects.toThrow(/a function this build does not recognize/);
+    }
+  });
+
   // A linkable CSV (ssn + names + dob give satisfiable keys) that ALSO contains
   // columns the quick path discloses: `notes` infers as an `other` column (role
   // payload), and `member_id` infers as a single row-identifier left isPayload, so

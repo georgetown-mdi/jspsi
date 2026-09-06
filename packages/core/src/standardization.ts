@@ -1217,7 +1217,12 @@ interface TransformParamCoercion {
 export function describeTransformCoercions(
   step: TransformStep,
 ): TransformParamCoercion[] {
-  const fallbacks = TRANSFORM_PARAM_FALLBACKS[step.function];
+  // Own-property lookup, as the per-param check below: the function name is
+  // partner-authored free text, and a bare index answers `constructor` or
+  // `toString` with an inherited Object.prototype member.
+  const fallbacks = Object.hasOwn(TRANSFORM_PARAM_FALLBACKS, step.function)
+    ? TRANSFORM_PARAM_FALLBACKS[step.function]
+    : undefined;
   if (fallbacks === undefined) return [];
   const params = step.params ?? {};
   const coercions: TransformParamCoercion[] = [];
@@ -1280,7 +1285,13 @@ function compileStep(step: {
           : undefined,
     };
   }
-  const factory = STANDARDIZING_FUNCTIONS[step.function];
+  // Own-property lookup: a bare index answers the names that reach only
+  // Object.prototype (`constructor`, `toString`) with an inherited member, which
+  // compiles to a non-callable step and throws at the first row instead of
+  // taking the refusal below.
+  const factory = Object.hasOwn(STANDARDIZING_FUNCTIONS, step.function)
+    ? STANDARDIZING_FUNCTIONS[step.function]
+    : undefined;
   // On the element-transform path the name is partner-authored free text -- the
   // wire schema types `function` as a bounded string, not as one of the names
   // this build knows -- so it is narrowed rather than echoed, as the magnitude
