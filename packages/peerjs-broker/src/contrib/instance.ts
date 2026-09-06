@@ -8,6 +8,8 @@ import { WebSocketServer } from "./services/webSocketServer/index.ts";
 
 import { attachSignalingDiagnostics } from "../diagnostics.ts";
 
+import type { SignalingDiagnosticSink } from "../diagnostics.ts";
+
 import defaultConfig from "./config/index.ts";
 
 // import type express from "express";
@@ -39,9 +41,11 @@ export interface PeerServerInstance {
 
 export function CreateInstanceWSOnly({
   server,
+  diagnosticSink,
   options,
 }: {
   server: HttpServer | Http2Server;
+  diagnosticSink: SignalingDiagnosticSink;
   options?: Partial<IConfig>;
 }): PeerServerInstance {
   const config: IConfig = {
@@ -120,10 +124,11 @@ export function CreateInstanceWSOnly({
 
   // Attached rather than left off: an `error` emitted with no listener is thrown
   // rather than dropped, and the broker raises one over a peer hang-up it is
-  // built to survive. Behind that the sink writes each report to the diagnostic
-  // log, attributed, rate limited, and with the peer's own bytes escaped.
-  // See docs/spec/CHANNEL_SECURITY.md.
-  attachSignalingDiagnostics(wss);
+  // built to survive. Behind that the sink writes each report to the caller's
+  // diagnostic sink, attributed, rate limited, and with the peer's own bytes
+  // escaped. The sink is a required argument rather than an option, so no
+  // wiring reaches this line without one. See docs/spec/CHANNEL_SECURITY.md.
+  attachSignalingDiagnostics(wss, diagnosticSink);
 
   messagesExpire.startMessagesExpiration();
   checkBrokenConnections.start();

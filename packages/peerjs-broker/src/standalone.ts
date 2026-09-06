@@ -2,6 +2,7 @@ import { createServer } from "node:http";
 
 import { CreatePeerServerWSOnly } from "./contrib/index.ts";
 
+import type { Displayable } from "@psilink/core/untrusted-text";
 import type { AddressInfo } from "node:net";
 
 /**
@@ -34,11 +35,29 @@ import type { AddressInfo } from "node:net";
 /** The line the parent matches to learn the port. */
 const READY_PREFIX = "psilink-broker";
 
+/** What marks this process's lines for an operator reading a stream several
+ * processes write to. The same context `@psilink/core`'s prefixed loggers give
+ * the broker's diagnostics in the web app, so one line shape serves both
+ * embeddings. */
+const DIAGNOSTIC_CONTEXT = "peerjs-broker";
+
 function readFlag(name: string, fallback: string): string {
   const index = process.argv.indexOf(`--${name}`);
   return index >= 0 && index + 1 < process.argv.length
     ? process.argv[index + 1]
     : fallback;
+}
+
+/** This runner's diagnostic sink, wired below with no flag in front of it: a
+ * broker left unwatched is the case the reports exist for, so there is nothing
+ * to switch on. Diagnostics go to stderr because stdout carries the ready-line
+ * protocol above and nothing else. The text arrives escaped, capped and rate
+ * limited from the diagnostics module, so this writes it as it stands. */
+function writeDiagnostic(message: Displayable): void {
+  const timestamp = new Date().toISOString();
+  process.stderr.write(
+    `[${timestamp}] [WARN] [${DIAGNOSTIC_CONTEXT}] ${message}\n`,
+  );
 }
 
 const server = createServer((_request, response) => {
@@ -48,7 +67,7 @@ const server = createServer((_request, response) => {
   response.end();
 });
 
-CreatePeerServerWSOnly(server, {
+CreatePeerServerWSOnly(server, writeDiagnostic, {
   path: readFlag("path", "/api"),
   key: readFlag("key", "peerjs"),
 });

@@ -66,27 +66,33 @@ export default defineConfig([
     },
     plugins: [resolve(), typescript({ outputToFilesystem: true }), commonjs()],
   },
-  // The two published entry points build TOGETHER, with code splitting, so a
-  // module both of them reach exists once at run time. Built separately they
+  // The published entry points build TOGETHER, with code splitting, so a module
+  // more than one of them reaches exists once at run time. Built separately they
   // would each hold their own copy, and a module holding mutable state -- the
   // fan-out listing the testing entry's lever rewrites (src/fanOutFunctions.ts)
   // -- would be two independent states, so the lever would rewrite a listing the
-  // main entry's code never reads.
+  // main entry's code never reads. A class is the same shape of problem: the
+  // untrusted-text entry publishes JsonStructureBoundError, and two copies of it
+  // would fail an `instanceof` against a refusal the main entry threw.
   {
-    input: { core: "src/main.ts", testing: "src/testing.ts" },
+    input: {
+      core: "src/main.ts",
+      testing: "src/testing.ts",
+      "untrusted-text": "src/untrustedText.ts",
+    },
     external: makeExternal(ALWAYS_BUNDLED),
     // resolve() lets rollup inline the ALWAYS_BUNDLED packages (currently
     // canonicalize) from node_modules; everything else is held external by the
     // `external` predicate above, so only the bundled set is pulled in.
     plugins: [resolve(), typescript({ outputToFilesystem: true })],
-    // `[name]` is the input key above, so the entry names have to stay `core`
-    // and `testing`: package.json points main, module, and both `exports`
-    // conditions at dist/core.* and dist/testing.*. A manifest rename that left
-    // these alone is caught by the dist freshness guard, which derives the files
-    // it looks for from that exports map (scripts/lib/coreDistFreshness.mjs).
-    // The chunk name is fixed rather than hashed so a rebuild overwrites the
-    // shared chunk instead of leaving the previous one behind in a published
-    // dist.
+    // `[name]` is the input key above, so the entry names have to stay `core`,
+    // `testing` and `untrusted-text`: package.json points main, module, and
+    // every `exports` condition at dist/core.*, dist/testing.* and
+    // dist/untrusted-text.*. A manifest rename that left these alone is caught
+    // by the dist freshness guard, which derives the files it looks for from
+    // that exports map (scripts/lib/coreDistFreshness.mjs). The chunk name is
+    // fixed rather than hashed so a rebuild overwrites the shared chunk instead
+    // of leaving the previous one behind in a published dist.
     output: [
       {
         dir: "dist",
@@ -110,6 +116,11 @@ export default defineConfig([
   {
     input: "src/testing.ts",
     output: { file: "dist/testing.d.ts", format: "es" },
+    plugins: [dts()],
+  },
+  {
+    input: "src/untrustedText.ts",
+    output: { file: "dist/untrusted-text.d.ts", format: "es" },
     plugins: [dts()],
   },
 ]);

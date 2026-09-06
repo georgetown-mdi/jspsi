@@ -30,9 +30,10 @@ export const CORE_DIR = fileURLToPath(
   new URL("../../packages/core/", import.meta.url),
 );
 
-// Sources rollup reads (rollup.config.ts names src/main.ts and src/testing.ts as
-// its inputs). package.json is absent by design: npm rewrites it during some
-// install flows, which would report staleness the build cannot resolve.
+// Sources rollup reads (rollup.config.ts names src/main.ts, src/testing.ts, and
+// src/untrustedText.ts as its inputs). package.json is absent by design: npm
+// rewrites it during some install flows, which would report staleness the
+// build cannot resolve.
 const SOURCE_PATHS = ["src", "rollup.config.ts"];
 
 /**
