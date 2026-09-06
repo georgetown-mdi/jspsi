@@ -632,30 +632,9 @@ SFTP requires at most one primary authentication method alongside `username`. `p
 | `keyboard_interactive` | boolean | Answer the server's `keyboard-interactive` authentication prompts with `password`, in addition to offering the direct `password` method; only valid with `password`. Enable this for a server that disables the SSH `password` method but accepts the same password over `keyboard-interactive`. Every prompt is answered with the same configured password, so it cannot satisfy a multi-prompt or one-time-code challenge. Default `false`. Applies to the CLI `sftp` channel only. |
 | `host_key_fingerprint` | string or list | OpenSSH SHA256 host-key fingerprint (`SHA256:<43 standard base64 chars>`, the `+`/`/` alphabet OpenSSH emits, not base64url), or a non-empty list of them. When set, the server's host key is verified before authentication and the connection is rejected unless it matches one of the listed fingerprints. A list gives zero-downtime host-key rotation: pin the incoming key alongside the current one during the rekey window so either is accepted with no failed exchange in between, then drop the old entry after the cutover. When absent, the connection is **refused** (fail-closed): an interactive run instead establishes the pin on first use -- any command that opens the SFTP connection (`exchange`, an online `invite`/`accept`, or a zero-setup exchange) prompts with the presented fingerprint and, on confirmation, records it -- while a non-interactive run fails closed. So this field is typically pinned out-of-band or populated automatically on the first interactive run; see [CLI.md](CLI.md#sftp-host-key-trust). `@`-file supported (per entry). Applies to the CLI `sftp` channel only. |
 
+A whole `sftp` block with a credential in it, and the block each other channel takes, is under [Connection blocks by channel](#connection-blocks-by-channel).
+
 ```yaml
-# WebRTC example
-connection:
-  channel: webrtc
-  server:
-    host: api.peerjs.com
-    port: 443
-
-# SFTP example
-connection:
-  channel: sftp
-  server:
-    host: sftp.example.org
-    port: 22
-    path: /exchanges/agency-a-agency-b/
-    username: psilink
-    private_key: "@/run/secrets/id_ed25519"
-    host_key_fingerprint: "SHA256:uNiVztksCsDhcc0u9e8BujQXVUpKZIDTMczCvj3tD2s"
-
-# File-drop example (network-mounted folder)
-connection:
-  channel: filedrop
-  path: /mnt/sftp-share/exchanges/agency-a-agency-b
-
 # SFTP host-key rotation: pin the incoming key alongside the current one for the
 # rekey window so either is accepted, then drop the old entry after the cutover.
 connection:
