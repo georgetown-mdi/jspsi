@@ -28,6 +28,7 @@
     "check:workflow-agent-models": "node scripts/check-workflow-agent-models.mjs",
     "check:workflow-args-resolve": "node scripts/check-workflow-args-resolve.mjs",
     "check:action-pin-drift": "node scripts/check-action-pin-drift.mjs",
+    "check:checkout-ref-override": "node scripts/check-checkout-ref-override.mjs",
     "check:merge-gate-identities": "node scripts/check-merge-gate-identities.mjs",
     "check:dependabot-ignore-shape": "node scripts/check-dependabot-ignore-shape.mjs",
     "check:dependabot-pin-coverage": "node scripts/check-dependabot-pin-coverage.mjs",

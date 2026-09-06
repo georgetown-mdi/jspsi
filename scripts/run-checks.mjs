@@ -99,6 +99,11 @@ export const CHECKS = [
       "Every action pin in .github/actions is mirrored by one in .github/workflows, the path Dependabot is configured against.",
   },
   {
+    script: "check:checkout-ref-override",
+    description:
+      "No workflow triggered by a pull request hands actions/checkout a ref or sha, so a gate runs the head merged with the base tip.",
+  },
+  {
     script: "check:merge-gate-identities",
     description:
       "No gating job is renamed out from under the required check that names it, no path filter is added to a gating workflow, and every workflow declaring a required job is on the list held filter-free. The branch-rule half needs a token and states a skip without one.",

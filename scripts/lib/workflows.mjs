@@ -95,26 +95,47 @@ export function workflowDocument(root, path) {
   return parseWorkflow(path, read(root, path));
 }
 
-// Every `uses:` string a parsed document holds, in document order. The walk is
-// structural rather than an enumeration of the shapes GitHub accepts, so a
-// step's `uses:`, a job-level reusable-workflow `uses:`, and a composite's
-// `runs.steps[].uses` are all collected without naming any of them.
-function usesInDocument(document) {
+/**
+ * Every node of a parsed document that names a `uses:` string, in document
+ * order, as `{location, uses, inputs}`. `location` is the dotted path the node
+ * sits at (`jobs.build.steps[0]`), and `inputs` is the node's `with:` block, or
+ * null where it has none.
+ *
+ * The walk is structural rather than an enumeration of the shapes GitHub
+ * accepts, so a step's `uses:`, a job-level reusable-workflow `uses:`, and a
+ * composite's `runs.steps[].uses` are all collected without naming any of them.
+ */
+export function usesNodes(document) {
   const found = [];
-  const walk = (node) => {
+  const walk = (node, location) => {
     if (Array.isArray(node)) {
-      node.forEach(walk);
+      node.forEach((entry, index) => walk(entry, `${location}[${index}]`));
       return;
     }
     if (node === null || typeof node !== "object") return;
     for (const [key, value] of Object.entries(node)) {
-      if (key === "uses" && typeof value === "string") found.push(value);
-      walk(value);
+      if (key === "uses" && typeof value === "string") {
+        const inputs = node.with;
+        found.push({
+          location,
+          uses: value,
+          inputs:
+            inputs !== null &&
+            typeof inputs === "object" &&
+            !Array.isArray(inputs)
+              ? inputs
+              : null,
+        });
+      }
+      walk(value, location === "" ? key : `${location}.${key}`);
     }
   };
-  walk(document);
+  walk(document, "");
   return found;
 }
+
+const usesInDocument = (document) =>
+  usesNodes(document).map((node) => node.uses);
 
 /**
  * Split a `uses:` reference into `{name, ref}`, or null when it names no remote
