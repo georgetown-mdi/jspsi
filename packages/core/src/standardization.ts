@@ -2363,27 +2363,74 @@ class AccumulatedCandidatesDrop extends Error {
 }
 
 /**
- * How many rows one key round reports in full before it states the rest as a
- * count. The bounds a drop is taken at are crossed by the SHAPE of the terms and
- * the data, so terms that put every row over one of them drop every row: without
- * a ceiling here the operator's log holds one line per row per key, at a volume
- * the partner's authored terms choose. A handful of lines shows which rows and
- * which bound; the round's closing summary ({@link summarizeKeyRoundDrops})
- * states the totals the suppressed lines would have counted out one at a time.
+ * How many rows one key round reports in full, per kind of row line, before it
+ * states the rest as a count. The bounds a drop is taken at, and the count that
+ * makes a row wide, are crossed by the SHAPE of the terms and the data, so terms
+ * that put every row over one of them reach every row: without a ceiling here the
+ * operator's log holds one line per row per key, at a volume the partner's
+ * authored terms choose. A handful of lines shows which rows and which bound; the
+ * round's closing summaries ({@link summarizeKeyRoundDrops},
+ * {@link summarizeKeyRoundWideRows}) state the totals the suppressed lines would
+ * have counted out one at a time.
  */
-export const MAX_DROP_LINES_PER_KEY_ROUND = 5;
+export const MAX_ROW_LINES_PER_KEY_ROUND = 5;
 
-// What one key round has dropped: every row it dropped, how many of those it
-// named in a line of their own, and the dropped total its last closing line
-// stated. The last two are separate notions -- the individual-line allowance
-// stops at MAX_DROP_LINES_PER_KEY_ROUND while the watermark follows the total --
-// so a round closed twice states each further drop once and against the right
-// number. One tally per ROUND rather than per key, so a sender and a receiver
-// reading the same key object in one process keep their counts apart.
-interface KeyRoundDropTally {
-  dropped: number;
+// What one key round has counted at one of its row sinks: every row the sink
+// reached, how many of those it named in a line of their own, and the total its
+// last closing line stated. The last two are separate notions -- the
+// individual-line allowance stops at MAX_ROW_LINES_PER_KEY_ROUND while the
+// watermark follows the total -- so a round closed twice states each further row
+// once and against the right number. One tally per ROUND rather than per key, so
+// a sender and a receiver reading the same key object in one process keep their
+// counts apart, and one per sink, so a round's drops and its wide rows spend
+// their allowances independently.
+interface KeyRoundRowTally {
+  rows: number;
   reportedIndividually: number;
   summarizedThrough: number;
+}
+
+function newKeyRoundRowTally(): KeyRoundRowTally {
+  return { rows: 0, reportedIndividually: 0, summarizedThrough: 0 };
+}
+
+// Count one row at a sink and answer whether the round still has an individual
+// line to spend on it.
+function chargeKeyRoundRowLine(tally: KeyRoundRowTally): boolean {
+  tally.rows += 1;
+  if (tally.reportedIndividually >= MAX_ROW_LINES_PER_KEY_ROUND) return false;
+  tally.reportedIndividually += 1;
+  return true;
+}
+
+// The counts a sink's closing line has left to state, or `undefined` where its
+// individual lines and its earlier summaries already covered every row it
+// counted. `sinceLastSummary` is set only past a round's first summary, which is
+// the one measured against the individual-line allowance. Advancing the watermark
+// to the counted total makes a close idempotent -- a second call has nothing left
+// to state -- so a caller may close a round it has already closed, and a round
+// that goes on counting past a close covers the further rows at its next one.
+interface PendingKeyRoundRowSummary {
+  readonly total: number;
+  readonly beyondIndividualLines: number;
+  readonly sinceLastSummary: number | undefined;
+}
+
+function takePendingKeyRoundRowSummary(
+  tally: KeyRoundRowTally,
+): PendingKeyRoundRowSummary | undefined {
+  const covered = Math.max(tally.reportedIndividually, tally.summarizedThrough);
+  if (tally.rows <= covered) return undefined;
+  const summarizedThroughBefore = tally.summarizedThrough;
+  tally.summarizedThrough = tally.rows;
+  return {
+    total: tally.rows,
+    beyondIndividualLines: tally.rows - tally.reportedIndividually,
+    sinceLastSummary:
+      summarizedThroughBefore === 0
+        ? undefined
+        : tally.rows - summarizedThroughBefore,
+  };
 }
 
 // A record whose candidate set for one key is too wide contributes nothing to
@@ -2391,56 +2438,97 @@ interface KeyRoundDropTally {
 // value for the key does. The row index and the derived counts name no value; the
 // key name is partner-authored free text, so it is escaped at this sink.
 function dropRowFromKeyRound(
-  tally: KeyRoundDropTally,
+  tally: KeyRoundRowTally,
   key: LinkageKey,
   index: number,
   reason: string,
 ): null {
-  tally.dropped += 1;
-  if (tally.reportedIndividually < MAX_DROP_LINES_PER_KEY_ROUND) {
-    tally.reportedIndividually += 1;
+  if (chargeKeyRoundRowLine(tally))
     logger.warn(
       `row ${index}, key "${redactAndSanitizeForDisplay(key.name)}": ` +
         `${reason}, so the record contributes no value to this key's round ` +
         "and remains eligible for later keys",
     );
-  }
   return null;
 }
 
-// The round's closing line for the rows its sink counted but neither named
+// The round's closing line for the rows its drop sink counted but neither named
 // individually nor already summarized, on the same logger and level those lines
-// use. It names counts and the key alone, as they do. Advancing the watermark to
-// the dropped total makes it idempotent -- a second call has nothing left to
-// state -- so a caller may close a round it has already closed. A round that goes
-// on dropping past a close covers the further rows at its next one, worded as a
-// count against that earlier line's total rather than against the exhausted
-// individual-line allowance, which only the first summary is measured from.
+// use. It names counts and the key alone, as they do.
 function summarizeKeyRoundDrops(
   key: LinkageKey,
-  tally: KeyRoundDropTally,
+  tally: KeyRoundRowTally,
 ): void {
-  const covered = Math.max(tally.reportedIndividually, tally.summarizedThrough);
-  if (tally.dropped <= covered) return;
-  const summarizedThroughBefore = tally.summarizedThrough;
-  tally.summarizedThrough = tally.dropped;
+  const pending = takePendingKeyRoundRowSummary(tally);
+  if (pending === undefined) return;
   const escapedName = redactAndSanitizeForDisplay(key.name);
   const eligibility =
     "; each contributes no value to this key's round and remains eligible " +
     "for later keys";
-  if (summarizedThroughBefore === 0)
+  if (pending.sinceLastSummary === undefined)
     logger.warn(
-      `key "${escapedName}": ${tally.dropped} rows dropped from this key's ` +
-        `round, ${tally.dropped - tally.reportedIndividually} of them beyond ` +
-        `the ${MAX_DROP_LINES_PER_KEY_ROUND} reported individually` +
+      `key "${escapedName}": ${pending.total} rows dropped from this key's ` +
+        `round, ${pending.beyondIndividualLines} of them beyond ` +
+        `the ${MAX_ROW_LINES_PER_KEY_ROUND} reported individually` +
         eligibility,
     );
   else
     logger.warn(
-      `key "${escapedName}": ${tally.dropped - summarizedThroughBefore} ` +
+      `key "${escapedName}": ${pending.sinceLastSummary} ` +
         "further rows dropped from this key's round since its last summary, " +
-        `${tally.dropped} in total` +
+        `${pending.total} in total` +
         eligibility,
+    );
+}
+
+// The privacy advisory for a record whose assembled candidate set is wide, and
+// which still contributes every one of those candidates to the round -- the
+// counterpart of the drop sink above, coalesced the same way and for the same
+// reason: the count that makes a row wide is a property of the partner-authored
+// terms, so terms that widen every row would otherwise put one line per row in
+// front of the operator. The row index and the count name no value; the key name
+// is escaped as it is at the drop sink.
+function warnWideRowInKeyRound(
+  tally: KeyRoundRowTally,
+  key: LinkageKey,
+  index: number,
+  realized: number,
+): void {
+  if (!chargeKeyRoundRowLine(tally)) return;
+  logger.warn(
+    `row ${index}, key "${redactAndSanitizeForDisplay(key.name)}": ` +
+      `cross-product produced ${realized} key strings ` +
+      `(>${FAN_OUT_CANDIDATES_PER_ELEMENT}); a wide per-record expansion in ` +
+      "dual-party-output exchanges may degrade privacy guarantees",
+  );
+}
+
+// The wide-row sink's closing line, on the drop summary's own footing.
+function summarizeKeyRoundWideRows(
+  key: LinkageKey,
+  tally: KeyRoundRowTally,
+): void {
+  const pending = takePendingKeyRoundRowSummary(tally);
+  if (pending === undefined) return;
+  const escapedName = redactAndSanitizeForDisplay(key.name);
+  const privacy =
+    "; a wide per-record expansion in dual-party-output exchanges may " +
+    "degrade privacy guarantees";
+  if (pending.sinceLastSummary === undefined)
+    logger.warn(
+      `key "${escapedName}": ${pending.total} rows produced more than ` +
+        `${FAN_OUT_CANDIDATES_PER_ELEMENT} key strings in this key's round, ` +
+        `${pending.beyondIndividualLines} of them beyond the ` +
+        `${MAX_ROW_LINES_PER_KEY_ROUND} reported individually` +
+        privacy,
+    );
+  else
+    logger.warn(
+      `key "${escapedName}": ${pending.sinceLastSummary} further rows ` +
+        "produced more than " +
+        `${FAN_OUT_CANDIDATES_PER_ELEMENT} key strings in this key's round ` +
+        `since its last summary, ${pending.total} in total` +
+        privacy,
     );
 }
 
@@ -2484,7 +2572,14 @@ interface KeyReadPlan {
    * outgrow the slot bound the partner derives.
    */
   readonly width: number;
-  readonly drops: KeyRoundDropTally;
+  readonly drops: KeyRoundRowTally;
+  /**
+   * The rows this round assembled a wide candidate set for, counted at the
+   * privacy advisory's own sink so its allowance and its closing line are
+   * independent of the drops beside it: a round can drop rows and widen others,
+   * and neither total is a slice of the other.
+   */
+  readonly wideRows: KeyRoundRowTally;
 }
 
 // The expansion each element position actually applies, positionally aligned with
@@ -2557,7 +2652,8 @@ function planKeyRead(
     width:
       declaredKeyWidth(key, keyIndex) *
       localFanOutFactor(dataset.declaresFanOut),
-    drops: { dropped: 0, reportedIndividually: 0, summarizedThrough: 0 },
+    drops: newKeyRoundRowTally(),
+    wideRows: newKeyRoundRowTally(),
   };
 }
 
@@ -2608,11 +2704,11 @@ function planKeyRead(
  * `APPLIED_SETTINGS.fuzzyComparisons`: while that is false a fuzzy element builds
  * the same single key string as an element without one.
  *
- * One call is a round of its own, so a drop it takes is always reported in full:
- * a caller building a whole round row by row through this entry point reports one
- * line per dropped row, where {@link StandardizedKeyIterable} -- the round the
- * exchange runs -- reports the first {@link MAX_DROP_LINES_PER_KEY_ROUND} and
- * summarizes the rest.
+ * One call is a round of its own, so a drop it takes and a wide-row advisory it
+ * raises are always reported in full: a caller building a whole round row by row
+ * through this entry point reports one line per such row, where
+ * {@link StandardizedKeyIterable} -- the round the exchange runs -- reports the
+ * first {@link MAX_ROW_LINES_PER_KEY_ROUND} of each and summarizes the rest.
  */
 export function buildKeyStrings(
   key: LinkageKey,
@@ -2643,6 +2739,7 @@ function buildKeyStringsUnderPlan(
     fate,
     width,
     drops,
+    wideRows,
   }: KeyReadPlan,
   dataset: StandardizedDataset,
   index: number,
@@ -2923,12 +3020,7 @@ function buildKeyStringsUnderPlan(
   // whatever its key's width, where reading the width would put a privacy line
   // in front of the operator for every row two candidates wide on a width-1 key.
   if (result.size > FAN_OUT_CANDIDATES_PER_ELEMENT)
-    logger.warn(
-      `row ${index}, key "${redactAndSanitizeForDisplay(key.name)}": ` +
-        `cross-product produced ${result.size} key strings ` +
-        `(>${FAN_OUT_CANDIDATES_PER_ELEMENT}); a wide per-record expansion in ` +
-        "dual-party-output exchanges may degrade privacy guarantees",
-    );
+    warnWideRowInKeyRound(wideRows, key, index, result.size);
 
   return result;
 }
@@ -3022,20 +3114,33 @@ export class StandardizedKeyIterable {
   }
 
   /**
-   * Close the round's drop reporting, emitting one summary line for the rows
-   * dropped past the {@link MAX_DROP_LINES_PER_KEY_ROUND} reported in full.
-   * Silent for a round that dropped nothing, or few enough to have reported
-   * every one, and idempotent. A round read on past a close covers the rows it
-   * drops after it at its next close, counted against the total that line
-   * stated.
+   * Close the round's per-row reporting, emitting one summary line per sink for
+   * the rows it counted past the {@link MAX_ROW_LINES_PER_KEY_ROUND} it reported
+   * in full: the rows dropped from the round, and the rows whose assembled
+   * candidate set was wide enough to raise the privacy advisory. Each sink is
+   * silent where it counted nothing, or few enough to have reported every one,
+   * and each is idempotent. A round read on past a close covers the rows it
+   * counts after it at its next close, against the total that line stated.
    *
    * The consumer calls it: a round is read by index as well as by iteration
    * (the cascade reads only the rows still unmatched after the previous key), so
    * the rows this round will be asked for are the consumer's to know, not this
    * object's.
+   *
+   * The two lines go to one logger, each caught on its own, so a sink that
+   * refuses one still receives the other; this method never throws.
    */
-  summarizeDroppedRows(): void {
-    if (this.plan !== undefined)
+  closeRowReporting(): void {
+    if (this.plan === undefined) return;
+    try {
       summarizeKeyRoundDrops(this.key, this.plan.drops);
+    } catch {
+      // Nothing to report it through: the reporting channel is what failed.
+    }
+    try {
+      summarizeKeyRoundWideRows(this.key, this.plan.wideRows);
+    } catch {
+      // Nothing to report it through: the reporting channel is what failed.
+    }
   }
 }

@@ -1,19 +1,20 @@
 import { afterEach, expect, test, vi } from "vitest";
 
-// The drop reporting a whole RUN produces, over a real message pipe and a real
-// PSI library: the per-row lines are bounded and the round's totals reach the
-// operator, on terms whose fan-out puts every row over the width bound. The
-// round-level behaviour is pinned in standardizedKeyIterable.test.ts; what this
-// file adds is what only the exchange exercises -- that a run closes its rounds
-// at all, that a run whose PSI phase throws closes them too, and that a sink
-// refusing one close costs neither the failure nor the rounds behind it.
+// The per-row reporting a whole RUN produces, over a real message pipe and a
+// real PSI library: the per-row lines are bounded and the round's totals reach
+// the operator, on terms whose fan-out puts every row over the width bound and
+// on terms that widen every row without dropping one. The round-level behaviour
+// is pinned in standardizedKeyIterable.test.ts; what this file adds is what only
+// the exchange exercises -- that a run closes its rounds at all, that a run whose
+// PSI phase throws closes them too, and that a sink refusing one close costs
+// neither the failure nor the rounds behind it.
 
 import PSI from "@openmined/psi.js";
 
 import { prepareForExchange, runExchange } from "../src/exchange";
 import { createMessagePipe } from "../src/connection/messageConnection";
 import {
-  MAX_DROP_LINES_PER_KEY_ROUND,
+  MAX_ROW_LINES_PER_KEY_ROUND,
   FAN_OUT_CANDIDATES_PER_ELEMENT,
 } from "../src/standardization";
 import { getLogger } from "../src/utils/logger";
@@ -74,7 +75,7 @@ const twoKeyTerms = {
   ],
 };
 
-const rowCount = MAX_DROP_LINES_PER_KEY_ROUND * 3;
+const rowCount = MAX_ROW_LINES_PER_KEY_ROUND * 3;
 
 const overWideRows = (party: string) =>
   Array.from({ length: rowCount }, (_unused, row) => ({
@@ -146,7 +147,7 @@ test("a run that drops every row reports a few of them and one summary", async (
 
   // Two parties, each reporting its own round's allowance and one summary --
   // 30 dropped rows behind 10 lines and 2 summaries.
-  expect(perRow).toHaveLength(MAX_DROP_LINES_PER_KEY_ROUND * 2);
+  expect(perRow).toHaveLength(MAX_ROW_LINES_PER_KEY_ROUND * 2);
   expect(summaries).toHaveLength(2);
   for (const summary of summaries) {
     expect(summary).toContain(`${rowCount} rows dropped`);
@@ -193,7 +194,7 @@ test("a run that throws still summarizes each round it opened, once", async () =
     .map((call) => call[0] as string)
     .filter((message) => message.includes('key "firstName"'));
   expect(drops.filter((message) => message.startsWith("row "))).toHaveLength(
-    MAX_DROP_LINES_PER_KEY_ROUND * 2,
+    MAX_ROW_LINES_PER_KEY_ROUND * 2,
   );
   const summaries = drops.filter((message) => message.includes("rows dropped"));
   expect(summaries).toHaveLength(2);
@@ -268,4 +269,98 @@ test("a summary line the sink refuses costs no other round its close", async () 
   expect(closed).toHaveLength(2);
   for (const summary of closed)
     expect(summary).toContain(`${rowCount} rows dropped`);
+});
+
+// A key wide enough to hold every candidate its rows realize, so each row is
+// warned as wide and still contributes all of them -- the advisory rather than
+// the drop, coalesced the same way and closed by the same teardown.
+const wideAdvisoryTerms = {
+  ...terms,
+  linkageFields: [
+    { name: "firstName", type: "first_name" as const },
+    { name: "lastName", type: "last_name" as const },
+  ],
+  linkageKeys: [
+    {
+      name: "firstName + lastName",
+      elements: [
+        {
+          field: "firstName",
+          transform: [{ function: "split_on", params: { delimiter: " " } }],
+        },
+        {
+          field: "lastName",
+          transform: [{ function: "split_on", params: { delimiter: " " } }],
+        },
+      ],
+    },
+  ],
+};
+
+const wideAdvisoryRows = (party: string) =>
+  Array.from({ length: rowCount }, (_unused, row) => ({
+    first_name: Array.from(
+      { length: FAN_OUT_CANDIDATES_PER_ELEMENT + 1 },
+      (_u, token) => `${party}${row}token${token}`,
+    ).join(" "),
+    last_name: `${party}sole${row}`,
+  }));
+
+test("a run whose rows are wide reports a few of them and one summary", async () => {
+  const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+  const [connInitiator, connResponder] = createMessagePipe();
+  const [initiator, responder] = await Promise.all([
+    runExchange(
+      connInitiator,
+      "initiator",
+      prepareForExchange(
+        {
+          linkageTerms: {
+            ...wideAdvisoryTerms,
+            identity: "Initiator Co",
+            output: both,
+          },
+        },
+        "Initiator Co",
+        wideAdvisoryRows("i"),
+        ["first_name", "last_name"],
+      ),
+      { psiLibrary },
+    ),
+    runExchange(
+      connResponder,
+      "responder",
+      prepareForExchange(
+        {
+          linkageTerms: {
+            ...wideAdvisoryTerms,
+            identity: "Responder Co",
+            output: both,
+          },
+        },
+        "Responder Co",
+        wideAdvisoryRows("r"),
+        ["first_name", "last_name"],
+      ),
+      { psiLibrary },
+    ),
+  ]);
+
+  // Every row contributed its whole candidate set; the two parties share no
+  // value, so nothing matched.
+  expect(initiator.associationTable).toEqual([[], []]);
+  expect(responder.associationTable).toEqual([[], []]);
+
+  const lines = warn.mock.calls.map((call) => call[0] as string);
+  expect(
+    lines.filter((line) => line.includes("cross-product produced 21")),
+  ).toHaveLength(MAX_ROW_LINES_PER_KEY_ROUND * 2);
+  const summaries = lines.filter((line) =>
+    line.includes("key strings in this key's round"),
+  );
+  expect(summaries).toHaveLength(2);
+  for (const summary of summaries) {
+    expect(summary).toContain(`${rowCount} rows produced more than 20`);
+    expect(summary).not.toMatch(/token/i);
+  }
 });

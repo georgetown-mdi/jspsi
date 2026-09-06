@@ -2,7 +2,7 @@ import { expect, test, describe, afterEach, vi } from "vitest";
 
 import {
   buildStandardizedDataset,
-  MAX_DROP_LINES_PER_KEY_ROUND,
+  MAX_ROW_LINES_PER_KEY_ROUND,
   StandardizedDataset,
   StandardizedField,
   StandardizedKeyIterable,
@@ -287,7 +287,7 @@ describe("StandardizedKeyIterable — drop reporting over a whole round", () => 
   // row in front of the operator, regardless of dataset size.
   const logger = getLogger("cleaning");
   const key = terms.linkageKeys[0];
-  const rowCount = MAX_DROP_LINES_PER_KEY_ROUND * 3;
+  const rowCount = MAX_ROW_LINES_PER_KEY_ROUND * 3;
   const wideRows = Array.from({ length: rowCount }, (_unused, row) => ({
     ssn: `55981130${row}`,
     last_name: Array.from({ length: 21 }, (_u, i) => `N${row}x${i}`).join("-"),
@@ -315,19 +315,19 @@ describe("StandardizedKeyIterable — drop reporting over a whole round", () => 
     const iter = new StandardizedKeyIterable(key, wideDataset(), rowCount);
     expect([...iter].every((value) => value === undefined)).toBe(true);
     // Every row dropped, and only the allowance was reported one at a time.
-    expect(warn).toHaveBeenCalledTimes(MAX_DROP_LINES_PER_KEY_ROUND);
+    expect(warn).toHaveBeenCalledTimes(MAX_ROW_LINES_PER_KEY_ROUND);
     for (const [row, call] of warn.mock.calls.entries())
       expect(call[0]).toMatch(
         new RegExp(`^row ${row}, key "SSN \\+ LN \\+ DOB": realizes 21 `),
       );
 
-    iter.summarizeDroppedRows();
-    expect(warn).toHaveBeenCalledTimes(MAX_DROP_LINES_PER_KEY_ROUND + 1);
-    const summary = warn.mock.calls[MAX_DROP_LINES_PER_KEY_ROUND][0] as string;
+    iter.closeRowReporting();
+    expect(warn).toHaveBeenCalledTimes(MAX_ROW_LINES_PER_KEY_ROUND + 1);
+    const summary = warn.mock.calls[MAX_ROW_LINES_PER_KEY_ROUND][0] as string;
     expect(summary).toContain(`key "${key.name}"`);
     expect(summary).toContain(`${rowCount} rows dropped`);
     expect(summary).toContain(
-      `${rowCount - MAX_DROP_LINES_PER_KEY_ROUND} of them beyond`,
+      `${rowCount - MAX_ROW_LINES_PER_KEY_ROUND} of them beyond`,
     );
     // The summary names no value, exactly as the individual lines do not:
     // the rows it stands for hold this party's own data.
@@ -340,7 +340,7 @@ describe("StandardizedKeyIterable — drop reporting over a whole round", () => 
     const info = vi.spyOn(logger, "info").mockImplementation(() => {});
     const iter = new StandardizedKeyIterable(key, wideDataset(), rowCount);
     for (const _value of iter);
-    iter.summarizeDroppedRows();
+    iter.closeRowReporting();
     expect(warn.mock.calls.at(-1)?.[0]).toContain("rows dropped");
     expect(info).not.toHaveBeenCalled();
   });
@@ -349,19 +349,19 @@ describe("StandardizedKeyIterable — drop reporting over a whole round", () => 
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
     const iter = new StandardizedKeyIterable(key, wideDataset(), rowCount);
     for (const _value of iter);
-    iter.summarizeDroppedRows();
-    iter.summarizeDroppedRows();
-    expect(warn).toHaveBeenCalledTimes(MAX_DROP_LINES_PER_KEY_ROUND + 1);
+    iter.closeRowReporting();
+    iter.closeRowReporting();
+    expect(warn).toHaveBeenCalledTimes(MAX_ROW_LINES_PER_KEY_ROUND + 1);
   });
 
   test("a round closed again after further drops counts them as a delta", () => {
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
     const iter = new StandardizedKeyIterable(key, wideDataset(), rowCount);
-    const firstBatch = MAX_DROP_LINES_PER_KEY_ROUND * 2;
+    const firstBatch = MAX_ROW_LINES_PER_KEY_ROUND * 2;
     for (let row = 0; row < firstBatch; row++) iter.at(row);
-    iter.summarizeDroppedRows();
+    iter.closeRowReporting();
     for (let row = firstBatch; row < rowCount; row++) iter.at(row);
-    iter.summarizeDroppedRows();
+    iter.closeRowReporting();
 
     const summaries = warn.mock.calls
       .map((call) => call[0] as string)
@@ -369,8 +369,8 @@ describe("StandardizedKeyIterable — drop reporting over a whole round", () => 
     expect(summaries).toHaveLength(2);
     expect(summaries[0]).toContain(`${firstBatch} rows dropped`);
     expect(summaries[0]).toContain(
-      `${firstBatch - MAX_DROP_LINES_PER_KEY_ROUND} of them beyond the ` +
-        `${MAX_DROP_LINES_PER_KEY_ROUND} reported individually`,
+      `${firstBatch - MAX_ROW_LINES_PER_KEY_ROUND} of them beyond the ` +
+        `${MAX_ROW_LINES_PER_KEY_ROUND} reported individually`,
     );
     // The allowance was spent before the second batch, so the second
     // summary line counts its rows against the total the first one held,
@@ -383,16 +383,16 @@ describe("StandardizedKeyIterable — drop reporting over a whole round", () => 
   test("a round under the allowance closes with no summary at all", () => {
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
     const iter = new StandardizedKeyIterable(key, wideDataset(), rowCount);
-    for (let row = 0; row < MAX_DROP_LINES_PER_KEY_ROUND; row++) iter.at(row);
-    iter.summarizeDroppedRows();
-    expect(warn).toHaveBeenCalledTimes(MAX_DROP_LINES_PER_KEY_ROUND);
+    for (let row = 0; row < MAX_ROW_LINES_PER_KEY_ROUND; row++) iter.at(row);
+    iter.closeRowReporting();
+    expect(warn).toHaveBeenCalledTimes(MAX_ROW_LINES_PER_KEY_ROUND);
   });
 
   test("a round that dropped nothing closes silently", () => {
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
     const iter = new StandardizedKeyIterable(key, dataset, rawRows.length);
     for (const _value of iter);
-    iter.summarizeDroppedRows();
+    iter.closeRowReporting();
     expect(warn).not.toHaveBeenCalled();
   });
 
@@ -405,8 +405,8 @@ describe("StandardizedKeyIterable — drop reporting over a whole round", () => 
     const receiver = new StandardizedKeyIterable(key, shared, rowCount, true);
     for (const _value of sender);
     for (const _value of receiver);
-    sender.summarizeDroppedRows();
-    receiver.summarizeDroppedRows();
+    sender.closeRowReporting();
+    receiver.closeRowReporting();
     const summaries = warn.mock.calls
       .map((call) => call[0] as string)
       .filter((message) => message.includes("rows dropped"));
@@ -430,10 +430,10 @@ describe("StandardizedKeyIterable — drop reporting over a whole round", () => 
       rowCount,
     );
     for (const _value of iter);
-    iter.summarizeDroppedRows();
+    iter.closeRowReporting();
 
     const lines = warn.mock.calls.map((call) => call[0] as string);
-    expect(lines).toHaveLength(MAX_DROP_LINES_PER_KEY_ROUND + 1);
+    expect(lines).toHaveLength(MAX_ROW_LINES_PER_KEY_ROUND + 1);
     for (const line of lines) {
       expect(line).toContain(`key "${escapedName}"`);
       expect(line).not.toContain(bell);
@@ -511,5 +511,221 @@ describe("StandardizedKeyIterable — an element transform that cannot compile",
   test("refuses at the first row read rather than at construction", () => {
     const iter = new StandardizedKeyIterable(key, dataset, rawRows.length);
     expect(() => iter.at(0)).toThrow("unknown standardization function");
+  });
+});
+
+describe("StandardizedKeyIterable — wide-row advisory over a whole round", () => {
+  // A key wide enough to hold every candidate the rows below realize, so the
+  // rows are warned as wide and still contribute all of them -- the advisory's
+  // own shape, distinct from the drop, and the reason it needs a coalescing of
+  // its own rather than sharing the drop sink's.
+  const logger = getLogger("cleaning");
+  const wideAdvisoryKey = {
+    name: "LN + FN",
+    elements: [
+      {
+        field: "lastName",
+        transform: [{ function: "split_on", params: { delimiter: "-" } }],
+      },
+      {
+        field: "firstName",
+        transform: [{ function: "split_on", params: { delimiter: "-" } }],
+      },
+    ],
+  };
+  const rowCount = MAX_ROW_LINES_PER_KEY_ROUND * 3;
+
+  // 21 candidates crossed with one: over the 20 the advisory is measured
+  // against, and far inside the 400 this key's two declared producers buy it.
+  const rowsRealizing = (parts: number) =>
+    Array.from({ length: rowCount }, (_unused, row) => ({
+      last_name: Array.from({ length: parts }, (_u, i) =>
+        `N${row}x${i}`.padEnd(8, "z"),
+      ).join("-"),
+      first_name: `SOLE${row}`,
+    }));
+
+  const datasetOf = (rows: ReadonlyArray<Record<string, string>>) =>
+    new StandardizedDataset(
+      [
+        new StandardizedField("lastName", "last_name", [], rows),
+        new StandardizedField("firstName", "first_name", [], rows),
+      ],
+      [wideAdvisoryKey],
+    );
+
+  afterEach(() => vi.restoreAllMocks());
+
+  test("reports the first few wide rows in full and the rest as one summary", () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const iter = new StandardizedKeyIterable(
+      wideAdvisoryKey,
+      datasetOf(rowsRealizing(21)),
+      rowCount,
+    );
+    // Every row contributed its whole candidate set: the advisory reports a
+    // width, it does not withhold one.
+    for (const value of iter)
+      expect((value as ReadonlySet<string>).size).toBe(21);
+    expect(warn).toHaveBeenCalledTimes(MAX_ROW_LINES_PER_KEY_ROUND);
+    for (const [row, call] of warn.mock.calls.entries())
+      expect(call[0]).toMatch(
+        new RegExp(
+          `^row ${row}, key "LN \\+ FN": cross-product produced 21 key strings`,
+        ),
+      );
+
+    iter.closeRowReporting();
+    const summary = warn.mock.calls[MAX_ROW_LINES_PER_KEY_ROUND][0] as string;
+    expect(warn).toHaveBeenCalledTimes(MAX_ROW_LINES_PER_KEY_ROUND + 1);
+    expect(summary).toContain(`key "${wideAdvisoryKey.name}"`);
+    expect(summary).toContain(`${rowCount} rows produced more than 20`);
+    expect(summary).toContain(
+      `${rowCount - MAX_ROW_LINES_PER_KEY_ROUND} of them beyond`,
+    );
+    // The rows the summary stands for hold this party's own data, so it names
+    // none of their values, exactly as the individual lines do not.
+    expect(summary).not.toContain("N0x");
+    expect(summary).not.toContain("SOLE");
+  });
+
+  test("a round closed again after further wide rows counts them as a delta", () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const iter = new StandardizedKeyIterable(
+      wideAdvisoryKey,
+      datasetOf(rowsRealizing(21)),
+      rowCount,
+    );
+    const firstBatch = MAX_ROW_LINES_PER_KEY_ROUND * 2;
+    for (let row = 0; row < firstBatch; row++) iter.at(row);
+    iter.closeRowReporting();
+    iter.closeRowReporting();
+    for (let row = firstBatch; row < rowCount; row++) iter.at(row);
+    iter.closeRowReporting();
+
+    const summaries = warn.mock.calls
+      .map((call) => call[0] as string)
+      .filter((message) => message.includes("key strings in this key's round"));
+    expect(summaries).toHaveLength(2);
+    expect(summaries[0]).toContain(`${firstBatch} rows produced more than 20`);
+    expect(summaries[1]).toContain(`${rowCount - firstBatch} further rows`);
+    expect(summaries[1]).toContain(`${rowCount} in total`);
+  });
+
+  test("a round with no wide row closes silently", () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const iter = new StandardizedKeyIterable(
+      wideAdvisoryKey,
+      datasetOf(rowsRealizing(2)),
+      rowCount,
+    );
+    for (const _value of iter);
+    iter.closeRowReporting();
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  test("the drop and the advisory spend their allowances apart", () => {
+    // A round can drop some rows and widen others, and neither total is a slice
+    // of the other, so each sink reports its own allowance and its own summary.
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const rows = rowsRealizing(21).map((row, index) =>
+      index % 2 === 0
+        ? row
+        : {
+            ...row,
+            last_name: Array.from({ length: 401 }, (_u, i) =>
+              `D${index}x${i}`.padEnd(8, "z"),
+            ).join("-"),
+          },
+    );
+    const iter = new StandardizedKeyIterable(
+      wideAdvisoryKey,
+      datasetOf(rows),
+      rowCount,
+    );
+    for (const _value of iter);
+    iter.closeRowReporting();
+
+    const lines = warn.mock.calls.map((call) => call[0] as string);
+    expect(
+      lines.filter((line) =>
+        /^row \d+, key "LN \+ FN": realizes 401/.test(line),
+      ),
+    ).toHaveLength(MAX_ROW_LINES_PER_KEY_ROUND);
+    expect(
+      lines.filter((line) => line.includes("cross-product produced 21")),
+    ).toHaveLength(MAX_ROW_LINES_PER_KEY_ROUND);
+    expect(
+      lines.filter((line) =>
+        line.includes("rows dropped from this key's round"),
+      ),
+    ).toHaveLength(1);
+    expect(
+      lines.filter((line) => line.includes("key strings in this key's round")),
+    ).toHaveLength(1);
+  });
+
+  const dropSomeWidenOthers = () =>
+    rowsRealizing(21).map((row, index) =>
+      index % 2 === 0
+        ? row
+        : {
+            ...row,
+            last_name: Array.from({ length: 401 }, (_u, i) =>
+              `D${index}x${i}`.padEnd(8, "z"),
+            ).join("-"),
+          },
+    );
+
+  test("a sink that refuses the drop summary still receives the wide-row summary", () => {
+    const warn = vi
+      .spyOn(logger, "warn")
+      .mockImplementation((...args: unknown[]) => {
+        if ((args[0] as string).includes("rows dropped from this key's round"))
+          throw new Error("the diagnostic sink refused the drop summary");
+      });
+    const iter = new StandardizedKeyIterable(
+      wideAdvisoryKey,
+      datasetOf(dropSomeWidenOthers()),
+      rowCount,
+    );
+    for (const _value of iter);
+    expect(() => iter.closeRowReporting()).not.toThrow();
+
+    const lines = warn.mock.calls.map((call) => call[0] as string);
+    expect(
+      lines.filter((line) =>
+        line.includes("rows dropped from this key's round"),
+      ),
+    ).toHaveLength(1);
+    expect(
+      lines.filter((line) => line.includes("key strings in this key's round")),
+    ).toHaveLength(1);
+  });
+
+  test("a sink that refuses the wide-row summary still receives the drop summary", () => {
+    const warn = vi
+      .spyOn(logger, "warn")
+      .mockImplementation((...args: unknown[]) => {
+        if ((args[0] as string).includes("key strings in this key's round"))
+          throw new Error("the diagnostic sink refused the wide-row summary");
+      });
+    const iter = new StandardizedKeyIterable(
+      wideAdvisoryKey,
+      datasetOf(dropSomeWidenOthers()),
+      rowCount,
+    );
+    for (const _value of iter);
+    expect(() => iter.closeRowReporting()).not.toThrow();
+
+    const lines = warn.mock.calls.map((call) => call[0] as string);
+    expect(
+      lines.filter((line) =>
+        line.includes("rows dropped from this key's round"),
+      ),
+    ).toHaveLength(1);
+    expect(
+      lines.filter((line) => line.includes("key strings in this key's round")),
+    ).toHaveLength(1);
   });
 });
