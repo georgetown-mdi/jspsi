@@ -111,14 +111,14 @@ jobs:
         uses: docker/setup-buildx-action@v4
 
       # The scan gate, ahead of every registry step below on purpose: a release
-      # whose image carries a fixable HIGH or CRITICAL OS-layer vulnerability
-      # never reaches Docker Hub at all, rather than being pushed under `latest`
-      # and then withheld from signing. Nothing in this job has authenticated to
-      # the registry yet when it runs. The publish sequence below holds the same
-      # property once the gate is past: each image is signed and attested
-      # immediately after its own push, so the window in which a published image
-      # is unsigned is that image's own signing step and nothing else -- never
-      # another artifact's build.
+      # whose image carries a fixable HIGH or CRITICAL vulnerability in an OS or
+      # language package never reaches Docker Hub at all, rather than being pushed
+      # under `latest` and then withheld from signing. Nothing in this job has
+      # authenticated to the registry yet when it runs. The publish sequence below
+      # holds the same property once the gate is past: each image is signed and
+      # attested immediately after its own push, so the window in which a published
+      # image is unsigned is that image's own signing step and nothing else --
+      # never another artifact's build.
       #
       # The scan needs an image to read, so this builds one single-arch and
       # loads it -- the same shape image_smoke.yaml uses for its pre-merge scan.
@@ -173,8 +173,9 @@ jobs:
 
       # Same scanner, threshold and exception list as the pull-request gate in
       # image_smoke.yaml, which carries why each input is set the way it is.
-      # This is the ship-gate half: a base image pinned months before the tag can
-      # have acquired a vulnerability since the pull request that set the pin.
+      # This is the ship-gate half: a base image pinned months before the tag, or
+      # a lockfile resolved as long ago, can have acquired a vulnerability since
+      # the pull request that set it.
       #
       # One gate per published image, and both ahead of the login below, so a
       # fixable HIGH or CRITICAL in either package closure stops the whole
@@ -184,7 +185,7 @@ jobs:
       # either gate still lets the surviving sibling build, scan, and report --
       # a blocked release reports what both images carry and the maintainer
       # bumps both pins in one pass instead of one per attempt.
-      - name: Scan the release image for OS-layer vulnerabilities
+      - name: Scan the release image for vulnerable packages
         id: vulnerability_scan
         if: ${{ !cancelled() && steps.default_build.outcome == 'success' }}
         uses: aquasecurity/trivy-action@v0.36.0
@@ -192,7 +193,7 @@ jobs:
           scan-type: image
           image-ref: psi-link:release-candidate
           scanners: vuln
-          vuln-type: os
+          vuln-type: os,library
           severity: HIGH,CRITICAL
           ignore-unfixed: true
           trivyignores: .github/trivyignore.yaml
@@ -200,7 +201,7 @@ jobs:
           format: table
           output: trivy-release-image.txt
 
-      - name: Scan the release FIPS variant image for OS-layer vulnerabilities
+      - name: Scan the release FIPS variant image for vulnerable packages
         id: fips_vulnerability_scan
         if: ${{ !cancelled() && steps.fips_build.outcome == 'success' }}
         uses: aquasecurity/trivy-action@v0.36.0
@@ -208,7 +209,7 @@ jobs:
           scan-type: image
           image-ref: psi-link:fips-release-candidate
           scanners: vuln
-          vuln-type: os
+          vuln-type: os,library
           severity: HIGH,CRITICAL
           ignore-unfixed: true
           trivyignores: .github/trivyignore.yaml
@@ -245,7 +246,7 @@ jobs:
           {
             echo "## Release image vulnerability scans"
             echo
-            echo "Fixable HIGH and CRITICAL vulnerabilities in each image's OS package layer, with the exceptions in \`.github/trivyignore.yaml\` applied."
+            echo "Fixable HIGH and CRITICAL vulnerabilities in each image's OS and language packages, with the exceptions in \`.github/trivyignore.yaml\` applied."
             echo
             report "Default image" "$SCAN_OUTCOME" trivy-release-image.txt
             report "FIPS variant image" "$FIPS_SCAN_OUTCOME" trivy-release-image-fips.txt
