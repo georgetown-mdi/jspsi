@@ -149,6 +149,11 @@ export const CHECKS = [
       "Nitro's experimental.websocket stays off, so nothing attaches a second upgrade listener beside the signaling route.",
   },
   {
+    script: "check:core-barrel-wildcards",
+    description:
+      "packages/core/src/main.ts publishes a named list, with no wildcard re-export putting a module's whole surface on the main entry.",
+  },
+  {
     script: "check:vectors",
     description:
       "Every known-answer vector under packages/core/test/vectors/ still reproduces from its generator.",

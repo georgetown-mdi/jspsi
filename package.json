@@ -39,6 +39,7 @@
     "check:routetree": "node scripts/check-routetree-fresh.mjs",
     "check:web-config-native-load": "node scripts/check-web-config-native-load.mjs",
     "check:nitro-websocket-unset": "node scripts/check-nitro-websocket-unset.mjs",
+    "check:core-barrel-wildcards": "node scripts/check-core-barrel-wildcards.mjs",
     "check:vectors": "node scripts/check-vectors-generators.mjs",
     "check:protocol-version-bump": "node scripts/check-protocol-version-bump.mjs",
     "check:exchange-record-version": "node scripts/check-exchange-record-version.mjs",
