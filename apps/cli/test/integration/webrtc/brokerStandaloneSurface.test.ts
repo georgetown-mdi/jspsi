@@ -7,6 +7,7 @@ import { fileURLToPath } from "node:url";
 import { afterEach, expect, test } from "vitest";
 
 import { startBrokerProcess } from "../../signaling/brokerProcess";
+import { stopChild } from "../../stopChild";
 
 import type { BrokerProcess } from "../../signaling/brokerProcess";
 import type { AddressInfo } from "node:net";
@@ -30,6 +31,12 @@ import type { AddressInfo } from "node:net";
  * does not fail the check, and well under the test timeout, so a runner that
  * went back to holding such a socket fails here rather than hanging. */
 const PRE_HANDSHAKE_HOLD_LIMIT_MS = 25_000;
+
+/** Longest the runner is given to refuse an option and exit. Far above the
+ * start it would otherwise have completed, and well under the test timeout, so
+ * a runner that went back to listening on the defaults fails the check rather
+ * than holding it to the timeout. */
+const REFUSAL_EXIT_TIMEOUT_MS = 15_000;
 
 let broker: BrokerProcess | undefined;
 
@@ -157,16 +164,32 @@ test("refuses an option it cannot act on rather than binding the defaults", asyn
     ],
     { cwd: brokerRoot, stdio: ["ignore", "pipe", "pipe"] },
   );
-  let stdout = "";
-  let stderr = "";
-  child.stdout?.on("data", (data: Buffer) => (stdout += data.toString()));
-  child.stderr?.on("data", (data: Buffer) => (stderr += data.toString()));
-  const code = await new Promise<number | null>((resolve) =>
-    child.once("exit", resolve),
-  );
+  // Unlike the broker handle above, this child has no teardown of its own, so
+  // it is killed on every path out: a runner that stopped refusing would
+  // otherwise be left listening behind a failed assertion.
+  try {
+    let stdout = "";
+    let stderr = "";
+    child.stdout?.on("data", (data: Buffer) => (stdout += data.toString()));
+    child.stderr?.on("data", (data: Buffer) => (stderr += data.toString()));
+    const code = await new Promise<number | null | "still running">(
+      (resolve) => {
+        const giveUp = setTimeout(
+          () => resolve("still running"),
+          REFUSAL_EXIT_TIMEOUT_MS,
+        );
+        child.once("exit", (exitCode) => {
+          clearTimeout(giveUp);
+          resolve(exitCode);
+        });
+      },
+    );
 
-  expect(code).toBe(64);
-  expect(stdout).toBe("");
-  expect(stderr).toContain("[ERROR] [peerjs-broker]");
-  expect(stderr).toContain("--port");
+    expect(code).toBe(64);
+    expect(stdout).toBe("");
+    expect(stderr).toContain("[ERROR] [peerjs-broker]");
+    expect(stderr).toContain("--port");
+  } finally {
+    await stopChild(child);
+  }
 }, 60_000);
