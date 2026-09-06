@@ -720,12 +720,15 @@ jobs:
 
       # Every package the image ships: the base image's system packages, and the
       # language packages inside it -- the production npm tree the builder
-      # installs, and the npm CLI and Node binary the base bundles. Dependabot,
-      # the dependency review gate and the release `npm audit` all read this
-      # repository's own dependency declarations, so nothing else reaches what a
-      # base image brought in. The base is pinned by digest, which is why the
-      # weekly schedule above exists -- a vulnerability published against a pin
-      # nothing has touched has no other trigger.
+      # installs, and the npm CLI's bundled dependencies the base bundles. The
+      # Node binary itself is not a component Trivy catalogs, so a CVE in the
+      # Node runtime is outside this gate and moves only when the pinned base
+      # image's Node version does. Dependabot, the dependency review gate and
+      # the release `npm audit` all read this repository's own dependency
+      # declarations, so nothing else reaches what a base image brought in. The
+      # base is pinned by digest, which is why the weekly schedule above exists
+      # -- a vulnerability published against a pin nothing has touched has no
+      # other trigger.
       #
       # The scope and the threshold, set here rather than left to a default:
       #   - `vuln-type: os,library` is both halves of the image. Trivy reads the
@@ -744,8 +747,9 @@ jobs:
       #     acceptance: an entry in force keeps this gate green whether
       #     or not the condition it was written for still holds.
       #
-      # A finding the base image brought in -- a system package, or the npm CLI
-      # and Node binary under /usr/local -- is a prompt to bump the pinned base:
+      # A finding the base image brought in -- a system package, or the npm
+      # CLI's bundled dependencies under /usr/local -- is a prompt to bump the
+      # pinned base:
       # the digest in the Dockerfile, and on the variant the Amazon Linux release
       # snapshot its dnf transactions resolve against as well. The pins are
       # deliberate, so nothing on the npm side resolves them. For the default
@@ -1258,7 +1262,7 @@ jobs:
       # show nothing it found. This puts it on the run's summary page and states
       # the remedy, which is not the same one a pull-request finding takes.
       - name: Record the published image's scan in the run summary
-        if: ${{ !cancelled() && steps.published_vulnerability_scan.outcome != 'skipped' }}
+        if: ${{ !cancelled() }}
         env:
           SCAN_OUTCOME: ${{ steps.published_vulnerability_scan.outcome }}
         run: |
