@@ -213,20 +213,23 @@ export const SIGNALING_CERTIFICATE_FAILED_MESSAGE =
   "server's own certificate is current and issued for the configured `host`.";
 
 /**
- * What a failed `wss://` signaling socket reports on a run that configures
- * Node's environment proxying, where no check is made at all: the check
- * dials the signaling server itself, which is not the path such a dial takes,
- * so its answer would be about a connection the run never made. It names the
- * same remedy as its sibling above -- an intercepting proxy is at least as
- * likely the cause here -- and the one thing the operator can check instead.
+ * What a failed `wss://` signaling socket reports on a run that turns Node's
+ * environment proxying on, where no check is made at all: the check dials the
+ * signaling server directly and never through a proxy, so it cannot tell
+ * which path the failed connection took -- `NO_PROXY` decides that per dial --
+ * and any verdict it reached might be about a connection the run never made.
+ * It names the same remedy as its sibling above, an intercepting proxy being
+ * at least as likely the cause here.
  */
 export const SIGNALING_PROXIED_FAILED_MESSAGE =
   "the connection to the signaling server failed, and its TLS certificate " +
-  "was not checked: this run sets NODE_USE_ENV_PROXY with a proxy variable, " +
-  "so the check would describe a direct connection rather than the proxied " +
-  "one. If the proxy intercepts TLS, add its certificate authority to this " +
-  "machine's trust store, or name a file holding it in NODE_EXTRA_CA_CERTS; " +
-  "otherwise check that the proxy reaches the configured `host` and `port`.";
+  "was not checked: this run has Node's environment proxying turned on " +
+  "(NODE_USE_ENV_PROXY or --use-env-proxy, with a proxy address in the " +
+  "environment), and the check dials the signaling server directly, so it " +
+  "cannot tell whether this connection went through a proxy. If a proxy " +
+  "intercepts TLS, add its certificate authority to this machine's trust " +
+  "store, or name a file holding it in NODE_EXTRA_CA_CERTS; otherwise check " +
+  "that the configured `host` and `port` are reachable.";
 
 /** Label the verification failure's code takes a cause link of its own under. */
 const CERTIFICATE_PROBLEM_LINK_LABEL = "certificate check reported: ";
