@@ -48,7 +48,9 @@ const POLL_INTERVAL_KEY = "poll_interval_ms";
 /**
  * The tuning fields shown as a commented example, in render order.
  * `poll_interval_ms` applies to the file-based channels only (`sftp` and
- * `filedrop`), so a `webrtc` block, whose schema rejects it, omits it.
+ * `filedrop`), so a `webrtc` block omits it: that channel's options schema
+ * strips the key on parse, and an operator who uncommented it would get no
+ * effect and no error.
  */
 function tuningDefaults(channel: unknown): Array<[string, number]> {
   const shared: Array<[string, number]> = [

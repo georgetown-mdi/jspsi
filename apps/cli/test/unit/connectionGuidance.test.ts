@@ -108,7 +108,7 @@ test("the commented tuning example loads once the operator uncomments it", () =>
   });
 });
 
-test("a webrtc block omits poll_interval_ms, which its schema rejects", () => {
+test("a webrtc block omits poll_interval_ms, which its schema strips", () => {
   const raw = write({
     connection: {
       channel: "webrtc",
@@ -119,6 +119,18 @@ test("a webrtc block omits poll_interval_ms, which its schema rejects", () => {
   });
   expect(raw).not.toContain("poll_interval_ms");
   expect(raw).toContain(`#   peer_timeout_ms: ${DEFAULT_PEER_TIMEOUT_MS}`);
+  // Offering the field would mislead: the schema drops it without an error,
+  // so an operator who uncommented it would see no effect.
+  const withPoll = parseExchangeSpec({
+    ...(YAML.parse(raw) as Record<string, unknown>),
+    connection: {
+      channel: "webrtc",
+      server: { host: "api.peerjs.com", port: 443 },
+      role: "acceptor",
+      options: { poll_interval_ms: 250 },
+    },
+  });
+  expect(withPoll.connection.options).not.toHaveProperty("pollIntervalMs");
 });
 
 test("a seeded options block keeps its own fields and is not shown them twice", () => {
