@@ -432,16 +432,20 @@ export async function loadInputRows(
 
 /**
  * Tell the operator which column positions lost a bidi control character at the
- * parse, or say nothing when none did. The logger is built at warn time rather
- * than held at module scope so it binds the level and sink the command handler
- * installed.
+ * parse, or say nothing when none did. Shared by every CLI read of an operator
+ * CSV -- the loader below and `init`'s bounded inference read -- so no seat
+ * authors a config or runs an exchange on a changed name silently. The logger is
+ * built at warn time rather than held at module scope so it binds the level and
+ * sink the command handler installed.
  *
  * The line states the collision case rather than claiming the name kept is the
  * rest of the header: where the removal leaves two columns sharing one name, the
  * parser numbers the later one (`name`, `name_1`), which is neither position's
  * header and can be the untouched column's.
  */
-function warnBidiStrippedColumns(positions: ReadonlyArray<number>): void {
+export function warnBidiStrippedColumns(
+  positions: ReadonlyArray<number>,
+): void {
   if (positions.length === 0) return;
   const plural = positions.length > 1;
   getLogger("input").warn(

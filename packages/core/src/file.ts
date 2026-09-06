@@ -651,10 +651,12 @@ export async function streamCSVRows(
  * would see (the two are compared in inferDateInputFormat.test.ts).
  *
  * Parsed inline (no `worker`), like the loaders above. Resolves with the header
- * field list (empty when the file has no header), the column `selectColumn`
- * chose (`undefined` when it selected none), and the bounded sample; rejects on a
- * read/parse error, the same contract as {@link loadCSVFile}. Returning the
- * resolved column lets a caller key the sample without re-running `selectColumn`.
+ * field list (empty when the file has no header), the 1-based positions the
+ * header transform removed bidi control characters from, the column
+ * `selectColumn` chose (`undefined` when it selected none), and the bounded
+ * sample; rejects on a read/parse error, the same contract as
+ * {@link loadCSVFile}. Returning the resolved column lets a caller key the sample
+ * without re-running `selectColumn`.
  */
 export function loadCSVColumnSample(
   file: LocalFile,
@@ -663,12 +665,14 @@ export function loadCSVColumnSample(
   byteCeiling: number = CSV_LINE_BYTE_CEILING,
 ): Promise<{
   columns: Array<string>;
+  bidiStrippedColumns: Array<number>;
   sampledColumn: string | undefined;
   sample: Array<string>;
 }> {
   return new Promise((resolve, reject) => {
     let columns: Array<string> | undefined;
     let target: string | undefined;
+    const bidiStrippedColumns: Array<number> = [];
     const sample: Array<string> = [];
 
     // Bound a single logical line on the streamed read (init reads a file
@@ -689,9 +693,9 @@ export function loadCSVColumnSample(
       skipEmptyLines: true,
       // The same header transform the shared runner applies, so the column names
       // this read hands to config authoring are the names the exchange's own read
-      // of the file will key its rows by. The stripped positions are dropped: this
-      // read has no operator-facing notice to compose them into.
-      transformHeader: bidiStrippingHeaderTransform([]),
+      // of the file will key its rows by, and the positions it changed reach this
+      // read's caller for the same notice every other seat states.
+      transformHeader: bidiStrippingHeaderTransform(bidiStrippedColumns),
       chunk: (results, parser) => {
         if (target === undefined) {
           // Fix the header and the column to sample as soon as a non-empty
@@ -736,7 +740,12 @@ export function loadCSVColumnSample(
           reject(new Error("CSV parse completed without producing a chunk"));
           return;
         }
-        resolve({ columns, sampledColumn: target, sample });
+        resolve({
+          columns,
+          bidiStrippedColumns,
+          sampledColumn: target,
+          sample,
+        });
       },
       error: (error) => {
         // The guard's ceiling trip surfaces here -- it destroys the source with

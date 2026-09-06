@@ -23,6 +23,10 @@ export function inferDateOfBirthColumn(
 interface InferredDateInputFormat {
   /** The CSV header field names. */
   columns: Array<string>;
+  /** The 1-based positions of the names the read removed bidi control characters
+   * from (`CSVParseMeta.bidiStrippedColumns`), so a caller authoring a config
+   * from this read tells its operator what changed. */
+  bidiStrippedColumns: Array<number>;
   /** The date-of-birth column the format was inferred from, absent when the
    * header has none. */
   dobColumn?: string;
@@ -51,16 +55,18 @@ export async function inferDateInputFormatFromSource(
   file: LocalFile,
   byteCeiling: number = CSV_LINE_BYTE_CEILING,
 ): Promise<InferredDateInputFormat> {
-  const { columns, sampledColumn, sample } = await loadCSVColumnSample(
-    file,
-    inferDateOfBirthColumn,
-    INFER_DATE_SCAN_CAP,
-    byteCeiling,
-  );
+  const { columns, bidiStrippedColumns, sampledColumn, sample } =
+    await loadCSVColumnSample(
+      file,
+      inferDateOfBirthColumn,
+      INFER_DATE_SCAN_CAP,
+      byteCeiling,
+    );
   const dateInputFormat =
     sampledColumn !== undefined ? inferDateFormat(sample) : undefined;
   return {
     columns,
+    bidiStrippedColumns,
     ...(sampledColumn !== undefined ? { dobColumn: sampledColumn } : {}),
     ...(dateInputFormat !== undefined ? { dateInputFormat } : {}),
   };

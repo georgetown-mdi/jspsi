@@ -21,7 +21,7 @@ import { assertNoUnknownOptions, singleValue } from "../util/flags";
 import { configureLogging, logLevelFlag } from "../util/logging";
 import { promptConfirm } from "../util/prompt";
 import { addLoggingOptions } from "../optionDefinitions";
-import { buildDataSpec } from "../onlineBootstrap";
+import { buildDataSpec, warnBidiStrippedColumns } from "../onlineBootstrap";
 import {
   askIdentityAtPrompt,
   identityFromFlagOrPrompt,
@@ -204,6 +204,10 @@ export function resolveInitInput(
  * a bounded DOB sample via {@link inferDateInputFormatFromSource}, which
  * yields the same format as a full read.
  *
+ * That read applies core's header sanitation like every other, so it states the
+ * positions it changed through the same warning line the exchange reads use: the
+ * config this writes names the sanitized column, not the header as typed.
+ *
  * @internal exported for testing
  */
 export async function buildTemplateData(
@@ -231,9 +235,15 @@ export async function buildTemplateData(
     );
   }
 
+  warnBidiStrippedColumns(inferred.bidiStrippedColumns);
+
   return buildDataSpec({
     identity,
-    rows: { rawRows: [], columns: inferred.columns },
+    rows: {
+      rawRows: [],
+      columns: inferred.columns,
+      sanitizedColumnPositions: inferred.bidiStrippedColumns,
+    },
     ...(inferred.dateInputFormat !== undefined
       ? { dateInputFormat: inferred.dateInputFormat }
       : {}),
