@@ -35,6 +35,7 @@ import {
   renderDateOutput,
   resolveFieldColumns,
   STANDARDIZATION_FUNCTION_NAMES,
+  stepCompileBudgetRefusalMessage,
   stepCompileRefusalMessage,
   uncompilableStepLabel,
   valueOverCeiling,
@@ -194,6 +195,26 @@ export function assertFanOutImplemented(
 }
 
 /**
+ * Total wall-clock budget, in milliseconds, for compiling every declared step of
+ * one document in {@link assertTransformsCompile}. Both collections cap at 256
+ * entries, so a schema-valid document can declare thousands of steps, and a
+ * partner-authored `parse_date` format or raw pattern compiles under the
+ * linear-time engine at a cost the wire bounds do not hold down. Once the budget
+ * is spent the remaining steps are refused unchecked (fail closed), the same
+ * shape the dialect walk takes (`config/transformRegexDialect.ts`). A document a
+ * party would actually mint finishes in single-digit milliseconds.
+ */
+const TRANSFORM_COMPILE_TOTAL_BUDGET_MS = 2000;
+
+/** Optional override for the compile walk's budget. Exposed so tests can drive
+ * the exhaustion path deterministically. */
+interface TransformCompileBudget {
+  /** Total wall-clock budget across all steps; see
+   * {@link TRANSFORM_COMPILE_TOTAL_BUDGET_MS}. */
+  totalBudgetMs?: number;
+}
+
+/**
  * Refuse a declared pipeline whose compile throws, where the terms are authored
  * or minted rather than where the run reaches it.
  *
@@ -224,22 +245,36 @@ export function assertFanOutImplemented(
  * classifies both as a usage error (exit 64) through the base class.
  *
  * This is the safety check at the mint boundary, not the authoring surface: the
- * web element editor marks an unfilled bound on the input that has to change
- * (`StepListEditor`), and the Generate gate refuses ahead of it. What reaches
- * here is what neither covers -- an imported document, or a caller that mints
- * without the editor.
+ * web element editor marks a malformed param on the input that has to change
+ * (`StepListEditor`). What reaches here is what that does not cover -- an
+ * imported document, or a caller that mints without the editor. It runs once
+ * per mint rather than on every editor pass, because compiling a whole
+ * document's transforms costs enough to need a budget
+ * ({@link TRANSFORM_COMPILE_TOTAL_BUDGET_MS}); the compiles are memoized
+ * ({@link uncompilableStepLabel}), so a repeated mint of one document pays for
+ * them once.
  */
 export function assertTransformsCompile(
   terms: LinkageTerms,
   standardization?: Standardization,
+  budget: TransformCompileBudget = {},
 ): void {
+  const totalBudgetMs =
+    budget.totalBudgetMs ?? TRANSFORM_COMPILE_TOTAL_BUDGET_MS;
+  const startedAt = Date.now();
   for (const transformation of standardization ?? []) {
+    if (Date.now() - startedAt >= totalBudgetMs)
+      throw new OperatorConfigError(
+        stepCompileBudgetRefusalMessage(totalBudgetMs),
+      );
     const label = uncompilableStepLabel(transformation.steps);
     if (label !== undefined)
       throw new OperatorConfigError(stepCompileRefusalMessage(label));
   }
   for (const key of terms.linkageKeys) {
     for (const element of key.elements) {
+      if (Date.now() - startedAt >= totalBudgetMs)
+        throw new UsageError(stepCompileBudgetRefusalMessage(totalBudgetMs));
       const label = uncompilableStepLabel(element.transform);
       if (label !== undefined)
         throw new UsageError(stepCompileRefusalMessage(label));

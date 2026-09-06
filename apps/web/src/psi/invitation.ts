@@ -640,9 +640,9 @@ export async function generateInvitation(params: {
   // name this build does not recognize. The pipeline is built before the first
   // row, so such a step aborts both parties' runs after the invitation has been
   // accepted, with only out-of-band renegotiation left as the remedy. Covering
-  // the same two pipelines the fan-out check above does, and reached by the same
-  // callers: the quick path, and any caller that mints without the editor's
-  // Generate gate.
+  // the same two pipelines the fan-out check above does, and the whole refusal
+  // for every caller: the editor's validation pass leaves the compile question
+  // here, where it is asked once per mint rather than on every pass.
   assertTransformsCompile(linkageTerms, params.standardization);
 
   // The per-party cleaning this mint stands behind, reconciled ONCE to the
