@@ -1103,6 +1103,8 @@ Two exchanges have no result table for the columns to reach, and they are treate
 
 The result's headers stay distinct: a partner payload column whose name collides with one already written takes a `their_` prefix. The full header-assignment order and fallback rule are in [PROTOCOL.md](spec/PROTOCOL.md#output).
 
+The key is read by the CLI and by the console when it runs a config file; the web app's authoring surface does not yet offer a control for it.
+
 Your own columns are not covered by the exchange record's commitments, which bind what was exchanged rather than what you filed beside it; verification of a result written with the key is unaffected ([EXCHANGE_RECORD.md](spec/EXCHANGE_RECORD.md#commitment-scheme)).
 
 ---
