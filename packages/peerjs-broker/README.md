@@ -10,9 +10,27 @@ The package ships TypeScript source and has no build step of its own, though it 
 
 ```sh
 npm start -w packages/peerjs-broker
+npm start -w packages/peerjs-broker -- --host 0.0.0.0 --port 9000
 ```
 
-It listens on an ephemeral loopback port and prints `psilink-broker <port>` once ready. `--path <mount>` and `--key <api-key>` override the mount path and the accepted API key.
+By default it listens on `127.0.0.1` on an ephemeral port, mounts the signaling server at `/api`, and accepts the PeerJS protocol's well-known `peerjs` realm key. It prints one line, `psilink-broker <port>`, on stdout once it is listening, then stays up until it is signalled; nothing else reaches stdout, so a parent process reads the port with a single match. That line reports the port alone -- the address is the operator's own instruction, while an ephemeral port is not known until the bind returns.
+
+| Setting      | Flag               | Environment           | Default         |
+| ------------ | ------------------ | --------------------- | --------------- |
+| Bind address | `--host <address>` | `PSILINK_BROKER_HOST` | `127.0.0.1`     |
+| Port         | `--port <number>`  | `PSILINK_BROKER_PORT` | `0` (ephemeral) |
+| Mount path   | `--path <mount>`   | --                    | `/api`          |
+| Realm key    | `--key <api-key>`  | --                    | `peerjs`        |
+
+A flag takes precedence over the environment variable beside it, and an environment variable set to an empty value counts as unset. A port that is not a whole number from 0 to 65535, a blank value, a repeated flag, a flag with no value, a mount that does not begin with `/`, and any unrecognized argument are each refused before the broker starts, with a message naming the flag or the variable the value came from; the process exits 64, the same usage exit the CLI uses. A bind the operating system refuses -- an address that is not this host's, a port already taken -- is reported the same way and exits 69, as is a later fault on the listening socket.
+
+The runner terminates no TLS and applies none of the HTTP upgrade-surface timeouts the web app installs on its own server (`apps/web/server/upgradeHardening.ts`), so a deployment reachable off the host puts it behind a front that does both.
+
+## Readiness
+
+The runner answers `GET` and `HEAD` on `<mount>/health` -- `/api/health` under the default mount -- with `200` and the body `ready`. It sits under the mount rather than at the root so one route rule in front of the broker covers the probe and the signaling endpoint together. Any other request, including another method on that path, is refused with `404`: the broker handles WebSocket upgrades and this one endpoint, and nothing else is part of any wire it serves.
+
+The handler is installed and the signaling server mounted before the runner listens, so an answer means this process is accepting connections with its upgrade route attached. That is the whole of what the answer states: the body is a fixed line, since reporting registered peers or queued frames would put rendezvous metadata on an unauthenticated endpoint. What the probe does disclose -- that a broker is running here -- anyone who can reach the port already learns by opening a WebSocket, so it needs no gate of its own.
 
 ## Diagnostics
 
