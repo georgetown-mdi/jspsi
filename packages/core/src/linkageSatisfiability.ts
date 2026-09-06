@@ -346,9 +346,13 @@ export function assertTransformsCompile(
   // what this one paid for, admitting after enough retries a document no edit
   // had touched.
   const pending: PendingCompiledTransforms = new Map();
-  const startedAt = Date.now();
+  // performance.now() rather than the wall clock: a backward clock step during
+  // the walk (an NTP correction, a container resuming) makes the difference
+  // negative and leaves the rest of the document unbounded, which is the
+  // fail-open direction for a bound on compile cost.
+  const startedAt = performance.now();
   for (const transformation of standardization ?? []) {
-    if (Date.now() - startedAt >= totalBudgetMs)
+    if (performance.now() - startedAt >= totalBudgetMs)
       throw new OperatorConfigError(
         stepCompileBudgetRefusalMessage(totalBudgetMs),
       );
@@ -358,7 +362,7 @@ export function assertTransformsCompile(
   }
   for (const key of terms.linkageKeys) {
     for (const element of key.elements) {
-      if (Date.now() - startedAt >= totalBudgetMs)
+      if (performance.now() - startedAt >= totalBudgetMs)
         throw new UsageError(stepCompileBudgetRefusalMessage(totalBudgetMs));
       const label = uncompilableStepLabel(element.transform, pending);
       if (label !== undefined)
