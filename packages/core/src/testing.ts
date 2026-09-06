@@ -1,6 +1,9 @@
 import logLibrary from "loglevel";
 
 import type { AssociationTable } from "./types";
+import type { ExchangeResult, PreparedExchange } from "./exchange.js";
+import { getDefaultLinkageTerms } from "./defaults/builtInLinkageTerms.js";
+import { StandardizedDataset } from "./standardization.js";
 
 export {
   CONSENT_PROBE_TERMS,
@@ -126,6 +129,50 @@ export function sortAssociationTable(
           },
           [[], []] as [Array<number>, Array<number>],
         );
+}
+
+/**
+ * The smallest complete {@link PreparedExchange}: empty metadata, the
+ * built-in default linkage terms, an empty {@link StandardizedDataset}, no
+ * raw rows, and a zero row count. `overrides` replaces whichever fields a
+ * test's own collaborators actually read; everything else stays the minimal
+ * literal. Stays out of the main entry point: it stands in for a real
+ * `prepareForExchange` result in a test whose mocked collaborators never
+ * reach past the fields `overrides` sets.
+ */
+export function minimalPreparedExchange(
+  overrides: Partial<PreparedExchange> = {},
+): PreparedExchange {
+  return {
+    metadata: [],
+    linkageTerms: getDefaultLinkageTerms("Minimal prepared-exchange fixture"),
+    dataset: new StandardizedDataset([], []),
+    rawRows: [],
+    rowCount: 0,
+    ...overrides,
+  } satisfies PreparedExchange;
+}
+
+/**
+ * The smallest complete {@link ExchangeResult}: no association table or
+ * intersection count, the built-in default linkage terms standing in for the
+ * partner's, a receiver role, and an empty partner payload. `overrides`
+ * replaces whichever fields a test's own assertions read. Stays out of the
+ * main entry point for the same reason as {@link minimalPreparedExchange}: it
+ * stands in for a real `runExchange` result in a test whose mocked
+ * collaborators never reach past the fields `overrides` sets.
+ */
+export function minimalExchangeResult(
+  overrides: Partial<ExchangeResult> = {},
+): ExchangeResult {
+  return {
+    associationTable: undefined,
+    intersectionCount: undefined,
+    partnerTerms: getDefaultLinkageTerms("Minimal exchange-result fixture"),
+    resolvedRole: "receiver",
+    partnerPayload: { columns: [], rowIndices: [], rows: [] },
+    ...overrides,
+  } satisfies ExchangeResult;
 }
 
 /** @internal */

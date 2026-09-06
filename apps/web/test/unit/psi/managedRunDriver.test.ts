@@ -5,11 +5,14 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import log from "loglevel";
 
 import {
-  StandardizedDataset,
   describeResolvedRunShape,
   getDefaultLinkageTerms,
   runExchange,
 } from "@psilink/core";
+import {
+  minimalExchangeResult,
+  minimalPreparedExchange,
+} from "@psilink/core/testing";
 
 import {
   DISCLOSURE_NOT_FILED_WARNING,
@@ -37,10 +40,8 @@ import type Peer from "peerjs";
 
 import type * as PsilinkCore from "@psilink/core";
 import type {
-  ExchangeResult,
   HandshakeRole,
   MessageConnection,
-  PreparedExchange,
   PsiBackendSelection,
   RendezvousRole,
   ResolvedRunShape,
@@ -108,15 +109,10 @@ vi.mock("../../../src/psi/disclosureAccountingStore.js", () => ({
   appendDisclosureRecordToStore: vi.fn(() => Promise.resolve()),
 }));
 vi.mock("../../../src/psi/managed/managedPreparedExchange.js", () => ({
-  prepareManagedRerunExchange: vi.fn(
-    () =>
-      ({
-        metadata: [],
-        linkageTerms: getDefaultLinkageTerms("Managed re-run fixture"),
-        dataset: new StandardizedDataset([], []),
-        rawRows: [],
-        rowCount: 0,
-      }) satisfies PreparedExchange,
+  prepareManagedRerunExchange: vi.fn(() =>
+    minimalPreparedExchange({
+      linkageTerms: getDefaultLinkageTerms("Managed re-run fixture"),
+    }),
   ),
 }));
 vi.mock("../../../src/psi/authenticateExchange.js", () => ({
@@ -145,13 +141,9 @@ vi.mock("@psilink/core", async (importOriginal) => {
       } satisfies PsiBackendSelection),
     ),
     runExchange: vi.fn(() =>
-      Promise.resolve({
-        associationTable: undefined,
-        intersectionCount: undefined,
-        partnerTerms: stubPartnerTerms,
-        resolvedRole: "receiver",
-        partnerPayload: { columns: [], rowIndices: [], rows: [] },
-      } satisfies ExchangeResult),
+      Promise.resolve(
+        minimalExchangeResult({ partnerTerms: stubPartnerTerms }),
+      ),
     ),
   };
 });
@@ -637,13 +629,7 @@ describe("naming what the agreed terms resolved to", () => {
         },
       ) => {
         options.onProtocolConfirmed?.(partnerTerms, "receiver", runShape);
-        return Promise.resolve({
-          associationTable: undefined,
-          intersectionCount: undefined,
-          partnerTerms,
-          resolvedRole: "receiver",
-          partnerPayload: { columns: [], rowIndices: [], rows: [] },
-        } satisfies ExchangeResult);
+        return Promise.resolve(minimalExchangeResult({ partnerTerms }));
       },
     );
   }
@@ -720,27 +706,28 @@ describe("naming what the agreed terms resolved to", () => {
 
 describe("filing the run's disclosure", () => {
   /** Make this run's exchange produce a real self-attested record, the way a
-   * completed exchange does. The cast is the shape the assertions need: the rest of
-   * `ExchangeResult` is the mocked outputs builder's business, not this run's. */
+   * completed exchange does. Only the audit fields the assertions read are
+   * overridden: the rest is the mocked outputs builder's business, not
+   * this run's. */
   async function exchangeYieldsRecord() {
     const record = await disclosureRecord();
-    mockedRunExchange.mockResolvedValueOnce({
-      associationTable: undefined,
-      intersectionCount: undefined,
-      partnerTerms: getDefaultLinkageTerms("Disclosure-record partner fixture"),
-      resolvedRole: "receiver",
-      partnerPayload: { columns: [], rowIndices: [], rows: [] },
-      audit: {
-        record,
-        keys: {
-          version: "psilink-exchange-keys/v1",
-          salts: {
-            localPayloadSent: "local-payload-salt",
-            partnerPayloadReceived: "partner-payload-salt",
+    mockedRunExchange.mockResolvedValueOnce(
+      minimalExchangeResult({
+        partnerTerms: getDefaultLinkageTerms(
+          "Disclosure-record partner fixture",
+        ),
+        audit: {
+          record,
+          keys: {
+            version: "psilink-exchange-keys/v1",
+            salts: {
+              localPayloadSent: "local-payload-salt",
+              partnerPayloadReceived: "partner-payload-salt",
+            },
           },
         },
-      },
-    } satisfies ExchangeResult);
+      }),
+    );
     return record;
   }
 

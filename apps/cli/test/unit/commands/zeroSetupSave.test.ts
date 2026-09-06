@@ -3,12 +3,9 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import YAML from "yaml";
-import {
-  getDefaultLinkageTerms,
-  StandardizedDataset,
-  UsageError,
-} from "@psilink/core";
+import { getDefaultLinkageTerms, UsageError } from "@psilink/core";
 import type { ExchangeSpec, PreparedExchange } from "@psilink/core";
+import { minimalPreparedExchange } from "@psilink/core/testing";
 
 import {
   buildSaveSpec,
@@ -29,19 +26,13 @@ function sampleSpec(): ExchangeSpec {
 
 // buildSaveSpec reads only linkageTerms and metadata off the prepared exchange
 // (the rest travels the recurring config no other route this test drives), so
-// each fixture below fills the remaining required fields with the smallest
-// complete value.
+// each fixture below fills the remaining required fields via the shared
+// minimal factory.
 function preparedFrom(
   linkageTerms: PreparedExchange["linkageTerms"],
   metadata: PreparedExchange["metadata"],
 ): PreparedExchange {
-  return {
-    linkageTerms,
-    metadata,
-    dataset: new StandardizedDataset([], []),
-    rawRows: [],
-    rowCount: 0,
-  } satisfies PreparedExchange;
+  return minimalPreparedExchange({ linkageTerms, metadata });
 }
 
 function capture(): { log: { info: (m: string) => void }; messages: string[] } {
