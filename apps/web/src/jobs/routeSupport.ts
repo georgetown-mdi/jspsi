@@ -22,7 +22,8 @@ const log = getLogger("job-api");
 /**
  * The outcome of gating a job route: either a short-circuit {@link Response} the
  * handler returns as-is, or the resolved {@link JobManager} to proceed with. A
- * disabled API yields 404, indistinguishable from an unknown route.
+ * disabled API yields 404, the same response the `/api` namespace's refusal
+ * returns ahead of the router (see utils/apiNamespace.ts).
  */
 type GateOutcome =
   | { kind: "response"; response: Response }
