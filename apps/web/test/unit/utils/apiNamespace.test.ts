@@ -118,6 +118,9 @@ describe("the /api refusal on a deployment without the job API", () => {
     ["GET", "/api/%6aobs/slot"],
     ["GET", "/api%2Fjobs/slot"],
     ["GET", "/api/%zz/%e0%a4%a5"],
+    // The URL parser resolves this to /api/jobs/slot before the guard reads it,
+    // so this row pins the resolved form. The target as written reaches the
+    // entry only over a raw socket, which the integration matrix drives.
     ["GET", "/api/peerjs/%2e%2e/jobs/slot"],
     ["GET", "/api/%2570eerjs/id"],
     ["GET", "/api/PEERJS/id"],

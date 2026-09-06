@@ -1,4 +1,5 @@
 import { mkdtempSync, rmSync } from "node:fs";
+import { connect } from "node:net";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -28,6 +29,13 @@ import type { ChildProcess } from "node:child_process";
 // framework version that adds a response shape: the shapes belong to the
 // framework, so nothing here enumerates them -- every request below is required
 // to answer the one refusal, whatever the framework would have answered.
+//
+// Two targets are written on the wire verbatim instead of driven through
+// `fetch`, which resolves a dot segment against the base URL before the request
+// leaves. Sent raw, a dot segment reaches the server as written, and where the
+// stack resolves it is not this suite's claim: what is required is that the
+// hosted build answers the one refusal for it and the console build answers the
+// job route.
 
 /** The whole observable shape of a response. Date and the connection headers
  * are dropped: they vary per request rather than per path, and a probe reads
@@ -76,6 +84,69 @@ async function shapeOf(
   };
 }
 
+/** How long a raw-socket probe waits for the whole response before giving up. */
+const RAW_PROBE_TIMEOUT_MS = 10_000;
+
+/** The shape and body a server answers a request target written on the wire
+ * verbatim, so no client library resolves the target first. The probe asks for
+ * the connection to close and reads to end of stream, which is why it needs no
+ * framing of its own; `Connection` is already among the volatile headers the
+ * shape drops. */
+function rawShapeOf(
+  base: string,
+  target: string,
+  accept: string,
+): Promise<ResponseShape & { body: string }> {
+  const { hostname, port } = new URL(base);
+  return new Promise((resolve, reject) => {
+    const chunks: Array<Buffer> = [];
+    const socket = connect(Number(port), hostname, () => {
+      socket.write(
+        `GET ${target} HTTP/1.1\r\nHost: ${hostname}:${port}\r\n` +
+          `Accept: ${accept}\r\nConnection: close\r\n\r\n`,
+      );
+    });
+    socket.setTimeout(RAW_PROBE_TIMEOUT_MS, () => {
+      socket.destroy(new Error(`no answer for the raw target ${target}`));
+    });
+    socket.on("data", (chunk: Buffer) => chunks.push(chunk));
+    socket.on("error", reject);
+    socket.on("end", () => {
+      try {
+        resolve(parseRawResponse(Buffer.concat(chunks)));
+      } catch (error) {
+        reject(error);
+      }
+    });
+  });
+}
+
+/** Read a raw HTTP/1.1 response into the same shape {@link shapeOf} reports,
+ * with the bytes after the head as the body -- chunk framing included, since
+ * nothing here de-frames it. */
+function parseRawResponse(raw: Buffer): ResponseShape & { body: string } {
+  const separator = raw.indexOf("\r\n\r\n");
+  if (separator === -1)
+    throw new Error(`no header terminator in a ${raw.byteLength}-byte answer`);
+  const [statusLine, ...headerLines] = raw
+    .subarray(0, separator)
+    .toString("latin1")
+    .split("\r\n");
+  const body = raw.subarray(separator + 4);
+  return {
+    status: Number(statusLine.split(" ")[1]),
+    headers: headerLines
+      .map((line): [string, string] => [
+        line.slice(0, line.indexOf(":")).trim().toLowerCase(),
+        line.slice(line.indexOf(":") + 1).trim(),
+      ])
+      .filter(([name]) => !VOLATILE_HEADERS.has(name))
+      .sort(([left], [right]) => (left < right ? -1 : left > right ? 1 : 0)),
+    bodyLength: body.byteLength,
+    body: body.toString("utf8"),
+  };
+}
+
 /** The one refusal: the job gate's own empty 404 (jobEmptyResponse in
  * src/jobs/gate.ts) with the security headers the server entry applies to every
  * response. Written out rather than read from the app, so a change to either
@@ -116,8 +187,10 @@ function refusalFor(method: string): ResponseShape {
  *   router canonicalizes with a redirect rather than matching as written,
  * - the prefix case-varied and percent-encoded, and a segment after it
  *   percent-encoded, all of which the router resolves to the declared route,
- * - a percent-encoded separator and percent-encoded dot segments, which reach
- *   the namespace only once decoded,
+ * - a percent-encoded separator, which reaches the namespace only once decoded,
+ * - a dot segment written past the allowlisted prefix, which `fetch` resolves to
+ *   `/api/jobs/slot` before the request leaves, so the row drives that resolved
+ *   path and the target as written is driven over a raw socket instead,
  * - an encoded space on the prefix's trailing edge, on a segment after it, and
  *   on the tail, which the router resolves to the declared route for some of
  *   those positions and to nothing for others,
@@ -153,6 +226,8 @@ const REFUSED: ReadonlyArray<
   ["GET", "/api/%6aobs/slot", "jobRoute"],
   ["GET", "/api/jobs/%73lot", "jobRoute"],
   ["GET", "/api%2Fjobs/slot"],
+  // Resolved to /api/jobs/slot by the URL parser before it is sent; the
+  // unresolved target is RAW_TARGETS below.
   ["GET", "/api/peerjs/%2e%2e/jobs/slot", "jobRoute"],
   ["GET", "/api/jobs/slot%20", "jobRoute"],
   ["GET", "/api/%20jobs/slot"],
@@ -192,6 +267,20 @@ const UNTOUCHED: ReadonlyArray<string> = [
   "/ap%69x",
   "/api%20/jobs/slot",
 ];
+
+/** The targets the matrix writes on the wire verbatim: a dot segment past the
+ * allowlisted prefix, spelled plainly and percent-encoded. `fetch` resolves
+ * both to `/api/jobs/slot` before sending, so driven through it neither reaches
+ * the server as written. */
+const RAW_TARGETS: ReadonlyArray<string> = [
+  "/api/peerjs/../jobs/slot",
+  "/api/peerjs/%2e%2e/jobs/slot",
+];
+
+/** What the job route answers for a free slot, as it appears in the raw
+ * response body: the probe reads chunk framing around it, so the payload is
+ * matched inside the body rather than as the whole of it. */
+const SLOT_FREE = '{"occupied":false}';
 
 const BROKER_PATHS: ReadonlyArray<string> = [
   "/api/peerjs/id",
@@ -253,6 +342,15 @@ describe.skipIf(!hasBuild)("the /api namespace's refusal", () => {
       },
     );
 
+    test.each(RAW_TARGETS)(
+      "a hosted probe reads the one refusal for a verbatim GET %s",
+      async (target) => {
+        const { body, ...shape } = await rawShapeOf(hostedBase, target, accept);
+        expect(shape).toEqual(REFUSAL);
+        expect(body).toBe("");
+      },
+    );
+
     test.each(BROKER_PATHS)(
       "the broker still answers GET %s on the hosted build",
       async (path) => {
@@ -275,8 +373,8 @@ describe.skipIf(!hasBuild)("the /api namespace's refusal", () => {
   // Two claims. The refusal reads the same enablement the per-route gate reads,
   // so a mis-keyed one darkens the console's own API here rather than failing
   // silently. And each hosted row above means nothing unless the router
-  // resolves that spelling to a route, so the job-route rows are re-driven
-  // against the profile where nothing refuses them.
+  // resolves that spelling to a route, so the job-route rows and the raw
+  // targets are re-driven against the profile where nothing refuses them.
   describe("where the job API is enabled", () => {
     test("the matrix names the spellings this arm re-drives", () => {
       expect(JOB_ROUTE_REQUESTS.length).toBeGreaterThan(0);
@@ -293,6 +391,19 @@ describe.skipIf(!hasBuild)("the /api namespace's refusal", () => {
         );
         expect(answered.status).toBe(200);
         if (method !== "HEAD") expect(answered.bodyLength).toBeGreaterThan(0);
+      },
+    );
+
+    test.each(RAW_TARGETS)(
+      "the job route answers a verbatim GET %s",
+      async (target) => {
+        const answered = await rawShapeOf(
+          consoleBase,
+          target,
+          ACCEPT_VALUES[1][1],
+        );
+        expect(answered.status).toBe(200);
+        expect(answered.body).toContain(SLOT_FREE);
       },
     );
 
