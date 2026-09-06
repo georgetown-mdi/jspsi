@@ -134,13 +134,15 @@ function isRefusedApiPath(url: string): boolean {
  * deployment where the job API is not enabled, a refused path is answered
  * without calling `route` at all. Enablement is read per request from the same
  * {@link isJobApiEnabled} the per-route job gate reads, so the two cannot
- * disagree about which profile they are on.
+ * disagree about which profile they are on. The path is decided first, so only
+ * a request under `/api` pays that read; both tests are free of side effects,
+ * so the order changes nothing but the work skipped.
  */
 export function withApiGuard(
   route: (request: Request) => Response | Promise<Response>,
 ): (request: Request) => Promise<Response> {
   return async (request) => {
-    if (!isJobApiEnabled(readJobApiConfig()) && isRefusedApiPath(request.url))
+    if (isRefusedApiPath(request.url) && !isJobApiEnabled(readJobApiConfig()))
       return jobEmptyResponse(404);
     return route(request);
   };
