@@ -222,6 +222,10 @@ export type InvitationFileFailure =
       /** The 1-based positions of the empty-named columns, for the operator-facing
        * message (see {@link unnameableColumnsAlert}). */
       positions: Array<number>;
+      /** The 1-based positions the parse removed bidi control characters from, so
+       * the message can tell an empty name the removal produced from one a blank
+       * header cell did. Empty for a header that held none. */
+      sanitizedPositions: Array<number>;
     }
   | {
       /** A column marked to send has a name longer than `MAX_NAME_LENGTH`. The
@@ -552,11 +556,15 @@ export async function generateInvitation(params: {
   // produced.
   let rawRows: Array<CSVRow>;
   let columns: Array<string>;
+  // The mint's own re-parse reports what it stripped; the profiled path has no
+  // parse here, so its seat states the sanitation from the profile instead.
+  let sanitizedPositions: Array<number> = [];
   if (file !== undefined) {
     try {
       const csvResult = await loadCSVFileOffMainThread(file);
       rawRows = csvResult.data;
       columns = csvResult.meta.fields ?? [];
+      sanitizedPositions = csvResult.meta.bidiStrippedColumns;
     } catch (cause) {
       throw new InvitationFileError({ kind: "unreadable", cause });
     }
@@ -577,6 +585,7 @@ export async function generateInvitation(params: {
     throw new InvitationFileError({
       kind: "unnameable",
       positions: emptyPositions,
+      sanitizedPositions,
     });
 
   // The terms to embed. The AdvancedInvite model's authored terms are
@@ -627,10 +636,11 @@ export async function generateInvitation(params: {
         params.metadata,
         linkageTerms.output,
       );
-    disclosureMetadata = params.metadata ?? inferMetadata(columns);
+    disclosureMetadata =
+      params.metadata ?? inferMetadata(columns, sanitizedPositions);
     disclosedPayloadColumns = disclosedColumnNames(disclosureMetadata);
   } else {
-    const metadata = inferMetadata(columns);
+    const metadata = inferMetadata(columns, sanitizedPositions);
     disclosureMetadata = metadata;
     linkageTerms = getDefaultLinkageTerms(inviterName, metadata);
 

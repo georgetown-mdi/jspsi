@@ -57,7 +57,7 @@ function termsOf(spec: ExchangeDataSpec): LinkageTerms {
  * payload column does not participate in matching, so the explicit `match`
  * (role: linkage) is what makes the keys satisfiable. */
 function remappedMetadata(): Metadata {
-  let md = normalizeForEditor(inferMetadata(columns));
+  let md = normalizeForEditor(inferMetadata(columns, []));
   md = setColumnType(md, "a", "first_name").metadata;
   md = setColumnType(md, "b", "last_name").metadata;
   md = setColumnDisclosure(md, "a", "match").metadata;
@@ -107,7 +107,7 @@ describe("acceptorExchangeDataSpec", () => {
 
 describe("editing metadata changes the verdict and reaches the run", () => {
   test("an inferred-metadata verdict blocks; the remap makes it satisfiable", () => {
-    const inferred = inferMetadata(columns);
+    const inferred = inferMetadata(columns, []);
     expect(
       assessLinkageSatisfiability(columns, terms, undefined, inferred)
         .satisfiableKeyCount,

@@ -32,6 +32,8 @@ import { AcceptorScreen } from "@exchange/AcceptorScreen";
 import { RETAIN_MODE_BILATERAL_NOTICE } from "@console/exchangeFilesModel";
 import { SPLIT_RENDEZVOUS_RETAIN_REQUIREMENT } from "@console/filedropRendezvousChoice";
 
+import { CONTROLS_ONLY_HEADER_PROFILE } from "../utils/unnamedColumnProfiles";
+
 import { createAppMount, flushPendingUpdates } from "./renderApp";
 
 import type {
@@ -393,6 +395,7 @@ const ACCEPT_PROFILE = {
   ...ACCEPT_FILE,
   rowCount: 2,
   columns: ["first_name", "last_name"],
+  bidiStrippedColumns: [],
   dateInputFormat: "%m/%d/%Y",
   columnSamples: [
     { column: "first_name", values: ["Ann", "Bo"] },
@@ -401,6 +404,9 @@ const ACCEPT_PROFILE = {
 };
 
 interface AcceptStubOptions {
+  /** The body `GET /api/jobs/inputs/profile` serves. Defaults to
+   * {@link ACCEPT_PROFILE}. */
+  profile?: unknown;
   /** When set, `POST /api/jobs` returns a busy (409) holding this id (the slot is
    * occupied), and the id's status/events routes are served so the accept can
    * re-attach to it. `holdProbe` withholds the FIRST status GET (the liveness
@@ -483,7 +489,7 @@ function stubServerJobAccept(options: AcceptStubOptions = {}): {
           jsonResponse({ configured: true, files: [ACCEPT_FILE] }),
         );
       if (url.startsWith("/api/jobs/inputs/profile"))
-        return Promise.resolve(jsonResponse(ACCEPT_PROFILE));
+        return Promise.resolve(jsonResponse(options.profile ?? ACCEPT_PROFILE));
       if (url === "/api/jobs/inputs/coverage")
         return Promise.resolve(jsonResponse({ rates: [] }));
       if (url === "/api/jobs")
@@ -575,6 +581,71 @@ async function reachAcceptStart() {
   await reachAcceptColumns();
   await page.getByRole("button", { name: "Start the exchange" }).click();
 }
+
+describe("console acceptor sanitized-header notice", () => {
+  test("names the header positions the console's parse stripped", async () => {
+    // The console reads the file on the server, so the positions ride the
+    // profile the file step commits; the confirm-columns step states them, where
+    // the names are read and marked. Positions only -- echoing the header would
+    // put the removed characters back into the notice.
+    stubServerJobAccept({
+      profile: { ...ACCEPT_PROFILE, bidiStrippedColumns: [2] },
+    });
+    window.location.hash = await encodeToken(FILEDROP_ENDPOINT);
+    app.render(createElement(AcceptorScreen));
+    await reachAcceptColumns();
+
+    await expect
+      .element(
+        page.getByText("A formatting character was removed from a column name"),
+      )
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("Column 2", { exact: false }))
+      .toBeInTheDocument();
+    // A notice, not a refusal: the launch is still offered.
+    await expect
+      .element(page.getByRole("button", { name: "Start the exchange" }))
+      .toBeEnabled();
+  });
+});
+
+describe("console acceptor unnamed-column refusal", () => {
+  test("a header the strip emptied is refused by that cause, notice beside it", async () => {
+    // The committed profile is the body the console's own parse returns for a
+    // header whose middle column is only direction characters
+    // (unnamedColumnProfiles). The file step refuses it and never reaches the
+    // confirm-columns step, so the notice for what the read changed is stated
+    // beside the refusal, which names the removal rather than a trailing comma.
+    stubServerJobAccept({
+      profile: { ...ACCEPT_PROFILE, ...CONTROLS_ONLY_HEADER_PROFILE },
+    });
+    window.location.hash = await encodeToken(FILEDROP_ENDPOINT);
+    app.render(createElement(AcceptorScreen));
+    await page
+      .getByRole("button", { name: "Continue: consent & your file" })
+      .click();
+    await userEvent.fill(page.getByLabelText("Your name"), "Sam Alvarez");
+    await page.getByRole("checkbox").click();
+    await page.getByRole("button", { name: "Select cohort.csv" }).click();
+    await page.getByRole("button", { name: "Use this file" }).click();
+
+    await expect
+      .element(page.getByText("This file has an unnamed column"))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("That name held nothing but", { exact: false }))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("trailing comma", { exact: false }))
+      .not.toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText("A formatting character was removed from a column name"),
+      )
+      .toBeInTheDocument();
+  });
+});
 
 describe("console acceptor file-handling gate", () => {
   /** Reach the confirm-columns step of a runnable console accept and open the

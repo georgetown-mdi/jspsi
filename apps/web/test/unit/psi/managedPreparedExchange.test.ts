@@ -20,7 +20,7 @@ const rows: Array<CSVRow> = [
 // narrowed to the keys these columns support, which is what a re-run's own
 // columns then have to satisfy in full.
 const standingTerms = (identity: string) =>
-  getDefaultLinkageTerms(identity, inferMetadata(columns));
+  getDefaultLinkageTerms(identity, inferMetadata(columns, []));
 
 function exchangeFile(expectedPayloadColumns?: Array<string>) {
   return composeManagedExchangeFile({

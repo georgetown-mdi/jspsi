@@ -1000,15 +1000,75 @@ describe("acceptor screen: confirm your columns (verdict, mapper, launch)", () =
       .toBeInTheDocument();
   });
 
+  test("a header the strip emptied is refused by that cause, notice beside it", async () => {
+    // The acceptor's own browser read. A refused file never reaches the columns
+    // step, so the notice for what that read changed is stated here, beside the
+    // refusal the same read caused -- and the refusal names the removal, not the
+    // trailing comma, which is not what happened to this header.
+    window.location.hash = await encodeAcceptToken();
+    app.render(createElement(AcceptorScreen));
+    await userEvent.click(
+      page.getByRole("button", { name: "Continue: consent & your file" }),
+    );
+    await consentAndName();
+    const fileInput = document.querySelector('input[type="file"]');
+    await userEvent.upload(
+      page.elementLocator(fileInput as HTMLElement),
+      // U+202E (right-to-left override) then U+2069 (pop directional isolate):
+      // the whole of column 2's name, so the strip leaves it unnamed.
+      csvFile("id,\u202E\u2069,city\n1,x,Springfield\n"),
+    );
+    await userEvent.click(
+      page.getByRole("button", { name: "Accept and continue" }),
+    );
+    await expect
+      .element(page.getByText("This file has an unnamed column"))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("That name held nothing but", { exact: false }))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("trailing comma", { exact: false }))
+      .not.toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText("A formatting character was removed from a column name"),
+      )
+      .toBeInTheDocument();
+  });
+
+  test("the confirm-columns step names the header positions the parse stripped", async () => {
+    // The acceptor's own read: the file entry advances straight to this step, so
+    // this is where what the parse removed has to be stated. Located by position,
+    // never by echoing the header.
+    await reachColumns(
+      "first_name,last_name,no\u202Etes,post\nAlice,Smith,b,c\n",
+    );
+    await expect
+      .element(
+        page.getByText("A formatting character was removed from a column name"),
+      )
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("Column 3", { exact: false }))
+      .toBeInTheDocument();
+  });
+
   test("the ledger's send row shows a header as the step's panel does, and contains it", async () => {
     // The step's panel and this ledger row name the SAME disclosed set, side by
     // side on the one screen where the operator decides what leaves the machine, so
     // a header escaped in one and verbatim in the other reads two ways at once. The
     // row holds the step's isolation as characters instead: a ledger value is a
     // string sink, where no element can hold it.
-    const hostile = "notes\u202Eevil";
+    //
+    // The header the file holds carries an override; the name every sink here shows
+    // is the one core's parse boundary stripped it from, so this drives both halves
+    // at once -- what the acceptor's own read does to the header, and how the row
+    // then shows it.
+    const hostileHeader = "notes\u202Eevil";
+    const sanitized = "notesevil";
     await reachColumns(
-      `first_name,last_name,pre,${hostile},post\nAlice,Smith,a,b,c\n`,
+      `first_name,last_name,pre,${hostileHeader},post\nAlice,Smith,a,b,c\n`,
     );
     const ledger = document.querySelector(
       'aside[aria-label="This exchange"]',
@@ -1017,18 +1077,20 @@ describe("acceptor screen: confirm your columns (verdict, mapper, launch)", () =
       .find((row) => row.querySelector("dt")?.textContent === "You will send")
       ?.querySelector("dd");
     expect(sendValue?.textContent).toBe(
-      ["pre", hostile, "post"].map(isolatedColumnName).join(", "),
+      ["pre", sanitized, "post"].map(isolatedColumnName).join(", "),
     );
-    // And nowhere on the screen is the escaped form: the panel and this row name
-    // the same set, so an escape on either is the disagreement this pins.
+    // And nowhere on the screen is the header's escaped form: the panel and this
+    // row name the same set, so an escape on either is the disagreement this pins.
     expect(document.body.textContent).not.toContain(
-      sanitizeForDisplay(hostile),
+      sanitizeForDisplay(hostileHeader),
     );
+    // Nor the override itself, at any sink on the screen: what the boundary
+    // removed cannot reach one.
+    expect(document.body.textContent).not.toContain("\u202E");
 
-    // And the isolate characters do the work the <bdi> does in the panel: the tail
-    // of the override-bearing name stays ahead of the name listed after it, which
-    // is what an unterminated override moves. Measured through a Range, since the
-    // whole row is one text node with no element to take a box.
+    // And the isolate characters do the work the <bdi> does in the panel: the
+    // names stay in the order the row lists them. Measured through a Range, since
+    // the whole row is one text node with no element to take a box.
     const value = sendValue?.firstChild;
     expect(value).toBeInstanceOf(Text);
     expect(visualOrderWithin(value as Text, ["pre", "evil", "post"])).toEqual([
@@ -1170,6 +1232,7 @@ describe("acceptor columns step: one column name across the screen", () => {
       createElement(AcceptorColumnsStep, {
         linkageTerms: acceptorTerms,
         columns,
+        bidiStrippedColumns: [],
         columnsState,
         editorState,
         verdict: acceptorVerdict(columns, acceptorTerms, editorState),
@@ -1444,6 +1507,7 @@ describe("acceptor columns step: the send summary is gated on the inviting party
       createElement(AcceptorColumnsStep, {
         linkageTerms,
         columns,
+        bidiStrippedColumns: [],
         columnsState,
         editorState,
         verdict: acceptorVerdict(columns, linkageTerms, editorState),
@@ -1557,6 +1621,7 @@ describe("acceptor columns step: the columns the invitation will not accept", ()
       createElement(AcceptorColumnsStep, {
         linkageTerms,
         columns,
+        bidiStrippedColumns: [],
         columnsState,
         editorState,
         verdict: acceptorVerdict(columns, linkageTerms, editorState),

@@ -14,8 +14,8 @@ import type { Metadata } from "../../src/config/metadata";
 // --- inferMetadata: linkage columns ------------------------------------------
 
 test("phone and email: linkage role, not payload by default", () => {
-  const [phone] = inferMetadata(["phone_number"]);
-  const [email] = inferMetadata(["email_address"]);
+  const [phone] = inferMetadata(["phone_number"], []);
+  const [email] = inferMetadata(["email_address"], []);
   expect(phone.role).toBe("linkage");
   expect(phone.isPayload).toBe(false);
   expect(email.role).toBe("linkage");
@@ -26,7 +26,7 @@ test("zip_code: linkage role, not payload by default", () => {
   // A recognized PII type defaults to linkage and is NOT disclosed: an inferred
   // ZIP column participates in matching only if a key references it, and is never
   // silently shipped as payload (unlike an unrecognized `other` column, which is).
-  const [zip] = inferMetadata(["zip"]);
+  const [zip] = inferMetadata(["zip"], []);
   expect(zip.type).toBe("zip_code");
   expect(zip.role).toBe("linkage");
   expect(zip.isPayload).toBe(false);
@@ -34,7 +34,7 @@ test("zip_code: linkage role, not payload by default", () => {
 
 test("an inferred zip column is excluded from the disclosed set", () => {
   const disclosed = disclosedColumnNames(
-    inferMetadata(["first_name", "last_name", "zip", "notes"]),
+    inferMetadata(["first_name", "last_name", "zip", "notes"], []),
   );
   expect(disclosed).not.toContain("zip");
   expect(disclosed).toContain("notes");
@@ -43,14 +43,14 @@ test("an inferred zip column is excluded from the disclosed set", () => {
 // --- inferMetadata: identifier column ----------------------------------------
 
 test("identifier canonical name: identifier role, not linkage", () => {
-  const [col] = inferMetadata(["identifier"]);
+  const [col] = inferMetadata(["identifier"], []);
   expect(col.type).toBe("identifier");
   expect(col.role).toBe("identifier");
   expect(col.isPayload).toBe(true);
 });
 
 test("identifier alias 'id': identifier role, not linkage", () => {
-  const [col] = inferMetadata(["id"]);
+  const [col] = inferMetadata(["id"], []);
   expect(col.type).toBe("identifier");
   expect(col.role).toBe("identifier");
   expect(col.isPayload).toBe(true);
@@ -59,18 +59,18 @@ test("identifier alias 'id': identifier role, not linkage", () => {
 // --- inferMetadata: _id suffix ----------------------------------------------
 
 test("column ending in _id: inferred as identifier type, isPayload true", () => {
-  const [col] = inferMetadata(["client_id"]);
+  const [col] = inferMetadata(["client_id"], []);
   expect(col.type).toBe("identifier");
   expect(col.isPayload).toBe(true);
 });
 
 test("single _id column: promoted to identifier role", () => {
-  const [col] = inferMetadata(["client_id"]);
+  const [col] = inferMetadata(["client_id"], []);
   expect(col.role).toBe("identifier");
 });
 
 test("multiple _id columns: no promotion, all remain payload role", () => {
-  const result = inferMetadata(["client_id", "member_id"]);
+  const result = inferMetadata(["client_id", "member_id"], []);
   expect(result[0].type).toBe("identifier");
   expect(result[0].role).toBe("payload");
   expect(result[1].type).toBe("identifier");
@@ -78,7 +78,7 @@ test("multiple _id columns: no promotion, all remain payload role", () => {
 });
 
 test("canonical id column alongside _id column: id keeps identifier role, _id stays payload", () => {
-  const result = inferMetadata(["id", "client_id"]);
+  const result = inferMetadata(["id", "client_id"], []);
   const idCol = result.find((c) => c.name === "id");
   const clientIdCol = result.find((c) => c.name === "client_id");
   expect(idCol?.role).toBe("identifier");
@@ -88,8 +88,8 @@ test("canonical id column alongside _id column: id keeps identifier role, _id st
 // --- inferMetadata: name is preserved ----------------------------------------
 
 test("original column name casing is preserved", () => {
-  const [upper] = inferMetadata(["LAST_NAME"]);
-  const [mixed] = inferMetadata(["First_Name"]);
+  const [upper] = inferMetadata(["LAST_NAME"], []);
+  const [mixed] = inferMetadata(["First_Name"], []);
   expect(upper.name).toBe("LAST_NAME");
   expect(mixed.name).toBe("First_Name");
 });
@@ -125,7 +125,7 @@ test.each([
   ["phonenumber", "phone_number"],
   ["emailaddress", "email_address"],
 ] as const)('alias "%s" resolves to type "%s"', (alias, expectedType) => {
-  const [col] = inferMetadata([alias]);
+  const [col] = inferMetadata([alias], []);
   expect(col.type).toBe(expectedType);
 });
 
@@ -139,7 +139,7 @@ test.each([
 ] as const)(
   'column name "%s" is matched case-insensitively',
   (name, expectedType) => {
-    const [col] = inferMetadata([name]);
+    const [col] = inferMetadata([name], []);
     expect(col.type).toBe(expectedType);
   },
 );
@@ -147,7 +147,7 @@ test.each([
 // --- inferMetadata: mixed columns --------------------------------------------
 
 test("known and unknown columns are inferred correctly in a single call", () => {
-  const result = inferMetadata(["ssn", "program_start_date", "first_name"]);
+  const result = inferMetadata(["ssn", "program_start_date", "first_name"], []);
   expect(result[0]).toMatchObject({
     type: "ssn",
     role: "linkage",
@@ -356,14 +356,17 @@ test("inferMetadata never assigns role: ignored", () => {
   // ignored is opt-in (user intent, not inferable): inference only ever emits
   // linkage, identifier, or payload. Exercise linkage, canonical-identifier,
   // _id-suffix, promoted-single-id, and unknown columns together.
-  const result = inferMetadata([
-    "ssn",
-    "first_name",
-    "identifier",
-    "client_id",
-    "member_id",
-    "program_start_date",
-  ]);
+  const result = inferMetadata(
+    [
+      "ssn",
+      "first_name",
+      "identifier",
+      "client_id",
+      "member_id",
+      "program_start_date",
+    ],
+    [],
+  );
   expect(result.every((c) => c.role !== "ignored")).toBe(true);
 });
 
@@ -375,8 +378,10 @@ test("inferMetadata rejects an empty column name at intake", () => {
   // payload (every downstream name floors at .min(1)). Reject it at this intake
   // chokepoint as a clear UsageError rather than disclosing it and losing the audit
   // record to the non-fatal record-build guard. A UsageError so the CLI exits 64.
-  expect(() => inferMetadata([""])).toThrow(UsageError);
-  expect(() => inferMetadata(["ssn", "", "first_name"])).toThrow(UsageError);
+  expect(() => inferMetadata([""], [])).toThrow(UsageError);
+  expect(() => inferMetadata(["ssn", "", "first_name"], [])).toThrow(
+    UsageError,
+  );
 });
 
 test("inferMetadata empty-name error names the positions, not input", () => {
@@ -384,7 +389,7 @@ test("inferMetadata empty-name error names the positions, not input", () => {
   // the operator can find the unnamed headers; both empty columns are named.
   let message = "";
   try {
-    inferMetadata(["ssn", "", "first_name", ""]);
+    inferMetadata(["ssn", "", "first_name", ""], []);
   } catch (err) {
     message = err instanceof Error ? err.message : String(err);
   }
@@ -392,9 +397,51 @@ test("inferMetadata empty-name error names the positions, not input", () => {
   expect(message).toContain("4");
 });
 
+test("the empty-name refusal blames the removal when it emptied the name", () => {
+  // A header made only of text-direction characters is neither a trailing comma
+  // nor a blank cell, so a caller holding the parse's sanitation positions gets a
+  // cause and a remedy that fit what the operator's file actually had.
+  let message = "";
+  try {
+    inferMetadata(["id", "", "city"], [2]);
+  } catch (err) {
+    message = err instanceof Error ? err.message : String(err);
+  }
+  expect(message).toContain("input column 2 has an empty name");
+  expect(message).toContain("invisible text-direction characters");
+  expect(message).toContain("ordinary characters");
+  expect(message).not.toContain("trailing comma");
+});
+
+test("the empty-name refusal states both causes for a mixed header", () => {
+  let message = "";
+  try {
+    inferMetadata(["id", "", "city", ""], [2]);
+  } catch (err) {
+    message = err instanceof Error ? err.message : String(err);
+  }
+  expect(message).toContain("input columns 2, 4 have an empty name");
+  expect(message).toContain("column 2 held");
+  expect(message).toContain("invisible text-direction characters");
+  expect(message).toContain("trailing comma");
+});
+
+test("a sanitized position that is not empty leaves the generic cause", () => {
+  // The parse strips a name that keeps other characters too; that column is named
+  // and is not what this refusal is about.
+  let message = "";
+  try {
+    inferMetadata(["id", "city", ""], [2]);
+  } catch (err) {
+    message = err instanceof Error ? err.message : String(err);
+  }
+  expect(message).toContain("trailing comma");
+  expect(message).not.toContain("text-direction");
+});
+
 test("inferMetadata accepts a fully-named header (no regression)", () => {
   expect(() =>
-    inferMetadata(["ssn", "first_name", "last_name", "dob"]),
+    inferMetadata(["ssn", "first_name", "last_name", "dob"], []),
   ).not.toThrow();
 });
 

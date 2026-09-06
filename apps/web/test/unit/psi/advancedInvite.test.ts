@@ -227,11 +227,17 @@ describe("seedAdvancedInvite + buildAdvancedTerms", () => {
     // Generating with no changes produces terms equivalent to today's quick-path
     // auto-derived output for the same inputs.
     expect(buildAdvancedTerms(draft)).toStrictEqual(
-      getDefaultLinkageTerms("County Health Dept", inferMetadata(ALL_COLUMNS)),
+      getDefaultLinkageTerms(
+        "County Health Dept",
+        inferMetadata(ALL_COLUMNS, []),
+      ),
     );
     // The seed itself is that auto-derived set, so it opens valid, never blank.
     expect(seed.terms).toStrictEqual(
-      getDefaultLinkageTerms("County Health Dept", inferMetadata(ALL_COLUMNS)),
+      getDefaultLinkageTerms(
+        "County Health Dept",
+        inferMetadata(ALL_COLUMNS, []),
+      ),
     );
   });
 

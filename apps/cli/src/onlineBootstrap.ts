@@ -395,11 +395,25 @@ export function expiresFromNow(durationSeconds: number): string {
  *
  * `verify-receipt` does NOT come through here: its result CSV is legitimately
  * empty for a zero-match exchange.
+ *
+ * A header that lost a bidi control character at the parse
+ * (`CSVParseMeta.bidiStrippedColumns`, `packages/core/src/file.ts`) is reported
+ * here as a warning rather than a refusal, so the CLI operator is told what the
+ * web intake seats tell theirs. The line names the 1-based column positions and
+ * never the header itself: printing the name would put the removed characters
+ * back into the diagnostic.
+ * Those positions are returned as `sanitizedColumnPositions` too: the empty-name
+ * refusal downstream (`inferMetadata`) states the removal as the cause of a name
+ * the removal emptied only when the caller hands it this list.
  */
 export async function loadInputRows(
   input: string,
   { allowStdin = false }: { allowStdin?: boolean } = {},
-): Promise<{ rawRows: Array<CSVRow>; columns: string[] }> {
+): Promise<{
+  rawRows: Array<CSVRow>;
+  columns: string[];
+  sanitizedColumnPositions: Array<number>;
+}> {
   const csvResult = await loadCSVFile(openInputSource(input, { allowStdin }));
   if (csvResult.data.length === 0)
     throw new UsageError(
@@ -408,10 +422,49 @@ export async function loadInputRows(
         "non-match, so it is refused here; check the export that produced the " +
         "file.",
     );
+  warnBidiStrippedColumns(csvResult.meta.bidiStrippedColumns);
   return {
     rawRows: csvResult.data,
     columns: csvResult.meta.fields ?? [],
+    sanitizedColumnPositions: csvResult.meta.bidiStrippedColumns,
   };
+}
+
+/**
+ * Tell the operator which column positions lost a bidi control character at the
+ * parse, or say nothing when none did. Shared by every CLI read of an operator
+ * CSV -- the loader below and `init`'s bounded inference read -- so no seat
+ * authors a config or runs an exchange on a changed name silently. The logger is
+ * built at warn time rather than held at module scope so it binds the level and
+ * sink the command handler installed.
+ *
+ * The line states the collision case rather than claiming the name kept is the
+ * rest of the header: where the removal leaves two columns sharing one name, the
+ * parser numbers the later one (`name`, `name_1`), which is neither position's
+ * header and can be the untouched column's.
+ *
+ * What it says about disclosure is conditioned on the run: this loader serves
+ * every CLI read, including an exchange whose config makes that column neither a
+ * linkage field nor a payload column, in which case its name is transmitted
+ * nowhere. The line states the matching name and any name the run sends.
+ */
+export function warnBidiStrippedColumns(
+  positions: ReadonlyArray<number>,
+): void {
+  if (positions.length === 0) return;
+  const plural = positions.length > 1;
+  getLogger("input").warn(
+    `column${plural ? "s" : ""} ${positions.join(", ")} of your CSV input ` +
+      `had ${plural ? "names that held" : "a name that held"} invisible ` +
+      `text-direction characters. The characters are gone from the ` +
+      `name${plural ? "s" : ""} used for matching and from any name this ` +
+      `exchange sends your partner. ` +
+      `Where that left two columns with the same name, the later one was ` +
+      `numbered to keep the two apart. Check that ` +
+      `${plural ? "those columns" : "the column"} still ` +
+      `${plural ? "read" : "reads"} the way your file names ` +
+      `${plural ? "them" : "it"}; if not, edit the header row and run again.`,
+  );
 }
 
 /** Name an input in a refusal message: a path as given, or stdin as what it is. */
@@ -519,7 +572,14 @@ export function singlePassDisclosureNotice(): string {
 export function buildDataSpec(args: {
   terms?: LinkageTerms;
   identity: string;
-  rows?: { rawRows: Array<CSVRow>; columns: string[] };
+  rows?: {
+    rawRows: Array<CSVRow>;
+    columns: string[];
+    /** The 1-based positions this read removed bidi control characters from
+     * ({@link loadInputRows}'s own field), so the empty-name refusal below names
+     * the removal. Required: an omitted list states the trailing-comma cause. */
+    sanitizedColumnPositions: Array<number>;
+  };
   dateInputFormat?: string;
   linkageStrategy?: LinkageStrategy;
 }): ResolvedDataSpec {
@@ -535,7 +595,7 @@ export function buildDataSpec(args: {
     return { linkageTerms: terms };
   }
 
-  const metadata = inferMetadata(rows.columns);
+  const metadata = inferMetadata(rows.columns, rows.sanitizedColumnPositions);
   const linkageTerms =
     terms ??
     withLinkageStrategy(

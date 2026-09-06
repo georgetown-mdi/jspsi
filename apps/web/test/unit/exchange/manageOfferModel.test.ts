@@ -57,7 +57,7 @@ const inviterColumns = [
   "dob",
   "program_code",
 ];
-const inviterMetadata = inferMetadata(inviterColumns);
+const inviterMetadata = inferMetadata(inviterColumns, []);
 const inviterTerms = getDefaultLinkageTerms(
   "County Health Dept",
   inviterMetadata,
@@ -204,13 +204,10 @@ const acceptedTerms = deriveAcceptedLinkageTerms(inviterTerms, "Clinic A");
 // The acceptor's own file: ssn/first_name/last_name/dob infer linkage columns and
 // visit_id infers a disclosed payload column, so the set it would send is
 // non-empty and derived, not authored.
-const acceptorMetadataFixture = inferMetadata([
-  "ssn",
-  "first_name",
-  "last_name",
-  "dob",
-  "visit_id",
-]);
+const acceptorMetadataFixture = inferMetadata(
+  ["ssn", "first_name", "last_name", "dob", "visit_id"],
+  [],
+);
 
 describe("the acceptor's outbound-payload consent record", () => {
   test("records the resolved set as confirmed -- exactly what the columns step showed", () => {
@@ -238,7 +235,10 @@ describe("the acceptor's outbound-payload consent record", () => {
   });
 
   test("records confirmed with an EMPTY set when the file discloses nothing, distinct from no record", () => {
-    const keysOnly = inferMetadata(["ssn", "first_name", "last_name", "dob"]);
+    const keysOnly = inferMetadata(
+      ["ssn", "first_name", "last_name", "dob"],
+      [],
+    );
     const doc = composeManagedDocument(
       {
         side: "acceptor",
@@ -391,7 +391,7 @@ describe("buildManagedDeposit (inviter)", () => {
 
 describe("buildManagedDeposit (acceptor)", () => {
   const acceptorColumns = ["ssn", "first_name", "last_name", "dob", "visit_id"];
-  const acceptorMetadata = inferMetadata(acceptorColumns);
+  const acceptorMetadata = inferMetadata(acceptorColumns, []);
   // The acceptor's own perspective: identity replaced, output/payload mirrored.
   const acceptorTerms = deriveAcceptedLinkageTerms(inviterTerms, "Clinic A");
 

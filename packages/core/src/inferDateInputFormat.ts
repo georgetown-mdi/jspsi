@@ -11,11 +11,23 @@ import { INFER_DATE_SCAN_CAP, inferDateFormat } from "./utils/date.js";
  * that needs to locate the DOB column for date-format inference -- the CLI's init
  * path, the shared {@link inferDateInputFormatFromSource} below, and the web
  * server's streaming file profile -- picks the same column and cannot drift.
+ *
+ * An empty column name is dropped rather than handed to {@link inferMetadata}:
+ * this selection runs inside the read -- `loadCSVColumnSample`'s chunk handler
+ * and the web server's stream consumer -- which holds no sanitized-position
+ * list, so its empty-name refusal would state the wrong cause for a name the
+ * bidi strip emptied, ahead of the caller's own warning. The one refusal stays
+ * with that caller, which passes the positions
+ * (`CSVParseMeta.bidiStrippedColumns`) and names the removal. A type is resolved
+ * per name, so dropping one changes no other column's type.
  */
 export function inferDateOfBirthColumn(
   columns: Array<string>,
 ): string | undefined {
-  return inferMetadata(columns).find((c) => c.type === "date_of_birth")?.name;
+  const named = columns.filter((name) => name.length > 0);
+  // No name is empty past that filter, so no refusal can fire and there is no
+  // cause to state; the read's caller raises the one that names the removal.
+  return inferMetadata(named, []).find((c) => c.type === "date_of_birth")?.name;
 }
 
 /** The header columns plus the inferred date-input format of a source's
@@ -23,6 +35,10 @@ export function inferDateOfBirthColumn(
 interface InferredDateInputFormat {
   /** The CSV header field names. */
   columns: Array<string>;
+  /** The 1-based positions of the names the read removed bidi control characters
+   * from (`CSVParseMeta.bidiStrippedColumns`), so a caller authoring a config
+   * from this read tells its operator what changed. */
+  bidiStrippedColumns: Array<number>;
   /** The date-of-birth column the format was inferred from, absent when the
    * header has none. */
   dobColumn?: string;
@@ -51,16 +67,18 @@ export async function inferDateInputFormatFromSource(
   file: LocalFile,
   byteCeiling: number = CSV_LINE_BYTE_CEILING,
 ): Promise<InferredDateInputFormat> {
-  const { columns, sampledColumn, sample } = await loadCSVColumnSample(
-    file,
-    inferDateOfBirthColumn,
-    INFER_DATE_SCAN_CAP,
-    byteCeiling,
-  );
+  const { columns, bidiStrippedColumns, sampledColumn, sample } =
+    await loadCSVColumnSample(
+      file,
+      inferDateOfBirthColumn,
+      INFER_DATE_SCAN_CAP,
+      byteCeiling,
+    );
   const dateInputFormat =
     sampledColumn !== undefined ? inferDateFormat(sample) : undefined;
   return {
     columns,
+    bidiStrippedColumns,
     ...(sampledColumn !== undefined ? { dobColumn: sampledColumn } : {}),
     ...(dateInputFormat !== undefined ? { dateInputFormat } : {}),
   };

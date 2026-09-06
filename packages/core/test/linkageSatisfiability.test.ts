@@ -226,7 +226,7 @@ describe("coalesceSubstitutesConstant", () => {
     const dataset = buildStandardizedDataset(
       undefined,
       rows,
-      inferMetadata(["last_name"]),
+      inferMetadata(["last_name"], []),
       terms,
     );
     const keyStrings = rows.flatMap((_, index) => [
@@ -1477,7 +1477,7 @@ describe("assertFanOutImplemented", () => {
 const FULL_COLUMNS = ["first_name", "last_name", "dob", "ssn"];
 const fullTerms = getDefaultLinkageTerms(
   "Agency A",
-  inferMetadata(FULL_COLUMNS),
+  inferMetadata(FULL_COLUMNS, []),
 );
 
 describe("unsatisfiedLinkageFields", () => {
@@ -1776,7 +1776,7 @@ describe("assessLinkageSatisfiability", () => {
     // dropping ssn from the declared fields while keeping the keys that use it.
     const base = getDefaultLinkageTerms(
       "Agency A",
-      inferMetadata(FULL_COLUMNS),
+      inferMetadata(FULL_COLUMNS, []),
     );
     const keysUsingSsn = base.linkageKeys.filter((k) =>
       k.elements.some((e) => e.field === "ssn"),
@@ -1803,7 +1803,7 @@ describe("assessLinkageSatisfiability", () => {
     // unproducible) is empty.
     const base = getDefaultLinkageTerms(
       "Agency A",
-      inferMetadata(FULL_COLUMNS),
+      inferMetadata(FULL_COLUMNS, []),
     );
     const firstNameField = base.linkageFields.find(
       (f) => f.name === "first_name",
@@ -1878,7 +1878,7 @@ describe("assessLinkageSatisfiability dead keys", () => {
     const dataset = buildStandardizedDataset(
       undefined,
       [{ dob: "01/15/1990" }],
-      inferMetadata(columns),
+      inferMetadata(columns, []),
       terms,
     );
     expect(buildKeyStrings(terms.linkageKeys[0], dataset, 0)).toBeNull();
@@ -1906,7 +1906,7 @@ describe("assessLinkageSatisfiability dead keys", () => {
       const dataset = buildStandardizedDataset(
         undefined,
         [{ dob: "01/15/1990" }],
-        inferMetadata(columns),
+        inferMetadata(columns, []),
         terms,
       );
       expect(
@@ -1956,7 +1956,7 @@ describe("assessLinkageSatisfiability dead keys", () => {
     const dataset = buildStandardizedDataset(
       undefined,
       [{ dob: "01/15/90" }],
-      inferMetadata(columns),
+      inferMetadata(columns, []),
       terms,
     );
     expect(buildKeyStrings(terms.linkageKeys[0], dataset, 0)).toEqual(
@@ -1973,7 +1973,7 @@ describe("assessLinkageSatisfiability dead keys", () => {
     const dataset = buildStandardizedDataset(
       undefined,
       [{ dob: "01/15/90" }],
-      inferMetadata(columns),
+      inferMetadata(columns, []),
       terms,
     );
     expect(buildKeyStrings(terms.linkageKeys[0], dataset, 0)).not.toBeNull();
@@ -2067,7 +2067,7 @@ describe("assessLinkageSatisfiability dead keys", () => {
         const dataset = buildStandardizedDataset(
           undefined,
           [{ dob: value }],
-          inferMetadata(columns),
+          inferMetadata(columns, []),
           terms,
         );
         expect(buildKeyStrings(terms.linkageKeys[0], dataset, 0)).toBeNull();
@@ -2800,7 +2800,7 @@ describe("assessLinkageSatisfiability matches buildStandardizedDataset", () => {
     "$name",
     ({ columns, standardization, metadata, expected }) => {
       const row = Object.fromEntries(columns.map((c) => [c, "x"]));
-      const builderMetadata = metadata ?? inferMetadata(columns);
+      const builderMetadata = metadata ?? inferMetadata(columns, []);
       const dataset = buildStandardizedDataset(
         standardization,
         [row],

@@ -11,7 +11,11 @@ import {
   sanitizeErrorForDisplay,
 } from "@psilink/core";
 
-import { emptyColumnPositions, unnameableColumnsAlert } from "@psi/columnNames";
+import {
+  emptyColumnPositions,
+  sanitizedColumnsAlert,
+  unnameableColumnsAlert,
+} from "@psi/columnNames";
 import { capturedInputHandle } from "@psi/managed/managedInputHandle";
 import { columnSamplesFromRows } from "@psi/columnSamples";
 import { createManagedExchange } from "@psi/managed/managedExchangeStore";
@@ -272,6 +276,12 @@ export function AcceptorScreen() {
   // columns step and its verdict derive from it; and the layered column-step editor
   // state (metadata + override layers), seeded once from the acquired columns.
   const [acquired, setAcquired] = useState<AcceptorAcquiredCsv>();
+  // The 1-based positions the parse stripped bidi control characters from, held
+  // beside the acquired file so the confirm-columns step states what was removed
+  // on the screen where the names are read and marked.
+  const [bidiStrippedColumns, setBidiStrippedColumns] = useState<Array<number>>(
+    [],
+  );
   // The original file whose parse produced `acquired`, captured at the same commit
   // so the server-job path submits the exact bytes the browser path parsed (no
   // re-serialization of rawRows). Fixed alongside `acquired` and the committed name.
@@ -504,6 +514,7 @@ export function AcceptorScreen() {
   function selectFile(chosen: File) {
     setRejectionMessage(undefined);
     setParseAlert(undefined);
+    setBidiStrippedColumns([]);
     setFieldErrors((current) => ({ ...current, file: false }));
     setFile(chosen);
   }
@@ -548,9 +559,15 @@ export function AcceptorScreen() {
   // columns reseed. `acquired` stays unset until the consent gate passes, so the
   // columns step is still gated on "Accept and continue".
   function commitConsoleAcceptFile(profile: ProfiledJobInput) {
+    // Before the refusal below, not after it: the same read that emptied a name
+    // changed the positions this notice states, and a refused file never reaches
+    // the columns step where the notice is otherwise shown.
+    setBidiStrippedColumns(profile.bidiStrippedColumns);
     const emptyPositions = emptyColumnPositions(profile.columns);
     if (emptyPositions.length > 0) {
-      setParseAlert(unnameableColumnsAlert(emptyPositions));
+      setParseAlert(
+        unnameableColumnsAlert(emptyPositions, profile.bidiStrippedColumns),
+      );
       return;
     }
     setParseAlert(undefined);
@@ -630,9 +647,12 @@ export function AcceptorScreen() {
       });
       if (id !== parseId.current) return;
       const columns = result.meta.fields ?? [];
+      const stripped = result.meta.bidiStrippedColumns;
+      // Before the refusal below, for the reason commitConsoleAcceptFile states.
+      setBidiStrippedColumns(stripped);
       const emptyPositions = emptyColumnPositions(columns);
       if (emptyPositions.length > 0) {
-        setParseAlert(unnameableColumnsAlert(emptyPositions));
+        setParseAlert(unnameableColumnsAlert(emptyPositions, stripped));
         return;
       }
       // Store the parsed CSV (not discard it) and seed the columns-step editor from
@@ -663,6 +683,14 @@ export function AcceptorScreen() {
       if (id === parseId.current) setParsing(false);
     }
   }
+
+  // What the read removed from this file's header, stated on the intake step as
+  // well as the columns step: a read that also left a column unnamed refuses
+  // there, and the columns step that otherwise holds the notice is never reached.
+  const sanitizedNotice =
+    bidiStrippedColumns.length > 0
+      ? sanitizedColumnsAlert(bidiStrippedColumns)
+      : undefined;
 
   const ready = decode.status === "ready";
   const token = ready ? decode.invitation.token : undefined;
@@ -1380,6 +1408,17 @@ export function AcceptorScreen() {
                 </span>
               </Alert>
             )}
+            {sanitizedNotice !== undefined && (
+              <Alert
+                role="note"
+                color="yellow"
+                title={sanitizedNotice.title}
+                icon={<IconAlertCircle aria-hidden />}
+                mt="md"
+              >
+                {sanitizedNotice.message}
+              </Alert>
+            )}
             {legalAgreementDisplay !== undefined && (
               <fieldset className={styles.fieldset}>
                 <legend>Legal agreement</legend>
@@ -1433,6 +1472,7 @@ export function AcceptorScreen() {
             <AcceptorColumnsStep
               linkageTerms={linkageTerms}
               columns={acquired.columns}
+              bidiStrippedColumns={bidiStrippedColumns}
               columnsState={columnsState}
               editorState={editorState}
               verdict={verdict}

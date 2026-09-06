@@ -415,7 +415,7 @@ test("the disclosed set is resolved from the column names when no metadata is su
   // Same set, same message, whichever half of the pair holds it.
   const supplied = makeLogger();
   warnColumnsTheInvitationWillNotAccept({
-    metadata: inferMetadata(columnNames),
+    metadata: inferMetadata(columnNames, []),
     columnNames,
     terms: refusingTerms(),
     mode: "offline",
@@ -591,4 +591,47 @@ test("a dead key's refusal names the key and no field at all", () => {
     dobTerms([{ function: "parse_date", params: { inputFormat: "MM/DD" } }]),
   );
   expect(links.slice(2)).toEqual(["linkage key that drops every record: DOB"]);
+});
+
+test("a declared name the read strips from the header says so in the refusal", () => {
+  // The CSV read removes text-direction characters from the header, so a
+  // configuration that names a column as it was typed declares a name no column
+  // of the input has. The shortfall alone would send the operator looking for a
+  // column the file does have. U+202E RLO, written as an escape so a fixture
+  // about invisible characters is readable.
+  const declared = "d\u202eob";
+  const terms: LinkageTerms = {
+    ...dobTerms(),
+    linkageFields: [{ name: declared, type: "date_of_birth" }],
+    linkageKeys: [{ name: "DOB", elements: [{ field: declared }] }],
+  };
+  const metadata = inferMetadata(["dob"], []).map((column) => ({
+    ...column,
+    name: declared,
+  }));
+  let thrown: unknown;
+  try {
+    checkLinkageSatisfiability(
+      ["dob"],
+      terms,
+      mintMessaging,
+      undefined,
+      metadata,
+    );
+  } catch (err) {
+    thrown = err;
+  }
+  expect(thrown).toBeInstanceOf(LinkageTermsUnsatisfiableError);
+  const rendered = sanitizeErrorForDisplay(thrown);
+  expect(rendered).toContain(
+    "A name the configuration declares holds invisible text-direction characters",
+  );
+  expect(rendered).toContain("declared without them");
+});
+
+test("a shortfall with no such name adds no text-direction sentence", () => {
+  // The ordinary case: the input simply lacks a column the terms need.
+  expect(refusalRenderedForDisplay(["other"], dobTerms())).not.toContain(
+    "text-direction",
+  );
 });

@@ -620,7 +620,9 @@ export function resolveExchangeInputs(
   identity: string | undefined,
   columnNames: Array<string>,
 ): { metadata: Metadata; linkageTerms: LinkageTerms } {
-  const metadata = exchangeDataSpec.metadata ?? inferMetadata(columnNames);
+  // A column list this is handed, not a read of its own: the intake that read
+  // the header holds the sanitized positions and refuses an empty name there.
+  const metadata = exchangeDataSpec.metadata ?? inferMetadata(columnNames, []);
   return {
     metadata,
     linkageTerms:

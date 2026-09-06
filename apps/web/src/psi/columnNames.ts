@@ -28,22 +28,101 @@ export function emptyColumnPositions(
  * operator-controlled content, so they are shown directly. The return shape is
  * the structural {@link AlertContent} (`{ title, message }`) every caller assigns
  * it to, restated inline so this leaf helper does not depend on the component layer.
+ *
+ * `sanitizedPositions` are the positions the parse removed bidi control
+ * characters from (`meta.bidiStrippedColumns`). An unnamed position among them
+ * held nothing but those characters, so the trailing-comma cause is wrong for it
+ * and the removal is stated instead -- the operator's header was neither blank
+ * nor trailing, and the remedy differs. Required rather than defaulted: an
+ * omitted list means "blame the trailing comma", and a seat that forgot to
+ * thread its parse's positions would state that wrong cause silently.
  */
-export function unnameableColumnsAlert(positions: ReadonlyArray<number>): {
+export function unnameableColumnsAlert(
+  positions: ReadonlyArray<number>,
+  sanitizedPositions: ReadonlyArray<number>,
+): {
   title: string;
   message: string;
 } {
   const plural = positions.length > 1;
+  const sanitized = new Set(sanitizedPositions);
+  const strippedEmpty = positions.filter((position) => sanitized.has(position));
+  const strippedPlural = strippedEmpty.length > 1;
+  const cause =
+    strippedEmpty.length === 0
+      ? `A trailing comma, a blank cell, or a leading delimiter in the header ` +
+        `row produces an unnamed column, which cannot be used for matching or ` +
+        `sent to your partner. Fix the header row -- name the ` +
+        `column${plural ? "s" : ""} or remove the empty ` +
+        `field${plural ? "s" : ""} -- and choose the file again.`
+      : strippedEmpty.length === positions.length
+        ? `${plural ? "Those names held" : "That name held"} nothing but ` +
+          `invisible text-direction characters, which this read removes, ` +
+          `leaving no name to match on or send to your partner. Fix the header ` +
+          `row -- give ${plural ? "those columns names" : "that column a name"} ` +
+          `made of ordinary characters -- and choose the file again.`
+        : `Column${strippedPlural ? "s" : ""} ${strippedEmpty.join(", ")} held ` +
+          `nothing but invisible text-direction characters, which this read ` +
+          `removes; a trailing comma, a blank cell, or a leading delimiter in ` +
+          `the header row produces the rest. An unnamed column cannot be used ` +
+          `for matching or sent to your partner. Fix the header row -- give ` +
+          `every column a name made of ordinary characters -- and choose the ` +
+          `file again.`;
   return {
     title: plural
       ? "This file has unnamed columns"
       : "This file has an unnamed column",
     message:
       `Column${plural ? "s" : ""} ${positions.join(", ")} in your CSV ` +
-      `${plural ? "have" : "has"} no name. A trailing comma, a blank cell, or a ` +
-      `leading delimiter in the header row produces an unnamed column, which ` +
-      `cannot be used for matching or sent to your partner. Fix the header row -- ` +
-      `name the column${plural ? "s" : ""} or remove the empty field${plural ? "s" : ""} -- and choose the file again.`,
+      `${plural ? "have" : "has"} no name. ${cause}`,
+  };
+}
+
+/**
+ * The operator-facing notice for a file whose header held bidi control
+ * characters, shared by every intake seat so the wording cannot drift. Core's
+ * CSV parse removes them from the name before anything matches on it or sends
+ * it, and reports the 1-based positions it changed (`meta.bidiStrippedColumns`,
+ * `packages/core/src/file.ts`); this is how the operator is told.
+ *
+ * A notice, not a refusal: the header is the operator's own, an operator who
+ * cannot edit a vendor export would lose the exchange over it, and the removal
+ * has already made the name safe to show and to send. `positions` are not
+ * operator-controlled content and are shown directly, while the offending name
+ * never is -- echoing it would put the reordering characters back into the copy
+ * the notice is written to keep readable.
+ *
+ * The copy states the collision case rather than claiming the name kept is the
+ * rest of the header: where the removal leaves two columns sharing one name, the
+ * parser numbers the later one (`name`, `name_1`), which is neither position's
+ * header and can be the untouched column's.
+ *
+ * What it says about disclosure is conditioned on the exchange: a column that is
+ * neither a linkage field nor a marked payload column has its name transmitted
+ * nowhere. The copy states the matching name, the name this screen shows, and
+ * any name the exchange sends.
+ */
+export function sanitizedColumnsAlert(positions: ReadonlyArray<number>): {
+  title: string;
+  message: string;
+} {
+  const plural = positions.length > 1;
+  return {
+    title: plural
+      ? "Formatting characters removed from column names"
+      : "A formatting character was removed from a column name",
+    message:
+      `Column${plural ? "s" : ""} ${positions.join(", ")} in your CSV ` +
+      `${plural ? "had names that held" : "had a name that held"} invisible ` +
+      `text-direction characters. The characters are gone from the ` +
+      `name${plural ? "s" : ""} used for matching and shown on this screen, ` +
+      `and from any name this exchange sends your partner. Where that left ` +
+      `two columns with the same name, ` +
+      `the later one was numbered to keep the two apart. Check that ` +
+      `${plural ? "those columns" : "the column"} still ` +
+      `${plural ? "read" : "reads"} the way your file names ` +
+      `${plural ? "them" : "it"}; if not, edit the header row and choose the ` +
+      `file again.`,
   };
 }
 

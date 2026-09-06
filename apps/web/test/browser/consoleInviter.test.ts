@@ -34,6 +34,10 @@ import { RETAIN_MODE_BILATERAL_NOTICE } from "@console/exchangeFilesModel";
 import { SPLIT_RENDEZVOUS_RETAIN_REQUIREMENT } from "@console/filedropRendezvousChoice";
 import styles from "@styles/app.module.css";
 
+import {
+  BLANK_HEADER_CELL_PROFILE,
+  CONTROLS_ONLY_HEADER_PROFILE,
+} from "../utils/unnamedColumnProfiles";
 import { createAppMount, flushPendingUpdates } from "./renderApp";
 import { captureDownloads } from "./captureDownloads";
 
@@ -69,6 +73,7 @@ const CLIENTS_PROFILE = {
   ...CLIENTS_FILE,
   rowCount: 2,
   columns: ["client_id", "first_name", "last_name", "dob", "program_code"],
+  bidiStrippedColumns: [],
   dateInputFormat: "%m/%d/%Y",
   columnSamples: [
     { column: "client_id", values: ["1", "2"] },
@@ -1253,15 +1258,7 @@ describe("console inviter picker re-profile", () => {
 
   test("a profile with a blank header cell is refused without unmounting the screen", async () => {
     stubJobApi({
-      profile: {
-        ...CLIENTS_PROFILE,
-        columns: ["client_id", "", "dob"],
-        columnSamples: [
-          { column: "client_id", values: ["1", "2"] },
-          { column: "", values: ["x", "y"] },
-          { column: "dob", values: ["01/02/1990", "03/04/1985"] },
-        ],
-      },
+      profile: { ...CLIENTS_PROFILE, ...BLANK_HEADER_CELL_PROFILE },
     });
     app.render(createElement(InviterScreen));
     await userEvent.fill(page.getByLabelText("Your name"), "Dana Okafor");
@@ -1273,6 +1270,60 @@ describe("console inviter picker re-profile", () => {
       .element(page.getByText("This file has an unnamed column"))
       .toBeInTheDocument();
     await expect.element(page.getByLabelText("Your name")).toBeInTheDocument();
+  });
+
+  test("a profile reporting a sanitized header names the columns it changed", async () => {
+    // The console never reads the file in the browser, so the positions the
+    // server's parse stripped ride the profile; the seat states them where the
+    // operator can act on them, and the notice never echoes the header.
+    stubJobApi({
+      profile: { ...CLIENTS_PROFILE, bidiStrippedColumns: [2, 4] },
+    });
+    app.render(createElement(InviterScreen));
+    await userEvent.fill(page.getByLabelText("Your name"), "Dana Okafor");
+    await page.getByRole("button", { name: "Select clients.csv" }).click();
+    await page.getByRole("button", { name: "Use this file" }).click();
+    await expect
+      .element(
+        page.getByText("Formatting characters removed from column names"),
+      )
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("Columns 2, 4", { exact: false }))
+      .toBeInTheDocument();
+    // The file is usable: this is a notice, not a refusal.
+    await expect
+      .element(page.getByRole("button", { name: "Continue" }))
+      .toBeEnabled();
+  });
+
+  test("a header the strip emptied is refused by that cause, notice still shown", async () => {
+    // The column whose name held nothing but text-direction characters comes back
+    // unnamed, so the file is refused -- but by the removal, not by the trailing
+    // comma the generic copy offers, and the notice for what the read changed
+    // stays on the screen beside it. The stubbed body is the one the console's
+    // own parse returns for that header (unnamedColumnProfiles).
+    stubJobApi({
+      profile: { ...CLIENTS_PROFILE, ...CONTROLS_ONLY_HEADER_PROFILE },
+    });
+    app.render(createElement(InviterScreen));
+    await userEvent.fill(page.getByLabelText("Your name"), "Dana Okafor");
+    await page.getByRole("button", { name: "Select clients.csv" }).click();
+    await page.getByRole("button", { name: "Use this file" }).click();
+    await expect
+      .element(page.getByText("This file has an unnamed column"))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("That name held nothing but", { exact: false }))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("trailing comma", { exact: false }))
+      .not.toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText("A formatting character was removed from a column name"),
+      )
+      .toBeInTheDocument();
   });
 });
 

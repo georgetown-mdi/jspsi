@@ -119,6 +119,7 @@ const ACCEPT_PROFILE = {
   ...ACCEPT_FILE,
   rowCount: 2,
   columns: ["first_name", "last_name"],
+  bidiStrippedColumns: [],
   dateInputFormat: "%m/%d/%Y",
   columnSamples: [
     { column: "first_name", values: ["Ann", "Bo"] },

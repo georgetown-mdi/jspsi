@@ -105,7 +105,9 @@ export function acceptorInitialColumnsState(
   columns: Array<string>,
 ): AcceptorColumnsState {
   return {
-    metadata: normalizeForEditor(inferMetadata(columns)),
+    // Columns the file step already committed: it read the header, holds the
+    // sanitized positions, and refuses an empty name before this seeds.
+    metadata: normalizeForEditor(inferMetadata(columns, [])),
     inputOverrides: new Map(),
     stepOverrides: new Map(),
   };

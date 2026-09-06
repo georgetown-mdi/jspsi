@@ -43,7 +43,7 @@ describe("the consent summary's payload block", () => {
     // the wire transmits on -- not from the (absent) payload.send. This is the
     // under-declaration gap the dedicated field closes, and the no-drift
     // invariant: the displayed set equals the transmitted set over one metadata.
-    const metadata = inferMetadata(DISCLOSING_COLUMNS);
+    const metadata = inferMetadata(DISCLOSING_COLUMNS, []);
     const disclosed = disclosedColumnNames(metadata);
     const terms = getDefaultLinkageTerms("Inviter", metadata);
     expect(terms.payload).toBeUndefined();
@@ -60,7 +60,7 @@ describe("the consent summary's payload block", () => {
     // against it, while an authored send with no held subset leaves nothing to
     // reconcile against. A surface classifying the received-columns line reads
     // this narrower flag, so it is pinned apart from sendDeclared.
-    const metadata = inferMetadata(DISCLOSING_COLUMNS);
+    const metadata = inferMetadata(DISCLOSING_COLUMNS, []);
     const terms = getDefaultLinkageTerms("Inviter", metadata);
     const authoredSend = { payload: { send: [{ name: "notes" }] } };
     const authored = summarizeInvitation({
@@ -85,7 +85,7 @@ describe("the consent summary's payload block", () => {
   test("shows no received columns when nothing is held or authored", () => {
     const terms = getDefaultLinkageTerms(
       "Inviter",
-      inferMetadata(LINKAGE_ONLY_COLUMNS),
+      inferMetadata(LINKAGE_ONLY_COLUMNS, []),
     );
     const summary = summarizeInvitation({ linkageTerms: terms });
     expect(summary.payload).toBeUndefined();
@@ -100,7 +100,7 @@ describe("the consent summary's payload block", () => {
     // keeps the consent surfaces and the runtime enforcement aligned.
     const terms = getDefaultLinkageTerms(
       "Inviter",
-      inferMetadata(LINKAGE_ONLY_COLUMNS),
+      inferMetadata(LINKAGE_ONLY_COLUMNS, []),
     );
     const summary = summarizeInvitation({
       linkageTerms: terms,
@@ -124,7 +124,7 @@ describe("the consent summary's payload block", () => {
     // with the lazy case.
     const terms = getDefaultLinkageTerms(
       "Inviter",
-      inferMetadata(LINKAGE_ONLY_COLUMNS),
+      inferMetadata(LINKAGE_ONLY_COLUMNS, []),
     );
     const summary = summarizeInvitation({
       linkageTerms: { ...terms, payload: { receive: [] } },
@@ -142,7 +142,7 @@ describe("the consent summary's payload block", () => {
 describe("the consent summary's retain disclosure", () => {
   const terms = getDefaultLinkageTerms(
     "Inviter",
-    inferMetadata(LINKAGE_ONLY_COLUMNS),
+    inferMetadata(LINKAGE_ONLY_COLUMNS, []),
   );
   const SPLIT_ENDPOINT: ConnectionEndpoint = {
     channel: "filedrop",
@@ -232,7 +232,7 @@ describe("the consent summary's retain disclosure", () => {
 });
 
 describe("the consent summary's fan-out register", () => {
-  const metadata = inferMetadata(LINKAGE_ONLY_COLUMNS);
+  const metadata = inferMetadata(LINKAGE_ONLY_COLUMNS, []);
   const baseTerms = getDefaultLinkageTerms("Inviter", metadata);
   const fanOutTerms = {
     ...baseTerms,
@@ -335,7 +335,7 @@ describe("the consent summary's fan-out register", () => {
 });
 
 describe("the consent summary's date-collapse marker", () => {
-  const metadata = inferMetadata(LINKAGE_ONLY_COLUMNS);
+  const metadata = inferMetadata(LINKAGE_ONLY_COLUMNS, []);
   const baseTerms = getDefaultLinkageTerms("Inviter", metadata);
   const LITERAL_REGION_FORMAT = "ACME-YYYYMMDD";
   // One key over the date field, with whatever transform a case declares.
@@ -521,7 +521,7 @@ describe("the consent summary's date-collapse marker", () => {
 describe("the consent summary's per-step params", () => {
   const baseTerms = getDefaultLinkageTerms(
     "Inviter",
-    inferMetadata(LINKAGE_ONLY_COLUMNS),
+    inferMetadata(LINKAGE_ONLY_COLUMNS, []),
   );
 
   test("a step named after an Object prototype member still renders", () => {

@@ -949,7 +949,7 @@ const LINKAGE_COLUMNS = ["first_name", "last_name", "dob", "ssn"];
 // invitation declares, so terms declaring a key no test CSV here holds would
 // refuse every acceptance below.
 function sampleTerms(identity: string): LinkageTerms {
-  return getDefaultLinkageTerms(identity, inferMetadata(LINKAGE_COLUMNS));
+  return getDefaultLinkageTerms(identity, inferMetadata(LINKAGE_COLUMNS, []));
 }
 
 // The distinctive clause of the warning under test, kept apart from the remedies

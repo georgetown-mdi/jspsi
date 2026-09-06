@@ -112,7 +112,7 @@ describe("no draft edit builds terms holding an explicitly-undefined property", 
       "last_name",
     );
 
-    const metadata = inferMetadata(ALL_COLUMNS);
+    const metadata = inferMetadata(ALL_COLUMNS, []);
     const document = getDefaultLinkageTerms("Author", metadata);
     const parsed = safeParseLinkageTerms(
       JSON.parse(JSON.stringify(document)) as unknown,

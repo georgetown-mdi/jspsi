@@ -8,6 +8,7 @@ import YAML from "yaml";
 import {
   CsvRowParseError,
   getDefaultLinkageTerms,
+  getDiagnosticSink,
   getLogger,
   inferDateInputFormatFromSource,
   INFER_DATE_SCAN_CAP,
@@ -16,6 +17,7 @@ import {
   parseExchangeSpec,
   reconcileReceivedPayload,
   safeParseConnectionConfig,
+  setDiagnosticSink,
   SHARED_SECRET_REGEX,
   UsageError,
 } from "@psilink/core";
@@ -60,6 +62,7 @@ import {
   parseLinkageStrategyFlag,
   runOnlineBootstrap,
   singlePassDisclosureNotice,
+  warnBidiStrippedColumns,
 } from "../../src/onlineBootstrap";
 import { redactUrlCredentials } from "../../src/util/connectionUrl";
 import { openInputSource } from "../../src/util/dataIo";
@@ -1977,6 +1980,7 @@ const ROWS = {
     },
   ],
   columns: COLUMNS,
+  sanitizedColumnPositions: [],
 };
 
 test("buildDataSpec: infers linkage terms, metadata, and standardization from input (invite)", () => {
@@ -3983,6 +3987,177 @@ test("loadInputRows: `-` at an interactive terminal is rejected (invite path inh
   });
 });
 
+test("loadInputRows: a bidi-stripped header is reported by position, never by name", async () => {
+  // The web intake seats show the operator which column positions the parse
+  // changed; the CLI operator is told the same through the shared loader, so no
+  // seat runs on a name that differs from the file's header with no notice. The
+  // header itself stays out of the line: printing it would put the removed
+  // characters back into the diagnostic. A clean header logs nothing.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-loadrows-bidi-"));
+  const logged: Array<string> = [];
+  const previousSink = getDiagnosticSink();
+  const log = getLogger("input");
+  const previousLevel = log.getLevel();
+  let clean: Array<string> = [];
+  try {
+    // U+202E RLO inside the dob header, written as an escape so a fixture about
+    // invisible characters is readable.
+    const stripped = path.join(dir, "stripped.csv");
+    fs.writeFileSync(stripped, "id,d\u202eob,city\n1,1990-01-02,Rome\n");
+    const plainHeader = path.join(dir, "plain.csv");
+    fs.writeFileSync(plainHeader, "id,dob,city\n1,1990-01-02,Rome\n");
+    setDiagnosticSink((_method, _prefix, args) => {
+      logged.push(args.map((arg) => String(arg)).join(" "));
+    });
+    log.setLevel("warn");
+    const rows = await loadInputRows(stripped, { allowStdin: true });
+    expect(rows.columns).toEqual(["id", "dob", "city"]);
+    const before = logged.length;
+    await loadInputRows(plainHeader, { allowStdin: true });
+    clean = logged.slice(before);
+  } finally {
+    setDiagnosticSink(previousSink);
+    log.setLevel(previousLevel);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+
+  const line = logged.find((entry) => entry.includes("text-direction"));
+  expect(line).toBeDefined();
+  expect(line).toContain("column 2");
+  expect(line).not.toContain("dob");
+  expect(line).not.toContain("\u202e");
+  expect(clean).toEqual([]);
+});
+
+test("loadInputRows: a header that collides after the strip is warned by position, and the parser numbers the later column", async () => {
+  // Driven through the real parser: `name,na<RLO>me` strips to two `name`
+  // columns, which PapaParse renames to `name` and `name_1`. The warn line must
+  // not tell the operator the name kept is the rest of the header -- the later
+  // column's name is in neither the file nor the line -- so it states the
+  // numbering instead.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-loadrows-clash-"));
+  const logged: Array<string> = [];
+  const previousSink = getDiagnosticSink();
+  const log = getLogger("input");
+  const previousLevel = log.getLevel();
+  let columns: Array<string> = [];
+  let positions: Array<number> = [];
+  try {
+    const clash = path.join(dir, "clash.csv");
+    fs.writeFileSync(clash, "name,na\u202eme\n alice,bob\n");
+    setDiagnosticSink((_method, _prefix, args) => {
+      logged.push(args.map((arg) => String(arg)).join(" "));
+    });
+    log.setLevel("warn");
+    const rows = await loadInputRows(clash, { allowStdin: true });
+    columns = rows.columns;
+    positions = rows.sanitizedColumnPositions;
+  } finally {
+    setDiagnosticSink(previousSink);
+    log.setLevel(previousLevel);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+
+  expect(columns).toEqual(["name", "name_1"]);
+  expect(positions).toEqual([2]);
+  const line = logged.find((entry) => entry.includes("text-direction"));
+  expect(line).toContain("column 2");
+  expect(line).toContain("two columns with the same name");
+  expect(line).toContain("the later one was numbered");
+  expect(line).not.toContain("rest of the header");
+});
+
+test("the strip warning conditions the disclosure claim on what the run sends", () => {
+  // This loader serves every CLI read, including an exchange whose config makes
+  // the changed column neither a linkage field nor a payload column -- its name
+  // is transmitted nowhere. The line states the names the removal reaches
+  // rather than asserting the changed name went to the partner.
+  const logged: Array<string> = [];
+  const previousSink = getDiagnosticSink();
+  const log = getLogger("input");
+  const previousLevel = log.getLevel();
+  try {
+    setDiagnosticSink((_method, _prefix, args) => {
+      logged.push(args.map((arg) => String(arg)).join(" "));
+    });
+    log.setLevel("warn");
+    warnBidiStrippedColumns([2]);
+  } finally {
+    setDiagnosticSink(previousSink);
+    log.setLevel(previousLevel);
+  }
+
+  const line = logged.find((entry) => entry.includes("text-direction"));
+  expect(line).toContain("from any name this exchange sends your partner");
+  expect(line).not.toContain("and sent to your partner");
+});
+
+test("the empty-name refusal blames the removal when the strip emptied the name", async () => {
+  // Driven through the real parser and the real refusal: a header made only of
+  // text-direction characters strips to the empty name inferMetadata refuses, and
+  // the operator's header was neither a trailing comma nor a blank cell, so the
+  // stated cause and remedy must not be those. The strip warning lands ahead of it.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-loadrows-empty-"));
+  const logged: Array<string> = [];
+  const previousSink = getDiagnosticSink();
+  const log = getLogger("input");
+  const previousLevel = log.getLevel();
+  let message = "";
+  let thrown: unknown;
+  try {
+    // U+202E RLO then U+2069 PDI, written as escapes so a fixture about
+    // invisible characters is readable.
+    const onlyControls = path.join(dir, "only-controls.csv");
+    fs.writeFileSync(onlyControls, "id,\u202e\u2069,city\n1,x,Rome\n");
+    setDiagnosticSink((_method, _prefix, args) => {
+      logged.push(args.map((arg) => String(arg)).join(" "));
+    });
+    log.setLevel("warn");
+    const rows = await loadInputRows(onlyControls, { allowStdin: true });
+    expect(rows.sanitizedColumnPositions).toEqual([2]);
+    try {
+      buildDataSpec({ identity: "Org", rows });
+    } catch (err) {
+      thrown = err;
+      message = err instanceof Error ? err.message : String(err);
+    }
+  } finally {
+    setDiagnosticSink(previousSink);
+    log.setLevel(previousLevel);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+
+  expect(thrown).toBeInstanceOf(UsageError);
+  expect(message).toContain("input column 2 has an empty name");
+  expect(message).toContain("invisible text-direction characters");
+  expect(message).not.toContain("trailing comma");
+  expect(
+    logged.some((entry) => entry.includes("text-direction characters")),
+  ).toBe(true);
+});
+
+test("the empty-name refusal keeps the blank-cell cause for a blank header cell", async () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-loadrows-blank-"));
+  let message = "";
+  try {
+    const blank = path.join(dir, "blank.csv");
+    fs.writeFileSync(blank, "id,,city\n1,x,Rome\n");
+    const rows = await loadInputRows(blank, { allowStdin: true });
+    expect(rows.sanitizedColumnPositions).toEqual([]);
+    try {
+      buildDataSpec({ identity: "Org", rows });
+    } catch (err) {
+      message = err instanceof Error ? err.message : String(err);
+    }
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+
+  expect(message).toContain("input column 2 has an empty name");
+  expect(message).toContain("trailing comma");
+  expect(message).not.toContain("text-direction");
+});
+
 // --- init's bounded inference read (inferDateInputFormatFromSource) -----------
 
 // A column set where date_of_birth joins a satisfiable default linkage key (a
@@ -4021,7 +4196,11 @@ async function inferInitDataSpec(
   );
   const dataSpec = buildDataSpec({
     identity: "Org",
-    rows: { rawRows: [], columns: inferred.columns },
+    rows: {
+      rawRows: [],
+      columns: inferred.columns,
+      sanitizedColumnPositions: inferred.bidiStrippedColumns,
+    },
     ...(inferred.dateInputFormat !== undefined
       ? { dateInputFormat: inferred.dateInputFormat }
       : {}),
@@ -4217,6 +4396,7 @@ const STRATEGY_ROWS = {
     },
   ],
   columns: ["first_name", "last_name", "dob", "ssn"],
+  sanitizedColumnPositions: [],
 };
 
 test("buildDataSpec: --linkage-strategy single-pass authors single-pass terms", () => {

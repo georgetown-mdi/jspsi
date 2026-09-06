@@ -224,7 +224,8 @@ export function unsatisfiedLinkageFields(
   const resolution = resolveFieldColumns(
     terms,
     standardization,
-    metadata ?? inferMetadata(columns),
+    // A column list this is handed, not a read of its own (see resolveExchangeInputs).
+    metadata ?? inferMetadata(columns, []),
   );
   // A field is producible iff the shared resolution bound it to a column present
   // in the input. The binding rules (explicit-preempts-fallback, first-match type

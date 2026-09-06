@@ -18,6 +18,7 @@ import {
 import {
   emptyColumnPositions,
   overlongColumnsAlert,
+  sanitizedColumnsAlert,
   unnameableColumnsAlert,
 } from "@psi/columnNames";
 import { capturedInputHandle } from "@psi/managed/managedInputHandle";
@@ -228,7 +229,10 @@ function invitationFileAlert(failure: InvitationFileFailure): AlertContent {
         message: sanitizeErrorForDisplay(failure.cause),
       };
     case "unnameable":
-      return unnameableColumnsAlert(failure.positions);
+      return unnameableColumnsAlert(
+        failure.positions,
+        failure.sanitizedPositions,
+      );
     case "overlong":
       return overlongColumnsAlert(failure.positions);
     case "unlinkable":
@@ -290,6 +294,9 @@ export function InviterScreen() {
   const [sourceHandle, setSourceHandle] = useState<FileSystemFileHandle>();
   const [editor, setEditor] = useState<InviterEditor>();
   const [intakeAlert, setIntakeAlert] = useState<AlertContent>();
+  // The boundary's column-name sanitation, held apart from intakeAlert: it is an
+  // advisory about the file just read, not a refusal, and both can apply at once.
+  const [sanitizedNotice, setSanitizedNotice] = useState<AlertContent>();
   const [reading, setReading] = useState(false);
   const [announcement, setAnnouncement] = useState("");
   const [invitation, setInvitation] = useState<GeneratedInvitation>();
@@ -709,6 +716,7 @@ export function InviterScreen() {
   // `acquired`/`editor`, so leaving them set would present the previous file
   // as the one the operator just dropped.
   function discardRead(alert: AlertContent) {
+    setSanitizedNotice(undefined);
     setAcquired(undefined);
     setConsoleSource(undefined);
     setSourceFile(undefined);
@@ -733,17 +741,25 @@ export function InviterScreen() {
     if (seed !== undefined) setName(seed.name);
     setReading(true);
     setIntakeAlert(undefined);
+    setSanitizedNotice(undefined);
     try {
       const result = await loadCSVFileOffMainThread(file, {
         signal: controller.signal,
       });
       if (id !== parseId.current) return;
       const columns = result.meta.fields ?? [];
+      const stripped = result.meta.bidiStrippedColumns;
       const emptyPositions = emptyColumnPositions(columns);
       if (emptyPositions.length > 0) {
-        discardRead(unnameableColumnsAlert(emptyPositions));
+        // Set after discardRead clears it: the refusal names the columns the
+        // removal left unnamed, the notice every position the read changed.
+        discardRead(unnameableColumnsAlert(emptyPositions, stripped));
+        if (stripped.length > 0)
+          setSanitizedNotice(sanitizedColumnsAlert(stripped));
         return;
       }
+      if (stripped.length > 0)
+        setSanitizedNotice(sanitizedColumnsAlert(stripped));
       const csv: AcquiredCsv = {
         fileName: file.name,
         sizeBytes: file.size,
@@ -783,11 +799,17 @@ export function InviterScreen() {
   // keeps the authored draft when its columns are unchanged and only refreshes
   // the profile-derived facts; otherwise it reseeds from the profile.
   function commitConsoleFile(profile: ProfiledJobInput) {
+    const stripped = profile.bidiStrippedColumns;
     const emptyPositions = emptyColumnPositions(profile.columns);
     if (emptyPositions.length > 0) {
-      discardRead(unnameableColumnsAlert(emptyPositions));
+      discardRead(unnameableColumnsAlert(emptyPositions, stripped));
+      if (stripped.length > 0)
+        setSanitizedNotice(sanitizedColumnsAlert(stripped));
       return;
     }
+    setSanitizedNotice(
+      stripped.length > 0 ? sanitizedColumnsAlert(stripped) : undefined,
+    );
     const csv = consoleAcquiredCsv({
       fileName: profile.name,
       sizeBytes: profile.sizeBytes,
@@ -865,6 +887,7 @@ export function InviterScreen() {
     setSourceHandle(undefined);
     setEditor(undefined);
     setIntakeAlert(undefined);
+    setSanitizedNotice(undefined);
     setReading(false);
     setDemoActive(false);
     setSavedExchange(undefined);
@@ -1273,6 +1296,7 @@ export function InviterScreen() {
             acquired={acquired}
             linkable={linkable}
             alert={intakeAlert}
+            notice={sanitizedNotice}
             committed={
               consoleSource !== undefined
                 ? { name: consoleSource.name }

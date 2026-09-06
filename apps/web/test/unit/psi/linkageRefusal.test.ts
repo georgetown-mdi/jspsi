@@ -52,7 +52,7 @@ describe("linkageRefusalFor", () => {
     // columns support; narrowed to none, the field types a conforming file would
     // contain come from the UNNARROWED set rather than the verdict's own (empty) one.
     const columns = ["notes"];
-    const narrowed = getDefaultLinkageTerms("x", inferMetadata(columns));
+    const narrowed = getDefaultLinkageTerms("x", inferMetadata(columns, []));
     expect(narrowed.linkageKeys).toEqual([]);
     const verdict = decideLinkageTermsVerdict(columns, narrowed);
     const missing = decideLinkageTermsVerdict(

@@ -196,7 +196,9 @@ export function previewInferredTerms(
   identity: string,
   linkageStrategy: LinkageStrategy,
 ): DirectTermsPreview {
-  const metadata = inferMetadata(columns);
+  // Preview over columns the file step already committed: it read the header,
+  // holds the sanitized positions, and refuses an empty name before this runs.
+  const metadata = inferMetadata(columns, []);
   const linkageTerms = {
     ...getDefaultLinkageTerms(identity, metadata),
     linkageStrategy,

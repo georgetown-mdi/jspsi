@@ -32,26 +32,21 @@ const app = createAppMount();
 // client_id/first_name/last_name/dob infer matching roles; program_code is not
 // in the alias map, so it infers a disclosed payload column -- the one column
 // separating "the columns I send" from "every column of my file".
-const metadata = inferMetadata([
-  "client_id",
-  "first_name",
-  "last_name",
-  "dob",
-  "program_code",
-]);
+const metadata = inferMetadata(
+  ["client_id", "first_name", "last_name", "dob", "program_code"],
+  [],
+);
 
 // A file whose only column is the record identifier: the result already begins
 // with it, so `all` selects nothing.
-const identifierOnlyMetadata = inferMetadata(["client_id"]);
+const identifierOnlyMetadata = inferMetadata(["client_id"], []);
 
 // A file of matching columns and nothing else: the columns are there, but they
 // are role linkage rather than payload, so `disclosed` selects nothing.
-const linkageOnlyMetadata = inferMetadata([
-  "client_id",
-  "first_name",
-  "last_name",
-  "dob",
-]);
+const linkageOnlyMetadata = inferMetadata(
+  ["client_id", "first_name", "last_name", "dob"],
+  [],
+);
 
 async function mount(
   ownColumns: OwnColumnsChoice | undefined,

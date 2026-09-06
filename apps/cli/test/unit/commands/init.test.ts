@@ -9,9 +9,11 @@ import {
   ExchangeSpecSchema,
   StandardizationSchema,
   UsageError,
+  getDiagnosticSink,
   getLogger,
   parseExchangeSpec,
   safeParseMetadata,
+  setDiagnosticSink,
 } from "@psilink/core";
 
 import {
@@ -272,6 +274,84 @@ test("buildTemplateData: the bounded read infers the same terms (incl. DOB forma
   expect(
     (parseDate?.params as { inputFormat?: string } | undefined)?.inputFormat,
   ).toBe("MM/DD/YYYY");
+});
+
+test("buildTemplateData: the header this read changed is named by position", async () => {
+  // init's bounded read applies the same header sanitation as the exchange
+  // reads, so the config it authors names the sanitized column. The operator is
+  // told which position changed before that config is written, by the same line
+  // the other CLI reads use -- and the name itself stays out of it.
+  const dir = scratchDir();
+  const file = path.join(dir, "in.csv");
+  // U+202E RLO inside the last_name header, written as an escape so a fixture
+  // about invisible characters is readable.
+  fs.writeFileSync(
+    file,
+    "first_name,la\u202est_name,dob,ssn\n" +
+      "Alice,Smith,1990-01-02,123456789\n",
+  );
+  const logged: Array<string> = [];
+  const previousSink = getDiagnosticSink();
+  const inputLog = getLogger("input");
+  const previousLevel = inputLog.getLevel();
+  let names: Array<string> | undefined;
+  try {
+    setDiagnosticSink((_method, _prefix, args) => {
+      logged.push(args.map((arg) => String(arg)).join(" "));
+    });
+    inputLog.setLevel("warn");
+    const data = await buildTemplateData(file, "Org");
+    names = data.metadata?.map((column) => column.name);
+  } finally {
+    setDiagnosticSink(previousSink);
+    inputLog.setLevel(previousLevel);
+  }
+
+  expect(names).toContain("last_name");
+  const line = logged.find((entry) => entry.includes("text-direction"));
+  expect(line).toBeDefined();
+  expect(line).toContain("column 2");
+  expect(line).not.toContain("last_name");
+  expect(line).not.toContain("\u202e");
+});
+
+test("buildTemplateData: a header the strip emptied names the removal", async () => {
+  // A column whose whole name is direction characters comes back unnamed. The
+  // read resolves rather than refusing under the parse, so the operator gets the
+  // strip warning first and then a refusal naming the removal -- not the
+  // trailing-comma cause, which is not what happened to their header.
+  const dir = scratchDir();
+  const file = path.join(dir, "in.csv");
+  // U+202E RLO then U+2069 PDI, written as escapes so a fixture about invisible
+  // characters is readable.
+  fs.writeFileSync(file, "id,\u202e\u2069,city\n1,x,Springfield\n");
+  const logged: Array<string> = [];
+  const previousSink = getDiagnosticSink();
+  const inputLog = getLogger("input");
+  const previousLevel = inputLog.getLevel();
+  let refusal: unknown;
+  try {
+    setDiagnosticSink((_method, _prefix, args) => {
+      logged.push(args.map((arg) => String(arg)).join(" "));
+    });
+    inputLog.setLevel("warn");
+    refusal = await buildTemplateData(file, "Org").then(
+      () => undefined,
+      (error: unknown) => error,
+    );
+  } finally {
+    setDiagnosticSink(previousSink);
+    inputLog.setLevel(previousLevel);
+  }
+
+  expect(refusal).toBeInstanceOf(UsageError);
+  const message = (refusal as Error).message;
+  expect(message).toContain("input column 2 has an empty name");
+  expect(message).toContain("nothing but invisible text-direction characters");
+  expect(message).not.toContain("trailing comma");
+  const line = logged.find((entry) => entry.includes("text-direction"));
+  expect(line).toBeDefined();
+  expect(line).toContain("column 2");
 });
 
 test("buildTemplateData: `-` reads the CSV from stdin", async () => {

@@ -49,7 +49,7 @@ describe("previewInferredTerms", () => {
     );
     const core = getDefaultLinkageTerms(
       "County Health",
-      inferMetadata(LINKABLE_COLUMNS),
+      inferMetadata(LINKABLE_COLUMNS, []),
     );
 
     expect(preview.linkageTerms.linkageKeys).toEqual(core.linkageKeys);
@@ -64,7 +64,7 @@ describe("previewInferredTerms", () => {
       DEFAULT_PREVIEW_IDENTITY,
       DIRECT_LINKAGE_STRATEGY_DEFAULT,
     );
-    const disclosed = disclosedColumnNames(inferMetadata(LINKABLE_COLUMNS));
+    const disclosed = disclosedColumnNames(inferMetadata(LINKABLE_COLUMNS, []));
 
     expect(preview.disclosedPayloadColumns).toEqual(disclosed);
     // An unrecognized column is inferred as disclosed payload, so it leaves the

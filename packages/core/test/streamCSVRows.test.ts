@@ -55,7 +55,7 @@ function csvWithRows(rows: number): string {
 test("streamCSVRows yields exactly the rows and columns loadCSVFile accumulates", async () => {
   const csv = csvWithRows(2000);
   const collected: Array<CSVRow> = [];
-  const columns = await streamCSVRows(streamOf(csv), (rows) => {
+  const { columns } = await streamCSVRows(streamOf(csv), (rows) => {
     for (const row of rows) collected.push(row);
   });
   const full = await loadCSVFile(streamOf(csv));
@@ -66,7 +66,7 @@ test("streamCSVRows yields exactly the rows and columns loadCSVFile accumulates"
 test("streamCSVRows retains nothing: it hands each chunk's rows to the consumer", async () => {
   const csv = csvWithRows(50);
   let seen = 0;
-  const columns = await streamCSVRows(streamOf(csv), (rows, cols) => {
+  const { columns } = await streamCSVRows(streamOf(csv), (rows, cols) => {
     seen += rows.length;
     // The header column list is available on every chunk.
     expect(cols).toEqual(["first_name", "last_name", "dob", "member_id"]);
@@ -76,7 +76,7 @@ test("streamCSVRows retains nothing: it hands each chunk's rows to the consumer"
 });
 
 test("streamCSVRows resolves an empty header list for a headerless empty input", async () => {
-  const columns = await streamCSVRows(streamOf("\n"), () => undefined);
+  const { columns } = await streamCSVRows(streamOf("\n"), () => undefined);
   expect(columns).toEqual([]);
 });
 

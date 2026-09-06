@@ -159,7 +159,9 @@ export function dateInputFormatForColumns(
   rawRows: ReadonlyArray<CSVRow>,
 ): string | undefined {
   return inferDateInputFormat(
-    normalizeForEditor(inferMetadata(columns)),
+    // A column list this is handed, not a read of its own: the intake that read
+    // the header refuses an empty name before seeding an editor from it.
+    normalizeForEditor(inferMetadata(columns, [])),
     rawRows,
   );
 }
@@ -185,7 +187,7 @@ export function seedAdvancedInvite(
   // re-derives isPayload from role, so the offerable key set -- which
   // getDefaultLinkageTerms derives from the `role: linkage` column TYPES -- is
   // unchanged by it.
-  const metadata = normalizeForEditor(inferMetadata(columns));
+  const metadata = normalizeForEditor(inferMetadata(columns, []));
   const terms = getDefaultLinkageTerms(identity, metadata);
   const keys = offerableDraftKeys(identity, metadata);
   return {

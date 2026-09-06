@@ -43,6 +43,7 @@ export function YourFileSection({
   acquired,
   linkable,
   alert,
+  notice,
   committed,
   onCommit,
   onContinue,
@@ -58,6 +59,10 @@ export function YourFileSection({
   /** Whether the read file can back at least one matching key. */
   linkable: boolean;
   alert: AlertContent | undefined;
+  /** An advisory about the read file the operator should see but need not act on
+   * before continuing -- the boundary's column-name sanitation. Rendered beside
+   * {@link alert}, which is the refusal slot. */
+  notice: AlertContent | undefined;
   /** The file committed to the host on the console (its profiled reference), so the
    * picker marks its row; unused off the console. */
   committed?: WorkInputReference;
@@ -235,6 +240,16 @@ export function YourFileSection({
           {/* sanitizeErrorForDisplay separates a cause chain with newlines;
               pre-line preserves them (its documented rendering contract). */}
           <span style={{ whiteSpace: "pre-line" }}>{alert.message}</span>
+        </Alert>
+      )}
+      {notice !== undefined && (
+        <Alert
+          color="yellow"
+          title={notice.title}
+          icon={<IconAlertCircle />}
+          mt="md"
+        >
+          <span style={{ whiteSpace: "pre-line" }}>{notice.message}</span>
         </Alert>
       )}
       {acquired !== undefined && linkable && (

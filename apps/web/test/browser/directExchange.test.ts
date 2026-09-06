@@ -28,6 +28,8 @@ import { RETAIN_MODE_BILATERAL_NOTICE } from "@console/exchangeFilesModel";
 import { SPLIT_RENDEZVOUS_RETAIN_REQUIREMENT } from "@console/filedropRendezvousChoice";
 import { UNDESCRIBABLE_RECORD_LEAD } from "@exchange/RecordDownload";
 
+import { CONTROLS_ONLY_HEADER_PROFILE } from "../utils/unnamedColumnProfiles";
+
 import { createAppMount, flushPendingUpdates } from "./renderApp";
 
 import type { JobHandoff } from "@jobs/handoff";
@@ -59,6 +61,7 @@ const CLIENTS_PROFILE = {
   ...CLIENTS_FILE,
   rowCount: 2,
   columns: ["client_id", "first_name", "last_name", "dob", "program_code"],
+  bidiStrippedColumns: [],
   dateInputFormat: "%m/%d/%Y",
   columnSamples: [
     { column: "client_id", values: ["1", "2"] },
@@ -81,6 +84,9 @@ interface CapturedRequest {
 interface StubOptions {
   sftp?: unknown;
   rendezvous?: unknown;
+  /** The body `GET /api/jobs/inputs/profile` serves. Defaults to
+   * {@link CLIENTS_PROFILE}. */
+  profile?: unknown;
   /** The run status a `GET /api/jobs/job-7` reports. Defaults to `running`; a
    * terminal value (`failed`) lets a discard skip the cancel-and-poll wait and DELETE
    * at once, so a start-over test does not sit through the 15 s discard budget. */
@@ -154,7 +160,9 @@ function stubJobApi(options: StubOptions = {}): {
           jsonResponse({ configured: true, files: [CLIENTS_FILE] }),
         );
       if (url.startsWith("/api/jobs/inputs/profile"))
-        return Promise.resolve(jsonResponse(CLIENTS_PROFILE));
+        return Promise.resolve(
+          jsonResponse(options.profile ?? CLIENTS_PROFILE),
+        );
       if (url === "/api/jobs/sftp/probe") {
         const probe = options.probe ?? {
           status: 200,
@@ -399,6 +407,68 @@ describe("direct exchange confirm and run", () => {
     await expect
       .element(page.getByRole("heading", { level: 1 }))
       .toHaveTextContent("Exchange complete");
+  });
+
+  test("a header the strip emptied is refused by that cause, notice beside it", async () => {
+    // The committed profile is the body the console's own parse returns for a
+    // header whose middle column is only direction characters
+    // (unnamedColumnProfiles). The refusal drops the file, so the confirm screen
+    // that otherwise states the removal is never reached: the file step states it
+    // beside the refusal, which names the removal rather than a trailing comma.
+    stubJobApi({
+      sftp: CONFIGURED_SFTP,
+      profile: { ...CLIENTS_PROFILE, ...CONTROLS_ONLY_HEADER_PROFILE },
+    });
+    app.render(createElement(DirectExchangeScreen));
+    await page.getByRole("button", { name: "Select clients.csv" }).click();
+    await page.getByRole("button", { name: "Use this file" }).click();
+
+    await expect
+      .element(page.getByText("This file has an unnamed column"))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("That name held nothing but", { exact: false }))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("trailing comma", { exact: false }))
+      .not.toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText("A formatting character was removed from a column name"),
+      )
+      .toBeInTheDocument();
+    // The refused file did not commit: the spine stays on its file step.
+    await expect
+      .element(page.getByRole("heading", { level: 1, name: "Your file" }))
+      .toBeInTheDocument();
+  });
+
+  test("names the header positions the console's parse stripped", async () => {
+    // The console reads the file on the server, so the positions ride the
+    // profile; this spine states them on the confirm screen, the last one before
+    // the run, since the file step it came through does not outlive the choice.
+    // Positions only -- echoing the header would put the removed characters back
+    // into the notice.
+    stubJobApi({
+      sftp: CONFIGURED_SFTP,
+      profile: { ...CLIENTS_PROFILE, bidiStrippedColumns: [2, 5] },
+    });
+    app.render(createElement(DirectExchangeScreen));
+    await reachConfirm();
+
+    await expect
+      .element(
+        page.getByText("Formatting characters removed from column names"),
+      )
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("Columns 2, 5", { exact: false }))
+      .toBeInTheDocument();
+    // A notice, not a refusal: the run is still reachable behind its affirmation.
+    await page.getByRole("checkbox").click();
+    await expect
+      .element(page.getByRole("button", { name: "Run the exchange" }))
+      .toBeEnabled();
   });
 
   test("a terms mismatch shows clearly through the job-error path", async () => {

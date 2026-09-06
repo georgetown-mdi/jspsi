@@ -305,6 +305,54 @@ export const ALIAS_TYPE_META_MAP = DEFAULT_COLUMN_TYPES_AND_ALIASES.reduce(
 );
 
 /**
+ * Refuse a header holding an empty (zero-length) column name, naming the cause
+ * that produced it.
+ *
+ * `sanitizedPositions` are the 1-based positions the parse removed bidi control
+ * characters from (`CSVParseMeta.bidiStrippedColumns`, `packages/core/src/file.ts`).
+ * An empty position among them held nothing but those characters, so the
+ * trailing-comma cause is wrong for it and the removal is stated instead; an
+ * empty list gives the trailing-comma cause for every position.
+ */
+function assertColumnNamesNonEmpty(
+  columnNames: ReadonlyArray<string>,
+  sanitizedPositions: ReadonlyArray<number>,
+): void {
+  const emptyPositions = columnNames
+    .map((name, index) => (name.length === 0 ? index + 1 : 0))
+    .filter((position) => position > 0);
+  if (emptyPositions.length === 0) return;
+
+  const sanitized = new Set(sanitizedPositions);
+  const strippedEmpty = emptyPositions.filter((position) =>
+    sanitized.has(position),
+  );
+  const plural = emptyPositions.length > 1;
+  const strippedPlural = strippedEmpty.length > 1;
+  const cause =
+    strippedEmpty.length === 0
+      ? `a trailing comma, a blank cell, or a leading delimiter in the CSV ` +
+        `header row produces an unnamed column. Name the ` +
+        `column${plural ? "s" : ""}, or remove the empty header ` +
+        `field${plural ? "s" : ""}.`
+      : strippedEmpty.length === emptyPositions.length
+        ? `${plural ? "those names" : "that name"} held nothing but invisible ` +
+          `text-direction characters, which this read removes. Give the ` +
+          `column${plural ? "s" : ""} ${plural ? "names" : "a name"} made of ` +
+          `ordinary characters, and run again.`
+        : `column${strippedPlural ? "s" : ""} ${strippedEmpty.join(", ")} ` +
+          `held nothing but invisible text-direction characters, which this ` +
+          `read removes, and a trailing comma, a blank cell, or a leading ` +
+          `delimiter in the CSV header row produces the rest. Name every ` +
+          `column with ordinary characters, and run again.`;
+  throw new UsageError(
+    `input column${plural ? "s" : ""} ${emptyPositions.join(", ")} ` +
+      `${plural ? "have" : "has"} an empty name. A column used for linkage, ` +
+      `identification, or payload must be named; ${cause}`,
+  );
+}
+
+/**
  * Assigns default roles to columns based on their names, using aliases
  * where appropriate. Columns ending in `_id` are also treated as
  * identifiers.
@@ -312,6 +360,13 @@ export const ALIAS_TYPE_META_MAP = DEFAULT_COLUMN_TYPES_AND_ALIASES.reduce(
  * A single identifier column gets `role: identifier`, used to index
  * observations. With more than one, only a column literally named `id` or
  * `identifier` gets that role; otherwise no identifier role is assigned.
+ *
+ * `sanitizedPositions` are the 1-based positions the CSV parse removed bidi
+ * control characters from, so the empty-name refusal below can name the removal
+ * as the cause. Required rather than defaulted: an omitted list means "blame the
+ * trailing comma", and a read that forgot to thread its own positions would
+ * state that wrong cause silently. A caller holding a column list rather than a
+ * read of its own passes an empty list, saying so at the call site.
  *
  * @throws {UsageError} when any column name is empty. Downstream name
  *   fields (metadata, payload, wire, exchange-record schemas) all floor at
@@ -322,21 +377,11 @@ export const ALIAS_TYPE_META_MAP = DEFAULT_COLUMN_TYPES_AND_ALIASES.reduce(
  *   so the CLI classifies it as a configuration error (exit 64); the
  *   message names the offending positions only, never the (empty) names.
  */
-export function inferMetadata(columnNames: Array<string>): Metadata {
-  const emptyPositions = columnNames
-    .map((name, index) => (name.length === 0 ? index + 1 : 0))
-    .filter((position) => position > 0);
-  if (emptyPositions.length > 0) {
-    const plural = emptyPositions.length > 1;
-    throw new UsageError(
-      `input column${plural ? "s" : ""} ${emptyPositions.join(", ")} ` +
-        `${plural ? "have" : "has"} an empty name. A column used for linkage, ` +
-        `identification, or payload must be named; a trailing comma, a blank ` +
-        `cell, or a leading delimiter in the CSV header row produces an unnamed ` +
-        `column. Name the column${plural ? "s" : ""}, or remove the empty ` +
-        `header field${plural ? "s" : ""}.`,
-    );
-  }
+export function inferMetadata(
+  columnNames: Array<string>,
+  sanitizedPositions: ReadonlyArray<number>,
+): Metadata {
+  assertColumnNamesNonEmpty(columnNames, sanitizedPositions);
 
   const result: Metadata = columnNames.map((name) => {
     const lookupName = name.toLowerCase();
