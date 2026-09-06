@@ -1305,6 +1305,43 @@ test("validateInvite: a retain-mode config declares it on the token", async () =
   expect(token.inviterRetainsFiles).toBe(true);
 });
 
+test("validateInvite: a config-as-source invite emits no connection endpoint", async () => {
+  // This mint declares the retention from the config's options block alone and
+  // puts no locator on the token, so it needs no declaration derived from the
+  // endpoint's shape and no endpoint can contradict the one it states -- a
+  // split inbound/outbound connection, the shape that settles the mode by
+  // itself, included.
+  const dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-invite-split-"));
+  tmpDirs.push(dir);
+  const configPath = path.join(dir, "psilink.yaml");
+  saveConfig(configPath, {
+    connection: {
+      channel: "filedrop",
+      inboundPath: "/mnt/share/in",
+      outboundPath: "/mnt/share/out",
+      options: {
+        retainFiles: true,
+        locklessRendezvous: true,
+        timestampInFilename: true,
+      },
+    },
+    linkageTerms: defaultTerms(),
+  });
+  const ready = await validateInvite({
+    resolved: { mode: "offline" },
+    options: testOptions({
+      configFile: configPath,
+      keyFile: path.join(dir, ".psilink.key"),
+    }),
+    acceptTimeout: 900,
+    log: silentLog,
+  });
+  expect(ready.mode).toBe("offlineFromConfig");
+  const token = await decodeInvitation(ready.invitation);
+  expect(token.connectionEndpoint).toBeUndefined();
+  expect(token.inviterRetainsFiles).toBe(true);
+});
+
 test("validateInvite: a webrtc config declares nothing, whatever its options say", async () => {
   // Config-as-source mint reads the connection block without validating it, so
   // this pairing mints without ever reaching the endpoint-paired refusal (which

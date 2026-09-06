@@ -2,12 +2,17 @@ import { Readable } from "node:stream";
 
 import { describe, expect, test } from "vitest";
 
+import { decodeInvitation } from "@psilink/core";
+
 import {
   INVITATION_PLACEHOLDER,
   acceptKitFileName,
   buildAcceptKit,
 } from "@exchange/acceptKit";
-import { generateInvitation } from "@psi/invitation";
+import {
+  generateInvitation,
+  invitationDeclaresRetainedFiles,
+} from "@psi/invitation";
 
 import type { AcceptKitEndpoint } from "@exchange/acceptKit";
 import type { InvitationLocation } from "@psi/invitation";
@@ -914,6 +919,34 @@ describe("accept kit invariants", () => {
     expect(text).not.toContain(minted.deepLink);
     // Nor the inviter's own identity, which is the token's to disclose.
     expect(text).not.toContain("County Health Dept");
+  });
+
+  test("states one retention mode on the token and on the sheet", async () => {
+    // Both partner-facing statements of retain mode come from one derived
+    // value, the rule the mint applies: a split rendezvous composed while the
+    // run's own retain flag is off declares the retention on the token, and
+    // the sheet beside it discloses the same mode rather than delete mode.
+    const retainFiles = invitationDeclaresRetainedFiles({
+      connectionEndpoint: SFTP_SPLIT,
+      retainsFiles: false,
+    });
+    const minted = await generateInvitation({
+      inviterName: "County Health Dept",
+      file: Readable.from(CSV),
+      location,
+      connectionEndpoint: SFTP_SPLIT,
+      retainsFiles: retainFiles,
+    });
+    const token = await decodeInvitation(minted.encoded);
+    expect(token.inviterRetainsFiles).toBe(true);
+    const text = buildAcceptKit({
+      endpoint: SFTP_SPLIT,
+      retainFiles,
+      locklessRendezvous: true,
+      version: "1.4.2",
+    });
+    expect(text).toContain("THIS EXCHANGE KEEPS ITS FILES");
+    expect(text).toContain("--retain-files");
   });
 
   test("has the shared folder's name, never the console path behind it", () => {

@@ -8,6 +8,7 @@ import {
   decideLinkageTermsVerdict,
   disclosedColumnNames,
   encodeInvitation,
+  endpointRequiresRetainedFiles,
   generateSharedSecret,
   getDefaultLinkageTerms,
   inferMetadata,
@@ -331,6 +332,34 @@ function resolveConnectionEndpoint(
 }
 
 /**
+ * Whether an invitation minted from these inputs declares
+ * `inviterRetainsFiles`. Two grounds, ORed: the caller's resolved
+ * `retain_files`, and the endpoint's own shape -- a split
+ * `inbound_path`/`outbound_path` rendezvous runs in retain mode whatever the
+ * caller passed ({@link endpointRequiresRetainedFiles}), and
+ * `encodeInvitation` refuses a mint emitting one that leaves the retention
+ * undeclared.
+ *
+ * {@link generateInvitation} applies this to the token. A caller that shows
+ * the same retention on a second partner-facing surface -- the accept kit's
+ * file-handling disclosure -- reads it from here and feeds both from the one
+ * value, so the token and the sheet cannot state different modes.
+ *
+ * The webrtc request has no directory to split, so the shape ground never
+ * fires on it; a `true` flag beside it is passed through to the token
+ * schema's refusal rather than silenced here.
+ */
+export function invitationDeclaresRetainedFiles(params: {
+  connectionEndpoint?: ConnectionEndpointRequest;
+  retainsFiles?: boolean;
+}): boolean {
+  const { connectionEndpoint = { channel: "webrtc" }, retainsFiles = false } =
+    params;
+  if (connectionEndpoint.channel === "webrtc") return retainsFiles;
+  return retainsFiles || endpointRequiresRetainedFiles(connectionEndpoint);
+}
+
+/**
  * Generate a fresh single-use invitation from the inviter's CSV: a new shared
  * secret, the linkage terms derived from the file, and this app's PeerJS
  * endpoint, encoded to a string and also wrapped as a deep-link URL. Each call
@@ -441,9 +470,16 @@ export async function generateInvitation(params: {
    * accept side.
    *
    * Passed only for a file-sync exchange whose options the caller has
-   * resolved. Omitted (or false) declares nothing rather than declaring
-   * delete mode; a webrtc mint (no retain mode) leaves it alone, and the
-   * token schema refuses the pair outright.
+   * resolved. On a shared-directory or webrtc endpoint, omitted (or false)
+   * declares nothing rather than declaring delete mode; a webrtc mint (no
+   * retain mode) leaves it alone, and the token schema refuses the pair
+   * outright.
+   *
+   * This flag ADDS to the resolved endpoint's own shape, which is the other
+   * ground for the declaration: a split `inbound_path`/`outbound_path`
+   * endpoint puts every connection built from it in retain mode
+   * ({@link invitationDeclaresRetainedFiles}), so the mint declares the
+   * retention whether or not the caller passed the flag.
    */
   retainsFiles?: boolean;
 }): Promise<GeneratedInvitation> {
@@ -659,6 +695,10 @@ export async function generateInvitation(params: {
   // check.
   const expires = new Date(Date.now() + lifetimeSeconds * 1000).toISOString();
   const sharedSecret = generateSharedSecret();
+  const declaresRetainedFiles = invitationDeclaresRetainedFiles({
+    connectionEndpoint,
+    retainsFiles,
+  });
   const token: InvitationToken = {
     version: "1",
     linkageTerms,
@@ -666,7 +706,7 @@ export async function generateInvitation(params: {
     expires,
     connectionEndpoint: resolveConnectionEndpoint(connectionEndpoint, location),
     disclosedPayloadColumns,
-    ...(retainsFiles ? { inviterRetainsFiles: true } : {}),
+    ...(declaresRetainedFiles ? { inviterRetainsFiles: true } : {}),
   };
 
   const encoded = await encodeInvitation(token);
