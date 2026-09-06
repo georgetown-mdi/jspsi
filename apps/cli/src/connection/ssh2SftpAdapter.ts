@@ -15,6 +15,7 @@ import {
   PutOptions,
   PutSource,
   TransportOperationStalledError,
+  getLogger,
   getLoggerForVerbosity,
   retryPromise,
   sanitizeErrorForDisplay,
@@ -58,6 +59,8 @@ import {
   isPreIdentificationDialFailure,
   peerProbeTargetFromConnectOptions,
 } from "./sftpPeerIdentification";
+import { SSH_WIRE_TRACE_LOGGER_NAME, sshWireTrace } from "./sftpWireTrace";
+import type { SshWireTrace } from "./sftpWireTrace";
 import {
   SubsystemOpenTimeoutError,
   subsystemOpenTimeoutMs,
@@ -103,6 +106,12 @@ import {
   unreadableTransportLifecycleWarning,
 } from "./sftpAdapterWarnings";
 
+// The SSH stack's diagnostics reach the operator under a logger of their own,
+// at the level `--log-level` applies: `getLoggerForVerbosity` floors a logger
+// to the quieter of that level and the `-v` count, which would put this trace
+// behind both flags.
+const sshWireTraceLog = getLogger(SSH_WIRE_TRACE_LOGGER_NAME);
+
 // SSH_FX_FAILURE: the generic SFTPv3 status (4) a server returns when an
 // operation did not take effect for a reason it does not further classify. The
 // numeric value reaches us because ssh2-sftp-client passes ssh2's raw status
@@ -118,13 +127,15 @@ const SSH_FX_FAILURE = 4;
 // operator-configurable: a liveness safety check, not a tunable.
 const CLIENT_CLOSE_TIMEOUT_MS = 5_000;
 
-// Upper bound (ms) on how long either forced close (see
+// Upper bound (ms) on a wait that runs over a socket this side may already have
+// destroyed: either forced close (see
 // {@link SSH2SFTPClientAdapter.forceCloseEndedTransport} and
-// {@link SSH2SFTPClientAdapter.forceCloseTerminalTransport}) waits out teardown
-// after destroying the socket beneath the ssh2 Client. The one bound armed on a
-// REF'D timer (see awaitBoundedTeardown), because the destroyed socket it waits
-// on leaves no ref'd handle of its own. Not operator-configurable, like every
-// other SFTP liveness bound.
+// {@link SSH2SFTPClientAdapter.forceCloseTerminalTransport}) waiting out
+// teardown after destroying the socket beneath the ssh2 Client, and the wire
+// trace's drain ({@link SSH2SFTPClientAdapter.drainWireTrace}). The one bound
+// armed on a REF'D timer (see awaitBoundedTeardown), because the destroyed
+// socket it waits on leaves no ref'd handle of its own. Not
+// operator-configurable, like every other SFTP liveness bound.
 const FORCED_CLOSE_TIMEOUT_MS = 1_000;
 
 // Upper bound (ms) on a queued session transition's wait for the transition
@@ -409,6 +420,12 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
   // release reading stands where a session is live.
   private sessionBoundary: SessionBoundary = "notReleased";
   private log: ReturnType<typeof getLoggerForVerbosity>;
+  // Where the SSH stack's own diagnostics go, or undefined when the operator's
+  // log level is not trace (see ./sftpWireTrace). Resolved in the constructor
+  // rather than per dial: an application applies the operator's level before it
+  // builds a connection, so the level a dial would read is the one already read
+  // here.
+  private readonly wireTrace: SshWireTrace | undefined;
   // The raw SFTPWrapper this adapter has already attached its fatal-'error'
   // listener to, so connect() attaches exactly once per wrapper instance (see
   // attachFatalErrorListener). Stored as the wrapper object identity, not a
@@ -478,6 +495,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     } = {},
   ) {
     this.log = getLoggerForVerbosity("sftp-adapter", options.verbosity ?? 1);
+    this.wireTrace = sshWireTrace(sshWireTraceLog);
     // ssh2-sftp-client's bare constructor installs default callbacks that
     // console.error/console.log the underlying ssh2 Client's error/end/close
     // events whenever they fire outside a high-level operation it initiated.
@@ -1511,6 +1529,15 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     // transport-agnostic; cast here is intentional.
     const { maxReconnectAttempts: _, ...rest } = options;
     const connectOptions = rest as Ssh2SftpClient.ConnectOptions;
+    // Route the SSH stack's own diagnostics into psilink's logger for the
+    // life of the connection this dial opens, at the trace level and nowhere
+    // else (see ./sftpWireTrace). A recovery re-dial and a connection-per-poll
+    // cycle start read connectOptions back from originalConnectOptions, set
+    // before this destructure and never carrying debug, so no callback
+    // survives to them; every dial path -- the first connect, a recovery
+    // re-dial, a connection-per-poll cycle start -- passes here.
+    if (this.wireTrace !== undefined)
+      connectOptions.debug = this.wireTrace.emit;
     this.options = connectOptions;
     // Watch the transport lifecycle from the first dial on, so the reading a later
     // recovery re-dial takes covers every transport this adapter establishes.
@@ -1896,13 +1923,28 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     this.session.beginClose();
     this.terminalClose ??= this.runTransition({
       kind: "teardown",
-      run: (held) => this.closeTerminally(held),
+      run: async (held) => {
+        try {
+          await this.closeTerminally(held);
+        } finally {
+          await this.drainWireTrace(held);
+        }
+      },
       // A teardown that gave up its wait has closed the transport from this side
       // all the same, so it reports the same nothing a completed close does:
       // rejecting would tell a caller that a run which already succeeded failed.
       abandoned: () => undefined,
     });
-    await this.terminalClose;
+    try {
+      await this.terminalClose;
+    } finally {
+      // Past this close the SSH stack has no reader: an application's diagnostic
+      // sink does not outlive the command that installed it, and a line emitted
+      // after it closes reaches the console instead (see ./sftpWireTrace). The
+      // close above waits the drain out first, so what is dropped here is only
+      // what a transport this side could not close still had to say.
+      this.wireTrace?.detach();
+    }
   }
 
   private async closeTerminally(held: HeldSessionTransition): Promise<void> {
@@ -1947,6 +1989,44 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     // reports is unchanged from an unbounded await -- core logs it at debug and the
     // exit code is untouched -- so it is not swallowed here.
     if (outcome.status === "failed") throw outcome.error;
+  }
+
+  // The SSH stack renders its last lines -- the socket's end and close, and a
+  // DISCONNECT the server sent on its way out -- as the transport drains, which
+  // outlasts a close ssh2-sftp-client answered without one of its own (the
+  // host-key probe's refused dial takes that path). Waiting it out here is what
+  // puts those lines in the operator's --log-file rather than the console the
+  // logger falls through to once a command has closed its sink.
+  //
+  // It drives nothing and reads no outcome, and waits only where a close is
+  // still to come: a socket this side has not destroyed, or a destroyed one
+  // whose 'close' the transport still owes. An unavailable subscription leaves
+  // the detach in end() the whole answer.
+  //
+  // The bound holds the process alive, per the destroyed-socket rule in {@link
+  // awaitBoundedTeardown}: this wait runs over a socket that may already be
+  // destroyed -- the state a refused dial leaves -- and nothing ref'd stands
+  // behind it there, so an unref'd bound would let a run whose partner withholds
+  // the 'close' exit 0 with everything after end() unrun.
+  private async drainWireTrace(held: HeldSessionTransition): Promise<void> {
+    if (this.wireTrace === undefined) return;
+    const seams = resolveForcedCloseSeams(
+      this.client as unknown as Ssh2SftpClientInternals,
+    );
+    if ("missing" in seams) return;
+    if (
+      seams.socket.destroyed === true &&
+      this.session.transportClose !== "owed"
+    )
+      return;
+    await this.awaitClientClose(
+      held,
+      seams.once,
+      seams.removeListener,
+      FORCED_CLOSE_TIMEOUT_MS,
+      undefined,
+      true,
+    );
   }
 
   // ssh2-sftp-client's end() did not close the connection: either the partner
@@ -2339,9 +2419,9 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     this.warnForcedRelease();
   }
 
-  // Arm a wait for the ssh2 Client's 'close', drive a teardown action, and resolve
-  // once that 'close' lands or `timeoutMs` expires -- the shape both the release's
-  // end() and its forced close need.
+  // Arm a wait for the ssh2 Client's 'close', drive a teardown action when one is
+  // supplied, and resolve once that 'close' lands or `timeoutMs` expires -- the
+  // shape the release's end(), its forced close, and the wire trace's drain need.
   //
   // The listener is armed BEFORE the action runs, so a synchronous 'close' cannot
   // land in the gap, and removed however the wait settles: against a server that
@@ -2354,7 +2434,7 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     once: (event: "close", listener: () => void) => void,
     removeListener: (event: "close", listener: () => void) => void,
     timeoutMs: number,
-    drive: () => void,
+    drive: (() => void) | undefined,
     holdProcessAlive: boolean,
   ): Promise<void> {
     let settle!: () => void;
