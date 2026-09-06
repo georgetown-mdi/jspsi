@@ -120,6 +120,8 @@ describe("the /api refusal on a deployment without the job API", () => {
     ["GET", "/api/%zz/%e0%a4%a5"],
     ["GET", "/api/peerjs/%2e%2e/jobs/slot"],
     ["GET", "/api/%2570eerjs/id"],
+    ["GET", "/api/PEERJS/id"],
+    ["GET", "/api/%70eerjs/id"],
   ])("refuses %s %s before the router", async (method, path) => {
     const { response, reached } = await answer(method, path);
     expect(reached).toEqual([]);
