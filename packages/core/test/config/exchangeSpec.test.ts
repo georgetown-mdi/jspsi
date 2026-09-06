@@ -426,5 +426,5 @@ test("includeOwnColumns: a count-only exchange refuses the key at parse", () => 
   const issue = result.error?.issues[0];
   expect(issue?.message).toContain("include_own_columns");
   expect(issue?.message).toContain("count-only");
-  expect(issue?.path).toEqual(["include_own_columns"]);
+  expect(issue?.path).toEqual(["includeOwnColumns"]);
 });

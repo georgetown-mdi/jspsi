@@ -138,7 +138,7 @@ export const ExchangeSpecSchema = z
       spec.includeOwnColumns === undefined ||
       spec.linkageTerms.algorithm !== "psi-c",
     {
-      path: ["include_own_columns"],
+      path: ["includeOwnColumns"],
       message:
         'include_own_columns is set on a count-only ("psi-c") exchange, which ' +
         "writes no result file: it reports the size of the intersection and " +
