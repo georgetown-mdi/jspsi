@@ -3,7 +3,11 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
 import YAML from "yaml";
-import { getDefaultLinkageTerms, UsageError } from "@psilink/core";
+import {
+  getDefaultLinkageTerms,
+  StandardizedDataset,
+  UsageError,
+} from "@psilink/core";
 import type { ExchangeSpec, PreparedExchange } from "@psilink/core";
 
 import {
@@ -21,6 +25,23 @@ function sampleSpec(): ExchangeSpec {
     connection: { channel: "filedrop", path: "/mnt/share" },
     linkageTerms: getDefaultLinkageTerms("Test Party"),
   };
+}
+
+// buildSaveSpec reads only linkageTerms and metadata off the prepared exchange
+// (the rest travels the recurring config no other route this test drives), so
+// each fixture below fills the remaining required fields with the smallest
+// complete value.
+function preparedFrom(
+  linkageTerms: PreparedExchange["linkageTerms"],
+  metadata: PreparedExchange["metadata"],
+): PreparedExchange {
+  return {
+    linkageTerms,
+    metadata,
+    dataset: new StandardizedDataset([], []),
+    rawRows: [],
+    rowCount: 0,
+  } satisfies PreparedExchange;
 }
 
 function capture(): { log: { info: (m: string) => void }; messages: string[] } {
@@ -47,11 +68,10 @@ afterEach(() => {
 test("buildSaveSpec includes the connection, terms and metadata, omitting standardization", () => {
   const connection = { channel: "filedrop", path: "/mnt/share" } as const;
   const linkageTerms = getDefaultLinkageTerms("Test Party");
-  const metadata = [{ name: "ssn", type: "ssn" }];
-  const prepared = {
-    linkageTerms,
-    metadata,
-  } as unknown as PreparedExchange;
+  const metadata = [
+    { name: "ssn", type: "ssn", role: "linkage", isPayload: false },
+  ] satisfies PreparedExchange["metadata"];
+  const prepared = preparedFrom(linkageTerms, metadata);
 
   const spec = buildSaveSpec(connection, prepared);
 
@@ -66,10 +86,7 @@ test("buildSaveSpec includes the connection, terms and metadata, omitting standa
 test("buildSaveSpec records a non-empty observed received set as the commitment", () => {
   // A zero-setup --save party fixes the payload columns it observed in the
   // first exchange so a later `psilink exchange` fails closed on a divergence.
-  const prepared = {
-    linkageTerms: getDefaultLinkageTerms("Test Party"),
-    metadata: [],
-  } as unknown as PreparedExchange;
+  const prepared = preparedFrom(getDefaultLinkageTerms("Test Party"), []);
 
   const spec = buildSaveSpec(
     { channel: "filedrop", path: "/mnt/share" },
@@ -85,10 +102,7 @@ test("buildSaveSpec leaves an empty observation lazy, not a strict receive-nothi
   // zero-match first exchange; the two are indistinguishable here, so persisting []
   // (strict "receive nothing") would false-abort a later matching run. An empty
   // observation therefore records no commitment (absent field, reconciled lazily).
-  const prepared = {
-    linkageTerms: getDefaultLinkageTerms("Test Party"),
-    metadata: [],
-  } as unknown as PreparedExchange;
+  const prepared = preparedFrom(getDefaultLinkageTerms("Test Party"), []);
 
   const spec = buildSaveSpec(
     { channel: "filedrop", path: "/mnt/share" },
@@ -105,10 +119,7 @@ test("both-saved persists the observed received set to disk as expected_payload_
   const { log } = capture();
   const spec = buildSaveSpec(
     { channel: "filedrop", path: "/mnt/share" },
-    {
-      linkageTerms: getDefaultLinkageTerms("Test Party"),
-      metadata: [],
-    } as unknown as PreparedExchange,
+    preparedFrom(getDefaultLinkageTerms("Test Party"), []),
     ["dob", "zip"],
   );
   finalizeBootstrap({
@@ -156,10 +167,7 @@ test("save persists an @path credential as the reference, never the secret conte
       channel: "sftp",
       server: { host: "h", username: "u", password: `@${pwFile}` },
     },
-    {
-      linkageTerms: getDefaultLinkageTerms("Test Party"),
-      metadata: [],
-    } as unknown as PreparedExchange,
+    preparedFrom(getDefaultLinkageTerms("Test Party"), []),
   );
   finalizeBootstrap({
     save: true,

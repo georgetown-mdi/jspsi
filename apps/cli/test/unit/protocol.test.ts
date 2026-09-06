@@ -243,6 +243,8 @@ import {
   sanitizeErrorForDisplay,
   sanitizeForDisplay,
   describeResolvedRunShape,
+  getDefaultLinkageTerms,
+  StandardizedDataset,
   DEFAULT_MAX_DISPLAY_LENGTH,
   DISPLAY_TRUNCATION_MARKER,
   WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
@@ -299,8 +301,24 @@ const signingIdentityFixture = await generateSigningIdentity("test-party", {
   },
 });
 
+// The smallest complete PreparedExchange, overridable per test for the one or
+// two fields a case reads; runExchange and buildOutputTable are mocked, so
+// nothing else here is exercised against a real transport.
+function preparedWith(
+  overrides: Partial<PreparedExchange> = {},
+): PreparedExchange {
+  return {
+    metadata: [],
+    linkageTerms: getDefaultLinkageTerms("Protocol-test fixture"),
+    dataset: new StandardizedDataset([], []),
+    rawRows: [],
+    rowCount: 0,
+    ...overrides,
+  } satisfies PreparedExchange;
+}
+
 // Values unused because runExchange and buildOutputTable are mocked.
-const minimalPrepared = {} as unknown as PreparedExchange;
+const minimalPrepared = preparedWith();
 
 // PEER_WAIT_HANG_BACKSTOP_MS bounds every peer wait a two-party case makes,
 // including teardown; it is not a timing assertion since the mocked
@@ -726,7 +744,7 @@ test("the local own-columns selection reaches the result formatter", async () =>
   // thing the CLI owes it is the hand-off: the selection prepareForExchange
   // carried must reach buildOutputTable, which composes the file.
   vi.mocked(buildOutputTable).mockClear();
-  const carrying = { includeOwnColumns: "all" } as unknown as PreparedExchange;
+  const carrying = preparedWith({ includeOwnColumns: "all" });
   await Promise.all([
     runProtocol({
       connection: {
@@ -3891,13 +3909,13 @@ test("runProtocol invokes onAuthenticated after the rotated key is saved and bef
   // race).
   const events: string[] = [];
   vi.mocked(runExchange).mockImplementation((async (...callArgs: unknown[]) => {
-    const prepared = callArgs[2] as { id?: string };
-    events.push(`exchange:${prepared.id ?? "?"}`);
+    const prepared = callArgs[2] as PreparedExchange;
+    events.push(`exchange:${prepared.linkageTerms.identity ?? "?"}`);
     return defaultRunExchange();
   }) as never);
 
-  const preparedA = { id: "A" } as unknown as PreparedExchange;
-  const preparedB = { id: "B" } as unknown as PreparedExchange;
+  const preparedA = preparedWith({ linkageTerms: getDefaultLinkageTerms("A") });
+  const preparedB = preparedWith({ linkageTerms: getDefaultLinkageTerms("B") });
 
   let hookSawToken: string | undefined;
   let aExchangeRunAtHookTime: boolean | undefined;
@@ -5432,7 +5450,7 @@ test("a successful run under --event-stream reports stage timing and counters", 
   // metrics summary, then the success terminal event. recordsProcessed reflects
   // this party's own input row count; a clean filedrop run retried/reconnected
   // zero times.
-  const preparedWithRows = { rowCount: 7 } as unknown as PreparedExchange;
+  const preparedWithRows = preparedWith({ rowCount: 7 });
   vi.mocked(runExchange).mockImplementation((async (...args: unknown[]) => {
     const options = args[3] as { onStage?: (id: string) => void };
     options.onStage?.("stage 1 / 2");
@@ -6190,7 +6208,7 @@ test(
     // followed by the classified error -- the machine-readable abort reason,
     // distinct from the free-text stderr log. No stageEnd fires for the in-flight
     // stage (only completed stages are timed).
-    const preparedWithRows = { rowCount: 4 } as unknown as PreparedExchange;
+    const preparedWithRows = preparedWith({ rowCount: 4 });
     vi.mocked(runExchange).mockImplementation((async (...args: unknown[]) => {
       // Hold both parties here before either fault fires: the lock winner reaches
       // runExchange the moment it creates the lock, while the loser is still
