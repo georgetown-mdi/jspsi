@@ -8,6 +8,7 @@ import {
   decideLinkageTermsVerdict,
   disclosedColumnNames,
   encodeInvitation,
+  endpointRequiresRetainedFiles,
   generateSharedSecret,
   getDefaultLinkageTerms,
   inferMetadata,
@@ -444,6 +445,12 @@ export async function generateInvitation(params: {
    * resolved. Omitted (or false) declares nothing rather than declaring
    * delete mode; a webrtc mint (no retain mode) leaves it alone, and the
    * token schema refuses the pair outright.
+   *
+   * This flag ADDS to the resolved endpoint's own shape, which is the other
+   * ground for the declaration: a split `inbound_path`/`outbound_path`
+   * endpoint puts every connection built from it in retain mode
+   * (`endpointRequiresRetainedFiles`), so the mint declares the retention
+   * whether or not the caller passed the flag.
    */
   retainsFiles?: boolean;
 }): Promise<GeneratedInvitation> {
@@ -659,14 +666,26 @@ export async function generateInvitation(params: {
   // check.
   const expires = new Date(Date.now() + lifetimeSeconds * 1000).toISOString();
   const sharedSecret = generateSharedSecret();
+  const resolvedEndpoint = resolveConnectionEndpoint(
+    connectionEndpoint,
+    location,
+  );
+  // Two grounds, ORed so the declaration cannot contradict the endpoint the
+  // token holds: the caller's resolved `retain_files`, and the endpoint's own
+  // shape -- a split inbound/outbound rendezvous runs in retain mode whatever
+  // the caller passed, and `encodeInvitation` refuses a mint emitting one that
+  // leaves the retention undeclared. The shape ground never fires on webrtc,
+  // which has no directory to split.
+  const declaresRetainedFiles =
+    retainsFiles || endpointRequiresRetainedFiles(resolvedEndpoint);
   const token: InvitationToken = {
     version: "1",
     linkageTerms,
     sharedSecret,
     expires,
-    connectionEndpoint: resolveConnectionEndpoint(connectionEndpoint, location),
+    connectionEndpoint: resolvedEndpoint,
     disclosedPayloadColumns,
-    ...(retainsFiles ? { inviterRetainsFiles: true } : {}),
+    ...(declaresRetainedFiles ? { inviterRetainsFiles: true } : {}),
   };
 
   const encoded = await encodeInvitation(token);

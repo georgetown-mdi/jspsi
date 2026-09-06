@@ -163,6 +163,54 @@ describe("generateInvitation", () => {
     expect(token.inviterRetainsFiles).toBeUndefined();
   });
 
+  test.each([
+    {
+      label: "a split filedrop endpoint",
+      endpoint: {
+        channel: "filedrop",
+        inboundPath: "/mnt/share/in",
+        outboundPath: "/mnt/share/out",
+      },
+      declaration: true,
+    },
+    {
+      label: "a split sftp endpoint",
+      endpoint: {
+        channel: "sftp",
+        host: "sftp.example.org",
+        inboundPath: "/exchanges/in",
+        outboundPath: "/exchanges/out",
+      },
+      declaration: true,
+    },
+    {
+      label: "a shared-directory filedrop endpoint",
+      endpoint: { channel: "filedrop", path: "/mnt/share/drop" },
+      declaration: undefined,
+    },
+    {
+      label: "a webrtc endpoint",
+      endpoint: { channel: "webrtc" },
+      declaration: undefined,
+    },
+  ] as const)(
+    "derives the declaration from $label minted with the flag omitted",
+    async ({ endpoint, declaration }) => {
+      // The split pair puts every connection built from it in retain mode, so
+      // the mint states the retention a caller left out rather than refusing
+      // the token. The other two shapes have no retention to derive from, so an
+      // omitted flag still declares nothing.
+      const { encoded } = await generateInvitation({
+        inviterName: "County Health Dept",
+        file: csvStream(),
+        location,
+        connectionEndpoint: endpoint,
+      });
+      const token = await decodeInvitation(encoded);
+      expect(token.inviterRetainsFiles).toBe(declaration);
+    },
+  );
+
   test("refuses a retain declaration on the default webrtc mint", async () => {
     // The schema's guard, reached through generateInvitation: retain mode is a
     // file-sync setting the webrtc channel does not have, so a caller passing
