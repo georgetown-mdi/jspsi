@@ -9,7 +9,11 @@ import {
 } from "@psilink/core";
 import type { LinkageTerms, Metadata, Standardization } from "@psilink/core";
 
-import { CONNECTION_BLOCK_DOC_URL } from "./connectionGuidance";
+import {
+  CONNECTION_BLOCK_DOC_URL,
+  POLL_INTERVAL_LINES,
+} from "./connectionGuidance";
+import { commentBlock, commentKey } from "./yamlComments";
 
 // Placeholder server fields the operator must replace before the first exchange.
 // Kept identical in spirit to the offline-invite placeholder connection
@@ -55,8 +59,8 @@ const HEADER_LINES = [
  * contents are example/inferred data rather than fixed options.
  *
  * @internal exported so a test asserts every entry's path still resolves in the
- * rendered document -- {@link commentKey} no-ops on a miss, so a renamed field
- * would otherwise drop its comment silently.
+ * rendered document -- `commentKey` no-ops on a miss, so a renamed field would
+ * otherwise drop its comment silently.
  */
 export const FIELD_DOCS: Array<{ path: Array<string>; lines: Array<string> }> =
   [
@@ -113,10 +117,8 @@ export const FIELD_DOCS: Array<{ path: Array<string>; lines: Array<string> }> =
     {
       path: ["connection", "options", "poll_interval_ms"],
       lines: [
-        "How often to check for the partner's file, in ms. Every wait for the next",
-        "one costs up to this long, and an exchange makes many, so on a small",
-        "dataset the polling, not the PSI masking, is most of its wall-clock time.",
-        "Lower it on a directory or a server you control.",
+        "How often to check for the partner's file, in ms.",
+        ...POLL_INTERVAL_LINES,
       ],
     },
     {
@@ -374,9 +376,7 @@ export function renderConfigTemplate(data: TemplateDataSpec): string {
     spec.standardization = data.standardization;
 
   const doc = new YAML.Document(snakeizeKeys(spec));
-  doc.commentBefore = HEADER_LINES.map((line) =>
-    line.length > 0 ? ` ${line}` : "",
-  ).join("\n");
+  doc.commentBefore = commentBlock(HEADER_LINES);
   for (const { path, lines } of FIELD_DOCS) commentKey(doc, path, lines);
 
   const sections = [doc.toString().trimEnd()];
@@ -385,29 +385,4 @@ export function renderConfigTemplate(data: TemplateDataSpec): string {
   if (data.metadata === undefined) sections.push(INFERRED_SECTIONS_HINT);
   sections.push(OPTIONAL_SECTIONS);
   return sections.join("\n") + "\n";
-}
-
-/**
- * Attach a block comment before the key at `path` in the document. A no-op when
- * the path's parent is not a mapping or the key is absent -- the FIELD_DOCS
- * entries track the spec shape this module builds, so a miss means that shape
- * changed and the matching entry should be updated, not that the render should
- * fail.
- */
-function commentKey(
-  doc: YAML.Document,
-  path: Array<string>,
-  lines: Array<string>,
-): void {
-  const parentPath = path.slice(0, -1);
-  const key = path[path.length - 1];
-  const parent =
-    parentPath.length === 0 ? doc.contents : doc.getIn(parentPath, true);
-  if (!YAML.isMap(parent)) return;
-  for (const pair of parent.items) {
-    if (YAML.isScalar(pair.key) && pair.key.value === key) {
-      pair.key.commentBefore = lines.map((line) => ` ${line}`).join("\n");
-      return;
-    }
-  }
 }

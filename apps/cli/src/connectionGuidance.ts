@@ -7,6 +7,8 @@ import {
   DEFAULT_SERVER_CONNECT_TIMEOUT_MS,
 } from "@psilink/core";
 
+import { commentBlock, commentKey } from "./yamlComments";
+
 /**
  * The documentation section holding one runnable `connection` block per channel.
  * `invite` and `accept` write a connection block the operator still has to
@@ -36,11 +38,16 @@ const TUNING_LINES = [
   "and edit to change one.",
 ];
 
-const POLL_LINES = [
+/**
+ * What the poll interval costs, for both config sites that document it: the
+ * guidance attached to a written connection block and the `init` template's
+ * entry for the field. What the PSI masking costs beside it is the spec's to
+ * state (docs/spec/PROTOCOL.md), so neither site states it.
+ */
+export const POLL_INTERVAL_LINES = [
   "Every wait for the partner's next file costs up to one poll_interval_ms, and",
-  "an exchange makes many, so on a small dataset the polling, not the PSI",
-  "masking, is most of its wall-clock time. Lower it on a directory or a server",
-  "you control.",
+  "an exchange makes many, so the interval adds up across a run. Lower it on a",
+  "directory or a server you control.",
 ];
 
 const POLL_INTERVAL_KEY = "poll_interval_ms";
@@ -62,20 +69,6 @@ function tuningDefaults(channel: unknown): Array<[string, number]> {
   return [[POLL_INTERVAL_KEY, DEFAULT_POLLING_FREQUENCY_MS], ...shared];
 }
 
-function commentBlock(lines: Array<string>): string {
-  return lines.map((line) => (line.length > 0 ? ` ${line}` : "")).join("\n");
-}
-
-function commentBeforeKey(
-  map: YAML.YAMLMap,
-  key: string,
-  lines: Array<string>,
-): void {
-  for (const pair of map.items)
-    if (YAML.isScalar(pair.key) && pair.key.value === key)
-      pair.key.commentBefore = commentBlock(lines);
-}
-
 /**
  * Attach the operator guidance to a saved config's `connection` block: what the
  * channel alternatives are and where each one's block is documented, plus the
@@ -90,7 +83,7 @@ function commentBeforeKey(
 export function annotateConnectionGuidance(doc: YAML.Document): void {
   const connection = doc.get("connection", true);
   if (!YAML.isMap(doc.contents) || !YAML.isMap(connection)) return;
-  commentBeforeKey(doc.contents, "connection", CONNECTION_LINES);
+  commentKey(doc, ["connection"], CONNECTION_LINES);
 
   const options = connection.get("options", true);
   const alreadySet = YAML.isMap(options) ? options : undefined;
@@ -100,7 +93,7 @@ export function annotateConnectionGuidance(doc: YAML.Document): void {
   if (shown.length === 0) return;
 
   const intro = shown.some(([key]) => key === POLL_INTERVAL_KEY)
-    ? [...TUNING_LINES, ...POLL_LINES]
+    ? [...TUNING_LINES, ...POLL_INTERVAL_LINES]
     : TUNING_LINES;
   const example = shown.map(([key, value]) => `${key}: ${value}`);
   if (alreadySet !== undefined) {
