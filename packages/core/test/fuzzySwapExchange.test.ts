@@ -239,15 +239,11 @@ test("a swapped key still matches nothing the arrangements do not reach", async 
   expect(matchedPairs(reversed)).toEqual([]);
 });
 
-// The same pair, with the deletion expansion on both of its positions. Unlike
-// `transpositions` this kind expands on BOTH parties regardless of which one
-// role resolution designates the receiver (fuzzyComparisons.ts,
-// expandsOnReceiverOnly). Its own candidate count grows with the value's
-// width rather than its square, but the declared ceiling an unbounded element
-// is charged (MAX_FUZZY_EXPANSION_INPUT_LENGTH, not the short value this test
-// actually hands it) still multiplies across the key's two elements and the
-// swap's two orders, so a transform bounds it the same way the transposed key
-// above bounds its own pair.
+// A transform still bounds this pair even though the test's own values are
+// short: without one, an element's declared width defaults to
+// MAX_FUZZY_EXPANSION_INPUT_LENGTH rather than the actual value length, and
+// that declared width is what the key's width multiplies across its two
+// elements and the swap's two orders (declaredKeyWidth, fanOutFunctions.ts).
 const BOUND_TO_SIX_CHARACTERS: TransformStep[] = [
   { function: "substring", params: { start: 1, length: 6 } },
 ];
