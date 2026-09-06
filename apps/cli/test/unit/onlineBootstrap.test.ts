@@ -8,6 +8,7 @@ import YAML from "yaml";
 import {
   CsvRowParseError,
   getDefaultLinkageTerms,
+  getDiagnosticSink,
   getLogger,
   inferDateInputFormatFromSource,
   INFER_DATE_SCAN_CAP,
@@ -16,6 +17,7 @@ import {
   parseExchangeSpec,
   reconcileReceivedPayload,
   safeParseConnectionConfig,
+  setDiagnosticSink,
   SHARED_SECRET_REGEX,
   UsageError,
 } from "@psilink/core";
@@ -3981,6 +3983,48 @@ test("loadInputRows: `-` at an interactive terminal is rejected (invite path inh
       /pipe/,
     );
   });
+});
+
+test("loadInputRows: a bidi-stripped header is reported by position, never by name", async () => {
+  // The web intake seats show the operator which column positions the parse
+  // changed; the CLI operator is told the same through the shared loader, so no
+  // seat runs on a name that differs from the file's header with no notice. The
+  // header itself stays out of the line: printing it would put the removed
+  // characters back into the diagnostic. A clean header logs nothing.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-loadrows-bidi-"));
+  const logged: Array<string> = [];
+  const previousSink = getDiagnosticSink();
+  const log = getLogger("input");
+  const previousLevel = log.getLevel();
+  let clean: Array<string> = [];
+  try {
+    // U+202E RLO inside the dob header, written as an escape so a fixture about
+    // invisible characters is readable.
+    const stripped = path.join(dir, "stripped.csv");
+    fs.writeFileSync(stripped, "id,d\u202eob,city\n1,1990-01-02,Rome\n");
+    const plainHeader = path.join(dir, "plain.csv");
+    fs.writeFileSync(plainHeader, "id,dob,city\n1,1990-01-02,Rome\n");
+    setDiagnosticSink((_method, _prefix, args) => {
+      logged.push(args.map((arg) => String(arg)).join(" "));
+    });
+    log.setLevel("warn");
+    const rows = await loadInputRows(stripped, { allowStdin: true });
+    expect(rows.columns).toEqual(["id", "dob", "city"]);
+    const before = logged.length;
+    await loadInputRows(plainHeader, { allowStdin: true });
+    clean = logged.slice(before);
+  } finally {
+    setDiagnosticSink(previousSink);
+    log.setLevel(previousLevel);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+
+  const line = logged.find((entry) => entry.includes("text-direction"));
+  expect(line).toBeDefined();
+  expect(line).toContain("column 2");
+  expect(line).not.toContain("dob");
+  expect(line).not.toContain("\u202e");
+  expect(clean).toEqual([]);
 });
 
 // --- init's bounded inference read (inferDateInputFormatFromSource) -----------

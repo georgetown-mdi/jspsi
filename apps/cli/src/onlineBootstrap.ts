@@ -395,6 +395,13 @@ export function expiresFromNow(durationSeconds: number): string {
  *
  * `verify-receipt` does NOT come through here: its result CSV is legitimately
  * empty for a zero-match exchange.
+ *
+ * A header that lost a bidi control character at the parse
+ * (`CSVParseMeta.bidiStrippedColumns`, `packages/core/src/file.ts`) is reported
+ * here as a warning rather than a refusal, so the CLI operator is told what the
+ * web intake seats tell theirs. The line names the 1-based column positions and
+ * never the header itself: printing the name would put the removed characters
+ * back into the diagnostic.
  */
 export async function loadInputRows(
   input: string,
@@ -408,10 +415,32 @@ export async function loadInputRows(
         "non-match, so it is refused here; check the export that produced the " +
         "file.",
     );
+  warnBidiStrippedColumns(csvResult.meta.bidiStrippedColumns);
   return {
     rawRows: csvResult.data,
     columns: csvResult.meta.fields ?? [],
   };
+}
+
+/**
+ * Tell the operator which column positions lost a bidi control character at the
+ * parse, or say nothing when none did. The logger is built at warn time rather
+ * than held at module scope so it binds the level and sink the command handler
+ * installed.
+ */
+function warnBidiStrippedColumns(positions: ReadonlyArray<number>): void {
+  if (positions.length === 0) return;
+  const plural = positions.length > 1;
+  getLogger("input").warn(
+    `column${plural ? "s" : ""} ${positions.join(", ")} of your CSV input ` +
+      `had ${plural ? "names that held" : "a name that held"} invisible ` +
+      `text-direction characters. They were removed, so the ` +
+      `name${plural ? "s" : ""} used for matching and sent to your partner ` +
+      `${plural ? "are" : "is"} the rest of the header. Check that ` +
+      `${plural ? "those columns" : "that column"} still ` +
+      `${plural ? "read" : "reads"} the way your file names ` +
+      `${plural ? "them" : "it"}; if not, edit the header row and run again.`,
+  );
 }
 
 /** Name an input in a refusal message: a path as given, or stdin as what it is. */
