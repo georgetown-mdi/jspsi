@@ -35,6 +35,8 @@ import {
   renderDateOutput,
   resolveFieldColumns,
   STANDARDIZATION_FUNCTION_NAMES,
+  stepCompileRefusalMessage,
+  uncompilableStepLabel,
   valueOverCeiling,
   YEAR_FORMAT_TOKENS,
 } from "./standardization.js";
@@ -187,6 +189,60 @@ export function assertFanOutImplemented(
       const declared = declaredFanOutFunction(element.transform);
       if (declared !== undefined)
         throw new UsageError(fanOutDeclaredMessage(declared));
+    }
+  }
+}
+
+/**
+ * Refuse a declared pipeline whose compile throws, where the terms are authored
+ * or minted rather than where the run reaches it.
+ *
+ * A step's factory reads its parameters once, before the first row
+ * ({@link compileSteps}), and a `pad_left` with no `length`, a multi-character
+ * fill, a `phonetic` naming an unimplemented algorithm, or a function name this
+ * build does not recognize throws there. Without this the throw lands after the
+ * invitation is sealed and accepted, so the partner has spent its setup effort
+ * before the authoring fault shows -- and the remedy the run boundary can offer
+ * by then is out-of-band renegotiation rather than an edit. The message here is
+ * the author's: correct the parameters, or remove the step.
+ *
+ * The fan-out sibling {@link assertFanOutImplemented} runs at the same points and
+ * checks the same two pipeline surfaces, for the same reason both realize what a
+ * key is built from: a standardization transformation feeds
+ * {@link StandardizedField}, and a linkage-key element transform feeds
+ * {@link buildKeyStrings}. `standardization` is omitted where the caller holds
+ * none.
+ *
+ * The two surfaces share one message under DIFFERENT error classes, by whose
+ * content the fault is -- as the fan-out refusal splits them. A
+ * `standardization` is only ever this party's own, so that half is an
+ * {@link OperatorConfigError}, the actionable "config" category both front ends
+ * key off. A linkage-key element transform is adopted verbatim from the
+ * partner's invitation on the accept path, so that half stays a plain
+ * {@link UsageError}. Either way the message names only a function label this
+ * build recognizes, so no partner free text is interpolated, and the CLI
+ * classifies both as a usage error (exit 64) through the base class.
+ *
+ * This is the safety check at the mint boundary, not the authoring surface: the
+ * web element editor marks an unfilled bound on the input that has to change
+ * (`StepListEditor`), and the Generate gate refuses ahead of it. What reaches
+ * here is what neither covers -- an imported document, or a caller that mints
+ * without the editor.
+ */
+export function assertTransformsCompile(
+  terms: LinkageTerms,
+  standardization?: Standardization,
+): void {
+  for (const transformation of standardization ?? []) {
+    const label = uncompilableStepLabel(transformation.steps);
+    if (label !== undefined)
+      throw new OperatorConfigError(stepCompileRefusalMessage(label));
+  }
+  for (const key of terms.linkageKeys) {
+    for (const element of key.elements) {
+      const label = uncompilableStepLabel(element.transform);
+      if (label !== undefined)
+        throw new UsageError(stepCompileRefusalMessage(label));
     }
   }
 }

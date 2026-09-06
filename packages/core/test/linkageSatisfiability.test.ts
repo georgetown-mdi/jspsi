@@ -14,6 +14,7 @@ import {
   validateStandardizationAgainstTerms,
   assertFanOutImplemented,
   assertStandardizationMatchesTerms,
+  assertTransformsCompile,
   unsatisfiedLinkageFields,
   assessLinkageSatisfiability,
   assertLinkageTermsSatisfiable,
@@ -55,6 +56,7 @@ import type {
   TransformStep,
 } from "../src/config/linkageTermsSchema";
 import type { Standardization } from "../src/config/standardizationSchema";
+import { safeParseLinkageTerms } from "../src/config/linkageTermsSchema";
 
 const col = (name: string, type: ColumnMetadata["type"]): ColumnMetadata => ({
   name,
@@ -1468,6 +1470,145 @@ describe("assertFanOutImplemented", () => {
       assertFanOutImplemented(minimalTerms, standardization),
     ).not.toThrow();
     expect(() => assertFanOutImplemented(minimalTerms)).not.toThrow();
+  });
+});
+
+// --- assertTransformsCompile -------------------------------------------------
+
+describe("assertTransformsCompile", () => {
+  // Every shape a factory refuses at compile: an absent required param, a param
+  // the factory checks past its type, an unimplemented enum member, and a
+  // function name outside the registry. Each parses as linkage terms -- transform
+  // params are z.unknown() on the wire schema -- so this assert is what stands
+  // between them and a run that aborts on the first key.
+  const uncompilableSteps = [
+    { function: "pad_left", params: {} },
+    { function: "pad_left", params: { length: 4, char: "ab" } },
+    { function: "phonetic", params: { algorithm: "metaphone" } },
+    { function: "no_such_function", params: {} },
+  ];
+
+  const keysWithTransform = (
+    steps: TransformStep[],
+  ): LinkageTerms["linkageKeys"] => [
+    {
+      name: "LN+DOB",
+      elements: [
+        { field: "last_name", transform: steps },
+        { field: "date_of_birth" },
+      ],
+    },
+  ];
+
+  test("the steps it refuses are ones the terms schema admits", () => {
+    // The gap this assert closes, asserted rather than claimed: a transform
+    // param is z.unknown() on the wire schema, so every step above rides an
+    // invitation that parses and is caught nowhere until the pipeline is built.
+    for (const step of uncompilableSteps) {
+      const parsed = safeParseLinkageTerms({
+        ...minimalTerms,
+        linkageKeys: keysWithTransform([step]),
+      });
+      expect(parsed.success).toBe(true);
+    }
+  });
+
+  test("refuses each uncompilable step in a standardization, naming the function", () => {
+    // A standardization is only ever this party's own, so the refusal is an
+    // OperatorConfigError -- the actionable config category both front ends key
+    // off, the same split assertFanOutImplemented keeps.
+    for (const step of uncompilableSteps) {
+      const standardization = [
+        { output: "last_name", input: "LN", steps: [step] },
+      ];
+      expect(() =>
+        assertTransformsCompile(minimalTerms, standardization),
+      ).toThrow(OperatorConfigError);
+    }
+    expect(() =>
+      assertTransformsCompile(minimalTerms, [
+        { output: "last_name", input: "LN", steps: [uncompilableSteps[0]] },
+      ]),
+    ).toThrow(/"pad_left"/);
+  });
+
+  test("refuses each uncompilable step in a key element transform", () => {
+    // The element transform is adopted verbatim from a partner's invitation on
+    // the accept path, so this half stays a plain UsageError.
+    for (const step of uncompilableSteps) {
+      const terms: LinkageTerms = {
+        ...minimalTerms,
+        linkageKeys: keysWithTransform([step]),
+      };
+      expect(() => assertTransformsCompile(terms)).toThrow(UsageError);
+      expect(() => assertTransformsCompile(terms)).not.toThrow(
+        OperatorConfigError,
+      );
+    }
+  });
+
+  test("narrows a function name the build does not recognize out of the message", () => {
+    // An element transform's `function` is partner-authored free text, so it is
+    // never echoed: a name outside the registry reaches the message as a fixed
+    // literal instead.
+    const terms: LinkageTerms = {
+      ...minimalTerms,
+      linkageKeys: keysWithTransform([
+        { function: "ZZ_PARTNER_CHOSEN_NAME", params: {} },
+      ]),
+    };
+    expect(() => assertTransformsCompile(terms)).toThrow(
+      /a function this build does not recognize/,
+    );
+    expect(() => assertTransformsCompile(terms)).not.toThrow(
+      /ZZ_PARTNER_CHOSEN_NAME/,
+    );
+  });
+
+  test("states the two remedies the author still holds, not a renegotiation", () => {
+    // The refusal is raised only where the party still holds the document, so
+    // its remedy is an edit -- never the out-of-band renegotiation the run
+    // boundary can offer once an invitation has gone out.
+    const terms: LinkageTerms = {
+      ...minimalTerms,
+      linkageKeys: keysWithTransform([uncompilableSteps[0]]),
+    };
+    expect(() => assertTransformsCompile(terms)).toThrow(
+      /Correct that step's parameters, or remove the step\./,
+    );
+  });
+
+  test("names the FIRST uncompilable step of a pipeline, not a later one", () => {
+    // Each step is compiled alone, so the one reported is the one an author
+    // reaches first rather than whichever the pipeline compile happened to hit.
+    const terms: LinkageTerms = {
+      ...minimalTerms,
+      linkageKeys: keysWithTransform([
+        { function: "to_upper_case" },
+        { function: "pad_left", params: {} },
+        { function: "phonetic", params: { algorithm: "metaphone" } },
+      ]),
+    };
+    expect(() => assertTransformsCompile(terms)).toThrow(/"pad_left"/);
+  });
+
+  test("admits a pipeline every step of which compiles, both surfaces", () => {
+    // Not vacuous: the well-formed counterparts of the refused steps above, plus
+    // a substring window that reads nothing -- which compiles, and is graded dead
+    // by decideLinkageTermsVerdict rather than refused here.
+    const compilable: TransformStep[] = [
+      { function: "to_upper_case" },
+      { function: "pad_left", params: { length: 9, char: "0" } },
+      { function: "phonetic", params: { algorithm: "soundex" } },
+      { function: "substring", params: {} },
+    ];
+    expect(() =>
+      assertTransformsCompile(
+        { ...minimalTerms, linkageKeys: keysWithTransform(compilable) },
+        [{ output: "last_name", input: "LN", steps: compilable }],
+      ),
+    ).not.toThrow();
+    expect(() => assertTransformsCompile(minimalTerms)).not.toThrow();
   });
 });
 
