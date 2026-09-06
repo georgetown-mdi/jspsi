@@ -74,43 +74,71 @@ describe("StepListEditor: a token-embedded regex stays read-only without allowRa
 // advancedInviteValidation.test.ts (every dead window is one the descriptors
 // reject) reaches the operator only while this copy still marks the input.
 describe("StepListEditor: a bound left unfilled is marked on its own input", () => {
-  const unfilledStart: EditableStep = {
-    function: "substring",
-    params: { length: 4 },
-  };
+  const START = "Start position";
+  const LENGTH = "Length";
 
-  test("an unfilled substring start renders an inline alert tied to that input", async () => {
-    app.render(
-      createElement(StepListEditor, {
-        steps: [unfilledStart],
-        onStepsChange: () => {},
-        addStepLabel: "Add a transform",
-      }),
-    );
+  // Every window shape core grades dead, each paired with the bound (or bounds)
+  // whose input has to change. Held as a set rather than one representative
+  // because the mark attributes the fault, and which bound it lands on is what
+  // the operator acts on.
+  const deadWindows: Array<{
+    shape: string;
+    params: Record<string, number>;
+    marked: Array<string>;
+  }> = [
+    { shape: "no bounds at all", params: {}, marked: [START, LENGTH] },
+    { shape: "a cleared start", params: { length: 4 }, marked: [START] },
+    { shape: "a cleared length", params: { start: 2 }, marked: [LENGTH] },
+    { shape: "a start of 0", params: { start: 0, length: 4 }, marked: [START] },
+    {
+      shape: "a length of 0",
+      params: { start: 2, length: 0 },
+      marked: [LENGTH],
+    },
+  ];
 
-    const start = page.getByRole("textbox", { name: "Start position" });
-    await expect.element(start).toBeInTheDocument();
-    // Exactly one inline error, with a message rather than an empty node.
-    const alerts = page.getByRole("alert").elements();
-    expect(alerts).toHaveLength(1);
-    expect(alerts[0].textContent.length).toBeGreaterThan(0);
-    // And it is the START bound's: the offending input points at it through
-    // aria-describedby, so the operator (and a screen reader) reaches the error
-    // from the field that has to change, not from a message loose in the row.
-    const describedBy = start.element().getAttribute("aria-describedby") ?? "";
-    expect(describedBy.split(/\s+/)).toContain(alerts[0].id);
-    // The bound that IS filled is not marked -- the mark attributes the fault.
-    const filled = page
-      .getByRole("textbox", { name: "Length" })
-      .element()
-      .getAttribute("aria-describedby");
-    expect(filled === null ? [] : filled.split(/\s+/)).not.toContain(
-      alerts[0].id,
-    );
-  });
+  test.each(deadWindows)(
+    "$shape marks $marked and nothing else",
+    async ({ params, marked }) => {
+      app.render(
+        createElement(StepListEditor, {
+          steps: [{ function: "substring", params }],
+          onStepsChange: () => {},
+          addStepLabel: "Add a transform",
+        }),
+      );
+
+      await expect
+        .element(page.getByRole("textbox", { name: START }))
+        .toBeInTheDocument();
+      // One inline error per marked bound, each with a message rather than an
+      // empty node.
+      const alerts = page.getByRole("alert").elements();
+      expect(alerts).toHaveLength(marked.length);
+      for (const alert of alerts)
+        expect(alert.textContent.length).toBeGreaterThan(0);
+
+      // Each marked bound points at one of them through aria-describedby, so the
+      // operator (and a screen reader) reaches the error from the field that has
+      // to change rather than from a message loose in the row -- and a bound that
+      // is fine points at none, which is what makes the mark attribute the fault.
+      const alertIds = new Set(alerts.map((alert) => alert.id));
+      for (const label of [START, LENGTH]) {
+        const describedBy =
+          page
+            .getByRole("textbox", { name: label })
+            .element()
+            .getAttribute("aria-describedby") ?? "";
+        const described = describedBy
+          .split(/\s+/)
+          .filter((id) => alertIds.has(id));
+        expect(described.length > 0).toBe(marked.includes(label));
+      }
+    },
+  );
 
   test("a window that reads something has no inline error", async () => {
-    // Not vacuous: the mark above is the unfilled bound's, not every substring's.
+    // Not vacuous: the mark above is the dead window's, not every substring's.
     app.render(
       createElement(StepListEditor, {
         steps: [{ function: "substring", params: { start: 2, length: 4 } }],
@@ -120,7 +148,7 @@ describe("StepListEditor: a bound left unfilled is marked on its own input", () 
     );
 
     await expect
-      .element(page.getByRole("textbox", { name: "Start position" }))
+      .element(page.getByRole("textbox", { name: START }))
       .toBeInTheDocument();
     expect(page.getByRole("alert").elements()).toHaveLength(0);
   });
