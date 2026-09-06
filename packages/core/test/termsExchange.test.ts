@@ -18,6 +18,7 @@ import {
   ConnectionError,
   type MessageConnection,
 } from "../src/connection/messageConnection";
+import { sanitizeErrorForDisplay } from "../src/utils/sanitizeErrorForDisplay";
 import { recordingConnection } from "./utils/recordingConnection";
 
 // --- Test fixtures -----------------------------------------------------------
@@ -941,4 +942,110 @@ test("exchangeTerms responder: rejects (does not hang) when abort send fails on 
     protocolVersion: PROTOCOL_VERSION,
   });
   await expect(responder).rejects.toThrow("linkage terms are incompatible");
+});
+
+// --- Partner fragments composed around first-party copy -----------------------
+// Abort reasons and compatibility errors are partner-written text standing
+// beside this exchange's own copy. The display sink redacts each rendered
+// link forward from a dangling BEGIN to the end of that link, so an
+// unredacted marker planted in one fragment deletes everything composed
+// behind it -- the next reason, or the sentence naming the mismatch. Each is
+// redacted where it is composed, which bounds that rule to the fragment.
+
+const BEGIN_MARKER = "-----BEGIN OPENSSH PRIVATE KEY-----";
+const END_MARKER = "-----END OPENSSH PRIVATE KEY-----";
+const REDACTION = "[redacted private key]";
+
+/** The initiator's abort slot: the partner's message 2 carries the reasons. */
+async function initiatorAbortRender(reasons: string[]): Promise<string> {
+  const [connA, connB] = makeConnections();
+  const initiator = exchangeTerms(connA, "initiator", termsA, 100);
+  await connB.receive();
+  await connB.send({
+    linkageTerms: termsB,
+    decision: "abort",
+    protocolVersion: PROTOCOL_VERSION,
+    abortReasons: reasons,
+  });
+  return sanitizeErrorForDisplay(await initiator.catch((err: unknown) => err));
+}
+
+/** The responder's abort slot: the partner's message 3 carries the reasons. */
+async function responderAbortRender(reasons: string[]): Promise<string> {
+  const [connA, connB] = makeConnections();
+  const responder = exchangeTerms(connB, "responder", termsB, 200);
+  await connA.send({
+    linkageTerms: termsA,
+    recordCount: 100,
+    protocolVersion: PROTOCOL_VERSION,
+  });
+  await connA.receive();
+  await connA.send({ decision: "abort", abortReasons: reasons });
+  return sanitizeErrorForDisplay(await responder.catch((err: unknown) => err));
+}
+
+const abortRenders = [initiatorAbortRender, responderAbortRender];
+
+test("a marker in an abort reason leaves the reason behind it", async () => {
+  for (const render of abortRenders) {
+    const rendered = await render([BEGIN_MARKER, "the second reason"]);
+    expect(rendered).toContain("partner aborted linkage terms exchange");
+    expect(rendered).toContain(REDACTION);
+    expect(rendered).toContain("the second reason");
+  }
+});
+
+test("a lone END marker in an abort reason deletes nothing", async () => {
+  for (const render of abortRenders)
+    expect(await render([END_MARKER, "the second reason"])).toBe(
+      `partner aborted linkage terms exchange: ${END_MARKER}; the second reason`,
+    );
+});
+
+test("a plain abort reason reads as its own text", async () => {
+  for (const render of abortRenders)
+    expect(await render(["the operator declined the terms"])).toBe(
+      "partner aborted linkage terms exchange: the operator declined the terms",
+    );
+});
+
+/**
+ * Both parties' renders of a payload-column mismatch: the responder weighs the
+ * terms and throws the incompatibility, and the initiator meets the same
+ * errors as the reasons on the responder's abort.
+ */
+async function columnMismatchRenders(
+  name: string,
+): Promise<{ initiator: string; responder: string }> {
+  const [a, b] = await runExchange(termsA, {
+    ...termsB,
+    payload: { receive: [{ name }] },
+  });
+  const rendered = (settled: PromiseSettledResult<unknown>): string =>
+    sanitizeErrorForDisplay((settled as PromiseRejectedResult).reason);
+  return { initiator: rendered(a), responder: rendered(b) };
+}
+
+test("a marker in a partner column name leaves the diagnostic it names", async () => {
+  const { initiator, responder } = await columnMismatchRenders(BEGIN_MARKER);
+  for (const rendered of [initiator, responder]) {
+    expect(rendered).toContain(REDACTION);
+    expect(rendered).toContain("do not match partner send columns");
+  }
+  expect(responder).toContain(
+    'linkage terms are incompatible: payload mismatch: local receive columns ["[redacted private key]"]',
+  );
+  expect(initiator).toContain(
+    "partner aborted linkage terms exchange: payload mismatch:",
+  );
+});
+
+test("a plain partner column name reads as its own text", async () => {
+  const { initiator, responder } = await columnMismatchRenders("email");
+  expect(responder).toBe(
+    'linkage terms are incompatible: payload mismatch: local receive columns ["email"] do not match partner send columns []',
+  );
+  expect(initiator).toBe(
+    'partner aborted linkage terms exchange: payload mismatch: local receive columns ["email"] do not match partner send columns []',
+  );
 });

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  createPrivateKeyStreamRedactor,
   joinErrorCauseChain,
   sanitizeErrorChainLinks,
   sanitizeErrorForDisplay,
@@ -692,5 +693,120 @@ describe("redactAndSanitizeForDisplay", () => {
     expect(redactAndSanitizeForDisplay("x".repeat(50), { maxLength: 10 })).toBe(
       sanitizeForDisplay("x".repeat(50), { maxLength: 10 }),
     );
+  });
+});
+
+describe("createPrivateKeyStreamRedactor", () => {
+  const REDACTION = "[redacted private key]";
+  const BEGIN = "-----BEGIN OPENSSH PRIVATE KEY-----";
+  const END = "-----END OPENSSH PRIVATE KEY-----";
+  const KEY_BODY = "MIIByteslookingsecret0123456789ABCDEFabcdef+/wEHEHE";
+  const BLOCK = `${BEGIN}\n${KEY_BODY}\n${END}`;
+
+  /** What the redactor emits for a stream delivered as `chunks`, flush included. */
+  function streamed(chunks: Array<string>): string {
+    const redactor = createPrivateKeyStreamRedactor();
+    return (
+      chunks.map((chunk) => redactor.push(chunk)).join("") + redactor.close()
+    );
+  }
+
+  /** Every two-piece delivery of `text`, split at each offset in turn. */
+  function everySplit(text: string): Array<Array<string>> {
+    const splits: Array<Array<string>> = [];
+    for (let at = 0; at <= text.length; at += 1)
+      splits.push([text.slice(0, at), text.slice(at)]);
+    return splits;
+  }
+
+  test("a block delivered whole becomes one replacement", () => {
+    expect(streamed([`loading key: ${BLOCK}\nfailed`])).toBe(
+      `loading key: ${REDACTION}\nfailed`,
+    );
+  });
+
+  test("a block split at every offset renders as the whole delivery does", () => {
+    // Every offset includes each position inside the BEGIN and END markers,
+    // which is the delivery boundary the held-back lookahead exists for.
+    const text = `loading key: ${BLOCK}\nfailed`;
+    const whole = streamed([text]);
+    for (const chunks of everySplit(text))
+      expect(streamed(chunks), chunks[0]).toBe(whole);
+  });
+
+  test("a block delivered one code unit at a time renders the same", () => {
+    const text = `loading key: ${BLOCK}\nfailed`;
+    expect(streamed(Array.from(text))).toBe(streamed([text]));
+  });
+
+  test("a BEGIN marker with no END stays redacted through the close", () => {
+    const text = `${BEGIN}\n${KEY_BODY}\nand the run's last words`;
+    for (const chunks of everySplit(text))
+      expect(streamed(chunks)).toBe(REDACTION);
+  });
+
+  test("an END marker with no BEGIN deletes nothing before it", () => {
+    const text = `the run's own words ${END} and the words after`;
+    for (const chunks of everySplit(text)) expect(streamed(chunks)).toBe(text);
+  });
+
+  test("several blocks in one stream each cost one replacement", () => {
+    const text = `one ${BLOCK} two ${BLOCK} three`;
+    for (const chunks of everySplit(text))
+      expect(streamed(chunks)).toBe(`one ${REDACTION} two ${REDACTION} three`);
+  });
+
+  test("text holding no marker passes through byte-identical", () => {
+    for (const text of [
+      "",
+      "exchange failed: connection reset",
+      "C:\\keys\\id_ed25519 is world-readable",
+      "SHA256:abc/def+ghi=",
+    ])
+      for (const chunks of everySplit(text))
+        expect(streamed(chunks)).toBe(text);
+  });
+
+  test("text ending in a partial marker is flushed whole on close", () => {
+    // The held-back lookahead is what a partial marker sits in, so a stream
+    // that simply stops mid-marker must still deliver the operator's bytes.
+    for (let kept = 0; kept < BEGIN.length; kept += 1) {
+      const text = `the run stopped here: ${BEGIN.slice(0, kept)}`;
+      expect(streamed([text]), text).toBe(text);
+      expect(streamed(Array.from(text)), text).toBe(text);
+    }
+  });
+
+  test("a body longer than any one delivery leaves no byte of itself", () => {
+    const body = Array.from(
+      { length: 400 },
+      (_, line) => `line${line}${KEY_BODY}`,
+    ).join("\n");
+    const redactor = createPrivateKeyStreamRedactor();
+    const emitted: Array<string> = [];
+    emitted.push(redactor.push(`starting\n${BEGIN}\n`));
+    for (let at = 0; at < body.length; at += 97)
+      emitted.push(redactor.push(body.slice(at, at + 97)));
+    emitted.push(redactor.push(`\n${END}\nstopped`));
+    emitted.push(redactor.close());
+    expect(emitted.join("")).toBe(`starting\n${REDACTION}\nstopped`);
+    for (const piece of emitted) expect(piece).not.toContain(KEY_BODY);
+  });
+
+  test("the stream agrees with the whole-text pass on what it strips", () => {
+    for (const text of [
+      `loading key: ${BLOCK}`,
+      `${BEGIN}\n${KEY_BODY}`,
+      `a ${END} b`,
+      `${BLOCK} then ${BLOCK}`,
+      "no markers at all",
+    ])
+      expect(streamed([text]), text).toBe(redactPrivateKeyMaterial(text));
+  });
+
+  test("a marker whose label runs long is still stripped inside one delivery", () => {
+    const label = "X".repeat(200);
+    const text = `-----BEGIN ${label} PRIVATE KEY-----\n${KEY_BODY}\n-----END ${label} PRIVATE KEY-----`;
+    expect(streamed([text])).toBe(REDACTION);
   });
 });

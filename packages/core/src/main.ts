@@ -163,8 +163,10 @@ export {
   joinErrorCauseChain,
   redactPrivateKeyMaterial,
   redactAndSanitizeForDisplay,
+  createPrivateKeyStreamRedactor,
   MAX_ERROR_CAUSE_DEPTH,
 } from "./utils/sanitizeErrorForDisplay";
+export type { PrivateKeyStreamRedactor } from "./utils/sanitizeErrorForDisplay";
 // The delimiting grammar for a linkage-terms value named in an operator-facing
 // diagnostic. Exported because the CLI's reconcile refusal and citation-drift
 // warning and both consent surfaces name the same class of partner-chosen

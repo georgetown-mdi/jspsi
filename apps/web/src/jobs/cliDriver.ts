@@ -5,6 +5,7 @@ import { spawn } from "node:child_process";
 
 import {
   WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
+  createPrivateKeyStreamRedactor,
   parseBoundedJson,
   sanitizeErrorChainLinks,
   sanitizeForDisplay,
@@ -75,10 +76,12 @@ export interface JobTerminalState {
  */
 export interface CliRunDiagnostics {
   /**
-   * The child's retained stderr tail, RAW and bounded to the retention cap; the
-   * empty string when it wrote none. Raw because its sink is the console seat,
-   * which escapes the cause link it rides once as it renders it: escaping here
-   * as well would double every literal backslash on its way to the operator
+   * The child's retained stderr tail, bounded to the retention cap and with
+   * private-key material already redacted out of the stream it was clipped
+   * from ({@link attachStderrTail}); the empty string when the child wrote
+   * none. Otherwise RAW, because its sink is the console seat, which escapes
+   * the cause link it rides once as it renders it: escaping here as well
+   * would double every literal backslash on its way to the operator
    * (CONTRIBUTING.md, Operator-facing escaping).
    */
   stderrTail: string;
@@ -531,16 +534,42 @@ function sanitizeValue(value: unknown): unknown {
 
 /**
  * Retain a bounded tail of the child's stderr for diagnostics: the last
- * {@link STDERR_TAIL_CAP} code units it wrote, raw. A rolling window, so the
- * bytes a failing run wrote LAST are the ones kept.
+ * {@link STDERR_TAIL_CAP} code units it wrote, private-key material already
+ * redacted. A rolling window, so the bytes a failing run wrote LAST are the
+ * ones kept.
+ *
+ * The stream is redacted BEFORE the window clips it, which is what a window
+ * needs and a redaction of the retained tail cannot give it: a key longer
+ * than {@link STDERR_TAIL_CAP} reaches the window as body alone, its BEGIN
+ * marker already evicted and its END not yet written, and no rule reading
+ * the tail can tell that body from any other bytes. The redactor consumes
+ * the child's stderr in the order it was written, so the window only ever
+ * holds output it has already passed
+ * ({@link createPrivateKeyStreamRedactor}). Everything else about the tail
+ * stays RAW: escaping is the display sink's, and redaction is not escaping.
+ *
+ * The redactor holds back part of each delivery until the next one arrives,
+ * so `end` flushes the remainder into the window rather than leaving the
+ * child's last line short of what it wrote.
+ *
+ * A caller that reads `get` before stderr's `end` -- the spawn-error path in
+ * {@link attachTerminalReconciliation} -- is short by up to a marker's
+ * lookahead (`PRIVATE_KEY_MARKER_LOOKAHEAD` code units) of the last delivery.
  */
 function attachStderrTail(child: ChildProcess): { get: () => string } {
   let tail = "";
+  const redactor = createPrivateKeyStreamRedactor();
+  const retain = (text: string): void => {
+    if (text.length > 0) tail = (tail + text).slice(-STDERR_TAIL_CAP);
+  };
   const stderr = child.stderr;
   if (stderr !== null) {
     stderr.setEncoding("utf8");
     stderr.on("data", (chunk: string) => {
-      tail = (tail + chunk).slice(-STDERR_TAIL_CAP);
+      retain(redactor.push(chunk));
+    });
+    stderr.on("end", () => {
+      retain(redactor.close());
     });
   }
   return { get: () => tail };
@@ -585,6 +614,9 @@ function attachTerminalReconciliation(
   child.on("error", (error: Error) => {
     // The child could not be spawned or died abnormally; report a diagnostic and
     // classify as a failure so the manager always reaches a terminal state.
+    // It delivers before stderr's `end`, so the tail can be short by a marker's
+    // lookahead of the child's last delivery: diagnostic fidelity only, on a
+    // path that rarely has stderr at all.
     handlers.onDegraded(
       `CLI process error: ${sanitizeForDisplay(error.message)}`,
     );

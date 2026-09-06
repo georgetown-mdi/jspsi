@@ -146,6 +146,107 @@ export function redactPrivateKeyMaterial(text: string): string {
 }
 
 /**
+ * One BEGIN or END marker, un-anchored and non-global, for the incremental
+ * scan in {@link createPrivateKeyStreamRedactor}. The same shapes
+ * {@link PRIVATE_KEY_BLOCK} matches, split apart because a streaming scan
+ * meets each end of a block on a delivery of its own.
+ */
+const PRIVATE_KEY_BEGIN_MARKER = /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/;
+const PRIVATE_KEY_END_MARKER = /-----END [A-Z0-9 ]*PRIVATE KEY-----/;
+
+/**
+ * The longest marker the streaming scan holds back for, in UTF-16 code
+ * units: the fixed `-----BEGIN ` opener and `PRIVATE KEY-----` closer around
+ * a label of at most 64. A marker split across two deliveries is scanned
+ * whole because that many code units of each delivery are held back until
+ * the next one arrives.
+ *
+ * The label the marker patterns admit is unbounded, so this bounds the
+ * LOOKAHEAD rather than what matches: a marker with a longer label is still
+ * matched wherever it lands inside one delivery. What the bound gives up is
+ * a marker whose label runs past 64 characters AND falls across a delivery
+ * boundary -- a shape no PEM or OpenSSH label takes, the longest in use
+ * being `ENCRYPTED ` at ten.
+ */
+const PRIVATE_KEY_MARKER_LOOKAHEAD =
+  "-----BEGIN ".length + 64 + "PRIVATE KEY-----".length;
+
+/**
+ * A redactor for private-key material arriving in pieces, for a sink that
+ * keeps a WINDOW of what it is given rather than the whole of it -- the
+ * console's retained stderr tail (`attachStderrTail` in
+ * `apps/web/src/jobs/cliDriver.ts`).
+ *
+ * A window clips before anything renders, so a key longer than the window
+ * lands in it as body alone: its BEGIN marker already evicted, its END not
+ * yet written. {@link redactPrivateKeyMaterial} cannot see that shape, since
+ * it holds no marker at all, and no rule reading the window can -- a rule
+ * inferring a key body from the shape of the remaining bytes would strip
+ * fingerprints and shared secrets with it. Redacting the STREAM in front of
+ * the window is what closes it: every marker passes this scan in the order
+ * the child wrote it, so the window only ever holds output this has already
+ * redacted.
+ *
+ * The scan holds "inside a block" across deliveries: on a BEGIN marker it
+ * emits {@link REDACTED_PRIVATE_KEY} once and emits nothing further until an
+ * END marker is consumed, so a block spanning any number of deliveries costs
+ * one replacement. A block still open at {@link PrivateKeyStreamRedactor.close}
+ * stays redacted to the end, the same fail-closed reach the dangling rule
+ * takes. An END marker with no BEGIN of its own is ordinary text: the reach
+ * is forward only, here as at the render boundary, so no delivery can delete
+ * what an earlier one already emitted.
+ */
+export interface PrivateKeyStreamRedactor {
+  /** Redact `chunk` in the stream's state and return what may be emitted. */
+  push(chunk: string): string;
+  /**
+   * The held-back remainder, redacted; nothing while a block is still open.
+   * A caller that never calls it loses at most
+   * {@link PRIVATE_KEY_MARKER_LOOKAHEAD} code units of the last delivery.
+   */
+  close(): string;
+}
+
+/** Open a {@link PrivateKeyStreamRedactor} over a fresh, empty stream. */
+export function createPrivateKeyStreamRedactor(): PrivateKeyStreamRedactor {
+  let held = "";
+  let insideBlock = false;
+
+  return {
+    push(chunk: string): string {
+      let pending = held + chunk;
+      let emitted = "";
+      for (;;) {
+        if (insideBlock) {
+          const end = PRIVATE_KEY_END_MARKER.exec(pending);
+          if (end === null) break;
+          pending = pending.slice(end.index + end[0].length);
+          insideBlock = false;
+          continue;
+        }
+        const begin = PRIVATE_KEY_BEGIN_MARKER.exec(pending);
+        if (begin === null) break;
+        emitted += pending.slice(0, begin.index) + REDACTED_PRIVATE_KEY;
+        pending = pending.slice(begin.index + begin[0].length);
+        insideBlock = true;
+      }
+      // Inside a block the remainder is body, held only as the context an
+      // END marker may span; outside one it is emitted except for the
+      // lookahead a marker may span.
+      const kept = Math.min(pending.length, PRIVATE_KEY_MARKER_LOOKAHEAD);
+      if (!insideBlock) emitted += pending.slice(0, pending.length - kept);
+      held = pending.slice(pending.length - kept);
+      return emitted;
+    },
+    close(): string {
+      const remainder = insideBlock ? "" : redactPrivateKeyMaterial(held);
+      held = "";
+      return remainder;
+    },
+  };
+}
+
+/**
  * Prepare a fragment somebody else chose -- a partner-, server-, or
  * operator-supplied value -- for interpolation into a line that reaches a
  * log, console, or prompt sink: {@link redactPrivateKeyMaterial} first,
