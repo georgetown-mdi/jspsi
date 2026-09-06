@@ -700,3 +700,63 @@ test("guardStreamLineByteCeiling: a non-stream source (no `on`) is inert", () =>
   detach();
   expect(destroyed).toBe(false);
 });
+
+// The bidi control characters the header transform removes, written as escapes
+// so the source of a test about invisible characters is readable.
+const RLO = "\u202e";
+const PDI = "\u2069";
+const LRI = "\u2066";
+
+test("the header transform removes bidi controls and reports their positions", async () => {
+  const result = await loadCSVFile(
+    streamOf(`id,na${RLO}me,${LRI}dob${PDI}\n1,alice,1990-01-02\n`),
+  );
+  expect(result.meta.fields).toEqual(["id", "name", "dob"]);
+  expect(result.meta.bidiStrippedColumns).toEqual([2, 3]);
+});
+
+test("a header holding no bidi control reports no stripped position", async () => {
+  const result = await loadCSVFile(streamOf("id,prénom,姓名\n1,alice,x\n"));
+  expect(result.meta.fields).toEqual(["id", "prénom", "姓名"]);
+  expect(result.meta.bidiStrippedColumns).toEqual([]);
+});
+
+test("the rows are keyed by the stripped name, so no values are lost", async () => {
+  // PapaParse keys each row object by the header string the transform returns, so
+  // the strip at the parse boundary needs no re-keying pass; a strip applied after
+  // the parse would leave every value under the raw key.
+  const result = await loadCSVFile(
+    streamOf(`na${RLO}me,dob\nalice,1990-01-02\nbob,1985-12-31\n`),
+  );
+  expect(result.data).toEqual([
+    { name: "alice", dob: "1990-01-02" },
+    { name: "bob", dob: "1985-12-31" },
+  ]);
+});
+
+test("a name stripped to nothing reaches the unnamed-column refusal", async () => {
+  // Not special-cased by the transform: an all-control header becomes the empty
+  // name every intake already refuses.
+  const result = await loadCSVFile(streamOf(`id,${RLO}${PDI}\n1,2\n`));
+  expect(result.meta.fields).toEqual(["id", ""]);
+  expect(result.meta.bidiStrippedColumns).toEqual([2]);
+});
+
+test("both drivers strip the same header and report the same positions", async () => {
+  const csv = `id,na${RLO}me,dob\n1,alice,1990-01-02\n`;
+  const full = await loadCSVFile(streamOf(csv));
+  const streamed = await streamCSVRows(streamOf(csv), () => undefined);
+  expect(streamed.columns).toEqual(full.meta.fields);
+  expect(streamed.bidiStrippedColumns).toEqual(full.meta.bidiStrippedColumns);
+});
+
+test("loadCSVColumnSample reads the stripped header the exchange keys on", async () => {
+  const sampled = await loadCSVColumnSample(
+    streamOf(`id,d${RLO}ob\n1,1990-01-02\n2,1985-12-31\n`),
+    (columns) => columns[1],
+    10,
+  );
+  expect(sampled.columns).toEqual(["id", "dob"]);
+  expect(sampled.sampledColumn).toBe("dob");
+  expect(sampled.sample).toEqual(["1990-01-02", "1985-12-31"]);
+});

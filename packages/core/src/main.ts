@@ -420,7 +420,14 @@ export {
   CsvLineByteCeilingError,
   CsvRowParseError,
 } from "./file";
-export type { CSVRow } from "./file";
+export type { CSVRow, CSVParseMeta } from "./file";
+// The bidi control characters no name may hold, and the strip the CSV header
+// transform applies. Shared so the ingestion boundary and any schema tightening
+// the same class agree on what a name may contain.
+export {
+  BIDI_CONTROL_PATTERN,
+  stripBidiControls,
+} from "./utils/bidiControls.js";
 export {
   inferDateInputFormatFromSource,
   inferDateOfBirthColumn,
