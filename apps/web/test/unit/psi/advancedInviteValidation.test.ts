@@ -10,6 +10,7 @@ import {
   canonicalString,
   pipelineAlwaysDrops,
   safeParseLinkageTerms,
+  uncompilableStepLabel,
 } from "@psilink/core";
 
 import {
@@ -426,6 +427,84 @@ describe("the canonical-encode gate (the byte form both parties hash)", () => {
     const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
     const tolerated = withFirstElementTransform(draft, [step]);
     expect(validateAdvancedInvite(tolerated, seed, now).canGenerate).toBe(true);
+  });
+});
+
+describe("the compile gate on a key-element transform core cannot build", () => {
+  // The sibling of the encode gate above: the encoder asks whether a param can be
+  // RECORDED, this asks whether the step it sits in can be BUILT. A pipeline is
+  // built once, before the first row, so a step the factory refuses aborts both
+  // parties' runs -- and without this gate only after the invitation has been
+  // minted, accepted, and set up against.
+  const now = new Date("2026-01-01T00:00:00Z");
+
+  // One step per shape a factory refuses: an absent required param, a param the
+  // factory checks past its type, an unimplemented enum member, and a function
+  // name outside the registry.
+  const uncompilable: Array<TransformStep> = [
+    { function: "pad_left", params: {} },
+    { function: "pad_left", params: { length: 4, char: "ab" } },
+    { function: "phonetic", params: { algorithm: "metaphone" } },
+    { function: "no_such_function", params: {} },
+  ];
+
+  test.each(uncompilable)("refuses %j, with the authoring remedy", (step) => {
+    const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    const authored = withFirstElementTransform(draft, [step]);
+    // The assumptions: the terms schema admits the step (a transform param is
+    // `z.unknown()` there) and the encoder does too, so the message below is this
+    // gate's answer rather than one either of those would have given.
+    const terms = buildAdvancedTerms(authored);
+    expect(safeParseLinkageTerms(terms).success).toBe(true);
+    expect(() => canonicalString(terms)).not.toThrow();
+    expect(uncompilableStepLabel([step])).toBeDefined();
+
+    const result = validateAdvancedInvite(authored, seed, now);
+    expect(result.canGenerate).toBe(false);
+    expect(result.terms).toBeUndefined();
+    expect(result.errors.keys).toMatch(/cannot run with the parameters/);
+    expect(result.errors.keys).toMatch(
+      /correct that step's parameters, or remove the step/,
+    );
+    // The remedy it must not be: the out-of-band renegotiation the accept and
+    // exchange paths offer once an invitation is already in a partner's hands.
+    expect(result.errors.keys).not.toMatch(/partner/i);
+  });
+
+  test("a step every factory builds keeps generating", () => {
+    // Not vacuous: the well-formed counterparts of the refused steps above.
+    const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    const authored = withFirstElementTransform(draft, [
+      { function: "pad_left", params: { length: 9, char: "0" } },
+      { function: "phonetic", params: { algorithm: "soundex" } },
+    ]);
+    expect(validateAdvancedInvite(authored, seed, now).canGenerate).toBe(true);
+  });
+
+  test("a disabled key's uncompilable transform does not block Generate", () => {
+    // A disabled key is dropped from the built terms, so nothing compiles it and
+    // it blocks nothing -- the same rule the fan-out and encode gates keep.
+    const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    const parked = {
+      ...draft,
+      keys: draft.keys.map((entry, index) =>
+        index === draft.keys.length - 1
+          ? {
+              ...entry,
+              enabled: false,
+              key: {
+                ...entry.key,
+                elements: entry.key.elements.map((element, position) =>
+                  position === 0
+                    ? { ...element, transform: [uncompilable[0]] }
+                    : element,
+                ),
+              },
+            }
+          : entry,
+      ),
+    };
+    expect(validateAdvancedInvite(parked, seed, now).canGenerate).toBe(true);
   });
 });
 
