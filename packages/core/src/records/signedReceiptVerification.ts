@@ -251,7 +251,10 @@ export interface DualSignedRecordVerificationInputs {
  * record restates the first two from both parties' linkage terms, and pairs
  * nothing -- terms belong to a partnership, not to one run of it. With neither,
  * every check is reported as not performed rather than assumed -- which also holds
- * the verdict short of verified.
+ * the verdict short of verified. A record is taken as the caller's own copy: every
+ * anchor drawn from it makes the checks it feeds self-confirming when the record
+ * arrived with the receipt, and the verdict then states only that the two
+ * artifacts describe one run, the model docs/spec/EXCHANGE_RECORD.md sets out.
  */
 export interface SignedRecordExpectationSources {
   record?: ExchangeRecord;
