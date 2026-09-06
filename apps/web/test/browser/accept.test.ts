@@ -1000,6 +1000,43 @@ describe("acceptor screen: confirm your columns (verdict, mapper, launch)", () =
       .toBeInTheDocument();
   });
 
+  test("a header the strip emptied is refused by that cause, notice beside it", async () => {
+    // The acceptor's own browser read. A refused file never reaches the columns
+    // step, so the notice for what that read changed is stated here, beside the
+    // refusal the same read caused -- and the refusal names the removal, not the
+    // trailing comma, which is not what happened to this header.
+    window.location.hash = await encodeAcceptToken();
+    app.render(createElement(AcceptorScreen));
+    await userEvent.click(
+      page.getByRole("button", { name: "Continue: consent & your file" }),
+    );
+    await consentAndName();
+    const fileInput = document.querySelector('input[type="file"]');
+    await userEvent.upload(
+      page.elementLocator(fileInput as HTMLElement),
+      // U+202E (right-to-left override) then U+2069 (pop directional isolate):
+      // the whole of column 2's name, so the strip leaves it unnamed.
+      csvFile("id,\u202E\u2069,city\n1,x,Springfield\n"),
+    );
+    await userEvent.click(
+      page.getByRole("button", { name: "Accept and continue" }),
+    );
+    await expect
+      .element(page.getByText("This file has an unnamed column"))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("That name held nothing but", { exact: false }))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("trailing comma", { exact: false }))
+      .not.toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText("A formatting character was removed from a column name"),
+      )
+      .toBeInTheDocument();
+  });
+
   test("the confirm-columns step names the header positions the parse stripped", async () => {
     // The acceptor's own read: the file entry advances straight to this step, so
     // this is where what the parse removed has to be stated. Located by position,

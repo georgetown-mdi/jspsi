@@ -32,6 +32,8 @@ import { AcceptorScreen } from "@exchange/AcceptorScreen";
 import { RETAIN_MODE_BILATERAL_NOTICE } from "@console/exchangeFilesModel";
 import { SPLIT_RENDEZVOUS_RETAIN_REQUIREMENT } from "@console/filedropRendezvousChoice";
 
+import { CONTROLS_ONLY_HEADER_PROFILE } from "../utils/unnamedColumnProfiles";
+
 import { createAppMount, flushPendingUpdates } from "./renderApp";
 
 import type {
@@ -605,6 +607,43 @@ describe("console acceptor sanitized-header notice", () => {
     await expect
       .element(page.getByRole("button", { name: "Start the exchange" }))
       .toBeEnabled();
+  });
+});
+
+describe("console acceptor unnamed-column refusal", () => {
+  test("a header the strip emptied is refused by that cause, notice beside it", async () => {
+    // The committed profile is the body the console's own parse returns for a
+    // header whose middle column is only direction characters
+    // (unnamedColumnProfiles). The file step refuses it and never reaches the
+    // confirm-columns step, so the notice for what the read changed is stated
+    // beside the refusal, which names the removal rather than a trailing comma.
+    stubServerJobAccept({
+      profile: { ...ACCEPT_PROFILE, ...CONTROLS_ONLY_HEADER_PROFILE },
+    });
+    window.location.hash = await encodeToken(FILEDROP_ENDPOINT);
+    app.render(createElement(AcceptorScreen));
+    await page
+      .getByRole("button", { name: "Continue: consent & your file" })
+      .click();
+    await userEvent.fill(page.getByLabelText("Your name"), "Sam Alvarez");
+    await page.getByRole("checkbox").click();
+    await page.getByRole("button", { name: "Select cohort.csv" }).click();
+    await page.getByRole("button", { name: "Use this file" }).click();
+
+    await expect
+      .element(page.getByText("This file has an unnamed column"))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("That name held nothing but", { exact: false }))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("trailing comma", { exact: false }))
+      .not.toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText("A formatting character was removed from a column name"),
+      )
+      .toBeInTheDocument();
   });
 });
 

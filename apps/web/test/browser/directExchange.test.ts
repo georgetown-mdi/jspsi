@@ -28,6 +28,8 @@ import { RETAIN_MODE_BILATERAL_NOTICE } from "@console/exchangeFilesModel";
 import { SPLIT_RENDEZVOUS_RETAIN_REQUIREMENT } from "@console/filedropRendezvousChoice";
 import { UNDESCRIBABLE_RECORD_LEAD } from "@exchange/RecordDownload";
 
+import { CONTROLS_ONLY_HEADER_PROFILE } from "../utils/unnamedColumnProfiles";
+
 import { createAppMount, flushPendingUpdates } from "./renderApp";
 
 import type { JobHandoff } from "@jobs/handoff";
@@ -405,6 +407,40 @@ describe("direct exchange confirm and run", () => {
     await expect
       .element(page.getByRole("heading", { level: 1 }))
       .toHaveTextContent("Exchange complete");
+  });
+
+  test("a header the strip emptied is refused by that cause, notice beside it", async () => {
+    // The committed profile is the body the console's own parse returns for a
+    // header whose middle column is only direction characters
+    // (unnamedColumnProfiles). The refusal drops the file, so the confirm screen
+    // that otherwise states the removal is never reached: the file step states it
+    // beside the refusal, which names the removal rather than a trailing comma.
+    stubJobApi({
+      sftp: CONFIGURED_SFTP,
+      profile: { ...CLIENTS_PROFILE, ...CONTROLS_ONLY_HEADER_PROFILE },
+    });
+    app.render(createElement(DirectExchangeScreen));
+    await page.getByRole("button", { name: "Select clients.csv" }).click();
+    await page.getByRole("button", { name: "Use this file" }).click();
+
+    await expect
+      .element(page.getByText("This file has an unnamed column"))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("That name held nothing but", { exact: false }))
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByText("trailing comma", { exact: false }))
+      .not.toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText("A formatting character was removed from a column name"),
+      )
+      .toBeInTheDocument();
+    // The refused file did not commit: the spine stays on its file step.
+    await expect
+      .element(page.getByRole("heading", { level: 1, name: "Your file" }))
+      .toBeInTheDocument();
   });
 
   test("names the header positions the console's parse stripped", async () => {

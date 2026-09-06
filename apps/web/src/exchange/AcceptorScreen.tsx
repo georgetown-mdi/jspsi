@@ -11,7 +11,11 @@ import {
   sanitizeErrorForDisplay,
 } from "@psilink/core";
 
-import { emptyColumnPositions, unnameableColumnsAlert } from "@psi/columnNames";
+import {
+  emptyColumnPositions,
+  sanitizedColumnsAlert,
+  unnameableColumnsAlert,
+} from "@psi/columnNames";
 import { capturedInputHandle } from "@psi/managed/managedInputHandle";
 import { columnSamplesFromRows } from "@psi/columnSamples";
 import { createManagedExchange } from "@psi/managed/managedExchangeStore";
@@ -555,6 +559,10 @@ export function AcceptorScreen() {
   // columns reseed. `acquired` stays unset until the consent gate passes, so the
   // columns step is still gated on "Accept and continue".
   function commitConsoleAcceptFile(profile: ProfiledJobInput) {
+    // Before the refusal below, not after it: the same read that emptied a name
+    // changed the positions this notice states, and a refused file never reaches
+    // the columns step where the notice is otherwise shown.
+    setBidiStrippedColumns(profile.bidiStrippedColumns);
     const emptyPositions = emptyColumnPositions(profile.columns);
     if (emptyPositions.length > 0) {
       setParseAlert(
@@ -563,7 +571,6 @@ export function AcceptorScreen() {
       return;
     }
     setParseAlert(undefined);
-    setBidiStrippedColumns(profile.bidiStrippedColumns);
     setFieldErrors((current) => ({ ...current, file: false }));
     const columnsUnchanged =
       consoleSource !== undefined &&
@@ -641,12 +648,13 @@ export function AcceptorScreen() {
       if (id !== parseId.current) return;
       const columns = result.meta.fields ?? [];
       const stripped = result.meta.bidiStrippedColumns;
+      // Before the refusal below, for the reason commitConsoleAcceptFile states.
+      setBidiStrippedColumns(stripped);
       const emptyPositions = emptyColumnPositions(columns);
       if (emptyPositions.length > 0) {
         setParseAlert(unnameableColumnsAlert(emptyPositions, stripped));
         return;
       }
-      setBidiStrippedColumns(stripped);
       // Store the parsed CSV (not discard it) and seed the columns-step editor from
       // its columns; the verdict and launch payload derive from this state. Commit
       // the gate-checked name here so the run records it even if the input is later
@@ -675,6 +683,14 @@ export function AcceptorScreen() {
       if (id === parseId.current) setParsing(false);
     }
   }
+
+  // What the read removed from this file's header, stated on the intake step as
+  // well as the columns step: a read that also left a column unnamed refuses
+  // there, and the columns step that otherwise holds the notice is never reached.
+  const sanitizedNotice =
+    bidiStrippedColumns.length > 0
+      ? sanitizedColumnsAlert(bidiStrippedColumns)
+      : undefined;
 
   const ready = decode.status === "ready";
   const token = ready ? decode.invitation.token : undefined;
@@ -1390,6 +1406,17 @@ export function AcceptorScreen() {
                 <span style={{ whiteSpace: "pre-line" }}>
                   {parseAlert.message}
                 </span>
+              </Alert>
+            )}
+            {sanitizedNotice !== undefined && (
+              <Alert
+                role="note"
+                color="yellow"
+                title={sanitizedNotice.title}
+                icon={<IconAlertCircle aria-hidden />}
+                mt="md"
+              >
+                {sanitizedNotice.message}
               </Alert>
             )}
             {legalAgreementDisplay !== undefined && (

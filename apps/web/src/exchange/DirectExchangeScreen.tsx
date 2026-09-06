@@ -4,7 +4,11 @@ import { Alert, Anchor } from "@mantine/core";
 import { IconAlertCircle } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
 
-import { emptyColumnPositions, unnameableColumnsAlert } from "@psi/columnNames";
+import {
+  emptyColumnPositions,
+  sanitizedColumnsAlert,
+  unnameableColumnsAlert,
+} from "@psi/columnNames";
 import { deleteSftpConnection } from "@psi/jobClient/sftpAuthoringClient";
 import { fetchJobRendezvous } from "@psi/jobClient/workInputClient";
 import { fetchSftpConnection } from "@psi/jobClient/serverJobExchangeDriver";
@@ -87,6 +91,10 @@ export function DirectExchangeScreen() {
   const [step, setStep] = useState<DirectStep>("file");
   const [consoleSource, setConsoleSource] = useState<ProfiledJobInput>();
   const [intakeAlert, setIntakeAlert] = useState<AlertContent>();
+  // What the console's parse removed from the chosen file's header. Held on this
+  // spine rather than read off the committed profile, so it is still stated when
+  // the same read leaves a column unnamed and the file step refuses it.
+  const [sanitizedNotice, setSanitizedNotice] = useState<AlertContent>();
   const [transport, setTransport] = useState<DirectTransport>("sftp");
   const [sftpInfo, setSftpInfo] = useState<SftpConnectionInfo>();
   const [rendezvous, setRendezvous] = useState<JobRendezvousConfig>();
@@ -202,12 +210,16 @@ export function DirectExchangeScreen() {
   // time. A fresh file drops the trust affirmation, so the operator re-affirms for
   // the new context, then advances to the server step.
   function commitFile(profile: ProfiledJobInput) {
+    const stripped = profile.bidiStrippedColumns;
+    // Before the refusal below, which drops the profile the confirm step reads
+    // its own notice from: the removal is stated beside the refusal it caused.
+    setSanitizedNotice(
+      stripped.length > 0 ? sanitizedColumnsAlert(stripped) : undefined,
+    );
     const emptyPositions = emptyColumnPositions(profile.columns);
     if (emptyPositions.length > 0) {
       setConsoleSource(undefined);
-      setIntakeAlert(
-        unnameableColumnsAlert(emptyPositions, profile.bidiStrippedColumns),
-      );
+      setIntakeAlert(unnameableColumnsAlert(emptyPositions, stripped));
       return;
     }
     setIntakeAlert(undefined);
@@ -313,6 +325,17 @@ export function DirectExchangeScreen() {
                 mb="md"
               >
                 {intakeAlert.message}
+              </Alert>
+            )}
+            {sanitizedNotice !== undefined && (
+              <Alert
+                role="note"
+                color="yellow"
+                icon={<IconAlertCircle aria-hidden />}
+                title={sanitizedNotice.title}
+                mb="md"
+              >
+                {sanitizedNotice.message}
               </Alert>
             )}
             <ServerFilePicker
