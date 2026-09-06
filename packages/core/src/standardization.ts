@@ -3127,13 +3127,20 @@ export class StandardizedKeyIterable {
    * the rows this round will be asked for are the consumer's to know, not this
    * object's.
    *
-   * Both lines go to one logger, so a sink that refuses the drop summary costs
-   * the wide-row summary behind it; the caller's teardown holds the exception
-   * (`runExchange`).
+   * The two lines go to one logger, each caught on its own, so a sink that
+   * refuses one still receives the other; this method never throws.
    */
   closeRowReporting(): void {
     if (this.plan === undefined) return;
-    summarizeKeyRoundDrops(this.key, this.plan.drops);
-    summarizeKeyRoundWideRows(this.key, this.plan.wideRows);
+    try {
+      summarizeKeyRoundDrops(this.key, this.plan.drops);
+    } catch {
+      // Nothing to report it through: the reporting channel is what failed.
+    }
+    try {
+      summarizeKeyRoundWideRows(this.key, this.plan.wideRows);
+    } catch {
+      // Nothing to report it through: the reporting channel is what failed.
+    }
   }
 }

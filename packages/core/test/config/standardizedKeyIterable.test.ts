@@ -664,4 +664,68 @@ describe("StandardizedKeyIterable — wide-row advisory over a whole round", () 
       lines.filter((line) => line.includes("key strings in this key's round")),
     ).toHaveLength(1);
   });
+
+  const dropSomeWidenOthers = () =>
+    rowsRealizing(21).map((row, index) =>
+      index % 2 === 0
+        ? row
+        : {
+            ...row,
+            last_name: Array.from({ length: 401 }, (_u, i) =>
+              `D${index}x${i}`.padEnd(8, "z"),
+            ).join("-"),
+          },
+    );
+
+  test("a sink that refuses the drop summary still receives the wide-row summary", () => {
+    const warn = vi
+      .spyOn(logger, "warn")
+      .mockImplementation((...args: unknown[]) => {
+        if ((args[0] as string).includes("rows dropped from this key's round"))
+          throw new Error("the diagnostic sink refused the drop summary");
+      });
+    const iter = new StandardizedKeyIterable(
+      wideAdvisoryKey,
+      datasetOf(dropSomeWidenOthers()),
+      rowCount,
+    );
+    for (const _value of iter);
+    expect(() => iter.closeRowReporting()).not.toThrow();
+
+    const lines = warn.mock.calls.map((call) => call[0] as string);
+    expect(
+      lines.filter((line) =>
+        line.includes("rows dropped from this key's round"),
+      ),
+    ).toHaveLength(1);
+    expect(
+      lines.filter((line) => line.includes("key strings in this key's round")),
+    ).toHaveLength(1);
+  });
+
+  test("a sink that refuses the wide-row summary still receives the drop summary", () => {
+    const warn = vi
+      .spyOn(logger, "warn")
+      .mockImplementation((...args: unknown[]) => {
+        if ((args[0] as string).includes("key strings in this key's round"))
+          throw new Error("the diagnostic sink refused the wide-row summary");
+      });
+    const iter = new StandardizedKeyIterable(
+      wideAdvisoryKey,
+      datasetOf(dropSomeWidenOthers()),
+      rowCount,
+    );
+    for (const _value of iter);
+    expect(() => iter.closeRowReporting()).not.toThrow();
+
+    const lines = warn.mock.calls.map((call) => call[0] as string);
+    expect(
+      lines.filter((line) =>
+        line.includes("rows dropped from this key's round"),
+      ),
+    ).toHaveLength(1);
+    expect(
+      lines.filter((line) => line.includes("key strings in this key's round")),
+    ).toHaveLength(1);
+  });
 });
