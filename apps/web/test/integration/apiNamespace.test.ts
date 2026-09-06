@@ -118,6 +118,11 @@ function refusalFor(method: string): ResponseShape {
  *   percent-encoded, all of which the router resolves to the declared route,
  * - a percent-encoded separator and percent-encoded dot segments, which reach
  *   the namespace only once decoded,
+ * - an encoded space on the prefix's trailing edge, on a segment after it, and
+ *   on the tail, which the router resolves to the declared route for some of
+ *   those positions and to nothing for others,
+ * - a query string on a declared route, which the path the refusal reads
+ *   excludes,
  * - methods other than GET, HEAD and OPTIONS among them.
  */
 const REFUSED: ReadonlyArray<[string, string]> = [
@@ -142,6 +147,10 @@ const REFUSED: ReadonlyArray<[string, string]> = [
   ["GET", "/api/jobs/%73lot"],
   ["GET", "/api%2Fjobs/slot"],
   ["GET", "/api/peerjs/%2e%2e/jobs/slot"],
+  ["GET", "/api/jobs/slot%20"],
+  ["GET", "/api/%20jobs/slot"],
+  ["GET", "/api/jobs%20/slot"],
+  ["GET", "/api/jobs/slot?x=1"],
   ["POST", "/api/nothing-here"],
   ["POST", "/api/jobs/slot"],
   ["DELETE", "/api/jobs/slot"],
@@ -154,6 +163,18 @@ const REFUSED: ReadonlyArray<[string, string]> = [
  * attaches its WebSocket upgrade listener on the first GET under this subtree
  * (src/peerServer.ts), so a refusal reaching it would stop public signaling
  * rather than harden anything. */
+/** Paths the refusal does not reach, each held to the answer it has with no
+ * refusal installed: a page outside the namespace, a path whose decoded form
+ * leaves it, and one whose first segment is `api` only as written -- `%20`
+ * decodes that segment to `api `, which is not the namespace, so the path
+ * resolves to no route on either deployment profile and answers the site's
+ * ordinary shapes. */
+const UNTOUCHED: ReadonlyArray<string> = [
+  "/nothing-here",
+  "/ap%69x",
+  "/api%20/jobs/slot",
+];
+
 const BROKER_PATHS: ReadonlyArray<string> = [
   "/api/peerjs/id",
   "/api/peerjs/id/",
@@ -223,22 +244,14 @@ describe.skipIf(!hasBuild)("the /api namespace's refusal", () => {
       },
     );
 
-    test("a page outside /api is untouched", async () => {
-      const rendered = await shapeOf(
-        hostedBase,
-        "GET",
-        "/nothing-here",
-        accept,
-      );
-      expect(rendered).not.toEqual(REFUSAL);
-      expect(rendered.bodyLength).toBeGreaterThan(0);
-    });
-
-    test("a path whose decoded form leaves /api is untouched", async () => {
-      const rendered = await shapeOf(hostedBase, "GET", "/ap%69x", accept);
-      expect(rendered).not.toEqual(REFUSAL);
-      expect(rendered.bodyLength).toBeGreaterThan(0);
-    });
+    test.each(UNTOUCHED)(
+      "a path outside /api is untouched: %s",
+      async (path) => {
+        const rendered = await shapeOf(hostedBase, "GET", path, accept);
+        expect(rendered).not.toEqual(REFUSAL);
+        expect(rendered.bodyLength).toBeGreaterThan(0);
+      },
+    );
   });
 
   test("the job API answers its own routes where it is enabled", async () => {
