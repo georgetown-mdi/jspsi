@@ -125,9 +125,10 @@ function nodeFlags(): Array<string> {
  * `--use-env-proxy` flag by either route, the last flag deciding, so both are
  * read here.
  *
- * It answers for the run, not for one endpoint: `NO_PROXY` excludes hosts from
- * the proxy per dial, which is Node's resolution to make rather than one to
- * reproduce here, so a run excluding the signaling host is still answered yes.
+ * It answers for the run, not for one endpoint: `NO_PROXY` and `no_proxy`
+ * exclude hosts from the proxy per dial, which is Node's resolution to make
+ * rather than one to reproduce here, so a run excluding the signaling host is
+ * still answered yes.
  * Node reads all of this as the process starts, so a value written into
  * `process.env` after that changes this answer without changing the dial.
  */
