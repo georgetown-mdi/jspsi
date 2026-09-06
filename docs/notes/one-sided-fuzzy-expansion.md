@@ -34,7 +34,7 @@ It is NOT an agreed term, by design. A term naming the expanding party would hav
 
 ## Why the role may flip between runs, and why that is harmless
 
-Role resolution reads the exchanged record counts, so a recurring exchange whose datasets grow at different rates can resolve the opposite roles on two consecutive runs. The intersection does not move, because each full-variant relation is an **involution**: `b` is a transposition of `a` exactly when `a` is a transposition of `b`; a one-year shift and the two orders of a swapped pair are the same. So `a`'s variants contain `b` exactly when `b`'s variants contain `a`, and the pair meets whichever party expanded.
+Role resolution reads the exchanged record counts, so a recurring exchange whose datasets grow at different rates can resolve the opposite roles on two consecutive runs. The intersection does not move, because each full-variant relation is an **involution**: `b` is a transposition of `a` exactly when `a` is a transposition of `b`; a one-year shift and the two orders of a swapped pair are the same. A day/month exchange is one over the calendar dates and only there: the generator emits nothing for an input that is not a real date, so both readings of every pair it produces are dates and each maps back to the other. So `a`'s variants contain `b` exactly when `b`'s variants contain `a`, and the pair meets whichever party expanded.
 
 That is why nothing here holds the role steady across runs. Pinning it would need a term, a negotiation, or a stored decision, all to preserve a property the arithmetic already gives.
 

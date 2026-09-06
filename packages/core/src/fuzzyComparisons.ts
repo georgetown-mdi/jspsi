@@ -151,11 +151,13 @@ export function adjacentYearCandidates(value: string): string[] {
  * entered under the other field order to meet it
  * (docs/notes/one-sided-fuzzy-expansion.md).
  *
- * A day above 12 names no month, so an exchanged date that is not a real
- * calendar date emits no candidate -- the impossible-date refusal `parse_date`
- * standardization already carries. An input whose own day and month are not a
- * real calendar date emits no candidate either, for the same reason. A date
- * whose day and month are equal exchanges to itself and emits none.
+ * Both readings must be real calendar dates: an exchanged reading that is not
+ * one (a day above 12 names no month) emits no candidate, and an input that is
+ * not one emits none either. The second guard is what makes the relation an
+ * involution -- without it "19901301" would expand to "19900113", which does
+ * not expand back, and the pair would meet under one role resolution and not
+ * the other. A date whose day and month are equal exchanges to itself and
+ * emits none.
  *
  * Throws when `value` is not a canonical `YYYYMMDD` date, rather than returning
  * the value unexpanded -- see {@link expandFuzzyComparisons}.
