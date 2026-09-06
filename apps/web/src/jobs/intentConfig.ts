@@ -95,6 +95,11 @@ function outboundPayloadConsentFor(
  * intent cannot hold; it is read only under `certificate` mode, so a caller
  * composing an unsigned exchange may omit it. The `retention_disposition`
  * note is forwarded verbatim.
+ *
+ * `include_own_columns` is forwarded verbatim too: a local output-composition
+ * setting the CLI reads when it writes this party's result file, adding nothing
+ * to what the partner is sent. The schema refuses it beside a count-only
+ * algorithm, so an intent pairing the two fails here rather than at the run.
  */
 export function composeConfigDocument(
   intent: JobFiledropExchangeIntent,
@@ -109,6 +114,7 @@ export function composeConfigDocument(
     expectedPayloadColumns,
     expectedPartnerDeduplicate,
     retentionDisposition,
+    includeOwnColumns,
   } = intent;
   const outboundPayloadConsent = outboundPayloadConsentFor(intent);
   const signing = composedSigning(intent, signingPaths);
@@ -133,6 +139,7 @@ export function composeConfigDocument(
       : {}),
     ...(signing !== undefined ? { signing } : {}),
     ...(retentionDisposition !== undefined ? { retentionDisposition } : {}),
+    ...(includeOwnColumns !== undefined ? { includeOwnColumns } : {}),
   };
   return mintExchangeFile(fileInput);
 }
@@ -148,7 +155,8 @@ export function composeConfigDocument(
  * the CLI child resolves at exchange time, so no secret byte transits this
  * process. The client's `linkageTerms`, `metadata`, `standardization`,
  * `expectedPayloadColumns`, `expectedPartnerDeduplicate`,
- * `outbound_payload_consent`, `signing`, and `retention_disposition` are
+ * `outbound_payload_consent`, `signing`, `retention_disposition`, and
+ * `include_own_columns` are
  * composed as they are on the filedrop path; `options` is the same
  * numeric/boolean/enum subset, plus the `connectionPerPoll` dialing mode
  * this channel alone admits.
@@ -173,6 +181,7 @@ export function composeSftpConfigDocument(
     expectedPayloadColumns,
     expectedPartnerDeduplicate,
     retentionDisposition,
+    includeOwnColumns,
   } = intent;
   const outboundPayloadConsent = outboundPayloadConsentFor(intent);
   const signing = composedSigning(intent, signingPaths);
@@ -192,6 +201,7 @@ export function composeSftpConfigDocument(
       : {}),
     ...(signing !== undefined ? { signing } : {}),
     ...(retentionDisposition !== undefined ? { retentionDisposition } : {}),
+    ...(includeOwnColumns !== undefined ? { includeOwnColumns } : {}),
   };
   const validated = ExchangeSpecSchema.parse(assembled);
   return stringifyYaml(snakeizeKeys(validated));

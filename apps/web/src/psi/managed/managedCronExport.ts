@@ -261,6 +261,7 @@ function composableDocumentFields(): ReadonlySet<string> {
     expectedPayloadColumns: [],
     expectedPartnerDeduplicate: false,
     outboundPayloadConsent: { status: "pending" },
+    includeOwnColumns: "all",
   };
   return new Set(Object.keys(composeManagedExchangeFile(widestComposition)));
 }

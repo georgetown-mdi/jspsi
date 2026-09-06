@@ -49,6 +49,8 @@ import type {
 
 import type { DisclosureChoice } from "./metadataEditing";
 
+import type { OwnColumnsChoice } from "./ownColumnsModel";
+
 import type { Transport } from "./transportChooser";
 
 /** The read file the spine works over: identity for the file card plus the
@@ -329,6 +331,23 @@ export function editorWithAlgorithm(
 ): InviterEditor {
   if (editor.sealed === true) return editor;
   return { ...editor, draft: { ...editor.draft, algorithm } };
+}
+
+/** Set which of this party's own input columns its result file holds beside the
+ * partner's values. `"none"` drops the field rather than storing a value for
+ * it, so an operator who turns the setting back off leaves a draft
+ * indistinguishable from one that never set it -- the config key's own absent
+ * state. */
+export function editorWithIncludeOwnColumns(
+  editor: InviterEditor,
+  choice: OwnColumnsChoice,
+): InviterEditor {
+  if (editor.sealed === true) return editor;
+  if (choice === "none") {
+    const { includeOwnColumns: _dropped, ...draft } = editor.draft;
+    return { ...editor, draft };
+  }
+  return { ...editor, draft: { ...editor.draft, includeOwnColumns: choice } };
 }
 
 /** Set input deduplication. Gated exactly as {@link editorWithAlgorithm}: the

@@ -127,6 +127,15 @@ export interface ManagedExchangeDocumentParts {
    * declaration, and its partner's side is the acceptor's own mirrored `false`.
    */
   expectedPartnerDeduplicate?: boolean;
+  /**
+   * Which of this party's own input columns its result file holds beside the
+   * partner's values -- the value the mint decided against the terms it emitted
+   * (`generateInvitation`), held verbatim so a scheduled re-run writes the file
+   * the operator authored. Local: it moves no term, and the partner's own
+   * result is untouched by it. Absent where the operator chose nothing, or
+   * where the terms leave it nothing to act on.
+   */
+  includeOwnColumns?: ExchangeSpec["includeOwnColumns"];
 }
 
 /**
@@ -176,6 +185,9 @@ export function composeManagedDocument(
       ? { expectedPartnerDeduplicate: parts.expectedPartnerDeduplicate }
       : {}),
     ...(outboundPayloadConsent !== undefined ? { outboundPayloadConsent } : {}),
+    ...(parts.includeOwnColumns !== undefined
+      ? { includeOwnColumns: parts.includeOwnColumns }
+      : {}),
   });
 }
 
