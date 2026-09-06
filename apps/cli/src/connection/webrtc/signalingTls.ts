@@ -68,16 +68,20 @@ export type SignalingCertificateAnswer =
 
 /**
  * The one value `NODE_USE_ENV_PROXY` opts in with: measured on Node 26 against
- * a CONNECT proxy, "true", "yes" and "0" all leave a `wss://` dial direct.
+ * a CONNECT proxy, "true", "TRUE", "yes", "0", "01" and " 1" all leave a
+ * `wss://` dial direct.
  */
 const ENVIRONMENT_PROXY_OPT_IN = "1";
 
 /**
  * The variables the proxy for a `wss://` dial is read from. Measured on the
- * same run: each of the four routes the dial, the `http` pair included, and
- * `ALL_PROXY` routes nothing. Both measurements are held against a real proxy
- * by test/integration/webrtc/signalingCertificate.test.ts, so a Node upgrade
- * that moves either is a failing test rather than an operator told about a
+ * same run: each of the four routes the dial, the `http` pair included, while
+ * `ALL_PROXY`, `all_proxy` and `npm_config_proxy` route nothing.
+ *
+ * Every spelling named here and above is a row of
+ * test/integration/webrtc/signalingCertificate.test.ts, driven against a real
+ * proxy, so a Node upgrade that moves one -- or an edit adding a variable Node
+ * does not honor -- is a failing test rather than an operator told about a
  * certificate their dial never reached.
  */
 const PROXY_ENVIRONMENT_VARIABLES = [

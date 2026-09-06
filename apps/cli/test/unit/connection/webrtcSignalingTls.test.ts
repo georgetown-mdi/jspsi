@@ -43,6 +43,9 @@ const PROXY_VARIABLES = [
   "https_proxy",
   "HTTP_PROXY",
   "http_proxy",
+  "ALL_PROXY",
+  "all_proxy",
+  "npm_config_proxy",
 ];
 
 /**
@@ -339,9 +342,9 @@ test("a proxied run's drop after registering reports the plain failure", async (
 
 test("which environment configures a proxy for the dial", () => {
   // The routing these mirror is measured against a real CONNECT proxy in
-  // test/integration/webrtc/signalingCertificate.test.ts; what is pinned here
-  // is that the answer follows it, an opt-in spelling that does not opt in
-  // and an empty value included.
+  // test/integration/webrtc/signalingCertificate.test.ts, row for row; what is
+  // pinned here is that the answer follows it, a variable Node does not read,
+  // an opt-in spelling that does not opt in and an empty value included.
   const proxy = "http://proxy.invalid:8080";
   for (const [configured, environment, nodeArgs] of [
     [true, { NODE_USE_ENV_PROXY: "1", HTTPS_PROXY: proxy }, []],
@@ -350,9 +353,15 @@ test("which environment configures a proxy for the dial", () => {
     [true, { NODE_USE_ENV_PROXY: "1", http_proxy: proxy }, []],
     [false, { NODE_USE_ENV_PROXY: "1" }, []],
     [false, { NODE_USE_ENV_PROXY: "1", HTTPS_PROXY: "" }, []],
+    [false, { NODE_USE_ENV_PROXY: "1", ALL_PROXY: proxy }, []],
+    [false, { NODE_USE_ENV_PROXY: "1", all_proxy: proxy }, []],
+    [false, { NODE_USE_ENV_PROXY: "1", npm_config_proxy: proxy }, []],
     [false, { NODE_USE_ENV_PROXY: "true", HTTPS_PROXY: proxy }, []],
+    [false, { NODE_USE_ENV_PROXY: "TRUE", HTTPS_PROXY: proxy }, []],
     [false, { NODE_USE_ENV_PROXY: "yes", HTTPS_PROXY: proxy }, []],
     [false, { NODE_USE_ENV_PROXY: "0", HTTPS_PROXY: proxy }, []],
+    [false, { NODE_USE_ENV_PROXY: "01", HTTPS_PROXY: proxy }, []],
+    [false, { NODE_USE_ENV_PROXY: " 1", HTTPS_PROXY: proxy }, []],
     [false, { HTTPS_PROXY: proxy }, []],
     [true, { HTTPS_PROXY: proxy }, ["--use-env-proxy"]],
     [true, { HTTPS_PROXY: proxy }, ["--use_env_proxy"]],

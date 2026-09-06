@@ -363,6 +363,8 @@ const PROXY_VARIABLES = [
   "HTTP_PROXY",
   "http_proxy",
   "ALL_PROXY",
+  "all_proxy",
+  "npm_config_proxy",
 ];
 
 /**
@@ -407,7 +409,9 @@ type RoutingRow = {
 };
 
 /**
- * Every environment and command line the routing is driven under. A run whose
+ * Every environment and command line the routing is driven under: every proxy
+ * variable and opt-in spelling the module names, honored or not, so a variable
+ * added to its list that Node does not read fails a row here. A run whose
  * `variable` is absent configures no proxy at all, which is the one thing
  * neither opt-in route can proxy a dial without.
  */
@@ -417,8 +421,14 @@ const ROUTING_ROWS: Array<RoutingRow> = [
   { proxied: true, optIn: "1", variable: "HTTP_PROXY" },
   { proxied: true, optIn: "1", variable: "http_proxy" },
   { proxied: false, optIn: "1", variable: "ALL_PROXY" },
+  { proxied: false, optIn: "1", variable: "all_proxy" },
+  { proxied: false, optIn: "1", variable: "npm_config_proxy" },
   { proxied: false, optIn: "true", variable: "HTTPS_PROXY" },
+  { proxied: false, optIn: "TRUE", variable: "HTTPS_PROXY" },
+  { proxied: false, optIn: "yes", variable: "HTTPS_PROXY" },
   { proxied: false, optIn: "0", variable: "HTTPS_PROXY" },
+  { proxied: false, optIn: "01", variable: "HTTPS_PROXY" },
+  { proxied: false, optIn: " 1", variable: "HTTPS_PROXY" },
   { proxied: false, variable: "HTTPS_PROXY" },
   { proxied: true, variable: "HTTPS_PROXY", nodeArgs: ["--use-env-proxy"] },
   { proxied: true, variable: "HTTPS_PROXY", nodeOptions: "--use-env-proxy" },
