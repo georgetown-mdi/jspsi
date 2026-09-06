@@ -395,6 +395,36 @@ describe("reconstructCommittedData round-trips through the real build path", () 
     expect(report.outcome).toBe("failed");
     expect(report.commitments.localPayloadSent).toBe("mismatch");
   });
+
+  test("a result column past the received payload leaves every commitment open", async () => {
+    // The received values are the record's own governance width, read from the
+    // third column, not everything to the end of the row: a result holding this
+    // party's own columns after the partner's still reproduces the received
+    // payload the partner sent.
+    const { report, warnings, data } = await roundTrip({
+      rawRows: idRows,
+      metadata: idMeta,
+      associationTable: [
+        [0, 2],
+        [1, 0],
+      ],
+      partnerPayload: {
+        columns: ["note"],
+        rowIndices: [0, 1],
+        rows: [["q-0"], ["q-1"]],
+      },
+      ourIdColumn: "pid",
+      editRetainedResult: (rows) => {
+        for (const row of rows) row.push("own value");
+      },
+    });
+    expect(data.partnerPayloadReceived).toEqual({
+      columns: ["note"],
+      rows: [["q-0"], ["q-1"]],
+    });
+    expect(warnings).toEqual([]);
+    expect(report.outcome).toBe("verified");
+  });
 });
 
 // A deduplicating cardinality repeats a row index on one side of the association

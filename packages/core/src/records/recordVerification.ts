@@ -396,7 +396,10 @@ interface ReconstructedData {
 }
 
 // The result file's fixed leading columns: our matched record id, then the
-// partner's row index. Payload value columns (if any) follow.
+// partner's row index. The received payload's value columns follow, and
+// anything after them is this party's own data, covered by no commitment --
+// so the received values are read as a fixed-width window from
+// RESULT_VALUE_COLUMN_START, never to the end of the row.
 const RESULT_OUR_ID_COLUMN = 0;
 const RESULT_PARTNER_INDEX_COLUMN = 1;
 const RESULT_VALUE_COLUMN_START = 2;
@@ -421,6 +424,9 @@ function sameCells(
  * two payloads are committed one row per matched RECORD, not per pair
  * ({@link distinctMatchedRows}): `localPayloadSent` reads the retained
  * input at each distinct matched row of ours; `partnerPayloadReceived`
+ * takes as many of each result row's value columns as the record's
+ * governance names received columns -- a result may hold this party's own
+ * columns after them, which no commitment covers -- then
  * recovers the partner's send order by sorting the result rows by the
  * partner-index column and taking each distinct partner row once, and
  * collapses repeated copies of one partner row only where they agree cell
@@ -521,7 +527,8 @@ export function reconstructCommittedData(
         };
   data.localPayloadSent = localPayloadSent as CanonicalValue;
 
-  // partnerPayloadReceived: the received values (result value columns),
+  // partnerPayloadReceived: the received values -- as many result columns as
+  // the record's governance names, starting at RESULT_VALUE_COLUMN_START --
   // re-sorted into the partner's send order and taken once per distinct
   // partner row, collapsing repeated copies only where they agree cell for
   // cell -- see the function's own doc comment for why.
@@ -533,7 +540,10 @@ export function reconstructCommittedData(
     const bySendOrder = result.rows
       .map((row, i): [number, Array<string | null>] => [
         partnerIndices[i],
-        row.slice(RESULT_VALUE_COLUMN_START),
+        row.slice(
+          RESULT_VALUE_COLUMN_START,
+          RESULT_VALUE_COLUMN_START + receivedColumns.length,
+        ),
       ])
       .sort((a, b) => a[0] - b[0]);
     const rows: Array<Array<string | null>> = [];
