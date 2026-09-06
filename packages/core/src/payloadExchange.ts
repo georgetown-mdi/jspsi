@@ -953,8 +953,10 @@ function quoteCsvField(value: string): string {
 // Pick a column name not already taken, starting from `base` and falling back to
 // a prefixed (then numbered) variant. Every result header goes through here
 // against the headers already assigned, so no two columns of the file share a
-// name. The prefix says whose column it is: `their_` for the partner's payload
-// and row-index columns, `own_` for one of ours.
+// name. The prefix is a collision fallback, not a whose-column label: it renames
+// the column assigned LATER and leaves the earlier one's name intact, so a
+// partner column literally named own_x or their_x keeps that name unless a
+// later column collides with it.
 function uniqueColumnName(
   base: string,
   taken: ReadonlySet<string>,
