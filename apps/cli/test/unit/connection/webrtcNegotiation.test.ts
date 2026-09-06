@@ -1014,9 +1014,11 @@ test("the channel-open ceiling reports the same diagnosis", async () => {
  * Drive one of the two diagnosed failures against a peer whose statistics
  * cannot be read, timing the failure itself: the diagnosis is bounded, so what
  * a report that never arrives may cost is the description, not the outcome.
+ * The never-settles mode lives in {@link neverSettlingStatsFailure} instead,
+ * since a real clock can beat the ceiling by a millisecond.
  */
 async function failureWithUnreadableStats(options: {
-  statsAnswer: ScriptedPeer["statsAnswer"];
+  statsAnswer: Exclude<ScriptedPeer["statsAnswer"], "never-settles">;
   path: "connection-failed" | "channel-open-ceiling";
 }): Promise<{ error: ConnectionError; elapsedMs: number }> {
   const { socket, peer, session, inviterId } = await startRendezvous({
