@@ -24,12 +24,14 @@ import type { TLSSocket } from "node:tls";
  * `authorizationError`). The socket is destroyed as soon as either outcome is
  * known and nothing is ever written to it.
  *
- * The probe dials the configured endpoint's own host and port directly. When
- * Node's opt-in environment proxying (`NODE_USE_ENV_PROXY` with `HTTPS_PROXY`
- * set) routes the `WebSocket` dial through a proxy instead, the probe's
- * verdict describes the origin's certificate rather than the proxy's, and the
- * failure the operator hit at the proxy is reported as the generic signaling
- * failure.
+ * The probe dials the configured endpoint's own host and port directly and
+ * never through a proxy: `tls.connect` reads no proxy environment at all
+ * (measured against a real CONNECT proxy, which saw nothing while the probe
+ * answered). A run with Node's environment proxying configured dials the
+ * `WebSocket` through the proxy instead, so the probe cannot tell what that
+ * connection presented, and {@link askSignalingCertificate} -- the one place
+ * that decides which of the two a failed dial is told about -- answers such a
+ * failure with no certificate verdict rather than one about the origin.
  */
 
 /**
@@ -49,6 +51,98 @@ export type SignalingCertificateProbe = (
   location: BrokerLocation,
   signal?: AbortSignal,
 ) => Promise<string | undefined>;
+
+/**
+ * What a failed signaling dial is told about the endpoint's certificate.
+ *
+ * `undefined` adds nothing to the failure the caller already has: the
+ * certificate verified, the check reached no verdict, or the dial was one no
+ * check applies to.
+ */
+export type SignalingCertificateAnswer =
+  /** The certificate did not verify, under this verification failure code. */
+  | { kind: "verification-failed"; code: string }
+  /** No check was made: the dial this run makes is not the one a check makes. */
+  | { kind: "not-checked-proxied" }
+  | undefined;
+
+/**
+ * The one value `NODE_USE_ENV_PROXY` opts in with: measured on Node 26 against
+ * a CONNECT proxy, "true", "TRUE", "yes", "0", "01" and " 1" all leave a
+ * `wss://` dial direct.
+ */
+const ENVIRONMENT_PROXY_OPT_IN = "1";
+
+/**
+ * The variables the proxy for a `wss://` dial is read from. Measured on the
+ * same run: each of the four routes the dial, the `http` pair included, while
+ * `ALL_PROXY`, `all_proxy` and `npm_config_proxy` route nothing.
+ *
+ * Every spelling named here and above is a row of
+ * test/integration/webrtc/signalingCertificate.test.ts, driven against a real
+ * proxy, so a Node upgrade that moves one -- or an edit adding a variable Node
+ * does not honor -- is a failing test rather than an operator told about a
+ * certificate their dial never reached.
+ */
+const PROXY_ENVIRONMENT_VARIABLES = [
+  "HTTPS_PROXY",
+  "https_proxy",
+  "HTTP_PROXY",
+  "http_proxy",
+];
+
+/**
+ * Whether `token` is the Node flag turning environment proxying on, the flag
+ * turning it off, or neither. Measured on Node 26 against a CONNECT proxy: an
+ * underscore reads as a hyphen, a double quote is dropped, and a `=` and
+ * whatever follows it are ignored, so `--use-env-proxy=false` turns proxying
+ * ON and `--no-use-env-proxy=true` turns it off.
+ */
+function environmentProxyingFlag(token: string): boolean | undefined {
+  const name = token.replaceAll('"', "").split("=")[0]?.replaceAll("_", "-");
+  if (name === "--use-env-proxy") return true;
+  if (name === "--no-use-env-proxy") return false;
+  return undefined;
+}
+
+/**
+ * The Node flags this run started under, in the order Node applied them:
+ * measured on the same run, `NODE_OPTIONS` is read before the command line,
+ * and a space is the only separator it accepts -- a tab or a newline between
+ * two flags stops the process before it runs.
+ */
+function nodeFlags(): Array<string> {
+  return [...(process.env.NODE_OPTIONS ?? "").split(" "), ...process.execArgv];
+}
+
+/**
+ * Whether this run has the environment proxying configured that a `wss://`
+ * dial follows and {@link probeSignalingCertificate} does not. Read through
+ * {@link askSignalingCertificate}, which holds the scheme this question is
+ * asked under.
+ *
+ * Node takes the opt-in from `NODE_USE_ENV_PROXY` or from the
+ * `--use-env-proxy` flag by either route, the last flag deciding, so both are
+ * read here.
+ *
+ * It answers for the run, not for one endpoint: `NO_PROXY` and `no_proxy`
+ * exclude hosts from the proxy per dial, which is Node's resolution to make
+ * rather than one to reproduce here, so a run excluding the signaling host is
+ * still answered yes.
+ * Node reads all of this as the process starts, so a value written into
+ * `process.env` after that changes this answer without changing the dial.
+ */
+export function environmentProxyingConfigured(): boolean {
+  let optedIn = process.env.NODE_USE_ENV_PROXY === ENVIRONMENT_PROXY_OPT_IN;
+  for (const token of nodeFlags()) {
+    const flag = environmentProxyingFlag(token);
+    if (flag !== undefined) optedIn = flag;
+  }
+  if (!optedIn) return false;
+  return PROXY_ENVIRONMENT_VARIABLES.some(
+    (variable) => (process.env[variable] ?? "") !== "",
+  );
+}
 
 /**
  * The host to hand `tls.connect`: the URL parser's, with an IPv6 literal's
@@ -140,3 +234,25 @@ export const probeSignalingCertificate: SignalingCertificateProbe = (
     socket.on("secureConnect", () => settle(undefined));
     socket.on("error", () => settle(verificationFailureCode(socket)));
   });
+
+/**
+ * What to tell a failed signaling dial to `location` about the endpoint's
+ * certificate: what `probe` found, or that no check was made.
+ *
+ * This is the one place the question is decided, so every condition that
+ * settles it is here. A `ws://` dial has no certificate on any path, and a run
+ * whose environment routes the dial through a proxy reaches an endpoint the
+ * probe does not, so neither is asked and neither is told about a certificate
+ * -- the second says so, because there the check is the thing an operator
+ * would otherwise expect to have run.
+ */
+export async function askSignalingCertificate(
+  location: BrokerLocation,
+  probe: SignalingCertificateProbe,
+  signal?: AbortSignal,
+): Promise<SignalingCertificateAnswer> {
+  if (!location.secure) return undefined;
+  if (environmentProxyingConfigured()) return { kind: "not-checked-proxied" };
+  const code = await probe(location, signal);
+  return code === undefined ? undefined : { kind: "verification-failed", code };
+}
