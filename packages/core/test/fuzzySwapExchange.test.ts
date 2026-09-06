@@ -14,7 +14,7 @@ import PSI from "@openmined/psi.js";
 import { prepareForExchange, runExchange } from "../src/exchange";
 import { createMessagePipe } from "../src/connection/messageConnection";
 
-import type { ExchangeResult } from "../src/exchange";
+import type { ExchangeResult, PreparedExchange } from "../src/exchange";
 import type {
   LinkageKey,
   Output,
@@ -101,6 +101,36 @@ function prepared(key: LinkageKey, identity: string, rows: NameRow[]) {
 }
 
 /**
+ * Drive one exchange between two already-padded parties over a fresh message
+ * pipe. `prepare` turns each side's own rows into a `PreparedExchange` --
+ * `prepared` and `preparedDob` below, generic over the row shape the linkage
+ * terms in use expect.
+ */
+async function runFuzzyExchange<Row>(
+  key: LinkageKey,
+  authoredRows: Row[],
+  reversedRows: Row[],
+  prepare: (key: LinkageKey, identity: string, rows: Row[]) => PreparedExchange,
+): Promise<{ authored: ExchangeResult; reversed: ExchangeResult }> {
+  const [connAuthored, connReversed] = createMessagePipe();
+  const [authored, reversed] = await Promise.all([
+    runExchange(
+      connAuthored,
+      "initiator",
+      prepare(key, "Authored Co", authoredRows),
+      { psiLibrary },
+    ),
+    runExchange(
+      connReversed,
+      "responder",
+      prepare(key, "Reversed Co", reversedRows),
+      { psiLibrary },
+    ),
+  ]);
+  return { authored, reversed };
+}
+
+/**
  * Drive one exchange between the party holding the records as authored and the
  * party holding some of them the other way round, with `receiver` naming which
  * of the two role resolution is to designate.
@@ -117,28 +147,18 @@ async function runSwapExchange(
   receiver: "authored" | "reversed",
 ): Promise<{ authored: ExchangeResult; reversed: ExchangeResult }> {
   const padding = 3;
-  const [connAuthored, connReversed] = createMessagePipe();
-  const [authored, reversed] = await Promise.all([
-    runExchange(
-      connAuthored,
-      "initiator",
-      prepared(key, "Authored Co", [
-        ...authoredRows,
-        ...(receiver === "authored" ? [] : filler("AUTH", padding)),
-      ]),
-      { psiLibrary },
-    ),
-    runExchange(
-      connReversed,
-      "responder",
-      prepared(key, "Reversed Co", [
-        ...reversedRows,
-        ...(receiver === "reversed" ? [] : filler("REV", padding)),
-      ]),
-      { psiLibrary },
-    ),
-  ]);
-  return { authored, reversed };
+  return runFuzzyExchange(
+    key,
+    [
+      ...authoredRows,
+      ...(receiver === "authored" ? [] : filler("AUTH", padding)),
+    ],
+    [
+      ...reversedRows,
+      ...(receiver === "reversed" ? [] : filler("REV", padding)),
+    ],
+    prepared,
+  );
 }
 
 // The matched (local row, partner row) pairs in ascending local order, which is
@@ -335,6 +355,8 @@ const dobFiller = (count: number): DobRow[] =>
     date_of_birth: `06/15/19${20 + i}`,
   }));
 
+// As `runSwapExchange` above, but over `DobRow`s and `dobFiller`'s single
+// padding shape rather than one per party.
 async function runDobExchange(
   key: LinkageKey,
   authoredRows: DobRow[],
@@ -342,28 +364,12 @@ async function runDobExchange(
   receiver: "authored" | "reversed",
 ): Promise<{ authored: ExchangeResult; reversed: ExchangeResult }> {
   const padding = 3;
-  const [connAuthored, connReversed] = createMessagePipe();
-  const [authored, reversed] = await Promise.all([
-    runExchange(
-      connAuthored,
-      "initiator",
-      preparedDob(key, "Authored Co", [
-        ...authoredRows,
-        ...(receiver === "authored" ? [] : dobFiller(padding)),
-      ]),
-      { psiLibrary },
-    ),
-    runExchange(
-      connReversed,
-      "responder",
-      preparedDob(key, "Reversed Co", [
-        ...reversedRows,
-        ...(receiver === "reversed" ? [] : dobFiller(padding)),
-      ]),
-      { psiLibrary },
-    ),
-  ]);
-  return { authored, reversed };
+  return runFuzzyExchange(
+    key,
+    [...authoredRows, ...(receiver === "authored" ? [] : dobFiller(padding))],
+    [...reversedRows, ...(receiver === "reversed" ? [] : dobFiller(padding))],
+    preparedDob,
+  );
 }
 
 const adjacentYearsKey: LinkageKey = {
