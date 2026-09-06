@@ -17,11 +17,19 @@
 // (`replaceControlCharactersForDisplay`), so a value's `\n` cannot be
 // confused with a control character the composition placed.
 //
+// The boundary also REDACTS private-key material, ahead of everything above.
+// The dangling-BEGIN rule is fail-closed to the end of the unit it runs
+// over, so a marker planted in a value would take the clause copy and the
+// diagnostics composed after it; redacting here bounds that rule to the
+// value's own run. Redaction is not escaping and does not double, so it
+// composes with the single display escape downstream.
+//
 // The brand is what makes the sweep hold: `validateCompatibility`
 // accumulates `CompatibilityMessageFragment`, not `string`, so a raw value
 // interpolated into a diagnostic does not compile. The two constructors are
 // total and safe, so there is no "trust me" entry point to police.
 
+import { redactPrivateKeyMaterial } from "../utils/sanitizeErrorForDisplay.js";
 import { replaceControlCharactersForDisplay } from "../utils/sanitizeForDisplay.js";
 
 declare const compatibilityMessageBrand: unique symbol;
@@ -41,10 +49,11 @@ declare const compatibilityMessageBrand: unique symbol;
  * A phantom property keyed by a module-private `unique symbol`: only the
  * constructors here can produce one, short of an `as
  * CompatibilityMessageFragment` assertion; no value carries it at runtime.
- * It claims delimiting and control-character treatment, not escaping -- a
- * quoted run keeps the raw partner value's confusables and non-ASCII,
- * since escaping is the display sink's job; the brand guarantees only that
- * the value cannot leave its run or render as a placed control character.
+ * It claims delimiting, control-character treatment, and private-key
+ * redaction, not escaping -- a quoted run keeps the raw partner value's
+ * confusables and non-ASCII, since escaping is the display sink's job; the
+ * brand guarantees only that the value cannot leave its run, render as a
+ * placed control character, or reach a redaction pass holding a marker.
  */
 export type CompatibilityMessageFragment = string & {
   readonly [compatibilityMessageBrand]: true;
@@ -92,7 +101,8 @@ export const MAX_BARE_TERMS_VALUE_LENGTH = 64;
 export const BARE_TERMS_VALUE_PATTERN = /^[A-Za-z0-9._-]*[0-9][A-Za-z0-9._-]*$/;
 
 /**
- * Render a terms value as one delimited run: its control characters
+ * Render a terms value as one delimited run: its private-key material
+ * redacted ({@link redactPrivateKeyMaterial}), its control characters
  * replaced ({@link replaceControlCharactersForDisplay}), then wrapped in
  * {@link TERMS_VALUE_DELIMITER}, with every delimiter inside it doubled.
  *
@@ -110,7 +120,9 @@ export const BARE_TERMS_VALUE_PATTERN = /^[A-Za-z0-9._-]*[0-9][A-Za-z0-9._-]*$/;
  * against the raw values, never a quoted form.
  */
 export function quoteTermsValue(value: string): CompatibilityMessageFragment {
-  const doubled = replaceControlCharactersForDisplay(value).replaceAll(
+  const doubled = replaceControlCharactersForDisplay(
+    redactPrivateKeyMaterial(value),
+  ).replaceAll(
     TERMS_VALUE_DELIMITER,
     TERMS_VALUE_DELIMITER + TERMS_VALUE_DELIMITER,
   );
@@ -130,14 +142,20 @@ export function quoteTermsValue(value: string): CompatibilityMessageFragment {
  * its signature guaranteeing they were schema-parsed. Both branches yield
  * a fragment no value can escape; which one runs decides only how the
  * diagnostic reads.
+ *
+ * The redaction runs ahead of the shape check, on the value the check then
+ * reads, so the bare branch cannot render key material either: the
+ * replacement text is not bare-shaped, so a redacted value takes the
+ * delimited form.
  */
 export function bareTermsValue(value: string): CompatibilityMessageFragment {
+  const redacted = redactPrivateKeyMaterial(value);
   if (
-    value.length <= MAX_BARE_TERMS_VALUE_LENGTH &&
-    BARE_TERMS_VALUE_PATTERN.test(value)
+    redacted.length <= MAX_BARE_TERMS_VALUE_LENGTH &&
+    BARE_TERMS_VALUE_PATTERN.test(redacted)
   )
-    return value as CompatibilityMessageFragment;
-  return quoteTermsValue(value);
+    return redacted as CompatibilityMessageFragment;
+  return quoteTermsValue(redacted);
 }
 
 /**

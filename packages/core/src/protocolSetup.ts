@@ -9,6 +9,7 @@ import { SHARED_SECRET_REGEX } from "./config/connection";
 import { MAX_RECORD_COUNT } from "./connection/frameSize";
 import { randomBytes, toBase64Url } from "./utils/crypto";
 import { describeDecodeError } from "./utils/describeDecodeError";
+import { redactPrivateKeyMaterial } from "./utils/sanitizeErrorForDisplay";
 import { boundedArray } from "./utils/boundedArray";
 import {
   receiveParsed,
@@ -460,9 +461,15 @@ export async function exchangeTerms(
     const msg = parseOrProtocolError(termsWithDecisionMessage, rawMsg);
 
     if (msg.decision === "abort") {
+      // The reasons are partner-written free text joined into one rendered
+      // link, so each is redacted where it is composed: the dangling-BEGIN
+      // rule is fail-closed to the end of that link, and a marker in one
+      // unredacted reason takes every reason behind it with it.
       throw new Error(
         "partner aborted linkage terms exchange" +
-          (msg.abortReasons?.length ? `: ${msg.abortReasons.join("; ")}` : ""),
+          (msg.abortReasons?.length
+            ? `: ${msg.abortReasons.map(redactPrivateKeyMaterial).join("; ")}`
+            : ""),
       );
     }
 
@@ -492,7 +499,10 @@ export async function exchangeTerms(
       // JSON-dumps -- so a partner key holding bidi-override / zero-width /
       // homoglyph bytes would otherwise reach the operator unescaped.
       // Escaping at the source makes the invariant hold here rather than
-      // leaning on the display-sink safety check.
+      // leaning on the display-sink safety check. The path holds partner
+      // bytes, so the render is redacted here as well: the responder joins
+      // this description with the other compatibility errors, and a marker
+      // in an unredacted one takes those behind it with it.
       //
       // The message text needs no escaping: unknown keys are stripped by
       // the non-strict `z.object` schemas rather than echoed via
@@ -502,7 +512,7 @@ export async function exchangeTerms(
       // not the received value -- only the path holds partner bytes.
       throw new Error(
         "partner linkage terms failed to parse: " +
-          describeDecodeError(parseErr),
+          redactPrivateKeyMaterial(describeDecodeError(parseErr)),
       );
     }
 
@@ -561,9 +571,10 @@ export async function exchangeTerms(
     } catch (parseErr) {
       // describeDecodeError escapes the partner-controlled Zod issue path at the
       // source (the `invalid_key`/bounded-`z.record`-key path included) and
-      // relays the schema-fixed message text -- see the parse-error note in the
-      // initiator branch above.
-      parseError = describeDecodeError(parseErr);
+      // relays the schema-fixed message text, and is redacted for the reason
+      // that note gives -- see the parse-error note in the initiator branch
+      // above.
+      parseError = redactPrivateKeyMaterial(describeDecodeError(parseErr));
     }
 
     // Fail-closed protocol-version check first: a version skew is the root
@@ -597,9 +608,12 @@ export async function exchangeTerms(
 
     const msg = await receiveParsed(conn, decisionMessage);
     if (msg.decision === "abort") {
+      // Redacted per reason, as in the initiator branch above.
       throw new Error(
         "partner aborted linkage terms exchange" +
-          (msg.abortReasons?.length ? `: ${msg.abortReasons.join("; ")}` : ""),
+          (msg.abortReasons?.length
+            ? `: ${msg.abortReasons.map(redactPrivateKeyMaterial).join("; ")}`
+            : ""),
       );
     }
 

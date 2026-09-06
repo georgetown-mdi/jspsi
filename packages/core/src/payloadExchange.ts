@@ -23,6 +23,7 @@ import {
   ConnectionError,
   receiveParsed,
 } from "./connection/messageConnection.js";
+import { redactPrivateKeyMaterial } from "./utils/sanitizeErrorForDisplay.js";
 import { singleIssueArray } from "./utils/singleIssueArray.js";
 import { loneSurrogateIndex } from "./utils/wellFormedString.js";
 import { OutboundDisclosureRefusalError, UsageError } from "./errors.js";
@@ -838,7 +839,9 @@ export function assertOutboundPayloadConsented(
  *   error because the peer violated the disclosure contract; the receiving
  *   party's callers surface it as a failed exchange. The offending names are
  *   partner-controlled and interpolated raw, escaped once where the error is
- *   rendered.
+ *   rendered -- and redacted of private-key material where they are
+ *   composed, since the message states its cause behind them and the
+ *   dangling-BEGIN rule reaches to the end of the rendered link.
  */
 export function reconcileReceivedPayload(
   received: PartnerPayload,
@@ -851,8 +854,8 @@ export function reconcileReceivedPayload(
   const matches =
     got.length === want.length && got.every((name, i) => name === want[i]);
   if (matches) return;
-  const gotShown = got.join(", ");
-  const wantShown = want.join(", ");
+  const gotShown = got.map(redactPrivateKeyMaterial).join(", ");
+  const wantShown = want.map(redactPrivateKeyMaterial).join(", ");
   const wantDescription =
     want.length === 0 ? `no payload at all` : `only [${wantShown}]`;
   throw new ConnectionError(

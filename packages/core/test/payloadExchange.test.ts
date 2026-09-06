@@ -1055,6 +1055,41 @@ test("reconcileReceivedPayload: receiving more columns than declared aborts (ove
   ).toThrow(ConnectionError);
 });
 
+function renderReconcileRefusal(receivedName: string): string {
+  const err = (() => {
+    try {
+      reconcileReceivedPayload(received(["a", receivedName]), ["a", "b"]);
+    } catch (e) {
+      return e;
+    }
+    return undefined;
+  })();
+  return sanitizeErrorForDisplay(err);
+}
+
+test("reconcileReceivedPayload: a marker in a received name leaves the cause", () => {
+  // The partner names the columns and the message states its cause behind
+  // them, so each name is redacted where it is composed: the display sink
+  // redacts a whole link forward from a dangling BEGIN, and an unredacted
+  // marker there deletes the abort explanation.
+  const rendered = renderReconcileRefusal(
+    "-----BEGIN OPENSSH PRIVATE KEY-----",
+  );
+  expect(rendered).toContain("payload disclosure mismatch");
+  expect(rendered).toContain("[redacted private key]");
+  expect(rendered).toContain("does not match what");
+});
+
+test("reconcileReceivedPayload: a lone END marker in a name deletes nothing", () => {
+  // The redaction reaches forward only, so a name that is nothing but an
+  // END marker is ordinary text: it renders whole and takes no neighbour.
+  const marker = "-----END OPENSSH PRIVATE KEY-----";
+  const rendered = renderReconcileRefusal(marker);
+  expect(rendered).toContain("payload disclosure mismatch");
+  expect(rendered).toContain(marker);
+  expect(rendered).toContain("does not match what");
+});
+
 // --- exchangePayloads --------------------------------------------------------
 
 async function runExchangePayloads(
