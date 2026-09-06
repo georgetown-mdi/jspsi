@@ -490,6 +490,50 @@ The runtime enforcement mechanism, the wire field an invitation holds, the accep
 
 Specifies the communication channel and server addresses. The partner shared secret is configured separately, in the top-level [`authentication`](#authentication) block; for WebRTC, the inviter/acceptor peer-addressing role is [`connection.role`](#connectionrole).
 
+### Connection blocks by channel
+
+The smallest block each channel takes, to paste into `psilink.yaml` in place of the placeholder `psilink invite` and `psilink accept` write. Every field is described in the sections below; the tuning under [`connection.options`](#connectionoptions) is optional everywhere.
+
+**SFTP** -- both parties connect to one SFTP server and exchange files in a directory there:
+
+```yaml
+connection:
+  channel: sftp
+  server:
+    host: sftp.example.org
+    port: 22
+    path: /exchanges/agency-a-agency-b/
+    username: psilink
+    private_key: "@/run/secrets/id_ed25519"
+```
+
+Supply exactly one credential beside `username` -- `password` or `private_key`, each best written as an [`@`-file reference](#file-references) so the secret stays out of the config. The server's host key is pinned in [`host_key_fingerprint`](#sftp-server-authentication), which an interactive first run records for you.
+
+**File-drop** -- both parties read and write one directory each has mounted (a network share, or a folder a sync tool keeps in step with the partner's):
+
+```yaml
+connection:
+  channel: filedrop
+  path: /mnt/sftp-share/exchanges/agency-a-agency-b
+```
+
+There is no server and no credential: access to the directory is the access control. Where the deployment gives you separate drop and pickup folders instead of one shared directory, use the [`inbound_path`/`outbound_path`](#connectioninbound_path--connectionoutbound_path) pair.
+
+**WebRTC** -- both parties connect through a peer-coordination server and exchange data over a direct peer-to-peer channel:
+
+```yaml
+connection:
+  channel: webrtc
+  server:
+    host: api.peerjs.com
+    port: 443
+  role: inviter
+```
+
+The peer addresses are derived from the shared secret, so there is nothing to fill in beyond the coordination server; [`connection.role`](#connectionrole) is `inviter` on the party that issued the invitation and `acceptor` on the party that accepted it. `psilink accept` seeds this block whole from the invitation, so it usually needs no edit at all.
+
+**Which to pick.** [COMMUNICATION.md](COMMUNICATION.md#channels) describes what each channel needs from the network and [DEPLOYMENT.md](DEPLOYMENT.md) how to operate it. The two parties need not name the same file-based channel: one party's `filedrop` mount can be a directory the other reaches over `sftp`, as long as both see the same files. WebRTC is the exception -- it is a direct connection between the two, so both parties must be on it.
+
 ### `connection.channel`
 
 *Type:* enum: `webrtc` | `sftp` | `filedrop`  
