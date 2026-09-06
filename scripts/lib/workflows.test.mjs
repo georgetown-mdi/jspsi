@@ -11,6 +11,7 @@ import {
   parseWorkflow,
   readWorkflows,
   treeReferences,
+  usesNodes,
   workflowDocument,
   workflowFiles,
 } from "./workflows.mjs";
@@ -78,6 +79,38 @@ runs:
       },
       { file: "wf.yaml", name: "actions/checkout", ref: "v7" },
       { file: "wf.yaml", name: "actions/setup-node", ref: "v7" },
+    ]);
+  });
+
+  it("gives each node its location and its with: block", () => {
+    const source = `jobs:
+  build:
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: staging
+      - uses: actions/setup-node@v7
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/checkout@v7
+        `;
+    expect(usesNodes(parseWorkflow("wf.yaml", source))).toEqual([
+      {
+        location: "jobs.build.steps[0]",
+        uses: "actions/checkout@v7",
+        inputs: { ref: "staging" },
+      },
+      {
+        location: "jobs.build.steps[1]",
+        uses: "actions/setup-node@v7",
+        inputs: null,
+      },
+      {
+        location: "runs.steps[0]",
+        uses: "actions/checkout@v7",
+        inputs: null,
+      },
     ]);
   });
 

@@ -73,10 +73,13 @@ answer at a round's price.
 - **The composition, as a matter of review.** What covers it instead is
   mechanical: every gate re-runs at the new head, and a pull-request gate runs
   against the head merged with the base tip, so a composition that fails to
-  build, typecheck, lint, or pass a test is caught there. What is left over is
-  an interaction that compiles and passes every test while being wrong -- the
-  residual risk this path accepts, and the reason a single executable line
-  inside the branch's own diff sends the head to a full round.
+  build, typecheck, lint, or pass a test is caught there. Running that merge is
+  `actions/checkout`'s default on a `pull_request` event, and
+  `npm run check:checkout-ref-override` holds every pull-request-triggered
+  workflow to it. What is left over is an interaction that compiles and passes
+  every test while being wrong -- the residual risk this path accepts, and the
+  reason a single executable line inside the branch's own diff sends the head
+  to a full round.
 - **Markdown.** Excluded, as it is under the non-executable-delta path, where a
   markdown-only delta already holds. So a conflict resolved inside a governing
   document -- a `docs/spec/` file -- is not read by this path. That is a stated
