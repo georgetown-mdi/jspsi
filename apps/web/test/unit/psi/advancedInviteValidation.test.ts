@@ -486,6 +486,37 @@ describe("the canonical-encode gate (the byte form both parties hash)", () => {
   });
 });
 
+describe("a transform params key the terms schema refuses", () => {
+  // The key is the one segment of a terms issue path an operator or a partner
+  // authors, so a mint that echoed its path would put those bytes on the screen.
+  // This editor maps an issue to the control that owns it and shows that
+  // control's own message, so the path reaches no rendering at all.
+  const now = new Date("2026-01-01T00:00:00Z");
+
+  test("blocks Generate against the key list and echoes no part of the key", () => {
+    const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    const badKey = "de\x1b[31m\u202elimiter-unrepeatable-key";
+    const imported = withFirstElementTransform(draft, [
+      { function: "trim", params: { [badKey]: 1 } },
+    ]);
+    // The assumption this rests on: the schema is what refuses the document, so
+    // the mapping below is running on a real schema issue.
+    expect(safeParseLinkageTerms(buildAdvancedTerms(imported)).success).toBe(
+      false,
+    );
+
+    const result = validateAdvancedInvite(imported, seed, now);
+    expect(result.canGenerate).toBe(false);
+    expect(result.terms).toBeUndefined();
+    expect(result.errors.keys).toBeDefined();
+    const rendered = Object.values(result.errors).join("\n");
+    expect(rendered).not.toContain("unrepeatable-key");
+    expect(rendered).not.toContain("\x1b");
+    expect(rendered).not.toContain("\u202e");
+    expect(rendered).not.toContain("params");
+  });
+});
+
 describe("a key-element transform core cannot build", () => {
   // The pass leaves the compile question to the mint (core's
   // `assertTransformsCompile`, driven in invitation.test.ts and core's own

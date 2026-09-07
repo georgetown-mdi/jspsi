@@ -3883,10 +3883,10 @@ test("loadConfigLinkageSource refuses a control character in a metadata name", (
 
 // A camelized issue path names each segment in the spelling the file writes,
 // which works only for keys the camelize pass itself built. The one exception
-// is a transform `params` record key -- the schema's only free-form record,
-// bounded only on length -- so a path there stops at `params` instead:
-// `_evil_key` and `EvilKey` both camelize to `EvilKey`, so naming either
-// would misname a key one of those files does not contain.
+// is a transform `params` record key -- the schema's only free-form record --
+// so a path there stops at `params` instead: `_evil_key` and `EvilKey` both
+// camelize to `EvilKey`, so naming either would misname a key one of those
+// files does not contain.
 test("loadConfigLinkageSource stops a linkage_terms issue path at the params block", () => {
   const configPath = path.join(dir, "psilink.yaml");
   const terms = cloneTerms(getDefaultLinkageTerms("Agency A"));
@@ -3912,6 +3912,35 @@ test("loadConfigLinkageSource stops a linkage_terms issue path at the params blo
   expect(rendered).toContain("linkage_keys.0.elements.0.transform.0.params: ");
   // The key itself reaches the operator in no form: not raw, which the display
   // boundary would have had to escape, and not as the escape either.
+  expect(rendered).not.toContain("\x1b");
+  expect(rendered).not.toContain("\u202e");
+  expect(rendered).not.toContain("\\x1b");
+  expect(rendered).not.toContain("\\u202e");
+});
+
+// The name shape is what refuses this key, not its length: it sits well inside
+// MAX_NAME_LENGTH, which a length bound alone admits.
+test("loadConfigLinkageSource refuses a params key holding a control character", () => {
+  const configPath = path.join(dir, "psilink.yaml");
+  const terms = cloneTerms(getDefaultLinkageTerms("Agency A"));
+  const badKey = "de\x1b[31m\u202elimiter-unrepeatable-key";
+  expect(badKey.length).toBeLessThan(MAX_NAME_LENGTH);
+  terms.linkageKeys[0].elements[0].transform = [
+    { function: "split_on", params: { [badKey]: "," } },
+  ];
+  fs.writeFileSync(configPath, YAML.stringify({ linkage_terms: terms }));
+  let caught: unknown;
+  try {
+    loadConfigLinkageSource(configPath);
+  } catch (err) {
+    caught = err;
+  }
+  expect(caught).toBeInstanceOf(UsageError);
+  const rendered = sanitizeErrorForDisplay(caught);
+  expect(rendered).toContain("invalid linkage_terms");
+  expect(rendered).toContain("linkage_keys.0.elements.0.transform.0.params: ");
+  // The block is named and the key is not, in any form.
+  expect(rendered).not.toContain("unrepeatable-key");
   expect(rendered).not.toContain("\x1b");
   expect(rendered).not.toContain("\u202e");
   expect(rendered).not.toContain("\\x1b");

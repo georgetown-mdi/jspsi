@@ -99,9 +99,10 @@ export const TEXT_CONTROL_CHAR_MESSAGE =
  * The shape a name-class value of a terms document must match, beyond its
  * {@link MAX_NAME_LENGTH} cap: a linkage field, key, or element `name`, an
  * element `field` reference, an element-`swap` reference, a transform
- * `function` name, a payload column `name`, a legal-agreement `reference`, and
- * a rule-set set `name`. It admits everything but two classes -- the control
- * characters {@link TEXT_CONTROL_CHAR_PATTERN} refuses in a free-text field
+ * `function` name and a transform `params` record KEY, a payload column
+ * `name`, a legal-agreement `reference`, and a rule-set set `name`. It admits
+ * everything but two classes -- the control characters
+ * {@link TEXT_CONTROL_CHAR_PATTERN} refuses in a free-text field
  * (C0 with NUL, DEL, C1, tab, line feed and carriage return included), and the
  * nine Unicode bidirectional formatting characters `BIDI_CONTROL_PATTERN`
  * (utils/nameControls.ts) names. Letters are untouched, so a name written in
@@ -138,14 +139,17 @@ export const TEXT_CONTROL_CHAR_MESSAGE =
  * header meets this refusal, and no character a name may keep is taken out of a
  * header. The BMP sweep above holds that equality in both directions.
  *
+ * A `params` record KEY takes the shape and the value it names does not. The
+ * key is the parameter's name -- the label a step's implementation is looked up
+ * by, and the path segment a refusal locates the offending entry as -- so it is
+ * a name in the same sense the `function` name beside it is.
+ *
  * What stays outside the rule, and why:
  * - A transform `params` string value and a name-constraint
  *   `allowedCharacters` class are length-bounded only. Each is data a step
  *   matches or substitutes with rather than a name -- a tab is a plausible
  *   delimiter and a line feed a plausible replacement -- so a character rule
  *   there would refuse legitimate terms.
- * - A `params` record KEY keeps its length bound alone, as the value it names
- *   does.
  * - `version` needs nothing: its semver regex admits neither class already, and
  *   a second check on it could never fire.
  * - A reader of an already-recorded value -- the exchange-record reader
@@ -678,9 +682,9 @@ const TransformParamValueSchema = z
 // base the pad_left refine below chains onto (mirrors LinkageTermsBaseSchema).
 const TransformStepBaseSchema = z.object({
   function: nameValue(z.string().min(1).max(MAX_NAME_LENGTH)),
-  // The record's keys (parameter names) are length-bounded only -- left out of
-  // the name shape for the reason NAME_SHAPE_PATTERN records -- and each string
-  // value is length-bounded by TransformParamValueSchema above. The entry count is bounded at
+  // The record's keys (parameter names) take the name shape beside their length
+  // bound, for the reason NAME_SHAPE_PATTERN records; each string value is
+  // length-bounded only, by TransformParamValueSchema above. The entry count is bounded at
   // MAX_PARAMS_ENTRIES by a bare key count (exceedsOwnKeyCount) that runs
   // before the per-key length check -- the same permissive-stage +
   // count-refine + pipe shape as boundedArray, so an over-count record is
@@ -700,7 +704,12 @@ const TransformStepBaseSchema = z.object({
         abort: true,
       },
     )
-    .pipe(z.record(z.string().max(MAX_NAME_LENGTH), TransformParamValueSchema))
+    .pipe(
+      z.record(
+        nameValue(z.string().max(MAX_NAME_LENGTH)),
+        TransformParamValueSchema,
+      ),
+    )
     .optional(),
 });
 

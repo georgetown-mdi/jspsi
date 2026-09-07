@@ -1918,8 +1918,8 @@ test("the control-character refusal names the field by path, not the value", () 
 // in its own shape: no free-text control character, and none of the nine bidi
 // formatting characters the CSV read strips from a header. The cases below pin
 // one accepted and two refused values per field in scope, the edges of both
-// refused classes, and the three values the rule leaves out by design -- a
-// transform param value, a param key, and an allowedCharacters class.
+// refused classes, and the two values the rule leaves out by design -- a
+// transform param value and an allowedCharacters class.
 
 // The two refused classes, one representative each, written as escapes so this
 // source holds no raw invisible byte.
@@ -2082,32 +2082,75 @@ test("a free-text field still admits a bidi character a name may not hold", () =
   ).not.toThrow();
 });
 
-test("a transform param value and key are length-bounded only", () => {
-  // The two recorded exclusions on the params record. A value is data a step
-  // matches or substitutes with -- a tab is a plausible delimiter, a line feed a
-  // plausible replacement -- so refusing either would refuse legitimate terms,
-  // and a key is left with the value it names.
-  expect(() =>
-    parseLinkageTerms({
-      ...base,
-      linkageKeys: [
-        {
-          name: "SSN",
-          elements: [
-            {
-              field: "ssn",
-              transform: [
-                {
-                  function: "split_on",
-                  params: { delimiter: "\t", [`no${BEL}te`]: `line\nbreak` },
-                },
-              ],
-            },
-          ],
-        },
+// A `split_on` step whose params record holds whatever the case supplies, so
+// each case below is a step an exchange would really run.
+const splitOnParamsTerms = (params: Record<string, unknown>) => ({
+  ...base,
+  linkageKeys: [
+    {
+      name: "SSN",
+      elements: [
+        { field: "ssn", transform: [{ function: "split_on", params }] },
       ],
-    }),
+    },
+  ],
+});
+
+test("a transform param value is length-bounded only", () => {
+  // The recorded exclusion on the params record. A value is data a step matches
+  // or substitutes with -- a tab is a plausible delimiter, a line feed a
+  // plausible replacement -- so refusing one would refuse legitimate terms.
+  expect(() =>
+    parseLinkageTerms(
+      splitOnParamsTerms({ delimiter: "\t", replacement: `line\nbreak` }),
+    ),
   ).not.toThrow();
+});
+
+test("a transform params key holding no refused character is accepted", () => {
+  expect(() =>
+    parseLinkageTerms(splitOnParamsTerms({ delimiter: "," })),
+  ).not.toThrow();
+});
+
+test.each([
+  ["a control character", BEL],
+  ["a text-direction character", RLO],
+])("rejects a transform params key holding %s", (_label, character) => {
+  expect(() =>
+    parseLinkageTerms(splitOnParamsTerms({ [`de${character}limiter`]: "," })),
+  ).toThrow(ZodError);
+});
+
+test("the params key refusal is the fixed message at the key's own path", () => {
+  // The key is the last path segment, so the entry is located without the
+  // message naming it -- the same split every other name refusal takes. Zod
+  // wraps a record-key failure in an `invalid_key` issue whose own message is
+  // fixed text about the record; the name-class message sits on the nested
+  // issue, which is where the fixed literal is asserted.
+  const key = `de${BEL}limiter-unrepeatable-key`;
+  const result = safeParseLinkageTerms(splitOnParamsTerms({ [key]: "," }));
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  const issue = result.error.issues[0] as {
+    code: string;
+    message: string;
+    path: PropertyKey[];
+    issues?: Array<{ message: string }>;
+  };
+  expect(issue.code).toBe("invalid_key");
+  expect(issue.path.join(".")).toBe(
+    `linkageKeys.0.elements.0.transform.0.params.${key}`,
+  );
+  expect(issue.issues?.map((nested) => nested.message)).toEqual([
+    NAME_SHAPE_MESSAGE,
+  ]);
+  // The message text names no submitted value; only the path holds the key,
+  // and describeDecodeError escapes each segment of it.
+  expect(issue.message).not.toContain("unrepeatable-key");
+  const relayed = describeDecodeError(result.error);
+  expect(relayed).toContain("\\x07");
+  expect(relayed).not.toContain(BEL);
 });
 
 test("an allowedCharacters class is length-bounded only", () => {
