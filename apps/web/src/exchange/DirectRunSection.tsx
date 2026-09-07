@@ -9,8 +9,7 @@ import {
   FailureAlert,
   FailureRecoveryButton,
   RECONNECTING_HEADING,
-  ReattachedRunNotice,
-  ReattachingNotice,
+  ReattachNotice,
   RunDownloads,
   RunWarningsAlert,
   SERVER_JOB_KEEP_OPEN_BODY,
@@ -159,8 +158,11 @@ export function DirectRunSection({
       <h1 tabIndex={-1} ref={headingRef}>
         {title}
       </h1>
-      {reattachedRun && <ReattachedRunNotice state={reattachState} />}
-      {reattaching && !reattachedRun && <ReattachingNotice />}
+      <ReattachNotice
+        reattaching={reattaching}
+        reattachedRun={reattachedRun}
+        state={reattachState}
+      />
       {failure !== undefined && (
         <FailureAlert failure={failure}>
           {retryable && (

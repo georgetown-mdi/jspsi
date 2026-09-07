@@ -836,13 +836,20 @@ describe("console acceptor re-attaches on a busy create", () => {
         }),
       )
       .toBeInTheDocument();
+    // The lead reads twice -- the polite region announces it, the visible notice
+    // leads with it -- so the visible one is the last of the two.
     await expect
       .element(
-        page.getByText(
-          "You are back on an exchange this console already holds.",
-        ),
+        page
+          .getByText("You are back on an exchange this console already holds.")
+          .last(),
       )
-      .toBeInTheDocument();
+      .toBeVisible();
+    await expect
+      .element(page.getByTestId("reattach-announcement"))
+      .toHaveTextContent(
+        "You are back on an exchange this console already holds.",
+      );
 
     // The resolved id was probed live and its event stream re-attached to.
     await vi.waitFor(() =>
@@ -1008,9 +1015,14 @@ describe("console acceptor run warnings", () => {
       message: "the rendezvous directory is not empty",
     });
     api.closeEvents();
+    // The headline reads twice while the alert stands -- the polite region
+    // announces it, the visible Alert is titled with it.
     await expect
-      .element(page.getByText("The exchange reported a warning"))
-      .toBeInTheDocument();
+      .element(page.getByText("The exchange reported a warning").last())
+      .toBeVisible();
+    await expect
+      .element(page.getByTestId("run-warnings-announcement"))
+      .toHaveTextContent("The exchange reported a warning");
     await expect.element(page.getByText(NOT_EMPTY_LEAD)).toBeInTheDocument();
   });
 });

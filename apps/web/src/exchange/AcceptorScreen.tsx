@@ -1195,9 +1195,10 @@ export function AcceptorScreen() {
             step, before consent and file): a way back to an exchange still running
             from a prior visit. Renders nothing when there is none to recover. */}
         {consoleBuild && step === "review" && <RecoveredExchangePanel />}
-        {decode.status === "pending" && (
-          <p aria-live="polite">Reading your invitation...</p>
-        )}
+        {/* No live role: the decode runs once on mount, so this sentence is
+            initial page content that no later change reaches, and the settle
+            moves focus to the terms, the block, or the error alert. */}
+        {decode.status === "pending" && <p>Reading your invitation...</p>}
         {decode.status === "error" && (
           <Alert
             color="red"
