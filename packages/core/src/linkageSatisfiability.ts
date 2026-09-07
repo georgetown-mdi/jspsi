@@ -211,7 +211,9 @@ export function assertFanOutImplemented(
  * with distinct 256-character formats, the most expensive shape this build
  * compiles, took 0.7 s on an idle container and up to 1.9 s under its ordinary
  * load, against 2 s. The budget can still refuse a within-cap document on a
- * slower machine, where retrying is legitimate: each attempt was bounded.
+ * slower machine, where retrying is legitimate: each attempt was bounded, to the
+ * budget plus at most one steps array's compile, and this count is what bounds
+ * that array.
  */
 const TRANSFORM_COMPILE_MAX_STEPS = 512;
 
@@ -309,17 +311,27 @@ function stepCountRefusal(
  * web element editor marks a malformed param on the input that has to change
  * (`StepListEditor`). What reaches here is what that does not cover -- an
  * imported document, or a caller that mints without the editor. It runs once
- * per mint rather than on every editor pass, because compiling a whole
- * document's transforms costs enough to need bounding.
+ * per mint and on no editor pass, because compiling a whole document's
+ * transforms costs enough to need bounding.
  *
- * Two bounds hold that cost. The declared step count
- * ({@link TRANSFORM_COMPILE_MAX_STEPS}) is checked before anything compiles, so
- * a document over it takes the same refusal on every machine and every retry;
- * the wall-clock budget ({@link TRANSFORM_COMPILE_TOTAL_BUDGET_MS}) stands
- * behind it for a document under the count whose steps are expensive. The
- * compiles are memoized ({@link uncompilableStepLabel}) once the walk has
- * finished, so a repeated mint of one document pays for them once, while a
- * refused one leaves the memo as it found it.
+ * Two bounds hold that cost, and they hold this walk alone. The declared step
+ * count ({@link TRANSFORM_COMPILE_MAX_STEPS}) is checked before anything
+ * compiles, so a document over it takes the same refusal on every machine and
+ * every retry; the wall-clock budget
+ * ({@link TRANSFORM_COMPILE_TOTAL_BUDGET_MS}) stands behind it for a document
+ * under the count whose steps are expensive, read once per steps array rather
+ * than per step, so one attempt can overrun it by at most one array's compile --
+ * the overrun the step count bounds. The compiles are memoized
+ * ({@link uncompilableStepLabel}) once the walk has finished, so a repeated mint
+ * of one document pays for them once, while a refused one leaves the memo as it
+ * found it.
+ *
+ * The grading path compiles too, outside both bounds:
+ * {@link pipelineAlwaysDrops}, which the browser editor's validation pass runs
+ * on every pass, and the consent header's
+ * {@link substringCollapsesParsedDateToConstant} each build a `substring` run
+ * following a `parse_date` to measure what it collapses. What holds that walk is
+ * the schema's per-element step cap and the encoded-token length cap.
  */
 export function assertTransformsCompile(
   terms: LinkageTerms,

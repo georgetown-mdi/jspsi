@@ -453,7 +453,9 @@ export function validateAdvancedInvite(
   // a harmless pass-through), so on a key element the encoder is the gate, not
   // the descriptors. A step core cannot compile at all is refused at the mint
   // (`assertTransformsCompile`), which walks a whole document once per Generate
-  // rather than on every pass through here.
+  // and runs nowhere in this pass. The linkage grading above does compile:
+  // `pipelineAlwaysDrops` measures a `substring` run following a `parse_date` by
+  // probe on every pass, outside the mint walk's step-count and budget bounds.
   //
   // The exception is a param the pipeline drops value-INDEPENDENTLY -- a key that
   // matches nothing for BOTH parties, refused in core instead: `pipelineAlwaysDrops`

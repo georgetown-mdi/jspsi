@@ -713,8 +713,8 @@ export async function generateInvitation(params: {
   // row, so such a step aborts both parties' runs after the invitation has been
   // accepted, with only out-of-band renegotiation left as the remedy. Covering
   // the same two pipelines the fan-out check above does, and the whole refusal
-  // for every caller: the editor's validation pass leaves the compile question
-  // here, where it is asked once per mint rather than on every pass.
+  // for every caller: this walk compiles at the mint only, and no editor
+  // validation pass runs it.
   assertTransformsCompile(linkageTerms, params.standardization);
 
   // The per-party cleaning this mint stands behind, reconciled ONCE to the
