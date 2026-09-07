@@ -3,7 +3,6 @@ import { describe, expect, test } from "vitest";
 import { pack, unpack } from "peerjs-js-binarypack";
 
 import {
-  MAX_WEBRTC_FRAME_STRUCTURE_BYTES,
   MAX_WEBRTC_REASSEMBLY_DEPTH,
   MAX_WEBRTC_STRING_BYTES,
   scanFrameStructure,
@@ -81,7 +80,6 @@ describe("encodeBinaryPackValue: frames the pinned packer cannot write", () => {
         expect(
           scanFrameStructure(
             encoded,
-            MAX_WEBRTC_FRAME_STRUCTURE_BYTES,
             MAX_WEBRTC_REASSEMBLY_DEPTH,
             MAX_WEBRTC_STRING_BYTES,
           ),

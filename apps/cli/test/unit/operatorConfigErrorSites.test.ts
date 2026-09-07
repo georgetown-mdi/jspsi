@@ -133,6 +133,16 @@ const RECORDED_SITES: readonly ConfigErrorSite[] = [
     file: "packages/core/src/exchange.ts",
     anchor: "assertLocalCertificateAuthorizesAgreedIdentity",
     raises: "OperatorConfigError",
+    interpolates: ["agreedIdentity"],
+    provenance:
+      "the refusal for a certificate bound to a label a terms document cannot " +
+      "state names only `agreedIdentity`, whose provenance the entry below " +
+      "reaches; the bound label is not quoted here at all.",
+  },
+  {
+    file: "packages/core/src/exchange.ts",
+    anchor: "assertLocalCertificateAuthorizesAgreedIdentity",
+    raises: "OperatorConfigError",
     interpolates: ["agreedIdentity", "certificate.identity"],
     provenance:
       "both names are this party's own. `certificate.identity` is bound into " +
@@ -244,6 +254,16 @@ const RECORDED_SITES: readonly ConfigErrorSite[] = [
     provenance:
       "the message is SIGNING_IDENTITY_FILE_UNSET_REFUSAL, a module constant of " +
       "fixed prose; not even the configured path is quoted.",
+  },
+  {
+    file: "apps/cli/src/signingIdentityDivergence.ts",
+    anchor: "assertIdentityMatchesAgreedTerms",
+    raises: "OperatorConfigError",
+    interpolates: ["termsIdentity"],
+    provenance:
+      "the refusal for a certificate bound to a label the linkage terms " +
+      "cannot state names only `termsIdentity`, whose provenance the entry " +
+      "below reaches; the bound label is not quoted here at all.",
   },
   {
     file: "apps/cli/src/signingIdentityDivergence.ts",

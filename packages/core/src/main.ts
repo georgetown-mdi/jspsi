@@ -88,7 +88,6 @@ export {
   MAX_CHUNKS_PER_REASSEMBLY,
   MAX_CONCURRENT_REASSEMBLIES,
   MAX_WEBRTC_FRAME_BYTES,
-  MAX_WEBRTC_FRAME_STRUCTURE_BYTES,
   MAX_WEBRTC_REASSEMBLY_DEPTH,
   MAX_WEBRTC_STRING_BYTES,
   MIN_CHUNK_RESIDENT_BYTES,
@@ -258,6 +257,7 @@ export {
   NAME_SHAPE_PATTERN,
   TEXT_CONTROL_CHAR_MESSAGE,
   TEXT_CONTROL_CHAR_PATTERN,
+  TEXT_DIRECTION_MESSAGE,
   referencedLinkageFieldNames,
   safeParseLinkageTerms,
 } from "./config/linkageTermsSchema";
@@ -442,10 +442,12 @@ export {
   CsvRowParseError,
 } from "./file";
 export type { CSVRow, CSVParseMeta } from "./file";
-// The characters no name may hold, and the strip the CSV header transform
-// applies. Shared so the ingestion boundary and the terms schema's name shape
-// agree on what a name may contain.
+// The characters no name may hold, the text-direction half of that class, and
+// the strip the CSV header transform applies. Shared so the ingestion boundary,
+// the terms schema's name shape, and the surfaces mirroring the identity rule
+// agree on what a name and a recorded free-text value may contain.
 export {
+  BIDI_CONTROL_PATTERN,
   NAME_CONTROL_CHAR_PATTERN,
   stripNameControlChars,
 } from "./utils/nameControls.js";

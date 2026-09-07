@@ -16,6 +16,7 @@ import {
 } from "../../src/exchange";
 import { receiveCountReport } from "../../src/protocolSetup";
 import { UsageError } from "../../src/errors";
+import { sanitizeErrorForDisplay } from "../../src/utils/sanitizeErrorForDisplay";
 import {
   ConnectionError,
   createMessagePipe,
@@ -412,8 +413,11 @@ test("an over-broad count-only run is refused before any round, never narrowed",
   );
 
   expect(refusal).toBeInstanceOf(Error);
-  expect((refusal as Error).message).toContain("failed to parse");
-  expect((refusal as Error).message).toMatch(/exactly one linkage key/);
+  // Read off the rendered chain: on the party that hears the abort, the reason
+  // its partner stated is a labelled cause link, not message text.
+  const rendered = sanitizeErrorForDisplay(refusal);
+  expect(rendered).toContain("failed to parse");
+  expect(rendered).toMatch(/exactly one linkage key/);
 });
 
 // The PSI round's frames are the only binary ones a run puts on the wire: the terms

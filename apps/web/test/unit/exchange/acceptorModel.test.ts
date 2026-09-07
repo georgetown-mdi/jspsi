@@ -4,6 +4,7 @@ import { UNNAMED_PARTY_LABEL } from "@psilink/core";
 
 import {
   ACCEPTOR_NAME_CONTROL_CHAR_PROBLEM,
+  ACCEPTOR_NAME_TEXT_DIRECTION_PROBLEM,
   ACCEPTOR_SEND_FORWARD_REFERENCE,
   acceptUnsupported,
   acceptorConsentName,
@@ -506,6 +507,24 @@ describe("acceptor name shape", () => {
     expect(acceptorNameProblem(`County${control}Health`)).toBe(
       ACCEPTOR_NAME_CONTROL_CHAR_PROBLEM,
     );
+  });
+
+  test.each([
+    ["a right-to-left override", RLO],
+    ["a left-to-right embedding", "\u202a"],
+    ["a pop directional isolate", "\u2069"],
+  ])("reports %s in the name under its own wording", (_label, character) => {
+    // The second rule core holds this value to. Its own message: an operator
+    // told about control characters would not know what to remove.
+    expect(acceptorNameProblem(`County${character}Health`)).toBe(
+      ACCEPTOR_NAME_TEXT_DIRECTION_PROBLEM,
+    );
+  });
+
+  test("reports nothing for a direction mark, which core admits", () => {
+    // The implicit marks open no scope, so core keeps them and the field must
+    // not stop a name that would be accepted.
+    expect(acceptorNameProblem("County\u200eHealth")).toBeUndefined();
   });
 
   test("reports nothing for a name written in letters outside ASCII", () => {

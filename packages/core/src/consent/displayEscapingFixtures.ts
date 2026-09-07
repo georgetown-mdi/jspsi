@@ -49,16 +49,18 @@ export const PRINTABLE_ASCII = /^[\x20-\x7e]*$/;
  *
  * By design, this goes beyond what the schema admits, on two counts.
  * `version`, `date`, `expirationDate`, and the two rule-set `version` strings
- * are format-constrained (semver, `z.iso.date`). `identity` and the constraint
- * `exclude` value are free text held to the control-character rule
- * (`TEXT_CONTROL_CHAR_PATTERN`, config/linkageTermsSchema.ts), which refuses the ESC
- * and BEL they hold here; the bidi override in `purpose` and in the payload
- * `description` is not a control character, so those two stay within what a
- * decoded token can hold -- a real parse of this fixture's own values accepts
- * both -- and it is exactly what the display-escaping assertions over those
- * two fields exercise. They hold one here because the display boundary's
- * contract is uniform and does not depend on that validation staying in place
- * -- the same reason `summarizeInvitation` routes the dates through the
+ * are format-constrained (semver, `z.iso.date`). The four free-text fields --
+ * `identity`, the legal agreement's `purpose`, the payload `description`, and
+ * the constraint `exclude` value -- are held to the control-character rule
+ * (`TEXT_CONTROL_CHAR_PATTERN`, config/linkageTermsSchema.ts), which refuses
+ * the ESC and BEL they hold here, and the first three refuse the bidi override
+ * beside it (`TEXT_DIRECTION_MESSAGE`), which all three hold here. The values a
+ * decoded token can still hold an override in are that `exclude` value and the
+ * two no character rule shapes at all: a transform `params` value and the
+ * `allowedCharacters` class. Every
+ * field holds a hostile code point here because the display boundary's contract
+ * is uniform and does not depend on any of that validation staying in place --
+ * the same reason `summarizeInvitation` routes the dates through the
  * sanitizer.
  */
 /**

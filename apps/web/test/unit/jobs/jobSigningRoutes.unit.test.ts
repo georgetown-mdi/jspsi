@@ -251,6 +251,50 @@ describe("POST /api/jobs/signing/fingerprint maps each condition", () => {
     }
   });
 
+  test("a text-direction character in the identity is a 400 before any child is spawned", async () => {
+    // The nine embedding, override and isolate characters of UAX #9. One of them
+    // opens a layout scope that outlives the label, and the label is bound into
+    // a certificate the partner pins and DISPLAYS, so it is refused on the way
+    // in rather than at the terms the run later parses.
+    for (const code of [
+      0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2066, 0x2067, 0x2068, 0x2069,
+    ]) {
+      const { dataRoot } = seedManager();
+      const identity = `Agency${String.fromCodePoint(code)}A`;
+      const response = await postFingerprint({ identity });
+      expect(response.status).toBe(400);
+      // A field path and a shape reason: no part of the submitted label crosses.
+      const text = await response.text();
+      expect(text).not.toContain("Agency");
+      expect(text).not.toContain(String.fromCodePoint(code));
+      expect(JSON.parse(text)).toMatchObject({ error: expect.any(String) });
+      // The stub CLI creates the identity file, so its absence proves no child ran.
+      expect(
+        fs.existsSync(path.join(dataRoot, SIGNING_IDENTITY_FILE_NAME)),
+      ).toBe(false);
+      // The other boundary the shared contract holds takes the same verdict.
+      expect(
+        jobZeroSetupIntentSchema.safeParse(validZeroSetupIntent({ identity }))
+          .success,
+      ).toBe(false);
+    }
+  });
+
+  test("a direction mark in the identity binds normally", async () => {
+    // U+200E, U+200F and U+061C set a direction for the neutral characters
+    // around them and open no scope reaching past the label, so a party writing
+    // its name in a right-to-left script keeps them at both boundaries.
+    for (const mark of ["\u200e", "\u200f", "\u061c"]) {
+      seedManager();
+      const identity = `Agency${mark}A`;
+      expect((await postFingerprint({ identity })).status).toBe(200);
+      expect(
+        jobZeroSetupIntentSchema.safeParse(validZeroSetupIntent({ identity }))
+          .success,
+      ).toBe(true);
+    }
+  });
+
   test("an identity written in the operator's own script binds normally", async () => {
     // The rule bounds control characters, not the operator's alphabet. A party
     // name that cannot be spelled in ASCII reaches the child as one argv token.

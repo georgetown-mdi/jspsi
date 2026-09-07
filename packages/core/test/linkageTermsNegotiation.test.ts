@@ -7,6 +7,7 @@ import {
 import {
   MAX_TEXT_LENGTH,
   TEXT_CONTROL_CHAR_MESSAGE,
+  TEXT_DIRECTION_MESSAGE,
   safeParseLinkageTerms,
 } from "../src/config/linkageTermsSchema";
 import type { LinkageTerms } from "../src/config/linkageTermsSchema";
@@ -963,6 +964,27 @@ test("deriveAcceptedLinkageTerms refuses a control character in the ACCEPTOR's o
   // for this rule follows.
   expect(message).not.toContain("quarantined-county");
   expect(message).not.toContain("\t");
+});
+
+test("deriveAcceptedLinkageTerms refuses a text-direction character in the ACCEPTOR's own identity", () => {
+  // The second rule the schema holds this field to, applied where the
+  // control-character rule is and for the same reason: substituted unchecked,
+  // the value fails the re-check at the end under the invitation's account.
+  let thrown: unknown;
+  try {
+    deriveAcceptedLinkageTerms(
+      inviterBase,
+      "Agency\u202eA of quarantined-county",
+    );
+  } catch (e) {
+    thrown = e;
+  }
+  expect(thrown).toBeInstanceOf(UsageError);
+  const { message } = thrown as Error;
+  expect(message).toContain(TEXT_DIRECTION_MESSAGE);
+  expect(message).not.toContain("cannot be accepted unchanged");
+  expect(message).not.toContain("quarantined-county");
+  expect(message).not.toContain("\u202e");
 });
 
 test.each([

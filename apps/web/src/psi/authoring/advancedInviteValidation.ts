@@ -5,6 +5,8 @@ import {
   INVITATION_LIFETIME_SECONDS,
   MAX_INVITATION_LIFETIME_SECONDS,
   NAME_SHAPE_PATTERN,
+  TEXT_CONTROL_CHAR_MESSAGE,
+  TEXT_DIRECTION_MESSAGE,
   UsageError,
   assertDeduplicateImplemented,
   canonicalString,
@@ -416,9 +418,11 @@ export function validateAdvancedInvite(
 
   const parsed = safeParseLinkageTerms(terms);
   if (!parsed.success) {
-    // Each control touched by a schema issue gets its control-specific message
-    // (keyed on the control, not the individual issue, so the set of affected
-    // controls is all that matters). Keeps the first message per control: the keys
+    // Each control touched by a schema issue gets its control-specific message:
+    // the one its class of fault earns where the issue names a refused character
+    // class (refusedCharacterMessage), and the control's generic message
+    // otherwise, since the rest of the schema's issues are technical and name a
+    // value no editor may echo. Keeps the first message per control: the keys
     // control sets its accurate message up front so it wins over the generic
     // schema mapping, and stacking several messages on one input is noise. The
     // payload control is the exception -- a schema payload error (e.g. an
@@ -426,13 +430,19 @@ export function validateAdvancedInvite(
     // direction-conflict message that may already occupy it, so both are shown
     // rather than leaving the operator unaware of one that still blocks
     // generation.
-    const schemaFields = new Set(
-      parsed.error.issues.map((issue) => fieldForIssuePath(issue.path)),
-    );
-    for (const field of schemaFields) {
+    const schemaFields = new Map<AdvancedField, Set<string>>();
+    for (const issue of parsed.error.issues) {
+      const field = fieldForIssuePath(issue.path);
+      const seen = schemaFields.get(field);
+      if (seen === undefined) schemaFields.set(field, new Set([issue.message]));
+      else seen.add(issue.message);
+    }
+    for (const [field, issueMessages] of schemaFields) {
       const existing = errors[field];
       if (existing === undefined) {
-        errors[field] = messageForField(field);
+        errors[field] =
+          refusedCharacterMessage(field, issueMessages) ??
+          messageForField(field);
       } else if (field === "payload") {
         // Lead with the schema/column error and trail the direction conflict: the
         // schema error is the obstacle that persists after the operator reverses
@@ -638,6 +648,54 @@ function fieldForIssuePath(path: ReadonlyArray<PropertyKey>): AdvancedField {
   // linkageKeys, linkageFields, and anything else the editor can influence
   // surface against the key list (the only structural control it offers).
   return "keys";
+}
+
+/** The words each control uses for the two character classes the schema refuses
+ * in the free-text values a record holds verbatim, in the wording the acceptor's
+ * own name field uses for the same two rules (`acceptorModel.ts`). Only the two
+ * of the three fields this editor authors are listed: the third is a payload
+ * column `description`, which the built terms never hold -- the payload is
+ * derived from the disclosed column names alone (`payloadSendForMetadata`), so
+ * that control cannot receive one of these issues, which the validation test
+ * pins rather than this sentence.
+ *
+ * Their own messages because the generic ones tell an operator who pasted such a
+ * value to enter a value they have already entered. Neither echoes any part of
+ * it: the offending text is the value itself, so quoting it would put those
+ * characters on the screen -- the reason {@link REFUSED_PARAM_NAME_MESSAGE}
+ * names no parameter. */
+const REFUSED_CHARACTER_MESSAGES: Partial<
+  Record<AdvancedField, { control: string; direction: string }>
+> = {
+  identity: {
+    control:
+      "Your name cannot contain control characters (a line break or a tab, for instance).",
+    direction:
+      "Your name cannot contain text-direction characters (a right-to-left override, for instance).",
+  },
+  legalPurpose: {
+    control:
+      "The purpose cannot contain control characters (a line break or a tab, for instance).",
+    direction:
+      "The purpose cannot contain text-direction characters (a right-to-left override, for instance).",
+  },
+};
+
+/** The message for a control whose schema issues include one of the two refused
+ * character classes, or undefined for a control with no such wording or a set of
+ * issues holding neither class. Read on the schema's own message literals, so
+ * the editor and the schema cannot come to disagree about which rule fired. The
+ * control-character class is answered first: it is the one an operator is likelier
+ * to have pasted, and a value holding both is fixed one character at a time. */
+function refusedCharacterMessage(
+  field: AdvancedField,
+  issueMessages: ReadonlySet<string>,
+): string | undefined {
+  const words = REFUSED_CHARACTER_MESSAGES[field];
+  if (words === undefined) return undefined;
+  if (issueMessages.has(TEXT_CONTROL_CHAR_MESSAGE)) return words.control;
+  if (issueMessages.has(TEXT_DIRECTION_MESSAGE)) return words.direction;
+  return undefined;
 }
 
 /** A clear, control-specific message for a schema failure on that control. The

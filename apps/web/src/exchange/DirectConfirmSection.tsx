@@ -22,6 +22,7 @@ import { useOnlineStatus } from "@components/useOnlineStatus";
 
 import {
   IDENTITY_CONTROL_CHAR_PATTERN,
+  IDENTITY_DIRECTION_CHAR_PATTERN,
   MAX_IDENTITY_LENGTH,
 } from "@jobs/intentSchemas";
 import {
@@ -150,9 +151,11 @@ export function DirectConfirmSection({
   // on the value the run actually sends (the trimmed label; a blank field omits
   // identity and the run names no party, so it is not an error). Naming the fault
   // at the field keeps a label the schema refuses -- a leading dash, an over-long
-  // value, or a control character -- from reaching the server as an opaque 400
-  // that failureFor would misattribute to the file or SFTP destination -- the
-  // shared contract's own rules, which this guard cannot loosen.
+  // value, a control character, or a text-direction character -- from reaching
+  // the server as an opaque 400 that failureFor would misattribute to the file
+  // or SFTP destination -- the shared contract's own rules, which this guard
+  // cannot loosen. Each class gets its own words: the two rules refuse different
+  // characters, and an operator fixing one is not told about the other.
   const trimmedIdentity = identity.trim();
   const identityError =
     trimmedIdentity.length === 0
@@ -163,7 +166,9 @@ export function DirectConfirmSection({
           ? `Identity cannot exceed ${MAX_IDENTITY_LENGTH} characters`
           : IDENTITY_CONTROL_CHAR_PATTERN.test(trimmedIdentity)
             ? "Identity cannot contain control characters (a line break or a tab, for instance)"
-            : undefined;
+            : IDENTITY_DIRECTION_CHAR_PATTERN.test(trimmedIdentity)
+              ? "Identity cannot contain text-direction characters (a right-to-left override, for instance)"
+              : undefined;
 
   return (
     <Stack gap="lg">

@@ -84,9 +84,15 @@ describe("the configuration rows escape what somebody else authored", () => {
   const ZWJ = "\u200d";
 
   test("a hostile identity, key name, and legal reference are escaped", () => {
+    // The zero-width joiner throughout rather than the override: every value
+    // these rows render is schema-shaped -- the identity is a free-text field a
+    // record holds, the key name and the reference are names -- and each shape
+    // refuses the override outright. The joiner is outside every refused class
+    // and still needs escaping here. The override half of the class is pinned
+    // by the connection test below, whose host no schema shapes.
     const hostileTerms = {
       ...linkageTerms,
-      identity: `County${RLO} Health`,
+      identity: `County${ZWJ} Health`,
       linkageKeys: [
         {
           name: `SSN${ZWJ} + DOB`,
@@ -94,9 +100,6 @@ describe("the configuration rows escape what somebody else authored", () => {
         },
       ],
       legalAgreement: {
-        // The zero-width joiner rather than the override: a reference is a name,
-        // and the schema's name shape refuses the override outright. The joiner
-        // is outside both refused classes and still needs escaping here.
         reference: `MOU${ZWJ}-001`,
         purpose: "Care coordination",
         expirationDate: "2027-01-01",
@@ -111,9 +114,7 @@ describe("the configuration rows escape what somebody else authored", () => {
     const rendered = rows
       .flatMap((row) => [row.value ?? "", ...(row.values ?? [])])
       .join(" ");
-    expect(rendered).not.toContain(RLO);
     expect(rendered).not.toContain(ZWJ);
-    expect(rendered).toContain("\\u202e");
     expect(rendered).toContain("\\u200d");
   });
 
