@@ -6,20 +6,27 @@ import {
   createMessagePipe,
   type MessageConnection,
 } from "../src/connection/messageConnection";
-import { DEFAULT_MAX_DISPLAY_LENGTH } from "../src/utils/sanitizeForDisplay";
-import { sanitizeErrorForDisplay } from "../src/utils/sanitizeErrorForDisplay";
+import { MAX_PARTNER_VALUES_SHOWN } from "../src/utils/partnerOriginText";
+import {
+  COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
+  DEFAULT_MAX_DISPLAY_LENGTH,
+} from "../src/utils/sanitizeForDisplay";
+import {
+  CAUSE_DEPTH_ELISION_MARKER,
+  sanitizeErrorForDisplay,
+} from "../src/utils/sanitizeErrorForDisplay";
 
 // What each abort-bearing message class of the terms exchange delivers when the
-// partner plants private-key material, a forged link boundary, or an
-// unbounded value in ONE of the reasons it chose. The whole class is asserted
+// partner plants private-key material, a forged link boundary, a forged
+// reason separator, or an unbounded value in ONE of the reasons it chose. The whole class is asserted
 // at once, over every plant in every position, rather than one site at a time:
 // the guarantee is a property of the branded type and its one elimination
 // (src/utils/partnerOriginText.ts), so a new abort site inherits it and a
 // regression shows up here whichever site introduces it.
 //
 // The property, in one sentence: the first-party sentence and every reason the
-// partner did NOT plant in arrive whole, and no reason renders past the
-// per-value budget. This is the terms-exchange analogue of
+// partner did NOT plant in arrive whole, no reason renders past the per-value
+// budget, and what the ceiling does not show is counted rather than dropped. This is the terms-exchange analogue of
 // test/connection/transportRefusalBudget.test.ts, which holds the same
 // partition for the bounded-transport refusals.
 
@@ -93,7 +100,21 @@ const CAUSE_SEPARATOR = sanitizeErrorForDisplay(
   new Error("a", { cause: new Error("b") }),
 ).slice(1, -1);
 
+// The separator between two reasons packed on one link, read back the same
+// way: the line breaks the elimination places, as the sink's escape renders
+// them. A reason cannot spell it (src/utils/partnerOriginText.ts), which is
+// what makes this split exact rather than a guess at the framing.
+const VALUE_SEPARATOR = sanitizeErrorForDisplay(new Error("a\n\nb")).slice(
+  1,
+  -1,
+);
+
 const linksOf = (rendered: string): string[] => rendered.split(CAUSE_SEPARATOR);
+
+const reasonsOf = (rendered: string): string[] =>
+  linksOf(rendered)
+    .slice(1)
+    .flatMap((link) => link.split(VALUE_SEPARATOR));
 
 const FIRST_PARTY_SENTENCE = "partner aborted linkage terms exchange";
 const REASON_LABEL = "reason the partner gave: ";
@@ -112,13 +133,14 @@ const PLANT_TAIL = " and the rest of what the partner wrote";
 // What one reason may hold that the reasons beside it must survive: each
 // marker on its own (a dangling BEGIN reaches forward to the end of what it
 // is composed with; a lone END must delete nothing), a whole block, a forged
-// link boundary, and a value long enough to spend a whole message's display
-// budget on its own.
+// link boundary, a forged separator between two reasons of one link, and a
+// value long enough to spend a whole message's display budget on its own.
 const PLANTS: Record<string, string> = {
   "a dangling BEGIN marker": `${BEGIN_MARKER}${PLANT_TAIL}`,
   "a lone END marker": `${END_MARKER}${PLANT_TAIL}`,
   "a whole private-key block": `${BEGIN_MARKER}\n${KEY_BODY.repeat(30)}\n${END_MARKER}${PLANT_TAIL}`,
   "a forged link boundary": `\ncaused by: a sentence the partner wrote${PLANT_TAIL}`,
+  "a forged reason separator": `\\x0a\\x0a${REASON_LABEL}a reason the partner never sent${PLANT_TAIL}`,
   "an unbounded value": "w".repeat(10_000),
 };
 
@@ -131,6 +153,7 @@ const PLANT_KEEPS_TAIL: Record<string, boolean> = {
   "a lone END marker": true,
   "a whole private-key block": true,
   "a forged link boundary": true,
+  "a forged reason separator": true,
   "an unbounded value": false,
 };
 
@@ -142,40 +165,97 @@ const PLAIN_REASONS = [
   "identity mismatch",
 ];
 
-for (const [className, render] of Object.entries(MESSAGE_CLASSES))
-  for (const [plantName, plant] of Object.entries(PLANTS))
+// A refusal the size of a real one: more reasons than one link carries and
+// more than the chain shows, so the plant sits mid-pack with whole reasons on
+// either side of it and the ceiling's counted tail behind them.
+const MANY_REASONS = Array.from(
+  { length: 20 },
+  (_, index) => `reason number ${index + 1} the partner stated`,
+);
+const PLANTED_POSITION = 14;
+
+/**
+ * What every rendered abort must hold, whichever reason the partner planted
+ * in: the first-party sentence on its own link, one labelled place per reason
+ * the ceiling admits, each reason inside the per-value budget, each link
+ * inside the renderer's per-link budget, and every reason the partner did not
+ * plant in arriving whole.
+ */
+function expectPartitioned(
+  rendered: string,
+  reasons: readonly string[],
+  planted: number,
+): string {
+  const links = linksOf(rendered);
+  expect(links[0]).toBe(FIRST_PARTY_SENTENCE);
+  for (const link of links)
+    expect(link.length).toBeLessThanOrEqual(
+      COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
+    );
+
+  const shown = Math.min(reasons.length, MAX_PARTNER_VALUES_SHOWN);
+  const rendersReasons = reasonsOf(rendered).slice(0, shown);
+  expect(rendersReasons).toHaveLength(shown);
+
+  for (let index = 0; index < shown; index++) {
+    const reason = rendersReasons[index]!;
+    expect(reason.startsWith(REASON_LABEL)).toBe(true);
+    // The separator the elimination places appears only where it placed it: a
+    // reason that spells it renders with its backslashes doubled, so the token
+    // never opens a second reason inside one.
+    expect(reason).not.toContain(VALUE_SEPARATOR);
+    // Every reason is charged to the per-value budget on its own, so no reason
+    // can spend the budget another reason's disclosure needs.
+    expect(reason.length).toBeLessThanOrEqual(
+      REASON_LABEL.length + DEFAULT_MAX_DISPLAY_LENGTH,
+    );
+    if (index !== planted)
+      expect(reason).toBe(`${REASON_LABEL}${reasons[index]}`);
+  }
+
+  return rendersReasons[planted]!;
+}
+
+/** What the planted reason itself must deliver: no key body, and no more. */
+function expectPlantContained(reason: string, plantName: string): void {
+  const plant = PLANTS[plantName]!;
+  expect(reason).not.toContain(KEY_BODY);
+  if (plant.includes(BEGIN_MARKER)) expect(reason).toContain(REDACTION);
+  expect(reason.includes(PLANT_TAIL)).toBe(PLANT_KEEPS_TAIL[plantName]);
+}
+
+for (const [className, render] of Object.entries(MESSAGE_CLASSES)) {
+  for (const [plantName, plant] of Object.entries(PLANTS)) {
     for (let planted = 0; planted < PLAIN_REASONS.length; planted++)
       test(`${className}: ${plantName} at reason ${planted + 1} leaves every other reason whole`, async () => {
         const reasons = PLAIN_REASONS.map((reason, index) =>
           index === planted ? plant : reason,
         );
-        const links = linksOf(await render(reasons));
 
-        // One link for the first-party sentence and one per reason: a planted
-        // separator does not add a link, and no reason is dropped.
-        expect(links).toHaveLength(1 + reasons.length);
-        expect(links[0]).toBe(FIRST_PARTY_SENTENCE);
-
-        for (let index = 0; index < reasons.length; index++) {
-          const link = links[index + 1]!;
-          expect(link.startsWith(REASON_LABEL)).toBe(true);
-          // The escape's own control-character token, which only a control
-          // character the COMPOSITION placed can produce: a reason's own are
-          // replaced where the link is built, so the two are never confusable
-          // (a literal `\x0a` the partner types escapes its backslash).
-          expect(link).not.toMatch(/\\x[0-9a-f]{2}/);
-          // Every link is charged to the per-value budget on its own, so no
-          // reason can spend the budget another reason's disclosure needs.
-          expect(link.length).toBeLessThanOrEqual(DEFAULT_MAX_DISPLAY_LENGTH);
-          if (index !== planted)
-            expect(link).toBe(`${REASON_LABEL}${PLAIN_REASONS[index]}`);
-        }
-
-        const plantedLink = links[planted + 1]!;
-        expect(plantedLink).not.toContain(KEY_BODY);
-        if (plant.includes(BEGIN_MARKER))
-          expect(plantedLink).toContain(REDACTION);
-        expect(plantedLink.includes(PLANT_TAIL)).toBe(
-          PLANT_KEEPS_TAIL[plantName],
+        expectPlantContained(
+          expectPartitioned(await render(reasons), reasons, planted),
+          plantName,
         );
       });
+
+    test(`${className}: ${plantName} mid-pack of ${MANY_REASONS.length} reasons leaves every neighbour whole`, async () => {
+      const reasons = MANY_REASONS.map((reason, index) =>
+        index === PLANTED_POSITION ? plant : reason,
+      );
+      const rendered = await render(reasons);
+
+      expectPlantContained(
+        expectPartitioned(rendered, reasons, PLANTED_POSITION),
+        plantName,
+      );
+      // The reasons past the ceiling are counted, not dropped in silence, and
+      // the renderer's own depth marker never appears: the count says how many
+      // reasons the operator has not read.
+      const links = linksOf(rendered);
+      expect(links[links.length - 1]).toBe(
+        `${reasons.length - MAX_PARTNER_VALUES_SHOWN} further values the partner sent are not shown`,
+      );
+      expect(rendered).not.toContain(CAUSE_DEPTH_ELISION_MARKER);
+    });
+  }
+}

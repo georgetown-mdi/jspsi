@@ -954,9 +954,13 @@ test("exchangeTerms responder: rejects (does not hang) when abort send fails on 
 // behind it -- the next reason, or the sentence naming the mismatch. Each is
 // redacted where it is composed, which bounds that rule to the fragment.
 
-// The rendered opening of one abort reason: the renderer's cause-link
-// separator plus the label protocolSetup puts on every reason's own link.
+// The rendered opening of the first abort reason on a link: the renderer's
+// cause-link separator plus the label protocolSetup puts on every reason.
 const REASON_LINK = "\ncaused by: reason the partner gave: ";
+// The opening of the next reason packed on that same link: the escape's own
+// token for the line breaks the elimination places between two reasons
+// (src/utils/partnerOriginText.ts), then the same label.
+const PACKED_REASON = "\\x0a\\x0areason the partner gave: ";
 const BEGIN_MARKER = "-----BEGIN OPENSSH PRIVATE KEY-----";
 const END_MARKER = "-----END OPENSSH PRIVATE KEY-----";
 const REDACTION = "[redacted private key]";
@@ -1004,7 +1008,7 @@ test("a lone END marker in an abort reason deletes nothing", async () => {
   for (const render of abortRenders)
     expect(await render([END_MARKER, "the second reason"])).toBe(
       `partner aborted linkage terms exchange${REASON_LINK}${END_MARKER}` +
-        `${REASON_LINK}the second reason`,
+        `${PACKED_REASON}the second reason`,
     );
 });
 

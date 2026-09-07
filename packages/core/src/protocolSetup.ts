@@ -151,8 +151,8 @@ const termsMessage = z.object({
   hostKey: hostKeyField,
 });
 
-// Branded at the decode, so a reason reaches the operator only as the labelled
-// cause link errorWithPartnerCauseLinks builds (utils/partnerOriginText.ts):
+// Branded at the decode, so a reason reaches the operator only behind the
+// label errorWithPartnerCauseLinks puts on it (utils/partnerOriginText.ts):
 // the reasons are partner-written free text, and a plain `string[]` leaves
 // every composition site free to join them into first-party copy, where one
 // reason's planted marker or unbounded length spends the display budget the
@@ -213,9 +213,9 @@ const sharedSecretMessage = z.object({
 });
 
 // The abort both slots of the terms exchange throw: the same first-party
-// sentence from either side, with each of the partner's reasons on a labelled
-// cause link of its own. The sentence holds no partner byte, so a reason can
-// neither delete it nor spend another reason's display budget.
+// sentence from either side, with each of the partner's reasons labelled and
+// bounded on the cause links behind it. The sentence holds no partner byte, so
+// a reason can neither delete it nor spend another reason's display budget.
 const PARTNER_ABORT_MESSAGE = "partner aborted linkage terms exchange";
 const PARTNER_ABORT_REASON_LABEL = "reason the partner gave: ";
 
