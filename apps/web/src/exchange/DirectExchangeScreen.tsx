@@ -214,9 +214,7 @@ export function DirectExchangeScreen() {
     // Before the refusal below, which drops the profile the confirm step reads
     // its own notice from: the removal is stated beside the refusal it caused.
     setSanitizedNotice(
-      stripped.length > 0
-        ? sanitizedColumnsAlert(stripped, "this party")
-        : undefined,
+      stripped.length > 0 ? sanitizedColumnsAlert(stripped) : undefined,
     );
     const emptyPositions = emptyColumnPositions(profile.columns);
     if (emptyPositions.length > 0) {

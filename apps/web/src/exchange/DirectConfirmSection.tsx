@@ -143,7 +143,7 @@ export function DirectConfirmSection({
   // this spine has no earlier surface that outlives the file step.
   const sanitizedNotice =
     profile.bidiStrippedColumns.length > 0
-      ? sanitizedColumnsAlert(profile.bidiStrippedColumns, "this party")
+      ? sanitizedColumnsAlert(profile.bidiStrippedColumns)
       : undefined;
 
   // Client-side guard mirroring the intent schema's identity contract, validated

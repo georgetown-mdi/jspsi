@@ -45,12 +45,12 @@ export interface LinkagePreflightMessaging {
    * and exchange hold terms a partner is held to as well; the mint holds none
    * until the invitation it is about to generate is sent. */
   termsStanding: LinkageTermsStanding;
-  /** Who wrote the names these terms declare, selecting who the declared-name
-   * sentence addresses its rename to ({@link bidiDeclaredNameNote}). The accept
-   * path reads the partner's invitation, a document this operator cannot edit,
-   * so telling them to declare the name differently names the wrong party; a
-   * configuration an acceptance wrote holds that invitation's field names
-   * verbatim and reads the same way. */
+  /** Which remedy the declared-name sentence states ({@link
+   * bidiDeclaredNameNote}). The accept path reads the partner's invitation, a
+   * document this operator cannot edit, so telling this operator to declare the
+   * name differently names the wrong party. A configuration holds names this
+   * operator declared, or names an acceptance copied from an invitation
+   * verbatim, so the other seats take a remedy stating both. */
   declaredNamesAuthor: "this party" | "the partner";
 }
 
@@ -112,14 +112,12 @@ function declaredNameDiffersOnlyByBidiControls(
 
 /**
  * The sentence a refusal adds when a declared name holds those characters,
- * addressed to whoever can rename it: `declaredNamesAuthor` selects between this
- * operator, who wrote the names, and the partner, whose invitation is their own
- * document and has to be sent again corrected. The partner's remedy names the
- * invitation rather than the terms' origin noun, since that is the document the
- * partner authors whether this seat reads it directly or holds its field names
- * in a configuration an acceptance wrote. Beyond the origin noun both
- * interpolate nothing -- the name itself is terms content, partner-authored on
- * the accept path, and stays on the cause links that state names.
+ * stating the remedy the seat can offer: the accept path reads the partner's
+ * invitation, so only a corrected invitation fixes it, while a configuration
+ * can hold either party's name and takes one remedy covering both. Beyond the
+ * origin noun both interpolate nothing -- the name itself is terms content,
+ * partner-authored on the accept path, and stays on the cause links that state
+ * names.
  */
 function bidiDeclaredNameNote(messaging: LinkagePreflightMessaging): string {
   if (messaging.declaredNamesAuthor === "the partner")
@@ -132,7 +130,9 @@ function bidiDeclaredNameNote(messaging: LinkagePreflightMessaging): string {
   return (
     ` A name the ${messaging.source} declares holds invisible text-direction ` +
     `characters, which this read removes from the CSV header, so it matches ` +
-    `no column of this input and has to be declared without them.`
+    `no column of this input. Declare it without them, or, if it came from ` +
+    `your partner's invitation, ask them for a new invitation that declares ` +
+    `it without them.`
   );
 }
 

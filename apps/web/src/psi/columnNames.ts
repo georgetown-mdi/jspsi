@@ -79,15 +79,6 @@ export function unnameableColumnsAlert(
 }
 
 /**
- * Who declared the linkage terms this exchange runs under, selecting who
- * {@link sanitizedColumnsAlert} addresses its declared-name remedy to: this
- * operator on the inviter and console seats, who wrote the terms, and the
- * partner on the acceptor seats, where the terms are the partner's invitation
- * and this operator cannot edit them.
- */
-export type DeclaredNamesAuthor = "this party" | "the partner";
-
-/**
  * The operator-facing notice for a file whose header held bidi control
  * characters, shared by every intake seat so the wording cannot drift. Core's
  * CSV parse removes them from the name before anything matches on it or sends
@@ -111,26 +102,17 @@ export type DeclaredNamesAuthor = "this party" | "the partner";
  * shows, and the sent name where the exchange takes that from the header. A name
  * the linkage terms declare is not read from the header at all and keeps these
  * characters, so the copy states what that costs -- the name is used as declared
- * and reaches the partner wherever the exchange sends it -- and addresses the
- * edit to whoever can make it: `declaredNamesAuthor` selects between this
- * operator's own terms and the partner's invitation, which has to be sent again
- * corrected. Both remedies are fixed strings, so nothing operator- or
- * partner-authored reaches the copy. Refusing such a name is the terms rule's,
- * not this read's.
+ * and reaches the partner wherever the exchange sends it -- and stops there. It
+ * names no remedy: this notice serves every intake seat, including the acceptor
+ * seats whose terms are the partner's invitation and the direct-exchange seats
+ * with no terms to edit, so no one edit is the operator's to make. Refusing such
+ * a name is the terms rule's, not this read's.
  */
-export function sanitizedColumnsAlert(
-  positions: ReadonlyArray<number>,
-  declaredNamesAuthor: DeclaredNamesAuthor,
-): {
+export function sanitizedColumnsAlert(positions: ReadonlyArray<number>): {
   title: string;
   message: string;
 } {
   const plural = positions.length > 1;
-  const declaredNameRemedy =
-    declaredNamesAuthor === "the partner"
-      ? "Your partner has to declare it without those characters and send a " +
-        "new invitation."
-      : "Change the terms for this exchange to declare it without them.";
   return {
     title: plural
       ? "Formatting characters removed from column names"
@@ -145,9 +127,8 @@ export function sanitizedColumnsAlert(
       `${plural ? "them" : "it"} from the header. This read does not change a ` +
       `name the linkage terms declare; one that holds these characters is ` +
       `used as declared and reaches your partner wherever the exchange sends ` +
-      `it. ${declaredNameRemedy} ` +
-      `Where that left two columns with the same name, ` +
-      `the later one was numbered to keep the two apart. Check that ` +
+      `it. Where that left two columns with the same name, the later one was ` +
+      `numbered to keep the two apart. Check that ` +
       `${plural ? "those columns" : "the column"} still ` +
       `${plural ? "read" : "reads"} the way your file names ` +
       `${plural ? "them" : "it"}; if not, edit the header row and choose the ` +

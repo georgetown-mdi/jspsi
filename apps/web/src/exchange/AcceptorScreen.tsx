@@ -689,7 +689,7 @@ export function AcceptorScreen() {
   // there, and the columns step that otherwise holds the notice is never reached.
   const sanitizedNotice =
     bidiStrippedColumns.length > 0
-      ? sanitizedColumnsAlert(bidiStrippedColumns, "the partner")
+      ? sanitizedColumnsAlert(bidiStrippedColumns)
       : undefined;
 
   const ready = decode.status === "ready";

@@ -755,11 +755,11 @@ export function InviterScreen() {
         // removal left unnamed, the notice every position the read changed.
         discardRead(unnameableColumnsAlert(emptyPositions, stripped));
         if (stripped.length > 0)
-          setSanitizedNotice(sanitizedColumnsAlert(stripped, "this party"));
+          setSanitizedNotice(sanitizedColumnsAlert(stripped));
         return;
       }
       if (stripped.length > 0)
-        setSanitizedNotice(sanitizedColumnsAlert(stripped, "this party"));
+        setSanitizedNotice(sanitizedColumnsAlert(stripped));
       const csv: AcquiredCsv = {
         fileName: file.name,
         sizeBytes: file.size,
@@ -804,13 +804,11 @@ export function InviterScreen() {
     if (emptyPositions.length > 0) {
       discardRead(unnameableColumnsAlert(emptyPositions, stripped));
       if (stripped.length > 0)
-        setSanitizedNotice(sanitizedColumnsAlert(stripped, "this party"));
+        setSanitizedNotice(sanitizedColumnsAlert(stripped));
       return;
     }
     setSanitizedNotice(
-      stripped.length > 0
-        ? sanitizedColumnsAlert(stripped, "this party")
-        : undefined,
+      stripped.length > 0 ? sanitizedColumnsAlert(stripped) : undefined,
     );
     const csv = consoleAcquiredCsv({
       fileName: profile.name,

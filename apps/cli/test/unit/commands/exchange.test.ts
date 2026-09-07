@@ -2212,13 +2212,13 @@ test("prepareDataset: a header the strip emptied names the removal, not the trai
   }
 });
 
-test("prepareDataset: an accepted config addresses the declared-name rename to the partner", async () => {
-  // `psilink accept` writes the invitation's linkage field names into the config
-  // verbatim, and this operator cannot redeclare them, so a config an acceptance
-  // stands behind -- the presence of expected_partner_deduplicate, which nothing
-  // else writes -- addresses the rename to the partner. A config no acceptance
-  // stands behind keeps this operator's own. U+202E RLO, written as an escape so
-  // a fixture about invisible characters is readable.
+test("prepareDataset: the declared-name remedy covers whoever declared the name", async () => {
+  // A configuration holds names this operator declared and names `psilink
+  // accept` copied from an invitation verbatim, and nothing in the run tells the
+  // two apart, so the one sentence states both edits -- on a config an
+  // acceptance stands behind (expected_partner_deduplicate, which nothing else
+  // writes) as on one this operator wrote. U+202E RLO, written as an escape so a
+  // fixture about invisible characters is readable.
   const declared = "n\u202eotes";
   const terms: LinkageTerms = {
     ...ssnOnlyTerms,
@@ -2227,30 +2227,26 @@ test("prepareDataset: an accepted config addresses the declared-name rename to t
   };
   const input = writeInput("dob,notes\n1990-01-02,none\n");
 
-  const accepted = await prepareDataset(
-    { linkageTerms: terms, expectedPartnerDeduplicate: false },
-    "Test Party",
-    input,
-    consentContext(),
-  ).catch((e: unknown) => e);
-  expect(accepted).toBeInstanceOf(UsageError);
-  expect(sanitizeErrorForDisplay(accepted)).toContain(
-    "Your partner has to declare that name without them and send a new invitation",
-  );
-  expect((accepted as Error).message).not.toContain("\u202e");
-
-  const authored = await prepareDataset(
+  for (const spec of [
     { linkageTerms: terms },
-    "Test Party",
-    input,
-    consentContext(),
-  ).catch((e: unknown) => e);
-  expect(sanitizeErrorForDisplay(authored)).toContain(
-    "A name the configuration declares holds invisible text-direction characters",
-  );
-  expect(sanitizeErrorForDisplay(authored)).not.toContain(
-    "Your partner has to declare",
-  );
+    { linkageTerms: terms, expectedPartnerDeduplicate: false },
+  ]) {
+    const thrown = await prepareDataset(
+      spec,
+      "Test Party",
+      input,
+      consentContext(),
+    ).catch((e: unknown) => e);
+    expect(thrown).toBeInstanceOf(UsageError);
+    expect(sanitizeErrorForDisplay(thrown)).toContain(
+      "A name the configuration declares holds invisible text-direction " +
+        "characters, which this read removes from the CSV header, so it " +
+        "matches no column of this input. Declare it without them, or, if it " +
+        "came from your partner's invitation, ask them for a new invitation " +
+        "that declares it without them.",
+    );
+    expect((thrown as Error).message).not.toContain("\u202e");
+  }
 });
 
 test("prepareDataset: the read's stripped positions reach prepareForExchange", async () => {

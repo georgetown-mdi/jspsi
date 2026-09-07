@@ -628,7 +628,10 @@ test("a declared name the read strips from the header says so in the refusal", (
   expect(rendered).toContain(
     "A name the configuration declares holds invisible text-direction characters",
   );
-  expect(rendered).toContain("declared without them");
+  // A configuration holds this operator's own declaration and one an acceptance
+  // copied from an invitation verbatim, so the remedy states both edits.
+  expect(rendered).toContain("Declare it without them");
+  expect(rendered).toContain("ask them for a new invitation");
 });
 
 test("on the accept path the rename is addressed to the partner who wrote it", () => {
