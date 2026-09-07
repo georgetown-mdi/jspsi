@@ -1217,7 +1217,12 @@ interface TransformParamCoercion {
 export function describeTransformCoercions(
   step: TransformStep,
 ): TransformParamCoercion[] {
-  const fallbacks = TRANSFORM_PARAM_FALLBACKS[step.function];
+  // Own-property lookup, as the per-param check below: the function name is
+  // partner-authored free text, and a bare index answers `constructor` or
+  // `toString` with an inherited Object.prototype member.
+  const fallbacks = Object.hasOwn(TRANSFORM_PARAM_FALLBACKS, step.function)
+    ? TRANSFORM_PARAM_FALLBACKS[step.function]
+    : undefined;
   if (fallbacks === undefined) return [];
   const params = step.params ?? {};
   const coercions: TransformParamCoercion[] = [];
@@ -1280,7 +1285,13 @@ function compileStep(step: {
           : undefined,
     };
   }
-  const factory = STANDARDIZING_FUNCTIONS[step.function];
+  // Own-property lookup: a bare index answers the names that reach only
+  // Object.prototype (`constructor`, `toString`) with an inherited member, which
+  // compiles to a non-callable step and throws at the first row instead of
+  // taking the refusal below.
+  const factory = Object.hasOwn(STANDARDIZING_FUNCTIONS, step.function)
+    ? STANDARDIZING_FUNCTIONS[step.function]
+    : undefined;
   // On the element-transform path the name is partner-authored free text -- the
   // wire schema types `function` as a bounded string, not as one of the names
   // this build knows -- so it is narrowed rather than echoed, as the magnitude
@@ -1306,6 +1317,158 @@ export function compileSteps(
   steps: Array<{ function: string; params?: Params }>,
 ): CompiledStep[] {
   return steps.map(compileStep);
+}
+
+/**
+ * The label of the first step in `steps` whose compile throws, or `undefined`
+ * when every step compiles. A pipeline is compiled once, before the first row is
+ * read, so a step the factory refuses -- a `pad_left` with no `length`, a
+ * multi-character fill, a `phonetic` naming an algorithm this build does not
+ * implement, a function name it does not recognize -- aborts the run before it
+ * matches anything.
+ *
+ * Total over what a compile throws, by class as well as by cause: the question
+ * asked is whether compiling this step throws, and the answer must not depend on
+ * which error the factory chose. Each step is compiled ALONE, which asks the same
+ * question the pipeline compile does -- {@link compileStep} reads one step and
+ * holds no state across the list -- and is what lets the offending step be named.
+ *
+ * The name is narrowed to a literal this build recognizes before it is returned,
+ * so an element transform's partner-authored `function` never reaches a message
+ * through it.
+ *
+ * Answered out of the memo the run itself reads
+ * ({@link compiledElementTransforms}): a compile is the expensive part of the
+ * question -- a partner-authored pattern compiles under the linear-time
+ * engine -- so a second pass over the same step array pays nothing, and the run
+ * reuses what this compiled. The memo is keyed on the array's identity, so a
+ * document rebuilt from its source is a fresh compile.
+ *
+ * What this compiles is held in `pending` rather than written to the memo, and
+ * the caller commits it ({@link commitCompiledTransforms}) once its whole walk
+ * has finished. A walk that refuses part way -- the caller bounds its own cost
+ * in wall-clock time -- must leave the memo as it found it, or the next walk
+ * over the same arrays would resume where this one stopped and admit, unedited,
+ * a document this one refused.
+ *
+ * Read by `assertTransformsCompile` in `linkageSatisfiability.ts`.
+ */
+export function uncompilableStepLabel(
+  steps: TransformStep[] | undefined,
+  pending: PendingCompiledTransforms,
+): string | undefined {
+  if (steps === undefined || steps.length === 0) return undefined;
+  if (compiledElementTransforms.has(steps) || pending.has(steps))
+    return undefined;
+  const compiled: CompiledStep[] = [];
+  for (const step of steps) {
+    try {
+      compiled.push(compileStep(step));
+    } catch {
+      return transformFunctionLabel(step.function);
+    }
+  }
+  pending.set(steps, compiled);
+  return undefined;
+}
+
+/**
+ * The steps one walk of {@link uncompilableStepLabel} has compiled and not yet
+ * committed to the memo, keyed by the step array's identity as the memo is.
+ *
+ * @internal held by `assertTransformsCompile` in `linkageSatisfiability.ts`.
+ */
+export type PendingCompiledTransforms = Map<TransformStep[], CompiledStep[]>;
+
+/**
+ * Whether `steps` already has compiled steps in the memo the run reads.
+ *
+ * @internal pins where the compile walk commits, in
+ * `linkageSatisfiability.test.ts`: a refused walk must leave the memo as it
+ * found it, which nothing else observes.
+ */
+export function hasMemoizedCompiledSteps(steps: TransformStep[]): boolean {
+  return compiledElementTransforms.has(steps);
+}
+
+/**
+ * Move a completed walk's compiled steps into the memo the run reads, so the
+ * run pays for them once between them. Called only where the walk finished:
+ * a refused document leaves its buffer to be dropped, so no later walk resumes
+ * past what this one paid for. What makes a refusal repeatable is the step
+ * count bound instead, since the engine's pattern cache is process-global.
+ *
+ * @internal called by `assertTransformsCompile` in `linkageSatisfiability.ts`.
+ */
+export function commitCompiledTransforms(
+  pending: PendingCompiledTransforms,
+): void {
+  for (const [steps, compiled] of pending)
+    compiledElementTransforms.set(steps, compiled);
+}
+
+/**
+ * The message both compile refusals hold, raised where terms are authored or
+ * minted. `label` comes from {@link uncompilableStepLabel}, which narrows the
+ * function name to a fixed literal, so no partner free text reaches the message;
+ * the offending parameter is not named, since its name and value are
+ * partner-controlled on the element-transform half. The two refusals share the
+ * wording and differ only in error class, by whose content the fault is (see
+ * `assertTransformsCompile`).
+ *
+ * The remedy is the author's own -- correct the parameters or remove the step --
+ * because this refusal is raised only where the party still holds the document
+ * it is refusing, never after an invitation has gone out.
+ *
+ * @internal composed by `assertTransformsCompile` in `linkageSatisfiability.ts`.
+ */
+export function stepCompileRefusalMessage(label: string): string {
+  return (
+    "a transform step cannot be built from the parameters it declares " +
+    `(${label}): a pipeline is built once, before the first row is read, so ` +
+    "an exchange on these transforms would stop before it matched anything. " +
+    "It is refused up front instead. Correct that step's parameters, or " +
+    "remove the step."
+  );
+}
+
+/**
+ * The message the compile check holds for a document declaring more transform
+ * steps than it checks. Both values are counts -- what the document declares and
+ * the build's own limit -- so no partner text reaches it, and both are stated
+ * because the remedy is to get from the one to the other.
+ *
+ * @internal composed by `assertTransformsCompile` in `linkageSatisfiability.ts`.
+ */
+export function stepCountRefusalMessage(
+  declaredSteps: number,
+  maxSteps: number,
+): string {
+  return (
+    "these transforms declare more steps than one set of terms may hold: " +
+    `${declaredSteps} steps, against a limit of ${maxSteps}. Reduce the ` +
+    "number of linkage keys, key elements, or transform steps they declare."
+  );
+}
+
+/**
+ * The message the compile check holds when its wall-clock budget runs out
+ * before every step has been compiled -- the fail-closed half of
+ * `assertTransformsCompile`, whose budget is the value interpolated here. The
+ * terms are refused rather than admitted unchecked, so the remedy is a smaller
+ * document; no step is named, because none was found at fault. The count limit
+ * above is what an author acts on; this fires only for a document under that
+ * limit whose steps are individually expensive.
+ *
+ * @internal composed by `assertTransformsCompile` in `linkageSatisfiability.ts`.
+ */
+export function stepCompileBudgetRefusalMessage(budgetMs: number): string {
+  return (
+    "checking that every transform step can be built did not finish within " +
+    `the ${budgetMs} ms allowed, so these transforms are refused rather than ` +
+    "accepted unchecked. Reduce the number of linkage keys, key elements, or " +
+    "transform steps they declare."
+  );
 }
 
 /**
@@ -1861,6 +2024,9 @@ function cartesianProduct(arrays: string[][]): string[][] {
 // released with the terms; the swap path preserves the array reference, so a swapped
 // element still hits. The compiled steps are stateless (each factory closure builds a
 // fresh matcher per call), so reuse across rows is safe.
+//
+// `uncompilableStepLabel` reads and fills the same entries, so the mint-boundary
+// compile check and the run compile one document's transforms once between them.
 const compiledElementTransforms = new WeakMap<
   TransformStep[],
   CompiledStep[]

@@ -4,6 +4,8 @@ import {
   runPipeline,
   buildStandardizedDataset,
   buildKeyStrings,
+  compileSteps,
+  hasMemoizedCompiledSteps,
   FAN_OUT_FUNCTION_NAMES,
   StandardizedField,
   StandardizedDataset,
@@ -14,6 +16,7 @@ import {
   validateStandardizationAgainstTerms,
   assertFanOutImplemented,
   assertStandardizationMatchesTerms,
+  assertTransformsCompile,
   unsatisfiedLinkageFields,
   assessLinkageSatisfiability,
   assertLinkageTermsSatisfiable,
@@ -55,6 +58,7 @@ import type {
   TransformStep,
 } from "../src/config/linkageTermsSchema";
 import type { Standardization } from "../src/config/standardizationSchema";
+import { safeParseLinkageTerms } from "../src/config/linkageTermsSchema";
 
 const col = (name: string, type: ColumnMetadata["type"]): ColumnMetadata => ({
   name,
@@ -1468,6 +1472,348 @@ describe("assertFanOutImplemented", () => {
       assertFanOutImplemented(minimalTerms, standardization),
     ).not.toThrow();
     expect(() => assertFanOutImplemented(minimalTerms)).not.toThrow();
+  });
+});
+
+// --- assertTransformsCompile -------------------------------------------------
+
+describe("assertTransformsCompile", () => {
+  // Every shape a factory refuses at compile: an absent required param, a param
+  // the factory checks past its type, an unimplemented enum member, and a
+  // function name outside the registry. Each parses as linkage terms -- transform
+  // params are z.unknown() on the wire schema -- so this assert is what stands
+  // between them and a run that aborts on the first key.
+  const uncompilableSteps = [
+    { function: "pad_left", params: {} },
+    { function: "pad_left", params: { length: 4, char: "ab" } },
+    { function: "phonetic", params: { algorithm: "metaphone" } },
+    { function: "no_such_function", params: {} },
+  ];
+
+  const keysWithTransform = (
+    steps: TransformStep[],
+  ): LinkageTerms["linkageKeys"] => [
+    {
+      name: "LN+DOB",
+      elements: [
+        { field: "last_name", transform: steps },
+        { field: "date_of_birth" },
+      ],
+    },
+  ];
+
+  test("the steps it refuses are ones the terms schema admits", () => {
+    // The gap this assert closes, asserted rather than claimed: a transform
+    // param is z.unknown() on the wire schema, so every step above rides an
+    // invitation that parses and is caught nowhere until the pipeline is built.
+    for (const step of uncompilableSteps) {
+      const parsed = safeParseLinkageTerms({
+        ...minimalTerms,
+        linkageKeys: keysWithTransform([step]),
+      });
+      expect(parsed.success).toBe(true);
+    }
+  });
+
+  test("refuses each uncompilable step in a standardization, naming the function", () => {
+    // A standardization is only ever this party's own, so the refusal is an
+    // OperatorConfigError -- the actionable config category both front ends key
+    // off, the same split assertFanOutImplemented keeps.
+    for (const step of uncompilableSteps) {
+      const standardization = [
+        { output: "last_name", input: "LN", steps: [step] },
+      ];
+      expect(() =>
+        assertTransformsCompile(minimalTerms, standardization),
+      ).toThrow(OperatorConfigError);
+    }
+    expect(() =>
+      assertTransformsCompile(minimalTerms, [
+        { output: "last_name", input: "LN", steps: [uncompilableSteps[0]] },
+      ]),
+    ).toThrow(/"pad_left"/);
+  });
+
+  test("refuses each uncompilable step in a key element transform", () => {
+    // The element transform is adopted verbatim from a partner's invitation on
+    // the accept path, so this half stays a plain UsageError.
+    for (const step of uncompilableSteps) {
+      const terms: LinkageTerms = {
+        ...minimalTerms,
+        linkageKeys: keysWithTransform([step]),
+      };
+      expect(() => assertTransformsCompile(terms)).toThrow(UsageError);
+      expect(() => assertTransformsCompile(terms)).not.toThrow(
+        OperatorConfigError,
+      );
+    }
+  });
+
+  test("narrows a function name the build does not recognize out of the message", () => {
+    // An element transform's `function` is partner-authored free text, so it is
+    // never echoed: a name outside the registry reaches the message as a fixed
+    // literal instead.
+    const terms: LinkageTerms = {
+      ...minimalTerms,
+      linkageKeys: keysWithTransform([
+        { function: "ZZ_PARTNER_CHOSEN_NAME", params: {} },
+      ]),
+    };
+    expect(() => assertTransformsCompile(terms)).toThrow(
+      /a function this build does not recognize/,
+    );
+    expect(() => assertTransformsCompile(terms)).not.toThrow(
+      /ZZ_PARTNER_CHOSEN_NAME/,
+    );
+  });
+
+  test("states the two remedies the author still holds, not a renegotiation", () => {
+    // The refusal is raised only where the party still holds the document, so
+    // its remedy is an edit -- never the out-of-band renegotiation the run
+    // boundary can offer once an invitation has gone out.
+    const terms: LinkageTerms = {
+      ...minimalTerms,
+      linkageKeys: keysWithTransform([uncompilableSteps[0]]),
+    };
+    expect(() => assertTransformsCompile(terms)).toThrow(
+      /Correct that step's parameters, or remove the step\./,
+    );
+  });
+
+  test("names the FIRST uncompilable step of a pipeline, not a later one", () => {
+    // Each step is compiled alone, so the one reported is the one an author
+    // reaches first rather than whichever the pipeline compile happened to hit.
+    const terms: LinkageTerms = {
+      ...minimalTerms,
+      linkageKeys: keysWithTransform([
+        { function: "to_upper_case" },
+        { function: "pad_left", params: {} },
+        { function: "phonetic", params: { algorithm: "metaphone" } },
+      ]),
+    };
+    expect(() => assertTransformsCompile(terms)).toThrow(/"pad_left"/);
+  });
+
+  test("refuses every Object.prototype name on both surfaces", () => {
+    // The registry is read by an own-property lookup, so a name that reaches
+    // only Object.prototype is a name this build does not recognize. Under a
+    // bare index `constructor` and `toString` answer with an inherited member,
+    // which is not a factory: the step compiles to a non-callable, is admitted
+    // here, and throws at the first row -- after the invitation was accepted,
+    // the abort this check exists to prevent. Held over the whole prototype
+    // rather than those two names, so a future engine's addition is covered.
+    for (const name of Object.getOwnPropertyNames(Object.prototype)) {
+      const step = { function: name, params: {} };
+      const terms: LinkageTerms = {
+        ...minimalTerms,
+        linkageKeys: keysWithTransform([step]),
+      };
+      expect(() => assertTransformsCompile(terms), name).toThrow(UsageError);
+      expect(() => assertTransformsCompile(terms), name).toThrow(
+        /a function this build does not recognize/,
+      );
+      expect(
+        () =>
+          assertTransformsCompile(minimalTerms, [
+            { output: "last_name", input: "LN", steps: [step] },
+          ]),
+        name,
+      ).toThrow(OperatorConfigError);
+      // The run's own compile agrees, so the mint refuses what the run would
+      // refuse rather than what it would crash on.
+      expect(() => compileSteps([step]), name).toThrow(
+        UnknownStandardizationFunctionError,
+      );
+    }
+  });
+
+  test("admits a pipeline every step of which compiles, both surfaces", () => {
+    // Not vacuous: the well-formed counterparts of the refused steps above, plus
+    // a substring window that reads nothing -- which compiles, and is graded dead
+    // by decideLinkageTermsVerdict rather than refused here.
+    const compilable: TransformStep[] = [
+      { function: "to_upper_case" },
+      { function: "pad_left", params: { length: 9, char: "0" } },
+      { function: "phonetic", params: { algorithm: "soundex" } },
+      { function: "substring", params: {} },
+    ];
+    expect(() =>
+      assertTransformsCompile(
+        { ...minimalTerms, linkageKeys: keysWithTransform(compilable) },
+        [{ output: "last_name", input: "LN", steps: compilable }],
+      ),
+    ).not.toThrow();
+    expect(() => assertTransformsCompile(minimalTerms)).not.toThrow();
+  });
+
+  test("refuses closed on each surface when the compile budget runs out", () => {
+    // The walk cannot be interrupted mid-compile, so it checks the clock between
+    // steps and refuses what it has not checked -- the shape the dialect walk
+    // takes. Each surface keeps its own error class through the exhaustion path.
+    const compilable: TransformStep[] = [
+      { function: "pad_left", params: { length: 9, char: "0" } },
+    ];
+    const terms: LinkageTerms = {
+      ...minimalTerms,
+      linkageKeys: keysWithTransform(compilable),
+    };
+    expect(() =>
+      assertTransformsCompile(
+        terms,
+        [{ output: "last_name", input: "LN", steps: compilable }],
+        { totalBudgetMs: 0 },
+      ),
+    ).toThrow(OperatorConfigError);
+    expect(() =>
+      assertTransformsCompile(terms, undefined, { totalBudgetMs: 0 }),
+    ).toThrow(UsageError);
+    expect(() =>
+      assertTransformsCompile(terms, undefined, { totalBudgetMs: 0 }),
+    ).toThrow(/did not finish within the 0 ms allowed/);
+    // Not vacuous: the same terms pass under the budget the mint runs with.
+    expect(() => assertTransformsCompile(terms)).not.toThrow();
+  });
+
+  test("a walk the budget stops commits none of what it compiled", () => {
+    // What the walk compiled before the budget was spent is dropped, so the
+    // memo holds nothing a later walk over the same document resumes past. That
+    // bounds each attempt without making a budget refusal repeatable: the
+    // engine's own pattern cache is process-global and outlives it. The formats
+    // are unique to this test so that cache is cold here.
+    const elements: LinkageKeyElement[] = Array.from(
+      { length: 32 },
+      (_, index) => ({
+        field: "last_name",
+        transform: [
+          {
+            function: "parse_date",
+            params: {
+              inputFormat: `BUDGET-${index}-${"MM/DD/YYYY".repeat(26)}`.slice(
+                0,
+                256,
+              ),
+            },
+          },
+        ],
+      }),
+    );
+    const memoized = (): number =>
+      elements.filter((element) =>
+        hasMemoizedCompiledSteps(element.transform as TransformStep[]),
+      ).length;
+    const terms: LinkageTerms = {
+      ...minimalTerms,
+      linkageKeys: [{ name: "LN", elements }],
+    };
+    expect(() =>
+      assertTransformsCompile(terms, undefined, { totalBudgetMs: 1 }),
+    ).toThrow(/did not finish within the 1 ms allowed/);
+    expect(memoized()).toBe(0);
+    // Not vacuous: a walk that reaches the end does commit what it compiled,
+    // which is what makes a repeated mint of one document pay for it once.
+    expect(() => assertTransformsCompile(terms)).not.toThrow();
+    expect(memoized()).toBe(elements.length);
+  });
+
+  test("refuses a document over the count bound on every mint", () => {
+    // The count bound is the deterministic half: the same document declares the
+    // same steps whatever the machine or the attempt, so a mint repeated after
+    // no edit gets the same refusal rather than eventually going through.
+    const terms: LinkageTerms = {
+      ...minimalTerms,
+      linkageKeys: keysWithTransform(
+        Array.from({ length: 5 }, () => ({ function: "to_upper_case" })),
+      ),
+    };
+    for (let attempt = 0; attempt < 20; attempt += 1)
+      expect(
+        () => assertTransformsCompile(terms, undefined, { maxSteps: 4 }),
+        `attempt ${attempt}`,
+      ).toThrow(/5 steps, against a limit of 4/);
+  });
+
+  test("refuses a document declaring more steps than the count bound", () => {
+    // The deterministic bound the budget cannot be: a count of what the
+    // document declares, answered before anything compiles, so the same
+    // document gets the same answer on any machine. Each surface keeps the
+    // error class it keeps for the compile refusals, by whose content the
+    // fault is.
+    const steps = (count: number): TransformStep[] =>
+      Array.from({ length: count }, () => ({ function: "to_upper_case" }));
+    const overCount: LinkageTerms = {
+      ...minimalTerms,
+      linkageKeys: keysWithTransform(steps(5)),
+    };
+    expect(() =>
+      assertTransformsCompile(overCount, undefined, { maxSteps: 4 }),
+    ).toThrow(UsageError);
+    expect(() =>
+      assertTransformsCompile(overCount, undefined, { maxSteps: 4 }),
+    ).toThrow(/5 steps, against a limit of 4/);
+    expect(() =>
+      assertTransformsCompile(
+        minimalTerms,
+        [{ output: "last_name", input: "LN", steps: steps(5) }],
+        { maxSteps: 4 },
+      ),
+    ).toThrow(OperatorConfigError);
+    // The two surfaces are counted together, and the class follows the one
+    // whose steps take the total past the bound.
+    expect(() =>
+      assertTransformsCompile(
+        { ...minimalTerms, linkageKeys: keysWithTransform(steps(3)) },
+        [{ output: "last_name", input: "LN", steps: steps(3) }],
+        { maxSteps: 4 },
+      ),
+    ).toThrow(UsageError);
+    // Refused on the count alone, before a step is compiled: an uncompilable
+    // step in an over-count document is not what the message names.
+    expect(() =>
+      assertTransformsCompile(
+        { ...minimalTerms, linkageKeys: keysWithTransform(steps(4)) },
+        [
+          {
+            output: "last_name",
+            input: "LN",
+            steps: [uncompilableSteps[0], ...steps(1)],
+          },
+        ],
+        { maxSteps: 4 },
+      ),
+    ).toThrow(/6 steps, against a limit of 4/);
+    // Not vacuous: the same shapes pass under the bound the mint runs with.
+    expect(() => assertTransformsCompile(overCount)).not.toThrow();
+  });
+
+  test("compiles a document's transforms once across repeated checks", () => {
+    // The check shares the run's compile memo, which is what lets a mint that
+    // repeats -- a retried Generate, an exchange file saved after the code --
+    // cost nothing the first one already paid. Measured rather than claimed:
+    // each step below compiles a pattern of its own, so a second uncached walk
+    // would cost what the first did.
+    const distinctSteps = (count: number): TransformStep[] =>
+      Array.from({ length: count }, (_, index) => ({
+        function: "parse_date",
+        params: {
+          inputFormat: `-${index}-${"MM/DD/YYYY".repeat(26)}`.slice(0, 256),
+        },
+      }));
+    const terms: LinkageTerms = {
+      ...minimalTerms,
+      linkageKeys: keysWithTransform(distinctSteps(256)),
+    };
+    const elapsed = (run: () => void): number => {
+      const startedAt = performance.now();
+      run();
+      return performance.now() - startedAt;
+    };
+    const first = elapsed(() => {
+      assertTransformsCompile(terms);
+    });
+    const second = elapsed(() => {
+      assertTransformsCompile(terms);
+    });
+    expect(second * 10).toBeLessThan(first);
   });
 });
 

@@ -29,16 +29,26 @@ import { declaredFanOutFunction } from "./fanOutFunctions.js";
 import { redactPrivateKeyMaterial } from "./utils/sanitizeErrorForDisplay.js";
 import {
   applyStep,
+  commitCompiledTransforms,
   compileSteps,
   fanOutDeclaredMessage,
   parseDateFormat,
   renderDateOutput,
   resolveFieldColumns,
   STANDARDIZATION_FUNCTION_NAMES,
+  stepCompileBudgetRefusalMessage,
+  stepCompileRefusalMessage,
+  stepCountRefusalMessage,
+  uncompilableStepLabel,
   valueOverCeiling,
   YEAR_FORMAT_TOKENS,
 } from "./standardization.js";
-import type { CompiledStep, FieldValue, Params } from "./standardization.js";
+import type {
+  CompiledStep,
+  FieldValue,
+  Params,
+  PendingCompiledTransforms,
+} from "./standardization.js";
 
 /**
  * Validate that every standardization transformation output name corresponds to
@@ -189,6 +199,184 @@ export function assertFanOutImplemented(
         throw new UsageError(fanOutDeclaredMessage(declared));
     }
   }
+}
+
+/**
+ * Upper bound on the transform steps one document may declare in total, across
+ * its standardization and every linkage-key element, checked by
+ * {@link assertTransformsCompile} before anything is compiled.
+ *
+ * The count, not the clock, is the verdict a document gets on any machine. It
+ * is half the count measured against the budget below: 1024 `parse_date` steps
+ * with distinct 256-character formats, the most expensive shape this build
+ * compiles, took 0.7 s on an idle container and up to 1.9 s under its ordinary
+ * load, against 2 s. The budget can still refuse a within-cap document on a
+ * slower machine, where retrying is legitimate: each attempt was bounded, to the
+ * budget plus at most one steps array's compile, and this count is what bounds
+ * that array.
+ */
+const TRANSFORM_COMPILE_MAX_STEPS = 512;
+
+/**
+ * Total wall-clock budget, in milliseconds, for compiling every declared step of
+ * one document in {@link assertTransformsCompile}. The count bound above holds
+ * how many steps reach the walk; this holds the walk's cost for a document under
+ * that bound whose steps are individually expensive, a partner-authored
+ * `parse_date` format or raw pattern compiling under the linear-time engine at a
+ * cost the wire bounds do not hold down. Once the budget is spent the remaining
+ * steps are refused unchecked (fail closed), the same shape the dialect walk
+ * takes (`config/transformRegexDialect.ts`). A document a party would actually
+ * mint finishes in single-digit milliseconds.
+ */
+const TRANSFORM_COMPILE_TOTAL_BUDGET_MS = 2000;
+
+/** Optional overrides for the compile walk's bounds; both defaulted. Exposed so
+ * tests can drive the two refusal paths deterministically. */
+interface TransformCompileBudget {
+  /** Total wall-clock budget across all steps; see
+   * {@link TRANSFORM_COMPILE_TOTAL_BUDGET_MS}. */
+  totalBudgetMs?: number;
+  /** Total declared steps the document may hold; see
+   * {@link TRANSFORM_COMPILE_MAX_STEPS}. */
+  maxSteps?: number;
+}
+
+/**
+ * The refusal for a document declaring more than `maxSteps` transform steps in
+ * total, or `undefined` for one within the bound. Counted before any step is
+ * compiled, so what it answers is the document's own shape and nothing about the
+ * machine it is minted on.
+ *
+ * The class follows the surface whose steps take the total past the bound, in
+ * the order {@link assertTransformsCompile} walks them -- whose content the
+ * fault is, the split the compile refusals keep. The message states the whole
+ * document's count, since the remedy spans both surfaces.
+ */
+function stepCountRefusal(
+  terms: LinkageTerms,
+  standardization: Standardization | undefined,
+  maxSteps: number,
+): Error | undefined {
+  const standardizationSteps = (standardization ?? []).reduce(
+    (total, transformation) => total + (transformation.steps ?? []).length,
+    0,
+  );
+  const elementSteps = terms.linkageKeys.reduce(
+    (total, key) =>
+      total +
+      key.elements.reduce(
+        (keyTotal, element) => keyTotal + (element.transform ?? []).length,
+        0,
+      ),
+    0,
+  );
+  const declaredSteps = standardizationSteps + elementSteps;
+  if (declaredSteps <= maxSteps) return undefined;
+  return standardizationSteps > maxSteps
+    ? new OperatorConfigError(stepCountRefusalMessage(declaredSteps, maxSteps))
+    : new UsageError(stepCountRefusalMessage(declaredSteps, maxSteps));
+}
+
+/**
+ * Refuse a declared pipeline whose compile throws, where the terms are authored
+ * or minted rather than where the run reaches it.
+ *
+ * A step's factory reads its parameters once, before the first row
+ * ({@link compileSteps}), and a `pad_left` with no `length`, a multi-character
+ * fill, a `phonetic` naming an unimplemented algorithm, or a function name this
+ * build does not recognize throws there. Without this the throw lands after the
+ * invitation is sealed and accepted, so the partner has spent its setup effort
+ * before the authoring fault shows -- and the remedy the run boundary can offer
+ * by then is out-of-band renegotiation rather than an edit. The message here is
+ * the author's: correct the parameters, or remove the step.
+ *
+ * The fan-out sibling {@link assertFanOutImplemented} runs at the same points and
+ * checks the same two pipeline surfaces, for the same reason both realize what a
+ * key is built from: a standardization transformation feeds
+ * {@link StandardizedField}, and a linkage-key element transform feeds
+ * {@link buildKeyStrings}. `standardization` is omitted where the caller holds
+ * none.
+ *
+ * The two surfaces share one message under DIFFERENT error classes, by whose
+ * content the fault is -- as the fan-out refusal splits them. A
+ * `standardization` is only ever this party's own, so that half is an
+ * {@link OperatorConfigError}, the actionable "config" category both front ends
+ * key off. A linkage-key element transform is adopted verbatim from the
+ * partner's invitation on the accept path, so that half stays a plain
+ * {@link UsageError}. Either way the message names only a function label this
+ * build recognizes, so no partner free text is interpolated, and the CLI
+ * classifies both as a usage error (exit 64) through the base class.
+ *
+ * This is the safety check at the mint boundary, not the authoring surface: the
+ * web element editor marks a malformed param on the input that has to change
+ * (`StepListEditor`). What reaches here is what that does not cover -- an
+ * imported document, or a caller that mints without the editor. It runs once
+ * per mint and on no editor pass, because compiling a whole document's
+ * transforms costs enough to need bounding.
+ *
+ * Two bounds hold that cost, and they hold this walk alone. The declared step
+ * count ({@link TRANSFORM_COMPILE_MAX_STEPS}) is checked before anything
+ * compiles, so a document over it takes the same refusal on every machine and
+ * every retry; the wall-clock budget
+ * ({@link TRANSFORM_COMPILE_TOTAL_BUDGET_MS}) stands behind it for a document
+ * under the count whose steps are expensive, read once per steps array rather
+ * than per step, so one attempt can overrun it by at most one array's compile --
+ * the overrun the step count bounds. The compiles are memoized
+ * ({@link uncompilableStepLabel}) once the walk has finished, so a repeated mint
+ * of one document pays for them once, while a refused one leaves the memo as it
+ * found it.
+ *
+ * The grading path compiles too, outside both bounds:
+ * {@link pipelineAlwaysDrops}, which the browser editor's validation pass runs
+ * on every pass, and the consent header's
+ * {@link substringCollapsesParsedDateToConstant} each build a `substring` run
+ * following a `parse_date` to measure what it collapses. What holds that walk is
+ * the schema's per-element step cap and the encoded-token length cap.
+ */
+export function assertTransformsCompile(
+  terms: LinkageTerms,
+  standardization?: Standardization,
+  budget: TransformCompileBudget = {},
+): void {
+  const totalBudgetMs =
+    budget.totalBudgetMs ?? TRANSFORM_COMPILE_TOTAL_BUDGET_MS;
+  const overCount = stepCountRefusal(
+    terms,
+    standardization,
+    budget.maxSteps ?? TRANSFORM_COMPILE_MAX_STEPS,
+  );
+  if (overCount !== undefined) throw overCount;
+  // Compiled steps are held aside and committed only where the whole walk
+  // finished, so the next walk over the same arrays cannot resume past what
+  // this one paid for. That bounds each attempt rather than making a budget
+  // refusal repeatable: the engine's pattern cache is process-global
+  // (`utils/linearRegex.ts`) and outlives the refusal, so the count bound above
+  // is the verdict that repeats.
+  const pending: PendingCompiledTransforms = new Map();
+  // performance.now() rather than the wall clock: a backward clock step during
+  // the walk (an NTP correction, a container resuming) makes the difference
+  // negative and leaves the rest of the document unbounded, which is the
+  // fail-open direction for a bound on compile cost.
+  const startedAt = performance.now();
+  for (const transformation of standardization ?? []) {
+    if (performance.now() - startedAt >= totalBudgetMs)
+      throw new OperatorConfigError(
+        stepCompileBudgetRefusalMessage(totalBudgetMs),
+      );
+    const label = uncompilableStepLabel(transformation.steps, pending);
+    if (label !== undefined)
+      throw new OperatorConfigError(stepCompileRefusalMessage(label));
+  }
+  for (const key of terms.linkageKeys) {
+    for (const element of key.elements) {
+      if (performance.now() - startedAt >= totalBudgetMs)
+        throw new UsageError(stepCompileBudgetRefusalMessage(totalBudgetMs));
+      const label = uncompilableStepLabel(element.transform, pending);
+      if (label !== undefined)
+        throw new UsageError(stepCompileRefusalMessage(label));
+    }
+  }
+  commitCompiledTransforms(pending);
 }
 
 /**

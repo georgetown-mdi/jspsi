@@ -356,6 +356,7 @@ export {
 export {
   assertFanOutImplemented,
   assertStandardizationMatchesTerms,
+  assertTransformsCompile,
   assessLinkageSatisfiability,
   coalesceSubstitutesConstant,
   decideLinkageTermsVerdict,

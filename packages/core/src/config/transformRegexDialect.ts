@@ -36,6 +36,21 @@ export const REGEX_STEP_PATTERN_PARAM: Readonly<Record<string, string>> = {
 };
 
 /**
+ * The `params` key holding the raw pattern of a step naming `functionName`, or
+ * `undefined` where the function has none. Read through this rather than by a
+ * bare index: the function name is partner-authored free text, and the table is
+ * a total `Record`, so an index answers a name reaching only `Object.prototype`
+ * (`constructor`, `toString`) with an inherited member instead of `undefined`.
+ */
+export function regexStepPatternParam(
+  functionName: string,
+): string | undefined {
+  return Object.hasOwn(REGEX_STEP_PATTERN_PARAM, functionName)
+    ? REGEX_STEP_PATTERN_PARAM[functionName]
+    : undefined;
+}
+
+/**
  * Total wall-clock budget, in milliseconds, for checking dialect
  * conformance across all transform patterns in one linkage-terms
  * validation. Each collection caps at 256 entries, but their product (keys
@@ -91,7 +106,7 @@ export function linkageTermsHaveNonConformantTransformRegex(
   for (const key of terms.linkageKeys) {
     for (const element of key.elements) {
       for (const step of element.transform ?? []) {
-        const paramKey = REGEX_STEP_PATTERN_PARAM[step.function];
+        const paramKey = regexStepPatternParam(step.function);
         if (paramKey === undefined) continue;
         const raw = step.params?.[paramKey];
         // An omitted pattern compiles to a degenerate, in-dialect literal at

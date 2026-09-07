@@ -451,7 +451,11 @@ export function validateAdvancedInvite(
   // cannot edit one by one. A descriptor-shaped refusal there would hard-block a
   // document core runs benignly (e.g. a `coalesce` whose `default` is not text is
   // a harmless pass-through), so on a key element the encoder is the gate, not
-  // the descriptors.
+  // the descriptors. A step core cannot compile at all is refused at the mint
+  // (`assertTransformsCompile`), which walks a whole document once per Generate
+  // and runs nowhere in this pass. The linkage grading above does compile:
+  // `pipelineAlwaysDrops` measures a `substring` run following a `parse_date` by
+  // probe on every pass, outside the mint walk's step-count and budget bounds.
   //
   // The exception is a param the pipeline drops value-INDEPENDENTLY -- a key that
   // matches nothing for BOTH parties, refused in core instead: `pipelineAlwaysDrops`
@@ -468,7 +472,7 @@ export function validateAdvancedInvite(
     )
   ) {
     errors.standardization =
-      "Finish or fix the highlighted cleaning steps before generating.";
+      "Finish, fix, or remove the highlighted cleaning steps before generating.";
   }
 
   // The fan-out gate, read from the same list core's own refusal
@@ -600,7 +604,7 @@ function messageForField(field: AdvancedField): string {
     case "standardization":
       // Set directly in validateAdvancedInvite (not via a schema-path mapping); this
       // keeps the switch exhaustive over AdvancedField.
-      return "Finish or fix the highlighted cleaning steps before generating.";
+      return "Finish, fix, or remove the highlighted cleaning steps before generating.";
   }
 }
 

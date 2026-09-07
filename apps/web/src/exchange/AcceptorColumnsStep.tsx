@@ -610,7 +610,8 @@ export function AcceptorColumnsStep({
 
         {!standardizationValid && (
           <Text size="xs" c="red" role="alert">
-            Finish or fix the highlighted cleaning steps before continuing.
+            Finish, fix, or remove the highlighted cleaning steps before
+            continuing.
           </Text>
         )}
 

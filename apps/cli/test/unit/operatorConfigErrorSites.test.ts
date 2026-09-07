@@ -196,6 +196,47 @@ const RECORDED_SITES: readonly ConfigErrorSite[] = [
       "correctly absent from this ledger.",
   },
   {
+    file: "packages/core/src/linkageSatisfiability.ts",
+    anchor: "stepCountRefusal",
+    raises: "OperatorConfigError",
+    interpolates: ["stepCountRefusalMessage(declaredSteps, maxSteps)"],
+    provenance:
+      "both values the callee interpolates are counts -- how many steps the " +
+      "document declares, and the build's own limit -- and no step, function, " +
+      "or param is named. The count spans both surfaces, and the class " +
+      "follows the one whose steps take the total past the limit: this arm " +
+      "is reached only where this party's own standardization exceeds it " +
+      "alone, and the agreed terms' element transforms take the plain " +
+      "UsageError arm beside it, correctly absent from this ledger.",
+  },
+  {
+    file: "packages/core/src/linkageSatisfiability.ts",
+    anchor: "assertTransformsCompile",
+    raises: "OperatorConfigError",
+    interpolates: ["stepCompileBudgetRefusalMessage(totalBudgetMs)"],
+    provenance:
+      "the only value the callee interpolates is the budget the walk ran " +
+      "under -- a build constant, or the number the caller passed -- and no " +
+      "step is named, the refusal being that none was checked. The sibling " +
+      "arm over the agreed terms' element transforms raises a plain " +
+      "UsageError on the same exhaustion and is correctly absent here.",
+  },
+  {
+    file: "packages/core/src/linkageSatisfiability.ts",
+    anchor: "assertTransformsCompile",
+    raises: "OperatorConfigError",
+    interpolates: ["stepCompileRefusalMessage(label)"],
+    provenance:
+      "`label` is read off this party's own standardization argument and is " +
+      "narrowed by transformFunctionLabel before it reaches the message, so " +
+      "what the callee interpolates is either a build literal from " +
+      "STANDARDIZATION_FUNCTION_NAMES or the fixed stand-in for a name this " +
+      "build does not recognize. The sibling arm over the agreed terms' " +
+      "element transforms, which the accept path adopts wholesale, raises a " +
+      "plain UsageError instead and is correctly absent from this ledger -- " +
+      "the same split assertFanOutImplemented above keeps.",
+  },
+  {
     file: "apps/cli/src/commands/exchange.ts",
     anchor: "certificateModeIdentityPath",
     raises: "OperatorConfigError",

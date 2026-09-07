@@ -519,12 +519,13 @@ export function validateParamValue(
  * (e.g. a cleared `substring.start`) is not valid, so the host keeps it out of
  * the exchange rather than running a malformed param as a silent full-field
  * exclusion or throwing at compile. A step naming a function core does not
- * recognize is treated as valid: it is not authored through this surface and
- * its params are not editable, so there is nothing here to judge.
+ * recognize is invalid for the same reason: the descriptor table is core's own
+ * registry, so a name absent from it is one the pipeline compile throws on, and
+ * its params are not editable here -- the remedy is to remove the step.
  */
 export function isStepValid(step: StandardizationStep): boolean {
   const descriptor = descriptorFor(step.function);
-  if (descriptor === undefined) return true;
+  if (descriptor === undefined) return false;
   return describeParamFields(descriptor).every((field) => {
     const value = step.params?.[field.key];
     const isEmpty =
