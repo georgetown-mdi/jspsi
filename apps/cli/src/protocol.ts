@@ -10,6 +10,7 @@ import {
   exchangeRecordOwedButUnbuilt,
   countIsPartnerReported,
   buildOutputTable,
+  describeResolvedMatching,
   describeResolvedRunShape,
   authenticateConnection,
   assertSharedSecretReadyForHandshake,
@@ -633,6 +634,11 @@ async function runExchangeStage(params: {
           emit((e) => e.warning(UNNAMED_PARTNER_ACCOUNTING_NOTE));
         } else log.info(...line);
         log.info("role:", resolvedRole);
+        // Each party's deduplicate value comes from its own document, so the
+        // pair -- and the cardinality it resolves to -- exists only now. Stated
+        // on the info line beside the role rather than on the warning channel
+        // below: it is what every run proceeds on, not an exception to it.
+        log.info(describeResolvedMatching(runShape));
 
         // What the agreed terms actually resolved to, named here because
         // nothing earlier states it: the consent surfaces show each

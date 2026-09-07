@@ -75,7 +75,7 @@ const resolveFor = (
   resolveLinkageCardinality(
     cardinalityTerms(local, strategy),
     cardinalityTerms(partner, strategy),
-  );
+  ).cardinality;
 
 test("the agreed deduplicate pair maps to the per-side cardinality label", () => {
   // The label is read from the CALLING party's own side, so the declaring party
@@ -85,6 +85,25 @@ test("the agreed deduplicate pair maps to the per-side cardinality label", () =>
   expect(resolveFor(true, false)).toBe("many-to-one");
   expect(resolveFor(false, true)).toBe("one-to-many");
   expect(resolveFor(true, true)).toBe("many-to-many");
+});
+
+test("the resolved matching states both parties' values beside the label", () => {
+  // The label is mirrored, so a party reading it off its own record cannot tell
+  // which side declared what without the two values recorded beside it.
+  expect(
+    resolveLinkageCardinality(cardinalityTerms(false), cardinalityTerms(true)),
+  ).toEqual({
+    localDeduplicate: false,
+    partnerDeduplicate: true,
+    cardinality: "one-to-many",
+  });
+  expect(
+    resolveLinkageCardinality(cardinalityTerms(true), cardinalityTerms(false)),
+  ).toEqual({
+    localDeduplicate: true,
+    partnerDeduplicate: false,
+    cardinality: "many-to-one",
+  });
 });
 
 // The refusal's remedy is assembled from the strategy table, so which clauses
@@ -288,11 +307,11 @@ test("an accept-derived pair resolves the one-sided cardinality (hostile flip cl
     const inviter = cardinalityTerms(declared);
     const acceptor = deriveAcceptedLinkageTerms(inviter, "Acceptor");
     expect(acceptor.deduplicate).toBe(false);
-    expect(resolveLinkageCardinality(acceptor, inviter)).toBe(
+    expect(resolveLinkageCardinality(acceptor, inviter).cardinality).toBe(
       declared ? "one-to-many" : "one-to-one",
     );
     // The mirror label, from the inviter's own side of the same pair.
-    expect(resolveLinkageCardinality(inviter, acceptor)).toBe(
+    expect(resolveLinkageCardinality(inviter, acceptor).cardinality).toBe(
       declared ? "many-to-one" : "one-to-one",
     );
   }
@@ -303,7 +322,9 @@ test("an accept-derived pair resolves the one-sided cardinality (hostile flip cl
     cardinalityTerms(true),
     "Acceptor",
   );
-  expect(resolveLinkageCardinality(acceptor, flipped)).toBe("one-to-one");
+  expect(resolveLinkageCardinality(acceptor, flipped).cardinality).toBe(
+    "one-to-one",
+  );
 });
 
 test("assertDeduplicateImplemented passes every strategy this build ships", () => {

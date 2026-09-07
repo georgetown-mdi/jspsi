@@ -21,6 +21,7 @@ import type {
   MessageConnection,
   PreparedExchange,
   ProcessState,
+  ResolvedMatching,
 } from "@psilink/core";
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 
@@ -202,6 +203,12 @@ interface ExchangeOutputsBase {
    * and a helper alike -- the helper's record is produced even though it does not
    * bind the result table. */
   record?: RecordDownloads;
+  /** What the two parties' agreed `deduplicate` values resolved to
+   * ({@link ExchangeResult.matching}), so the completion panel states the
+   * partner's value and the cardinality the pair gave this run. Absent on the
+   * server-job path, where the console holds the run and relays an outcome
+   * rather than an exchange result, and the panel then states neither. */
+  matching?: ResolvedMatching;
 }
 
 /** A receiver's outputs: the matched results file (CSV), plus the optional record

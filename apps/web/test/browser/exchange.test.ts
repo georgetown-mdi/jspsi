@@ -134,6 +134,12 @@ interface CapturedLifecycle {
     intersectionCount?: number;
     countReportedByPartner?: boolean;
     matchedRecordCount?: number;
+    matching?: {
+      localDeduplicate: boolean;
+      partnerDeduplicate: boolean;
+      cardinality:
+        "one-to-one" | "one-to-many" | "many-to-one" | "many-to-many";
+    };
     record?: {
       recordUrl: string;
       recordFileName: string;
@@ -1951,6 +1957,11 @@ describe("inviter screen", () => {
       kind: "matched" as const,
       resultsUrl: URL.createObjectURL(new Blob(["a,b\n"])),
       matchedRecordCount: 1847,
+      matching: {
+        localDeduplicate: false,
+        partnerDeduplicate: true,
+        cardinality: "one-to-many" as const,
+      },
       record: {
         recordUrl: URL.createObjectURL(new Blob(["{}"])),
         recordFileName: "psilink-record-2026-07-08T14-32.json",
@@ -1964,6 +1975,18 @@ describe("inviter screen", () => {
       .toHaveTextContent("Exchange complete");
     await expect
       .element(page.getByText(/1,847.*matched records/))
+      .toBeInTheDocument();
+    // The partner's own deduplicate value and the cardinality the pair resolved
+    // to: this seat consented to no document of its partner's, so the completion
+    // panel is where it reads what the partner presented.
+    await expect
+      .element(
+        page.getByText(
+          "Deduplication as agreed at the terms exchange: you declared " +
+            "deduplicate false, your partner declared deduplicate true. This " +
+            "run matches one-to-many.",
+        ),
+      )
       .toBeInTheDocument();
     await expect.element(page.getByText(/^Finished /)).toBeInTheDocument();
     // The status label's live region reaches the final "Done".

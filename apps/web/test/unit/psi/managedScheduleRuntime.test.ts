@@ -191,6 +191,8 @@ describe("the notices an unattended run can raise", () => {
     const warn = vi.spyOn(log, "warn").mockImplementation(() => undefined);
     const { cardinalityNotice, pairTableAdvisory } = describeResolvedRunShape({
       cardinality: "many-to-many",
+      localDeduplicate: true,
+      partnerDeduplicate: true,
       localRecordCount: 3163,
       localDeclaredRecordCount: 3163,
       partnerRecordCount: 3164,

@@ -8,6 +8,7 @@ import {
   assertBothSidedDeduplicateImplemented,
   assertCountOnlyTermsShape,
   assertDeduplicateImplemented,
+  resolvedMatchingFromTerms,
 } from "./linkageTermsPolicy.js";
 import { getDefaultLinkageTerms } from "./defaults/builtInLinkageTerms.js";
 import { getDefaultStandardization } from "./defaults/builtInStandardization.js";
@@ -47,6 +48,7 @@ import {
 } from "./psi/link.js";
 import type { LinkageCardinality } from "./psi/link.js";
 import type { ResolvedRunShape } from "./pairTableProjection.js";
+import type { ResolvedMatching } from "./linkageTermsPolicy.js";
 import { InProcessPsiEngine } from "./psi/psiEngine.js";
 import {
   partyFansOut,
@@ -584,27 +586,28 @@ export function assertPresentedDeduplicateMatchesInvitation(
 }
 
 /**
- * Resolve the matching cardinality {@link runExchange} passes to the
- * linkage strategies, from the two parties' agreed `deduplicate`
- * settings. The label is read from the calling party's own side, so the
- * two parties hold mirror labels for one procedure
- * (docs/spec/PROTOCOL.md, Deduplicating cardinalities): `(true, false)`
- * gives the declaring party `many-to-one`; `(true, true)` gives
- * `many-to-many`, which {@link assertBothSidedDeduplicateImplemented}
+ * Resolve what the two parties' agreed `deduplicate` settings gave this
+ * run: the cardinality {@link runExchange} passes to the linkage
+ * strategies, beside the two values it was resolved from. The label is read
+ * from the calling party's own side, so the two parties hold mirror labels
+ * for one procedure (docs/spec/PROTOCOL.md, Deduplicating cardinalities):
+ * `(true, false)` gives the declaring party `many-to-one`; `(true, true)`
+ * gives `many-to-many`, which {@link assertBothSidedDeduplicateImplemented}
  * requires a matching strategy for. A refusal is symmetric and aborts
  * both parties at this point.
+ *
+ * The refusals are this function's own; the derivation beneath them is
+ * {@link resolvedMatchingFromTerms}, which the self-attested record reads
+ * too, so a record cannot name a cardinality its run did not resolve to.
  */
 export function resolveLinkageCardinality(
   localTerms: LinkageTerms,
   partnerTerms: LinkageTerms,
-): LinkageCardinality {
+): ResolvedMatching {
   assertDeduplicateImplemented(localTerms);
   assertDeduplicateImplemented(partnerTerms);
   assertBothSidedDeduplicateImplemented(localTerms, partnerTerms);
-  if (localTerms.deduplicate && partnerTerms.deduplicate) return "many-to-many";
-  if (localTerms.deduplicate) return "many-to-one";
-  if (partnerTerms.deduplicate) return "one-to-many";
-  return "one-to-one";
+  return resolvedMatchingFromTerms(localTerms, partnerTerms);
 }
 
 /**
@@ -1002,6 +1005,18 @@ export interface ExchangeResult {
   intersectionCount: number | undefined;
   /** Linkage terms received from the partner during the handshake. */
   partnerTerms: LinkageTerms;
+  /**
+   * What the two parties' agreed `deduplicate` values resolved to for this
+   * party: its own declared value, the value the partner presented at the
+   * terms exchange, and the cardinality the pair gives this party
+   * ({@link resolveLinkageCardinality}).
+   *
+   * The same triple the self-attested record holds, so a completion surface
+   * states what the run resolved to without re-deriving it from the two
+   * terms documents and without waiting for the record to be built -- a run
+   * whose record build failed still reports it.
+   */
+  matching: ResolvedMatching;
   /** The PSI role assigned to this party (sender or receiver). */
   resolvedRole: PsiRole;
   /** Payload data received from the partner after linkage. */
@@ -1468,7 +1483,8 @@ export async function runExchange(
   // none, or the both-sided pair under one that pairs no many-to-many) aborts
   // BOTH parties at this same point -- before the bootstrap frame and the PSI
   // rounds -- rather than desyncing the lockstep. See resolveLinkageCardinality.
-  const cardinality = resolveLinkageCardinality(linkageTerms, partnerTerms);
+  const matching = resolveLinkageCardinality(linkageTerms, partnerTerms);
+  const { cardinality } = matching;
 
   // Resolve which disclosure this exchange runs from both parties' agreed terms, at
   // the same point and for the same reason as the cardinality above: the resolution
@@ -1561,7 +1577,7 @@ export async function runExchange(
   // half is the withheld one -- the single-pass blind-helper case above, which the
   // cascade never reaches.
   onProtocolConfirmed(partnerTerms, resolvedRole, {
-    cardinality,
+    ...matching,
     localRecordCount: rowCount,
     localDeclaredRecordCount: declaredRecordCount,
     partnerRecordCount,
@@ -1942,6 +1958,7 @@ export async function runExchange(
     // the only thing standing between a helper and a count.
     intersectionCount: heldResult ? intersectionCount : undefined,
     partnerTerms,
+    matching,
     resolvedRole,
     partnerPayload,
     audit,

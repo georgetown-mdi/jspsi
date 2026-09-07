@@ -242,6 +242,7 @@ import {
   isPeerWaitTimeout,
   sanitizeErrorForDisplay,
   sanitizeForDisplay,
+  describeResolvedMatching,
   describeResolvedRunShape,
   getDefaultLinkageTerms,
   DEFAULT_MAX_DISPLAY_LENGTH,
@@ -805,6 +806,8 @@ test("names a deduplicating cardinality and warns on an over-bound projection", 
   // machine-interface stream a supervisor or a console seat reads instead of it.
   const runShape: ResolvedRunShape = {
     cardinality: "many-to-many",
+    localDeduplicate: true,
+    partnerDeduplicate: true,
     localRecordCount: 3163,
     localDeclaredRecordCount: 3163,
     partnerRecordCount: 3163,
@@ -875,6 +878,8 @@ test("leaves the pre-round boundary silent on a one-to-one run", async () => {
   vi.mocked(runExchange).mockImplementation(
     runExchangeConfirming({
       cardinality: "one-to-one",
+      localDeduplicate: false,
+      partnerDeduplicate: false,
       localRecordCount: 3163,
       localDeclaredRecordCount: 3163,
       partnerRecordCount: 3163,
@@ -912,6 +917,62 @@ test("leaves the pre-round boundary silent on a one-to-one run", async () => {
   expect(mockState.warnings).toStrictEqual([]);
 }, 20_000);
 
+test("states the partner's deduplicate value and the resolved cardinality on every run", async () => {
+  // The partner's value comes from its own document, so nothing before the terms
+  // exchange states it. Asserted on the one-to-one run above all: that shape
+  // raises no notice, so without this line the operator reads neither fact.
+  vi.mocked(runExchange).mockImplementation(
+    runExchangeConfirming({
+      cardinality: "one-to-one",
+      localDeduplicate: false,
+      partnerDeduplicate: false,
+      localRecordCount: 4,
+      localDeclaredRecordCount: 4,
+      partnerRecordCount: 6,
+      localExpectsOutput: true,
+      partnerAssociationTableWithheld: false,
+    }) as never,
+  );
+  await Promise.all([
+    runProtocol({
+      connection: {
+        channel: "filedrop",
+        path: dropDir,
+        options: TWO_PARTY_OPTIONS,
+      },
+      auth: null,
+      prepared: minimalPrepared,
+      output: undefined,
+      verbosity: -1,
+      loggerName: "test-a",
+    }),
+    runProtocol({
+      connection: {
+        channel: "filedrop",
+        path: dropDir,
+        options: TWO_PARTY_OPTIONS,
+      },
+      auth: null,
+      prepared: minimalPrepared,
+      output: undefined,
+      verbosity: -1,
+      loggerName: "test-b",
+    }),
+  ]);
+
+  // Composed by core and rendered here unchanged, so the CLI and the browser
+  // seats cannot drift into two wordings of the one fact. It is an info line,
+  // not a warning: it states what the run proceeds on rather than an exception
+  // to it, which is why the one-to-one run above still raises nothing.
+  const expected = describeResolvedMatching({
+    localDeduplicate: false,
+    partnerDeduplicate: false,
+    cardinality: "one-to-one",
+  });
+  expect(mockState.infos).toContain(expected);
+  expect(mockState.warnings).toStrictEqual([]);
+}, 20_000);
+
 test("tells a non-receiving party what the run's completion tells it too", async () => {
   // The contradiction this closes, end to end on one seat: only the declaring
   // "many" party is required to expect output, so the "one" party of a
@@ -922,6 +983,8 @@ test("tells a non-receiving party what the run's completion tells it too", async
     runExchangeConfirming(
       {
         cardinality: "one-to-many",
+        localDeduplicate: false,
+        partnerDeduplicate: true,
         localRecordCount: 4,
         localDeclaredRecordCount: 4,
         partnerRecordCount: 6,
@@ -952,7 +1015,7 @@ test("tells a non-receiving party what the run's completion tells it too", async
 // --- Self-attested record persistence via runProtocol ------------------------
 
 const sampleRecord: ExchangeRecord = {
-  version: "psilink-exchange-record/v6",
+  version: "psilink-exchange-record/v7",
   outcome: "completed",
   createdAt: "2026-01-02T03:04:05.000Z",
   termsHash: "hQi6gjL9Z0RFtfz2TZVqXmUF1Cu8PaBFbClOJ9R8l_Q",
@@ -963,6 +1026,11 @@ const sampleRecord: ExchangeRecord = {
     matchingBasis: [{ name: "ssn", type: "ssn" }],
     payloadSent: [],
     payloadReceived: [],
+    matching: {
+      localDeduplicate: false,
+      partnerDeduplicate: false,
+      cardinality: "one-to-one",
+    },
   },
   recordsExposed: 5,
   bindingNonce: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",

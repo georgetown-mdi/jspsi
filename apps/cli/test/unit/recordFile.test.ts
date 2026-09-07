@@ -60,7 +60,7 @@ afterEach(() => {
 
 // A minimal but schema-valid record + verification-keys pair to write to disk.
 const record: ExchangeRecord = {
-  version: "psilink-exchange-record/v6",
+  version: "psilink-exchange-record/v7",
   outcome: "completed",
   createdAt: "2026-01-02T03:04:05.000Z",
   termsHash: "hQi6gjL9Z0RFtfz2TZVqXmUF1Cu8PaBFbClOJ9R8l_Q",
@@ -71,6 +71,11 @@ const record: ExchangeRecord = {
     matchingBasis: [{ name: "ssn", type: "ssn" }],
     payloadSent: [],
     payloadReceived: [],
+    matching: {
+      localDeduplicate: false,
+      partnerDeduplicate: false,
+      cardinality: "one-to-one",
+    },
   },
   recordsExposed: 5,
   resultSize: 2,

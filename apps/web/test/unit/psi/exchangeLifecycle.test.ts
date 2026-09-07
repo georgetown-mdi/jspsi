@@ -117,6 +117,11 @@ const STUB_EXCHANGE_RESULT = {
   associationTable: undefined,
   intersectionCount: undefined,
   partnerTerms: STUB_LINKAGE_TERMS,
+  matching: {
+    localDeduplicate: false,
+    partnerDeduplicate: false,
+    cardinality: "one-to-one",
+  },
   resolvedRole: "receiver",
   partnerPayload: { columns: [], rowIndices: [], rows: [] },
 } satisfies ExchangeResult;
@@ -924,6 +929,8 @@ describe("runExchangeLifecycle", () => {
 
   const OVER_BOUND_SHAPE: ResolvedRunShape = {
     cardinality: "many-to-many",
+    localDeduplicate: true,
+    partnerDeduplicate: true,
     localRecordCount: 3163,
     localDeclaredRecordCount: 3163,
     partnerRecordCount: 3163,
@@ -998,6 +1005,8 @@ describe("runExchangeLifecycle", () => {
     mockedRunExchange.mockImplementation(
       runExchangeConfirming({
         cardinality: "one-to-one",
+        localDeduplicate: false,
+        partnerDeduplicate: false,
         localRecordCount: 3163,
         localDeclaredRecordCount: 3163,
         partnerRecordCount: 3163,
@@ -1025,6 +1034,8 @@ describe("runExchangeLifecycle", () => {
     const s = seams();
     const shape: ResolvedRunShape = {
       cardinality: "one-to-many",
+      localDeduplicate: false,
+      partnerDeduplicate: true,
       localRecordCount: 3163,
       localDeclaredRecordCount: 3163,
       partnerRecordCount: 3163,

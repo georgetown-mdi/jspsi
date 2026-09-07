@@ -16,6 +16,7 @@ import type {
   LinkageStrategy,
   LinkageTerms,
 } from "./config/linkageTermsSchema.js";
+import type { LinkageCardinality } from "./psi/link.js";
 
 /**
  * Which of the count-only shape rules a `psi-c` terms document breaks. The
@@ -314,6 +315,74 @@ export function assertBothSidedDeduplicateImplemented(
           `or set ${oneSidedRemedy}`
         : `Set ${oneSidedRemedy}`),
   );
+}
+
+/**
+ * Every {@link LinkageCardinality}, as a schema's accepted value set.
+ *
+ * The label set is closed: a record naming a cardinality this build does not
+ * define is not a record this build can read, so its reader rejects the value
+ * rather than passing it through.
+ */
+export const LINKAGE_CARDINALITIES = [
+  "one-to-one",
+  "one-to-many",
+  "many-to-one",
+  "many-to-many",
+] as const satisfies readonly LinkageCardinality[];
+
+// The matching cardinality an agreed `deduplicate` pair resolves to, read from
+// the LOCAL party's own side, so the two parties of one deduplicating exchange
+// hold mirror labels for the single procedure they run (docs/spec/PROTOCOL.md,
+// Deduplicating cardinalities).
+function linkageCardinalityFromDeduplicate(
+  localDeduplicate: boolean,
+  partnerDeduplicate: boolean,
+): LinkageCardinality {
+  if (localDeduplicate && partnerDeduplicate) return "many-to-many";
+  if (localDeduplicate) return "many-to-one";
+  if (partnerDeduplicate) return "one-to-many";
+  return "one-to-one";
+}
+
+/**
+ * What the two parties' agreed `deduplicate` values resolved to for one
+ * party: its own declared value, the value its partner presented at the terms
+ * exchange, and the cardinality the pair gives this party.
+ *
+ * The two values are recorded beside the label rather than left implicit in
+ * it, since the label is mirrored and a party reading `one-to-many` off its
+ * own record cannot otherwise tell which side declared what.
+ */
+export interface ResolvedMatching {
+  readonly localDeduplicate: boolean;
+  readonly partnerDeduplicate: boolean;
+  readonly cardinality: LinkageCardinality;
+}
+
+/**
+ * The {@link ResolvedMatching} for a party holding `localTerms` against a
+ * partner presenting `partnerTerms`.
+ *
+ * The one derivation the run boundary, the returned outcome, and the
+ * self-attested record all read, so a party's record cannot name a cardinality
+ * its run did not resolve to. It applies none of the refusals
+ * `resolveLinkageCardinality` (`exchange.ts`) applies: a caller reaching the
+ * run boundary passes through those first, and the record builder derives this
+ * from terms that boundary already admitted.
+ */
+export function resolvedMatchingFromTerms(
+  localTerms: LinkageTerms,
+  partnerTerms: LinkageTerms,
+): ResolvedMatching {
+  return {
+    localDeduplicate: localTerms.deduplicate,
+    partnerDeduplicate: partnerTerms.deduplicate,
+    cardinality: linkageCardinalityFromDeduplicate(
+      localTerms.deduplicate,
+      partnerTerms.deduplicate,
+    ),
+  };
 }
 
 // The two elements a key's `swap` names, or undefined when the key declares no

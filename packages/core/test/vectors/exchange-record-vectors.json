@@ -125,7 +125,7 @@
         }
       },
       "record": {
-        "version": "psilink-exchange-record/v6",
+        "version": "psilink-exchange-record/v7",
         "createdAt": "2026-01-02T03:04:05.000Z",
         "outcome": "completed",
         "termsHash": "NndSxh_H2dH9QDOK3GNhZz574iSYpmWXZBAcqzbbJ7o",
@@ -155,7 +155,12 @@
               "name": "status",
               "description": "Enrollment status at the most recent visit."
             }
-          ]
+          ],
+          "matching": {
+            "localDeduplicate": false,
+            "partnerDeduplicate": false,
+            "cardinality": "one-to-one"
+          }
         },
         "recordsExposed": 5,
         "resultSize": 2,
@@ -259,7 +264,7 @@
         }
       },
       "record": {
-        "version": "psilink-exchange-record/v6",
+        "version": "psilink-exchange-record/v7",
         "createdAt": "2026-01-02T03:04:05.000Z",
         "outcome": "completed",
         "termsHash": "1pgvorgQseW486XCURs3KAcOP_YN3bnIhVndGsrHHwc",
@@ -274,7 +279,12 @@
             }
           ],
           "payloadSent": [],
-          "payloadReceived": []
+          "payloadReceived": [],
+          "matching": {
+            "localDeduplicate": false,
+            "partnerDeduplicate": false,
+            "cardinality": "one-to-one"
+          }
         },
         "recordsExposed": 3,
         "resultSize": 1,
@@ -390,7 +400,7 @@
         }
       },
       "record": {
-        "version": "psilink-exchange-record/v6",
+        "version": "psilink-exchange-record/v7",
         "createdAt": "2026-01-02T03:04:05.000Z",
         "outcome": "completed",
         "termsHash": "0mw2vkRK9EL4_K_3ZPpnmToLl2eyDBS3zGfoxqOlOTc",
@@ -410,7 +420,12 @@
               "description": "Administered dose in milligrams."
             }
           ],
-          "payloadReceived": []
+          "payloadReceived": [],
+          "matching": {
+            "localDeduplicate": false,
+            "partnerDeduplicate": false,
+            "cardinality": "one-to-one"
+          }
         },
         "recordsExposed": 4,
         "bindingNonce": "ICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA",
@@ -528,7 +543,7 @@
         }
       },
       "record": {
-        "version": "psilink-exchange-record/v6",
+        "version": "psilink-exchange-record/v7",
         "createdAt": "2026-01-02T03:04:05.000Z",
         "outcome": "completed",
         "termsHash": "0mw2vkRK9EL4_K_3ZPpnmToLl2eyDBS3zGfoxqOlOTc",
@@ -548,7 +563,12 @@
               "name": "dose",
               "description": "Administered dose in milligrams."
             }
-          ]
+          ],
+          "matching": {
+            "localDeduplicate": false,
+            "partnerDeduplicate": false,
+            "cardinality": "one-to-one"
+          }
         },
         "recordsExposed": 6,
         "bindingNonce": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA",
@@ -694,7 +714,7 @@
         }
       },
       "record": {
-        "version": "psilink-exchange-record/v6",
+        "version": "psilink-exchange-record/v7",
         "createdAt": "2026-01-02T03:04:05.000Z",
         "outcome": "completed",
         "termsHash": "eZBA72rLn0xaADBj7BGC0mWHe_7s0pwED7tzDaUVjWk",
@@ -722,7 +742,12 @@
             }
           ],
           "payloadSent": [],
-          "payloadReceived": []
+          "payloadReceived": [],
+          "matching": {
+            "localDeduplicate": false,
+            "partnerDeduplicate": false,
+            "cardinality": "one-to-one"
+          }
         },
         "recordsExposed": 8,
         "resultSize": 3,
@@ -867,7 +892,7 @@
         }
       },
       "record": {
-        "version": "psilink-exchange-record/v6",
+        "version": "psilink-exchange-record/v7",
         "createdAt": "2026-01-02T03:04:05.000Z",
         "outcome": "completed",
         "termsHash": "AzJi5GLcAEIuLecddIrltTqEXxzN35jvu9OPcLpZ910",
@@ -895,7 +920,12 @@
             }
           ],
           "payloadSent": [],
-          "payloadReceived": []
+          "payloadReceived": [],
+          "matching": {
+            "localDeduplicate": false,
+            "partnerDeduplicate": false,
+            "cardinality": "one-to-one"
+          }
         },
         "recordsExposed": 8,
         "resultSize": 3,
@@ -1038,7 +1068,7 @@
         }
       },
       "record": {
-        "version": "psilink-exchange-record/v6",
+        "version": "psilink-exchange-record/v7",
         "createdAt": "2026-01-02T03:04:05.000Z",
         "outcome": "completed",
         "termsHash": "NndSxh_H2dH9QDOK3GNhZz574iSYpmWXZBAcqzbbJ7o",
@@ -1068,7 +1098,12 @@
               "name": "status",
               "description": "Enrollment status at the most recent visit."
             }
-          ]
+          ],
+          "matching": {
+            "localDeduplicate": false,
+            "partnerDeduplicate": false,
+            "cardinality": "one-to-one"
+          }
         },
         "recordsExposed": 5,
         "resultSize": 2,
@@ -1192,7 +1227,7 @@
         }
       },
       "record": {
-        "version": "psilink-exchange-record/v6",
+        "version": "psilink-exchange-record/v7",
         "createdAt": "2026-01-02T03:04:05.000Z",
         "outcome": "completed",
         "termsHash": "-mC6tZrCMQSzff2U5-6INjSqA4k8GbYkVTWjmJq92tk",
@@ -1221,7 +1256,12 @@
             "keySet": "contradicted"
           },
           "payloadSent": [],
-          "payloadReceived": []
+          "payloadReceived": [],
+          "matching": {
+            "localDeduplicate": false,
+            "partnerDeduplicate": false,
+            "cardinality": "one-to-one"
+          }
         },
         "recordsExposed": 3,
         "resultSize": 1,
@@ -1385,7 +1425,7 @@
         }
       },
       "record": {
-        "version": "psilink-exchange-record/v6",
+        "version": "psilink-exchange-record/v7",
         "createdAt": "2026-01-02T03:04:05.000Z",
         "outcome": "completed",
         "termsHash": "ldxVOhHDYzxE130SIN5Yx4Xr_aJTye5YjaG7kO2oAJQ",
@@ -1422,7 +1462,12 @@
             "keySet": "consistent"
           },
           "payloadSent": [],
-          "payloadReceived": []
+          "payloadReceived": [],
+          "matching": {
+            "localDeduplicate": false,
+            "partnerDeduplicate": false,
+            "cardinality": "one-to-one"
+          }
         },
         "recordsExposed": 5,
         "bindingNonce": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
@@ -1583,7 +1628,7 @@
         }
       },
       "record": {
-        "version": "psilink-exchange-record/v6",
+        "version": "psilink-exchange-record/v7",
         "createdAt": "2026-01-02T03:04:05.000Z",
         "outcome": "completed",
         "termsHash": "rpEsquyNSax88z8WM723OMdf7SoVFtV45Pgy3FkeeOc",
@@ -1620,7 +1665,12 @@
             "keySet": "unchecked"
           },
           "payloadSent": [],
-          "payloadReceived": []
+          "payloadReceived": [],
+          "matching": {
+            "localDeduplicate": false,
+            "partnerDeduplicate": false,
+            "cardinality": "one-to-one"
+          }
         },
         "recordsExposed": 5,
         "bindingNonce": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA",
@@ -1719,7 +1769,7 @@
         }
       },
       "record": {
-        "version": "psilink-exchange-record/v6",
+        "version": "psilink-exchange-record/v7",
         "createdAt": "2026-01-02T03:04:05.000Z",
         "outcome": "completed",
         "termsHash": "6SJZlUOZSCBkd1l8YQFlACMchYvQPCLpa4QefopNc_c",
@@ -1733,7 +1783,12 @@
             }
           ],
           "payloadSent": [],
-          "payloadReceived": []
+          "payloadReceived": [],
+          "matching": {
+            "localDeduplicate": false,
+            "partnerDeduplicate": false,
+            "cardinality": "one-to-one"
+          }
         },
         "recordsExposed": 3,
         "resultSize": 1,
@@ -1878,7 +1933,7 @@
         }
       },
       "record": {
-        "version": "psilink-exchange-record/v6",
+        "version": "psilink-exchange-record/v7",
         "createdAt": "2026-01-02T03:04:06.000Z",
         "outcome": "receipt-swap-terminated",
         "termsHash": "NndSxh_H2dH9QDOK3GNhZz574iSYpmWXZBAcqzbbJ7o",
@@ -1908,7 +1963,12 @@
               "name": "status",
               "description": "Enrollment status at the most recent visit."
             }
-          ]
+          ],
+          "matching": {
+            "localDeduplicate": false,
+            "partnerDeduplicate": false,
+            "cardinality": "one-to-one"
+          }
         },
         "recordsExposed": 5,
         "resultSize": 2,
