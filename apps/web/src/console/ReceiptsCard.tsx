@@ -79,10 +79,11 @@ function fingerprintFailureMessage(
       );
     case "syncing":
       return (
-        "A shared-folder exchange is running and syncing the folder your " +
-        "signing identity would be written into. Create it after that " +
-        "exchange finishes, or give the synced folder a mount of its own " +
-        "(JOB_RENDEZVOUS_DIR) so your key is never in it."
+        "A shared-folder exchange is still open on this console, and it syncs " +
+        "the folder your signing identity would be written into. Wait for that " +
+        "exchange to finish, discard it, then create your identity. Or give " +
+        "the synced folder a mount of its own (JOB_RENDEZVOUS_DIR) so your key " +
+        "is never in it."
       );
     case "invalid":
       return outcome.message;

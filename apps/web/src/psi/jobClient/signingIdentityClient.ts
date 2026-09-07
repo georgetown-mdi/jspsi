@@ -30,10 +30,10 @@ import {
  *   (`SigningFingerprintResult` states which and why), so it is named apart from a
  *   generic error to hold copy that points at that folder.
  * - `syncing`: the identity was not created because a shared-folder exchange is
- *   running and syncing the folder it would be created in. Distinct from
- *   `refused` because the operator's answer is to wait for that run or to give
- *   the synced folder a mount of its own, not to go looking at the folder's
- *   contents.
+ *   still open on the console and syncs the folder it would be created in.
+ *   Distinct from `refused` because the operator's answer is to let that
+ *   exchange finish and discard it, or to give the synced folder a mount of its
+ *   own, not to go looking at the folder's contents.
  * - `invalid`: a `400` -- the label was malformed; `message` is the server's
  *   field-path-only reason, safe to show.
  * - `busy`: a `409` -- a request is already running; the operator can retry.

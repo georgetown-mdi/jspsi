@@ -2143,6 +2143,22 @@ describe("a filedrop run that would publish the signing identity", () => {
     }
   });
 
+  test("answers an occupied console with the busy rejection, not this one", async () => {
+    // A create posted to recover a lost attachment folds onto the running
+    // exchange on the busy rejection alone, so the refusal is raised after it: a
+    // browser that lost its attachment while the identity appeared mid-run would
+    // otherwise meet this refusal and have no way back to its own exchange.
+    const root = directory("signing-busy");
+    const manager = makeSigningManager({ dataRoot: root, delayMs: 5000 });
+    const running = await manager.createJob(validIntent());
+    writeIdentity(root);
+    const error = await manager
+      .createJob(validIntent())
+      .catch((thrown: unknown) => thrown);
+    expect(error).toBeInstanceOf(ExchangeBusyError);
+    expect((error as ExchangeBusyError).activeJobId).toBe(running);
+  });
+
   test("admits an sftp run out of the shared layout", async () => {
     // Nobody syncs the mount on an sftp exchange, so the layout costs nothing
     // there and the run stays the operator's to make.

@@ -45,9 +45,10 @@ const NOTE = "Filed in the association database; purged after six years.";
 const BUSY_FAILURE = "Another fingerprint request is still running.";
 
 /** What the card says when the console withheld the create because a
- * shared-folder exchange is syncing the folder the key would land in. */
+ * shared-folder exchange still holds the console's exchange slot and syncs the
+ * folder the key would land in. */
 const SYNCING_FAILURE =
-  "A shared-folder exchange is running and syncing the folder your signing identity would be written into.";
+  "A shared-folder exchange is still open on this console, and it syncs the folder your signing identity would be written into.";
 
 interface StubbedResponse {
   status?: number;
@@ -319,11 +320,13 @@ describe("ReceiptsCard: a request that resolves while the operator edits", () =>
 });
 
 describe("ReceiptsCard: a failed request", () => {
-  test("names the run syncing the folder, and what to do after it", async () => {
+  test("names the open exchange syncing the folder, and both ways out", async () => {
     // The console answers a create it will not make with a status of its own, so
     // the card must not fold it into the generic "could not be created" copy:
-    // nothing is wrong with the folder, and the operator's move is to wait for
-    // the run or to give the synced folder a mount of its own.
+    // nothing is wrong with the folder. The condition is an exchange the console
+    // still holds -- finished but undiscarded as much as running -- so the copy
+    // names discarding it beside the mount of its own, and never tells the
+    // operator only to wait for a run that has already ended.
     stubSigningApi({ responses: [{ body: { status: "syncing" } }] });
     await renderCard();
     await chooseCertificateMode();
@@ -332,6 +335,7 @@ describe("ReceiptsCard: a failed request", () => {
     await expect
       .element(page.getByText(SYNCING_FAILURE, { exact: false }))
       .toBeInTheDocument();
+    expect(app.container.textContent).toContain("discard it");
     expect(app.container.textContent).toContain("JOB_RENDEZVOUS_DIR");
   });
 

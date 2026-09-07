@@ -44,13 +44,14 @@ The other half of the refusal is a presence probe: one fixed file name, directly
 
 ### Limits accepted, not closed
 
-These are accepted under the deployment the console is for: the partner is an authenticated party under a signed agreement, and one writing into the synced folder to attack this party is not the case being designed against. They are recorded here, and in the spec's refusal section, so the refusal is not read as a control against a hostile partner.
+These are accepted under the deployment the console is for: the partner is an authenticated party under a signed agreement, and one writing into the synced folder to attack this party is not the case being designed against. They are recorded here, and in the spec's refusal section, so the refusal is not read as a control against a hostile partner. The last is not about the partner at all: it is where the two refusals fail to cover each other, recorded rather than gated.
 
 - **The folder syncs at all times, not only during a run.** The disclosure a key in that folder is has already happened by the time any run is started, so the refusal signals the layout rather than preventing it. The advisory is what names that, and the mount change is what ends it.
 - **The probe reads a name, not a key.** It reads that name in the folder the partner writes into. A file a partner plants there refuses a run that would have published nothing -- an exchange by a party with no identity of its own anywhere -- and an identity the operator renamed is not seen at all, so a run that would publish it is admitted.
 - **A document at that path is taken as this party's identity.** The console points the CLI at that path for every fingerprint request and for runs on every channel, and the CLI loads whatever is there. A document bound to a different identity label is warned about rather than refused on that load (`warnOnIdentityDivergence`), and the console discards the child's stderr; one bound to the same label -- the label the agreed terms hold, which the partner knows -- diverges from nothing, so `psilink exchange` accepts it too. A partner able to write into the synced folder could therefore put their own signing identity at that path.
+- **The two refusals exclude each other in one direction only.** The mint reads the exchange slot; the run reads whether the identity file is there, and nothing makes it read a mint already under way. A shared-directory run created after the mint's child started and before that child wrote the file is admitted, over a window of one child process start, and the key then lands in the folder that run syncs. A gate over both would buy that one window at the cost of a second refusal on a surface whose whole point is how narrow the first one is.
 
-The remedy for both is the one the refusal already names: keep the identity outside every folder a partner syncs. The identity-location option below is what would make that routine rather than a mount change.
+The remedy for all of them is the one the refusal already names: keep the identity outside every folder a partner syncs. The identity-location option below is what would make that routine rather than a mount change.
 
 ## What is left open
 

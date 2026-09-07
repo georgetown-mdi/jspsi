@@ -452,13 +452,14 @@ The rejection is the one `POST /api/jobs` answer with a body: `400` `{ "reason":
 
 #### Stated limits
 
-The refusal covers one run on one layout, and the layout is one the operator can be in without ever starting a run. Three limits follow, accepted under the deployment's trust in an authenticated partner under a signed agreement rather than closed:
+The refusal covers one run on one layout, and the layout is one the operator can be in without ever starting a run. Four limits follow, accepted rather than closed -- the first three under the deployment's trust in an authenticated partner under a signed agreement:
 
 - **The folder syncs at all times, not only during a run.** The operator's sync tool keeps a configured rendezvous in step continuously, so a key written into it is disclosed from that moment whether or not an exchange is ever started. The refusal signals the layout; it does not prevent the disclosure. Keeping a key in a folder they have chosen to sync is the operator's own choice, and the console's posture there is the standing one -- warn and guide, not block: the receipts card names the hazard on that layout and points at the remedy, a rendezvous mount of its own.
 - **The probe reads a name, not a key.** It is a presence probe on one fixed file name in the mounted data root, which on the refusing layout is a folder the partner writes into. A file a partner plants at that name refuses a run that would have published nothing, and an identity the operator renamed is not seen, so a run that would publish it is admitted. The file's contents are not read, and neither its mode nor its ownership changes the answer.
 - **A document at that path is taken as this party's identity.** It is what `POST /api/jobs/signing/fingerprint` reports the fingerprint of, and what a run on any channel signs with. The CLI's load-or-create warns rather than refuses when the loaded certificate's bound label diverges from the agreed terms, and this endpoint discards that stderr; a document bound to the agreed label diverges from nothing. A partner able to write into the synced folder could therefore substitute one.
+- **The two refusals exclude each other in one direction only.** A create of the identity is answered `syncing` while a `filedrop` exchange occupies the slot, and a run is refused while the identity file is present -- but the run's probe reads presence at create time and nothing else. A `filedrop` run created after a fingerprint child spawned and before that child wrote the file is admitted, over a window of one child process start, and the key then lands in the folder that run syncs.
 
-The remedy for all three is keeping the identity outside every folder a partner syncs (see [console-signing-identity-custody.md](../notes/console-signing-identity-custody.md)).
+The remedy for all four is keeping the identity outside every folder a partner syncs (see [console-signing-identity-custody.md](../notes/console-signing-identity-custody.md)).
 
 ## The secrets mount and browsing
 
