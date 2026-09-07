@@ -12,6 +12,7 @@ import {
 import { getDefaultLinkageTerms } from "./defaults/builtInLinkageTerms.js";
 import { getDefaultStandardization } from "./defaults/builtInStandardization.js";
 import {
+  assertDeclaredWidthMatchesStrategy,
   buildStandardizedDataset,
   declaredEffectiveKeyCount,
   declaredKeyWidth,
@@ -312,34 +313,6 @@ export function assertMatchedPairsWellFormed(
  */
 export function matchedPairCount(associationTable: AssociationTable): number {
   return associationTable[0].length;
-}
-
-/**
- * Refuse agreed terms that declare a per-record candidate width
- * ({@link partyFansOut}) on a strategy matching a single value per record,
- * before anything goes on the wire: fan-out matching runs under
- * single-pass only (docs/spec/PROTOCOL.md, Fan-out runs under single-pass
- * only). Covers the width a fuzzy comparison declares, which
- * `assertFanOutImplemented` does not reach by step name. A
- * {@link UsageError}: the width is a function of terms the accept path
- * adopts wholesale.
- */
-function assertDeclaredWidthMatchesStrategy(
-  terms: LinkageTerms,
-  effectiveKeyCount: number,
-): void {
-  if (terms.linkageStrategy === "single-pass") return;
-  const keyCount = terms.linkageKeys.length;
-  if (!partyFansOut(keyCount, { effectiveKeyCount })) return;
-  throw new UsageError(
-    "these linkage terms declare " +
-      `${effectiveKeyCount} candidate value slot(s) per record against their ` +
-      `${keyCount} linkage key(s), so a record may realize several candidates ` +
-      "for a key, while they name a strategy that matches a single value per " +
-      "record. Matching a candidate set runs under the single-pass linkage " +
-      "strategy only. Remove the expanding step or fuzzy comparison from the " +
-      "key's elements, or agree terms whose linkage_strategy is single-pass.",
-  );
 }
 
 /**
@@ -1394,7 +1367,7 @@ export async function runExchange(
 
   // Refuse a declared width on a strategy that cannot match a candidate set,
   // before anything goes on the wire. See assertDeclaredWidthMatchesStrategy.
-  assertDeclaredWidthMatchesStrategy(linkageTerms, effectiveKeyCount);
+  assertDeclaredWidthMatchesStrategy(linkageTerms);
 
   onStage(CONFIRMING_PROTOCOL_STAGE_ID);
   const {

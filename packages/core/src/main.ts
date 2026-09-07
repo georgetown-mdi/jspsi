@@ -349,9 +349,11 @@ export {
   STANDARDIZATION_FUNCTION_NAMES,
   StandardizedDataset,
   StandardizedField,
+  assertDeclaredWidthMatchesStrategy,
   buildKeyStrings,
   buildStandardizedDataset,
   runPipeline,
+  strategyCannotMatchDeclaredWidth,
 } from "./standardization";
 export {
   assertFanOutImplemented,

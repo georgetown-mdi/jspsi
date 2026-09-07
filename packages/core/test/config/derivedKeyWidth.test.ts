@@ -13,10 +13,12 @@ import {
   PROTOCOL_VERSION,
 } from "../../src/protocolSetup";
 import {
+  assertDeclaredWidthMatchesStrategy,
   declaredEffectiveKeyCount,
   declaredKeyWidth,
   FAN_OUT_CANDIDATES_PER_ELEMENT,
   MAX_KEY_CANDIDATE_WIDTH,
+  strategyCannotMatchDeclaredWidth,
   SWAP_VARIANT_WIDTH_FACTOR,
 } from "../../src/fanOutFunctions";
 import {
@@ -893,5 +895,46 @@ describe("a declared width off single-pass", () => {
     await expect(run).rejects.toThrow(UsageError);
     await expect(run).rejects.toThrow(/candidate value slot\(s\) per record/);
     await expect(run).rejects.not.toThrow(/partner/);
+  });
+
+  test("the exported verdict answers for the terms the run refuses", () => {
+    // The reader an authoring surface gates Generate on, held to the refusal
+    // above: the run boundary calls the assertion below over the agreed terms,
+    // so terms the verdict answers `true` for are the terms that abort, and the
+    // single-pass pair it answers `false` for is the pair that runs.
+    const cascadeTerms: LinkageTerms = {
+      ...termsWithFuzzyKey("adjacent_years"),
+      linkageStrategy: "cascade",
+    };
+    expect(strategyCannotMatchDeclaredWidth(cascadeTerms)).toBe(true);
+    expect(() => assertDeclaredWidthMatchesStrategy(cascadeTerms)).toThrow(
+      /candidate value slot\(s\) per record/,
+    );
+
+    const singlePassTerms = termsWithFuzzyKey("adjacent_years");
+    expect(singlePassTerms.linkageStrategy).toBe("single-pass");
+    expect(strategyCannotMatchDeclaredWidth(singlePassTerms)).toBe(false);
+    expect(() =>
+      assertDeclaredWidthMatchesStrategy(singlePassTerms),
+    ).not.toThrow();
+  });
+
+  test("a width no strategy admits throws out of the verdict", () => {
+    // The over-wide key the width derivation refuses on its own: the verdict
+    // cannot answer it, so a caller reading it meets the width's own refusal
+    // rather than a `false` that would read as runnable.
+    const overWide: LinkageTerms = {
+      ...termsWithFuzzyKey("transpositions"),
+      linkageStrategy: "cascade",
+    };
+    // Unbounded by a transform, so the kind's ceiling is taken at the whole
+    // expansion input length -- past what one key may declare.
+    delete overWide.linkageKeys[0].elements[0].transform;
+    expect(() => strategyCannotMatchDeclaredWidth(overWide)).toThrow(
+      UsageError,
+    );
+    expect(() => strategyCannotMatchDeclaredWidth(overWide)).toThrow(
+      new RegExp(`${MAX_KEY_CANDIDATE_WIDTH} candidate values`),
+    );
   });
 });

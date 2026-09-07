@@ -17,6 +17,7 @@
 
 import { APPLIED_SETTINGS } from "./consent/appliedSettings.js";
 import { MAX_LINKAGE_ENTRIES } from "./config/linkageTermsSchema.js";
+import { partyFansOut } from "./connection/frameSize.js";
 import type { LinkageKey, LinkageTerms } from "./config/linkageTermsSchema.js";
 import { UsageError } from "./errors.js";
 import { fuzzyCandidateCeiling } from "./fuzzyComparisons.js";
@@ -286,6 +287,57 @@ export function declaredEffectiveKeyCount(terms: LinkageTerms): number {
         "of their elements.",
     );
   return effectiveKeyCount;
+}
+
+/**
+ * Whether `terms` declare a per-record candidate set the linkage strategy they
+ * name cannot match: a declared width above their key count
+ * ({@link partyFansOut}) under a strategy that matches a single value per
+ * record, which is every strategy but single-pass (docs/spec/PROTOCOL.md,
+ * Fan-out runs under single-pass only).
+ *
+ * The verdict {@link assertDeclaredWidthMatchesStrategy} refuses on, readable
+ * without its throw so a surface that authors or mints terms answers the
+ * question the run boundary answers rather than deriving the width a second
+ * time.
+ *
+ * @throws {UsageError} if the declared width breaks a bound of its own
+ * ({@link declaredKeyWidth}, {@link declaredEffectiveKeyCount}) -- terms
+ * refused under every strategy, so a caller that offers the strategy as a
+ * remedy states that refusal separately from this verdict.
+ */
+export function strategyCannotMatchDeclaredWidth(terms: LinkageTerms): boolean {
+  if (terms.linkageStrategy === "single-pass") return false;
+  return partyFansOut(terms.linkageKeys.length, {
+    effectiveKeyCount: declaredEffectiveKeyCount(terms),
+  });
+}
+
+/**
+ * Refuse agreed terms that declare a per-record candidate width on a strategy
+ * matching a single value per record
+ * ({@link strategyCannotMatchDeclaredWidth}), before anything goes on the
+ * wire. Covers the width a fuzzy comparison declares, which
+ * `assertFanOutImplemented` does not reach by step name.
+ *
+ * Called at the run boundary (`runExchange`) for the agreed terms, and read
+ * through its predicate at the surfaces that author them. A
+ * {@link UsageError}: the width is a function of terms the accept path adopts
+ * wholesale.
+ */
+export function assertDeclaredWidthMatchesStrategy(terms: LinkageTerms): void {
+  if (!strategyCannotMatchDeclaredWidth(terms)) return;
+  const effectiveKeyCount = declaredEffectiveKeyCount(terms);
+  throw new UsageError(
+    "these linkage terms declare " +
+      `${effectiveKeyCount} candidate value slot(s) per record against their ` +
+      `${terms.linkageKeys.length} linkage key(s), so a record may realize ` +
+      "several candidates for a key, while they name a strategy that matches " +
+      "a single value per record. Matching a candidate set runs under the " +
+      "single-pass linkage strategy only. Remove the expanding step or fuzzy " +
+      "comparison from the key's elements, or agree terms whose " +
+      "linkage_strategy is single-pass.",
+  );
 }
 
 /**

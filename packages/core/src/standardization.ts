@@ -51,11 +51,13 @@ import {
 } from "./fanOutFunctions.js";
 
 export {
+  assertDeclaredWidthMatchesStrategy,
   declaredEffectiveKeyCount,
   declaredKeyWidth,
   FAN_OUT_CANDIDATES_PER_ELEMENT,
   FAN_OUT_FUNCTION_NAMES,
   localFanOutFactor,
+  strategyCannotMatchDeclaredWidth,
 } from "./fanOutFunctions.js";
 export { DEFAULT_DATE_OUTPUT_FORMAT } from "./keyElementWidth.js";
 
