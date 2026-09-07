@@ -632,10 +632,11 @@ Two mechanisms uphold it:
 
 The **run+rotate** critical section is guarded by a single-writer lock (the Web
 Locks API, `navigator.locks`) keyed to the managed record's id, held for the whole
-window from "begin this run" through "rotated secret durably persisted". Two tabs
-of the same origin cannot both enter it: the second waits or is refused, so a
-scheduled run and an operator-opened tab -- or two tabs -- on one device cannot
-fork the secret by racing a run.
+window from "begin this run" through the success that run records -- the exchange
+with the partner included. Two tabs of the same origin cannot both enter it: the
+second waits or is refused, so a scheduled run and an operator-opened tab -- or
+two tabs -- on one device cannot fork the secret by racing a run, and no two of
+them exchange with the partner for one record at the same time.
 
 A hand-off's confirmation takes the same lock before it spends this device's copy,
 so a hand-off and a run exclude each other as two runs do. Whichever takes the lock
@@ -726,8 +727,8 @@ are withheld while this tab is running the exchange, and while a run in any
 other context holds the [single-writer
 lock](#cross-tab-single-writer-locking-web-locks), which is how a second tab's
 run or a scheduled one reaches them. The surface names the run as the reason;
-the hand-offs return when this tab's run ends or, for another context, when its
-lock releases at the rotation persist.
+the hand-offs return when this tab's run ends or, for another context, when that
+run ends and releases its lock.
 
 That withholding is a reading of the lock taken every so often, so it can miss a
 run that starts between two readings. Nothing rests on it: confirming a hand-off

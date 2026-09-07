@@ -290,8 +290,8 @@ export function runManagedExchangeInBrowser(
           throw error;
         }
       },
-      // After the durable persist and the lock release: run the PSI exchange, build
-      // the outputs, and tear down regardless of outcome.
+      // After the durable persist: run the PSI exchange, build the outputs, and
+      // tear down regardless of outcome.
       dataExchange: async (carried) => {
         try {
           const result = await runExchange(

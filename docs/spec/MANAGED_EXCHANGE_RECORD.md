@@ -248,9 +248,11 @@ secret nor the document. Two rules decide whether the entry it is handed lands,
 and each drops the entry whole rather than writing part of it:
 
 - **Monotonic on `at`.** An entry stamped before the stored one is dropped. The
-  [run+rotate lock](#the-secret-is-a-linear-resource) covers handshake through
-  persist, not two runs' bookkeeping tails, so an earlier run's late write can
-  arrive after a newer run's outcome; this rule makes it a no-op instead.
+  [run+rotate lock](#the-secret-is-a-linear-resource) serializes the runs it
+  binds, but not every entry reaches this write from inside it -- a [schedule
+  advance](#catch-up-on-wake)'s verdict on a closed window is written outside
+  the lock -- so an entry stamped behind the stored one can still arrive; this
+  rule makes it a no-op instead.
 - **A failure MUST NOT overwrite a success stamped after its own run began.**
   Every write states the instant its run began -- stamped before the run's first
   check, so it precedes every act the run makes -- and an entry whose outcome is
@@ -650,9 +652,15 @@ run, they fork the secret permanently: after the first device rotates, the secon
 device's copy is stale, and no automatic reconciliation exists (there is no grace
 window; see [Desync detection and
 recovery](../MANAGED_EXCHANGE.md#desync-detection-and-recovery)). The guard on a
-single device is a cross-tab single-writer lock over the run+rotate critical
-section (Web Locks); export/import between devices is **migration, not sync** (the
-source copy is invalidated on export). Both are specified in
+single device is a cross-tab single-writer lock (Web Locks) held from a run's
+begin through the success stamp it writes, so **one exchange of a record is in
+flight at a time** on a browser profile: a second tab, a second attended Run, and
+a scheduled attempt are each refused or queued across the whole run, the payload
+exchange included, rather than across its rotation alone. A [hand-off
+spend](#the-backup-marker-the-spent-state-and-the-import-marker-local-siblings-never-in-the-artifact)
+contends for that same lock, so it too is refused while an exchange is in flight.
+Export/import between devices is **migration, not sync** (the source copy is
+invalidated on export). Both are specified in
 [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md#single-device-ownership).
 
 ### Persist-before-success ordering

@@ -12,11 +12,11 @@
  * rotated `sharedSecret` (and `expires`, restamped from `tokenMaxAgeDays` when a
  * policy is set) is durably persisted and the write awaited; only then does the
  * data exchange begin, and only on its completion is the run recorded succeeded.
- * {@link runRotationCriticalSection} is the locked window (handshake through
- * persist); it resolves a gate holding the value the data exchange needs, so the
- * data exchange is unreachable until the persist resolves even though the caller
- * runs it after releasing the lock -- the ordering is a property of the control
- * flow, not the caller's discipline.
+ * {@link runRotationCriticalSection} is the handshake-through-persist half of
+ * the caller's locked window; it resolves a gate holding the value the data
+ * exchange needs, so the data exchange is unreachable until the persist
+ * resolves -- the ordering is a property of the control flow, not the caller's
+ * discipline.
  */
 
 import type {
@@ -180,9 +180,7 @@ export interface ManagedRotationCriticalSection<THandshake> {
 /**
  * The result of the locked critical section: the handshake's held value,
  * obtainable only once the rotated secret is durably persisted. A caller
- * structurally cannot begin the data exchange before the persist resolves, even
- * though the caller runs it AFTER releasing the lock (the lock covers only
- * through persist, per the spec's window).
+ * structurally cannot begin the data exchange before the persist resolves.
  */
 interface ManagedRotationGate<THandshake> {
   /** The handshake's held value, to hand to the data-exchange phase. */
@@ -199,9 +197,9 @@ interface ManagedRotationGate<THandshake> {
  *    the `storage`-kind `lastRun`.
  *
  * Returns the {@link ManagedRotationGate} only after the persist commits, so the
- * data exchange it gates is unreachable before the persist resolves even though
- * the caller runs it after releasing the lock -- the lock window is exactly this
- * function, no wider.
+ * data exchange it gates is unreachable before the persist resolves. The lock
+ * window is the caller's and is wider than this function: it runs on to the
+ * data exchange and the success stamp ({@link ./managedExchangeRun.ts}).
  *
  * @throws {RotationPersistError} if the rotation write-back fails to persist.
  */

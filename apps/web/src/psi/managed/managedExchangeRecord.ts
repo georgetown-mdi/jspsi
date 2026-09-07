@@ -616,10 +616,10 @@ export function applyManagedExchangeReinviteRotation(
  * chronological.
  *
  * Monotonic on `at`: an entry older than the stored one leaves the record
- * unchanged. The run+rotate lock covers only handshake through persist, not two
- * runs' bookkeeping tails, so a slow earlier run's late write could otherwise
- * land after -- and mask -- a newer run's outcome; this guard makes the stale
- * write a no-op instead.
+ * unchanged. The run+rotate lock serializes the runs it binds, but a schedule
+ * advance's verdict on a closed window is written outside it, so an entry
+ * stamped behind the stored one could otherwise land after -- and mask -- a
+ * newer outcome; this guard makes the stale write a no-op instead.
  *
  * A failure never overwrites a success stamped after its own run began:
  * `runStartedAtMs` is the instant the run producing `lastRun` began, and a
