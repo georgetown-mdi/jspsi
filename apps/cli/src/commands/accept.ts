@@ -24,6 +24,7 @@ import type {
 } from "@psilink/core";
 
 import {
+  applyConnectionOverrides,
   diffLinkageTerms,
   linkageTermsStandingOf,
   persistExpectedPartnerDeduplicate,
@@ -289,6 +290,30 @@ type AcceptReady = {
 );
 
 /**
+ * The endpoint-seeded connection with `--peer-timeout` applied, for the
+ * acceptance that runs the exchange itself. `peerTimeout` is a SharedOption on
+ * every channel, so one value bounds the rendezvous, the channel opening, and
+ * the peer silence after (see `webRtcDialFrom`).
+ *
+ * The same object becomes the run's connection and the one the bootstrap
+ * writes, so the live dial and the saved `connection.options.peer_timeout_ms`
+ * hold the same budget and a later unattended `psilink exchange` inherits it.
+ * An absent flag applies no override and leaves the transport on its own
+ * defaults.
+ *
+ * The cast restores the narrowing {@link applyConnectionOverrides} widens to
+ * `ConnectionConfig`; the override changes no channel.
+ */
+function withRunPeerTimeout(
+  connection: WebRTCConnectionConfig,
+  peerTimeoutSeconds: number | undefined,
+): WebRTCConnectionConfig {
+  return applyConnectionOverrides(connection, {
+    options: { peerTimeout: peerTimeoutSeconds },
+  }) as WebRTCConnectionConfig;
+}
+
+/**
  * Validate and prepare an acceptance without committing any side effect. Throws
  * (for the shared {@link runOrExit} mapper) on any failure; runs the invitation
  * decode before the connection/input work so the `decode -> myTerms ->
@@ -524,15 +549,6 @@ export async function validateAccept(params: {
     };
   }
 
-  // Offline: the server-block overrides (--server-* and --outbound-path) and the
-  // connection-options overrides (timeouts, --max-reconnect-attempts, the
-  // file-sync toggles) cannot take effect (the connection block is seeded from
-  // the invitation endpoint or a placeholder, not built from a URL), so warn
-  // rather than silently drop a flag the operator passed. Two diagnostics: the
-  // server block and the connection.options block have distinct remedies.
-  warnServerOverridesIgnoredOffline(options, log);
-  warnOptionsOverridesIgnoredOffline(options, log);
-
   const { reuse: reuseExistingConfig, existingOutputShares } =
     reconcileAcceptConfig({
       configPath: options.configFile,
@@ -544,7 +560,10 @@ export async function validateAccept(params: {
   const { connection: endpointConnection, seeded } = connectionFromEndpoint(
     token.connectionEndpoint,
   );
-  const connection = withWebRTCPeerRole(endpointConnection, "acceptor");
+  const endpointRoleConnection = withWebRTCPeerRole(
+    endpointConnection,
+    "acceptor",
+  );
   // `-` is gated on `--consent-to-terms` here exactly as on the online path
   // above: stdin serves the confirmation prompt unless the flag skips it, freeing
   // it for the CSV.
@@ -564,10 +583,24 @@ export async function validateAccept(params: {
   // (its `@path` references, `server.key`, `secure`) and dials what it says,
   // which may differ from the endpoint-built connection here.
   const runnableConnection =
-    connection.channel === "webrtc" && !reuseExistingConfig
-      ? connection
+    endpointRoleConnection.channel === "webrtc" &&
+    !reuseExistingConfig &&
+    rows !== undefined
+      ? withRunPeerTimeout(endpointRoleConnection, options.peerTimeout)
       : undefined;
-  const runsExchange = runnableConnection !== undefined && rows !== undefined;
+  const runsExchange = runnableConnection !== undefined;
+  const connection = runnableConnection ?? endpointRoleConnection;
+  // The server-block overrides (--server-* and --outbound-path) reach nothing
+  // on either branch: the connection block is seeded from the invitation
+  // endpoint or a placeholder, not built from a URL, so warn rather than
+  // silently drop a flag the operator passed. The connection-options overrides
+  // are dropped the same way, except --peer-timeout on the branch that runs the
+  // exchange, applied above. Two diagnostics: the two blocks differ in remedy.
+  warnServerOverridesIgnoredOffline(options, log);
+  warnOptionsOverridesIgnoredOffline(
+    runsExchange ? { ...options, peerTimeout: undefined } : options,
+    log,
+  );
   // Name the kept configuration as the reason a webrtc acceptance stops short of
   // the run its endpoint would otherwise support, so an operator who passed an
   // input file expecting one reads why rather than a silent exit 0 with no

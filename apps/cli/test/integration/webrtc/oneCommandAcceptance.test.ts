@@ -65,22 +65,36 @@ const liveTest = test.skipIf(loopbackTlsCert === null);
 const BROKER_HOST = "127.0.0.1";
 
 /**
- * The inviting party's budget for the whole run: the wait for the partner to
- * accept, plus the exchange's own peer waits after. Generous against the
- * measured ~12s an ICE round takes here, and inside the per-process
- * deadlines below, so a stall reports as a peer timeout, not a killed
- * process.
+ * Each party's budget for the whole run: the wait to meet the partner, plus
+ * the exchange's own peer waits after. The inviter sets it with
+ * `--accept-timeout` and the accepting party with `--peer-timeout`, which is
+ * that party's lever on the same three waits. Generous against the measured
+ * ~12s an ICE round takes here, and inside the per-process deadlines below,
+ * so a stall reports as a peer timeout, not a killed process. Held in
+ * milliseconds beside the flag spelling, since the configuration a run writes
+ * is asserted against the same value.
  */
-const ACCEPT_TIMEOUT = "60s";
+const PARTY_RUN_BUDGET_MS = 60_000;
+const PARTY_RUN_BUDGET = `${PARTY_RUN_BUDGET_MS / 1000}s`;
 
 /**
- * Hard deadline on each party. The accepting side takes the webrtc
- * transport's own rendezvous default (ten minutes), since an acceptance
- * seeded from an invitation endpoint carries no `peer_timeout_ms` and gets
- * no `--peer-timeout` override; without this, a stalled acceptance would run
- * until vitest killed the worker instead of reporting its cause.
+ * Hard deadline on each party: a run that outlives it is killed and reported
+ * as killed, rather than left to vitest's worker timeout. Each leg below
+ * bounds its own wait well inside it -- the acceptance through
+ * `--peer-timeout`, the inviter through `--accept-timeout` -- so a party that
+ * reaches this deadline is a failure of that bound, not of the deadline.
  */
 const PARTY_DEADLINE_MS = 90_000;
+
+/**
+ * The accepting party's budget where the leg is about the wait itself: short
+ * enough that a partner who never arrives is reported in seconds, long enough
+ * that the acceptance's own startup cannot spend it before the rendezvous
+ * begins. The expiry message quotes the seconds, so the spelling and the
+ * milliseconds are derived from one value here.
+ */
+const NO_SHOW_PEER_TIMEOUT_MS = 10_000;
+const NO_SHOW_PEER_TIMEOUT = `${NO_SHOW_PEER_TIMEOUT_MS / 1000}s`;
 
 // The de-symmetrized inputs, so the result proves the PSI filtered on both
 // sides rather than echoing every record: each side carries one non-matcher
@@ -159,6 +173,32 @@ function party(args: string[], stdin?: string): RunningCli {
   });
   parties.push(running);
   return running;
+}
+
+/**
+ * The span between two of a party's own log lines, in milliseconds.
+ *
+ * A wait is measured from the run's log rather than from the wall clock around
+ * the process: starting Node, compiling the sources, loading the PSI engine and
+ * preparing the exchange all precede the wait and cost more than it does, so a
+ * bound on the whole invocation would be sized against this machine's load
+ * instead of against the budget under test.
+ *
+ * Each line is found by a fixed fragment of its message and read for the
+ * timestamp the CLI's own log format puts at the head of it.
+ */
+function loggedSpanMs(stderr: string, from: string, to: string): number {
+  const at = (fragment: string): number => {
+    const line = stderr.split("\n").find((l) => l.includes(fragment));
+    const stamp = line?.match(/^\[([^\]]+)\]/)?.[1];
+    const parsed = stamp === undefined ? NaN : Date.parse(stamp);
+    if (Number.isNaN(parsed))
+      throw new Error(
+        `no timestamped log line contains "${fragment}"; the run wrote:\n${stderr}`,
+      );
+    return parsed;
+  };
+  return at(to) - at(from);
 }
 
 /** The association table a party wrote, as its header and its row pairs. */
@@ -241,7 +281,7 @@ liveTest(
       "--identity",
       "invite",
       "--accept-timeout",
-      ACCEPT_TIMEOUT,
+      PARTY_RUN_BUDGET,
       "--no-record",
       "--log-level",
       "info",
@@ -270,6 +310,10 @@ liveTest(
         "accept",
         "--record-file",
         acceptRecord,
+        // This acceptance runs the exchange, so its own budget bounds it: the
+        // wait for the partner at the rendezvous, and the peer waits after.
+        "--peer-timeout",
+        PARTY_RUN_BUDGET,
         "--log-level",
         "info",
       ],
@@ -329,6 +373,11 @@ liveTest(
     expect(acceptSpec.connection.server.port).toBe(front.port);
     expect(acceptSpec.connection.server.path).toBe(broker.path);
     expect(acceptSpec.connection.role).toBe("acceptor");
+    // The budget this run dialed on is the one the configuration records, so a
+    // later unattended `psilink exchange` from it waits the same.
+    expect(acceptSpec.connection.options?.peerTimeoutMs).toBe(
+      PARTY_RUN_BUDGET_MS,
+    );
     const acceptToken = loadKeyFile(acceptKey);
     const inviteToken = loadKeyFile(inviteKey);
     expect(acceptToken?.sharedSecret).toBeDefined();
@@ -348,4 +397,101 @@ liveTest(
     expect(record.partnerIdentity).toBe("invite");
   },
   180_000,
+);
+
+liveTest(
+  "an acceptance whose partner never arrives stops at its --peer-timeout",
+  async () => {
+    // The unattended case the flag exists for: the invitation is real, so the
+    // acceptance dials the coordination server the inviter published, but the
+    // party that published it is gone before the rendezvous begins. Without a
+    // budget of its own this waits out the transport's ten-minute rendezvous
+    // default; with one it fails in seconds, on the availability class a
+    // supervisor retries.
+    const inviteInput = path.join(work, "invite-input.csv");
+    fs.writeFileSync(inviteInput, INVITE_CSV);
+    const acceptInput = path.join(work, "accept-input.csv");
+    fs.writeFileSync(acceptInput, ACCEPT_CSV);
+    const acceptConfig = path.join(work, "accept.yaml");
+    const acceptKey = path.join(work, "accept.key");
+    const acceptOut = path.join(work, "accept-out.csv");
+
+    const inviter = party([
+      "invite",
+      `wss://${BROKER_HOST}:${front.port}${broker.path}`,
+      inviteInput,
+      path.join(work, "invite-out.csv"),
+      "--config-file",
+      path.join(work, "invite.yaml"),
+      "--key-file",
+      path.join(work, "invite.key"),
+      "--identity",
+      "invite",
+      "--accept-timeout",
+      PARTY_RUN_BUDGET,
+      "--no-record",
+      "--log-level",
+      "info",
+    ]);
+    const invitation = await inviter.firstStdoutLine(60_000);
+    // The partner leaves before the acceptance starts, which is what makes this
+    // a no-show rather than a slow peer: the broker holds no registration to
+    // deliver the offer to, and an offer to an unregistered id is dropped.
+    await inviter.stop();
+
+    // --consent-to-terms is the unattended shape: nothing answers a prompt, so
+    // the wait under test is the rendezvous rather than a terminal read.
+    const acceptor = party([
+      "accept",
+      "--consent-to-terms",
+      invitation,
+      acceptInput,
+      acceptOut,
+      "--config-file",
+      acceptConfig,
+      "--key-file",
+      acceptKey,
+      "--identity",
+      "accept",
+      "--peer-timeout",
+      NO_SHOW_PEER_TIMEOUT,
+      "--no-record",
+      "--log-level",
+      "info",
+    ]);
+    const acceptRun = await acceptor.finished;
+
+    // The availability class, so a supervisor tells "nobody was there" from a
+    // refused invitation (64) or a broken exchange (70).
+    expect(
+      acceptRun.exitCode,
+      describeCliRun("the acceptance", acceptRun),
+    ).toBe(69);
+    // The failure names the wait in the units the flag takes, and the flag that
+    // sets it, so the operator who chose ten seconds reads ten seconds back.
+    expect(acceptRun.stderr).toContain(
+      `did not answer within ${NO_SHOW_PEER_TIMEOUT}`,
+    );
+    expect(acceptRun.stderr).toContain("--peer-timeout");
+    // Its own budget ended the run, not the deadline that kills a party: an
+    // acceptance left on the transport's ten-minute rendezvous default would be
+    // killed here instead, with no exit code of its own and nothing said.
+    expect(acceptRun.timedOut).toBe(false);
+    // And it waited the budget it was given rather than failing early for some
+    // other reason: at least the ten seconds asked for, and inside a bound
+    // generous enough for the ICE gathering that runs within the same wait.
+    const waitedMs = loggedSpanMs(
+      acceptRun.stderr,
+      "rendezvousing through the signaling server",
+      "did not answer within",
+    );
+    expect(waitedMs).toBeGreaterThanOrEqual(NO_SHOW_PEER_TIMEOUT_MS);
+    expect(waitedMs).toBeLessThan(45_000);
+    // And nothing was provisioned: the configuration and key are written once
+    // the handshake succeeds, which never happened.
+    expect(fs.existsSync(acceptConfig)).toBe(false);
+    expect(fs.existsSync(acceptKey)).toBe(false);
+    expect(fs.existsSync(acceptOut)).toBe(false);
+  },
+  120_000,
 );
