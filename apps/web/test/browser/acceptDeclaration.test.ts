@@ -130,7 +130,7 @@ function mountStep(
     createElement(AcceptorColumnsStep, {
       linkageTerms,
       columns,
-      bidiStrippedColumns: [],
+      sanitizedColumnPositions: [],
       columnsState,
       editorState,
       verdict: acceptorVerdict(columns, linkageTerms, editorState),

@@ -29,8 +29,8 @@ export function emptyColumnPositions(
  * the structural {@link AlertContent} (`{ title, message }`) every caller assigns
  * it to, restated inline so this leaf helper does not depend on the component layer.
  *
- * `sanitizedPositions` are the positions the parse removed bidi control
- * characters from (`meta.bidiStrippedColumns`). An unnamed position among them
+ * `sanitizedPositions` are the positions the parse removed control characters
+ * from (`meta.sanitizedColumnPositions`). An unnamed position among them
  * held nothing but those characters, so the trailing-comma cause is wrong for it
  * and the removal is stated instead -- the operator's header was neither blank
  * nor trailing, and the remedy differs. Required rather than defaulted: an
@@ -57,12 +57,12 @@ export function unnameableColumnsAlert(
         `field${plural ? "s" : ""} -- and choose the file again.`
       : strippedEmpty.length === positions.length
         ? `${plural ? "Those names held" : "That name held"} nothing but ` +
-          `invisible text-direction characters, which this read removes, ` +
-          `leaving no name to match on or send to your partner. Fix the header ` +
+          `invisible control characters, which this read removes, leaving no ` +
+          `name to match on or send to your partner. Fix the header ` +
           `row -- give ${plural ? "those columns names" : "that column a name"} ` +
           `made of ordinary characters -- and choose the file again.`
         : `Column${strippedPlural ? "s" : ""} ${strippedEmpty.join(", ")} held ` +
-          `nothing but invisible text-direction characters, which this read ` +
+          `nothing but invisible control characters, which this read ` +
           `removes; a trailing comma, a blank cell, or a leading delimiter in ` +
           `the header row produces the rest. An unnamed column cannot be used ` +
           `for matching or sent to your partner. Fix the header row -- give ` +
@@ -79,10 +79,10 @@ export function unnameableColumnsAlert(
 }
 
 /**
- * The operator-facing notice for a file whose header held bidi control
- * characters, shared by every intake seat so the wording cannot drift. Core's
+ * The operator-facing notice for a file whose header held control characters,
+ * shared by every intake seat so the wording cannot drift. Core's
  * CSV parse removes them from the name before anything matches on it or sends
- * it, and reports the 1-based positions it changed (`meta.bidiStrippedColumns`,
+ * it, and reports the 1-based positions it changed (`meta.sanitizedColumnPositions`,
  * `packages/core/src/file.ts`); this is how the operator is told.
  *
  * A notice, not a refusal: the header is the operator's own, an operator who
@@ -101,12 +101,11 @@ export function unnameableColumnsAlert(
  * it derives from the header, which are the matching name, the name this screen
  * shows, and the sent name where the exchange takes that from the header. A name
  * the linkage terms declare is not read from the header at all and keeps these
- * characters, so the copy states what that costs -- the name is used as declared
- * and reaches the partner wherever the exchange sends it -- and stops there. It
- * names no remedy: this notice serves every intake seat, including the acceptor
- * seats whose terms are the partner's invitation and the direct-exchange seats
- * with no terms to edit, so no one edit is the operator's to make. Refusing such
- * a name is the terms rule's, not this read's.
+ * characters; refusing it is the terms rule's, not this read's, so the copy
+ * states that refusal and stops there. It names no remedy: this notice serves
+ * every intake seat, including the acceptor seats whose terms are the partner's
+ * invitation and the direct-exchange seats with no terms to edit, so no one edit
+ * is the operator's to make.
  */
 export function sanitizedColumnsAlert(positions: ReadonlyArray<number>): {
   title: string;
@@ -120,14 +119,15 @@ export function sanitizedColumnsAlert(positions: ReadonlyArray<number>): {
     message:
       `Column${plural ? "s" : ""} ${positions.join(", ")} in your CSV ` +
       `${plural ? "had names that held" : "had a name that held"} invisible ` +
-      `text-direction characters. The characters are gone from every name ` +
+      `control characters, text-direction ones among them. The characters are ` +
+      `gone from every name ` +
       `this read takes from the header: the name${plural ? "s" : ""} matched ` +
       `on, the name${plural ? "s" : ""} shown on this screen, and the ` +
       `name${plural ? "s" : ""} sent to your partner where the exchange takes ` +
       `${plural ? "them" : "it"} from the header. This read does not change a ` +
-      `name the linkage terms declare; one that holds these characters is ` +
-      `used as declared and reaches your partner wherever the exchange sends ` +
-      `it. Where that left two columns with the same name, the later one was ` +
+      `name the linkage terms declare; terms declaring one that holds these ` +
+      `characters are refused when they are read. ` +
+      `Where that left two columns with the same name, the later one was ` +
       `numbered to keep the two apart. Check that ` +
       `${plural ? "those columns" : "the column"} still ` +
       `${plural ? "read" : "reads"} the way your file names ` +

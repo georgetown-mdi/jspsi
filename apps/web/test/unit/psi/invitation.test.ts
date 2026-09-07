@@ -598,7 +598,7 @@ describe("generateInvitation", () => {
 
   test("an unnamed column the strip produced reports its sanitized position", async () => {
     // The mint's own re-parse is a refusal seat too: a header made only of
-    // text-direction characters strips to the empty name, and the failure carries
+    // control characters strips to the empty name, and the failure carries
     // the sanitation positions so the alert states that cause rather than a
     // trailing comma.
     const STRIPPED_TO_EMPTY_CSV =

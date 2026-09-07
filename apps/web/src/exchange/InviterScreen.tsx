@@ -748,7 +748,7 @@ export function InviterScreen() {
       });
       if (id !== parseId.current) return;
       const columns = result.meta.fields ?? [];
-      const stripped = result.meta.bidiStrippedColumns;
+      const stripped = result.meta.sanitizedColumnPositions;
       const emptyPositions = emptyColumnPositions(columns);
       if (emptyPositions.length > 0) {
         // Set after discardRead clears it: the refusal names the columns the
@@ -799,7 +799,7 @@ export function InviterScreen() {
   // keeps the authored draft when its columns are unchanged and only refreshes
   // the profile-derived facts; otherwise it reseeds from the profile.
   function commitConsoleFile(profile: ProfiledJobInput) {
-    const stripped = profile.bidiStrippedColumns;
+    const stripped = profile.sanitizedColumnPositions;
     const emptyPositions = emptyColumnPositions(profile.columns);
     if (emptyPositions.length > 0) {
       discardRead(unnameableColumnsAlert(emptyPositions, stripped));

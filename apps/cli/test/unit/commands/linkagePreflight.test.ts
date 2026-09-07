@@ -596,7 +596,7 @@ test("a dead key's refusal names the key and no field at all", () => {
 });
 
 test("a declared name the read strips from the header says so in the refusal", () => {
-  // The CSV read removes text-direction characters from the header, so a
+  // The CSV read removes control characters from the header, so a
   // configuration that names a column as it was typed declares a name no column
   // of the input has. The shortfall alone would send the operator looking for a
   // column the file does have. U+202E RLO, written as an escape so a fixture
@@ -626,7 +626,7 @@ test("a declared name the read strips from the header says so in the refusal", (
   expect(thrown).toBeInstanceOf(LinkageTermsUnsatisfiableError);
   const rendered = sanitizeErrorForDisplay(thrown);
   expect(rendered).toContain(
-    "A name the configuration declares holds invisible text-direction characters",
+    "A name the configuration declares holds invisible control characters",
   );
   // A configuration holds this operator's own declaration and one an acceptance
   // copied from an invitation verbatim, so the remedy states both edits.
@@ -657,16 +657,16 @@ test("on the accept path the rename is addressed to the partner who wrote it", (
   expect(thrown).toBeInstanceOf(LinkageTermsUnsatisfiableError);
   const rendered = sanitizeErrorForDisplay(thrown);
   expect(rendered).toContain(
-    "The invitation names a column with invisible text-direction characters",
+    "The invitation names a column with invisible control characters",
   );
   expect(rendered).toContain("Your partner has to declare that name");
   expect(rendered).not.toContain("A name the invitation declares");
   expect((thrown as Error).message).not.toContain("\u202e");
 });
 
-test("a shortfall with no such name adds no text-direction sentence", () => {
+test("a shortfall with no such name adds no stripped-name sentence", () => {
   // The ordinary case: the input simply lacks a column the terms need.
   expect(refusalRenderedForDisplay(["other"], dobTerms())).not.toContain(
-    "text-direction",
+    "invisible control characters",
   );
 });

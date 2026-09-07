@@ -398,7 +398,7 @@ test("inferMetadata empty-name error names the positions, not input", () => {
 });
 
 test("the empty-name refusal blames the removal when it emptied the name", () => {
-  // A header made only of text-direction characters is neither a trailing comma
+  // A header made only of control characters is neither a trailing comma
   // nor a blank cell, so a caller holding the parse's sanitation positions gets a
   // cause and a remedy that fit what the operator's file actually had.
   let message = "";
@@ -408,7 +408,7 @@ test("the empty-name refusal blames the removal when it emptied the name", () =>
     message = err instanceof Error ? err.message : String(err);
   }
   expect(message).toContain("input column 2 has an empty name");
-  expect(message).toContain("invisible text-direction characters");
+  expect(message).toContain("invisible control characters");
   expect(message).toContain("ordinary characters");
   expect(message).not.toContain("trailing comma");
 });
@@ -422,7 +422,7 @@ test("the empty-name refusal states both causes for a mixed header", () => {
   }
   expect(message).toContain("input columns 2, 4 have an empty name");
   expect(message).toContain("column 2 held");
-  expect(message).toContain("invisible text-direction characters");
+  expect(message).toContain("invisible control characters");
   expect(message).toContain("trailing comma");
 });
 
@@ -436,7 +436,7 @@ test("a sanitized position that is not empty leaves the generic cause", () => {
     message = err instanceof Error ? err.message : String(err);
   }
   expect(message).toContain("trailing comma");
-  expect(message).not.toContain("text-direction");
+  expect(message).not.toContain("invisible control characters");
 });
 
 test("inferMetadata accepts a fully-named header (no regression)", () => {

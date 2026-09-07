@@ -188,7 +188,7 @@ function jobInputProfileOf(body: unknown): ProfiledJobInput | null {
     return null;
   if (typeof rowCount !== "number" || !Number.isInteger(rowCount)) return null;
   if (!isStringArray(columns)) return null;
-  if (!isColumnPositionArray(body.bidiStrippedColumns, columns.length))
+  if (!isColumnPositionArray(body.sanitizedColumnPositions, columns.length))
     return null;
   if (!Array.isArray(columnSamples)) return null;
   const samples = new Map<string, Array<string>>();
@@ -208,7 +208,7 @@ function jobInputProfileOf(body: unknown): ProfiledJobInput | null {
     modifiedAt,
     rowCount,
     columns,
-    bidiStrippedColumns: body.bidiStrippedColumns,
+    sanitizedColumnPositions: body.sanitizedColumnPositions,
     columnSamples: samples,
     ...(dateInputFormat !== undefined ? { dateInputFormat } : {}),
   };

@@ -1236,7 +1236,7 @@ describe("acceptor columns step: one column name across the screen", () => {
       createElement(AcceptorColumnsStep, {
         linkageTerms: acceptorTerms,
         columns,
-        bidiStrippedColumns: [],
+        sanitizedColumnPositions: [],
         columnsState,
         editorState,
         verdict: acceptorVerdict(columns, acceptorTerms, editorState),
@@ -1511,7 +1511,7 @@ describe("acceptor columns step: the send summary is gated on the inviting party
       createElement(AcceptorColumnsStep, {
         linkageTerms,
         columns,
-        bidiStrippedColumns: [],
+        sanitizedColumnPositions: [],
         columnsState,
         editorState,
         verdict: acceptorVerdict(columns, linkageTerms, editorState),
@@ -1625,7 +1625,7 @@ describe("acceptor columns step: the columns the invitation will not accept", ()
       createElement(AcceptorColumnsStep, {
         linkageTerms,
         columns,
-        bidiStrippedColumns: [],
+        sanitizedColumnPositions: [],
         columnsState,
         editorState,
         verdict: acceptorVerdict(columns, linkageTerms, editorState),

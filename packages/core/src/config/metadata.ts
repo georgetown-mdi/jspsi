@@ -308,8 +308,8 @@ export const ALIAS_TYPE_META_MAP = DEFAULT_COLUMN_TYPES_AND_ALIASES.reduce(
  * Refuse a header holding an empty (zero-length) column name, naming the cause
  * that produced it.
  *
- * `sanitizedPositions` are the 1-based positions the parse removed bidi control
- * characters from (`CSVParseMeta.bidiStrippedColumns`, `packages/core/src/file.ts`).
+ * `sanitizedPositions` are the 1-based positions the parse removed control
+ * characters from (`CSVParseMeta.sanitizedColumnPositions`, `packages/core/src/file.ts`).
  * An empty position among them held nothing but those characters, so the
  * trailing-comma cause is wrong for it and the removal is stated instead; an
  * empty list gives the trailing-comma cause for every position.
@@ -337,11 +337,11 @@ function assertColumnNamesNonEmpty(
         `field${plural ? "s" : ""}.`
       : strippedEmpty.length === emptyPositions.length
         ? `${plural ? "those names" : "that name"} held nothing but invisible ` +
-          `text-direction characters, which this read removes. Give the ` +
+          `control characters, which this read removes. Give the ` +
           `column${plural ? "s" : ""} ${plural ? "names" : "a name"} made of ` +
           `ordinary characters, and run again.`
         : `column${strippedPlural ? "s" : ""} ${strippedEmpty.join(", ")} ` +
-          `held nothing but invisible text-direction characters, which this ` +
+          `held nothing but invisible control characters, which this ` +
           `read removes, and a trailing comma, a blank cell, or a leading ` +
           `delimiter in the CSV header row produces the rest. Name every ` +
           `column with ordinary characters, and run again.`;
@@ -361,7 +361,7 @@ function assertColumnNamesNonEmpty(
  * observations. With more than one, only a column literally named `id` or
  * `identifier` gets that role; otherwise no identifier role is assigned.
  *
- * `sanitizedPositions` are the 1-based positions the CSV parse removed bidi
+ * `sanitizedPositions` are the 1-based positions the CSV parse removed
  * control characters from, so the empty-name refusal below can name the removal
  * as the cause. Required rather than defaulted: an omitted list means "blame the
  * trailing comma", and a read that forgot to thread its own positions would

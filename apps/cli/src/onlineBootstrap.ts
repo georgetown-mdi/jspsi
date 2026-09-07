@@ -396,8 +396,8 @@ export function expiresFromNow(durationSeconds: number): string {
  * `verify-receipt` does NOT come through here: its result CSV is legitimately
  * empty for a zero-match exchange.
  *
- * A header that lost a bidi control character at the parse
- * (`CSVParseMeta.bidiStrippedColumns`, `packages/core/src/file.ts`) is reported
+ * A header that lost a control character at the parse
+ * (`CSVParseMeta.sanitizedColumnPositions`, `packages/core/src/file.ts`) is reported
  * here as a warning rather than a refusal, so the CLI operator is told what the
  * web intake seats tell theirs. The line names the 1-based column positions and
  * never the header itself: printing the name would put the removed characters
@@ -422,16 +422,16 @@ export async function loadInputRows(
         "non-match, so it is refused here; check the export that produced the " +
         "file.",
     );
-  warnBidiStrippedColumns(csvResult.meta.bidiStrippedColumns);
+  warnSanitizedColumns(csvResult.meta.sanitizedColumnPositions);
   return {
     rawRows: csvResult.data,
     columns: csvResult.meta.fields ?? [],
-    sanitizedColumnPositions: csvResult.meta.bidiStrippedColumns,
+    sanitizedColumnPositions: csvResult.meta.sanitizedColumnPositions,
   };
 }
 
 /**
- * Tell the operator which column positions lost a bidi control character at the
+ * Tell the operator which column positions lost a control character at the
  * parse, or say nothing when none did. Shared by every CLI read of an operator
  * CSV -- the loader below and `init`'s bounded inference read -- so no seat
  * authors a config or runs an exchange on a changed name silently. The logger is
@@ -447,30 +447,29 @@ export async function loadInputRows(
  * it derives from the header, which are the matching name and the sent name
  * where the exchange takes that from the header. A name declared outside the
  * header -- an explicit metadata block, a linkage field, a standardization
- * output -- is not read from the header at all, keeps these characters, and
- * reaches the partner wherever the run sends it, so the line says so and stops
- * there. It names no remedy: this read serves every CLI path, including an
- * accept whose declared names are the partner's invitation and a zero-setup run
- * with no configuration at all, so no one document is the operator's to edit.
- * The seat-specific refusal (`checkLinkageSatisfiability`) names who fixes
- * it. Refusing such a name is the terms rule's, not this read's.
+ * output -- is not read from the header at all and keeps these characters, and
+ * the terms rule is what refuses it: a document declaring such a name fails to
+ * parse, naming the field. The line says so and stops there. It names no
+ * remedy: this read serves every CLI path, including an accept whose declared
+ * names are the partner's invitation and a zero-setup run with no configuration
+ * at all, so no one document is the operator's to edit. The seat-specific
+ * refusal (`checkLinkageSatisfiability`) names who fixes a declared name this
+ * input cannot match.
  */
-export function warnBidiStrippedColumns(
-  positions: ReadonlyArray<number>,
-): void {
+export function warnSanitizedColumns(positions: ReadonlyArray<number>): void {
   if (positions.length === 0) return;
   const plural = positions.length > 1;
   getLogger("input").warn(
     `column${plural ? "s" : ""} ${positions.join(", ")} of your CSV input ` +
       `had ${plural ? "names that held" : "a name that held"} invisible ` +
-      `text-direction characters. The characters are gone from every name ` +
+      `control characters, text-direction ones among them. The characters are ` +
+      `gone from every name ` +
       `this read takes from the header: the ` +
       `name${plural ? "s" : ""} matched on, and the ` +
       `name${plural ? "s" : ""} sent to your partner where the exchange ` +
       `takes ${plural ? "them" : "it"} from the header. This read does not ` +
-      `change a name declared outside the header; one that holds these ` +
-      `characters is used as declared and reaches your partner wherever the ` +
-      `exchange sends it. ` +
+      `change a name declared outside the header; terms declaring one that ` +
+      `holds these characters are refused when they are read. ` +
       `Where that left two columns with the same name, the later one was ` +
       `numbered to keep the two apart. Check that ` +
       `${plural ? "those columns" : "the column"} still ` +
@@ -587,7 +586,7 @@ export function buildDataSpec(args: {
   rows?: {
     rawRows: Array<CSVRow>;
     columns: string[];
-    /** The 1-based positions this read removed bidi control characters from
+    /** The 1-based positions this read removed control characters from
      * ({@link loadInputRows}'s own field), so the empty-name refusal below names
      * the removal. Required: an omitted list states the trailing-comma cause. */
     sanitizedColumnPositions: Array<number>;

@@ -7,7 +7,7 @@ import {
   LinkageTermsUnsatisfiableError,
   MAX_ERROR_CAUSE_DEPTH,
   redactAndSanitizeForDisplay,
-  stripBidiControls,
+  stripNameControlChars,
   summarizeLinkageShortfall,
 } from "@psilink/core";
 import type {
@@ -46,7 +46,7 @@ export interface LinkagePreflightMessaging {
    * until the invitation it is about to generate is sent. */
   termsStanding: LinkageTermsStanding;
   /** Which remedy the declared-name sentence states ({@link
-   * bidiDeclaredNameNote}). The accept path reads the partner's invitation, a
+   * strippedDeclaredNameNote}). The accept path reads the partner's invitation, a
    * document this operator cannot edit, so telling this operator to declare the
    * name differently names the wrong party. A configuration holds names this
    * operator declared, or names an acceptance copied from an invitation
@@ -91,8 +91,8 @@ function fitDetailLinks(details: string[], overflowNoun: string): string[] {
 
 /**
  * Whether a name the terms or the committed metadata declare matches a column of
- * this input only once the bidi control characters the CSV read removes are
- * taken out of it.
+ * this input only once the control characters the CSV read removes are taken out
+ * of it.
  *
  * The read strips those characters from the header before anything matches on
  * it, so a document naming a column by the header as typed declares a name no
@@ -100,13 +100,13 @@ function fitDetailLinks(details: string[], overflowNoun: string): string[] {
  * cleaning that drops every record) are all wrong for it. True here is what
  * lets the refusal say so.
  */
-function declaredNameDiffersOnlyByBidiControls(
+function declaredNameDiffersOnlyByControlChars(
   columns: ReadonlyArray<string>,
   declaredNames: ReadonlyArray<string>,
 ): boolean {
   const present = new Set(columns);
   return declaredNames.some(
-    (name) => !present.has(name) && present.has(stripBidiControls(name)),
+    (name) => !present.has(name) && present.has(stripNameControlChars(name)),
   );
 }
 
@@ -119,16 +119,18 @@ function declaredNameDiffersOnlyByBidiControls(
  * partner-authored on the accept path, and stays on the cause links that state
  * names.
  */
-function bidiDeclaredNameNote(messaging: LinkagePreflightMessaging): string {
+function strippedDeclaredNameNote(
+  messaging: LinkagePreflightMessaging,
+): string {
   if (messaging.declaredNamesAuthor === "the partner")
     return (
-      ` The ${messaging.source} names a column with invisible text-direction ` +
+      ` The ${messaging.source} names a column with invisible control ` +
       `characters, which this read removes from the CSV header, so no column ` +
       `of this input matches it. Your partner has to declare that name ` +
       `without them and send a new invitation.`
     );
   return (
-    ` A name the ${messaging.source} declares holds invisible text-direction ` +
+    ` A name the ${messaging.source} declares holds invisible control ` +
     `characters, which this read removes from the CSV header, so it matches ` +
     `no column of this input. Declare it without them, or, if it came from ` +
     `your partner's invitation, ask them for a new invitation that declares ` +
@@ -224,18 +226,18 @@ export function checkLinkageSatisfiability(
     remedyLeads.push("correct the cleaning steps those keys declare");
   const remedy = remedyLeads.join(" and ");
 
-  const bidiNote = declaredNameDiffersOnlyByBidiControls(columns, [
+  const strippedNameNote = declaredNameDiffersOnlyByControlChars(columns, [
     ...verdict.unsatisfiedFields.map((field) => field.name),
     ...(metadata ?? []).map((column) => column.name),
   ])
-    ? bidiDeclaredNameNote(messaging)
+    ? strippedDeclaredNameNote(messaging)
     : "";
 
   throw new LinkageTermsUnsatisfiableError(
     `this CSV cannot satisfy every linkage key the ${messaging.source} ` +
       `declares: ${summarizeLinkageShortfall(verdict, messaging.termsStanding)}. ` +
       messaging.blockConsequence +
-      bidiNote,
+      strippedNameNote,
     {
       cause: chainDetailCauses([
         `${remedy.charAt(0).toUpperCase()}${remedy.slice(1)}, ${messaging.blockRemedy}`,

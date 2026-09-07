@@ -88,7 +88,7 @@ function MarkedColumnList({ names }: { names: Array<string> }) {
 export function AcceptorColumnsStep({
   linkageTerms,
   columns,
-  bidiStrippedColumns,
+  sanitizedColumnPositions,
   columnsState,
   editorState,
   verdict,
@@ -113,10 +113,10 @@ export function AcceptorColumnsStep({
   linkageTerms: LinkageTerms;
   /** The acceptor's own CSV column names. */
   columns: Array<string>;
-  /** The 1-based positions of the columns whose name lost bidi control characters
-   * at the parse, from core's `CSVParseMeta.bidiStrippedColumns`. Empty for a
+  /** The 1-based positions of the columns whose name lost control characters
+   * at the parse, from core's `CSVParseMeta.sanitizedColumnPositions`. Empty for a
    * header that held none. */
-  bidiStrippedColumns: Array<number>;
+  sanitizedColumnPositions: Array<number>;
   columnsState: AcceptorColumnsState;
   /** The effective `{ metadata, standardization }` the verdict and launch consume. */
   editorState: { metadata: Metadata; standardization: Standardization };
@@ -236,8 +236,8 @@ export function AcceptorColumnsStep({
       ? overlongColumnsAlert(overlongDisclosed)
       : undefined;
   const sanitizedNotice =
-    bidiStrippedColumns.length > 0
-      ? sanitizedColumnsAlert(bidiStrippedColumns)
+    sanitizedColumnPositions.length > 0
+      ? sanitizedColumnsAlert(sanitizedColumnPositions)
       : undefined;
   const standardizationValid = acceptorStandardizationValid(
     editorState.standardization,

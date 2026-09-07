@@ -64,7 +64,7 @@ import {
   parseLinkageStrategyFlag,
   runOnlineBootstrap,
   singlePassDisclosureNotice,
-  warnBidiStrippedColumns,
+  warnSanitizedColumns,
 } from "../../src/onlineBootstrap";
 import { redactUrlCredentials } from "../../src/util/connectionUrl";
 import { openInputSource } from "../../src/util/dataIo";
@@ -3992,6 +3992,51 @@ test("loadInputRows: `-` at an interactive terminal is rejected (invite path inh
   });
 });
 
+test("loadInputRows: a tab inside a header name is removed and reported too", async () => {
+  // The class the loader strips is the one a linkage terms name may not hold, so
+  // a header the operator's own export wrote with a tab in it never reaches the
+  // terms schema as a name it refuses. A column of control characters alone
+  // comes back unnamed, the same consequence the bidi half already had.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-loadrows-c0-"));
+  const logged: Array<string> = [];
+  const previousSink = getDiagnosticSink();
+  const log = getLogger("input");
+  const previousLevel = log.getLevel();
+  let rows: Awaited<ReturnType<typeof loadInputRows>> | undefined;
+  let onlyControls: Awaited<ReturnType<typeof loadInputRows>> | undefined;
+  try {
+    // A tab and an escape, written as escapes so a fixture about invisible
+    // characters is readable.
+    const tabbed = path.join(dir, "tabbed.csv");
+    fs.writeFileSync(
+      tabbed,
+      "id,date\u0009of\u0009birth,city\n1,1990-01-02,Rome\n",
+    );
+    const controlsOnly = path.join(dir, "controls-only.csv");
+    fs.writeFileSync(controlsOnly, "id,\u0009\u001b,city\n1,x,Rome\n");
+    setDiagnosticSink((_method, _prefix, args) => {
+      logged.push(args.map((arg) => String(arg)).join(" "));
+    });
+    log.setLevel("warn");
+    rows = await loadInputRows(tabbed, { allowStdin: true });
+    onlyControls = await loadInputRows(controlsOnly, { allowStdin: true });
+  } finally {
+    setDiagnosticSink(previousSink);
+    log.setLevel(previousLevel);
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+
+  expect(rows?.columns).toEqual(["id", "dateofbirth", "city"]);
+  expect(rows?.sanitizedColumnPositions).toEqual([2]);
+  expect(onlyControls?.columns).toEqual(["id", "", "city"]);
+  expect(onlyControls?.sanitizedColumnPositions).toEqual([2]);
+  const line = logged.find((entry) =>
+    entry.includes("invisible control characters"),
+  );
+  expect(line).toContain("column 2");
+  expect(line).not.toContain("date");
+});
+
 test("loadInputRows: a bidi-stripped header is reported by position, never by name", async () => {
   // The web intake seats show the operator which column positions the parse
   // changed; the CLI operator is told the same through the shared loader, so no
@@ -4026,7 +4071,9 @@ test("loadInputRows: a bidi-stripped header is reported by position, never by na
     fs.rmSync(dir, { recursive: true, force: true });
   }
 
-  const line = logged.find((entry) => entry.includes("text-direction"));
+  const line = logged.find((entry) =>
+    entry.includes("invisible control characters"),
+  );
   expect(line).toBeDefined();
   expect(line).toContain("column 2");
   expect(line).not.toContain("dob");
@@ -4065,7 +4112,9 @@ test("loadInputRows: a header that collides after the strip is warned by positio
 
   expect(columns).toEqual(["name", "name_1"]);
   expect(positions).toEqual([2]);
-  const line = logged.find((entry) => entry.includes("text-direction"));
+  const line = logged.find((entry) =>
+    entry.includes("invisible control characters"),
+  );
   expect(line).toContain("column 2");
   expect(line).toContain("two columns with the same name");
   expect(line).toContain("the later one was numbered");
@@ -4074,9 +4123,9 @@ test("loadInputRows: a header that collides after the strip is warned by positio
 
 test("the strip warning bounds the removal to the names this read derives", () => {
   // The read reaches the names it takes from the header and nothing else: a
-  // name declared outside the header keeps these characters and rides into the
-  // exchange as declared, so the line claims no more than the derived names and
-  // states that cost.
+  // name declared outside the header keeps these characters, and the terms rule
+  // is what refuses it, so the line claims no more than the derived names and
+  // names that refusal.
   const logged: Array<string> = [];
   const previousSink = getDiagnosticSink();
   const log = getLogger("input");
@@ -4086,18 +4135,22 @@ test("the strip warning bounds the removal to the names this read derives", () =
       logged.push(args.map((arg) => String(arg)).join(" "));
     });
     log.setLevel("warn");
-    warnBidiStrippedColumns([2]);
+    warnSanitizedColumns([2]);
   } finally {
     setDiagnosticSink(previousSink);
     log.setLevel(previousLevel);
   }
 
-  const line = logged.find((entry) => entry.includes("text-direction"));
+  const line = logged.find((entry) =>
+    entry.includes("invisible control characters"),
+  );
   expect(line).toContain(
     "gone from every name this read takes from the header",
   );
   expect(line).toContain("does not change a name declared outside the header");
-  expect(line).toContain("used as declared and reaches your partner");
+  expect(line).toContain(
+    "terms declaring one that holds these characters are refused",
+  );
   expect(line).not.toContain("and sent to your partner");
   expect(line).not.toContain("from any name this exchange sends your partner");
 });
@@ -4117,13 +4170,15 @@ test("the strip warning names no configuration to rewrite", () => {
       logged.push(args.map((arg) => String(arg)).join(" "));
     });
     log.setLevel("warn");
-    warnBidiStrippedColumns([1, 3]);
+    warnSanitizedColumns([1, 3]);
   } finally {
     setDiagnosticSink(previousSink);
     log.setLevel(previousLevel);
   }
 
-  const line = logged.find((entry) => entry.includes("text-direction"));
+  const line = logged.find((entry) =>
+    entry.includes("invisible control characters"),
+  );
   expect(line).toBeDefined();
   expect(line).not.toContain("configuration");
   expect(line).not.toContain("rewrite");
@@ -4132,7 +4187,7 @@ test("the strip warning names no configuration to rewrite", () => {
 
 test("the empty-name refusal blames the removal when the strip emptied the name", async () => {
   // Driven through the real parser and the real refusal: a header made only of
-  // text-direction characters strips to the empty name inferMetadata refuses, and
+  // control characters strips to the empty name inferMetadata refuses, and
   // the operator's header was neither a trailing comma nor a blank cell, so the
   // stated cause and remedy must not be those. The strip warning lands ahead of it.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-loadrows-empty-"));
@@ -4167,10 +4222,10 @@ test("the empty-name refusal blames the removal when the strip emptied the name"
 
   expect(thrown).toBeInstanceOf(UsageError);
   expect(message).toContain("input column 2 has an empty name");
-  expect(message).toContain("invisible text-direction characters");
+  expect(message).toContain("invisible control characters");
   expect(message).not.toContain("trailing comma");
   expect(
-    logged.some((entry) => entry.includes("text-direction characters")),
+    logged.some((entry) => entry.includes("invisible control characters")),
   ).toBe(true);
 });
 
@@ -4193,7 +4248,7 @@ test("the empty-name refusal keeps the blank-cell cause for a blank header cell"
 
   expect(message).toContain("input column 2 has an empty name");
   expect(message).toContain("trailing comma");
-  expect(message).not.toContain("text-direction");
+  expect(message).not.toContain("invisible control characters");
 });
 
 // --- init's bounded inference read (inferDateInputFormatFromSource) -----------
@@ -4237,7 +4292,7 @@ async function inferInitDataSpec(
     rows: {
       rawRows: [],
       columns: inferred.columns,
-      sanitizedColumnPositions: inferred.bidiStrippedColumns,
+      sanitizedColumnPositions: inferred.sanitizedColumnPositions,
     },
     ...(inferred.dateInputFormat !== undefined
       ? { dateInputFormat: inferred.dateInputFormat }

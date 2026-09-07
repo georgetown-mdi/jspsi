@@ -61,7 +61,7 @@ const CLIENTS_PROFILE = {
   ...CLIENTS_FILE,
   rowCount: 2,
   columns: ["client_id", "first_name", "last_name", "dob", "program_code"],
-  bidiStrippedColumns: [],
+  sanitizedColumnPositions: [],
   dateInputFormat: "%m/%d/%Y",
   columnSamples: [
     { column: "client_id", values: ["1", "2"] },
@@ -451,7 +451,7 @@ describe("direct exchange confirm and run", () => {
     // into the notice.
     stubJobApi({
       sftp: CONFIGURED_SFTP,
-      profile: { ...CLIENTS_PROFILE, bidiStrippedColumns: [2, 5] },
+      profile: { ...CLIENTS_PROFILE, sanitizedColumnPositions: [2, 5] },
     });
     app.render(createElement(DirectExchangeScreen));
     await reachConfirm();

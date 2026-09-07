@@ -104,7 +104,7 @@ export const TEXT_CONTROL_CHAR_MESSAGE =
  * characters {@link TEXT_CONTROL_CHAR_PATTERN} refuses in a free-text field
  * (C0 with NUL, DEL, C1, tab, line feed and carriage return included), and the
  * nine Unicode bidirectional formatting characters `BIDI_CONTROL_PATTERN`
- * (utils/bidiControls.ts) names. Letters are untouched, so a name written in
+ * (utils/nameControls.ts) names. Letters are untouched, so a name written in
  * any script passes.
  *
  * Applied at each FIELD, as the `version` semver regex below is, rather than as
@@ -120,9 +120,11 @@ export const TEXT_CONTROL_CHAR_MESSAGE =
  * (packages/core/test/config/nameShapeParity.test.ts),
  * which fails if either class moves without this one.
  *
- * The bidi half is what keeps this schema's notion of a name and the CSV read's
- * in agreement: a header loses those characters at ingestion (`file.ts`), so a
- * name they would have reordered is not one this schema accepts whole either.
+ * The same class the CSV read strips from a header at ingestion
+ * (`NAME_CONTROL_CHAR_PATTERN`, utils/nameControls.ts), which is what keeps this
+ * schema's notion of a name and that read's in agreement: no name derived from a
+ * header meets this refusal, and no character a name may keep is taken out of a
+ * header. The BMP sweep above holds that equality in both directions.
  *
  * What stays outside the rule, and why:
  * - A transform `params` string value and a name-constraint

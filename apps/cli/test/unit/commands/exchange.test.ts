@@ -2202,12 +2202,12 @@ test("prepareDataset: a header the strip emptied names the removal, not the trai
     expect(err).toBeInstanceOf(UsageError);
     const message = (err as Error).message;
     expect(message).toContain("input column 2 has an empty name");
-    expect(message).toContain(
-      "nothing but invisible text-direction characters",
-    );
+    expect(message).toContain("nothing but invisible control characters");
     expect(message).not.toContain("trailing comma");
     expect(
-      mockState.warnings.find((line) => line.includes("text-direction")),
+      mockState.warnings.find((line) =>
+        line.includes("invisible control characters"),
+      ),
     ).toContain("column 2");
   }
 });
@@ -2239,7 +2239,7 @@ test("prepareDataset: the declared-name remedy covers whoever declared the name"
     ).catch((e: unknown) => e);
     expect(thrown).toBeInstanceOf(UsageError);
     expect(sanitizeErrorForDisplay(thrown)).toContain(
-      "A name the configuration declares holds invisible text-direction " +
+      "A name the configuration declares holds invisible control " +
         "characters, which this read removes from the CSV header, so it " +
         "matches no column of this input. Declare it without them, or, if it " +
         "came from your partner's invitation, ask them for a new invitation " +

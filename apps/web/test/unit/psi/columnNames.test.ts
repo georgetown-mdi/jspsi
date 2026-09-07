@@ -41,10 +41,10 @@ describe("unnameableColumnsAlert", () => {
   });
 
   test("blames the removal, not a blank cell, when the read emptied the name", () => {
-    // A header made only of text-direction characters is neither a trailing
+    // A header made only of control characters is neither a trailing
     // comma nor a blank cell, so the stated cause and remedy must not be those.
     const alert = unnameableColumnsAlert([2], [2]);
-    expect(alert.message).toContain("invisible text-direction characters");
+    expect(alert.message).toContain("invisible control characters");
     expect(alert.message).toContain("ordinary characters");
     expect(alert.message).not.toContain("trailing comma");
   });
@@ -53,14 +53,14 @@ describe("unnameableColumnsAlert", () => {
     const alert = unnameableColumnsAlert([2, 5], [2]);
     expect(alert.message).toContain("Columns 2, 5");
     expect(alert.message).toContain("Column 2 held");
-    expect(alert.message).toContain("invisible text-direction characters");
+    expect(alert.message).toContain("invisible control characters");
     expect(alert.message).toContain("trailing comma");
   });
 
   test("keeps the blank-cell cause when the removal touched other columns only", () => {
     const alert = unnameableColumnsAlert([4], [2]);
     expect(alert.message).toContain("trailing comma");
-    expect(alert.message).not.toContain("text-direction");
+    expect(alert.message).not.toContain("invisible control characters");
   });
 });
 
@@ -129,16 +129,16 @@ describe("sanitizedColumnsAlert", () => {
     );
   });
 
-  test("states what an untouched declared name costs, and names no remedy", () => {
+  test("states where an untouched declared name is refused, and names no remedy", () => {
     // The consequence is the same on every seat that renders this; the edit is
     // not. The acceptor seats hold terms the partner declared in an invitation,
     // and the direct-exchange seats hold no terms at all, so the copy states
     // one sentence and leaves the remedy to the seat that knows it.
     const alert = sanitizedColumnsAlert([1]);
     expect(alert.message).toContain(
-      "This read does not change a name the linkage terms declare; one that " +
-        "holds these characters is used as declared and reaches your partner " +
-        "wherever the exchange sends it.",
+      "This read does not change a name the linkage terms declare; terms " +
+        "declaring one that holds these characters are refused when they are " +
+        "read.",
     );
     expect(alert.message).not.toContain("configuration");
     expect(alert.message).not.toContain("invitation");

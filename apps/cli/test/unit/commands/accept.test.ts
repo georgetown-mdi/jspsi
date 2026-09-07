@@ -1123,7 +1123,10 @@ describe("the count-only shape, at the accept boundary", () => {
     // so the configuration this acceptance writes cannot run (prepareForExchange
     // refuses it before any data is sent). One warning, however many columns, naming them
     // and both remedies, while the operator can still decline.
-    const hostile = `notes${ESC}[0m`;
+    // A zero-width joiner rather than an ESC: this name comes from the CSV
+    // header, which the read strips every control character from, and the
+    // joiner is outside that class and still needs escaping here.
+    const hostile = `notes\u200d[0m`;
     const { warnings, ready } = await acceptWarnings({
       token: tokenDeclaringReceive([]),
       columns: [...LINKAGE_COLUMNS, "diagnosis", hostile],
@@ -1139,7 +1142,7 @@ describe("the count-only shape, at the accept boundary", () => {
     expect(refused).toContain(`\n  - ${sanitizeForDisplay(hostile)}`);
     // The names are the operator's own file's and reach the log sink without ever
     // becoming an Error, so the sink is where they are escaped.
-    expect(refused).not.toContain(ESC);
+    expect(refused).not.toContain("\u200d");
     // Offline acceptance completes, so it says where the refusal actually arrives.
     expect(refused).toContain("psilink exchange");
   });
