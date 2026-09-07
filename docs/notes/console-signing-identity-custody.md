@@ -20,7 +20,9 @@ The console's standing posture is warn-and-guide: the operator is the machine's 
 
 Key disclosure does not fit that shape. What the operator would be choosing is not a risk they carry themselves and can weigh -- it is handing a partner the key that signs for them with every other partner, and no later choice of theirs takes it back. The warning also arrives where it cannot be acted on cheaply: the remedy is a mount change, which means restarting the console, so an operator reading the warning mid-authoring is being asked to abandon the run either way. Refusing states the same thing at the moment it is true and leaves the authored draft alone.
 
-The refusal stays narrow so that the posture does not spread. It fires only for a shared-directory exchange, only while the identity file is actually there, and only where the comparison positively found the collision. Every other layout runs, including layouts where the check is merely unsure -- a refusal is owed a positive finding, and an operator hard-blocked by a check that could not resolve a path has no remedy the console can name.
+The refusal stays narrow so that the posture does not spread. It fires only for a shared-directory exchange, only where the run would have a key in the synced folder, and only where the comparison positively found the collision. Every other layout runs, including layouts where the check is merely unsure -- a refusal is owed a positive finding, and an operator hard-blocked by a check that could not resolve a path has no remedy the console can name.
+
+"Would have a key" covers the key the run itself would mint, not only one already on disk. The console passes the identity path to the CLI child explicitly, and a signed run with no identity yet has the child create one there -- so a rule keyed on the file's presence would admit exactly the first signed run, the one that publishes the key it just made. The same reasoning refuses a fingerprint request that would MINT into that folder, while leaving a request that only reads an identity already there alone: that request creates nothing, and the run is refused on its own.
 
 ## What the check can and cannot see
 

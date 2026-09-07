@@ -29,6 +29,9 @@ import {
  *   operator's mounted folder and none is distinguishable from the console
  *   (`SigningFingerprintResult` states which and why), so it is named apart from a
  *   generic error to hold copy that points at that folder.
+ * - `identityInRendezvous`: the console refused to CREATE the identity, because
+ *   the folder it would land in is one the partner syncs. About the console's
+ *   mounts rather than the request, so the copy names the mount to change.
  * - `invalid`: a `400` -- the label was malformed; `message` is the server's
  *   field-path-only reason, safe to show.
  * - `busy`: a `409` -- a request is already running; the operator can retry.
@@ -45,6 +48,7 @@ export type SigningFingerprintOutcome =
       certificateFileName?: string;
     }
   | { kind: "refused" }
+  | { kind: "identityInRendezvous" }
   | { kind: "invalid"; message: string }
   | { kind: "busy" }
   | { kind: "timeout" }
@@ -59,6 +63,8 @@ function fingerprintOutcomeOf(body: unknown): SigningFingerprintOutcome {
   if (!isRecord(body)) return { kind: "error" };
   const { status } = body;
   if (status === "refused") return { kind: "refused" };
+  if (status === "identityInRendezvous")
+    return { kind: "identityInRendezvous" };
   if (status === "timeout") return { kind: "timeout" };
   if (status !== "ok") return { kind: "error" };
   const { fingerprint, created, identityFileName, certificateFileName } = body;

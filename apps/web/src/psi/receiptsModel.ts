@@ -19,8 +19,8 @@ import type { JobSigningChoice } from "@jobs/intentSchemas";
  * Regenerating the signing identity is a command-line action, not offered
  * here ({@link IDENTITY_REGENERATION_NOTICE}); the identity's location is
  * fixed to the console's one mounted working directory
- * ({@link IDENTITY_AT_REST_NOTICE}; shared-mount hazard:
- * {@link IDENTITY_SHARED_MOUNT_ADVISORY}).
+ * ({@link IDENTITY_AT_REST_NOTICE}; what the pre-run refusal for the
+ * shared-mount layout cannot see: {@link IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY}).
  */
 
 /**
@@ -274,8 +274,9 @@ export function receiptsProblems(
  *
  * True on every layout, so raised on every one, and an `info` rather than a
  * warning ({@link ReceiptsAdvisorySeverity}) -- it poses no hazard this run
- * makes live. The layout-gated hazard is
- * {@link IDENTITY_SHARED_MOUNT_ADVISORY}, raised above it where it applies.
+ * makes live. The layout-gated word is
+ * {@link IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY}, raised above it where it
+ * applies.
  */
 export const IDENTITY_AT_REST_NOTICE =
   "Your signing key is written into the folder you mounted, beside this " +

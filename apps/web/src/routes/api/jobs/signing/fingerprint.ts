@@ -52,8 +52,11 @@ const fingerprintBodySchema = z.strictObject({
  * fingerprint, whether this call created the identity, and the two mount FILE
  * NAMES the console's copy points the operator at -- names, never paths, so no
  * container location crosses the boundary. Anything else is a category
- * (`refused` / `timeout` / `error`), so the client reads the outcome from the
- * body rather than from the status.
+ * (`refused` / `timeout` / `error` / `identityInRendezvous`), so the client
+ * reads the outcome from the body rather than from the status. Each category is
+ * an enumerated word and the whole body: the last one is about the console's
+ * mounts, which the browser never learns, so it names the refusal and nothing
+ * about the layout that produced it.
  */
 function fingerprintEnvelope(
   result: SigningFingerprintResult,
@@ -74,6 +77,10 @@ function fingerprintEnvelope(
  * `POST /api/jobs/signing/fingerprint` -- create-or-reuse this party's signing
  * identity in the console's mounted working directory and return its
  * fingerprint, so the operator can share it out-of-band before a signed exchange.
+ *
+ * Creating one is refused where the directory it would land in is a directory a
+ * partner syncs ({@link JobManager.resolveSigningFingerprint}); reading one
+ * already there is not.
  *
  * It is the console's whole signing-identity surface, narrow by design: it can
  * create-or-reuse and export the PUBLIC certificate, but cannot regenerate --

@@ -135,6 +135,12 @@ const FINGERPRINT_SIGKILL_GRACE_MS = 5_000;
  * - `timeout`: the watchdog killed the child.
  * - `error`: any other non-zero exit, no valid fingerprint line, or the
  *   child could not be spawned.
+ * - `identityInRendezvous`: no child ran at all. There is no identity yet and a
+ *   rendezvous leg holds the directory one would be created in, so minting it
+ *   would put this party's private key where a file-sync run publishes it. The
+ *   manager raises it before this driver is reached
+ *   ({@link JobManager.resolveSigningFingerprint}); every other member is a
+ *   child's outcome.
  */
 export type SigningFingerprintResult =
   | {
@@ -145,7 +151,8 @@ export type SigningFingerprintResult =
     }
   | { kind: "refused" }
   | { kind: "timeout" }
-  | { kind: "error" };
+  | { kind: "error" }
+  | { kind: "identityInRendezvous" };
 
 /**
  * Parse and re-validate the child's single stdout line. The command prints the

@@ -168,10 +168,11 @@ export class JobRendezvousRetainRequiredError extends Error {
  * the rendezvous directory to the partner, and a long-lived private key there
  * lets whoever reads it sign receipts in this party's name with every partner.
  *
- * Raised only where the identity file exists and a rendezvous leg IS or HOLDS
- * its directory, positively established (see
- * {@link rendezvousHoldsDirectory}). The route maps it to a 400 naming the
- * refusal, which is the one create rejection whose body says which it is.
+ * Raised only where a rendezvous leg IS or HOLDS the identity's directory,
+ * positively established (see {@link rendezvousHoldsDirectory}), and the run
+ * would have a key there -- one already on disk, or the one a `certificate`
+ * intent has the child mint. The route maps it to a 400 naming the refusal,
+ * which is the one create rejection whose body says which it is.
  */
 export class JobSigningIdentityExposedError extends Error {
   constructor() {
@@ -518,7 +519,7 @@ export class JobManager {
         throw new JobRendezvousRetainRequiredError();
       // Refused rather than warned: the run would copy this party's long-lived
       // private key to the partner, and no wording recovers a disclosed key.
-      if (this.rendezvousHoldsSigningIdentity())
+      if (this.runWouldPublishSigningIdentity(intent))
         throw new JobSigningIdentityExposedError();
     }
 
@@ -575,28 +576,46 @@ export class JobManager {
   }
 
   /**
-   * Whether a filedrop run would publish this party's signing identity: the
-   * identity file is there, and a rendezvous leg IS or HOLDS the directory it
-   * sits in ({@link signingIdentityDirectory}). A leg mounted INSIDE that
-   * directory, a sibling, and a console with no identity yet are all admitted --
-   * none of them puts the key where the partner reads.
+   * Whether a rendezvous leg IS or HOLDS the directory this party's signing
+   * identity sits in ({@link signingIdentityDirectory}) -- the layout in which
+   * a key there is a key the partner reads. A leg mounted INSIDE that directory
+   * and a leg beside it both hold nothing of it.
    *
-   * Read per run rather than at boot: the identity is created on demand between
-   * one run and the next, and the mounts can be re-pointed under a running
-   * console.
+   * Read per request rather than at boot, since the mounts can be re-pointed
+   * under a running console.
    *
    * A hold the comparison could not establish -- an unreadable path component,
    * or one host directory bound in at two container paths outside the ancestor
-   * chain -- admits the run: a refusal is owed a positive finding, and the
+   * chain -- reads as no hold: a refusal is owed a positive finding, and the
    * console says what it cannot see beside the signing control instead.
    */
-  private rendezvousHoldsSigningIdentity(): boolean {
-    if (!signingIdentityExists(this.dataRoot)) return false;
+  private rendezvousHoldsIdentityDirectory(): boolean {
     const verdict = rendezvousHoldsDirectory(
       this.rendezvousLegs().map(([dir]) => dir),
       signingIdentityDirectory(this.dataRoot),
     );
     return verdict.holds && !verdict.uncertain;
+  }
+
+  /**
+   * Whether a filedrop run from this intent would publish this party's signing
+   * identity: a rendezvous leg holds the identity's directory
+   * ({@link rendezvousHoldsIdentityDirectory}) and the run has a key there.
+   *
+   * A key is there when the identity file exists, and equally when the intent
+   * asks for `certificate` signing with none yet: the child is pointed at
+   * {@link signingIdentityPath} and mints one at that path, so the first signed
+   * run publishes the key it just created. A run that signs nothing and finds no
+   * identity file publishes none, so the shared layout alone admits it.
+   *
+   * The identity is read per run rather than at boot, since it is created on
+   * demand between one run and the next.
+   */
+  private runWouldPublishSigningIdentity(intent: JobCreateIntent): boolean {
+    const keyWouldBeThere =
+      signingIdentityExists(this.dataRoot) ||
+      (intent.mode !== "zeroSetup" && intent.signing?.mode === "certificate");
+    return keyWouldBeThere && this.rendezvousHoldsIdentityDirectory();
   }
 
   /**
@@ -741,6 +760,13 @@ export class JobManager {
    * a second fixed name in the same mount. The manager owns both paths, so no
    * request value is ever a path.
    *
+   * A request that would MINT the identity is refused where a rendezvous leg
+   * holds the directory it would be minted in
+   * ({@link rendezvousHoldsIdentityDirectory}): the key would land where a
+   * filedrop run publishes it. Reading an identity already there is admitted --
+   * this request creates nothing, and the run that would publish it is refused
+   * on its own ({@link JobSigningIdentityExposedError}).
+   *
    * Single-flight: the flag is claimed synchronously, so a concurrent
    * request is {@link SigningFingerprintBusyError} (a 409) rather than a
    * second child racing the same file.
@@ -749,6 +775,11 @@ export class JobManager {
     identityLabel: string;
     exportCertificate: boolean;
   }): Promise<SigningFingerprintResult> {
+    if (
+      !signingIdentityExists(this.dataRoot) &&
+      this.rendezvousHoldsIdentityDirectory()
+    )
+      return { kind: "identityInRendezvous" };
     if (this.fingerprintInFlight) throw new SigningFingerprintBusyError();
     this.fingerprintInFlight = true;
     try {

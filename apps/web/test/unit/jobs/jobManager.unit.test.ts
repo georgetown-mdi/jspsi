@@ -1932,6 +1932,10 @@ describe("the disk-only DELETE arm", () => {
   });
 });
 
+/** A canonical-format partner fingerprint, the pin a certificate-mode intent
+ * must hold. */
+const PARTNER_FINGERPRINT = "C".repeat(43);
+
 describe("a filedrop run that would publish the signing identity", () => {
   /** A manager over an explicit data root, so a test can put the rendezvous mount
    * exactly where the layout under test wants it relative to the folder holding
@@ -2046,14 +2050,33 @@ describe("a filedrop run that would publish the signing identity", () => {
     );
   });
 
-  test("admits the shared layout while no identity has been created", async () => {
-    // The refusal is about a private key that is there: a console that has never
-    // asked for a fingerprint publishes none.
+  test("admits the shared layout for an unsigned run with no identity", async () => {
+    // Nothing to publish: no key on disk, and a run signing nothing creates
+    // none.
     const root = directory("signing-absent");
     const manager = makeSigningManager({ dataRoot: root });
-    await expect(manager.createJob(validIntent())).resolves.toBeTypeOf(
-      "string",
-    );
+    await expect(
+      manager.createJob(validIntent({ signing: { mode: "none" } })),
+    ).resolves.toBeTypeOf("string");
+  });
+
+  test("refuses the shared layout for a signed run with no identity", async () => {
+    // The child is pointed at the identity path explicitly and mints one there,
+    // so keying the refusal on the file's presence would admit exactly the first
+    // signed run -- the one that publishes the key it just created.
+    const root = directory("signing-first-run");
+    const manager = makeSigningManager({ dataRoot: root });
+    await expect(
+      manager.createJob(
+        validIntent({
+          signing: {
+            mode: "certificate",
+            partnerFingerprint: PARTNER_FINGERPRINT,
+          },
+        }),
+      ),
+    ).rejects.toBeInstanceOf(JobSigningIdentityExposedError);
+    expect(fs.readdirSync(root)).toEqual([]);
   });
 
   test("admits an sftp run out of the shared layout", async () => {
@@ -2086,5 +2109,34 @@ describe("a filedrop run that would publish the signing identity", () => {
     expect(alert.message).toContain("The console did not start it");
     expect(alert.message).toContain("JOB_RENDEZVOUS_DIR");
     expect(alert.message).toContain("sign receipts in your name");
+  });
+
+  describe("the fingerprint request into the same layout", () => {
+    test("refuses to mint the identity where a rendezvous leg holds its folder", async () => {
+      const root = directory("fingerprint-mint");
+      const manager = makeSigningManager({ dataRoot: root });
+      await expect(
+        manager.resolveSigningFingerprint({
+          identityLabel: "Agency A",
+          exportCertificate: false,
+        }),
+      ).resolves.toEqual({ kind: "identityInRendezvous" });
+      // No child ran, so nothing was written into the folder the partner syncs.
+      expect(fs.readdirSync(root)).toEqual([]);
+    });
+
+    test("reads an identity already in that folder", async () => {
+      // This request creates nothing, so it publishes nothing; the run that
+      // would publish the file is refused on its own.
+      const root = directory("fingerprint-read");
+      writeIdentity(root);
+      const manager = makeSigningManager({ dataRoot: root });
+      await expect(
+        manager.resolveSigningFingerprint({
+          identityLabel: "Agency A",
+          exportCertificate: false,
+        }),
+      ).resolves.toMatchObject({ kind: "ok", created: false });
+    });
   });
 });
