@@ -61,7 +61,8 @@ import { classifyInboundValue, concatChunks, unpackFrame } from "./peerjsWire";
  * Every breach is terminal and fail-closed: the offending bytes are never
  * unpacked and never delivered, and the failure names the rule that refused them
  * -- the pre-scan enforces the nesting depth, the per-string cap, the
- * byte-backed-elements check and the map-key rule on one walk.
+ * byte-backed-elements check, the cumulative element rule and the map-key rule
+ * on one walk.
  */
 
 /** What one accepted datagram produced. */
@@ -86,7 +87,7 @@ export interface InboundBoundOptions {
 /**
  * A terminal refusal of one frame: `predicate` says what the frame did, so the
  * message names the rule that fired rather than one standing in for the rest.
- * For the four pre-scan rules the predicate comes from core's one renderer, so
+ * For the five pre-scan rules the predicate comes from core's one renderer, so
  * both transports word those identically; the wire-byte and chunk-cap
  * predicates are composed here, from this side's own fixed limits.
  *

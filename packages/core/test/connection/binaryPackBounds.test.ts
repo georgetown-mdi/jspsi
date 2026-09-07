@@ -1,4 +1,4 @@
-import { pack } from "peerjs-js-binarypack";
+import { pack, unpack } from "peerjs-js-binarypack";
 import { describe, expect, test } from "vitest";
 
 import {
@@ -11,9 +11,10 @@ import {
   describeFrameStructureRefusal,
   scanFrameStructure,
 } from "../../src/connection/binaryPackBounds";
+import { MAX_SINGLE_PASS_CELLS } from "../../src/connection/frameSize";
 
 import type { FrameStructureRefusal } from "../../src/connection/binaryPackBounds";
-import type { Packable } from "peerjs-js-binarypack";
+import type { Packable, Unpackable } from "peerjs-js-binarypack";
 
 /** Whether the scan refuses `frame` under the given limits, for the tests that
  * assert only the verdict; the rule each refusal names is asserted separately (see
@@ -107,6 +108,138 @@ describe("scanFrameStructure", () => {
   });
 });
 
+function concatBytes(parts: Array<Uint8Array>): Uint8Array {
+  let length = 0;
+  for (const part of parts) length += part.length;
+  const joined = new Uint8Array(length);
+  let offset = 0;
+  for (const part of parts) {
+    joined.set(part, offset);
+    offset += part.length;
+  }
+  return joined;
+}
+
+/** `levels` nested array32 headers each declaring `width` children, with `width`
+ * one-byte values behind the innermost -- so every level's declared count is
+ * backed by the bytes that follow it, and the wire spends those bytes once
+ * however many levels reserve them. */
+function nestedArrayFrame(levels: number, width: number): Uint8Array {
+  const parts: Array<Uint8Array> = [];
+  for (let i = 0; i < levels; i += 1) parts.push(array32Header(width));
+  parts.push(new Uint8Array(width).fill(0x01));
+  return concatBytes(parts);
+}
+
+/** Encode with the real packer. It resolves asynchronously only for a `Blob`,
+ * which nothing here packs; an awaited-by-accident promise would put
+ * `[object Promise]` in a fixture's bytes, so the branch is asserted. */
+function packSync(value: Packable): Uint8Array {
+  const packed = pack(value);
+  if (packed instanceof Promise) {
+    throw new Error("BinaryPack packed a fixture asynchronously");
+  }
+  return new Uint8Array(packed);
+}
+
+/** One legitimate frame shape, built at a record count: the wire bytes, and the
+ * element total its containers declare between them. The builder counts what it
+ * declares rather than the scan handing the count back. */
+interface RecordShape {
+  readonly label: string;
+  readonly build: (records: number) => {
+    frame: Uint8Array;
+    declaredElements: number;
+  };
+}
+
+/** The two largest legitimate non-binary shapes psilink puts on the data channel,
+ * built per record with the real packer under a hand-written array32 header so a
+ * record count too large for `pack`'s per-element recursion still assembles. */
+const RECORD_SHAPES: Array<RecordShape> = [
+  {
+    label: "a mapped-element frame",
+    build: (records) => ({
+      frame: concatBytes([
+        array32Header(records),
+        ...Array.from({ length: records }, (_, i) =>
+          packSync({ theirIndex: i, iteration: i % 3 }),
+        ),
+      ]),
+      // The outer array's element per record, plus the two key/value pairs of
+      // each record's fixmap.
+      declaredElements: records * 5,
+    }),
+  },
+  {
+    label: "a payload frame's rows",
+    build: (records) => ({
+      frame: concatBytes([
+        array32Header(records),
+        ...Array.from({ length: records }, () => packSync(["20001"])),
+      ]),
+      declaredElements: records * 2,
+    }),
+  },
+];
+
+describe("scanFrameStructure: the cumulative element rule", () => {
+  const scan = (frame: Uint8Array): FrameStructureRefusal | undefined =>
+    scanFrameStructure(
+      frame,
+      MAX_WEBRTC_REASSEMBLY_DEPTH,
+      MAX_WEBRTC_STRING_BYTES,
+    );
+
+  test("refuses nested levels that each declare the same trailing bytes", () => {
+    // Every level here satisfies the per-container rule -- 700,000 declared
+    // against the 700,000 one-byte values that follow -- yet `unpack_array`
+    // reserves that width once per level, so 200 levels retain 1.1 GB over
+    // 701,000 wire bytes. The cumulative rule is what refuses it.
+    expect(scan(nestedArrayFrame(200, 700_000))).toEqual({
+      rule: "total-elements",
+    });
+  });
+
+  test("admits the same declared counts backed at one level, and unpacks them", () => {
+    const frame = nestedArrayFrame(1, 700_000);
+    expect(scan(frame)).toBeUndefined();
+    const decoded = unpack<Unpackable>(frame as unknown as ArrayBuffer);
+    expect(Array.isArray(decoded) && decoded.length).toBe(700_000);
+  });
+
+  test("admits the largest legitimate shapes at the single-pass ceiling", () => {
+    // Both quantities are affine in the record count, so two builds fix each
+    // shape's per-record slope and the ceiling frame follows from them. The
+    // slopes are taken at small record indices, whose packed integers are
+    // narrower than the ceiling's, so the extrapolated wire bytes understate the
+    // real frame's while the declared count per record is exact.
+    const small = 1_000;
+    const large = 3_000;
+    for (const { label, build } of RECORD_SHAPES) {
+      const at = { small: build(small), large: build(large) };
+      expect(scan(at.small.frame), `${label} was refused`).toBeUndefined();
+      expect(scan(at.large.frame), `${label} was refused`).toBeUndefined();
+
+      const span = large - small;
+      const elementsPerRecord =
+        (at.large.declaredElements - at.small.declaredElements) / span;
+      const bytesPerRecord =
+        (at.large.frame.byteLength - at.small.frame.byteLength) / span;
+      const elementsAtCeiling =
+        at.large.declaredElements +
+        elementsPerRecord * (MAX_SINGLE_PASS_CELLS - large);
+      const bytesAtCeiling =
+        at.large.frame.byteLength +
+        bytesPerRecord * (MAX_SINGLE_PASS_CELLS - large);
+      expect(
+        elementsAtCeiling,
+        `${label} at ${MAX_SINGLE_PASS_CELLS} records declares ${elementsAtCeiling} elements over at least ${bytesAtCeiling} wire bytes`,
+      ).toBeLessThan(bytesAtCeiling);
+    }
+  });
+});
+
 describe("scanFrameStructure: the map-key rule", () => {
   // A map key that is not a string on the wire is refused: the property name
   // `map[key] = value` coerces it to grows with the descendants `unpack`
@@ -164,11 +297,10 @@ describe("scanFrameStructure: the map-key rule", () => {
   });
 });
 
-/** Encode a value with the real BinaryPack packer and return the wire bytes. The
- * packer resolves synchronously for everything but a `Blob`, which nothing here
- * packs; the await keeps the declared type accurate. */
+/** Encode a value with the real BinaryPack packer and return the wire bytes, for
+ * the tests whose surrounding case is already async. */
 async function packFrame(value: Packable): Promise<Uint8Array> {
-  return new Uint8Array(await pack(value));
+  return packSync(value);
 }
 
 /** A single value wrapped in `levels` arrays. */
@@ -223,6 +355,14 @@ describe("scanFrameStructure: the rule a refusal names", () => {
     });
   });
 
+  test("names the cumulative element rule", () => {
+    // Two byte-backed levels over the same trailing bytes: the per-container rule
+    // passes at each, the cumulative one does not.
+    expect(refusalFor(nestedArrayFrame(2, 1024))).toEqual({
+      rule: "total-elements",
+    });
+  });
+
   test("names the map-key rule", () => {
     // A fixmap keyed by a fixint, likewise assembled: the packer emits a map only
     // for a plain JS object, whose keys are strings.
@@ -262,6 +402,12 @@ describe("scanFrameStructure: the rule a refusal names", () => {
           "declares a container with more elements than the bytes behind it can encode",
         limits: [256, wideStringCap],
         frames: [array32Header(1000), array32Header(0xffffffff)],
+      },
+      {
+        message:
+          "declares more elements across the whole frame than its bytes can encode",
+        limits: [256, wideStringCap],
+        frames: [nestedArrayFrame(2, 1024), nestedArrayFrame(200, 700_000)],
       },
       {
         message: "keys a map with a value that is not a string",

@@ -161,8 +161,8 @@ export function assertChunkReassemblySupported(conn: DataConnection): void {
  * - The deserialized structure's shape, in `_handleDataMessage` (both an
  *   unchunked frame and a completed reassembly flow through it): one walk of
  *   the frame's BinaryPack bytes enforces the nesting depth, the per-string
- *   cap, the byte-backed-elements check and the map-key rule before PeerJS
- *   unpacks it.
+ *   cap, the byte-backed-elements check, the cumulative element rule and the
+ *   map-key rule before PeerJS unpacks it.
  *
  * @param conn   The PeerJS data connection (open or not yet open).
  * @param fail   Latches a terminal failure (the connection's `controls.fail`).

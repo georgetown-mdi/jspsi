@@ -545,11 +545,12 @@ describe("boundedReassembly on the shapes the wire size understates", () => {
   // name -- driven through the web wrap rather than against the scan alone, so the
   // enforcement this transport actually installs is what the assertions see.
 
-  test("delivers a nested chain whose reserved stores outrun its wire size", () => {
-    // 200 byte-backed levels of 700,000 declared children each, under a megabyte of
-    // wire. Every rule is met, so the wrap delivers it: what bounds this shape is
-    // the wire cap times the amplification measured for it in
-    // packages/core/test/connection/binaryPackRetention.test.ts.
+  test("fails closed on a nested chain whose reserved stores outrun its wire size", () => {
+    // 200 byte-backed levels of 700,000 declared children each, under a megabyte
+    // of wire, which the real unpacker turns into 1.1 GB of reserved stores by
+    // reserving that width once per level. Every other rule is met -- each level
+    // has the bytes it declares behind it -- so the cumulative element rule is
+    // what refuses it, and the failure names that rule.
     const frame = nestedArrayFrame(200, 700_000, 700_000);
     expect(frame.byteLength).toBeLessThan(1024 * 1024);
 
@@ -557,8 +558,26 @@ describe("boundedReassembly on the shapes the wire size understates", () => {
     const fail = installProduction(conn);
     for (const chunk of chunkAtMtu(frame, 1)) conn._handleChunk(chunk);
 
+    expect(fail).toHaveBeenCalledTimes(1);
+    expect((fail.mock.calls[0][0] as ConnectionError).message).toBe(
+      "inbound WebRTC frame declares more elements across the whole frame than its bytes can encode",
+    );
+    expect(conn.delivered).toHaveLength(0);
+  });
+
+  test("delivers the same declared counts backed at one level", () => {
+    // The refused chain's near neighbour: one level declaring the same 700,000
+    // children over the same 700,000 element bytes. The rule turns on a count the
+    // frame declares more than once, not on the count itself.
+    const frame = nestedArrayFrame(1, 700_000, 700_000);
+
+    const conn = new FakeChunkedConnection();
+    const fail = installProduction(conn);
+    for (const chunk of chunkAtMtu(frame, 1)) conn._handleChunk(chunk);
+
     expect(fail).not.toHaveBeenCalled();
     expect(conn.delivered).toHaveLength(1);
+    expect(unpackFrame(conn.delivered[0])).toHaveLength(700_000);
   });
 
   test("delivers a frame of declared bin/raw views far under the wire cap", async () => {

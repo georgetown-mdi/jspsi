@@ -142,6 +142,9 @@ export const MAX_WEBRTC_STRING_BYTES = 100 * 1024 ** 2;
  * - `unbacked-elements`: a container declares more elements than the bytes
  *   that follow it can encode, so its declared count is one `unpack` would
  *   zero-fill rather than read.
+ * - `total-elements`: the containers of the frame declare more elements
+ *   between them than the whole frame's bytes can encode (see
+ *   {@link scanFrameStructure}).
  * - `map-key`: a map key that is not a string on the wire (see
  *   {@link scanFrameStructure}).
  */
@@ -149,6 +152,7 @@ export type FrameStructureRefusal =
   | { readonly rule: "nesting-depth"; readonly limit: number }
   | { readonly rule: "string-bytes"; readonly limit: number }
   | { readonly rule: "unbacked-elements" }
+  | { readonly rule: "total-elements" }
   | { readonly rule: "map-key" };
 
 /**
@@ -171,6 +175,8 @@ export function describeFrameStructureRefusal(
       return `exceeds its ${refusal.limit}-byte string limit`;
     case "unbacked-elements":
       return "declares a container with more elements than the bytes behind it can encode";
+    case "total-elements":
+      return "declares more elements across the whole frame than its bytes can encode";
     case "map-key":
       return "keys a map with a value that is not a string";
   }
@@ -331,15 +337,26 @@ function readValueHeader(
  * {@link FrameStructureRefusal} of the first rule that fires, or `undefined`
  * if the frame is admitted. A frame is refused when it nests deeper than
  * `maxDepth`, contains a string longer than `maxStringBytes`, declares any
- * container with more elements than the bytes that follow it can encode, or
- * keys a map with anything but a string. It walks the structure reading only
- * container headers and payload lengths, never materializing the payload, so
- * it refuses at the offending header before `unpack` allocates and skips a
- * large binary set frame in O(1).
+ * container with more elements than the bytes that follow it can encode,
+ * declares more elements across all its containers than the whole frame's
+ * bytes can encode, or keys a map with anything but a string. It walks the
+ * structure reading only container headers and payload lengths, never
+ * materializing the payload, so it refuses at the offending header before
+ * `unpack` allocates and skips a large binary set frame in O(1).
  *
- * What the three rules leave admitted is a multiple of the frame's wire
- * bytes, measured per shape in docs/spec/CHANNEL_SECURITY.md and pinned
- * against the real unpacker by
+ * The cumulative element rule is what ties retention to the wire. The
+ * per-container rule alone does not: `unpack_array` reserves `new Array(N)`
+ * from a declared count before reading an element, so a chain of nested
+ * containers each declaring the same width over the same trailing bytes is
+ * byte-backed at every level yet reserves that width once per level. Summing
+ * the declared counts across the walk charges each level separately, and a
+ * legitimate frame always satisfies the sum, because every declared child is
+ * a value that costs at least one wire byte of its own to encode.
+ *
+ * What the rules leave admitted is at most one declared node per wire byte,
+ * each retaining a measured number of bytes, so a frame retains its wire bytes
+ * times the worst per-node figure -- the envelope in
+ * docs/spec/CHANNEL_SECURITY.md, pinned against the real unpacker by
  * `packages/core/test/connection/binaryPackRetention.test.ts`. The wire-byte
  * cap ({@link MAX_WEBRTC_FRAME_BYTES}) is what that multiple applies to.
  *
@@ -371,6 +388,7 @@ export function scanFrameStructure(
   // mapLevel[d] = whether level d is a map's children, which alternate key, value,
   // key, ... so an even count still to read is a key position.
   const mapLevel: Array<boolean> = [false];
+  let declaredElements = 0;
   try {
     while (remaining.length > 0) {
       const top = remaining.length - 1;
@@ -394,6 +412,12 @@ export function scanFrameStructure(
         // Each declared element needs at least one byte to encode, so a container
         // claiming more elements than the bytes that follow is a zero-fill lie.
         if (children > cursor.remaining()) return { rule: "unbacked-elements" };
+        // Each element is also a value of its own, so the frame's containers
+        // cannot declare more between them than its bytes can encode. The
+        // per-container rule alone lets nested levels re-reserve the same
+        // trailing bytes, once per level.
+        declaredElements += children;
+        if (declaredElements > buf.length) return { rule: "total-elements" };
         if (remaining.length >= maxDepth)
           return { rule: "nesting-depth", limit: maxDepth };
         remaining.push(children);

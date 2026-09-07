@@ -21,9 +21,10 @@
 // (docs/TESTING.md, Shared test material). What each transport contributes is the
 // half that cannot move: the assertion that drives its own reassembler.
 //
-// Every frame is the real packer's output. The two shapes that packer never emits --
-// a container declaring more elements than the bytes behind it, and a map key that is
-// not a string -- are assembled around real-packed parts, the same concession core's
+// Every frame is the real packer's output. The three shapes that packer never emits
+// -- a container declaring more elements than the bytes behind it, nested containers
+// declaring the same trailing bytes at every level, and a map key that is not a
+// string -- are assembled around real-packed parts, the same concession core's
 // differential suite makes for the markers the packer cannot reach.
 
 import { pack, unpack } from "peerjs-js-binarypack";
@@ -168,6 +169,15 @@ const refusedFrames: Record<
   "unbacked-elements": {
     label: "an array32 declaring a million elements over one packed value",
     frame: concatBytes([array32Header(1_000_000), packValue("psilink")]),
+    limits: PRODUCTION_LIMITS,
+  },
+  "total-elements": {
+    label: "two array32 levels declaring the same trailing bytes each",
+    frame: concatBytes([
+      array32Header(1024),
+      array32Header(1024),
+      new Uint8Array(1024).fill(0x01),
+    ]),
     limits: PRODUCTION_LIMITS,
   },
   "map-key": {

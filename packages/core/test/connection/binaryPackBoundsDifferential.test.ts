@@ -9,6 +9,7 @@ import {
   scanFrameStructure,
 } from "../../src/connection/binaryPackBounds";
 
+import type { FrameStructureRefusal } from "../../src/connection/binaryPackBounds";
 import type { Packable, Unpackable } from "peerjs-js-binarypack";
 
 // The differential counterpart to binaryPackBounds.test.ts, which drives the scan
@@ -465,16 +466,19 @@ async function allFrames(): Promise<
 
 const utf8 = new TextEncoder();
 
-/** Whether the scan admits `frame` under the production depth and per-string
+/** The scan's verdict on `frame` under the production depth and per-string
  * limits. */
-function scanAdmits(frame: Uint8Array): boolean {
-  return (
-    scanFrameStructure(
-      frame,
-      MAX_WEBRTC_REASSEMBLY_DEPTH,
-      MAX_WEBRTC_STRING_BYTES,
-    ) === undefined
+function scanVerdict(frame: Uint8Array): FrameStructureRefusal | undefined {
+  return scanFrameStructure(
+    frame,
+    MAX_WEBRTC_REASSEMBLY_DEPTH,
+    MAX_WEBRTC_STRING_BYTES,
   );
+}
+
+/** Whether the scan admits `frame` under those same limits. */
+function scanAdmits(frame: Uint8Array): boolean {
+  return scanVerdict(frame) === undefined;
 }
 
 describe("the BinaryPack marker classes the scan dispatches on", () => {
@@ -674,21 +678,29 @@ describe("scanFrameStructure on the shapes the wire size understates", () => {
       "the innermost level did not decode the wire's elements",
     ).toBe(1);
 
-    expect(scanAdmits(frame), "a byte-backed nested chain was refused").toBe(
-      true,
-    );
+    // That reservation per level is what the per-container rule cannot see and
+    // the cumulative one does: six levels declare 120 children between them over
+    // 38 wire bytes.
+    expect(scanVerdict(frame)).toEqual({ rule: "total-elements" });
   });
 
-  test("admits a nested chain whose reserved stores outrun its wire size", () => {
+  test("refuses a nested chain whose reserved stores outrun its wire size", () => {
     // 200 levels of 700,000 declared children each, every level with more bytes
     // behind it than children in front of it, so the byte-backed rule is met at
-    // every level and the frame stays under a megabyte. Nothing refuses it: the
-    // retained store is bounded by the wire cap times the amplification measured
-    // for this shape in binaryPackRetention.test.ts, which is where its cost is
-    // stated rather than modelled here.
+    // every level and the frame stays under a megabyte. The real unpacker
+    // reserves 1.1 GB for it; the cumulative element rule is what refuses it.
     const frame = wideNestedArrayFrame(200, 700_000, 700_000);
     expect(frame.byteLength).toBeLessThan(1024 * 1024);
+    expect(scanVerdict(frame)).toEqual({ rule: "total-elements" });
+  });
+
+  test("admits the same declared count backed at one level", () => {
+    // The refused chain's near neighbour: one level declaring the same 700,000
+    // children over the same element bytes. What the rule turns on is a count
+    // declared once per level, not the count itself.
+    const frame = wideNestedArrayFrame(1, 700_000, 700_000);
     expect(scanAdmits(frame)).toBe(true);
+    expect(unpackFrame(frame)).toHaveLength(700_000);
   });
 
   test("refuses a map whose keys the real unpacker coerces from packed doubles", async () => {
@@ -921,30 +933,53 @@ describe("a non-string map key over a cursor underrun", () => {
   const atKey = (): Uint8Array =>
     concatBytes([new Uint8Array([0x81]), unbackedChain(LEVELS, WIDTH)]);
 
-  /** The same chain at a map's VALUE position, behind a real string key. */
-  const atValue = (): Uint8Array =>
-    concatBytes([
-      new Uint8Array([0x81, 0xb1, 0x6b]), // fixmap(1), fixstr "k"
-      unbackedChain(LEVELS, WIDTH),
-    ]);
+  /** An `array32` declaring twice as many children as the real-packed doubles
+   * behind it, so the cursor underruns inside it while every other rule is met:
+   * the doubles back the declared count byte for byte, and the declared total
+   * stays far under the frame's own size. */
+  async function underrunningContainer(doubles: number): Promise<Uint8Array> {
+    const parts: Array<Uint8Array> = [
+      new Uint8Array([0xdd, ...u32Bytes(doubles * 2)]),
+    ];
+    for (let i = 0; i < doubles; i++) {
+      parts.push(await packBytes((i + 1) * Math.PI));
+    }
+    return concatBytes(parts);
+  }
 
-  test("the fixture really is the admit-on-underrun shape", () => {
-    // The control: the identical chain at a VALUE position is still admitted, and
-    // admitted through the underrun path -- so what the key-position case below
-    // refuses is the key, not some other property of these bytes.
-    const frame = atValue();
+  test("an underrunning container at a value position is admitted", async () => {
+    // The control: an underrun ALONE is not what refuses a frame. This container
+    // declares 40 children over 20 real-packed doubles, sits behind a real string
+    // key, and is admitted -- so what the key-position cases below refuse is the
+    // key, not the underrun.
+    const frame = concatBytes([
+      new Uint8Array([0x81, 0xb1, 0x6b]), // fixmap(1), fixstr "k"
+      await underrunningContainer(20),
+    ]);
     expect(scanAdmits(frame)).toBe(true);
 
-    // The declared descendants really do outrun the wire: the innermost level is
-    // the only one the frame's bytes back, so every level above it is zero-filled.
-    const decoded = unpackFrame(frame);
-    const outer = (decoded as Record<string, unknown>)["k"];
-    expect(Array.isArray(outer) && outer.length).toBe(WIDTH);
-    expect(frame.byteLength).toBeLessThan(LEVELS * WIDTH);
+    // The declared children really do outrun the wire: the unpacker reserves all
+    // 40 and zero-fills the 20 the bytes do not reach.
+    const outer = (unpackFrame(frame) as Record<string, unknown>)["k"];
+    expect(Array.isArray(outer) && outer.length).toBe(40);
+    expect((outer as Array<unknown>)[39]).toBe(0);
   });
 
-  test("refuses the same chain at a key position", () => {
-    expect(scanAdmits(atKey())).toBe(false);
+  test("refuses the same underrunning container at a key position", async () => {
+    const frame = concatBytes([
+      new Uint8Array([0x81]),
+      await underrunningContainer(20),
+    ]);
+    expect(scanVerdict(frame)).toEqual({ rule: "map-key" });
+  });
+
+  test("refuses the chain at a key position on the key's marker alone", () => {
+    // The key rule decides before the scan descends, so it fires on this chain
+    // rather than the cumulative element rule its subtree would otherwise draw.
+    expect(scanVerdict(atKey())).toEqual({ rule: "map-key" });
+    expect(scanVerdict(unbackedChain(LEVELS, WIDTH))).toEqual({
+      rule: "total-elements",
+    });
   });
 
   test("the real unpacker amplifies that frame into one oversized property name", () => {
