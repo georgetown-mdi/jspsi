@@ -2850,6 +2850,68 @@ describe("InvitationTerms: the send-columns chip list is named by its visible ca
   });
 });
 
+describe("InvitationTerms: each column name takes the treatment its provenance decides", () => {
+  // Two provenances meet on the acceptor's consent screen. Its own outbound send is
+  // read from the file it chose, so each name shows through ColumnName -- a <bdi>,
+  // the isolation the confirm-columns step gives the same header -- while a name the
+  // INVITATION declares reaches the screen through the summary, escaped. Measured
+  // over one screen holding both, so a call site that swapped either treatment for
+  // the other fails here.
+
+  // U+00E9 LATIN SMALL LETTER E WITH ACUTE: ordinary content in a real header and
+  // outside printable ASCII, so the escape rewrites it. Written as an escape rather
+  // than a raw byte, so a fixture about an invisible rewrite is itself readable.
+  const ACCENT = "\u00E9";
+  // The three classes that tell the treatments apart in the rendered text: the
+  // accented letter the escape replaces with a hex escape, a backslash it doubles,
+  // and the right-to-left override the isolation is there for.
+  const ownHeader = `caf${ACCENT}${RLO}\\rate`;
+  const declaredSend = `sent${ACCENT}${RLO}\\score`;
+  const declaredReceive = `asked${ACCENT}${RLO}\\zip`;
+  // The same three characters on both sides, so what separates the two treatments is
+  // where the name came from rather than which bytes it holds.
+  const declaringTerms: LinkageTerms = {
+    ...terms,
+    payload: {
+      send: [{ name: declaredSend }],
+      receive: [{ name: declaredReceive }],
+    },
+  };
+
+  test("isolates the acceptor's own header and escapes the names the invitation declares", async () => {
+    renderTerms(declaringTerms, {
+      perspective: "review",
+      outboundColumns: [ownHeader],
+    });
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+
+    // The chip holds the header as itself, in a <bdi> the browser actually
+    // isolates: read through the computed style, so an element the engine does not
+    // isolate fails here rather than passing on the tag name alone.
+    const chips = page.getByRole("list", {
+      name: "What you will send to your partner",
+    });
+    await expect.element(chips).toBeInTheDocument();
+    const isolates = [...chips.element().querySelectorAll("bdi")];
+    expect(isolates.map((element) => element.textContent)).toEqual([ownHeader]);
+    for (const element of isolates)
+      expect(getComputedStyle(element).unicodeBidi).toBe("isolate");
+    // And nowhere on the screen is the escaped form of that header: the chip site
+    // put back on sanitizeForDisplay fails here rather than on the chip alone.
+    expect(app.container.textContent).not.toContain(
+      sanitizeForDisplay(ownHeader),
+    );
+
+    // Beside it, both declared directions keep the escape, and neither declared
+    // name reaches the screen as its own bytes.
+    const panel = await readyPanel("Other details");
+    expect(panel.textContent).toContain(sanitizeForDisplay(declaredSend));
+    expect(panel.textContent).toContain(sanitizeForDisplay(declaredReceive));
+    for (const declared of [declaredSend, declaredReceive])
+      expect(app.container.textContent).not.toContain(declared);
+  });
+});
+
 describe("InvitationTerms: no partner-controlled byte reaches the screen", () => {
   // The render half of the display-escaping property core's unit suite asserts
   // by walking the whole summarizeInvitation return value
@@ -2987,18 +3049,21 @@ describe("InvitationTerms: no partner-controlled byte reaches the screen", () =>
 
   test("the same holds on the acceptor's review screen, over the columns and expiry the token includes", async () => {
     // The props the accept screen supplies alongside the terms: the
-    // disclosed-columns subset the partner's token holds, the acceptor's own file
-    // header, and the token's expiry instant -- each reaching the screen through
-    // the same display boundary.
+    // disclosed-columns subset the partner's token holds and the token's expiry
+    // instant, each reaching the screen through the same display boundary. The
+    // acceptor's own file header goes in as a plain name and is not walked for:
+    // it is the one prop here the partner does not control, so it is isolated
+    // rather than escaped (asserted by the provenance pair above), and it enters
+    // only to render the send list this walk then reads for partner text.
     await expectEveryPresentedStringEscaped(
       {
         linkageTerms: hostileTerms,
         perspective: "review",
         disclosedPayloadColumns: [`disclo${RLO}sed`],
-        outboundColumns: [`hea${BEL}der`],
+        outboundColumns: ["header"],
         expires: hostileSource.expires,
       },
-      [HOSTILE_IDENTITY, `disclo${RLO}sed`, `hea${BEL}der`],
+      [HOSTILE_IDENTITY, `disclo${RLO}sed`],
     );
   });
 });

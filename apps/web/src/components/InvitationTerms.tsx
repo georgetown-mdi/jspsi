@@ -28,12 +28,12 @@ import {
   distinctLinkageRuleSetVerdicts,
   linkageRuleSetVerdictNote,
   ruleSetCitation,
-  sanitizeForDisplay,
   summarizeInvitation,
   unshownDeclaredNamesLine,
 } from "@psilink/core";
 
 import { ColumnChips } from "@components/ColumnChips";
+import { ColumnName } from "@components/ColumnName";
 
 import type { ReactNode, Ref } from "react";
 
@@ -749,16 +749,16 @@ export function InvitationTerms({
                       cannot disagree, and as a plain length -- none of the operator's
                       header text enters the sentence. */}
                   <OutboundSendCount count={outboundColumns.length} />
-                  {/* These are the operator's OWN CSV headers (from the live
-                      metadata disclosure), not a sanitized summary value, so
-                      sanitize them for display like every other column-name surface
-                      (ColumnChips renders verbatim) -- a header containing
-                      bidi/zero-width/homoglyph characters must not misrepresent to
-                      the operator what leaves their machine. */}
+                  {/* These are the operator's OWN CSV headers, read from the file
+                      they chose rather than from the partner's token, so each
+                      shows through ColumnName, the isolation every sink for a
+                      name of theirs uses: one header reads the same here as on
+                      the step that marks it to send. The names the invitation
+                      declares stay escaped wherever this panel shows them. */}
                   <ColumnChips
-                    columns={outboundColumns.map((name) =>
-                      sanitizeForDisplay(name),
-                    )}
+                    columns={outboundColumns.map((name, index) => (
+                      <ColumnName key={index} name={name} />
+                    ))}
                     labelledBy={outboundSendCaptionId}
                   />
                 </>
