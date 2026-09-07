@@ -96,12 +96,32 @@ const NOTICE_CEILING = 4_000;
 // then the local widening and what it costs. Pinned once, since the two tests that
 // read it drive the offer over columns sitting at different uses -- what it costs
 // must be one true sentence for both, naming no role.
+const PARTNER_REMEDY =
+  "Ask your partner for an invitation that expects what your file sends.";
+
 const WIDENING_OFFER =
-  "Ask your partner for an invitation that expects what your file sends." +
+  PARTNER_REMEDY +
   " Where your file does have such a column, you can set it to " +
   '"Sent to your partner" below instead - that discloses more than you ' +
   "have marked so far, and each column has a single use, so sending it " +
   "replaces the use it has now.";
+
+// What the same half says instead where taking that widening would cost an agreed
+// linkage key: the column the partner expects is one this file matches on, and a
+// column has a single use, so sending it leaves the run short of a key both parties
+// agreed to match on. Pinned in both numbers, since the offer is one sentence over
+// the whole declared list and its columns can sit at different uses.
+const WIDENING_COSTS_A_KEY =
+  'Setting the column your file does have to "Sent to your partner" below' +
+  " will not start the exchange: that column is used to match, and each" +
+  " column has a single use, so sending it would leave an agreed linkage" +
+  " key with no column to match on.";
+
+const WIDENING_COSTS_A_KEY_PLURAL =
+  'Setting the columns your file does have to "Sent to your partner" below' +
+  " will not start the exchange: at least one of them is used to match, and" +
+  " each column has a single use, so sending them would leave an agreed" +
+  " linkage key with no column to match on.";
 
 function mountStep(
   linkageTerms: LinkageTerms,
@@ -229,10 +249,11 @@ describe("acceptor columns step: a disagreeing non-empty declaration", () => {
     );
   });
 
-  test("offers marking a declared column the file does have, after the partner's remedy and with its cost", async () => {
-    // The same direction where the secondary remedy exists: the declared column is
-    // in this file (currently used for matching). It is offered only after the
-    // corrected invitation, and never without what it costs.
+  test("states the linkage cost where the declared column the file has is one it matches on", async () => {
+    // The same direction where the secondary remedy exists, over the column it is
+    // most often offered for: the declared column is in this file and used for
+    // matching. Sending it would leave the run short of an agreed key, so the offer
+    // states that rather than the single-use cost, which reads as a way out.
     mountStep(
       {
         ...acceptorTerms,
@@ -245,7 +266,10 @@ describe("acceptor columns step: a disagreeing non-empty declaration", () => {
         page.getByText("Your partner expects a column you are not sending"),
       )
       .toBeInTheDocument();
-    expect(app.container.textContent).toContain(WIDENING_OFFER);
+    expect(app.container.textContent).toContain(
+      `${PARTNER_REMEDY} ${WIDENING_COSTS_A_KEY}`,
+    );
+    expect(app.container.textContent).not.toContain(WIDENING_OFFER);
     expect(app.container.textContent).not.toContain(
       "not a column in this file",
     );
@@ -326,6 +350,47 @@ describe("acceptor columns step: a disagreeing non-empty declaration", () => {
       `and ${MAX_PAYLOAD_ENTRIES - MAX_DECLARED_NAMES_SHOWN} more not shown here.`,
     );
     expect(notice.textContent.length).toBeLessThanOrEqual(NOTICE_CEILING);
+  });
+
+  test("states the linkage cost over a declaration longer than the list it paints", async () => {
+    // The bound above paints names, not remedies: the column whose sending would
+    // cost a key sits past it here, so a cost read per painted name would say
+    // nothing at all. The offer is one sentence over the whole declaration, and it
+    // is the whole declaration it is read from.
+    const unpainted = Array.from(
+      { length: MAX_DECLARED_NAMES_SHOWN + 1 },
+      (_, index) => `absent_${index}`,
+    );
+    // Two columns this file does have, at the two uses the offer covers: one it
+    // matches on and one it keeps as its record identifier. Only the first costs a
+    // key, which is what the plural sentence states.
+    const held = ["first_name", "record_id"];
+    mountStep(
+      {
+        ...acceptorTerms,
+        payload: {
+          receive: [...unpainted, ...held].map((name) => ({ name })),
+        },
+      },
+      ["first_name", "last_name", "record_id"],
+    );
+    await expect
+      .element(
+        page.getByText("Your partner expects columns you are not sending"),
+      )
+      .toBeInTheDocument();
+
+    const notice = declarationNotice();
+    const painted = Array.from(notice.querySelectorAll("li")).map(
+      (item) => item.textContent,
+    );
+    expect(painted).toHaveLength(MAX_DECLARED_NAMES_SHOWN);
+    for (const name of held) expect(painted).not.toContain(name);
+    // Still after the partner's remedy and the different-file one, which the
+    // absent names above make available here.
+    expect(notice.textContent).toContain(
+      `or choose a file that has those columns. ${WIDENING_COSTS_A_KEY_PLURAL}`,
+    );
   });
 
   test("escapes a declared name the file also has, while the grid row it points at renders that header verbatim", async () => {

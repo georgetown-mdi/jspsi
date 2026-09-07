@@ -37,6 +37,7 @@ import {
   acceptorLaunchBlockedReason,
   acceptorOverlongDisclosedColumns,
   acceptorPayloadDeclarationConflict,
+  acceptorSendingExpectedColumnsCostsKey,
   acceptorStandardizationValid,
   acceptorUnsatisfiedTypes,
 } from "./acceptorColumnsModel";
@@ -215,6 +216,15 @@ export function AcceptorColumnsStep({
     declarationConflict?.declaredButNotSent.filter((gap) => gap.inFile) ?? [];
   const expectedMissingFromFile =
     declarationConflict?.declaredButNotSent.filter((gap) => !gap.inFile) ?? [];
+  // Whether taking that offer would cost an agreed linkage key: a column this file
+  // matches on stops matching once it is sent, and the run is refused for the key it
+  // fed. Read from the model, over the whole declared set rather than the names
+  // painted below, so the offer's cost is the one the operator would meet.
+  const sendingCostsLinkageKey = acceptorSendingExpectedColumnsCostsKey(
+    columns,
+    linkageTerms,
+    columnsState,
+  );
   // The cap keeps a flooded declaration from putting the metadata grid the operator
   // has to edit, and the launch control below it, past a screenful of partner text.
   // What it leaves out is counted rather than dropped, so the operator is still told
@@ -539,13 +549,15 @@ export function AcceptorColumnsStep({
                         {unshownDeclaredNamesLine(unshownDeclaredCount)}
                       </Text>
                     )}
-                    {/* The remedy here is mostly the partner's: widening the
-                        operator's own disclosure to match is offered only where the
-                        column exists, and never as the fix. Its cost is stated
-                        without naming a role: one sentence covers a list whose
-                        columns can sit at different uses -- one matching, one the
-                        record identifier, one ignored -- and the grid row it points
-                        at is where the use each of them gives up is shown. */}
+                    {/* The remedy here is mostly the partner's: the local widening
+                        is offered only where the column exists, never as the fix,
+                        and its cost is one sentence over the whole list -- whose
+                        columns can sit at different uses, each shown in the grid row
+                        the sentence points at. Where the widening would leave an
+                        agreed key unsatisfiable, that is the cost stated instead:
+                        taking the offer would only move the operator on to the
+                        linkage refusal. Read from the whole declaration, which the
+                        painted names need not hold. */}
                     Ask your partner for an invitation that expects what your
                     file sends
                     {expectedMissingFromFile.length > 0 &&
@@ -556,7 +568,11 @@ export function AcceptorColumnsStep({
                       }`}
                     .
                     {expectedInFile.length > 0 &&
-                      ' Where your file does have such a column, you can set it to "Sent to your partner" below instead - that discloses more than you have marked so far, and each column has a single use, so sending it replaces the use it has now.'}
+                      (!sendingCostsLinkageKey
+                        ? ' Where your file does have such a column, you can set it to "Sent to your partner" below instead - that discloses more than you have marked so far, and each column has a single use, so sending it replaces the use it has now.'
+                        : expectedInFile.length === 1
+                          ? ' Setting the column your file does have to "Sent to your partner" below will not start the exchange: that column is used to match, and each column has a single use, so sending it would leave an agreed linkage key with no column to match on.'
+                          : ' Setting the columns your file does have to "Sent to your partner" below will not start the exchange: at least one of them is used to match, and each column has a single use, so sending them would leave an agreed linkage key with no column to match on.')}
                   </>
                 )}
               </>
