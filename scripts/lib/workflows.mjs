@@ -11,9 +11,9 @@
 // parser produces, so `document.on` reads off a parsed workflow directly.
 //
 // Nothing here models what GitHub accepts. A document is read as data and the
-// `uses:` walk is structural, so a shape this repository does not use is
-// neither recognized nor refused; each check states what it reads and what it
-// cannot see.
+// `uses:` walk is structural but for the one position it names, `jobs:`, so a
+// shape this repository does not use is neither recognized nor refused; each
+// check states what it reads and what it cannot see.
 
 import { existsSync, readFileSync, readdirSync } from "node:fs";
 import { resolve } from "node:path";
@@ -95,42 +95,64 @@ export function workflowDocument(root, path) {
   return parseWorkflow(path, read(root, path));
 }
 
+const mappingOrNull = (value) =>
+  value !== null && typeof value === "object" && !Array.isArray(value)
+    ? value
+    : null;
+
 /**
  * Every node of a parsed document that names a `uses:` string, in document
- * order, as `{location, uses, inputs}`. `location` is the dotted path the node
- * sits at (`jobs.build.steps[0]`), and `inputs` is the node's `with:` block, or
- * null where it has none.
+ * order, as `{location, id, uses, inputs, condition, continueOnError, jobName,
+ * jobContinueOnError}`. `location` is the dotted path the node sits at
+ * (`jobs.build.steps[0]`), `id` is the node's own `id:`, and `inputs` is the
+ * node's `with:` block; each of the last two is null where the node has none.
+ *
+ * The final four are what decides whether the node's failure reaches the run:
+ * its own `if:` and `continue-on-error:`, the name of the job it sits in, and
+ * that job's `continue-on-error:`. The keys come back as written and
+ * unevaluated, so a reader gets the expression rather than the value it takes
+ * on one leg. A step `id:` is unique only within its job, so a reader naming a
+ * step across a file needs `jobName` beside it.
  *
  * The walk is structural rather than an enumeration of the shapes GitHub
  * accepts, so a step's `uses:`, a job-level reusable-workflow `uses:`, and a
  * composite's `runs.steps[].uses` are all collected without naming any of them.
+ * The one position it names is the top-level `jobs:` mapping, whose keys are
+ * the job names and whose values are where a job-level `continue-on-error:`
+ * sits; a composite action's steps have no job above them and report null for
+ * both.
  */
 export function usesNodes(document) {
   const found = [];
-  const walk = (node, location) => {
+  const walk = (node, location, job) => {
     if (Array.isArray(node)) {
-      node.forEach((entry, index) => walk(entry, `${location}[${index}]`));
+      node.forEach((entry, index) => walk(entry, `${location}[${index}]`, job));
       return;
     }
     if (node === null || typeof node !== "object") return;
     for (const [key, value] of Object.entries(node)) {
       if (key === "uses" && typeof value === "string") {
-        const inputs = node.with;
         found.push({
           location,
+          id: typeof node.id === "string" ? node.id : null,
           uses: value,
-          inputs:
-            inputs !== null &&
-            typeof inputs === "object" &&
-            !Array.isArray(inputs)
-              ? inputs
-              : null,
+          inputs: mappingOrNull(node.with),
+          condition: node.if ?? null,
+          continueOnError: node["continue-on-error"] ?? null,
+          jobName: job === null ? null : job.name,
+          jobContinueOnError:
+            job === null ? null : (job.mapping["continue-on-error"] ?? null),
         });
       }
-      walk(value, location === "" ? key : `${location}.${key}`);
+      const jobMapping = location === "jobs" ? mappingOrNull(value) : null;
+      walk(
+        value,
+        location === "" ? key : `${location}.${key}`,
+        jobMapping === null ? job : { name: key, mapping: jobMapping },
+      );
     }
   };
-  walk(document, "");
+  walk(document, "", null);
   return found;
 }
 
