@@ -10,7 +10,7 @@ import {
   CONSENT_VERDICT_PARAM_NAMES,
   parseDateInputDropsEveryRecord,
   pipelineAlwaysDrops,
-  substringCollapsesParsedDateToConstant,
+  pipelineCollapsesParsedDateToConstant,
 } from "../linkageSatisfiability.js";
 import { displayText } from "../utils/sanitizeForDisplay.js";
 import { redactAndSanitizeForDisplay } from "../utils/sanitizeErrorForDisplay.js";
@@ -866,7 +866,7 @@ const DEFAULT_PARSE_DATE_INPUT = "MM/DD/YYYY";
  * characters, collapsing every date exactly as a tokenless output does.
  * That verdict is a property of the steps together, so
  * {@link elementBreadthMarker} takes it from core's
- * {@link substringCollapsesParsedDateToConstant} instead of this per-step
+ * {@link pipelineCollapsesParsedDateToConstant} instead of this per-step
  * classification.
  *
  * A `parse_date` whose input format omits a component core requires drops
@@ -966,7 +966,7 @@ const LITERAL_CORRESPONDENCE_BREAKING_FUNCTIONS: ReadonlySet<string> = new Set([
  *
  * - "any date": a `parse_date` whose output layout holds no date token, or
  *   whose output a later `substring` run is measured to leave constant for
- *   every date ({@link substringCollapsesParsedDateToConstant}) -- the
+ *   every date ({@link pipelineCollapsesParsedDateToConstant}) -- the
  *   maximal collapse, checked first since it dominates any other rule the
  *   element also holds.
  * - "fallback": a `coalesce` that substitutes a constant on every record an
@@ -1002,7 +1002,7 @@ const LITERAL_CORRESPONDENCE_BREAKING_FUNCTIONS: ReadonlySet<string> = new Set([
  * window landing in the fill in fact collapses every short record onto one
  * constant. Neither masking shape is reachable from the built-in key sets
  * (only `substring` and `swap` appear there). Second: the date-collapse
- * measurement ({@link substringCollapsesParsedDateToConstant}) runs probe
+ * measurement ({@link pipelineCollapsesParsedDateToConstant}) runs probe
  * dates through the steps between a `parse_date` and the end of a
  * substring run; it cannot see a value-DEPENDENT drop (a `filter_regex` or
  * `null_if` that passes the probes but drops a real record), so such an
@@ -1026,15 +1026,13 @@ function elementBreadthMarker(
   // core's pipelineAlwaysDrops, which accounts for a rescuing `coalesce`.
   if (pipelineAlwaysDrops(element.transform)) return undefined;
   // Tier 3a: "any date" -- checked before every other rule since it is the
-  // maximal collapse. Every step index is offered to
-  // substringCollapsesParsedDateToConstant because the predicate itself
-  // decides which one ends a maximal substring run.
+  // maximal collapse. The whole pipeline is offered at once because core
+  // decides which step ends a maximal substring run, and reads every run of one
+  // element in a single walk.
   const parseDateBreadths = steps.map(parseDateBreadth);
   if (
     parseDateBreadths.includes("any date") ||
-    steps.some((_step, index) =>
-      substringCollapsesParsedDateToConstant(steps, index),
-    )
+    pipelineCollapsesParsedDateToConstant(steps)
   )
     return displayText`any date`;
   // Tier 3b: "fallback" -- gated on core's position-aware predicate so the
