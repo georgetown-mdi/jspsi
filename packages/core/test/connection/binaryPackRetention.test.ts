@@ -39,10 +39,16 @@ import type { Packable, Unpackable } from "peerjs-js-binarypack";
 
 /** The runner's collector, exposed by `--expose-gc` (`execArgv` in this
  * package's vitest config). Without it every heap delta below would be whatever
- * the collector happened to have done, so the measurement skips itself rather
- * than report a number nothing stands behind -- and the run's skipped-leg
- * reporter names it, so a runner that stops passing the flag is visible. */
+ * the collector happened to have done, so the measurements skip themselves
+ * rather than report a number nothing stands behind. */
 const collect = (globalThis as { gc?: () => void }).gc;
+
+/** Why a measurement skipped, stated at the run: a runtime skip carries its note
+ * into the skipped-leg reporter, so a runner that stops passing the flag says
+ * what it stopped measuring rather than naming a leg and leaving it at that. */
+const NO_COLLECTOR_REASON =
+  "run without --expose-gc: a heap delta measured with no collector to settle " +
+  "the heap stands for nothing";
 
 /** Settle the heap: a full collection cycle, repeated, so the reading before and
  * the reading after are both taken at a floor rather than mid-cycle. */
@@ -105,6 +111,20 @@ function flatFrame(count: number, marker: number): Uint8Array {
   ]);
 }
 
+/** An `array32` of `count` values, each `marker` followed by the `payload` bytes
+ * `unpack` reads for it. */
+function markerFrame(
+  count: number,
+  marker: number,
+  payload: Array<number>,
+): Uint8Array {
+  const value = new Uint8Array([marker, ...payload]);
+  const frame = new Uint8Array(5 + count * value.length);
+  frame.set([0xdd, ...u32Bytes(count)], 0);
+  for (let i = 0; i < count; i++) frame.set(value, 5 + i * value.length);
+  return frame;
+}
+
 /** How a shape's retention is charged: against the elements its containers
  * declare, or -- for a string, whose cost is per code point -- against its wire
  * bytes. */
@@ -152,6 +172,51 @@ const SHAPES: Array<{
   },
 ];
 
+/** The number markers wider than 16 bits, each with the payload bytes `unpack`
+ * reads after the marker. Every one of them decodes through arithmetic into a JS
+ * number, so it costs an array slot and at most a heap number behind it; a
+ * version that decoded one into a heavier boxed value -- a `BigInt` for the
+ * 64-bit markers, say -- would retain past the per-slot figure the envelope
+ * rests on
+ * (docs/spec/DEPENDENCY_PINS.md, the PeerJS stack upgrade checklist). */
+const WIDE_NUMBER_MARKERS: Array<{
+  label: string;
+  marker: number;
+  payload: Array<number>;
+}> = [
+  { label: "float", marker: 0xca, payload: [0x3f, 0x8c, 0xcc, 0xcd] },
+  {
+    label: "double",
+    marker: 0xcb,
+    payload: [0x3f, 0xf1, 0x99, 0x99, 0x99, 0x99, 0x99, 0x9a],
+  },
+  { label: "uint32", marker: 0xce, payload: [0xff, 0xff, 0xff, 0xff] },
+  { label: "int32", marker: 0xd2, payload: [0xff, 0xff, 0xff, 0x00] },
+  {
+    label: "uint64",
+    marker: 0xcf,
+    payload: [0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00],
+  },
+  {
+    label: "int64",
+    marker: 0xd3,
+    payload: [0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x00],
+  },
+];
+
+/** Elements the wide-number frames declare. Larger than the flat shapes' count
+ * because a number costs one array slot: the heap delta at this width is megabytes
+ * rather than the kilobytes a smaller count would leave to read against noise. */
+const WIDE_NUMBER_ELEMENTS = 1_000_000;
+
+/** Bound on what one wide number retains per declared node. Measured between 8.0
+ * -- the array slot alone, where the decoded value is a small integer the slot
+ * holds itself -- and 24.0, where it is a heap number the slot points at. Both
+ * sit far under the per-node worst the envelope multiplies by; the bound is above
+ * both, so it detects a decode that grew heavier still, while the JS-number claim
+ * is held exactly by the leg above rather than by this figure. */
+const MAX_WIDE_NUMBER_RETAINED = 64;
+
 /** Bytes the heap holds for `frame`'s decoded value, and what it gives back when
  * that value is dropped. */
 function measureRetention(frame: Uint8Array): {
@@ -170,46 +235,73 @@ function measureRetention(frame: Uint8Array): {
   return { retained, releasedOnDrop: retained - (heapUsed() - before) };
 }
 
-describe.skipIf(collect === undefined)(
-  "what an admitted frame retains, measured against the real unpacker",
-  () => {
-    test("stays under the measured amplification bound for every shape", () => {
-      for (const {
-        label,
-        build,
-        per,
-        declaredElements,
-        maxRetained,
-      } of SHAPES) {
-        const frame = build();
-        expect(
-          scanFrameStructure(
-            frame,
-            MAX_WEBRTC_REASSEMBLY_DEPTH,
-            MAX_WEBRTC_STRING_BYTES,
-          ),
-          `${label}: refused by the pre-scan, so it measures nothing admitted`,
-        ).toBeUndefined();
+describe("what an admitted frame retains, measured against the real unpacker", () => {
+  test("stays under the measured amplification bound for every shape", (ctx) => {
+    ctx.skip(collect === undefined, NO_COLLECTOR_REASON);
+    for (const { label, build, per, declaredElements, maxRetained } of SHAPES) {
+      const frame = build();
+      expect(
+        scanFrameStructure(
+          frame,
+          MAX_WEBRTC_REASSEMBLY_DEPTH,
+          MAX_WEBRTC_STRING_BYTES,
+        ),
+        `${label}: refused by the pre-scan, so it measures nothing admitted`,
+      ).toBeUndefined();
 
-        const { retained, releasedOnDrop } = measureRetention(frame);
-        const units =
-          per === "declared node" ? declaredElements : frame.byteLength;
-        const perUnit = retained / units;
-        expect(
-          perUnit,
-          `${label}: ${units} ${per}s retained ${retained} bytes, ${perUnit.toFixed(1)} per ${per} (the envelope multiplies the wire cap by the worst per-node figure, ~208 bytes, measured on the empty bin view)`,
-        ).toBeLessThan(maxRetained);
-        // A retention the drop does not give back would be a leak somewhere else
-        // in the run rather than this frame's decode, and would put the figure
-        // above on the wrong quantity.
-        expect(
-          releasedOnDrop / retained,
-          `${label}: dropping the decode released ${releasedOnDrop} of ${retained} bytes`,
-        ).toBeGreaterThan(0.9);
-      }
-    });
-  },
-);
+      const { retained, releasedOnDrop } = measureRetention(frame);
+      const units =
+        per === "declared node" ? declaredElements : frame.byteLength;
+      const perUnit = retained / units;
+      expect(
+        perUnit,
+        `${label}: ${units} ${per}s retained ${retained} bytes, ${perUnit.toFixed(1)} per ${per} (the envelope multiplies the wire cap by the worst per-node figure, ~208 bytes, measured on the empty bin view)`,
+      ).toBeLessThan(maxRetained);
+      // A retention the drop does not give back would be a leak somewhere else
+      // in the run rather than this frame's decode, and would put the figure
+      // above on the wrong quantity.
+      expect(
+        releasedOnDrop / retained,
+        `${label}: dropping the decode released ${releasedOnDrop} of ${retained} bytes`,
+      ).toBeGreaterThan(0.9);
+    }
+  });
+
+  test("decodes every wide number marker to a JS number", () => {
+    for (const { label, marker, payload } of WIDE_NUMBER_MARKERS) {
+      expect(
+        typeof unpackFrame(new Uint8Array([marker, ...payload])),
+        `${label}: decoded to something other than a JS number`,
+      ).toBe("number");
+    }
+  });
+
+  test("retains one node per declared wide number marker", (ctx) => {
+    ctx.skip(collect === undefined, NO_COLLECTOR_REASON);
+    for (const { label, marker, payload } of WIDE_NUMBER_MARKERS) {
+      const frame = markerFrame(WIDE_NUMBER_ELEMENTS, marker, payload);
+      expect(
+        scanFrameStructure(
+          frame,
+          MAX_WEBRTC_REASSEMBLY_DEPTH,
+          MAX_WEBRTC_STRING_BYTES,
+        ),
+        `${label}: refused by the pre-scan, so it measures nothing admitted`,
+      ).toBeUndefined();
+
+      const { retained, releasedOnDrop } = measureRetention(frame);
+      const perNode = retained / WIDE_NUMBER_ELEMENTS;
+      expect(
+        perNode,
+        `${label}: ${WIDE_NUMBER_ELEMENTS} declared nodes retained ${retained} bytes, ${perNode.toFixed(1)} per declared node`,
+      ).toBeLessThan(MAX_WIDE_NUMBER_RETAINED);
+      expect(
+        releasedOnDrop / retained,
+        `${label}: dropping the decode released ${releasedOnDrop} of ${retained} bytes`,
+      ).toBeGreaterThan(0.9);
+    }
+  });
+});
 
 describe("what the pre-scan keeps out of the envelope above", () => {
   test("the nested chain reserving the same bytes at every level", () => {

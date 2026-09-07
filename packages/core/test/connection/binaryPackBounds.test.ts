@@ -153,7 +153,23 @@ interface RecordShape {
   };
 }
 
-/** The two largest legitimate non-binary shapes psilink puts on the data channel,
+/** The index a shape packs for its `i`th record, taken from the top of the
+ * ceiling's range so it packs to the width it has in the ceiling frame. An index
+ * sampled from the bottom of the range packs two bytes where the ceiling frame
+ * spends five, and a slope taken from it understates the ceiling frame's wire
+ * bytes by a third. The ceiling frame's own first 65,536 indices are narrower
+ * than these, under half a percent of its wire bytes. */
+function ceilingScaleIndex(records: number, i: number): number {
+  return MAX_SINGLE_PASS_CELLS - records + i;
+}
+
+/** Wire bytes per declared element each shape keeps at the ceiling, at least,
+ * against the one element per byte the cumulative element rule refuses at.
+ * docs/spec/CHANNEL_SECURITY.md states this margin; the narrowest of the three
+ * shapes below measures 3.5. */
+const MIN_CEILING_HEADROOM = 3;
+
+/** The three largest legitimate non-binary shapes psilink puts on the data channel,
  * built per record with the real packer under a hand-written array32 header so a
  * record count too large for `pack`'s per-element recursion still assembles. */
 const RECORD_SHAPES: Array<RecordShape> = [
@@ -163,7 +179,10 @@ const RECORD_SHAPES: Array<RecordShape> = [
       frame: concatBytes([
         array32Header(records),
         ...Array.from({ length: records }, (_, i) =>
-          packSync({ theirIndex: i, iteration: i % 3 }),
+          packSync({
+            theirIndex: ceilingScaleIndex(records, i),
+            iteration: i % 3,
+          }),
         ),
       ]),
       // The outer array's element per record, plus the two key/value pairs of
@@ -179,6 +198,24 @@ const RECORD_SHAPES: Array<RecordShape> = [
         ...Array.from({ length: records }, () => packSync(["20001"])),
       ]),
       declaredElements: records * 2,
+    }),
+  },
+  {
+    // `[localIndices, partnerIndices]`, the paired index arrays the exchange
+    // sends: a two-element outer array over one declared element per index in
+    // each half.
+    label: "an association table",
+    build: (records) => ({
+      frame: concatBytes([
+        new Uint8Array([0x92]),
+        ...[0, 1].flatMap(() => [
+          array32Header(records),
+          ...Array.from({ length: records }, (_, i) =>
+            packSync(ceilingScaleIndex(records, i)),
+          ),
+        ]),
+      ]),
+      declaredElements: 2 + records * 2,
     }),
   },
 ];
@@ -211,9 +248,8 @@ describe("scanFrameStructure: the cumulative element rule", () => {
   test("admits the largest legitimate shapes at the single-pass ceiling", () => {
     // Both quantities are affine in the record count, so two builds fix each
     // shape's per-record slope and the ceiling frame follows from them. The
-    // slopes are taken at small record indices, whose packed integers are
-    // narrower than the ceiling's, so the extrapolated wire bytes understate the
-    // real frame's while the declared count per record is exact.
+    // declared count per record is exact, and so is the wire slope: each sample
+    // frame packs its indices at the width the ceiling frame packs them.
     const small = 1_000;
     const large = 3_000;
     for (const { label, build } of RECORD_SHAPES) {
@@ -232,10 +268,11 @@ describe("scanFrameStructure: the cumulative element rule", () => {
       const bytesAtCeiling =
         at.large.frame.byteLength +
         bytesPerRecord * (MAX_SINGLE_PASS_CELLS - large);
+      const elementsPerWireByte = elementsAtCeiling / bytesAtCeiling;
       expect(
-        elementsAtCeiling,
-        `${label} at ${MAX_SINGLE_PASS_CELLS} records declares ${elementsAtCeiling} elements over at least ${bytesAtCeiling} wire bytes`,
-      ).toBeLessThan(bytesAtCeiling);
+        bytesAtCeiling / elementsAtCeiling,
+        `${label} at ${MAX_SINGLE_PASS_CELLS} records declares ${elementsAtCeiling} elements over ${bytesAtCeiling} wire bytes, ${elementsPerWireByte.toFixed(3)} per byte`,
+      ).toBeGreaterThanOrEqual(MIN_CEILING_HEADROOM);
     }
   });
 });
