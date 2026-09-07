@@ -424,11 +424,14 @@ export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
       "the acceptor's, which changes how many records the intersection holds " +
       "-- and discloses to whichever party receives the result how the " +
       "inviter's records group onto each matched record of the acceptor's.",
-    // Which party reads the grouping follows the output shape, so the two shapes
-    // a deduplicating document can take are measured separately. The schema
+    // Which party reads the grouping follows the output shape, so the shapes a
+    // deduplicating document can take are measured separately. The schema
     // requires the declaring party to receive output, so `shareWithPartner` is
-    // the whole of the remaining axis: both parties receive, or the inviter
-    // alone does.
+    // the whole of that axis: both parties receive, or the inviter alone does.
+    // The sole-receiver case then splits again on what the accepting party is
+    // told about the rounds, which the exchange settles rather than the display
+    // (`withholdsAcceptorAssociationTable`), so it is measured on both sides of
+    // that verdict.
     shapes: [
       {
         name: "both parties receive the result",
@@ -438,21 +441,24 @@ export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
         ],
         forbiddenVariantCopy: [
           DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT,
-          // The display limit belongs to the sole-receiver shape alone: this
-          // shape presents the accepting party the grouping, so a sentence
+          // Both sole-receiver sentences belong to the shapes below: this one
+          // presents the accepting party the grouping, so either sentence
           // saying what it is NOT shown would name a withholding that does not
           // happen.
           CONSENT_FACTS.duplicateGroupingDisplayLimit.note,
+          CONSENT_FACTS.duplicateGroupingWithheld.note,
         ],
       },
       {
-        name: "the inviting party is the sole receiver",
+        name: "the inviting party is the sole receiver and the table is exchanged",
         // The acceptor mirrors to a party that receives nothing, so the inviter
         // may transmit no payload to it: an invitation declaring a `send` here
         // is one deriveAcceptedLinkageTerms refuses, and the probe would measure
         // the surfaces on a document no acceptance can reach. The request FROM
         // the acceptor stays, since that direction is exactly what the widening
-        // the side note states reaches.
+        // the side note states reaches -- and it is also what leaves the
+        // accepting party's half of the table exchanged under either strategy,
+        // which is what separates this shape from the one below.
         shape: (terms) =>
           edited(terms, (draft) => {
             draft.output.shareWithPartner = false;
@@ -468,7 +474,42 @@ export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
           CONSENT_FACTS.duplicateGroupingDisplayLimit.note,
           DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
         ],
-        forbiddenVariantCopy: [DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT],
+        forbiddenVariantCopy: [
+          DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,
+          // The enforced sentence is the other shape's: claiming it for a run
+          // that exchanges the table would put a protection under an `enforced`
+          // basis the run does not make.
+          CONSENT_FACTS.duplicateGroupingWithheld.note,
+        ],
+      },
+      {
+        name: "the inviting party is the sole receiver and the table is withheld",
+        // The one combination the exchange closes itself: single-pass, the
+        // inviting party the only party entitled to output, and no column
+        // requested of the accepting party -- a declared-empty request, which
+        // binds that party's own disclosure where an absent one would not.
+        shape: (terms) =>
+          edited(terms, (draft) => {
+            draft.linkageStrategy = "single-pass";
+            draft.output.shareWithPartner = false;
+            draft.payload = { send: [], receive: [] };
+          }),
+        requiredVariantCopy: [
+          DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT,
+          // Same placement as the display limit above, and the same reason for
+          // pinning it across both surfaces: the reader met by what this client
+          // presents is entitled, in the same place, to what the exchange holds
+          // rather than the client.
+          CONSENT_FACTS.duplicateGroupingWithheld.note,
+          DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
+        ],
+        forbiddenVariantCopy: [
+          DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,
+          // And the display-scoped sentence must not reach this shape: it would
+          // tell a reader whose grouping the wire withholds that other software
+          // on their side could show it.
+          CONSENT_FACTS.duplicateGroupingDisplayLimit.note,
+        ],
       },
     ],
     vary: (terms) =>

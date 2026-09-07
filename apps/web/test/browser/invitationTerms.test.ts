@@ -2646,6 +2646,43 @@ describe("InvitationTerms: a qualifying sentence sits at its headline's visibili
     expect(collapse.textContent).toContain(
       CONSENT_FACTS.duplicateGroupingDisplayLimit.note,
     );
+    // The cascade these terms name carries the grouping to this party's own
+    // process, so the enforced sentence must not stand in for the one above.
+    expect(app.container.textContent).not.toContain(
+      CONSENT_FACTS.duplicateGroupingWithheld.note,
+    );
+    expect(collapse.textContent).toContain(DEDUPLICATE_ACCEPTOR_SIDE_NOTE);
+    expect(app.container.textContent).not.toContain(
+      DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,
+    );
+  });
+
+  test("a sole-receiver deduplicating invitation states the exchange's own non-receipt where the run withholds the table", async () => {
+    // The third shape: the sole-receiver output under single-pass with no
+    // column requested of the accepting party, which is the one combination
+    // the exchange closes itself. The screen reads which of the two sentences
+    // that is from core's resolution of the run, so the register a reader is
+    // told stays the register the run holds.
+    renderCaveatTerms({
+      linkageStrategy: "single-pass",
+      output: { expectsOutput: true, shareWithPartner: false },
+      payload: { send: [], receive: [] },
+    });
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+
+    const collapse = await readyCollapse("Other details");
+    expect(collapse.textContent).toContain(
+      DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT,
+    );
+    expect(collapse.textContent).toContain(
+      CONSENT_FACTS.duplicateGroupingWithheld.note,
+    );
+    // And the display-scoped sentence stays off a run whose wire holds the
+    // withholding: it would tell this party that other software on its own
+    // side could show it what the exchange never sends.
+    expect(app.container.textContent).not.toContain(
+      CONSENT_FACTS.duplicateGroupingDisplayLimit.note,
+    );
     expect(collapse.textContent).toContain(DEDUPLICATE_ACCEPTOR_SIDE_NOTE);
     expect(app.container.textContent).not.toContain(
       DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,

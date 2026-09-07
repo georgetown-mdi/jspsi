@@ -3600,8 +3600,53 @@ describe("displayInvitation: the declared terms it discloses (columns, citations
     expect(CONSENT_FACTS.duplicateGroupingDisplayLimit.basis).toBe(
       "trust-contingent",
     );
+    // The cascade this token names carries the grouping to this party's own
+    // process, so the enforced sentence must not stand in for the one above.
+    expect(soleReceiver).not.toContain(
+      CONSENT_FACTS.duplicateGroupingWithheld.note,
+    );
     expect(soleReceiver).toContain(`    ${DEDUPLICATE_ACCEPTOR_SIDE_NOTE}`);
     expect(soleReceiver).not.toContain(
+      DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,
+    );
+  });
+
+  test("displayInvitation: a sole-receiver deduplicating term states the exchange's own non-receipt where the run withholds the table", () => {
+    // The third shape a deduplicating invitation takes: the sole-receiver
+    // output under single-pass with no column requested of this party, which
+    // is the one combination the exchange closes itself rather than this
+    // client choosing not to show it. The prompt reads which of the two
+    // sentences that is from core's resolution of the run, so the register an
+    // acceptor is told stays the register the run actually holds.
+    const log = getLogger("accept-display-deduplicate-table-withheld-test");
+    log.setLevel("silent");
+    const base = sampleToken(FUTURE());
+    const withheld = renderDisplayInvitation(log, {
+      ...base,
+      linkageTerms: {
+        ...base.linkageTerms,
+        deduplicate: true,
+        linkageStrategy: "single-pass",
+        output: { expectsOutput: true, shareWithPartner: false },
+        payload: { send: [], receive: [] },
+      },
+    });
+
+    expect(withheld).toContain(
+      `    ${DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT}`,
+    );
+    expect(withheld).toContain(
+      `    ${CONSENT_FACTS.duplicateGroupingWithheld.note}`,
+    );
+    expect(CONSENT_FACTS.duplicateGroupingWithheld.basis).toBe("enforced");
+    // And the display-scoped sentence stays off a run whose wire holds the
+    // withholding: it would tell this party that other software on its own
+    // side could show it what the exchange never sends.
+    expect(withheld).not.toContain(
+      CONSENT_FACTS.duplicateGroupingDisplayLimit.note,
+    );
+    expect(withheld).toContain(`    ${DEDUPLICATE_ACCEPTOR_SIDE_NOTE}`);
+    expect(withheld).not.toContain(
       DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,
     );
   });
@@ -3795,6 +3840,19 @@ describe("displayInvitation: the declared terms it discloses (columns, citations
         payload: { ...CONSENT_PROBE_TERMS.payload, receive: [] },
       },
     });
+    // And its enforced counterpart is the eighth: the same sole-receiver shape
+    // on the one combination the exchange closes itself, which the seventh's
+    // cascade cannot reach.
+    const deduplicatingTableWithheld = renderDisplayInvitation(log, {
+      ...sampleToken(FUTURE()),
+      linkageTerms: {
+        ...CONSENT_PROBE_TERMS,
+        deduplicate: true,
+        linkageStrategy: "single-pass",
+        output: { expectsOutput: true, shareWithPartner: false },
+        payload: { send: [], receive: [] },
+      },
+    });
     const rendered = [
       acceptorWithheld,
       inviterWithheld,
@@ -3803,6 +3861,7 @@ describe("displayInvitation: the declared terms it discloses (columns, citations
       fanOutMatched,
       fanOutRefused,
       deduplicatingSoleReceiver,
+      deduplicatingTableWithheld,
     ].join("\n");
 
     // The whole table, rather than a list restated here: a caveat this renderer

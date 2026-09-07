@@ -1361,14 +1361,22 @@ export function InvitationTerms({
                       : DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT}
                   </Text>
                   {/* The sole-receiver statement states the withholding this
-                    client makes; what the rounds still disclose to the accepting
-                    party's own process is the fact beside it, read from the shared
-                    table. Only that shape needs it: where the inviting party shares
-                    the result, the accepting party is presented the grouping and
-                    there is no display limit to qualify. */}
+                    client makes; what the exchange itself does with the grouping
+                    is the fact beside it, read from the shared table. WHICH of the
+                    two renders follows core's resolution of the run
+                    (acceptorTableWithheld), never a reading of the strategy and the
+                    payload request made here. Only that shape needs either: where
+                    the inviting party shares the result, the accepting party is
+                    presented the grouping and there is nothing to qualify. */}
                   {!summary.inviterSharesResult && (
                     <Text size="xs" c="dimmed">
-                      {CONSENT_FACTS.duplicateGroupingDisplayLimit.note}
+                      {
+                        CONSENT_FACTS[
+                          summary.acceptorTableWithheld
+                            ? "duplicateGroupingWithheld"
+                            : "duplicateGroupingDisplayLimit"
+                        ].note
+                      }
                     </Text>
                   )}
                   <Text size="xs" c="dimmed">

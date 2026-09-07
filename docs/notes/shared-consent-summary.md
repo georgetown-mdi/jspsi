@@ -354,31 +354,50 @@ presents the acceptor none of it.
 
 ### Where the acceptor's non-receipt is held, and where it is not
 
-That second half is display-scoped on purpose, and the surfaces say so. What
+That second half is display-scoped for most runs, and the surfaces say so. What
 holds it is the entitlement gate on the table `runExchange` returns, so a
 sole-receiver acceptance is handed none. The wire is not what holds it in
-general. Under cascade the rounds carry the grouping to the acceptor's own
-process -- its matched position repeated once per group member, against the
-inviter's row indices. Under single-pass the one wire-level withholding can
-reach it, since the sole receiver is the party entitled to output and role
-resolution therefore makes the acceptor the sender that withholding covers, but
-only where the acceptor transmits no payload column of its own; an invitation
-requesting one leaves the table exchanged and the grouping in that party's
-process again.
+general: on most runs that gate is the whole of it, the matching still carries
+the grouping to the acceptor's own process, and what its operator is shown then
+rests on the software that party runs.
 
-Stating the withholding as an absolute would put a trust-contingent fact under an
-`enforced` headline, which is the one error this classification exists to
-prevent. So the two halves are two facts. The STATEMENT says what psilink
-presents, which is the display withholding this client makes. The limit -- that
-the matching still carries the grouping to the acceptor's process wherever the
-withholding above does not reach, so what its operator is shown rests on the
-software that party runs -- is a
-`trust-contingent` entry of its own in the shared table
-(`duplicateGroupingDisplayLimit`), rendered beside the statement by both
-surfaces. A limit that is a claim about software rather than about the run is
-classified as one rather than left as an unmarked clause inside a sentence, which
-is the same reason every other caveat in the table is an entry rather than prose
-in a renderer.
+One combination is the exception, and it is a combination of three things
+rather than a property of the setting: the strategy, which party is entitled
+to output, and whether the invitation asks the acceptor for a payload column.
+The rule and its composition with a deduplicating cardinality are specified,
+not restated here -- [PROTOCOL.md](../spec/PROTOCOL.md), "Withholding the
+sender's table from a blind helper" and "Where the 'one' party receives no
+output".
+
+Stating the withholding as an absolute would put a trust-contingent fact under
+an `enforced` headline, which is the one error this classification exists to
+prevent. Stating it as never held would understate a run that does close it. So
+the account is three facts, not one sentence with a qualifier:
+
+- The STATEMENT says what psilink presents, which is the display withholding
+  this client makes, and holds for every sole-receiver shape.
+- `duplicateGroupingDisplayLimit` is the `trust-contingent` entry beside it
+  wherever the exchange has not closed the grouping. A limit that is a claim
+  about software rather than about the run is classified as one rather than
+  left as an unmarked clause inside a sentence, which is the same reason every
+  other caveat in the table is an entry rather than prose in a renderer.
+- `duplicateGroupingWithheld` is the `enforced` entry that replaces it where
+  the run does close it, and states what the wire withholds and from whom.
+
+Which of the two renders is not a judgment either surface makes. Core resolves
+the combination once (`withholdsAcceptorAssociationTable`,
+`consent/invitationSummary.ts`), asking the run's own predicate for the verdict
+rather than reading the rule a second time, and each surface selects the fact
+from the resolved flag the summary carries -- the same shape the fan-out pair
+takes. A second reading is exactly what would let one surface promise a
+protection the run does not make.
+
+The enforced entry's basis is enforced in this table's own sense: either the
+fact is true of the run, or the exchange stops rather than proceed. The empty
+payload request mirrors to an empty `payload.send` for the accepting party,
+which `assertPayloadSendDisclosed` holds to exactly the columns that party's
+metadata discloses before any data moves, so a file that would transmit one
+stops there rather than reaching the rounds with the table exchanged.
 
 The split is also what keeps the duplicate-matches marker where it belongs. That
 marker states its headline's own fact, match multiplicity, which the run does
@@ -390,15 +409,16 @@ beside it -- the same division the partner's result receipt takes above and the
 retain-mode line takes below.
 
 That forced the pin to grow a shape axis of its own. It names copy a surface must
-render for a variant document, so a term with two truthful sentences could
-otherwise pin only what both shapes share -- which is neither sentence -- or pin
-one and let the other shape render it. The classification names the shapes
-instead, and each holds both the copy its variant owes and the copy it must not
-include, so a surface rendering one sentence under every shape fails on the shape
-whose run does not make that disclosure. Both surfaces are measured against the
-same two pairs. The display limit rides those pairs too: the sole-receiver shape
-owes it beside its statement, and the both-receive shape forbids it, since a
-screen that presents the acceptor the grouping has no withholding to qualify.
+render for a variant document, so a term with several truthful sentences could
+otherwise pin only what every shape shares -- which is none of them -- or pin one
+and let the other shapes render it. The classification names the shapes instead,
+and each holds both the copy its variant owes and the copy it must not include,
+so a surface rendering one sentence under every shape fails on the shape whose
+run does not make that disclosure. Both surfaces are measured against the same
+three pairs: both parties receive, the inviting party alone receives with the
+table exchanged, and the inviting party alone receives with the table withheld.
+The two limits ride those pairs, each required by the shape whose run it
+describes and forbidden by the other two.
 
 Whichever sentence renders, its placement is the same rule the caveats follow,
 applied to the headline it qualifies rather than to the setting's implementation
