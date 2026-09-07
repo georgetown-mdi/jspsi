@@ -377,6 +377,97 @@ test("the refusal names the shape rule and never echoes the label back", async (
   expect(message).not.toContain("Secret-Looking-Value");
 });
 
+/** The nine Unicode bidirectional embedding, override and isolate characters
+ * (UAX #9), written by code point so the fixtures below stay readable. */
+const TEXT_DIRECTION_CODE_POINTS = [
+  0x202a, 0x202b, 0x202c, 0x202d, 0x202e, 0x2066, 0x2067, 0x2068, 0x2069,
+];
+
+test.each(
+  TEXT_DIRECTION_CODE_POINTS.map((code) => [
+    `U+${code.toString(16).toUpperCase()}`,
+    String.fromCodePoint(code),
+  ]),
+)(
+  "refuses to bind an identity holding %s, and writes no file",
+  async (_label, character) => {
+    // A layout scope opened in the label outlives it and reorders the copy the
+    // certificate's identity is displayed beside, wherever a partner reads the
+    // fingerprint they pinned. The terms document refuses this class in the
+    // same field, and this command binds the value without parsing terms.
+    const idPath = path.join(dir, "id.json");
+    await expect(
+      resolveSigningIdentity({
+        identityPath: idPath,
+        identityArg: `Party${character}A`,
+        force: false,
+        log: noopLog,
+      }),
+    ).rejects.toThrow(UsageError);
+    expect(fs.existsSync(idPath)).toBe(false);
+  },
+);
+
+test("the direction refusal names its own rule and echoes no label byte", async () => {
+  const idPath = path.join(dir, "id.json");
+  let caught: unknown;
+  try {
+    await resolveSigningIdentity({
+      identityPath: idPath,
+      identityArg: `Party${String.fromCodePoint(0x202e)}Secret-Looking-Value`,
+      force: false,
+      log: noopLog,
+    });
+  } catch (err) {
+    caught = err;
+  }
+  expect(caught).toBeInstanceOf(UsageError);
+  const message = (caught as Error).message;
+  // Its own sentence, not the control class's: an operator told to remove a
+  // control character would not find one in this label.
+  expect(message).toContain("must not contain a text-direction character");
+  expect(message).not.toContain("must not contain control characters");
+  expect(message).toContain("--identity");
+  expect(message).toContain("linkage_terms.identity");
+  expect(message).not.toContain("Secret-Looking-Value");
+  expect(message).not.toContain(String.fromCodePoint(0x202e));
+});
+
+test("a text-direction label from the config is refused too", async () => {
+  // linkage_terms.identity is the other route into the same binding, so it
+  // takes the same rule.
+  const idPath = path.join(dir, "id.json");
+  await expect(
+    resolveSigningIdentity({
+      identityPath: idPath,
+      configIdentity: `Party${String.fromCodePoint(0x2066)}A`,
+      force: false,
+      log: noopLog,
+    }),
+  ).rejects.toThrow(UsageError);
+  expect(fs.existsSync(idPath)).toBe(false);
+});
+
+test.each([
+  ["U+200E", "\u200e"],
+  ["U+200F", "\u200f"],
+  ["U+061C", "\u061c"],
+])("binds an identity holding the direction mark %s", async (label, mark) => {
+  // The implicit marks open no scope reaching past the characters around them,
+  // so they are admitted here exactly as the terms document admits them; a
+  // party writing its name in a right-to-left script may need one.
+  const idPath = path.join(dir, `${label}.json`);
+  const bound = `Party${mark}A`;
+  const { identity, action } = await resolveSigningIdentity({
+    identityPath: idPath,
+    identityArg: bound,
+    force: false,
+    log: noopLog,
+  });
+  expect(action).toBe("Created");
+  expect(identity.certificate.identity).toBe(bound);
+});
+
 test("refuses a label longer than the bound the linkage terms hold", async () => {
   const idPath = path.join(dir, "id.json");
   await expect(

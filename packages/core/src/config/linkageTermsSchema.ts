@@ -85,10 +85,11 @@ export const MAX_TEXT_LENGTH = 1024;
  * The web console applies these same ranges to an operator's `--identity`
  * label (`IDENTITY_CONTROL_CHAR_PATTERN`, apps/web/src/jobs/intentSchemas.ts,
  * held equal by apps/web/test/unit/jobs/identityLabelParity.test.ts) and is
- * stricter in one direction, also refusing a leading `-`, and narrower in
- * another: it holds this class alone, so a label holding a text-direction
- * character passes the console's field check and is refused here when the CLI
- * parses the terms it became.
+ * stricter in one direction, also refusing a leading `-`. That label and the
+ * CLI's `psilink fingerprint` argument reach a certificate without passing
+ * through this schema, so each refuses this class and the text-direction one
+ * ({@link TEXT_DIRECTION_MESSAGE}) at its own boundary: a label bound into a
+ * certificate holds only what this document's `identity` may hold.
  */
 export const TEXT_CONTROL_CHAR_PATTERN = /[\u0000-\u001f\u007f-\u009f]/;
 

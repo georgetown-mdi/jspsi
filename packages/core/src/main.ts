@@ -254,6 +254,7 @@ export {
   NAME_SHAPE_PATTERN,
   TEXT_CONTROL_CHAR_MESSAGE,
   TEXT_CONTROL_CHAR_PATTERN,
+  TEXT_DIRECTION_MESSAGE,
   referencedLinkageFieldNames,
   safeParseLinkageTerms,
 } from "./config/linkageTermsSchema";
