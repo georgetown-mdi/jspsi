@@ -4,6 +4,7 @@ import {
   FAN_OUT_FUNCTION_NAMES,
   INVITATION_LIFETIME_SECONDS,
   MAX_INVITATION_LIFETIME_SECONDS,
+  NAME_SHAPE_PATTERN,
   UsageError,
   assertDeduplicateImplemented,
   canonicalString,
@@ -153,6 +154,22 @@ const SWAP_TRANSFORM_MISMATCH_MESSAGE =
   "different cleaning steps. Open that key and give both fields the same steps, " +
   "or turn off matching them in either order.";
 
+/** Shown when a linkage key's transform names a parameter holding a character a
+ * terms name may not contain, which the schema refuses on the `linkageKeys` path
+ * -- collapsed by the generic mapping to "Enable at least one linkage key." on a
+ * draft whose keys are all enabled, so this message must be set ahead of that
+ * mapping. Renaming is not offered as a way out: this editor's own step controls
+ * write the parameter names their functions take, so such a name arrives only on
+ * an imported document, whose parameters the operator does not edit one by one.
+ * Names neither the key nor the parameter, the same reason
+ * {@link UNSUPPLYABLE_KEY_MESSAGE} names no field -- and here the name is the
+ * offending text itself, so quoting it would put those characters on the
+ * screen. */
+const REFUSED_PARAM_NAME_MESSAGE =
+  "A linkage key's transform names a parameter with a control or " +
+  "text-direction character in it, which these terms cannot carry. Open that " +
+  "key and remove that step, or turn the key off.";
+
 /** Shown when the built terms cannot be canonically encoded and the offending
  * value is not in any enabled key's transform -- the residual the editor's own
  * controls and the import path have no way to author, since every other term is a
@@ -228,6 +245,22 @@ function isCanonicallyEncodable(value: unknown): boolean {
     if (err instanceof CanonicalEncodingError) return false;
     throw err;
   }
+}
+
+/** Whether any of the built terms' transform steps names a parameter outside
+ * {@link NAME_SHAPE_PATTERN}, which the terms schema holds every name to. Asked
+ * of the same pattern the schema applies, so the editor and the schema cannot
+ * disagree about which parameter names are refused. */
+function namesRefusedParam(terms: LinkageTerms): boolean {
+  return terms.linkageKeys.some((key) =>
+    key.elements.some((element) =>
+      (element.transform ?? []).some((step) =>
+        Object.keys(step.params ?? {}).some(
+          (name) => !NAME_SHAPE_PATTERN.test(name),
+        ),
+      ),
+    ),
+  );
 }
 
 /**
@@ -354,6 +387,14 @@ export function validateAdvancedInvite(
     terms.linkageKeys.some(swapPairTransformsDiffer)
   )
     errors.keys = SWAP_TRANSFORM_MISMATCH_MESSAGE;
+
+  // A transform parameter named with a character a terms name may not hold is
+  // refused on the same `linkageKeys` path, and needs its own message ahead of
+  // the mapping for the reason the checks above do. Ordered after them because
+  // it is the narrowest fault: each of those is a property of the key the
+  // operator is looking at, while this one is a name inside one of its steps.
+  if (errors.keys === undefined && namesRefusedParam(terms))
+    errors.keys = REFUSED_PARAM_NAME_MESSAGE;
 
   // The "non-receiving-party-cannot-receive" rule, enforced live: sending payload
   // to a partner that receives no result is incoherent, since the partner has no
