@@ -64,20 +64,14 @@ function withFuzzyOnFirstElement(terms: LinkageTerms): LinkageTerms {
   };
 }
 
-describe("gated settings cannot reach the built terms", () => {
-  // These pin the gating WHILE an applied-flag is false. When one flips (the
-  // engine wires the feature in), the clamp stops firing and these fail loudly,
-  // forcing the gating copy and tests to be updated in lockstep -- the "fail if a
-  // control is wired ahead of engine support" guard. Two settings sit outside
-  // that set because the exchange honors them: the algorithm, and deduplicate.
-  test("buildAdvancedTerms clamps fuzzy, and writes the algorithm and deduplicate through", () => {
+describe("every authored setting reaches the built terms", () => {
+  // The clamp and the import door fire on a setting whose APPLIED_SETTINGS flag
+  // is false, and no flag is. These pin that nothing an editor control can
+  // author is silently dropped or refused on the way through; gatedSettings.test.ts
+  // drives the clamp itself against a flag mocked off.
+  test("buildAdvancedTerms writes fuzzy, the algorithm and deduplicate through", () => {
     const { draft } = seedAdvancedInvite("Org", ALL_COLUMNS);
-    // Force the gated setting on, bypassing the disabled control, to prove the
-    // build clamps regardless of how the draft reached this state. The other two
-    // are set alongside it to prove the clamp is per setting rather than a blanket
-    // one: each reaches the built terms and is judged there by the rules that
-    // apply to it.
-    const forced: AdvancedInviteDraft = {
+    const authored: AdvancedInviteDraft = {
       ...draft,
       algorithm: "psi-c",
       deduplicate: true,
@@ -97,17 +91,15 @@ describe("gated settings cannot reach the built terms", () => {
           : entry,
       ),
     };
-    const terms = buildAdvancedTerms(forced);
+    const terms = buildAdvancedTerms(authored);
     expect(terms.algorithm).toBe("psi-c");
     expect(terms.deduplicate).toBe(true);
-    expect(
-      terms.linkageKeys.every((key) =>
-        key.elements.every((el) => el.generateFuzzyComparisons === undefined),
-      ),
-    ).toBe(true);
+    expect(terms.linkageKeys[0].elements[0].generateFuzzyComparisons).toBe(
+      "edit_distances",
+    );
   });
 
-  test("gatedActiveSettingMessage refuses an import that turns a held-back setting on", () => {
+  test("gatedActiveSettingMessage refuses no setting the run applies", () => {
     const base = getDefaultLinkageTerms("Org", inferMetadata(ALL_COLUMNS, []));
     expect(gatedActiveSettingMessage(base)).toBeUndefined();
     // The algorithm is not held back at all: an imported count-only document is
@@ -115,16 +107,15 @@ describe("gated settings cannot reach the built terms", () => {
     expect(
       gatedActiveSettingMessage({ ...base, algorithm: "psi-c" }),
     ).toBeUndefined();
-    // Nor is a deduplicating term, which the exchange does apply -- this door is
-    // closed against a setting the run would silently drop, not against every
-    // setting an editor control gates.
+    // The two settings the door does read, each applied, so each passes: this
+    // door is closed against a setting the run would silently drop, not against
+    // every setting an editor control gates.
     expect(
       gatedActiveSettingMessage({ ...base, deduplicate: true }),
     ).toBeUndefined();
-    // The one that is held back: the exchange applies no fuzzy expansion.
-    expect(gatedActiveSettingMessage(withFuzzyOnFirstElement(base))).toMatch(
-      /fuzzy/i,
-    );
+    expect(
+      gatedActiveSettingMessage(withFuzzyOnFirstElement(base)),
+    ).toBeUndefined();
   });
 });
 

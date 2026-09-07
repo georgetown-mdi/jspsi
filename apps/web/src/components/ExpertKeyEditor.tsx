@@ -78,16 +78,26 @@ const KEY_VERDICT_BADGES: Record<
   },
 };
 
-/** The fuzzy-comparison expansions an element can declare, with plain-language
- * labels. The control is rendered only when the run applies fuzzy comparisons (see
+/** Plain-language label for every fuzzy-comparison expansion an element can
+ * declare. Keyed by the core union rather than listed as an array, so an
+ * expansion added to `GenerateFuzzyComparisons` without a label here fails to
+ * compile -- the totality `expandsOnReceiverOnly` and `fuzzyCandidateCeiling`
+ * hold in core, at the one surface that offers the choice. An unoffered
+ * expansion would be authorable by import and unreachable in the editor. */
+const FUZZY_LABELS: Record<FuzzyComparison, string> = {
+  transpositions: "Two-digit transpositions",
+  edit_distances: "Single-character edits",
+  adjacent_years: "Adjacent years (+/- 1)",
+  day_month_swaps: "Day and month exchanged",
+};
+
+/** The control's options, in the order the labels above declare. The control is
+ * rendered only when the run applies fuzzy comparisons (see
  * APPLIED_SETTINGS.fuzzyComparisons); while it does not, the control is hidden
  * rather than shown disabled with a "not available" note. */
-const FUZZY_OPTIONS: Array<{ value: FuzzyComparison; label: string }> = [
-  { value: "transpositions", label: "Two-digit transpositions" },
-  { value: "edit_distances", label: "Single-character edits" },
-  { value: "adjacent_years", label: "Adjacent years (+/- 1)" },
-  { value: "day_month_swaps", label: "Day and month exchanged" },
-];
+const FUZZY_OPTIONS: Array<{ value: FuzzyComparison; label: string }> = (
+  Object.keys(FUZZY_LABELS) as Array<FuzzyComparison>
+).map((value) => ({ value, label: FUZZY_LABELS[value] }));
 
 /** The effective identifier of an element within its key -- its alias if set,
  * otherwise the field name. This is what a swap target names and what must be
@@ -549,10 +559,9 @@ export function ExpertKeyEditor({
 
                                 {/* The fuzzy-comparison control is shown only when the
                               exchange actually applies fuzzy expansions. While it
-                              does not (APPLIED_SETTINGS.fuzzyComparisons is false),
-                              the whole control is hidden rather than shown disabled
-                              with a "not available" note, so the element editor is
-                              not cluttered with a dead capability. */}
+                              does not, the whole control is hidden rather than shown
+                              disabled with a "not available" note, so the element
+                              editor is not cluttered with a dead capability. */}
                                 {fuzzyApplied && (
                                   <Select
                                     label="Fuzzy comparison"

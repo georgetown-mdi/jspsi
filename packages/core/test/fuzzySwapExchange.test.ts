@@ -1,13 +1,10 @@
-import { expect, test, vi } from "vitest";
+import { expect, test } from "vitest";
 
-// The whole point of this file is what the shipped build does not do: the swap
-// variant and the fuzzy expansion are gated on APPLIED_SETTINGS.fuzzyComparisons,
-// so a driven exchange over a swapped key is the only place the width both
-// parties declare for such a key and the candidates one of them assembles are
-// composed rather than checked apart.
-vi.mock("../src/consent/appliedSettings", () => ({
-  APPLIED_SETTINGS: { deduplicate: true, fuzzyComparisons: true },
-}));
+// A driven exchange is the only place the width both parties declare for a
+// swapped or expanded key and the candidates one of them assembles are composed
+// rather than checked apart. It reads the real APPLIED_SETTINGS, so the four
+// expansion kinds and the swap variant are pinned end to end on the shipped
+// build.
 
 import PSI from "@openmined/psi.js";
 

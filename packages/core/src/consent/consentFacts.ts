@@ -883,9 +883,10 @@ export const DEDUPLICATE_ACCEPTOR_SIDE_NOTE =
  * The caveat copy for a term an inviter may declare that today's exchange does
  * not apply, keyed by the {@link APPLIED_SETTINGS} flag that gates it.
  *
- * `fuzzyComparisons` is the one such term. It has no refusal: it is a silent
- * no-op that narrows the match, so its marker says only that the expansion is
- * proposed, where claiming a refusal would describe a run that does not happen.
+ * `fuzzyComparisons` is the one entry, and its flag is on, so the marker is
+ * what a surface renders if the setting is ever gated again. It claims no
+ * refusal: an unapplied expansion is a silent narrowing of the match rather
+ * than a refused run, so the marker says only that the expansion is proposed.
  * A term whose not-applying IS a refusal takes the opposite copy -- naming the
  * refusal and what to ask the inviter for -- which is what makes this a table
  * rather than a house style.

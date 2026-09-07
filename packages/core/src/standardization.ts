@@ -3046,10 +3046,10 @@ function buildKeyStringsUnderPlan(
     // silently.
     //
     // Gated on APPLIED_SETTINGS.fuzzyComparisons, the single source of truth both
-    // consent surfaces annotate this term from. Flipping the flag belongs with
-    // the round that consumes a candidate set: a fuzzy row would otherwise reach
-    // a linkage strategy holding several candidates, which is refused, turning
-    // the no-op the consent copy describes into an aborted exchange.
+    // consent surfaces annotate this term from. The gate and the round that
+    // consumes a candidate set are one decision: an expanded row reaching a
+    // strategy that matches only a single value is refused, which would turn the
+    // narrowed match the consent copy describes into an aborted exchange.
     //
     // The expansion is the ROLE-KEYED one the plan resolved, not the element's
     // raw designation: a receiver-only kind builds candidates on the receiver

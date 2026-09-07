@@ -4,7 +4,7 @@ title: "One-Sided Fuzzy Expansion"
 
 # One-sided fuzzy expansion: which party enumerates the variants
 
-_Status: decided and built, behind the `APPLIED_SETTINGS.fuzzyComparisons` flag the expansion itself sits behind. The normative rows -- the classification, the expanding party, the ceilings, and the refusals -- are in [PROTOCOL.md](../spec/PROTOCOL.md#which-party-expands-full-variant-and-deletion-neighbourhood-expansions); this note records the model behind them and what was set aside. See [docs/notes/README.md](README.md)._
+_Status: decided, built, and applied (`APPLIED_SETTINGS.fuzzyComparisons`). The normative rows -- the classification, the expanding party, the ceilings, and the refusals -- are in [PROTOCOL.md](../spec/PROTOCOL.md#which-party-expands-full-variant-and-deletion-neighbourhood-expansions); this note records the model behind them and what was set aside. See [docs/notes/README.md](README.md)._
 
 Fuzzy linkage keys were described in one breath -- "generate the variants of the value and intersect the widened sets" -- as though transposing two digits of an SSN and comparing single-character edits were one mechanism. They are two, and the difference decides how many parties execute the expansion. Getting it wrong is not a crash: it is a run that quietly costs twice the work, or one that quietly matches fewer records than the agreed terms describe.
 

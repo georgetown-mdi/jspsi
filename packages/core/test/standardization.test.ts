@@ -1408,10 +1408,14 @@ describe("buildKeyStrings: element-transform compilation reused across rows", ()
           ],
         },
         {
+          // The pair declares one transform, which is what the schema requires
+          // of a swap and what the receiver re-checks before assembling both
+          // orders. The two arrays hold equal steps and are distinct objects, so
+          // the WeakMap keyed on the array still sees two.
           name: "b",
           field: "second",
           transform: [
-            { function: "extract_regex", params: { pattern: "^(\\d{2})" } },
+            { function: "extract_regex", params: { pattern: "(\\d{2})$" } },
           ],
         },
       ],
@@ -2142,11 +2146,14 @@ describe("buildKeyStrings", () => {
       swap: ["first_name", "last_name"] as [string, string],
     };
     const dataset = makeDataset({ first_name: "JANE", last_name: "SMITH" });
+    // The sender builds the authored order alone; the receiver builds both, which
+    // is what makes the pair match in either order (fuzzySwapExchange.test.ts
+    // drives the property over a real exchange).
     expect(buildKeyStrings(swapKey, dataset, 0, false)).toEqual(
       new Set(["JANESMITH"]),
     );
     expect(buildKeyStrings(swapKey, dataset, 0, true)).toEqual(
-      new Set(["SMITHJANE"]),
+      new Set(["SMITHJANE", "JANESMITH"]),
     );
   });
 
@@ -2203,17 +2210,18 @@ describe("buildKeyStrings", () => {
     // And the two agree on a MATCH, not on a shared miss.
     expect(matches(swapKey, partyA, partyB)).toBe(true);
 
-    // The same pair with its transforms differing is what role resolution would
-    // otherwise decide -- the given-name comparison runs under the transform of
-    // whichever position the receiver's swap feeds it.
+    // The same pair with its transforms differing would let role resolution
+    // decide the comparison -- the given name runs under the transform of
+    // whichever position the receiver's swap feeds it. The receiver refuses it
+    // rather than matching on a set neither order realizes.
     const differing = {
       ...swapKey,
       elements: [swapKey.elements[0], { field: "last_name" }],
     };
-    expect(matches(differing, partyA, partyB)).not.toBe(
-      matches(differing, partyB, partyA),
+    expect(() => matches(differing, partyA, partyB)).toThrow(
+      /swap whose two elements do not declare the same transform/,
     );
-    // It does not reach this layer: the terms refuse it.
+    // It does not reach that layer either: the terms refuse it.
     const refused = safeParseLinkageTerms({
       version: "2.1.0",
       date: "2025-06-01",
@@ -2391,13 +2399,11 @@ describe("buildKeyStrings", () => {
     );
   });
 
-  test("no key this build admits reaches the width bound without a fan-out", () => {
-    // Fuzzy expansion, the other candidate producer, does not expand while
-    // APPLIED_SETTINGS.fuzzyComparisons is false, so the width bound and
-    // assembly cap bind fan-out alone in this build and a fan-out-free row
-    // contributes exactly one key string however many fuzzy elements its key
-    // declares. Three edit-distance elements over eight-character values would
-    // assemble 729 key strings once that gate opens, over the bound.
+  test("a key whose fuzzy elements compound past the ceiling never reads a row", () => {
+    // The other candidate producer reaches the same bounds: three edit-distance
+    // elements over eight-character values compound a declared width above
+    // MAX_KEY_CANDIDATE_WIDTH, so the key is refused where the width is derived
+    // rather than at a row that realized it.
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
     const dataset = makeDataset({
       last_name: "ABCDEFGH",
@@ -2411,7 +2417,7 @@ describe("buildKeyStrings", () => {
         generateFuzzyComparisons: "edit_distances" as const,
       })),
     };
-    expect(buildKeyStrings(fuzzyKey, dataset, 0)?.size).toBe(1);
+    expect(() => buildKeyStrings(fuzzyKey, dataset, 0)).toThrow(UsageError);
     expect(warn).not.toHaveBeenCalled();
   });
 
@@ -3851,14 +3857,17 @@ describe("buildKeyStrings", () => {
   // --- the receiver's swapped locators ---------------------------------------
   // A key declaring `swap` moves the two named elements' FIELDS on the receiver
   // and leaves their transforms in place, so the position that reads a column
-  // differs there from the position that declares it. The fixtures below
-  // declare a transform on only ONE position of the pair, to tell the two
-  // positions apart in a refusal's issue path -- not an admissible document
-  // (the terms schema binds a pair to one transform), but a locator fixture.
+  // differs there from the position that declares it. The pair below declares
+  // one transform on both positions, the shape the terms schema binds it to and
+  // the receiver re-checks before assembling both orders; what tells the two
+  // positions apart in a refusal's issue path is which column each is fed.
 
   const swapKey = (transform?: LinkageKeyElement["transform"]) => ({
     name: "FN+LN swapped",
-    elements: [{ field: "first_name", transform }, { field: "last_name" }],
+    elements: [
+      { field: "first_name", transform },
+      { field: "last_name", transform },
+    ],
     swap: ["first_name", "last_name"] as [string, string],
   });
 
@@ -3908,26 +3917,34 @@ describe("buildKeyStrings", () => {
     );
   });
 
-  test("a swapped receiver's accumulation refusal names the step that produced the candidates", () => {
+  test("a swapped receiver's accumulation refusal names the position fed the column", () => {
     // The other half: an element transform amplified each of the field's values,
-    // and the swap leaves a transform where it is declared, so the refusal names
-    // the element declaring it rather than the one declaring the column it read.
+    // and the swap moves only the column, so each role names the position its own
+    // element list feeds the offending field to.
     const amplifying = swapKey([
       {
         function: "replace_regex",
         params: { pattern: "a*", replacement: "x".repeat(800) },
       },
     ]);
-    const dataset = withUnlistedFanOutFunctions(() =>
-      makeDataset({
-        first_name: "JANE",
-        last_name: Array.from({ length: 2000 }, (_unused, i) =>
-          String(i).padStart(4, "0"),
-        ),
-      }),
+    const dataset = () =>
+      withUnlistedFanOutFunctions(() =>
+        makeDataset({
+          first_name: "JANE",
+          last_name: Array.from({ length: 2000 }, (_unused, i) =>
+            String(i).padStart(4, "0"),
+          ),
+        }),
+      );
+    const at = (element: number) =>
+      new RegExp(
+        `accumulated \\d+ characters of candidate values from row 0 of this party's data \\(linkageKeys\\[3\\]\\.elements\\[${element}\\]\\)`,
+      );
+    expect(() => buildKeyStrings(amplifying, dataset(), 0, false, 3)).toThrow(
+      at(1),
     );
-    expect(() => buildKeyStrings(amplifying, dataset, 0, true, 3)).toThrow(
-      /accumulated \d+ characters of candidate values from row 0 of this party's data \(linkageKeys\[3\]\.elements\[0\]\)/,
+    expect(() => buildKeyStrings(amplifying, dataset(), 0, true, 3)).toThrow(
+      at(0),
     );
   });
 
@@ -3944,7 +3961,9 @@ describe("buildKeyStrings", () => {
         params: { pattern: "a*", replacement: substitutingReplacement },
       },
     ]);
-    expect(buildKeyStrings(amplifying, dataset, 0, false, 3)).not.toBeNull();
+    expect(() => buildKeyStrings(amplifying, dataset, 0, false, 3)).toThrow(
+      /linkageKeys\[3\]\.elements\[1\]\.transform\[0\]/,
+    );
     expect(() => buildKeyStrings(amplifying, dataset, 0, true, 3)).toThrow(
       /linkageKeys\[3\]\.elements\[0\]\.transform\[0\]/,
     );

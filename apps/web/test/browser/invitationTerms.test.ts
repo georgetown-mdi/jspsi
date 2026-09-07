@@ -2745,12 +2745,11 @@ describe("InvitationTerms: a qualifying sentence sits at its headline's visibili
     );
   });
 
-  test("the fuzzy caveat sits with its annotation inside the key's own detail, behind the matching disclosure", async () => {
-    // A key element with a proposed (not-applied) fuzzy comparison. By the rule
-    // the caveat stays in the key's collapsed detail alongside the annotation it
-    // qualifies -- the two are one sentence, so they cannot separate -- and the whole
-    // key detail is behind the default-collapsed "Matching strategies" disclosure,
-    // not in the always-visible core.
+  test("an applied fuzzy comparison shows its annotation inside the key's own detail with no caveat", async () => {
+    // The run applies the expansion, so the annotation stands unqualified. Where
+    // it is placed is the rule under test: in the key's collapsed detail, behind
+    // the default-collapsed "Matching strategies" disclosure and not in the
+    // always-visible core, which is where a caveat would have to join it.
     renderCaveatTerms({
       linkageFields: [{ name: "dob", type: "date_of_birth" }],
       linkageKeys: [
@@ -2764,26 +2763,25 @@ describe("InvitationTerms: a qualifying sentence sits at its headline's visibili
     });
     await expect.element(toggle("Matching strategies")).toBeInTheDocument();
 
-    // Behind the matching disclosure, not in the core: the caveat is within the
-    // collapsed "Matching strategies" panel (which holds the nested key detail even
-    // while hidden), so it is never shown always-visible like the psi-c caveat.
+    // Behind the matching disclosure, not in the core: the annotation is within
+    // the collapsed "Matching strategies" panel (which holds the nested key detail
+    // even while hidden), so it is never shown always-visible like the psi-c caveat.
     expect((await readyPanel("Matching strategies")).textContent).toContain(
-      "(proposed; not yet applied)",
+      "adjacent years",
     );
 
-    // Open the matching list, then the key: the annotation and its not-yet-applied
-    // caveat are together in that key's own detail.
+    // Open the matching list, then the key: the annotation is in that key's own
+    // detail, and the run applies it, so nothing qualifies it.
     await userEvent.click(toggle("Matching strategies"));
     const panel = await readyPanel("DOB");
     expect(panel.textContent).toContain("adjacent years");
-    expect(panel.textContent).toContain("(proposed; not yet applied)");
+    expect(panel.textContent).not.toContain("(proposed; not yet applied)");
   });
 
   test("a setting that matches the run has no not-yet-applied caveat", async () => {
-    // psi (identifiers revealed -- the run's actual behavior), deduplicate off, and
-    // no fuzzy: every displayed setting equals what the run does, so none is
-    // flagged. The flag gating itself is asserted in the summarizeInvitation unit
-    // tests.
+    // psi (identifiers revealed -- the run's actual behavior) and deduplicate
+    // off: every displayed setting equals what the run does, so none is flagged.
+    // The flag gating itself is asserted in the summarizeInvitation unit tests.
     renderCaveatTerms({
       algorithm: "psi",
       deduplicate: false,

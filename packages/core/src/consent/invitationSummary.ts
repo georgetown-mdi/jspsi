@@ -1326,10 +1326,9 @@ export function summarizeInvitation(
   }
 
   // The consent screen reflects the inviter's terms as proposed, not only
-  // what today's exchange executes: the per-element generateFuzzyComparisons
-  // is shown even though the run does not yet apply the expansion. The
-  // *Applied flags below report that gap to the renderer; the displayed
-  // terms are what the acceptor agrees to.
+  // what today's exchange executes: a term the run would not apply is shown
+  // all the same, and the *Applied flags below report the gap to the
+  // renderer. The displayed terms are what the acceptor agrees to.
   // Which of the two fan-out registers this invitation is in: the strategy
   // that matches a candidate set, or one that refuses the terms outright.
   // Read once here so the element markers, the key summaries, and the
