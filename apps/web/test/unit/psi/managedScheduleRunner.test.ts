@@ -51,9 +51,9 @@ import type { ManagedLocalState } from "@psi/managed/managedLocalStateShape";
 
 // The unattended runner's tick in Node, with the clock, the store, the delay
 // and the run all injected. The fake clock advances only where real time would
-// -- inside an attempt's peer wait and inside the pacing delay -- so a
-// window's occupancy is exact and the assertions can name the instant the
-// last attempt ended. The store fake applies the REAL conditioned write
+// -- inside an attempt's peer wait and inside the stand-down between two
+// attempts -- so a window's occupancy is exact and the assertions can name the
+// instant the last attempt ended. The store fake applies the REAL conditioned write
 // (`applyManagedExchangeScheduleAdvance`), so a test is held to the store's own cadence-and-plan match.
 
 /** Anchor 2026-01-06T14:00Z, weekly, a three-hour window: window n opens
@@ -146,6 +146,9 @@ function harness(options: {
   unreadableIds?: Array<string>;
   stopAfterAttempts?: number;
   failAdvanceFor?: string;
+  /** How many attempts the record read tolerates before it rejects, standing in
+   * for a store read that fails between two attempts. */
+  failReadRecordAfterAttempts?: number;
   /** A write applied to the stored record immediately before the conditioned
    * advance lands, standing in for another tab's edit between this tick's
    * snapshot and its write. */
@@ -187,7 +190,14 @@ function harness(options: {
       Promise.resolve(
         options.localState ?? new Map<string, ManagedLocalState>(),
       ),
-    readRecord: (id) => Promise.resolve(stored.get(id)),
+    readRecord: (id) => {
+      if (
+        options.failReadRecordAfterAttempts !== undefined &&
+        attempts.length >= options.failReadRecordAfterAttempts
+      )
+        return Promise.reject(new Error("the store refused the read"));
+      return Promise.resolve(stored.get(id));
+    },
     persistAdvance: (id, advance) => {
       order.push("advance");
       advances.push({ id, advance });
@@ -461,14 +471,22 @@ describe("a due window in the open runtime", () => {
 });
 
 describe("a window whose attempts do not agree", () => {
+  /** What one no-show attempt costs the three-hour window: its whole peer wait,
+   * then the stand-down that follows it. */
+  const noShowThenStandDownMs =
+    ATTEMPT_PEER_WAIT_MS + ATTEMPT_LOCK_STANDDOWN_MS;
+
   /** A transient failure that runs the rest of the window out, so the occupancy
    * ends on THIS attempt and the window's disposition is decided with it as the
-   * last verdict. */
-  function transientThroughTheClose(afterMs: number): AttemptScript[number] {
+   * last verdict. `precedingNoShows` is how many no-show attempts ran before
+   * it, whose waits and stand-downs are the window time already spent. */
+  function transientThroughTheClose(
+    precedingNoShows: number,
+  ): AttemptScript[number] {
     return {
       kind: "fail",
       error: new Error("the channel dropped"),
-      spendsMs: 3 * 60 * 60 * 1000 - afterMs,
+      spendsMs: 3 * 60 * 60 * 1000 - precedingNoShows * noShowThenStandDownMs,
     };
   }
 
@@ -476,16 +494,16 @@ describe("a window whose attempts do not agree", () => {
     // The defect this pins: taking the LAST attempt's verdict alone let one
     // dropped channel at the end of a window of no-show waits record "failed",
     // which leaves consecutiveMisses untouched -- so the window nobody arrived
-    // in was never counted as a miss at all. Zero pacing after an attempt that
-    // spent its whole peer wait is what makes that trailing attempt cheap to
-    // reach.
+    // in was never counted as a miss at all. Two no-show waits and the
+    // stand-downs after them spend half an hour of the three-hour window, so
+    // the trailing failure still runs inside this same window.
     const runner = harness({
       records: [recordWith()],
       startAt: "2026-01-06T14:00:00.000Z",
       script: [
         ...noShowScript(),
         ...noShowScript(),
-        transientThroughTheClose(2 * ATTEMPT_PEER_WAIT_MS),
+        transientThroughTheClose(2),
       ],
     });
 
@@ -494,6 +512,8 @@ describe("a window whose attempts do not agree", () => {
     expect(entry.attempts).toBe(3);
     expect(entry.disposition).toBe("missed");
     expect(runner.advances[0].advance.schedule.consecutiveMisses).toBe(1);
+    // The trailing attempt ended ON the close, which is what the fixture is for.
+    expect(runner.nowMs()).toBe(at("2026-01-06T17:00:00.000Z"));
   });
 
   test("leaves a window whose failures are all local uncounted", async () => {
@@ -512,6 +532,7 @@ describe("a window whose attempts do not agree", () => {
     expect(entry.attempts).toBe(1);
     expect(entry.disposition).toBe("failed");
     expect(runner.advances[0].advance.schedule.consecutiveMisses).toBe(0);
+    expect(runner.nowMs()).toBe(at("2026-01-06T17:00:00.000Z"));
   });
 
   test("leaves the window failed when a handshake that failed closed trails the no-show waits", async () => {
@@ -1108,6 +1129,25 @@ describe("one record's trouble", () => {
     expect(entry).toMatchObject({
       attempts: 1,
       disposition: "failed",
+      skipped: "bookkeeping-failed",
+    });
+    expect(runner.attempts).toHaveLength(1);
+  });
+
+  test("reports the attempts it made when the re-read between two fails", async () => {
+    const runner = harness({
+      records: [recordWith()],
+      startAt: "2026-01-06T14:00:00.000Z",
+      script: noShowScript(),
+      failReadRecordAfterAttempts: 1,
+    });
+
+    const [entry] = await tickManagedSchedules(runner.seams);
+
+    // The read that rejects is the one the loop head makes across the
+    // stand-down, so the window had already made its first attempt.
+    expect(entry).toMatchObject({
+      attempts: 1,
       skipped: "bookkeeping-failed",
     });
     expect(runner.attempts).toHaveLength(1);

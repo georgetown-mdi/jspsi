@@ -56,6 +56,18 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+/** A deferred promise, so a test can hold an attended run's data exchange open
+ * across the moment the next scheduled attempt begins. */
+function deferred(): { promise: Promise<void>; resolve: () => void } {
+  let resolve!: () => void;
+  const promise = new Promise<void>((r) => {
+    resolve = () => {
+      r();
+    };
+  });
+  return { promise, resolve };
+}
+
 /** A handle the runner accepts as the record's input pointer. Nothing under
  * test reads through it: the run's phases are supplied by this file. */
 async function inputHandle(): Promise<FileSystemFileHandle> {
@@ -92,11 +104,13 @@ interface ScheduledWindow {
  * bookkeeping writes) with a partner who never arrives.
  */
 async function scheduledWindow(hooks: {
-  /** Runs inside an attempt, while the lock is held. */
+  /** Runs inside an attempt, while the lock is held. `record` is the one that
+   * attempt carries, which after the first is what the loop head re-read. */
   duringAttempt?: (context: {
     id: string;
     attempt: number;
     now: () => number;
+    record: ManagedExchangeRecord;
   }) => Promise<void>;
   /** Runs during a stand-down, while no lock is held. */
   duringStandDown?: (context: {
@@ -151,6 +165,7 @@ async function scheduledWindow(hooks: {
               id: record.id,
               attempt: attempts,
               now,
+              record: attempt.record,
             });
             await sleep(attempt.peerWaitTimeoutMs / SCALE);
             throw new PartnerNoShowError(
@@ -246,6 +261,80 @@ describe("the run+rotate lock across a scheduled window's stand-down", () => {
 
     const stored = await getManagedExchange(window.record.id);
     expect(stored?.lastRun?.outcome).toBe("succeeded");
+    expect(entry.disposition).toBe("succeeded");
+    expect(stored?.schedule?.consecutiveMisses).toBe(0);
+  }, 120_000);
+
+  test("an attended run still exchanging at the next loop head does not stop that attempt", async () => {
+    // The ordering the stand-down makes reachable and neither guard covers: the
+    // run lock releases at the rotation persist, so an attended run taken in a
+    // stand-down can still be exchanging payload when the next attempt's re-read
+    // runs. No success is stamped until that exchange ends, so the re-read finds
+    // the window unmet and the attempt runs -- against the record the attended
+    // run just rotated. This pins that ordering and what it does not cost: the
+    // attended success is still the stored outcome and the window still counts
+    // as met (see docs/spec/MANAGED_EXCHANGE_RECORD.md, "What the next attempt
+    // re-reads", which states the limit).
+    const rotatedSecret = generateSharedSecret();
+    const exchanging = deferred();
+    const releaseExchange = deferred();
+    const secretsAttempted: Array<string> = [];
+    let attended: Promise<unknown> | undefined;
+    let storedWhileExchanging: ManagedExchangeRecord | undefined;
+
+    const window = await scheduledWindow({
+      duringStandDown: async ({ id, now }) => {
+        if (attended !== undefined) return;
+        const claimed = await getManagedExchange(id);
+        if (claimed === undefined) throw new Error("the record went");
+        attended = runManagedRerun(
+          claimed,
+          {
+            acquireInput: () => Promise.resolve(undefined),
+            handshake: () =>
+              Promise.resolve({ rotatedSecret, handshake: "carried" }),
+            dataExchange: async () => {
+              await releaseExchange.promise;
+              return "exchanged";
+            },
+          },
+          {
+            now,
+            lock: { ifAvailable: true },
+            onDataExchangeStart: exchanging.resolve,
+          },
+        );
+        // Held here until the attended run is past its persist and its lock
+        // release, so the stand-down ends with its data exchange in flight.
+        await exchanging.promise;
+        storedWhileExchanging = await getManagedExchange(id);
+      },
+      duringAttempt: ({ attempt, record }) => {
+        secretsAttempted.push(record.sharedSecret);
+        // The attended exchange completes while this attempt waits on its own
+        // partner, so its success is stamped after the attempt began.
+        if (attempt === 2) releaseExchange.resolve();
+        return Promise.resolve();
+      },
+    });
+
+    const [entry] = await tickManagedSchedules(window.seams);
+    await attended;
+
+    // What the loop head read: the rotation landed, and the only outcome
+    // stored is the first attempt's own no-show -- the attended run stamps its
+    // success only once the data exchange it is still running ends.
+    expect(storedWhileExchanging?.sharedSecret).toBe(rotatedSecret);
+    expect(storedWhileExchanging?.lastRun?.outcome).toBe("missed");
+    // So a second attempt ran, carrying the record the attended run rotated.
+    expect(secretsAttempted[0]).toBe(window.record.sharedSecret);
+    expect(secretsAttempted[1]).toBe(rotatedSecret);
+    // What the branch's guards still hold: the attended success is the stored
+    // outcome, the window is met, and the attempt that ran alongside it -- a
+    // no-show -- rotated nothing of its own.
+    const stored = await getManagedExchange(window.record.id);
+    expect(stored?.lastRun?.outcome).toBe("succeeded");
+    expect(stored?.sharedSecret).toBe(rotatedSecret);
     expect(entry.disposition).toBe("succeeded");
     expect(stored?.schedule?.consecutiveMisses).toBe(0);
   }, 120_000);

@@ -345,8 +345,7 @@ async function occupyDueWindow(
   // unaccounted: it counts as missed at the wake that finds it elapsed.
   if (handle === undefined) return { ...entry, skipped: "no-input-handle" };
 
-  const occupancy = await occupyWindow(claimed, handle, due, seams);
-  entry.attempts = occupancy.attempts;
+  const occupancy = await occupyWindow(claimed, handle, due, entry, seams);
   if (occupancy.disposition === undefined)
     return {
       ...entry,
@@ -403,11 +402,11 @@ async function settleWindowDisposition(
     : occupied;
 }
 
-/** What occupying one window produced: how many attempts it took and the
- * window's disposition, absent when the window ended before anything decided
- * it. */
+/** What occupying one window produced: the window's disposition, absent when the
+ * window ended before anything decided it. The attempt count is not here -- the
+ * occupancy counts into the tick's own entry, so a rejection between two
+ * attempts still leaves the attempts that happened reported. */
 interface WindowOccupancy {
-  attempts: number;
   disposition?: ManagedScheduleWindowDisposition;
   /** Why the occupancy ended with no disposition, when a re-read between two
    * attempts decided it rather than the window's own close. */
@@ -495,16 +494,20 @@ async function readWindowState(
  * ({@link readWindowState}).
  * The window's disposition folds every attempt rather than reading the last one
  * (see {@link foldWindowDisposition}).
+ *
+ * `entry` counts the attempts as they begin rather than at the return, so a
+ * re-read that rejects mid-occupancy still leaves the tick reporting the
+ * attempts this window made beside the failure.
  */
 async function occupyWindow(
   claimed: ManagedExchangeRecord,
   claimedHandle: FileSystemFileHandle,
   window: ManagedScheduleWindow,
+  entry: ManagedScheduleTickEntry,
   seams: ManagedScheduleTickSeams,
 ): Promise<WindowOccupancy> {
   let record = claimed;
   let handle = claimedHandle;
-  let attempts = 0;
   let partnerWasAbsent = false;
   let contactWasProven = false;
   let disposition: ManagedScheduleWindowDisposition | undefined;
@@ -513,19 +516,19 @@ async function occupyWindow(
     // open, and recording a miss for one this runner simply stopped occupying
     // would count a miss the partner may yet have been met in. A later wake
     // decides it from the stored plan.
-    if (seams.stopped()) return { attempts };
+    if (seams.stopped()) return {};
     const remainingMs = window.closesAtMs - seams.now();
-    if (remainingMs <= 0 || attempts >= MAX_WINDOW_ATTEMPTS) break;
-    if (attempts > 0) {
+    if (remainingMs <= 0 || entry.attempts >= MAX_WINDOW_ATTEMPTS) break;
+    if (entry.attempts > 0) {
       const state = await readWindowState(record.id, window, seams);
       if (!state.attempt) {
         const { attempt, ...ended } = state;
-        return { attempts, ...ended };
+        return ended;
       }
       record = state.record;
       handle = state.handle;
     }
-    attempts += 1;
+    entry.attempts += 1;
     let dataExchangeStarted = false;
     try {
       await seams.runAttempt({
@@ -536,14 +539,13 @@ async function occupyWindow(
           dataExchangeStarted = true;
         },
       });
-      return { attempts, disposition: "succeeded" };
+      return { disposition: "succeeded" };
     } catch (error) {
       const verdict = managedScheduleWindowVerdict(error, dataExchangeStarted);
       if (verdict.disposition === "missed") partnerWasAbsent = true;
       if (verdict.provesContact) contactWasProven = true;
       if (!verdict.retryable)
         return {
-          attempts,
           disposition: foldWindowDisposition(
             verdict.disposition,
             partnerWasAbsent,
@@ -565,7 +567,6 @@ async function occupyWindow(
     );
   }
   return {
-    attempts,
     ...(disposition !== undefined
       ? {
           disposition: foldWindowDisposition(

@@ -275,6 +275,13 @@ carries: that one is the catch-up walk's verdict on an already-closed window
 rather than a run in flight, so it states no run start and the monotonic rule is
 what holds a newer success off it.
 
+That reach is a **stated limit** on the second rule: the `storage` entry a
+failed rotation persist carries is dropped like any other non-succeeded one, so
+a run that rotates, fails to save the rotated secret, and finds an earlier run's
+success stamped at or after its own start leaves the record reading `succeeded`
+-- and leaves the next run's tiering without the benign-desync steer that
+`storage` kind gives it.
+
 ### The schedule object
 
 The optional `schedule` object holds the partnership-agreed run cadence, the
@@ -549,6 +556,15 @@ stamped after that run began, so the attended run's success cannot be erased by
 the no-show that follows it. The window's own disposition is read against the
 store once more before it is written, so a window met that way counts no miss;
 a success landing after even that is credited by the next wake's catch-up.
+
+One ordering is a **stated limit** rather than a covered case: the run lock
+releases at the rotation persist and the success is stamped only after the data
+exchange, so an attended run taken in a stand-down can still be exchanging when
+the next attempt's re-read runs, which finds the rotation and no success and
+attempts again against the record that run just rotated, with its exchange in
+flight. The bookkeeping settles on the attended success either way -- its stamp
+lands after the attempt began, so the attempt's own miss is dropped and the
+window counts as met.
 
 An occupancy belongs to one record. Each wake dispatches every due record that is
 not already occupying its window, so an exchange holding its own window open for
