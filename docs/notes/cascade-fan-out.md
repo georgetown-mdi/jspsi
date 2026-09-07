@@ -99,11 +99,20 @@ resolution frames" covers, as a protocol-version event.
 ## Where the design landed
 
 PROTOCOL.md holds that per-round design, for a candidate set from any
-producer:
+producer.
 [Per-round candidacy under cascade](../spec/PROTOCOL.md#per-round-candidacy-under-cascade)
-and the four subsections after it fix the frame extension and its checks, the
-disclosure it pays, the version consequence, the combinations that stay
-unsupported, and the normative double-match case. One reason stated above is
+opens it, and the four subsections after it fix the frame extension and its
+checks
+([The per-round grouping the two frames hold](../spec/PROTOCOL.md#the-per-round-grouping-the-two-frames-hold)),
+[the normative double-match case](../spec/PROTOCOL.md#the-normative-double-match-case),
+[what the cascade realization owes](../spec/PROTOCOL.md#what-the-cascade-realization-owes),
+and
+[the combinations that stay unsupported](../spec/PROTOCOL.md#the-combinations-that-stay-unsupported).
+The disclosure the grouping pays is a row of
+[The disclosure delta fan-out pays](../spec/PROTOCOL.md#the-disclosure-delta-fan-out-pays)
+and its version consequence a paragraph of
+[Wire-format deltas](../spec/PROTOCOL.md#wire-format-deltas-existing-frames-only-and-no-version-bump),
+both sections above it. One reason stated above is
 corrected there: round `j + 1`'s candidate sets do not diverge, each party
 computing its own removals from its own round output and its own incidence,
 and what a party cannot compute alone is the round's accepted pair set. The
