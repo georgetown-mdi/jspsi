@@ -29,6 +29,11 @@ export default defineConfig({
         test: {
           name: "unit",
           include: ["test/**/*.{test,spec}.?(c|m)[jt]s?(x)"],
+          // `--expose-gc` for the one suite that measures a heap delta
+          // (test/connection/binaryPackRetention.test.ts, which skips itself
+          // without a collector). It exposes `globalThis.gc` and changes no
+          // collection behavior, so the rest of the project is unaffected.
+          execArgv: ["--expose-gc"],
           // Keep the stress tier out of the default run; it is opt-in via
           // `npm run test:stress`. Extend (not replace) vitest's defaults so
           // node_modules/dist stay excluded.

@@ -47,6 +47,7 @@ stands, from a direction still open to a decision taken and built.
 | [signing-identity-custody.md](signing-identity-custody.md) | Decided and built, by a 3-panelist design panel converging 3-0. |
 | [standing-relay-delivery.md](standing-relay-delivery.md) | Decided, the reference is written, and the first deployment has driven a relayed exchange through it. |
 | [web-server-runtime-role.md](web-server-runtime-role.md) | Direction recorded; no removal scheduled. |
+| [webrtc-frame-structure-envelope.md](webrtc-frame-structure-envelope.md) | Decided and built, by a 3-panelist design panel converging 3-0 on the retirement and 2-1 on the ceiling. |
 | [webrtc-relay-deployment.md](webrtc-relay-deployment.md) | Measured, with a recommendation and a proposed epic; the recommendation is now deployed and verified against the standing relay. |
 
 Each note states its full status at its own top; this table is a pointer, not a restatement.

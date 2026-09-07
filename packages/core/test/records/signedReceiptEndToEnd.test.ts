@@ -28,6 +28,7 @@ import {
 } from "../../src/records/signingIdentity";
 import { COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH } from "../../src/utils/sanitizeForDisplay";
 import { canonicalString } from "../../src/utils/canonical";
+import { safeParseLinkageTerms } from "../../src/config/linkageTermsSchema";
 import { toCommittedPayload } from "../../src/payloadExchange";
 
 import type { Output } from "../../src/config/linkageTermsSchema";
@@ -728,6 +729,34 @@ test("the local-certificate refusal's fixed prose leaves the identity pair room 
   expect(fixedProse).toBeLessThanOrEqual(
     COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH - IDENTITY_PAIR_DISPLAY_BUDGET,
   );
+});
+
+test("a certificate bound to a label the terms refuse names the re-key exit and no part of the label", () => {
+  // The identity file admits any non-empty label (records/signingIdentity.ts),
+  // so a certificate can hold one the terms refuse -- and its holder meets this
+  // refusal with no linkage_terms.identity edit that reconciles the pair.
+  const boundLabel = "Initiator\u202eCo";
+  const agreedIdentity = "Initiator Co";
+  expect(
+    safeParseLinkageTerms({ ...firstNameTerms, identity: boundLabel }).success,
+  ).toBe(false);
+
+  let thrown: unknown;
+  try {
+    assertLocalCertificateAuthorizesAgreedIdentity(
+      { ...identityA.certificate, identity: boundLabel },
+      agreedIdentity,
+    );
+  } catch (err) {
+    thrown = err;
+  }
+  expect(thrown).toBeInstanceOf(OperatorConfigError);
+  const message = (thrown as Error).message;
+  expect(message).toContain("psilink fingerprint --force --identity");
+  expect(message).toContain("re-pin the new fingerprint");
+  expect(message).not.toContain("linkage_terms.identity to the name on the");
+  expect(message).not.toContain(boundLabel);
+  expect(message).not.toContain("\u202e");
 });
 
 // --- Pairing a receipt to one run --------------------------------------------

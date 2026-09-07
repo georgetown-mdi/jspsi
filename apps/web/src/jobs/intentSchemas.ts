@@ -61,7 +61,9 @@ export const MAX_IDENTITY_LENGTH = 1024;
  * the four free-text fields of a linkage-terms document, the party `identity`
  * among them, which a label accepted here becomes; the two patterns are held
  * equal by test/unit/jobs/identityLabelParity.test.ts. This contract is
- * stricter: it also refuses a leading `-`.
+ * stricter in one direction, also refusing a leading `-`, and it refuses the
+ * text-direction class beside this one
+ * ({@link IDENTITY_DIRECTION_CHAR_PATTERN}), as core's `identity` does.
  */
 export const IDENTITY_CONTROL_CHAR_PATTERN =
   // eslint-disable-next-line no-control-regex
@@ -75,6 +77,36 @@ export const IDENTITY_CONTROL_CHAR_PATTERN =
  */
 export const IDENTITY_CONTROL_CHAR_MESSAGE =
   "identity must not contain control characters";
+
+/**
+ * The second class an `identity` label may not contain: the nine Unicode
+ * bidirectional embedding, override and isolate characters (U+202A-U+202E and
+ * U+2066-U+2069, Unicode UAX #9). One of them opens a layout scope that
+ * outlives the label and reorders the copy it is placed beside, and the label
+ * is bound into a long-lived certificate a partner pins and DISPLAYS, and is
+ * written into both parties' exchange records as the terms state it. Nothing in
+ * a party name needs one: a right-to-left name lays out from its own letters.
+ *
+ * The implicit marks U+200E LRM, U+200F RLM and U+061C ALM stay admitted: each
+ * sets a direction for the neutral characters around it and opens no scope
+ * reaching past them.
+ *
+ * Core's `BIDI_CONTROL_PATTERN` (packages/core/src/utils/nameControls.ts) is
+ * the same class over the terms document's recorded free-text fields, the party
+ * `identity` among them; the two patterns are held equal by
+ * test/unit/jobs/identityLabelParity.test.ts.
+ */
+export const IDENTITY_DIRECTION_CHAR_PATTERN = /[\u202a-\u202e\u2066-\u2069]/u;
+
+/**
+ * The reason every boundary reports for a label containing one, naming a field
+ * path and a shape reason and never the submitted bytes, for the reason
+ * {@link IDENTITY_CONTROL_CHAR_MESSAGE} gives. Its own sentence rather than a
+ * shared one, since the two rules refuse different characters and an operator
+ * fixing one is not told about the other.
+ */
+export const IDENTITY_DIRECTION_CHAR_MESSAGE =
+  "identity must not contain text-direction characters";
 
 /**
  * Upper bound on a `peer_id`. It prefixes every filename this party writes into
@@ -625,8 +657,9 @@ export type JobZeroSetupLinkageStrategy = "cascade" | "single-pass";
  *   `--linkage-strategy`.
  * - `identity` is a bounded operator label forwarded to the CLI's
  *   `--identity` (the party name/org/contact string), bounded by
- *   {@link MAX_IDENTITY_LENGTH} and held to the shared label contract's two
- *   shape rules: no leading `-` and no control character.
+ *   {@link MAX_IDENTITY_LENGTH} and held to the shared label contract's three
+ *   shape rules: no leading `-`, no control character, and no text-direction
+ *   character.
  *
  * Neither is a path, host, or credential. Exactly one of `inputCsv` or
  * `inputFile` is set (enforced by {@link jobZeroSetupIntentSchema}),
@@ -1007,9 +1040,10 @@ const jobZeroSetupIntentCommonFields = {
   eventStream: z.boolean().optional(),
   linkageStrategy: z.enum(["cascade", "single-pass"]).optional(),
   // Free text, unlike the closed strategy enum, so it takes the shared label
-  // contract's two shape rules (`@jobs/intentSchemas`): no leading `-` and no
-  // control character. The driver emits it as a single `--identity=<value>`
-  // token, which parses a `-`-leading value verbatim regardless.
+  // contract's three shape rules (`@jobs/intentSchemas`): no leading `-`, no
+  // control character, and no text-direction character. The driver emits it as
+  // a single `--identity=<value>` token, which parses a `-`-leading value
+  // verbatim regardless.
   identity: z
     .string()
     .min(1)
@@ -1017,6 +1051,9 @@ const jobZeroSetupIntentCommonFields = {
     .regex(/^[^-]/, "identity must not begin with '-'")
     .refine((label) => !IDENTITY_CONTROL_CHAR_PATTERN.test(label), {
       message: IDENTITY_CONTROL_CHAR_MESSAGE,
+    })
+    .refine((label) => !IDENTITY_DIRECTION_CHAR_PATTERN.test(label), {
+      message: IDENTITY_DIRECTION_CHAR_MESSAGE,
     })
     .optional(),
 };

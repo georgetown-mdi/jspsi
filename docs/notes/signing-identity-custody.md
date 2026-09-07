@@ -36,7 +36,7 @@ The three answers are one rule read against three situations: refuse where the m
 
 ## The label bound at creation
 
-Closed in the same change, since it is the same decision point: `psilink fingerprint` bound `--identity` (or `linkage_terms.identity`) into the certificate after only a non-empty check, so the CLI could mint identities the linkage-terms schema itself refuses. The label now takes that schema's two rules -- no control character, and the same length bound -- matching what the console's fingerprint route already applies to the label it binds. The value is not transient: it is bound into a long-lived certificate, and read back and displayed by whoever pinned the fingerprint, long after the run that chose it.
+Closed in the same change, since it is the same decision point: `psilink fingerprint` bound `--identity` (or `linkage_terms.identity`) into the certificate after only a non-empty check, so the CLI could mint identities the linkage-terms schema itself refuses. The label takes that schema's rules for the field -- no control character, no text-direction character, and the same length bound -- which the console's fingerprint route applies to the label it binds as well. The value is not transient: it is bound into a long-lived certificate, and read back and displayed by whoever pinned the fingerprint, long after the run that chose it.
 
 ## What this note does not decide
 

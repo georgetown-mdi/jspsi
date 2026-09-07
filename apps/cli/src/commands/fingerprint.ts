@@ -3,6 +3,7 @@ import fs from "node:fs";
 import path from "node:path";
 
 import {
+  BIDI_CONTROL_PATTERN,
   computeCertificateFingerprint,
   generateSigningIdentity,
   getLogger,
@@ -11,6 +12,7 @@ import {
   serializeCertificate,
   TEXT_CONTROL_CHAR_MESSAGE,
   TEXT_CONTROL_CHAR_PATTERN,
+  TEXT_DIRECTION_MESSAGE,
   UsageError,
 } from "@psilink/core";
 import type { SigningIdentity } from "@psilink/core";
@@ -157,19 +159,26 @@ export function readConfigHints(
  *
  * The label reaches this command from `--identity` or `linkage_terms.identity`
  * without passing through `LinkageTermsSchema`, which is where every other
- * route into that field is bounded and refused a control character
- * ({@link TEXT_CONTROL_CHAR_PATTERN}); the console's fingerprint route applies
- * the same two rules at its own boundary. Unchecked here, the CLI would mint
- * certificates holding labels the terms document itself refuses -- and this one
- * is not a transient: it is bound into a long-lived certificate, read back and
- * DISPLAYED by whoever pinned the fingerprint, long after the run that chose it.
+ * route into that field is bounded and refused its two character classes; the
+ * console's fingerprint route applies the same rules at its own boundary.
+ * Unchecked here, the CLI would mint certificates holding labels the terms
+ * document itself refuses -- and this one is not a transient: it is bound into
+ * a long-lived certificate, read back and DISPLAYED by whoever pinned the
+ * fingerprint, long after the run that chose it.
  *
  * Applied to the value actually being bound, whichever source supplied it, the
  * binding continued by a `--force` re-key included: what a new certificate
  * holds is what the check is about.
  *
- * Neither message echoes the label. The offending value is the operator's own
- * text and naming it back adds nothing to a rule about its shape, which is the
+ * It holds the length bound and both classes the terms document refuses in
+ * that field: the control characters ({@link TEXT_CONTROL_CHAR_PATTERN}), and
+ * the nine text-direction embedding, override and isolate characters
+ * ({@link BIDI_CONTROL_PATTERN}), one of which opens a layout scope that
+ * reorders the copy the certificate's identity is displayed beside. The
+ * implicit marks U+200E, U+200F and U+061C stay admitted, as they do there.
+ *
+ * No message echoes the label. The offending value is the operator's own text
+ * and naming it back adds nothing to a rule about its shape, which is the
  * discipline the terms document's own refusals keep.
  */
 function assertBindableIdentity(identity: string): void {
@@ -177,6 +186,12 @@ function assertBindableIdentity(identity: string): void {
     throw new UsageError(
       "the identity to bind into the signing certificate cannot be used: " +
         `${TEXT_CONTROL_CHAR_MESSAGE}. Supply one that has none, through ` +
+        "--identity or linkage_terms.identity.",
+    );
+  if (BIDI_CONTROL_PATTERN.test(identity))
+    throw new UsageError(
+      "the identity to bind into the signing certificate cannot be used: " +
+        `${TEXT_DIRECTION_MESSAGE}. Supply one that has none, through ` +
         "--identity or linkage_terms.identity.",
     );
   if (identity.length > MAX_TEXT_LENGTH)
