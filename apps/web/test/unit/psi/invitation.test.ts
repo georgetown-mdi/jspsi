@@ -798,7 +798,10 @@ describe("generateInvitation", () => {
   const uncompilableStep = { function: "pad_left", params: {} };
 
   test("refuses to mint when a linkage-key element transform cannot be built", async () => {
-    const metadata = inferMetadata(["ssn", "first_name", "last_name", "dob"]);
+    const metadata = inferMetadata(
+      ["ssn", "first_name", "last_name", "dob"],
+      [],
+    );
     const base = getDefaultLinkageTerms("Org", metadata);
     const uncompilable = {
       ...base,
@@ -828,7 +831,10 @@ describe("generateInvitation", () => {
   });
 
   test("refuses to mint when the authored standardization cannot be built", async () => {
-    const metadata = inferMetadata(["ssn", "first_name", "last_name", "dob"]);
+    const metadata = inferMetadata(
+      ["ssn", "first_name", "last_name", "dob"],
+      [],
+    );
     await expect(
       generateInvitation({
         inviterName: "Org",
@@ -854,7 +860,10 @@ describe("generateInvitation", () => {
     // partner had already accepted. Every own property of the prototype is
     // driven, so the mint's answer does not depend on which two names today's
     // engine puts there.
-    const metadata = inferMetadata(["ssn", "first_name", "last_name", "dob"]);
+    const metadata = inferMetadata(
+      ["ssn", "first_name", "last_name", "dob"],
+      [],
+    );
     const base = getDefaultLinkageTerms("Org", metadata);
     for (const name of Object.getOwnPropertyNames(Object.prototype)) {
       const terms = {
