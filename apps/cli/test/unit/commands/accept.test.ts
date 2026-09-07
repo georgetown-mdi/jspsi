@@ -108,6 +108,7 @@ import {
   PLACEHOLDER_IDENTITY,
 } from "../../../src/partyIdentity";
 import { saveConfig } from "../../../src/config";
+import { webRtcDialFrom } from "../../../src/protocol";
 import {
   CONNECTION_BLOCK_DOC_URL,
   CONNECTION_BLOCK_NOTICE,
@@ -1274,6 +1275,44 @@ describe("the count-only shape, at the accept boundary", () => {
     }
   });
 
+  test("validateAccept: offline reports an ignored --server-* override before an aborting input read", async () => {
+    // The warning is emitted ahead of the config reconciliation and the input
+    // read, both of which abort: an operator whose accept fails on the CSV still
+    // reads that the --server-* flags they passed have no effect, rather than
+    // rerunning with a fixed CSV to learn it.
+    const missingInput = path.join(
+      tmpdir(),
+      `psilink-accept-absent-${process.pid}-${optionsCounter++}.csv`,
+    );
+    const log = getLogger("accept-offline-override-warn-before-abort");
+    log.setLevel("silent");
+    const warnSpy = vi.spyOn(log, "warn");
+    try {
+      const encoded = await encodeInvitation(sampleToken(FUTURE()));
+      await expect(
+        validateAccept({
+          resolved: {
+            mode: "offline",
+            invitation: encoded,
+            input: missingInput,
+          },
+          options: testOptions({ serverUsername: "alice" }),
+          log,
+        }),
+      ).rejects.toThrow(/does not exist/);
+      expect(
+        warnSpy.mock.calls.some(
+          (c) =>
+            typeof c[0] === "string" &&
+            c[0].includes("--server-username") &&
+            c[0].includes("no effect on an offline invite/accept"),
+        ),
+      ).toBe(true);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
   test("validateAccept: online does not warn about a --server-* override (it is applied)", async () => {
     // The online path builds the connection from the URL through
     // applyConnectionOverrides, so the override takes effect and no
@@ -1585,6 +1624,90 @@ describe("accepting and running a webrtc exchange in one command", () => {
       expect(ready.prepared.expectedPartnerDeduplicate).toBe(
         token.linkageTerms.deduplicate,
       );
+    } finally {
+      fs.rmSync(input, { force: true });
+    }
+  });
+
+  test("validateAccept: --peer-timeout bounds the acceptance that runs the exchange", async () => {
+    // This acceptance conducts the exchange itself, so the budget flag is the
+    // operator's only lever on how long it waits for a partner who never
+    // arrives; it is applied to the connection rather than reported ignored.
+    const input = writeInputCSV(["first_name", "last_name", "dob", "ssn"]);
+    const messages: string[] = [];
+    try {
+      const encoded = await encodeInvitation(
+        sampleToken(FUTURE(), WEBRTC_ENDPOINT),
+      );
+      const ready = await validateAccept({
+        resolved: { mode: "offline", invitation: encoded, input },
+        options: testOptions({ peerTimeout: 10 }),
+        log: recordingLog(messages),
+      });
+      expect(ready.mode).toBe("endpointRun");
+      if (ready.mode !== "endpointRun") return;
+      // Seconds at the flag, milliseconds in the connection this run dials and
+      // the bootstrap writes.
+      expect(ready.connection.options?.peerTimeoutMs).toBe(10_000);
+      expect(
+        messages.some((m) => m.includes("--peer-timeout")),
+        "the running acceptance reported the flag it just applied as ignored",
+      ).toBe(false);
+      // What that one value buys on this transport: the wait for the partner to
+      // arrive, the wait for the channel to open, and the peer silence after.
+      const { options } = webRtcDialFrom(
+        ready.connection,
+        generateSharedSecret(),
+      );
+      expect(options.rendezvousTimeoutMs).toBe(10_000);
+      expect(options.channelOpenTimeoutMs).toBe(10_000);
+      expect(options.inactivityTimeoutMs).toBe(10_000);
+    } finally {
+      fs.rmSync(input, { force: true });
+    }
+  });
+
+  test("validateAccept: --peer-timeout stays reported ignored on an acceptance that writes a configuration", async () => {
+    // The write-only branch applies no connection override: the block it writes
+    // is one the operator edits, so a budget flag would be silently dropped and
+    // is named instead. Both shapes that reach it -- no input file to exchange,
+    // and an endpoint on a channel whose credentials the operator supplies --
+    // report it.
+    const input = writeInputCSV(["first_name", "last_name", "dob", "ssn"]);
+    try {
+      for (const resolved of [
+        {
+          invitation: await encodeInvitation(
+            sampleToken(FUTURE(), WEBRTC_ENDPOINT),
+          ),
+        },
+        {
+          invitation: await encodeInvitation(
+            sampleToken(FUTURE(), {
+              channel: "sftp" as const,
+              host: "sftp.example.org",
+              path: "/exchange",
+            }),
+          ),
+          input,
+        },
+      ]) {
+        const messages: string[] = [];
+        const ready = await validateAccept({
+          resolved: { mode: "offline", ...resolved },
+          options: testOptions({ peerTimeout: 10 }),
+          log: recordingLog(messages),
+        });
+        expect(ready.mode).toBe("offline");
+        if (ready.mode !== "offline") return;
+        expect(ready.connection.options?.peerTimeoutMs).toBeUndefined();
+        expect(
+          messages.some(
+            (m) =>
+              m.includes("--peer-timeout") && m.includes("connection.options"),
+          ),
+        ).toBe(true);
+      }
     } finally {
       fs.rmSync(input, { force: true });
     }
@@ -4890,6 +5013,48 @@ describe("handler: '--consent-to-terms' gates the confirmation prompt", () => {
       // The acceptor observes nothing it must crystallize: its received set is the
       // one the invitation declared, which it already has.
       expect(passed.persistObservedReceivedPayload).toBeUndefined();
+    } finally {
+      exit.mockRestore();
+      runOnlineBootstrapMock.mockReset();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("handler: --peer-timeout reaches the run and the configuration it writes", async () => {
+    // One connection is both the run's and the bootstrap's, so the value the
+    // dial waits on is the peer_timeout_ms the written configuration holds and
+    // a later unattended `psilink exchange` inherits. No run-only override is
+    // passed, which is what keeps the two the same value.
+    const { dir, input, configFile, keyFile } = offlineAcceptFixture();
+    const runOnlineBootstrapMock = vi.mocked(runOnlineBootstrap);
+    runOnlineBootstrapMock.mockResolvedValue({ configWriteError: undefined });
+    const exit = vi
+      .spyOn(process, "exit")
+      .mockImplementation((() => undefined) as never);
+    try {
+      const encoded = await encodeInvitation(
+        sampleToken(FUTURE(), {
+          channel: "webrtc",
+          host: "peer.example.org",
+          path: "/psi",
+        }),
+      );
+      await acceptHandler({
+        _: [],
+        $0: "psilink",
+        identity: "Agency B",
+        args: [encoded, input, path.join(dir, "results.csv")],
+        "consent-to-terms": true,
+        "config-file": configFile,
+        "key-file": keyFile,
+        "peer-timeout": "10s",
+        "log-level": "silent",
+        record: false,
+      } as unknown as Arguments);
+      expect(exit).not.toHaveBeenCalled();
+      const passed = runOnlineBootstrapMock.mock.calls[0][0];
+      expect(passed.connection.options?.peerTimeoutMs).toBe(10_000);
+      expect(passed.runOnlyPeerTimeoutSeconds).toBeUndefined();
     } finally {
       exit.mockRestore();
       runOnlineBootstrapMock.mockReset();
