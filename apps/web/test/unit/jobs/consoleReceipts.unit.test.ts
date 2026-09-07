@@ -57,6 +57,7 @@ import {
   signingCertificatePath,
   signingIdentityPath,
 } from "@jobs/signingIdentity";
+import { browseSegment } from "@jobs/workInputName";
 import { importLinkageTerms } from "@psi/linkageTermsIO";
 import { resolveWorkdirFile } from "@jobs/workdir";
 
@@ -1347,6 +1348,21 @@ describe("the receipts card's model", () => {
     const label = identityLocationLabel(located.identityLocation);
     expect(label).toBe("secrets / .ssh / identity.json");
     expect(label.startsWith("/")).toBe(false);
+  });
+
+  test("a text-direction override in a picked name is shown escaped", () => {
+    // The browse admits any single-segment name without a control character, so
+    // a file whose name holds a right-to-left override is pickable. Shown raw it
+    // would reorder the line the operator reads to check which key signs, and
+    // that line is the whole of what the card says about the location.
+    const reversing = "identity\u202egpj.json";
+    expect(browseSegment(reversing)).toBe(true);
+    const label = identityLocationLabel({
+      mount: "secrets",
+      subPath: [reversing],
+    });
+    expect(label).toBe("secrets / identity\\u202egpj.json");
+    expect(label).not.toContain("\u202e");
   });
 
   test("changing the location drops the fingerprint read at the old one", () => {

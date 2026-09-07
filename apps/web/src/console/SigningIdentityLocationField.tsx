@@ -2,9 +2,7 @@ import { useEffect, useRef } from "react";
 
 import { Button, Group, Stack, Text } from "@mantine/core";
 
-import { sanitizeForDisplay } from "@psilink/core";
-
-import { IDENTITY_DEFAULT_LOCATION_LABEL } from "@psi/receiptsModel";
+import { identityLocationLabel } from "@psi/receiptsModel";
 
 import styles from "@styles/app.module.css";
 
@@ -65,11 +63,7 @@ export function SigningIdentityLocationField({
       <Group gap="xs" align="center">
         <Text size="sm">In use:</Text>
         <span className={styles.mono} data-testid="signing-identity-location">
-          {location === undefined
-            ? IDENTITY_DEFAULT_LOCATION_LABEL
-            : `secrets / ${location.subPath
-                .map((segment) => sanitizeForDisplay(segment))
-                .join(" / ")}`}
+          {identityLocationLabel(location)}
         </span>
         {location !== undefined && (
           <Button

@@ -857,9 +857,7 @@ export class JobManager {
     const identityPath = resolveSigningIdentityPath({
       dataRoot: this.dataRoot,
       secretsDir: this.jobSecretsDir,
-      ...(args.identityLocation !== undefined
-        ? { location: args.identityLocation }
-        : { location: undefined }),
+      location: args.identityLocation,
     });
     if (args.identityLocation !== undefined) {
       if (!signingIdentityExists(identityPath)) return { kind: "absent" };

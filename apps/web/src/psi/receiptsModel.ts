@@ -1,4 +1,8 @@
-import { FINGERPRINT_REGEX, MAX_TEXT_LENGTH } from "@psilink/core";
+import {
+  FINGERPRINT_REGEX,
+  MAX_TEXT_LENGTH,
+  sanitizeForDisplay,
+} from "@psilink/core";
 
 import { NOTE_CONTROL_CHAR_PATTERN } from "@jobs/intentSchemas";
 
@@ -112,12 +116,20 @@ export function receiptsWithField<TField extends keyof ReceiptsDraft>(
 export const IDENTITY_DEFAULT_LOCATION_LABEL =
   "The folder you mounted (default)";
 
-/** The picked location as one displayable line: the mount id then each segment. */
+/**
+ * The picked location as one displayable line: the mount id then each segment,
+ * every part escaped for display. A segment is a name the mount browse admits,
+ * which bars a control character and nothing else outside ASCII -- a
+ * text-direction override among them -- so the escape is what keeps the line
+ * reading as the file the operator picked.
+ */
 export function identityLocationLabel(
   location: JobSigningIdentityLocation | undefined,
 ): string {
   if (location === undefined) return IDENTITY_DEFAULT_LOCATION_LABEL;
-  return [location.mount, ...location.subPath].join(" / ");
+  return [location.mount, ...location.subPath]
+    .map((segment) => sanitizeForDisplay(segment))
+    .join(" / ");
 }
 
 /** The subset of a job intent this card contributes. Both fields are present
