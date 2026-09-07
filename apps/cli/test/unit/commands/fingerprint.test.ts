@@ -559,31 +559,66 @@ test("warns when the bound identity diverges from the config identity", async ()
   expect(message).toContain("refused before it runs");
 });
 
-test("a control-character label is escaped where the warning is logged", async () => {
+test("a non-ASCII label is escaped where the warning is logged", async () => {
   // This log sink is where these values get their one escape pass
   // (CONTRIBUTING.md, Operator-facing escaping), via the shared party-identity
-  // helper; a label holding a terminal escape must not reach the operator's
-  // terminal as one. Reached over an identity ALREADY on disk: a new binding
-  // holding a control character is refused outright (below), but the
-  // certificate schema admits an existing one, so a loaded file is how such a
-  // label still reaches this sink.
+  // helper, which rewrites everything outside printable ASCII. The bound label
+  // is one the terms admit: a label holding a control or text-direction
+  // character takes the re-key branch below, which quotes no label at all, so
+  // this branch is where the bound value still reaches the sink.
   const idPath = path.join(dir, "id.json");
   const warn = vi.fn();
-  const esc = String.fromCharCode(0x1b);
-  idFile.saveSigningIdentity(
-    idPath,
-    await generateSigningIdentity(`Party ${esc}[31mA`),
-  );
   await resolveSigningIdentity({
     identityPath: idPath,
+    identityArg: "Sant\u00e9 Publique",
     configIdentity: `Agency\nA`,
     force: false,
     log: { warn },
   });
   const message = warn.mock.calls[0]?.[0] as string;
-  expect(message).toContain("Party \\x1b[31mA");
+  expect(message).toContain("Sant\\xe9 Publique");
+  // Escaped once: a second pass would double the backslash the first wrote.
+  expect(message).not.toContain("\\\\xe9");
   expect(message).toContain("Agency\\x0aA");
   expect(/[^\t\x20-\x7e]/.test(message)).toBe(false);
+});
+
+test("a bound label the terms cannot state warns with the re-key exit", async () => {
+  // A new binding holding one of these characters is refused outright by the
+  // binding check above, but the certificate schema admits one already bound,
+  // so a loaded file is how such a label reaches this sink. Its holder cannot
+  // author linkage_terms.identity to match it -- the terms refuse the same two
+  // classes -- so the warning names the exit that exists, a re-key, and quotes
+  // no part of the label.
+  const esc = String.fromCharCode(0x1b);
+  for (const [index, label] of [
+    `Records ${esc}[31mUnit`,
+    "Records \u202eUnit",
+  ].entries()) {
+    const idPath = path.join(dir, `id-${index}.json`);
+    const warn = vi.fn();
+    idFile.saveSigningIdentity(idPath, await generateSigningIdentity(label));
+    await resolveSigningIdentity({
+      identityPath: idPath,
+      configIdentity: "Agency A",
+      force: false,
+      log: { warn },
+    });
+    expect(warn).toHaveBeenCalledOnce();
+    const message = warn.mock.calls[0]?.[0] as string;
+    expect(message).toContain("the linkage terms cannot state");
+    expect(message).toContain("psilink fingerprint --force --identity");
+    expect(message).toContain("re-pin the new fingerprint");
+    // The config edit the terms make impossible is not among the remedies.
+    expect(message).not.toContain("set linkage_terms.identity to the bound");
+    // No byte of the label reaches the operator, raw or escaped; the config
+    // value it diverges from is still named, since that is the one to act on.
+    expect(message).not.toContain("Records");
+    expect(message).not.toContain("\\x1b");
+    expect(message).not.toContain("\\u202e");
+    expect(message).toContain('"Agency A"');
+    expect(/[^\t\x20-\x7e]/.test(message)).toBe(false);
+  }
 });
 
 test("is silent when the bound identity matches the config identity", async () => {

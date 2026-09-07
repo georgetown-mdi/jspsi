@@ -259,6 +259,16 @@ const RECORDED_SITES: readonly ConfigErrorSite[] = [
     file: "apps/cli/src/signingIdentityDivergence.ts",
     anchor: "assertIdentityMatchesAgreedTerms",
     raises: "OperatorConfigError",
+    interpolates: ["termsIdentity"],
+    provenance:
+      "the refusal for a certificate bound to a label the linkage terms " +
+      "cannot state names only `termsIdentity`, whose provenance the entry " +
+      "below reaches; the bound label is not quoted here at all.",
+  },
+  {
+    file: "apps/cli/src/signingIdentityDivergence.ts",
+    anchor: "assertIdentityMatchesAgreedTerms",
+    raises: "OperatorConfigError",
     interpolates: ["certificate.identity", "termsIdentity"],
     provenance:
       "both names are this party's own: `certificate.identity` is bound into " +
