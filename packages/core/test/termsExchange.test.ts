@@ -401,10 +401,12 @@ test("the responder's abort frame holds the protocol version", async () => {
     protocolVersion: PROTOCOL_VERSION,
   });
   if (a.status !== "rejected" || b.status !== "rejected") throw new Error();
-  // The initiator hears the terms cause the responder stated, not a version skew.
-  const initiatorMessage = (a.reason as Error).message;
-  expect(initiatorMessage).toContain("algorithm mismatch");
-  expect(initiatorMessage).not.toContain(PROTOCOL_VERSION_MISMATCH_MESSAGE);
+  // The initiator hears the terms cause the responder stated, not a version
+  // skew. Read off the rendered chain rather than `.message`: a partner-stated
+  // reason is a labelled cause link, never text inside the message.
+  const initiatorRendered = sanitizeErrorForDisplay(a.reason);
+  expect(initiatorRendered).toContain("algorithm mismatch");
+  expect(initiatorRendered).not.toContain(PROTOCOL_VERSION_MISMATCH_MESSAGE);
 });
 
 test("responder fails fast when message 1 advertises a malformed protocol version", async () => {
@@ -952,6 +954,18 @@ test("exchangeTerms responder: rejects (does not hang) when abort send fails on 
 // behind it -- the next reason, or the sentence naming the mismatch. Each is
 // redacted where it is composed, which bounds that rule to the fragment.
 
+// The first-party text opening the reason at a 1-based position: the position
+// the elimination leads every label with (src/utils/partnerOriginText.ts),
+// then the label protocolSetup passes it.
+const reasonLabel = (position: number): string =>
+  `${position}. reason the partner gave: `;
+// The rendered opening of the first abort reason on a link: the renderer's
+// cause-link separator, then that label.
+const REASON_LINK = `\ncaused by: ${reasonLabel(1)}`;
+// The opening of the next reason packed on that same link: the escape's own
+// token for the line breaks the elimination places between two reasons, then
+// the label the second reason carries.
+const PACKED_REASON = `\\x0a\\x0a${reasonLabel(2)}`;
 const BEGIN_MARKER = "-----BEGIN OPENSSH PRIVATE KEY-----";
 const END_MARKER = "-----END OPENSSH PRIVATE KEY-----";
 const REDACTION = "[redacted private key]";
@@ -998,14 +1012,16 @@ test("a marker in an abort reason leaves the reason behind it", async () => {
 test("a lone END marker in an abort reason deletes nothing", async () => {
   for (const render of abortRenders)
     expect(await render([END_MARKER, "the second reason"])).toBe(
-      `partner aborted linkage terms exchange: ${END_MARKER}; the second reason`,
+      `partner aborted linkage terms exchange${REASON_LINK}${END_MARKER}` +
+        `${PACKED_REASON}the second reason`,
     );
 });
 
 test("a plain abort reason reads as its own text", async () => {
   for (const render of abortRenders)
     expect(await render(["the operator declined the terms"])).toBe(
-      "partner aborted linkage terms exchange: the operator declined the terms",
+      `partner aborted linkage terms exchange${REASON_LINK}` +
+        `the operator declined the terms`,
     );
 });
 
@@ -1036,7 +1052,7 @@ test("a marker in a partner column name leaves the diagnostic it names", async (
     'linkage terms are incompatible: payload mismatch: local receive columns ["[redacted private key]"]',
   );
   expect(initiator).toContain(
-    "partner aborted linkage terms exchange: payload mismatch:",
+    `partner aborted linkage terms exchange${REASON_LINK}payload mismatch:`,
   );
 });
 
@@ -1046,6 +1062,7 @@ test("a plain partner column name reads as its own text", async () => {
     'linkage terms are incompatible: payload mismatch: local receive columns ["email"] do not match partner send columns []',
   );
   expect(initiator).toBe(
-    'partner aborted linkage terms exchange: payload mismatch: local receive columns ["email"] do not match partner send columns []',
+    `partner aborted linkage terms exchange${REASON_LINK}payload mismatch: ` +
+      'local receive columns ["email"] do not match partner send columns []',
   );
 });

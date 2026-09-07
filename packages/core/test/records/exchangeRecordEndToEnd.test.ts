@@ -210,8 +210,11 @@ test("terms exchange: an out-of-shape psi-c document is refused on receipt, reje
     // Each party's failure is the count-only rule the document breaks -- the
     // one that refuses it, preserved through the abort so both ends name it
     // -- and not the unusable PSI library, so no round ran on either side.
-    expect(refusal.message).toMatch(/exactly one linkage key/);
-    expect(refusal.message).not.toMatch(/PSI library/);
+    // Read off the rendered chain: the partner's stated reason reaches the
+    // aborting party as a labelled cause link, not as message text.
+    const rendered = sanitizeErrorForDisplay(refusal);
+    expect(rendered).toMatch(/exactly one linkage key/);
+    expect(rendered).not.toMatch(/PSI library/);
   }
 });
 
