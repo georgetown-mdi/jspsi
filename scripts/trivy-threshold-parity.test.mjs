@@ -75,15 +75,16 @@ const REQUIRED_INPUTS = [
 ];
 
 // Invocations whose failure controls hold them to something other than what
-// the rest of the tree runs, each named by file and step id with the reason in
-// words. An entry is a decision that a scan under this name reports rather
-// than gates, so it states what makes it report-only and what ends that. The
-// `if:` and `continue-on-error:` are recorded as written and compared against
-// the file, so an entry the step it names does not match fails instead of
-// standing as an exemption for a reason the step has dropped.
+// the rest of the tree runs, each named by file, job and step id with the
+// reason in words. An entry is a decision that a scan under this name reports
+// rather than gates, so it states what makes it report-only and what ends
+// that. The `if:` and `continue-on-error:` are recorded as written and
+// compared against the file, so an entry the step it names does not match
+// fails instead of standing as an exemption for a reason the step has
+// dropped.
 const RECORDED_FAILURE_MODES = [
   {
-    site: ".github/workflows/image_smoke.yaml vulnerability_scan",
+    site: ".github/workflows/image_smoke.yaml smoke vulnerability_scan",
     condition:
       "${{ matrix.fips == 'false' || github.event_name != 'pull_request' }}",
     continueOnError: "${{ matrix.fips == 'true' }}",
@@ -92,6 +93,18 @@ const RECORDED_FAILURE_MODES = [
       "The FIPS variant's pinned base rootfs has fixable HIGH findings no pin movement clears, so that leg is skipped on a pull request and reports without failing the run on every other trigger. The base image bump that clears the findings drops both keys and this entry with them.",
   },
 ];
+
+/**
+ * What names one step across the tree: its file, the job it sits in, and its
+ * own id. A step id is unique within its job only, so two jobs of one file may
+ * each hold a step called `scan` and the job name is part of this name. A step
+ * with no id, and a composite action's step under no job at all, are named by
+ * the position they sit at instead.
+ */
+const siteOf = (path, node) =>
+  node.id === null || node.jobName === null
+    ? `${path} ${node.location}`
+    : `${path} ${node.jobName} ${node.id}`;
 
 /** Every trivy-action step in the given workflows, in file and document order. */
 function invocationsIn(workflows) {
@@ -102,7 +115,7 @@ function invocationsIn(workflows) {
         return reference !== null && reference.name.trim() === TRIVY_ACTION;
       })
       .map((node) => ({
-        site: `${path} ${node.id ?? node.location}`,
+        site: siteOf(path, node),
         ref: parseActionReference(node.uses).ref,
         inputs: node.inputs ?? {},
         condition: node.condition,
@@ -170,11 +183,22 @@ const describeControls = (controls) =>
 const sameControls = (first, second) =>
   Object.keys(first).every((key) => first[key] === second[key]);
 
-/** Which key keeps a report-only invocation's finding out of the run's result. */
+/**
+ * Which keys keep a report-only invocation's finding out of the run's result.
+ * Both are named where both are set: dropping only the key a message states
+ * leaves the invocation reporting under the other one.
+ */
 const reportsBecause = (invocation) =>
-  leavesFailuresEnforced(invocation.continueOnError)
-    ? `its job sets continue-on-error to ${asWritten(invocation.jobContinueOnError)}`
-    : `it sets continue-on-error to ${asWritten(invocation.continueOnError)}`;
+  [
+    leavesFailuresEnforced(invocation.continueOnError)
+      ? null
+      : `it sets continue-on-error to ${asWritten(invocation.continueOnError)}`,
+    leavesFailuresEnforced(invocation.jobContinueOnError)
+      ? null
+      : `its job sets continue-on-error to ${asWritten(invocation.jobContinueOnError)}`,
+  ]
+    .filter((cause) => cause !== null)
+    .join(" and ");
 
 /**
  * Every departure from one failure mode across `invocations`, as messages: an
@@ -191,7 +215,7 @@ function failureModeProblems(invocations, records) {
     const invocation = bySite.get(record.site);
     if (invocation === undefined) {
       problems.push(
-        `RECORDED_FAILURE_MODES names ${record.site}, which matches no ${TRIVY_ACTION} step under .github/workflows. Point the entry at the step's file and id, or drop it with the step.`,
+        `RECORDED_FAILURE_MODES names ${record.site}, which matches no ${TRIVY_ACTION} step under .github/workflows. Point the entry at the step's file, job and id, or drop it with the step.`,
       );
       continue;
     }
@@ -232,29 +256,54 @@ function failureModeProblems(invocations, records) {
   return problems;
 }
 
+/** One synthetic job running the scanner, with the entry's keys written in. */
+const fixtureJob = (name, stepId, entry) => [
+  `  ${name}:`,
+  ...(entry.job ?? []).map((line) => `    ${line}`),
+  "    steps:",
+  `      - id: ${stepId}`,
+  ...(entry.step ?? []).map((line) => `        ${line}`),
+  `        uses: ${TRIVY_ACTION}@v0.36.0`,
+  "        with:",
+  "          image-ref: example:latest",
+  "          severity: HIGH,CRITICAL",
+  '          exit-code: "1"',
+];
+
 /** Trivy invocations in one synthetic workflow per entry, for the cases below. */
-const fixtureInvocations = (steps) =>
+const fixtureInvocations = (entries) =>
   invocationsIn(
-    steps.map((step, index) => ({
+    entries.map((entry, index) => ({
       path: `.github/workflows/fixture-${index}.yaml`,
-      source: [
-        "jobs:",
-        "  scan:",
-        ...(step.job ?? []).map((line) => `    ${line}`),
-        "    steps:",
-        `      - id: scan_${index}`,
-        ...(step.step ?? []).map((line) => `        ${line}`),
-        `        uses: ${TRIVY_ACTION}@v0.36.0`,
-        "        with:",
-        "          image-ref: example:latest",
-        "          severity: HIGH,CRITICAL",
-        '          exit-code: "1"',
-      ].join("\n"),
+      source: ["jobs:", ...fixtureJob("scan", `scan_${index}`, entry)].join(
+        "\n",
+      ),
     })),
   );
 
 const fixtureSite = (index) =>
-  `.github/workflows/fixture-${index}.yaml scan_${index}`;
+  `.github/workflows/fixture-${index}.yaml scan scan_${index}`;
+
+const SHARED_ID_FIXTURE = ".github/workflows/fixture-shared-id.yaml";
+
+/**
+ * Trivy invocations in one synthetic workflow whose jobs all give their step
+ * the same id, which GitHub accepts: a step id is unique within its job only.
+ */
+const sharedStepIdInvocations = (entries) =>
+  invocationsIn([
+    {
+      path: SHARED_ID_FIXTURE,
+      source: [
+        "jobs:",
+        ...entries.flatMap((entry, index) =>
+          fixtureJob(`job_${index}`, "scan", entry),
+        ),
+      ].join("\n"),
+    },
+  ]);
+
+const sharedStepIdSite = (index) => `${SHARED_ID_FIXTURE} job_${index} scan`;
 
 describe("the image vulnerability scan's threshold", () => {
   const invocations = trivyInvocations(repoRoot);
@@ -322,6 +371,49 @@ describe("the failure-mode comparison", () => {
     ).toEqual([
       expect.stringContaining(
         `${fixtureSite(1)} reports rather than gates, because its job sets continue-on-error to true`,
+      ),
+    ]);
+  });
+
+  it("names both keys where the step and its job each keep a finding out of the run", () => {
+    expect(
+      failureModeProblems(
+        fixtureInvocations([
+          {},
+          {
+            job: ["continue-on-error: true"],
+            step: ["continue-on-error: true"],
+          },
+        ]),
+        [],
+      ),
+    ).toEqual([
+      expect.stringContaining(
+        `${fixtureSite(1)} reports rather than gates, because it sets continue-on-error to true and its job sets continue-on-error to true`,
+      ),
+    ]);
+  });
+
+  it("reads two jobs of one file sharing a step id as two invocations", () => {
+    expect(
+      failureModeProblems(
+        sharedStepIdInvocations([
+          { step: ["continue-on-error: true"] },
+          { step: ["continue-on-error: true"] },
+        ]),
+        [
+          {
+            site: sharedStepIdSite(1),
+            condition: null,
+            continueOnError: "true",
+            jobContinueOnError: null,
+            reason: "Its base image has findings no pin movement clears.",
+          },
+        ],
+      ),
+    ).toEqual([
+      expect.stringContaining(
+        `${sharedStepIdSite(0)} reports rather than gates, because it sets continue-on-error to true`,
       ),
     ]);
   });

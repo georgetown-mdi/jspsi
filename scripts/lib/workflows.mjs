@@ -102,22 +102,25 @@ const mappingOrNull = (value) =>
 
 /**
  * Every node of a parsed document that names a `uses:` string, in document
- * order, as `{location, id, uses, inputs, condition, continueOnError,
+ * order, as `{location, id, uses, inputs, condition, continueOnError, jobName,
  * jobContinueOnError}`. `location` is the dotted path the node sits at
  * (`jobs.build.steps[0]`), `id` is the node's own `id:`, and `inputs` is the
  * node's `with:` block; each of the last two is null where the node has none.
  *
- * The final three are the keys deciding whether the node's failure reaches the
- * run: its own `if:` and `continue-on-error:`, and the `continue-on-error:` of
- * the job it sits in, each as written and unevaluated, so a reader gets the
- * expression rather than the value it takes on one leg.
+ * The final four are what decides whether the node's failure reaches the run:
+ * its own `if:` and `continue-on-error:`, the name of the job it sits in, and
+ * that job's `continue-on-error:`. The keys come back as written and
+ * unevaluated, so a reader gets the expression rather than the value it takes
+ * on one leg. A step `id:` is unique only within its job, so a reader naming a
+ * step across a file needs `jobName` beside it.
  *
  * The walk is structural rather than an enumeration of the shapes GitHub
  * accepts, so a step's `uses:`, a job-level reusable-workflow `uses:`, and a
  * composite's `runs.steps[].uses` are all collected without naming any of them.
- * The one position it names is the top-level `jobs:` mapping, whose values are
- * where a job-level `continue-on-error:` sits; a composite action's steps have
- * no job above them and report null for it.
+ * The one position it names is the top-level `jobs:` mapping, whose keys are
+ * the job names and whose values are where a job-level `continue-on-error:`
+ * sits; a composite action's steps have no job above them and report null for
+ * both.
  */
 export function usesNodes(document) {
   const found = [];
@@ -136,14 +139,16 @@ export function usesNodes(document) {
           inputs: mappingOrNull(node.with),
           condition: node.if ?? null,
           continueOnError: node["continue-on-error"] ?? null,
+          jobName: job === null ? null : job.name,
           jobContinueOnError:
-            job === null ? null : (job["continue-on-error"] ?? null),
+            job === null ? null : (job.mapping["continue-on-error"] ?? null),
         });
       }
+      const jobMapping = location === "jobs" ? mappingOrNull(value) : null;
       walk(
         value,
         location === "" ? key : `${location}.${key}`,
-        location === "jobs" ? (mappingOrNull(value) ?? job) : job,
+        jobMapping === null ? job : { name: key, mapping: jobMapping },
       );
     }
   };

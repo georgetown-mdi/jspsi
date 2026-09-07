@@ -103,6 +103,7 @@ runs:
         inputs: { ref: "staging" },
         condition: null,
         continueOnError: null,
+        jobName: "build",
         jobContinueOnError: null,
       },
       {
@@ -112,6 +113,7 @@ runs:
         inputs: null,
         condition: null,
         continueOnError: null,
+        jobName: "build",
         jobContinueOnError: null,
       },
       {
@@ -121,12 +123,13 @@ runs:
         inputs: null,
         condition: null,
         continueOnError: null,
+        jobName: null,
         jobContinueOnError: null,
       },
     ]);
   });
 
-  it("gives each node its id and the keys deciding whether its failure reaches the run", () => {
+  it("gives each node its id, its job and the keys deciding whether its failure reaches the run", () => {
     const source = `jobs:
   build:
     continue-on-error: true
@@ -145,11 +148,19 @@ runs:
 `;
     expect(
       usesNodes(parseWorkflow("wf.yaml", source)).map(
-        ({ location, id, condition, continueOnError, jobContinueOnError }) => ({
+        ({
           location,
           id,
           condition,
           continueOnError,
+          jobName,
+          jobContinueOnError,
+        }) => ({
+          location,
+          id,
+          condition,
+          continueOnError,
+          jobName,
           jobContinueOnError,
         }),
       ),
@@ -159,6 +170,7 @@ runs:
         id: "scan",
         condition: "${{ github.event_name != 'pull_request' }}",
         continueOnError: "${{ matrix.variant == 'fips' }}",
+        jobName: "build",
         jobContinueOnError: true,
       },
       {
@@ -166,6 +178,7 @@ runs:
         id: null,
         condition: null,
         continueOnError: null,
+        jobName: "publish",
         jobContinueOnError: null,
       },
       {
@@ -173,6 +186,7 @@ runs:
         id: null,
         condition: null,
         continueOnError: null,
+        jobName: null,
         jobContinueOnError: null,
       },
     ]);
