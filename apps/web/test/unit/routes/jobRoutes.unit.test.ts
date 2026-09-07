@@ -12,6 +12,7 @@ import {
 } from "@jobs/routeSupport";
 import { formatFirstIssue, formatIssues } from "@jobs/schemaIssueMessage";
 import { JobManager } from "@jobs/jobManager";
+import { SIGNING_IDENTITY_FILE_NAME } from "@jobs/signingIdentity";
 
 import { Route as CancelRoute } from "../../../src/routes/api/jobs/$jobId/cancel";
 import { Route as CreateRoute } from "../../../src/routes/api/jobs/index";
@@ -2387,5 +2388,52 @@ describe("POST /api/jobs bounds the body before schema parse", () => {
     })) as Response;
     // A 404 (not 413) proves the oversized body was never read: the gate ran first.
     expect(response.status).toBe(404);
+  });
+});
+
+describe("POST /api/jobs and the signing identity in the rendezvous", () => {
+  /** The single-mount console with an identity already created: JOB_RENDEZVOUS_DIR
+   * falls back to the data root, so the folder the partner writes into is the
+   * folder the key sits in. */
+  function enableSharedMountConsole(): string {
+    const root = tempDataRoot("routes-signing");
+    roots.push(root);
+    fs.mkdirSync(root, { recursive: true });
+    fs.writeFileSync(
+      path.join(root, SIGNING_IDENTITY_FILE_NAME),
+      "{}\n",
+      "utf8",
+    );
+    vi.stubEnv("JOB_DATA_ROOT", root);
+    vi.stubEnv("JOB_CLI_BINARY", STUB_CLI_PATH);
+    vi.stubEnv("STUB_FD3_EVENTS", JSON.stringify([]));
+    vi.stubEnv("STUB_EXIT_CODE", "0");
+    return root;
+  }
+
+  test("a filedrop intent is a 400 naming the refusal, and nothing else", async () => {
+    enableSharedMountConsole();
+    const response = (await handlersOf(CreateRoute).POST({
+      request: createRequest(validIntent()),
+      params: {},
+    })) as Response;
+    expect(response.status).toBe(400);
+    // The token names which refusal it is and nothing more: no path, no mount
+    // name, no message the browser would render as it stands.
+    expect(await response.json()).toEqual({
+      reason: "signing-identity-in-rendezvous",
+    });
+  });
+
+  test("the same console admits the run once the identity is out of the folder", async () => {
+    // Only the identity's presence differs from the 400 above, so that 400 was
+    // the signing-identity gate rather than anything else about the intent.
+    const root = enableSharedMountConsole();
+    fs.rmSync(path.join(root, SIGNING_IDENTITY_FILE_NAME));
+    const response = (await handlersOf(CreateRoute).POST({
+      request: createRequest(validIntent()),
+      params: {},
+    })) as Response;
+    expect(response.status).toBe(201);
   });
 });

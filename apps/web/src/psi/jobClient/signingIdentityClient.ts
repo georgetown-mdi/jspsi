@@ -29,6 +29,11 @@ import {
  *   operator's mounted folder and none is distinguishable from the console
  *   (`SigningFingerprintResult` states which and why), so it is named apart from a
  *   generic error to hold copy that points at that folder.
+ * - `syncing`: the identity was not created because a shared-folder exchange is
+ *   still open on the console and syncs the folder it would be created in.
+ *   Distinct from `refused` because the operator's answer is to let that
+ *   exchange finish and discard it, or to give the synced folder a mount of its
+ *   own, not to go looking at the folder's contents.
  * - `invalid`: a `400` -- the label was malformed; `message` is the server's
  *   field-path-only reason, safe to show.
  * - `busy`: a `409` -- a request is already running; the operator can retry.
@@ -45,6 +50,7 @@ export type SigningFingerprintOutcome =
       certificateFileName?: string;
     }
   | { kind: "refused" }
+  | { kind: "syncing" }
   | { kind: "invalid"; message: string }
   | { kind: "busy" }
   | { kind: "timeout" }
@@ -59,6 +65,7 @@ function fingerprintOutcomeOf(body: unknown): SigningFingerprintOutcome {
   if (!isRecord(body)) return { kind: "error" };
   const { status } = body;
   if (status === "refused") return { kind: "refused" };
+  if (status === "syncing") return { kind: "syncing" };
   if (status === "timeout") return { kind: "timeout" };
   if (status !== "ok") return { kind: "error" };
   const { fingerprint, created, identityFileName, certificateFileName } = body;

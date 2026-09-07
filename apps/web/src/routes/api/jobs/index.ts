@@ -4,6 +4,7 @@ import {
   ExchangeBusyError,
   JobRendezvousRetainRequiredError,
   JobRendezvousUnavailableError,
+  JobSigningIdentityExposedError,
   SftpUnavailableError,
 } from "@jobs/jobManager";
 import {
@@ -13,6 +14,7 @@ import {
 } from "@jobs/routeSupport";
 import { jobEmptyResponse, jobJsonResponse } from "@jobs/gate";
 import { JobInputNotFoundError } from "@jobs/workInputs";
+import { SIGNING_IDENTITY_IN_RENDEZVOUS_REFUSAL } from "@jobs/jobCreateRefusal";
 import { jobCreateIntentSchema } from "@jobs/intentSchemas";
 
 /**
@@ -44,6 +46,12 @@ import { jobCreateIntentSchema } from "@jobs/intentSchemas";
  * a split-provisioned console cannot run without retain mode are each 400. The busy
  * rejection is a 409 containing only the occupying exchange's id (nothing else about
  * it), disclosed to the same-origin operator on their own loopback console.
+ *
+ * One 400 does hold a body: a filedrop intent refused because a rendezvous
+ * directory holds this party's signing identity answers
+ * `{ "reason": "signing-identity-in-rendezvous" }` -- a fixed token, no path --
+ * since that refusal is about the console's mounts rather than the intent, and
+ * the browser cannot otherwise say what to fix.
  */
 export const Route = createFileRoute("/api/jobs/")({
   server: {
@@ -70,6 +78,14 @@ export const Route = createFileRoute("/api/jobs/")({
           // browser can re-attach to the running exchange.
           if (error instanceof ExchangeBusyError)
             return jobJsonResponse({ id: error.activeJobId }, 409);
+          // The refusal the browser cannot diagnose from the intent it sent: it
+          // is about the console's mounts. The body names the refusal with a
+          // fixed token and nothing else -- no path, no mount name.
+          if (error instanceof JobSigningIdentityExposedError)
+            return jobJsonResponse(
+              { reason: SIGNING_IDENTITY_IN_RENDEZVOUS_REFUSAL },
+              400,
+            );
           // A mounted input that names no regular file, a filedrop intent with no
           // rendezvous directory configured, a filedrop intent on a
           // split-provisioned console without retain mode, or an sftp intent with

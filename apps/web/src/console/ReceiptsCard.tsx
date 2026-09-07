@@ -77,6 +77,14 @@ function fingerprintFailureMessage(
         "passed explicitly here. Fix what you find and try again -- running " +
         "'psilink fingerprint' against the same folder prints the reason."
       );
+    case "syncing":
+      return (
+        "A shared-folder exchange is still open on this console, and it syncs " +
+        "the folder your signing identity would be written into. Wait for that " +
+        "exchange to finish, discard it, then create your identity. Or give " +
+        "the synced folder a mount of its own (JOB_RENDEZVOUS_DIR) so your key " +
+        "is never in it."
+      );
     case "invalid":
       return outcome.message;
     case "busy":

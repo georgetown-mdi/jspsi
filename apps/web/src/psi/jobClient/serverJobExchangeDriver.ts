@@ -11,6 +11,7 @@ import {
   MAX_SFTP_CONNECTION_RESPONSE_BYTES,
   readBoundedJson,
 } from "@psi/jobClient/jobApiBody";
+import { isJobCreateRefusalReason } from "@jobs/jobCreateRefusal";
 import { jobCreateIntentSchema } from "@jobs/intentSchemas";
 import { jobRecordDownloads } from "@psi/jobClient/jobExchangeRecord";
 import { refusedColumnNames } from "@psi/columnNames";
@@ -39,6 +40,7 @@ import type {
   Standardization,
 } from "@psilink/core";
 import type { RelayEvent, RelayEventType } from "@jobs/cliDriver";
+import type { JobCreateRefusalReason } from "@jobs/jobCreateRefusal";
 import type { ReceiptsIntentFields } from "../receiptsModel";
 import type { RefusedColumnName } from "@psi/columnNames";
 import type { RunDiagnosticsIntentFields } from "../runDiagnosticsModel";
@@ -218,12 +220,17 @@ export type JobStatusProbe =
  * create includes {@link activeJobId}, the id of the exchange occupying the
  * console's single slot, parsed from the response body -- the browser
  * re-attaches to it rather than surfacing the "already running" alert (see
- * `exchange/reattachOnBusy`). Present only on a 409 whose body held one. */
+ * `exchange/reattachOnBusy`). Present only on a 409 whose body held one.
+ * {@link JobApiRequestError.refusalReason} is the counterpart on a refused (400)
+ * create: the fixed token naming a refusal about the console's own mounts, which
+ * the intent this browser holds cannot explain. Present only on a 400 whose body
+ * held one this bundle knows. */
 export class JobApiRequestError extends Error {
   constructor(
     readonly status: number,
     message: string,
     readonly activeJobId?: string,
+    readonly refusalReason?: JobCreateRefusalReason,
   ) {
     super(message);
     this.name = "JobApiRequestError";
@@ -287,6 +294,11 @@ export function createFetchJobApiClient(
           // single slot -- so the caller can re-attach to it. Absent on every
           // other status (an empty-bodied 400/413/500 is treated as no id).
           response.status === 409 ? await readBodyJobId(response) : undefined,
+          // A refused (400) body may hold `{ reason }`; every other 400 is
+          // empty-bodied and reads as no reason.
+          response.status === 400
+            ? await readBodyRefusalReason(response)
+            : undefined,
         );
       const body: unknown = await readBoundedJson(
         response,
@@ -369,6 +381,24 @@ async function readBodyJobId(response: Response): Promise<string | undefined> {
     );
     const id = (body as { id?: unknown }).id;
     return typeof id === "string" && id.length > 0 ? id : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Read a `{ reason }` refusal token off a refused create's body, or undefined
+ * when the body is absent, unparseable, or names no token this bundle knows. The
+ * token selects fixed console copy; nothing from the body is displayed. */
+async function readBodyRefusalReason(
+  response: Response,
+): Promise<JobCreateRefusalReason | undefined> {
+  try {
+    const body: unknown = await readBoundedJson(
+      response,
+      MAX_JOB_STATUS_RESPONSE_BYTES,
+    );
+    const reason = (body as { reason?: unknown }).reason;
+    return isJobCreateRefusalReason(reason) ? reason : undefined;
   } catch {
     return undefined;
   }

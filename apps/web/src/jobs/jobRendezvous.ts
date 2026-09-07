@@ -461,41 +461,41 @@ function readDirectoryIdentity(dir: string): DirectoryIdentity {
 }
 
 /**
- * Whether a leg holds the job data root, and whether that verdict was positively
+ * Whether a leg holds a directory, and whether that verdict was positively
  * established -- a lexical match, or a filesystem identity match against a
  * directory the process could read -- rather than defaulted to "holds" because a
  * directory somewhere in the comparison could not be read. See
  * {@link JobRendezvousProvisioning.sharesDataRootUncertain}.
  */
-interface DataRootHoldVerdict {
+export interface DirectoryHoldVerdict {
   holds: boolean;
   uncertain: boolean;
 }
 
 /**
- * Whether `leg` IS the data root, or holds it, by FILESYSTEM identity rather than
+ * Whether `leg` IS `target`, or holds it, by FILESYSTEM identity rather than
  * by path spelling -- catching aliasing a symlink does not express, such as one
  * host directory bind-mounted at two container paths, which `realpath` cannot see.
  *
  * The whole ancestor chain is walked, directional like {@link pathFormsContain}: a
- * leg aliasing a directory that holds the data root reaches the key too. A
- * directory the process could not stat counts as holding, `uncertain` (warn-and-
- * guide default); one simply absent counts as nothing.
+ * leg aliasing a directory that holds `target` reaches it too. A directory the
+ * process could not stat counts as holding, `uncertain` (warn-and-guide default);
+ * one simply absent counts as nothing.
  *
  * Aliasing outside the ancestor chain -- a leg bound onto a directory whose own
- * contents reach the data root by another route -- remains invisible.
+ * contents reach `target` by another route -- remains invisible.
  */
-function legAliasesDataRootChain(
+function legAliasesDirectoryChain(
   leg: string,
-  dataRoot: string,
-): DataRootHoldVerdict {
+  target: string,
+): DirectoryHoldVerdict {
   const legIdentity = readDirectoryIdentity(leg);
   if (!legIdentity.known)
     return {
       holds: legIdentity.unreadable,
       uncertain: legIdentity.unreadable,
     };
-  let current = path.resolve(dataRoot);
+  let current = path.resolve(target);
   for (;;) {
     const identity = readDirectoryIdentity(current);
     if (identity.known) {
@@ -511,43 +511,67 @@ function legAliasesDataRootChain(
 }
 
 /**
- * Whether any rendezvous leg holds the job data root
- * ({@link JobRendezvousProvisioning.sharesDataRoot}), and whether that verdict was
- * positively established rather than defaulted
- * ({@link JobRendezvousProvisioning.sharesDataRootUncertain}).
+ * Whether any rendezvous leg IS `target` or holds it, and whether that verdict was
+ * positively established rather than defaulted.
  *
- * Every leg ({@link jobRendezvousDirs}) is tested DIRECTIONALLY: a leg that holds
- * the data root puts this party's files where the partner syncs; a leg mounted
- * INSIDE the data root does not. Each leg is compared as configured, as its real
- * path ({@link resolvePathForms}), and by filesystem identity
- * ({@link legAliasesDataRootChain}).
+ * Every leg is tested DIRECTIONALLY: a leg that holds `target` puts this party's
+ * files there where the partner syncs; a leg mounted INSIDE `target` does not.
+ * Each leg is compared as configured, as its real path
+ * ({@link resolvePathForms}), and by filesystem identity
+ * ({@link legAliasesDirectoryChain}).
  *
- * A leg or the data root whose real path cannot be read counts as holding and
+ * A leg or `target` whose real path cannot be read counts as holding and
  * `uncertain`, since what cannot be resolved is exactly where a joining symlink
- * would sit. Every leg is checked rather than stopping at the first that holds, so
- * one leg's unresolved comparison cannot shadow another's positive match.
+ * would sit -- except a leg spelled exactly as `target`, which is that one
+ * directory whatever the spelling resolves to. Every leg is checked rather than
+ * stopping at the first that holds, so one leg's unresolved comparison cannot
+ * shadow another's positive match.
+ *
+ * The two callers read the verdict differently: the data-root report
+ * ({@link JobRendezvousProvisioning.sharesDataRoot}) treats an uncertain hold as
+ * a hold and hedges its copy, while the pre-run signing-identity refusal
+ * ({@link JobManager.createJob}) admits the run and leaves the operator the
+ * advisory, since a refusal is owed a positive finding.
  */
-function rendezvousHoldsDataRoot(
-  provisioning: JobRendezvousProvisioning,
-  dataRoot: string | undefined,
-): DataRootHoldVerdict {
-  if (dataRoot === undefined) return { holds: false, uncertain: false };
-  const dataRootPaths = resolvePathForms(dataRoot);
+export function rendezvousHoldsDirectory(
+  legs: ReadonlyArray<string>,
+  target: string,
+): DirectoryHoldVerdict {
+  const targetPaths = resolvePathForms(target);
   let uncertainHold = false;
-  for (const dir of jobRendezvousDirs(provisioning)) {
+  for (const dir of legs) {
     const legPaths = resolvePathForms(dir);
-    if (!legPaths.canonicalized || !dataRootPaths.canonicalized) {
+    // One spelling of one directory: an unreadable component on the way to it
+    // moves nothing, since both sides name it the same way.
+    if (legPaths.resolved === targetPaths.resolved)
+      return { holds: true, uncertain: false };
+    if (!legPaths.canonicalized || !targetPaths.canonicalized) {
       uncertainHold = true;
       continue;
     }
-    if (pathFormsContain(legPaths, dataRootPaths))
+    if (pathFormsContain(legPaths, targetPaths))
       return { holds: true, uncertain: false };
-    const alias = legAliasesDataRootChain(dir, dataRoot);
+    const alias = legAliasesDirectoryChain(dir, target);
     if (alias.holds && !alias.uncertain)
       return { holds: true, uncertain: false };
     if (alias.holds) uncertainHold = true;
   }
   return { holds: uncertainHold, uncertain: uncertainHold };
+}
+
+/**
+ * Whether any rendezvous leg holds the job data root
+ * ({@link JobRendezvousProvisioning.sharesDataRoot}), and whether that verdict was
+ * positively established
+ * ({@link JobRendezvousProvisioning.sharesDataRootUncertain}), over every leg this
+ * console has ({@link jobRendezvousDirs}).
+ */
+function rendezvousHoldsDataRoot(
+  provisioning: JobRendezvousProvisioning,
+  dataRoot: string | undefined,
+): DirectoryHoldVerdict {
+  if (dataRoot === undefined) return { holds: false, uncertain: false };
+  return rendezvousHoldsDirectory(jobRendezvousDirs(provisioning), dataRoot);
 }
 
 /**

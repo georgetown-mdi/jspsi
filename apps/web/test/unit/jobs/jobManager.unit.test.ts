@@ -18,15 +18,21 @@ import {
   JobManager,
   JobRendezvousRetainRequiredError,
   JobRendezvousUnavailableError,
+  JobSigningIdentityExposedError,
   SftpUnavailableError,
 } from "@jobs/jobManager";
 import {
   HANDOFF_INBOUND_DIRECTORY_PLACEHOLDER,
   HANDOFF_OUTBOUND_DIRECTORY_PLACEHOLDER,
 } from "@jobs/handoff";
+import {
+  JobApiRequestError,
+  createServerJobExchangeDriver,
+} from "@psi/jobClient/serverJobExchangeDriver";
 import { generateJobId, writeJobFile } from "@jobs/workdir";
 import { JobInputNotFoundError } from "@jobs/workInputs";
-import { createServerJobExchangeDriver } from "@psi/jobClient/serverJobExchangeDriver";
+import { SIGNING_IDENTITY_FILE_NAME } from "@jobs/signingIdentity";
+import { SIGNING_IDENTITY_IN_RENDEZVOUS_REFUSAL } from "@jobs/jobCreateRefusal";
 import { failureFor } from "@exchange/useInviterExchange";
 
 import {
@@ -1923,5 +1929,388 @@ describe("the disk-only DELETE arm", () => {
     // The child is still "running", so the slot is held under this id; the disk
     // arm refuses it.
     expect(await manager.deleteJob(id)).toBe(false);
+  });
+});
+
+/** A canonical-format partner fingerprint, the pin a certificate-mode intent
+ * must hold. */
+const PARTNER_FINGERPRINT = "C".repeat(42) + "A";
+
+describe("a filedrop run that would publish the signing identity", () => {
+  /** A manager over an explicit data root, so a test can put the rendezvous mount
+   * exactly where the layout under test wants it relative to the folder holding
+   * the signing identity. */
+  function makeSigningManager(options: {
+    dataRoot: string;
+    jobRendezvousDir?: string;
+    jobRendezvousOutboundDir?: string;
+    delayMs?: number;
+  }): JobManager {
+    const manager = new JobManager({
+      dataRoot: options.dataRoot,
+      binaryPath: STUB_CLI_PATH,
+      childEnv: {
+        STUB_FD3_EVENTS: "[]",
+        ...(options.delayMs !== undefined
+          ? { STUB_DELAY_MS: String(options.delayMs) }
+          : {}),
+      },
+      jobRendezvousDir: options.jobRendezvousDir ?? options.dataRoot,
+      jobRendezvousOutboundDir: options.jobRendezvousOutboundDir,
+    });
+    managers.push(manager);
+    return manager;
+  }
+
+  /** A created directory registered for cleanup. */
+  function directory(label: string): string {
+    const dir = tempDataRoot(label);
+    roots.push(dir);
+    fs.mkdirSync(dir, { recursive: true });
+    return dir;
+  }
+
+  /** Put a signing identity in the data root, as the console's own fingerprint
+   * request does. Only its presence is read by the check under test, so these
+   * bytes stand in for the document the CLI writes. */
+  function writeIdentity(dataRoot: string): void {
+    fs.writeFileSync(
+      path.join(dataRoot, SIGNING_IDENTITY_FILE_NAME),
+      "{}\n",
+      "utf8",
+    );
+  }
+
+  test("refuses when the rendezvous mount IS the folder holding the identity", async () => {
+    // The single-mount console: JOB_RENDEZVOUS_DIR falls back to the data root,
+    // so the folder the partner writes into is the folder the key sits in.
+    const root = directory("signing-shared");
+    writeIdentity(root);
+    const manager = makeSigningManager({ dataRoot: root });
+    await expect(manager.createJob(validIntent())).rejects.toBeInstanceOf(
+      JobSigningIdentityExposedError,
+    );
+    // Refused before the slot is claimed, so no workdir is left and the next
+    // create is not met with a busy rejection.
+    expect(fs.readdirSync(root)).toEqual([SIGNING_IDENTITY_FILE_NAME]);
+  });
+
+  /** Whether this process is root, which reads a mode-`000` file regardless of
+   * its permissions -- so the unreadable-identity case cannot be staged as that
+   * account and the test below states so by skipping rather than passing on a
+   * file it could read after all. */
+  const runningAsRoot = process.getuid?.() === 0;
+
+  test.skipIf(runningAsRoot)(
+    "refuses on an identity file the console cannot read",
+    async () => {
+      // The probe answers presence, not readability. A key the console's own uid
+      // cannot open -- mode 000 here, a uid-mapped mount or a key minted under
+      // another account in the field -- is a key the partner's sync copies all the
+      // same, so a readability test would admit exactly the run this refusal is
+      // for.
+      const root = directory("signing-unreadable");
+      writeIdentity(root);
+      fs.chmodSync(path.join(root, SIGNING_IDENTITY_FILE_NAME), 0o000);
+      const manager = makeSigningManager({ dataRoot: root });
+      await expect(manager.createJob(validIntent())).rejects.toBeInstanceOf(
+        JobSigningIdentityExposedError,
+      );
+    },
+  );
+
+  test("refuses when the rendezvous mount HOLDS the folder holding the identity", async () => {
+    const rendezvous = directory("signing-holder");
+    const root = path.join(rendezvous, "work");
+    fs.mkdirSync(root, { recursive: true });
+    writeIdentity(root);
+    const manager = makeSigningManager({
+      dataRoot: root,
+      jobRendezvousDir: rendezvous,
+    });
+    await expect(manager.createJob(validIntent())).rejects.toBeInstanceOf(
+      JobSigningIdentityExposedError,
+    );
+  });
+
+  test("refuses when the OUTBOUND leg of a split console holds it", async () => {
+    // Both legs are partner-synced, so which leg the collision is on does not
+    // change what the run would publish.
+    const root = directory("signing-split");
+    writeIdentity(root);
+    const manager = makeSigningManager({
+      dataRoot: root,
+      jobRendezvousDir: directory("signing-split-inbound"),
+      jobRendezvousOutboundDir: root,
+    });
+    const intent = validIntent();
+    await expect(
+      manager.createJob({
+        ...intent,
+        options: { ...intent.options, retainFiles: true },
+      }),
+    ).rejects.toBeInstanceOf(JobSigningIdentityExposedError);
+  });
+
+  test("admits a rendezvous mount beside the identity's folder", async () => {
+    const root = directory("signing-sibling");
+    writeIdentity(root);
+    const manager = makeSigningManager({
+      dataRoot: root,
+      jobRendezvousDir: directory("signing-sibling-rvz"),
+    });
+    await expect(manager.createJob(validIntent())).resolves.toBeTypeOf(
+      "string",
+    );
+  });
+
+  test("admits a rendezvous mount INSIDE the identity's folder", async () => {
+    // Directional: the partner writes into a folder below the one the key sits
+    // in, so the key is not among the files that run publishes.
+    const root = directory("signing-nested");
+    writeIdentity(root);
+    const rendezvous = path.join(root, "rendezvous");
+    fs.mkdirSync(rendezvous, { recursive: true });
+    const manager = makeSigningManager({
+      dataRoot: root,
+      jobRendezvousDir: rendezvous,
+    });
+    await expect(manager.createJob(validIntent())).resolves.toBeTypeOf(
+      "string",
+    );
+  });
+
+  test("admits the shared layout for an unsigned run with no identity", async () => {
+    // Nothing to publish: no key on disk, and a run signing nothing creates
+    // none.
+    const root = directory("signing-absent");
+    const manager = makeSigningManager({ dataRoot: root });
+    await expect(
+      manager.createJob(validIntent({ signing: { mode: "none" } })),
+    ).resolves.toBeTypeOf("string");
+  });
+
+  test("admits the shared layout for a signed run with no identity", async () => {
+    // Nothing to publish here either: the CLI loads this party's identity from
+    // the path the console names and refuses the run when nothing is there
+    // (`resolveSigningPersist`), so a signed run never creates the key it would
+    // go on to sync. The run fails at the child, with the CLI's own guidance.
+    const root = directory("signing-first-run");
+    const manager = makeSigningManager({ dataRoot: root });
+    await expect(
+      manager.createJob(
+        validIntent({
+          signing: {
+            mode: "certificate",
+            partnerFingerprint: PARTNER_FINGERPRINT,
+          },
+        }),
+      ),
+    ).resolves.toBeTypeOf("string");
+  });
+
+  test("admits a shared layout the comparison could not establish", async () => {
+    // A leg whose real path cannot be read cannot be ruled out of holding the
+    // identity's folder, and a refusal is owed a positive finding: the run goes
+    // ahead and the receipts card's advisory is what the operator gets. The key
+    // is on disk, so the other half of the refusal holds.
+    const root = directory("signing-unresolved");
+    writeIdentity(root);
+    const rendezvous = directory("signing-unresolved-rvz");
+    const manager = makeSigningManager({
+      dataRoot: root,
+      jobRendezvousDir: rendezvous,
+    });
+    const realpathSync = fs.realpathSync;
+    const spy = vi
+      .spyOn(fs, "realpathSync")
+      .mockImplementation((target, options) => {
+        if (path.resolve(String(target)) === rendezvous) {
+          const error: NodeJS.ErrnoException = new Error(
+            "EACCES: permission denied",
+          );
+          error.code = "EACCES";
+          throw error;
+        }
+        return realpathSync(target, options);
+      });
+    try {
+      await expect(manager.createJob(validIntent())).resolves.toBeTypeOf(
+        "string",
+      );
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
+  test("answers an occupied console with the busy rejection, not this one", async () => {
+    // A create posted to recover a lost attachment folds onto the running
+    // exchange on the busy rejection alone, so the refusal is raised after it: a
+    // browser that lost its attachment while the identity appeared mid-run would
+    // otherwise meet this refusal and have no way back to its own exchange.
+    const root = directory("signing-busy");
+    const manager = makeSigningManager({ dataRoot: root, delayMs: 5000 });
+    const running = await manager.createJob(validIntent());
+    writeIdentity(root);
+    const error = await manager
+      .createJob(validIntent())
+      .catch((thrown: unknown) => thrown);
+    expect(error).toBeInstanceOf(ExchangeBusyError);
+    expect((error as ExchangeBusyError).activeJobId).toBe(running);
+  });
+
+  test("admits an sftp run out of the shared layout", async () => {
+    // Nobody syncs the mount on an sftp exchange, so the layout costs nothing
+    // there and the run stays the operator's to make.
+    const root = directory("signing-sftp");
+    writeIdentity(root);
+    const manager = makeSigningManager({ dataRoot: root });
+    armSftpConnection(manager);
+    await expect(manager.createJob(validSftpIntent())).resolves.toBeTypeOf(
+      "string",
+    );
+  });
+
+  test("names the refusal to the operator through the console's alert", () => {
+    // The layers that compose the operator's copy: the route answers the
+    // manager's refusal with the fixed token, the driver reads it off the body,
+    // and the seat composes the alert. The message names what the run would do
+    // and the mount that fixes it.
+    const alert = failureFor(
+      "config",
+      new JobApiRequestError(
+        400,
+        "POST /api/jobs failed with status 400",
+        undefined,
+        SIGNING_IDENTITY_IN_RENDEZVOUS_REFUSAL,
+      ),
+    );
+    expect(alert.category).toBe("config");
+    expect(alert.message).toContain("The console did not start it");
+    expect(alert.message).toContain("JOB_RENDEZVOUS_DIR");
+    expect(alert.message).toContain("sign receipts in your name");
+  });
+
+  test("the refusal's copy claims the path, not the file at it", () => {
+    // What the check read is the presence of one fixed name in the folder the
+    // partner syncs into -- never the file's contents, and never a key the run
+    // would go on to create, which no run does. Copy calling that file the
+    // operator's signing key asserts what nothing verified, and a partner who
+    // plants a file at that name makes the console say it. So the message states
+    // the path alone, and offers moving the file out beside the mount change,
+    // since the file may not be the operator's.
+    const alert = failureFor(
+      "config",
+      new JobApiRequestError(
+        400,
+        "POST /api/jobs failed with status 400",
+        undefined,
+        SIGNING_IDENTITY_IN_RENDEZVOUS_REFUSAL,
+      ),
+    );
+    expect(alert.message).toContain("A file sits at your signing identity's");
+    expect(alert.message).not.toMatch(/create|mint/);
+    expect(alert.message).toContain(
+      "Move that file out of every folder you share with a partner",
+    );
+    expect(alert.title).toBe(
+      "This exchange shares your signing identity's folder",
+    );
+  });
+
+  describe("the fingerprint request into the same layout", () => {
+    test("creates the identity on demand, whatever the layout", async () => {
+      // The key is created in the working directory on demand -- the default
+      // this console keeps. Refusing here instead would take certificate mode
+      // away from every channel on a one-mount console, since the rendezvous
+      // falls back to the data root: an SFTP or WebRTC exchange out of that
+      // mount publishes nothing, and only a shared-folder run is refused.
+      const root = directory("fingerprint-mint");
+      const manager = makeSigningManager({ dataRoot: root });
+      await expect(
+        manager.resolveSigningFingerprint({
+          identityLabel: "Agency A",
+          exportCertificate: false,
+        }),
+      ).resolves.toMatchObject({ kind: "ok", created: true });
+    });
+
+    test("reads an identity already in that folder", async () => {
+      const root = directory("fingerprint-read");
+      writeIdentity(root);
+      const manager = makeSigningManager({ dataRoot: root });
+      await expect(
+        manager.resolveSigningFingerprint({
+          identityLabel: "Agency A",
+          exportCertificate: false,
+        }),
+      ).resolves.toMatchObject({ kind: "ok", created: false });
+    });
+
+    test("refuses the create while a shared-folder run is syncing that folder", async () => {
+      // The run's own create-time check ran before this key existed, so nothing
+      // else stops the console dropping a private key into the folder that run
+      // is syncing as it goes. No child spawns, so no key is written.
+      const root = directory("fingerprint-live-filedrop");
+      const manager = makeSigningManager({ dataRoot: root, delayMs: 5000 });
+      await manager.createJob(validIntent());
+      await expect(
+        manager.resolveSigningFingerprint({
+          identityLabel: "Agency A",
+          exportCertificate: false,
+        }),
+      ).resolves.toEqual({ kind: "syncing" });
+      expect(fs.existsSync(path.join(root, SIGNING_IDENTITY_FILE_NAME))).toBe(
+        false,
+      );
+    });
+
+    test("creates while an sftp run holds the slot", async () => {
+      // Nobody syncs the mount on an sftp exchange, so the run in the slot says
+      // nothing about where the key may be written.
+      const root = directory("fingerprint-live-sftp");
+      // The stub honors one delay for every child it is spawned as, so the
+      // exchange child's hold on the slot is bounded by what the fingerprint
+      // child below can wait out. The gate is read before that child spawns.
+      const manager = makeSigningManager({ dataRoot: root, delayMs: 800 });
+      armSftpConnection(manager);
+      await manager.createJob(validSftpIntent());
+      await expect(
+        manager.resolveSigningFingerprint({
+          identityLabel: "Agency A",
+          exportCertificate: false,
+        }),
+      ).resolves.toMatchObject({ kind: "ok", created: true });
+    });
+
+    test("creates on the same layout with no run in the slot", async () => {
+      // The gate is the live run, not the layout: on the default one-mount
+      // console with nothing running, the key is created on demand.
+      const root = directory("fingerprint-idle-slot");
+      const manager = makeSigningManager({ dataRoot: root });
+      await expect(
+        manager.resolveSigningFingerprint({
+          identityLabel: "Agency A",
+          exportCertificate: false,
+        }),
+      ).resolves.toMatchObject({ kind: "ok", created: true });
+    });
+
+    test("reads an identity already there while that run syncs the folder", async () => {
+      // Only the create is refused. The key reached the folder after the run
+      // started -- the only way both hold at once -- and it is on disk whatever
+      // this request does, so withholding the fingerprint would leave the
+      // operator unable to read the one they have.
+      const root = directory("fingerprint-live-read");
+      const manager = makeSigningManager({ dataRoot: root, delayMs: 800 });
+      await manager.createJob(validIntent());
+      writeIdentity(root);
+      await expect(
+        manager.resolveSigningFingerprint({
+          identityLabel: "Agency A",
+          exportCertificate: false,
+        }),
+      ).resolves.toMatchObject({ kind: "ok", created: false });
+    });
   });
 });

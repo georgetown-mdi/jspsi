@@ -218,6 +218,7 @@ describe("the ok body is re-validated field by field", () => {
 describe("the outcome is read from the body's status, not from the HTTP status", () => {
   test.each([
     ["refused", { kind: "refused" }],
+    ["syncing", { kind: "syncing" }],
     ["timeout", { kind: "timeout" }],
   ])("a 200 holding status %s is that category", async (status, expected) => {
     expect(

@@ -9,6 +9,7 @@ import {
   createWorkdir,
   generateJobId,
   isValidJobId,
+  jobPathPresent,
   removeWorkdir,
   resolveWorkdir,
   writeJobFile,
@@ -81,4 +82,33 @@ describe("createWorkdir and writeJobFile enforce least-privilege modes", () => {
     expect(fs.existsSync(workdir)).toBe(false);
     await expect(removeWorkdir(workdir)).resolves.toBeUndefined();
   });
+});
+
+describe("jobPathPresent", () => {
+  /** Root searches a mode-`000` directory whatever its permissions, so the
+   * unsearchable-parent case cannot be staged as that account and the test below
+   * skips rather than passing on a directory it could search after all. */
+  const runningAsRoot = process.getuid?.() === 0;
+
+  test.skipIf(runningAsRoot)(
+    "reads a file under an unsearchable parent as absent",
+    () => {
+      // The probe fails open: a path whose parent cannot be searched is treated
+      // as nothing being there, which for the signing refusal admits the run. The
+      // console cannot see into that mount to find anything there either, and the
+      // data root it cannot search fails createWorkdir before a run starts.
+      const root = tempDataRoot("present-unsearchable");
+      created.push(root);
+      const parent = path.join(root, "mount");
+      fs.mkdirSync(parent, { recursive: true });
+      const filePath = path.join(parent, ".psilink-signing-identity.json");
+      fs.writeFileSync(filePath, "{}\n");
+      fs.chmodSync(parent, 0o000);
+      try {
+        expect(jobPathPresent(filePath)).toBe(false);
+      } finally {
+        fs.chmodSync(parent, 0o700);
+      }
+    },
+  );
 });

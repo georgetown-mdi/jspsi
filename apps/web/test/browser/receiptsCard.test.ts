@@ -44,6 +44,12 @@ const NOTE = "Filed in the association database; purged after six years.";
 /** The card's copy for a `409`, which is what the stale-failure test looks for. */
 const BUSY_FAILURE = "Another fingerprint request is still running.";
 
+/** What the card says when the console withheld the create because a
+ * shared-folder exchange still holds the console's exchange slot and syncs the
+ * folder the key would land in. */
+const SYNCING_FAILURE =
+  "A shared-folder exchange is still open on this console, and it syncs the folder your signing identity would be written into.";
+
 interface StubbedResponse {
   status?: number;
   body?: unknown;
@@ -120,7 +126,9 @@ function stubSigningApi(options: StubOptions = {}): { bodies: Array<string> } {
 let latestDraft: ReceiptsDraft = RECEIPTS_DEFAULT;
 
 /** The default console layout: one mount, so the rendezvous holds the working
- * directory and the card's whole advisory set is on show. */
+ * directory. A shared-folder exchange there is refused before it runs, and the
+ * card's advisory states that refusal and the one path it reads. Creating the
+ * identity is not refused on any layout. */
 const SINGLE_MOUNT_RENDEZVOUS: JobRendezvousConfig = {
   configured: true,
   locator: "psilink",
@@ -312,6 +320,25 @@ describe("ReceiptsCard: a request that resolves while the operator edits", () =>
 });
 
 describe("ReceiptsCard: a failed request", () => {
+  test("names the open exchange syncing the folder, and both ways out", async () => {
+    // The console answers a create it will not make with a status of its own, so
+    // the card must not fold it into the generic "could not be created" copy:
+    // nothing is wrong with the folder. The condition is an exchange the console
+    // still holds -- finished but undiscarded as much as running -- so the copy
+    // names discarding it beside the mount of its own, and never tells the
+    // operator only to wait for a run that has already ended.
+    stubSigningApi({ responses: [{ body: { status: "syncing" } }] });
+    await renderCard();
+    await chooseCertificateMode();
+
+    await createButton().click();
+    await expect
+      .element(page.getByText(SYNCING_FAILURE, { exact: false }))
+      .toBeInTheDocument();
+    expect(app.container.textContent).toContain("discard it");
+    expect(app.container.textContent).toContain("JOB_RENDEZVOUS_DIR");
+  });
+
   test("leaves no stale failure for the next visit to certificate mode", async () => {
     stubSigningApi({ responses: [{ status: 409 }, { body: okBody() }] });
     await renderCard();

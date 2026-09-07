@@ -133,6 +133,27 @@ export function jobFileExists(filePath: string): boolean {
   }
 }
 
+/**
+ * Whether anything is at the given path, readable or not: an `lstat` that does
+ * not follow a symlink, so a file this process cannot open (mode `000`, an owner
+ * the container's uid is not, a uid-mapped mount) and a dangling link both count
+ * as present.
+ *
+ * The question a refusal asks. {@link jobFileExists} answers whether a file can
+ * be READ, which is the wrong test where an unreadable file is exactly the case
+ * that must still refuse.
+ *
+ * A path whose parent directory cannot be searched at all is treated as absent:
+ * the console cannot see into the mount to find anything there either.
+ */
+export function jobPathPresent(filePath: string): boolean {
+  try {
+    return fs.lstatSync(filePath, { throwIfNoEntry: false }) !== undefined;
+  } catch {
+    return false;
+  }
+}
+
 /** Whether a job's result file exists and is readable. */
 export function resultFileExists(outputPath: string): boolean {
   return jobFileExists(outputPath);

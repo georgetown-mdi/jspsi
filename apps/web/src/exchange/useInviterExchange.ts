@@ -26,6 +26,7 @@ import {
   writeAttachment,
 } from "@psi/jobClient/consoleJobAttachment";
 import { HANDSHAKE_ROLE_FOR_SIDE } from "@psi/handshakeRole";
+import { SIGNING_IDENTITY_IN_RENDEZVOUS_REFUSAL } from "@jobs/jobCreateRefusal";
 import { consoleJobColumnRefusalAlert } from "@psi/columnNames";
 import { createBrowserExchangeDriver } from "@psi/exchangeDriver";
 import { hasRecoveryHint } from "@psi/authenticateExchange";
@@ -130,6 +131,29 @@ export function failureFor(
     return {
       category: "config",
       ...consoleJobColumnRefusalAlert(error.columns, seat),
+    };
+  // The console refused the run before it started: a file sits at the path this
+  // party's signing identity is kept at, in a folder the exchange shares with the
+  // partner. The copy claims that and no more, since the console reads the path's
+  // presence and never the file. Classified `config`: the layout is what has to
+  // change, so the alert offers start-over rather than a retry, which would refuse
+  // identically. Placed above the mounted-file branch, whose 400 copy is about the
+  // file rather than the mounts.
+  if (
+    error instanceof JobApiRequestError &&
+    error.refusalReason === SIGNING_IDENTITY_IN_RENDEZVOUS_REFUSAL
+  )
+    return {
+      category: "config",
+      title: "This exchange shares your signing identity's folder",
+      message:
+        "The console did not start it. A file sits at your signing identity's " +
+        "path, in a folder this exchange shares with your partner. Whoever " +
+        "reads a signing key there can sign receipts in your name -- for every " +
+        "exchange, with every partner. Move that file out of every folder you " +
+        "share with a partner, or give the shared folder a mount of its own " +
+        "(JOB_RENDEZVOUS_DIR), separate from the folder holding your key, " +
+        "input, and results, then run the exchange again.",
     };
   // A console job create rejected the mounted file: a 400 the driver categorizes
   // `config`. The file is the likely fault, so the alert names it -- except on
