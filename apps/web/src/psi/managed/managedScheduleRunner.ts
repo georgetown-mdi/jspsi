@@ -116,7 +116,7 @@ export const ATTEMPT_LOCK_STANDDOWN_MS = ATTEMPT_PEER_WAIT_MS / 2;
  * ordinary occupancy -- at the peer wait above, a window would have to stay open
  * for the better part of a day to reach this -- so the cap does not cut a
  * realistic window short. It bounds the other case: an attempt failing
- * immediately, paced by {@link ATTEMPT_LOCK_STANDDOWN_MS}, would otherwise keep
+ * immediately, followed each time by {@link ATTEMPT_LOCK_STANDDOWN_MS}, would otherwise keep
  * the runner in a wide window for its whole width.
  */
 export const MAX_WINDOW_ATTEMPTS = 64;
@@ -143,7 +143,7 @@ export interface ManagedScheduleAttempt {
 }
 
 /** The platform boundaries the tick runs on: the clock, the two store reads, the
- * conditioned schedule write, the run, the pacing delay, and the runtime's own
+ * conditioned schedule write, the run, the stand-down delay, and the runtime's own
  * stop. Every one is injected, so the tick's decisions are testable without a
  * database, a broker, or a real clock. */
 export interface ManagedScheduleTickSeams {
@@ -174,7 +174,7 @@ export interface ManagedScheduleTickSeams {
   /** Run one attempt to completion, resolving on a completed exchange and
    * rejecting with the run path's own error otherwise. */
   runAttempt: (attempt: ManagedScheduleAttempt) => Promise<unknown>;
-  /** Pace the next attempt. */
+  /** Stand down before the next attempt. */
   delay: (ms: number) => Promise<void>;
   /** Whether the runtime hosting this tick is going away. */
   stopped: () => boolean;

@@ -646,8 +646,10 @@ On the scheduled path an attempt holds the lock across its whole wait for the
 partner, so an operator who opens the app during one and runs the exchange by
 hand is told a run is already in progress. Between two attempts the runner
 stands down and holds no lock, and a Run taken in that interval proceeds
-normally: it takes the lock, runs the exchange, and the scheduled runner's next
-attempt then finds the window already met and stops occupying it. So the wait
+normally: it takes the lock and runs the exchange, and once its success is
+recorded the scheduled runner's next attempt finds the window already met and
+stops occupying it; an attempt that begins while that run is still exchanging
+runs as well, and the window still settles on the run's success. So the wait
 for an occupied window is one attempt's partner wait rather than the rest of the
 window, and pressing Run again after being told to wait is the way through it.
 

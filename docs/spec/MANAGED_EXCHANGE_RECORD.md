@@ -562,9 +562,13 @@ releases at the rotation persist and the success is stamped only after the data
 exchange, so an attended run taken in a stand-down can still be exchanging when
 the next attempt's re-read runs, which finds the rotation and no success and
 attempts again against the record that run just rotated, with its exchange in
-flight. The bookkeeping settles on the attended success either way -- its stamp
-lands after the attempt began, so the attempt's own miss is dropped and the
-window counts as met.
+flight. That attempt takes the lock, handshakes with the partner on the secret
+the attended run just rotated, and proceeds to its own data exchange, so two of
+this device's data exchanges can be in flight at once -- the second disclosure
+the occupancy's own boundary rule prevents within one occupancy, not across
+an attended run. The bookkeeping settles on the attended success either way --
+its stamp lands after the attempt began, so the attempt's own miss is dropped
+and the window counts as met.
 
 An occupancy belongs to one record. Each wake dispatches every due record that is
 not already occupying its window, so an exchange holding its own window open for
