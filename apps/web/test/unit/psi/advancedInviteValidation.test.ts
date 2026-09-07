@@ -508,7 +508,11 @@ describe("a transform params key the terms schema refuses", () => {
     const result = validateAdvancedInvite(imported, seed, now);
     expect(result.canGenerate).toBe(false);
     expect(result.terms).toBeUndefined();
-    expect(result.errors.keys).toBeDefined();
+    // The message states the fault. The generic mapping would answer a
+    // linkageKeys-path issue with "Enable at least one linkage key.", which this
+    // draft has already done.
+    expect(result.errors.keys).toMatch(/control or text-direction character/);
+    expect(result.errors.keys).not.toMatch(/Enable at least one linkage key/);
     const rendered = Object.values(result.errors).join("\n");
     expect(rendered).not.toContain("unrepeatable-key");
     expect(rendered).not.toContain("\x1b");

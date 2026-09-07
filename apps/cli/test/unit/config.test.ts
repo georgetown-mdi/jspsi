@@ -12,6 +12,7 @@ import {
   MAX_NAME_LENGTH,
   MAX_TEXT_LENGTH,
   MAX_NESTING_DEPTH,
+  NAME_SHAPE_MESSAGE,
   NestingDepthExceededError,
   parseExchangeSpec,
   quoteTermsValue,
@@ -3939,6 +3940,14 @@ test("loadConfigLinkageSource refuses a params key holding a control character",
   const rendered = sanitizeErrorForDisplay(caught);
   expect(rendered).toContain("invalid linkage_terms");
   expect(rendered).toContain("linkage_keys.0.elements.0.transform.0.params: ");
+  // The reason the operator reads is the schema's own, not the wrapper Zod puts
+  // over a refused record key -- with the path cut at the block, the reason is
+  // the only part left that says what is wrong. It trails no remedy where the
+  // metadata refusal beside it does: that remedy comes from the metadata
+  // message's own text, which is about a name declared against a header the CSV
+  // read strips, and a params key is not declared against anything.
+  expect(rendered).toContain(NAME_SHAPE_MESSAGE);
+  expect(rendered).not.toContain("Invalid key in record");
   // The block is named and the key is not, in any form.
   expect(rendered).not.toContain("unrepeatable-key");
   expect(rendered).not.toContain("\x1b");

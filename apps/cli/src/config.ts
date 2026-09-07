@@ -1640,9 +1640,21 @@ export type ConfigLinkageSourceResult =
  * A camelized path STOPS at a `params` segment, naming the block rather than
  * the key inside it: that free-form record holds the author's own key, and
  * the camelized form of two different on-disk spellings can collide.
+ *
+ * A refused record KEY arrives as Zod's `invalid_key` issue: its own message is
+ * the wrapper text `Invalid key in record`, while what the key violated sits on
+ * the issues nested under it. Those nested messages are rendered in the
+ * wrapper's place -- with the path cut at `params`, the reason is the only part
+ * left to say what is wrong -- and they are the schema's own fixed literals,
+ * naming no key.
  */
 function describeSchemaIssues(
-  issues: ReadonlyArray<{ path: ReadonlyArray<PropertyKey>; message: string }>,
+  issues: ReadonlyArray<{
+    path: ReadonlyArray<PropertyKey>;
+    message: string;
+    code?: string;
+    issues?: ReadonlyArray<{ message: string }>;
+  }>,
   keys: "camelized" | "as-written",
 ): string {
   return issues
@@ -1659,7 +1671,12 @@ function describeSchemaIssues(
         keys === "camelized" ? snakeizeKey(String(segment)) : String(segment),
       );
       const at = segments.length > 0 ? `${segments.join(".")}: ` : "";
-      return `${at}${issue.message}`;
+      const nested = issue.code === "invalid_key" ? (issue.issues ?? []) : [];
+      const reason =
+        nested.length > 0
+          ? nested.map((inner) => inner.message).join(", ")
+          : issue.message;
+      return `${at}${reason}`;
     })
     .join("; ");
 }
