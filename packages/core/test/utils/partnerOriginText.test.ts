@@ -344,3 +344,32 @@ test("an oversized label cannot push a link past the per-link budget", () => {
     );
   expect(links[1]).toContain("...[truncated]");
 });
+
+// The clip's other half, and what the module's doc rests the anti-suppression
+// guarantee on: the position leads the label, so a label at or over the label
+// budget is cut behind it and two packs of one repeated value stay distinct.
+// Cutting the position away instead makes the packs byte-identical, and the
+// renderer's duplicate-link suppression takes a whole pack off the operator's
+// screen -- uncounted, since the tail states what the ceiling left out.
+test("a clipped label keeps every value's leading position", () => {
+  const links = linksOf(
+    errorWithPartnerCauseLinks(
+      SENTENCE,
+      "L".repeat(328),
+      partnerOriginTextList(
+        Array.from({ length: 6 }, () => "w".repeat(10_000)),
+      ),
+    ),
+  );
+
+  expect(links).toHaveLength(3);
+  expect(links[1]).not.toBe(links[2]);
+  const packed = [
+    ...links[1]!.split(VALUE_SEPARATOR),
+    ...links[2]!.split(VALUE_SEPARATOR),
+  ];
+  expect(packed).toHaveLength(6);
+  packed.forEach((value, index) =>
+    expect(value.startsWith(`${index + 1}. `)).toBe(true),
+  );
+});

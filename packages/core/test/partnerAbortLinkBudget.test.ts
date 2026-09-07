@@ -13,6 +13,7 @@ import {
 } from "../src/utils/sanitizeForDisplay";
 import {
   CAUSE_DEPTH_ELISION_MARKER,
+  MAX_ERROR_CAUSE_DEPTH,
   sanitizeErrorForDisplay,
 } from "../src/utils/sanitizeErrorForDisplay";
 
@@ -395,3 +396,24 @@ for (const [className, render] of Object.entries(MESSAGE_CLASSES)) {
     expectCountedTail(rendered, reasons.length);
   });
 }
+
+// What the counted tail rests on: the abort error is the outermost rendered
+// link. A full chain spends every link the renderer walks, so one wrapper
+// around the abort error would push the tail past that bound and leave the
+// renderer's own elision marker, which holds no count, in its place
+// (docs/spec/CHANNEL_SECURITY.md). Nothing wraps it on any path today, and a
+// wrapper added later reddens here rather than costing the operator the count
+// in silence.
+test("terms exchange message 2: the counted tail is the chain's last link", async () => {
+  const reasons = Array.from(
+    { length: WIRE_MAX_REASONS },
+    (_, index) => `reason number ${index + 1} the partner stated`,
+  );
+  const links = linksOf(await messageTwoAbort(reasons));
+
+  expect(links).toHaveLength(MAX_ERROR_CAUSE_DEPTH);
+  expect(links[links.length - 1]).toBe(
+    `${WIRE_MAX_REASONS - MAX_PARTNER_VALUES_SHOWN} further values the partner sent are not shown`,
+  );
+  expect(links.join("")).not.toContain(CAUSE_DEPTH_ELISION_MARKER);
+});
