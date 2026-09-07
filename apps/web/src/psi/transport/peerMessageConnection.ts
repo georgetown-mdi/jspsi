@@ -10,6 +10,10 @@ import {
   boundChunkReassembly,
   checkDeliveredFrameBound,
 } from "./boundedReassembly";
+import {
+  assertIterativePackingSupported,
+  packOutboundFramesIteratively,
+} from "./iterativePacking";
 import { redactErrorIds } from "./peerLogging";
 import { waitForConnectionOpen } from "./waitForOpen";
 import { waitForPeerClose } from "./waitForPeerClose";
@@ -44,6 +48,9 @@ const DEFAULT_WEBRTC_INACTIVITY_TIMEOUT_MS = 60 * 60 * 1000;
  * ({@link boundChunkReassembly}, re-checked at delivery by
  * {@link checkDeliveredFrameBound}) -- the WebRTC transport's own bound, since
  * core's AEAD frame-size envelope does not apply on the DTLS-wrapped web path.
+ * The outbound path packs through core's iterative encoder
+ * ({@link packOutboundFramesIteratively}), so a frame's element count is
+ * bounded by memory rather than by the JavaScript stack.
  *
  * If the channel never opens, the returned promise rejects and the half-open
  * channel is torn down first, since `peer.disconnect()` alone would not
@@ -78,6 +85,7 @@ export async function openPeerMessageConnection(
   // strand the half-wired channel (the QueuedMessageConnection is never
   // returned, so its catch-driven close cannot run).
   assertChunkReassemblySupported(conn);
+  assertIterativePackingSupported(conn);
   const opened = waitForConnectionOpen(conn, options?.openTimeoutMs);
   const mc = new QueuedMessageConnection(
     (controls) => {
@@ -89,6 +97,10 @@ export async function openPeerMessageConnection(
         maxFrameBytes,
         maxConcurrentReassemblies: options?.maxConcurrentReassemblies,
       });
+      // Replace PeerJS's recursive BinaryPack encode before the first send: its
+      // own packer overflows the stack a few thousand matched records in, on
+      // the sender, after both parties have paid for the PSI compute.
+      packOutboundFramesIteratively(conn);
       // Re-check a fully delivered frame at this stable layer: a safety check
       // for the chunk-layer bound above (which reaches into PeerJS internals)
       // that refuses an over-cap binary frame as delivered, however assembled.

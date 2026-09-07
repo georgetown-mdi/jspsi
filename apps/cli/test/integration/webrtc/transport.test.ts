@@ -16,7 +16,10 @@ import {
   WERIFT_BUILT_IN_STUN_URI,
   openWebRtcPeerSession,
 } from "../../../src/connection/webrtc/weriftPeer";
-import { PEERJS_CHUNK_MTU } from "../../../src/connection/webrtc/peerjsWire";
+import {
+  PEERJS_CHUNK_MTU,
+  packValue,
+} from "../../../src/connection/webrtc/peerjsWire";
 import { startBrokerProcess } from "../../signaling/brokerProcess";
 
 import type { BrokerLocation } from "../../../src/connection/webrtc/brokerClient";
@@ -178,6 +181,30 @@ test("the final frame is delivered before the clean close", async () => {
   );
   expect(after).toBeInstanceOf(ConnectionError);
   expect(after?.kind).toBe("transport");
+}, 180_000);
+
+test("a 200,000-record frame crosses the channel whole", async () => {
+  // The record-scaling frame at a size no exchange could send while the
+  // outbound path packed recursively: the largest of the four, one entry per
+  // matched record. It is also the size at which the send path pushes its
+  // datagrams into the channel in one uninterrupted loop, so this measures that
+  // push as much as the encoding.
+  const { inviter, acceptor } = await connectedPair();
+  const frame = Array.from({ length: 200_000 }, (_, index) => ({
+    theirIndex: index,
+    iteration: index % 3,
+  }));
+  const packed = packValue(frame);
+  const datagrams = Math.ceil(packed.byteLength / PEERJS_CHUNK_MTU);
+  expect(datagrams).toBeGreaterThan(300);
+
+  await acceptor.send(frame);
+  const received = await inviter.receive();
+
+  // Compared by digest of the re-encoded frame rather than element by element:
+  // the bytes are the contract, and 200,000 objects compared structurally cost
+  // more than the exchange itself.
+  expect(sha256(packValue(received))).toBe(sha256(packed));
 }, 180_000);
 
 test("a configured iceServers list is the list the peer connection is built with", async () => {

@@ -169,6 +169,49 @@ The inbound path is bounded before anything is reassembled --
 `MAX_WEBRTC_FRAME_BYTES` and the structural scan that goes with it are specified
 in [CHANNEL_SECURITY.md](CHANNEL_SECURITY.md#webrtc-data-channel-inbound-bound).
 
+### Outbound encoding
+
+Both parties encode an outbound frame with psilink's own BinaryPack encoder
+(`encodeBinaryPackValue`, `packages/core/src/connection/binaryPackEncode.ts`)
+rather than with `peerjs-js-binarypack`'s `pack`. It walks a frame's arrays and
+objects with an explicit stack, so a frame's element count is bounded by memory;
+the library's own packer descends one call frame per element and overflows the
+sender's stack at roughly 7,800 matched records, well below what the inbound
+bounds admit. The CLI calls it from its wire module; the browser installs it over
+the PeerJS data connection's own encode step, leaving PeerJS's chunking and
+buffering in place
+(`apps/web/src/psi/transport/iterativePacking.ts`).
+
+The wire is unchanged. The encoder emits the bytes the pinned packer emits,
+marker for marker, for every value kind psilink sends:
+
+- null and undefined (`0xc0`), booleans (`0xc2`/`0xc3`).
+- Integers on the packer's own ladder -- fixint, then the first unsigned or
+  signed marker whose range holds the value -- and non-integral numbers as the
+  packer's `double` (`0xcb`), whose exponent and fraction come from a logarithm
+  and a truncating multiply rather than from the IEEE-754 bits.
+- Strings as UTF-8 under `0xb0 + n` / `0xd8` / `0xd9`, byte arrays
+  (`Uint8Array`, `ArrayBuffer`, any typed-array view) under `0xa0 + n` / `0xda`
+  / `0xdb`.
+- Arrays under `0x90 + n` / `0xdc` / `0xdd` and plain objects as maps under
+  `0x80 + n` / `0xde` / `0xdf`, keys packed as strings in `Object.keys` order.
+
+Above the count a 16-bit header can declare, the wider `array32` and `map32`
+headers appear; the inbound scan and `unpack` already read both, so a frame
+larger than the previous ceiling needs no negotiation. Any other value kind --
+a `Date`, a `Map`, a class instance, a number outside the integer range -- is
+refused with a `usage`-kind `ConnectionError` rather than guessed at, since a
+guess that misses is a silently corrupt frame. Two more frame shapes are refused
+so that no frame is written the packer would not have written whole: a value
+that holds itself, which the packer meets as a stack overflow and the encoder as
+a container already on the walk from the root, and an object with an own
+`constructor` or `hasOwnProperty` key, each of which shadows a check the packer
+makes -- it reads `value.constructor` to pick the kind and calls
+`value.hasOwnProperty(key)` for each key of a map. The encoder refuses that
+shadow outright, which is wider than the packer: the packer throws on all but
+one of these shapes, and on the one it survives -- an own `hasOwnProperty` that
+answers false for every key -- it writes a map header it fills with nothing.
+
 ## The clean close
 
 The close sentinel is a `__peerData` close object sent through the same
