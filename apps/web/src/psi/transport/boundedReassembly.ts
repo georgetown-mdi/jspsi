@@ -11,7 +11,6 @@ import {
   MAX_CHUNKS_PER_REASSEMBLY,
   MAX_CONCURRENT_REASSEMBLIES,
   MAX_WEBRTC_FRAME_BYTES,
-  MAX_WEBRTC_FRAME_STRUCTURE_BYTES,
   MAX_WEBRTC_REASSEMBLY_DEPTH,
   MAX_WEBRTC_STRING_BYTES,
   MIN_CHUNK_RESIDENT_BYTES,
@@ -159,13 +158,11 @@ export function assertChunkReassemblySupported(conn: DataConnection): void {
  *   beyond the cap silently evicts the oldest partial (the lockstep protocol
  *   never has a legitimate second partial, so eviction only drops
  *   adversarial data).
- * - Deserialized structure's approximate retained-byte cost:
- *   `maxStructureBytes`, in `_handleDataMessage` (both an unchunked frame and
- *   a completed reassembly flow through it) -- the frame's BinaryPack
- *   structure is scanned and each value charged its per-kind weight before
- *   PeerJS unpacks it, since `unpack` can allocate far more than the wire
- *   bytes. The same walk enforces nesting depth, the per-string cap, the
- *   byte-backed-elements check and the map-key rule.
+ * - The deserialized structure's shape, in `_handleDataMessage` (both an
+ *   unchunked frame and a completed reassembly flow through it): one walk of
+ *   the frame's BinaryPack bytes enforces the nesting depth, the per-string
+ *   cap, the byte-backed-elements check and the map-key rule before PeerJS
+ *   unpacks it.
  *
  * @param conn   The PeerJS data connection (open or not yet open).
  * @param fail   Latches a terminal failure (the connection's `controls.fail`).
@@ -180,7 +177,6 @@ export function boundChunkReassembly(
   options?: {
     maxFrameBytes?: number;
     maxConcurrentReassemblies?: number;
-    maxStructureBytes?: number;
     maxReassemblyDepth?: number;
     maxChunks?: number;
     minChunkResidentBytes?: number;
@@ -190,8 +186,6 @@ export function boundChunkReassembly(
   const maxFrameBytes = options?.maxFrameBytes ?? MAX_WEBRTC_FRAME_BYTES;
   const maxConcurrent =
     options?.maxConcurrentReassemblies ?? MAX_CONCURRENT_REASSEMBLIES;
-  const maxStructureBytes =
-    options?.maxStructureBytes ?? MAX_WEBRTC_FRAME_STRUCTURE_BYTES;
   const maxDepth = options?.maxReassemblyDepth ?? MAX_WEBRTC_REASSEMBLY_DEPTH;
   const maxChunks = options?.maxChunks ?? MAX_CHUNKS_PER_REASSEMBLY;
   const minChunkBytes =
@@ -271,7 +265,6 @@ export function boundChunkReassembly(
     if (failed) return;
     const refusal = scanFrameStructure(
       toUint8(message.data),
-      maxStructureBytes,
       maxDepth,
       maxStringBytes,
     );

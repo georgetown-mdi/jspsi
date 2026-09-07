@@ -4,10 +4,8 @@ import { pack, unpack } from "peerjs-js-binarypack";
 
 import {
   MAX_WEBRTC_FRAME_BYTES,
-  MAX_WEBRTC_FRAME_STRUCTURE_BYTES,
   MAX_WEBRTC_REASSEMBLY_DEPTH,
   MAX_WEBRTC_STRING_BYTES,
-  WEBRTC_VALUE_WEIGHTS,
   scanFrameStructure,
 } from "../../src/connection/binaryPackBounds";
 
@@ -16,20 +14,19 @@ import type { Packable, Unpackable } from "peerjs-js-binarypack";
 // The differential counterpart to binaryPackBounds.test.ts, which drives the scan
 // against hand-written fixtures. Here the oracle is the REAL peerjs-js-binarypack:
 // every frame is produced by the real `pack` (or, for the markers that packer never
-// emits, assembled around real-packed parts), and the cost each frame is compared
-// against is summed from the value the real `unpack` actually returns -- not from a
-// second walk of the wire.
+// emits, assembled around real-packed parts), and what each frame decodes to is read
+// off the value the real `unpack` returns rather than from a second walk of the wire.
 //
 // `peerjs-js-binarypack` is an exact-pinned devDependency of THIS package
 // (packages/core/package.json), so the guard holds whether or not an app keeps the
 // dependency: the scan lives here, and so does the pin backing it
 // (docs/spec/DEPENDENCY_PINS.md).
 //
-// The scan is a defensive over-approximation, so the critical assertion is that
-// it charges at LEAST the published weights' cost for the structure the real
-// unpacker builds; the exact-agreement test beside it is the drift detector that
-// fails loudly when a bump moves the marker table. Both compare the scan against
-// that weight model, so neither is a measurement of the heap.
+// What this suite holds is the scan's reading of the wire against the real
+// unpacker's: that the two agree on every marker's payload width and child count,
+// that no frame psilink sends is refused, and that the two shapes the rules exist
+// for are the shapes the real unpacker really amplifies. What an admitted frame
+// RETAINS is measured, not modelled, in binaryPackRetention.test.ts.
 
 /** The trailing value every probe frame has after the marker under test. Both
  * the real unpacker and the scan must land on it at the same offset, so a marker
@@ -386,9 +383,8 @@ function nestedValues(seed: number, count: number): Array<Packable> {
 }
 
 /** The frame shape the WebRTC transport actually sends -- an array of
- * `{theirIndex, iteration}` records -- so the differential covers the real
- * in-protocol frame the structural budget is sized against, not only synthetic
- * shapes. */
+ * `{theirIndex, iteration}` records -- so the differential covers the largest
+ * legitimate non-binary frame, not only synthetic shapes. */
 function mappedElementFrame(n: number): Packable {
   const out: Array<{ theirIndex: number; iteration: number }> = [];
   for (let i = 0; i < n; i++) out.push({ theirIndex: i, iteration: i % 3 });
@@ -413,29 +409,6 @@ async function binaryArrayFrame(count: number): Promise<Uint8Array> {
   const body = new Uint8Array(count * element.length);
   for (let i = 0; i < count; i++) body.set(element, i * element.length);
   return concatBytes([new Uint8Array([0xdd, ...u32Bytes(count)]), body]);
-}
-
-/** An `array32` declaring `count` elements, each the real packer's encoding of an
- * integer past the small-integer range -- the fewest wire bytes a boxed number can
- * cost, with every element byte the encoder's. The body is filled by doubling
- * copies, so a frame sized to the production budget is a chain of memcpys rather
- * than tens of millions of writes. */
-async function boxedNumberArrayFrame(count: number): Promise<Uint8Array> {
-  const element = await packBytes(2 ** 31);
-  const header = new Uint8Array([0xdd, ...u32Bytes(count)]);
-  const out = new Uint8Array(header.length + count * element.length);
-  out.set(header, 0);
-  if (count > 0) out.set(element, header.length);
-  for (let filled = 1; filled < count;) {
-    const copied = Math.min(filled, count - filled);
-    out.copyWithin(
-      header.length + filled * element.length,
-      header.length,
-      header.length + copied * element.length,
-    );
-    filled += copied;
-  }
-  return out;
 }
 
 /** Whole-frame shapes, at the root rather than wrapped in a probe array. */
@@ -492,149 +465,16 @@ async function allFrames(): Promise<
 
 const utf8 = new TextEncoder();
 
-/** Resident weight of a string of `wireBytes` UTF-8 bytes under the published cost
- * model (a SeqString header plus its UTF-16 characters). */
-function stringWeightOf(wireBytes: number): number {
-  return (
-    WEBRTC_VALUE_WEIGHTS.stringBase +
-    WEBRTC_VALUE_WEIGHTS.stringPerByte * wireBytes
-  );
-}
-
-/** The number markers the model charges the boxed-number weight: every one wider
- * than 16 bits, whatever value it holds. */
-const WIDE_NUMBER_MARKERS: ReadonlySet<number> = new Set([
-  0xca, // float
-  0xcb, // double
-  0xce, // uint32
-  0xcf, // uint64
-  0xd2, // int32
-  0xd3, // int64
-]);
-
-/** Memoized per value: a corpus frame repeats a handful of numbers many thousands
- * of times, and each miss packs one value with the real encoder. */
-const boxedCostByValue = new Map<number, number>();
-
-/**
- * What a decoded number scores under the published model: the boxed-number weight if
- * its marker is one of the wide ones, nothing if the container's slot holds it. Which
- * marker a number takes is asked of the REAL packer rather than modelled here, so
- * this side of the differential reads the library's own encoding choice.
- *
- * That makes the score exact for a frame whose numbers are encoded as the packer
- * encodes them -- every frame the corpus holds. A frame that writes a small value
- * in a wider marker is charged the boxed weight by the scan and scores nothing here:
- * the scan over-charges, which is the safe direction and has a test of its own below.
- */
-async function boxedNumberCost(value: number): Promise<number> {
-  const cached = boxedCostByValue.get(value);
-  if (cached !== undefined) return cached;
-  const marker = (await packBytes(value))[0];
-  const cost = WIDE_NUMBER_MARKERS.has(marker)
-    ? WEBRTC_VALUE_WEIGHTS.boxedNumber
-    : 0;
-  boxedCostByValue.set(value, cost);
-  return cost;
-}
-
-/**
- * The retained cost the value the real unpacker RETURNED implies under the published
- * {@link WEBRTC_VALUE_WEIGHTS} -- the modelled cost the scan's charge is compared
- * against. What inventory it walks comes from the decoded JS value, so it rests on
- * the real library's dispatch rather than on a second reading of the marker table;
- * what each decoded value COSTS is the published model, never a measurement of the
- * heap, so every comparison below is only as strong as the model is.
- *
- * A decoded `bin`/`raw` value scores the `binary` weight: the fixed per-value overhead
- * of the view the unpacker returned, and nothing for the payload that view wraps,
- * which is ~1x the value's wire bytes and bounded by the wire-byte cap rather than by
- * the structural budget. A decoded number scores the boxed-number weight of the
- * marker the real packer gives it (see {@link boxedNumberCost}).
- *
- * The one place the wire is inferred rather than observed is a string's declared
- * byte length, recovered by re-encoding the decoded string; the round trip that makes
- * that exact is asserted below rather than assumed. A decoded value can only ever
- * under-count relative to the wire (a map with repeated keys collapses to one
- * property), which is the safe direction for the "charges at least" assertion.
- */
-async function modelledUnpackCost(value: unknown): Promise<number> {
-  if (typeof value === "string") {
-    return stringWeightOf(utf8.encode(value).length);
-  }
-  if (typeof value === "number") {
-    return await boxedNumberCost(value);
-  }
-  if (value instanceof ArrayBuffer || ArrayBuffer.isView(value)) {
-    return WEBRTC_VALUE_WEIGHTS.binary;
-  }
-  if (Array.isArray(value)) {
-    // The decoded array's own length is the count `unpack_array` sized the backing
-    // store from, so the slots are read off the value the library returned -- an
-    // element the wire never held still occupies one.
-    let cost =
-      WEBRTC_VALUE_WEIGHTS.array + value.length * WEBRTC_VALUE_WEIGHTS.scalar;
-    for (let i = 0; i < value.length; i++)
-      cost += await modelledUnpackCost(value[i]);
-    return cost;
-  }
-  if (value !== null && typeof value === "object") {
-    const entries = Object.entries(value);
-    // Two slots per pair, and each property name charged as the string it is. A
-    // decoded name is the key's COERCED form, which matters only for a key that
-    // was not a string on the wire -- and the scan refuses those outright, so on
-    // every frame this cost is compared against the decoded name IS the wire
-    // string.
-    let cost =
-      WEBRTC_VALUE_WEIGHTS.object +
-      entries.length * 2 * WEBRTC_VALUE_WEIGHTS.scalar;
-    for (const [key, inner] of entries) {
-      cost += stringWeightOf(utf8.encode(key).length);
-      cost += await modelledUnpackCost(inner);
-    }
-    return cost;
-  }
-  return 0;
-}
-
-/** Whether the scan accepts `frame` at `budget` retained bytes, with the depth and
- * per-string caps held at their production values so only the byte budget varies. */
-function scanAccepts(frame: Uint8Array, budget: number): boolean {
+/** Whether the scan admits `frame` under the production depth and per-string
+ * limits. */
+function scanAdmits(frame: Uint8Array): boolean {
   return (
     scanFrameStructure(
       frame,
-      budget,
       MAX_WEBRTC_REASSEMBLY_DEPTH,
       MAX_WEBRTC_STRING_BYTES,
     ) === undefined
   );
-}
-
-/**
- * The exact retained cost `scanFrameStructure` charges `frame`, recovered from the
- * scan's own accept/reject boundary: it rejects as soon as the running sum exceeds
- * the budget, so it accepts exactly the budgets at or above that sum, and the least
- * accepted budget IS the sum. Reading the charge as a number -- rather than only
- * probing one boundary -- lets a divergence report both figures.
- */
-function chargedCost(frame: Uint8Array): number {
-  if (scanAccepts(frame, 0)) return 0;
-  let high = 1;
-  while (!scanAccepts(frame, high)) {
-    high *= 2;
-    if (high > MAX_WEBRTC_FRAME_STRUCTURE_BYTES) {
-      throw new Error(
-        "the scan rejects this frame at every budget, so no charge is defined",
-      );
-    }
-  }
-  let low = Math.floor(high / 2); // rejected, so the charge is above it
-  while (high - low > 1) {
-    const mid = Math.floor((low + high) / 2);
-    if (scanAccepts(frame, mid)) high = mid;
-    else low = mid;
-  }
-  return high;
 }
 
 describe("the BinaryPack marker classes the scan dispatches on", () => {
@@ -750,10 +590,9 @@ describe("the real packer's marker table", () => {
   });
 
   test("writes a mapped-element index past 65,535 in a wide marker", async () => {
-    // The budget's admitted-record derivation charges every record of a
-    // multi-million-record frame the boxed weight for its index. That holds only
-    // while the packer writes an index that size in a marker wider than 16 bits, so
-    // the derivation rests on this rather than on a reading of the packer's ranges.
+    // A mapped-element record's index takes a marker whose payload width the scan
+    // has to skip by exactly, and at the record counts a real exchange reaches that
+    // marker is a wide one. Read off the packer rather than off its ranges.
     const record = await packBytes({ theirIndex: 6_000_000, iteration: 2 });
     expect(markerClassOf(record[0]), "the record is no longer a fixmap").toBe(
       "fixmap",
@@ -763,11 +602,10 @@ describe("the real packer's marker table", () => {
   });
 
   test("round-trips a string's declared wire byte length", async () => {
-    // `modelledUnpackCost` recovers a string's declared wire length by re-encoding
-    // the decoded string, its one inference about the wire. That is exact while the
-    // unpacker's UTF-8 decode is faithful -- the first assertion -- and it is the
-    // byte length, not the identity, that the inference actually needs, so both are
-    // checks here rather than an assumption.
+    // The per-string cap is enforced on the DECLARED wire length, so what the
+    // unpacker builds from those bytes has to be the string they encode: a decode
+    // that dropped or added code points would put the cap on a different quantity
+    // than the one it is set against.
     for (const value of [
       "",
       "a",
@@ -792,52 +630,18 @@ describe("the real packer's marker table", () => {
 });
 
 describe("scanFrameStructure against the real unpacker", () => {
-  test("charges at least the modelled cost of the structure the unpacker built", async () => {
-    // The security direction, and the reason the scan can be trusted as a bound
-    // within the model's coverage: for every frame the real unpacker decodes, the
-    // cost the scan sums must be no less than the published weights' cost for the
-    // structure the unpacker actually built. A scan that under-charged any marker
-    // relative to that inventory would admit a frame the budget means to reject.
-    for (const { label, frame } of await allFrames()) {
-      const charged = chargedCost(frame);
-      const modelled = await modelledUnpackCost(unpackFrame(frame));
-      expect(
-        charged,
-        `${label}: scan charged ${charged}, below the modelled ${modelled}`,
-      ).toBeGreaterThanOrEqual(modelled);
-    }
-  });
-
-  test("charges exactly the modelled cost, for the kinds the model covers", async () => {
-    // The drift detector. The scan is permitted to be a conservative
-    // over-approximation -- the assertion above is the one the bound rests on -- but
-    // today it charges the decoded inventory's modelled cost exactly, so any
-    // divergence is a change worth seeing: a marker whose payload width or child
-    // count the scan reads differently than the library moves this off. Every kind
-    // the decoded inventory can hold is scored here, `bin`/`raw` included.
-    for (const { label, frame } of await allFrames()) {
-      const charged = chargedCost(frame);
-      const modelled = await modelledUnpackCost(unpackFrame(frame));
-      expect(
-        charged,
-        `${label}: scan charged ${charged}, the model ${modelled}`,
-      ).toBe(modelled);
-    }
-  });
-
-  test("accepts every real-encoded frame under the production budget", async () => {
-    // No corpus frame comes near the production envelope, so a rejection here is a
-    // divergence -- a marker the scan mis-reads relative to the real unpacker -- and
-    // not a tight test budget firing.
+  test("admits every real-encoded frame under the production limits", async () => {
+    // No corpus frame comes near the production limits, so a refusal here is a
+    // divergence -- a marker the scan mis-reads relative to the real unpacker --
+    // and not a tight test limit firing.
     for (const { label, frame } of await allFrames()) {
       expect(
         scanFrameStructure(
           frame,
-          MAX_WEBRTC_FRAME_STRUCTURE_BYTES,
           MAX_WEBRTC_REASSEMBLY_DEPTH,
           MAX_WEBRTC_STRING_BYTES,
         ),
-        `${label}: the scan rejected a frame the real unpacker accepts`,
+        `${label}: the scan refused a frame the real unpacker accepts`,
       ).toBeUndefined();
     }
   });
@@ -848,10 +652,10 @@ describe("scanFrameStructure on the shapes the wire size understates", () => {
   // wire holds each declared value. These are the two shapes where what `unpack`
   // retains is decided by something other than the bytes it reads: a declared count
   // an ancestor reserves room for, and a key the assignment coerces. Each is decoded
-  // by the real unpacker here, and the scan's charge is held against the structure
-  // that decode actually produced.
+  // by the real unpacker here, so what the rules answer is a structure that decode
+  // really produces.
 
-  test("charges the backing store every level of a nested chain reserves", async () => {
+  test("the real unpacker reserves every level of a nested chain in full", async () => {
     const frame = nestedArrayFrame(6, 20, 20);
     const decoded = unpackFrame(frame);
 
@@ -870,26 +674,21 @@ describe("scanFrameStructure on the shapes the wire size understates", () => {
       "the innermost level did not decode the wire's elements",
     ).toBe(1);
 
-    expect(chargedCost(frame)).toBe(await modelledUnpackCost(decoded));
+    expect(scanAdmits(frame), "a byte-backed nested chain was refused").toBe(
+      true,
+    );
   });
 
-  test("refuses a nested chain whose reserved stores exceed the production budget", () => {
+  test("admits a nested chain whose reserved stores outrun its wire size", () => {
     // 200 levels of 700,000 declared children each, every level with more bytes
-    // behind it than children in front of it. The frame stays under a megabyte, far
-    // below the wire-byte cap, so the wire cap is not what refuses it.
+    // behind it than children in front of it, so the byte-backed rule is met at
+    // every level and the frame stays under a megabyte. Nothing refuses it: the
+    // retained store is bounded by the wire cap times the amplification measured
+    // for this shape in binaryPackRetention.test.ts, which is where its cost is
+    // stated rather than modelled here.
     const frame = wideNestedArrayFrame(200, 700_000, 700_000);
     expect(frame.byteLength).toBeLessThan(1024 * 1024);
-    expect(
-      scanFrameStructure(
-        frame,
-        MAX_WEBRTC_FRAME_STRUCTURE_BYTES,
-        MAX_WEBRTC_REASSEMBLY_DEPTH,
-        MAX_WEBRTC_STRING_BYTES,
-      ),
-    ).toEqual({
-      rule: "structure-bytes",
-      limit: MAX_WEBRTC_FRAME_STRUCTURE_BYTES,
-    });
+    expect(scanAdmits(frame)).toBe(true);
   });
 
   test("refuses a map whose keys the real unpacker coerces from packed doubles", async () => {
@@ -898,7 +697,7 @@ describe("scanFrameStructure on the shapes the wire size understates", () => {
     const decoded = unpackFrame(frame) as Record<string, unknown>;
 
     // The real unpacker does retain one coerced property name per pair, so the
-    // refusal below is answering a cost this frame really would impose.
+    // refusal below is answering a retention this frame really would impose.
     const names = Object.keys(decoded);
     expect(
       names,
@@ -906,10 +705,7 @@ describe("scanFrameStructure on the shapes the wire size understates", () => {
     ).toHaveLength(pairs);
     expect(names[0]).toBe(String(Math.PI));
 
-    expect(
-      scanAccepts(frame, Number.MAX_SAFE_INTEGER),
-      "a non-string map key was accepted at an unbounded budget",
-    ).toBe(false);
+    expect(scanAdmits(frame), "a non-string map key was admitted").toBe(false);
   });
 
   test("refuses a map keyed by a container, whatever the unpacker would join it into", () => {
@@ -928,18 +724,16 @@ describe("scanFrameStructure on the shapes the wire size understates", () => {
       "the array key did not coerce to its joined element forms",
     ).toBe(new Array<number>(elements).fill(1).join(","));
 
-    expect(
-      scanAccepts(frame, Number.MAX_SAFE_INTEGER),
-      "a container map key was accepted at an unbounded budget",
-    ).toBe(false);
+    expect(scanAdmits(frame), "a container map key was admitted").toBe(false);
   });
 });
 
 describe("scanFrameStructure on a frame of bin/raw values", () => {
   // A `bin`/`raw` element is one wire byte at its shortest and decodes to a view of
-  // its own, so a frame of them is where the wire size says least about what
-  // `unpack` commits: the structural budget is what bounds how many such views a
-  // frame can declare, while the wire-byte cap bounds the payloads they wrap.
+  // its own, the flat shape whose wire size says least about what `unpack` retains
+  // (the per-value figure is measured in binaryPackRetention.test.ts). The rules
+  // here admit it; the wire-byte cap is what bounds both the views and the payloads
+  // they wrap.
 
   test("the real unpacker retains one view per declared element", async () => {
     const count = 2_000;
@@ -959,133 +753,20 @@ describe("scanFrameStructure on a frame of bin/raw values", () => {
       buffers.add((value as Uint8Array).buffer);
     }
     // Each view holds a buffer of its own rather than a window onto the frame, so
-    // the per-value charge is answering a cost the decode really imposes.
+    // the measured per-value retention is answering a cost the decode really
+    // imposes.
     expect(buffers.size, "the decoded views share their backing buffer").toBe(
       count,
     );
-
-    expect(chargedCost(frame)).toBe(await modelledUnpackCost(decoded));
   });
 
-  test("refuses a frame whose declared views exceed the production budget", async () => {
+  test("admits a frame of declared views far below the wire cap", async () => {
+    // One wire byte per element: five million views inside four megabytes of wire,
+    // admitted, so what bounds this shape is the wire cap and the measured
+    // per-view retention rather than a rule here.
     const frame = await binaryArrayFrame(5_000_000);
-    // One wire byte per element, so the frame sits far under the wire-byte cap and
-    // nothing but the structural budget can be what refuses it.
     expect(frame.byteLength).toBeLessThan(MAX_WEBRTC_FRAME_BYTES);
-    expect(scanAccepts(frame, MAX_WEBRTC_FRAME_STRUCTURE_BYTES)).toBe(false);
-  });
-
-  test("admits a frame whose declared views stay within the budget", async () => {
-    // The refusal above is the budget acting on the declared count, not a blanket
-    // refusal of a binary-heavy frame: the same shape an order of magnitude smaller
-    // is accepted at the production budget.
-    const frame = await binaryArrayFrame(500_000);
-    expect(scanAccepts(frame, MAX_WEBRTC_FRAME_STRUCTURE_BYTES)).toBe(true);
-  });
-});
-
-describe("scanFrameStructure on a frame of boxed numbers", () => {
-  // A number the container's backing slot cannot hold is boxed on the heap beside
-  // it, and the cheapest wide marker declares one in five wire bytes: after
-  // `bin`/`raw`, this is the kind whose wire size says least about what `unpack`
-  // retains.
-
-  /** The marker classes the boxed-number weight is charged to, by name. */
-  const WIDE_NUMBER_CLASSES: ReadonlySet<MarkerName> = new Set<MarkerName>([
-    "float",
-    "double",
-    "uint32",
-    "uint64",
-    "int32",
-    "int64",
-  ]);
-
-  test("every wide number marker decodes to a JS number", async () => {
-    // What the weight charges is a heap number, so it rests on these markers
-    // decoding to numbers rather than to some other boxed type -- a `BigInt` for the
-    // 64-bit markers, say, whose cost the weight would not cover. Driven on the real
-    // unpacker rather than recorded as an assumption.
-    const covered = new Set<MarkerName>();
-    for (const { marker, label, frame } of await markerCorpus()) {
-      if (!WIDE_NUMBER_CLASSES.has(marker)) continue;
-      covered.add(marker);
-      const decoded = unpackFrame(frame) as Array<unknown>;
-      expect(
-        typeof decoded[0],
-        `${marker}/${label}: decoded to something other than a number`,
-      ).toBe("number");
-    }
-    expect([...covered].sort()).toEqual([...WIDE_NUMBER_CLASSES].sort());
-  });
-
-  test("the real unpacker decodes one number per declared element", async () => {
-    const count = 2_000;
-    const frame = await boxedNumberArrayFrame(count);
-    const decoded = unpackFrame(frame) as Array<unknown>;
-
-    expect(
-      decoded,
-      "the frame did not decode to one value per declared element",
-    ).toHaveLength(count);
-    for (const value of decoded) {
-      expect(typeof value, "an element did not decode to a number").toBe(
-        "number",
-      );
-      expect(
-        Number.isSafeInteger(value) && Math.abs(value as number) >= 2 ** 31,
-        "an element decoded to a value a container slot could hold",
-      ).toBe(true);
-    }
-
-    expect(chargedCost(frame)).toBe(await modelledUnpackCost(decoded));
-    expect(chargedCost(frame)).toBe(
-      WEBRTC_VALUE_WEIGHTS.array +
-        count *
-          (WEBRTC_VALUE_WEIGHTS.scalar + WEBRTC_VALUE_WEIGHTS.boxedNumber),
-    );
-  });
-
-  test("refuses a frame whose declared numbers exceed the production budget", async () => {
-    // The frame is sized to the budget rather than scaled down, because the whole
-    // point of the boxed charge is where the two bounds sit relative to each
-    // other: the wire a budget-filling number frame must spend is INSIDE the
-    // wire-byte cap, so the structure budget is what refuses it and the retention
-    // is bounded there rather than by the wire.
-    const perValue =
-      WEBRTC_VALUE_WEIGHTS.scalar + WEBRTC_VALUE_WEIGHTS.boxedNumber;
-    const frame = await boxedNumberArrayFrame(
-      Math.ceil(MAX_WEBRTC_FRAME_STRUCTURE_BYTES / perValue),
-    );
-    expect(frame.byteLength).toBeLessThan(MAX_WEBRTC_FRAME_BYTES);
-    expect(scanAccepts(frame, MAX_WEBRTC_FRAME_STRUCTURE_BYTES)).toBe(false);
-  });
-
-  test("admits a frame whose declared numbers stay within the budget", async () => {
-    // The refusal above is the budget acting on the declared count, not a blanket
-    // refusal of a number-heavy frame.
-    const frame = await boxedNumberArrayFrame(4_000_000);
-    expect(scanAccepts(frame, MAX_WEBRTC_FRAME_STRUCTURE_BYTES)).toBe(true);
-  });
-
-  test("charges the boxed weight to a small value written in a wide marker", async () => {
-    // The charge reads the marker, not the value, so a number the packer would have
-    // written as a fixint is charged the box anyway once the frame writes it wide.
-    // This is the one shape where the scan and the decoded-value oracle diverge, and
-    // the divergence is the scan charging more.
-    const frame = new Uint8Array([0x91, 0xce, 0, 0, 0, 5]); // fixarray(1), uint32 5
-    const decoded = unpackFrame(frame);
-    expect(
-      decoded,
-      "the wide marker did not decode to the value it carries",
-    ).toEqual([5]);
-
-    const charged = chargedCost(frame);
-    expect(charged).toBe(
-      WEBRTC_VALUE_WEIGHTS.array +
-        WEBRTC_VALUE_WEIGHTS.scalar +
-        WEBRTC_VALUE_WEIGHTS.boxedNumber,
-    );
-    expect(charged).toBeGreaterThan(await modelledUnpackCost(decoded));
+    expect(scanAdmits(frame)).toBe(true);
   });
 });
 
@@ -1183,13 +864,13 @@ describe("the map-key rule against the real packer", () => {
   // safe only because no legitimate frame holds one. That is a claim about the
   // real packer's behavior on the real send-site shapes, so it is driven here rather
   // than asserted in prose: the scan itself is the detector, since a non-string key
-  // anywhere in a frame is the one thing that makes it refuse at every budget.
+  // anywhere in a frame refuses it.
 
-  test("accepts every value psilink sends on the WebRTC data channel", async () => {
+  test("admits every value psilink sends on the WebRTC data channel", async () => {
     for (const { label, value } of webrtcSendSiteValues()) {
       const frame = await packBytes(value);
       expect(
-        scanAccepts(frame, MAX_WEBRTC_FRAME_STRUCTURE_BYTES),
+        scanAdmits(frame),
         `the scan refused a real-packed ${label} frame`,
       ).toBe(true);
     }
@@ -1215,11 +896,12 @@ describe("the map-key rule against the real packer", () => {
 
 describe("a non-string map key over a cursor underrun", () => {
   // Dangerous together: a map key whose subtree declares more descendants
-  // than the wire backs, so the cursor underruns. An underrun alone is safe
-  // -- the zero-filled bytes land in already-charged slots -- but under a
-  // key, the unpacker joins the whole zero-filled subtree into one property
-  // name, a cost no charge covers. The key rule decides on the marker byte
-  // before the scan descends, so an underrun deeper in the frame can't reach it.
+  // than the wire backs, so the cursor underruns. An underrun alone leaves the
+  // zero-filled elements in stores an ancestor's declared count already
+  // committed, but under a key the unpacker joins the whole zero-filled subtree
+  // into one property name, whose size grows with what the frame declares rather
+  // than with the wire. The key rule decides on the marker byte before the scan
+  // descends, so an underrun deeper in the frame can't reach it.
 
   const LEVELS = 8;
   const WIDTH = 20_000;
@@ -1246,34 +928,23 @@ describe("a non-string map key over a cursor underrun", () => {
       unbackedChain(LEVELS, WIDTH),
     ]);
 
-  test("the fixture really is the accept-on-underrun shape", async () => {
-    // The control: the identical chain at a VALUE position is still accepted, and
-    // accepted through the underrun path -- so what the key-position case below
+  test("the fixture really is the admit-on-underrun shape", () => {
+    // The control: the identical chain at a VALUE position is still admitted, and
+    // admitted through the underrun path -- so what the key-position case below
     // refuses is the key, not some other property of these bytes.
     const frame = atValue();
-    expect(scanAccepts(frame, MAX_WEBRTC_FRAME_STRUCTURE_BYTES)).toBe(true);
-
-    // And the accept is sound: the scan charges at least the modelled cost of the
-    // structure those same bytes produce.
-    const decoded = unpackFrame(frame);
-    expect(chargedCost(frame)).toBeGreaterThanOrEqual(
-      await modelledUnpackCost(decoded),
-    );
+    expect(scanAdmits(frame)).toBe(true);
 
     // The declared descendants really do outrun the wire: the innermost level is
     // the only one the frame's bytes back, so every level above it is zero-filled.
+    const decoded = unpackFrame(frame);
     const outer = (decoded as Record<string, unknown>)["k"];
     expect(Array.isArray(outer) && outer.length).toBe(WIDTH);
     expect(frame.byteLength).toBeLessThan(LEVELS * WIDTH);
   });
 
-  test("refuses the same chain at a key position, at every budget", () => {
-    const frame = atKey();
-    expect(scanAccepts(frame, MAX_WEBRTC_FRAME_STRUCTURE_BYTES)).toBe(false);
-    expect(scanAccepts(frame, Number.MAX_SAFE_INTEGER)).toBe(false);
-    expect(() => chargedCost(frame)).toThrow(
-      /rejects this frame at every budget/,
-    );
+  test("refuses the same chain at a key position", () => {
+    expect(scanAdmits(atKey())).toBe(false);
   });
 
   test("the real unpacker amplifies that frame into one oversized property name", () => {
@@ -1287,8 +958,10 @@ describe("a non-string map key over a cursor underrun", () => {
     const names = Object.keys(decoded);
     expect(names).toHaveLength(1);
 
-    const retainedBytes = names[0].length * WEBRTC_VALUE_WEIGHTS.stringPerByte;
     expect(names[0].length).toBeGreaterThan(300_000);
-    expect(retainedBytes / frame.byteLength).toBeGreaterThan(30);
+    expect(
+      names[0].length / frame.byteLength,
+      `the coerced name is ${names[0].length} characters over ${frame.byteLength} wire bytes`,
+    ).toBeGreaterThan(15);
   });
 });

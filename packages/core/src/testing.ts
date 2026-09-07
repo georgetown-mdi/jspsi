@@ -77,10 +77,9 @@ export { AEAD_ENVELOPE_VERSION } from "./connection/encryptedMessageConnection.j
 export { createMessagePipe } from "./connection/messageConnection.js";
 
 // The input bounds a suite drives at their edge: the invitation decode's host,
-// path, and whole-token limits, the WebRTC frame pre-scan's per-kind weights,
-// and the CSV line ceiling. They stay out of the main entry point: core's own
-// parse enforces each, and a caller meets the refusal rather than the number.
-export { WEBRTC_VALUE_WEIGHTS } from "./connection/binaryPackBounds.js";
+// path, and whole-token limits, and the CSV line ceiling. They stay out of the
+// main entry point: core's own parse enforces each, and a caller meets the
+// refusal rather than the number.
 export {
   MAX_ENDPOINT_HOST_LENGTH,
   MAX_ENDPOINT_PATH_LENGTH,

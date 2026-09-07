@@ -29,7 +29,6 @@
 import { pack, unpack } from "peerjs-js-binarypack";
 
 import {
-  MAX_WEBRTC_FRAME_STRUCTURE_BYTES,
   MAX_WEBRTC_REASSEMBLY_DEPTH,
   MAX_WEBRTC_STRING_BYTES,
   describeFrameStructureRefusal,
@@ -39,11 +38,10 @@ import {
 import type { FrameStructureRefusal } from "@psilink/core";
 import type { Unpackable } from "peerjs-js-binarypack";
 
-/** The three limits `scanFrameStructure` measures a frame against. A fixture has
- * its own, and every side is driven with those same three numbers, so a divergence
+/** The two limits `scanFrameStructure` measures a frame against. A fixture has
+ * its own, and every side is driven with those same two numbers, so a divergence
  * can only be the enforcement and never the setup. */
 export interface FrameScanLimits {
-  readonly maxStructureBytes: number;
   readonly maxDepth: number;
   readonly maxStringBytes: number;
 }
@@ -66,19 +64,11 @@ export type FrameVerdict =
   | { kind: "pending" };
 
 /** The production limits, so a fixture reduces only the limit its own rule tests and
- * stays inside the real envelope on the other two. */
+ * stays inside the real envelope on the other one. */
 const PRODUCTION_LIMITS: FrameScanLimits = {
-  maxStructureBytes: MAX_WEBRTC_FRAME_STRUCTURE_BYTES,
   maxDepth: MAX_WEBRTC_REASSEMBLY_DEPTH,
   maxStringBytes: MAX_WEBRTC_STRING_BYTES,
 };
-
-/** The reduced structure budget the retained-byte pair is measured against. It has to
- * sit above what a chunk envelope itself costs, or a reassembly leg would refuse an
- * envelope instead of the frame it holds and pass while testing nothing; each
- * transport's pending-until-the-last-datagram test holds that, failing on any
- * envelope the scan refuses. */
-const REDUCED_STRUCTURE_BYTES = 4096;
 
 /** The reduced nesting cap the depth pair is measured against. */
 const REDUCED_DEPTH = 4;
@@ -111,8 +101,8 @@ export function unpackFrame(bytes: Uint8Array): unknown {
   return unpack<Unpackable>(bytes as unknown as ArrayBuffer);
 }
 
-/** `n` mapped-element records -- `Array<{theirIndex, iteration}>`, the largest
- * legitimate frame the structural budget is sized against. */
+/** `n` mapped-element records -- `Array<{theirIndex, iteration}>`, the shape of
+ * the largest legitimate non-binary frame. */
 function mappedElementRecords(
   n: number,
 ): Array<{ theirIndex: number; iteration: number }> {
@@ -159,20 +149,12 @@ function concatBytes(parts: Array<Uint8Array>): Uint8Array {
 }
 
 /** One refused frame per pre-scan rule, keyed by the rule it must draw rather than
- * listed, so a sixth rule added to `FrameStructureRefusal` fails this file's
+ * listed, so a fifth rule added to `FrameStructureRefusal` fails this file's
  * typecheck -- in every workspace that consumes it -- until it has a fixture. */
 const refusedFrames: Record<
   FrameStructureRefusal["rule"],
   Omit<WebrtcFrameFixture, "refusedBy">
 > = {
-  "structure-bytes": {
-    label: "200 mapped-element records over the structure budget",
-    frame: packValue(mappedElementRecords(200)),
-    limits: {
-      ...PRODUCTION_LIMITS,
-      maxStructureBytes: REDUCED_STRUCTURE_BYTES,
-    },
-  },
   "nesting-depth": {
     label: "arrays nested past the depth cap",
     frame: packValue(nestedArrays(12)),
@@ -213,14 +195,6 @@ const admittedValues: Array<{
   value: unknown;
   limits: FrameScanLimits;
 }> = [
-  {
-    label: "20 mapped-element records under the same structure budget",
-    value: mappedElementRecords(20),
-    limits: {
-      ...PRODUCTION_LIMITS,
-      maxStructureBytes: REDUCED_STRUCTURE_BYTES,
-    },
-  },
   {
     label: "arrays nested to the same depth cap",
     value: nestedArrays(REDUCED_DEPTH - 1),
@@ -310,7 +284,6 @@ export function frameScanRefusal(
 ): FrameStructureRefusal | undefined {
   return scanFrameStructure(
     fixture.frame,
-    fixture.limits.maxStructureBytes,
     fixture.limits.maxDepth,
     fixture.limits.maxStringBytes,
   );

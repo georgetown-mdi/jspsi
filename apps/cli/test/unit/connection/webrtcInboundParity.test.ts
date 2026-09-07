@@ -36,12 +36,11 @@ import type { InboundBoundOptions } from "../../../src/connection/webrtc/inbound
 // reassembler belongs in this app's test tree. The scan it is driven against is the
 // one this app links from core's BUILD, not a source copy.
 
-/** The reassembler's overrides for a fixture's limits. Only the three limits the
+/** The reassembler's overrides for a fixture's limits. Only the two limits the
  * fixture set varies are set; every other bound stays at its production default, as
  * it does on the web leg. */
 function boundsFor(fixture: WebrtcFrameFixture): InboundBoundOptions {
   return {
-    maxStructureBytes: fixture.limits.maxStructureBytes,
     maxReassemblyDepth: fixture.limits.maxDepth,
     maxStringBytes: fixture.limits.maxStringBytes,
   };
