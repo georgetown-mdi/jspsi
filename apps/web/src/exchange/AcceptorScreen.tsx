@@ -13,7 +13,10 @@ import {
 
 import {
   emptyColumnPositions,
+  overlongCoverageColumns,
+  refusedColumnNames,
   sanitizedColumnsAlert,
+  savedExchangeColumnRefusalAlert,
   unnameableColumnsAlert,
 } from "@psi/columnNames";
 import { capturedInputHandle } from "@psi/managed/managedInputHandle";
@@ -114,8 +117,8 @@ import { AcceptorColumnsStep } from "./AcceptorColumnsStep";
 import { AcceptorExchangeSection } from "./AcceptorExchangeSection";
 import { WorkShell } from "./WorkShell";
 
+import { MANAGE_OFFER_IDLE, ManageExchangeOffer } from "./ManageExchangeOffer";
 import { Ledger } from "./Ledger";
-import { ManageExchangeOffer } from "./ManageExchangeOffer";
 import { RecoveredExchangePanel } from "./RecoveredExchangePanel";
 import { TopBar } from "./TopBar";
 import { acceptorTimelineSteps } from "./exchangeRun";
@@ -153,7 +156,7 @@ import type { ExchangeFilesDraft } from "@console/exchangeFilesModel";
 import type { FieldStepOverride } from "@psi/standardizationAuthoring";
 import type { FileRejection } from "@mantine/dropzone";
 import type { ManageOfferChoices } from "./manageOfferModel";
-import type { ManageOfferStatus } from "./ManageExchangeOffer";
+import type { ManageOfferState } from "./ManageExchangeOffer";
 import type { RailStep } from "@psi/rail";
 import type { ReceiptsDraft } from "@psi/receiptsModel";
 import type { RunDiagnosticsDraft } from "@psi/runDiagnosticsModel";
@@ -311,7 +314,11 @@ export function AcceptorScreen() {
   // the credential-free locator. An accepted SFTP exchange is blocked from launch
   // until this holds a connection.
   const [sftpInfo, setSftpInfo] = useState<SftpConnectionInfo>();
-  const [manageStatus, setManageStatus] = useState<ManageOfferStatus>("idle");
+  // The offer's progress and, for a failed deposit, what it was about when a
+  // column name explains it. Held as one value so no reset can leave a refusal
+  // standing over an idle offer.
+  const [manageOffer, setManageOffer] =
+    useState<ManageOfferState>(MANAGE_OFFER_IDLE);
   // The launched exchange (the assembled edits + optional advisory).
   const [launched, setLaunched] = useState<AcceptorLaunched>();
 
@@ -895,6 +902,19 @@ export function AcceptorScreen() {
           ratesUnavailable,
         )
       : undefined;
+  // The columns whose header the console's coverage sweep refuses over its length,
+  // so the unavailable notice names what tripped the bound. Empty off the console:
+  // the hosted sweep runs in this browser, under no such bound.
+  const coverageRefusedColumns = useMemo(
+    () =>
+      consoleSource === undefined
+        ? []
+        : overlongCoverageColumns(
+            editorState?.standardization ?? EMPTY_STANDARDIZATION,
+            consoleSource.columns,
+          ),
+    [consoleSource, editorState],
+  );
 
   const spineSteps: Array<RailStep> =
     step === "launched"
@@ -1054,6 +1074,10 @@ export function AcceptorScreen() {
     // exchange must not start until the operator has authored a connection (with
     // the required host-key fingerprint) to the partner-named server.
     if (sftpConnectionMissing) return;
+    // A re-launch reached by browser Back leaves the offer as the prior launch
+    // left it, so the fresh launch resets it rather than opening under a refusal
+    // the operator has already acted on.
+    setManageOffer(MANAGE_OFFER_IDLE);
     setLaunched(acceptorLaunchPayload(editorState));
     goToStep("launched");
   };
@@ -1085,7 +1109,7 @@ export function AcceptorScreen() {
     // the re-launch. A no-op on a browser accept.
     abandonRun();
     setLaunched(undefined);
-    setManageStatus("idle");
+    setManageOffer(MANAGE_OFFER_IDLE);
     goToStep("columns");
   };
 
@@ -1103,7 +1127,7 @@ export function AcceptorScreen() {
     if (decode.status !== "ready" || launched === undefined) return;
     const { token: invitationToken, endpoint } = decode.invitation;
     if (endpoint.channel !== "webrtc") return;
-    setManageStatus("depositing");
+    setManageOffer({ status: "depositing" });
     try {
       await createManagedExchange(
         buildManagedDeposit(
@@ -1135,7 +1159,7 @@ export function AcceptorScreen() {
           Date.now(),
         ),
       );
-      setManageStatus("deposited");
+      setManageOffer({ status: "deposited" });
     } catch (error) {
       console.error(
         "managed exchange deposit failed:",
@@ -1144,7 +1168,16 @@ export function AcceptorScreen() {
       whenDiagnostic(() =>
         console.error("managed exchange deposit failed (detail):", error),
       );
-      setManageStatus("error");
+      // The alert names the column out of the document's own metadata, which is
+      // what the refused parse read; a failure no column explains leaves the
+      // generic copy standing.
+      const refused = refusedColumnNames(launched.edits.metadata);
+      setManageOffer({
+        status: "error",
+        ...(refused.length > 0
+          ? { refusal: savedExchangeColumnRefusalAlert(refused) }
+          : {}),
+      });
     }
   }
 
@@ -1565,6 +1598,7 @@ export function AcceptorScreen() {
               rates={rates}
               ratesPending={ratesPending}
               coverageUnavailable={ratesUnavailable}
+              coverageRefusedColumns={coverageRefusedColumns}
               deadKeyCount={verdict.deadKeyCount}
               cleaningResetKey={cleaningResetKey}
               {...(consoleSource !== undefined
@@ -1600,7 +1634,8 @@ export function AcceptorScreen() {
               launched !== undefined &&
               failure === undefined && (
                 <ManageExchangeOffer
-                  status={manageStatus}
+                  status={manageOffer.status}
+                  refusal={manageOffer.refusal}
                   handleCaptured={sourceHandle !== undefined}
                   onManage={(choices) => void manageExchange(choices)}
                 />

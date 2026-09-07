@@ -24,12 +24,29 @@ import {
   maxAgeDaysError,
 } from "./manageOfferModel";
 
+import type { AlertContent } from "@components/csvIntake";
 import type { ManageOfferChoices } from "./manageOfferModel";
 
 /** The deposit's progress, driven by the host that owns the store write: `idle`
  * before the operator commits, `depositing` while the write is in flight,
  * `deposited` once the record lands, and `error` when the write failed. */
 export type ManageOfferStatus = "idle" | "depositing" | "deposited" | "error";
+
+/**
+ * The offer's whole host-held state: the deposit's progress and, for an `error`,
+ * what it was about when a column name explains it. One value rather than two,
+ * so a reset cannot clear the progress and leave the refusal standing -- which
+ * would disable the deposit with nothing on screen to explain it. A refusal is
+ * representable only beside `error`, so no assignment can pair one with a
+ * progress the operator would then be unable to explain.
+ */
+export type ManageOfferState =
+  | { status: Exclude<ManageOfferStatus, "error">; refusal?: undefined }
+  | { status: "error"; refusal?: AlertContent };
+
+/** The offer's state before any deposit, and the value every path that abandons
+ * or restarts an exchange resets to. */
+export const MANAGE_OFFER_IDLE: ManageOfferState = { status: "idle" };
 
 /** Whether this browser can open the managed store, probed once on mount:
  * `undefined` while the probe is in flight, then the settled answer. The offer
@@ -61,10 +78,16 @@ function useManagedStoreAvailability(): boolean | undefined {
  */
 export function ManageExchangeOffer({
   status,
+  refusal,
   handleCaptured,
   onManage,
 }: {
   status: ManageOfferStatus;
+  /** What an `error` status was about, when the host could say. Present only
+   * where the deposit was refused over something the operator can act on -- a
+   * column name the stored document cannot hold -- since a retry then fails
+   * identically; undefined keeps the generic try-again copy. */
+  refusal?: AlertContent;
   /** Whether a File System Access input-file handle was captured from the
    * operator's selection, so a scheduled re-run can re-read the file without
    * re-selection. Absent capture is normal (a click-selected file, or a browser
@@ -136,8 +159,15 @@ export function ManageExchangeOffer({
   const cadenceNote = maxAgeCadenceNote(tokenMaxAgeDays);
   const labelValid = labelWithinCap(label);
   const depositing = status === "depositing";
+  // A refusal names a column of the stored document, which none of this panel's
+  // inputs changes, so the deposit is blocked rather than left clickable for the
+  // retry the alert says fails identically. The way on is the header row and a
+  // fresh exchange, which mounts this panel anew.
   const canManage =
-    labelValid && !depositing && (!maxAgeEnabled || maxAgeError === undefined);
+    labelValid &&
+    !depositing &&
+    refusal === undefined &&
+    (!maxAgeEnabled || maxAgeError === undefined);
 
   return (
     <div className={styles.callout}>
@@ -191,11 +221,11 @@ export function ManageExchangeOffer({
       {status === "error" && (
         <Alert
           color="red"
-          title="Could not save this recurring exchange"
+          title={refusal?.title ?? "Could not save this recurring exchange"}
           mt="sm"
         >
-          The exchange was not stored. Your one-off exchange is unaffected - try
-          again.
+          {refusal?.message ??
+            "The exchange was not stored. Your one-off exchange is unaffected - try again."}
         </Alert>
       )}
       <Button

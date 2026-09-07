@@ -19,7 +19,10 @@ import {
 import {
   emptyColumnPositions,
   overlongColumnsAlert,
+  overlongCoverageColumns,
+  refusedColumnNames,
   sanitizedColumnsAlert,
+  savedExchangeColumnRefusalAlert,
   unnameableColumnsAlert,
 } from "@psi/columnNames";
 import { capturedInputHandle } from "@psi/managed/managedInputHandle";
@@ -136,11 +139,11 @@ import { useBeforeUnloadPrompt, useUnloadGuard } from "./useUnloadGuard";
 import { AgreementTab } from "./AgreementTab";
 import { WorkShell } from "./WorkShell";
 
+import { MANAGE_OFFER_IDLE, ManageExchangeOffer } from "./ManageExchangeOffer";
 import { CleaningTab } from "./CleaningTab";
 import { InviterExchangeSection } from "./InviterExchangeSection";
 import { KeysTab } from "./KeysTab";
 import { Ledger } from "./Ledger";
-import { ManageExchangeOffer } from "./ManageExchangeOffer";
 import { MatchingSharingSection } from "./MatchingSharingSection";
 import { Problems } from "./Problems";
 import { RecoveredExchangePanel } from "./RecoveredExchangePanel";
@@ -179,7 +182,7 @@ import type { ConnectionTuningDraft } from "@console/connectionTuningModel";
 import type { DisclosureChoice } from "@psi/metadataEditing";
 import type { ExchangeFilesDraft } from "@console/exchangeFilesModel";
 import type { ManageOfferChoices } from "./manageOfferModel";
-import type { ManageOfferStatus } from "./ManageExchangeOffer";
+import type { ManageOfferState } from "./ManageExchangeOffer";
 import type { ReceiptsDraft } from "@psi/receiptsModel";
 import type { RunDiagnosticsDraft } from "@psi/runDiagnosticsModel";
 import type { SavedExchange } from "./SaveExchangeSection";
@@ -397,7 +400,11 @@ export function InviterScreen() {
   const [receipts, setReceipts] = useState<ReceiptsDraft>(RECEIPTS_DEFAULT);
   const [receiptsOpen, setReceiptsOpen] = useState(false);
   const [demoActive, setDemoActive] = useState(false);
-  const [manageStatus, setManageStatus] = useState<ManageOfferStatus>("idle");
+  // The offer's progress and, for a failed deposit, what it was about when a
+  // column name explains it. Held as one value so no reset can leave a refusal
+  // standing over an idle offer.
+  const [manageOffer, setManageOffer] =
+    useState<ManageOfferState>(MANAGE_OFFER_IDLE);
 
   // Fetch the console's authored SFTP connection once on a console build; one
   // fetch per console serves the session, and the default transport reads its
@@ -538,6 +545,19 @@ export function InviterScreen() {
     rates,
     ratesUnavailable,
   );
+  // The columns whose header the console's coverage sweep refuses over its length,
+  // so the unavailable notice names what tripped the bound. Empty off the console:
+  // the hosted sweep runs in this browser, under no such bound.
+  const coverageRefusedColumns = useMemo(
+    () =>
+      consoleSource === undefined
+        ? []
+        : overlongCoverageColumns(
+            editor?.draft.standardization ?? EMPTY_STANDARDIZATION,
+            consoleSource.columns,
+          ),
+    [consoleSource, editor],
+  );
   const coverageProblems = cleaningCoverageProblems(editor, rates);
 
   // The operator authored an SFTP connection in-console (its credential-free
@@ -573,7 +593,7 @@ export function InviterScreen() {
     setInvitation(undefined);
     setAcceptKitExchange(undefined);
     setSavedExchange(undefined);
-    setManageStatus("idle");
+    setManageOffer(MANAGE_OFFER_IDLE);
     goTo("review");
   }
 
@@ -587,7 +607,7 @@ export function InviterScreen() {
   // Manage, so there is no discard path here.
   async function manageExchange(choices: ManageOfferChoices) {
     if (invitation === undefined || editor === undefined) return;
-    setManageStatus("depositing");
+    setManageOffer({ status: "depositing" });
     try {
       const connection = webrtcLocatorFromEndpoint(
         webrtcEndpointFromLocation(invitationLocation()),
@@ -622,7 +642,7 @@ export function InviterScreen() {
           Date.now(),
         ),
       );
-      setManageStatus("deposited");
+      setManageOffer({ status: "deposited" });
     } catch (error) {
       console.error(
         "managed exchange deposit failed:",
@@ -631,7 +651,16 @@ export function InviterScreen() {
       whenDiagnostic(() =>
         console.error("managed exchange deposit failed (detail):", error),
       );
-      setManageStatus("error");
+      // The alert names the column out of the document's own metadata, which is
+      // what the refused parse read; a failure no column explains leaves the
+      // generic copy standing.
+      const refused = refusedColumnNames(invitation.metadata);
+      setManageOffer({
+        status: "error",
+        ...(refused.length > 0
+          ? { refusal: savedExchangeColumnRefusalAlert(refused) }
+          : {}),
+      });
     }
   }
 
@@ -932,7 +961,7 @@ export function InviterScreen() {
     setSavedExchange(undefined);
     setInvitation(undefined);
     setAcceptKitExchange(undefined);
-    setManageStatus("idle");
+    setManageOffer(MANAGE_OFFER_IDLE);
     goTo("file");
   }
 
@@ -1082,7 +1111,7 @@ export function InviterScreen() {
               locklessRendezvous: runOptions?.locklessRendezvous === true,
             },
       );
-      setManageStatus("idle");
+      setManageOffer(MANAGE_OFFER_IDLE);
       goTo("share");
     } catch (error) {
       if (error instanceof InvitationFileError) {
@@ -1480,6 +1509,7 @@ export function InviterScreen() {
               rates={rates}
               pending={ratesPending}
               coverageUnavailable={ratesUnavailable}
+              coverageRefusedColumns={coverageRefusedColumns}
               onFieldSteps={(output, fieldSteps) =>
                 applyEditor(editorWithFieldSteps(editor, output, fieldSteps))
               }
@@ -1589,7 +1619,8 @@ export function InviterScreen() {
               failure === undefined &&
               !demoActive && (
                 <ManageExchangeOffer
-                  status={manageStatus}
+                  status={manageOffer.status}
+                  refusal={manageOffer.refusal}
                   handleCaptured={sourceHandle !== undefined}
                   onManage={(choices) => void manageExchange(choices)}
                 />

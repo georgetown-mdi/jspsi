@@ -1270,6 +1270,15 @@ describe("console inviter picker re-profile", () => {
       .element(page.getByText("This file has an unnamed column"))
       .toBeInTheDocument();
     await expect.element(page.getByLabelText("Your name")).toBeInTheDocument();
+    // The refusal discards the read, so no profiled columns are held and the
+    // step cannot be left. That is what keeps the mint's own re-check -- which
+    // has no parse on this path and so reports no sanitation of its own -- from
+    // being the seat an operator meets an unnamed column at.
+    await expect
+      .element(
+        page.getByRole("button", { name: "Continue to matching & sharing" }),
+      )
+      .toBeDisabled();
   });
 
   test("a profile reporting a sanitized header names the columns it changed", async () => {

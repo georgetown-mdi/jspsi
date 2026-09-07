@@ -16,6 +16,7 @@ import {
 
 import {
   JobApiRequestError,
+  JobIntentColumnNameError,
   RelayedTerminalError,
   createFetchJobApiClient,
   createServerJobExchangeDriver,
@@ -25,6 +26,7 @@ import {
   writeAttachment,
 } from "@psi/jobClient/consoleJobAttachment";
 import { HANDSHAKE_ROLE_FOR_SIDE } from "@psi/handshakeRole";
+import { consoleJobColumnRefusalAlert } from "@psi/columnNames";
 import { createBrowserExchangeDriver } from "@psi/exchangeDriver";
 import { hasRecoveryHint } from "@psi/authenticateExchange";
 import { inviterExchangeDataSpec } from "@psi/authoring/advancedInvite";
@@ -120,6 +122,15 @@ export function failureFor(
         "restarting the console also clears it.",
     };
   }
+  // The browser refused the intent before sending it, over a column name the
+  // console cannot record. Named rather than reported as a file fault: the file
+  // is fine and re-choosing it changes nothing, so the alert routes to the header
+  // row instead, naming the recovery control this seat's own alert offers.
+  if (error instanceof JobIntentColumnNameError)
+    return {
+      category: "config",
+      ...consoleJobColumnRefusalAlert(error.columns, seat),
+    };
   // A console job create rejected the mounted file: a 400 the driver categorizes
   // `config`. The file is the likely fault, so the alert names it -- except on
   // the sftp channel, where a vanished picked remote is equally likely, so that

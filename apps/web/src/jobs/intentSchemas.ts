@@ -16,6 +16,7 @@ import {
   MAX_RECONNECT_ATTEMPTS,
   MAX_TEXT_LENGTH,
   MAX_TIMEOUT_SECONDS,
+  MAX_TRANSFORM_PATTERN_LENGTH,
   MetadataSchema,
   OwnColumnSelectionSchema,
   SHARED_SECRET_REGEX,
@@ -739,6 +740,50 @@ const boundedMetadataSchema = MetadataSchema.refine(
     ),
   { message: "a metadata column description exceeds the length cap" },
 );
+
+/**
+ * The standardization functions whose named param is compiled to a
+ * linear-time regex at pipeline construction (`compileLinearRegex` in core's
+ * standardization.ts), paired with that param's camelCase name -- the only
+ * sources whose length drives the super-linear RE2 compile the coverage route
+ * bounds. A plain-string param (coalesce's `default`, null_if's
+ * `value`/`values`) is never compiled and is unbounded elsewhere, so capping
+ * it would 400 a pipeline that runs fine everywhere else. `parse_date`'s
+ * format param also compiles, but the coverage accumulator already bounds it
+ * via `isStepValid` before any compile.
+ */
+const REGEX_SOURCE_PARAM_BY_FUNCTION: Record<string, string> = {
+  replace_regex: "pattern",
+  extract_regex: "pattern",
+  filter_regex: "pattern",
+  split_on: "delimiter",
+};
+
+/**
+ * Whether every standardization step's compiled regex source in `transformation`
+ * stays within {@link MAX_TRANSFORM_PATTERN_LENGTH}. The count bounds below do
+ * not reach pattern length, and RE2JS compile cost lands on the console's event
+ * loop before any row streams, so the coverage route caps the source length of
+ * exactly the params that reach regex compilation
+ * ({@link REGEX_SOURCE_PARAM_BY_FUNCTION}) -- a compute-DoS bound on the
+ * browser-supplied standardization body, not an access perimeter over the
+ * operator's own directory. Shared with the editor, which reads it to decide
+ * whether an unavailable coverage sweep is the input header's doing.
+ */
+export function stepPatternsWithinCap(
+  transformation: Standardization[number],
+): boolean {
+  for (const step of transformation.steps ?? []) {
+    if (!Object.hasOwn(REGEX_SOURCE_PARAM_BY_FUNCTION, step.function)) continue;
+    const value = step.params?.[REGEX_SOURCE_PARAM_BY_FUNCTION[step.function]];
+    if (
+      typeof value === "string" &&
+      value.length > MAX_TRANSFORM_PATTERN_LENGTH
+    )
+      return false;
+  }
+  return true;
+}
 
 const boundedStandardizationSchema = StandardizationSchema.refine(
   (transformations) =>
