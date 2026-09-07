@@ -119,8 +119,8 @@ describe("parse_date probe cost", () => {
   test("the consent header's collapse marker reads one element in one walk", () => {
     const steps = probeShapedSteps(MAX_TRANSFORM_STEPS);
     expect(pipelineCollapsesParsedDateToConstant(steps)).toBe(true);
-    // The first run collapses, so the marker is answered after that run's span
-    // and its tail rather than after a walk per step.
+    // The walk measures every run end of the element once, so the marker costs
+    // at most one compile per declared step rather than a walk per step.
     expect(stepsCompiled()).toBeLessThanOrEqual(MAX_TRANSFORM_STEPS);
   });
 

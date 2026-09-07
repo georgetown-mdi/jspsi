@@ -971,8 +971,9 @@ function openParsedDateSpan(parseDateStep: TransformStep): ParsedDateSpan {
 }
 
 /** Apply one measured step to every probe still readable. A compile this build
- * refuses leaves no probe readable, since the whole measured run compiles before
- * any of it is run. */
+ * refuses blanks every probe for the rest of the span: the per-run reading this
+ * walk mirrors compiles a whole run before running any of it, so a refused step
+ * leaves that run and every later run end in its span unreadable. */
 function advanceParsedDateSpan(
   span: ParsedDateSpan,
   step: TransformStep,
