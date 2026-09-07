@@ -464,6 +464,16 @@ describe("the copy every refusal point shares", () => {
     expect(message).toContain(`${FSI}${name}${PDI}`);
   });
 
+  test("locates an unnamed column by position, with no empty name clause", () => {
+    // The clause that would hold the name renders as nothing between two commas,
+    // so the sentence states the position and what was refused, and nothing else.
+    const message = savedExchangeColumnRefusalAlert([
+      { position: 3, name: "", refusal: "unnamed" },
+    ]).message;
+    expect(message).toContain("Column 3 has no name.");
+    expect(message).not.toContain(", ,");
+  });
+
   test("names every refused column in position order", () => {
     const message = savedExchangeColumnRefusalAlert([
       { position: 1, name: "a", refusal: "unnamed" },

@@ -357,16 +357,19 @@ const REFUSAL_CLAUSES: Record<ColumnNameRefusal, string> = {
  *
  * A name is shown here where {@link overlongColumnsAlert} shows only positions,
  * because that alert asks the operator to choose what to send while this one asks
- * them to find a column in a document whose parse failed.
+ * them to find a column in a document whose parse failed. An unnamed column has
+ * nothing to show between the commas, so the clause naming it is left out and the
+ * position alone locates the column.
  */
 export function refusedColumnsSentence(
   refused: ReadonlyArray<RefusedColumnName>,
 ): string {
   return refused
-    .map(
-      (column) =>
-        `Column ${column.position}, ${isolatedColumnName(column.name)}, ` +
-        `${REFUSAL_CLAUSES[column.refusal]}.`,
+    .map((column) =>
+      column.name.length === 0
+        ? `Column ${column.position} ${REFUSAL_CLAUSES[column.refusal]}.`
+        : `Column ${column.position}, ${isolatedColumnName(column.name)}, ` +
+          `${REFUSAL_CLAUSES[column.refusal]}.`,
     )
     .join(" ");
 }
