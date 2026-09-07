@@ -755,6 +755,8 @@ The warning is not confined to the invocation that binds the identity: a later o
 
 `--force` regenerates the identity: a new key with a new fingerprint, which invalidates every fingerprint a partner has already pinned. They must re-pin before your receipts verify again, so treat it as a coordinated action rather than a retry.
 
+Re-keying is the only way out of an identity bound to a label the linkage terms refuse -- one holding a control or text-direction character. Editing `linkage_terms.identity` to the bound label is not a way out there, because the terms refuse that label too, and an exchange under such a certificate is refused before it runs. Bind a label the terms admit with `--force --identity`, then have every partner re-pin the new fingerprint.
+
 `--export-certificate PATH` additionally writes this party's public certificate -- the certificate alone, never the private key -- to `PATH` for sending to a partner. Naming the signing identity file itself is refused rather than allowed to overwrite the private key with the certificate.
 
 ## Verifying a receipt

@@ -133,6 +133,16 @@ const RECORDED_SITES: readonly ConfigErrorSite[] = [
     file: "packages/core/src/exchange.ts",
     anchor: "assertLocalCertificateAuthorizesAgreedIdentity",
     raises: "OperatorConfigError",
+    interpolates: ["agreedIdentity"],
+    provenance:
+      "the refusal for a certificate bound to a label a terms document cannot " +
+      "state names only `agreedIdentity`, whose provenance the entry below " +
+      "reaches; the bound label is not quoted here at all.",
+  },
+  {
+    file: "packages/core/src/exchange.ts",
+    anchor: "assertLocalCertificateAuthorizesAgreedIdentity",
+    raises: "OperatorConfigError",
     interpolates: ["agreedIdentity", "certificate.identity"],
     provenance:
       "both names are this party's own. `certificate.identity` is bound into " +

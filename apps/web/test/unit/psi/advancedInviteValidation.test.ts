@@ -521,6 +521,84 @@ describe("a transform params key the terms schema refuses", () => {
   });
 });
 
+describe("a free-text value holding a character the terms refuse", () => {
+  // The schema refuses two character classes in the free-text values a record
+  // holds verbatim, and both arrive by paste rather than by typing. The generic
+  // message for each control answers such a value by asking for one the operator
+  // has already entered, so each class gets the control's own words -- naming no
+  // part of the value, which is the offending text itself.
+  const now = new Date("2026-01-01T00:00:00Z");
+
+  test("names the class on the identity control and echoes no part of the name", () => {
+    const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    const pasted = "Org\u202eunrepeatable-name";
+    // The assumption this rests on: the schema is what refuses the document.
+    expect(
+      safeParseLinkageTerms(buildAdvancedTerms({ ...draft, identity: pasted }))
+        .success,
+    ).toBe(false);
+
+    const result = validateAdvancedInvite(
+      { ...draft, identity: pasted },
+      seed,
+      now,
+    );
+    expect(result.canGenerate).toBe(false);
+    expect(result.errors.identity).toMatch(/text-direction characters/);
+    expect(result.errors.identity).not.toMatch(/Enter a name/);
+    const rendered = Object.values(result.errors).join("\n");
+    expect(rendered).not.toContain("unrepeatable-name");
+    expect(rendered).not.toContain("\u202e");
+  });
+
+  test("names the class on the purpose control and echoes no part of the purpose", () => {
+    const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    const legalAgreement = {
+      reference: "MOU-1",
+      purpose: "Audit\u0007unrepeatable-purpose",
+      expirationDate: "2026-12-31",
+    };
+    expect(
+      safeParseLinkageTerms(buildAdvancedTerms({ ...draft, legalAgreement }))
+        .success,
+    ).toBe(false);
+
+    const result = validateAdvancedInvite(
+      { ...draft, legalAgreement },
+      seed,
+      now,
+    );
+    expect(result.canGenerate).toBe(false);
+    expect(result.errors.legalPurpose).toMatch(/control characters/);
+    expect(result.errors.legalPurpose).not.toMatch(/Enter the purpose/);
+    const rendered = Object.values(result.errors).join("\n");
+    expect(rendered).not.toContain("unrepeatable-purpose");
+    expect(rendered).not.toContain("\u0007");
+  });
+
+  test("the third such field, a payload column description, is one the built terms never hold", () => {
+    // Why the columns control needs no wording of its own: the payload is
+    // authored from the disclosed column NAMES alone, so a description an
+    // operator could hold in metadata reaches no terms document this editor
+    // builds, and no issue of either class can report against that control.
+    const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    const described = {
+      ...draft,
+      metadata: draft.metadata.map((column) => ({
+        ...column,
+        isPayload: true,
+        description: "sent\u202eunrepeatable-description",
+      })),
+    };
+
+    const terms = buildAdvancedTerms(described);
+    expect(terms.payload?.send?.length).toBeGreaterThan(0);
+    for (const column of terms.payload?.send ?? [])
+      expect(column.description).toBeUndefined();
+    expect(validateAdvancedInvite(described, seed, now).canGenerate).toBe(true);
+  });
+});
+
 describe("a key-element transform core cannot build", () => {
   // The pass leaves the compile question to the mint (core's
   // `assertTransformsCompile`, driven in invitation.test.ts and core's own
