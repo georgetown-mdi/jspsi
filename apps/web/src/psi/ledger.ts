@@ -76,6 +76,11 @@ export function ledgerOutcomeOf(outputs: RunOutputs): LedgerOutcome {
   }
 }
 
+/** The clause both count-only receive rows close with, the forward-looking one
+ * and the settled one, so what the row promises and what it reports cannot
+ * drift apart. */
+const COUNT_ONLY_NO_TABLE = "no matched rows and no shared columns";
+
 /**
  * The receive row's value for a count-only exchange, shared by both seats'
  * ledgers. States the size of the overlap only, with no matched rows or
@@ -90,8 +95,32 @@ function countOnlyLedgerValue(
 ): string {
   return (
     `${new Intl.NumberFormat("en-US").format(intersectionCount)} records in ` +
-    "common - the size of the overlap only, no matched rows and no shared columns" +
+    `common - the size of the overlap only, ${COUNT_ONLY_NO_TABLE}` +
     (countReportedByPartner ? "; reported by your partner" : "")
+  );
+}
+
+/**
+ * The receive row's value BEFORE a count-only run, shared by both seats: a
+ * count-only exchange produces the overlap size for whoever the terms give it
+ * to and nothing else, so the row states that rather than promising the matched
+ * rows and shared columns no such run produces for anyone. Same vocabulary as
+ * the settled count-only row ({@link countOnlyLedgerValue}), minus a figure
+ * neither party has yet.
+ */
+export const COUNT_ONLY_RECEIVE_ROW_VALUE = `How many records you have in common - ${COUNT_ONLY_NO_TABLE}`;
+
+/**
+ * The receive row's value for a matched run whose row count never reached this
+ * browser -- the console holds the result file and counts none of its rows.
+ * The row names what arrived and where the count is, rather than displaying
+ * the zero a missing figure would otherwise default to. `matchedRowsSuffix` is
+ * the caller's, as in {@link settledReceiveValue}.
+ */
+function uncountedMatchedValue(matchedRowsSuffix: string): string {
+  return (
+    `Matched rows${matchedRowsSuffix} - row count not available; ` +
+    "download the result to count them"
   );
 }
 
@@ -114,9 +143,11 @@ export function settledReceiveValue(
     case "withheld":
       return "No result table - withheld by the agreed terms";
     case "matched":
-      return `${new Intl.NumberFormat("en-US").format(
-        outcome.matchedRecordCount ?? 0,
-      )} matched rows${matchedRowsSuffix}`;
+      return outcome.matchedRecordCount === undefined
+        ? uncountedMatchedValue(matchedRowsSuffix)
+        : `${new Intl.NumberFormat("en-US").format(
+            outcome.matchedRecordCount,
+          )} matched rows${matchedRowsSuffix}`;
   }
 }
 
@@ -149,6 +180,10 @@ export function inviterLedgerRows(
   }
   const sent = disclosedColumnNames(editor.draft.metadata);
   const keys = enabledKeys(editor.draft);
+  const forwardReceive =
+    editor.draft.algorithm === "psi-c"
+      ? COUNT_ONLY_RECEIVE_ROW_VALUE
+      : "Matched rows + your partner's shared columns";
   return [
     sent.length > 0
       ? {
@@ -168,7 +203,7 @@ export function inviterLedgerRows(
       reference: "Step 2",
       value:
         outcome === undefined
-          ? "Matched rows + your partner's shared columns"
+          ? forwardReceive
           : settledReceiveValue(outcome, " + shared columns"),
     },
     keys.length > 0

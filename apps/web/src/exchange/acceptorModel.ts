@@ -11,8 +11,8 @@ import { isBareSftpHost } from "@psi/sftpHost";
 
 import { isolatedColumnName } from "@components/ColumnName";
 
+import { COUNT_ONLY_RECEIVE_ROW_VALUE, settledReceiveValue } from "@psi/ledger";
 import { dateTimeLabel } from "@psi/formatting";
-import { settledReceiveValue } from "@psi/ledger";
 
 import { TRANSPORT_LEDGER_LABELS } from "@psi/transportChooser";
 import { saveRailNote } from "./saveExchangeModel";
@@ -229,9 +229,11 @@ export function acceptorLedgerRows(
     {
       label: "You will receive",
       value:
-        received.length > 0
-          ? `Matched rows + ${received.join(", ")}`
-          : "Matched rows",
+        summary.algorithm === "psi-c"
+          ? COUNT_ONLY_RECEIVE_ROW_VALUE
+          : received.length > 0
+            ? `Matched rows + ${received.join(", ")}`
+            : "Matched rows",
     },
     summary.linkageKeys.length > 0
       ? {
