@@ -133,13 +133,33 @@ test("a datagram over the wire-byte cap is refused before it is unpacked", () =>
 });
 
 test("a structure-amplifying frame is refused before unpack allocates", () => {
-  // An array32 header declaring 2^32-1 elements from five wire bytes: the
-  // structural pre-scan charges it and rejects before `unpack` allocates.
+  // An array32 header declaring 2^32-1 elements from five wire bytes: no byte
+  // follows it to back one, so the pre-scan refuses it before `unpack` reserves
+  // the store.
   const bomb = new Uint8Array([0xdd, 0xff, 0xff, 0xff, 0xff]);
-  const bounds = new BoundedInboundFrames({ maxStructureBytes: 4096 });
+  const bounds = new BoundedInboundFrames();
   const { kind, message } = refusal(() => bounds.accept(bomb));
   expect(kind).toBe("protocol");
-  expect(message).toContain("4096-byte structure limit");
+  expect(message).toContain(
+    "declares a container with more elements than the bytes behind it can encode",
+  );
+});
+
+test("a nested frame that re-reserves its own bytes is refused the same way", () => {
+  // Two array32 levels declaring 1,024 children each over the 1,024 one-byte
+  // values behind them: each level satisfies the byte-backed rule and `unpack`
+  // reserves the width twice, so the cumulative element rule is what refuses it.
+  const width = 1024;
+  const chain = new Uint8Array(10 + width).fill(0x01);
+  for (const offset of [0, 5]) {
+    chain.set([0xdd, 0x00, 0x00, width >>> 8, width & 0xff], offset);
+  }
+  const bounds = new BoundedInboundFrames();
+  const { kind, message } = refusal(() => bounds.accept(chain));
+  expect(kind).toBe("protocol");
+  expect(message).toBe(
+    "inbound WebRTC frame declares more elements across the whole frame than its bytes can encode",
+  );
 });
 
 test("a reassembly declaring more chunks than the cap is refused up front", () => {

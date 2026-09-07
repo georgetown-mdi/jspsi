@@ -3,7 +3,6 @@ import {
   MAX_CHUNKS_PER_REASSEMBLY,
   MAX_CONCURRENT_REASSEMBLIES,
   MAX_WEBRTC_FRAME_BYTES,
-  MAX_WEBRTC_FRAME_STRUCTURE_BYTES,
   MAX_WEBRTC_REASSEMBLY_DEPTH,
   MAX_WEBRTC_STRING_BYTES,
   MIN_CHUNK_RESIDENT_BYTES,
@@ -61,8 +60,9 @@ import { classifyInboundValue, concatChunks, unpackFrame } from "./peerjsWire";
  *
  * Every breach is terminal and fail-closed: the offending bytes are never
  * unpacked and never delivered, and the failure names the rule that refused them
- * -- the pre-scan enforces the retained-byte budget, the nesting depth, the
- * per-string cap, the byte-backed-elements check and the map-key rule on one walk.
+ * -- the pre-scan enforces the nesting depth, the per-string cap, the
+ * byte-backed-elements check, the cumulative element rule and the map-key rule
+ * on one walk.
  */
 
 /** What one accepted datagram produced. */
@@ -78,7 +78,6 @@ export type InboundOutcome =
 export interface InboundBoundOptions {
   maxFrameBytes?: number;
   maxConcurrentReassemblies?: number;
-  maxStructureBytes?: number;
   maxReassemblyDepth?: number;
   maxChunks?: number;
   minChunkResidentBytes?: number;
@@ -136,7 +135,6 @@ interface Reassembly {
 export class BoundedInboundFrames {
   private readonly maxFrameBytes: number;
   private readonly maxConcurrent: number;
-  private readonly maxStructureBytes: number;
   private readonly maxDepth: number;
   private readonly maxChunks: number;
   private readonly minChunkBytes: number;
@@ -151,8 +149,6 @@ export class BoundedInboundFrames {
     this.maxFrameBytes = options?.maxFrameBytes ?? MAX_WEBRTC_FRAME_BYTES;
     this.maxConcurrent =
       options?.maxConcurrentReassemblies ?? MAX_CONCURRENT_REASSEMBLIES;
-    this.maxStructureBytes =
-      options?.maxStructureBytes ?? MAX_WEBRTC_FRAME_STRUCTURE_BYTES;
     this.maxDepth = options?.maxReassemblyDepth ?? MAX_WEBRTC_REASSEMBLY_DEPTH;
     this.maxChunks = options?.maxChunks ?? MAX_CHUNKS_PER_REASSEMBLY;
     this.minChunkBytes =
@@ -209,7 +205,6 @@ export class BoundedInboundFrames {
     }
     const refusal = scanFrameStructure(
       bytes,
-      this.maxStructureBytes,
       this.maxDepth,
       this.maxStringBytes,
     );

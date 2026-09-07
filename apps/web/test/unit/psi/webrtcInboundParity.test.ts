@@ -120,7 +120,6 @@ function guardedConnection(fixture: WebrtcFrameFixture): {
     conn as unknown as DataConnection,
     (error) => failures.push(error),
     {
-      maxStructureBytes: fixture.limits.maxStructureBytes,
       maxReassemblyDepth: fixture.limits.maxDepth,
       maxStringBytes: fixture.limits.maxStringBytes,
     },
