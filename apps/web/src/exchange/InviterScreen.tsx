@@ -1085,34 +1085,40 @@ export function InviterScreen() {
       setManageStatus("idle");
       goTo("share");
     } catch (error) {
-      const transformRefusal = transformRefusalIn(error);
       if (error instanceof InvitationFileError) {
         // The mint re-parses the retained file, so it can fail in the same
         // user-actionable ways step 1 gates on (the file changed on disk, or
         // its satisfiability shifted with the edited terms); show the same
         // shared alerts rather than a generic failure.
         setCreateAlert(invitationFileAlert(error.failure));
-      } else if (transformRefusal !== undefined) {
-        // A document the transform check refused: the operator holds the terms
-        // and the remedy is an edit, so retrying the same click cannot clear it.
-        setCreateAlert(transformRefusalAlert(transformRefusal));
       } else {
-        // Internal and non-user-actionable: a fixed message avoids echoing
-        // internals into a secret-bearing flow, the default log states only
-        // the error type, and the detail reaches the console only under
-        // diagnostic mode.
-        console.error(
-          "invitation creation failed:",
-          error instanceof Error ? error.name : typeof error,
-        );
-        whenDiagnostic(() =>
-          console.error("invitation creation failed (detail):", error),
-        );
-        setCreateAlert({
-          title: "Could not create the invitation",
-          message:
-            "Something went wrong while creating the invitation. Your terms are unchanged - try again.",
-        });
+        // The tag is read after the class test rather than before it: the read
+        // walks `.cause` links, and an accessor that throws there propagates
+        // out of this handler, which must not cost a file error its alert.
+        const transformRefusal = transformRefusalIn(error);
+        if (transformRefusal !== undefined) {
+          // A document the transform check refused: the operator holds the
+          // terms and the remedy is an edit, so retrying the same click cannot
+          // clear it.
+          setCreateAlert(transformRefusalAlert(transformRefusal));
+        } else {
+          // Internal and non-user-actionable: a fixed message avoids echoing
+          // internals into a secret-bearing flow, the default log states only
+          // the error type, and the detail reaches the console only under
+          // diagnostic mode.
+          console.error(
+            "invitation creation failed:",
+            error instanceof Error ? error.name : typeof error,
+          );
+          whenDiagnostic(() =>
+            console.error("invitation creation failed (detail):", error),
+          );
+          setCreateAlert({
+            title: "Could not create the invitation",
+            message:
+              "Something went wrong while creating the invitation. Your terms are unchanged - try again.",
+          });
+        }
       }
     } finally {
       setMinting(false);
@@ -1157,27 +1163,31 @@ export function InviterScreen() {
       triggerBlobDownload(fileName, yaml, "application/yaml");
       setSavedExchange({ invitation: minted, fileName });
     } catch (error) {
-      const transformRefusal = transformRefusalIn(error);
       if (error instanceof InvitationFileError) {
         setSaveAlert(invitationFileAlert(error.failure));
-      } else if (transformRefusal !== undefined) {
-        setSaveAlert(transformRefusalAlert(transformRefusal));
       } else {
-        // Internal and non-user-actionable (a schema/encoding fault): a fixed
-        // message keeps internals out of a secret-bearing flow, the default
-        // log states only the error type, and the detail is diagnostic-gated.
-        console.error(
-          "exchange file save failed:",
-          error instanceof Error ? error.name : typeof error,
-        );
-        whenDiagnostic(() =>
-          console.error("exchange file save failed (detail):", error),
-        );
-        setSaveAlert({
-          title: "Could not save the exchange file",
-          message:
-            "Something went wrong while saving. Your terms are unchanged - try again.",
-        });
+        // The tag is read after the class test here too, for the reason the
+        // create click's handler states.
+        const transformRefusal = transformRefusalIn(error);
+        if (transformRefusal !== undefined) {
+          setSaveAlert(transformRefusalAlert(transformRefusal));
+        } else {
+          // Internal and non-user-actionable (a schema/encoding fault): a fixed
+          // message keeps internals out of a secret-bearing flow, the default
+          // log states only the error type, and the detail is diagnostic-gated.
+          console.error(
+            "exchange file save failed:",
+            error instanceof Error ? error.name : typeof error,
+          );
+          whenDiagnostic(() =>
+            console.error("exchange file save failed (detail):", error),
+          );
+          setSaveAlert({
+            title: "Could not save the exchange file",
+            message:
+              "Something went wrong while saving. Your terms are unchanged - try again.",
+          });
+        }
       }
     } finally {
       setSaving(false);

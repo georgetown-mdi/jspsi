@@ -33,6 +33,7 @@ import {
   commitCompiledTransforms,
   compileSteps,
   fanOutDeclaredMessage,
+  isTransformFunctionLabel,
   parseDateFormat,
   renderDateOutput,
   resolveFieldColumns,
@@ -285,21 +286,28 @@ function markTransformRefusal<E extends object>(
   return Object.assign(error, { [TRANSFORM_REFUSAL_TAG]: refusal });
 }
 
-// Every field a caller can render is checked here rather than trusted from the
-// tag, so what a front end interpolates is a value of the declared shape and not
-// whatever an object in the cause chain happened to hold under this name.
+function isStepCount(value: unknown): value is number {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0;
+}
+
+// The tag is read off any object in the cause chain, so each field a caller can
+// render is checked against the values the two tagging sites produce, not just
+// against its type: a step label is one transformFunctionLabel returns, and a
+// count is a non-negative safe integer. A tag holding anything else is no tag,
+// and the caller falls back to its own generic message.
 function asTransformRefusal(value: unknown): TransformRefusal | undefined {
   if (typeof value !== "object" || value === null) return undefined;
   const candidate = value as Partial<Record<string, unknown>>;
   if (
     candidate.reason === "uncompilable-step" &&
-    typeof candidate.stepLabel === "string"
+    typeof candidate.stepLabel === "string" &&
+    isTransformFunctionLabel(candidate.stepLabel)
   )
     return { reason: "uncompilable-step", stepLabel: candidate.stepLabel };
   if (
     candidate.reason === "too-many-steps" &&
-    typeof candidate.declaredSteps === "number" &&
-    typeof candidate.maxSteps === "number"
+    isStepCount(candidate.declaredSteps) &&
+    isStepCount(candidate.maxSteps)
   )
     return {
       reason: "too-many-steps",

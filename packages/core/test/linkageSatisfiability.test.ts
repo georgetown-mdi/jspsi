@@ -1935,6 +1935,65 @@ describe("transformRefusalIn", () => {
     ).toBeUndefined();
   });
 
+  test("reads a tag holding anything but a label this build renders as none", () => {
+    // The tag is read off any object in the cause chain, so a chain link a
+    // front end did not mint could hold one. A step label outside what the
+    // tagging site produces is no tag at all, leaving the generic message,
+    // rather than text of that link's choosing rendered in the mapped alert.
+    const taggedChain = (refusal: unknown): Error =>
+      new Error("mint failed", {
+        cause: { psilinkTransformRefusal: refusal },
+      });
+    expect(
+      transformRefusalIn(
+        taggedChain({
+          reason: "uncompilable-step",
+          stepLabel: "ZZSPOOFLABEL",
+        }),
+      ),
+    ).toBeUndefined();
+    for (const stepLabel of [
+      '"pad_left"',
+      "a function this build does not recognize",
+    ])
+      expect(
+        transformRefusalIn(
+          taggedChain({ reason: "uncompilable-step", stepLabel }),
+        ),
+        stepLabel,
+      ).toEqual({
+        reason: "uncompilable-step",
+        stepLabel,
+      });
+    // A count is read only as the shape the walk counts with: a fraction, a
+    // negative, or a non-number is no tag either.
+    for (const declaredSteps of [5.5, -1, Number.NaN, Infinity, "5"])
+      expect(
+        transformRefusalIn(
+          taggedChain({ reason: "too-many-steps", declaredSteps, maxSteps: 4 }),
+        ),
+        String(declaredSteps),
+      ).toBeUndefined();
+    expect(
+      transformRefusalIn(
+        taggedChain({
+          reason: "too-many-steps",
+          declaredSteps: 5,
+          maxSteps: 4.5,
+        }),
+      ),
+    ).toBeUndefined();
+    expect(
+      transformRefusalIn(
+        taggedChain({
+          reason: "too-many-steps",
+          declaredSteps: 5,
+          maxSteps: 4,
+        }),
+      ),
+    ).toEqual({ reason: "too-many-steps", declaredSteps: 5, maxSteps: 4 });
+  });
+
   test("reads the refusal through whatever wrapped it", () => {
     const refused = refusalFrom(() =>
       assertTransformsCompile({
