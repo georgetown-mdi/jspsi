@@ -3846,6 +3846,35 @@ test("loadConfigLinkageSource file-names a metadata camelize-bound trip", () => 
   );
 });
 
+// The gate that keeps a declared column name free of the class the CSV read
+// strips from a header: a config naming a column as the header was typed is
+// refused where it is loaded, so no such name reaches matching, the disclosed
+// payload column list, or a record. U+0007 BEL, written as an escape so a
+// fixture about invisible characters is readable.
+test("loadConfigLinkageSource refuses a control character in a metadata name", () => {
+  const configPath = path.join(dir, "psilink.yaml");
+  fs.writeFileSync(
+    configPath,
+    YAML.stringify({
+      linkage_terms: getDefaultLinkageTerms("Agency A"),
+      metadata: [
+        {
+          name: "client\u0007id",
+          type: "identifier",
+          role: "identifier",
+          is_payload: true,
+        },
+      ],
+    }),
+  );
+  expect(() => loadConfigLinkageSource(configPath)).toThrow(UsageError);
+  // The field path, and none of the offending name.
+  expect(() => loadConfigLinkageSource(configPath)).toThrow(
+    `config file ${configPath} has invalid metadata: 0.name: a metadata ` +
+      "column name must not contain a control or text-direction character",
+  );
+});
+
 // A camelized issue path names each segment in the spelling the file writes,
 // which works only for keys the camelize pass itself built. The one exception
 // is a transform `params` record key -- the schema's only free-form record,

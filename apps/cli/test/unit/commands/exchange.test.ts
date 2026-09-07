@@ -2212,43 +2212,6 @@ test("prepareDataset: a header the strip emptied names the removal, not the trai
   }
 });
 
-test("prepareDataset: the declared-name remedy covers whoever declared the name", async () => {
-  // A configuration holds names this operator declared and names `psilink
-  // accept` copied from an invitation verbatim, and nothing in the run tells the
-  // two apart, so the one sentence states both edits -- on a config an
-  // acceptance stands behind (expected_partner_deduplicate, which nothing else
-  // writes) as on one this operator wrote. U+202E RLO, written as an escape so a
-  // fixture about invisible characters is readable.
-  const declared = "n\u202eotes";
-  const terms: LinkageTerms = {
-    ...ssnOnlyTerms,
-    linkageFields: [{ name: declared, type: "ssn" }],
-    linkageKeys: [{ name: "SSN", elements: [{ field: declared }] }],
-  };
-  const input = writeInput("dob,notes\n1990-01-02,none\n");
-
-  for (const spec of [
-    { linkageTerms: terms },
-    { linkageTerms: terms, expectedPartnerDeduplicate: false },
-  ]) {
-    const thrown = await prepareDataset(
-      spec,
-      "Test Party",
-      input,
-      consentContext(),
-    ).catch((e: unknown) => e);
-    expect(thrown).toBeInstanceOf(UsageError);
-    expect(sanitizeErrorForDisplay(thrown)).toContain(
-      "A name the configuration declares holds invisible control " +
-        "characters, which this read removes from the CSV header, so it " +
-        "matches no column of this input. Declare it without them, or, if it " +
-        "came from your partner's invitation, ask them for a new invitation " +
-        "that declares it without them.",
-    );
-    expect((thrown as Error).message).not.toContain("\u202e");
-  }
-});
-
 test("prepareDataset: the read's stripped positions reach prepareForExchange", async () => {
   // The positions travel to both resolutions the run makes, the pre-flight one
   // and the prepare itself: a spec with no metadata block infers it inside

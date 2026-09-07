@@ -446,15 +446,13 @@ export async function loadInputRows(
  * What it says about disclosure is bounded by what this read reaches: the names
  * it derives from the header, which are the matching name and the sent name
  * where the exchange takes that from the header. A name declared outside the
- * header -- an explicit metadata block, a linkage field, a standardization
- * output -- is not read from the header at all and keeps these characters, and
- * the terms rule is what refuses it: a document declaring such a name fails to
- * parse, naming the field. The line says so and stops there. It names no
+ * header -- a linkage field, an explicit metadata block -- is not read from the
+ * header at all, and the name shape is what refuses it: a document declaring
+ * such a name fails to parse, naming the field. The line states the terms rule,
+ * the one every seat this read serves holds, and stops there. It names no
  * remedy: this read serves every CLI path, including an accept whose declared
  * names are the partner's invitation and a zero-setup run with no configuration
- * at all, so no one document is the operator's to edit. The seat-specific
- * refusal (`checkLinkageSatisfiability`) names who fixes a declared name this
- * input cannot match.
+ * at all, so no one document is the operator's to edit.
  */
 export function warnSanitizedColumns(positions: ReadonlyArray<number>): void {
   if (positions.length === 0) return;

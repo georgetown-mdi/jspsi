@@ -4123,9 +4123,9 @@ test("loadInputRows: a header that collides after the strip is warned by positio
 
 test("the strip warning bounds the removal to the names this read derives", () => {
   // The read reaches the names it takes from the header and nothing else: a
-  // name declared outside the header keeps these characters, and the terms rule
-  // is what refuses it, so the line claims no more than the derived names and
-  // names that refusal.
+  // name declared outside the header is not this read's to change, and the name
+  // shape is what refuses one holding these characters, so the line claims no
+  // more than the derived names and names that refusal.
   const logged: Array<string> = [];
   const previousSink = getDiagnosticSink();
   const log = getLogger("input");
@@ -4159,8 +4159,7 @@ test("the strip warning names no configuration to rewrite", () => {
   // loadInputRows serves every CLI read: `psilink accept`, whose declared names
   // are the partner's invitation, and a zero-setup run with no configuration at
   // all. A remedy naming this operator's configuration would address the wrong
-  // party on both, so the line states the consequence and stops; the
-  // seat-specific refusal names who fixes it.
+  // party on both, so the line states the consequence and stops.
   const logged: Array<string> = [];
   const previousSink = getDiagnosticSink();
   const log = getLogger("input");

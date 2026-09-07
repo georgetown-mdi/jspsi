@@ -36,7 +36,6 @@ const messaging = {
   blockConsequence: RUN_BLOCK_CONSEQUENCE,
   blockRemedy: "request a fresh invitation.",
   termsStanding: "agreed",
-  declaredNamesAuthor: "the partner",
 } satisfies LinkagePreflightMessaging;
 
 // The mint seat: the operator's own terms, which no partner holds yet. Its
@@ -50,7 +49,6 @@ const mintMessaging = {
     "configuration's own exchange refuses to run.",
   blockRemedy: "then generate the invitation again.",
   termsStanding: "draft",
-  declaredNamesAuthor: "this party",
 } satisfies LinkagePreflightMessaging;
 
 // A single date_of_birth field bound to a present "dob" column, so the key is
@@ -593,80 +591,4 @@ test("a dead key's refusal names the key and no field at all", () => {
     dobTerms([{ function: "parse_date", params: { inputFormat: "MM/DD" } }]),
   );
   expect(links.slice(2)).toEqual(["linkage key that drops every record: DOB"]);
-});
-
-test("a declared name the read strips from the header says so in the refusal", () => {
-  // The CSV read removes control characters from the header, so a
-  // configuration that names a column as it was typed declares a name no column
-  // of the input has. The shortfall alone would send the operator looking for a
-  // column the file does have. U+202E RLO, written as an escape so a fixture
-  // about invisible characters is readable.
-  const declared = "d\u202eob";
-  const terms: LinkageTerms = {
-    ...dobTerms(),
-    linkageFields: [{ name: declared, type: "date_of_birth" }],
-    linkageKeys: [{ name: "DOB", elements: [{ field: declared }] }],
-  };
-  const metadata = inferMetadata(["dob"], []).map((column) => ({
-    ...column,
-    name: declared,
-  }));
-  let thrown: unknown;
-  try {
-    checkLinkageSatisfiability(
-      ["dob"],
-      terms,
-      mintMessaging,
-      undefined,
-      metadata,
-    );
-  } catch (err) {
-    thrown = err;
-  }
-  expect(thrown).toBeInstanceOf(LinkageTermsUnsatisfiableError);
-  const rendered = sanitizeErrorForDisplay(thrown);
-  expect(rendered).toContain(
-    "A name the configuration declares holds invisible control characters",
-  );
-  // A configuration holds this operator's own declaration and one an acceptance
-  // copied from an invitation verbatim, so the remedy states both edits.
-  expect(rendered).toContain("Declare it without them");
-  expect(rendered).toContain("ask them for a new invitation");
-});
-
-test("on the accept path the rename is addressed to the partner who wrote it", () => {
-  // The invitation is the partner's document: an acceptor cannot declare its
-  // names differently, so the sentence states what the invitation names and
-  // whose correction fixes it. The accept seat passes no metadata, so the
-  // declared name that reaches the check is the unsatisfied field's own -- an
-  // ssn field this input has no column for, named as the "notes" header was
-  // typed. U+202E RLO, written as an escape so a fixture about invisible
-  // characters is readable.
-  const declared = "n\u202eotes";
-  const terms: LinkageTerms = {
-    ...dobTerms(),
-    linkageFields: [{ name: declared, type: "ssn" }],
-    linkageKeys: [{ name: "SSN", elements: [{ field: declared }] }],
-  };
-  let thrown: unknown;
-  try {
-    checkLinkageSatisfiability(["dob", "notes"], terms, messaging);
-  } catch (err) {
-    thrown = err;
-  }
-  expect(thrown).toBeInstanceOf(LinkageTermsUnsatisfiableError);
-  const rendered = sanitizeErrorForDisplay(thrown);
-  expect(rendered).toContain(
-    "The invitation names a column with invisible control characters",
-  );
-  expect(rendered).toContain("Your partner has to declare that name");
-  expect(rendered).not.toContain("A name the invitation declares");
-  expect((thrown as Error).message).not.toContain("\u202e");
-});
-
-test("a shortfall with no such name adds no stripped-name sentence", () => {
-  // The ordinary case: the input simply lacks a column the terms need.
-  expect(refusalRenderedForDisplay(["other"], dobTerms())).not.toContain(
-    "invisible control characters",
-  );
 });

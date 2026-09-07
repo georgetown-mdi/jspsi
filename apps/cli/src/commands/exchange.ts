@@ -722,7 +722,6 @@ export async function prepareDataset(
         blockRemedy:
           "or re-establish the exchange with linkage terms the CSV satisfies.",
         termsStanding: "agreed",
-        declaredNamesAuthor: "this party",
       },
       exchangeDataSpec.standardization,
       exchangeDataSpec.metadata,

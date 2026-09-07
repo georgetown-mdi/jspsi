@@ -107,6 +107,11 @@ export const TEXT_CONTROL_CHAR_MESSAGE =
  * (utils/nameControls.ts) names. Letters are untouched, so a name written in
  * any script passes.
  *
+ * The operator's own explicit metadata block takes the same shape on its
+ * column `name` (config/metadata.ts), under a message naming that block: a
+ * declared column name is a name rather than a data value, and each disclosed
+ * one reaches the partner in the invitation's payload column list.
+ *
  * Applied at each FIELD, as the `version` semver regex below is, rather than as
  * a pass over the class: every field named above holds it in its own string
  * schema, so a document is refused at parse on every seat that reads one -- the

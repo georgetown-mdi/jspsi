@@ -4,6 +4,7 @@ import {
   NAME_SHAPE_PATTERN,
   TEXT_CONTROL_CHAR_PATTERN,
 } from "../../src/config/linkageTermsSchema";
+import { MetadataSchema } from "../../src/config/metadata";
 import {
   BIDI_CONTROL_PATTERN,
   stripNameControlChars,
@@ -55,6 +56,29 @@ test("the CSV read strips exactly the characters a name may not hold", () => {
     const strippedAtIngestion = stripNameControlChars(character) !== character;
     const admittedInAName = NAME_SHAPE_PATTERN.test(`a${character}b`);
     if (strippedAtIngestion === admittedInAName)
+      disagreements.push(label(codePoint));
+  }
+  expect(disagreements).toEqual([]);
+});
+
+test("the metadata block's column name admits exactly what the shape admits", () => {
+  // The third boundary a declared column name crosses. The block is the
+  // operator's own, but a disclosed column's name reaches the partner in the
+  // invitation's payload column list, so it holds the same shape -- driven
+  // through the schema rather than read off its source, since the schema is
+  // what a config load runs.
+  const disagreements: Array<string> = [];
+  for (const { codePoint, character } of bmpCharacters()) {
+    const admittedByTheSchema = MetadataSchema.safeParse([
+      {
+        name: `a${character}b`,
+        type: "other",
+        role: "payload",
+        isPayload: true,
+      },
+    ]).success;
+    const admittedInAName = NAME_SHAPE_PATTERN.test(`a${character}b`);
+    if (admittedByTheSchema !== admittedInAName)
       disagreements.push(label(codePoint));
   }
   expect(disagreements).toEqual([]);

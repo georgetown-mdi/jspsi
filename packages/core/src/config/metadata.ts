@@ -3,7 +3,7 @@ import { z } from "zod";
 import { UsageError } from "../errors.js";
 import { SEMANTIC_TYPES } from "../types";
 import { COUNT_ONLY_SHAPE_REFUSALS } from "../linkageTermsPolicy.js";
-import { MAX_NAME_LENGTH } from "./linkageTermsSchema.js";
+import { MAX_NAME_LENGTH, NAME_SHAPE_PATTERN } from "./linkageTermsSchema.js";
 import { safeParseCamelized } from "./safeParseCamelized.js";
 
 import type { Algorithm, SemanticType } from "../types";
@@ -50,14 +50,29 @@ export interface ColumnMetadata {
   description?: string;
 }
 
+/**
+ * Refusal message for a metadata column name holding a character
+ * {@link NAME_SHAPE_PATTERN} refuses, in the form the linkage-terms names use
+ * and naming the block it fires on. A fixed literal echoing no submitted
+ * value, like the length and uniqueness messages beside it.
+ */
+export const METADATA_NAME_SHAPE_MESSAGE =
+  "a metadata column name must not contain a control or text-direction character";
+
 const ColumnMetadataSchema: z.ZodType<ColumnMetadata> = z.object({
-  // Bounded `.min(1).max(MAX_NAME_LENGTH)` to match the linkage-terms
-  // schema's `name` fields, rejecting an empty name at config parse rather
-  // than as a later downstream failure. This is the operator's own LOCAL
-  // config, not partner-supplied input, so it is UX hardening, not a
-  // threat-model bound. Like the uniqueness refine below, the messages are
-  // static and do not echo the operator-authored name.
-  name: z.string().min(1).max(MAX_NAME_LENGTH),
+  // Bounded `.min(1).max(MAX_NAME_LENGTH)` and held to NAME_SHAPE_PATTERN to
+  // match the linkage-terms schema's `name` fields, rejecting an empty or
+  // ill-shaped name at config parse rather than as a later downstream
+  // failure. A declared name is not a data value: this block names the
+  // columns matched on, and each disclosed one reaches the partner in the
+  // invitation's payload column list and both parties' exchange records. Like
+  // the uniqueness refine below, the messages are static and do not echo the
+  // operator-authored name.
+  name: z
+    .string()
+    .min(1)
+    .max(MAX_NAME_LENGTH)
+    .regex(NAME_SHAPE_PATTERN, METADATA_NAME_SHAPE_MESSAGE),
   type: z.enum(SEMANTIC_TYPES),
   role: ColumnRoleSchema,
   isPayload: z.boolean(),

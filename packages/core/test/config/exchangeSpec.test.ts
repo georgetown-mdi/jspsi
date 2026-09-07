@@ -5,6 +5,7 @@ import {
   parseExchangeSpec,
   safeParseExchangeSpec,
 } from "../../src/config/exchangeSpec";
+import { METADATA_NAME_SHAPE_MESSAGE } from "../../src/config/metadata";
 import {
   MAX_TEXT_LENGTH,
   MAX_TRANSFORM_PARAM_LENGTH,
@@ -220,6 +221,32 @@ test("a name-class control character is rejected through this spec path", () => 
     "linkageTerms.payload.send.0.name",
   );
   expect(JSON.stringify(result.error.issues)).toContain(NAME_SHAPE_MESSAGE);
+});
+
+test("a control character in a metadata name is rejected through this spec path", () => {
+  // The metadata block is the operator's own, but a disclosed column's name
+  // reaches the partner in the invitation's payload column list, so the block
+  // holds the name shape too. The refusal names the field by path in the
+  // spelling a config file writes.
+  const result = safeParseExchangeSpec({
+    ...minimalSpec,
+    metadata: [
+      {
+        name: "client\u0007id",
+        type: "identifier",
+        role: "identifier",
+        is_payload: true,
+      },
+    ],
+  });
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  expect(result.error.issues.map((issue) => issue.path.join("."))).toContain(
+    "metadata.0.name",
+  );
+  expect(JSON.stringify(result.error.issues)).toContain(
+    METADATA_NAME_SHAPE_MESSAGE,
+  );
 });
 
 // --- parse vs safeParse ------------------------------------------------------
