@@ -369,6 +369,46 @@ test("a control-character label reaches the operator escaped, once", async () =>
   expect(/[^\t\x20-\x7e]/.test(rendered.split("\n").join(" "))).toBe(false);
 });
 
+// --- a bound label the agreed terms cannot state ------------------------------
+// The certificate schema admits a label holding a control or text-direction
+// character and `psilink fingerprint` refuses to bind a new one, so a file
+// written before that check is how one still reaches this boundary. Its holder
+// cannot author linkage_terms.identity to match it -- the terms refuse the same
+// two classes -- so the remedy the divergence refusal offers first is one they
+// cannot perform, and this refusal names the exit that exists instead.
+
+test("a bound label the terms cannot state is refused with the re-key exit", async () => {
+  const esc = String.fromCharCode(0x1b);
+  for (const [index, label] of [
+    `Records ${esc}[31mUnit`,
+    "Records \u202eUnit",
+  ].entries()) {
+    const config = certificateModeOver(
+      path.join(dir, `signing-identity-${index}.json`),
+      await generateSigningIdentity(label, { privateKey: fixedPrivateKey }),
+    );
+    const rejection = resolveSigningPersist(config, "Agency A, a@agency-a.gov");
+    await expect(rejection).rejects.toThrow(OperatorConfigError);
+    const rendered = await rejection.then(
+      () => "",
+      (err: unknown) => sanitizeErrorForDisplay(err),
+    );
+    expect(rendered).toContain("the linkage terms cannot state");
+    expect(rendered).toContain("psilink fingerprint --force --identity");
+    expect(rendered).toContain("re-pin the new fingerprint");
+    // The config edit the terms make impossible is not among the remedies.
+    expect(rendered).not.toContain("set linkage_terms.identity to the bound");
+    // No byte of the label reaches the operator, raw or escaped: the label is
+    // the offending text itself. The terms value it diverges from is still
+    // named, since that is the one the operator acts on.
+    expect(rendered).not.toContain("Records");
+    expect(rendered).not.toContain("\\x1b");
+    expect(rendered).not.toContain("\\u202e");
+    expect(rendered).toContain('"Agency A, a@agency-a.gov"');
+    expect(rendered).not.toContain(DISPLAY_TRUNCATION_MARKER);
+  }
+});
+
 test("resolves when the loaded identity matches the run's terms identity", async () => {
   const config = certificateModeOver(path.join(dir, "signing-identity.json"));
   await expect(

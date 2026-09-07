@@ -79,6 +79,8 @@ import {
 } from "./records/signedReceipt.js";
 import { OperatorConfigError, UsageError, causeChainSome } from "./errors.js";
 import type { Metadata, OwnColumnSelection } from "./config/metadata.js";
+import { TEXT_CONTROL_CHAR_PATTERN } from "./config/linkageTermsSchema.js";
+import { BIDI_CONTROL_PATTERN } from "./utils/nameControls.js";
 import type { LinkageTerms } from "./config/linkageTermsSchema.js";
 import type { StandardizedDataset } from "./standardization.js";
 import type {
@@ -464,12 +466,36 @@ export function assertSignedReceiptNamesBothParties(
  * not {@link ReceiptVerificationError}: both disagreeing values are this
  * party's own, nothing partner-controlled. The message names both values,
  * last, after the remedy.
+ *
+ * A certificate bound to a label holding one of the two character classes
+ * the terms refuse in `identity` (`TEXT_CONTROL_CHAR_PATTERN` and
+ * `BIDI_CONTROL_PATTERN`, config/linkageTermsSchema.ts) takes a message of
+ * its own: no terms document can name that label, so the remedy above is
+ * one its holder cannot perform, and the exit is a re-key under a label the
+ * terms admit followed by a re-pin at every partner. It names no part of
+ * the label -- the label is the offending text itself, so quoting it would
+ * put those characters on the screen, the discipline the binding check
+ * keeps at the other boundary (`psilink fingerprint`).
  */
 export function assertLocalCertificateAuthorizesAgreedIdentity(
   certificate: CertificateBody,
   agreedIdentity: string,
 ): void {
   if (certificateAuthorizesIdentity(certificate, agreedIdentity)) return;
+  if (
+    TEXT_CONTROL_CHAR_PATTERN.test(certificate.identity) ||
+    BIDI_CONTROL_PATTERN.test(certificate.identity)
+  )
+    throw new OperatorConfigError(
+      "this party's signing certificate is bound to a label the linkage " +
+        "terms cannot state -- it holds a control or text-direction " +
+        "character -- so this run cannot finish: the partner authorizes the " +
+        "presented certificate against the name in the agreed terms, and no " +
+        "terms document may name this one. Re-key the signing identity with " +
+        "'psilink fingerprint --force --identity' under a label the terms " +
+        "admit, then have every partner re-pin the new fingerprint before " +
+        `receipts verify again. The agreed terms name "${agreedIdentity}".`,
+    );
   throw new OperatorConfigError(
     "this party's signing certificate does not authorize the identity it " +
       "agreed terms under, so it cannot finish: a certificate is trusted by " +

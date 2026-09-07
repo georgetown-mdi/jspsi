@@ -13,6 +13,7 @@ import {
   MAX_TEXT_LENGTH,
   NAME_SHAPE_MESSAGE,
   TEXT_CONTROL_CHAR_MESSAGE,
+  TEXT_DIRECTION_MESSAGE,
   LONE_SURROGATE_MESSAGE,
   LinkageTermsSchema,
   NESTING_DEPTH_MESSAGE,
@@ -1798,6 +1799,9 @@ test("rejects an over-long constraint exclude value", () => {
 // cases below pin the reach (every one of the four refuses) and the two edges
 // the rule is drawn at: a control character is refused wherever it sits, and a
 // value written in letters outside ASCII is not.
+//
+// The three of the four a record holds verbatim refuse a second class the
+// section after this one covers: the nine text-direction characters.
 
 const NUL = "\u0000";
 const ESC = "\u001b";
@@ -1913,6 +1917,123 @@ test("the control-character refusal names the field by path, not the value", () 
   expect(rendered).not.toContain("unrepeatable-label");
 });
 
+// --- Recorded free-text text-direction rule ----------------------------------
+// The three free-text fields a record holds verbatim -- the party `identity`,
+// the legal agreement's `purpose`, and a payload column's `description` --
+// refuse the nine bidirectional embedding, override and isolate characters
+// beside the control class above, since a layout scope opened in one of them
+// reorders the copy the record is read beside. The fourth free-text field, a
+// constraint `exclude` value, is a data value the run matches a field's
+// contents against and keeps them.
+
+// Written as escapes, never as raw bytes, so this source about invisible
+// characters is itself readable.
+const RLO = "\u202e";
+const LRM = "\u200e";
+const BIDI_CONTROLS: Array<[string, string]> = [
+  ["a left-to-right embedding", "\u202a"],
+  ["a right-to-left embedding", "\u202b"],
+  ["a pop directional formatting", "\u202c"],
+  ["a left-to-right override", "\u202d"],
+  ["a right-to-left override", RLO],
+  ["a left-to-right isolate", "\u2066"],
+  ["a right-to-left isolate", "\u2067"],
+  ["a first-strong isolate", "\u2068"],
+  ["a pop directional isolate", "\u2069"],
+];
+
+// The implicit marks, outside the refused class: each sets a direction for the
+// neutral characters around it and opens no scope reaching past them, so a
+// party writing a right-to-left sentence keeps them.
+const DIRECTION_MARKS: Array<[string, string]> = [
+  ["a left-to-right mark", LRM],
+  ["a right-to-left mark", "\u200f"],
+  ["an arabic letter mark", "\u061c"],
+];
+
+// One document per field, with the issue path a refusal locates that field by.
+const RECORDED_FREE_TEXT_FIELDS: Array<
+  [string, (value: string) => unknown, string]
+> = [
+  [
+    "a party identity",
+    (value) => freeTextTerms({ identity: value }),
+    "identity",
+  ],
+  [
+    "a legal agreement purpose",
+    (value) => freeTextTerms({ purpose: value }),
+    "legalAgreement.purpose",
+  ],
+  [
+    "a payload column description",
+    (value) => freeTextTerms({ description: value }),
+    "payload.send.0.description",
+  ],
+];
+
+test.each(
+  RECORDED_FREE_TEXT_FIELDS.flatMap(([field, terms]) =>
+    BIDI_CONTROLS.map(
+      ([character, value]) =>
+        [`${field} holding ${character}`, terms, value] as const,
+    ),
+  ),
+)("rejects %s", (_label, terms, character) => {
+  expect(() => parseLinkageTerms(terms(`Agency${character}A`))).toThrow(
+    ZodError,
+  );
+});
+
+test.each(RECORDED_FREE_TEXT_FIELDS)(
+  "the text-direction refusal names %s by path, not the value",
+  (_label, terms, path) => {
+    // The same split the control-character refusal takes: the field is located
+    // by issue path, and neither the submitted text nor the character it holds
+    // appears in what the parse reports.
+    const result = safeParseLinkageTerms(
+      terms(`Agency${RLO}unrepeatable-label`),
+    );
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.path.join("."))).toContain(
+      path,
+    );
+    const rendered = JSON.stringify(result.error.issues);
+    expect(rendered).toContain(TEXT_DIRECTION_MESSAGE);
+    expect(rendered).not.toContain("unrepeatable-label");
+    expect(rendered).not.toContain(RLO);
+  },
+);
+
+test.each(DIRECTION_MARKS)(
+  "every free-text field admits %s",
+  (_label, mark) => {
+    expect(() =>
+      parseLinkageTerms(
+        freeTextTerms({
+          identity: `${mark}Agency A`,
+          purpose: `${mark}Audit of the State tutoring program`,
+          description: `${mark}Date of enrollment`,
+          exclude: `${mark}123456789`,
+        }),
+      ),
+    ).not.toThrow();
+  },
+);
+
+test.each(BIDI_CONTROLS)(
+  "a constraint exclude value admits %s",
+  (_label, character) => {
+    // The one free-text field outside this rule. What an exclude entry may hold
+    // is what the data it is matched against may hold, as a transform param
+    // value and an allowedCharacters class are, and no record holds it.
+    expect(() =>
+      parseLinkageTerms(freeTextTerms({ exclude: `123${character}456789` })),
+    ).not.toThrow();
+  },
+);
+
 // --- Name-class shape rule ---------------------------------------------------
 // Every MAX_NAME_LENGTH-bounded name of the document holds NAME_SHAPE_PATTERN
 // in its own shape: no free-text control character, and none of the nine bidi
@@ -1921,15 +2042,12 @@ test("the control-character refusal names the field by path, not the value", () 
 // refused classes, and the two values the rule leaves out by design -- a
 // transform param value and an allowedCharacters class.
 
-// The two refused classes, one representative each, written as escapes so this
-// source holds no raw invisible byte.
+// The two refused classes, one representative each: the control half written as
+// an escape here, the direction half `RLO` above.
 const BEL = "\u0007";
-const RLO = "\u202e";
-// Accepted beside them: the zero-width joiner and the left-to-right MARK, which
-// sets a direction for the neutrals around it and opens no scope, so it is
-// outside the bidi class the strip and this rule name.
+// Accepted beside them: the zero-width joiner, and the left-to-right mark `LRM`
+// above.
 const ZWJ = "\u200d";
-const LRM = "\u200e";
 
 // A name exercising what the rule leaves alone: letters in three scripts, an
 // astral character, and the two admitted invisibles above.
@@ -2055,15 +2173,7 @@ test.each([
   ["a tab", "\t"],
   ["a line feed", "\n"],
   ["a carriage return", "\r"],
-  ["a left-to-right embedding", "\u202a"],
-  ["a right-to-left embedding", "\u202b"],
-  ["a pop directional formatting", "\u202c"],
-  ["a left-to-right override", "\u202d"],
-  ["a right-to-left override", RLO],
-  ["a left-to-right isolate", "\u2066"],
-  ["a right-to-left isolate", "\u2067"],
-  ["a first-strong isolate", "\u2068"],
-  ["a pop directional isolate", "\u2069"],
+  ...BIDI_CONTROLS,
 ])("rejects a payload column name holding %s", (_label, character) => {
   expect(() =>
     parseLinkageTerms({
@@ -2071,15 +2181,6 @@ test.each([
       payload: { send: [{ name: `id${character}` }] },
     }),
   ).toThrow(ZodError);
-});
-
-test("a free-text field still admits a bidi character a name may not hold", () => {
-  // The two rules draw different classes on purpose: free text is a sentence a
-  // party writes, where a direction control can be meant, while a name is a
-  // label matched, recorded, and shown beside other copy.
-  expect(() =>
-    parseLinkageTerms({ ...base, identity: `Agency${RLO} A` }),
-  ).not.toThrow();
 });
 
 // A `split_on` step whose params record holds whatever the case supplies, so

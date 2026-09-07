@@ -24,7 +24,9 @@ import {
   MAX_TEXT_LENGTH,
   TEXT_CONTROL_CHAR_MESSAGE,
   TEXT_CONTROL_CHAR_PATTERN,
+  TEXT_DIRECTION_MESSAGE,
 } from "./config/linkageTermsSchema.js";
+import { BIDI_CONTROL_PATTERN } from "./utils/nameControls.js";
 import type {
   LinkageField,
   LinkageRuleSetReference,
@@ -44,9 +46,9 @@ import type {
  * - `identity` is replaced with the acceptor's own name (a CLI flag or
  *   prompt, a browser field), so the inviter's identity does not leak into
  *   the acceptor's terms. Held here to the same rules the schema holds a
- *   party `identity` to (control characters, non-empty,
- *   {@link MAX_TEXT_LENGTH}), under a refusal naming the local input,
- *   rather than at the generic re-check below.
+ *   party `identity` to (control characters, text-direction characters,
+ *   non-empty, {@link MAX_TEXT_LENGTH}), under a refusal naming the local
+ *   input, rather than at the generic re-check below.
  * - `output` is MIRRORED, not copied: {@link validateCompatibility} compares
  *   it as a mirror (`local.expectsOutput` against `partner.shareWithPartner`
  *   and vice versa), so a verbatim copy is only accidentally correct for the
@@ -88,10 +90,11 @@ import type {
  * refusal names the rule the received document breaks and keeps such an
  * invitation off the consent surfaces and off the wire.
  *
- * @throws {UsageError} when `acceptorIdentity` contains a control character,
- *   is empty, or exceeds {@link MAX_TEXT_LENGTH}, or when the inviter's
- *   terms are `psi-c` outside the count-only shape or declare `deduplicate`
- *   under a strategy that matches no deduplicating cardinality.
+ * @throws {UsageError} when `acceptorIdentity` contains a control or
+ *   text-direction character, is empty, or exceeds {@link MAX_TEXT_LENGTH},
+ *   or when the inviter's terms are `psi-c` outside the count-only shape or
+ *   declare `deduplicate` under a strategy that matches no deduplicating
+ *   cardinality.
  * @throws {Error} when the inviter's terms cannot be coherently accepted
  *   for the mirrored output direction.
  */
@@ -102,11 +105,17 @@ export function deriveAcceptedLinkageTerms(
   // This party's own name takes the rules the schema holds a party `identity` to
   // here, before it is substituted (see the doc comment): left to the re-check at
   // the end, the same value is refused as an invitation that cannot be accepted --
-  // an account of an input the operator supplied itself.
+  // an account of an input the operator supplied itself. Both character rules the
+  // field holds, each under the message the schema states it by.
   if (TEXT_CONTROL_CHAR_PATTERN.test(acceptorIdentity))
     throw new UsageError(
       "the identity supplied for this party cannot be used: " +
         `${TEXT_CONTROL_CHAR_MESSAGE}. Supply one that has none.`,
+    );
+  if (BIDI_CONTROL_PATTERN.test(acceptorIdentity))
+    throw new UsageError(
+      "the identity supplied for this party cannot be used: " +
+        `${TEXT_DIRECTION_MESSAGE}. Supply one that has none.`,
     );
   if (acceptorIdentity.length === 0)
     throw new UsageError(

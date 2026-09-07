@@ -5,6 +5,8 @@ import { z } from "zod";
 import {
   IDENTITY_CONTROL_CHAR_MESSAGE,
   IDENTITY_CONTROL_CHAR_PATTERN,
+  IDENTITY_DIRECTION_CHAR_MESSAGE,
+  IDENTITY_DIRECTION_CHAR_PATTERN,
   MAX_IDENTITY_LENGTH,
 } from "@jobs/intentSchemas";
 
@@ -29,10 +31,10 @@ import type { SigningFingerprintResult } from "@jobs/signingIdentity";
  * unmodeled key, so the request can only ever say WHOSE identity to mint, never
  * where to read or write. The label is held to the shared label contract
  * (`@jobs/intentSchemas`): bounded by {@link MAX_IDENTITY_LENGTH}, refused a
- * leading `-`, and refused any control character -- the last is critical rather
- * than defensive, since the label binds into a long-lived certificate every
- * partner pins, and a NUL would otherwise be caught only incidentally, where the
- * child is spawned.
+ * leading `-`, and refused any control or text-direction character -- the last
+ * two are critical rather than defensive, since the label binds into a
+ * long-lived certificate every partner pins and displays, and a NUL would
+ * otherwise be caught only incidentally, where the child is spawned.
  */
 const fingerprintBodySchema = z.strictObject({
   identity: z
@@ -42,6 +44,9 @@ const fingerprintBodySchema = z.strictObject({
     .regex(/^[^-]/, "identity must not begin with '-'")
     .refine((label) => !IDENTITY_CONTROL_CHAR_PATTERN.test(label), {
       message: IDENTITY_CONTROL_CHAR_MESSAGE,
+    })
+    .refine((label) => !IDENTITY_DIRECTION_CHAR_PATTERN.test(label), {
+      message: IDENTITY_DIRECTION_CHAR_MESSAGE,
     }),
   exportCertificate: z.boolean().optional(),
 });
