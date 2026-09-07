@@ -133,8 +133,8 @@ export interface ManagedRerunOptions {
  *    export handed off ({@link ManagedExchangeSpentError}, the `"handed-off"`
  *    state), then acquires and validates the input before the handshake opens
  *    any connection (a {@link ManagedInputError} has the `"input"` or
- *    `"terms-shortfall"` tier), holds the lock across the handshake and the
- *    durable rotation persist, then runs the data exchange and records success.
+ *    `"terms-shortfall"` tier), and holds the lock across the handshake, the
+ *    durable rotation persist, the data exchange, and the success it records.
  *
  * The lock's own unavailability ({@link ManagedExchangeLockUnavailableError}: a
  * run is already in progress in another tab) propagates for the caller to show
