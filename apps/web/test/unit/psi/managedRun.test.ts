@@ -298,6 +298,7 @@ describe("runManagedRerun: a copy an export handed off", () => {
           outcome: "failed",
           failureKind: "handed-off",
         },
+        at,
       ],
     ]);
   });
@@ -345,6 +346,7 @@ describe("runManagedRerun: a copy an export handed off", () => {
           outcome: "failed",
           failureKind: "custody-unreadable",
         },
+        at,
       ],
     ]);
   });

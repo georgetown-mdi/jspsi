@@ -466,6 +466,7 @@ describe("classifyManagedRunFailure: a no-show read against standing desync evid
     const afterRun = applyManagedExchangeLastRun(
       atLaunch,
       missedRun(Date.parse("2026-07-14T11:00:00.000Z")),
+      Date.parse("2026-07-14T11:00:00.000Z"),
     );
     expect(afterRun.lastRun?.outcome).toBe("missed");
     expect(afterRun.lastRun?.failureKind).toBeUndefined();
@@ -502,10 +503,12 @@ describe("classifyManagedRunFailure: a no-show read against standing desync evid
     const afterPersistFailure = applyManagedExchangeLastRun(
       atMount,
       storageFailureRun(persistFailedAt),
+      persistFailedAt,
     );
     const afterNoShow = applyManagedExchangeLastRun(
       afterPersistFailure,
       missedRun(Date.parse("2026-07-14T11:00:00.000Z")),
+      Date.parse("2026-07-14T11:00:00.000Z"),
     );
 
     const firstRun = classifyManagedRunFailure(

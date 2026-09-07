@@ -109,6 +109,17 @@ interface ManagedExchangeRunPhases<TInput, THandshake, TExchange> {
    * field-scoped store writes; `tokenMaxAgeDays` restamps `expires`. */
   record: { id: string; tokenMaxAgeDays?: number };
   /**
+   * The instant this run began, UTC milliseconds -- before the lock was
+   * requested, so it precedes every act the run makes. Passed to every
+   * bookkeeping write so a failure outcome cannot overwrite a success another
+   * context stamped after that instant (see
+   * {@link ./managedExchangeStore.ts}, `recordManagedExchangeLastRun`). The
+   * caller supplies it rather than this module reading the clock, so the
+   * pre-connection checks it makes first are inside the run this instant
+   * opens.
+   */
+  runStartedAtMs: number;
+  /**
    * Acquire and validate the input file before any connection: read it
    * through the persisted handle (or re-selected file), then reject a
    * missing file, a gone permission, or a column shape the standing terms
@@ -143,9 +154,10 @@ interface ManagedExchangeRunPhases<TInput, THandshake, TExchange> {
 }
 
 /** The outcome of a completed managed exchange run: the data-exchange result and
- * the `succeeded` `lastRun` this run stamped. The store keeps the newest entry
- * across racing runs' tails (the monotonic guard in the bookkeeping write), so
- * this is this run's outcome, not necessarily the stored one. */
+ * the `succeeded` `lastRun` this run stamped. The store's write rules decide
+ * which of two racing runs' tails it keeps ({@link ./managedExchangeStore.ts},
+ * `recordManagedExchangeLastRun`), so this is this run's outcome, not
+ * necessarily the stored one. */
 export interface ManagedExchangeRunResult<TExchange> {
   /** The data-exchange phase's return value. */
   exchange: TExchange;
@@ -164,11 +176,13 @@ export interface ManagedExchangeRunResult<TExchange> {
  * before any connection is opened, recording the `handed-off` or benign
  * input `lastRun` respectively. A persist failure after rotation records a
  * `storage`-kind `lastRun`; a handshake or data-exchange failure propagates
- * unchanged for the runner to classify. The bookkeeping tail is monotonic on
- * `at` ({@link recordManagedExchangeLastRun}), and the success stamp is an
- * unlocked, individually failable write -- its failure degrades the next
- * run's tiering (Tier-2), not a correctness break, since the rotated secret
- * is already durable.
+ * unchanged for the runner to classify. Every bookkeeping write states
+ * `runStartedAtMs`, so the store's write rules
+ * ({@link recordManagedExchangeLastRun}) hold a failure off a success another
+ * context stamped after this run began; the success stamp is an unlocked,
+ * individually failable write -- its failure degrades the next run's tiering
+ * (Tier-2), not a correctness break, since the rotated secret is already
+ * durable.
  *
  * @throws {ManagedExchangeLockUnavailableError} if `lock.ifAvailable` is set
  *   and a run is already in progress on this device.
@@ -188,7 +202,7 @@ export interface ManagedExchangeRunResult<TExchange> {
 export async function runManagedExchange<TInput, THandshake, TExchange>(
   phases: ManagedExchangeRunPhases<TInput, THandshake, TExchange>,
 ): Promise<ManagedExchangeRunResult<TExchange>> {
-  const { record } = phases;
+  const { record, runStartedAtMs } = phases;
   const now = phases.now ?? Date.now;
 
   const gate = await withManagedExchangeLock(
@@ -197,7 +211,7 @@ export async function runManagedExchange<TInput, THandshake, TExchange>(
       // A copy an export handed off is refused before anything else this window
       // does: the sibling state is read here rather than trusted from whatever a
       // caller loaded, so a hand-off confirmed since that load stops this run.
-      await refuseHandedOffCopy(record.id, now);
+      await refuseHandedOffCopy(record.id, now, runStartedAtMs);
       // The input guard runs before the handshake opens any connection. A benign
       // input rejection records its classified kind inside the lock (this run's
       // record until the lock releases), then re-raises with no handshake attempted.
@@ -217,6 +231,7 @@ export async function runManagedExchange<TInput, THandshake, TExchange>(
                 "failed",
                 managedInputFailureKind(error.rejection),
               ),
+              runStartedAtMs,
             );
           } catch {
             // Swallowed: the ManagedInputError still reaches the runner on the rethrow.
@@ -244,7 +259,7 @@ export async function runManagedExchange<TInput, THandshake, TExchange>(
           // classification, and the storage lastRun the error itself holds,
           // depend on the original propagating.
           try {
-            await recordLastRun(record.id, error.lastRun);
+            await recordLastRun(record.id, error.lastRun, runStartedAtMs);
           } catch {
             // Swallowed: error.lastRun still reaches the runner on the rethrow.
           }
@@ -262,7 +277,7 @@ export async function runManagedExchange<TInput, THandshake, TExchange>(
   phases.onDataExchangeStart?.();
   const exchange = await phases.dataExchange(gate.handshake);
   const lastRun = succeededRun(now());
-  await recordLastRun(record.id, lastRun);
+  await recordLastRun(record.id, lastRun, runStartedAtMs);
   return { exchange, lastRun };
 }
 
@@ -285,16 +300,25 @@ export async function runManagedExchange<TInput, THandshake, TExchange>(
 async function refuseHandedOffCopy(
   id: string,
   now: () => number,
+  runStartedAtMs: number,
 ): Promise<void> {
   let local: ManagedLocalState | undefined;
   try {
     local = await getManagedLocalState(id);
   } catch (error) {
-    await recordRefusal(id, failedRun(now(), "failed", "custody-unreadable"));
+    await recordRefusal(
+      id,
+      failedRun(now(), "failed", "custody-unreadable"),
+      runStartedAtMs,
+    );
     throw new ManagedExchangeCustodyUnreadableError(id, error);
   }
   if (local?.spent === undefined) return;
-  await recordRefusal(id, failedRun(now(), "failed", "handed-off"));
+  await recordRefusal(
+    id,
+    failedRun(now(), "failed", "handed-off"),
+    runStartedAtMs,
+  );
   throw new ManagedExchangeSpentError(id);
 }
 
@@ -303,9 +327,10 @@ async function refuseHandedOffCopy(
 async function recordRefusal(
   id: string,
   lastRun: ManagedExchangeLastRun,
+  runStartedAtMs: number,
 ): Promise<void> {
   try {
-    await recordLastRun(id, lastRun);
+    await recordLastRun(id, lastRun, runStartedAtMs);
   } catch {
     // Swallowed: the refusal still reaches the runner.
   }
@@ -326,6 +351,7 @@ async function persistRotation(
 async function recordLastRun(
   id: string,
   lastRun: ManagedExchangeLastRun,
+  runStartedAtMs: number,
 ): Promise<void> {
-  await recordManagedExchangeLastRun(id, lastRun);
+  await recordManagedExchangeLastRun(id, lastRun, runStartedAtMs);
 }

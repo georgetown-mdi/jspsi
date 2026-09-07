@@ -64,6 +64,7 @@ vi.mock("@psi/managed/managedRunDriver", async () => {
         await store.recordManagedExchangeLastRun(
           config.record.id,
           rotate.storageFailureRun(at),
+          at,
         );
         throw new rotate.RotationPersistError(
           at,
@@ -73,6 +74,7 @@ vi.mock("@psi/managed/managedRunDriver", async () => {
       await store.recordManagedExchangeLastRun(
         config.record.id,
         rotate.missedRun(at),
+        at,
       );
       throw new PartnerNoShowError("timed out waiting for the other party");
     },
@@ -113,6 +115,7 @@ async function runUntilItNoShows(): Promise<string> {
   await recordManagedExchangeLastRun(
     created.id,
     storageFailureRun(Date.now() - 60_000),
+    Date.now() - 60_000,
   );
   app.render(createElement(ManagedRunSurface, { id: created.id }));
   const runButton = page.getByRole("button", { name: "Run exchange" });

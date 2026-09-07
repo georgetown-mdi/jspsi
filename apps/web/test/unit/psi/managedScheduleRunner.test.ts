@@ -705,7 +705,11 @@ describe("a window the single-writer lock was held through", () => {
         if (concurrent !== undefined)
           runner.stored.set(
             record.id,
-            applyManagedExchangeLastRun(held, concurrent),
+            applyManagedExchangeLastRun(
+              held,
+              concurrent,
+              Date.parse(concurrent.at),
+            ),
           );
         runner.advanceClock(60 * 60 * 1000);
         await tickManagedSchedules(runner.seams);

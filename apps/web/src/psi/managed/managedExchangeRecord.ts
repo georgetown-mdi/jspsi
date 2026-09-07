@@ -610,20 +610,38 @@ export function applyManagedExchangeReinviteRotation(
  * untouched. Separate from a rotation write so the run outcome is recorded
  * without re-touching the rotated secret. The input record is not mutated.
  *
+ * Two write rules drop an entry rather than store it, both comparing parsed
+ * instants rather than strings, since the schema admits ISO datetimes of
+ * varying fractional precision whose lexicographic order diverges from
+ * chronological.
+ *
  * Monotonic on `at`: an entry older than the stored one leaves the record
  * unchanged. The run+rotate lock covers only handshake through persist, not two
  * runs' bookkeeping tails, so a slow earlier run's late write could otherwise
  * land after -- and mask -- a newer run's outcome; this guard makes the stale
- * write a no-op instead. Compared as parsed instants, not strings, since the
- * schema admits ISO datetimes of varying fractional precision, whose
- * lexicographic order diverges from chronological. */
+ * write a no-op instead.
+ *
+ * A failure never overwrites a success stamped after its own run began:
+ * `runStartedAtMs` is the instant the run producing `lastRun` began, and a
+ * non-`"succeeded"` outcome is dropped when the stored entry is a
+ * `"succeeded"` one stamped at or after it. The `at` comparison alone does not
+ * cover this: another context can complete a whole run inside a failing run's
+ * peer wait, so the failure is the newer stamp and would land over it. A
+ * success is the unrecoverable entry -- nothing re-derives it once overwritten,
+ * and a scheduled window that then folds to a miss counts one that was met --
+ * so a stamp sharing the run's start instant is kept too. */
 export function applyManagedExchangeLastRun(
   record: ManagedExchangeRecord,
   lastRun: ManagedExchangeLastRun,
+  runStartedAtMs: number,
 ): ManagedExchangeRecord {
+  const stored = record.lastRun;
+  if (stored !== undefined && Date.parse(stored.at) > Date.parse(lastRun.at))
+    return parseManagedExchangeRecord(record);
   if (
-    record.lastRun !== undefined &&
-    Date.parse(record.lastRun.at) > Date.parse(lastRun.at)
+    lastRun.outcome !== "succeeded" &&
+    stored?.outcome === "succeeded" &&
+    Date.parse(stored.at) >= runStartedAtMs
   )
     return parseManagedExchangeRecord(record);
   return parseManagedExchangeRecord({ ...record, lastRun });
@@ -680,10 +698,13 @@ export interface ManagedExchangeScheduleAdvance {
  * The stored instants are compared as parsed moments rather than strings, for
  * the varying-ISO-precision reason {@link applyManagedExchangeLastRun} states.
  *
- * `lastRun` alone stays monotonic on `at` exactly as
- * {@link applyManagedExchangeLastRun}: the schedule advance still applies -- the
- * window did close, whatever landed afterwards -- while a bookkeeping entry
- * staler than the stored one is dropped rather than masking a newer outcome.
+ * `lastRun` alone stays monotonic on `at`, the first of the rules
+ * {@link applyManagedExchangeLastRun} holds: the schedule advance still applies
+ * -- the window did close, whatever landed afterwards -- while a bookkeeping
+ * entry staler than the stored one is dropped rather than masking a newer
+ * outcome. The entry an advance carries is the catch-up walk's, stamped at an
+ * already-closed window rather than by a run in flight, so the monotonic rule
+ * is what holds a newer success off it and there is no run start to state.
  * Both stamps are read through {@link parseStoredInstant} rather than
  * `Date.parse`, so a stamp having no UTC designator compares as no run at all,
  * letting the window's own bookkeeping land over it. */
