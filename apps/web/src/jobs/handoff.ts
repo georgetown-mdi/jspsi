@@ -119,7 +119,9 @@ export const HANDOFF_INBOUND_DIRECTORY_URL_PLACEHOLDER =
  * config's `signing.identity_file`.
  *
  * The identity is a real file on the operator's host, but the console loads
- * it by the CONTAINER's path, which their host does not have. The template
+ * it by the CONTAINER's path, which their host does not have -- whether that
+ * is the mounted data root's default or the secrets-mount file the operator
+ * chose, since the console resolves either to a container path. The template
  * names the file rather than the location, and the panel says which file to
  * point it at.
  */

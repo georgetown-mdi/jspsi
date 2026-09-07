@@ -6,6 +6,8 @@ import {
   readJsonOrNull,
 } from "./jobApiBody";
 
+import type { JobSigningIdentityLocation } from "@jobs/intentSchemas";
+
 /**
  * The browser-side client for the console's signing-identity surface
  * (`POST /api/jobs/signing/fingerprint`). One same-origin fetch to a
@@ -34,6 +36,10 @@ import {
  *   Distinct from `refused` because the operator's answer is to let that
  *   exchange finish and discard it, or to give the synced folder a mount of its
  *   own, not to go looking at the folder's contents.
+ * - `absent`: the operator picked a location of their own and no identity is at
+ *   it. The console reads a picked location and never creates there, so this is
+ *   an answer rather than a failure: the remedy is to create the identity with
+ *   `psilink fingerprint` at that path, or to pick the file that holds one.
  * - `invalid`: a `400` -- the label was malformed; `message` is the server's
  *   field-path-only reason, safe to show.
  * - `busy`: a `409` -- a request is already running; the operator can retry.
@@ -51,6 +57,7 @@ export type SigningFingerprintOutcome =
     }
   | { kind: "refused" }
   | { kind: "syncing" }
+  | { kind: "absent" }
   | { kind: "invalid"; message: string }
   | { kind: "busy" }
   | { kind: "timeout" }
@@ -66,6 +73,7 @@ function fingerprintOutcomeOf(body: unknown): SigningFingerprintOutcome {
   const { status } = body;
   if (status === "refused") return { kind: "refused" };
   if (status === "syncing") return { kind: "syncing" };
+  if (status === "absent") return { kind: "absent" };
   if (status === "timeout") return { kind: "timeout" };
   if (status !== "ok") return { kind: "error" };
   const { fingerprint, created, identityFileName, certificateFileName } = body;
@@ -113,25 +121,38 @@ function validationMessage(body: unknown): string {
 
 /**
  * Create-or-reuse this party's signing identity on the console and read its
- * fingerprint, through `POST /api/jobs/signing/fingerprint`. Sends only the
- * operator's identity label and the export toggle.
+ * fingerprint, through `POST /api/jobs/signing/fingerprint`. Sends the
+ * operator's identity label, the export toggle, and -- when they configured a
+ * location of their own -- the mount locator they picked, never a path: the
+ * server resolves it against its own secrets mount.
+ *
+ * A configured location is READ. Nothing there answers `absent` rather than
+ * minting a key in a directory the operator keeps their own way.
  *
  * There is no regenerate call, here or on the server: re-keying invalidates every
  * fingerprint a partner has pinned, so it stays a command-line action.
  */
 export async function resolveSigningFingerprint(
   identity: string,
-  exportCertificate = false,
+  options: {
+    /** Also write the public certificate out beside the mounted data root. */
+    exportCertificate?: boolean;
+    /** The operator's own identity location; omitted for the console default. */
+    identityLocation?: JobSigningIdentityLocation;
+  } = {},
   fetchImpl: typeof fetch = fetch,
 ): Promise<SigningFingerprintOutcome> {
+  const { exportCertificate, identityLocation } = options;
   let response: Response;
   try {
     response = await fetchImpl("/api/jobs/signing/fingerprint", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(
-        exportCertificate ? { identity, exportCertificate } : { identity },
-      ),
+      body: JSON.stringify({
+        identity,
+        ...(exportCertificate === true ? { exportCertificate } : {}),
+        ...(identityLocation !== undefined ? { identityLocation } : {}),
+      }),
     });
   } catch {
     return { kind: "error" };

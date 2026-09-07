@@ -2,8 +2,11 @@ import { FINGERPRINT_REGEX, MAX_TEXT_LENGTH } from "@psilink/core";
 
 import { NOTE_CONTROL_CHAR_PATTERN } from "@jobs/intentSchemas";
 
+import type {
+  JobSigningChoice,
+  JobSigningIdentityLocation,
+} from "@jobs/intentSchemas";
 import type { JobRendezvousConfig } from "./jobClient/workInputClient";
-import type { JobSigningChoice } from "@jobs/intentSchemas";
 
 /**
  * The pure model behind the console's "Receipts and record keeping" card:
@@ -17,12 +20,13 @@ import type { JobSigningChoice } from "@jobs/intentSchemas";
  * same module as the server schema that enforces it.
  *
  * Regenerating the signing identity is a command-line action, not offered
- * here ({@link IDENTITY_REGENERATION_NOTICE}); the identity's location is
- * fixed to the console's one mounted working directory
- * ({@link IDENTITY_AT_REST_NOTICE}; what the pre-run refusal for the
- * shared-mount layout does and does not see:
+ * here ({@link IDENTITY_REGENERATION_NOTICE}); the identity's location
+ * defaults to the console's one mounted working directory
+ * ({@link IDENTITY_AT_REST_NOTICE}) and the operator may point it at a file in
+ * the secrets mount instead ({@link IDENTITY_PICKED_LOCATION_NOTICE}). What the
+ * pre-run refusal for the shared-mount layout does and does not see:
  * {@link IDENTITY_SHARED_MOUNT_REFUSAL_ADVISORY} and
- * {@link IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY}).
+ * {@link IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY}.
  */
 
 /**
@@ -55,6 +59,13 @@ export interface ReceiptsDraft {
   partnerFingerprint: string;
   /** The retention/disposition note as raw field text; blank means no note. */
   retentionDisposition: string;
+  /**
+   * Where this party's signing identity is kept, as a locator picked in the
+   * console's secrets browse. Absent is the console's default: the fixed name
+   * in the mounted working directory, created there on demand. A locator, never
+   * a path -- the browser never learns one.
+   */
+  identityLocation?: JobSigningIdentityLocation;
 }
 
 /**
@@ -72,7 +83,10 @@ export const RECEIPTS_DEFAULT: ReceiptsDraft = {
  * The draft with one field set. Clearing certificate mode also drops this
  * party's resolved fingerprint, so a later return to certificate mode
  * re-asks the console rather than showing a stale value -- the identity file
- * lives in a mount the operator can edit between visits.
+ * lives in a mount the operator can edit between visits. Changing the
+ * identity's LOCATION drops it for the same reason and a sharper one: a
+ * fingerprint read at one location says nothing about the key at another, and
+ * showing it beside the new location would misreport which key signs.
  */
 export function receiptsWithField<TField extends keyof ReceiptsDraft>(
   draft: ReceiptsDraft,
@@ -80,9 +94,30 @@ export function receiptsWithField<TField extends keyof ReceiptsDraft>(
   value: ReceiptsDraft[TField],
 ): ReceiptsDraft {
   const changed: ReceiptsDraft = { ...draft, [field]: value };
+  if (field === "identityLocation") {
+    const { ownFingerprint: _stale, ...moved } = changed;
+    return moved;
+  }
   if (changed.mode === "certificate") return changed;
   const { ownFingerprint: _dropped, ...rest } = changed;
   return { ...rest, partnerFingerprint: "" };
+}
+
+/**
+ * The signing identity's location as the console names it to the operator: the
+ * mount id and the segments they picked, joined for display, or the default
+ * folder's own words. Never a container path -- the browser holds a locator and
+ * shows exactly that.
+ */
+export const IDENTITY_DEFAULT_LOCATION_LABEL =
+  "The folder you mounted (default)";
+
+/** The picked location as one displayable line: the mount id then each segment. */
+export function identityLocationLabel(
+  location: JobSigningIdentityLocation | undefined,
+): string {
+  if (location === undefined) return IDENTITY_DEFAULT_LOCATION_LABEL;
+  return [location.mount, ...location.subPath].join(" / ");
 }
 
 /** The subset of a job intent this card contributes. Both fields are present
@@ -114,6 +149,9 @@ export function receiptsIntentFields(
           signing: {
             mode: "certificate" as const,
             ...(pin !== "" ? { partnerFingerprint: pin } : {}),
+            ...(draft.identityLocation !== undefined
+              ? { identityLocation: draft.identityLocation }
+              : {}),
           },
         }
       : {}),
@@ -270,21 +308,40 @@ export function receiptsProblems(
 }
 
 /**
- * What the console says about where the signing identity lands, before the
- * operator asks for one: the console's one mounted working directory,
- * because the key must outlive the job.
+ * What the console says about where the signing identity lands under the
+ * DEFAULT location, before the operator asks for one: the console's one mounted
+ * working directory, because the key must outlive the job.
  *
- * True on every layout, so raised on every one, and an `info` rather than a
- * warning ({@link ReceiptsAdvisorySeverity}) -- it poses no hazard this run
- * makes live. The layout-gated word above it, where the layout raises one, is
- * {@link IDENTITY_SHARED_MOUNT_REFUSAL_ADVISORY} or
- * {@link IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY}.
+ * True on every layout the default is in force on, so raised on every one, and
+ * an `info` rather than a warning ({@link ReceiptsAdvisorySeverity}) -- it poses
+ * no hazard this run makes live. The layout-gated word above it, where the
+ * layout raises one, is {@link IDENTITY_SHARED_MOUNT_REFUSAL_ADVISORY} or
+ * {@link IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY}. A picked location takes
+ * {@link IDENTITY_PICKED_LOCATION_NOTICE} instead.
  */
 export const IDENTITY_AT_REST_NOTICE =
   "Your signing key is written into the folder you mounted, beside this " +
   "exchange's other files, because it has to outlive the run and be a file you " +
   "still have afterwards. Treat that folder like the results themselves: keep " +
-  "it readable only by you, and do not put it on shared storage.";
+  "it readable only by you, and do not put it on shared storage. To keep it " +
+  "somewhere else, change where your signing identity is kept above and pick " +
+  "a file in your secrets folder.";
+
+/**
+ * What the console says once the operator picked a location of their own: the
+ * console reads that file and writes nothing there, so the identity is theirs
+ * to create and to look after.
+ *
+ * An `info`, and the only location advisory raised in that case: the key is not
+ * in the mounted working directory, so neither shared-mount warning is about
+ * this run. A picked location inside a folder the partner syncs is refused
+ * before the run starts, on the same comparison the default location takes.
+ */
+export const IDENTITY_PICKED_LOCATION_NOTICE =
+  "Your signing key is read from the file you picked in your secrets folder, " +
+  "and the console never writes there. Create it once at the command line -- " +
+  "'psilink fingerprint --identity-file' pointed at that path -- and mount the " +
+  "folder read-only afterwards. Keep it out of every folder your partner syncs.";
 
 /**
  * What the console says about the one shared-folder layout its pre-run check
@@ -310,7 +367,9 @@ export const IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY =
   "folder locations and identity, so one folder mounted twice under two names " +
   "passes it. Keep the synced folder (JOB_RENDEZVOUS_DIR) separate from the " +
   "folder holding your key, input, and results, and check that the two are not " +
-  "one folder under two names.";
+  "one folder under two names. You can also move the key out of the way here: " +
+  "change where your signing identity is kept above and pick a file in your " +
+  "secrets folder, outside every folder your partner syncs.";
 
 /**
  * What the console says on the layout it positively established as shared: the
@@ -334,7 +393,9 @@ export const IDENTITY_SHARED_MOUNT_REFUSAL_ADVISORY =
   "under another path, are not seen -- and whoever reads your signing key can " +
   "sign receipts in your name, for every exchange, with every partner. Give " +
   "the synced folder a mount of its own (JOB_RENDEZVOUS_DIR), separate from " +
-  "the folder holding your key, input, and results.";
+  "the folder holding your key, input, and results -- or change where your " +
+  "signing identity is kept above and pick a file in your secrets folder, " +
+  "outside every folder your partner syncs.";
 
 /**
  * What the console says about re-keying, so the operator learns it before a
@@ -370,10 +431,13 @@ export const RECEIPT_LOCATION_NOTICE =
   "it afterwards.";
 
 /** What the console says about the certificate export, so an operator who
- * ticks it knows what leaves the console. */
+ * ticks it knows what leaves the console. It lands in the mounted working
+ * directory wherever the identity itself is kept: that is the one folder the
+ * console writes to. */
 export const CERTIFICATE_EXPORT_NOTICE =
   "The export is the public certificate only -- never your private key -- and " +
-  "it lands in the same mounted folder. Your partner needs only the fingerprint " +
+  "it lands in the folder you mounted, there even when your signing identity " +
+  "is kept elsewhere. Your partner needs only the fingerprint " +
   "to pin you; the certificate file is for an auditor who wants to check a " +
   "receipt without either party's help.";
 
@@ -423,6 +487,15 @@ export function receiptsAdvisories(
   rendezvous: JobRendezvousConfig | undefined,
 ): Array<ReceiptsAdvisory> {
   if (draft.mode !== "certificate") return [];
+  // A picked location takes the key out of the mounted working directory, so
+  // neither shared-mount warning is about this run: both are about a key in the
+  // folder the rendezvous falls back to. A pick inside a folder the partner
+  // syncs is refused before the run starts, on the same comparison.
+  if (draft.identityLocation !== undefined)
+    return [
+      { message: IDENTITY_PICKED_LOCATION_NOTICE, severity: "info" },
+      { message: RECEIPT_LOCATION_NOTICE, severity: "info" },
+    ];
   const separatelyMounted =
     rendezvous?.configured === true && rendezvous.sharesDataRoot === false;
   const sharedLayoutEstablished =

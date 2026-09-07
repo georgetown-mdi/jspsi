@@ -30,6 +30,8 @@ import styles from "@styles/app.module.css";
 
 import { DisclosureSection } from "../components/DisclosureSection";
 
+import { SigningIdentityLocationField } from "./SigningIdentityLocationField";
+
 import type { ReceiptsDraft, ReceiptsSigningMode } from "@psi/receiptsModel";
 import type { JobRendezvousConfig } from "@psi/jobClient/workInputClient";
 import type { SigningFingerprintOutcome } from "@psi/jobClient/signingIdentityClient";
@@ -60,11 +62,21 @@ const MODE_CHOICES: ReadonlyArray<{
  * `refused` message holds the whole CLI exit-64 class, unsplittable once stderr
  * is discarded (`runSigningFingerprint` in `jobs/signingIdentity.ts`); one member
  * is a malformed `psilink.yaml` a partner can write when the mount is also the
- * synced folder, so the copy sends the operator to read that file too. */
+ * synced folder, so the copy sends the operator to read that file too. The
+ * `absent` message answers a read of a picked location holding nothing, and
+ * names the command that puts an identity there. */
 function fingerprintFailureMessage(
   outcome: Exclude<SigningFingerprintOutcome, { kind: "ok" }>,
 ): string {
   switch (outcome.kind) {
+    case "absent":
+      return (
+        "There is no signing identity at the file you picked. The console " +
+        "reads that location and never writes to it, so create the identity " +
+        "yourself at the command line -- 'psilink fingerprint --identity-file' " +
+        "pointed at that path -- then show the fingerprint again. Or pick the " +
+        "file that already holds your identity."
+      );
     case "refused":
       return (
         "Your signing identity could not be created or read in the folder you " +
@@ -140,6 +152,7 @@ export function ReceiptsCard({
   const requestProblemId = useId();
   const [resolving, setResolving] = useState(false);
   const [failure, setFailure] = useState<string>();
+  const [locationPickerOpen, setLocationPickerOpen] = useState(false);
   const [exportCertificate, setExportCertificate] = useState(false);
   const [exportedName, setExportedName] = useState<string>();
   const [identityFileName, setIdentityFileName] = useState<string>();
@@ -190,10 +203,11 @@ export function ReceiptsCard({
     const seq = (seqRef.current += 1);
     setResolving(true);
     setFailure(undefined);
-    const outcome = await resolveSigningFingerprint(
-      identity.trim(),
+    const location = draftRef.current.identityLocation;
+    const outcome = await resolveSigningFingerprint(identity.trim(), {
       exportCertificate,
-    );
+      ...(location !== undefined ? { identityLocation: location } : {}),
+    });
     // Discard a superseded result: the mode changed, or a newer request started.
     if (seqRef.current !== seq) return;
     setResolving(false);
@@ -246,13 +260,22 @@ export function ReceiptsCard({
 
         {draft.mode === "certificate" && (
           <>
+            <SigningIdentityLocationField
+              location={draft.identityLocation}
+              pickerOpen={locationPickerOpen}
+              onPickerOpen={() => setLocationPickerOpen(true)}
+              onPickerClose={() => setLocationPickerOpen(false)}
+              onChange={(location) => set("identityLocation", location)}
+            />
+
             <Stack gap="xs">
               <Text size="sm" fw={600}>
                 Your fingerprint, to share with your partner
               </Text>
               <Text size="xs" c="dimmed">
-                This creates your signing identity if you do not have one yet,
-                and shows the same fingerprint every time after that.
+                {draft.identityLocation === undefined
+                  ? "This creates your signing identity if you do not have one yet, and shows the same fingerprint every time after that."
+                  : "This reads the identity at the file you picked and shows its fingerprint. It never writes there, so a file that is not yet in place is reported rather than created."}
               </Text>
               <Checkbox
                 checked={exportCertificate}
@@ -272,9 +295,11 @@ export function ReceiptsCard({
                   }
                   onClick={() => void resolveFingerprint()}
                 >
-                  {draft.ownFingerprint === undefined
-                    ? "Create or show my fingerprint"
-                    : "Show it again"}
+                  {draft.ownFingerprint !== undefined
+                    ? "Show it again"
+                    : draft.identityLocation === undefined
+                      ? "Create or show my fingerprint"
+                      : "Show my fingerprint"}
                 </Button>
               </div>
               {requestProblem !== undefined && (
@@ -316,7 +341,11 @@ export function ReceiptsCard({
                       ? "Your signing identity was created"
                       : "Your signing identity was already set up"}
                     {identityFileName !== undefined
-                      ? ` (${identityFileName} in your mounted folder)`
+                      ? ` (${identityFileName} in ${
+                          draft.identityLocation === undefined
+                            ? "your mounted folder"
+                            : "your secrets folder"
+                        })`
                       : ""}
                     . Send this fingerprint over a channel you trust -- not the
                     same message as the invitation.

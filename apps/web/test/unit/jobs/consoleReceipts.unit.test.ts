@@ -14,8 +14,10 @@ import {
 } from "@jobs/handoff";
 import {
   IDENTITY_AT_REST_NOTICE,
+  IDENTITY_DEFAULT_LOCATION_LABEL,
   IDENTITY_LABEL_REQUIRED_REASON,
   IDENTITY_MISSING_PROBLEM,
+  IDENTITY_PICKED_LOCATION_NOTICE,
   IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY,
   IDENTITY_SHARED_MOUNT_REFUSAL_ADVISORY,
   NO_PARTNER_PIN_PROBLEM,
@@ -27,6 +29,7 @@ import {
   SESSION_DERIVED_PROBLEM,
   UNNAMED_PARTY_PROBLEM,
   fingerprintRequestProblem,
+  identityLocationLabel,
   receiptsAdvisories,
   receiptsIntentFields,
   receiptsProblems,
@@ -626,6 +629,7 @@ describe("the certificate export never overwrites the identity file", () => {
     expect(() =>
       runSigningFingerprint({
         binaryPath: STUB_CLI_PATH,
+        dataRoot: root,
         identityPath: signingIdentityPath(root),
         identityLabel: "Agency A",
         exportPath: signingIdentityPath(root),
@@ -732,6 +736,7 @@ describe("the fingerprint driver", () => {
     const identityPath = signingIdentityPath(root);
     const first = await runSigningFingerprint({
       binaryPath: STUB_CLI_PATH,
+      dataRoot: root,
       identityPath,
       identityLabel: "Agency A",
       childEnv: { STUB_FINGERPRINT_STDOUT: `${OWN_FINGERPRINT}\n` },
@@ -746,6 +751,7 @@ describe("the fingerprint driver", () => {
 
     const second = await runSigningFingerprint({
       binaryPath: STUB_CLI_PATH,
+      dataRoot: root,
       identityPath,
       identityLabel: "Agency A",
       exportPath: signingCertificatePath(root),
@@ -778,6 +784,7 @@ describe("the fingerprint driver", () => {
     try {
       const result = await runSigningFingerprint({
         binaryPath: STUB_CLI_PATH,
+        dataRoot: root,
         identityPath: signingIdentityPath(root),
         identityLabel: "Agency A",
         childEnv: {
@@ -801,6 +808,7 @@ describe("the fingerprint driver", () => {
     const unmade = path.join(root, "not-yet");
     const result = await runSigningFingerprint({
       binaryPath: STUB_CLI_PATH,
+      dataRoot: unmade,
       identityPath: signingIdentityPath(unmade),
       identityLabel: "Agency A",
       childEnv: { STUB_FINGERPRINT_STDOUT: `${OWN_FINGERPRINT}\n` },
@@ -816,6 +824,7 @@ describe("the fingerprint driver", () => {
     const root = scratchDir();
     const result = await runSigningFingerprint({
       binaryPath: STUB_CLI_PATH,
+      dataRoot: root,
       identityPath: signingIdentityPath(root),
       identityLabel: "Agency A",
       childEnv: { STUB_FINGERPRINT_STDOUT: "x".repeat(8192) },
@@ -829,6 +838,7 @@ describe("the fingerprint driver", () => {
     const root = scratchDir();
     const result = await runSigningFingerprint({
       binaryPath: STUB_CLI_PATH,
+      dataRoot: root,
       identityPath: signingIdentityPath(root),
       identityLabel: "Agency A",
       childEnv: { STUB_IGNORE_SIGTERM: "1", STUB_DELAY_MS: "5000" },
@@ -849,6 +859,7 @@ describe("the fingerprint driver", () => {
     await expect(
       runSigningFingerprint({
         binaryPath: STUB_CLI_PATH,
+        dataRoot: occupied,
         identityPath: signingIdentityPath(occupied),
         identityLabel: "Agency A",
         childEnv: { STUB_FINGERPRINT_STDOUT: `${OWN_FINGERPRINT}\n` },
@@ -1293,6 +1304,107 @@ describe("the receipts card's model", () => {
     expect(cleared.partnerFingerprint).toBe("");
     // The note is about the record, not the receipt, so it survives the switch.
     expect(cleared.retentionDisposition).toBe(RETENTION_NOTE);
+  });
+
+  test("an untouched draft names the default location and emits no locator", () => {
+    // The option's absence IS the default, so a draft that never touched it
+    // composes exactly the block an exchange authored before the option did.
+    expect(RECEIPTS_DEFAULT.identityLocation).toBeUndefined();
+    expect(identityLocationLabel(undefined)).toBe(
+      IDENTITY_DEFAULT_LOCATION_LABEL,
+    );
+    expect(
+      receiptsIntentFields(
+        draft({
+          mode: "certificate",
+          ownFingerprint: OWN_FINGERPRINT,
+          partnerFingerprint: PARTNER_FINGERPRINT,
+        }),
+      ).signing,
+    ).toEqual({ mode: "certificate", partnerFingerprint: PARTNER_FINGERPRINT });
+  });
+
+  test("a picked location rides the signing block as a locator, never a path", () => {
+    const located = draft({
+      mode: "certificate",
+      ownFingerprint: OWN_FINGERPRINT,
+      partnerFingerprint: PARTNER_FINGERPRINT,
+      identityLocation: {
+        mount: "secrets",
+        subPath: [".ssh", "identity.json"],
+      },
+    });
+    expect(receiptsIntentFields(located).signing).toEqual({
+      mode: "certificate",
+      partnerFingerprint: PARTNER_FINGERPRINT,
+      identityLocation: {
+        mount: "secrets",
+        subPath: [".ssh", "identity.json"],
+      },
+    });
+    // What the card shows is the locator's own segments: no leading slash and
+    // nothing the browser did not itself send.
+    const label = identityLocationLabel(located.identityLocation);
+    expect(label).toBe("secrets / .ssh / identity.json");
+    expect(label.startsWith("/")).toBe(false);
+  });
+
+  test("changing the location drops the fingerprint read at the old one", () => {
+    // A fingerprint is a fact about one key. Carrying it across a move would
+    // report the old key's value beside the new location and let the run gate
+    // pass on an identity that may not be there.
+    const authored = draft({
+      mode: "certificate",
+      ownFingerprint: OWN_FINGERPRINT,
+      partnerFingerprint: PARTNER_FINGERPRINT,
+    });
+    const moved = receiptsWithField(authored, "identityLocation", {
+      mount: "secrets",
+      subPath: ["identity.json"],
+    });
+    expect(moved.ownFingerprint).toBeUndefined();
+    expect(moved.partnerFingerprint).toBe(PARTNER_FINGERPRINT);
+    expect(problemsFor(moved)).toContain(IDENTITY_MISSING_PROBLEM);
+    // And back to the default, which is equally a move.
+    const returned = receiptsWithField(
+      { ...moved, ownFingerprint: OWN_FINGERPRINT },
+      "identityLocation",
+      undefined,
+    );
+    expect(returned.ownFingerprint).toBeUndefined();
+  });
+
+  test("a picked location withdraws the shared-mount warning it answers", () => {
+    // Both warnings are about a key in the folder the rendezvous falls back to.
+    // With the key out of that folder they are about no hazard this run makes
+    // live, and a warning shown on the safe layout too tells the operator
+    // nothing about which layout they are in.
+    const located = draft({
+      mode: "certificate",
+      ownFingerprint: OWN_FINGERPRINT,
+      partnerFingerprint: PARTNER_FINGERPRINT,
+      identityLocation: { mount: "secrets", subPath: ["identity.json"] },
+    });
+    for (const rendezvous of [
+      SHARED_RENDEZVOUS,
+      UNCERTAIN_SHARED_RENDEZVOUS,
+      undefined,
+    ])
+      expect(receiptsAdvisories(located, rendezvous)).toEqual([
+        { message: IDENTITY_PICKED_LOCATION_NOTICE, severity: "info" },
+        { message: RECEIPT_LOCATION_NOTICE, severity: "info" },
+      ]);
+  });
+
+  test("each location advisory names the remedy the other one is", () => {
+    // The shared-mount warnings gained the option as a second remedy; the
+    // picked-location notice states what the console does there instead.
+    expect(IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY).toMatch(/secrets folder/);
+    expect(IDENTITY_SHARED_MOUNT_REFUSAL_ADVISORY).toMatch(/secrets folder/);
+    expect(IDENTITY_AT_REST_NOTICE).toMatch(/secrets folder/);
+    expect(IDENTITY_PICKED_LOCATION_NOTICE).toMatch(/never writes there/);
+    expect(IDENTITY_PICKED_LOCATION_NOTICE).toMatch(/psilink fingerprint/);
+    expect(IDENTITY_PICKED_LOCATION_NOTICE).toMatch(/your partner syncs/);
   });
 });
 

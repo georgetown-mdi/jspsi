@@ -45,6 +45,7 @@ import {
   spawnZeroSetupJob,
 } from "./cliDriver";
 import {
+  resolveSigningIdentityPath,
   runSigningFingerprint,
   signingCertificatePath,
   signingIdentityDirectory,
@@ -68,6 +69,7 @@ import type {
   JobCreateIntent,
   JobExchangeIntent,
   JobInputFileReference,
+  JobSigningIdentityLocation,
   JobSigningPaths,
 } from "./intentSchemas";
 import type { ExchangeRecordOutcome } from "@psilink/core";
@@ -524,6 +526,11 @@ export class JobManager {
         throw new JobRendezvousRetainRequiredError();
     }
 
+    // Resolved before the slot is claimed, so an identity location naming no
+    // path in the secrets mount is a rejection that leaves the console free
+    // rather than one taken against an occupied slot.
+    const identityPath = this.identityPathFor(intent);
+
     // Claim the slot with no await between the null check and the assignment --
     // the signing refusal in between is synchronous -- so two concurrent POSTs
     // cannot both observe a free slot. The busy rejection holds the occupying
@@ -533,7 +540,10 @@ export class JobManager {
     // private key to the partner, and no wording recovers a disclosed key.
     // After the busy check, so a create posted to recover a lost attachment on
     // an occupied console meets the rejection that re-attaches it.
-    if (intent.channel === "filedrop" && this.runWouldPublishSigningIdentity())
+    if (
+      intent.channel === "filedrop" &&
+      this.runWouldPublishSigningIdentity(identityPath)
+    )
       throw new JobSigningIdentityExposedError();
     this.slot = { phase: "starting", id, channel: intent.channel };
 
@@ -553,6 +563,7 @@ export class JobManager {
         created.workdir,
         serverEntry,
         mountedInputPath,
+        identityPath,
       );
     } catch (error) {
       // spawnExchangeJob is the final fallible step of startJobInWorkdir, so
@@ -584,11 +595,36 @@ export class JobManager {
   }
 
   /**
+   * The absolute path of the signing identity a request or an intent names: the
+   * operator's configured location, or the console's default in the mounted data
+   * root when it names none.
+   *
+   * @throws {SigningIdentityLocationError} when the location does not resolve in
+   *   the secrets mount; the routes map it to a 400 naming the field.
+   */
+  private identityPathFor(intent: JobCreateIntent): string {
+    return resolveSigningIdentityPath({
+      dataRoot: this.dataRoot,
+      secretsDir: this.jobSecretsDir,
+      location:
+        intent.mode !== "zeroSetup"
+          ? intent.signing?.identityLocation
+          : undefined,
+    });
+  }
+
+  /**
    * Whether a filedrop run would publish this party's signing identity: an
-   * identity file is in the mounted data root, and a rendezvous leg IS or HOLDS
+   * identity file is at one of the paths below, and a rendezvous leg IS or HOLDS
    * the directory it sits in ({@link signingIdentityDirectory}) -- the layout in
    * which a key there is a key the partner reads. A leg mounted INSIDE that
    * directory and a leg beside it both hold nothing of it.
+   *
+   * Two paths are read, not one: the identity this run loads (`identityPath`),
+   * and the console's default in the data root, which a run that configured a
+   * location of its own leaves behind rather than moves. A key at either is a
+   * key the sync copies, and the file is what the partner reads whether or not
+   * this run is the one that loads it.
    *
    * A `certificate` run with no identity file publishes none either: the CLI
    * loads this party's identity from the path the console names and refuses the
@@ -604,22 +640,23 @@ export class JobManager {
    * chain -- counts as no hold: a refusal is owed a positive finding, and the
    * console says what it cannot see beside the signing control instead.
    */
-  private runWouldPublishSigningIdentity(): boolean {
-    return (
-      signingIdentityExists(this.dataRoot) &&
-      this.rendezvousHoldsIdentityDirectory()
+  private runWouldPublishSigningIdentity(identityPath: string): boolean {
+    return [identityPath, signingIdentityPath(this.dataRoot)].some(
+      (candidate) =>
+        signingIdentityExists(candidate) &&
+        this.rendezvousHoldsIdentityDirectory(candidate),
     );
   }
 
   /**
-   * Whether a rendezvous leg IS or HOLDS the directory the signing identity sits
-   * in, positively established. An unestablished hold is false: a refusal is owed
-   * a positive finding.
+   * Whether a rendezvous leg IS or HOLDS the directory the given signing identity
+   * sits in, positively established. An unestablished hold is false: a refusal is
+   * owed a positive finding.
    */
-  private rendezvousHoldsIdentityDirectory(): boolean {
+  private rendezvousHoldsIdentityDirectory(identityPath: string): boolean {
     const verdict = rendezvousHoldsDirectory(
       this.rendezvousLegs().map(([dir]) => dir),
-      signingIdentityDirectory(this.dataRoot),
+      signingIdentityDirectory(identityPath),
     );
     return verdict.holds && !verdict.uncertain;
   }
@@ -630,6 +667,10 @@ export class JobManager {
    * run, no identity file is there yet, and a leg holds the directory one would
    * be created in.
    *
+   * Asked of the path the create would land at, which is the console's default
+   * in the data root: a configured location is read and never created
+   * ({@link resolveSigningFingerprint}), so no other path is ever written.
+   *
    * Reading an identity already there is not this case -- the key is on disk
    * whatever this request does -- so only the create is refused, and only while
    * that run occupies the slot. With no run in the slot, or an sftp run in it,
@@ -637,11 +678,11 @@ export class JobManager {
    * demand in the mounted working directory, and the create-time refusal is what
    * stops the run that would publish it.
    */
-  private mintWouldLandInSyncedFolder(): boolean {
+  private mintWouldLandInSyncedFolder(identityPath: string): boolean {
     return (
       this.slot?.channel === "filedrop" &&
-      !signingIdentityExists(this.dataRoot) &&
-      this.rendezvousHoldsIdentityDirectory()
+      !signingIdentityExists(identityPath) &&
+      this.rendezvousHoldsIdentityDirectory(identityPath)
     );
   }
 
@@ -760,18 +801,18 @@ export class JobManager {
 
   /**
    * The absolute paths a `certificate`-mode job's composed `signing` block
-   * names: the long-lived identity in the console's mounted data root
-   * (durable across jobs; see {@link signingIdentityPath}), and the receipt
-   * pinned to a fixed name in this job's workdir. Each is composed through
-   * its directory's own containment check rather than joined, so a constant
-   * that stopped resolving inside that directory is refused rather than
-   * naming a file served from outside the workdir.
+   * names: the long-lived identity at the location this run resolved
+   * ({@link identityPathFor}), and the receipt pinned to a fixed name in this
+   * job's workdir. The receipt is composed through the workdir's own
+   * containment check rather than joined, so a constant that stopped resolving
+   * inside it is refused rather than naming a file served from outside.
    */
   private signingPathsFor(
     workdir: string,
+    identityPath: string,
   ): JobSigningPaths & { receiptOutput: string } {
     return {
-      identityFile: signingIdentityPath(this.dataRoot),
+      identityFile: identityPath,
       receiptOutput: workdirArtifactPath(workdir, JOB_FILE_NAMES.receipt),
     };
   }
@@ -796,18 +837,40 @@ export class JobManager {
    * directory the key would be written into
    * ({@link mintWouldLandInSyncedFolder}); the run's own create-time refusal
    * cannot see a key that did not exist when it started.
+   *
+   * `identityLocation` is the operator's own location, or absent for the
+   * console's default. Creation happens at the DEFAULT only: a location the
+   * operator picked is one the console reads, so nothing there is answered
+   * `absent` rather than minted. The console writes nowhere but the data root,
+   * and the operator's own mount is where they keep a key they minted
+   * themselves, read-only if they chose.
+   *
+   * @throws {SigningIdentityLocationError} when `identityLocation` does not
+   *   resolve in the secrets mount.
    */
   async resolveSigningFingerprint(args: {
     identityLabel: string;
     exportCertificate: boolean;
+    identityLocation?: JobSigningIdentityLocation;
   }): Promise<SigningFingerprintResult> {
     if (this.fingerprintInFlight) throw new SigningFingerprintBusyError();
-    if (this.mintWouldLandInSyncedFolder()) return { kind: "syncing" };
+    const identityPath = resolveSigningIdentityPath({
+      dataRoot: this.dataRoot,
+      secretsDir: this.jobSecretsDir,
+      ...(args.identityLocation !== undefined
+        ? { location: args.identityLocation }
+        : { location: undefined }),
+    });
+    if (args.identityLocation !== undefined) {
+      if (!signingIdentityExists(identityPath)) return { kind: "absent" };
+    } else if (this.mintWouldLandInSyncedFolder(identityPath))
+      return { kind: "syncing" };
     this.fingerprintInFlight = true;
     try {
       return await runSigningFingerprint({
         binaryPath: this.binaryPath,
-        identityPath: signingIdentityPath(this.dataRoot),
+        dataRoot: this.dataRoot,
+        identityPath,
         identityLabel: args.identityLabel,
         ...(args.exportCertificate
           ? { exportPath: signingCertificatePath(this.dataRoot) }
@@ -825,6 +888,7 @@ export class JobManager {
     workdir: string,
     serverEntry: JobSftpServerEntry | undefined,
     mountedInputPath: string | undefined,
+    identityPath: string,
   ): Promise<string> {
     // Exchange composes a config document and a key file into the workdir;
     // zero-setup writes NEITHER -- its connection rides argv and it has no
@@ -833,7 +897,12 @@ export class JobManager {
     const exchangeDocuments =
       intent.mode === "zeroSetup"
         ? undefined
-        : await this.writeExchangeDocuments(intent, workdir, serverEntry);
+        : await this.writeExchangeDocuments(
+            intent,
+            workdir,
+            serverEntry,
+            identityPath,
+          );
 
     const inputPath = await this.writeJobInput(
       intent,
@@ -851,7 +920,7 @@ export class JobManager {
     // config at all, so it has no signing block and never signs.
     const receiptPath =
       intent.mode !== "zeroSetup" && intent.signing?.mode === "certificate"
-        ? this.signingPathsFor(workdir).receiptOutput
+        ? this.signingPathsFor(workdir, identityPath).receiptOutput
         : null;
 
     const handoff = buildJobHandoff(intent, serverEntry, {
@@ -944,13 +1013,14 @@ export class JobManager {
     intent: JobExchangeIntent,
     workdir: string,
     serverEntry: JobSftpServerEntry | undefined,
+    identityPath: string,
   ): Promise<{ configPath: string; keyPath: string }> {
     const configDocument = composeDocumentByChannel(
       intent,
       this.jobRendezvousDir,
       this.jobRendezvousOutboundDir,
       serverEntry,
-      this.signingPathsFor(workdir),
+      this.signingPathsFor(workdir, identityPath),
     );
     const keyDocument = composeKeyFileDocument(intent);
     const configPath = await writeJobFile(

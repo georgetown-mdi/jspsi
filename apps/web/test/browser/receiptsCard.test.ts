@@ -58,6 +58,12 @@ interface StubbedResponse {
 interface StubOptions {
   /** The responses the endpoint gives, in request order; the last one repeats. */
   responses?: Array<StubbedResponse>;
+  /** The entries the secrets browse answers with, when a test opens the picker
+   * to change where the signing identity is kept. */
+  secretsEntries?: Array<{ name: string; kind: "dir" | "file" }>;
+  /** Whether the console has a secrets mount at all; false answers the browse
+   * the way an unset JOB_SECRETS_DIR does. */
+  secretsConfigured?: boolean;
   /** Gates the responses wait on, taken in request order: the nth request settles
    * when the nth promise does, so a test can drive the card while a request is
    * genuinely in flight. A request past the end of the list settles at once. */
@@ -99,6 +105,17 @@ function stubSigningApi(options: StubOptions = {}): { bodies: Array<string> } {
     "fetch",
     (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
       const url = String(input);
+      if (url.startsWith("/api/jobs/mounts/secrets/entries"))
+        return Promise.resolve(
+          new Response(
+            JSON.stringify({
+              configured: options.secretsConfigured ?? true,
+              readable: true,
+              entries: options.secretsEntries ?? [],
+            }),
+            { status: 200, headers: { "Content-Type": "application/json" } },
+          ),
+        );
       if (url !== "/api/jobs/signing/fingerprint")
         return realFetch(input, init);
       const index = requests++;
@@ -176,6 +193,17 @@ const retentionNote = () =>
 
 const createButton = () =>
   page.getByRole("button", { name: "Create or show my fingerprint" });
+
+/** The file the secrets browse offers, and the one a test picks. */
+const PICKED_IDENTITY = "psilink-signing-identity.json";
+
+/** Open the identity-location browse and pick the one file it lists. */
+async function pickIdentityLocation(name: string): Promise<void> {
+  await page
+    .getByRole("button", { name: "Choose a file from the secrets folder" })
+    .click();
+  await page.getByRole("button", { name: `Use ${name}` }).click();
+}
 
 async function renderCard(identity: string = IDENTITY): Promise<void> {
   app.render(createElement(ReceiptsHarness, { identity }));
@@ -255,6 +283,125 @@ describe("ReceiptsCard: asking the console for this party's fingerprint", () => 
       identity: IDENTITY,
       exportCertificate: true,
     });
+  });
+
+  test("a picked location rides the request as a locator, never a path", async () => {
+    // The whole point of the browse: the operator names the file by picking it,
+    // and what leaves the browser is the mount id and the segments it listed.
+    const stub = stubSigningApi({
+      secretsEntries: [{ name: PICKED_IDENTITY, kind: "file" }],
+      responses: [
+        { body: okBody({ created: false, identityFileName: PICKED_IDENTITY }) },
+      ],
+    });
+    await renderCard();
+    await chooseCertificateMode();
+
+    await pickIdentityLocation(PICKED_IDENTITY);
+    await expect
+      .element(page.getByRole("button", { name: "Show my fingerprint" }))
+      .toBeInTheDocument();
+    await page.getByRole("button", { name: "Show my fingerprint" }).click();
+
+    await expect
+      .element(page.getByLabelText("Your certificate fingerprint"))
+      .toHaveTextContent(FINGERPRINT);
+    expect(JSON.parse(stub.bodies[0])).toEqual({
+      identity: IDENTITY,
+      identityLocation: { mount: "secrets", subPath: [PICKED_IDENTITY] },
+    });
+    expect(latestDraft.identityLocation).toEqual({
+      mount: "secrets",
+      subPath: [PICKED_IDENTITY],
+    });
+    // What the card shows is the locator's own segments; nothing on screen is a
+    // container path, and the console never sent one either.
+    expect(app.container.textContent).toContain(`secrets / ${PICKED_IDENTITY}`);
+    expect(app.container.textContent).not.toContain("/run/");
+    expect(app.container.textContent).not.toContain(IDENTITY_FILE);
+  });
+
+  test("moving the location drops the fingerprint read at the old one", async () => {
+    const stub = stubSigningApi({
+      secretsEntries: [{ name: PICKED_IDENTITY, kind: "file" }],
+    });
+    await renderCard();
+    await chooseCertificateMode();
+    await createButton().click();
+    await expect
+      .element(page.getByLabelText("Your certificate fingerprint"))
+      .toBeInTheDocument();
+
+    await pickIdentityLocation(PICKED_IDENTITY);
+
+    // The value is gone from the draft and from the screen: it was a fact about
+    // the key at the old location, and nothing here says the new one holds it.
+    expect(latestDraft.ownFingerprint).toBeUndefined();
+    await expect
+      .element(page.getByLabelText("Your certificate fingerprint"))
+      .not.toBeInTheDocument();
+    expect(stub.bodies).toHaveLength(1);
+  });
+
+  test("nothing at the picked location is reported, not created", async () => {
+    stubSigningApi({
+      secretsEntries: [{ name: PICKED_IDENTITY, kind: "file" }],
+      responses: [{ body: { status: "absent" } }],
+    });
+    await renderCard();
+    await chooseCertificateMode();
+    await pickIdentityLocation(PICKED_IDENTITY);
+
+    await page.getByRole("button", { name: "Show my fingerprint" }).click();
+
+    await expect
+      .element(page.getByText("There is no signing identity at the file"))
+      .toBeInTheDocument();
+    expect(app.container.textContent).toContain("psilink fingerprint");
+    expect(latestDraft.ownFingerprint).toBeUndefined();
+  });
+
+  test("returning to the default folder sends no locator at all", async () => {
+    const stub = stubSigningApi({
+      secretsEntries: [{ name: PICKED_IDENTITY, kind: "file" }],
+    });
+    await renderCard();
+    await chooseCertificateMode();
+    await pickIdentityLocation(PICKED_IDENTITY);
+
+    await page
+      .getByRole("button", { name: "Use the folder you mounted" })
+      .click();
+    await createButton().click();
+
+    await expect
+      .element(page.getByLabelText("Your certificate fingerprint"))
+      .toBeInTheDocument();
+    expect(JSON.parse(stub.bodies[0])).toEqual({ identity: IDENTITY });
+    expect(latestDraft.identityLocation).toBeUndefined();
+  });
+
+  test("a console with no secrets mount says so in the identity's own terms", async () => {
+    // The picker is shared with the credential field, whose remedy is a typed
+    // @-file reference beside it. The identity field has no such field, so the
+    // notice must name the remedy that is actually open here.
+    stubSigningApi({ secretsConfigured: false });
+    await renderCard();
+    await chooseCertificateMode();
+
+    await page
+      .getByRole("button", { name: "Choose a file from the secrets folder" })
+      .click();
+
+    await expect
+      .element(
+        page.getByText("your signing identity stays in the folder you mounted"),
+      )
+      .toBeInTheDocument();
+    expect(app.container.textContent).toContain(
+      "No separate secrets directory",
+    );
+    expect(app.container.textContent).not.toContain("type a file reference");
   });
 
   test("withholds the request while this exchange states no identity", async () => {

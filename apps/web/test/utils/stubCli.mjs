@@ -111,9 +111,11 @@ if (process.argv[2] === "probe-host-key") {
     // The real command creates the identity file (and the export) before it
     // prints, so the stub does too: the driver reads the identity path's presence
     // BEFORE spawning, and a second invocation must therefore see the file this
-    // one left.
+    // one left. Create-or-REUSE, as the real command is: an identity already
+    // there is loaded, never rewritten, so a read of one in a read-only mount
+    // writes nothing.
     const identityFile = flagValue(process.argv, "--identity-file");
-    if (identityFile !== undefined)
+    if (identityFile !== undefined && !fs.existsSync(identityFile))
       fs.writeFileSync(identityFile, JSON.stringify({ stub: "identity" }));
     const exportFile = flagValue(process.argv, "--export-certificate");
     if (exportFile !== undefined)

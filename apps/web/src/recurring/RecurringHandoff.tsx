@@ -196,13 +196,14 @@ function ConfigSteps({
             Copy your signing identity into that folder
           </p>
           <p className={styles.small}>
-            This run signs its receipt with the signing identity in your mounted
-            folder. Copy that file to the scheduling machine, readable only by
-            you (chmod 600 on Linux/macOS), and set signing.identity_file to
-            where you put it -- the path in the configuration above is a
-            placeholder. Copy it; do not run psilink fingerprint there to make a
-            new one. That mints a different key with a different fingerprint,
-            and your partner has pinned the old one.
+            This run signs its receipt with the signing identity at the location
+            you chose on the console -- the folder you mounted, or the file you
+            picked in your secrets folder. Copy that file to the scheduling
+            machine, readable only by you (chmod 600 on Linux/macOS), and set
+            signing.identity_file to where you put it -- the path in the
+            configuration above is a placeholder. Copy it; do not run psilink
+            fingerprint there to make a new one. That mints a different key with
+            a different fingerprint, and your partner has pinned the old one.
           </p>
         </li>
       )}
