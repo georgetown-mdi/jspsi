@@ -688,3 +688,129 @@ describe("buildKeyStrings: the swap's full variant", () => {
     );
   });
 });
+
+describe("buildKeyStrings: the accumulating bound over an expanded element", () => {
+  const logger = getLogger("cleaning");
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  // A `transpositions` element declares one candidate per pair of positions, so
+  // 45 characters is the widest value whose ceiling stays inside
+  // MAX_KEY_CANDIDATE_WIDTH. One token's characters are distinct so the
+  // expansion's own deduplication collapses nothing, and the leading digits keep
+  // the tokens distinct from one another so the element retains each of them.
+  const TOKEN_WIDTH = 45;
+  const BOUND_TO_TOKEN_WIDTH: TransformStep[] = [
+    { function: "substring", params: { start: 1, length: TOKEN_WIDTH } },
+  ];
+
+  const token = (i: number) =>
+    String(i).padStart(2, "0") +
+    Array.from({ length: TOKEN_WIDTH - 2 }, (_unused, j) =>
+      String.fromCharCode(0x41 + j),
+    ).join("");
+
+  // One split cell of those tokens crossed with a second element the crossing has
+  // to stop the row before it reads. The characters the first element retains
+  // BEFORE the expansion are 45 per token -- three orders of magnitude inside the
+  // cap at either cell width below -- and the 991 candidates each token realizes
+  // are what multiply them past it.
+  const expandingKey: LinkageKey = {
+    name: "TOKENS+DOB",
+    elements: [
+      {
+        field: "tokens",
+        transform: BOUND_TO_TOKEN_WIDTH,
+        generateFuzzyComparisons: "transpositions",
+      },
+      { field: "date_of_birth" },
+    ],
+  };
+
+  function splitDataset(tokenCount: number): StandardizedDataset {
+    return new StandardizedDataset(
+      [
+        new StandardizedField(
+          "tokens",
+          "tokens",
+          [{ function: "split_on", params: { delimiter: "\\|" } }],
+          [
+            {
+              tokens: Array.from({ length: tokenCount }, (_unused, i) =>
+                token(i),
+              ).join("|"),
+            },
+          ],
+        ),
+        new StandardizedField(
+          "date_of_birth",
+          "date_of_birth",
+          [],
+          [{ date_of_birth: "19750716" }],
+        ),
+      ],
+      [expandingKey],
+    );
+  }
+
+  // The element the crossing has to land before. Realizing it is what the
+  // assembled projection cannot avoid paying, since that projection is reachable
+  // only once every element's candidates exist, so a call here is the observation
+  // that the row was charged on its pre-expansion candidates.
+  const spyOnLaterElement = (dataset: StandardizedDataset) =>
+    vi.spyOn(dataset.getField("date_of_birth") as StandardizedField, "get");
+
+  test("a declared fan-out row the expansion pushes past the cap drops before the next element is read", () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const dataset = splitDataset(100);
+    const laterElement = spyOnLaterElement(dataset);
+    expect(buildKeyStrings(expandingKey, dataset, 0, true, 1)).toBeNull();
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toMatch(
+      /accumulates \d+ characters of candidate values once this key's fuzzy comparisons expand them/,
+    );
+    expect(laterElement).not.toHaveBeenCalled();
+  });
+
+  test("the same crossing refuses when no declared producer accounts for the row", () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    let raised: unknown;
+    let laterElement: ReturnType<typeof spyOnLaterElement> | undefined;
+    try {
+      withUnlistedFanOutFunctions(() => {
+        const dataset = splitDataset(100);
+        laterElement = spyOnLaterElement(dataset);
+        return buildKeyStrings(expandingKey, dataset, 0, true, 1);
+      });
+    } catch (err) {
+      raised = err;
+    }
+    expect(raised).toBeInstanceOf(UsageError);
+    expect((raised as UsageError).message).toMatch(
+      /accumulated \d+ characters of candidate values from row 0 of this party's data \(linkageKeys\[1\]\.elements\[0\]\)/,
+    );
+    expect((raised as UsageError).message).toMatch(
+      /declare fuzzy comparisons on fewer of the key's elements/,
+    );
+    expect(laterElement).not.toHaveBeenCalled();
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  test("a row the expansion leaves inside the cap is built through its last element", () => {
+    // The same shape one tenth narrower: the pre-expansion charge moves by 450
+    // characters and the post-expansion one by 445,950, so what decides the
+    // crossing is the expanded set rather than a margin the tokens happened to
+    // sit under. This row is still over the ASSEMBLED limbs, which is a drop of
+    // their own; what it pins is that the accumulating charge let the second
+    // element be read at all.
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const dataset = splitDataset(90);
+    const laterElement = spyOnLaterElement(dataset);
+    expect(buildKeyStrings(expandingKey, dataset, 0, true, 1)).toBeNull();
+    expect(laterElement).toHaveBeenCalled();
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).not.toMatch(/once this key's fuzzy/);
+  });
+});
