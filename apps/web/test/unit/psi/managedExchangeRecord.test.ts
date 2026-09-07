@@ -622,11 +622,10 @@ describe("applyManagedExchangeLastRun", () => {
   });
 
   test("a failure does not overwrite a success stamped after its run began", () => {
-    // The ordering PR review found by driving the runner: a scheduled attempt
-    // opens, an attended run completes and stamps its success inside that
-    // attempt's peer wait, and the attempt then no-shows and stamps a NEWER
-    // `missed` entry. Monotonicity admits that write; the run-start rule is
-    // what holds it off.
+    // A scheduled attempt opens, an attended run completes and stamps its
+    // success inside that attempt's peer wait, and the attempt then no-shows
+    // and stamps a NEWER `missed` entry. Monotonicity admits that write; the
+    // run-start rule is what holds it off.
     const runStartedAtMs = Date.parse("2026-07-14T12:00:00.000Z");
     const attendedSuccess: ManagedExchangeLastRun = {
       at: "2026-07-14T12:05:00.000Z",

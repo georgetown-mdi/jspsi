@@ -848,11 +848,10 @@ describe("a failing run never overwrites a success stamped after it began", () =
     const runStartedAtMs = Date.now();
     const successAt = runStartedAtMs + 1_000;
 
-    // The ordering PR review reached by driving the runner: this run is open,
-    // another context completes a whole exchange and stamps its success, and
-    // this run then fails and writes a NEWER failure stamp. The failure is the
-    // newer entry, so monotonicity admits it; the run-start rule is what keeps
-    // the success.
+    // This run is open, another context completes a whole exchange and stamps
+    // its success, and this run then fails and writes a NEWER failure stamp.
+    // The failure is the newer entry, so monotonicity admits it; the run-start
+    // rule is what keeps the success.
     await expect(
       runManagedExchange({
         record: created,
@@ -916,7 +915,11 @@ describe("a failing run never overwrites a success stamped after it began", () =
     const completedAt = runStartedAtMs + 2_000;
     await recordManagedExchangeLastRun(
       created.id,
-      succeededRun(runStartedAtMs + 1_000),
+      {
+        at: new Date(runStartedAtMs + 1_000).toISOString(),
+        outcome: "failed",
+        failureKind: "custody-unreadable",
+      },
       runStartedAtMs + 1_000,
     );
 
