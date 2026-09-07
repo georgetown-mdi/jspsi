@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 //
-// Normalize a squash-and-merge commit message draft, and refuse the parts of it
-// a machine cannot fix. Reads the draft from a path or stdin, writes the
+// Normalize a squash-and-merge commit message draft, and refuse the two parts of
+// it a machine cannot fix. Reads the draft from a path or stdin, writes the
 // normalized message to stdout or to `--out <path>`.
 //
 // Usage:
@@ -15,23 +15,41 @@
 // where those rules are executable, and the limits below are the only copy of
 // the numbers outside CONTRIBUTING.md's own statement of the rule.
 //
-// THE SPLIT BETWEEN NORMALIZING AND REFUSING is what a machine can fix without
-// authoring. Rewrapping a paragraph changes no words, so the body is rewrapped
-// silently. Shortening an over-budget subject, unpicking a markdown marker, or
-// turning a list into prose all need someone to decide what the message says, so
-// each is refused with the rule named instead. The subject line is never
-// rewrapped or reflowed under either half.
+// THE SPLIT BETWEEN NORMALIZING AND REFUSING is whether the fix keeps the words.
+// Rewrapping a paragraph, dropping a markdown marker, turning a list item into a
+// paragraph, and putting the blank line under the subject all leave the text
+// saying what it said, so they happen silently. Two things are refused instead:
+// a subject over the budget, which cannot be shortened without dropping
+// something the subject says, and an over-wide line inside an indented block,
+// which cannot be reflowed without destroying the shape it was indented for.
+//
+// WHAT A CHECK OVER AN ALREADY-WRITTEN DRAFT ASKS. `violations` is empty
+// exactly when neither refusal fires and the draft is what this script produces
+// from it, character for character, so the hook gating a hand-written file has
+// one question to ask and the file this script writes always passes it. A body
+// wrapped by hand at some other column is not what it produces; the fix is one
+// run of this script.
+//
+// WHAT NORMALIZING DOES TO MARKDOWN. Emphasis and an inline code span lose their
+// markers and keep the text. A heading marker, a code fence line, and a
+// blockquote marker are dropped, and a heading's text becomes a paragraph of its
+// own. `[text](url)` becomes `text` with the url in parentheses after it, unless
+// the text already holds the url. A list item becomes its own paragraph with its
+// marker removed, its continuation lines joined into it, and an indented item
+// riding with the item above it.
 //
 // THE SUBJECT BUDGET COUNTS THE SUFFIX. GitHub appends " (#NNNN)" to the subject
 // at squash time, and CONTRIBUTING.md's 50-character limit is on what lands, so
 // the budget checked here is 50 minus that suffix's width at the pull request's
-// own number. A draft written before the number is known passes `unassigned`,
-// which assumes the four digits every pull request in this repository has.
+// own number, measured against the subject as normalized. A draft written before
+// the number is known passes `unassigned`, which assumes the four digits every
+// pull request in this repository has.
 //
 // AN INDENTED BLOCK IS LEFT VERBATIM. Rewrapping indented text would destroy the
 // shape someone indented it for, so a block holding an indented line is not
 // touched -- and an over-wide line inside one is refused rather than fixed,
-// which keeps the wrap guarantee total.
+// which keeps the wrap guarantee total. A block holding a list marker at column
+// 0 is a list rather than indented text, whatever its items are indented by.
 //
 // STATED LIMIT. A single word longer than the column budget occupies a line of
 // its own, over budget: breaking it would change the text. `violations` exempts
@@ -53,18 +71,41 @@ export const UNASSIGNED_PR = "unassigned";
 /** Digits assumed for the suffix when the pull-request number is unknown. */
 export const ASSUMED_PR_DIGITS = 4;
 
-/** Markdown a commit message does not take, each with the name of what it is. */
+/** A fenced-code delimiter, whose line is dropped whole. */
+const CODE_FENCE = /^\s*(?:```|~~~)/;
+
+/** A heading marker, whose line becomes a paragraph of its own. */
+const HEADING = /^\s{0,3}#{1,6}\s+/;
+
+/** A blockquote marker, dropped from the front of the line. */
+const BLOCKQUOTE = /^\s*>\s?/;
+
+// A bullet or numbered item starting at column 0. A numbered marker runs to two
+// digits: a longer run of digits before a period at the start of a line is
+// prose, a year most often.
+const TOP_LEVEL_LIST = /^(?:[-*+]|\d{1,2}[.)])\s+/;
+
+/** The same item indented under another one. */
+const NESTED_LIST = /^\s+(?:[-*+]|\d{1,2}[.)])\s+/;
+
+/** A markdown link, as text and url. */
+const LINK = /\[([^\]]*)\]\(([^)\s]*)\)/g;
+
+/**
+ * Markdown a commit message does not take, each with the name of what it is.
+ * This names what a report says; what normalizing does with each is
+ * `plainText` and `paragraphsOf` below.
+ */
 const MARKDOWN_MARKERS = [
-  { pattern: /^\s{0,3}#{1,6}\s/, name: "a markdown heading" },
-  { pattern: /^\s*(?:```|~~~)/, name: "a code fence" },
-  { pattern: /^\s*>\s/, name: "a blockquote marker" },
-  { pattern: /\*\*[^*]+\*\*|__[^_]+__/, name: "markdown emphasis" },
+  { pattern: HEADING, name: "a markdown heading" },
+  { pattern: BLOCKQUOTE, name: "a blockquote marker" },
+  {
+    pattern: /\*\*[^*]+\*\*|__[^_]+__|\*[^*]+\*|(?<!\w)_[^_]+_(?!\w)/,
+    name: "markdown emphasis",
+  },
   { pattern: /`[^`]+`/, name: "an inline code span" },
   { pattern: /\[[^\]]*\]\([^)\s]*\)/, name: "a markdown link" },
 ];
-
-/** A bullet or numbered item starting at column 0. */
-const TOP_LEVEL_LIST = /^(?:[-*+]\s|\d+[.)]\s)/;
 
 /** The suffix GitHub appends to the subject when it squash-merges. */
 export function squashSuffix(prNumber) {
@@ -82,17 +123,25 @@ export function subjectBudget(prNumber) {
 
 /**
  * The draft as a subject, the line under it, and the body: line endings
- * normalized, trailing whitespace dropped, and the blank lines around the whole
- * message removed. `separator` is undefined when the draft is a subject alone.
+ * normalized, trailing whitespace dropped, code fence lines removed, and the
+ * blank lines around the whole message removed. `separator` is the line under
+ * the subject as written, and the body holds every line after the subject with
+ * one blank separator dropped.
  */
 export function splitDraft(draft) {
   const lines = String(draft ?? "")
     .replace(/\r\n?/g, "\n")
     .split("\n")
-    .map((line) => line.replace(/\s+$/, ""));
+    .map((line) => line.replace(/\s+$/, ""))
+    .filter((line) => !CODE_FENCE.test(line));
   while (lines.length > 0 && lines[0] === "") lines.shift();
   while (lines.length > 0 && lines.at(-1) === "") lines.pop();
-  return { subject: lines[0] ?? "", separator: lines[1], body: lines.slice(2) };
+  const separator = lines[1];
+  return {
+    subject: lines[0] ?? "",
+    separator,
+    body: separator === "" ? lines.slice(2) : lines.slice(1),
+  };
 }
 
 /** The body's blank-line-separated blocks, blank lines dropped. */
@@ -111,9 +160,82 @@ function blocksOf(body) {
   return blocks;
 }
 
-/** Whether the block holds an indented line, which leaves it verbatim. */
-function isIndented(block) {
-  return block.some((line) => /^\s/.test(line));
+/**
+ * Which lines of the block start a list item. A marker at column 0 starts one
+ * where the block opens on it, where an item is already open, or where the line
+ * above ends in a colon; anywhere else it is a word that happens to sit at the
+ * front of a wrapped line, and splitting there would lose it.
+ */
+function itemStarts(block) {
+  const starts = [];
+  let open = false;
+  for (const [index, raw] of block.entries()) {
+    const line = raw.replace(BLOCKQUOTE, "");
+    const above = index === 0 ? "" : block[index - 1].replace(BLOCKQUOTE, "");
+    const item =
+      TOP_LEVEL_LIST.test(line) && (index === 0 || open || above.endsWith(":"));
+    starts.push(item);
+    open ||= item;
+  }
+  return starts;
+}
+
+/** Whether the block is indented text, which is copied through as it stands. */
+function isVerbatim(block) {
+  return (
+    block.some((line) => /^\s/.test(line)) && !itemStarts(block).some(Boolean)
+  );
+}
+
+/** One line with its inline markdown markers removed. */
+function plainText(line) {
+  return line
+    .replace(LINK, (_match, text, url) =>
+      text.includes(url) ? text : `${text} (${url})`,
+    )
+    .replace(/\*\*([^*]+)\*\*/g, "$1")
+    .replace(/__([^_]+)__/g, "$1")
+    .replace(/\*([^*]+)\*/g, "$1")
+    .replace(/(?<!\w)_([^_]+)_(?!\w)/g, "$1")
+    .replace(/`([^`]+)`/g, "$1")
+    .trim();
+}
+
+/** The subject with its markers removed. It is never rewrapped or reflowed. */
+function normalizeSubject(subject) {
+  return plainText(
+    subject
+      .replace(BLOCKQUOTE, "")
+      .replace(HEADING, "")
+      .replace(TOP_LEVEL_LIST, ""),
+  );
+}
+
+/** A non-verbatim block as the paragraphs it normalizes to, markers removed. */
+function paragraphsOf(block) {
+  const paragraphs = [];
+  const starts = itemStarts(block);
+  let current = [];
+  const flush = () => {
+    const text = current.join(" ").replace(/\s+/g, " ").trim();
+    if (text !== "") paragraphs.push(text);
+    current = [];
+  };
+  for (const [index, raw] of block.entries()) {
+    const line = raw.replace(BLOCKQUOTE, "");
+    if (HEADING.test(line)) {
+      flush();
+      current.push(plainText(line.replace(HEADING, "")));
+      flush();
+    } else if (starts[index]) {
+      flush();
+      current.push(plainText(line.replace(TOP_LEVEL_LIST, "")));
+    } else {
+      current.push(plainText(line.replace(NESTED_LIST, "")));
+    }
+  }
+  flush();
+  return paragraphs;
 }
 
 /** One paragraph greedily wrapped, as lines. */
@@ -135,15 +257,21 @@ export function wrapParagraph(text, columns = BODY_WRAP_COLUMNS) {
 }
 
 /**
- * The draft with every unindented body paragraph rewrapped and one blank line
- * between blocks. The subject line is copied through untouched.
+ * The draft with its markdown and its lists turned into paragraphs, every
+ * paragraph rewrapped, and one blank line between blocks. Indented blocks and
+ * the subject's own words are copied through.
  */
 export function normalizeDraft(draft) {
   const { subject, body } = splitDraft(draft);
-  const wrapped = blocksOf(body).map((block) =>
-    isIndented(block) ? block : wrapParagraph(block.join(" ")),
+  const blocks = blocksOf(body).flatMap((block) =>
+    isVerbatim(block)
+      ? [block]
+      : paragraphsOf(block).map((paragraph) => wrapParagraph(paragraph)),
   );
-  const lines = [subject, ...wrapped.flatMap((block) => ["", ...block])];
+  const lines = [
+    normalizeSubject(subject),
+    ...blocks.flatMap((block) => ["", ...block]),
+  ];
   return `${lines.join("\n")}\n`;
 }
 
@@ -153,52 +281,28 @@ function quoted(line) {
 }
 
 /**
- * What is wrong with the draft that normalizing cannot fix: an empty or
- * over-budget subject, a missing blank line under it, markdown, a top-level
- * list, or an over-wide line inside an indented block. Empty means the draft is
- * ready once its body is rewrapped.
+ * What is wrong with the draft that normalizing cannot fix: an empty draft, a
+ * subject over budget once the suffix is counted, or an over-wide line inside an
+ * indented block. Empty means the draft is ready once it is normalized.
  */
 export function refusals(draft, prNumber) {
-  const { subject, separator, body } = splitDraft(draft);
-  if (subject === "") {
+  const { subject, body } = splitDraft(draft);
+  const normalized = normalizeSubject(subject);
+  if (normalized === "") {
     return ["The draft is empty; a squash message needs a subject line."];
   }
 
   const found = [];
   const budget = subjectBudget(prNumber);
-  if (subject.length > budget) {
+  if (normalized.length > budget) {
     found.push(
-      `The subject is ${subject.length} characters and the budget is ${budget}: ` +
+      `The subject is ${normalized.length} characters and the budget is ${budget}: ` +
         `GitHub appends "${squashSuffix(prNumber)}" at squash time, and ` +
         `CONTRIBUTING.md's limit of ${SUBJECT_LIMIT} counts it. Shorten the subject.`,
     );
   }
-  if (separator !== undefined && separator !== "") {
-    found.push(
-      "The line under the subject is not blank, so git reads the whole opening " +
-        `as one subject: "${quoted(separator)}". Put a blank line between the ` +
-        "subject and the body.",
-    );
-  }
 
-  for (const line of [subject, ...body]) {
-    if (TOP_LEVEL_LIST.test(line)) {
-      found.push(
-        `A commit message body is prose, not a list: "${quoted(line)}". Write ` +
-          "the point as a sentence.",
-      );
-      continue;
-    }
-    const marker = MARKDOWN_MARKERS.find(({ pattern }) => pattern.test(line));
-    if (marker !== undefined) {
-      found.push(
-        `A commit message takes no markdown, and this line holds ${marker.name}: ` +
-          `"${quoted(line)}".`,
-      );
-    }
-  }
-
-  for (const block of blocksOf(body).filter(isIndented)) {
+  for (const block of blocksOf(body).filter(isVerbatim)) {
     for (const line of block.filter(
       (line) => line.length > BODY_WRAP_COLUMNS,
     )) {
@@ -219,7 +323,7 @@ export function refusals(draft, prNumber) {
  */
 export function overlongBodyLines(draft) {
   return blocksOf(splitDraft(draft).body)
-    .filter((block) => !isIndented(block))
+    .filter((block) => !isVerbatim(block))
     .flat()
     .filter(
       (line) => line.length > BODY_WRAP_COLUMNS && /\s/.test(line.trim()),
@@ -227,19 +331,81 @@ export function overlongBodyLines(draft) {
 }
 
 /**
- * Every Commit Messages rule the draft breaks as written, the wrap included.
- * This is what a check over an already-written draft asks; a producer that can
- * still rewrite the draft asks `refusals` instead.
+ * What normalizing would change about the draft, named rule by rule where a rule
+ * names it. The list is empty exactly when the draft is already what the
+ * normalizer produces, so a caller that cannot rewrite the draft can gate on it;
+ * the names are a report, and anything they miss is reported as the difference
+ * it is.
  */
-export function violations(draft, prNumber) {
-  return [
-    ...refusals(draft, prNumber),
+function unnormalized(draft) {
+  if (normalizeDraft(draft) === draft) return [];
+
+  const found = [];
+  const { subject, separator, body } = splitDraft(draft);
+  if (separator !== undefined && separator !== "") {
+    found.push(
+      "The line under the subject is not blank, so git reads the whole opening " +
+        `as one subject: "${quoted(separator)}". Normalizing puts a blank line ` +
+        "between the subject and the body.",
+    );
+  }
+  if (/^\s*(?:```|~~~)/m.test(String(draft ?? ""))) {
+    found.push(
+      "A commit message takes no markdown, and this draft holds a code fence. " +
+        "Normalizing drops the fence line.",
+    );
+  }
+
+  const listed = (line) =>
+    `A commit message body is prose, not a list: "${quoted(line)}". ` +
+    "Normalizing drops the marker and makes the item a paragraph.";
+  const marked = (line) => {
+    const marker = MARKDOWN_MARKERS.find(({ pattern }) => pattern.test(line));
+    return marker === undefined
+      ? null
+      : `A commit message takes no markdown, and this line holds ${marker.name}: ` +
+          `"${quoted(line)}". Normalizing drops the marker and keeps the text.`;
+  };
+
+  for (const block of [[subject], ...blocksOf(body)].filter(
+    (block) => !isVerbatim(block),
+  )) {
+    const starts = itemStarts(block);
+    const isList = starts.some(Boolean);
+    for (const [index, line] of block.entries()) {
+      if (starts[index] || (isList && NESTED_LIST.test(line))) {
+        found.push(listed(line));
+        continue;
+      }
+      const message = marked(line);
+      if (message !== null) found.push(message);
+    }
+  }
+
+  found.push(
     ...overlongBodyLines(draft).map(
       (line) =>
         `A body line is ${line.length} columns and CONTRIBUTING.md wraps at ` +
         `${BODY_WRAP_COLUMNS}: "${quoted(line)}".`,
     ),
-  ];
+  );
+
+  if (found.length === 0) {
+    found.push(
+      "The draft is not what the normalizer produces from it: the blank lines, " +
+        "the trailing whitespace, or the final newline differ.",
+    );
+  }
+  return found;
+}
+
+/**
+ * Every Commit Messages rule the draft breaks as written, the ones normalizing
+ * fixes included. This is what a check over an already-written draft asks; a
+ * producer that can still normalize the draft asks `refusals` instead.
+ */
+export function violations(draft, prNumber) {
+  return [...refusals(draft, prNumber), ...unnormalized(draft)];
 }
 
 /** The normalized draft and what it still breaks, in one call. */

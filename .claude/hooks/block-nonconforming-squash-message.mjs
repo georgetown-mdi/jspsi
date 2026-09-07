@@ -1,8 +1,10 @@
 #!/usr/bin/env node
 // PreToolUse hook: refuse a Write or Edit that would leave a squash-and-merge
-// draft under scratch/squash-messages/ breaking CONTRIBUTING.md's Commit
-// Messages rules -- an unwrapped body, a subject over budget once GitHub's
-// " (#NNNN)" suffix is counted, markdown, or a top-level list.
+// draft under scratch/squash-messages/ that is not what
+// ../scripts/format-squash-message.mjs produces from it, or that breaks one of
+// the two Commit Messages rules the normalizer cannot fix -- a subject over
+// budget once GitHub's " (#NNNN)" suffix is counted, an over-wide line inside an
+// indented block.
 //
 // Why this exists: the maintainer pastes one of these files verbatim into the
 // merge box, so what it holds is what lands in the history, and a reminder
@@ -10,12 +12,12 @@
 // rules are one module, ../scripts/format-squash-message.mjs, which holds the
 // limits; this hook runs them over the content the call would write.
 //
-// WHY IT REFUSES THE WRAP RATHER THAN FIXING IT. The normalizer rewraps a body
-// without a decision from anyone, but a PreToolUse hook here has no rewrite to
-// offer -- it either allows the call or blocks it -- so the fix is named in the
-// refusal instead: draft in /tmp, run the normalizer with `--out`, and let the
-// script's own write land the file. A script's fs write is not a tool call, so
-// nothing here fires on it.
+// WHY IT NAMES THE NORMALIZER RATHER THAN RUNNING IT. The normalizer rewraps a
+// body and strips markdown without a decision from anyone, but this hook does
+// not rewrite the content of the call it gates: it allows or blocks, and names
+// the fix in the refusal -- draft in /tmp, run the normalizer with `--out`, and
+// let the script's own write land the file. A script's fs write is not a tool
+// call, so nothing here fires on it.
 //
 // THE PULL-REQUEST NUMBER COMES FROM THE FILE NAME, which is how
 // remind-squash-message.mjs keys these files: `<number>.txt` for a pull request
@@ -123,8 +125,9 @@ function block(path, prNumber, broken) {
       broken.map((problem) => `  - ${problem}\n`).join("") +
       `Write the draft to /tmp and normalize it from there: \`node ${NORMALIZER} ` +
       `${prArgument} /tmp/squash-message.txt --out '${path}'\`. That rewraps the body at ` +
-      `${BODY_WRAP_COLUMNS} columns, reports anything left that needs rewriting rather ` +
-      "than reflowing, and writes the file itself, so no Write call is needed.\n",
+      `${BODY_WRAP_COLUMNS} columns, strips the markdown and the list markers, reports ` +
+      "the two things it cannot fix without rewriting the message, and writes the file " +
+      "itself, so no Write call is needed.\n",
   );
   process.exit(2);
 }

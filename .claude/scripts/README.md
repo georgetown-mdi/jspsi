@@ -9,7 +9,8 @@ push:
 - `worktree-init.sh`, which places a fresh worktree on its branching base and
   provisions its `node_modules`
 - `squash-message.mjs`, which drafts the squash message a pull request lands as,
-  and `format-squash-message.mjs`, which rewraps a draft's body and reports the
+  and `format-squash-message.mjs`, which rewraps a draft's body, drops the
+  markdown and list markers a commit message does not take, and reports the two
   Commit Messages rules it cannot fix without rewriting the message. It holds
   the subject budget and the wrap column, which the reminder hook and the
   `block-nonconforming-squash-message.mjs` guard both read rather than restate

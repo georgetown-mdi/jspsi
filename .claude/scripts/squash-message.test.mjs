@@ -5,7 +5,11 @@ import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { afterEach, describe, expect, it } from "vitest";
 
-import { BODY_WRAP_COLUMNS, splitDraft } from "./format-squash-message.mjs";
+import {
+  BODY_WRAP_COLUMNS,
+  SUBJECT_LIMIT,
+  splitDraft,
+} from "./format-squash-message.mjs";
 import {
   ALLOWED_TOOLS,
   DISALLOWED_TOOLS,
@@ -178,11 +182,21 @@ describe("squash-message output", () => {
     }
   });
 
+  it("takes the markers out of the draft the run produced", () => {
+    const result = run(
+      "Wrap the squash message on the way out\n\n- a list item\n",
+    );
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe(
+      "Wrap the squash message on the way out\n\na list item\n",
+    );
+  });
+
   it("prints an unfixable draft as it came, with the rule on stderr", () => {
-    const drafted = "Wrap the squash message on the way out\n\n- a list item\n";
+    const drafted = `${"x".repeat(SUBJECT_LIMIT)}\n\nA body sentence.\n`;
     const result = run(drafted);
     expect(result.status).toBe(2);
     expect(result.stdout).toBe(drafted);
-    expect(result.stderr).toContain("prose, not a list");
+    expect(result.stderr).toContain("Shorten the subject");
   });
 });

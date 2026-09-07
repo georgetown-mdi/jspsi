@@ -84,12 +84,114 @@ describe("format-squash-message wrapping", () => {
     const lines = wrapParagraph(`start ${word} end`);
     expect(lines).toEqual(["start", word, "end"]);
   });
+});
+
+// One case per marker the normalizer takes out. Each body normalizes to the
+// text beside it, the subject unchanged.
+const NORMALIZED = [
+  {
+    name: "a heading marker, whose line becomes a paragraph",
+    body: "## Motivation\nThe rules had two copies.",
+    want: "Motivation\n\nThe rules had two copies.",
+  },
+  {
+    name: "asterisk emphasis",
+    body: "This is **strong** and *slanted* text.",
+    want: "This is strong and slanted text.",
+  },
+  {
+    name: "underscore emphasis, leaving an identifier alone",
+    body: "This is __strong__ and _slanted_, unlike snake_case_name.",
+    want: "This is strong and slanted, unlike snake_case_name.",
+  },
+  {
+    name: "an inline code span",
+    body: "This names `a code span` in a body.",
+    want: "This names a code span in a body.",
+  },
+  {
+    name: "a link, whose url follows the text",
+    body: "See [the design](docs/DESIGN.md) for context.",
+    want: "See the design (docs/DESIGN.md) for context.",
+  },
+  {
+    name: "a link whose text already holds the url",
+    body: "See [docs/DESIGN.md](docs/DESIGN.md) for context.",
+    want: "See docs/DESIGN.md for context.",
+  },
+  {
+    name: "a code fence, whose line is dropped whole",
+    body: "```\nA sentence the run wrapped in a fence.\n```",
+    want: "A sentence the run wrapped in a fence.",
+  },
+  {
+    name: "a blockquote marker",
+    body: "> A quoted line.",
+    want: "A quoted line.",
+  },
+  {
+    name: "a bullet item, which becomes its own paragraph",
+    body: "- first point\n* second point\n+ third point",
+    want: "first point\n\nsecond point\n\nthird point",
+  },
+  {
+    name: "a numbered item in either spelling",
+    body: "1. first point\n2) second point",
+    want: "first point\n\nsecond point",
+  },
+  {
+    name: "an item's continuation lines, joined into it",
+    body: "- first point\n  continued on the next line",
+    want: "first point continued on the next line",
+  },
+  {
+    name: "a nested item, which rides with its parent paragraph",
+    body: "- first point\n  - a point under it",
+    want: "first point a point under it",
+  },
+  {
+    name: "a list under a lead-in line, which stays a paragraph",
+    body: "The points:\n- one\n- two",
+    want: "The points:\n\none\n\ntwo",
+  },
+  {
+    name: "prose whose wrapped line opens on a year",
+    body: "The release landed and\n2026. The next one is in May.",
+    want: "The release landed and 2026. The next one is in May.",
+  },
+];
+
+describe("format-squash-message normalizing", () => {
+  for (const { name, body, want } of NORMALIZED) {
+    it(`takes out ${name}`, () => {
+      expect(normalizeDraft(draft(body))).toBe(`${SUBJECT}\n\n${want}\n`);
+      expect(refusals(draft(body), 1374)).toEqual([]);
+    });
+  }
+
+  it("puts in the blank line under the subject the draft is missing", () => {
+    expect(normalizeDraft(`${SUBJECT}\nBody sentence.\n`)).toBe(
+      `${SUBJECT}\n\nBody sentence.\n`,
+    );
+  });
+
+  it("takes the markers out of the subject without reflowing it", () => {
+    expect(normalizeDraft("## `Fix` the **thing**\n\nBody.\n")).toBe(
+      "Fix the thing\n\nBody.\n",
+    );
+  });
 
   it("is a fixed point: normalizing its own output changes nothing", () => {
-    const wide = `${"word ".repeat(40)}end`;
-    const once = normalizeDraft(draft(wide));
-    expect(normalizeDraft(once)).toBe(once);
-    expect(violations(once, 1374)).toEqual([]);
+    const drafts = [
+      draft(`${"word ".repeat(40)}end`),
+      `${SUBJECT}\nBody sentence.\n`,
+      ...NORMALIZED.map(({ body }) => draft(body)),
+    ];
+    for (const source of drafts) {
+      const once = normalizeDraft(source);
+      expect(normalizeDraft(once), source).toBe(once);
+      expect(violations(once, 1374), source).toEqual([]);
+    }
   });
 });
 
@@ -100,6 +202,11 @@ describe("format-squash-message subject budget", () => {
     expect(refusals(`${subject}\n\nBody.\n`, 1374)).toEqual([]);
     expect(refusals(`${subject}x\n\nBody.\n`, 1374)).toHaveLength(1);
     expect(refusals(`${subject}x\n\nBody.\n`, 1374)[0]).toContain("(#1374)");
+  });
+
+  it("measures the subject the normalizer produces, markers gone", () => {
+    const subject = "x".repeat(subjectBudget(1374));
+    expect(refusals(`\`${subject}\`\n\nBody.\n`, 1374)).toEqual([]);
   });
 
   it("assumes a four-digit suffix when the number is unknown", () => {
@@ -126,33 +233,6 @@ describe("format-squash-message subject budget", () => {
 describe("format-squash-message refusals", () => {
   const refusedFor = (body) => refusals(draft(body), 1374);
 
-  it("refuses markdown a commit message does not take", () => {
-    for (const body of [
-      "## Motivation",
-      "This is **emphasis** in a body.",
-      "This names `a code span` in a body.",
-      "See [the design](docs/DESIGN.md) for context.",
-      "```\ncode\n```",
-      "> quoted line",
-    ]) {
-      expect(refusedFor(body), body).not.toEqual([]);
-      expect(refusedFor(body)[0], body).toContain("no markdown");
-    }
-  });
-
-  it("refuses a top-level list", () => {
-    for (const body of ["- first point", "* first point", "1. first point"]) {
-      expect(refusedFor(body), body).not.toEqual([]);
-      expect(refusedFor(body)[0], body).toContain("prose, not a list");
-    }
-  });
-
-  it("refuses a body that starts on the line under the subject", () => {
-    const found = refusals(`${SUBJECT}\nBody sentence.\n`, 1374);
-    expect(found).toHaveLength(1);
-    expect(found[0]).toContain("blank");
-  });
-
   it("refuses an over-wide line inside an indented block", () => {
     const found = refusedFor(`  ${"x".repeat(BODY_WRAP_COLUMNS)}`);
     expect(found).toHaveLength(1);
@@ -163,13 +243,21 @@ describe("format-squash-message refusals", () => {
     expect(refusals("   \n\n", 1374)).toHaveLength(1);
   });
 
+  it("refuses nothing normalizing can fix without losing a word", () => {
+    for (const { body } of NORMALIZED) {
+      expect(refusedFor(body), body).toEqual([]);
+    }
+    expect(refusals(`${SUBJECT}\nBody sentence.\n`, 1374)).toEqual([]);
+    expect(refusedFor(`${"word ".repeat(30)}end`)).toEqual([]);
+  });
+
   it("passes a message shaped the way this repository writes them", () => {
     const body =
       "Squash drafts reached the maintainer with unwrapped body lines,\n" +
       "because both producers stated the rule in prose and nothing\n" +
       "checked the result.";
     expect(refusedFor(body)).toEqual([]);
-    expect(violations(draft(body), 1374)).toEqual([]);
+    expect(violations(normalizeDraft(draft(body)), 1374)).toEqual([]);
   });
 });
 
@@ -181,6 +269,34 @@ describe("format-squash-message violations", () => {
     expect(violations(draft(wide), 1374)[0]).toContain(
       String(BODY_WRAP_COLUMNS),
     );
+  });
+
+  it("names the markdown, the list, and the missing blank line", () => {
+    expect(violations(draft("## Motivation"), 1374)[0]).toContain(
+      "no markdown",
+    );
+    expect(violations(draft("- first point"), 1374)[0]).toContain(
+      "prose, not a list",
+    );
+    expect(violations(`${SUBJECT}\nBody sentence.\n`, 1374)[0]).toContain(
+      "blank",
+    );
+  });
+
+  it("reports a draft no rule names but the normalizer still changes", () => {
+    const found = violations(`${SUBJECT}\n\nBody sentence.\n\n\n`, 1374);
+    expect(found).toHaveLength(1);
+    expect(found[0]).toContain("normalizer produces");
+  });
+
+  // A body wrapped by hand at some narrower column is not what the normalizer
+  // produces, so the gate is byte identity with its output rather than "every
+  // line fits": the file is written by the normalizer, and an edit that leaves
+  // the paragraph short is one command away from normalized again.
+  it("reports a paragraph hand-wrapped narrower than the column", () => {
+    const body = "A body sentence broken\nearly, well under the column.";
+    expect(violations(draft(body), 1374)).toHaveLength(1);
+    expect(violations(normalizeDraft(draft(body)), 1374)).toEqual([]);
   });
 
   it("exempts a single unbreakable word, which no wrap can shorten", () => {
@@ -230,6 +346,12 @@ describe("format-squash-message as a command", () => {
     }
   });
 
+  it("takes the markers out rather than refusing over them", () => {
+    const result = run(["1374"], draft("- a list item with `a code span`"));
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe(`${SUBJECT}\n\na list item with a code span\n`);
+  });
+
   it("writes the normalized draft to --out and nothing to stdout", () => {
     const directory = tempDirectory();
     const source = join(directory, "draft.txt");
@@ -247,9 +369,10 @@ describe("format-squash-message as a command", () => {
   it("writes nothing at all when the draft is refused", () => {
     const directory = tempDirectory();
     const target = join(directory, "1374.txt");
-    const result = run(["1374", "--out", target], draft("- a list item"));
+    const subject = "x".repeat(subjectBudget(1374) + 1);
+    const result = run(["1374", "--out", target], `${subject}\n\nBody.\n`);
     expect(result.status).toBe(2);
-    expect(result.stderr).toContain("prose, not a list");
+    expect(result.stderr).toContain("Shorten the subject");
     expect(result.stderr).toContain("Nothing was written");
     expect(() => readFileSync(target, "utf8")).toThrow();
   });

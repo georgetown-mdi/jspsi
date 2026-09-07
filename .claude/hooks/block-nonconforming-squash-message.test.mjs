@@ -100,6 +100,26 @@ describe("block-nonconforming-squash-message hook", () => {
     expect(refusal(writeEvent(path, draft("- first point")))).toContain(
       "prose, not a list",
     );
+    expect(
+      refusal(writeEvent(path, `${SUBJECT}\nA body sentence.\n`)),
+    ).toContain("blank");
+  });
+
+  // The normalizer fixes each of these, so the one thing this hook must never
+  // do is block the file that command writes.
+  it("allows what the normalizer makes of each of those drafts", () => {
+    const path = join(draftDirectory(), "1374.txt");
+    for (const content of [
+      draft("## Motivation"),
+      draft("- first point\n- second point"),
+      `${SUBJECT}\nA body sentence.\n`,
+      draft("This is **strong** and holds `a code span`."),
+    ]) {
+      expect(
+        refusal(writeEvent(path, normalizeDraft(content))),
+        content,
+      ).toBeNull();
+    }
   });
 
   it("checks an Edit against the file with the replacement applied", () => {

@@ -37,12 +37,12 @@
 // they would drift from the document.
 //
 // THE DRAFT GOES OUT THROUGH THE NORMALIZER. format-squash-message.mjs rewraps
-// the body at the column CONTRIBUTING.md sets and reports what it cannot fix
-// without rewriting the message -- an over-budget subject, markdown, a top-level
-// list. A draft that trips one of those is printed as the run produced it, with
-// the reasons on stderr and a nonzero exit, rather than normalized into
-// something that reads finished: a `claude -p` run wrapping its answer in prose
-// or a code fence lands here, and mangling it would cost the whole run.
+// the body at the column CONTRIBUTING.md sets and strips the markdown a `claude
+// -p` run wraps its answer in, a code fence included. It reports the two things
+// it cannot fix without rewriting the message -- an over-budget subject, an
+// over-wide line inside an indented block -- and a draft that trips one of those
+// is printed as the run produced it, with the reasons on stderr and a nonzero
+// exit, rather than half-fixed into something that reads finished.
 //
 // The prompt goes in on STDIN, and each tool list is one comma-joined token.
 // Both are what the real CLI needs rather than preferences: `--allowedTools` and
