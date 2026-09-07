@@ -220,12 +220,34 @@ describe("the console job create", () => {
       ]),
       { kind: "workFile", name: "clients.csv" },
       "filedrop",
+      "inviter",
     );
     expect(failure.title).toBe("The console could not start this exchange");
     expect(failure.message).toContain("Column 2");
+    // The inviter's start-over reaches the file picker, so its copy names it.
+    expect(failure.message).toContain("choose the file again, and start over");
     // The file-removed cause the empty-bodied 400 otherwise produces is wrong
     // here: the file is fine and re-choosing it changes nothing.
     expect(failure.message).not.toContain("may have been removed");
+  });
+
+  test("names the way back the acceptor's own alert offers", () => {
+    // The acceptor's config-category recovery is "Back to your columns", which
+    // keeps every column-step input and re-selects the file from there, so a
+    // start-over sentence would name a control that seat never shows.
+    const failure = failureFor(
+      "config",
+      new JobIntentColumnNameError([
+        { position: 2, name: OVERLONG_NAME, refusal: "too-long" },
+      ]),
+      { kind: "workFile", name: "clients.csv" },
+      "filedrop",
+      "acceptor",
+    );
+    expect(failure.message).toContain(
+      "go back to your columns, and choose the file again",
+    );
+    expect(failure.message).not.toContain("start over");
   });
 
   test("keeps the file-removed cause for a 400 no column explains", () => {
@@ -277,9 +299,10 @@ describe("the console's cleaning coverage sweep", () => {
 
 describe("the copy every refusal point shares", () => {
   test("shows the name through the display cut, bounded and isolated", () => {
-    const message = consoleJobColumnRefusalAlert([
-      { position: 4, name: OVERLONG_NAME, refusal: "too-long" },
-    ]).message;
+    const message = consoleJobColumnRefusalAlert(
+      [{ position: 4, name: OVERLONG_NAME, refusal: "too-long" }],
+      "inviter",
+    ).message;
     // The cut, not the raw header: the isolate wraps it and the name stops at
     // the ceiling, so an unbounded header cannot paint over the alert.
     expect(message).toContain(FSI);

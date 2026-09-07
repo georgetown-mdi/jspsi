@@ -24,6 +24,7 @@ import {
   maxAgeDaysError,
 } from "./manageOfferModel";
 
+import type { AlertContent } from "@components/csvIntake";
 import type { ManageOfferChoices } from "./manageOfferModel";
 
 /** The deposit's progress, driven by the host that owns the store write: `idle`
@@ -70,7 +71,7 @@ export function ManageExchangeOffer({
    * where the deposit was refused over something the operator can act on -- a
    * column name the stored document cannot hold -- since a retry then fails
    * identically; undefined keeps the generic try-again copy. */
-  refusal?: { title: string; message: string };
+  refusal?: AlertContent;
   /** Whether a File System Access input-file handle was captured from the
    * operator's selection, so a scheduled re-run can re-read the file without
    * re-selection. Absent capture is normal (a click-selected file, or a browser
@@ -142,8 +143,15 @@ export function ManageExchangeOffer({
   const cadenceNote = maxAgeCadenceNote(tokenMaxAgeDays);
   const labelValid = labelWithinCap(label);
   const depositing = status === "depositing";
+  // A refusal names a column of the stored document, which none of this panel's
+  // inputs changes, so the deposit is blocked rather than left clickable for the
+  // retry the alert says fails identically. The way on is the header row and a
+  // fresh exchange, which mounts this panel anew.
   const canManage =
-    labelValid && !depositing && (!maxAgeEnabled || maxAgeError === undefined);
+    labelValid &&
+    !depositing &&
+    refusal === undefined &&
+    (!maxAgeEnabled || maxAgeError === undefined);
 
   return (
     <div className={styles.callout}>

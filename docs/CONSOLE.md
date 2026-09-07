@@ -101,12 +101,13 @@ The console also warns at job start when the rendezvous directory is not empty, 
 
 ### A column name the console cannot record
 
-The console bounds every declared column name at 256 characters, so a header
-past that stops two things and names the column in each: the exchange refuses
+The console bounds the length of every declared column name, so a header past
+that bound stops two things and names the column in each: the exchange refuses
 to start, and the cleaning coverage check cannot run over a step whose input
 column is named that way. Both say which column by its position in the file,
 show the name, and state the bound -- the file itself is fine, so choosing it
-again changes nothing and the fix is the header row.
+again changes nothing and the fix is the header row. The bound itself is in
+[CHANNEL_SECURITY.md](spec/CHANNEL_SECURITY.md#application-layer-parsed-input-bounds).
 
 ### Split inbound and outbound rendezvous folders
 

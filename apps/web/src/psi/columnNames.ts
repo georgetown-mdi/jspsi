@@ -385,12 +385,30 @@ export function savedExchangeColumnRefusalAlert(
 }
 
 /**
+ * The way back each seat's failure alert offers, named as that seat's own
+ * control names it: the inviter's alert offers a start-over that reaches the
+ * file picker, while the acceptor's offers only "Back to your columns", which
+ * keeps every column-step input and re-selects the file from there.
+ */
+const CONSOLE_REFUSAL_RECOVERY: Record<"inviter" | "acceptor", string> = {
+  inviter:
+    "Fix the header row in your file, choose the file again, and start over.",
+  acceptor:
+    "Fix the header row in your file, go back to your columns, and choose the file again.",
+};
+
+/**
  * The operator-facing alert for a console job the browser refuses to submit over
  * a column name. Raised before the POST, so the job API's empty-bodied `400` is
  * never what the operator meets and no route's answer changes.
+ *
+ * `seat` picks the recovery sentence, and is required rather than defaulted: a
+ * seat that fell through to the other's wording would name a control its own
+ * alert does not offer.
  */
 export function consoleJobColumnRefusalAlert(
   refused: ReadonlyArray<RefusedColumnName>,
+  seat: "inviter" | "acceptor",
 ): {
   title: string;
   message: string;
@@ -400,7 +418,6 @@ export function consoleJobColumnRefusalAlert(
     message:
       `${refusedColumnsSentence(refused)} The console cannot run an exchange ` +
       `over a column name it cannot record, so nothing was started and ` +
-      `nothing left this machine. Fix the header row in your file, choose the ` +
-      `file again, and start over.`,
+      `nothing left this machine. ${CONSOLE_REFUSAL_RECOVERY[seat]}`,
   };
 }

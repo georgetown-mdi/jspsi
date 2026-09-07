@@ -91,12 +91,16 @@ What managed does **not** add:
 
 ### When a column name stops the save
 
-The stored document holds every column name the exchange declares, and bounds
-each one at 256 characters, refuses a name holding an invisible control or
-text-direction character, and refuses a name a second column already uses. The
-bound covers **every** declared column, including one the exchange never sends:
-a wide vendor export whose header exceeds it can run as a one-off exchange and
-still not be storable as a recurring one.
+The stored document holds every column name the exchange declares, bounds each
+one's length, refuses a name holding an invisible control or text-direction
+character, and refuses a name a second column already uses. The length bound is
+in
+[CHANNEL_SECURITY.md](spec/CHANNEL_SECURITY.md#application-layer-parsed-input-bounds)
+and the character class in its
+[name-class rule](spec/CHANNEL_SECURITY.md#linkage-terms-name-class-character-rule).
+The bound covers **every** declared column, including one the exchange never
+sends: a wide vendor export whose header exceeds it can run as a one-off
+exchange and still not be storable as a recurring one.
 
 The save says which column. The offer names the column's position in the file,
 shows the name itself, and states which of those rules it broke, so the fix is
