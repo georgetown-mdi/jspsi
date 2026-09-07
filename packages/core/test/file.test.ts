@@ -701,24 +701,49 @@ test("guardStreamLineByteCeiling: a non-stream source (no `on`) is inert", () =>
   expect(destroyed).toBe(false);
 });
 
-// The bidi control characters the header transform removes, written as escapes
-// so the source of a test about invisible characters is readable.
+// Characters the header transform removes, written as escapes so the source of
+// a test about invisible characters is readable: three bidi controls, and a tab
+// and an escape from the C0 half of the class.
 const RLO = "\u202e";
 const PDI = "\u2069";
 const LRI = "\u2066";
+const TAB = "\u0009";
+const ESC = "\u001b";
 
 test("the header transform removes bidi controls and reports their positions", async () => {
   const result = await loadCSVFile(
     streamOf(`id,na${RLO}me,${LRI}dob${PDI}\n1,alice,1990-01-02\n`),
   );
   expect(result.meta.fields).toEqual(["id", "name", "dob"]);
-  expect(result.meta.bidiStrippedColumns).toEqual([2, 3]);
+  expect(result.meta.sanitizedColumnPositions).toEqual([2, 3]);
 });
 
-test("a header holding no bidi control reports no stripped position", async () => {
+test("the header transform removes the C0 controls too", async () => {
+  // The class the terms name shape refuses, not the bidi half alone: a tab
+  // inside a name is what an operator's own export produces, and it reaches the
+  // schema as a name only if this read leaves it there.
+  const result = await loadCSVFile(
+    streamOf(`id,date${TAB}of${TAB}birth,ci${ESC}ty\n1,1990-01-02,Rome\n`),
+  );
+  expect(result.meta.fields).toEqual(["id", "dateofbirth", "city"]);
+  expect(result.meta.sanitizedColumnPositions).toEqual([2, 3]);
+  expect(result.data).toEqual([
+    { id: "1", dateofbirth: "1990-01-02", city: "Rome" },
+  ]);
+});
+
+test("a name of C0 controls alone reaches the unnamed-column refusal", async () => {
+  // The empty-name consequence holds for the widened class as it does for the
+  // bidi half: the column comes back unnamed, reported at its position.
+  const result = await loadCSVFile(streamOf(`id,${TAB}${ESC}\n1,2\n`));
+  expect(result.meta.fields).toEqual(["id", ""]);
+  expect(result.meta.sanitizedColumnPositions).toEqual([2]);
+});
+
+test("a header holding none of the class reports no stripped position", async () => {
   const result = await loadCSVFile(streamOf("id,prénom,姓名\n1,alice,x\n"));
   expect(result.meta.fields).toEqual(["id", "prénom", "姓名"]);
-  expect(result.meta.bidiStrippedColumns).toEqual([]);
+  expect(result.meta.sanitizedColumnPositions).toEqual([]);
 });
 
 test("the rows are keyed by the stripped name, so no values are lost", async () => {
@@ -739,7 +764,7 @@ test("a name stripped to nothing reaches the unnamed-column refusal", async () =
   // name every intake already refuses.
   const result = await loadCSVFile(streamOf(`id,${RLO}${PDI}\n1,2\n`));
   expect(result.meta.fields).toEqual(["id", ""]);
-  expect(result.meta.bidiStrippedColumns).toEqual([2]);
+  expect(result.meta.sanitizedColumnPositions).toEqual([2]);
 });
 
 test("a name stripped onto another column keeps both columns' values", async () => {
@@ -751,7 +776,7 @@ test("a name stripped onto another column keeps both columns' values", async () 
   const collided = await loadCSVFile(streamOf(`na${RLO}me,name\nalice,bob\n`));
   expect(collided.meta.fields).toEqual(["name", "name_1"]);
   expect(collided.data).toEqual([{ name: "alice", name_1: "bob" }]);
-  expect(collided.meta.bidiStrippedColumns).toEqual([1]);
+  expect(collided.meta.sanitizedColumnPositions).toEqual([1]);
 
   const alreadyDuplicate = await loadCSVFile(
     streamOf("name,name\nalice,bob\n"),
@@ -765,7 +790,9 @@ test("both drivers strip the same header and report the same positions", async (
   const full = await loadCSVFile(streamOf(csv));
   const streamed = await streamCSVRows(streamOf(csv), () => undefined);
   expect(streamed.columns).toEqual(full.meta.fields);
-  expect(streamed.bidiStrippedColumns).toEqual(full.meta.bidiStrippedColumns);
+  expect(streamed.sanitizedColumnPositions).toEqual(
+    full.meta.sanitizedColumnPositions,
+  );
 });
 
 test("loadCSVColumnSample reads the stripped header the exchange keys on", async () => {

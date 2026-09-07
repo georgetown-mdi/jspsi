@@ -489,6 +489,37 @@ test("a schema-invalid config renders readably, not as a raw ZodError blob", () 
   expect(message).not.toContain('"code"');
 });
 
+test("a name-class character in expected_payload_columns is refused at config load", () => {
+  // The list is written from the disclosed set an accepted invitation holds, so
+  // the same shape holds it where the configuration is read as well as where the
+  // token is decoded: a config hand-edited to name a column with one of these
+  // characters fails to load (exit 64) naming the field, rather than running and
+  // writing that name into a result or a record. U+202E RLO, written as an
+  // escape so a fixture about invisible characters is readable.
+  fs.writeFileSync(
+    configFile,
+    YAML.stringify({
+      ...minimalFiledropConfig,
+      expected_payload_columns: ["risk\u202escore"],
+    }),
+  );
+  saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
+  expect(() => loadConfig(baseOptions())).toThrow(UsageError);
+  let message = "";
+  try {
+    loadConfig(baseOptions());
+  } catch (err) {
+    message = (err as Error).message;
+  }
+  expect(message).toContain("is not a valid exchange spec");
+  expect(message).toContain("expectedPayloadColumns.0");
+  expect(message).toContain(
+    "must not contain a control or text-direction character",
+  );
+  // The refusal locates the field and reports none of the operator's name.
+  expect(message).not.toContain("risk");
+});
+
 test("throws a UsageError at config load when a preserved @path credential file is missing", () => {
   // A saved config keeps the @path reference, not the secret; the reference is
   // resolved when the config loads, before any network activity. A moved or
@@ -2202,50 +2233,13 @@ test("prepareDataset: a header the strip emptied names the removal, not the trai
     expect(err).toBeInstanceOf(UsageError);
     const message = (err as Error).message;
     expect(message).toContain("input column 2 has an empty name");
-    expect(message).toContain(
-      "nothing but invisible text-direction characters",
-    );
+    expect(message).toContain("nothing but invisible control characters");
     expect(message).not.toContain("trailing comma");
     expect(
-      mockState.warnings.find((line) => line.includes("text-direction")),
+      mockState.warnings.find((line) =>
+        line.includes("invisible control characters"),
+      ),
     ).toContain("column 2");
-  }
-});
-
-test("prepareDataset: the declared-name remedy covers whoever declared the name", async () => {
-  // A configuration holds names this operator declared and names `psilink
-  // accept` copied from an invitation verbatim, and nothing in the run tells the
-  // two apart, so the one sentence states both edits -- on a config an
-  // acceptance stands behind (expected_partner_deduplicate, which nothing else
-  // writes) as on one this operator wrote. U+202E RLO, written as an escape so a
-  // fixture about invisible characters is readable.
-  const declared = "n\u202eotes";
-  const terms: LinkageTerms = {
-    ...ssnOnlyTerms,
-    linkageFields: [{ name: declared, type: "ssn" }],
-    linkageKeys: [{ name: "SSN", elements: [{ field: declared }] }],
-  };
-  const input = writeInput("dob,notes\n1990-01-02,none\n");
-
-  for (const spec of [
-    { linkageTerms: terms },
-    { linkageTerms: terms, expectedPartnerDeduplicate: false },
-  ]) {
-    const thrown = await prepareDataset(
-      spec,
-      "Test Party",
-      input,
-      consentContext(),
-    ).catch((e: unknown) => e);
-    expect(thrown).toBeInstanceOf(UsageError);
-    expect(sanitizeErrorForDisplay(thrown)).toContain(
-      "A name the configuration declares holds invisible text-direction " +
-        "characters, which this read removes from the CSV header, so it " +
-        "matches no column of this input. Declare it without them, or, if it " +
-        "came from your partner's invitation, ask them for a new invitation " +
-        "that declares it without them.",
-    );
-    expect((thrown as Error).message).not.toContain("\u202e");
   }
 });
 

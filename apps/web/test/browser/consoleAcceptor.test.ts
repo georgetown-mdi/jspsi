@@ -395,7 +395,7 @@ const ACCEPT_PROFILE = {
   ...ACCEPT_FILE,
   rowCount: 2,
   columns: ["first_name", "last_name"],
-  bidiStrippedColumns: [],
+  sanitizedColumnPositions: [],
   dateInputFormat: "%m/%d/%Y",
   columnSamples: [
     { column: "first_name", values: ["Ann", "Bo"] },
@@ -589,7 +589,7 @@ describe("console acceptor sanitized-header notice", () => {
     // the names are read and marked. Positions only -- echoing the header would
     // put the removed characters back into the notice.
     stubServerJobAccept({
-      profile: { ...ACCEPT_PROFILE, bidiStrippedColumns: [2] },
+      profile: { ...ACCEPT_PROFILE, sanitizedColumnPositions: [2] },
     });
     window.location.hash = await encodeToken(FILEDROP_ENDPOINT);
     app.render(createElement(AcceptorScreen));
@@ -597,7 +597,9 @@ describe("console acceptor sanitized-header notice", () => {
 
     await expect
       .element(
-        page.getByText("A formatting character was removed from a column name"),
+        page.getByText(
+          "An invisible control character was removed from a column name",
+        ),
       )
       .toBeInTheDocument();
     await expect
@@ -641,7 +643,9 @@ describe("console acceptor unnamed-column refusal", () => {
       .not.toBeInTheDocument();
     await expect
       .element(
-        page.getByText("A formatting character was removed from a column name"),
+        page.getByText(
+          "An invisible control character was removed from a column name",
+        ),
       )
       .toBeInTheDocument();
   });

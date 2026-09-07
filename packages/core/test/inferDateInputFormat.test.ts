@@ -59,7 +59,7 @@ test("a header that is only direction characters reaches the caller whole", asyn
     streamOf("id,\u202e\u2069,dob\n1,x,1990-01-02\n"),
   );
   expect(inferred.columns).toEqual(["id", "", "dob"]);
-  expect(inferred.bidiStrippedColumns).toEqual([2]);
+  expect(inferred.sanitizedColumnPositions).toEqual([2]);
   expect(inferred.dobColumn).toBe("dob");
   expect(inferred.dateInputFormat).toBe("YYYY-MM-DD");
 });

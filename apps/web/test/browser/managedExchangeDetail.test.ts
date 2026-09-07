@@ -163,26 +163,33 @@ describe("managed exchange detail configuration", () => {
   test("a value list renders one entry per item, and a hostile name reaches the DOM escaped", async () => {
     // Two properties of the same surface, driven over one document. A key name may
     // include the list separator, so joined text would present one agreed term as
-    // two -- the entries are their own list items instead. And a name may include a
+    // two -- the entries are their own list items instead. And a name may hold a
     // bidi override, which JSX escaping does not touch: it must arrive as an
     // escape, not as a code point that reorders the term a compliance user is
     // confirming.
+    //
+    // The terms name shape refuses that name at both the mint and the store's
+    // own parse, so it is written into the record after it is built. The
+    // component escapes the record it is handed rather than trusting what
+    // produced it, and that is the property driven here.
     const separatorName = "SSN, DOB";
     const hostileName = "LN\u202eEVIL";
+    const stored = record("inviter", {
+      exchangeFile: composeManagedExchangeFile({
+        connection: webrtcLocator,
+        linkageTerms: {
+          ...getDefaultLinkageTerms("County Health Dept"),
+          linkageKeys: [
+            { name: separatorName, elements: [{ field: "ssn" }] },
+            { name: "LN", elements: [{ field: "last_name" }] },
+          ],
+        },
+      }),
+    });
+    stored.exchangeFile.linkageTerms.linkageKeys[1].name = hostileName;
     app.render(
       createElement(ManagedExchangeDetail, {
-        record: record("inviter", {
-          exchangeFile: composeManagedExchangeFile({
-            connection: webrtcLocator,
-            linkageTerms: {
-              ...getDefaultLinkageTerms("County Health Dept"),
-              linkageKeys: [
-                { name: separatorName, elements: [{ field: "ssn" }] },
-                { name: hostileName, elements: [{ field: "last_name" }] },
-              ],
-            },
-          }),
-        }),
+        record: stored,
         accountingRead: { kind: "none" },
         onResetAccounting: () => Promise.resolve(),
         onRetryAccountingRead: () => undefined,

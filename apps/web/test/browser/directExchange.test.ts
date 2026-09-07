@@ -61,7 +61,7 @@ const CLIENTS_PROFILE = {
   ...CLIENTS_FILE,
   rowCount: 2,
   columns: ["client_id", "first_name", "last_name", "dob", "program_code"],
-  bidiStrippedColumns: [],
+  sanitizedColumnPositions: [],
   dateInputFormat: "%m/%d/%Y",
   columnSamples: [
     { column: "client_id", values: ["1", "2"] },
@@ -434,7 +434,9 @@ describe("direct exchange confirm and run", () => {
       .not.toBeInTheDocument();
     await expect
       .element(
-        page.getByText("A formatting character was removed from a column name"),
+        page.getByText(
+          "An invisible control character was removed from a column name",
+        ),
       )
       .toBeInTheDocument();
     // The refused file did not commit: the spine stays on its file step.
@@ -451,14 +453,16 @@ describe("direct exchange confirm and run", () => {
     // into the notice.
     stubJobApi({
       sftp: CONFIGURED_SFTP,
-      profile: { ...CLIENTS_PROFILE, bidiStrippedColumns: [2, 5] },
+      profile: { ...CLIENTS_PROFILE, sanitizedColumnPositions: [2, 5] },
     });
     app.render(createElement(DirectExchangeScreen));
     await reachConfirm();
 
     await expect
       .element(
-        page.getByText("Formatting characters removed from column names"),
+        page.getByText(
+          "Invisible control characters removed from column names",
+        ),
       )
       .toBeInTheDocument();
     await expect

@@ -222,7 +222,6 @@ function mintPreflightMessaging(configPath: string): LinkagePreflightMessaging {
       "they had accepted them.",
     blockRemedy: `then generate the invitation again; these terms come from ${configPath}.`,
     termsStanding: "draft",
-    declaredNamesAuthor: "this party",
   };
 }
 

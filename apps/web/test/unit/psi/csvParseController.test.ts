@@ -27,7 +27,7 @@ const META: CSVParseResult["meta"] = {
   truncated: false,
   cursor: 8,
   fields: ["a", "b"],
-  bidiStrippedColumns: [],
+  sanitizedColumnPositions: [],
 };
 
 // A well-formed result, matching what core's loadCSVFile resolves (data plus

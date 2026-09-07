@@ -72,7 +72,7 @@ describe("the browser file entry the inviter and acceptor seats share", () => {
   test("hands the seat stripped names and the positions to report", async () => {
     const result = await loadCSVFileOffMainThread(csvStream());
     expect(result.meta.fields).toEqual(SANITIZED);
-    expect(result.meta.bidiStrippedColumns).toEqual([5]);
+    expect(result.meta.sanitizedColumnPositions).toEqual([5]);
   });
 
   test("keys the rows by the stripped name, so no column's values are lost", async () => {
@@ -95,7 +95,7 @@ describe("the browser file entry the inviter and acceptor seats share", () => {
       csvStream("ssn,prénom,姓名,имя 🎉\n1,Ada,愛,Ада\n"),
     );
     expect(result.meta.fields).toEqual(["ssn", "prénom", "姓名", "имя 🎉"]);
-    expect(result.meta.bidiStrippedColumns).toEqual([]);
+    expect(result.meta.sanitizedColumnPositions).toEqual([]);
   });
 });
 
@@ -127,7 +127,7 @@ describe("the console's profile behind the direct-exchange and picker seats", ()
 
     const profile = await profileJobInput(dir, "input.csv");
     expect(profile.columns).toEqual(SANITIZED);
-    expect(profile.bidiStrippedColumns).toEqual([5]);
+    expect(profile.sanitizedColumnPositions).toEqual([5]);
     // The per-column samples are keyed by the same stripped name the seat marks.
     expect(profile.columnSamples.map((entry) => entry.column)).toEqual(
       SANITIZED,
@@ -145,7 +145,7 @@ describe("a header that leaves a column unnamed", () => {
     const profile = await profileJobInput(dir, "input.csv");
     return {
       columns: profile.columns,
-      bidiStrippedColumns: profile.bidiStrippedColumns,
+      sanitizedColumnPositions: profile.sanitizedColumnPositions,
       columnSamples: profile.columnSamples,
     };
   }

@@ -21,7 +21,7 @@ import { assertNoUnknownOptions, singleValue } from "../util/flags";
 import { configureLogging, logLevelFlag } from "../util/logging";
 import { promptConfirm } from "../util/prompt";
 import { addLoggingOptions } from "../optionDefinitions";
-import { buildDataSpec, warnBidiStrippedColumns } from "../onlineBootstrap";
+import { buildDataSpec, warnSanitizedColumns } from "../onlineBootstrap";
 import {
   askIdentityAtPrompt,
   identityFromFlagOrPrompt,
@@ -235,14 +235,14 @@ export async function buildTemplateData(
     );
   }
 
-  warnBidiStrippedColumns(inferred.bidiStrippedColumns);
+  warnSanitizedColumns(inferred.sanitizedColumnPositions);
 
   return buildDataSpec({
     identity,
     rows: {
       rawRows: [],
       columns: inferred.columns,
-      sanitizedColumnPositions: inferred.bidiStrippedColumns,
+      sanitizedColumnPositions: inferred.sanitizedColumnPositions,
     },
     ...(inferred.dateInputFormat !== undefined
       ? { dateInputFormat: inferred.dateInputFormat }

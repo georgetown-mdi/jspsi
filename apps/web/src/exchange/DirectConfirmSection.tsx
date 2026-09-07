@@ -142,8 +142,8 @@ export function DirectConfirmSection({
   // operator confirms the run from: the names below are the stripped ones, and
   // this spine has no earlier surface that outlives the file step.
   const sanitizedNotice =
-    profile.bidiStrippedColumns.length > 0
-      ? sanitizedColumnsAlert(profile.bidiStrippedColumns)
+    profile.sanitizedColumnPositions.length > 0
+      ? sanitizedColumnsAlert(profile.sanitizedColumnPositions)
       : undefined;
 
   // Client-side guard mirroring the intent schema's identity contract, validated

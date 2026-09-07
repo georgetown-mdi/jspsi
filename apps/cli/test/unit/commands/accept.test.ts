@@ -1123,7 +1123,10 @@ describe("the count-only shape, at the accept boundary", () => {
     // so the configuration this acceptance writes cannot run (prepareForExchange
     // refuses it before any data is sent). One warning, however many columns, naming them
     // and both remedies, while the operator can still decline.
-    const hostile = `notes${ESC}[0m`;
+    // A zero-width joiner rather than an ESC: this name comes from the CSV
+    // header, which the read strips every control character from, and the
+    // joiner is outside that class and still needs escaping here.
+    const hostile = `notes\u200d[0m`;
     const { warnings, ready } = await acceptWarnings({
       token: tokenDeclaringReceive([]),
       columns: [...LINKAGE_COLUMNS, "diagnosis", hostile],
@@ -1139,7 +1142,7 @@ describe("the count-only shape, at the accept boundary", () => {
     expect(refused).toContain(`\n  - ${sanitizeForDisplay(hostile)}`);
     // The names are the operator's own file's and reach the log sink without ever
     // becoming an Error, so the sink is where they are escaped.
-    expect(refused).not.toContain(ESC);
+    expect(refused).not.toContain("\u200d");
     // Offline acceptance completes, so it says where the refusal actually arrives.
     expect(refused).toContain("psilink exchange");
   });
@@ -5857,15 +5860,33 @@ describe("handler: the prompt's copy has the redaction on its own", () => {
     try {
       // Unlike the render-boundary walk, this route goes through the token's own
       // validation, so the hostile code points ride the fields a decoded token can
-      // still hold: the key name takes the two control characters, since the terms'
-      // free text is refused one at parse, and the identity takes the bidi
-      // override, which is not a control character.
+      // still hold: a transform param value takes the two control characters,
+      // being a data value the schema length-bounds and holds to no character
+      // rule, and the identity takes the bidi override, which the free-text rule
+      // does not refuse. The names are out -- every one of them is held to
+      // NAME_SHAPE_PATTERN, which refuses both classes.
       const encoded = await encodeInvitation({
         ...sampleToken(FUTURE()),
         linkageTerms: {
           ...sampleTerms(`InviterOrg${RLO}`),
           linkageKeys: [
-            { name: `ssn${BEL}${ESC}[31m`, elements: [{ field: "ssn" }] },
+            {
+              name: "ssn",
+              elements: [
+                {
+                  field: "ssn",
+                  transform: [
+                    {
+                      function: "replace_regex",
+                      params: {
+                        pattern: "-",
+                        replacement: `${BEL}${ESC}[31m`,
+                      },
+                    },
+                  ],
+                },
+              ],
+            },
           ],
         },
       });
@@ -6467,9 +6488,12 @@ describe("accept-reuse warns when the re-acceptance drops the commitment", () =>
 
   test("validateAccept: the dropped commitment's column names are escaped for display", async () => {
     // The recorded set is the partner's namespace, brought into the config by an
-    // earlier acceptance, so a name planted with a terminal escape must not reach
-    // the operator raw when this warning reads it back out.
-    const hostile = `notes${ESC}[0m`;
+    // earlier acceptance, so a name planted to disturb the terminal must not
+    // reach the operator raw when this warning reads it back out. A zero-width
+    // joiner rather than an ESC: the recorded list holds the name shape, which
+    // refuses a control character outright (the case below), and the joiner is
+    // outside that class and still needs escaping here.
+    const hostile = "notes\u200d[0m";
     const warnings = await reuseLockInWarnings({
       recorded: [hostile],
       disclosed: undefined,
@@ -6477,7 +6501,22 @@ describe("accept-reuse warns when the re-acceptance drops the commitment", () =>
     });
     const dropped = droppedLockInWarning(warnings);
     expect(dropped).toContain(sanitizeForDisplay(hostile));
-    expect(dropped).not.toContain(ESC);
+    expect(dropped).not.toContain("\u200d");
+  });
+
+  test("validateAccept: a recorded commitment holding the name class is refused", async () => {
+    // The class the header read strips and every name field refuses cannot sit
+    // in the recorded set either: the config read this reuse path makes holds
+    // the list to the same shape, so the acceptance stops at the config rather
+    // than warning about a name no honest writer could have put there. The
+    // refusal names the field and prints none of the value.
+    await expect(
+      reuseLockInWarnings({
+        recorded: [`notes${ESC}[0m`],
+        disclosed: undefined,
+        loggerName: "accept-lockin-drop-refused",
+      }),
+    ).rejects.toThrow(/expectedPayloadColumns\.0: a linkage terms name/);
   });
 });
 

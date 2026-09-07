@@ -4,6 +4,7 @@ import {
   MAX_NAME_LENGTH,
   MAX_PARAMS_ENTRIES,
   MAX_PAYLOAD_ENTRIES,
+  nameValue,
 } from "./linkageTermsSchema.js";
 import type { LinkageTerms } from "./linkageTermsSchema.js";
 import { camelizeKeys } from "../utils/camelizeKeys.js";
@@ -529,6 +530,13 @@ const InvitationTokenBodySchema = z.object({
   // are partner-controlled and are routed through sanitizeForDisplay wherever
   // they reach a consent surface or a diagnostic.
   //
+  // Each name also holds NAME_SHAPE_PATTERN (`nameValue`), as the terms' own
+  // payload column names do. An acceptance writes this list into the operator's
+  // configuration as `expected_payload_columns`, where it is read by the
+  // operator's editor and by tooling that is not psilink, so a partner's
+  // control or text-direction character is refused at decode rather than
+  // escaped at a display sink it never reaches.
+  //
   // The `.min(1)` floor rejects an empty name, matching the metadata/payload
   // name floors -- an honest inviter derives these from metadata whose names
   // are already non-empty. No array-level minimum: an empty array is meaningful
@@ -537,7 +545,7 @@ const InvitationTokenBodySchema = z.object({
   // enforces (a later non-empty payload aborts) -- so it must not be rejected
   // at decode. Only an omitted field reconciles lazily.
   disclosedPayloadColumns: boundedArray(
-    z.string().min(1).max(MAX_NAME_LENGTH),
+    nameValue(z.string().min(1).max(MAX_NAME_LENGTH)),
     MAX_PAYLOAD_ENTRIES,
     `disclosedPayloadColumns must not exceed ${MAX_PAYLOAD_ENTRIES} entries`,
   ).optional(),

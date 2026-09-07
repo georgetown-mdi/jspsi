@@ -308,7 +308,9 @@ test("buildTemplateData: the header this read changed is named by position", asy
   }
 
   expect(names).toContain("last_name");
-  const line = logged.find((entry) => entry.includes("text-direction"));
+  const line = logged.find((entry) =>
+    entry.includes("invisible control characters"),
+  );
   expect(line).toBeDefined();
   expect(line).toContain("column 2");
   expect(line).not.toContain("last_name");
@@ -347,9 +349,11 @@ test("buildTemplateData: a header the strip emptied names the removal", async ()
   expect(refusal).toBeInstanceOf(UsageError);
   const message = (refusal as Error).message;
   expect(message).toContain("input column 2 has an empty name");
-  expect(message).toContain("nothing but invisible text-direction characters");
+  expect(message).toContain("nothing but invisible control characters");
   expect(message).not.toContain("trailing comma");
-  const line = logged.find((entry) => entry.includes("text-direction"));
+  const line = logged.find((entry) =>
+    entry.includes("invisible control characters"),
+  );
   expect(line).toBeDefined();
   expect(line).toContain("column 2");
 });

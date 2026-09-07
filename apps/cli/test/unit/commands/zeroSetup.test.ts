@@ -806,7 +806,7 @@ test("handler: a header the strip emptied names the removal, not the trailing co
     ).rejects.toThrow("exit:64");
     const stderr = stderrChunks.join("");
     expect(stderr).toContain("input column 2 has an empty name");
-    expect(stderr).toContain("nothing but invisible text-direction characters");
+    expect(stderr).toContain("nothing but invisible control characters");
     expect(stderr).not.toContain("trailing comma");
   } finally {
     getLogger("psilink").setLevel("silent");

@@ -223,7 +223,7 @@ export type InvitationFileFailure =
       /** The 1-based positions of the empty-named columns, for the operator-facing
        * message (see {@link unnameableColumnsAlert}). */
       positions: Array<number>;
-      /** The 1-based positions the parse removed bidi control characters from, so
+      /** The 1-based positions the parse removed control characters from, so
        * the message can tell an empty name the removal produced from one a blank
        * header cell did. Empty for a header that held none. */
       sanitizedPositions: Array<number>;
@@ -565,7 +565,7 @@ export async function generateInvitation(params: {
       const csvResult = await loadCSVFileOffMainThread(file);
       rawRows = csvResult.data;
       columns = csvResult.meta.fields ?? [];
-      sanitizedPositions = csvResult.meta.bidiStrippedColumns;
+      sanitizedPositions = csvResult.meta.sanitizedColumnPositions;
     } catch (cause) {
       throw new InvitationFileError({ kind: "unreadable", cause });
     }

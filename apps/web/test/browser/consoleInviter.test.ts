@@ -73,7 +73,7 @@ const CLIENTS_PROFILE = {
   ...CLIENTS_FILE,
   rowCount: 2,
   columns: ["client_id", "first_name", "last_name", "dob", "program_code"],
-  bidiStrippedColumns: [],
+  sanitizedColumnPositions: [],
   dateInputFormat: "%m/%d/%Y",
   columnSamples: [
     { column: "client_id", values: ["1", "2"] },
@@ -1277,7 +1277,7 @@ describe("console inviter picker re-profile", () => {
     // server's parse stripped ride the profile; the seat states them where the
     // operator can act on them, and the notice never echoes the header.
     stubJobApi({
-      profile: { ...CLIENTS_PROFILE, bidiStrippedColumns: [2, 4] },
+      profile: { ...CLIENTS_PROFILE, sanitizedColumnPositions: [2, 4] },
     });
     app.render(createElement(InviterScreen));
     await userEvent.fill(page.getByLabelText("Your name"), "Dana Okafor");
@@ -1285,7 +1285,9 @@ describe("console inviter picker re-profile", () => {
     await page.getByRole("button", { name: "Use this file" }).click();
     await expect
       .element(
-        page.getByText("Formatting characters removed from column names"),
+        page.getByText(
+          "Invisible control characters removed from column names",
+        ),
       )
       .toBeInTheDocument();
     await expect
@@ -1298,7 +1300,7 @@ describe("console inviter picker re-profile", () => {
   });
 
   test("a header the strip emptied is refused by that cause, notice still shown", async () => {
-    // The column whose name held nothing but text-direction characters comes back
+    // The column whose name held nothing but control characters comes back
     // unnamed, so the file is refused -- but by the removal, not by the trailing
     // comma the generic copy offers, and the notice for what the read changed
     // stays on the screen beside it. The stubbed body is the one the console's
@@ -1321,7 +1323,9 @@ describe("console inviter picker re-profile", () => {
       .not.toBeInTheDocument();
     await expect
       .element(
-        page.getByText("A formatting character was removed from a column name"),
+        page.getByText(
+          "An invisible control character was removed from a column name",
+        ),
       )
       .toBeInTheDocument();
   });

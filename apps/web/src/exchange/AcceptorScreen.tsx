@@ -276,12 +276,12 @@ export function AcceptorScreen() {
   // columns step and its verdict derive from it; and the layered column-step editor
   // state (metadata + override layers), seeded once from the acquired columns.
   const [acquired, setAcquired] = useState<AcceptorAcquiredCsv>();
-  // The 1-based positions the parse stripped bidi control characters from, held
+  // The 1-based positions the parse stripped control characters from, held
   // beside the acquired file so the confirm-columns step states what was removed
   // on the screen where the names are read and marked.
-  const [bidiStrippedColumns, setBidiStrippedColumns] = useState<Array<number>>(
-    [],
-  );
+  const [sanitizedColumnPositions, setSanitizedColumnPositions] = useState<
+    Array<number>
+  >([]);
   // The original file whose parse produced `acquired`, captured at the same commit
   // so the server-job path submits the exact bytes the browser path parsed (no
   // re-serialization of rawRows). Fixed alongside `acquired` and the committed name.
@@ -514,7 +514,7 @@ export function AcceptorScreen() {
   function selectFile(chosen: File) {
     setRejectionMessage(undefined);
     setParseAlert(undefined);
-    setBidiStrippedColumns([]);
+    setSanitizedColumnPositions([]);
     setFieldErrors((current) => ({ ...current, file: false }));
     setFile(chosen);
   }
@@ -562,11 +562,14 @@ export function AcceptorScreen() {
     // Before the refusal below, not after it: the same read that emptied a name
     // changed the positions this notice states, and a refused file never reaches
     // the columns step where the notice is otherwise shown.
-    setBidiStrippedColumns(profile.bidiStrippedColumns);
+    setSanitizedColumnPositions(profile.sanitizedColumnPositions);
     const emptyPositions = emptyColumnPositions(profile.columns);
     if (emptyPositions.length > 0) {
       setParseAlert(
-        unnameableColumnsAlert(emptyPositions, profile.bidiStrippedColumns),
+        unnameableColumnsAlert(
+          emptyPositions,
+          profile.sanitizedColumnPositions,
+        ),
       );
       return;
     }
@@ -647,9 +650,9 @@ export function AcceptorScreen() {
       });
       if (id !== parseId.current) return;
       const columns = result.meta.fields ?? [];
-      const stripped = result.meta.bidiStrippedColumns;
+      const stripped = result.meta.sanitizedColumnPositions;
       // Before the refusal below, for the reason commitConsoleAcceptFile states.
-      setBidiStrippedColumns(stripped);
+      setSanitizedColumnPositions(stripped);
       const emptyPositions = emptyColumnPositions(columns);
       if (emptyPositions.length > 0) {
         setParseAlert(unnameableColumnsAlert(emptyPositions, stripped));
@@ -688,8 +691,8 @@ export function AcceptorScreen() {
   // well as the columns step: a read that also left a column unnamed refuses
   // there, and the columns step that otherwise holds the notice is never reached.
   const sanitizedNotice =
-    bidiStrippedColumns.length > 0
-      ? sanitizedColumnsAlert(bidiStrippedColumns)
+    sanitizedColumnPositions.length > 0
+      ? sanitizedColumnsAlert(sanitizedColumnPositions)
       : undefined;
 
   const ready = decode.status === "ready";
@@ -1472,7 +1475,7 @@ export function AcceptorScreen() {
             <AcceptorColumnsStep
               linkageTerms={linkageTerms}
               columns={acquired.columns}
-              bidiStrippedColumns={bidiStrippedColumns}
+              sanitizedColumnPositions={sanitizedColumnPositions}
               columnsState={columnsState}
               editorState={editorState}
               verdict={verdict}

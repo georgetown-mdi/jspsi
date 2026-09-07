@@ -33,7 +33,7 @@ const PROFILE_WIRE = {
   modifiedAt: 1_700_000_000_000,
   rowCount: 2,
   columns: ["first_name", "dob"],
-  bidiStrippedColumns: [],
+  sanitizedColumnPositions: [],
   dateInputFormat: "%m/%d/%Y",
   columnSamples: [
     { column: "first_name", values: ["Ann"] },
@@ -127,7 +127,7 @@ describe("fetchJobInputProfile", () => {
     const { profile } = result;
     expect(profile.name).toBe("clients.csv");
     expect(profile.columns).toEqual(["first_name", "dob"]);
-    expect(profile.bidiStrippedColumns).toEqual([]);
+    expect(profile.sanitizedColumnPositions).toEqual([]);
     expect(profile.dateInputFormat).toBe("%m/%d/%Y");
     expect(profile.columnSamples).toBeInstanceOf(Map);
     expect(profile.columnSamples.get("first_name")).toEqual(["Ann"]);
@@ -179,20 +179,20 @@ describe("fetchJobInputProfile", () => {
     }
   });
 
-  test("rejects a bidiStrippedColumns that is not a 1-based position list", async () => {
+  test("rejects a sanitizedColumnPositions that is not a 1-based position list", async () => {
     // The positions go straight into the operator's notice, so a body that is not
     // a list of positive integers within the header it reports degrades to
     // unavailable rather than composing a sentence naming column 0, column -1,
     // a column past the last one, or more positions than the file has columns.
     for (const bad of [
-      { ...PROFILE_WIRE, bidiStrippedColumns: undefined },
-      { ...PROFILE_WIRE, bidiStrippedColumns: 2 },
-      { ...PROFILE_WIRE, bidiStrippedColumns: ["2"] },
-      { ...PROFILE_WIRE, bidiStrippedColumns: [0] },
-      { ...PROFILE_WIRE, bidiStrippedColumns: [-1] },
-      { ...PROFILE_WIRE, bidiStrippedColumns: [1.5] },
-      { ...PROFILE_WIRE, bidiStrippedColumns: [3] },
-      { ...PROFILE_WIRE, bidiStrippedColumns: [1, 2, 2] },
+      { ...PROFILE_WIRE, sanitizedColumnPositions: undefined },
+      { ...PROFILE_WIRE, sanitizedColumnPositions: 2 },
+      { ...PROFILE_WIRE, sanitizedColumnPositions: ["2"] },
+      { ...PROFILE_WIRE, sanitizedColumnPositions: [0] },
+      { ...PROFILE_WIRE, sanitizedColumnPositions: [-1] },
+      { ...PROFILE_WIRE, sanitizedColumnPositions: [1.5] },
+      { ...PROFILE_WIRE, sanitizedColumnPositions: [3] },
+      { ...PROFILE_WIRE, sanitizedColumnPositions: [1, 2, 2] },
     ]) {
       expect(
         await fetchJobInputProfile("x", () =>
@@ -205,12 +205,12 @@ describe("fetchJobInputProfile", () => {
   test("carries the reported positions through to the seat", async () => {
     const result = await fetchJobInputProfile("x", () =>
       Promise.resolve(
-        jsonResponse({ ...PROFILE_WIRE, bidiStrippedColumns: [1, 2] }),
+        jsonResponse({ ...PROFILE_WIRE, sanitizedColumnPositions: [1, 2] }),
       ),
     );
     expect(result).toMatchObject({ kind: "profile" });
     if (result.kind !== "profile") throw new Error("expected a profile");
-    expect(result.profile.bidiStrippedColumns).toEqual([1, 2]);
+    expect(result.profile.sanitizedColumnPositions).toEqual([1, 2]);
   });
 
   test("maps a 404 to the not_found reason", async () => {

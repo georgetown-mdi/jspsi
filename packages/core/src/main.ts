@@ -249,6 +249,8 @@ export {
   MAX_PAYLOAD_ENTRIES,
   MAX_TEXT_LENGTH,
   MAX_TRANSFORM_PATTERN_LENGTH,
+  NAME_SHAPE_MESSAGE,
+  NAME_SHAPE_PATTERN,
   TEXT_CONTROL_CHAR_MESSAGE,
   TEXT_CONTROL_CHAR_PATTERN,
   referencedLinkageFieldNames,
@@ -430,13 +432,13 @@ export {
   CsvRowParseError,
 } from "./file";
 export type { CSVRow, CSVParseMeta } from "./file";
-// The bidi control characters no name may hold, and the strip the CSV header
-// transform applies. Shared so the ingestion boundary and any schema tightening
-// the same class agree on what a name may contain.
+// The characters no name may hold, and the strip the CSV header transform
+// applies. Shared so the ingestion boundary and the terms schema's name shape
+// agree on what a name may contain.
 export {
-  BIDI_CONTROL_PATTERN,
-  stripBidiControls,
-} from "./utils/bidiControls.js";
+  NAME_CONTROL_CHAR_PATTERN,
+  stripNameControlChars,
+} from "./utils/nameControls.js";
 export {
   inferDateInputFormatFromSource,
   inferDateOfBirthColumn,

@@ -212,12 +212,12 @@ export interface JobInputProfile {
   modifiedAt: number;
   rowCount: number;
   columns: Array<string>;
-  /** The 1-based positions of the columns whose name lost bidi control
-   * characters at the parse (core's `CSVParseMeta.bidiStrippedColumns`). The
+  /** The 1-based positions of the columns whose name lost control
+   * characters at the parse (core's `CSVParseMeta.sanitizedColumnPositions`). The
    * console's intake seats read the file through this profile rather than
    * parsing it themselves, so the positions ride the wire for the notice they
    * show; `columns` already holds the stripped names. */
-  bidiStrippedColumns: Array<number>;
+  sanitizedColumnPositions: Array<number>;
   dateInputFormat?: string;
   columnSamples: Array<ColumnSample>;
 }
@@ -244,9 +244,9 @@ export async function profileJobInput(
   let dobResolved = false;
   let rowCount = 0;
   let columns: Array<string>;
-  let bidiStrippedColumns: Array<number>;
+  let sanitizedColumnPositions: Array<number>;
   try {
-    ({ columns, bidiStrippedColumns } = await streamCSVRows(
+    ({ columns, sanitizedColumnPositions } = await streamCSVRows(
       stream,
       (rows, cols) => {
         if (!dobResolved && cols.length > 0) {
@@ -301,7 +301,7 @@ export async function profileJobInput(
     modifiedAt: mtimeMsInt(stat.mtimeMs),
     rowCount,
     columns,
-    bidiStrippedColumns,
+    sanitizedColumnPositions,
     ...(dateInputFormat !== undefined ? { dateInputFormat } : {}),
     columnSamples,
   };

@@ -210,7 +210,7 @@ export function DirectExchangeScreen() {
   // time. A fresh file drops the trust affirmation, so the operator re-affirms for
   // the new context, then advances to the server step.
   function commitFile(profile: ProfiledJobInput) {
-    const stripped = profile.bidiStrippedColumns;
+    const stripped = profile.sanitizedColumnPositions;
     // Before the refusal below, which drops the profile the confirm step reads
     // its own notice from: the removal is stated beside the refusal it caused.
     setSanitizedNotice(

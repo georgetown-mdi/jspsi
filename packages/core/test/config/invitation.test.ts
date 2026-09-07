@@ -24,6 +24,7 @@ import {
   MAX_LINKAGE_ENTRIES,
   MAX_DATE_FORMAT_LENGTH,
   MAX_TRANSFORM_PARAM_LENGTH,
+  NAME_SHAPE_MESSAGE,
 } from "../../src/config/linkageTermsSchema";
 import { summarizeInvitation } from "../../src/consent/invitationSummary";
 import { NestingDepthExceededError } from "../../src/utils/camelizeKeys";
@@ -418,6 +419,70 @@ test("decodeInvitation refuses a transform param over the content bound", async 
   await expect(decodeInvitation(await encodeRaw(token))).rejects.toThrow(
     /transform param must not exceed/,
   );
+});
+
+test("decodeInvitation refuses a bidi override in a name", async () => {
+  // The name shape sits on LinkageTermsSchema, so the invitation-token decode --
+  // a partner's document, checksum-verified but not authenticated -- refuses a
+  // reordering character in a name before the token reaches a consent surface.
+  // It is the same character a CSV header loses at ingestion, so the two
+  // boundaries agree on what a column may be called.
+  const token = {
+    ...baseToken,
+    linkageTerms: {
+      ...baseTerms,
+      payload: { send: [{ name: "risk\u202escore" }] },
+    },
+  };
+  await expect(decodeInvitation(await encodeRaw(token))).rejects.toThrow(
+    NAME_SHAPE_MESSAGE,
+  );
+});
+
+test("decodeInvitation refuses a name-class character in the disclosed set", async () => {
+  // The token's disclosed column list names the columns the acceptor will
+  // receive, and an acceptance writes it into that operator's configuration as
+  // `expected_payload_columns` -- a file read by the operator's editor and by
+  // tooling that is not psilink, where no display escaping of ours stands. So
+  // the list holds the same name shape the terms' own payload names do, at
+  // decode, before the token reaches a consent surface. A tab, a C1 control,
+  // and a bidi override, written as escapes.
+  for (const hostile of ["\u0009", "\u0085", "\u202e"]) {
+    // An ASCII marker beside the character: the refusal must report neither.
+    const token = {
+      ...baseToken,
+      disclosedPayloadColumns: [`zqmark${hostile}`],
+    };
+    const encoded = await encodeRaw(token);
+    await expect(decodeInvitation(encoded)).rejects.toThrow(NAME_SHAPE_MESSAGE);
+    let caught: unknown;
+    try {
+      await decodeInvitation(encoded);
+    } catch (err) {
+      caught = err;
+    }
+    const rendered = describeDecodeError(caught);
+    expect(rendered).toContain("disclosedPayloadColumns.0");
+    expect(rendered).not.toContain("zqmark");
+    expect(rendered).not.toContain(hostile);
+  }
+});
+
+test("decodeInvitation keeps an ordinary disclosed column name", async () => {
+  // Non-vacuous: the shape refuses the class above and nothing else, so a list
+  // of ordinary names still decodes, and the empty list -- the strict "receive
+  // nothing" commitment -- is still distinguishable from an omitted field.
+  const decoded = await decodeInvitation(
+    await encodeRaw({
+      ...baseToken,
+      disclosedPayloadColumns: ["risk_score", "notes"],
+    }),
+  );
+  expect(decoded.disclosedPayloadColumns).toEqual(["risk_score", "notes"]);
+  const empty = await decodeInvitation(
+    await encodeRaw({ ...baseToken, disclosedPayloadColumns: [] }),
+  );
+  expect(empty.disclosedPayloadColumns).toEqual([]);
 });
 
 test("decodeInvitation rejects a deeply-nested transform.params at decode (bounded fold)", async () => {

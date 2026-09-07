@@ -475,7 +475,7 @@ test("prepareForExchange: positions name the removal for an emptied header", () 
     message = err instanceof Error ? err.message : String(err);
   }
   expect(message).toContain("input column 2 has an empty name");
-  expect(message).toContain("invisible text-direction characters");
+  expect(message).toContain("invisible control characters");
   expect(message).not.toContain("trailing comma");
 });
 
@@ -495,7 +495,7 @@ test("prepareForExchange: a caller passing no positions states the header causes
   }
   expect(message).toContain("input column 2 has an empty name");
   expect(message).toContain("trailing comma");
-  expect(message).not.toContain("text-direction");
+  expect(message).not.toContain("invisible control characters");
 });
 
 // --- Schema ------------------------------------------------------------------

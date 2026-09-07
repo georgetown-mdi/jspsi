@@ -928,7 +928,6 @@ const INVITATION_PREFLIGHT_MESSAGING: LinkagePreflightMessaging = {
   blockRemedy:
     "or ask your partner for an invitation with different linkage terms.",
   termsStanding: "agreed",
-  declaredNamesAuthor: "the partner",
 };
 
 // --- Handler -----------------------------------------------------------------

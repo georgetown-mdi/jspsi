@@ -174,7 +174,7 @@ describe("column-name isolation: what the wrapper does not contain", () => {
   // Which sinks share the residual no longer decides what an operator's header
   // can do to their screen: every name below is composed here as a prop, while a
   // name read from a CSV loses all nine bidi control characters at core's parse
-  // boundary (`bidiStrippingHeaderTransform`, packages/core/src/file.ts), so
+  // boundary (`sanitizingHeaderTransform`, packages/core/src/file.ts), so
   // neither the unmatched PDI nor the open override this measures survives to any
   // sink. What remains for the sinks that were left undriven -- the
   // check-your-answers "Columns shared" row, the acceptor ledger's send row, the

@@ -11,6 +11,7 @@ import {
   safeParseLinkageTerms,
   MAX_NAME_LENGTH,
   MAX_TEXT_LENGTH,
+  NAME_SHAPE_MESSAGE,
   TEXT_CONTROL_CHAR_MESSAGE,
   LONE_SURROGATE_MESSAGE,
   LinkageTermsSchema,
@@ -1910,6 +1911,250 @@ test("the control-character refusal names the field by path, not the value", () 
   const rendered = JSON.stringify(result.error.issues);
   expect(rendered).toContain(TEXT_CONTROL_CHAR_MESSAGE);
   expect(rendered).not.toContain("unrepeatable-label");
+});
+
+// --- Name-class shape rule ---------------------------------------------------
+// Every MAX_NAME_LENGTH-bounded name of the document holds NAME_SHAPE_PATTERN
+// in its own shape: no free-text control character, and none of the nine bidi
+// formatting characters the CSV read strips from a header. The cases below pin
+// one accepted and two refused values per field in scope, the edges of both
+// refused classes, and the three values the rule leaves out by design -- a
+// transform param value, a param key, and an allowedCharacters class.
+
+// The two refused classes, one representative each, written as escapes so this
+// source holds no raw invisible byte.
+const BEL = "\u0007";
+const RLO = "\u202e";
+// Accepted beside them: the zero-width joiner and the left-to-right MARK, which
+// sets a direction for the neutrals around it and opens no scope, so it is
+// outside the bidi class the strip and this rule name.
+const ZWJ = "\u200d";
+const LRM = "\u200e";
+
+// A name exercising what the rule leaves alone: letters in three scripts, an
+// astral character, and the two admitted invisibles above.
+const ADMISSIBLE_NAME = `Ministère ${ZWJ}厚生労働省${LRM} \u{1f600}`;
+
+// One coherent document per name-class field, with that field holding `name` and
+// every other left valid, so a case is about the field it names. Where a name is
+// a reference (an element `field`, a `swap` entry) the thing it references takes
+// the same value, since a dangling reference would refuse the accepted case for
+// a reason that is not this rule.
+const NAME_FIELDS: Array<[string, (name: string) => unknown]> = [
+  [
+    "a linkage field name",
+    (name) => ({
+      ...base,
+      linkageFields: [
+        { name: "ssn", type: "ssn" },
+        { name, type: "ssn4" },
+      ],
+    }),
+  ],
+  [
+    "a linkage key name",
+    (name) => ({
+      ...base,
+      linkageKeys: [{ name, elements: [{ field: "ssn" }] }],
+    }),
+  ],
+  [
+    "a linkage key element field reference",
+    (name) => ({
+      ...base,
+      linkageFields: [{ name, type: "ssn" }],
+      linkageKeys: [{ name: "SSN", elements: [{ field: name }] }],
+    }),
+  ],
+  [
+    "a linkage key element name",
+    (name) => ({
+      ...base,
+      linkageKeys: [{ name: "SSN", elements: [{ field: "ssn", name }] }],
+    }),
+  ],
+  [
+    "a linkage key swap reference",
+    (name) => ({
+      ...base,
+      linkageFields: [
+        { name: "ssn", type: "ssn" },
+        { name: "ssn4", type: "ssn4" },
+      ],
+      linkageKeys: [
+        {
+          name: "SSN",
+          elements: [{ field: "ssn", name }, { field: "ssn4" }],
+          swap: [name, "ssn4"],
+        },
+      ],
+    }),
+  ],
+  [
+    "a transform function name",
+    (name) => ({
+      ...base,
+      linkageKeys: [
+        {
+          name: "SSN",
+          elements: [{ field: "ssn", transform: [{ function: name }] }],
+        },
+      ],
+    }),
+  ],
+  [
+    "a payload column name",
+    (name) => ({ ...base, payload: { send: [{ name }] } }),
+  ],
+  [
+    "a legal agreement reference",
+    (name) => ({
+      ...base,
+      legalAgreement: {
+        reference: name,
+        purpose: "Audit of the State tutoring program",
+        expirationDate: "2030-12-31",
+      },
+    }),
+  ],
+  [
+    "a linkage rule set name",
+    (name) => ({
+      ...base,
+      linkageRuleSet: {
+        fieldSet: { name, version: "1.0.0" },
+        keySet: { name: "baseline-keys", version: "1.0.0" },
+      },
+    }),
+  ],
+];
+
+test.each(NAME_FIELDS)("accepts %s written in letters", (_label, terms) => {
+  expect(() => parseLinkageTerms(terms(ADMISSIBLE_NAME))).not.toThrow();
+});
+
+test.each(NAME_FIELDS)(
+  "rejects %s holding a control character",
+  (_label, terms) => {
+    expect(() => parseLinkageTerms(terms(`ssn${BEL}4`))).toThrow(ZodError);
+  },
+);
+
+test.each(NAME_FIELDS)(
+  "rejects %s holding a bidi override",
+  (_label, terms) => {
+    expect(() => parseLinkageTerms(terms(`ssn${RLO}4`))).toThrow(ZodError);
+  },
+);
+
+test.each([
+  ["a NUL", NUL],
+  ["an ESC", ESC],
+  ["a DEL", DEL],
+  ["a C1 control", C1_NEXT_LINE],
+  ["a tab", "\t"],
+  ["a line feed", "\n"],
+  ["a carriage return", "\r"],
+  ["a left-to-right embedding", "\u202a"],
+  ["a right-to-left embedding", "\u202b"],
+  ["a pop directional formatting", "\u202c"],
+  ["a left-to-right override", "\u202d"],
+  ["a right-to-left override", RLO],
+  ["a left-to-right isolate", "\u2066"],
+  ["a right-to-left isolate", "\u2067"],
+  ["a first-strong isolate", "\u2068"],
+  ["a pop directional isolate", "\u2069"],
+])("rejects a payload column name holding %s", (_label, character) => {
+  expect(() =>
+    parseLinkageTerms({
+      ...base,
+      payload: { send: [{ name: `id${character}` }] },
+    }),
+  ).toThrow(ZodError);
+});
+
+test("a free-text field still admits a bidi character a name may not hold", () => {
+  // The two rules draw different classes on purpose: free text is a sentence a
+  // party writes, where a direction control can be meant, while a name is a
+  // label matched, recorded, and shown beside other copy.
+  expect(() =>
+    parseLinkageTerms({ ...base, identity: `Agency${RLO} A` }),
+  ).not.toThrow();
+});
+
+test("a transform param value and key are length-bounded only", () => {
+  // The two recorded exclusions on the params record. A value is data a step
+  // matches or substitutes with -- a tab is a plausible delimiter, a line feed a
+  // plausible replacement -- so refusing either would refuse legitimate terms,
+  // and a key is left with the value it names.
+  expect(() =>
+    parseLinkageTerms({
+      ...base,
+      linkageKeys: [
+        {
+          name: "SSN",
+          elements: [
+            {
+              field: "ssn",
+              transform: [
+                {
+                  function: "split_on",
+                  params: { delimiter: "\t", [`no${BEL}te`]: `line\nbreak` },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    }),
+  ).not.toThrow();
+});
+
+test("an allowedCharacters class is length-bounded only", () => {
+  // A partner-authored character class, behind the dialect gate: what it names is
+  // the data it admits, so a tab in it is a tab the field's values may hold.
+  expect(() =>
+    parseLinkageTerms({
+      ...base,
+      linkageFields: [
+        {
+          name: "firstName",
+          type: "first_name",
+          constraints: { allowedCharacters: "A-Z\t" },
+        },
+      ],
+      linkageKeys: [{ name: "FN", elements: [{ field: "firstName" }] }],
+    }),
+  ).not.toThrow();
+});
+
+test.each([
+  ["a control character", BEL],
+  ["a bidi override", RLO],
+])(
+  "the version regex already refuses %s, needing no shape of its own",
+  (_label, character) => {
+    // The rule's documentation states this rather than adding a second check that
+    // could never fire; the claim is measured here.
+    expect(() =>
+      parseLinkageTerms({ ...base, version: `1.0.0${character}` }),
+    ).toThrow(ZodError);
+  },
+);
+
+test("the name refusal names the field by path, not the value", () => {
+  const result = safeParseLinkageTerms({
+    ...base,
+    payload: { send: [{ name: `id${BEL}unrepeatable-name` }] },
+  });
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  expect(result.error.issues.map((issue) => issue.path.join("."))).toContain(
+    "payload.send.0.name",
+  );
+  const rendered = JSON.stringify(result.error.issues);
+  expect(rendered).toContain(NAME_SHAPE_MESSAGE);
+  expect(rendered).not.toContain("unrepeatable-name");
 });
 
 test("rejects an over-long linkage key swap reference", () => {

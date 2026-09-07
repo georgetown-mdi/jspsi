@@ -14,12 +14,12 @@
  * the mounted file's own and varies per run. */
 interface UnnamedColumnProfile {
   columns: Array<string>;
-  bidiStrippedColumns: Array<number>;
+  sanitizedColumnPositions: Array<number>;
   columnSamples: Array<{ column: string; values: Array<string> }>;
 }
 
 /**
- * A header whose middle column is nothing but text-direction characters --
+ * A header whose middle column is nothing but control characters --
  * U+202E (right-to-left override) then U+2069 (pop directional isolate), written
  * as escapes so a fixture about invisible characters is itself readable. The
  * strip leaves that column no name.
@@ -32,7 +32,7 @@ export const CONTROLS_ONLY_HEADER_CSV =
  * is reported, so the seat states the removal as the cause of the refusal. */
 export const CONTROLS_ONLY_HEADER_PROFILE: UnnamedColumnProfile = {
   columns: ["id", "", "city"],
-  bidiStrippedColumns: [2],
+  sanitizedColumnPositions: [2],
   columnSamples: [
     { column: "id", values: ["1", "2"] },
     { column: "", values: ["x", "y"] },
@@ -48,7 +48,7 @@ export const BLANK_HEADER_CELL_CSV =
  * stripped position, which is the trailing-comma cause the seat states. */
 export const BLANK_HEADER_CELL_PROFILE: UnnamedColumnProfile = {
   columns: ["client_id", "", "dob"],
-  bidiStrippedColumns: [],
+  sanitizedColumnPositions: [],
   columnSamples: [
     { column: "client_id", values: ["1", "2"] },
     { column: "", values: ["x", "y"] },

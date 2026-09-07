@@ -94,7 +94,10 @@ describe("the configuration rows escape what somebody else authored", () => {
         },
       ],
       legalAgreement: {
-        reference: `MOU${RLO}-001`,
+        // The zero-width joiner rather than the override: a reference is a name,
+        // and the schema's name shape refuses the override outright. The joiner
+        // is outside both refused classes and still needs escaping here.
+        reference: `MOU${ZWJ}-001`,
         purpose: "Care coordination",
         expirationDate: "2027-01-01",
       },
