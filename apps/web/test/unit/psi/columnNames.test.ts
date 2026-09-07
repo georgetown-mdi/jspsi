@@ -91,7 +91,7 @@ describe("overlongColumnsAlert", () => {
 
 describe("sanitizedColumnsAlert", () => {
   test("names a single column position in the singular", () => {
-    const alert = sanitizedColumnsAlert([3]);
+    const alert = sanitizedColumnsAlert([3], "this party");
     expect(alert.title).toBe(
       "A formatting character was removed from a column name",
     );
@@ -100,14 +100,14 @@ describe("sanitizedColumnsAlert", () => {
   });
 
   test("pluralizes the title and message for multiple positions", () => {
-    const alert = sanitizedColumnsAlert([2, 5]);
+    const alert = sanitizedColumnsAlert([2, 5], "this party");
     expect(alert.title).toBe("Formatting characters removed from column names");
     expect(alert.message).toContain("Columns 2, 5");
     expect(alert.message).toContain("had names that held");
   });
 
   test("states what was done and how to act on it", () => {
-    const alert = sanitizedColumnsAlert([1]);
+    const alert = sanitizedColumnsAlert([1], "this party");
     expect(alert.message).toContain("are gone from");
     expect(alert.message).toContain("edit the header row");
   });
@@ -116,7 +116,7 @@ describe("sanitizedColumnsAlert", () => {
     // The read reaches the names it derives from the header and nothing else: a
     // name the linkage terms declare keeps these characters, so the copy claims
     // no more than the derived names and says the declared one is untouched.
-    const alert = sanitizedColumnsAlert([1]);
+    const alert = sanitizedColumnsAlert([1], "this party");
     expect(alert.message).toContain(
       "gone from every name this read takes from the header",
     );
@@ -133,14 +133,42 @@ describe("sanitizedColumnsAlert", () => {
     // The bound is only half the operator's answer: a declared name holding
     // these characters is sent as declared, and the remedy is the terms this
     // browser holds, not a file on disk the web operator does not have.
-    const alert = sanitizedColumnsAlert([1]);
+    const alert = sanitizedColumnsAlert([1], "this party");
     expect(alert.message).toContain(
       "reaches your partner wherever the exchange sends it",
     );
     expect(alert.message).toContain(
-      "change the terms for this exchange to declare it without them",
+      "Change the terms for this exchange to declare it without them",
     );
     expect(alert.message).not.toContain("configuration");
+  });
+
+  test("addresses the declared-name remedy to the party that can make it", () => {
+    // The acceptor seats render this notice over terms the partner declared in
+    // an invitation this operator cannot edit, so the inviter's remedy would
+    // name the wrong party. The consequence is the same on both seats.
+    const acceptor = sanitizedColumnsAlert([1], "the partner");
+    expect(acceptor.message).toContain(
+      "reaches your partner wherever the exchange sends it",
+    );
+    expect(acceptor.message).toContain(
+      "Your partner has to declare it without those characters and send a new invitation",
+    );
+    expect(acceptor.message).not.toContain("change the terms");
+    expect(sanitizedColumnsAlert([1], "this party").message).not.toContain(
+      "send a new invitation",
+    );
+  });
+
+  test("interpolates no name on either author, only the positions", () => {
+    // Every fragment is a fixed string or a position, so no header name and no
+    // partner-authored byte can reach the copy through this helper.
+    for (const author of ["this party", "the partner"] as const) {
+      const alert = sanitizedColumnsAlert([2, 4], author);
+      expect(alert.message).toContain("Columns 2, 4");
+      expect(alert.message).toMatch(/^[ -~]*$/);
+      expect(alert.message.match(/\d+/g)).toEqual(["2", "4"]);
+    }
   });
 
   test("states the numbering instead of claiming the name is the rest of the header", () => {
@@ -148,7 +176,7 @@ describe("sanitizedColumnsAlert", () => {
     // whose two names differ only by a removed character comes back as `name`
     // and `name_1`, so the name a collided column keeps is not its own header
     // and can be the untouched column's.
-    const alert = sanitizedColumnsAlert([2]);
+    const alert = sanitizedColumnsAlert([2], "this party");
     expect(alert.message).toContain("two columns with the same name");
     expect(alert.message).toContain("the later one was numbered");
     expect(alert.message).not.toContain("rest of the header");

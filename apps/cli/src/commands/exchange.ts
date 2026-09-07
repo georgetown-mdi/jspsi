@@ -712,6 +712,11 @@ export async function prepareDataset(
   // has drifted from the terms the configuration committed to. Gated on
   // explicit linkageTerms only; the config's standardization and metadata are
   // passed so the verdict matches what prepareForExchange grades.
+  //
+  // A config `psilink accept` wrote holds the invitation's linkage field names
+  // verbatim, and this operator cannot redeclare them, so the declared-name
+  // remedy is addressed to the partner on exactly the configs an acceptance
+  // stands behind (linkageTermsStandingOf).
   if (exchangeDataSpec.linkageTerms !== undefined)
     checkLinkageSatisfiability(
       columns,
@@ -722,7 +727,10 @@ export async function prepareDataset(
         blockRemedy:
           "or re-establish the exchange with linkage terms the CSV satisfies.",
         termsStanding: "agreed",
-        declaredNamesAuthor: "this party",
+        declaredNamesAuthor:
+          linkageTermsStandingOf(exchangeDataSpec) === "accepted-with-partner"
+            ? "the partner"
+            : "this party",
       },
       exchangeDataSpec.standardization,
       exchangeDataSpec.metadata,
@@ -748,6 +756,7 @@ export async function prepareDataset(
     identity,
     rawRows,
     columns,
+    sanitizedColumnPositions,
   );
   warnOnValueConstraints(prepared, log);
   // Recurring / offline-accept enforcement: a committed config has its received

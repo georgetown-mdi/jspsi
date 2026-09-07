@@ -48,7 +48,9 @@ export interface LinkagePreflightMessaging {
   /** Who wrote the names these terms declare, selecting who the declared-name
    * sentence addresses its rename to ({@link bidiDeclaredNameNote}). The accept
    * path reads the partner's invitation, a document this operator cannot edit,
-   * so telling them to declare the name differently names the wrong party. */
+   * so telling them to declare the name differently names the wrong party; a
+   * configuration an acceptance wrote holds that invitation's field names
+   * verbatim and reads the same way. */
   declaredNamesAuthor: "this party" | "the partner";
 }
 
@@ -112,8 +114,11 @@ function declaredNameDiffersOnlyByBidiControls(
  * The sentence a refusal adds when a declared name holds those characters,
  * addressed to whoever can rename it: `declaredNamesAuthor` selects between this
  * operator, who wrote the names, and the partner, whose invitation is their own
- * document and has to be sent again corrected. Both interpolate the terms' origin
- * noun and nothing else -- the name itself is terms content, partner-authored on
+ * document and has to be sent again corrected. The partner's remedy names the
+ * invitation rather than the terms' origin noun, since that is the document the
+ * partner authors whether this seat reads it directly or holds its field names
+ * in a configuration an acceptance wrote. Beyond the origin noun both
+ * interpolate nothing -- the name itself is terms content, partner-authored on
  * the accept path, and stays on the cause links that state names.
  */
 function bidiDeclaredNameNote(messaging: LinkagePreflightMessaging): string {
@@ -122,7 +127,7 @@ function bidiDeclaredNameNote(messaging: LinkagePreflightMessaging): string {
       ` The ${messaging.source} names a column with invisible text-direction ` +
       `characters, which this read removes from the CSV header, so no column ` +
       `of this input matches it. Your partner has to declare that name ` +
-      `without them and send a new ${messaging.source}.`
+      `without them and send a new invitation.`
     );
   return (
     ` A name the ${messaging.source} declares holds invisible text-direction ` +

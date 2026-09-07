@@ -237,7 +237,7 @@ export function AcceptorColumnsStep({
       : undefined;
   const sanitizedNotice =
     bidiStrippedColumns.length > 0
-      ? sanitizedColumnsAlert(bidiStrippedColumns)
+      ? sanitizedColumnsAlert(bidiStrippedColumns, "the partner")
       : undefined;
   const standardizationValid = acceptorStandardizationValid(
     editorState.standardization,

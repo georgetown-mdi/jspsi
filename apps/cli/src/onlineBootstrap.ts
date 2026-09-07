@@ -445,11 +445,15 @@ export async function loadInputRows(
  *
  * What it says about disclosure is bounded by what this read reaches: the names
  * it derives from the header, which are the matching name and the sent name
- * where the exchange takes that from the header. A name the configuration
- * declares -- an explicit metadata block, a linkage field, a standardization
+ * where the exchange takes that from the header. A name declared outside the
+ * header -- an explicit metadata block, a linkage field, a standardization
  * output -- is not read from the header at all, keeps these characters, and
- * reaches the partner wherever the run sends it, so the line says so and names
- * the edit. Refusing such a name is the terms rule's, not this read's.
+ * reaches the partner wherever the run sends it, so the line says so and stops
+ * there. It names no remedy: this read serves every CLI path, including an
+ * accept whose declared names are the partner's invitation and a zero-setup run
+ * with no configuration at all, so no one document is the operator's to edit.
+ * The seat-specific refusal (`checkLinkageSatisfiability`) names who fixes
+ * it. Refusing such a name is the terms rule's, not this read's.
  */
 export function warnBidiStrippedColumns(
   positions: ReadonlyArray<number>,
@@ -464,9 +468,9 @@ export function warnBidiStrippedColumns(
       `name${plural ? "s" : ""} matched on, and the ` +
       `name${plural ? "s" : ""} sent to your partner where the exchange ` +
       `takes ${plural ? "them" : "it"} from the header. This read does not ` +
-      `change a name your configuration declares; one that holds these ` +
+      `change a name declared outside the header; one that holds these ` +
       `characters is used as declared and reaches your partner wherever the ` +
-      `exchange sends it, so rewrite it in the configuration without them. ` +
+      `exchange sends it. ` +
       `Where that left two columns with the same name, the later one was ` +
       `numbered to keep the two apart. Check that ` +
       `${plural ? "those columns" : "the column"} still ` +

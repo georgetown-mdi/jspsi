@@ -2212,6 +2212,59 @@ test("prepareDataset: a header the strip emptied names the removal, not the trai
   }
 });
 
+test("prepareDataset: an accepted config addresses the declared-name rename to the partner", async () => {
+  // `psilink accept` writes the invitation's linkage field names into the config
+  // verbatim, and this operator cannot redeclare them, so a config an acceptance
+  // stands behind -- the presence of expected_partner_deduplicate, which nothing
+  // else writes -- addresses the rename to the partner. A config no acceptance
+  // stands behind keeps this operator's own. U+202E RLO, written as an escape so
+  // a fixture about invisible characters is readable.
+  const declared = "n\u202eotes";
+  const terms: LinkageTerms = {
+    ...ssnOnlyTerms,
+    linkageFields: [{ name: declared, type: "ssn" }],
+    linkageKeys: [{ name: "SSN", elements: [{ field: declared }] }],
+  };
+  const input = writeInput("dob,notes\n1990-01-02,none\n");
+
+  const accepted = await prepareDataset(
+    { linkageTerms: terms, expectedPartnerDeduplicate: false },
+    "Test Party",
+    input,
+    consentContext(),
+  ).catch((e: unknown) => e);
+  expect(accepted).toBeInstanceOf(UsageError);
+  expect(sanitizeErrorForDisplay(accepted)).toContain(
+    "Your partner has to declare that name without them and send a new invitation",
+  );
+  expect((accepted as Error).message).not.toContain("\u202e");
+
+  const authored = await prepareDataset(
+    { linkageTerms: terms },
+    "Test Party",
+    input,
+    consentContext(),
+  ).catch((e: unknown) => e);
+  expect(sanitizeErrorForDisplay(authored)).toContain(
+    "A name the configuration declares holds invisible text-direction characters",
+  );
+  expect(sanitizeErrorForDisplay(authored)).not.toContain(
+    "Your partner has to declare",
+  );
+});
+
+test("prepareDataset: the read's stripped positions reach prepareForExchange", async () => {
+  // The positions travel to both resolutions the run makes, the pre-flight one
+  // and the prepare itself: a spec with no metadata block infers it inside
+  // prepareForExchange, where a header the removal emptied has to be refused
+  // naming the removal rather than the header-row causes. U+202E RLO, written as
+  // an escape so a fixture about invisible characters is readable.
+  const input = writeInput("id,d\u202eob,city\n1,1990-01-02,Rome\n");
+  vi.mocked(prepareForExchange).mockClear();
+  await prepareDataset({}, "Test Party", input, consentContext());
+  expect(vi.mocked(prepareForExchange).mock.calls[0][4]).toEqual([2]);
+});
+
 test("prepareDataset: refuses (UsageError) naming the field when the CSV satisfies no linkage key", async () => {
   // A first_name-only CSV cannot produce the ssn field the lone key needs, so the
   // run must stop with a usage error rather than reach a silent empty exchange.
