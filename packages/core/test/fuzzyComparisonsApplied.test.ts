@@ -8,6 +8,24 @@ vi.mock("../src/consent/appliedSettings", () => ({
   APPLIED_SETTINGS: { deduplicate: false, fuzzyComparisons: true },
 }));
 
+// Counts the per-value expansions buildKeyStrings performs, delegating to the
+// real one: the value-at-a-time loop is what bounds the allocation at a
+// crossing, and a single-call expansion of the whole list passes every
+// assertion on the row's fate while allocating the element's entire expansion.
+const fuzzyExpansions = vi.hoisted(() => ({ count: 0 }));
+
+vi.mock("../src/fuzzyComparisons", async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import("../src/fuzzyComparisons")>();
+  return {
+    ...original,
+    expandFuzzyComparisons: (value: string, kind: GenerateFuzzyComparisons) => {
+      fuzzyExpansions.count += 1;
+      return original.expandFuzzyComparisons(value, kind);
+    },
+  };
+});
+
 import {
   buildKeyStrings,
   StandardizedDataset,
@@ -17,6 +35,7 @@ import { FAN_OUT_CANDIDATES_PER_ELEMENT } from "../src/fanOutFunctions";
 import { UsageError } from "../src/errors";
 import { getLogger } from "../src/utils/logger";
 import type {
+  GenerateFuzzyComparisons,
   LinkageKey,
   TransformStep,
 } from "../src/config/linkageTermsSchema";
@@ -755,6 +774,14 @@ describe("buildKeyStrings: the accumulating bound over an expanded element", () 
     );
   }
 
+  // The cell the crossing lands inside, and the token it lands on. A token
+  // retains one candidate per pair of its positions that differ, plus the token
+  // itself -- 990 or 991 of TOKEN_WIDTH characters each -- so the row's
+  // corrected total passes MAX_ASSEMBLED_KEY_LENGTH_PER_ROW (4,194,304) at the
+  // 95th of the cell's tokens.
+  const CROSSING_CELL_TOKENS = 100;
+  const TOKENS_EXPANDED_BEFORE_CROSSING = 95;
+
   // The element the crossing has to land before. Realizing it is what the
   // assembled projection cannot avoid paying, since that projection is reachable
   // only once every element's candidates exist, so a call here is the observation
@@ -764,7 +791,7 @@ describe("buildKeyStrings: the accumulating bound over an expanded element", () 
 
   test("a declared fan-out row the expansion pushes past the cap drops before the next element is read", () => {
     const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
-    const dataset = splitDataset(100);
+    const dataset = splitDataset(CROSSING_CELL_TOKENS);
     const laterElement = spyOnLaterElement(dataset);
     expect(buildKeyStrings(expandingKey, dataset, 0, true, 1)).toBeNull();
     expect(warn).toHaveBeenCalledTimes(1);
@@ -780,7 +807,7 @@ describe("buildKeyStrings: the accumulating bound over an expanded element", () 
     let laterElement: ReturnType<typeof spyOnLaterElement> | undefined;
     try {
       withUnlistedFanOutFunctions(() => {
-        const dataset = splitDataset(100);
+        const dataset = splitDataset(CROSSING_CELL_TOKENS);
         laterElement = spyOnLaterElement(dataset);
         return buildKeyStrings(expandingKey, dataset, 0, true, 1);
       });
@@ -798,6 +825,19 @@ describe("buildKeyStrings: the accumulating bound over an expanded element", () 
     expect(warn).not.toHaveBeenCalled();
   });
 
+  test("the crossing row is expanded one value at a time, not in one call", () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const dataset = splitDataset(CROSSING_CELL_TOKENS);
+    fuzzyExpansions.count = 0;
+    expect(buildKeyStrings(expandingKey, dataset, 0, true, 1)).toBeNull();
+    // Expanding the list in a single call reads the same fate from the same
+    // crossing while allocating every token's expansion first, which is the
+    // allocation the charge exists to refuse; only the count separates them.
+    expect(fuzzyExpansions.count).toBe(TOKENS_EXPANDED_BEFORE_CROSSING);
+    expect(fuzzyExpansions.count).toBeLessThan(CROSSING_CELL_TOKENS);
+    expect(warn).toHaveBeenCalledTimes(1);
+  });
+
   test("a row the expansion leaves inside the cap is built through its last element", () => {
     // The same shape one tenth narrower: the pre-expansion charge moves by 450
     // characters and the post-expansion one by 445,950, so what decides the
@@ -812,5 +852,92 @@ describe("buildKeyStrings: the accumulating bound over an expanded element", () 
     expect(laterElement).toHaveBeenCalled();
     expect(warn).toHaveBeenCalledTimes(1);
     expect(warn.mock.calls[0][0]).not.toMatch(/once this key's fuzzy/);
+  });
+});
+
+describe("buildKeyStrings: a value the declared expansion cannot be applied to", () => {
+  const logger = getLogger("cleaning");
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  // `adjacent_years` retains three 8-character candidates per canonical date,
+  // so the row's corrected total passes MAX_ASSEMBLED_KEY_LENGTH_PER_ROW
+  // (4,194,304) at the 174,763rd date -- long before the non-canonical one the
+  // cell holds. What the crossing settles is the row; what the non-canonical
+  // date settles is the exchange, and it must not turn on which comes first.
+  const DATES_EXPANDED_BEFORE_CROSSING = 174763;
+  const NON_CANONICAL_DATE_INDEX = 190000;
+  const NON_CANONICAL_DATE = "1990-01-15";
+
+  const datesKey: LinkageKey = {
+    name: "DOB",
+    elements: [
+      { field: "dates_of_birth", generateFuzzyComparisons: "adjacent_years" },
+    ],
+  };
+
+  // Distinct canonical dates whose year either side is a real calendar date
+  // too, so each retains exactly three candidates: days 1-10 of months 1-10,
+  // from year 1000 up.
+  function canonicalDates(count: number): string[] {
+    const dates: string[] = [];
+    for (let year = 1000; dates.length < count; year++)
+      for (let month = 1; month <= 10 && dates.length < count; month++)
+        for (let day = 1; day <= 10 && dates.length < count; day++)
+          dates.push(
+            `${year}${String(month).padStart(2, "0")}${String(day).padStart(2, "0")}`,
+          );
+    return dates;
+  }
+
+  function splitDataset(dates: string[]): StandardizedDataset {
+    return new StandardizedDataset(
+      [
+        new StandardizedField(
+          "dates_of_birth",
+          "dates_of_birth",
+          [{ function: "split_on", params: { delimiter: "\\|" } }],
+          [{ dates_of_birth: dates.join("|") }],
+        ),
+      ],
+      [datesKey],
+    );
+  }
+
+  test("refuses the exchange though the crossing would settle the row first", () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const dates = canonicalDates(NON_CANONICAL_DATE_INDEX + 1);
+    dates[NON_CANONICAL_DATE_INDEX] = NON_CANONICAL_DATE;
+    const dataset = splitDataset(dates);
+    fuzzyExpansions.count = 0;
+    let raised: unknown;
+    try {
+      buildKeyStrings(datesKey, dataset, 0, true, 0);
+    } catch (err) {
+      raised = err;
+    }
+    expect(raised).toBeInstanceOf(UsageError);
+    expect((raised as UsageError).message).toMatch(
+      /"adjacent_years" fuzzy comparisons, but a row's standardized value is not a canonical YYYYMMDD date/,
+    );
+    // Read over the whole list before any of it is expanded, so no value's
+    // expansion and no crossing precedes the refusal.
+    expect(fuzzyExpansions.count).toBe(0);
+    expect(warn).not.toHaveBeenCalled();
+  });
+
+  test("the same cell without that value drops at a crossing well before it", () => {
+    const warn = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const dataset = splitDataset(canonicalDates(NON_CANONICAL_DATE_INDEX + 1));
+    fuzzyExpansions.count = 0;
+    expect(buildKeyStrings(datesKey, dataset, 0, true, 0)).toBeNull();
+    expect(fuzzyExpansions.count).toBe(DATES_EXPANDED_BEFORE_CROSSING);
+    expect(fuzzyExpansions.count).toBeLessThan(NON_CANONICAL_DATE_INDEX);
+    expect(warn).toHaveBeenCalledTimes(1);
+    expect(warn.mock.calls[0][0]).toMatch(
+      /once this key's fuzzy comparisons expand them/,
+    );
   });
 });

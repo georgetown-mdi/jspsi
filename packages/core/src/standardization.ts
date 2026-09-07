@@ -33,6 +33,7 @@ import { readRowColumn } from "./file.js";
 import type { CSVRow } from "./file.js";
 import { isCalendarDateValid } from "./utils/calendarDate.js";
 import {
+  assertFuzzyExpansionAccepts,
   expandFuzzyComparisons,
   expandsOnReceiverOnly,
 } from "./fuzzyComparisons.js";
@@ -3090,6 +3091,14 @@ function buildKeyStringsUnderPlan(
     // allocation this charge refuses. The transient at a crossing is one
     // value's expansion, bounded by the kind's ceiling and
     // MAX_FUZZY_EXPANSION_INPUT_LENGTH without reference to the row.
+
+    // The refusal for a value the kind cannot expand is read over the whole
+    // pre-expansion list first, because the loop below can settle the row at
+    // the accumulating bound before it reaches a later value -- which would
+    // leave whether the operator hears about an unexpandable value to where in
+    // the element's candidate order it sits. The list is already charged and
+    // bounded by the row cap, so the pass allocates nothing.
+    for (const value of candidates) assertFuzzyExpansionAccepts(value, fuzzy);
     rowCandidateCharacters -= totalCandidateCharacters(candidates);
     const expanded: string[] = [];
     for (const value of candidates) {
