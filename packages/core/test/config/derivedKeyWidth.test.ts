@@ -1,14 +1,9 @@
-import { expect, test, describe, vi } from "vitest";
+import { expect, test, describe } from "vitest";
 
-// The width a fuzzy element declares is gated on
-// APPLIED_SETTINGS.fuzzyComparisons, false in the shipped build because the
-// expansion it sizes builds nothing there (fuzzyComparisons.test.ts pins that
-// inert case). This file drives the flag on, so the derivation, its ceiling,
-// and the boundary that enforces it are verified rather than only reachable in
-// review.
-vi.mock("../../src/consent/appliedSettings", () => ({
-  APPLIED_SETTINGS: { deduplicate: true, fuzzyComparisons: true },
-}));
+// The width a fuzzy element declares, its ceiling, and the boundary that
+// enforces it. This file reads the real APPLIED_SETTINGS rather than a mock,
+// so a flag turned back off fails here instead of leaving these expectations
+// describing a run that no longer happens.
 
 import PSI from "@openmined/psi.js";
 
