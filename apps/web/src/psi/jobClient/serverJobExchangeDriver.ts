@@ -1004,17 +1004,14 @@ function zeroSetupIntentFor(
 
 /** The columns the console's create schema refuses this intent over, empty when
  * the intent's column names are all admissible (and for a zero-setup intent,
- * which declares no metadata). Located by issue path through the same schema the
- * route parses with, so the browser cannot refuse what the route would accept. */
+ * which declares no metadata). The schema is still what decides whether the
+ * intent goes, so the browser cannot refuse what the route would accept; the
+ * scan only names the column behind a refusal the schema already made. */
 function refusedIntentColumns(
   intent: JobCreateIntent,
 ): Array<RefusedColumnName> {
-  const parsed = jobCreateIntentSchema.safeParse(intent);
-  if (parsed.success) return [];
-  return refusedColumnNames(
-    parsed.error,
-    "metadata" in intent ? intent.metadata : undefined,
-  );
+  if (jobCreateIntentSchema.safeParse(intent).success) return [];
+  return refusedColumnNames("metadata" in intent ? intent.metadata : undefined);
 }
 
 /**

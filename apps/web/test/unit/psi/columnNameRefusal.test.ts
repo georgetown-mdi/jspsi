@@ -1,10 +1,16 @@
 import {
   MAX_NAME_LENGTH,
+  MAX_TRANSFORM_PATTERN_LENGTH,
+  MetadataSchema,
   generateSharedSecret,
   getDefaultLinkageTerms,
 } from "@psilink/core";
 import { describe, expect, test } from "vitest";
 
+import {
+  COVERAGE_UNAVAILABLE_MESSAGE,
+  coverageUnavailableMessage,
+} from "@components/FieldCoverage";
 import {
   JobApiRequestError,
   JobIntentColumnNameError,
@@ -15,13 +21,16 @@ import {
   safeParseManagedExchangeRecord,
 } from "@psi/managed/managedExchangeRecord";
 import {
+  MAX_STANDARDIZATION_STEPS,
+  jobCreateIntentSchema,
+} from "@jobs/intentSchemas";
+import {
   consoleJobColumnRefusalAlert,
   overlongCoverageColumns,
   refusedColumnNames,
   savedExchangeColumnRefusalAlert,
 } from "@psi/columnNames";
 import { failureFor } from "@exchange/useInviterExchange";
-import { jobCreateIntentSchema } from "@jobs/intentSchemas";
 
 import type {
   Metadata,
@@ -98,7 +107,7 @@ function storedRecord(columns: Metadata): unknown {
 function saveAlert(columns: Metadata) {
   const parsed = safeParseManagedExchangeRecord(storedRecord(columns));
   if (parsed.success) return undefined;
-  const refused = refusedColumnNames(parsed.error, columns);
+  const refused = refusedColumnNames(columns);
   return refused.length === 0
     ? undefined
     : savedExchangeColumnRefusalAlert(refused);
@@ -137,7 +146,7 @@ describe("the recurring-exchange save", () => {
     expect(parsed.success).toBe(false);
     if (parsed.success) return;
     const alert = savedExchangeColumnRefusalAlert(
-      refusedColumnNames(parsed.error, metadata({ name: OVERLONG_NAME })),
+      refusedColumnNames(metadata({ name: OVERLONG_NAME })),
     );
     expect(alert.title).toBe("Could not save this recurring exchange");
     expect(alert.message).toContain("Column 2");
@@ -168,14 +177,14 @@ describe("the recurring-exchange save", () => {
     });
     expect(parsed.success).toBe(false);
     if (parsed.success) return;
-    expect(refusedColumnNames(parsed.error, metadata())).toEqual([]);
+    expect(refusedColumnNames(metadata())).toEqual([]);
   });
 
   test("says nothing about a column when the document declares no metadata", () => {
     const parsed = safeParseManagedExchangeRecord({ schemaVersion: "nope" });
     expect(parsed.success).toBe(false);
     if (parsed.success) return;
-    expect(refusedColumnNames(parsed.error, undefined)).toEqual([]);
+    expect(refusedColumnNames(undefined)).toEqual([]);
   });
 });
 
@@ -201,7 +210,7 @@ describe("the console job create", () => {
     const parsed = jobCreateIntentSchema.safeParse(intent(columns));
     expect(parsed.success).toBe(false);
     if (parsed.success) return;
-    expect(refusedColumnNames(parsed.error, columns)).toEqual([
+    expect(refusedColumnNames(columns)).toEqual([
       { position: 2, name: OVERLONG_NAME, refusal: "too-long" },
     ]);
   });
@@ -261,6 +270,71 @@ describe("the console job create", () => {
   });
 });
 
+/**
+ * The scan reads the block instead of the parse error, so what keeps the browser
+ * from refusing a document core accepts (or passing one it refuses) is that the
+ * two agree exactly. Swept over every rule and each rule's boundary, plus the
+ * blocks the scenarios above use.
+ */
+const NAME_SAMPLES: Array<{ label: string; name: string }> = [
+  { label: "a plain name", name: "notes" },
+  { label: "a name at the length bound", name: "x".repeat(MAX_NAME_LENGTH) },
+  {
+    label: "a name one past the length bound",
+    name: "x".repeat(MAX_NAME_LENGTH + 1),
+  },
+  {
+    label: "an emoji name at the length bound",
+    name: "\u{1F600}".repeat(MAX_NAME_LENGTH / 2),
+  },
+  {
+    label: "an emoji name one code point past it",
+    name: "\u{1F600}".repeat(MAX_NAME_LENGTH / 2 + 1),
+  },
+  { label: "an empty name", name: "" },
+  { label: "a name holding a text-direction override", name: `notes${RLO}` },
+  { label: "a name holding a C0 control character", name: "notes\u0007" },
+  { label: "a name holding a C1 control character", name: "notes\u0085" },
+  { label: "an accented name", name: "n\u00e9e" },
+  { label: "a name holding a space", name: "client notes" },
+  { label: "a name the first column already uses", name: "client_id" },
+];
+
+const PARITY_BLOCKS: Array<{ label: string; columns: Metadata }> = [
+  { label: "an empty block", columns: [] },
+  ...NAME_SAMPLES.map(({ label, name }) => ({
+    label: `a block whose second column has ${label}`,
+    columns: metadata({ name }),
+  })),
+  ...NAME_SAMPLES.map(({ label, name }) => ({
+    label: `a block whose two columns both have ${label}`,
+    columns: metadata({ name }).map((column) => ({ ...column, name })),
+  })),
+  {
+    label: "the undisclosed-oversized-name scenario's block",
+    columns: metadata({
+      name: OVERLONG_NAME,
+      role: "ignored",
+      isPayload: false,
+    }),
+  },
+  {
+    label: "the console job create scenario's block",
+    columns: metadata({ name: OVERLONG_NAME }),
+  },
+];
+
+describe("the scan and core's schema refuse the same blocks", () => {
+  test.each(PARITY_BLOCKS)(
+    "$label is refused by both or by neither",
+    ({ columns }) => {
+      expect(MetadataSchema.safeParse(columns).success).toBe(
+        refusedColumnNames(columns).length === 0,
+      );
+    },
+  );
+});
+
 describe("the console's cleaning coverage sweep", () => {
   const columns = ["client_id", OVERLONG_NAME, "notes"];
 
@@ -294,6 +368,78 @@ describe("the console's cleaning coverage sweep", () => {
 
   test("names nothing while every input is within the bound", () => {
     expect(overlongCoverageColumns(cleaning("client_id"), columns)).toEqual([]);
+  });
+
+  test("names nothing when the step cap is what settled the sweep", () => {
+    // The step cap is not enforced in the editor, so a standardization can trip
+    // it while a header is oversized beside it. Shortening that header would not
+    // make the sweep run, so the banner keeps its generic copy rather than
+    // sending the operator to the header row.
+    const overCap: Standardization = [
+      { output: "field_0", input: OVERLONG_NAME, steps: [] },
+      {
+        output: "field_1",
+        input: "client_id",
+        steps: Array.from({ length: MAX_STANDARDIZATION_STEPS + 1 }, () => ({
+          function: "trim",
+        })),
+      },
+    ];
+    expect(overlongCoverageColumns(overCap, columns)).toEqual([]);
+  });
+
+  test("names nothing when a step's pattern is what settled the sweep", () => {
+    const overCap: Standardization = [
+      { output: "field_0", input: OVERLONG_NAME, steps: [] },
+      {
+        output: "field_1",
+        input: "client_id",
+        steps: [
+          {
+            function: "replace_regex",
+            params: {
+              pattern: "a".repeat(MAX_TRANSFORM_PATTERN_LENGTH + 1),
+              replacement: "b",
+            },
+          },
+        ],
+      },
+    ];
+    expect(overlongCoverageColumns(overCap, columns)).toEqual([]);
+  });
+
+  test("names nothing when an output name is what settled the sweep", () => {
+    // An `output` is a linkage field's name, not a column of the file, so no
+    // header edit clears it.
+    const overCap: Standardization = [
+      { output: OVERLONG_NAME, input: "client_id", steps: [] },
+      { output: "field_1", input: OVERLONG_NAME, steps: [] },
+    ];
+    expect(overlongCoverageColumns(overCap, columns)).toEqual([]);
+  });
+});
+
+describe("the coverage-unavailable copy", () => {
+  test("states the generic cause when no column explains the sweep", () => {
+    expect(coverageUnavailableMessage([])).toBe(COVERAGE_UNAVAILABLE_MESSAGE);
+  });
+
+  test("names one column and asks for the one header", () => {
+    const message = coverageUnavailableMessage([
+      { position: 2, name: "notes", refusal: "too-long" },
+    ]);
+    expect(message).toContain("Column 2");
+    expect(message).toContain("Shorten the header in your file");
+  });
+
+  test("asks for every header when more than one column is named", () => {
+    const message = coverageUnavailableMessage([
+      { position: 2, name: "notes", refusal: "too-long" },
+      { position: 3, name: "codes", refusal: "too-long" },
+    ]);
+    expect(message).toContain("Column 2");
+    expect(message).toContain("Column 3");
+    expect(message).toContain("Shorten the headers in your file");
   });
 });
 

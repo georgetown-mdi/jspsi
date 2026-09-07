@@ -15,7 +15,7 @@ import { CleaningTab } from "@exchange/CleaningTab";
 import { createAppMount } from "./renderApp";
 
 import type { AcquiredCsv } from "@psi/inviterEditor";
-import type { RefusedColumnName } from "@psi/columnNames";
+import type { OverlongColumnName } from "@psi/columnNames";
 
 // A minimal file whose seeded terms hold a few cleaning fields, so both surfaces
 // mount their standardization workbench alongside the banner under test.
@@ -35,7 +35,7 @@ afterEach(app.unmount);
 
 function renderCleaningTab(
   coverageUnavailable: boolean,
-  coverageRefusedColumns: ReadonlyArray<RefusedColumnName> = [],
+  coverageRefusedColumns: ReadonlyArray<OverlongColumnName> = [],
 ) {
   const editor = editorFromCsv("Dana Okafor", csv);
   app.render(

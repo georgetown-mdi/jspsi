@@ -1,6 +1,13 @@
 import { MAX_NAME_LENGTH, NAME_SHAPE_PATTERN } from "@psilink/core";
 
+import {
+  MAX_STANDARDIZATION_STEPS,
+  MAX_STANDARDIZATION_TRANSFORMATIONS,
+  stepPatternsWithinCap,
+} from "@jobs/intentSchemas";
 import { isolatedColumnName } from "@components/ColumnName";
+
+import type { Standardization } from "@psilink/core";
 
 /**
  * The 1-based positions of columns with an empty (zero-length) name, in column
@@ -203,34 +210,6 @@ export interface RefusedColumnName {
   refusal: ColumnNameRefusal;
 }
 
-/** The issue paths a Zod error reports, read structurally so a caller passes any
- * failed parse without this module depending on which schema raised it. */
-function issuePathsOf(error: unknown): Array<ReadonlyArray<PropertyKey>> {
-  const issues = (error as { issues?: unknown } | null | undefined)?.issues;
-  if (!Array.isArray(issues)) return [];
-  const paths: Array<ReadonlyArray<PropertyKey>> = [];
-  for (const issue of issues) {
-    const path = (issue as { path?: unknown }).path;
-    if (Array.isArray(path)) paths.push(path as Array<PropertyKey>);
-  }
-  return paths;
-}
-
-/**
- * The metadata index a column-name issue points at, or undefined for any other
- * issue. Matched on the path's TAIL -- `metadata`, an array index, `name` -- so
- * one mapper reads a stored record's nested block (`exchangeFile.metadata`) and a
- * job intent's top-level one alike, without either naming the other.
- */
-function metadataNameIndexOf(
-  path: ReadonlyArray<PropertyKey>,
-): number | undefined {
-  const [block, index, field] = path.slice(-3);
-  return block === "metadata" && typeof index === "number" && field === "name"
-    ? index
-    : undefined;
-}
-
 /** What the schema refuses about a declared name, or undefined when the name
  * breaks none of the rules this module can name. */
 function refusalOf(name: string): ColumnNameRefusal | undefined {
@@ -256,48 +235,72 @@ function repeatedNamePositions(
 }
 
 /**
- * The columns a failed whole-document parse refused, located by the Zod issue
- * path and classified against the name the document declares at that path. The
- * one mapper behind every point that would otherwise report a whole-document
- * failure holding nothing the operator can act on.
+ * The columns a whole-document parse refuses over a declared name, scanned out of
+ * the block the caller tried to write. The one mapper behind every point that
+ * would otherwise report a whole-document failure holding nothing the operator
+ * can act on.
  *
- * Classified from the NAME rather than from the issue's code: the code taxonomy
- * is the validation library's and moves with it, while the four rules the name is
- * held to are core's own and are checkable here. A position whose name breaks
- * none of them is left out, so the caller falls back to its own whole-document
- * copy rather than naming a column it can say nothing true about.
+ * Read from the block rather than from the failure: the four rules
+ * `ColumnMetadata.name` is held to are pure functions of the names, core's
+ * `MetadataSchema` fails exactly when one of them is broken, and every call site
+ * holds the array that was parsed. An issue path would only relocate the same
+ * answer, and its tail cannot tell core's uniqueness refine from the console's
+ * own column-count and description-length refines, which report at that path too.
+ * A block whose names break none of the rules yields nothing, so the caller falls
+ * back to its own whole-document copy rather than naming a column it can say
+ * nothing true about; an absent block yields nothing for the same reason.
  *
- * `metadata` is the block the caller tried to write, which is what holds the
- * names; an absent block yields nothing.
+ * The parity this rests on -- refused if and only if `MetadataSchema` refuses --
+ * is pinned in apps/web/test/unit/psi/columnNameRefusal.test.ts.
  */
 export function refusedColumnNames(
-  error: unknown,
   metadata: ReadonlyArray<{ name: string }> | undefined,
 ): Array<RefusedColumnName> {
   if (metadata === undefined) return [];
   const byPosition = new Map<number, RefusedColumnName>();
-  // The index rides in on an issue path, and the block the caller holds need not
-  // be the one that raised it, so an index outside the block names no column.
-  const nameAt = (index: number): string | undefined =>
-    index >= 0 && index < metadata.length ? metadata[index].name : undefined;
-  const add = (index: number, refusal: ColumnNameRefusal) => {
-    const name = nameAt(index);
-    if (name === undefined || byPosition.has(index + 1)) return;
-    byPosition.set(index + 1, { position: index + 1, name, refusal });
-  };
-  for (const path of issuePathsOf(error)) {
-    const index = metadataNameIndexOf(path);
-    if (index !== undefined) {
-      const name = nameAt(index);
-      const refusal = name === undefined ? undefined : refusalOf(name);
-      if (refusal !== undefined) add(index, refusal);
-      continue;
-    }
-    if (path[path.length - 1] === "metadata")
-      for (const position of repeatedNamePositions(metadata))
-        add(position - 1, "repeated");
-  }
+  metadata.forEach((column, index) => {
+    const refusal = refusalOf(column.name);
+    if (refusal !== undefined)
+      byPosition.set(index + 1, {
+        position: index + 1,
+        name: column.name,
+        refusal,
+      });
+  });
+  // A name the rules above already refuse keeps that refusal: it is the header
+  // edit the operator makes, and the repeat goes with it.
+  for (const position of repeatedNamePositions(metadata))
+    if (!byPosition.has(position))
+      byPosition.set(position, {
+        position,
+        name: metadata[position - 1].name,
+        refusal: "repeated",
+      });
   return [...byPosition.values()].sort((a, b) => a.position - b.position);
+}
+
+/** A column located by its oversized header alone -- what the coverage sweep
+ * refuses over and the only refusal its copy names a remedy for. */
+export type OverlongColumnName = RefusedColumnName & { refusal: "too-long" };
+
+/**
+ * Whether `standardization` breaks a coverage bound other than an input column's
+ * name length: the transformation and step counts, an `output` name, or a step's
+ * compiled regex source. The sweep's schema
+ * (`coverageStandardizationSchema`, apps/web/src/jobs/workInputs.ts) refuses on
+ * any of them, none is enforced in the editor, and shortening a header fixes
+ * none of them.
+ */
+function tripsOtherCoverageBound(
+  standardization: ReadonlyArray<Standardization[number]>,
+): boolean {
+  if (standardization.length > MAX_STANDARDIZATION_TRANSFORMATIONS) return true;
+  return standardization.some(
+    (transformation) =>
+      (transformation.steps?.length ?? 0) > MAX_STANDARDIZATION_STEPS ||
+      transformation.output.length > MAX_NAME_LENGTH ||
+      !stepPatternsWithinCap(transformation),
+  );
 }
 
 /**
@@ -310,12 +313,18 @@ export function refusedColumnNames(
  * Scoped to the `input` side, which is a column of the file: an `output` is a
  * linkage field's name, and naming it as a column would be wrong. A cleaning
  * field whose input matches no header entry is left out for the same reason.
+ *
+ * Empty while the same standardization breaks another of the sweep's bounds
+ * ({@link tripsOtherCoverageBound}), whichever one settled it: an oversized
+ * header alongside a tripped count or pattern cap is not what the operator has
+ * to fix, so the caller keeps its generic unavailable copy.
  */
 export function overlongCoverageColumns(
-  standardization: ReadonlyArray<{ input: string }>,
+  standardization: ReadonlyArray<Standardization[number]>,
   columns: ReadonlyArray<string>,
-): Array<RefusedColumnName> {
-  const byPosition = new Map<number, RefusedColumnName>();
+): Array<OverlongColumnName> {
+  if (tripsOtherCoverageBound(standardization)) return [];
+  const byPosition = new Map<number, OverlongColumnName>();
   for (const transformation of standardization) {
     if (transformation.input.length <= MAX_NAME_LENGTH) continue;
     const index = columns.indexOf(transformation.input);

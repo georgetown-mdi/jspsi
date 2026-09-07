@@ -5,7 +5,7 @@ import { isSilentEmpty } from "@psi/workers/nonEmptyAggregate";
 import { refusedColumnsSentence } from "@psi/columnNames";
 
 import type { FieldValueCoverage } from "@psi/workers/nonEmptyAggregate";
-import type { RefusedColumnName } from "@psi/columnNames";
+import type { OverlongColumnName } from "@psi/columnNames";
 
 /** The default coverage pending copy: the hosted sweep runs in the browser, so it
  * displays as the near-instant local check it is. */
@@ -28,22 +28,27 @@ export const COVERAGE_UNAVAILABLE_MESSAGE =
   "steps still apply; this check just did not run.";
 
 /**
- * The coverage-unavailable copy for a sweep the console refuses over a column
- * name: the same statement of what did not run, with the column that tripped the
- * bound named between its halves so the operator has something to act on. Falls
- * back to {@link COVERAGE_UNAVAILABLE_MESSAGE} when no column explains the
- * failure, since the sweep settles without a result for other reasons too.
+ * The coverage-unavailable copy for a sweep the console refuses over an oversized
+ * input column name: the same statement of what did not run, with the column that
+ * tripped the bound named between its halves so the operator has something to act
+ * on. Falls back to {@link COVERAGE_UNAVAILABLE_MESSAGE} when no column explains
+ * the failure, since the sweep settles without a result for other reasons too.
+ *
+ * The parameter admits only `too-long` entries, which is what the closing
+ * sentence states a remedy for; the other refusal kinds would read as a
+ * contradiction of their own clause.
  */
 export function coverageUnavailableMessage(
-  refused: ReadonlyArray<RefusedColumnName>,
+  refused: ReadonlyArray<OverlongColumnName>,
 ): string {
   if (refused.length === 0) return COVERAGE_UNAVAILABLE_MESSAGE;
+  const plural = refused.length > 1;
   return (
     "We could not check how many of your rows produce a value. " +
     `${refusedColumnsSentence(refused)} The console reads a cleaning step's ` +
     "input column by name, and refuses one this long, so the check could not " +
-    "run. Your cleaning steps still apply. Shorten the header in your file " +
-    "and choose the file again."
+    `run. Your cleaning steps still apply. Shorten the header${plural ? "s" : ""} ` +
+    "in your file and choose the file again."
   );
 }
 

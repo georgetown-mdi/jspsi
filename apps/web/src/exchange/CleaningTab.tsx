@@ -20,7 +20,7 @@ import type { LinkageField, StandardizationStep } from "@psilink/core";
 import type { ColumnSamples } from "@psi/columnSamples";
 import type { FieldValueCoverage } from "@psi/workers/nonEmptyAggregate";
 import type { InviterEditor } from "@psi/inviterEditor";
-import type { RefusedColumnName } from "@psi/columnNames";
+import type { OverlongColumnName } from "@psi/columnNames";
 
 /**
  * The Cleaning tab: per-field pipelines with previews and whole-file coverage,
@@ -69,7 +69,7 @@ export function CleaningTab({
    * indistinguishable from "no column explains it", and a host that forgot to
    * derive it would state that silently. Empty on the hosted build, whose sweep
    * runs in the browser under no such bound. */
-  coverageRefusedColumns: ReadonlyArray<RefusedColumnName>;
+  coverageRefusedColumns: ReadonlyArray<OverlongColumnName>;
   onFieldSteps: (output: string, steps: Array<StandardizationStep>) => void;
   onFieldInput: (output: string, input: string) => void;
   onFieldAdded: (type: LinkageField["type"]) => void;

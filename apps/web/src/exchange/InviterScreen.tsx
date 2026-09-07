@@ -139,11 +139,11 @@ import { useBeforeUnloadPrompt, useUnloadGuard } from "./useUnloadGuard";
 import { AgreementTab } from "./AgreementTab";
 import { WorkShell } from "./WorkShell";
 
+import { MANAGE_OFFER_IDLE, ManageExchangeOffer } from "./ManageExchangeOffer";
 import { CleaningTab } from "./CleaningTab";
 import { InviterExchangeSection } from "./InviterExchangeSection";
 import { KeysTab } from "./KeysTab";
 import { Ledger } from "./Ledger";
-import { ManageExchangeOffer } from "./ManageExchangeOffer";
 import { MatchingSharingSection } from "./MatchingSharingSection";
 import { Problems } from "./Problems";
 import { RecoveredExchangePanel } from "./RecoveredExchangePanel";
@@ -182,7 +182,7 @@ import type { ConnectionTuningDraft } from "@console/connectionTuningModel";
 import type { DisclosureChoice } from "@psi/metadataEditing";
 import type { ExchangeFilesDraft } from "@console/exchangeFilesModel";
 import type { ManageOfferChoices } from "./manageOfferModel";
-import type { ManageOfferStatus } from "./ManageExchangeOffer";
+import type { ManageOfferState } from "./ManageExchangeOffer";
 import type { ReceiptsDraft } from "@psi/receiptsModel";
 import type { RunDiagnosticsDraft } from "@psi/runDiagnosticsModel";
 import type { SavedExchange } from "./SaveExchangeSection";
@@ -400,10 +400,11 @@ export function InviterScreen() {
   const [receipts, setReceipts] = useState<ReceiptsDraft>(RECEIPTS_DEFAULT);
   const [receiptsOpen, setReceiptsOpen] = useState(false);
   const [demoActive, setDemoActive] = useState(false);
-  const [manageStatus, setManageStatus] = useState<ManageOfferStatus>("idle");
-  // What the failed deposit was about, when a column name explains it; undefined
-  // leaves the offer's generic could-not-save copy.
-  const [manageRefusal, setManageRefusal] = useState<AlertContent>();
+  // The offer's progress and, for a failed deposit, what it was about when a
+  // column name explains it. Held as one value so no reset can leave a refusal
+  // standing over an idle offer.
+  const [manageOffer, setManageOffer] =
+    useState<ManageOfferState>(MANAGE_OFFER_IDLE);
 
   // Fetch the console's authored SFTP connection once on a console build; one
   // fetch per console serves the session, and the default transport reads its
@@ -592,7 +593,7 @@ export function InviterScreen() {
     setInvitation(undefined);
     setAcceptKitExchange(undefined);
     setSavedExchange(undefined);
-    setManageStatus("idle");
+    setManageOffer(MANAGE_OFFER_IDLE);
     goTo("review");
   }
 
@@ -606,8 +607,7 @@ export function InviterScreen() {
   // Manage, so there is no discard path here.
   async function manageExchange(choices: ManageOfferChoices) {
     if (invitation === undefined || editor === undefined) return;
-    setManageStatus("depositing");
-    setManageRefusal(undefined);
+    setManageOffer({ status: "depositing" });
     try {
       const connection = webrtcLocatorFromEndpoint(
         webrtcEndpointFromLocation(invitationLocation()),
@@ -642,7 +642,7 @@ export function InviterScreen() {
           Date.now(),
         ),
       );
-      setManageStatus("deposited");
+      setManageOffer({ status: "deposited" });
     } catch (error) {
       console.error(
         "managed exchange deposit failed:",
@@ -651,16 +651,16 @@ export function InviterScreen() {
       whenDiagnostic(() =>
         console.error("managed exchange deposit failed (detail):", error),
       );
-      // The document's own metadata is what the refused parse read, so the alert
-      // names the column from it rather than from the failure's text; a failure
-      // no column explains leaves the generic copy standing.
-      const refused = refusedColumnNames(error, invitation.metadata);
-      setManageRefusal(
-        refused.length > 0
-          ? savedExchangeColumnRefusalAlert(refused)
-          : undefined,
-      );
-      setManageStatus("error");
+      // The alert names the column out of the document's own metadata, which is
+      // what the refused parse read; a failure no column explains leaves the
+      // generic copy standing.
+      const refused = refusedColumnNames(invitation.metadata);
+      setManageOffer({
+        status: "error",
+        ...(refused.length > 0
+          ? { refusal: savedExchangeColumnRefusalAlert(refused) }
+          : {}),
+      });
     }
   }
 
@@ -961,7 +961,7 @@ export function InviterScreen() {
     setSavedExchange(undefined);
     setInvitation(undefined);
     setAcceptKitExchange(undefined);
-    setManageStatus("idle");
+    setManageOffer(MANAGE_OFFER_IDLE);
     goTo("file");
   }
 
@@ -1111,7 +1111,7 @@ export function InviterScreen() {
               locklessRendezvous: runOptions?.locklessRendezvous === true,
             },
       );
-      setManageStatus("idle");
+      setManageOffer(MANAGE_OFFER_IDLE);
       goTo("share");
     } catch (error) {
       if (error instanceof InvitationFileError) {
@@ -1619,8 +1619,8 @@ export function InviterScreen() {
               failure === undefined &&
               !demoActive && (
                 <ManageExchangeOffer
-                  status={manageStatus}
-                  refusal={manageRefusal}
+                  status={manageOffer.status}
+                  refusal={manageOffer.refusal}
                   handleCaptured={sourceHandle !== undefined}
                   onManage={(choices) => void manageExchange(choices)}
                 />

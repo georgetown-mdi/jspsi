@@ -23,7 +23,7 @@ import type {
 } from "@psilink/core";
 import type { ColumnSamples } from "@psi/columnSamples";
 import type { FieldValueCoverage } from "@psi/workers/nonEmptyAggregate";
-import type { RefusedColumnName } from "@psi/columnNames";
+import type { OverlongColumnName } from "@psi/columnNames";
 
 /**
  * The acceptor's Cleaning tab: per-field pipelines with previews and whole-file
@@ -76,7 +76,7 @@ export function AcceptorCleaningStep({
    * indistinguishable from "no column explains it", and a host that forgot to
    * derive it would state that silently. Empty on the hosted build, whose sweep
    * runs in the browser under no such bound. */
-  coverageRefusedColumns: ReadonlyArray<RefusedColumnName>;
+  coverageRefusedColumns: ReadonlyArray<OverlongColumnName>;
   /** The count of self-defeating adopted keys, for the dead-key advisory. */
   deadKeyCount: number;
   /** A signature of each field's input binding, so a remap or reset auto-recovers
