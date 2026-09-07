@@ -58,6 +58,44 @@ function nonCanonicalDateRefusal(kind: GenerateFuzzyComparisons): UsageError {
 }
 
 /**
+ * Refuse a value the declared expansion cannot be applied to.
+ *
+ * The single place both input conditions live, so a caller that screens
+ * values ahead of expanding them screens on exactly what the expansion
+ * itself refuses. {@link expandFuzzyComparisons} calls it on the value it
+ * is handed, and `buildKeyStrings` calls it over an element's whole
+ * pre-expansion candidate list before expanding any of them: that loop can
+ * settle the row at the accumulating bound partway through the list, so
+ * without the pass ahead of it whether the operator is told about an
+ * unexpandable value would depend on where in the list it sits.
+ *
+ * Total over the kind, so a kind added without an arm fails to compile
+ * rather than silently taking the length check alone.
+ *
+ * @throws {UsageError} if `value` is above
+ * {@link MAX_FUZZY_EXPANSION_INPUT_LENGTH}, or if `kind` is
+ * `adjacent_years` or `day_month_swaps` and `value` is not a canonical
+ * `YYYYMMDD` date.
+ */
+export function assertFuzzyExpansionAccepts(
+  value: string,
+  kind: GenerateFuzzyComparisons,
+): void {
+  if (value.length > MAX_FUZZY_EXPANSION_INPUT_LENGTH)
+    throw fuzzyValueTooLongRefusal(kind);
+  switch (kind) {
+    case "adjacent_years":
+    case "day_month_swaps":
+      if (!CANONICAL_DATE_PATTERN.test(value))
+        throw nonCanonicalDateRefusal(kind);
+      return;
+    case "transpositions":
+    case "edit_distances":
+      return;
+  }
+}
+
+/**
  * Every two-position transposition of `value` -- all pairs of positions,
  * not adjacent ones alone -- excluding `value` itself.
  *
@@ -130,8 +168,7 @@ export function deletionCandidates(value: string): string[] {
  * the value unexpanded -- see {@link expandFuzzyComparisons}.
  */
 export function adjacentYearCandidates(value: string): string[] {
-  if (!CANONICAL_DATE_PATTERN.test(value))
-    throw nonCanonicalDateRefusal("adjacent_years");
+  assertFuzzyExpansionAccepts(value, "adjacent_years");
   const year = value.slice(0, 4);
   const month = value.slice(4, 6);
   const day = value.slice(6, 8);
@@ -168,8 +205,7 @@ export function adjacentYearCandidates(value: string): string[] {
  * the value unexpanded -- see {@link expandFuzzyComparisons}.
  */
 export function dayMonthSwapCandidates(value: string): string[] {
-  if (!CANONICAL_DATE_PATTERN.test(value))
-    throw nonCanonicalDateRefusal("day_month_swaps");
+  assertFuzzyExpansionAccepts(value, "day_month_swaps");
   const year = value.slice(0, 4);
   const month = value.slice(4, 6);
   const day = value.slice(6, 8);
@@ -302,8 +338,7 @@ export function expandFuzzyComparisons(
   value: string,
   kind: GenerateFuzzyComparisons,
 ): string[] {
-  if (value.length > MAX_FUZZY_EXPANSION_INPUT_LENGTH)
-    throw fuzzyValueTooLongRefusal(kind);
+  assertFuzzyExpansionAccepts(value, kind);
 
   let candidates: string[];
   switch (kind) {

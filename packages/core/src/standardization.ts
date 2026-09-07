@@ -33,6 +33,7 @@ import { readRowColumn } from "./file.js";
 import type { CSVRow } from "./file.js";
 import { isCalendarDateValid } from "./utils/calendarDate.js";
 import {
+  assertFuzzyExpansionAccepts,
   expandFuzzyComparisons,
   expandsOnReceiverOnly,
 } from "./fuzzyComparisons.js";
@@ -1534,6 +1535,12 @@ function noteFanOutProducer(
     provenance.fromUnlistedFunction = true;
 }
 
+// The characters an element's candidate list retains, the footing both the
+// accumulating charge and the assembled projection measure an element on.
+function totalCandidateCharacters(values: readonly string[]): number {
+  return values.reduce((total, value) => total + value.length, 0);
+}
+
 // Add one candidate to a step's accumulating output and report the characters it
 // RETAINED: a duplicate the set collapses retains nothing, so it is not charged
 // to the accumulation bound.
@@ -2501,9 +2508,10 @@ interface CandidateAccumulationSite {
 // the finished projection. The row index and the total are derived integers and
 // the path locates the element by index, so the message echoes neither the value
 // nor the partner's free text. The total is whichever accumulation crossed --
-// one step's output set, or the row's retained candidates across the key's
-// elements -- and the path names the element it was accumulating at, so the
-// message states the key rather than attributing the whole total to that
+// one step's output set, the row's retained candidates across the key's
+// elements, or those candidates once an element's declared fuzzy comparison
+// expanded them -- and the path names the element it was accumulating at, so
+// the message states the key rather than attributing the whole total to that
 // element.
 //
 // The fate here is the refusal, which is what a key {@link keyAccumulationFate}
@@ -2519,13 +2527,16 @@ function accumulatedCandidatesTooLongRefusal(
       `values from row ${site.rowIndex} of this party's data ` +
       `(${keyElementPath(site.keyIndex, site.elementIndex)}), above the ` +
       `${MAX_ASSEMBLED_KEY_LENGTH_PER_ROW} characters of key strings this ` +
-      "exchange builds for one row. A step that expands one value into several " +
-      "candidates hands every later step each of them in turn, so the " +
-      "candidates are allocated one after another and the total is bounded as " +
-      "they accumulate rather than once the whole set exists. Nothing can be " +
-      "shortened to fit: both parties must derive byte-identical keys. The " +
-      "exchange is refused instead. Remove or narrow the expanding step in the " +
-      "agreed linkage terms, or shorten the field the element reads.",
+      "exchange builds for one row. An element's candidates are allocated one " +
+      "after another -- a step that expands one value into several hands every " +
+      "later step each of them in turn, and a declared fuzzy comparison " +
+      "expands the element's transformed value again -- so the total is " +
+      "bounded as they accumulate rather than once the whole set exists. " +
+      "Nothing can be shortened to fit: both parties must derive " +
+      "byte-identical keys. The exchange is refused instead. Remove or narrow " +
+      "the expanding step in the agreed linkage terms, declare fuzzy " +
+      "comparisons on fewer of the key's elements, or shorten the field the " +
+      "element reads.",
   );
 }
 
@@ -3067,9 +3078,51 @@ function buildKeyStringsUnderPlan(
       elementValues.push(candidates);
       continue;
     }
-    const expanded = candidates.flatMap((value) =>
-      expandFuzzyComparisons(value, fuzzy),
-    );
+    // The element retains the expanded list in place of the candidates charged
+    // above, so the row's total is corrected to what it RETAINS: a total left
+    // at the pre-expansion figure would let a row sitting at the cap hold
+    // whatever the expansion multiplied the earlier elements into. The list is
+    // charged rather than its distinct values, since the cross-product reads
+    // the list and deduplicates only the assembled strings.
+    //
+    // One value at a time rather than a flatMap over the whole list, charged as
+    // the candidates land: expanding the list in one call allocates the
+    // element's entire expansion before any total is read, which is the
+    // allocation this charge refuses. The transient at a crossing is one
+    // value's expansion, bounded by the kind's ceiling and
+    // MAX_FUZZY_EXPANSION_INPUT_LENGTH without reference to the row.
+
+    // The refusal for a value the kind cannot expand is read over the whole
+    // pre-expansion list first, because the loop below can settle the row at
+    // the accumulating bound before it reaches a later value -- which would
+    // leave whether the operator hears about an unexpandable value to where in
+    // the element's candidate order it sits. The list is already charged and
+    // bounded by the row cap, so the pass allocates nothing.
+    for (const value of candidates) assertFuzzyExpansionAccepts(value, fuzzy);
+    rowCandidateCharacters -= totalCandidateCharacters(candidates);
+    const expanded: string[] = [];
+    for (const value of candidates) {
+      for (const candidate of expandFuzzyComparisons(value, fuzzy)) {
+        expanded.push(candidate);
+        rowCandidateCharacters += candidate.length;
+      }
+      if (rowCandidateCharacters > MAX_ASSEMBLED_KEY_LENGTH_PER_ROW) {
+        if (
+          accumulationFateAtCharge(fate, provenance.fromUnlistedFunction) ===
+          "drop"
+        )
+          return dropRowFromKeyRound(
+            drops,
+            key,
+            index,
+            `accumulates ${rowCandidateCharacters} characters of candidate ` +
+              "values once this key's fuzzy comparisons expand them, more " +
+              `than the ${MAX_ASSEMBLED_KEY_LENGTH_PER_ROW} characters of ` +
+              "key strings this exchange builds for one row",
+          );
+        throw accumulatedCandidatesTooLongRefusal(site, rowCandidateCharacters);
+      }
+    }
     if (expanded.length > candidates.length) fuzzyWidened = true;
     elementValues.push(expanded);
   }
@@ -3132,8 +3185,7 @@ function buildKeyStringsUnderPlan(
   const projectedKeyStringLength = elementValues.reduce(
     (total, values) =>
       total +
-      (projectedKeyStrings / values.length) *
-        values.reduce((sum, value) => sum + value.length, 0),
+      (projectedKeyStrings / values.length) * totalCandidateCharacters(values),
     0,
   );
   if (projectedKeyStringLength > MAX_ASSEMBLED_KEY_LENGTH_PER_ROW) {
