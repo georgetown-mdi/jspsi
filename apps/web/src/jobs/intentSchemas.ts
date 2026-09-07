@@ -61,7 +61,10 @@ export const MAX_IDENTITY_LENGTH = 1024;
  * the four free-text fields of a linkage-terms document, the party `identity`
  * among them, which a label accepted here becomes; the two patterns are held
  * equal by test/unit/jobs/identityLabelParity.test.ts. This contract is
- * stricter: it also refuses a leading `-`.
+ * stricter in one direction, also refusing a leading `-`, and narrower in
+ * another: core's `identity` refuses the nine text-direction characters as
+ * well, which this rule does not, so a label holding one passes here and is
+ * refused when the CLI parses the terms it became.
  */
 export const IDENTITY_CONTROL_CHAR_PATTERN =
   // eslint-disable-next-line no-control-regex

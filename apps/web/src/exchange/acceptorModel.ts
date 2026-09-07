@@ -1,4 +1,5 @@
 import {
+  BIDI_CONTROL_PATTERN,
   TEXT_CONTROL_CHAR_PATTERN,
   disclosedColumnNames,
   displayPartyIdentity,
@@ -375,12 +376,21 @@ export const ACCEPTOR_NAME_CONTROL_CHAR_PROBLEM =
   "Your name cannot contain control characters (a line break or a tab, for instance)";
 
 /**
+ * The same, for the second class core holds the value to: the nine Unicode
+ * text-direction formatting characters. Its own wording, since the two rules
+ * refuse different characters and an operator fixing one is not told about the
+ * other.
+ */
+export const ACCEPTOR_NAME_TEXT_DIRECTION_PROBLEM =
+  "Your name cannot contain text-direction characters (a right-to-left override, for instance)";
+
+/**
  * The consent step's inline name problem, or undefined for a name this acceptance
  * can adopt. The committed name becomes the party `identity` of the terms the
- * acceptance derives, which core refuses outright for a control character
- * (`deriveAcceptedLinkageTerms`), so the field names it where the operator can
- * still fix it rather than letting the launch fail as an exchange the surface
- * would attribute to the invitation or the file.
+ * acceptance derives, which core refuses outright for a control character and
+ * for a text-direction character (`deriveAcceptedLinkageTerms`), so the field
+ * names it where the operator can still fix it rather than letting the launch
+ * fail as an exchange the surface would attribute to the invitation or the file.
  *
  * Read on the TRIMMED name, which is what the gate commits and what core sees. An
  * empty name is not reported here: that is the consent gate's own
@@ -388,9 +398,12 @@ export const ACCEPTOR_NAME_CONTROL_CHAR_PROBLEM =
  * typing.
  */
 export function acceptorNameProblem(name: string): string | undefined {
-  return TEXT_CONTROL_CHAR_PATTERN.test(name.trim())
-    ? ACCEPTOR_NAME_CONTROL_CHAR_PROBLEM
-    : undefined;
+  const trimmed = name.trim();
+  if (TEXT_CONTROL_CHAR_PATTERN.test(trimmed))
+    return ACCEPTOR_NAME_CONTROL_CHAR_PROBLEM;
+  if (BIDI_CONTROL_PATTERN.test(trimmed))
+    return ACCEPTOR_NAME_TEXT_DIRECTION_PROBLEM;
+  return undefined;
 }
 
 /** The consent-step legal-agreement display: the three sanitized values plus

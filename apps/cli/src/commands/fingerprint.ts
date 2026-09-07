@@ -168,6 +168,11 @@ export function readConfigHints(
  * binding continued by a `--force` re-key included: what a new certificate
  * holds is what the check is about.
  *
+ * The control class and the length bound are what it holds. The terms document
+ * refuses the nine text-direction characters in that field as well and this
+ * check does not, so a label holding one is bindable here and is refused only
+ * where the terms are parsed.
+ *
  * Neither message echoes the label. The offending value is the operator's own
  * text and naming it back adds nothing to a rule about its shape, which is the
  * discipline the terms document's own refusals keep.

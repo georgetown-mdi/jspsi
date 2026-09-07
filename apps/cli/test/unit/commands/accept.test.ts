@@ -120,6 +120,11 @@ import { ttyStream } from "../../stdinStream";
 const promptConfirmMock = vi.mocked(promptConfirm);
 const promptFreeTextMock = vi.mocked(promptFreeText);
 
+// Beside the ESC, RLO and BEL the shared fixtures hold: an invisible character
+// every terms field admits, for a case whose value is read back through the
+// schema. Written as an escape so this source holds no raw invisible byte.
+const ZWJ = "\u200d";
+
 const silentLog = getLogger("accept-test");
 silentLog.setLevel("silent");
 
@@ -2115,7 +2120,11 @@ describe("reconciling a pre-existing config", () => {
     // out of a file, and the consent-surface sink this notice takes is their
     // display boundary.
     const flag = `Agency B${ESC}[0m`;
-    const stored = `Acceptor Org${RLO}`;
+    // The stored label is read back through the config schema, which refuses a
+    // control character and a text-direction one in an identity, so the value
+    // that needs escaping here is the zero-width joiner: invisible, outside both
+    // refused classes, and stored exactly as the operator typed it.
+    const stored = `Acceptor Org${ZWJ}`;
     const { promptWrites } = await acceptOverKeptConfig({
       terms: sampleTerms(stored),
       identity: flag,
@@ -2127,7 +2136,7 @@ describe("reconciling a pre-existing config", () => {
     expect(notice).toContain(sanitizeForDisplay(flag));
     expect(notice).toContain(sanitizeForDisplay(stored));
     expect(notice).not.toContain(ESC);
-    expect(notice).not.toContain(RLO);
+    expect(notice).not.toContain(ZWJ);
   });
 
   test("validateAccept: a reused config's rule-set citation is checked against its own rules", async () => {
@@ -5859,16 +5868,16 @@ describe("handler: the prompt's copy has the redaction on its own", () => {
     promptConfirmMock.mockResolvedValue(false);
     try {
       // Unlike the render-boundary walk, this route goes through the token's own
-      // validation, so the hostile code points ride the fields a decoded token can
-      // still hold: a transform param value takes the two control characters,
-      // being a data value the schema length-bounds and holds to no character
-      // rule, and the identity takes the bidi override, which the free-text rule
-      // does not refuse. The names are out -- every one of them is held to
-      // NAME_SHAPE_PATTERN, which refuses both classes.
+      // validation, so the hostile code points ride the one field a decoded token
+      // can still hold them in: a transform param value, a data value the schema
+      // length-bounds and holds to no character rule. Everything else is out --
+      // every name is held to NAME_SHAPE_PATTERN, and the identity, the purpose
+      // and a payload description refuse the control characters and the bidi
+      // override alike.
       const encoded = await encodeInvitation({
         ...sampleToken(FUTURE()),
         linkageTerms: {
-          ...sampleTerms(`InviterOrg${RLO}`),
+          ...sampleTerms("InviterOrg"),
           linkageKeys: [
             {
               name: "ssn",
@@ -5880,7 +5889,7 @@ describe("handler: the prompt's copy has the redaction on its own", () => {
                       function: "replace_regex",
                       params: {
                         pattern: "-",
-                        replacement: `${BEL}${ESC}[31m`,
+                        replacement: `${BEL}${ESC}[31m${RLO}`,
                       },
                     },
                   ],

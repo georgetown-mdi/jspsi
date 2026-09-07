@@ -10,6 +10,9 @@ import { IDENTITY_CONTROL_CHAR_PATTERN } from "@jobs/intentSchemas";
 // browser guard, the intent schema, and the signing-fingerprint route, then
 // against TEXT_CONTROL_CHAR_PATTERN as a linkage-terms `identity`; the two
 // patterns must agree or a label valid at one route could fail at the other.
+// The control class is what they hold in common: core's `identity` refuses the
+// nine text-direction characters beside it, and this rule does not, so a label
+// holding one is refused at the terms parse rather than at the field.
 
 test("the label rule and the terms free-text rule are the same pattern", () => {
   expect(IDENTITY_CONTROL_CHAR_PATTERN.source).toBe(

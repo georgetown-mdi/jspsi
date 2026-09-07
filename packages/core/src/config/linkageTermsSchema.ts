@@ -14,6 +14,7 @@ import {
 } from "./transformRegexDialect.js";
 import { exceedsOwnKeyCount } from "../utils/objectKeyCount.js";
 import { loneSurrogateIndex } from "../utils/wellFormedString.js";
+import { BIDI_CONTROL_PATTERN } from "../utils/nameControls.js";
 import {
   COUNT_ONLY_SHAPE_REFUSALS,
   countOnlyShapeViolation,
@@ -55,7 +56,9 @@ export const MAX_NAME_LENGTH = 256;
  * `identity`, a legal-agreement `purpose`, a payload column `description`, or
  * a constraint `exclude` value. Larger than {@link MAX_NAME_LENGTH} since
  * these hold a sentence or a long data value rather than a single label. The
- * same four fields apply {@link TEXT_CONTROL_CHAR_PATTERN} without exception.
+ * same four fields apply {@link TEXT_CONTROL_CHAR_PATTERN} without exception,
+ * and the three of them a record holds also apply `BIDI_CONTROL_PATTERN`
+ * (see {@link TEXT_DIRECTION_MESSAGE}).
  */
 export const MAX_TEXT_LENGTH = 1024;
 
@@ -64,7 +67,8 @@ export const MAX_TEXT_LENGTH = 1024;
  * free-text field of a terms document -- party `identity`, legal-agreement
  * `purpose`, payload column `description`, and each constraint `exclude`
  * entry: the C0 range (NUL included), DEL, and C1, with no exception for tab,
- * line feed, or carriage return.
+ * line feed, or carriage return. The three of those fields a record holds
+ * refuse a second class beside this one ({@link TEXT_DIRECTION_MESSAGE}).
  *
  * Enforced once at parse so every seat that reads a live document -- the
  * operator's own config load, the post-handshake wire re-parse
@@ -81,7 +85,10 @@ export const MAX_TEXT_LENGTH = 1024;
  * The web console applies these same ranges to an operator's `--identity`
  * label (`IDENTITY_CONTROL_CHAR_PATTERN`, apps/web/src/jobs/intentSchemas.ts,
  * held equal by apps/web/test/unit/jobs/identityLabelParity.test.ts) and is
- * stricter, also refusing a leading `-`.
+ * stricter in one direction, also refusing a leading `-`, and narrower in
+ * another: it holds this class alone, so a label holding a text-direction
+ * character passes the console's field check and is refused here when the CLI
+ * parses the terms it became.
  */
 export const TEXT_CONTROL_CHAR_PATTERN = /[\u0000-\u001f\u007f-\u009f]/;
 
@@ -94,6 +101,36 @@ export const TEXT_CONTROL_CHAR_PATTERN = /[\u0000-\u001f\u007f-\u009f]/;
  */
 export const TEXT_CONTROL_CHAR_MESSAGE =
   "a linkage terms free-text value must not contain control characters";
+
+/**
+ * The second class the three free-text fields a record holds verbatim refuse
+ * beside {@link TEXT_CONTROL_CHAR_PATTERN}: the nine Unicode bidirectional
+ * embedding, override and isolate characters `BIDI_CONTROL_PATTERN`
+ * (utils/nameControls.ts) names. The three are the party `identity`, the
+ * legal-agreement `purpose`, and a payload column `description`, each written
+ * into both parties' exchange records as submitted (records/exchangeRecord.ts)
+ * and read there by tooling that is not psilink, where no display boundary of
+ * ours stands. A layout scope opened in one of them outlives the value and
+ * reorders the copy it is placed beside, and none of the three needs one: a
+ * right-to-left sentence lays out from its own letters.
+ *
+ * The implicit marks U+200E LRM, U+200F RLM and U+061C ALM stay admitted, as
+ * they do in a name: each sets a direction for the neutral characters around
+ * it and opens no scope reaching past them.
+ *
+ * A constraint `exclude` value is outside this rule, so it is applied at the
+ * three fields rather than through {@link freeTextValue}, which shapes all
+ * four. An `exclude` entry is a data value the run matches a field's contents
+ * against -- the same footing a transform `params` value and a name-constraint
+ * `allowedCharacters` class stand on -- so what it may hold is what the data
+ * may hold, and it reaches no record: a record holds names, descriptions and
+ * references, never a value (docs/spec/EXCHANGE_RECORD.md).
+ *
+ * A fixed literal naming no submitted value, for the reason
+ * {@link TEXT_CONTROL_CHAR_MESSAGE} gives.
+ */
+export const TEXT_DIRECTION_MESSAGE =
+  "a linkage terms free-text value must not contain a text-direction character";
 
 /**
  * The shape a name-class value of a terms document must match, beyond its
@@ -318,6 +355,23 @@ const freeTextValue = (schema: z.ZodString) =>
   });
 
 /**
+ * One free-text value a record holds verbatim -- the party `identity`, the
+ * legal-agreement `purpose`, a payload column `description` -- holding
+ * {@link freeTextValue}'s control-character rule and the text-direction rule
+ * {@link TEXT_DIRECTION_MESSAGE} states, written once so the three cannot
+ * drift apart. A constraint `exclude` value takes the first rule alone, for
+ * the reason recorded with that message.
+ *
+ * Two checks rather than one over the union, so a refusal names the class the
+ * value holds, and a control character in any of the four free-text fields
+ * still reports the one thing {@link TEXT_CONTROL_CHAR_MESSAGE} says.
+ */
+const recordedFreeTextValue = (schema: z.ZodString) =>
+  freeTextValue(schema).refine((value) => !BIDI_CONTROL_PATTERN.test(value), {
+    message: TEXT_DIRECTION_MESSAGE,
+  });
+
+/**
  * One name-class value, holding the caller's own length floor and ceiling to
  * {@link NAME_SHAPE_PATTERN}. The regex goes on the field's own string schema
  * -- what the caller declares is the whole shape the field has -- rather than a
@@ -405,8 +459,10 @@ function firstWellFormednessRefusal(
 
 /**
  * A constraint `exclude` denylist: partner-controlled free-text values, each
- * length-bounded and control-character-refused like every other free-text string
- * ({@link freeTextValue}), with the entry COUNT bounded at
+ * length-bounded and control-character-refused ({@link freeTextValue}), and
+ * held to that rule alone -- the text-direction rule the three recorded
+ * free-text fields take is not this value's, for the reason
+ * {@link TEXT_DIRECTION_MESSAGE} records. The entry COUNT is bounded at
  * {@link MAX_EXCLUDE_ENTRIES} before per-element validation (see
  * {@link boundedArray}). Shared by all four constraint schemas so the bound is
  * defined once.
@@ -966,7 +1022,9 @@ export interface PayloadColumn {
 
 const PayloadColumnSchema: z.ZodType<PayloadColumn> = z.object({
   name: nameValue(z.string().min(1).max(MAX_NAME_LENGTH)),
-  description: freeTextValue(z.string().max(MAX_TEXT_LENGTH)).optional(),
+  description: recordedFreeTextValue(
+    z.string().max(MAX_TEXT_LENGTH),
+  ).optional(),
 });
 
 /**
@@ -1030,7 +1088,7 @@ interface LegalAgreement {
 
 const LegalAgreementSchema: z.ZodType<LegalAgreement> = z.object({
   reference: nameValue(z.string().min(1).max(MAX_NAME_LENGTH)),
-  purpose: freeTextValue(z.string().min(1).max(MAX_TEXT_LENGTH)),
+  purpose: recordedFreeTextValue(z.string().min(1).max(MAX_TEXT_LENGTH)),
   expirationDate: z.iso.date(),
 });
 
@@ -1243,10 +1301,12 @@ const LinkageTermsBaseSchema = z.object({
     .max(MAX_NAME_LENGTH)
     .regex(/^\d+\.\d+\.\d+$/, "version must be a valid semver string"),
   // Optional, and bounded where it is present: a party that names itself is held
-  // to a non-empty, length-capped, control-character-free label, and a party that
-  // supplies none omits the field rather than sending an empty string or a
-  // placeholder.
-  identity: freeTextValue(z.string().min(1).max(MAX_TEXT_LENGTH)).optional(),
+  // to a non-empty, length-capped label with no control or text-direction
+  // character in it, and a party that supplies none omits the field rather than
+  // sending an empty string or a placeholder.
+  identity: recordedFreeTextValue(
+    z.string().min(1).max(MAX_TEXT_LENGTH),
+  ).optional(),
   date: z.iso.date(),
   algorithm: AlgorithmSchema,
   linkageStrategy: LinkageStrategySchema.default("cascade"),

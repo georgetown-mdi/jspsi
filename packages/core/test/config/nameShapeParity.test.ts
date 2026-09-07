@@ -85,6 +85,47 @@ test("the metadata block's column name admits exactly what the shape admits", ()
   expect(disagreements).toEqual([]);
 });
 
+// The terms document a recorded free-text value is swept inside. Every field
+// the sweep is not about holds a value the schema accepts, and the three it is
+// about hold the swept character together: the per-field reach is pinned case
+// by case in linkageTermsSchema.test.ts, so this measures the CLASS.
+const termsWithRecordedFreeText = (value: string) => ({
+  version: "1.0.0",
+  identity: value,
+  date: "2025-01-01",
+  algorithm: "psi",
+  output: { expectsOutput: true, shareWithPartner: false },
+  deduplicate: false,
+  linkageFields: [{ name: "ssn", type: "ssn" }],
+  linkageKeys: [{ name: "SSN", elements: [{ field: "ssn" }] }],
+  payload: { send: [{ name: "enrollment_date", description: value }] },
+  legalAgreement: {
+    reference: "MOU-2025-0042",
+    purpose: value,
+    expirationDate: "2030-12-31",
+  },
+});
+
+test("a recorded free-text value refuses exactly the control and bidi classes", () => {
+  // The three free-text fields a record holds verbatim -- the party identity,
+  // the legal agreement's purpose, and a payload column's description -- refuse
+  // both classes, where the fourth free-text field (a constraint exclude value)
+  // refuses the control class alone. Driven through the schema a parse runs
+  // rather than read off its source.
+  const disagreements: Array<string> = [];
+  for (const { codePoint, character } of bmpCharacters()) {
+    const value = `Agency${character}A`;
+    const refusedByEitherClass =
+      TEXT_CONTROL_CHAR_PATTERN.test(value) || BIDI_CONTROL_PATTERN.test(value);
+    const admittedByTheSchema = safeParseLinkageTerms(
+      termsWithRecordedFreeText(value),
+    ).success;
+    if (admittedByTheSchema === refusedByEitherClass)
+      disagreements.push(label(codePoint));
+  }
+  expect(disagreements).toEqual([]);
+});
+
 // The terms document a params key is swept inside. Minimal but complete: the
 // sweep is about the key alone, so nothing else here may fail the parse.
 const termsWithParamsKey = (key: string) => ({
