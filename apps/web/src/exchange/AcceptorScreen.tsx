@@ -276,7 +276,7 @@ export function AcceptorScreen() {
   // columns step and its verdict derive from it; and the layered column-step editor
   // state (metadata + override layers), seeded once from the acquired columns.
   const [acquired, setAcquired] = useState<AcceptorAcquiredCsv>();
-  // The 1-based positions the parse stripped bidi control characters from, held
+  // The 1-based positions the parse stripped control characters from, held
   // beside the acquired file so the confirm-columns step states what was removed
   // on the screen where the names are read and marked.
   const [sanitizedColumnPositions, setSanitizedColumnPositions] = useState<
