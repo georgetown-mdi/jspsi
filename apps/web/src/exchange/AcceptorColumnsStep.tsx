@@ -549,15 +549,12 @@ export function AcceptorColumnsStep({
                         {unshownDeclaredNamesLine(unshownDeclaredCount)}
                       </Text>
                     )}
-                    {/* The remedy here is mostly the partner's: the local widening
-                        is offered only where the column exists, never as the fix,
-                        and its cost is one sentence over the whole list -- whose
-                        columns can sit at different uses, each shown in the grid row
-                        the sentence points at. Where the widening would leave an
-                        agreed key unsatisfiable, that is the cost stated instead:
-                        taking the offer would only move the operator on to the
-                        linkage refusal. Read from the whole declaration, which the
-                        painted names need not hold. */}
+                    {/* The remedy here is mostly the partner's; the widening
+                        below is a secondary offer, made only where the column
+                        exists. Its cost is graded by the same verdict the
+                        launch gate runs, over the whole declaration rather
+                        than the (possibly capped) list painted above, so the
+                        caveat cannot understate what taking it would cost. */}
                     Ask your partner for an invitation that expects what your
                     file sends
                     {expectedMissingFromFile.length > 0 &&
