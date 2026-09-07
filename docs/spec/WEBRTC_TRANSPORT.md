@@ -201,12 +201,16 @@ headers appear; the inbound scan and `unpack` already read both, so a frame
 larger than the previous ceiling needs no negotiation. Any other value kind --
 a `Date`, a `Map`, a class instance, a number outside the integer range -- is
 refused with a `usage`-kind `ConnectionError` rather than guessed at, since a
-guess that misses is a silently corrupt frame. Two frame shapes the pinned
-packer itself refuses are refused the same way, so that no frame is written the
-packer would not have written: a value that holds itself, which the packer meets
-as a stack overflow and the encoder as a container already on the walk from the
-root, and an object with an own `hasOwnProperty` key, which shadows the
-ownership check the packer's map encoder calls.
+guess that misses is a silently corrupt frame. Two more frame shapes are refused
+so that no frame is written the packer would not have written whole: a value
+that holds itself, which the packer meets as a stack overflow and the encoder as
+a container already on the walk from the root, and an object with an own
+`constructor` or `hasOwnProperty` key, each of which shadows a check the packer
+makes -- it reads `value.constructor` to pick the kind and calls
+`value.hasOwnProperty(key)` for each key of a map. The encoder refuses that
+shadow outright, which is wider than the packer: the packer throws on all but
+one of these shapes, and on the one it survives -- an own `hasOwnProperty` that
+answers false for every key -- it writes a map header it fills with nothing.
 
 ## The clean close
 

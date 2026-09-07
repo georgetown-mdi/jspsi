@@ -55,23 +55,25 @@ function cyclicFrameError(): ConnectionError {
   );
 }
 
-/** An own key that shadows the ownership check the library's own map encoder
- * calls, which makes the library refuse the object. */
-function shadowedOwnershipError(): ConnectionError {
+/** An own key that shadows a check the library makes on the value, which leaves
+ * the library throwing or writing a map header it never fills. */
+function shadowedPackerCheckError(key: string): ConnectionError {
   return new ConnectionError(
-    "cannot BinaryPack an outbound frame holding an object with an own " +
-      "hasOwnProperty key; rename that key",
+    `cannot BinaryPack an outbound frame holding an object with an own ${key}` +
+      " key; rename that key",
     "usage",
   );
 }
 
 /** Names an unsupported value for {@link unsupportedValueError}, by type rather
  * than by content: the frame is this side's own, but its message reaches a
- * console, and a value's own text has no place there. */
+ * console, and a value's own text has no place there. The name is read off the
+ * prototype, since an own `constructor` key is content rather than a type. */
 function describeValue(value: unknown): string {
   if (typeof value !== "object" || value === null) return `a ${typeof value}`;
-  const constructorName = (value as { constructor?: { name?: unknown } })
-    .constructor?.name;
+  const constructorName = (
+    Object.getPrototypeOf(value) as { constructor?: { name?: unknown } } | null
+  )?.constructor?.name;
   return typeof constructorName === "string" && constructorName.length > 0
     ? `an instance of ${constructorName}`
     : "an object with no prototype";
@@ -139,6 +141,11 @@ function isPlainObject(value: object): value is Record<string, unknown> {
   return value.constructor === Object;
 }
 
+/** Own keys that shadow a check the library makes: it reads `value.constructor`
+ * to dispatch on the kind, as {@link isPlainObject} does, and calls
+ * `value.hasOwnProperty(key)` for each key of a map. */
+const OWN_KEYS_THAT_SHADOW_A_PACKER_CHECK = ["constructor", "hasOwnProperty"];
+
 /** One container whose elements are still to be written, held on the encoder's
  * own stack in place of a call frame. */
 type PendingContainer =
@@ -168,8 +175,9 @@ function isPendingArray(
  *               those, nested to any depth.
  * @throws {ConnectionError} of kind `usage` on any other value kind (a Date, a
  *         Map, a class instance, a function), on a value that holds itself, on
- *         an object with an own `hasOwnProperty` key, and on a container,
- *         string or byte string longer than a 32-bit count can declare.
+ *         an object with an own `constructor` or `hasOwnProperty` key, and on
+ *         a container, string or byte string longer than a 32-bit count can
+ *         declare.
  */
 export function encodeBinaryPackValue(value: unknown): ArrayBuffer {
   const sink = new ByteSink();
@@ -331,14 +339,17 @@ export function encodeBinaryPackValue(value: unknown): ArrayBuffer {
       );
       return;
     }
+    // Read before the kind dispatch below, which makes the same `constructor`
+    // read the library does: an own key of either name leaves the packer
+    // throwing or writing a map header it never fills, and this encoder writes
+    // no frame the packer would not have written whole.
+    for (const shadowed of OWN_KEYS_THAT_SHADOW_A_PACKER_CHECK) {
+      if (Object.prototype.hasOwnProperty.call(next, shadowed)) {
+        throw shadowedPackerCheckError(shadowed);
+      }
+    }
     if (!isPlainObject(next)) {
       throw unsupportedValueError(describeValue(next));
-    }
-    // The library decides each own key with `next.hasOwnProperty(key)`, which
-    // an own key of that name shadows, so it refuses this object; this encoder
-    // writes no map the pinned packer would not have written.
-    if (Object.prototype.hasOwnProperty.call(next, "hasOwnProperty")) {
-      throw shadowedOwnershipError();
     }
     const keys = Object.keys(next);
     const length = keys.length;

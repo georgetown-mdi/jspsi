@@ -103,6 +103,17 @@ describe("encodeBinaryPackValue: nesting", () => {
   });
 });
 
+/** The message the encoder refuses `value` with, for an assertion about what
+ * the message must not hold. */
+function refusalMessage(value: unknown): string {
+  try {
+    encodeBinaryPackValue(value);
+  } catch (error) {
+    return (error as Error).message;
+  }
+  throw new Error("the encoder encoded a value it was expected to refuse");
+}
+
 describe("encodeBinaryPackValue: refusals", () => {
   const refused: Array<{ label: string; value: unknown }> = [
     { label: "a Date", value: new Date(0) },
@@ -132,8 +143,10 @@ describe("encodeBinaryPackValue: refusals", () => {
 
   // The packer reads a value's own `constructor` to decide a map and calls its
   // own `hasOwnProperty` to decide each key, so an own key of either name
-  // shadows a check the packer makes; the encoder must refuse wherever the
-  // packer does, not write a map the packer would not have.
+  // shadows a check the packer makes: it throws on both of these, and on an own
+  // `hasOwnProperty` answering false for every key writes a map header it never
+  // fills. The encoder refuses the shadow, writing no frame the packer would not
+  // have written whole.
   const packerShadows: Array<{ key: string; value: object }> = [
     { key: "constructor", value: { constructor: 1, theirIndex: 0 } },
     { key: "hasOwnProperty", value: { hasOwnProperty: 1, theirIndex: 0 } },
@@ -143,10 +156,19 @@ describe("encodeBinaryPackValue: refusals", () => {
     test(`refuses an object whose own ${key} key the packer also refuses`, () => {
       expect(() => pack(value as unknown as Packable)).toThrow();
       expect(() => encodeBinaryPackValue(value)).toThrowError(
-        /cannot BinaryPack an outbound frame/,
+        new RegExp(`an object with an own ${key} key`),
       );
     });
   }
+
+  test("names a shadowed constructor key rather than what it holds", () => {
+    const message = refusalMessage({
+      constructor: { name: "FRAME-CONTENT" },
+      a: 1,
+    });
+    expect(message).toContain("an object with an own constructor key");
+    expect(message).not.toContain("FRAME-CONTENT");
+  });
 
   test("refuses an object that holds itself, rather than walking forever", () => {
     const frame: Record<string, unknown> = { theirIndex: 0 };

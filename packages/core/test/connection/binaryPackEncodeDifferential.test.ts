@@ -127,8 +127,15 @@ const RECORD_SCALING_FRAMES = [
  * two sizes under the packer's own recursion ceiling, measured at roughly 7,800
  * records for the iteration map and higher for the other three. The top size
  * keeps well clear of it because the ceiling moves with the stack already in
- * use; a size that reaches it anyway skips below rather than failing. */
+ * use; a size above `SKIPPABLE_SIZE_FLOOR` that reaches it anyway skips below
+ * rather than failing. */
 const ORACLE_SIZES = [0, 1, 15, 16, 200, 5000];
+
+/** The size above which a missing oracle is a fact about the library rather
+ * than a loss of coverage. A ceiling that fell to this size or below has taken
+ * byte equality down to frames of a few records, which is the regression this
+ * suite exists to catch, so the case fails instead of skipping. */
+const SKIPPABLE_SIZE_FLOOR = 200;
 
 describe("encodeBinaryPackValue: the record-scaling frames, byte for byte", () => {
   for (const { name, build } of RECORD_SCALING_FRAMES) {
@@ -137,11 +144,19 @@ describe("encodeBinaryPackValue: the record-scaling frames, byte for byte", () =
         const frame = build(size);
         const oracle = oracleBytesWithinPackerCeiling(frame);
         if (oracle === undefined) {
-          context.skip(
+          const noOracle =
             `the pinned packer overflows its own call stack at ${size} ` +
-              `${name} records, so it cannot serve as the oracle for this ` +
-              "size; lower the top oracle size rather than reading this as " +
-              "an encoder regression",
+            `${name} records, so it cannot serve as the oracle for this size`;
+          if (size <= SKIPPABLE_SIZE_FLOOR) {
+            throw new Error(
+              `${noOracle}; its ceiling has fallen to ${SKIPPABLE_SIZE_FLOOR} ` +
+                "records or below, which leaves the byte-for-byte comparison " +
+                "measuring nothing but tiny frames",
+            );
+          }
+          context.skip(
+            `${noOracle}; lower the top oracle size rather than reading this ` +
+              "as an encoder regression",
           );
           return;
         }

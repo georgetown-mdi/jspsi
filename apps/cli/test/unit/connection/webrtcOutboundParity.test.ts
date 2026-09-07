@@ -20,11 +20,16 @@ import { packValue } from "../../../src/connection/webrtc/peerjsWire";
 // instead, and that fixture is named in a test of its own so one silently
 // changing class shows up.
 
+/** The library's bytes, or `undefined` where its own recursion ceiling stops it.
+ * Only that overflow downgrades a fixture to a round trip: any other failure
+ * class is the library refusing a value it used to pack, which this suite must
+ * report rather than absorb. */
 function libraryBytesOrUndefined(value: unknown): Uint8Array | undefined {
   try {
     return packWithTheLibrary(value);
-  } catch {
-    return undefined;
+  } catch (error) {
+    if (error instanceof RangeError) return undefined;
+    throw error;
   }
 }
 

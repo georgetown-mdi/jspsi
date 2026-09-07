@@ -42,6 +42,11 @@ interface PackingDataConnection {
  * exchange is large enough -- past the PSI compute both parties paid for.
  * Called before any listener is attached, so a broken assumption fails cleanly
  * with nothing to tear down.
+ *
+ * The four are all the replacement needs: PeerJS's fifth send path,
+ * `_send_blob`, is not probed because the replacement drops it. psilink sends
+ * no `Blob`, and one handed to the replacement is refused by the encoder
+ * (docs/spec/DEPENDENCY_PINS.md).
  */
 export function assertIterativePackingSupported(conn: DataConnection): void {
   const probe = conn as unknown as {

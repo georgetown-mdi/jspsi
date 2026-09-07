@@ -174,6 +174,19 @@ describe("packOutboundFramesIteratively", () => {
     expect(fake.datagrams[0]).toEqual(libraryBytes(sentinel));
   });
 
+  // PeerJS's own `_send` hands a Blob to `_send_blob`, packing it
+  // asynchronously; the replacement has no such path, so the Blob is refused
+  // before a datagram exists (docs/spec/DEPENDENCY_PINS.md).
+  test("refuses a Blob rather than taking the dropped async send path", () => {
+    const { fake, conn } = standIn();
+    packOutboundFramesIteratively(conn);
+
+    expect(() => fake.send(new Blob(["frame"]))).toThrowError(
+      /an outbound frame holding an instance of Blob/,
+    );
+    expect(fake.datagrams).toHaveLength(0);
+  });
+
   test("refuses a value kind the wire does not carry", () => {
     const { fake, conn } = standIn();
     packOutboundFramesIteratively(conn);
