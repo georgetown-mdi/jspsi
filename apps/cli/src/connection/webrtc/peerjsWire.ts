@@ -1,6 +1,6 @@
-import { pack, unpack } from "peerjs-js-binarypack";
+import { unpack } from "peerjs-js-binarypack";
 
-import { ConnectionError } from "@psilink/core";
+import { ConnectionError, encodeBinaryPackValue } from "@psilink/core";
 
 /**
  * The PeerJS DataConnection wire, written out rather than obtained by running
@@ -101,27 +101,16 @@ export function toFrameBytes(data: unknown): Uint8Array {
 }
 
 /**
- * BinaryPack-encode one application value, exactly as PeerJS's binary
- * DataConnection `_send` does before chunking.
+ * BinaryPack-encode one application value, into the bytes PeerJS's binary
+ * DataConnection `_send` puts on the wire before chunking.
  *
- * `pack` returns a `Promise` only for a `Blob` input, which nothing on this path
- * constructs (Node hands us `Buffer`/`Uint8Array` payloads), so the synchronous
- * branch is the only reachable one -- asserted rather than assumed, since a
- * silently-awaited promise would put a `[object Promise]` on the wire.
+ * Core's {@link encodeBinaryPackValue} rather than the library's own `pack`:
+ * the library descends one call frame per element and overflows the stack a few
+ * thousand matched records in, while the encoder walks the frame with an
+ * explicit stack and emits the same bytes (docs/spec/WEBRTC_TRANSPORT.md).
  */
 export function packValue(value: unknown): Uint8Array {
-  // `pack` accepts far more than its `Packable` type admits (the psilink frames
-  // are plain objects of strings, numbers and byte arrays); the cast is the
-  // boundary between our `unknown` frames and its declared input type.
-  const packed = pack(value as Parameters<typeof pack>[0]);
-  if (packed instanceof Promise) {
-    throw new ConnectionError(
-      "BinaryPack returned an asynchronous result for an outbound frame; the " +
-        "CLI transport packs only synchronous payloads",
-      "usage",
-    );
-  }
-  return new Uint8Array(packed);
+  return new Uint8Array(encodeBinaryPackValue(value));
 }
 
 /** The PeerJS in-band clean-close sentinel, packed and ready to send. */

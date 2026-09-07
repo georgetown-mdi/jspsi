@@ -456,7 +456,9 @@ test("an unanswered dialer fails on the rendezvous budget, and says so", async (
     channelOpenTimeoutMs: 100,
     rendezvousTimeoutMs: 150,
   });
-  await expect(session).rejects.toThrow(/did not answer within 150ms/);
+  await expect(session).rejects.toThrow(
+    /did not answer within 0.15s; --peer-timeout sets how long to wait/,
+  );
 });
 
 test("a channel that never opens after the answer fails at the open ceiling", async () => {
@@ -470,7 +472,9 @@ test("a channel that never opens after the answer fails at the open ceiling", as
     src: inviterId,
     payload: { sdp: { type: "answer", sdp: "v=0\r\nanswer\r\n" } },
   });
-  await expect(session).rejects.toThrow(/did not open within 100ms/);
+  await expect(session).rejects.toThrow(
+    /did not open within 0.1s .* --peer-timeout sets that bound/,
+  );
 });
 
 // --- the listener's answer --------------------------------------------------
@@ -1004,7 +1008,7 @@ test("the channel-open ceiling reports the same diagnosis", async () => {
     payload: { sdp: { type: "answer", sdp: "v=0\r\nanswer\r\n" } },
   });
   const rendered = await renderedFailure(session);
-  expect(rendered).toContain("did not open within 100ms");
+  expect(rendered).toContain("did not open within 0.1s");
   expect(rendered).toContain(
     "local candidates gathered: no relay candidate gathered; 1 (host)",
   );
@@ -1130,7 +1134,7 @@ test("a channel-open ceiling whose statistics throw reports the failure alone", 
     statsAnswer: "throws",
     path: "channel-open-ceiling",
   });
-  expectUndiagnosedFailure(error, "did not open within 100ms");
+  expectUndiagnosedFailure(error, "did not open within 0.1s");
   expect(elapsedMs).toBeLessThan(ICE_STATS_TIMEOUT_MS);
 });
 
@@ -1138,5 +1142,5 @@ test("a channel-open ceiling whose statistics never arrive still reports", async
   const error = await neverSettlingStatsFailure({
     path: "channel-open-ceiling",
   });
-  expectUndiagnosedFailure(error, "did not open within 100ms");
+  expectUndiagnosedFailure(error, "did not open within 0.1s");
 });

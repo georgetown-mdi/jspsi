@@ -95,6 +95,10 @@ export {
   scanFrameStructure,
 } from "./connection/binaryPackBounds";
 export type { FrameStructureRefusal } from "./connection/binaryPackBounds";
+// The send-side half of the same wire. Barrelled for the same reason: both
+// WebRTC transports encode their outbound frames outside this package, and one
+// implementation has to produce the bytes a partner's BinaryPack reads.
+export { encodeBinaryPackValue } from "./connection/binaryPackEncode";
 export {
   getLogger,
   getLoggerForVerbosity,
