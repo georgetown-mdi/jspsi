@@ -241,6 +241,7 @@ Documentation-tier placement is in scope for code review: a reviewer flags spec-
   message, already governed by this same rule.
 - Include a body for non-trivial commits explaining motivation and context, not just what changed. Hard-wrap body lines at roughly 70 characters.
 - A pull request is squash-merged, so its squash message is the commit that lands. `node .claude/scripts/squash-message.mjs <pr-number>` drafts one from the branch's commits, the PR body, and this document, and prints it for the maintainer to review before pasting; it merges nothing. A pull request with a single commit needs no hand-written squash message -- GitHub takes that commit's own message -- so the script refuses one and the work goes into the commit itself.
+- The subject budget and the body wrap above are checked rather than remembered. `node .claude/scripts/format-squash-message.mjs <pr-number|unassigned> [<draft-path>] [--out <path>]` rewraps a draft's body, drops the markdown and list markers a commit message does not take, and reports what it cannot fix without rewriting the message. `squash-message.mjs` prints its own draft through it.
 
 ## Pull Request Process
 

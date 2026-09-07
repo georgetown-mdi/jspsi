@@ -1,4 +1,15 @@
-import { describe, expect, it } from "vitest";
+import { spawnSync } from "node:child_process";
+import { chmodSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { delimiter, join } from "node:path";
+import { fileURLToPath } from "node:url";
+import { afterEach, describe, expect, it } from "vitest";
+
+import {
+  BODY_WRAP_COLUMNS,
+  SUBJECT_LIMIT,
+  splitDraft,
+} from "./format-squash-message.mjs";
 import {
   ALLOWED_TOOLS,
   DISALLOWED_TOOLS,
@@ -9,6 +20,8 @@ import {
   prompt,
   refusal,
 } from "./squash-message.mjs";
+
+const SCRIPT = fileURLToPath(new URL("./squash-message.mjs", import.meta.url));
 
 describe("squash-message argument parsing", () => {
   it("takes a bare number and the #-prefixed spelling", () => {
@@ -123,5 +136,67 @@ describe("squash-message tool surface", () => {
   it("keeps the prompt out of argv", () => {
     expect(args).not.toContain(prompt(928));
     for (const arg of args) expect(arg).not.toContain("squash-and-merge");
+  });
+});
+
+// The run's own output is the second producer of a squash message, so the draft
+// it prints goes through the normalizer. Both tools it spawns are stubbed on
+// PATH: nothing here reaches a real `gh`, a real `claude`, or the network.
+describe("squash-message output", () => {
+  const directories = [];
+  afterEach(() => {
+    while (directories.length > 0) {
+      rmSync(directories.pop(), { recursive: true, force: true });
+    }
+  });
+
+  function stubbedPath(draft) {
+    const directory = mkdtempSync(join(tmpdir(), "squash-message-stub-"));
+    directories.push(directory);
+    const draftPath = join(directory, "draft.txt");
+    writeFileSync(draftPath, draft);
+    const stub = (name, body) => {
+      const path = join(directory, name);
+      writeFileSync(path, `#!/bin/sh\n${body}\n`);
+      chmodSync(path, 0o755);
+    };
+    stub("gh", "echo 3");
+    stub("claude", `cat > /dev/null\ncat ${draftPath}`);
+    return `${directory}${delimiter}${process.env.PATH}`;
+  }
+
+  const run = (draft) =>
+    spawnSync("node", [SCRIPT, "1374"], {
+      encoding: "utf8",
+      env: { ...process.env, PATH: stubbedPath(draft) },
+    });
+
+  it("wraps the body of the draft the run produced", () => {
+    const paragraph = `${"word ".repeat(30)}end`;
+    const result = run(
+      `Wrap the squash message on the way out\n\n${paragraph}\n`,
+    );
+    expect(result.status).toBe(0);
+    for (const line of splitDraft(result.stdout).body) {
+      expect(line.length).toBeLessThanOrEqual(BODY_WRAP_COLUMNS);
+    }
+  });
+
+  it("takes the markers out of the draft the run produced", () => {
+    const result = run(
+      "Wrap the squash message on the way out\n\n- a list item\n",
+    );
+    expect(result.status).toBe(0);
+    expect(result.stdout).toBe(
+      "Wrap the squash message on the way out\n\na list item\n",
+    );
+  });
+
+  it("prints an unfixable draft as it came, with the rule on stderr", () => {
+    const drafted = `${"x".repeat(SUBJECT_LIMIT)}\n\nA body sentence.\n`;
+    const result = run(drafted);
+    expect(result.status).toBe(2);
+    expect(result.stdout).toBe(drafted);
+    expect(result.stderr).toContain("Shorten the subject");
   });
 });
