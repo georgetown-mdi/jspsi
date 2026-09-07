@@ -28,9 +28,14 @@ be told.
 Past it, the exchange died on the sender with `Maximum call stack size
 exceeded`, after both parties had run the PSI compute. Nothing on the receiving
 side was near its own limits: the inbound bounds admit a frame of millions of
-elements (`MAX_WEBRTC_FRAME_STRUCTURE_BYTES` sizes the mapped-element frame at
-about 5.65 million records), and both transports' reassembly and unpack are
-iterative. The ceiling belonged to one function on one side of the wire.
+elements under the cumulative declared-count rule in
+`packages/core/src/connection/binaryPackBounds.ts`, which bounds declared
+elements across the frame at one per wire byte under the 256 MiB wire cap --
+measured on this build at about 28 bytes per record for the mapped-element
+frame (84 MB for 3,000,000 records), which puts the headroom at the wire cap
+divided by that figure, on the order of 9 million records -- and both
+transports' reassembly and unpack are iterative. The ceiling belonged to one
+function on one side of the wire.
 
 ## What was decided
 
@@ -102,3 +107,14 @@ uninterrupted loop, with no backpressure of its own. At 200,000 records that is
 336 datagrams of a 5.47 MB frame; driven over a real werift pair through the
 repository's own broker, the frame arrives whole. That measurement is the reason
 the loop was left alone, not evidence that it has no limit of its own.
+
+Three limits of the encoder's parity with the pinned packer are measured facts,
+not properties either implementation states. An object whose prototype, not its
+own keys, answers `hasOwnProperty` falsely makes the pinned packer write a map
+header it then fills with nothing, while this encoder writes the whole map; the
+two diverge only where the packer's own output is itself unreadable past that
+header. That packer-survives shape -- an own `hasOwnProperty` answering false
+for every key -- is stated in the spec from a measurement, not backed by a
+check. And a plain object carrying a `BYTES_PER_ELEMENT` key encodes as an
+empty byte string on both sides, mirroring the packer's own dispatch rather
+than diverging from it.
