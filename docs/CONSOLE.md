@@ -99,6 +99,15 @@ The console also warns at job start when the rendezvous directory is not empty, 
 - Files that are not part of an exchange -- your input CSVs, your results, the per-job working directories -- are not what the refusal is about, so the warning names them without asking you to remove them, and the launch stays your call.
 - It reaches every console surface that watches an exchange run: the flow that mints an invitation, the flow that accepts a partner's, Direct exchange, and the panel that reconnects to an exchange already under way. That enumeration is about which surfaces display a warning, not a promise that every notice arrives whole: the console escapes each warning and caps its displayed length, so a long one -- a notice relayed from the CLI rather than raised by the console itself -- can reach the seat abbreviated.
 
+### A column name the console cannot record
+
+The console bounds every declared column name at 256 characters, so a header
+past that stops two things and names the column in each: the exchange refuses
+to start, and the cleaning coverage check cannot run over a step whose input
+column is named that way. Both say which column by its position in the file,
+show the name, and state the bound -- the file itself is fine, so choosing it
+again changes nothing and the fix is the header row.
+
 ### Split inbound and outbound rendezvous folders
 
 Some deployments bridge two folders rather than sharing one: this party reads its partner's files out of an **inbound** folder and writes its own into an **outbound** one, and the bridge makes each party's outbound the other's inbound. Set both `JOB_RENDEZVOUS_DIR` (inbound) and `JOB_RENDEZVOUS_OUTBOUND_DIR` (outbound) and every shared-directory exchange the console runs uses that pair, composing the CLI's `inbound_path`/`outbound_path` instead of a single `path` (see [FILE_SYNC.md](spec/FILE_SYNC.md#split-inboundoutbound-directories)).

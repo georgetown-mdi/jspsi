@@ -11,7 +11,9 @@ import {
   MAX_SFTP_CONNECTION_RESPONSE_BYTES,
   readBoundedJson,
 } from "@psi/jobClient/jobApiBody";
+import { jobCreateIntentSchema } from "@jobs/intentSchemas";
 import { jobRecordDownloads } from "@psi/jobClient/jobExchangeRecord";
+import { refusedColumnNames } from "@psi/columnNames";
 import { whenDiagnostic } from "@utils/diagnostics";
 
 import { ERROR_MESSAGE_CHAIN_FIELD } from "../relayErrorChain";
@@ -38,6 +40,7 @@ import type {
 } from "@psilink/core";
 import type { RelayEvent, RelayEventType } from "@jobs/cliDriver";
 import type { ReceiptsIntentFields } from "../receiptsModel";
+import type { RefusedColumnName } from "@psi/columnNames";
 import type { RunDiagnosticsIntentFields } from "../runDiagnosticsModel";
 import type { RunOutputs } from "../runOutputs";
 import type { SftpConnectionProjection } from "@jobs/jobManager";
@@ -224,6 +227,19 @@ export class JobApiRequestError extends Error {
   ) {
     super(message);
     this.name = "JobApiRequestError";
+  }
+}
+
+/**
+ * The pre-POST refusal for an intent the console's own schema would reject over a
+ * column name: raised in the browser, which holds the intent it is about to send,
+ * so the operator meets a diagnostic naming the column rather than the job API's
+ * empty-bodied `400`. No route's answer changes, and nothing is sent.
+ */
+export class JobIntentColumnNameError extends Error {
+  constructor(readonly columns: Array<RefusedColumnName>) {
+    super("job intent refused over a column name");
+    this.name = "JobIntentColumnNameError";
   }
 }
 
@@ -986,6 +1002,21 @@ function zeroSetupIntentFor(
     : { channel: "filedrop", ...shared };
 }
 
+/** The columns the console's create schema refuses this intent over, empty when
+ * the intent's column names are all admissible (and for a zero-setup intent,
+ * which declares no metadata). Located by issue path through the same schema the
+ * route parses with, so the browser cannot refuse what the route would accept. */
+function refusedIntentColumns(
+  intent: JobCreateIntent,
+): Array<RefusedColumnName> {
+  const parsed = jobCreateIntentSchema.safeParse(intent);
+  if (parsed.success) return [];
+  return refusedColumnNames(
+    parsed.error,
+    "metadata" in intent ? intent.metadata : undefined,
+  );
+}
+
 /**
  * Create the job, fire `onJobCreated`, then fold its SSE event stream onto the
  * lifecycle events -- the run body shared by both server-job drivers, differing
@@ -1009,6 +1040,19 @@ async function runCreatedJob(
   // is not narrowed to a constant by the first guard.
   const aborted = () => signal.aborted;
   if (aborted()) return;
+
+  // The console's own create schema, run here over the intent this browser holds.
+  // The route answers a schema refusal with an empty body by design, so a metadata
+  // column name it cannot record would otherwise reach the operator as a bare
+  // "could not use this file"; this names the column before anything is sent.
+  const refusedColumns = refusedIntentColumns(intent);
+  if (refusedColumns.length > 0) {
+    events.onError({
+      category: "config",
+      error: new JobIntentColumnNameError(refusedColumns),
+    });
+    return;
+  }
 
   let jobId: string;
   try {

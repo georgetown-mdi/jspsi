@@ -202,6 +202,36 @@ describe("fetchJobInputProfile", () => {
     }
   });
 
+  test("rejects a position named twice, on a header long enough to hold it", async () => {
+    // The two-column body above refuses [1, 2, 2] on its length bound alone, so
+    // uniqueness needs a header with room for the repeat: the list identifies
+    // columns, and a repeat renders the same number twice in the notice.
+    const wide = {
+      ...PROFILE_WIRE,
+      columns: ["first_name", "dob", "city"],
+      columnSamples: [
+        ...PROFILE_WIRE.columnSamples,
+        { column: "city", values: ["Springfield"] },
+      ],
+    };
+    expect(
+      await fetchJobInputProfile("x", () =>
+        Promise.resolve(
+          jsonResponse({ ...wide, sanitizedColumnPositions: [1, 2, 2] }),
+        ),
+      ),
+    ).toEqual({ kind: "unavailable", reason: "unknown" });
+    // The same list without the repeat is admitted, so the rejection above is
+    // the uniqueness rule rather than the wider header failing some other check.
+    expect(
+      await fetchJobInputProfile("x", () =>
+        Promise.resolve(
+          jsonResponse({ ...wide, sanitizedColumnPositions: [1, 2, 3] }),
+        ),
+      ),
+    ).toMatchObject({ kind: "profile" });
+  });
+
   test("carries the reported positions through to the seat", async () => {
     const result = await fetchJobInputProfile("x", () =>
       Promise.resolve(

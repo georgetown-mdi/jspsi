@@ -15,6 +15,7 @@ import { CleaningTab } from "@exchange/CleaningTab";
 import { createAppMount } from "./renderApp";
 
 import type { AcquiredCsv } from "@psi/inviterEditor";
+import type { RefusedColumnName } from "@psi/columnNames";
 
 // A minimal file whose seeded terms hold a few cleaning fields, so both surfaces
 // mount their standardization workbench alongside the banner under test.
@@ -32,7 +33,10 @@ const app = createAppMount();
 
 afterEach(app.unmount);
 
-function renderCleaningTab(coverageUnavailable: boolean) {
+function renderCleaningTab(
+  coverageUnavailable: boolean,
+  coverageRefusedColumns: ReadonlyArray<RefusedColumnName> = [],
+) {
   const editor = editorFromCsv("Dana Okafor", csv);
   app.render(
     createElement(CleaningTab, {
@@ -42,6 +46,7 @@ function renderCleaningTab(coverageUnavailable: boolean) {
       rates: null,
       pending: false,
       coverageUnavailable,
+      coverageRefusedColumns,
       onFieldSteps: () => undefined,
       onFieldInput: () => undefined,
       onFieldAdded: () => undefined,
@@ -76,6 +81,27 @@ describe("the Cleaning surfaces' coverage-unavailable banner", () => {
       .not.toBeInTheDocument();
   });
 
+  test("CleaningTab names the column the console's sweep refused", async () => {
+    // The console bounds a cleaning step's input-column name, so a sweep it
+    // settles without a result has a cause the operator can act on: the banner
+    // names the column and the bound instead of only stating the check did not
+    // run.
+    renderCleaningTab(true, [
+      { position: 2, name: "last_name", refusal: "too-long" },
+    ]);
+
+    await expect
+      .element(page.getByText("Could not check coverage"))
+      .toBeInTheDocument();
+    // The banner itself, not the live region beside it, which announces the
+    // same sentence.
+    const banner = page.getByRole("note");
+    await expect.element(banner).toHaveTextContent("Column 2");
+    await expect
+      .element(banner)
+      .not.toHaveTextContent("this check just did not run");
+  });
+
   test("AcceptorCleaningStep shows the banner when coverage is unavailable", async () => {
     // Derive the metadata, standardization, and declared fields from one seeded
     // editor so the standardization workbench's fields resolve (its
@@ -90,6 +116,7 @@ describe("the Cleaning surfaces' coverage-unavailable banner", () => {
         rates: null,
         ratesPending: false,
         coverageUnavailable: true,
+        coverageRefusedColumns: [],
         deadKeyCount: 0,
         cleaningResetKey: "",
         onFieldSteps: () => undefined,

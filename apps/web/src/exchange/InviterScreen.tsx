@@ -19,7 +19,10 @@ import {
 import {
   emptyColumnPositions,
   overlongColumnsAlert,
+  overlongCoverageColumns,
+  refusedColumnNames,
   sanitizedColumnsAlert,
+  savedExchangeColumnRefusalAlert,
   unnameableColumnsAlert,
 } from "@psi/columnNames";
 import { capturedInputHandle } from "@psi/managed/managedInputHandle";
@@ -398,6 +401,9 @@ export function InviterScreen() {
   const [receiptsOpen, setReceiptsOpen] = useState(false);
   const [demoActive, setDemoActive] = useState(false);
   const [manageStatus, setManageStatus] = useState<ManageOfferStatus>("idle");
+  // What the failed deposit was about, when a column name explains it; undefined
+  // leaves the offer's generic could-not-save copy.
+  const [manageRefusal, setManageRefusal] = useState<AlertContent>();
 
   // Fetch the console's authored SFTP connection once on a console build; one
   // fetch per console serves the session, and the default transport reads its
@@ -538,6 +544,19 @@ export function InviterScreen() {
     rates,
     ratesUnavailable,
   );
+  // The columns whose header the console's coverage sweep refuses over its length,
+  // so the unavailable notice names what tripped the bound. Empty off the console:
+  // the hosted sweep runs in this browser, under no such bound.
+  const coverageRefusedColumns = useMemo(
+    () =>
+      consoleSource === undefined
+        ? []
+        : overlongCoverageColumns(
+            editor?.draft.standardization ?? EMPTY_STANDARDIZATION,
+            consoleSource.columns,
+          ),
+    [consoleSource, editor],
+  );
   const coverageProblems = cleaningCoverageProblems(editor, rates);
 
   // The operator authored an SFTP connection in-console (its credential-free
@@ -588,6 +607,7 @@ export function InviterScreen() {
   async function manageExchange(choices: ManageOfferChoices) {
     if (invitation === undefined || editor === undefined) return;
     setManageStatus("depositing");
+    setManageRefusal(undefined);
     try {
       const connection = webrtcLocatorFromEndpoint(
         webrtcEndpointFromLocation(invitationLocation()),
@@ -630,6 +650,15 @@ export function InviterScreen() {
       );
       whenDiagnostic(() =>
         console.error("managed exchange deposit failed (detail):", error),
+      );
+      // The document's own metadata is what the refused parse read, so the alert
+      // names the column from it rather than from the failure's text; a failure
+      // no column explains leaves the generic copy standing.
+      const refused = refusedColumnNames(error, invitation.metadata);
+      setManageRefusal(
+        refused.length > 0
+          ? savedExchangeColumnRefusalAlert(refused)
+          : undefined,
       );
       setManageStatus("error");
     }
@@ -1480,6 +1509,7 @@ export function InviterScreen() {
               rates={rates}
               pending={ratesPending}
               coverageUnavailable={ratesUnavailable}
+              coverageRefusedColumns={coverageRefusedColumns}
               onFieldSteps={(output, fieldSteps) =>
                 applyEditor(editorWithFieldSteps(editor, output, fieldSteps))
               }
@@ -1590,6 +1620,7 @@ export function InviterScreen() {
               !demoActive && (
                 <ManageExchangeOffer
                   status={manageStatus}
+                  refusal={manageRefusal}
                   handleCaptured={sourceHandle !== undefined}
                   onManage={(choices) => void manageExchange(choices)}
                 />

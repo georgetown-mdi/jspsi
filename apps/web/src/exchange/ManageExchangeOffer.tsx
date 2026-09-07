@@ -61,10 +61,16 @@ function useManagedStoreAvailability(): boolean | undefined {
  */
 export function ManageExchangeOffer({
   status,
+  refusal,
   handleCaptured,
   onManage,
 }: {
   status: ManageOfferStatus;
+  /** What an `error` status was about, when the host could say. Present only
+   * where the deposit was refused over something the operator can act on -- a
+   * column name the stored document cannot hold -- since a retry then fails
+   * identically; undefined keeps the generic try-again copy. */
+  refusal?: { title: string; message: string };
   /** Whether a File System Access input-file handle was captured from the
    * operator's selection, so a scheduled re-run can re-read the file without
    * re-selection. Absent capture is normal (a click-selected file, or a browser
@@ -191,11 +197,11 @@ export function ManageExchangeOffer({
       {status === "error" && (
         <Alert
           color="red"
-          title="Could not save this recurring exchange"
+          title={refusal?.title ?? "Could not save this recurring exchange"}
           mt="sm"
         >
-          The exchange was not stored. Your one-off exchange is unaffected - try
-          again.
+          {refusal?.message ??
+            "The exchange was not stored. Your one-off exchange is unaffected - try again."}
         </Alert>
       )}
       <Button
