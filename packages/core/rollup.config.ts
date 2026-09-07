@@ -108,14 +108,28 @@ export default defineConfig([
       },
     ],
   },
+  // The main and testing entries' declaration files build TOGETHER for the same
+  // reason their JS output does above: a type testing.ts's surface shares with
+  // main.ts's -- PreparedExchange and ExchangeResult, whose dataset field holds
+  // a StandardizedDataset, a class with a private member -- has to resolve to
+  // ONE declaration. Built as two independent dts() passes, each would emit its
+  // own private-field-bearing copy of that class, and TypeScript treats two such
+  // copies as different types even though the source is identical: a testing.ts
+  // fixture typed against one copy would not assign to a main-entry parameter
+  // typed against the other. untrusted-text.ts stays a separate pass: its public
+  // surface (JsonStructureBoundError and the display/JSON chokepoints) shares no
+  // class with main.ts's.
   {
-    input: "src/main.ts",
-    output: { file: "dist/index.d.ts", format: "es" },
-    plugins: [dts()],
-  },
-  {
-    input: "src/testing.ts",
-    output: { file: "dist/testing.d.ts", format: "es" },
+    input: {
+      index: "src/main.ts",
+      testing: "src/testing.ts",
+    },
+    output: {
+      dir: "dist",
+      format: "es",
+      entryFileNames: "[name].d.ts",
+      chunkFileNames: "shared-types.d.ts",
+    },
     plugins: [dts()],
   },
   {

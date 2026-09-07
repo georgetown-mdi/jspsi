@@ -15,7 +15,9 @@ import {
   CONFIRMING_PROTOCOL_STAGE_ID,
   encodeInvitation,
   generateSharedSecret,
+  getDefaultLinkageTerms,
 } from "@psilink/core";
+import { minimalPreparedExchange } from "@psilink/core/testing";
 
 import { WAITING_STAGE_ID, stagesFor } from "@exchange/exchangeRun";
 import { AcceptorScreen } from "@exchange/AcceptorScreen";
@@ -56,14 +58,16 @@ vi.mock("@psi/transport/rendezvous", async () =>
 // terms-only stand-in drives the real acceptor stage-tree derivation for the
 // timeline the stub emits.
 function preparedWith(keyCount: number): PreparedExchange {
-  return {
+  return minimalPreparedExchange({
     linkageTerms: {
+      ...getDefaultLinkageTerms("Accept-journey fixture"),
       linkageStrategy: "cascade",
       linkageKeys: Array.from({ length: keyCount }, (_, i) => ({
         name: `key ${i + 1}`,
+        elements: [],
       })),
     },
-  } as unknown as PreparedExchange;
+  });
 }
 
 // The lifecycle stub for this journey: unlike accept.test.ts, which records

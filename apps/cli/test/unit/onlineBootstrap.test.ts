@@ -21,12 +21,14 @@ import {
   SHARED_SECRET_REGEX,
   UsageError,
 } from "@psilink/core";
-import { CSV_LINE_BYTE_CEILING } from "@psilink/core/testing";
+import {
+  CSV_LINE_BYTE_CEILING,
+  minimalPreparedExchange,
+} from "@psilink/core/testing";
 import type {
   ConnectionConfig,
   ConnectionEndpoint,
   PartnerPayload,
-  PreparedExchange,
   SFTPConnectionConfig,
   WebRTCConnectionConfig,
 } from "@psilink/core";
@@ -2050,7 +2052,10 @@ function onlineBootstrapParams(
   return {
     connection,
     dataSpec,
-    prepared: {} as unknown as PreparedExchange,
+    prepared: minimalPreparedExchange({
+      metadata: dataSpec.metadata ?? [],
+      linkageTerms: dataSpec.linkageTerms,
+    }),
     sharedSecret: generateSharedSecret(),
     expires: undefined,
     keyPath: path.join(path.dirname(configPath), ".psilink.key"),

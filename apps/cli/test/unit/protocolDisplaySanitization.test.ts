@@ -1,7 +1,5 @@
 import { vi, test, expect, beforeEach } from "vitest";
 
-import type { PreparedExchange } from "@psilink/core";
-
 // Shared, reconfigurable state readable inside the vi.mock factories despite ESM
 // hoisting. The log arrays capture only runProtocol's own logger (getLogger is
 // overridden below); the *Impl handlers let each test steer the mocked SFTP
@@ -77,14 +75,17 @@ vi.mock("../../src/connection/ssh2SftpAdapter", () => ({
 }));
 
 import { FileSyncConnection } from "@psilink/core";
-import { withCapturedLogs } from "@psilink/core/testing";
+import {
+  minimalPreparedExchange,
+  withCapturedLogs,
+} from "@psilink/core/testing";
 
 import { runProtocol } from "../../src/protocol";
 import type { RunProtocolOptions } from "../../src/protocol";
 
 // runExchange/buildOutputTable are never reached on these failure paths, so the
 // prepared value is unused.
-const minimalPrepared = {} as unknown as PreparedExchange;
+const minimalPrepared = minimalPreparedExchange();
 
 // runProtocol constructs a real FileSyncConnection, which logs through the
 // (un-mocked) getLoggerForVerbosity. Run it under withCapturedLogs so that

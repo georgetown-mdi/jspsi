@@ -14,8 +14,10 @@ import "@mantine/core/styles.css";
 import {
   encodeInvitation,
   generateSharedSecret,
+  getDefaultLinkageTerms,
   sanitizeForDisplay,
 } from "@psilink/core";
+import { minimalPreparedExchange } from "@psilink/core/testing";
 
 import {
   acceptorColumnsEditorState,
@@ -149,14 +151,16 @@ function preparedWith(
   linkageStrategy: "cascade" | "single-pass",
   keyCount: number,
 ): PreparedExchange {
-  return {
+  return minimalPreparedExchange({
     linkageTerms: {
+      ...getDefaultLinkageTerms("Accept-screen fixture"),
       linkageStrategy,
       linkageKeys: Array.from({ length: keyCount }, (_, i) => ({
         name: `key ${i + 1}`,
+        elements: [],
       })),
     },
-  } as unknown as PreparedExchange;
+  });
 }
 
 // Two single-element keys, one per name field, plus a payload the inviter sends

@@ -4,7 +4,15 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import log from "loglevel";
 
-import { describeResolvedRunShape, runExchange } from "@psilink/core";
+import {
+  describeResolvedRunShape,
+  getDefaultLinkageTerms,
+  runExchange,
+} from "@psilink/core";
+import {
+  minimalExchangeResult,
+  minimalPreparedExchange,
+} from "@psilink/core/testing";
 
 import {
   DISCLOSURE_NOT_FILED_WARNING,
@@ -32,9 +40,7 @@ import type Peer from "peerjs";
 
 import type * as PsilinkCore from "@psilink/core";
 import type {
-  ExchangeResult,
   HandshakeRole,
-  LinkageTerms,
   MessageConnection,
   PsiBackendSelection,
   RendezvousRole,
@@ -103,7 +109,11 @@ vi.mock("../../../src/psi/disclosureAccountingStore.js", () => ({
   appendDisclosureRecordToStore: vi.fn(() => Promise.resolve()),
 }));
 vi.mock("../../../src/psi/managed/managedPreparedExchange.js", () => ({
-  prepareManagedRerunExchange: vi.fn(() => ({})),
+  prepareManagedRerunExchange: vi.fn(() =>
+    minimalPreparedExchange({
+      linkageTerms: getDefaultLinkageTerms("Managed re-run fixture"),
+    }),
+  ),
 }));
 vi.mock("../../../src/psi/authenticateExchange.js", () => ({
   authenticateExchange: vi.fn(() => Promise.resolve({ rotatedSecret: "next" })),
@@ -119,6 +129,9 @@ vi.mock("@openmined/psi.js/psi_wasm_web", () => ({
 }));
 vi.mock("@psilink/core", async (importOriginal) => {
   const actual = await importOriginal<typeof PsilinkCore>();
+  const stubPartnerTerms = actual.getDefaultLinkageTerms(
+    "Managed re-run partner fixture",
+  );
   return {
     ...actual,
     loadPsiBackend: vi.fn(() =>
@@ -127,7 +140,11 @@ vi.mock("@psilink/core", async (importOriginal) => {
         backend: "wasm",
       } satisfies PsiBackendSelection),
     ),
-    runExchange: vi.fn(() => Promise.resolve({})),
+    runExchange: vi.fn(() =>
+      Promise.resolve(
+        minimalExchangeResult({ partnerTerms: stubPartnerTerms }),
+      ),
+    ),
   };
 });
 
@@ -599,6 +616,9 @@ describe("naming what the agreed terms resolved to", () => {
    * run. `runExchange` is mocked here, so this is the call site a real run
    * fires after the terms exchange completes. */
   function exchangeConfirming(runShape: ResolvedRunShape) {
+    const partnerTerms = getDefaultLinkageTerms(
+      "Confirmed-terms partner fixture",
+    );
     mockedRunExchange.mockImplementationOnce(
       (
         _conn: unknown,
@@ -608,8 +628,8 @@ describe("naming what the agreed terms resolved to", () => {
           onProtocolConfirmed?: RunExchangeOptions["onProtocolConfirmed"];
         },
       ) => {
-        options.onProtocolConfirmed?.({} as LinkageTerms, "receiver", runShape);
-        return Promise.resolve({} as ExchangeResult);
+        options.onProtocolConfirmed?.(partnerTerms, "receiver", runShape);
+        return Promise.resolve(minimalExchangeResult({ partnerTerms }));
       },
     );
   }
@@ -686,16 +706,28 @@ describe("naming what the agreed terms resolved to", () => {
 
 describe("filing the run's disclosure", () => {
   /** Make this run's exchange produce a real self-attested record, the way a
-   * completed exchange does. The cast is the shape the assertions need: the rest of
-   * `ExchangeResult` is the mocked outputs builder's business, not this run's. */
+   * completed exchange does. Only the audit fields the assertions read are
+   * overridden: the rest is the mocked outputs builder's business, not
+   * this run's. */
   async function exchangeYieldsRecord() {
     const record = await disclosureRecord();
-    mockedRunExchange.mockResolvedValueOnce({
-      audit: {
-        record,
-        keys: { version: "psilink-exchange-keys/v1", salts: {} },
-      },
-    } as unknown as Awaited<ReturnType<typeof runExchange>>);
+    mockedRunExchange.mockResolvedValueOnce(
+      minimalExchangeResult({
+        partnerTerms: getDefaultLinkageTerms(
+          "Disclosure-record partner fixture",
+        ),
+        audit: {
+          record,
+          keys: {
+            version: "psilink-exchange-keys/v1",
+            salts: {
+              localPayloadSent: "local-payload-salt",
+              partnerPayloadReceived: "partner-payload-salt",
+            },
+          },
+        },
+      }),
+    );
     return record;
   }
 

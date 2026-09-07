@@ -1,6 +1,10 @@
 import { describe, expect, test } from "vitest";
 
-import { CONFIRMING_PROTOCOL_STAGE_ID } from "@psilink/core";
+import {
+  CONFIRMING_PROTOCOL_STAGE_ID,
+  getDefaultLinkageTerms,
+} from "@psilink/core";
+import { minimalPreparedExchange } from "@psilink/core/testing";
 
 import {
   BEFORE_START_STAGE_ID,
@@ -30,14 +34,16 @@ function preparedWith(
   linkageStrategy: "cascade" | "single-pass",
   keyCount: number,
 ): PreparedExchange {
-  return {
+  return minimalPreparedExchange({
     linkageTerms: {
+      ...getDefaultLinkageTerms("Exchange-run fixture"),
       linkageStrategy,
       linkageKeys: Array.from({ length: keyCount }, (_, i) => ({
         name: `key ${i + 1}`,
+        elements: [],
       })),
     },
-  } as unknown as PreparedExchange;
+  });
 }
 
 function states(run: ExchangeRun): Array<string> {

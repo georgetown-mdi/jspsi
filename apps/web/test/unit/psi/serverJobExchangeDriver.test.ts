@@ -1,5 +1,9 @@
 import { afterEach, describe, expect, test, vi } from "vitest";
 
+import {
+  minimalExchangeResult,
+  minimalPreparedExchange,
+} from "@psilink/core/testing";
 import { ProcessState } from "@psilink/core";
 
 import {
@@ -18,12 +22,7 @@ import {
   validLinkageTerms,
 } from "../../utils/jobFixtures";
 
-import type {
-  ExchangeResult,
-  Metadata,
-  PreparedExchange,
-  Standardization,
-} from "@psilink/core";
+import type { ExchangeResult, Metadata, Standardization } from "@psilink/core";
 import type {
   JobApiClient,
   RecordAvailability,
@@ -600,13 +599,16 @@ describe("createServerJobExchangeDriver record downloads", () => {
       },
       revoke: () => {},
     };
+    // Only createdAt drives the filenames under test; the rest of the record and
+    // its keys are never read, so they stay the smallest cast fixture rather than
+    // an authored ExchangeRecord.
+    const audit = {
+      record: { createdAt: CREATED_AT },
+      keys: { salts: {} },
+    } as unknown as NonNullable<ExchangeResult["audit"]>;
     const inBrowser = buildRunOutputs(
-      {
-        associationTable: undefined,
-        partnerPayload: { columns: [], rowIndices: [], rows: [] },
-        audit: { record: { createdAt: CREATED_AT }, keys: { salts: {} } },
-      } as unknown as ExchangeResult,
-      {} as unknown as PreparedExchange,
+      minimalExchangeResult({ partnerTerms: validLinkageTerms(), audit }),
+      minimalPreparedExchange({ linkageTerms: validLinkageTerms() }),
       urls,
     );
 

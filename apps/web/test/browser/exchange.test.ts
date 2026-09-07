@@ -11,7 +11,8 @@ import { createElement } from "react";
 // bound and blankets the top bar, intercepting unrelated clicks.
 import "@mantine/core/styles.css";
 
-import { decodeInvitation } from "@psilink/core";
+import { decodeInvitation, getDefaultLinkageTerms } from "@psilink/core";
+import { minimalPreparedExchange } from "@psilink/core/testing";
 
 import { STEP_STATE_KEY } from "@exchange/stepHistory";
 
@@ -241,14 +242,16 @@ function preparedWith(
   linkageStrategy: "cascade" | "single-pass",
   keyCount: number,
 ): PreparedExchange {
-  return {
+  return minimalPreparedExchange({
     linkageTerms: {
+      ...getDefaultLinkageTerms("Exchange-page fixture"),
       linkageStrategy,
       linkageKeys: Array.from({ length: keyCount }, (_, i) => ({
         name: `key ${i + 1}`,
+        elements: [],
       })),
     },
-  } as unknown as PreparedExchange;
+  });
 }
 
 describe("quick path", () => {
