@@ -1275,6 +1275,44 @@ describe("the count-only shape, at the accept boundary", () => {
     }
   });
 
+  test("validateAccept: offline reports an ignored --server-* override before an aborting input read", async () => {
+    // The warning is emitted ahead of the config reconciliation and the input
+    // read, both of which abort: an operator whose accept fails on the CSV still
+    // reads that the --server-* flags they passed have no effect, rather than
+    // rerunning with a fixed CSV to learn it.
+    const missingInput = path.join(
+      tmpdir(),
+      `psilink-accept-absent-${process.pid}-${optionsCounter++}.csv`,
+    );
+    const log = getLogger("accept-offline-override-warn-before-abort");
+    log.setLevel("silent");
+    const warnSpy = vi.spyOn(log, "warn");
+    try {
+      const encoded = await encodeInvitation(sampleToken(FUTURE()));
+      await expect(
+        validateAccept({
+          resolved: {
+            mode: "offline",
+            invitation: encoded,
+            input: missingInput,
+          },
+          options: testOptions({ serverUsername: "alice" }),
+          log,
+        }),
+      ).rejects.toThrow(/does not exist/);
+      expect(
+        warnSpy.mock.calls.some(
+          (c) =>
+            typeof c[0] === "string" &&
+            c[0].includes("--server-username") &&
+            c[0].includes("no effect on an offline invite/accept"),
+        ),
+      ).toBe(true);
+    } finally {
+      warnSpy.mockRestore();
+    }
+  });
+
   test("validateAccept: online does not warn about a --server-* override (it is applied)", async () => {
     // The online path builds the connection from the URL through
     // applyConnectionOverrides, so the override takes effect and no

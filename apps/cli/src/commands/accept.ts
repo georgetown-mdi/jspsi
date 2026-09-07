@@ -549,6 +549,13 @@ export async function validateAccept(params: {
     };
   }
 
+  // Offline: the server-block overrides (--server-* and --outbound-path) cannot
+  // take effect (the connection block is seeded from the invitation endpoint or
+  // a placeholder, not built from a URL), so warn rather than silently drop a
+  // flag the operator passed. Ahead of the config reconciliation and the input
+  // read below, either of which aborts, so the operator reads the diagnostic
+  // even when the acceptance then fails.
+  warnServerOverridesIgnoredOffline(options, log);
   const { reuse: reuseExistingConfig, existingOutputShares } =
     reconcileAcceptConfig({
       configPath: options.configFile,
@@ -590,13 +597,11 @@ export async function validateAccept(params: {
       : undefined;
   const runsExchange = runnableConnection !== undefined;
   const connection = runnableConnection ?? endpointRoleConnection;
-  // The server-block overrides (--server-* and --outbound-path) reach nothing
-  // on either branch: the connection block is seeded from the invitation
-  // endpoint or a placeholder, not built from a URL, so warn rather than
-  // silently drop a flag the operator passed. The connection-options overrides
-  // are dropped the same way, except --peer-timeout on the branch that runs the
-  // exchange, applied above. Two diagnostics: the two blocks differ in remedy.
-  warnServerOverridesIgnoredOffline(options, log);
+  // The connection-options overrides (timeouts, --max-reconnect-attempts, the
+  // file-sync toggles) are dropped the same way as the server block, except
+  // --peer-timeout on the acceptance that runs the exchange, applied above --
+  // so this warning waits until runsExchange is known. A separate diagnostic
+  // from the server block's because the two remedies differ.
   warnOptionsOverridesIgnoredOffline(
     runsExchange ? { ...options, peerTimeout: undefined } : options,
     log,
