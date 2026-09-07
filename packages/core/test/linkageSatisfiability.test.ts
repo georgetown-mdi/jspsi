@@ -2,14 +2,19 @@ import { expect, test, describe } from "vitest";
 
 import {
   runPipeline,
+  applyStep,
   buildStandardizedDataset,
   buildKeyStrings,
   compileSteps,
   hasMemoizedCompiledSteps,
+  renderDateOutput,
+  valueOverCeiling,
+  DEFAULT_DATE_OUTPUT_FORMAT,
   FAN_OUT_FUNCTION_NAMES,
   StandardizedField,
   StandardizedDataset,
   STANDARDIZATION_FUNCTION_NAMES,
+  type CompiledStep,
   type FieldValue,
 } from "../src/standardization";
 import {
@@ -31,6 +36,7 @@ import {
   CONSENT_VERDICT_PARAM_NAMES,
   stepCanEmptyRealizedValue,
   pipelineAlwaysDrops,
+  pipelineCollapsesParsedDateToConstant,
   parseDateInputDropsEveryRecord,
   transformRefusalIn,
   type LinkageTermsStanding,
@@ -1204,6 +1210,392 @@ describe("pipelineAlwaysDrops rescue equivalence", () => {
     expect(examined).toBe(enumeratedPipelines);
     expect(deadVerdicts).toBeGreaterThan(0);
     expect(deadVerdicts).toBeLessThan(examined);
+  });
+});
+
+describe("parse_date probe walk equivalence", () => {
+  // The shipped predicates read every substring run of one element in a single
+  // forward pass carrying one value per probe date. Checked here: those verdicts
+  // against a transcription that measures each run on its own, re-running the
+  // probes from the `parse_date` for every run end, over every pipeline the
+  // alphabet below spells.
+  type ReferenceReading =
+    | { kind: "collapsed"; value: string }
+    | { kind: "valueDependentDrop" }
+    | { kind: "layoutDeterminedDrop" }
+    | { kind: "undetermined" }
+    | { kind: "cannotMeasure" };
+
+  type ReferenceOutcome =
+    | { kind: "value"; value: string }
+    | { kind: "dropped" }
+    | { kind: "candidates" }
+    | { kind: "unread" };
+
+  const runFromStart = (
+    input: string,
+    compiled: ReadonlyArray<CompiledStep>,
+  ): ReferenceOutcome => {
+    let current: FieldValue = input;
+    for (const step of compiled) {
+      current = applyStep(current, step);
+      if (valueOverCeiling(current) !== undefined) return { kind: "unread" };
+    }
+    if (current === null) return { kind: "dropped" };
+    if (current instanceof Set)
+      return current.size > 0 ? { kind: "candidates" } : { kind: "unread" };
+    return current === ""
+      ? { kind: "unread" }
+      : { kind: "value", value: current };
+  };
+
+  /** The measurement a run end carries: which `parse_date` laid out the value,
+   * the layout it renders, and the steps between it and the run end. Undefined
+   * where the index carries no measurement at all. */
+  const runMeasurement = (
+    steps: ReadonlyArray<TransformStep>,
+    index: number,
+  ):
+    | {
+        parseDateIndex: number;
+        outputFormat: string;
+        measuredSteps: TransformStep[];
+      }
+    | undefined => {
+    if (steps[index]?.function !== "substring") return undefined;
+    if (steps[index + 1]?.function === "substring") return undefined;
+    let runStart = index;
+    while (runStart > 0 && steps[runStart - 1].function === "substring")
+      runStart -= 1;
+    let parseDateIndex = runStart - 1;
+    while (
+      parseDateIndex >= 0 &&
+      steps[parseDateIndex].function !== "parse_date"
+    )
+      parseDateIndex -= 1;
+    if (parseDateIndex < 0) return undefined;
+    const parseDateStep = steps[parseDateIndex];
+    if (parseDateInputDropsEveryRecord(parseDateStep.params)) return undefined;
+    const rawOutputFormat = parseDateStep.params?.outputFormat;
+    return {
+      parseDateIndex,
+      outputFormat:
+        typeof rawOutputFormat === "string"
+          ? rawOutputFormat
+          : DEFAULT_DATE_OUTPUT_FORMAT,
+      measuredSteps: steps.slice(parseDateIndex + 1, index + 1),
+    };
+  };
+
+  const readRun = (
+    steps: ReadonlyArray<TransformStep>,
+    index: number,
+  ): ReferenceReading => {
+    const measurement = runMeasurement(steps, index);
+    if (measurement === undefined) return { kind: "undetermined" };
+    const { outputFormat, measuredSteps } = measurement;
+    try {
+      const compiled = compileSteps([...measuredSteps]);
+      const survivors = new Set<string>();
+      for (const probe of DATE_COLLAPSE_PROBES) {
+        const outcome = runFromStart(
+          renderDateOutput(outputFormat, probe.year, probe.month, probe.day),
+          compiled,
+        );
+        if (outcome.kind === "unread" || outcome.kind === "candidates")
+          return { kind: "cannotMeasure" };
+        if (outcome.kind === "value") survivors.add(outcome.value);
+        if (survivors.size > 1) return { kind: "undetermined" };
+      }
+      const [collapsed] = survivors;
+      if (collapsed !== undefined)
+        return { kind: "collapsed", value: collapsed };
+      return measuredSteps.every((step) =>
+        LAYOUT_DETERMINED_FUNCTION_NAMES.has(step.function),
+      )
+        ? { kind: "layoutDeterminedDrop" }
+        : { kind: "valueDependentDrop" };
+    } catch {
+      return { kind: "cannotMeasure" };
+    }
+  };
+
+  const collapsesPerRun = (
+    steps: ReadonlyArray<TransformStep>,
+    index: number,
+  ): boolean => {
+    const reading = readRun(steps, index);
+    if (
+      reading.kind === "cannotMeasure" ||
+      reading.kind === "valueDependentDrop"
+    )
+      return true;
+    if (reading.kind !== "collapsed") return false;
+    try {
+      const tail = runFromStart(
+        reading.value,
+        compileSteps([...steps.slice(index + 1)]),
+      );
+      return tail.kind !== "dropped";
+    } catch {
+      return true;
+    }
+  };
+
+  const dropsPerRun = (
+    steps: ReadonlyArray<TransformStep>,
+    index: number,
+  ): boolean => readRun(steps, index).kind === "layoutDeterminedDrop";
+
+  // The probe inputs the two formulations can differ over: a live `parse_date`
+  // under two output layouts and a dead one; windows that read a literal region,
+  // a date component, and nothing at all; a layout-determined step; steps that
+  // read the value (one naming a probe's own rendered value, one inflating a
+  // value past the per-value ceiling); a fan-out; a rescuing `coalesce`; and a
+  // function this build cannot compile.
+  const ALPHABET: ReadonlyArray<TransformStep> = [
+    {
+      function: "parse_date",
+      params: { inputFormat: "YYYY-MM-DD", outputFormat: "ACME-YYYYMMDD" },
+    },
+    {
+      function: "parse_date",
+      params: { inputFormat: "MM/DD/YYYY", outputFormat: "YYYY" },
+    },
+    { function: "parse_date", params: { inputFormat: "MM/DD" } },
+    { function: "substring", params: { start: 1, length: 4 } },
+    { function: "substring", params: { start: 6, length: 4 } },
+    { function: "substring", params: { start: 40, length: 4 } },
+    { function: "substring", params: { start: 1 } },
+    { function: "remove_dashes" },
+    { function: "null_if", params: { values: ["ACME"] } },
+    { function: "filter_regex", params: { pattern: "^[0-9]+$" } },
+    { function: "replace_regex", params: { pattern: "A", replacement: "B" } },
+    { function: "pad_left", params: { length: 5000, fill: "0" } },
+    { function: "split_on", params: { separator: "-" } },
+    { function: "coalesce", params: { default: "FALLBACK" } },
+    { function: "not_a_real_function" },
+  ];
+  const MAX_PIPELINE_LENGTH = 4;
+
+  const forEachPipelineOver = (
+    alphabet: ReadonlyArray<TransformStep>,
+    maxLength: number,
+    visit: (pipeline: TransformStep[]) => void,
+  ): void => {
+    const extend = (prefix: TransformStep[]): void => {
+      if (prefix.length === maxLength) return;
+      for (const step of alphabet) {
+        const pipeline = [...prefix, step];
+        visit(pipeline);
+        extend(pipeline);
+      }
+    };
+    extend([]);
+  };
+
+  const enumeratedOver = (alphabetSize: number, maxLength: number): number =>
+    Array.from(
+      { length: maxLength },
+      (_, index) => alphabetSize ** (index + 1),
+    ).reduce((total, count) => total + count, 0);
+
+  /** The element-level verdict composed out of the per-index reference: every
+   * step index offered to it, the first collapse answering. The shipped
+   * whole-element predicate is held equal to this. */
+  const collapsesPerIndex = (steps: ReadonlyArray<TransformStep>): boolean =>
+    steps.some((_step, index) => collapsesPerRun(steps, index));
+
+  /** Whether this build can compile `step`, which is what poisons a span. */
+  const compileThrows = (step: TransformStep): boolean => {
+    try {
+      compileSteps([step]);
+      return false;
+    } catch {
+      return true;
+    }
+  };
+
+  /** What each probe leaves the run ending at `index` holding, in declared
+   * order -- the sequence a reading is read off. Used to count which shapes a
+   * sweep reaches, not to decide a verdict. */
+  const probeOutcomesAt = (
+    steps: ReadonlyArray<TransformStep>,
+    index: number,
+  ): ReferenceOutcome[] | undefined => {
+    const measurement = runMeasurement(steps, index);
+    if (measurement === undefined) return undefined;
+    let compiled: CompiledStep[];
+    try {
+      compiled = compileSteps([...measurement.measuredSteps]);
+    } catch {
+      return undefined;
+    }
+    return DATE_COLLAPSE_PROBES.map((probe) => {
+      try {
+        return runFromStart(
+          renderDateOutput(
+            measurement.outputFormat,
+            probe.year,
+            probe.month,
+            probe.day,
+          ),
+          compiled,
+        );
+      } catch {
+        return { kind: "unread" } as ReferenceOutcome;
+      }
+    });
+  };
+
+  /** A run end settled by two distinct survivors read BEFORE a probe the
+   * measurement cannot read. The single forward pass carries one value per probe
+   * across the whole span, so the declared probe order it reads them back in is
+   * what keeps this a coarsening rather than an unmeasurable window. */
+  const distinctSurvivorsPrecedeUnreadableProbe = (
+    steps: ReadonlyArray<TransformStep>,
+    index: number,
+  ): boolean => {
+    const outcomes = probeOutcomesAt(steps, index);
+    if (outcomes === undefined) return false;
+    const survivors = new Set<string>();
+    for (const [probeIndex, outcome] of outcomes.entries()) {
+      if (outcome.kind === "unread" || outcome.kind === "candidates")
+        return false;
+      if (outcome.kind === "value") survivors.add(outcome.value);
+      if (survivors.size > 1)
+        return outcomes
+          .slice(probeIndex + 1)
+          .some(
+            (later) => later.kind === "unread" || later.kind === "candidates",
+          );
+    }
+    return false;
+  };
+
+  /** A run end whose measured steps hold a compile this build refuses, with a
+   * LATER run end under the same `parse_date`. The forward pass blanks every
+   * probe for the rest of the span rather than for that run alone, so this is
+   * the shape where the poisoning outlives the run the refusal sits in. */
+  const compileThrowPrecedesALaterRunEnd = (
+    steps: ReadonlyArray<TransformStep>,
+    index: number,
+  ): boolean => {
+    const measurement = runMeasurement(steps, index);
+    if (measurement === undefined) return false;
+    if (!measurement.measuredSteps.some(compileThrows)) return false;
+    return steps.some(
+      (_step, later) =>
+        later > index &&
+        runMeasurement(steps, later)?.parseDateIndex ===
+          measurement.parseDateIndex,
+    );
+  };
+
+  const forEachPipeline = (visit: (pipeline: TransformStep[]) => void): void =>
+    forEachPipelineOver(ALPHABET, MAX_PIPELINE_LENGTH, visit);
+
+  test("one walk gives the verdict per-run measurement gives", () => {
+    const divergent: string[] = [];
+    let examined = 0;
+    let collapseVerdicts = 0;
+    let dropVerdicts = 0;
+    let elementCollapseVerdicts = 0;
+    forEachPipeline((pipeline) => {
+      examined += 1;
+      for (const index of pipeline.keys()) {
+        const collapses = substringCollapsesParsedDateToConstant(
+          pipeline,
+          index,
+        );
+        const drops = substringRunDropsEveryParsedDate(pipeline, index);
+        if (collapses) collapseVerdicts += 1;
+        if (drops) dropVerdicts += 1;
+        if (
+          collapses !== collapsesPerRun(pipeline, index) ||
+          drops !== dropsPerRun(pipeline, index)
+        )
+          divergent.push(`${index} of ${JSON.stringify(pipeline)}`);
+      }
+      const elementCollapses = pipelineCollapsesParsedDateToConstant(pipeline);
+      if (elementCollapses) elementCollapseVerdicts += 1;
+      if (elementCollapses !== collapsesPerIndex(pipeline))
+        divergent.push(`element ${JSON.stringify(pipeline)}`);
+    });
+    // Two assertions so a failure includes witnesses as well as its scale: the
+    // whole divergent list is elided in the diff once it runs to thousands.
+    expect(divergent.slice(0, 3)).toEqual([]);
+    expect(divergent).toHaveLength(0);
+    // Not vacuous: the sweep is the full enumeration and reaches both verdicts.
+    expect(examined).toBe(enumeratedOver(ALPHABET.length, MAX_PIPELINE_LENGTH));
+    expect(collapseVerdicts).toBeGreaterThan(0);
+    expect(dropVerdicts).toBeGreaterThan(0);
+    expect(elementCollapseVerdicts).toBeGreaterThan(0);
+  });
+
+  // Two behaviors the single forward pass carries past the run that starts them
+  // need a span longer than one run, and the sweep above reaches neither: it
+  // stops at four steps, and every unreadability source in its alphabet takes
+  // all four probes at once. The alphabet here is small enough to enumerate
+  // deeper and holds what those two shapes need: a `replace_regex` that inflates
+  // ONE probe's rendered value past the per-value ceiling, a second `parse_date`
+  // layout whose windows leave the probes distinct, and a step this build cannot
+  // compile.
+  const DEEP_ALPHABET: ReadonlyArray<TransformStep> = [
+    {
+      function: "parse_date",
+      params: { inputFormat: "YYYY-MM-DD", outputFormat: "ACME-YYYYMMDD" },
+    },
+    {
+      function: "parse_date",
+      params: { inputFormat: "MM/DD/YYYY", outputFormat: "YYYY-MM-DD" },
+    },
+    { function: "substring", params: { start: 1, length: 4 } },
+    {
+      function: "replace_regex",
+      params: { pattern: "24", replacement: "0".repeat(5000) },
+    },
+    { function: "filter_regex", params: { pattern: "^[0-9]+$" } },
+    { function: "split_on", params: { separator: "-" } },
+    { function: "not_a_real_function" },
+  ];
+  const DEEP_PIPELINE_LENGTH = 5;
+
+  test("the walk holds where a span outlives the run that poisoned it", () => {
+    const divergent: string[] = [];
+    let examined = 0;
+    let distinctSurvivorsBeforeUnreadable = 0;
+    let compileThrowBeforeLaterRunEnd = 0;
+    forEachPipelineOver(DEEP_ALPHABET, DEEP_PIPELINE_LENGTH, (pipeline) => {
+      examined += 1;
+      for (const index of pipeline.keys()) {
+        if (distinctSurvivorsPrecedeUnreadableProbe(pipeline, index))
+          distinctSurvivorsBeforeUnreadable += 1;
+        if (compileThrowPrecedesALaterRunEnd(pipeline, index))
+          compileThrowBeforeLaterRunEnd += 1;
+        if (
+          substringCollapsesParsedDateToConstant(pipeline, index) !==
+            collapsesPerRun(pipeline, index) ||
+          substringRunDropsEveryParsedDate(pipeline, index) !==
+            dropsPerRun(pipeline, index)
+        )
+          divergent.push(`${index} of ${JSON.stringify(pipeline)}`);
+      }
+      if (
+        pipelineCollapsesParsedDateToConstant(pipeline) !==
+        collapsesPerIndex(pipeline)
+      )
+        divergent.push(`element ${JSON.stringify(pipeline)}`);
+    });
+    expect(divergent.slice(0, 3)).toEqual([]);
+    expect(divergent).toHaveLength(0);
+    expect(examined).toBe(
+      enumeratedOver(DEEP_ALPHABET.length, DEEP_PIPELINE_LENGTH),
+    );
+    // The counts are asserted rather than reported so the sweep cannot quietly
+    // stop reaching the two shapes it is here for.
+    expect(distinctSurvivorsBeforeUnreadable).toBeGreaterThan(0);
+    expect(compileThrowBeforeLaterRunEnd).toBeGreaterThan(0);
   });
 });
 

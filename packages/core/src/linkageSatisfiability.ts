@@ -434,9 +434,14 @@ function stepCountRefusal(
  * The grading path compiles too, outside both bounds:
  * {@link pipelineAlwaysDrops}, which the browser editor's validation pass runs
  * on every pass, and the consent header's
- * {@link substringCollapsesParsedDateToConstant} each build a `substring` run
- * following a `parse_date` to measure what it collapses. What holds that walk is
- * the schema's per-element step cap and the encoded-token length cap.
+ * {@link pipelineCollapsesParsedDateToConstant} each measure what a `substring`
+ * run following a `parse_date` collapses. Each reads every run of one element in
+ * one pass over it ({@link parsedDateRunReadings}), compiling each measured step
+ * once, so what a grading pass costs is linear in the document's declared steps
+ * rather than quadratic in each element's -- which is what an editor re-grading
+ * on every keystroke needs of it. The document itself is bounded by the schema's
+ * per-element step cap, the encoded-token length cap on the acceptor's side, and
+ * the editor's own import cap on the inviter's.
  */
 export function assertTransformsCompile(
   terms: LinkageTerms,
@@ -760,7 +765,7 @@ export const DATE_COLLAPSE_PROBES: ReadonlyArray<{
 //   ({@link MAX_TRANSFORMED_VALUE_LENGTH}) reports it here, as does an empty
 //   candidate set or an empty string -- shapes a window neither holds as a value
 //   nor drops as null. The caller resolves an `unread` probe UPWARD to the
-//   broader breadth word ({@link readParsedDateRun}): an inviter could otherwise
+//   broader breadth word ({@link parsedDateSpanReading}): an inviter could otherwise
 //   inflate one probe past the ceiling to buy a milder marker while every real
 //   date still collapses.
 type MeasuredRunOutcome =
@@ -787,6 +792,13 @@ function runCompiledSteps(
     current = applyStep(current, step);
     if (valueOverCeiling(current) !== undefined) return { kind: "unread" };
   }
+  return measuredValueOutcome(current);
+}
+
+// Which reading a run's last value is, once every step has been applied. Read
+// both by the whole-run helper above and by the forward walk below, which
+// carries one value per probe and asks this at each run end.
+function measuredValueOutcome(current: FieldValue): MeasuredRunOutcome {
   if (current === null) return { kind: "dropped" };
   if (current instanceof Set)
     return current.size > 0 ? { kind: "candidates" } : { kind: "unread" };
@@ -866,23 +878,130 @@ const UNDETERMINED: ParsedDateRunReading = { kind: "undetermined" };
 const CANNOT_MEASURE: ParsedDateRunReading = { kind: "cannotMeasure" };
 
 /**
- * Run the steps from the `parse_date` that laid out the value to the end of the
- * substring run at `index` over the probe dates, and report what they leave the
- * window holding. Both terms-level verdicts below read this one measurement.
+ * One element's steps compiled at most once each, for the walk below and for the
+ * tail reading that follows a collapse. A step compiles to what the whole-array
+ * compile would produce, since {@link compileSteps} maps over the array and each
+ * step's factory reads its own parameters and holds no state across the list --
+ * the same property that lets the mint boundary name the offending step
+ * ({@link uncompilableStepLabel}).
  *
- * The shape conditions, all necessary before anything is run:
+ * A compile that throws is held as the failure it threw and rethrown on every
+ * later ask, so a step this build cannot compile costs one attempt rather than
+ * one per reading that reaches it.
+ */
+function stepCompilerFor(
+  steps: ReadonlyArray<TransformStep>,
+): (index: number) => CompiledStep {
+  const compiled = new Map<
+    number,
+    { step: CompiledStep } | { failure: unknown }
+  >();
+  return (index: number): CompiledStep => {
+    let held = compiled.get(index);
+    if (held === undefined) {
+      try {
+        held = { step: compileSteps([steps[index]])[0] };
+      } catch (failure) {
+        held = { failure };
+      }
+      compiled.set(index, held);
+    }
+    if ("failure" in held) throw held.failure;
+    return held.step;
+  };
+}
+
+/**
+ * What the probe dates hold as the walk below carries them from the
+ * `parse_date` that laid their values out to the run end being read.
  *
- * - `index` is the END of a maximal run of consecutive `substring` steps. A
- *   reading taken at a link INSIDE a run describes a window the run's later
- *   links can slice back out of range; the value a run leaves is the value its
- *   last link leaves.
- * - Some `parse_date` runs ahead of that run. The NEAREST one laid out the value
- *   the run reads; steps before it are unconstrained, since they can only change
- *   whether a value parses, never the layout a parsed date renders to.
- * - That `parse_date`'s input format can parse a date at all
- *   ({@link parseDateInputDropsEveryRecord}); one that cannot supplies no value
- *   to slice, and the drop is already the one {@link pipelineAlwaysDrops} names
- *   at the `parse_date` itself.
+ * A probe is `undefined` where the measurement can no longer read it: a step
+ * took its value past the per-value ceiling
+ * ({@link MAX_TRANSFORMED_VALUE_LENGTH}), or a step this build cannot compile or
+ * run threw on it. Neither is recoverable by a later step -- a re-run from the
+ * `parse_date` would cross the same ceiling or throw at the same step -- so the
+ * probe stays unreadable for every later run end in the span, which is what
+ * running each probe once end to end has to mean.
+ */
+interface ParsedDateSpan {
+  probes: Array<FieldValue | undefined>;
+  /** Whether every step measured so far reads the layout rather than the value
+   * ({@link LAYOUT_DETERMINED_FUNCTION_NAMES}), which decides an all-probes drop. */
+  everyStepLayoutDetermined: boolean;
+}
+
+/** Whether `index` ends a maximal run of consecutive `substring` steps. A
+ * reading taken at a link INSIDE a run describes a window the run's later links
+ * can slice back out of range; the value a run leaves is the value its last link
+ * leaves. */
+function endsSubstringRun(
+  steps: ReadonlyArray<TransformStep>,
+  index: number,
+): boolean {
+  return (
+    steps[index].function === "substring" &&
+    steps[index + 1]?.function !== "substring"
+  );
+}
+
+/** The probe values a live `parse_date` lays out, one per probe date. A date the
+ * declared output format cannot render leaves that probe unreadable, on the same
+ * rule as a step that throws. */
+function openParsedDateSpan(parseDateStep: TransformStep): ParsedDateSpan {
+  const rawOutputFormat = parseDateStep.params?.outputFormat;
+  const outputFormat =
+    typeof rawOutputFormat === "string"
+      ? rawOutputFormat
+      : DEFAULT_DATE_OUTPUT_FORMAT;
+  return {
+    probes: DATE_COLLAPSE_PROBES.map((probe) => {
+      try {
+        return renderDateOutput(
+          outputFormat,
+          probe.year,
+          probe.month,
+          probe.day,
+        );
+      } catch {
+        return undefined;
+      }
+    }),
+    everyStepLayoutDetermined: true,
+  };
+}
+
+/** Apply one measured step to every probe still readable. A compile this build
+ * refuses blanks every probe for the rest of the span: the per-run reading this
+ * walk mirrors compiles a whole run before running any of it, so a refused step
+ * leaves that run and every later run end in its span unreadable. */
+function advanceParsedDateSpan(
+  span: ParsedDateSpan,
+  step: TransformStep,
+  index: number,
+  compiledStep: (index: number) => CompiledStep,
+): void {
+  if (!LAYOUT_DETERMINED_FUNCTION_NAMES.has(step.function))
+    span.everyStepLayoutDetermined = false;
+  let compiled: CompiledStep;
+  try {
+    compiled = compiledStep(index);
+  } catch {
+    span.probes = span.probes.map(() => undefined);
+    return;
+  }
+  span.probes = span.probes.map((value) => {
+    if (value === undefined) return undefined;
+    try {
+      const next = applyStep(value, compiled);
+      return valueOverCeiling(next) === undefined ? next : undefined;
+    } catch {
+      return undefined;
+    }
+  });
+}
+
+/**
+ * What the probe dates the span carries leave the window holding at a run end.
  *
  * A DROPPED probe does not defeat the reading. The probe dates are baked into
  * shipped public source, so requiring every one of them to survive would let a
@@ -903,62 +1022,80 @@ const CANNOT_MEASURE: ParsedDateRunReading = { kind: "cannotMeasure" };
  * unmeasurable (a `replace_regex` that inflates a future-dated probe over the
  * ceiling, an unrecognized function name) while every real date still collapses
  * onto one constant.
+ *
+ * The probes are read in their declared order and the reading is returned at the
+ * first one that settles it, so two probes holding distinct values is a
+ * determinate coarsening even where a third is unreadable.
  */
-function readParsedDateRun(
-  steps: ReadonlyArray<TransformStep>,
-  index: number,
-): ParsedDateRunReading {
-  if (steps[index]?.function !== "substring") return UNDETERMINED;
-  if (steps[index + 1]?.function === "substring") return UNDETERMINED;
-  let runStart = index;
-  while (runStart > 0 && steps[runStart - 1].function === "substring")
-    runStart -= 1;
-  let parseDateIndex = runStart - 1;
-  while (parseDateIndex >= 0 && steps[parseDateIndex].function !== "parse_date")
-    parseDateIndex -= 1;
-  if (parseDateIndex < 0) return UNDETERMINED;
-  const parseDateStep = steps[parseDateIndex];
-  if (parseDateInputDropsEveryRecord(parseDateStep.params)) return UNDETERMINED;
-  const rawOutputFormat = parseDateStep.params?.outputFormat;
-  const outputFormat =
-    typeof rawOutputFormat === "string"
-      ? rawOutputFormat
-      : DEFAULT_DATE_OUTPUT_FORMAT;
-  const measuredSteps = steps.slice(parseDateIndex + 1, index + 1);
-  try {
-    // Only the steps up to the run's end are compiled here; the rest of the
-    // pipeline is compiled by the caller that needs it, and only once a collapse
-    // is established, so an element that collapses nowhere costs one pass over
-    // each of its runs rather than one over its whole tail.
-    const compiled = compileSteps([...measuredSteps]);
-    const survivors = new Set<string>();
-    for (const probe of DATE_COLLAPSE_PROBES) {
-      const outcome = runCompiledSteps(
-        renderDateOutput(outputFormat, probe.year, probe.month, probe.day),
-        compiled,
-      );
-      // A probe the run cannot reduce to a value -- one inflated past the ceiling
-      // or expanded into a candidate set -- leaves the window's breadth unknown,
-      // so the reading resolves upward rather than falling to the milder word.
-      if (outcome.kind === "unread" || outcome.kind === "candidates")
-        return CANNOT_MEASURE;
-      if (outcome.kind === "value") survivors.add(outcome.value);
-      if (survivors.size > 1) return UNDETERMINED;
-    }
-    const [collapsed] = survivors;
-    if (collapsed !== undefined) return { kind: "collapsed", value: collapsed };
-    return measuredSteps.every((step) =>
-      LAYOUT_DETERMINED_FUNCTION_NAMES.has(step.function),
-    )
-      ? { kind: "layoutDeterminedDrop" }
-      : { kind: "valueDependentDrop" };
-  } catch {
-    // A step this build cannot compile or run gives no reading of what the window
-    // holds. That is a can't-measure, not a determinate coarsening: the caller
-    // resolves it up to the collapse word so an unrecognized function name cannot
-    // buy the milder marker.
-    return CANNOT_MEASURE;
+function parsedDateSpanReading(span: ParsedDateSpan): ParsedDateRunReading {
+  const survivors = new Set<string>();
+  for (const value of span.probes) {
+    if (value === undefined) return CANNOT_MEASURE;
+    const outcome = measuredValueOutcome(value);
+    if (outcome.kind === "unread" || outcome.kind === "candidates")
+      return CANNOT_MEASURE;
+    if (outcome.kind === "value") survivors.add(outcome.value);
+    if (survivors.size > 1) return UNDETERMINED;
   }
+  const [collapsed] = survivors;
+  if (collapsed !== undefined) return { kind: "collapsed", value: collapsed };
+  return span.everyStepLayoutDetermined
+    ? { kind: "layoutDeterminedDrop" }
+    : { kind: "valueDependentDrop" };
+}
+
+/**
+ * The reading every substring run of one element's steps gets, by the index that
+ * ends it. Both terms-level verdicts below read these measurements.
+ *
+ * The shape conditions a run must meet before anything is compiled or run:
+ *
+ * - Its index ENDS a maximal run of consecutive `substring` steps
+ *   ({@link endsSubstringRun}).
+ * - Some `parse_date` runs ahead of that run. The NEAREST one laid out the value
+ *   the run reads; steps before it are unconstrained, since they can only change
+ *   whether a value parses, never the layout a parsed date renders to.
+ * - That `parse_date`'s input format can parse a date at all
+ *   ({@link parseDateInputDropsEveryRecord}); one that cannot supplies no value
+ *   to slice, and the drop is already the one {@link pipelineAlwaysDrops} names
+ *   at the `parse_date` itself.
+ *
+ * Every run of one span is read in a SINGLE forward pass carrying one value per
+ * probe date, rather than each run re-running the probes from the `parse_date`.
+ * The reading is the same either way -- a run is a left fold over its compiled
+ * steps, so carrying the fold and reading it at each run end applies each step to
+ * each probe exactly as a fresh re-run would -- and it is what keeps the walk
+ * linear in the element's declared steps rather than quadratic in them, which is
+ * what an editor re-grading on every keystroke can afford. An index absent from
+ * the result is `undetermined`: no probe was run for it.
+ *
+ * A span holding no run end compiles nothing, and a span's steps past its LAST
+ * run end are never reached, so this compiles no step a per-run reading would
+ * not have compiled.
+ */
+function parsedDateRunReadings(
+  steps: ReadonlyArray<TransformStep>,
+  compiledStep: (index: number) => CompiledStep,
+): ParsedDateRunReading[] {
+  const readings = steps.map(() => UNDETERMINED);
+  for (const [parseDateIndex, parseDateStep] of steps.entries()) {
+    if (parseDateStep.function !== "parse_date") continue;
+    if (parseDateInputDropsEveryRecord(parseDateStep.params)) continue;
+    let spanEnd = parseDateIndex + 1;
+    while (spanEnd < steps.length && steps[spanEnd].function !== "parse_date")
+      spanEnd += 1;
+    let lastRunEnd = -1;
+    for (let index = parseDateIndex + 1; index < spanEnd; index += 1)
+      if (endsSubstringRun(steps, index)) lastRunEnd = index;
+    if (lastRunEnd < 0) continue;
+    const span = openParsedDateSpan(parseDateStep);
+    for (let index = parseDateIndex + 1; index <= lastRunEnd; index += 1) {
+      advanceParsedDateSpan(span, steps[index], index, compiledStep);
+      if (endsSubstringRun(steps, index))
+        readings[index] = parsedDateSpanReading(span);
+    }
+  }
+  return readings;
 }
 
 /**
@@ -987,7 +1124,7 @@ function readParsedDateRun(
  * The conditions:
  *
  * - The run reads a layout some live `parse_date` ahead of it rendered, taken at
- *   the run's END -- the shape {@link readParsedDateRun} establishes and where
+ *   the run's END -- the shape {@link parsedDateRunReadings} establishes and where
  *   the reasons for each of those live.
  * - Every probe that SURVIVES the run leaves it on one identical, non-empty
  *   value. A dropped probe does not withdraw the verdict: the probe dates ship
@@ -1042,17 +1179,54 @@ export function substringCollapsesParsedDateToConstant(
   steps: ReadonlyArray<TransformStep>,
   index: number,
 ): boolean {
-  const reading = readParsedDateRun(steps, index);
-  // A run whose breadth cannot be measured, and a value-dependent all-probes
-  // drop, both resolve UP to the collapse word (see readParsedDateRun): the safe
-  // direction on a consent surface.
+  const compiledStep = stepCompilerFor(steps);
+  const readings = parsedDateRunReadings(steps, compiledStep);
+  return collapsesAtRunEnd(steps, index, readings[index], compiledStep);
+}
+
+/**
+ * Whether ANY substring run of `steps` collapses every parsed date onto one
+ * constant -- the question the consent header's breadth marker asks of a whole
+ * element, answered over one walk of its runs rather than one walk per step.
+ *
+ * The runs are read in index order and the first collapse answers, so this is
+ * the verdict {@link substringCollapsesParsedDateToConstant} gives at some
+ * index and the reasoning there is the reasoning here.
+ *
+ * A caller asking this AND {@link pipelineAlwaysDrops} of the same element takes
+ * both from {@link gradeElementPipeline}, which compiles each measured step once
+ * for the pair rather than once for each.
+ */
+export function pipelineCollapsesParsedDateToConstant(
+  steps: ReadonlyArray<TransformStep>,
+): boolean {
+  return gradeElementPipeline(steps).collapsesParsedDateToConstant();
+}
+
+/**
+ * Whether the run ending at `index` collapses, given what the probes left it
+ * holding: the reading resolved against the REST of the pipeline.
+ *
+ * A run whose breadth cannot be measured, and a value-dependent all-probes drop,
+ * both resolve UP to the collapse word (see {@link parsedDateSpanReading}): the
+ * safe direction on a consent surface.
+ */
+function collapsesAtRunEnd(
+  steps: ReadonlyArray<TransformStep>,
+  index: number,
+  reading: ParsedDateRunReading | undefined,
+  compiledStep: (index: number) => CompiledStep,
+): boolean {
+  if (reading === undefined) return false;
   if (reading.kind === "cannotMeasure" || reading.kind === "valueDependentDrop")
     return true;
   if (reading.kind !== "collapsed") return false;
   try {
     const tail = runCompiledSteps(
       reading.value,
-      compileSteps([...steps.slice(index + 1)]),
+      steps
+        .slice(index + 1)
+        .map((_step, offset) => compiledStep(index + 1 + offset)),
     );
     // Every surviving record holds `reading.value` by the run's end, so the tail
     // is determinate with no probing. Only a measured DROP withdraws the collapse
@@ -1089,7 +1263,10 @@ export function substringRunDropsEveryParsedDate(
   steps: ReadonlyArray<TransformStep>,
   index: number,
 ): boolean {
-  return readParsedDateRun(steps, index).kind === "layoutDeterminedDrop";
+  return (
+    parsedDateRunReadings(steps, stepCompilerFor(steps))[index]?.kind ===
+    "layoutDeterminedDrop"
+  );
 }
 
 /**
@@ -1176,6 +1353,15 @@ export function pipelineAlwaysDrops(
   steps: ReadonlyArray<TransformStep> | undefined,
 ): boolean {
   if (steps === undefined) return false;
+  return gradeElementPipeline(steps).alwaysDrops();
+}
+
+/** The always-drops verdict read off readings the caller already holds, so one
+ * element's two verdicts share the walk that produced them. */
+function alwaysDropsGivenRunReadings(
+  steps: ReadonlyArray<TransformStep>,
+  readings: ReadonlyArray<ParsedDateRunReading>,
+): boolean {
   let dropped = false;
   for (const [index, step] of steps.entries()) {
     if (step.function === "coalesce") {
@@ -1197,11 +1383,48 @@ export function pipelineAlwaysDrops(
         parseDateInputDropsEveryRecord(step.params)) ||
       (step.function === "substring" &&
         substringWindowDropsEveryValue(step.params)) ||
-      substringRunDropsEveryParsedDate(steps, index)
+      readings[index].kind === "layoutDeterminedDrop"
     )
       dropped = true;
   }
   return dropped;
+}
+
+/** One element's two grading verdicts, each measured on the first ask off the
+ * walk {@link gradeElementPipeline} opens. */
+export interface ElementPipelineGrading {
+  /** Whether the element produces no value for any input at all
+   * ({@link pipelineAlwaysDrops}). */
+  alwaysDrops(): boolean;
+  /** Whether some substring run of the element leaves every parsed date on one
+   * constant ({@link pipelineCollapsesParsedDateToConstant}). */
+  collapsesParsedDateToConstant(): boolean;
+}
+
+/**
+ * Both element-level gradings of one steps array over ONE compiled-step memo and
+ * one forward pass ({@link parsedDateRunReadings}). The consent header's breadth
+ * marker asks both of every element it marks, and taking them from one grading
+ * compiles each measured step once for the pair rather than once for each --
+ * which is what keeps a grading pass at one compile per declared step.
+ *
+ * Each verdict is measured on the first ask and neither is measured unasked, so
+ * the order and the short-circuiting a caller writes still decide what runs.
+ */
+export function gradeElementPipeline(
+  steps: ReadonlyArray<TransformStep>,
+): ElementPipelineGrading {
+  const compiledStep = stepCompilerFor(steps);
+  let readings: ParsedDateRunReading[] | undefined;
+  const runReadings = (): ParsedDateRunReading[] =>
+    (readings ??= parsedDateRunReadings(steps, compiledStep));
+  return {
+    alwaysDrops: () => alwaysDropsGivenRunReadings(steps, runReadings()),
+    collapsesParsedDateToConstant: () =>
+      runReadings().some((reading, index) =>
+        collapsesAtRunEnd(steps, index, reading, compiledStep),
+      ),
+  };
 }
 
 /** How an input's columns fare against a set of linkage terms: which fields it
@@ -1389,14 +1612,14 @@ export function decideLinkageTermsVerdict(
       .map((f) => f.name)
       .filter((name) => !unsatisfiedNames.has(name)),
   );
-  // The dead scan walks a key's element transform steps; each maximal substring
-  // run re-measures a growing prefix per DATE_COLLAPSE_PROBES probe, so the
-  // cost is QUADRATIC in an element's step count, not linear. Needs no separate
-  // budget: both bounds it depends on are capped (an element's transform at
-  // MAX_TRANSFORM_STEPS, the whole partner-supplied token at
-  // MAX_ENCODED_INVITATION_LENGTH), and the operator's own committed-config
-  // path already drives heavier per-row compile and RE2 work at exchange time,
-  // so this scan is never the dominant cost.
+  // The dead scan walks a key's element transform steps; every maximal
+  // substring run of one element is measured in one forward pass over it
+  // (parsedDateRunReadings), so the scan compiles each measured step once and
+  // its cost is linear in the element's declared steps. Needs no separate
+  // budget: an editor re-grading on every keystroke pays under that walk what
+  // compiling the same document once already costs it, and the operator's own
+  // committed-config path drives heavier per-row compile and RE2 work at
+  // exchange time. The count this holds to is pinned in linkageProbeCost.test.ts.
   // parseDateInputDropsEveryRecord never calls parseDateFormat on a non-string, so
   // a hostile param shape cannot make it throw, and the measured run catches
   // whatever its own compile or run raises.
