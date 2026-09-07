@@ -115,8 +115,8 @@ export function sanitizedColumnsAlert(positions: ReadonlyArray<number>): {
   const plural = positions.length > 1;
   return {
     title: plural
-      ? "Formatting characters removed from column names"
-      : "A formatting character was removed from a column name",
+      ? "Invisible control characters removed from column names"
+      : "An invisible control character was removed from a column name",
     message:
       `Column${plural ? "s" : ""} ${positions.join(", ")} in your CSV ` +
       `${plural ? "had names that held" : "had a name that held"} invisible ` +

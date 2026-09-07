@@ -1285,7 +1285,9 @@ describe("console inviter picker re-profile", () => {
     await page.getByRole("button", { name: "Use this file" }).click();
     await expect
       .element(
-        page.getByText("Formatting characters removed from column names"),
+        page.getByText(
+          "Invisible control characters removed from column names",
+        ),
       )
       .toBeInTheDocument();
     await expect
@@ -1321,7 +1323,9 @@ describe("console inviter picker re-profile", () => {
       .not.toBeInTheDocument();
     await expect
       .element(
-        page.getByText("A formatting character was removed from a column name"),
+        page.getByText(
+          "An invisible control character was removed from a column name",
+        ),
       )
       .toBeInTheDocument();
   });

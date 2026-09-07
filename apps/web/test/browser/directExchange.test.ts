@@ -434,7 +434,9 @@ describe("direct exchange confirm and run", () => {
       .not.toBeInTheDocument();
     await expect
       .element(
-        page.getByText("A formatting character was removed from a column name"),
+        page.getByText(
+          "An invisible control character was removed from a column name",
+        ),
       )
       .toBeInTheDocument();
     // The refused file did not commit: the spine stays on its file step.
@@ -458,7 +460,9 @@ describe("direct exchange confirm and run", () => {
 
     await expect
       .element(
-        page.getByText("Formatting characters removed from column names"),
+        page.getByText(
+          "Invisible control characters removed from column names",
+        ),
       )
       .toBeInTheDocument();
     await expect

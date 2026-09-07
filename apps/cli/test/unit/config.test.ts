@@ -3873,6 +3873,12 @@ test("loadConfigLinkageSource refuses a control character in a metadata name", (
     `config file ${configPath} has invalid metadata: 0.name: a metadata ` +
       "column name must not contain a control or text-direction character",
   );
+  // And the remedy for the configuration that reaches this refusal: the name
+  // was written as the header was typed, so it names no column of the read file.
+  expect(() => loadConfigLinkageSource(configPath)).toThrow(
+    "re-run psilink init over the input file, or delete the character from " +
+      "the name",
+  );
 });
 
 // A camelized issue path names each segment in the spelling the file writes,

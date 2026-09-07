@@ -93,7 +93,7 @@ describe("sanitizedColumnsAlert", () => {
   test("names a single column position in the singular", () => {
     const alert = sanitizedColumnsAlert([3]);
     expect(alert.title).toBe(
-      "A formatting character was removed from a column name",
+      "An invisible control character was removed from a column name",
     );
     expect(alert.message).toContain("Column 3");
     expect(alert.message).toContain("had a name that held");
@@ -101,7 +101,9 @@ describe("sanitizedColumnsAlert", () => {
 
   test("pluralizes the title and message for multiple positions", () => {
     const alert = sanitizedColumnsAlert([2, 5]);
-    expect(alert.title).toBe("Formatting characters removed from column names");
+    expect(alert.title).toBe(
+      "Invisible control characters removed from column names",
+    );
     expect(alert.message).toContain("Columns 2, 5");
     expect(alert.message).toContain("had names that held");
   });

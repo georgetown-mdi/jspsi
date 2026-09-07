@@ -55,9 +55,17 @@ export interface ColumnMetadata {
  * {@link NAME_SHAPE_PATTERN} refuses, in the form the linkage-terms names use
  * and naming the block it fires on. A fixed literal echoing no submitted
  * value, like the length and uniqueness messages beside it.
+ *
+ * It names a remedy where the linkage-terms message names none, because the
+ * configuration that reaches this refusal has one: it declares a column as the
+ * header was typed, and the CSV read removes these characters from a header,
+ * so the declared name matches no column of the file.
  */
 export const METADATA_NAME_SHAPE_MESSAGE =
-  "a metadata column name must not contain a control or text-direction character";
+  "a metadata column name must not contain a control or text-direction " +
+  "character; the CSV read removes these characters from a header, so " +
+  "re-run psilink init over the input file, or delete the character from " +
+  "the name, to make the declared name match the header that is read";
 
 const ColumnMetadataSchema: z.ZodType<ColumnMetadata> = z.object({
   // Bounded `.min(1).max(MAX_NAME_LENGTH)` and held to NAME_SHAPE_PATTERN to

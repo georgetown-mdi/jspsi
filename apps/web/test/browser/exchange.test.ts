@@ -1406,7 +1406,9 @@ describe("inviter screen", () => {
       .not.toBeInTheDocument();
     await expect
       .element(
-        page.getByText("A formatting character was removed from a column name"),
+        page.getByText(
+          "An invisible control character was removed from a column name",
+        ),
       )
       .toBeInTheDocument();
     // The read is discarded with it: no file card, and no way forward.

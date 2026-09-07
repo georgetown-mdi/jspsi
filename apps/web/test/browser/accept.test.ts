@@ -395,6 +395,72 @@ describe("acceptor screen: decode gate", () => {
     // key; the readable one-liner never does.
     expect(text).not.toContain('"code"');
   });
+
+  // The name class the CSV header read removes is refused where a partner's
+  // token is decoded, and this seat is where a browser acceptor meets that
+  // refusal. Each case plants an ASCII marker beside the character, so a name
+  // that reached the notice shows as printable text rather than an invisible
+  // byte, and asserts the rendered notice is plain ASCII: neither the marker
+  // nor the character itself survives.
+  const MARKER = "MARKERWORD";
+
+  test("a disclosed payload column holding the name class renders no partner byte", async () => {
+    window.location.hash = await encodeRaw({
+      version: "1",
+      linkageTerms: acceptorTerms,
+      sharedSecret: generateSharedSecret(),
+      disclosedPayloadColumns: [`risk\u202e${MARKER}`],
+      connectionEndpoint: {
+        channel: "webrtc",
+        host: "127.0.0.1",
+        port: 3000,
+        path: "/api/",
+      },
+    });
+    app.render(createElement(AcceptorScreen));
+
+    await expect
+      .element(page.getByText("Cannot accept this invitation"))
+      .toBeInTheDocument();
+    const text = document.body.textContent;
+    expect(text).toContain("disclosedPayloadColumns.0:");
+    expect(text).not.toContain(MARKER);
+    expect(text).toMatch(/^[\x20-\x7e\n]*$/);
+  });
+
+  test("a linkage field name holding the name class renders no partner byte", async () => {
+    const hostileName = `first\u001b${MARKER}`;
+    window.location.hash = await encodeRaw({
+      version: "1",
+      linkageTerms: {
+        ...acceptorTerms,
+        linkageFields: [
+          { name: hostileName, type: "first_name" },
+          { name: "lastName", type: "last_name" },
+        ],
+        linkageKeys: [
+          { name: "first", elements: [{ field: hostileName }] },
+          { name: "last", elements: [{ field: "lastName" }] },
+        ],
+      },
+      sharedSecret: generateSharedSecret(),
+      connectionEndpoint: {
+        channel: "webrtc",
+        host: "127.0.0.1",
+        port: 3000,
+        path: "/api/",
+      },
+    });
+    app.render(createElement(AcceptorScreen));
+
+    await expect
+      .element(page.getByText("Cannot accept this invitation"))
+      .toBeInTheDocument();
+    const text = document.body.textContent;
+    expect(text).toContain("linkageFields.0.name:");
+    expect(text).not.toContain(MARKER);
+    expect(text).toMatch(/^[\x20-\x7e\n]*$/);
+  });
 });
 
 describe("acceptor screen: review terms", () => {
@@ -1036,7 +1102,9 @@ describe("acceptor screen: confirm your columns (verdict, mapper, launch)", () =
       .not.toBeInTheDocument();
     await expect
       .element(
-        page.getByText("A formatting character was removed from a column name"),
+        page.getByText(
+          "An invisible control character was removed from a column name",
+        ),
       )
       .toBeInTheDocument();
   });
@@ -1050,7 +1118,9 @@ describe("acceptor screen: confirm your columns (verdict, mapper, launch)", () =
     );
     await expect
       .element(
-        page.getByText("A formatting character was removed from a column name"),
+        page.getByText(
+          "An invisible control character was removed from a column name",
+        ),
       )
       .toBeInTheDocument();
     await expect

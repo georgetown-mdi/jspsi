@@ -597,7 +597,9 @@ describe("console acceptor sanitized-header notice", () => {
 
     await expect
       .element(
-        page.getByText("A formatting character was removed from a column name"),
+        page.getByText(
+          "An invisible control character was removed from a column name",
+        ),
       )
       .toBeInTheDocument();
     await expect
@@ -641,7 +643,9 @@ describe("console acceptor unnamed-column refusal", () => {
       .not.toBeInTheDocument();
     await expect
       .element(
-        page.getByText("A formatting character was removed from a column name"),
+        page.getByText(
+          "An invisible control character was removed from a column name",
+        ),
       )
       .toBeInTheDocument();
   });

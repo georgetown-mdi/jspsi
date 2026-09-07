@@ -392,6 +392,19 @@ test("the shape refusal names the field by path, not the value", () => {
   expect(rendered).not.toContain("unrepeatable-name");
 });
 
+test("the shape refusal names the remedy and the removal behind it", () => {
+  // A configuration reaches this refusal by declaring a column as the header
+  // was typed, so the rule alone leaves the operator with nothing to do: the
+  // message ties the character to the header read and names both ways out.
+  expect(METADATA_NAME_SHAPE_MESSAGE).toContain(
+    "the CSV read removes these characters from a header",
+  );
+  expect(METADATA_NAME_SHAPE_MESSAGE).toContain("re-run psilink init");
+  expect(METADATA_NAME_SHAPE_MESSAGE).toContain(
+    "delete the character from the name",
+  );
+});
+
 // --- role: ignored ------------------------------------------------------------
 
 test("safeParseMetadata accepts role: ignored", () => {
