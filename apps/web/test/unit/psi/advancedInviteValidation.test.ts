@@ -7,6 +7,7 @@ import {
   FAN_OUT_FUNCTION_NAMES,
   MAX_INVITATION_LIFETIME_SECONDS,
   StandardizedField,
+  assertTransformsCompile,
   authoredLinkageFields,
   canonicalString,
   pipelineAlwaysDrops,
@@ -495,17 +496,30 @@ describe("a key-element transform core cannot build", () => {
   // transforms cost to compile.
   const now = new Date("2026-01-01T00:00:00Z");
 
-  // One step per shape a factory refuses: an absent required param, a param the
-  // factory checks past its type, an unimplemented enum member, and a function
-  // name outside the registry.
-  const uncompilable: Array<TransformStep> = [
+  // One step per shape a factory refuses whose function this build does have:
+  // an absent required param, a param the factory checks past its type, and an
+  // unimplemented enum member. Answering any of them needs the compile the pass
+  // does not run.
+  const uncompilableParams: Array<TransformStep> = [
     { function: "pad_left", params: {} },
     { function: "pad_left", params: { length: 4, char: "ab" } },
     { function: "phonetic", params: { algorithm: "metaphone" } },
-    { function: "no_such_function", params: {} },
   ];
 
-  test.each(uncompilable)("passes %j through to the mint", (step) => {
+  // The fourth shape a factory refuses: a function name outside the registry.
+  // It needs no compile to spot -- the descriptor table is core's own registry
+  // -- so it is the one the pass answers itself, below.
+  const unrecognizedFunction: TransformStep = {
+    function: "no_such_function",
+    params: {},
+  };
+
+  const uncompilable: Array<TransformStep> = [
+    ...uncompilableParams,
+    unrecognizedFunction,
+  ];
+
+  test.each(uncompilableParams)("passes %j through to the mint", (step) => {
     const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
     const authored = withFirstElementTransform(draft, [step]);
     // Nothing else here answers the question either: the terms schema admits the
@@ -516,6 +530,56 @@ describe("a key-element transform core cannot build", () => {
     expect(() => canonicalString(terms)).not.toThrow();
 
     const result = validateAdvancedInvite(authored, seed, now);
+    expect(result.canGenerate).toBe(true);
+    expect(result.errors.keys).toBeUndefined();
+  });
+
+  test("blocks Generate on a key element naming a function core cannot run", () => {
+    // The one compile question the pass answers itself, so the step editor's
+    // alert on that row does not stand beside an open Generate: removing the
+    // step is the only way out, and the mint would refuse it anyway. The
+    // message names no function -- an element transform's is partner-authored
+    // free text -- and points at the row the editor marks.
+    const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    const authored = withFirstElementTransform(draft, [unrecognizedFunction]);
+    const result = validateAdvancedInvite(authored, seed, now);
+    expect(result.canGenerate).toBe(false);
+    expect(result.errors.keys).toMatch(
+      /psilink does not recognize.*remove the highlighted step/i,
+    );
+    expect(result.errors.keys).not.toMatch(/no_such_function/);
+    // Core's own verdict on the same document, so the gate gives advance notice
+    // of the mint's refusal rather than holding a reading of its own.
+    expect(() =>
+      assertTransformsCompile(buildAdvancedTerms(authored)),
+    ).toThrow();
+  });
+
+  test("a disabled key's unrecognized step does not block Generate", () => {
+    // The gate reads the built terms, so a step on a key the draft does not
+    // enable declares nothing the mint would refuse, exactly as the fan-out
+    // gate above reads them.
+    const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    const parked = {
+      ...draft,
+      keys: draft.keys.map((entry, index) =>
+        index === draft.keys.length - 1
+          ? {
+              ...entry,
+              enabled: false,
+              key: {
+                ...entry.key,
+                elements: entry.key.elements.map((element, position) =>
+                  position === 0
+                    ? { ...element, transform: [unrecognizedFunction] }
+                    : element,
+                ),
+              },
+            }
+          : entry,
+      ),
+    };
+    const result = validateAdvancedInvite(parked, seed, now);
     expect(result.canGenerate).toBe(true);
     expect(result.errors.keys).toBeUndefined();
   });

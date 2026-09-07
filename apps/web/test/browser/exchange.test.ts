@@ -11,7 +11,11 @@ import { createElement } from "react";
 // bound and blankets the top bar, intercepting unrelated clicks.
 import "@mantine/core/styles.css";
 
-import { decodeInvitation, getDefaultLinkageTerms } from "@psilink/core";
+import {
+  assertTransformsCompile,
+  decodeInvitation,
+  getDefaultLinkageTerms,
+} from "@psilink/core";
 import { minimalPreparedExchange } from "@psilink/core/testing";
 
 import { STEP_STATE_KEY } from "@exchange/stepHistory";
@@ -32,7 +36,7 @@ import { isolatedColumnName } from "@components/ColumnName";
 import { createAppMount, flushPendingUpdates } from "./renderApp";
 import { captureDownloads } from "./captureDownloads";
 
-import type { PreparedExchange } from "@psilink/core";
+import type { LinkageTerms, PreparedExchange } from "@psilink/core";
 
 // The grid's control labels isolate the header they name (the treatment
 // MatchingSharingSection applies), so selectors derive the label from the
@@ -233,6 +237,39 @@ async function reachReviewCreate() {
   await expect
     .element(page.getByRole("heading", { level: 1 }))
     .toHaveTextContent("Review & create");
+}
+
+// The two refusals the mint's transform check raises, built by driving the real
+// check rather than written by hand: what the screen has to map is what the mint
+// throws. Every step holds a marker, so a rendered alert can be measured against
+// the document it refused -- an imported one may be partner-authored, and none of
+// its bytes may reach the copy.
+const REFUSAL_MARKER = "ZZTRANSFORMMARK";
+
+function transformCheckRefusal(
+  reason: "uncompilable-step" | "too-many-steps",
+): Error {
+  // A multi-character pad fill throws where the step compiles; 600 steps is over
+  // the check's 512-step count bound, which it answers before any compile.
+  const transform =
+    reason === "uncompilable-step"
+      ? [{ function: "pad_left", params: { length: 4, char: REFUSAL_MARKER } }]
+      : Array.from({ length: 600 }, () => ({
+          function: "to_upper_case",
+          params: { note: REFUSAL_MARKER },
+        }));
+  const terms: LinkageTerms = {
+    ...getDefaultLinkageTerms("Refusal fixture"),
+    linkageKeys: [
+      { name: "LN", elements: [{ field: "last_name", transform }] },
+    ],
+  };
+  try {
+    assertTransformsCompile(terms);
+  } catch (error) {
+    return error as Error;
+  }
+  throw new Error(`expected the transform check to refuse: ${reason}`);
 }
 
 // stagesFor reads only the linkage terms off the prepared exchange (the unit
@@ -1371,6 +1408,105 @@ describe("inviter screen", () => {
     await expect
       .element(page.getByRole("heading", { level: 1 }))
       .toHaveTextContent("Your invitation is ready");
+  });
+
+  test("a refused transform names the step and the change at the create click", async () => {
+    // Neither refusal is cleared by retrying the same click: the terms hold the
+    // fault and the operator holds the terms, so each says which term and what
+    // to change instead of the fixed message an internal failure gets.
+    await reachReviewCreate();
+    const createButton = page.getByRole("button", {
+      name: "Create the invitation",
+    });
+
+    mintHarness.fail = transformCheckRefusal("uncompilable-step");
+    await createButton.click();
+    await expect
+      .element(page.getByText("A transform step cannot be built"))
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText('One transform step ("pad_left")', { exact: false }),
+      )
+      .toBeInTheDocument();
+
+    mintHarness.fail = transformCheckRefusal("too-many-steps");
+    await createButton.click();
+    await expect
+      .element(page.getByText("These terms declare too many transform steps"))
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText("600 transform steps together, more than the limit", {
+          exact: false,
+        }),
+      )
+      .toBeInTheDocument();
+
+    // Neither alert is the generic dead end, and neither echoes a byte of the
+    // document that was refused.
+    await expect
+      .element(
+        page.getByText("Something went wrong while creating", { exact: false }),
+      )
+      .not.toBeInTheDocument();
+    expect(document.body.textContent).not.toContain(REFUSAL_MARKER);
+
+    // The terms were never sealed, so a corrected document still mints.
+    mintHarness.fail = undefined;
+    await createButton.click();
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Your invitation is ready");
+  });
+
+  test("a refused transform names the step and the change at the save click", async () => {
+    // The second mint boundary, whose refusal has to read the same: a
+    // command-line transport mints nothing at Create and everything at Save.
+    await reachReviewCreate();
+    await page
+      .getByLabelText("Over SFTP, run by the psilink command-line tool")
+      .click();
+    await page.getByRole("button", { name: "Create the invitation" }).click();
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Save your exchange file");
+    await userEvent.fill(
+      page.getByLabelText("SFTP server host"),
+      "sftp.riverbend.example.gov",
+    );
+    const save = page.getByRole("button", { name: "Save exchange file" });
+
+    mintHarness.fail = transformCheckRefusal("uncompilable-step");
+    await save.click();
+    await expect
+      .element(page.getByText("A transform step cannot be built"))
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText('One transform step ("pad_left")', { exact: false }),
+      )
+      .toBeInTheDocument();
+
+    mintHarness.fail = transformCheckRefusal("too-many-steps");
+    await save.click();
+    await expect
+      .element(page.getByText("These terms declare too many transform steps"))
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText("600 transform steps together, more than the limit", {
+          exact: false,
+        }),
+      )
+      .toBeInTheDocument();
+
+    await expect
+      .element(
+        page.getByText("Something went wrong while saving", { exact: false }),
+      )
+      .not.toBeInTheDocument();
+    expect(document.body.textContent).not.toContain(REFUSAL_MARKER);
   });
 
   test("a header the strip emptied is refused by that cause, notice beside it", async () => {

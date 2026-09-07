@@ -365,6 +365,7 @@ export {
   pipelineAlwaysDrops,
   stepCanEmptyRealizedValue,
   summarizeLinkageShortfall,
+  transformRefusalIn,
   validateStandardizationAgainstTerms,
 } from "./linkageSatisfiability";
 export {
@@ -379,6 +380,7 @@ export type {
   LinkageKeyFitness,
   LinkageTermsStanding,
   LinkageTermsVerdict,
+  TransformRefusal,
 } from "./linkageSatisfiability";
 
 // The one display model both acceptance surfaces render the inviter's proposed

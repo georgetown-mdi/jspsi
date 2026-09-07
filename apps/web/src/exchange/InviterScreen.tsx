@@ -7,6 +7,7 @@ import {
   mintExchangeFile,
   sanitizeErrorForDisplay,
   sanitizeForDisplay,
+  transformRefusalIn,
 } from "@psilink/core";
 
 import {
@@ -185,7 +186,12 @@ import type { SavedExchange } from "./SaveExchangeSection";
 import type { Section } from "./stepRestore";
 import type { SftpConnectionProjection } from "@jobs/jobManager";
 
-import type { CSVRow, SemanticType, Standardization } from "@psilink/core";
+import type {
+  CSVRow,
+  SemanticType,
+  Standardization,
+  TransformRefusal,
+} from "@psilink/core";
 
 type SpineStep = "file" | "columns" | "review";
 
@@ -237,6 +243,39 @@ function invitationFileAlert(failure: InvitationFileFailure): AlertContent {
       return overlongColumnsAlert(failure.positions);
     case "unlinkable":
       return unlinkableFileAlert(failure.refusal);
+  }
+}
+
+/**
+ * The alert for a mint the transform check refused. Both mint surfaces render this
+ * one composition, as they do {@link invitationFileAlert}, and it is exhaustive over
+ * {@link TransformRefusal}, so a refusal core adds cannot reach either surface as
+ * the generic "something went wrong".
+ *
+ * The words are this app's own and interpolate only what core narrowed for it -- a
+ * step label that is a build literal, and two counts -- so an imported terms
+ * document, which a partner may have authored, cannot echo a byte of itself here.
+ */
+function transformRefusalAlert(refusal: TransformRefusal): AlertContent {
+  switch (refusal.reason) {
+    case "uncompilable-step":
+      return {
+        title: "A transform step cannot be built",
+        message:
+          `One transform step (${refusal.stepLabel}) cannot be built from the ` +
+          "settings it declares, so the exchange would stop before it matched " +
+          "anything. Open that step in your linkage keys or cleaning steps and " +
+          "correct its settings, or remove the step.",
+      };
+    case "too-many-steps":
+      return {
+        title: "These terms declare too many transform steps",
+        message:
+          `Your linkage keys and cleaning steps declare ${refusal.declaredSteps} ` +
+          `transform steps together, more than the limit of ${refusal.maxSteps}. ` +
+          "Reduce the number of linkage keys, key elements, or transform steps " +
+          "they declare.",
+      };
   }
 }
 
@@ -1046,12 +1085,17 @@ export function InviterScreen() {
       setManageStatus("idle");
       goTo("share");
     } catch (error) {
+      const transformRefusal = transformRefusalIn(error);
       if (error instanceof InvitationFileError) {
         // The mint re-parses the retained file, so it can fail in the same
         // user-actionable ways step 1 gates on (the file changed on disk, or
         // its satisfiability shifted with the edited terms); show the same
         // shared alerts rather than a generic failure.
         setCreateAlert(invitationFileAlert(error.failure));
+      } else if (transformRefusal !== undefined) {
+        // A document the transform check refused: the operator holds the terms
+        // and the remedy is an edit, so retrying the same click cannot clear it.
+        setCreateAlert(transformRefusalAlert(transformRefusal));
       } else {
         // Internal and non-user-actionable: a fixed message avoids echoing
         // internals into a secret-bearing flow, the default log states only
@@ -1113,8 +1157,11 @@ export function InviterScreen() {
       triggerBlobDownload(fileName, yaml, "application/yaml");
       setSavedExchange({ invitation: minted, fileName });
     } catch (error) {
+      const transformRefusal = transformRefusalIn(error);
       if (error instanceof InvitationFileError) {
         setSaveAlert(invitationFileAlert(error.failure));
+      } else if (transformRefusal !== undefined) {
+        setSaveAlert(transformRefusalAlert(transformRefusal));
       } else {
         // Internal and non-user-actionable (a schema/encoding fault): a fixed
         // message keeps internals out of a secret-bearing flow, the default

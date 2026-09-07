@@ -32,6 +32,7 @@ import {
   stepCanEmptyRealizedValue,
   pipelineAlwaysDrops,
   parseDateInputDropsEveryRecord,
+  transformRefusalIn,
   type LinkageTermsStanding,
 } from "../src/linkageSatisfiability";
 import {
@@ -1814,6 +1815,136 @@ describe("assertTransformsCompile", () => {
       assertTransformsCompile(terms);
     });
     expect(second * 10).toBeLessThan(first);
+  });
+});
+
+// --- transformRefusalIn ------------------------------------------------------
+
+describe("transformRefusalIn", () => {
+  // A front end that shows the author what to change has to tell the two
+  // document-shaped refusals apart, and the classes they are raised under answer
+  // a different question (whose content the fault is). The tag is that identity;
+  // these pin what it holds, on both surfaces and both classes.
+  const keysWithTransform = (
+    steps: TransformStep[],
+  ): LinkageTerms["linkageKeys"] => [
+    { name: "LN", elements: [{ field: "last_name", transform: steps }] },
+  ];
+
+  const refusalFrom = (run: () => void): unknown => {
+    try {
+      run();
+    } catch (error) {
+      return error;
+    }
+    throw new Error("expected a refusal");
+  };
+
+  test("names an uncompilable step by the label the message states", () => {
+    for (const surface of ["element", "standardization"] as const) {
+      const step = { function: "pad_left", params: { length: 4, char: "ab" } };
+      const error = refusalFrom(() =>
+        surface === "element"
+          ? assertTransformsCompile({
+              ...minimalTerms,
+              linkageKeys: keysWithTransform([step]),
+            })
+          : assertTransformsCompile(minimalTerms, [
+              { output: "last_name", input: "LN", steps: [step] },
+            ]),
+      );
+      expect(transformRefusalIn(error), surface).toEqual({
+        reason: "uncompilable-step",
+        stepLabel: '"pad_left"',
+      });
+    }
+  });
+
+  test("holds no byte of a document a partner authored", () => {
+    // The label is core's narrowed one, so a front end interpolating it echoes
+    // no function name, param name, or param value the document declares --
+    // measured with a marker planted in all three.
+    const terms: LinkageTerms = {
+      ...minimalTerms,
+      linkageKeys: keysWithTransform([
+        { function: "ZZMARKFN", params: { ZZMARKPARAM: "ZZMARKVALUE" } },
+      ]),
+    };
+    const refusal = transformRefusalIn(
+      refusalFrom(() => assertTransformsCompile(terms)),
+    );
+    expect(refusal).toEqual({
+      reason: "uncompilable-step",
+      stepLabel: "a function this build does not recognize",
+    });
+    expect(JSON.stringify(refusal)).not.toMatch(/ZZMARK/);
+  });
+
+  test("holds the two counts an over-count document is refused on", () => {
+    const steps = (count: number): TransformStep[] =>
+      Array.from({ length: count }, () => ({ function: "to_upper_case" }));
+    expect(
+      transformRefusalIn(
+        refusalFrom(() =>
+          assertTransformsCompile(
+            { ...minimalTerms, linkageKeys: keysWithTransform(steps(5)) },
+            undefined,
+            { maxSteps: 4 },
+          ),
+        ),
+      ),
+    ).toEqual({ reason: "too-many-steps", declaredSteps: 5, maxSteps: 4 });
+    // The other surface and error class hold the same reading: the count spans
+    // both, so the tag does too.
+    expect(
+      transformRefusalIn(
+        refusalFrom(() =>
+          assertTransformsCompile(
+            minimalTerms,
+            [{ output: "last_name", input: "LN", steps: steps(5) }],
+            { maxSteps: 4 },
+          ),
+        ),
+      ),
+    ).toEqual({ reason: "too-many-steps", declaredSteps: 5, maxSteps: 4 });
+  });
+
+  test("leaves the budget refusal and every other failure unmarked", () => {
+    // The budget refusal reports what was not checked rather than a fault in the
+    // document, and the same document can pass on a faster machine, so it holds
+    // no tag and a front end reading one falls back to its generic message.
+    const terms: LinkageTerms = {
+      ...minimalTerms,
+      linkageKeys: keysWithTransform([
+        { function: "pad_left", params: { length: 9, char: "0" } },
+      ]),
+    };
+    expect(
+      transformRefusalIn(
+        refusalFrom(() =>
+          assertTransformsCompile(terms, undefined, { totalBudgetMs: 0 }),
+        ),
+      ),
+    ).toBeUndefined();
+    expect(
+      transformRefusalIn(new UsageError("something else")),
+    ).toBeUndefined();
+    expect(transformRefusalIn(undefined)).toBeUndefined();
+    expect(
+      transformRefusalIn({ psilinkTransformRefusal: { reason: "invented" } }),
+    ).toBeUndefined();
+  });
+
+  test("reads the refusal through whatever wrapped it", () => {
+    const refused = refusalFrom(() =>
+      assertTransformsCompile({
+        ...minimalTerms,
+        linkageKeys: keysWithTransform([{ function: "pad_left", params: {} }]),
+      }),
+    );
+    expect(
+      transformRefusalIn(new Error("minting failed", { cause: refused })),
+    ).toEqual({ reason: "uncompilable-step", stepLabel: '"pad_left"' });
   });
 });
 

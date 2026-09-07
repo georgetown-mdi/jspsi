@@ -9,6 +9,7 @@
 // input file holds, is valueConstraints.ts.
 
 import {
+  causeChainSome,
   chainDetailCauses,
   LinkageTermsUnsatisfiableError,
   OperatorConfigError,
@@ -242,6 +243,97 @@ interface TransformCompileBudget {
 }
 
 /**
+ * Which of {@link assertTransformsCompile}'s two document-shaped refusals a
+ * failure is, with the values an authoring front end needs to say what to
+ * change:
+ *
+ * - `"uncompilable-step"` -- a step this document declares cannot be built from
+ *   the parameters beside it. `stepLabel` is the label
+ *   {@link uncompilableStepLabel} returned, already narrowed to a quoted name
+ *   from {@link STANDARDIZATION_FUNCTION_NAMES} or the fixed stand-in for a name
+ *   this build does not have, so it holds no authored text whichever surface the
+ *   step came from.
+ * - `"too-many-steps"` -- the document declares more transform steps than the
+ *   walk checks. Both counts are integers read off the document's shape.
+ *
+ * The walk's third refusal, its wall-clock budget, is absent by design: it
+ * reports what was not checked rather than a fault in the document, and the same
+ * document can pass on a faster machine, so a front end has nothing specific to
+ * tell the author about it.
+ */
+export type TransformRefusal =
+  | { readonly reason: "uncompilable-step"; readonly stepLabel: string }
+  | {
+      readonly reason: "too-many-steps";
+      readonly declaredSteps: number;
+      readonly maxSteps: number;
+    };
+
+/** The property {@link markTransformRefusal} sets and {@link transformRefusalIn}
+ * reads. */
+const TRANSFORM_REFUSAL_TAG = "psilinkTransformRefusal";
+
+// A property tag rather than a subclass, the shape markPeerWaitTimeout keeps:
+// each refusal's class already follows whose content the fault is (the
+// OperatorConfigError/UsageError split above), which the CLI's 64-vs-69 exit
+// code and the web's config alert both read, so a second axis of meaning cannot
+// ride on the class.
+function markTransformRefusal<E extends object>(
+  error: E,
+  refusal: TransformRefusal,
+): E {
+  return Object.assign(error, { [TRANSFORM_REFUSAL_TAG]: refusal });
+}
+
+// Every field a caller can render is checked here rather than trusted from the
+// tag, so what a front end interpolates is a value of the declared shape and not
+// whatever an object in the cause chain happened to hold under this name.
+function asTransformRefusal(value: unknown): TransformRefusal | undefined {
+  if (typeof value !== "object" || value === null) return undefined;
+  const candidate = value as Partial<Record<string, unknown>>;
+  if (
+    candidate.reason === "uncompilable-step" &&
+    typeof candidate.stepLabel === "string"
+  )
+    return { reason: "uncompilable-step", stepLabel: candidate.stepLabel };
+  if (
+    candidate.reason === "too-many-steps" &&
+    typeof candidate.declaredSteps === "number" &&
+    typeof candidate.maxSteps === "number"
+  )
+    return {
+      reason: "too-many-steps",
+      declaredSteps: candidate.declaredSteps,
+      maxSteps: candidate.maxSteps,
+    };
+  return undefined;
+}
+
+/**
+ * The {@link TransformRefusal} `error`, or anything in its `cause` chain, holds,
+ * or `undefined` for any other failure.
+ *
+ * This is how a caller tells the two document-shaped refusals apart: the classes
+ * they are raised under answer a different question (whose content the fault is),
+ * and their messages are not a machine-readable identity. A caller that shows
+ * the operator what to change reads this and composes its own words; the values
+ * here hold no text from the document, so a refused import cannot echo a byte of
+ * itself into that copy.
+ */
+export function transformRefusalIn(
+  error: unknown,
+): TransformRefusal | undefined {
+  let refusal: TransformRefusal | undefined;
+  causeChainSome(error, (link) => {
+    refusal = asTransformRefusal(
+      (link as Record<string, unknown>)[TRANSFORM_REFUSAL_TAG],
+    );
+    return refusal !== undefined;
+  });
+  return refusal;
+}
+
+/**
  * The refusal for a document declaring more than `maxSteps` transform steps in
  * total, or `undefined` for one within the bound. Counted before any step is
  * compiled, so what it answers is the document's own shape and nothing about the
@@ -272,9 +364,14 @@ function stepCountRefusal(
   );
   const declaredSteps = standardizationSteps + elementSteps;
   if (declaredSteps <= maxSteps) return undefined;
-  return standardizationSteps > maxSteps
-    ? new OperatorConfigError(stepCountRefusalMessage(declaredSteps, maxSteps))
-    : new UsageError(stepCountRefusalMessage(declaredSteps, maxSteps));
+  return markTransformRefusal(
+    standardizationSteps > maxSteps
+      ? new OperatorConfigError(
+          stepCountRefusalMessage(declaredSteps, maxSteps),
+        )
+      : new UsageError(stepCountRefusalMessage(declaredSteps, maxSteps)),
+    { reason: "too-many-steps", declaredSteps, maxSteps },
+  );
 }
 
 /**
@@ -365,7 +462,10 @@ export function assertTransformsCompile(
       );
     const label = uncompilableStepLabel(transformation.steps, pending);
     if (label !== undefined)
-      throw new OperatorConfigError(stepCompileRefusalMessage(label));
+      throw markTransformRefusal(
+        new OperatorConfigError(stepCompileRefusalMessage(label)),
+        { reason: "uncompilable-step", stepLabel: label },
+      );
   }
   for (const key of terms.linkageKeys) {
     for (const element of key.elements) {
@@ -373,7 +473,10 @@ export function assertTransformsCompile(
         throw new UsageError(stepCompileBudgetRefusalMessage(totalBudgetMs));
       const label = uncompilableStepLabel(element.transform, pending);
       if (label !== undefined)
-        throw new UsageError(stepCompileRefusalMessage(label));
+        throw markTransformRefusal(
+          new UsageError(stepCompileRefusalMessage(label)),
+          { reason: "uncompilable-step", stepLabel: label },
+        );
     }
   }
   commitCompiledTransforms(pending);
