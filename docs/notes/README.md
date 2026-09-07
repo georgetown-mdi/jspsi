@@ -14,6 +14,7 @@ stands, from a direction still open to a decision taken and built.
 | [bound-transformed-value.md](bound-transformed-value.md) | Decided and built, by a 3-panelist design panel. |
 | [broker-runtime-closure.md](broker-runtime-closure.md) | Decided and built. |
 | [cascade-fan-out.md](cascade-fan-out.md) | Directed; a spec item precedes the realization. |
+| [claude-md-spawn-cost.md](claude-md-spawn-cost.md) | Measurement only; what each spawn type receives, the orchestrator-only share under two partitions, and the saving a split would buy. |
 | [cli-webrtc-stack.md](cli-webrtc-stack.md) | Decided and built. |
 | [comment-history-narration-check.md](comment-history-narration-check.md) | Decided and built; the corpus measurement and the false-positive rate behind the check's phrase list. |
 | [connection-error-kind-taxonomy.md](connection-error-kind-taxonomy.md) | Decided and built; each classification records the condition that would reopen it. |

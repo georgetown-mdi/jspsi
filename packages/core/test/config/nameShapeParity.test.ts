@@ -3,6 +3,7 @@ import { expect, test } from "vitest";
 import {
   NAME_SHAPE_PATTERN,
   TEXT_CONTROL_CHAR_PATTERN,
+  safeParseLinkageTerms,
 } from "../../src/config/linkageTermsSchema";
 import { MetadataSchema } from "../../src/config/metadata";
 import {
@@ -77,6 +78,48 @@ test("the metadata block's column name admits exactly what the shape admits", ()
         isPayload: true,
       },
     ]).success;
+    const admittedInAName = NAME_SHAPE_PATTERN.test(`a${character}b`);
+    if (admittedByTheSchema !== admittedInAName)
+      disagreements.push(label(codePoint));
+  }
+  expect(disagreements).toEqual([]);
+});
+
+// The terms document a params key is swept inside. Minimal but complete: the
+// sweep is about the key alone, so nothing else here may fail the parse.
+const termsWithParamsKey = (key: string) => ({
+  version: "1.0.0",
+  identity: "Test Party",
+  date: "2025-01-01",
+  algorithm: "psi",
+  output: { expectsOutput: true, shareWithPartner: false },
+  deduplicate: false,
+  linkageFields: [{ name: "ssn", type: "ssn" }],
+  linkageKeys: [
+    {
+      name: "SSN",
+      elements: [
+        {
+          field: "ssn",
+          transform: [{ function: "trim", params: { [key]: 1 } }],
+        },
+      ],
+    },
+  ],
+});
+
+test("a transform params key admits exactly what the shape admits", () => {
+  // The fourth boundary a name crosses, and the only one that is an object KEY
+  // rather than a value: a parameter name a partner authors, which locates the
+  // offending entry in a refusal's issue path. Driven through the schema a
+  // parse runs rather than read off its source. `safeParseLinkageTerms` runs
+  // the camelize pre-pass first, as every real parse path does, so a key that
+  // reaches the record stage is the key the document holds.
+  const disagreements: Array<string> = [];
+  for (const { codePoint, character } of bmpCharacters()) {
+    const admittedByTheSchema = safeParseLinkageTerms(
+      termsWithParamsKey(`a${character}b`),
+    ).success;
     const admittedInAName = NAME_SHAPE_PATTERN.test(`a${character}b`);
     if (admittedByTheSchema !== admittedInAName)
       disagreements.push(label(codePoint));

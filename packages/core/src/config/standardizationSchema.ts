@@ -1,5 +1,7 @@
 import { z } from "zod";
 
+import { MAX_NAME_LENGTH } from "./linkageTermsSchema.js";
+
 // --- Standardizing step ------------------------------------------------------
 
 /**
@@ -30,10 +32,14 @@ const StandardizationStepSchema: z.ZodType<StandardizationStep> = z.object({
  */
 export interface StandardizationTransformation {
   /**
-   * Name of a linkage field in `linkage_terms.fields`. Must match exactly.
+   * Name of a linkage field in `linkage_terms.fields`. Must match exactly, and
+   * is bounded to {@link MAX_NAME_LENGTH} as that field's own name is.
    */
   output: string;
-  /** Column name in the raw input data. */
+  /**
+   * Column name in the raw input data, bounded to {@link MAX_NAME_LENGTH} as a
+   * declared column name is.
+   */
   input: string;
   /**
    * Steps applied in order. If omitted the raw input value is used unchanged.
@@ -43,8 +49,13 @@ export interface StandardizationTransformation {
 
 const StandardizationTransformationSchema: z.ZodType<StandardizationTransformation> =
   z.object({
-    output: z.string().min(1),
-    input: z.string().min(1),
+    // Both name a thing rather than hold data -- a linkage field this party
+    // declares and a column of this party's own input -- so each takes the
+    // ceiling every other name in a configuration has. Neither is sent to the
+    // partner, which is why the bound stands alone here and the terms names'
+    // character rule does not (docs/spec/CHANNEL_SECURITY.md).
+    output: z.string().min(1).max(MAX_NAME_LENGTH),
+    input: z.string().min(1).max(MAX_NAME_LENGTH),
     steps: z.array(StandardizationStepSchema).optional(),
   });
 
