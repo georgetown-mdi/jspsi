@@ -25,9 +25,23 @@ import {
 // different versions of the scanner are not the same gate whatever their inputs
 // say, and release.yaml's comment claims they are the same scanner.
 //
+// A gate is also what its failure reaches, and no `with:` input states that, so
+// the keys that decide it are read beside the inputs: the step's
+// `continue-on-error:` and `if:`, and the `continue-on-error:` of the job it
+// sits in. An invocation whose finding cannot fail the workflow is a report
+// under the gate's name and its threshold says nothing about what any run
+// refuses, so it is held apart from the invocations that gate unless
+// RECORDED_FAILURE_MODES names it with the reason.
+//
 // What it cannot see: whether the threshold is the right one, whether a run
 // used the file the tree holds, and any scan invoked by a `run:` line rather
-// than by the action. A tree with fewer than two invocations would satisfy
+// than by the action. The failure keys are read as text and no expression is
+// evaluated, so `continue-on-error: ${{ ... }}` counts as report-only on every
+// leg rather than the ones the expression picks, and an `if:` is read as a
+// condition without reading what it selects -- an invocation narrowed from
+// every trigger to one keeps the failure mode it had. Only `.github/workflows`
+// is read, so a scan moved behind a reusable workflow or a composite action is
+// not compared at all. A tree with fewer than two invocations would satisfy
 // every property here vacuously, so the count is asserted too.
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
@@ -60,21 +74,46 @@ const REQUIRED_INPUTS = [
   "exit-code",
 ];
 
-/** Every trivy-action step in the workflow tree, in file and document order. */
-function trivyInvocations(root) {
-  return readWorkflows(root).flatMap(({ path, source }) =>
+// Invocations whose failure controls hold them to something other than what
+// the rest of the tree runs, each named by file and step id with the reason in
+// words. An entry is a decision that a scan under this name reports rather
+// than gates, so it states what makes it report-only and what ends that. The
+// `if:` and `continue-on-error:` are recorded as written and compared against
+// the file, so an entry the step it names does not match fails instead of
+// standing as an exemption for a reason the step has dropped.
+const RECORDED_FAILURE_MODES = [
+  {
+    site: ".github/workflows/image_smoke.yaml vulnerability_scan",
+    condition:
+      "${{ matrix.fips == 'false' || github.event_name != 'pull_request' }}",
+    continueOnError: "${{ matrix.fips == 'true' }}",
+    jobContinueOnError: null,
+    reason:
+      "The FIPS variant's pinned base rootfs has fixable HIGH findings no pin movement clears, so that leg is skipped on a pull request and reports without failing the run on every other trigger. The base image bump that clears the findings drops both keys and this entry with them.",
+  },
+];
+
+/** Every trivy-action step in the given workflows, in file and document order. */
+function invocationsIn(workflows) {
+  return workflows.flatMap(({ path, source }) =>
     usesNodes(parseWorkflow(path, source))
       .filter((node) => {
         const reference = parseActionReference(node.uses);
         return reference !== null && reference.name.trim() === TRIVY_ACTION;
       })
       .map((node) => ({
-        site: `${path} ${node.location}`,
+        site: `${path} ${node.id ?? node.location}`,
         ref: parseActionReference(node.uses).ref,
         inputs: node.inputs ?? {},
+        condition: node.condition,
+        continueOnError: node.continueOnError,
+        jobContinueOnError: node.jobContinueOnError,
       })),
   );
 }
+
+/** Every trivy-action step in the workflow tree under `root`. */
+const trivyInvocations = (root) => invocationsIn(readWorkflows(root));
 
 /** What one invocation states about the gate, as a comparable object. */
 const gateOf = (invocation) => ({
@@ -85,6 +124,137 @@ const gateOf = (invocation) => ({
       .sort(([first], [second]) => (first < second ? -1 : 1)),
   ),
 });
+
+/** A failure key as the file writes it, or null where it is unset. */
+const asWritten = (value) =>
+  value === null || value === undefined ? null : String(value).trim();
+
+/** Whether a `continue-on-error:` value leaves a failure able to fail the run. */
+const leavesFailuresEnforced = (value) => {
+  const written = asWritten(value);
+  return written === null || written === "false";
+};
+
+/** Whether a finding at this invocation fails the workflow it runs in. */
+const failsTheWorkflow = (invocation) =>
+  leavesFailuresEnforced(invocation.continueOnError) &&
+  leavesFailuresEnforced(invocation.jobContinueOnError);
+
+/** When an invocation runs at all, as far as the file says. */
+const runsWhen = (invocation) =>
+  invocation.condition === null
+    ? "on every run of its job"
+    : "under a condition";
+
+/** The keys deciding what a finding at one site reaches, as written. */
+const failureControlsOf = (entry) => ({
+  condition: asWritten(entry.condition),
+  continueOnError: asWritten(entry.continueOnError),
+  jobContinueOnError: asWritten(entry.jobContinueOnError),
+});
+
+const CONTROL_KEYS = {
+  condition: "if",
+  continueOnError: "continue-on-error",
+  jobContinueOnError: "the job's continue-on-error",
+};
+
+const describeControls = (controls) =>
+  Object.entries(controls)
+    .map(
+      ([key, value]) =>
+        `${CONTROL_KEYS[key]} ${value === null ? "unset" : value}`,
+    )
+    .join(", ");
+
+const sameControls = (first, second) =>
+  Object.keys(first).every((key) => first[key] === second[key]);
+
+/** Which key keeps a report-only invocation's finding out of the run's result. */
+const reportsBecause = (invocation) =>
+  leavesFailuresEnforced(invocation.continueOnError)
+    ? `its job sets continue-on-error to ${asWritten(invocation.jobContinueOnError)}`
+    : `it sets continue-on-error to ${asWritten(invocation.continueOnError)}`;
+
+/**
+ * Every departure from one failure mode across `invocations`, as messages: an
+ * entry in `records` the step it names does not match, a report-only
+ * invocation no entry admits, and a difference in when two of them run.
+ */
+function failureModeProblems(invocations, records) {
+  const problems = [];
+  const bySite = new Map(
+    invocations.map((invocation) => [invocation.site, invocation]),
+  );
+
+  for (const record of records) {
+    const invocation = bySite.get(record.site);
+    if (invocation === undefined) {
+      problems.push(
+        `RECORDED_FAILURE_MODES names ${record.site}, which matches no ${TRIVY_ACTION} step under .github/workflows. Point the entry at the step's file and id, or drop it with the step.`,
+      );
+      continue;
+    }
+    if ((asWritten(record.reason) ?? "") === "") {
+      problems.push(
+        `RECORDED_FAILURE_MODES admits ${record.site} without saying why. State what makes this invocation report-only and what ends that, so the entry can be retired by whoever ends it.`,
+      );
+    }
+    const held = failureControlsOf(invocation);
+    const recorded = failureControlsOf(record);
+    if (!sameControls(recorded, held)) {
+      problems.push(
+        `${record.site} holds ${describeControls(held)} and RECORDED_FAILURE_MODES records it at ${describeControls(recorded)}, so the reason the entry states is not the one in force. Rewrite the entry against the step, or drop it where the step gates like the rest.`,
+      );
+    }
+  }
+
+  const compared = invocations.filter(
+    ({ site }) => !records.some((record) => record.site === site),
+  );
+  for (const invocation of compared) {
+    if (!failsTheWorkflow(invocation)) {
+      problems.push(
+        `${invocation.site} reports rather than gates, because ${reportsBecause(invocation)}, so a finding there cannot fail the workflow while its inputs hold it out as the same gate as the invocations that can. Drop the key, or record the site in RECORDED_FAILURE_MODES with what makes it report-only and what ends that.`,
+      );
+    }
+  }
+
+  const [first, ...rest] = compared;
+  for (const invocation of rest) {
+    if (runsWhen(invocation) !== runsWhen(first)) {
+      problems.push(
+        `${invocation.site} runs ${runsWhen(invocation)} and ${first.site} runs ${runsWhen(first)}, so the two do not answer for the same runs and the threshold they share is enforced on different ones. Give them the same condition, or record the difference in RECORDED_FAILURE_MODES with the reason.`,
+      );
+    }
+  }
+
+  return problems;
+}
+
+/** Trivy invocations in one synthetic workflow per entry, for the cases below. */
+const fixtureInvocations = (steps) =>
+  invocationsIn(
+    steps.map((step, index) => ({
+      path: `.github/workflows/fixture-${index}.yaml`,
+      source: [
+        "jobs:",
+        "  scan:",
+        ...(step.job ?? []).map((line) => `    ${line}`),
+        "    steps:",
+        `      - id: scan_${index}`,
+        ...(step.step ?? []).map((line) => `        ${line}`),
+        `        uses: ${TRIVY_ACTION}@v0.36.0`,
+        "        with:",
+        "          image-ref: example:latest",
+        "          severity: HIGH,CRITICAL",
+        '          exit-code: "1"',
+      ].join("\n"),
+    })),
+  );
+
+const fixtureSite = (index) =>
+  `.github/workflows/fixture-${index}.yaml scan_${index}`;
 
 describe("the image vulnerability scan's threshold", () => {
   const invocations = trivyInvocations(repoRoot);
@@ -116,5 +286,133 @@ describe("the image vulnerability scan's threshold", () => {
         `${invocation.site} and ${first.site} run the image scan at different settings, so one gate accepts what the other refuses. Move both in the same change, or record the difference in PER_SITE_INPUTS here with the reason it says nothing about what the gate accepts.`,
       ).toEqual(gateOf(first));
     }
+  });
+
+  it("fails the workflow at every invocation, or records what stops it", () => {
+    expect(failureModeProblems(invocations, RECORDED_FAILURE_MODES)).toEqual(
+      [],
+    );
+  });
+});
+
+describe("the failure-mode comparison", () => {
+  it("reads two invocations with no failure keys as answering for the same runs", () => {
+    expect(failureModeProblems(fixtureInvocations([{}, {}]), [])).toEqual([]);
+  });
+
+  it("fails an invocation whose own continue-on-error keeps a finding out of the run", () => {
+    expect(
+      failureModeProblems(
+        fixtureInvocations([{}, { step: ["continue-on-error: true"] }]),
+        [],
+      ),
+    ).toEqual([
+      expect.stringContaining(
+        `${fixtureSite(1)} reports rather than gates, because it sets continue-on-error to true`,
+      ),
+    ]);
+  });
+
+  it("fails an invocation whose job's continue-on-error keeps a finding out of the run", () => {
+    expect(
+      failureModeProblems(
+        fixtureInvocations([{}, { job: ["continue-on-error: true"] }]),
+        [],
+      ),
+    ).toEqual([
+      expect.stringContaining(
+        `${fixtureSite(1)} reports rather than gates, because its job sets continue-on-error to true`,
+      ),
+    ]);
+  });
+
+  it("fails an invocation running under a condition the others do not", () => {
+    expect(
+      failureModeProblems(
+        fixtureInvocations([
+          {},
+          { step: ["if: ${{ github.event_name != 'pull_request' }}"] },
+        ]),
+        [],
+      ),
+    ).toEqual([
+      expect.stringContaining(
+        `${fixtureSite(1)} runs under a condition and ${fixtureSite(0)} runs on every run of its job`,
+      ),
+    ]);
+  });
+
+  it("admits a report-only invocation a record names with its reason", () => {
+    expect(
+      failureModeProblems(
+        fixtureInvocations([{}, { step: ["continue-on-error: true"] }]),
+        [
+          {
+            site: fixtureSite(1),
+            condition: null,
+            continueOnError: "true",
+            jobContinueOnError: null,
+            reason: "Its base image has findings no pin movement clears.",
+          },
+        ],
+      ),
+    ).toEqual([]);
+  });
+
+  it("fails a record that admits an invocation without saying why", () => {
+    expect(
+      failureModeProblems(
+        fixtureInvocations([{}, { step: ["continue-on-error: true"] }]),
+        [
+          {
+            site: fixtureSite(1),
+            condition: null,
+            continueOnError: "true",
+            jobContinueOnError: null,
+            reason: "  ",
+          },
+        ],
+      ),
+    ).toEqual([
+      expect.stringContaining(
+        `RECORDED_FAILURE_MODES admits ${fixtureSite(1)} without saying why`,
+      ),
+    ]);
+  });
+
+  it("fails a record the step it names does not match", () => {
+    expect(
+      failureModeProblems(fixtureInvocations([{}, {}]), [
+        {
+          site: fixtureSite(1),
+          condition: null,
+          continueOnError: "true",
+          jobContinueOnError: null,
+          reason: "Its base image has findings no pin movement clears.",
+        },
+      ]),
+    ).toEqual([
+      expect.stringContaining(
+        `${fixtureSite(1)} holds if unset, continue-on-error unset, the job's continue-on-error unset and RECORDED_FAILURE_MODES records it at if unset, continue-on-error true, the job's continue-on-error unset`,
+      ),
+    ]);
+  });
+
+  it("fails a record naming a step the tree does not hold", () => {
+    expect(
+      failureModeProblems(fixtureInvocations([{}, {}]), [
+        {
+          site: fixtureSite(4),
+          condition: null,
+          continueOnError: "true",
+          jobContinueOnError: null,
+          reason: "Its base image has findings no pin movement clears.",
+        },
+      ]),
+    ).toEqual([
+      expect.stringContaining(
+        `RECORDED_FAILURE_MODES names ${fixtureSite(4)}, which matches no ${TRIVY_ACTION} step`,
+      ),
+    ]);
   });
 });

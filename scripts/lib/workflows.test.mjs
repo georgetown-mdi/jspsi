@@ -98,18 +98,82 @@ runs:
     expect(usesNodes(parseWorkflow("wf.yaml", source))).toEqual([
       {
         location: "jobs.build.steps[0]",
+        id: null,
         uses: "actions/checkout@v7",
         inputs: { ref: "staging" },
+        condition: null,
+        continueOnError: null,
+        jobContinueOnError: null,
       },
       {
         location: "jobs.build.steps[1]",
+        id: null,
         uses: "actions/setup-node@v7",
         inputs: null,
+        condition: null,
+        continueOnError: null,
+        jobContinueOnError: null,
       },
       {
         location: "runs.steps[0]",
+        id: null,
         uses: "actions/checkout@v7",
         inputs: null,
+        condition: null,
+        continueOnError: null,
+        jobContinueOnError: null,
+      },
+    ]);
+  });
+
+  it("gives each node its id and the keys deciding whether its failure reaches the run", () => {
+    const source = `jobs:
+  build:
+    continue-on-error: true
+    steps:
+      - id: scan
+        if: \${{ github.event_name != 'pull_request' }}
+        continue-on-error: \${{ matrix.variant == 'fips' }}
+        uses: aquasecurity/trivy-action@v0.36.0
+  publish:
+    steps:
+      - uses: actions/checkout@v7
+runs:
+  using: "composite"
+  steps:
+    - uses: actions/setup-node@v7
+`;
+    expect(
+      usesNodes(parseWorkflow("wf.yaml", source)).map(
+        ({ location, id, condition, continueOnError, jobContinueOnError }) => ({
+          location,
+          id,
+          condition,
+          continueOnError,
+          jobContinueOnError,
+        }),
+      ),
+    ).toEqual([
+      {
+        location: "jobs.build.steps[0]",
+        id: "scan",
+        condition: "${{ github.event_name != 'pull_request' }}",
+        continueOnError: "${{ matrix.variant == 'fips' }}",
+        jobContinueOnError: true,
+      },
+      {
+        location: "jobs.publish.steps[0]",
+        id: null,
+        condition: null,
+        continueOnError: null,
+        jobContinueOnError: null,
+      },
+      {
+        location: "runs.steps[0]",
+        id: null,
+        condition: null,
+        continueOnError: null,
+        jobContinueOnError: null,
       },
     ]);
   });
