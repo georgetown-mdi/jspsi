@@ -130,14 +130,39 @@ describe("encodeBinaryPackValue: refusals", () => {
     });
   }
 
-  test("refuses an object whose own constructor key the packer also refuses", () => {
-    // The packer reads `value.constructor` to decide a map, so an own key of
-    // that name shadows the check on both sides; the encoder must refuse
-    // wherever the packer does, not write a map the packer would not have.
-    const shadowed = { constructor: 1, theirIndex: 0 };
-    expect(() => pack(shadowed as unknown as Packable)).toThrow();
-    expect(() => encodeBinaryPackValue(shadowed)).toThrowError(
-      /cannot BinaryPack an outbound frame/,
+  // The packer reads a value's own `constructor` to decide a map and calls its
+  // own `hasOwnProperty` to decide each key, so an own key of either name
+  // shadows a check the packer makes; the encoder must refuse wherever the
+  // packer does, not write a map the packer would not have.
+  const packerShadows: Array<{ key: string; value: object }> = [
+    { key: "constructor", value: { constructor: 1, theirIndex: 0 } },
+    { key: "hasOwnProperty", value: { hasOwnProperty: 1, theirIndex: 0 } },
+  ];
+
+  for (const { key, value } of packerShadows) {
+    test(`refuses an object whose own ${key} key the packer also refuses`, () => {
+      expect(() => pack(value as unknown as Packable)).toThrow();
+      expect(() => encodeBinaryPackValue(value)).toThrowError(
+        /cannot BinaryPack an outbound frame/,
+      );
+    });
+  }
+
+  test("refuses an object that holds itself, rather than walking forever", () => {
+    const frame: Record<string, unknown> = { theirIndex: 0 };
+    frame.parent = frame;
+    expect(() => pack(frame as Packable)).toThrow(RangeError);
+    expect(() => encodeBinaryPackValue(frame)).toThrowError(
+      /an outbound frame that holds itself/,
+    );
+  });
+
+  test("refuses an array that holds itself, rather than walking forever", () => {
+    const frame: Array<unknown> = [1];
+    frame.push(frame);
+    expect(() => pack(frame as Packable)).toThrow(RangeError);
+    expect(() => encodeBinaryPackValue(frame)).toThrowError(
+      /an outbound frame that holds itself/,
     );
   });
 

@@ -183,6 +183,30 @@ describe("packOutboundFramesIteratively", () => {
     );
     expect(fake.datagrams).toHaveLength(0);
   });
+
+  test("refuses an object that holds itself, emitting nothing", () => {
+    const { fake, conn } = standIn();
+    packOutboundFramesIteratively(conn);
+
+    const frame: Record<string, unknown> = { theirIndex: 0 };
+    frame.parent = frame;
+    expect(() => fake.send(frame)).toThrowError(
+      /an outbound frame that holds itself/,
+    );
+    expect(fake.datagrams).toHaveLength(0);
+  });
+
+  test("refuses an array that holds itself, emitting nothing", () => {
+    const { fake, conn } = standIn();
+    packOutboundFramesIteratively(conn);
+
+    const frame: Array<unknown> = [1];
+    frame.push(frame);
+    expect(() => fake.send(frame)).toThrowError(
+      /an outbound frame that holds itself/,
+    );
+    expect(fake.datagrams).toHaveLength(0);
+  });
 });
 
 describe("assertIterativePackingSupported", () => {
@@ -214,6 +238,49 @@ describe("assertIterativePackingSupported", () => {
       assertIterativePackingSupported(probe as unknown as DataConnection),
     ).toThrow(/send internals/);
   });
+
+  /** A member kept under its own name but holding something the override cannot
+   * call or compare, as a `peerjs` restructuring that reuses a name would leave
+   * it: the assert reads the type, not just the presence. */
+  const wrongTypes: Array<{
+    label: string;
+    replace: (probe: Record<string, unknown>) => void;
+  }> = [
+    {
+      label: "_send is not a function",
+      replace: (probe) => {
+        probe._send = 1;
+      },
+    },
+    {
+      label: "_sendChunks is not a function",
+      replace: (probe) => {
+        probe._sendChunks = "sendChunks";
+      },
+    },
+    {
+      label: "_bufferedSend is not a function",
+      replace: (probe) => {
+        probe._bufferedSend = { send: () => {} };
+      },
+    },
+    {
+      label: "chunker.chunkedMTU is not a number",
+      replace: (probe) => {
+        probe.chunker = { chunkedMTU: String(CHUNKED_MTU) };
+      },
+    },
+  ];
+
+  for (const { label, replace } of wrongTypes) {
+    test(`fails loud when ${label}`, () => {
+      const probe = sendInternals();
+      replace(probe);
+      expect(() =>
+        assertIterativePackingSupported(probe as unknown as DataConnection),
+      ).toThrow(/send internals/);
+    });
+  }
 
   test("passes on a connection exposing all four", () => {
     const { conn } = standIn();

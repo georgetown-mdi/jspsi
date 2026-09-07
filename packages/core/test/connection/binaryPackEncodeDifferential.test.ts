@@ -29,19 +29,42 @@ function oracleBytes(value: unknown): Uint8Array {
   return new Uint8Array(packed);
 }
 
+/** The real packer's bytes, or `undefined` where its own recursion ceiling
+ * stops it. That ceiling moves with whatever stack is already in use, so a Node
+ * or vitest change can push it below a size chosen under it; the size that
+ * reaches it has no oracle any more, which is a fact about the library rather
+ * than a divergence in the encoder. */
+function oracleBytesWithinPackerCeiling(
+  value: unknown,
+): Uint8Array | undefined {
+  try {
+    return oracleBytes(value);
+  } catch (error) {
+    if (error instanceof RangeError) return undefined;
+    throw error;
+  }
+}
+
 function encodedBytes(value: unknown): Uint8Array {
   return new Uint8Array(encodeBinaryPackValue(value));
 }
 
-function expectSameBytes(value: unknown, label: string): void {
+function expectSameBytesAs(
+  oracle: Uint8Array,
+  value: unknown,
+  label: string,
+): void {
   const encoded = encodedBytes(value);
-  const oracle = oracleBytes(value);
   // Compared as hex rather than as arrays: a mismatch deep in a 5 MB frame
   // prints a readable diff instead of a wall of element indices.
   expect(
     `${label}: ${Buffer.from(encoded).toString("hex")}`,
     `${label} diverged from the pinned packer`,
   ).toBe(`${label}: ${Buffer.from(oracle).toString("hex")}`);
+}
+
+function expectSameBytes(value: unknown, label: string): void {
+  expectSameBytesAs(oracleBytes(value), value, label);
 }
 
 /** The iteration map psilink sends after the PSI round: one entry per matched
@@ -101,15 +124,28 @@ const RECORD_SCALING_FRAMES = [
 
 /** Sizes the real packer survives, so it can serve as the oracle: the empty
  * frame, the single record, both sides of the 15/16 fixed-header boundary, and
- * three sizes climbing to just under the packer's own recursion ceiling
- * (measured at roughly 7,800 records). */
-const ORACLE_SIZES = [0, 1, 15, 16, 200, 5000, 7000];
+ * two sizes under the packer's own recursion ceiling, measured at roughly 7,800
+ * records for the iteration map and higher for the other three. The top size
+ * keeps well clear of it because the ceiling moves with the stack already in
+ * use; a size that reaches it anyway skips below rather than failing. */
+const ORACLE_SIZES = [0, 1, 15, 16, 200, 5000];
 
 describe("encodeBinaryPackValue: the record-scaling frames, byte for byte", () => {
   for (const { name, build } of RECORD_SCALING_FRAMES) {
     for (const size of ORACLE_SIZES) {
-      test(`${name} at ${size} records`, () => {
-        expectSameBytes(build(size), `${name}@${size}`);
+      test(`${name} at ${size} records`, (context) => {
+        const frame = build(size);
+        const oracle = oracleBytesWithinPackerCeiling(frame);
+        if (oracle === undefined) {
+          context.skip(
+            `the pinned packer overflows its own call stack at ${size} ` +
+              `${name} records, so it cannot serve as the oracle for this ` +
+              "size; lower the top oracle size rather than reading this as " +
+              "an encoder regression",
+          );
+          return;
+        }
+        expectSameBytesAs(oracle, frame, `${name}@${size}`);
       });
     }
   }
@@ -206,6 +242,16 @@ const MARKER_PROBES: Array<{ label: string; value: unknown }> = [
   {
     label: "an AEAD envelope",
     value: new Uint8Array(1 + 12 + 4096 + 16).fill(9),
+  },
+  {
+    // Not a cycle: the encoder's cycle guard tracks the containers on the walk
+    // from the root down, so a value reached twice on separate branches is
+    // written twice, as the library writes it.
+    label: "a value reached twice on separate branches",
+    value: (() => {
+      const shared = { theirIndex: 0, iteration: 1 };
+      return [shared, [shared]];
+    })(),
   },
   {
     label: "mixed nesting",

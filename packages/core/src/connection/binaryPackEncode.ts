@@ -20,7 +20,9 @@
 //
 // A value kind the library encodes but psilink never sends -- a Date, a class
 // instance, a Blob -- is refused rather than guessed at, since a guess that
-// misses is a silently corrupt frame.
+// misses is a silently corrupt frame. So is a frame that holds itself: that walk
+// has no end, so the cycle is refused as soon as it is reached rather than left
+// to fill memory.
 
 import { ConnectionError } from "./messageConnection";
 
@@ -39,6 +41,26 @@ function unsupportedValueError(description: string): ConnectionError {
     `cannot BinaryPack an outbound frame holding ${description}; the WebRTC ` +
       "wire carries only null, booleans, numbers, strings, byte arrays, " +
       "arrays and plain objects",
+    "usage",
+  );
+}
+
+/** A frame that holds itself. Named by shape and never by content, for the same
+ * reason {@link describeValue} names a kind rather than a value. */
+function cyclicFrameError(): ConnectionError {
+  return new ConnectionError(
+    "cannot BinaryPack an outbound frame that holds itself; break the " +
+      "reference cycle before sending",
+    "usage",
+  );
+}
+
+/** An own key that shadows the ownership check the library's own map encoder
+ * calls, which makes the library refuse the object. */
+function shadowedOwnershipError(): ConnectionError {
+  return new ConnectionError(
+    "cannot BinaryPack an outbound frame holding an object with an own " +
+      "hasOwnProperty key; rename that key",
     "usage",
   );
 }
@@ -145,12 +167,18 @@ function isPendingArray(
  *               `Uint8Array`/`ArrayBuffer`, or an array or plain object of
  *               those, nested to any depth.
  * @throws {ConnectionError} of kind `usage` on any other value kind (a Date, a
- *         Map, a class instance, a function), and on a container, string or
- *         byte string longer than a 32-bit count can declare.
+ *         Map, a class instance, a function), on a value that holds itself, on
+ *         an object with an own `hasOwnProperty` key, and on a container,
+ *         string or byte string longer than a 32-bit count can declare.
  */
 export function encodeBinaryPackValue(value: unknown): ArrayBuffer {
   const sink = new ByteSink();
   const stack: Array<PendingContainer> = [];
+  // The containers on the walk from the root down to the value being written.
+  // A container that is already on it is a cycle, refused before the walk
+  // re-enters it; a container reached twice on separate branches is not one,
+  // and is written twice as the library writes it.
+  const ancestors = new Set<object>();
 
   const writeString = (text: string): void => {
     const encoded = utf8Encoder.encode(text);
@@ -269,6 +297,9 @@ export function encodeBinaryPackValue(value: unknown): ArrayBuffer {
     if (typeof next !== "object") {
       throw unsupportedValueError(describeValue(next));
     }
+    if (ancestors.has(next)) {
+      throw cyclicFrameError();
+    }
     // `instanceof Array`, not `Array.isArray`: the library dispatches on the
     // former, and an array from another realm -- true for one, false for the
     // other -- must be refused here rather than written as an array the library
@@ -286,6 +317,7 @@ export function encodeBinaryPackValue(value: unknown): ArrayBuffer {
       } else {
         throw unsupportedValueError("an array too long to declare");
       }
+      ancestors.add(next);
       stack.push({ elements: next, index: 0 });
       return;
     }
@@ -302,6 +334,12 @@ export function encodeBinaryPackValue(value: unknown): ArrayBuffer {
     if (!isPlainObject(next)) {
       throw unsupportedValueError(describeValue(next));
     }
+    // The library decides each own key with `next.hasOwnProperty(key)`, which
+    // an own key of that name shadows, so it refuses this object; this encoder
+    // writes no map the pinned packer would not have written.
+    if (Object.prototype.hasOwnProperty.call(next, "hasOwnProperty")) {
+      throw shadowedOwnershipError();
+    }
     const keys = Object.keys(next);
     const length = keys.length;
     if (length <= 0x0f) {
@@ -315,6 +353,7 @@ export function encodeBinaryPackValue(value: unknown): ArrayBuffer {
     } else {
       throw unsupportedValueError("an object with too many keys to declare");
     }
+    ancestors.add(next);
     stack.push({ source: next, keys, index: 0 });
   };
 
@@ -323,6 +362,7 @@ export function encodeBinaryPackValue(value: unknown): ArrayBuffer {
     const container = stack[stack.length - 1];
     if (isPendingArray(container)) {
       if (container.index >= container.elements.length) {
+        ancestors.delete(container.elements);
         stack.pop();
         continue;
       }
@@ -330,6 +370,7 @@ export function encodeBinaryPackValue(value: unknown): ArrayBuffer {
       container.index += 1;
     } else {
       if (container.index >= container.keys.length) {
+        ancestors.delete(container.source);
         stack.pop();
         continue;
       }
