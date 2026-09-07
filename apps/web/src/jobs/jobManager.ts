@@ -304,10 +304,16 @@ export interface JobRecord {
  * both pass the null check; it becomes `active` once the record exists. The
  * `deleted` flag makes the surface 404 immediately on DELETE while the slot stays
  * occupied until the child's exit is observed (see {@link JobManager.maybeFreeSlot}).
+ *
+ * `channel` is the occupying run's transport, held in both phases because a
+ * filedrop run makes the rendezvous mount an exchange's own working folder for
+ * its duration, which bears on what else may be written there
+ * ({@link JobManager.resolveSigningFingerprint}).
  */
-type ExchangeSlot =
+type ExchangeSlot = { channel: JobCreateIntent["channel"] } & (
   | { phase: "starting"; id: string }
-  | { phase: "active"; record: JobRecord; deleted: boolean };
+  | { phase: "active"; record: JobRecord; deleted: boolean }
+);
 
 /**
  * The hard cap on buffered events: a safety check well above the CLI stream's
@@ -526,7 +532,7 @@ export class JobManager {
     // two concurrent POSTs cannot both observe a free slot. The busy rejection
     // holds the occupying exchange's id so the caller can re-attach to it.
     if (this.slot !== null) throw new ExchangeBusyError(this.slotId()!);
-    this.slot = { phase: "starting", id };
+    this.slot = { phase: "starting", id, channel: intent.channel };
 
     let workdir: string | null = null;
     try {
@@ -596,12 +602,44 @@ export class JobManager {
    * console says what it cannot see beside the signing control instead.
    */
   private runWouldPublishSigningIdentity(): boolean {
-    if (!signingIdentityExists(this.dataRoot)) return false;
+    return (
+      signingIdentityExists(this.dataRoot) &&
+      this.rendezvousHoldsIdentityDirectory()
+    );
+  }
+
+  /**
+   * Whether a rendezvous leg IS or HOLDS the directory the signing identity sits
+   * in, positively established. An unestablished hold is false: a refusal is owed
+   * a positive finding.
+   */
+  private rendezvousHoldsIdentityDirectory(): boolean {
     const verdict = rendezvousHoldsDirectory(
       this.rendezvousLegs().map(([dir]) => dir),
       signingIdentityDirectory(this.dataRoot),
     );
     return verdict.holds && !verdict.uncertain;
+  }
+
+  /**
+   * Whether creating the identity now would write the private key into a folder
+   * a live filedrop exchange is syncing to the partner: the slot holds a filedrop
+   * run, no identity file is there yet, and a leg holds the directory one would
+   * be created in.
+   *
+   * Reading an identity already there is not this case -- the key is on disk
+   * whatever this request does -- so only the create is refused, and only while
+   * that run occupies the slot. With no run in the slot, or an sftp run in it,
+   * the create proceeds: the console's default is that the key is created on
+   * demand in the mounted working directory, and the create-time refusal is what
+   * stops the run that would publish it.
+   */
+  private mintWouldLandInSyncedFolder(): boolean {
+    return (
+      this.slot?.channel === "filedrop" &&
+      !signingIdentityExists(this.dataRoot) &&
+      this.rendezvousHoldsIdentityDirectory()
+    );
   }
 
   /**
@@ -749,12 +787,19 @@ export class JobManager {
    * Single-flight: the flag is claimed synchronously, so a concurrent
    * request is {@link SigningFingerprintBusyError} (a 409) rather than a
    * second child racing the same file.
+   *
+   * Creating the identity is answered `syncing` -- no child runs -- while a
+   * filedrop exchange occupies the exchange slot and its rendezvous holds the
+   * directory the key would be written into
+   * ({@link mintWouldLandInSyncedFolder}); the run's own create-time refusal
+   * cannot see a key that did not exist when it started.
    */
   async resolveSigningFingerprint(args: {
     identityLabel: string;
     exportCertificate: boolean;
   }): Promise<SigningFingerprintResult> {
     if (this.fingerprintInFlight) throw new SigningFingerprintBusyError();
+    if (this.mintWouldLandInSyncedFolder()) return { kind: "syncing" };
     this.fingerprintInFlight = true;
     try {
       return await runSigningFingerprint({
@@ -828,7 +873,12 @@ export class JobManager {
       cancelTimers: [],
       handoff,
     };
-    this.slot = { phase: "active", record, deleted: false };
+    this.slot = {
+      phase: "active",
+      record,
+      deleted: false,
+      channel: intent.channel,
+    };
 
     // One value for the preflight's recovery copy and for what the child is told
     // to do, so the notice cannot send the operator to a control this very launch

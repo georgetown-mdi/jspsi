@@ -1029,19 +1029,20 @@ describe("the receipts card's model", () => {
   test("the shared-mount advisory raises above the notices", () => {
     // It names a key-disclosure hazard the pre-run check cannot see, so it has
     // warning weight. The two notices state only where a file lands and how to
-    // look after it, so they stay at info.
+    // look after it, so they stay at info. Read on an unanswered report, the one
+    // layout that raises the advisory without establishing anything.
     const pinned = draft({
       mode: "certificate",
       ownFingerprint: OWN_FINGERPRINT,
       partnerFingerprint: PARTNER_FINGERPRINT,
     });
     expect(
-      receiptsAdvisories(pinned, SEPARATE_RENDEZVOUS)
+      receiptsAdvisories(pinned, undefined)
         .filter((advisory) => advisory.severity === "warning")
         .map((advisory) => advisory.message),
     ).toEqual([IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY]);
     expect(
-      receiptsAdvisories(pinned, SEPARATE_RENDEZVOUS)
+      receiptsAdvisories(pinned, undefined)
         .filter((advisory) => advisory.severity === "info")
         .map((advisory) => advisory.message),
     ).toEqual([IDENTITY_AT_REST_NOTICE, RECEIPT_LOCATION_NOTICE]);
@@ -1121,8 +1122,25 @@ describe("the receipts card's model", () => {
       ownFingerprint: OWN_FINGERPRINT,
       partnerFingerprint: PARTNER_FINGERPRINT,
     });
-    expect(receiptsAdvisories(pinned, SEPARATE_RENDEZVOUS)).toEqual([
+    expect(receiptsAdvisories(pinned, UNCERTAIN_SHARED_RENDEZVOUS)).toEqual([
       { message: IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY, severity: "warning" },
+      { message: IDENTITY_AT_REST_NOTICE, severity: "info" },
+      { message: RECEIPT_LOCATION_NOTICE, severity: "info" },
+    ]);
+  });
+
+  test("a rendezvous with a mount of its own raises no warning at all", () => {
+    // The recommended layout: nothing a partner syncs holds the key, so the
+    // hazard the warning names is not live. Raising it there too costs the
+    // warning channel its meaning -- the operator who did the recommended thing
+    // is the one who could no longer tell the two states apart -- while the two
+    // notices, true wherever the key is written, stay.
+    const pinned = draft({
+      mode: "certificate",
+      ownFingerprint: OWN_FINGERPRINT,
+      partnerFingerprint: PARTNER_FINGERPRINT,
+    });
+    expect(receiptsAdvisories(pinned, SEPARATE_RENDEZVOUS)).toEqual([
       { message: IDENTITY_AT_REST_NOTICE, severity: "info" },
       { message: RECEIPT_LOCATION_NOTICE, severity: "info" },
     ]);

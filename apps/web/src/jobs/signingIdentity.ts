@@ -3,7 +3,12 @@ import path from "node:path";
 
 import { FINGERPRINT_REGEX } from "@psilink/core";
 
-import { WORKDIR_MODE, jobFileExists, resolveWorkdirFile } from "./workdir";
+import {
+  WORKDIR_MODE,
+  jobFileExists,
+  jobPathPresent,
+  resolveWorkdirFile,
+} from "./workdir";
 import { runCapturedCliChild } from "./capturedCliChild";
 
 /**
@@ -78,12 +83,17 @@ export function signingIdentityDirectory(dataRoot: string): string {
   return path.dirname(signingIdentityPath(dataRoot));
 }
 
-/** Whether this party's signing identity file exists in the mounted data root.
- * The private key the pre-run refusal is about is a file that is there or is
- * not: with no identity yet, a file-sync exchange over the mount publishes no
- * key. */
+/**
+ * Whether this party's signing identity file is in the mounted data root. The
+ * private key the pre-run refusal is about is a file that is there or is not:
+ * with no identity yet, a file-sync exchange over the mount publishes no key.
+ *
+ * Presence, never readability ({@link jobPathPresent}): a key the console's own
+ * uid cannot open is a key the partner's sync copies all the same, so an
+ * unreadable identity file must refuse the run rather than be treated as absent.
+ */
 export function signingIdentityExists(dataRoot: string): boolean {
-  return jobFileExists(signingIdentityPath(dataRoot));
+  return jobPathPresent(signingIdentityPath(dataRoot));
 }
 
 /**
@@ -132,6 +142,9 @@ const FINGERPRINT_SIGKILL_GRACE_MS = 5_000;
  *   write, or a malformed default `psilink.yaml`; see
  *   {@link runSigningFingerprint}) -- not distinguishable here since stderr
  *   is discarded, so all are reported as one category.
+ * - `syncing`: no child ran. Creating the identity would have written the
+ *   private key into a folder a live file-drop exchange is syncing to the
+ *   partner ({@link JobManager.resolveSigningFingerprint}).
  * - `timeout`: the watchdog killed the child.
  * - `error`: any other non-zero exit, no valid fingerprint line, or the
  *   child could not be spawned.
@@ -144,6 +157,7 @@ export type SigningFingerprintResult =
       certificateExported: boolean;
     }
   | { kind: "refused" }
+  | { kind: "syncing" }
   | { kind: "timeout" }
   | { kind: "error" };
 

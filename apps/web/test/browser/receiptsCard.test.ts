@@ -44,6 +44,11 @@ const NOTE = "Filed in the association database; purged after six years.";
 /** The card's copy for a `409`, which is what the stale-failure test looks for. */
 const BUSY_FAILURE = "Another fingerprint request is still running.";
 
+/** What the card says when the console withheld the create because a
+ * shared-folder exchange is syncing the folder the key would land in. */
+const SYNCING_FAILURE =
+  "A shared-folder exchange is running and syncing the folder your signing identity would be written into.";
+
 interface StubbedResponse {
   status?: number;
   body?: unknown;
@@ -314,6 +319,22 @@ describe("ReceiptsCard: a request that resolves while the operator edits", () =>
 });
 
 describe("ReceiptsCard: a failed request", () => {
+  test("names the run syncing the folder, and what to do after it", async () => {
+    // The console answers a create it will not make with a status of its own, so
+    // the card must not fold it into the generic "could not be created" copy:
+    // nothing is wrong with the folder, and the operator's move is to wait for
+    // the run or to give the synced folder a mount of its own.
+    stubSigningApi({ responses: [{ body: { status: "syncing" } }] });
+    await renderCard();
+    await chooseCertificateMode();
+
+    await createButton().click();
+    await expect
+      .element(page.getByText(SYNCING_FAILURE, { exact: false }))
+      .toBeInTheDocument();
+    expect(app.container.textContent).toContain("JOB_RENDEZVOUS_DIR");
+  });
+
   test("leaves no stale failure for the next visit to certificate mode", async () => {
     stubSigningApi({ responses: [{ status: 409 }, { body: okBody() }] });
     await renderCard();

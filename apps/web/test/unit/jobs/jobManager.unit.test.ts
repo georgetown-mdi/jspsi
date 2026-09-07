@@ -1944,11 +1944,17 @@ describe("a filedrop run that would publish the signing identity", () => {
     dataRoot: string;
     jobRendezvousDir?: string;
     jobRendezvousOutboundDir?: string;
+    delayMs?: number;
   }): JobManager {
     const manager = new JobManager({
       dataRoot: options.dataRoot,
       binaryPath: STUB_CLI_PATH,
-      childEnv: { STUB_FD3_EVENTS: "[]" },
+      childEnv: {
+        STUB_FD3_EVENTS: "[]",
+        ...(options.delayMs !== undefined
+          ? { STUB_DELAY_MS: String(options.delayMs) }
+          : {}),
+      },
       jobRendezvousDir: options.jobRendezvousDir ?? options.dataRoot,
       jobRendezvousOutboundDir: options.jobRendezvousOutboundDir,
     });
@@ -1988,6 +1994,30 @@ describe("a filedrop run that would publish the signing identity", () => {
     // create is not met with a busy rejection.
     expect(fs.readdirSync(root)).toEqual([SIGNING_IDENTITY_FILE_NAME]);
   });
+
+  /** Whether this process is root, which reads a mode-`000` file regardless of
+   * its permissions -- so the unreadable-identity case cannot be staged as that
+   * account and the test below states so by skipping rather than passing on a
+   * file it could read after all. */
+  const runningAsRoot = process.getuid?.() === 0;
+
+  test.skipIf(runningAsRoot)(
+    "refuses on an identity file the console cannot read",
+    async () => {
+      // The probe answers presence, not readability. A key the console's own uid
+      // cannot open -- mode 000 here, a uid-mapped mount or a key minted under
+      // another account in the field -- is a key the partner's sync copies all the
+      // same, so a readability test would admit exactly the run this refusal is
+      // for.
+      const root = directory("signing-unreadable");
+      writeIdentity(root);
+      fs.chmodSync(path.join(root, SIGNING_IDENTITY_FILE_NAME), 0o000);
+      const manager = makeSigningManager({ dataRoot: root });
+      await expect(manager.createJob(validIntent())).rejects.toBeInstanceOf(
+        JobSigningIdentityExposedError,
+      );
+    },
+  );
 
   test("refuses when the rendezvous mount HOLDS the folder holding the identity", async () => {
     const rendezvous = directory("signing-holder");
@@ -2193,6 +2223,72 @@ describe("a filedrop run that would publish the signing identity", () => {
       const root = directory("fingerprint-read");
       writeIdentity(root);
       const manager = makeSigningManager({ dataRoot: root });
+      await expect(
+        manager.resolveSigningFingerprint({
+          identityLabel: "Agency A",
+          exportCertificate: false,
+        }),
+      ).resolves.toMatchObject({ kind: "ok", created: false });
+    });
+
+    test("refuses the create while a shared-folder run is syncing that folder", async () => {
+      // The run's own create-time check ran before this key existed, so nothing
+      // else stops the console dropping a private key into the folder that run
+      // is syncing as it goes. No child spawns, so no key is written.
+      const root = directory("fingerprint-live-filedrop");
+      const manager = makeSigningManager({ dataRoot: root, delayMs: 5000 });
+      await manager.createJob(validIntent());
+      await expect(
+        manager.resolveSigningFingerprint({
+          identityLabel: "Agency A",
+          exportCertificate: false,
+        }),
+      ).resolves.toEqual({ kind: "syncing" });
+      expect(fs.existsSync(path.join(root, SIGNING_IDENTITY_FILE_NAME))).toBe(
+        false,
+      );
+    });
+
+    test("creates while an sftp run holds the slot", async () => {
+      // Nobody syncs the mount on an sftp exchange, so the run in the slot says
+      // nothing about where the key may be written.
+      const root = directory("fingerprint-live-sftp");
+      // The stub honors one delay for every child it is spawned as, so the
+      // exchange child's hold on the slot is bounded by what the fingerprint
+      // child below can wait out. The gate is read before that child spawns.
+      const manager = makeSigningManager({ dataRoot: root, delayMs: 800 });
+      armSftpConnection(manager);
+      await manager.createJob(validSftpIntent());
+      await expect(
+        manager.resolveSigningFingerprint({
+          identityLabel: "Agency A",
+          exportCertificate: false,
+        }),
+      ).resolves.toMatchObject({ kind: "ok", created: true });
+    });
+
+    test("creates on the same layout with no run in the slot", async () => {
+      // The gate is the live run, not the layout: on the default one-mount
+      // console with nothing running, the key is created on demand.
+      const root = directory("fingerprint-idle-slot");
+      const manager = makeSigningManager({ dataRoot: root });
+      await expect(
+        manager.resolveSigningFingerprint({
+          identityLabel: "Agency A",
+          exportCertificate: false,
+        }),
+      ).resolves.toMatchObject({ kind: "ok", created: true });
+    });
+
+    test("reads an identity already there while that run syncs the folder", async () => {
+      // Only the create is refused. The key reached the folder after the run
+      // started -- the only way both hold at once -- and it is on disk whatever
+      // this request does, so withholding the fingerprint would leave the
+      // operator unable to read the one they have.
+      const root = directory("fingerprint-live-read");
+      const manager = makeSigningManager({ dataRoot: root, delayMs: 800 });
+      await manager.createJob(validIntent());
+      writeIdentity(root);
       await expect(
         manager.resolveSigningFingerprint({
           identityLabel: "Agency A",

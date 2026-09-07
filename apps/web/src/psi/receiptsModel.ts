@@ -276,7 +276,7 @@ export function receiptsProblems(
  *
  * True on every layout, so raised on every one, and an `info` rather than a
  * warning ({@link ReceiptsAdvisorySeverity}) -- it poses no hazard this run
- * makes live. The layout-gated word above it is
+ * makes live. The layout-gated word above it, where the layout raises one, is
  * {@link IDENTITY_SHARED_MOUNT_REFUSAL_ADVISORY} or
  * {@link IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY}.
  */
@@ -298,9 +298,9 @@ export const IDENTITY_AT_REST_NOTICE =
  * chain, looking like two folders. This advisory is what the operator can act
  * on where the check cannot.
  *
- * Raised everywhere the check did not positively establish the shared layout
- * (see {@link receiptsAdvisories}); that layout takes
- * {@link IDENTITY_SHARED_MOUNT_REFUSAL_ADVISORY} instead.
+ * Raised on a hedged or unread report (see {@link receiptsAdvisories}); the
+ * established shared layout takes {@link IDENTITY_SHARED_MOUNT_REFUSAL_ADVISORY}
+ * instead, and a rendezvous with a mount of its own raises neither.
  */
 export const IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY =
   "Before a shared-folder exchange runs, psilink checks whether the folder " +
@@ -322,8 +322,9 @@ export const IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY =
  * another name, and this folder mounted a second time under another container
  * path, are outside what it can see.
  *
- * Raised only on that layout (see {@link receiptsAdvisories}); every other one
- * takes {@link IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY}.
+ * Raised only on that layout (see {@link receiptsAdvisories}); a hedged or unread
+ * report takes {@link IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY}, and a rendezvous
+ * with a mount of its own raises neither.
  */
 export const IDENTITY_SHARED_MOUNT_REFUSAL_ADVISORY =
   "This console shares the folder your signing key is written into with your " +
@@ -403,15 +404,16 @@ interface ReceiptsAdvisory {
  * block: every one is a legitimate run the command line accepts too.
  * Grouped by severity; the order here is the order within a group.
  *
- * `rendezvous` is the console's own rendezvous report, choosing which of the two
- * advisories about the DEPLOYMENT rather than the draft is raised. A report that
- * positively establishes a rendezvous folder holding the mounted working
- * directory takes {@link IDENTITY_SHARED_MOUNT_REFUSAL_ADVISORY}, which states
- * the refusal in force there and the one path it reads; every other report --
- * a separate mount, a hedged answer, an unread one -- takes
- * {@link IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY}. One of the two is always raised:
- * the refusal covers a single path, so no layout leaves the operator with
- * nothing to act on.
+ * `rendezvous` is the console's own rendezvous report, deciding the one advisory
+ * about the DEPLOYMENT rather than the draft. A report that positively says the
+ * rendezvous has a mount of its own -- the recommended layout, where the key is
+ * not in a folder anyone syncs -- raises neither: a warning on the layout with no
+ * hazard live is what leaves an operator unable to tell the two states apart. A
+ * report that positively establishes a rendezvous folder holding the mounted
+ * working directory takes {@link IDENTITY_SHARED_MOUNT_REFUSAL_ADVISORY}, which
+ * states the refusal in force there and the one path it reads; a hedged or unread
+ * report takes {@link IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY}, since that is where
+ * the pre-run check can be fooled.
  *
  * A draft the run itself would refuse belongs in {@link receiptsProblems},
  * not here.
@@ -421,17 +423,23 @@ export function receiptsAdvisories(
   rendezvous: JobRendezvousConfig | undefined,
 ): Array<ReceiptsAdvisory> {
   if (draft.mode !== "certificate") return [];
+  const separatelyMounted =
+    rendezvous?.configured === true && rendezvous.sharesDataRoot === false;
   const sharedLayoutEstablished =
     rendezvous?.configured === true &&
     rendezvous.sharesDataRoot === true &&
     rendezvous.sharesDataRootUncertain === false;
   return [
-    {
-      message: sharedLayoutEstablished
-        ? IDENTITY_SHARED_MOUNT_REFUSAL_ADVISORY
-        : IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY,
-      severity: "warning" as const,
-    },
+    ...(separatelyMounted
+      ? []
+      : [
+          {
+            message: sharedLayoutEstablished
+              ? IDENTITY_SHARED_MOUNT_REFUSAL_ADVISORY
+              : IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY,
+            severity: "warning" as const,
+          },
+        ]),
     { message: IDENTITY_AT_REST_NOTICE, severity: "info" },
     { message: RECEIPT_LOCATION_NOTICE, severity: "info" },
   ];
