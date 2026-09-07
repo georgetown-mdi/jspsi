@@ -120,7 +120,8 @@ function stubSigningApi(options: StubOptions = {}): { bodies: Array<string> } {
 let latestDraft: ReceiptsDraft = RECEIPTS_DEFAULT;
 
 /** The default console layout: one mount, so the rendezvous holds the working
- * directory and the card's whole advisory set is on show. */
+ * directory. A shared-folder exchange there is refused before it runs, so the
+ * card shows its notices without the shared-mount advisory. */
 const SINGLE_MOUNT_RENDEZVOUS: JobRendezvousConfig = {
   configured: true,
   locator: "psilink",

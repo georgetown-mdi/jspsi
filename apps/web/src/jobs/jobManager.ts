@@ -34,7 +34,11 @@ import {
   workdirDirectoryExists,
   writeJobFile,
 } from "./workdir";
-import { jobRendezvousLegs, rendezvousStartupWarnings } from "./jobRendezvous";
+import {
+  jobRendezvousLegs,
+  rendezvousHoldsDirectory,
+  rendezvousStartupWarnings,
+} from "./jobRendezvous";
 import {
   resolveCliBinaryPath,
   spawnExchangeJob,
@@ -43,6 +47,8 @@ import {
 import {
   runSigningFingerprint,
   signingCertificatePath,
+  signingIdentityDirectory,
+  signingIdentityExists,
   signingIdentityPath,
 } from "./signingIdentity";
 import { buildJobHandoff } from "./handoff";
@@ -153,6 +159,26 @@ export class JobRendezvousRetainRequiredError extends Error {
       "a split rendezvous (inbound and outbound directories) requires retain mode",
     );
     this.name = "JobRendezvousRetainRequiredError";
+  }
+}
+
+/**
+ * Thrown by {@link JobManager.createJob} when a filedrop intent would sync the
+ * folder this party's signing identity sits in: the run publishes everything in
+ * the rendezvous directory to the partner, and a long-lived private key there
+ * lets whoever reads it sign receipts in this party's name with every partner.
+ *
+ * Raised only where the identity file exists and a rendezvous leg IS or HOLDS
+ * its directory, positively established (see
+ * {@link rendezvousHoldsDirectory}). The route maps it to a 400 naming the
+ * refusal, which is the one create rejection whose body says which it is.
+ */
+export class JobSigningIdentityExposedError extends Error {
+  constructor() {
+    super(
+      "a rendezvous directory holds this party's signing identity, so the run would publish the private key",
+    );
+    this.name = "JobSigningIdentityExposedError";
   }
 }
 
@@ -490,6 +516,10 @@ export class JobManager {
         intent.options?.retainFiles !== true
       )
         throw new JobRendezvousRetainRequiredError();
+      // Refused rather than warned: the run would copy this party's long-lived
+      // private key to the partner, and no wording recovers a disclosed key.
+      if (this.rendezvousHoldsSigningIdentity())
+        throw new JobSigningIdentityExposedError();
     }
 
     // Claim the slot with no await between the null check and the assignment, so
@@ -542,6 +572,31 @@ export class JobManager {
       this.jobRendezvousDir,
       this.jobRendezvousOutboundDir,
     );
+  }
+
+  /**
+   * Whether a filedrop run would publish this party's signing identity: the
+   * identity file is there, and a rendezvous leg IS or HOLDS the directory it
+   * sits in ({@link signingIdentityDirectory}). A leg mounted INSIDE that
+   * directory, a sibling, and a console with no identity yet are all admitted --
+   * none of them puts the key where the partner reads.
+   *
+   * Read per run rather than at boot: the identity is created on demand between
+   * one run and the next, and the mounts can be re-pointed under a running
+   * console.
+   *
+   * A hold the comparison could not establish -- an unreadable path component,
+   * or one host directory bound in at two container paths outside the ancestor
+   * chain -- admits the run: a refusal is owed a positive finding, and the
+   * console says what it cannot see beside the signing control instead.
+   */
+  private rendezvousHoldsSigningIdentity(): boolean {
+    if (!signingIdentityExists(this.dataRoot)) return false;
+    const verdict = rendezvousHoldsDirectory(
+      this.rendezvousLegs().map(([dir]) => dir),
+      signingIdentityDirectory(this.dataRoot),
+    );
+    return verdict.holds && !verdict.uncertain;
   }
 
   /**

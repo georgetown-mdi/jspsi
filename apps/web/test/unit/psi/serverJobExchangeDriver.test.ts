@@ -1186,6 +1186,58 @@ describe("createFetchJobApiClient over an injected fetch", () => {
     expect(error.activeJobId).toBeUndefined();
   });
 
+  test("a refused (400) create carries the refusal token off the body", async () => {
+    // The refusal is about the console's mounts, which this browser never learns,
+    // so the token is what lets the seat compose copy the operator can act on.
+    const fetchImpl = (() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({ reason: "signing-identity-in-rendezvous" }),
+          { status: 400, headers: { "Content-Type": "application/json" } },
+        ),
+      )) as typeof fetch;
+    const client = createFetchJobApiClient(fetchImpl);
+
+    const error = (await client
+      .createJob(
+        {
+          channel: "filedrop",
+          linkageTerms: validLinkageTerms(),
+          sharedSecret: VALID_SHARED_SECRET,
+          inputCsv: "x\n",
+          eventStream: true,
+        },
+        new AbortController().signal,
+      )
+      .catch((thrown: unknown) => thrown)) as JobApiRequestError;
+    expect(error.status).toBe(400);
+    expect(error.refusalReason).toBe("signing-identity-in-rendezvous");
+  });
+
+  test("an unknown or absent 400 reason leaves refusalReason undefined", async () => {
+    // Every other create rejection is empty-bodied, and a token this bundle does
+    // not know is treated as none: the seat falls back to its generic copy rather
+    // than rendering something it cannot interpret.
+    for (const body of [null, JSON.stringify({ reason: "who-knows" })]) {
+      const fetchImpl = (() =>
+        Promise.resolve(new Response(body, { status: 400 }))) as typeof fetch;
+      const error = (await createFetchJobApiClient(fetchImpl)
+        .createJob(
+          {
+            channel: "filedrop",
+            linkageTerms: validLinkageTerms(),
+            sharedSecret: VALID_SHARED_SECRET,
+            inputCsv: "x\n",
+            eventStream: true,
+          },
+          new AbortController().signal,
+        )
+        .catch((thrown: unknown) => thrown)) as JobApiRequestError;
+      expect(error.status).toBe(400);
+      expect(error.refusalReason).toBeUndefined();
+    }
+  });
+
   test("fetchRecordAvailability reads recordAvailable and recordCreatedAt", async () => {
     const statusResponse =
       (body: unknown): typeof fetch =>

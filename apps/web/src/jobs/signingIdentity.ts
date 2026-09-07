@@ -66,6 +66,27 @@ export function signingCertificatePath(dataRoot: string): string {
 }
 
 /**
+ * The directory the signing identity file sits in: the mounted data root
+ * itself, since the identity is a fixed name directly under it.
+ *
+ * Read by the pre-run check that refuses a file-sync exchange whose rendezvous
+ * directory holds this directory ({@link JobManager.createJob}): what the
+ * partner syncs is a directory, so the comparison is against the identity's
+ * directory rather than the file.
+ */
+export function signingIdentityDirectory(dataRoot: string): string {
+  return path.dirname(signingIdentityPath(dataRoot));
+}
+
+/** Whether this party's signing identity file exists in the mounted data root.
+ * The private key the pre-run refusal is about is a file that is there or is
+ * not: with no identity yet, a file-sync exchange over the mount publishes no
+ * key. */
+export function signingIdentityExists(dataRoot: string): boolean {
+  return jobFileExists(signingIdentityPath(dataRoot));
+}
+
+/**
  * Refuse an export path that resolves to the identity file itself, matching
  * the CLI's own `--export-certificate` guard
  * (`apps/cli/src/commands/fingerprint.ts`): overwriting it would destroy the

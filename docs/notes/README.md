@@ -19,6 +19,7 @@ stands, from a direction still open to a decision taken and built.
 | [connection-error-kind-taxonomy.md](connection-error-kind-taxonomy.md) | Decided and built; each classification records the condition that would reopen it. |
 | [connection-per-poll-sftp.md](connection-per-poll-sftp.md) | Shipped. |
 | [console-announce-and-focus.md](console-announce-and-focus.md) | Decided and built, by a 3-panelist design panel deciding 2-1. |
+| [console-signing-identity-custody.md](console-signing-identity-custody.md) | Decided on the maintainer's ruling; the refusal is built, the identity-location option is not. |
 | [core-dist-cache-buildinfo.md](core-dist-cache-buildinfo.md) | Decided and built. |
 | [cosign-keyless-signing.md](cosign-keyless-signing.md) | Decided and built. |
 | [cross-workspace-test-material.md](cross-workspace-test-material.md) | Decided and built. |

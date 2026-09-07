@@ -40,7 +40,7 @@ Closed in the same change, since it is the same decision point: `psilink fingerp
 
 ## What this note does not decide
 
-The console's own resolution is a separate decision, tracked separately. It composes an explicit `identity_file` on every job and never relied on the CLI's default, so nothing here changes it.
+The console's own resolution is a separate decision, recorded in [console-signing-identity-custody.md](console-signing-identity-custody.md). It composes an explicit `identity_file` on every job and never relied on the CLI's default, so nothing here changes it.
 
 ## See also
 

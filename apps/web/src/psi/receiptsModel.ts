@@ -284,43 +284,29 @@ export const IDENTITY_AT_REST_NOTICE =
   "it readable only by you, and do not put it on shared storage.";
 
 /**
- * What the console says where the folder the key is written into is also the
- * folder the partner syncs: the rendezvous directory falls back to the data
- * root when not separately provisioned (`jobRendezvous.ts`), so a
- * shared-folder exchange on a single-mount console syncs the key's own
- * folder -- and its disclosure lets the holder forge receipts under this
- * party's identity for every exchange, not just the one shared.
+ * What the console says about the one shared-folder layout its pre-run check
+ * can miss.
  *
- * Raised only on that layout (see {@link receiptsAdvisories}); withheld
- * where the rendezvous has a mount of its own. This is the established
- * variant, for a report that positively determined the layout
- * ({@link JobRendezvousConfig.sharesDataRootUncertain} false); the hedged
- * sibling is {@link IDENTITY_SHARED_MOUNT_ADVISORY_UNCERTAIN}.
+ * A shared-folder exchange whose synced folder holds the signing identity is
+ * refused before it starts (`JobManager.createJob`), so the operator is never
+ * left to weigh that layout themselves. The check compares mount paths, the
+ * real paths symlinks resolve them to, and folder identity -- which leaves one
+ * host folder mounted twice under two container paths, outside the ancestor
+ * chain, looking like two folders. This advisory is what the operator can act
+ * on where the check cannot.
+ *
+ * Withheld on the layout the check positively established as shared (see
+ * {@link receiptsAdvisories}), where the refusal itself is the message.
  */
-export const IDENTITY_SHARED_MOUNT_ADVISORY =
-  "This console rendezvouses out of the folder you mounted, so a " +
-  "shared-folder exchange here syncs the very folder your signing key sits in. " +
-  "On a run like that your long-lived private key sits where your partner " +
-  "writes, and whoever reads it can sign receipts in your name -- for every " +
-  "exchange, with every partner. Give the synced folder a mount of its own " +
-  "(JOB_RENDEZVOUS_DIR), separate from this one, before you sign an exchange " +
-  "that runs over it.";
-
-/**
- * The hedged sibling of {@link IDENTITY_SHARED_MOUNT_ADVISORY}, raised where
- * the rendezvous report could not rule out the shared layout rather than
- * positively establishing it. States the layout as unruled-out rather than
- * established: an operator who checks and finds the folders separate must
- * not be told flatly that they are not.
- */
-export const IDENTITY_SHARED_MOUNT_ADVISORY_UNCERTAIN =
-  "psilink cannot rule out that this console rendezvouses out of the folder " +
-  "you mounted, and on that layout a shared-folder exchange syncs the very " +
-  "folder your signing key sits in. On a run like that your long-lived private " +
-  "key sits where your partner writes, and whoever reads it can sign receipts " +
-  "in your name -- for every exchange, with every partner. Give the synced " +
-  "folder a mount of its own (JOB_RENDEZVOUS_DIR), separate from this one, " +
-  "before you sign an exchange that runs over it.";
+export const IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY =
+  "Before a shared-folder exchange runs, psilink checks whether the folder " +
+  "your partner writes into holds your signing key, and refuses the run if it " +
+  "does: your long-lived private key there lets whoever reads it sign receipts " +
+  "in your name -- for every exchange, with every partner. That check compares " +
+  "folder locations and identity, so one folder mounted twice under two names " +
+  "passes it. Keep the synced folder (JOB_RENDEZVOUS_DIR) separate from the " +
+  "folder holding your key, input, and results, and check that the two are not " +
+  "one folder under two names.";
 
 /**
  * What the console says about re-keying, so the operator learns it before a
@@ -392,12 +378,12 @@ interface ReceiptsAdvisory {
  *
  * `rendezvous` is the console's own rendezvous report, deciding the one
  * advisory about the DEPLOYMENT rather than the draft
- * ({@link IDENTITY_SHARED_MOUNT_ADVISORY} /
- * {@link IDENTITY_SHARED_MOUNT_ADVISORY_UNCERTAIN}): raised only where the
- * rendezvous folder holds the mounted working directory, and withheld only
- * on a report that positively says otherwise -- an unanswered or failed
- * probe keeps it. Which of the two messages shows follows the same report
- * (`sharesDataRootUncertain`).
+ * ({@link IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY}): withheld where the report
+ * positively establishes that a rendezvous folder holds the mounted working
+ * directory, since a shared-folder exchange on that layout is refused before it
+ * runs and the refusal is the message; raised everywhere else, including on an
+ * unanswered or hedged report, since that is where the pre-run check can be
+ * fooled.
  *
  * A draft the run itself would refuse belongs in {@link receiptsProblems},
  * not here.
@@ -407,20 +393,16 @@ export function receiptsAdvisories(
   rendezvous: JobRendezvousConfig | undefined,
 ): Array<ReceiptsAdvisory> {
   if (draft.mode !== "certificate") return [];
-  const separatelyMounted =
-    rendezvous?.configured === true && rendezvous.sharesDataRoot === false;
   const sharedLayoutEstablished =
     rendezvous?.configured === true &&
     rendezvous.sharesDataRoot === true &&
     rendezvous.sharesDataRootUncertain === false;
   return [
-    ...(separatelyMounted
+    ...(sharedLayoutEstablished
       ? []
       : [
           {
-            message: sharedLayoutEstablished
-              ? IDENTITY_SHARED_MOUNT_ADVISORY
-              : IDENTITY_SHARED_MOUNT_ADVISORY_UNCERTAIN,
+            message: IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY,
             severity: "warning" as const,
           },
         ]),

@@ -16,8 +16,7 @@ import {
   IDENTITY_AT_REST_NOTICE,
   IDENTITY_LABEL_REQUIRED_REASON,
   IDENTITY_MISSING_PROBLEM,
-  IDENTITY_SHARED_MOUNT_ADVISORY,
-  IDENTITY_SHARED_MOUNT_ADVISORY_UNCERTAIN,
+  IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY,
   NO_PARTNER_PIN_PROBLEM,
   PARTNER_FINGERPRINT_PROBLEM,
   RECEIPTS_DEFAULT,
@@ -86,10 +85,10 @@ const OWN_FINGERPRINT = "B".repeat(42) + "A";
 const RETENTION_NOTE =
   "Filed in the association database; kept six years, then purged.";
 
-/** The single-mount layout the identity-location advisory exists for: the folder
+/** The single-mount layout a shared-folder exchange is refused on: the folder
  * the partner syncs into holds the working directory this party's signing key is
  * written to, positively established by the walk (a lexical or filesystem
- * match), so the advisory states it as fact. */
+ * match), so the pre-run refusal covers it and the advisory is withheld. */
 const SHARED_RENDEZVOUS: JobRendezvousConfig = {
   configured: true,
   locator: "psilink",
@@ -100,14 +99,14 @@ const SHARED_RENDEZVOUS: JobRendezvousConfig = {
 
 /** The same single-mount layout, but where the walk could not rule it out rather
  * than positively establishing it -- an unresolved real path in the comparison --
- * so the advisory hedges instead of asserting. */
+ * so no run is refused over it and the advisory stands. */
 const UNCERTAIN_SHARED_RENDEZVOUS: JobRendezvousConfig = {
   ...SHARED_RENDEZVOUS,
   sharesDataRootUncertain: true,
 };
 
 /** A console whose rendezvous has a mount of its own, where the collision the
- * advisory names cannot arise. */
+ * refusal catches was not found. */
 const SEPARATE_RENDEZVOUS: JobRendezvousConfig = {
   ...SHARED_RENDEZVOUS,
   sharesDataRoot: false,
@@ -1027,30 +1026,29 @@ describe("the receipts card's model", () => {
   });
 
   test("the shared-mount advisory raises above the notices", () => {
-    // It names a key-disclosure hazard that is live by default on the
-    // single-mount filedrop layout, so it has warning weight. The two notices
-    // state only where a file lands and how to look after it, so they stay at
-    // info.
+    // It names a key-disclosure hazard the pre-run check cannot see, so it has
+    // warning weight. The two notices state only where a file lands and how to
+    // look after it, so they stay at info.
     const pinned = draft({
       mode: "certificate",
       ownFingerprint: OWN_FINGERPRINT,
       partnerFingerprint: PARTNER_FINGERPRINT,
     });
     expect(
-      receiptsAdvisories(pinned, SHARED_RENDEZVOUS)
+      receiptsAdvisories(pinned, SEPARATE_RENDEZVOUS)
         .filter((advisory) => advisory.severity === "warning")
         .map((advisory) => advisory.message),
-    ).toEqual([IDENTITY_SHARED_MOUNT_ADVISORY]);
+    ).toEqual([IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY]);
     expect(
-      receiptsAdvisories(pinned, SHARED_RENDEZVOUS)
+      receiptsAdvisories(pinned, SEPARATE_RENDEZVOUS)
         .filter((advisory) => advisory.severity === "info")
         .map((advisory) => advisory.message),
     ).toEqual([IDENTITY_AT_REST_NOTICE, RECEIPT_LOCATION_NOTICE]);
   });
 
-  test("an unresolved shared-mount comparison raises the hedged variant", () => {
-    // The walk defaulted to "holds" rather than matching it, so the copy must
-    // not assert the layout as fact.
+  test("an unresolved shared-mount comparison keeps the advisory", () => {
+    // The walk defaulted to "holds" rather than matching it, so no run is
+    // refused over the layout and the advisory is the whole treatment.
     const pinned = draft({
       mode: "certificate",
       ownFingerprint: OWN_FINGERPRINT,
@@ -1060,7 +1058,7 @@ describe("the receipts card's model", () => {
       receiptsAdvisories(pinned, UNCERTAIN_SHARED_RENDEZVOUS)
         .filter((advisory) => advisory.severity === "warning")
         .map((advisory) => advisory.message),
-    ).toEqual([IDENTITY_SHARED_MOUNT_ADVISORY_UNCERTAIN]);
+    ).toEqual([IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY]);
   });
 
   test("the unpinned problem names the whole consequence, not just the receipt", () => {
@@ -1122,66 +1120,43 @@ describe("the receipts card's model", () => {
       ownFingerprint: OWN_FINGERPRINT,
       partnerFingerprint: PARTNER_FINGERPRINT,
     });
-    expect(receiptsAdvisories(pinned, SHARED_RENDEZVOUS)).toEqual([
-      { message: IDENTITY_SHARED_MOUNT_ADVISORY, severity: "warning" },
+    expect(receiptsAdvisories(pinned, SEPARATE_RENDEZVOUS)).toEqual([
+      { message: IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY, severity: "warning" },
       { message: IDENTITY_AT_REST_NOTICE, severity: "info" },
       { message: RECEIPT_LOCATION_NOTICE, severity: "info" },
     ]);
   });
 
-  test("both shared-mount advisory variants name the collision at the choice point", () => {
-    // The rendezvous directory falls back to the data root, so a filedrop
-    // exchange on a one-mount console syncs the folder this key is written into.
-    // The operator meets that fact where they choose to sign, not only in the
-    // deployment guide, and it names the remedy the guide documents -- true of
-    // both the established and hedged copy, which differ only in the opening
-    // sentence.
-    for (const advisory of [
-      IDENTITY_SHARED_MOUNT_ADVISORY,
-      IDENTITY_SHARED_MOUNT_ADVISORY_UNCERTAIN,
-    ]) {
-      expect(advisory).toMatch(
-        /sign receipts in your name -- for every exchange, with every partner/,
-      );
-      expect(advisory).toMatch(/JOB_RENDEZVOUS_DIR/);
-    }
+  test("the shared-mount advisory names the collision at the choice point", () => {
+    // The operator meets what a synced folder holding the key would cost them
+    // where they choose to sign, not only in the deployment guide, and it names
+    // the remedy the guide documents.
+    expect(IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY).toMatch(
+      /sign receipts in your name -- for every exchange, with every partner/,
+    );
+    expect(IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY).toMatch(/JOB_RENDEZVOUS_DIR/);
   });
 
-  test("both shared-mount advisory variants hold the sync to the exchange that does it", () => {
-    // The layout is what raises the advisory, but it is a shared-folder exchange
-    // that puts a partner's writes in the mount: an SFTP or WebRTC run out of the
-    // same single mount has nobody syncing into it. Copy stating flatly that the
-    // partner writes there would be untrue on those runs, and an operator who can
-    // see it is untrue of theirs discounts the hazard it names.
-    for (const advisory of [
-      IDENTITY_SHARED_MOUNT_ADVISORY,
-      IDENTITY_SHARED_MOUNT_ADVISORY_UNCERTAIN,
-    ]) {
-      expect(advisory).toMatch(/a shared-folder exchange/);
-      expect(advisory).toMatch(
-        /On a run like that your long-lived private key sits where your partner/,
-      );
-    }
-  });
-
-  test("the shared-mount advisory states the layout as established fact", () => {
-    // Raised only where the report positively determined the layout (a lexical
-    // or filesystem match), so it is not telling the operator something the walk
-    // did not find.
-    expect(IDENTITY_SHARED_MOUNT_ADVISORY).not.toMatch(/cannot rule out/);
-    expect(IDENTITY_SHARED_MOUNT_ADVISORY).toMatch(
-      /This console rendezvouses out of the folder you mounted/,
+  test("the shared-mount advisory holds the sync to the exchange that does it", () => {
+    // It is a shared-folder exchange that puts a partner's writes in the mount:
+    // an SFTP or WebRTC run out of the same single mount has nobody syncing into
+    // it, and it is not refused. Copy stating flatly that the partner writes
+    // there would be untrue on those runs, and an operator who can see it is
+    // untrue of theirs discounts the hazard it names.
+    expect(IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY).toMatch(
+      /a shared-folder exchange/,
     );
   });
 
-  test("the uncertain shared-mount advisory states the layout as unruled-out, not established", () => {
-    // Raised on the report's fail-closed cases: a leg or a data root whose real
-    // path cannot be read counts as holding (jobRendezvous.ts), and a console
-    // that has not answered keeps the advisory (the case below). Neither case
-    // established the layout, so copy asserting it flatly would be telling the
-    // operator something the walk did not find -- which an operator who checks
-    // and finds otherwise learns to discount.
-    expect(IDENTITY_SHARED_MOUNT_ADVISORY_UNCERTAIN).toMatch(/cannot rule out/);
+  test("the shared-mount advisory states the check and what it misses", () => {
+    // Its whole reason to exist is the layout the pre-run refusal cannot see:
+    // one folder mounted twice under two names passes a comparison of locations
+    // and identity. Copy that only repeated the hazard would leave the operator
+    // trusting a check that had already cleared their console.
+    expect(IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY).toMatch(/refuses the run/);
+    expect(IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY).toMatch(
+      /one folder mounted twice under two names passes it/,
+    );
   });
 
   test("the receipt notice names where the download appears, not this screen", () => {
@@ -1210,28 +1185,29 @@ describe("the receipts card's model", () => {
     expect(IDENTITY_AT_REST_NOTICE).not.toMatch(/JOB_RENDEZVOUS_DIR/);
   });
 
-  test("a separately mounted rendezvous withholds only the shared-mount half", () => {
-    // The remedy that advisory closes on is already in place, so raising it there
-    // would spend the warning channel on a hazard that is not live. What survives
-    // the suppression is the at-rest notice: the key is still written into the
-    // mounted folder, and a card that said nothing about that would leave the
-    // operator with no word on where their long-lived key lands.
+  test("an established shared mount withholds only the shared-mount half", () => {
+    // A shared-folder exchange on that layout is refused before it runs, so the
+    // advisory would spend the warning channel on a hazard the console already
+    // stops. What survives the suppression is the at-rest notice: the key is
+    // still written into the mounted folder, and a card that said nothing about
+    // that would leave the operator with no word on where their long-lived key
+    // lands.
     const pinned = draft({
       mode: "certificate",
       ownFingerprint: OWN_FINGERPRINT,
       partnerFingerprint: PARTNER_FINGERPRINT,
     });
-    expect(receiptsAdvisories(pinned, SEPARATE_RENDEZVOUS)).toEqual([
+    expect(receiptsAdvisories(pinned, SHARED_RENDEZVOUS)).toEqual([
       { message: IDENTITY_AT_REST_NOTICE, severity: "info" },
       { message: RECEIPT_LOCATION_NOTICE, severity: "info" },
     ]);
   });
 
-  test("a console that has not answered keeps the hedged shared-mount advisory", () => {
+  test("a console that has not answered keeps the shared-mount advisory", () => {
     // An unresolved probe, a failed one, and a report that cannot run a filedrop
     // exchange as provisioned all leave the layout unknown -- and an unread report
-    // is not evidence of a separate mount, so the advisory stands, and in the
-    // hedged form: none of these established the layout.
+    // is not evidence of a separate mount, nor of a layout the refusal catches,
+    // so the advisory stands.
     const pinned = draft({
       mode: "certificate",
       ownFingerprint: OWN_FINGERPRINT,
@@ -1244,7 +1220,7 @@ describe("the receipts card's model", () => {
       { configured: true, locator: "psilink" },
     ])
       expect(receiptsAdvisories(pinned, rendezvous)).toContainEqual({
-        message: IDENTITY_SHARED_MOUNT_ADVISORY_UNCERTAIN,
+        message: IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY,
         severity: "warning",
       });
   });
