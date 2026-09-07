@@ -151,10 +151,11 @@ export class RotationPersistError extends Error {
   }
 }
 
-/** The locked half of a run: the handshake and the durable persist, injected by
- * the platform half as callbacks. This is exactly the window the single-writer
- * lock covers -- "begin this run" through "rotated secret durably persisted" --
- * and it is testable in Node with the persist call faked. */
+/** The rotation half of a run: the handshake and the durable persist,
+ * injected by the platform half as callbacks. The lock is the caller's,
+ * spanning the whole run; this half must finish before the first
+ * peer-visible payload, secret durably persisted -- testable in Node with
+ * the persist call faked. */
 export interface ManagedRotationCriticalSection<THandshake> {
   /**
    * Run the authenticated handshake and yield the rotated secret (from the
@@ -188,8 +189,8 @@ interface ManagedRotationGate<THandshake> {
 }
 
 /**
- * Run the locked half of one run's persist-before-success sequence: the window
- * the single-writer lock holds.
+ * Run the rotation half of one run's persist-before-success sequence: it
+ * finishes before the first peer-visible payload.
  *
  * 1. `handshake()` yields the `AuthResult`'s rotated secret.
  * 2. The rotation write-back is computed and `persist()`ed, awaited to
