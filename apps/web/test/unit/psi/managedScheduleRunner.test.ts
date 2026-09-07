@@ -1282,4 +1282,38 @@ describe("the stand-down between two attempts", () => {
     expect(entry.disposition).toBe("succeeded");
     expect(runner.advances[0].advance.schedule.consecutiveMisses).toBe(0);
   });
+
+  test("keeps the miss when the only success is stamped after the window closed", async () => {
+    // The settling read runs once the occupancy has ended, so a suspended
+    // runtime can resume at it long after this window closed -- by which time a
+    // success belonging to a LATER window can be stored. That success did not
+    // meet this window, and crediting it would erase a miss that was taken.
+    const record = recordWith();
+    const runner = harness({
+      records: [record],
+      // One peer wait before the close, so a single attempt ends the window.
+      startAt: "2026-01-06T16:50:00.000Z",
+      script: noShowScript(),
+    });
+    const seams: ManagedScheduleTickSeams = {
+      ...runner.seams,
+      readRecord: (id) => {
+        const held = runner.stored.get(id);
+        if (held === undefined) return Promise.resolve(undefined);
+        // The runtime resumes a day past this window's 17:00Z close.
+        runner.advanceClock(at("2026-01-07T17:00:00.000Z") - runner.nowMs());
+        const metAt = runner.nowMs() - 1_000;
+        return Promise.resolve(
+          applyManagedExchangeLastRun(held, succeededRun(metAt), metAt - 1_000),
+        );
+      },
+    };
+
+    const [entry] = await tickManagedSchedules(seams);
+
+    expect(entry.attempts).toBe(1);
+    expect(entry.disposition).toBe("missed");
+    expect(runner.advances[0].advance.schedule.consecutiveMisses).toBe(1);
+    expect(runner.stored.get(record.id)?.schedule?.consecutiveMisses).toBe(1);
+  });
 });

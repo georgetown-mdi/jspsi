@@ -199,9 +199,9 @@ describe("the run+rotate lock across a scheduled window's stand-down", () => {
   }, 120_000);
 
   test("an operator's run inside a stand-down takes the window, counting no miss", async () => {
-    // The ordering PR review found first: an attended Run completes in the gap
-    // between two attempts. The next attempt must not run the window a second
-    // time, and the window it met must not fold to a miss.
+    // An attended Run completes in the gap between two attempts. The next
+    // attempt must not run the window a second time, and the window it met
+    // must not fold to a miss.
     const window = await scheduledWindow({
       duringStandDown: async ({ id, now }) => {
         const stored = await getManagedExchange(id);
@@ -226,10 +226,10 @@ describe("the run+rotate lock across a scheduled window's stand-down", () => {
   }, 120_000);
 
   test("an operator's run that lands mid-attempt is not erased by the no-show", async () => {
-    // The ordering the surface was deleted over: the attended success is
-    // stamped while a scheduled attempt is already waiting, so the attempt's
-    // own `missed` entry is the NEWER stamp. Left to land it would erase the
-    // success permanently and count the met window as a miss.
+    // The attended success is stamped while a scheduled attempt is already
+    // waiting, so the attempt's own `missed` entry is the NEWER stamp. Left to
+    // land it would erase the success permanently and count the met window as
+    // a miss.
     const window = await scheduledWindow({
       duringAttempt: async ({ id, attempt, now }) => {
         if (attempt !== 1) return;

@@ -63,6 +63,7 @@ import {
 import {
   advanceManagedScheduleAfterWindow,
   catchUpManagedSchedule,
+  managedScheduleWindowStateAt,
 } from "./managedSchedule";
 import { ManagedExchangeExpiredError } from "./managedExpiry";
 import { ManagedExchangeLockUnavailableError } from "./managedExchangeLock";
@@ -207,8 +208,8 @@ export interface ManagedScheduleTickEntry {
   attempts: number;
   /** The window's disposition, absent when no window was occupied. It stands
    * alongside a `"bookkeeping-failed"` skip: the window was occupied and its
-   * disposition determined, and the write that would have recorded it is what
-   * failed. */
+   * disposition determined, and what failed is either the settling read that
+   * would have confirmed it or the write that would have recorded it. */
   disposition?: ManagedScheduleWindowDisposition;
   /** Why nothing was attempted, absent when a window was occupied and its
    * bookkeeping landed. */
@@ -417,9 +418,14 @@ interface WindowOccupancy {
  * Whether a record's stored bookkeeping shows a run completing the exchange
  * inside this window -- an attempt of this occupancy, or another context's run
  * during a stand-down. Such a window was met, so nothing more is attempted in
- * it and it counts no miss. A stamp from before the window opened, or one
- * stamped ahead of the reading instant, decides nothing -- the same reading
+ * it and it counts no miss. A stamp outside the window's half-open interval, or
+ * one stamped ahead of the reading instant, decides nothing -- the same reading
  * rule catch-up holds (docs/spec/MANAGED_EXCHANGE_RECORD.md).
+ *
+ * The window's own close is what bounds the settling read, which runs after the
+ * occupancy loop has exited: a suspended runtime can resume long after this
+ * window closed, and a success belonging to a later window would otherwise
+ * credit this one and erase the miss it actually took.
  */
 function windowMetBySuccess(
   record: ManagedExchangeRecord,
@@ -429,7 +435,7 @@ function windowMetBySuccess(
   const lastRun = record.lastRun;
   if (lastRun?.outcome !== "succeeded") return false;
   const at = parseStoredInstant(lastRun.at);
-  return at >= window.opensAtMs && at <= nowMs;
+  return managedScheduleWindowStateAt(window, at) === "open" && at <= nowMs;
 }
 
 /** What a re-read before an attempt found: the record to attempt with and the
@@ -512,7 +518,10 @@ async function occupyWindow(
     if (remainingMs <= 0 || attempts >= MAX_WINDOW_ATTEMPTS) break;
     if (attempts > 0) {
       const state = await readWindowState(record.id, window, seams);
-      if (!state.attempt) return { attempts, ...state };
+      if (!state.attempt) {
+        const { attempt, ...ended } = state;
+        return { attempts, ...ended };
+      }
       record = state.record;
       handle = state.handle;
     }
