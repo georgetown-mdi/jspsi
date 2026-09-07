@@ -2,7 +2,6 @@ import {
   ConnectionError,
   LinkageTermsUnsatisfiableError,
   OperatorConfigError,
-  describeResolvedMatching,
   describeResolvedRunShape,
   getLogger,
   runExchange,
@@ -294,18 +293,23 @@ interface RunExchangeLifecycleOptions<
     error: unknown;
   }) => void;
   /** A non-fatal, operator-relevant notice raised mid-run. Two sources, arriving
-   * at opposite ends of the run: what the agreed terms resolved to, raised
-   * right after the terms resolve and before the first round, composed by core
-   * ({@link describeResolvedMatching} on every run, and
-   * {@link describeResolvedRunShape} for the cardinality and projection
-   * notices); and the clean close ending on any exit
-   * that has no delivery signal rather than on the peer's close
+   * at opposite ends of the run: the deduplicating cardinality and the pair-table
+   * projection, raised right after the terms resolve and before the first round,
+   * composed by core ({@link describeResolvedRunShape}); and the clean close
+   * ending on any exit that has no delivery signal rather than on the peer's close
    * ({@link CLOSE_OUTCOME_WARNINGS}), which is raised only on a run that reported
    * its result. Optional: an owner with no warning sink omits it and the
    * notice is dropped. Never a terminal; the run still ends in exactly one
    * `onResult`/`onError`, and a notice raised during teardown arrives after
    * that one. */
   onWarning?: (message: string) => void;
+  /** What the two parties' agreed `deduplicate` values resolved to, reported
+   * once the terms are agreed and before the first round -- the earliest point
+   * that can name it, since each party's value comes from its own document. It
+   * is a neutral statement of the run's own terms rather than a notice, so it
+   * goes to its own slot and the owner states it as run status. Optional: an
+   * owner that states nothing before completion omits it. */
+  onResolvedMatching?: (matching: ResolvedMatching) => void;
 }
 
 /**
@@ -350,6 +354,7 @@ export async function runExchangeLifecycle<
     onResult,
     onError,
     onWarning,
+    onResolvedMatching,
   } = options;
 
   // Every owner-driven React callback is a no-op once the signal aborts, so an
@@ -385,6 +390,9 @@ export async function runExchangeLifecycle<
   // describes, or drop it entirely on a run that fails -- exactly the run
   // whose resolved shape the operator most needs to read.
   const emitRunNotice = ifLive((message: string) => onWarning?.(message));
+  const emitResolvedMatching = ifLive((matching: ResolvedMatching) =>
+    onResolvedMatching?.(matching),
+  );
 
   let acquired: AcquiredExchange;
   try {
@@ -524,20 +532,23 @@ export async function runExchangeLifecycle<
       onStage: emitStage,
       // What the agreed terms resolved to, named for the operator after the
       // terms exchange and before the first round, the earliest point that can
-      // name it. The matching sentence leads: it is stated on every run, and
-      // the CLI seat states the same one at the same point. Core composes all
-      // three and raises none -- the advisory is a front end's discretion
-      // (docs/spec/PROTOCOL.md, The both-sided expansion has no ceiling of its
-      // own) -- so this seat renders them through the same notice slot its
-      // transport warnings take, and the owning hook escapes what it folds.
+      // name it. The resolved pair goes to the status slot, since it states the
+      // run's own terms and is reported on every run; the deduplicating
+      // cardinality and the pair-table projection are notices, and take the
+      // slot this seat's transport warnings take. Core composes each and raises
+      // none -- the advisory is a front end's discretion (docs/spec/PROTOCOL.md,
+      // The both-sided expansion has no ceiling of its own) -- and the owning
+      // hook escapes what it folds.
       onProtocolConfirmed: (_partnerTerms, _resolvedRole, runShape) => {
+        const { localDeduplicate, partnerDeduplicate, cardinality } = runShape;
+        emitResolvedMatching({
+          localDeduplicate,
+          partnerDeduplicate,
+          cardinality,
+        });
         const { cardinalityNotice, pairTableAdvisory } =
           describeResolvedRunShape(runShape);
-        for (const notice of [
-          describeResolvedMatching(runShape),
-          cardinalityNotice,
-          pairTableAdvisory,
-        ])
+        for (const notice of [cardinalityNotice, pairTableAdvisory])
           if (notice !== undefined) emitRunNotice(notice);
       },
     });

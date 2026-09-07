@@ -3,7 +3,12 @@ import { whenDiagnostic } from "@utils/diagnostics";
 import { appendSanitizedRunWarning } from "@psi/runWarnings";
 
 import { isExchangeBusyError, reattachOnBusy } from "./reattachOnBusy";
-import { runWithCompletion, runWithStage, runWithStages } from "./exchangeRun";
+import {
+  runWithCompletion,
+  runWithMatching,
+  runWithStage,
+  runWithStages,
+} from "./exchangeRun";
 
 import type { Dispatch, SetStateAction } from "react";
 import type {
@@ -79,6 +84,8 @@ export function buildRunEvents({
     },
     onWarning: (message) =>
       setWarnings((current) => appendSanitizedRunWarning(current, message)),
+    onResolvedMatching: (matching) =>
+      setRun((current) => runWithMatching(current, matching)),
     onError: ({ category, error }) => {
       // Dev-gated: the raw Error object's message/cause can embed partner-/
       // server-controlled bytes, so a production console holds none of it,

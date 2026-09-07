@@ -149,7 +149,11 @@ interface CapturedLifecycle {
     };
   }) => void;
   onError: (failure: { category: string; error: unknown }) => void;
-  onWarning: (message: string) => void;
+  onResolvedMatching: (matching: {
+    localDeduplicate: boolean;
+    partnerDeduplicate: boolean;
+    cardinality: "one-to-one" | "one-to-many" | "many-to-one" | "many-to-many";
+  }) => void;
 }
 const lifecycleHarness = vi.hoisted(() => ({
   calls: [] as Array<unknown>,
@@ -1950,31 +1954,36 @@ describe("inviter screen", () => {
   });
 
   test("post-create: the resolved matching is readable before the run ends", async () => {
-    // The pre-round notice is the timing half of the statement: an operator can
-    // read what their partner presented while the exchange is still running,
-    // which is the only point at which reading it can change what they do. The
-    // completion panel keeps it, so the sentence stands twice by the end.
+    // The pre-round statement is the timing half: an operator can read what
+    // their partner presented while the exchange is still running, which is the
+    // only point at which reading it can change what they do. It states the
+    // run's own terms, so it reads as plain run status -- an ordinary
+    // one-to-one run raises no warning, and the warnings alert never mounts.
     const matching = {
       localDeduplicate: false,
-      partnerDeduplicate: true,
-      cardinality: "one-to-many" as const,
+      partnerDeduplicate: false,
+      cardinality: "one-to-one" as const,
     };
     const sentence = describeResolvedMatching(matching);
     const paragraphsSaying = (text: string) =>
       Array.from(document.querySelectorAll("p")).filter(
         (el) => el.textContent === text,
-      ).length;
+      );
 
     await createSealedInvitation();
     const call = lifecycleCall(0);
     call.onStages(stagesFor(preparedWith("cascade", 2)));
     call.onStage("confirming protocol");
-    call.onWarning(sentence);
+    call.onResolvedMatching(matching);
 
     await expect
       .element(page.getByRole("heading", { level: 1 }))
       .toHaveTextContent("Exchange in progress");
-    await vi.waitFor(() => expect(paragraphsSaying(sentence)).toBe(1));
+    await vi.waitFor(() => expect(paragraphsSaying(sentence)).toHaveLength(1));
+    expect(paragraphsSaying(sentence)[0].closest('[role="status"]')).toBeNull();
+    expect(
+      page.getByText("The exchange reported a warning").query(),
+    ).toBeNull();
 
     call.onResult({
       kind: "matched" as const,
@@ -1983,10 +1992,14 @@ describe("inviter screen", () => {
       matching,
     });
 
+    // The completion panel takes the sentence over, so it still stands once.
     await expect
       .element(page.getByRole("heading", { level: 1 }))
       .toHaveTextContent("Exchange complete");
-    await vi.waitFor(() => expect(paragraphsSaying(sentence)).toBe(2));
+    await vi.waitFor(() => expect(paragraphsSaying(sentence)).toHaveLength(1));
+    expect(
+      page.getByText("The exchange reported a warning").query(),
+    ).toBeNull();
   });
 
   test("post-create: completion offers the three downloads with caveats", async () => {

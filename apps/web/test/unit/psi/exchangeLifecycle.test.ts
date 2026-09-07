@@ -9,7 +9,6 @@ import {
   StandardizationTermsError,
   StandardizedDataset,
   UsageError,
-  describeResolvedMatching,
   describeResolvedRunShape,
   getDefaultLinkageTerms,
   runExchange,
@@ -195,6 +194,7 @@ function seams() {
     onResult: vi.fn(),
     onError: vi.fn(),
     onWarning: vi.fn(),
+    onResolvedMatching: vi.fn(),
     generateOutput: vi.fn(() => OUTPUTS),
   };
 }
@@ -928,6 +928,14 @@ describe("runExchangeLifecycle", () => {
     };
   }
 
+  /** The three fields of a run shape the status slot is handed: the record
+   * counts the shape also holds are the notices' input, not the pair's. */
+  const matchingOf = (shape: ResolvedRunShape) => ({
+    localDeduplicate: shape.localDeduplicate,
+    partnerDeduplicate: shape.partnerDeduplicate,
+    cardinality: shape.cardinality,
+  });
+
   const OVER_BOUND_SHAPE: ResolvedRunShape = {
     cardinality: "many-to-many",
     localDeduplicate: true,
@@ -942,8 +950,9 @@ describe("runExchangeLifecycle", () => {
   test("raises the run's resolved-shape notices ahead of its own terminal", async () => {
     // The operator has to be able to read what the terms resolved to while the
     // run is still going, so these arrive at the callback that produced them
-    // rather than with the result. Core composes all three strings; this seat
-    // only routes them to the notice slot its transport warnings already take.
+    // rather than with the result. Core composes both strings; this seat only
+    // routes them to the notice slot its transport warnings already take, and
+    // the resolved pair to the status slot ahead of them.
     const { mc } = makeFakeMc();
     mockedOpen.mockResolvedValue(mc);
     const { acquired } = makeResources();
@@ -952,6 +961,7 @@ describe("runExchangeLifecycle", () => {
     const { cardinalityNotice, pairTableAdvisory } =
       describeResolvedRunShape(OVER_BOUND_SHAPE);
     const order: Array<string> = [];
+    s.onResolvedMatching.mockImplementation(() => order.push("<matching>"));
     s.onWarning.mockImplementation((message: string) => order.push(message));
     s.onResult.mockImplementation(() => order.push("<result>"));
     mockedRunExchange.mockImplementation(
@@ -966,7 +976,7 @@ describe("runExchangeLifecycle", () => {
     });
 
     expect(order).toEqual([
-      describeResolvedMatching(OVER_BOUND_SHAPE),
+      "<matching>",
       cardinalityNotice,
       pairTableAdvisory,
       "<result>",
@@ -996,17 +1006,20 @@ describe("runExchangeLifecycle", () => {
     });
 
     expect(s.onWarning.mock.calls).toEqual([
-      [describeResolvedMatching(OVER_BOUND_SHAPE)],
       [cardinalityNotice],
       [pairTableAdvisory],
+    ]);
+    expect(s.onResolvedMatching.mock.calls).toEqual([
+      [matchingOf(OVER_BOUND_SHAPE)],
     ]);
     expect(s.onError).toHaveBeenCalledTimes(1);
   });
 
   test("states the resolved matching alone on a one-to-one run within the bound", async () => {
     // The run shape raises neither the cardinality notice nor the projection
-    // advisory here, so this is the seat where the operator would otherwise
-    // read nothing about the pair until the exchange had finished.
+    // advisory here, so an ordinary run carries no warning at all -- and the
+    // pair, which the operator would otherwise read nothing about until the
+    // exchange had finished, goes to the status slot on its own.
     const { mc } = makeFakeMc();
     mockedOpen.mockResolvedValue(mc);
     const { acquired } = makeResources();
@@ -1032,7 +1045,8 @@ describe("runExchangeLifecycle", () => {
     });
 
     expect(s.onResult).toHaveBeenCalledTimes(1);
-    expect(s.onWarning.mock.calls).toEqual([[describeResolvedMatching(shape)]]);
+    expect(s.onWarning).not.toHaveBeenCalled();
+    expect(s.onResolvedMatching.mock.calls).toEqual([[matchingOf(shape)]]);
   });
 
   test("raises the cardinality alone when the projection is within the bound", async () => {
@@ -1061,8 +1075,8 @@ describe("runExchangeLifecycle", () => {
     });
 
     expect(s.onWarning.mock.calls).toEqual([
-      [describeResolvedMatching(shape)],
       [describeResolvedRunShape(shape).cardinalityNotice],
     ]);
+    expect(s.onResolvedMatching.mock.calls).toEqual([[matchingOf(shape)]]);
   });
 });

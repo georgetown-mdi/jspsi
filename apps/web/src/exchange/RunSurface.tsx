@@ -264,8 +264,8 @@ export function completionOutcome(
  *
  * The matching statement is core's own composition
  * (`describeResolvedMatching`), the same sentence the CLI seat states and the
- * same one this seat already showed at protocol confirmation, so no two
- * sinks drift on what a run resolved to. It is omitted where the outputs
+ * same one a browser-conducted run already showed on its running screen, so no
+ * two sinks drift on what a run resolved to. It is omitted where the outputs
  * hold no resolved matching, rather than standing in a default for a pair this
  * seat did not read. */
 export function DonePanel({
