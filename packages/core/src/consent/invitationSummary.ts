@@ -1275,12 +1275,22 @@ function summarizeKey(
  * A deduplicating term neither adds a condition nor removes one; the
  * multiplicity bears on neither reason a helper needs its half (docs/spec/
  * PROTOCOL.md, Where the "one" party receives no output).
+ *
+ * A document no acceptance can reach describes no run, so it resolves false
+ * whatever the conditions above say. Where the inviting party keeps the
+ * result, the accepting party mirrors to no entitlement, and a `payload.send`
+ * the invitation declares mirrors to a `receive` that party may not hold, so
+ * `deriveAcceptedLinkageTerms` refuses the document before any surface
+ * consents to it -- pinned against that refusal in
+ * `test/consent/invitationSummary.test.ts` rather than restated here.
  */
 export function withholdsAcceptorAssociationTable(
   terms: LinkageTerms,
 ): boolean {
   if (terms.linkageStrategy !== "single-pass") return false;
   if (!terms.output.expectsOutput) return false;
+  if (!terms.output.shareWithPartner && (terms.payload?.send?.length ?? 0) > 0)
+    return false;
   const requestsNoPayload =
     terms.payload?.receive !== undefined && terms.payload.receive.length === 0;
   return withholdsSenderAssociationTable(

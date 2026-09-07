@@ -308,11 +308,11 @@ export const CONSENT_FACTS = {
       "(consent/invitationSummary.ts) off the run's own predicate, so a " +
       "surface never states this basis for a run that does not withhold.",
     note:
-      "This exchange withholds your half of the matched-pair table, so your " +
-      "side is sent no group sizes, no row positions, and nothing about which " +
-      "of your own records matched. Withholding them is a limit of the " +
-      "exchange rather than this software's choice, so no other software on " +
-      "this side could show them either.",
+      "This exchange withholds your half of the matched-pair table: psilink " +
+      "on this side never reads it, and a partner running psilink never sends " +
+      "it. You are shown no group sizes, no row positions, and nothing about " +
+      "which of your own records matched. Withholding them is a limit of the " +
+      "exchange rather than this software's choice.",
   },
   matchedFields: {
     basis: "enforced",

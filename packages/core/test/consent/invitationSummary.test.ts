@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 
 import { getDefaultLinkageTerms } from "../../src/defaults/builtInLinkageTerms.js";
 import {
@@ -467,6 +467,56 @@ describe("the consent summary's withheld-table register", () => {
     expect(() =>
       assertPayloadSendDisclosed(accepted.payload, metadata, accepted.output),
     ).not.toThrow();
+  });
+
+  test("drops it for a document no acceptance can reach", () => {
+    // The invitation keeps the result and also declares a column to send. The
+    // accepting party mirrors to no entitlement and to a `receive` it may not
+    // hold, so acceptance stops rather than any run following; the verdict
+    // follows that refusal instead of describing the run.
+    const alsoSendsAColumn = {
+      send: [{ name: "program_outcome" }],
+      receive: [],
+    };
+    expect(() =>
+      deriveAcceptedLinkageTerms(
+        { ...WITHHOLDING_TERMS, payload: alsoSendsAColumn },
+        "Acceptor",
+      ),
+    ).toThrow(/cannot be accepted unchanged/);
+    expect(withheld({ payload: alsoSendsAColumn })).toBe(false);
+  });
+
+  test("takes the verdict from the protocol's rule rather than a copy", async () => {
+    // The delegation the enforced basis rests on: the verdict is asked of
+    // withholdsSenderAssociationTable rather than restated here. Standing that
+    // rule on its head over one unchanged document is what a restated copy
+    // cannot follow, so a rule that grows a condition moves this predicate
+    // with it.
+    for (const ruleWithholds of [true, false]) {
+      const asked: [boolean, boolean][] = [];
+      vi.resetModules();
+      vi.doMock("../../src/psi/link.js", async () => ({
+        ...(await vi.importActual<typeof import("../../src/psi/link.js")>(
+          "../../src/psi/link.js",
+        )),
+        withholdsSenderAssociationTable: (
+          senderExpectsOutput: boolean,
+          senderDisclosesPayload: boolean,
+        ) => {
+          asked.push([senderExpectsOutput, senderDisclosesPayload]);
+          return ruleWithholds;
+        },
+      }));
+      const { withholdsAcceptorAssociationTable: overTheMockedRule } =
+        await import("../../src/consent/invitationSummary.js");
+      expect(overTheMockedRule(WITHHOLDING_TERMS)).toBe(ruleWithholds);
+      // Asked with the state that run holds: the accepting party is entitled
+      // to nothing and discloses nothing.
+      expect(asked).toEqual([[false, false]]);
+    }
+    vi.doUnmock("../../src/psi/link.js");
+    vi.resetModules();
   });
 });
 
