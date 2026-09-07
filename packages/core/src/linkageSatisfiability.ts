@@ -1191,14 +1191,15 @@ export function substringCollapsesParsedDateToConstant(
  * The runs are read in index order and the first collapse answers, so this is
  * the verdict {@link substringCollapsesParsedDateToConstant} gives at some
  * index and the reasoning there is the reasoning here.
+ *
+ * A caller asking this AND {@link pipelineAlwaysDrops} of the same element takes
+ * both from {@link gradeElementPipeline}, which compiles each measured step once
+ * for the pair rather than once for each.
  */
 export function pipelineCollapsesParsedDateToConstant(
   steps: ReadonlyArray<TransformStep>,
 ): boolean {
-  const compiledStep = stepCompilerFor(steps);
-  return parsedDateRunReadings(steps, compiledStep).some((reading, index) =>
-    collapsesAtRunEnd(steps, index, reading, compiledStep),
-  );
+  return gradeElementPipeline(steps).collapsesParsedDateToConstant();
 }
 
 /**
@@ -1351,7 +1352,15 @@ export function pipelineAlwaysDrops(
   steps: ReadonlyArray<TransformStep> | undefined,
 ): boolean {
   if (steps === undefined) return false;
-  const readings = parsedDateRunReadings(steps, stepCompilerFor(steps));
+  return gradeElementPipeline(steps).alwaysDrops();
+}
+
+/** The always-drops verdict read off readings the caller already holds, so one
+ * element's two verdicts share the walk that produced them. */
+function alwaysDropsGivenRunReadings(
+  steps: ReadonlyArray<TransformStep>,
+  readings: ReadonlyArray<ParsedDateRunReading>,
+): boolean {
   let dropped = false;
   for (const [index, step] of steps.entries()) {
     if (step.function === "coalesce") {
@@ -1378,6 +1387,43 @@ export function pipelineAlwaysDrops(
       dropped = true;
   }
   return dropped;
+}
+
+/** One element's two grading verdicts, each measured on the first ask off the
+ * walk {@link gradeElementPipeline} opens. */
+export interface ElementPipelineGrading {
+  /** Whether the element produces no value for any input at all
+   * ({@link pipelineAlwaysDrops}). */
+  alwaysDrops(): boolean;
+  /** Whether some substring run of the element leaves every parsed date on one
+   * constant ({@link pipelineCollapsesParsedDateToConstant}). */
+  collapsesParsedDateToConstant(): boolean;
+}
+
+/**
+ * Both element-level gradings of one steps array over ONE compiled-step memo and
+ * one forward pass ({@link parsedDateRunReadings}). The consent header's breadth
+ * marker asks both of every element it marks, and taking them from one grading
+ * compiles each measured step once for the pair rather than once for each --
+ * which is what keeps a grading pass at one compile per declared step.
+ *
+ * Each verdict is measured on the first ask and neither is measured unasked, so
+ * the order and the short-circuiting a caller writes still decide what runs.
+ */
+export function gradeElementPipeline(
+  steps: ReadonlyArray<TransformStep>,
+): ElementPipelineGrading {
+  const compiledStep = stepCompilerFor(steps);
+  let readings: ParsedDateRunReading[] | undefined;
+  const runReadings = (): ParsedDateRunReading[] =>
+    (readings ??= parsedDateRunReadings(steps, compiledStep));
+  return {
+    alwaysDrops: () => alwaysDropsGivenRunReadings(steps, runReadings()),
+    collapsesParsedDateToConstant: () =>
+      runReadings().some((reading, index) =>
+        collapsesAtRunEnd(steps, index, reading, compiledStep),
+      ),
+  };
 }
 
 /** How an input's columns fare against a set of linkage terms: which fields it

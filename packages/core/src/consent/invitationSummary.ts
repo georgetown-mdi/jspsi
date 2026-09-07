@@ -8,9 +8,8 @@ import {
 import {
   coalesceSubstitutesConstant,
   CONSENT_VERDICT_PARAM_NAMES,
+  gradeElementPipeline,
   parseDateInputDropsEveryRecord,
-  pipelineAlwaysDrops,
-  pipelineCollapsesParsedDateToConstant,
 } from "../linkageSatisfiability.js";
 import { displayText } from "../utils/sanitizeForDisplay.js";
 import { redactAndSanitizeForDisplay } from "../utils/sanitizeErrorForDisplay.js";
@@ -865,9 +864,8 @@ const DEFAULT_PARSE_DATE_INPUT = "MM/DD/YYYY";
  * run following this one can read a window that holds only the format's own
  * characters, collapsing every date exactly as a tokenless output does.
  * That verdict is a property of the steps together, so
- * {@link elementBreadthMarker} takes it from core's
- * {@link pipelineCollapsesParsedDateToConstant} instead of this per-step
- * classification.
+ * {@link elementBreadthMarker} takes it from the collapse verdict of core's
+ * {@link gradeElementPipeline} instead of this per-step classification.
  *
  * A `parse_date` whose input format omits a component core requires drops
  * EVERY record, so the element matches nothing, not more, and earns no
@@ -966,7 +964,7 @@ const LITERAL_CORRESPONDENCE_BREAKING_FUNCTIONS: ReadonlySet<string> = new Set([
  *
  * - "any date": a `parse_date` whose output layout holds no date token, or
  *   whose output a later `substring` run is measured to leave constant for
- *   every date ({@link pipelineCollapsesParsedDateToConstant}) -- the
+ *   every date (the collapse verdict of {@link gradeElementPipeline}) -- the
  *   maximal collapse, checked first since it dominates any other rule the
  *   element also holds.
  * - "fallback": a `coalesce` that substitutes a constant on every record an
@@ -1002,16 +1000,16 @@ const LITERAL_CORRESPONDENCE_BREAKING_FUNCTIONS: ReadonlySet<string> = new Set([
  * window landing in the fill in fact collapses every short record onto one
  * constant. Neither masking shape is reachable from the built-in key sets
  * (only `substring` and `swap` appear there). Second: the date-collapse
- * measurement ({@link pipelineCollapsesParsedDateToConstant}) runs probe
- * dates through the steps between a `parse_date` and the end of a
- * substring run; it cannot see a value-DEPENDENT drop (a `filter_regex` or
- * `null_if` that passes the probes but drops a real record), so such an
- * element earns "any date" while some records it would have collapsed are
- * in fact dropped -- the same tradeoff {@link pipelineAlwaysDrops} makes,
- * to avoid flagging a legitimate pipeline as dead. The probe dates ship in
- * public source, so a dropped or unmeasurable probe resolves to the
- * collapse word, never the milder one; both halves are held by tests
- * driving the shipped pipeline, not by this note.
+ * measurement ({@link gradeElementPipeline}) runs probe dates through the
+ * steps between a `parse_date` and the end of a substring run; it cannot
+ * see a value-DEPENDENT drop (a `filter_regex` or `null_if` that passes the
+ * probes but drops a real record), so such an element earns "any date"
+ * while some records it would have collapsed are in fact dropped -- the
+ * same tradeoff the grading's drop verdict makes, to avoid flagging a
+ * legitimate pipeline as dead. The probe dates ship in public source, so a
+ * dropped or unmeasurable probe resolves to the collapse word, never the
+ * milder one; both halves are held by tests driving the shipped pipeline,
+ * not by this note.
  */
 function elementBreadthMarker(
   element: LinkageKeyElement,
@@ -1023,8 +1021,10 @@ function elementBreadthMarker(
   if (declaresFanOut(element))
     return fanOutMatches ? displayText`multiple` : displayText`not supported`;
   // Tier 2: a pipeline that matches nothing earns no marker. Deferred to
-  // core's pipelineAlwaysDrops, which accounts for a rescuing `coalesce`.
-  if (pipelineAlwaysDrops(element.transform)) return undefined;
+  // core's drop verdict, which accounts for a rescuing `coalesce`. Its grading
+  // also answers tier 3a below, off one walk of the element's steps.
+  const grading = gradeElementPipeline(steps);
+  if (grading.alwaysDrops()) return undefined;
   // Tier 3a: "any date" -- checked before every other rule since it is the
   // maximal collapse. The whole pipeline is offered at once because core
   // decides which step ends a maximal substring run, and reads every run of one
@@ -1032,7 +1032,7 @@ function elementBreadthMarker(
   const parseDateBreadths = steps.map(parseDateBreadth);
   if (
     parseDateBreadths.includes("any date") ||
-    pipelineCollapsesParsedDateToConstant(steps)
+    grading.collapsesParsedDateToConstant()
   )
     return displayText`any date`;
   // Tier 3b: "fallback" -- gated on core's position-aware predicate so the

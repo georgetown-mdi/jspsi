@@ -19,6 +19,7 @@ import {
   pipelineAlwaysDrops,
   pipelineCollapsesParsedDateToConstant,
 } from "../src/linkageSatisfiability";
+import { summarizeInvitation } from "../src/consent/invitationSummary";
 import { MAX_TRANSFORM_STEPS } from "../src/config/linkageTermsSchema";
 import type {
   LinkageTerms,
@@ -121,5 +122,19 @@ describe("parse_date probe cost", () => {
     // The first run collapses, so the marker is answered after that run's span
     // and its tail rather than after a walk per step.
     expect(stepsCompiled()).toBeLessThanOrEqual(MAX_TRANSFORM_STEPS);
+  });
+
+  test("the header's two verdicts of one element cost one walk between them", () => {
+    // The breadth marker asks the drop verdict and then the collapse verdict of
+    // the same element. Asked separately they each walk it, which is two
+    // compiles per declared step on the one path that asks both; taken from one
+    // grading they share the walk.
+    const summary = summarizeInvitation({
+      linkageTerms: termsOf(1, MAX_TRANSFORM_STEPS),
+    });
+    expect(summary.linkageKeys[0].headerFields).toEqual([
+      "date of birth (any date)",
+    ]);
+    expect(stepsCompiled()).toBe(MAX_TRANSFORM_STEPS - 1);
   });
 });
