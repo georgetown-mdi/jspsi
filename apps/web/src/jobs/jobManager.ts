@@ -51,6 +51,7 @@ import {
   signingIdentityDirectory,
   signingIdentityExists,
   signingIdentityPath,
+  signingIdentityTargetExists,
 } from "./signingIdentity";
 import { buildJobHandoff } from "./handoff";
 import { probeSftpHostKey } from "./sftpProbe";
@@ -599,6 +600,11 @@ export class JobManager {
    * operator's configured location, or the console's default in the mounted data
    * root when it names none.
    *
+   * A configured location resolves through its links
+   * ({@link resolveSigningIdentityPath}), so the directory
+   * {@link runWouldPublishSigningIdentity} compares is the one the key sits in
+   * rather than the one a link to it sits in.
+   *
    * @throws {SigningIdentityLocationError} when the location does not resolve in
    *   the secrets mount; the routes map it to a 400 naming the field.
    */
@@ -845,6 +851,11 @@ export class JobManager {
    * and the operator's own mount is where they keep a key they minted
    * themselves, read-only if they chose.
    *
+   * Whether anything is there is asked of what the picked path names at its END
+   * ({@link signingIdentityTargetExists}): a link with nothing at its end is a
+   * name the child would create THROUGH, so it is answered `absent` and no child
+   * runs.
+   *
    * @throws {SigningIdentityLocationError} when `identityLocation` does not
    *   resolve in the secrets mount.
    */
@@ -860,7 +871,7 @@ export class JobManager {
       location: args.identityLocation,
     });
     if (args.identityLocation !== undefined) {
-      if (!signingIdentityExists(identityPath)) return { kind: "absent" };
+      if (!signingIdentityTargetExists(identityPath)) return { kind: "absent" };
     } else if (this.mintWouldLandInSyncedFolder(identityPath))
       return { kind: "syncing" };
     this.fingerprintInFlight = true;

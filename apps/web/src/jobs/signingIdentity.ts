@@ -7,6 +7,7 @@ import {
   WORKDIR_MODE,
   jobFileExists,
   jobPathPresent,
+  jobTargetPresent,
   resolveWorkdirFile,
 } from "./workdir";
 import { resolveMountPath } from "./mountBrowse";
@@ -102,6 +103,20 @@ export function signingIdentityDirectory(identityPath: string): string {
  */
 export function signingIdentityExists(identityPath: string): boolean {
   return jobPathPresent(identityPath);
+}
+
+/**
+ * Whether an identity file is at the end of the given path, following a symlink
+ * to its target ({@link jobTargetPresent}).
+ *
+ * The question a READ of a location the operator picked asks. The refusal above
+ * keeps counting a link, since it is about a key the partner's sync copies; a
+ * read has the opposite need -- a link with nothing at its end is nothing to
+ * read, and counting it present hands the create-or-reuse child a name it would
+ * create THROUGH, into whatever directory the link points at.
+ */
+export function signingIdentityTargetExists(identityPath: string): boolean {
+  return jobTargetPresent(identityPath);
 }
 
 /**

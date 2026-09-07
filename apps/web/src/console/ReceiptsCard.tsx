@@ -14,6 +14,8 @@ import {
 } from "@mantine/core";
 import { IconAlertTriangle, IconInfoCircle } from "@tabler/icons-react";
 
+import { sanitizeForDisplay } from "@psilink/core";
+
 import { resolveSigningFingerprint } from "@psi/jobClient/signingIdentityClient";
 
 import {
@@ -155,6 +157,10 @@ export function ReceiptsCard({
   const [locationPickerOpen, setLocationPickerOpen] = useState(false);
   const [exportCertificate, setExportCertificate] = useState(false);
   const [exportedName, setExportedName] = useState<string>();
+  // At a picked location this is the name of the file the operator chose in the
+  // browse, which admits any character but a control one or a separator, so it
+  // is escaped where it renders below -- the browse's own listing escapes it the
+  // same way.
   const [identityFileName, setIdentityFileName] = useState<string>();
   const [justCreated, setJustCreated] = useState(false);
   // The draft as of this render, so a resolved fingerprint merges into whatever
@@ -341,7 +347,7 @@ export function ReceiptsCard({
                       ? "Your signing identity was created"
                       : "Your signing identity was already set up"}
                     {identityFileName !== undefined
-                      ? ` (${identityFileName} in ${
+                      ? ` (${sanitizeForDisplay(identityFileName)} in ${
                           draft.identityLocation === undefined
                             ? "your mounted folder"
                             : "your secrets folder"

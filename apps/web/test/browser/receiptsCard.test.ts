@@ -197,6 +197,15 @@ const createButton = () =>
 /** The file the secrets browse offers, and the one a test picks. */
 const PICKED_IDENTITY = "psilink-signing-identity.json";
 
+/** A picked file whose name holds a right-to-left override, which the browse
+ * admits (it bars control characters and separators, not this) and the console
+ * echoes back as the name of the file the identity was read from. */
+const REORDERING_IDENTITY = `identity\u202egpj.json`;
+
+/** The same name as the card must show it: every character outside printable
+ * ASCII escaped, the form the browse's own listing shows. */
+const REORDERING_IDENTITY_SHOWN = "identity\\u202egpj.json";
+
 /** Open the identity-location browse and pick the one file it lists. */
 async function pickIdentityLocation(name: string): Promise<void> {
   await page
@@ -319,6 +328,36 @@ describe("ReceiptsCard: asking the console for this party's fingerprint", () => 
     expect(app.container.textContent).toContain(`secrets / ${PICKED_IDENTITY}`);
     expect(app.container.textContent).not.toContain("/run/");
     expect(app.container.textContent).not.toContain(IDENTITY_FILE);
+  });
+
+  test("a picked name that reorders the line is shown escaped", async () => {
+    // The name rides the console's answer back and lands in the line that tells
+    // the operator which file signed. Rendered raw, the override reorders that
+    // line into a different claim about which file was read.
+    stubSigningApi({
+      secretsEntries: [{ name: REORDERING_IDENTITY, kind: "file" }],
+      responses: [
+        {
+          body: okBody({
+            created: false,
+            identityFileName: REORDERING_IDENTITY,
+          }),
+        },
+      ],
+    });
+    await renderCard();
+    await chooseCertificateMode();
+
+    await pickIdentityLocation(REORDERING_IDENTITY_SHOWN);
+    await page.getByRole("button", { name: "Show my fingerprint" }).click();
+
+    await expect
+      .element(page.getByLabelText("Your certificate fingerprint"))
+      .toHaveTextContent(FINGERPRINT);
+    expect(app.container.textContent).toContain(
+      `(${REORDERING_IDENTITY_SHOWN} in your secrets folder)`,
+    );
+    expect(app.container.textContent).not.toContain("\u202e");
   });
 
   test("moving the location drops the fingerprint read at the old one", async () => {

@@ -118,6 +118,9 @@ function makeManager(options: {
   jobSecretsDir?: string;
   jobRendezvousDir?: string;
   delayMs?: number;
+  /** Where a spawned stub child records its argv, so a test can assert that
+   * no child ran at all rather than that its writes happened to fail. */
+  argvFile?: string;
 }): JobManager {
   const manager = new JobManager({
     dataRoot: options.dataRoot,
@@ -127,6 +130,9 @@ function makeManager(options: {
       STUB_FINGERPRINT_STDOUT: `${OWN_FINGERPRINT}\n`,
       ...(options.delayMs !== undefined
         ? { STUB_DELAY_MS: String(options.delayMs) }
+        : {}),
+      ...(options.argvFile !== undefined
+        ? { STUB_ARGV_FILE: options.argvFile }
         : {}),
     },
     jobRendezvousDir: options.jobRendezvousDir ?? options.dataRoot,
@@ -245,6 +251,38 @@ describe("resolveSigningIdentityPath", () => {
     ).toThrow(SigningIdentityLocationError);
   });
 
+  test("a link AT the picked file to a key outside the mount does not resolve", () => {
+    // The parent chain is entirely inside the mount here: the escape is the
+    // picked name itself, so a check that re-confines only the parent admits it.
+    const secrets = directory("location-final-link-secrets");
+    const outside = directory("location-final-link-outside");
+    const target = path.join(outside, "victim.json");
+    writeIdentity(target);
+    fs.symlinkSync(target, path.join(secrets, PICKED_IDENTITY_NAME));
+    expect(() =>
+      resolveSigningIdentityPath({
+        dataRoot: directory("location-final-link"),
+        secretsDir: secrets,
+        location: { mount: "secrets", subPath: [PICKED_IDENTITY_NAME] },
+      }),
+    ).toThrow(SigningIdentityLocationError);
+  });
+
+  test("a link AT the picked file to a key inside the mount resolves to the key", () => {
+    const secrets = directory("location-inside-link-secrets");
+    fs.mkdirSync(path.join(secrets, "vault"));
+    const target = path.join(secrets, "vault", "key.json");
+    writeIdentity(target);
+    fs.symlinkSync(target, path.join(secrets, PICKED_IDENTITY_NAME));
+    expect(
+      resolveSigningIdentityPath({
+        dataRoot: directory("location-inside-link"),
+        secretsDir: secrets,
+        location: { mount: "secrets", subPath: [PICKED_IDENTITY_NAME] },
+      }),
+    ).toBe(path.join(fs.realpathSync(secrets), "vault", "key.json"));
+  });
+
   test("a console with no secrets mount refuses a picked location", () => {
     expect(() =>
       resolveSigningIdentityPath({
@@ -343,6 +381,65 @@ describe("the file-sync refusal follows the configured identity", () => {
     ).rejects.toBeInstanceOf(JobSigningIdentityExposedError);
   });
 
+  test("a link to a key in a synced folder refuses the run", async () => {
+    // The comparison is about where the KEY is, not where the name pointing at
+    // it is: a link in the secrets mount to a key the partner syncs publishes
+    // that key exactly as picking it directly would.
+    const root = directory("refusal-link");
+    const secrets = directory("refusal-link-secrets");
+    const synced = path.join(secrets, "synced");
+    fs.mkdirSync(synced);
+    const key = path.join(synced, "signing-key.json");
+    writeIdentity(key);
+    fs.symlinkSync(key, path.join(secrets, PICKED_IDENTITY_NAME));
+    const manager = makeManager({
+      dataRoot: root,
+      jobSecretsDir: secrets,
+      jobRendezvousDir: synced,
+    });
+    await expect(
+      manager.createJob(signedIntent([PICKED_IDENTITY_NAME])),
+    ).rejects.toBeInstanceOf(JobSigningIdentityExposedError);
+  });
+
+  test("a link to a key in a folder no leg holds admits the run", async () => {
+    const root = directory("refusal-link-clear");
+    const secrets = directory("refusal-link-clear-secrets");
+    fs.mkdirSync(path.join(secrets, "vault"));
+    const key = path.join(secrets, "vault", "signing-key.json");
+    writeIdentity(key);
+    fs.symlinkSync(key, path.join(secrets, PICKED_IDENTITY_NAME));
+    const synced = path.join(secrets, "synced");
+    fs.mkdirSync(synced);
+    const manager = makeManager({
+      dataRoot: root,
+      jobSecretsDir: secrets,
+      jobRendezvousDir: synced,
+    });
+    await expect(
+      manager.createJob(signedIntent([PICKED_IDENTITY_NAME])),
+    ).resolves.toEqual(expect.any(String));
+  });
+
+  test("a link to a key on a mount of its own does not resolve at all", async () => {
+    // The rendezvous with a mount of its own is outside the secrets mount, so
+    // the link is refused where every out-of-mount link is: at resolution.
+    const root = directory("refusal-link-outside");
+    const secrets = directory("refusal-link-outside-secrets");
+    const rendezvous = directory("refusal-link-outside-rvz");
+    const key = path.join(rendezvous, "signing-key.json");
+    writeIdentity(key);
+    fs.symlinkSync(key, path.join(secrets, PICKED_IDENTITY_NAME));
+    const manager = makeManager({
+      dataRoot: root,
+      jobSecretsDir: secrets,
+      jobRendezvousDir: rendezvous,
+    });
+    await expect(
+      manager.createJob(signedIntent([PICKED_IDENTITY_NAME])),
+    ).rejects.toBeInstanceOf(SigningIdentityLocationError);
+  });
+
   test("an unsigned run over the same mounts is unaffected by the option", async () => {
     // A run that signs nothing loads no identity, so only the default path is
     // in question -- and with nothing there, nothing is published.
@@ -355,10 +452,18 @@ describe("the file-sync refusal follows the configured identity", () => {
 });
 
 describe("a picked location is read, never created", () => {
-  test("nothing at the picked path is reported absent, and no file appears", async () => {
+  test("nothing at the picked path is reported absent, and no child runs", async () => {
     const root = directory("read-absent");
     const secrets = directory("read-absent-secrets");
-    const manager = makeManager({ dataRoot: root, jobSecretsDir: secrets });
+    const argvFile = path.join(
+      directory("read-absent-argv"),
+      "child-argv.json",
+    );
+    const manager = makeManager({
+      dataRoot: root,
+      jobSecretsDir: secrets,
+      argvFile,
+    });
     await expect(
       manager.resolveSigningFingerprint({
         identityLabel: "Agency A",
@@ -366,8 +471,40 @@ describe("a picked location is read, never created", () => {
         identityLocation: { mount: "secrets", subPath: [PICKED_IDENTITY_NAME] },
       }),
     ).resolves.toEqual({ kind: "absent" });
+    expect(fs.existsSync(argvFile)).toBe(false);
     expect(treeOf(secrets)).toEqual([]);
     expect(treeOf(root)).toEqual([]);
+  });
+
+  test("a link with nothing at its end is reported absent, and no child runs", async () => {
+    // A link counts as something present to a check that does not follow it, and
+    // the child it would spawn is a create-or-reuse: it would write a fresh
+    // private key at the picked name. What is asserted is the console's own
+    // decision -- no child at all -- not that the child's write happened to fail.
+    const root = directory("read-dangling");
+    const secrets = directory("read-dangling-secrets");
+    const outside = directory("read-dangling-outside");
+    fs.symlinkSync(
+      path.join(outside, "key.json"),
+      path.join(secrets, PICKED_IDENTITY_NAME),
+    );
+    const argvFile = path.join(root, "child-argv.json");
+    const before = treeOf(secrets);
+    const manager = makeManager({
+      dataRoot: root,
+      jobSecretsDir: secrets,
+      argvFile,
+    });
+    await expect(
+      manager.resolveSigningFingerprint({
+        identityLabel: "Agency A",
+        exportCertificate: false,
+        identityLocation: { mount: "secrets", subPath: [PICKED_IDENTITY_NAME] },
+      }),
+    ).resolves.toEqual({ kind: "absent" });
+    expect(fs.existsSync(argvFile)).toBe(false);
+    expect(treeOf(secrets)).toEqual(before);
+    expect(treeOf(outside)).toEqual([]);
   });
 
   test("an identity already there is read and its fingerprint returned", async () => {

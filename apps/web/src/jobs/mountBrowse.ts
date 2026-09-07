@@ -103,8 +103,14 @@ export function listMountEntries(
  * Resolve `subPath` under `mountRoot` to a confined absolute path whose final
  * segment need not exist, or null when the subpath is empty, inadmissible, or
  * escapes the mount. The parent directory takes the same admission and realpath
- * re-confinement {@link listMountEntries} applies; the final segment is joined
- * onto the resolved parent and re-checked lexically, since it may name nothing.
+ * re-confinement {@link listMountEntries} applies.
+ *
+ * The final segment is resolved the same way whenever it names something: a
+ * symlink there is confined by its TARGET, so one pointing out of the mount is
+ * refused and one pointing inside resolves to the file it names. Only a segment
+ * that resolves to nothing -- absent, or a link with nothing at its end -- is
+ * kept as the resolved parent plus the name, which is inside the mount by the
+ * parent's own confinement.
  *
  * For a caller that must answer "is the file there?" itself rather than have the
  * resolution answer it -- the signing identity, whose absence is reported to the
@@ -119,12 +125,18 @@ export function resolveMountPath(
   if (!browseSegment(name)) return null;
   const parent = resolveConfinedRealpath(mountRoot, subPath.slice(0, -1));
   if (parent === null) return null;
-  const candidate = path.join(parent, name);
+  const joined = path.join(parent, name);
   let realRoot: string;
   try {
     realRoot = fs.realpathSync(path.resolve(mountRoot));
   } catch {
     return null;
+  }
+  let candidate: string;
+  try {
+    candidate = fs.realpathSync(joined);
+  } catch {
+    candidate = joined;
   }
   if (!isPathWithin(realRoot, candidate, "at-or-under")) return null;
   return { absolutePath: candidate };
