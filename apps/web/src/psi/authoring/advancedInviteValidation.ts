@@ -131,8 +131,7 @@ const UNENCODABLE_KEY_TRANSFORM_MESSAGE =
  * (`assertTransformsCompile`) -- this gate is that same refusal given at the
  * moment of choice, not a stricter reading, which is why it holds where the
  * descriptor param gate, stricter than core, does not. Names no function: an
- * element
- * transform's `function` is partner-authored free text, the same reason
+ * element transform's `function` is partner-authored free text, the same reason
  * {@link UNSUPPLYABLE_KEY_MESSAGE} names no field. The step list marks the
  * offending row, which is where the removal happens. */
 const UNRECOGNIZED_KEY_TRANSFORM_MESSAGE =
