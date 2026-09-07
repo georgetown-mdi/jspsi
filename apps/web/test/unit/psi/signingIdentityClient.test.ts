@@ -219,7 +219,6 @@ describe("the outcome is read from the body's status, not from the HTTP status",
   test.each([
     ["refused", { kind: "refused" }],
     ["timeout", { kind: "timeout" }],
-    ["identityInRendezvous", { kind: "identityInRendezvous" }],
   ])("a 200 holding status %s is that category", async (status, expected) => {
     expect(
       await resolveSigningFingerprint("Agency A", false, answering({ status })),

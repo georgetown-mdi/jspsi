@@ -1934,7 +1934,7 @@ describe("the disk-only DELETE arm", () => {
 
 /** A canonical-format partner fingerprint, the pin a certificate-mode intent
  * must hold. */
-const PARTNER_FINGERPRINT = "C".repeat(43);
+const PARTNER_FINGERPRINT = "C".repeat(42) + "A";
 
 describe("a filedrop run that would publish the signing identity", () => {
   /** A manager over an explicit data root, so a test can put the rendezvous mount
@@ -2060,10 +2060,11 @@ describe("a filedrop run that would publish the signing identity", () => {
     ).resolves.toBeTypeOf("string");
   });
 
-  test("refuses the shared layout for a signed run with no identity", async () => {
-    // The child is pointed at the identity path explicitly and mints one there,
-    // so keying the refusal on the file's presence would admit exactly the first
-    // signed run -- the one that publishes the key it just created.
+  test("admits the shared layout for a signed run with no identity", async () => {
+    // Nothing to publish here either: the CLI loads this party's identity from
+    // the path the console names and refuses the run when nothing is there
+    // (`resolveSigningPersist`), so a signed run never creates the key it would
+    // go on to sync. The run fails at the child, with the CLI's own guidance.
     const root = directory("signing-first-run");
     const manager = makeSigningManager({ dataRoot: root });
     await expect(
@@ -2075,8 +2076,41 @@ describe("a filedrop run that would publish the signing identity", () => {
           },
         }),
       ),
-    ).rejects.toBeInstanceOf(JobSigningIdentityExposedError);
-    expect(fs.readdirSync(root)).toEqual([]);
+    ).resolves.toBeTypeOf("string");
+  });
+
+  test("admits a shared layout the comparison could not establish", async () => {
+    // A leg whose real path cannot be read cannot be ruled out of holding the
+    // identity's folder, and a refusal is owed a positive finding: the run goes
+    // ahead and the receipts card's advisory is what the operator gets. The key
+    // is on disk, so the other half of the refusal holds.
+    const root = directory("signing-unresolved");
+    writeIdentity(root);
+    const rendezvous = directory("signing-unresolved-rvz");
+    const manager = makeSigningManager({
+      dataRoot: root,
+      jobRendezvousDir: rendezvous,
+    });
+    const realpathSync = fs.realpathSync;
+    const spy = vi
+      .spyOn(fs, "realpathSync")
+      .mockImplementation((target, options) => {
+        if (path.resolve(String(target)) === rendezvous) {
+          const error: NodeJS.ErrnoException = new Error(
+            "EACCES: permission denied",
+          );
+          error.code = "EACCES";
+          throw error;
+        }
+        return realpathSync(target, options);
+      });
+    try {
+      await expect(manager.createJob(validIntent())).resolves.toBeTypeOf(
+        "string",
+      );
+    } finally {
+      spy.mockRestore();
+    }
   });
 
   test("admits an sftp run out of the shared layout", async () => {
@@ -2113,11 +2147,12 @@ describe("a filedrop run that would publish the signing identity", () => {
 
   test("the refusal's copy claims the path, not the file at it", () => {
     // What the check read is the presence of one fixed name in the folder the
-    // partner syncs into -- never the file's contents. Copy calling that file
-    // the operator's signing key asserts what nothing verified, and a partner
-    // who plants a file at that name makes the console say it. So the message
-    // states the path and the run's own key, and offers moving the file out
-    // beside the mount change, since the file may not be the operator's.
+    // partner syncs into -- never the file's contents, and never a key the run
+    // would go on to create, which no run does. Copy calling that file the
+    // operator's signing key asserts what nothing verified, and a partner who
+    // plants a file at that name makes the console say it. So the message states
+    // the path alone, and offers moving the file out beside the mount change,
+    // since the file may not be the operator's.
     const alert = failureFor(
       "config",
       new JobApiRequestError(
@@ -2127,10 +2162,8 @@ describe("a filedrop run that would publish the signing identity", () => {
         SIGNING_IDENTITY_IN_RENDEZVOUS_REFUSAL,
       ),
     );
-    expect(alert.message).toContain("a file at that identity's path");
-    expect(alert.message).toContain(
-      "one already there, or one it would create to sign with",
-    );
+    expect(alert.message).toContain("A file sits at your signing identity's");
+    expect(alert.message).not.toMatch(/create|mint/);
     expect(alert.message).toContain(
       "Move that file out of every folder you share with a partner",
     );
@@ -2140,7 +2173,12 @@ describe("a filedrop run that would publish the signing identity", () => {
   });
 
   describe("the fingerprint request into the same layout", () => {
-    test("refuses to mint the identity where a rendezvous leg holds its folder", async () => {
+    test("creates the identity on demand, whatever the layout", async () => {
+      // The key is created in the working directory on demand -- the default
+      // this console keeps. Refusing here instead would take certificate mode
+      // away from every channel on a one-mount console, since the rendezvous
+      // falls back to the data root: an SFTP or WebRTC exchange out of that
+      // mount publishes nothing, and only a shared-folder run is refused.
       const root = directory("fingerprint-mint");
       const manager = makeSigningManager({ dataRoot: root });
       await expect(
@@ -2148,14 +2186,10 @@ describe("a filedrop run that would publish the signing identity", () => {
           identityLabel: "Agency A",
           exportCertificate: false,
         }),
-      ).resolves.toEqual({ kind: "identityInRendezvous" });
-      // No child ran, so nothing was written into the folder the partner syncs.
-      expect(fs.readdirSync(root)).toEqual([]);
+      ).resolves.toMatchObject({ kind: "ok", created: true });
     });
 
     test("reads an identity already in that folder", async () => {
-      // This request creates nothing, so it publishes nothing; the run that
-      // would publish the file is refused on its own.
       const root = directory("fingerprint-read");
       writeIdentity(root);
       const manager = makeSigningManager({ dataRoot: root });

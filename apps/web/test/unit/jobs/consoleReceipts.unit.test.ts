@@ -89,7 +89,7 @@ const RETENTION_NOTE =
 /** The single-mount layout a shared-folder exchange is refused on: the folder
  * the partner syncs into holds the working directory this party's signing key is
  * written to, positively established by the walk (a lexical or filesystem
- * match), so the advisory states the refusals in force there. */
+ * match), so the advisory states the refusal in force there. */
 const SHARED_RENDEZVOUS: JobRendezvousConfig = {
   configured: true,
   locator: "psilink",
@@ -1186,9 +1186,9 @@ describe("the receipts card's model", () => {
     expect(IDENTITY_AT_REST_NOTICE).not.toMatch(/JOB_RENDEZVOUS_DIR/);
   });
 
-  test("an established shared mount states the refusals and the one path they read", () => {
+  test("an established shared mount states the refusal and the one path it reads", () => {
     // The layout the console refuses on is the layout the operator most needs
-    // the word on, because the refusals read one fixed name in a folder the
+    // the word on, because the refusal reads one fixed name in a folder the
     // partner writes into. Saying nothing there would leave an operator whose
     // console has cleared every run believing the folder is watched.
     const pinned = draft({
@@ -1203,17 +1203,17 @@ describe("the receipts card's model", () => {
     ]);
   });
 
-  test("the established shared-mount advisory names both refusals and what neither sees", () => {
+  test("the established shared-mount advisory names the refusal and what it misses", () => {
     // Its two halves: what the console does on this layout -- refuse the run
-    // while a file sits at the identity's path, refuse to create one there --
-    // and the reach of the single path both refusals read, which leaves a
-    // renamed copy of the key and a second mount of this folder unseen.
+    // while a file sits at the identity's path -- and the reach of the single
+    // path that refusal reads, which leaves a renamed copy of the key and a
+    // second mount of this folder unseen. Creating an identity is refused on no
+    // layout, so copy promising that would be telling the operator of a control
+    // the console does not have.
     expect(IDENTITY_SHARED_MOUNT_REFUSAL_ADVISORY).toMatch(
       /refuses a shared-folder exchange/,
     );
-    expect(IDENTITY_SHARED_MOUNT_REFUSAL_ADVISORY).toMatch(
-      /refuses to create a new identity in that folder/,
-    );
+    expect(IDENTITY_SHARED_MOUNT_REFUSAL_ADVISORY).not.toMatch(/create|mint/);
     expect(IDENTITY_SHARED_MOUNT_REFUSAL_ADVISORY).toMatch(
       /checks that one path and nothing else/,
     );

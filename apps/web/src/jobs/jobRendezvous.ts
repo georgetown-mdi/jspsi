@@ -522,8 +522,10 @@ function legAliasesDirectoryChain(
  *
  * A leg or `target` whose real path cannot be read counts as holding and
  * `uncertain`, since what cannot be resolved is exactly where a joining symlink
- * would sit. Every leg is checked rather than stopping at the first that holds, so
- * one leg's unresolved comparison cannot shadow another's positive match.
+ * would sit -- except a leg spelled exactly as `target`, which is that one
+ * directory whatever the spelling resolves to. Every leg is checked rather than
+ * stopping at the first that holds, so one leg's unresolved comparison cannot
+ * shadow another's positive match.
  *
  * The two callers read the verdict differently: the data-root report
  * ({@link JobRendezvousProvisioning.sharesDataRoot}) treats an uncertain hold as
@@ -539,6 +541,10 @@ export function rendezvousHoldsDirectory(
   let uncertainHold = false;
   for (const dir of legs) {
     const legPaths = resolvePathForms(dir);
+    // One spelling of one directory: an unreadable component on the way to it
+    // moves nothing, since both sides name it the same way.
+    if (legPaths.resolved === targetPaths.resolved)
+      return { holds: true, uncertain: false };
     if (!legPaths.canonicalized || !targetPaths.canonicalized) {
       uncertainHold = true;
       continue;

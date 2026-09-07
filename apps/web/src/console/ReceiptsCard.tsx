@@ -77,16 +77,6 @@ function fingerprintFailureMessage(
         "passed explicitly here. Fix what you find and try again -- running " +
         "'psilink fingerprint' against the same folder prints the reason."
       );
-    case "identityInRendezvous":
-      return (
-        "Your signing identity was not created, because the folder it would " +
-        "be written into is a folder this console shares with your partner. " +
-        "A key there is a key your partner reads, and whoever holds it can " +
-        "sign receipts in your name -- for every exchange, with every " +
-        "partner. Give the shared folder a mount of its own " +
-        "(JOB_RENDEZVOUS_DIR), separate from the folder holding your key, " +
-        "input, and results, then create your signing identity again."
-      );
     case "invalid":
       return outcome.message;
     case "busy":

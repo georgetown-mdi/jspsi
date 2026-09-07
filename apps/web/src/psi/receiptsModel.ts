@@ -314,14 +314,13 @@ export const IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY =
 
 /**
  * What the console says on the layout it positively established as shared: the
- * two refusals in force there, and the single path both of them read.
+ * refusal in force there, and the single path it reads.
  *
  * A shared-folder exchange is refused while a file sits at the signing
- * identity's path in that folder, and a request to create an identity there is
- * refused too (`JobManager`). Both read that one fixed path in a folder the
- * partner writes into, so a copy of the key under another name, and this folder
- * mounted a second time under another container path, are outside what either
- * of them can see.
+ * identity's path in that folder (`JobManager.createJob`). That is the one fixed
+ * path it reads, in a folder the partner writes into, so a copy of the key under
+ * another name, and this folder mounted a second time under another container
+ * path, are outside what it can see.
  *
  * Raised only on that layout (see {@link receiptsAdvisories}); every other one
  * takes {@link IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY}.
@@ -329,13 +328,12 @@ export const IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY =
 export const IDENTITY_SHARED_MOUNT_REFUSAL_ADVISORY =
   "This console shares the folder your signing key is written into with your " +
   "partner. While a file sits at your signing identity's path there it refuses " +
-  "a shared-folder exchange, and it refuses to create a new identity in that " +
-  "folder. It checks that one path and nothing else, so a copy of your key " +
-  "under another name, and this folder mounted a second time under another " +
-  "path, are not seen -- and whoever reads your signing key can sign receipts " +
-  "in your name, for every exchange, with every partner. Give the synced " +
-  "folder a mount of its own (JOB_RENDEZVOUS_DIR), separate from the folder " +
-  "holding your key, input, and results.";
+  "a shared-folder exchange. It checks that one path and nothing else, so a " +
+  "copy of your key under another name, and this folder mounted a second time " +
+  "under another path, are not seen -- and whoever reads your signing key can " +
+  "sign receipts in your name, for every exchange, with every partner. Give " +
+  "the synced folder a mount of its own (JOB_RENDEZVOUS_DIR), separate from " +
+  "the folder holding your key, input, and results.";
 
 /**
  * What the console says about re-keying, so the operator learns it before a
@@ -409,10 +407,10 @@ interface ReceiptsAdvisory {
  * advisories about the DEPLOYMENT rather than the draft is raised. A report that
  * positively establishes a rendezvous folder holding the mounted working
  * directory takes {@link IDENTITY_SHARED_MOUNT_REFUSAL_ADVISORY}, which states
- * the refusals in force there and the one path they read; every other report --
+ * the refusal in force there and the one path it reads; every other report --
  * a separate mount, a hedged answer, an unread one -- takes
  * {@link IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY}. One of the two is always raised:
- * the refusals cover a single path, so no layout leaves the operator with
+ * the refusal covers a single path, so no layout leaves the operator with
  * nothing to act on.
  *
  * A draft the run itself would refuse belongs in {@link receiptsProblems},

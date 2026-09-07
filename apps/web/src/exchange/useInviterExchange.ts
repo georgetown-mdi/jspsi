@@ -132,13 +132,13 @@ export function failureFor(
       category: "config",
       ...consoleJobColumnRefusalAlert(error.columns, seat),
     };
-  // The console refused the run before it started: a folder it shares with the
-  // partner holds the path this party's signing identity is kept at, and the run
-  // would have a file there. The copy claims that and no more, since the console
-  // reads the path's presence and never the file. Classified `config`: the layout
-  // is what has to change, so the alert offers start-over rather than a retry,
-  // which would refuse identically. Placed above the mounted-file branch, whose
-  // 400 copy is about the file rather than the mounts.
+  // The console refused the run before it started: a file sits at the path this
+  // party's signing identity is kept at, in a folder the exchange shares with the
+  // partner. The copy claims that and no more, since the console reads the path's
+  // presence and never the file. Classified `config`: the layout is what has to
+  // change, so the alert offers start-over rather than a retry, which would refuse
+  // identically. Placed above the mounted-file branch, whose 400 copy is about the
+  // file rather than the mounts.
   if (
     error instanceof JobApiRequestError &&
     error.refusalReason === SIGNING_IDENTITY_IN_RENDEZVOUS_REFUSAL
@@ -147,13 +147,11 @@ export function failureFor(
       category: "config",
       title: "This exchange shares your signing identity's folder",
       message:
-        "The console did not start it. This console keeps your signing " +
-        "identity in a folder this exchange shares with your partner, and " +
-        "this run would have a file at that identity's path -- one already " +
-        "there, or one it would create to sign with. Whoever reads a signing " +
-        "key there can sign receipts in your name -- for every exchange, with " +
-        "every partner. Move that file out of every folder you share with a " +
-        "partner, or give the shared folder a mount of its own " +
+        "The console did not start it. A file sits at your signing identity's " +
+        "path, in a folder this exchange shares with your partner. Whoever " +
+        "reads a signing key there can sign receipts in your name -- for every " +
+        "exchange, with every partner. Move that file out of every folder you " +
+        "share with a partner, or give the shared folder a mount of its own " +
         "(JOB_RENDEZVOUS_DIR), separate from the folder holding your key, " +
         "input, and results, then run the exchange again.",
     };

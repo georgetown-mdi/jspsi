@@ -863,6 +863,21 @@ describe("whether a rendezvous leg holds the data root", () => {
     expect(provisioning.sharesDataRootUncertain).toBe(true);
   });
 
+  test("a leg spelled exactly as the data root does, established, even unresolved", () => {
+    // The single-folder console with an unreadable component on the way to its
+    // mount: one directory named one way on both sides of the comparison, so
+    // there is no symlink for the unresolved component to hide. Defaulting this
+    // to uncertain would hand the pre-run refusal -- which admits an uncertain
+    // hold -- exactly the layout it exists for.
+    const mounts = tempDir("mounts");
+    const work = subDir(mounts, "work");
+    const provisioning = withUnreadableRealpath(work, () =>
+      resolveJobRendezvousProvisioning({ JOB_DATA_ROOT: work }),
+    );
+    expect(provisioning.sharesDataRoot).toBe(true);
+    expect(provisioning.sharesDataRootUncertain).toBeUndefined();
+  });
+
   test("a leg bind-mounted onto the data root does, though no path relates them", () => {
     // One host directory bound in at two container paths: two paths, two real
     // paths, one directory -- and the partner's sync reaches the signing key
