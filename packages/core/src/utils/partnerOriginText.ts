@@ -171,6 +171,25 @@ export const MAX_PARTNER_VALUES_SHOWN =
   PARTNER_VALUES_PER_LINK * (MAX_ERROR_CAUSE_DEPTH - 2);
 
 /**
+ * The first-party text opening one value: its 1-based position in the list the
+ * partner sent, then the call site's label, fitted together to
+ * {@link PARTNER_LABEL_BUDGET} so the pair still leaves every value its own
+ * budget.
+ *
+ * The position is what keeps a repeated value on the operator's screen. The
+ * renderer drops a cause link whose raw message repeats the previous link's
+ * (`sanitizeErrorForDisplay`), so a partner repeating one value would
+ * otherwise pack byte-identical links and have every one but the first
+ * suppressed -- values gone with nothing counting them, since the tail
+ * below states what the ceiling left out and not what the renderer dropped. No
+ * two positions are equal, so no two links this builds are either, whatever
+ * bytes the partner picks. The position leads the label so that a label
+ * clipped to the budget is cut behind it and the positions stay distinct.
+ */
+const positionedLabel = (label: string, position: number): string =>
+  clipToRenderedCost(`${position}. ${label}`, PARTNER_LABEL_BUDGET);
+
+/**
  * One value as it sits on a link: the label's first-party text, then the
  * partner's value redacted, control-replaced and fitted to
  * {@link PARTNER_VALUE_BUDGET}.
@@ -210,8 +229,9 @@ const elidedValuesLink = (count: number): string =>
 /**
  * The ONE elimination form for {@link PartnerOriginText}: an `Error` whose own
  * message is `message` -- first-party text, and only first-party text -- and
- * whose `cause` chain holds the partner's values, in order, each labelled and
- * fitted, packed {@link PARTNER_VALUES_PER_LINK} to a link.
+ * whose `cause` chain holds the partner's values, in order, each fitted and
+ * labelled with its position, packed {@link PARTNER_VALUES_PER_LINK} to a
+ * link.
  *
  * It returns the `Error` rather than the link text because the guarantee is
  * about where a partner byte can land: a helper returning a string would put
@@ -229,7 +249,10 @@ const elidedValuesLink = (count: number): string =>
  * counting what it does not show. That ceiling is what the renderer's depth
  * bound leaves; sending more values than it admits is the only way a partner
  * can keep any value off the operator's screen, and the count is what makes
- * that visible.
+ * that visible. Repeating a value is not a second way: the position each
+ * label leads with (see {@link positionedLabel}) keeps two links from ever
+ * being byte-identical, so the renderer's duplicate-link suppression drops
+ * none of them.
  *
  * An empty list yields the bare first-party `Error`, so a partner that sends
  * `abortReasons: []` reads the same as one that sends none.
@@ -241,13 +264,12 @@ export function errorWithPartnerCauseLinks(
 ): Error {
   const raw = partnerText as unknown as string | readonly string[];
   const values = typeof raw === "string" ? [raw] : raw;
-  const fittedLabel = clipToRenderedCost(label, PARTNER_LABEL_BUDGET);
   const links: string[] = [];
   const shown = Math.min(values.length, MAX_PARTNER_VALUES_SHOWN);
   for (let i = 0; i < shown; i += PARTNER_VALUES_PER_LINK) {
     const packed: string[] = [];
     for (let j = i; j < Math.min(i + PARTNER_VALUES_PER_LINK, shown); j++)
-      packed.push(labelledValue(fittedLabel, values[j]!));
+      packed.push(labelledValue(positionedLabel(label, j + 1), values[j]!));
     links.push(packed.join(PARTNER_VALUE_SEPARATOR));
   }
   if (values.length > shown)

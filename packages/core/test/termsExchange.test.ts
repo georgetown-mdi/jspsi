@@ -954,13 +954,18 @@ test("exchangeTerms responder: rejects (does not hang) when abort send fails on 
 // behind it -- the next reason, or the sentence naming the mismatch. Each is
 // redacted where it is composed, which bounds that rule to the fragment.
 
+// The first-party text opening the reason at a 1-based position: the position
+// the elimination leads every label with (src/utils/partnerOriginText.ts),
+// then the label protocolSetup passes it.
+const reasonLabel = (position: number): string =>
+  `${position}. reason the partner gave: `;
 // The rendered opening of the first abort reason on a link: the renderer's
-// cause-link separator plus the label protocolSetup puts on every reason.
-const REASON_LINK = "\ncaused by: reason the partner gave: ";
+// cause-link separator, then that label.
+const REASON_LINK = `\ncaused by: ${reasonLabel(1)}`;
 // The opening of the next reason packed on that same link: the escape's own
-// token for the line breaks the elimination places between two reasons
-// (src/utils/partnerOriginText.ts), then the same label.
-const PACKED_REASON = "\\x0a\\x0areason the partner gave: ";
+// token for the line breaks the elimination places between two reasons, then
+// the label the second reason carries.
+const PACKED_REASON = `\\x0a\\x0a${reasonLabel(2)}`;
 const BEGIN_MARKER = "-----BEGIN OPENSSH PRIVATE KEY-----";
 const END_MARKER = "-----END OPENSSH PRIVATE KEY-----";
 const REDACTION = "[redacted private key]";

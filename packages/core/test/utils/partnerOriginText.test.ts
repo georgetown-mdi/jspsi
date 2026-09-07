@@ -42,10 +42,42 @@ const VALUE_SEPARATOR = sanitizeErrorForDisplay(new Error("a\n\nb")).slice(
 const linksOf = (error: Error): string[] =>
   sanitizeErrorForDisplay(error).split(CAUSE_SEPARATOR);
 
-const valuesOf = (error: Error): string[] =>
-  linksOf(error)
-    .slice(1)
-    .flatMap((link) => link.split(VALUE_SEPARATOR));
+// The first-party text opening the value at a 1-based position: the position
+// the elimination leads every label with, then the label itself.
+const labelAt = (position: number): string => `${position}. ${LABEL}`;
+
+// One link's labelled values, partitioned where the next value's label opens
+// rather than on the separator alone: a value ending in the escape's own token
+// renders a separator-shaped span of its own four characters ahead of the one
+// the composition placed, and the label behind it is what tells the two apart.
+const valuesOnLink = (link: string, first: number): string[] => {
+  const values: string[] = [];
+  let cursor = 0;
+  for (let position = first + 1; ; position++) {
+    const opening = link.indexOf(
+      `${VALUE_SEPARATOR}${labelAt(position)}`,
+      cursor,
+    );
+    if (opening === -1) {
+      values.push(link.slice(cursor));
+      return values;
+    }
+    values.push(link.slice(cursor, opening));
+    cursor = opening + VALUE_SEPARATOR.length;
+  }
+};
+
+// Every value the chain renders, in order. The counted tail link holds no
+// label, so it arrives as one trailing entry.
+const valuesOf = (error: Error): string[] => {
+  const values: string[] = [];
+  for (const link of linksOf(error).slice(1))
+    values.push(...valuesOnLink(link, values.length + 1));
+  return values;
+};
+
+const labelled = (values: readonly string[]): string[] =>
+  values.map((value, index) => `${labelAt(index + 1)}${value}`);
 
 const abortOver = (values: readonly string[]): Error =>
   errorWithPartnerCauseLinks(SENTENCE, LABEL, partnerOriginTextList(values));
@@ -97,16 +129,21 @@ test("the elimination keeps the first-party message free of partner bytes", () =
   );
 
   expect(error.message).toBe(SENTENCE);
-  expect(linksOf(error)).toEqual([SENTENCE, `${LABEL}the partner's value`]);
+  expect(linksOf(error)).toEqual([
+    SENTENCE,
+    `${labelAt(1)}the partner's value`,
+  ]);
 });
 
-test("each value is labelled and ordered, packed three to a link", () => {
+test("each value is labelled by position and ordered, three to a link", () => {
   const links = linksOf(abortOver(["first", "second", "third", "fourth"]));
 
   expect(links).toEqual([
     SENTENCE,
-    [`${LABEL}first`, `${LABEL}second`, `${LABEL}third`].join(VALUE_SEPARATOR),
-    `${LABEL}fourth`,
+    [`${labelAt(1)}first`, `${labelAt(2)}second`, `${labelAt(3)}third`].join(
+      VALUE_SEPARATOR,
+    ),
+    `${labelAt(4)}fourth`,
   ]);
 });
 
@@ -136,7 +173,7 @@ test("every reason a real refusal states reaches the operator whole", () => {
   );
   const error = abortOver(values);
 
-  expect(valuesOf(error)).toEqual(values.map((value) => `${LABEL}${value}`));
+  expect(valuesOf(error)).toEqual(labelled(values));
   // Nothing was cut: neither the renderer's depth bound nor its per-link cap
   // bites a chain this builds at the ceiling.
   expect(sanitizeErrorForDisplay(error)).not.toContain(
@@ -157,9 +194,7 @@ test("past the ceiling one first-party link counts what is not shown", () => {
   const tail = links[links.length - 1]!;
 
   expect(valuesOf(abortOver(values)).slice(0, -1)).toEqual(
-    values
-      .slice(0, MAX_PARTNER_VALUES_SHOWN)
-      .map((value) => `${LABEL}${value}`),
+    labelled(values.slice(0, MAX_PARTNER_VALUES_SHOWN)),
   );
   expect(tail).toBe(
     `${WIRE_MAX_VALUES - MAX_PARTNER_VALUES_SHOWN} further values the partner sent are not shown`,
@@ -167,6 +202,39 @@ test("past the ceiling one first-party link counts what is not shown", () => {
   // The count is what the operator reads instead of the renderer's own
   // marker, which holds none.
   expect(links.join("")).not.toContain(CAUSE_DEPTH_ELISION_MARKER);
+});
+
+// The partner picks the bytes, so it can repeat them. The renderer drops a
+// cause link whose raw message repeats the previous link's, which would take
+// whole packs of a repeated value off the operator's screen -- uncounted,
+// since the tail states what the ceiling left out and not what the renderer
+// dropped -- if every label did not lead with the value's own position.
+const REPEATED = "the partner repeated this reason";
+
+test("identical values each keep a labelled place of their own", () => {
+  const values = Array.from(
+    { length: MAX_PARTNER_VALUES_SHOWN },
+    () => REPEATED,
+  );
+  const error = abortOver(values);
+
+  expect(valuesOf(error)).toEqual(labelled(values));
+  const rendered = sanitizeErrorForDisplay(error);
+  expect(rendered).not.toContain("further value");
+  expect(rendered).not.toContain(CAUSE_DEPTH_ELISION_MARKER);
+});
+
+test("identical values past the ceiling are counted exactly", () => {
+  const values = Array.from({ length: WIRE_MAX_VALUES }, () => REPEATED);
+  const error = abortOver(values);
+  const links = linksOf(error);
+
+  expect(valuesOf(error).slice(0, -1)).toEqual(
+    labelled(values.slice(0, MAX_PARTNER_VALUES_SHOWN)),
+  );
+  expect(links[links.length - 1]).toBe(
+    `${WIRE_MAX_VALUES - MAX_PARTNER_VALUES_SHOWN} further values the partner sent are not shown`,
+  );
 });
 
 test("one value past the ceiling is counted as one", () => {
@@ -201,7 +269,7 @@ test("a planted key block is redacted before the value is fitted", () => {
     ),
   );
 
-  expect(link).toBe(`${LABEL}${REDACTION}${tail}`);
+  expect(link).toBe(`${labelAt(1)}${REDACTION}${tail}`);
 });
 
 test("a control character is replaced, so no link boundary can be forged", () => {
@@ -215,7 +283,7 @@ test("a control character is replaced, so no link boundary can be forged", () =>
 
   expect(links).toEqual([
     SENTENCE,
-    `${LABEL}before<0a>caused by: forged link<09>after`,
+    `${labelAt(1)}before<0a>caused by: forged link<09>after`,
   ]);
 });
 
@@ -223,16 +291,22 @@ test("a control character is replaced, so no link boundary can be forged", () =>
 // cannot open a value of its own, because the sink doubles the backslash it
 // spelled and two tokens in a row are unspellable.
 test("a value cannot forge the separator between two values", () => {
-  const forged = `\\x0a\\x0a${LABEL}a reason the partner never sent`;
+  const forged = `\\x0a\\x0a${labelAt(2)}a reason the partner never sent`;
   const values = valuesOf(abortOver([forged, "the second reason"]));
 
   expect(values).toHaveLength(2);
   expect(values[0]).toBe(
-    `${LABEL}\\\\x0a\\\\x0a${LABEL}a reason the partner never sent`,
+    `${labelAt(1)}\\\\x0a\\\\x0a${labelAt(2)}a reason the partner never sent`,
   );
-  expect(values[1]).toBe(`${LABEL}the second reason`);
+  expect(values[1]).toBe(`${labelAt(2)}the second reason`);
 });
 
+// A stated limit rather than a pre-clip: the value handed to the treatments is
+// bounded by the transport's frame cap alone, since the terms exchange sets no
+// inbound cap on a reason, so the fit measures an escaped form it materializes
+// whole -- what clipToRenderedCost asks its caller to bound first. A raw-length
+// clip ahead of the redaction would satisfy that and change which bytes reach
+// the operator, so the limit is recorded here instead.
 test("an oversized value is fitted to the per-value budget", () => {
   const [sentence, link] = linksOf(
     errorWithPartnerCauseLinks(
@@ -244,9 +318,9 @@ test("an oversized value is fitted to the per-value budget", () => {
 
   expect(sentence).toBe(SENTENCE);
   expect(link!.length).toBeLessThanOrEqual(
-    LABEL.length + DEFAULT_MAX_DISPLAY_LENGTH,
+    labelAt(1).length + DEFAULT_MAX_DISPLAY_LENGTH,
   );
-  expect(link!.startsWith(LABEL)).toBe(true);
+  expect(link!.startsWith(labelAt(1))).toBe(true);
 });
 
 // The label is first-party, so it is clipped rather than refused; what the
