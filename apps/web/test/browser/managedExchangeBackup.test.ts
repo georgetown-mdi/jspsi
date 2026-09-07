@@ -192,6 +192,7 @@ describe("the import marker is the restore evidence the desync tiering reads", (
     await recordManagedExchangeLastRun(
       installed.id,
       failedRun(Date.now(), "failed", "auth"),
+      Date.now(),
     );
     const [record, local] = [
       await getManagedExchange(installed.id),
@@ -212,6 +213,7 @@ describe("an unattended run's failure shows through the same tiers at the next v
     await recordManagedExchangeLastRun(
       record.id,
       failedRun(Date.now(), "failed", "auth"),
+      Date.now(),
     );
     const reloaded = await getManagedExchange(record.id);
     const local = await getManagedLocalState(record.id);
@@ -225,6 +227,7 @@ describe("an unattended run's failure shows through the same tiers at the next v
     await recordManagedExchangeLastRun(
       record.id,
       failedRun(Date.now(), "failed", "storage"),
+      Date.now(),
     );
     const reloaded = await getManagedExchange(record.id);
     const local = await getManagedLocalState(record.id);
@@ -474,11 +477,15 @@ describe("the export binds the marker to the bytes it serialized", () => {
       sharedSecret: generateSharedSecret(),
       expires: null,
     });
-    await recordManagedExchangeLastRun(record.id, {
-      at: new Date().toISOString(),
-      outcome: "failed",
-      failureKind: "transport",
-    });
+    await recordManagedExchangeLastRun(
+      record.id,
+      {
+        at: new Date().toISOString(),
+        outcome: "failed",
+        failureKind: "transport",
+      },
+      Date.now(),
+    );
 
     expect(await getManagedLocalState(record.id)).toBeUndefined();
     expect(

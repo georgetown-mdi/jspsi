@@ -854,9 +854,13 @@ export async function persistManagedExchangeReinvite(
  * strict-durability readwrite transaction, so recording an outcome cannot revert a
  * concurrent rotation write. Separate from {@link persistManagedExchangeRotation}
  * so the outcome (succeeded, or a `storage` failure when the rotation persist
- * itself failed) is recorded without re-touching the secret. Monotonic on `at`
- * (see {@link applyManagedExchangeLastRun}): a write staler than the stored entry
- * is a no-op, so a slow run's late bookkeeping cannot mask a newer outcome.
+ * itself failed) is recorded without re-touching the secret.
+ *
+ * The write rules are {@link applyManagedExchangeLastRun}'s, so this is the one
+ * call every runner -- attended and scheduled -- records an outcome through:
+ * a write staler than the stored entry is a no-op, and a failure outcome is a
+ * no-op against a success stamped at or after `runStartedAtMs`, the instant the
+ * run producing `lastRun` began.
  *
  * @throws {Error} if no record with `id` exists.
  * @throws {ZodError} if the stored value or the resulting record is invalid.
@@ -864,12 +868,13 @@ export async function persistManagedExchangeReinvite(
 export async function recordManagedExchangeLastRun(
   id: string,
   lastRun: ManagedExchangeLastRun,
+  runStartedAtMs: number,
 ): Promise<ManagedExchangeRecord> {
   return readModifyWriteRecord(id, (stored) => {
     if (stored === undefined)
       throw new Error(`no managed exchange with id ${id}`);
     const existing = parseManagedExchangeRecord(stored);
-    return applyManagedExchangeLastRun(existing, lastRun);
+    return applyManagedExchangeLastRun(existing, lastRun, runStartedAtMs);
   });
 }
 

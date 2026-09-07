@@ -166,6 +166,11 @@ export async function runManagedRerun<TInput, THandshake, TExchange>(
   options: ManagedRerunOptions = {},
 ): Promise<ManagedExchangeRunResult<TExchange>> {
   const now = options.now ?? Date.now;
+  // Stamped before the first check this run makes, and stated by every
+  // bookkeeping write below and inside runManagedExchange, so a success another
+  // context stamps while this run is in flight is not overwritten by this run's
+  // failure (docs/spec/MANAGED_EXCHANGE_RECORD.md, "Recording a run outcome").
+  const runStartedAtMs = now();
 
   // Checked before any connection: a lapsed bound means no run happened, so no
   // lastRun is written.
@@ -190,6 +195,7 @@ export async function runManagedRerun<TInput, THandshake, TExchange>(
           ? { tokenMaxAgeDays: record.tokenMaxAgeDays }
           : {}),
       },
+      runStartedAtMs,
       acquireInput: seams.acquireInput,
       handshake: seams.handshake,
       dataExchange: seams.dataExchange,
@@ -216,7 +222,7 @@ export async function runManagedRerun<TInput, THandshake, TExchange>(
       // Best-effort: a failed write here must never replace the run's own
       // failure.
       try {
-        await recordManagedExchangeLastRun(record.id, lastRun);
+        await recordManagedExchangeLastRun(record.id, lastRun, runStartedAtMs);
       } catch {
         // Swallowed: the original failure still reaches the caller on the rethrow.
       }

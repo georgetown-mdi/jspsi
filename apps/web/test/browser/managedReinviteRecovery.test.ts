@@ -68,6 +68,7 @@ describe("persistManagedExchangeReinvite drops the consumed failure", () => {
     await recordManagedExchangeLastRun(
       record.id,
       failedRun(Date.now(), "failed", "auth"),
+      Date.now(),
     );
     await markManagedExchangeImported(record.id, new Date().toISOString());
 
@@ -95,6 +96,7 @@ describe("persistManagedExchangeReinvite drops the consumed failure", () => {
     await recordManagedExchangeLastRun(
       record.id,
       failedRun(Date.now(), "failed", "auth"),
+      Date.now(),
     );
 
     await persistManagedExchangeReinvite(record.id, {

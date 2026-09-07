@@ -571,9 +571,20 @@ describe("applyManagedExchangeLastRun", () => {
     failureKind: "storage",
   };
 
+  /** Apply an entry from a run that began at the instant the entry itself
+   * names -- an instantaneous run, which is what a test setting up stored
+   * bookkeeping stands for. The run-start rule is driven by the tests that
+   * pass a start of their own. */
+  function applyStamped(
+    record: ManagedExchangeRecord,
+    lastRun: ManagedExchangeLastRun,
+  ): ManagedExchangeRecord {
+    return applyManagedExchangeLastRun(record, lastRun, Date.parse(lastRun.at));
+  }
+
   test("records an outcome, leaving the secret and document untouched", () => {
     const record = buildManagedExchangeRecord(newExchange());
-    const updated = applyManagedExchangeLastRun(record, olderRun);
+    const updated = applyStamped(record, olderRun);
     expect(updated.lastRun).toEqual(olderRun);
     expect(updated.sharedSecret).toBe(record.sharedSecret);
     expect(updated.exchangeFile).toEqual(record.exchangeFile);
@@ -582,36 +593,135 @@ describe("applyManagedExchangeLastRun", () => {
   });
 
   test("a newer entry overwrites an older stored one", () => {
-    const record = applyManagedExchangeLastRun(
+    const record = applyStamped(
       buildManagedExchangeRecord(newExchange()),
       olderRun,
     );
-    expect(applyManagedExchangeLastRun(record, newerRun).lastRun).toEqual(
-      newerRun,
-    );
+    expect(applyStamped(record, newerRun).lastRun).toEqual(newerRun);
   });
 
   test("an entry staler than the stored one is a no-op", () => {
-    const record = applyManagedExchangeLastRun(
+    const record = applyStamped(
       buildManagedExchangeRecord(newExchange()),
       newerRun,
     );
-    const applied = applyManagedExchangeLastRun(record, olderRun);
+    const applied = applyStamped(record, olderRun);
     expect(applied.lastRun).toEqual(newerRun);
   });
 
   test("an entry with the same instant overwrites (only strictly-staler no-ops)", () => {
-    const record = applyManagedExchangeLastRun(
+    const record = applyStamped(
       buildManagedExchangeRecord(newExchange()),
-      olderRun,
+      newerRun,
     );
     const sameInstant: ManagedExchangeLastRun = {
-      at: olderRun.at,
+      at: newerRun.at,
       outcome: "missed",
     };
-    expect(applyManagedExchangeLastRun(record, sameInstant).lastRun).toEqual(
-      sameInstant,
+    expect(applyStamped(record, sameInstant).lastRun).toEqual(sameInstant);
+  });
+
+  test("a failure does not overwrite a success stamped after its run began", () => {
+    // A scheduled attempt opens, an attended run completes and stamps its
+    // success inside that attempt's peer wait, and the attempt then no-shows
+    // and stamps a NEWER `missed` entry. Monotonicity admits that write; the
+    // run-start rule is what holds it off.
+    const runStartedAtMs = Date.parse("2026-07-14T12:00:00.000Z");
+    const attendedSuccess: ManagedExchangeLastRun = {
+      at: "2026-07-14T12:05:00.000Z",
+      outcome: "succeeded",
+    };
+    const record = applyStamped(
+      buildManagedExchangeRecord(newExchange()),
+      attendedSuccess,
     );
+    const noShow: ManagedExchangeLastRun = {
+      at: "2026-07-14T12:10:00.000Z",
+      outcome: "missed",
+    };
+    expect(
+      applyManagedExchangeLastRun(record, noShow, runStartedAtMs).lastRun,
+    ).toEqual(attendedSuccess);
+  });
+
+  test("a failure whose run began after the stored success writes normally", () => {
+    const attendedSuccess: ManagedExchangeLastRun = {
+      at: "2026-07-14T12:05:00.000Z",
+      outcome: "succeeded",
+    };
+    const record = applyStamped(
+      buildManagedExchangeRecord(newExchange()),
+      attendedSuccess,
+    );
+    const laterFailure: ManagedExchangeLastRun = {
+      at: "2026-07-14T12:20:00.000Z",
+      outcome: "failed",
+      failureKind: "transport",
+    };
+    expect(
+      applyManagedExchangeLastRun(
+        record,
+        laterFailure,
+        Date.parse("2026-07-14T12:10:00.000Z"),
+      ).lastRun,
+    ).toEqual(laterFailure);
+  });
+
+  test("a success stamped at the run's own start instant is kept", () => {
+    // A tie is not evidence the failure is the newer fact, and a success is the
+    // entry nothing re-derives once overwritten.
+    const runStartedAtMs = Date.parse("2026-07-14T12:00:00.000Z");
+    const success: ManagedExchangeLastRun = {
+      at: "2026-07-14T12:00:00.000Z",
+      outcome: "succeeded",
+    };
+    const record = applyStamped(
+      buildManagedExchangeRecord(newExchange()),
+      success,
+    );
+    const failure: ManagedExchangeLastRun = {
+      at: "2026-07-14T12:10:00.000Z",
+      outcome: "failed",
+      failureKind: "transport",
+    };
+    expect(
+      applyManagedExchangeLastRun(record, failure, runStartedAtMs).lastRun,
+    ).toEqual(success);
+  });
+
+  test("a success always writes over a stored failure it postdates", () => {
+    const record = applyStamped(
+      buildManagedExchangeRecord(newExchange()),
+      newerRun,
+    );
+    const success: ManagedExchangeLastRun = {
+      at: "2026-07-14T14:00:00.000Z",
+      outcome: "succeeded",
+    };
+    expect(
+      applyManagedExchangeLastRun(
+        record,
+        success,
+        Date.parse("2026-07-14T12:30:00.000Z"),
+      ).lastRun,
+    ).toEqual(success);
+  });
+
+  test("a failure writes over a stored failure whatever the run start", () => {
+    // The rule protects a success, not any newer entry: two failing runs still
+    // leave the newer outcome standing.
+    const record = applyStamped(buildManagedExchangeRecord(newExchange()), {
+      at: "2026-07-14T12:05:00.000Z",
+      outcome: "failed",
+      failureKind: "auth",
+    });
+    expect(
+      applyManagedExchangeLastRun(
+        record,
+        newerRun,
+        Date.parse("2026-07-14T12:00:00.000Z"),
+      ).lastRun,
+    ).toEqual(newerRun);
   });
 
   test("staleness compares instants, not strings, across ISO precisions", () => {
@@ -627,13 +737,13 @@ describe("applyManagedExchangeLastRun", () => {
       at: "2026-07-14T12:00:00Z",
       outcome: "succeeded",
     };
-    const record = applyManagedExchangeLastRun(
+    const record = applyStamped(
       buildManagedExchangeRecord(newExchange()),
       fractionalNewer,
     );
-    expect(
-      applyManagedExchangeLastRun(record, wholeSecondOlder).lastRun,
-    ).toEqual(fractionalNewer);
+    expect(applyStamped(record, wholeSecondOlder).lastRun).toEqual(
+      fractionalNewer,
+    );
   });
 });
 
@@ -839,10 +949,11 @@ describe("applyManagedExchangeScheduleAdvance", () => {
   test("a stale outcome is dropped while the schedule still advances", () => {
     // A run that landed after the window closed already recorded the newer
     // outcome; the window's own miss must not mask it, but the window did close.
-    const record = applyManagedExchangeLastRun(scheduled(), {
-      at: "2026-01-13T18:00:00.000Z",
-      outcome: "succeeded",
-    });
+    const record = applyManagedExchangeLastRun(
+      scheduled(),
+      { at: "2026-01-13T18:00:00.000Z", outcome: "succeeded" },
+      Date.parse("2026-01-13T18:00:00.000Z"),
+    );
     const advanced = applyManagedExchangeScheduleAdvance(record, {
       schedule: advancedSchedule,
       fromNextWindow: schedule.nextWindow,
@@ -906,10 +1017,11 @@ describe("diagnoseManagedExchangeRecord", () => {
     const record = buildManagedExchangeRecord(
       newExchange({ label: "Riverbend quarterly", side: "acceptor" }),
     );
-    const withRun = applyManagedExchangeLastRun(record, {
-      at: "2026-07-10T09:00:00.000Z",
-      outcome: "succeeded",
-    });
+    const withRun = applyManagedExchangeLastRun(
+      record,
+      { at: "2026-07-10T09:00:00.000Z", outcome: "succeeded" },
+      Date.parse("2026-07-10T09:00:00.000Z"),
+    );
     expect(diagnoseManagedExchangeRecord(withRun)).toEqual({
       id: withRun.id,
       label: "Riverbend quarterly",
