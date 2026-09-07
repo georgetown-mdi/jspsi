@@ -489,6 +489,37 @@ test("a schema-invalid config renders readably, not as a raw ZodError blob", () 
   expect(message).not.toContain('"code"');
 });
 
+test("a name-class character in expected_payload_columns is refused at config load", () => {
+  // The list is written from the disclosed set an accepted invitation holds, so
+  // the same shape holds it where the configuration is read as well as where the
+  // token is decoded: a config hand-edited to name a column with one of these
+  // characters fails to load (exit 64) naming the field, rather than running and
+  // writing that name into a result or a record. U+202E RLO, written as an
+  // escape so a fixture about invisible characters is readable.
+  fs.writeFileSync(
+    configFile,
+    YAML.stringify({
+      ...minimalFiledropConfig,
+      expected_payload_columns: ["risk\u202escore"],
+    }),
+  );
+  saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
+  expect(() => loadConfig(baseOptions())).toThrow(UsageError);
+  let message = "";
+  try {
+    loadConfig(baseOptions());
+  } catch (err) {
+    message = (err as Error).message;
+  }
+  expect(message).toContain("is not a valid exchange spec");
+  expect(message).toContain("expectedPayloadColumns.0");
+  expect(message).toContain(
+    "must not contain a control or text-direction character",
+  );
+  // The refusal locates the field and reports none of the operator's name.
+  expect(message).not.toContain("risk");
+});
+
 test("throws a UsageError at config load when a preserved @path credential file is missing", () => {
   // A saved config keeps the @path reference, not the secret; the reference is
   // resolved when the config loads, before any network activity. A moved or

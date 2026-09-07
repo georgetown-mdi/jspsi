@@ -4149,10 +4149,46 @@ test("the strip warning bounds the removal to the names this read derives", () =
   );
   expect(line).toContain("does not change a name declared outside the header");
   expect(line).toContain(
-    "terms declaring one that holds these characters are refused",
+    "a linkage terms name or a metadata column name that holds these " +
+      "characters is refused when the document is read",
   );
   expect(line).not.toContain("and sent to your partner");
   expect(line).not.toContain("from any name this exchange sends your partner");
+});
+
+test("the strip warning names the class, not what the header held", () => {
+  // The positions are the only thing the line reports about the file. A header
+  // that lost a tab and no text-direction character produces this same line, so
+  // the clause naming those characters must name the class the read removes
+  // rather than assert one of them was in the operator's header. The
+  // standardization names are outside the shape, so the refusal the line points
+  // at is scoped to the fields that hold it.
+  const logged: Array<string> = [];
+  const previousSink = getDiagnosticSink();
+  const log = getLogger("input");
+  const previousLevel = log.getLevel();
+  try {
+    setDiagnosticSink((_method, _prefix, args) => {
+      logged.push(args.map((arg) => String(arg)).join(" "));
+    });
+    log.setLevel("warn");
+    warnSanitizedColumns([2]);
+  } finally {
+    setDiagnosticSink(previousSink);
+    log.setLevel(previousLevel);
+  }
+
+  const line = logged.find((entry) =>
+    entry.includes("invisible control characters"),
+  );
+  expect(line).toContain(
+    "invisible control characters, a class that includes the " +
+      "text-direction ones",
+  );
+  expect(line).not.toContain("text-direction ones among them");
+  expect(line).toContain(
+    "a standardization input or output name is not held to that rule",
+  );
 });
 
 test("the strip warning names no configuration to rewrite", () => {

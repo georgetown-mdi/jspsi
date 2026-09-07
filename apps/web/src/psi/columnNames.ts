@@ -100,9 +100,10 @@ export function unnameableColumnsAlert(
  * What it says about disclosure is bounded by what this read reaches: the names
  * it derives from the header, which are the matching name, the name this screen
  * shows, and the sent name where the exchange takes that from the header. A name
- * the linkage terms declare is not read from the header at all and keeps these
- * characters; refusing it is the terms rule's, not this read's, so the copy
- * states that refusal and stops there. It names no remedy: this notice serves
+ * the linkage terms or a `metadata` block declare is not read from the header at
+ * all; refusing it is the schema's, not this read's, so the copy states that
+ * refusal, and names a standardization `input` or `output` as the one declared
+ * name it does not reach. It names no remedy: this notice serves
  * every intake seat, including the acceptor seats whose terms are the partner's
  * invitation and the direct-exchange seats with no terms to edit, so no one edit
  * is the operator's to make.
@@ -119,14 +120,16 @@ export function sanitizedColumnsAlert(positions: ReadonlyArray<number>): {
     message:
       `Column${plural ? "s" : ""} ${positions.join(", ")} in your CSV ` +
       `${plural ? "had names that held" : "had a name that held"} invisible ` +
-      `control characters, text-direction ones among them. The characters are ` +
+      `control characters, a class that includes the text-direction ones. ` +
+      `The characters are ` +
       `gone from every name ` +
       `this read takes from the header: the name${plural ? "s" : ""} matched ` +
       `on, the name${plural ? "s" : ""} shown on this screen, and the ` +
       `name${plural ? "s" : ""} sent to your partner where the exchange takes ` +
       `${plural ? "them" : "it"} from the header. This read does not change a ` +
-      `name the linkage terms declare; terms declaring one that holds these ` +
-      `characters are refused when they are read. ` +
+      `name the linkage terms or a metadata block declare: one that holds ` +
+      `these characters is refused when the document is read, and a ` +
+      `standardization input or output name is not held to that rule. ` +
       `Where that left two columns with the same name, the later one was ` +
       `numbered to keep the two apart. Check that ` +
       `${plural ? "those columns" : "the column"} still ` +

@@ -30,8 +30,8 @@ export const NAME_CONTROL_CHAR_PATTERN =
  * outliving themselves: the embeddings and overrides U+202A LRE, U+202B RLE,
  * U+202C PDF, U+202D LRO, U+202E RLO, and the isolates U+2066 LRI, U+2067 RLI,
  * U+2068 FSI, U+2069 PDI (Unicode UAX #9). The half of
- * {@link NAME_CONTROL_CHAR_PATTERN} that the display escaping does not reach,
- * since it replaces the Cc controls alone.
+ * {@link NAME_CONTROL_CHAR_PATTERN} that `replaceControlCharactersForDisplay`
+ * does not reach, since it replaces the Cc controls alone.
  *
  * The implicit marks U+200E LRM, U+200F RLM and U+061C ALM are outside this
  * class. They set a direction for the neutral text immediately around them and

@@ -112,6 +112,13 @@ export const TEXT_CONTROL_CHAR_MESSAGE =
  * declared column name is a name rather than a data value, and each disclosed
  * one reaches the partner in the invitation's payload column list.
  *
+ * The payload column lists that name those same columns hold it too -- the
+ * invitation token's `disclosedPayloadColumns`, which a partner authors and an
+ * acceptance writes into the operator's configuration, and the configuration's
+ * own `expectedPayloadColumns`, `disclosedPayloadColumns`, and outbound consent
+ * `columns` -- so a column name reaches a party's disk under this shape from
+ * either direction.
+ *
  * Applied at each FIELD, as the `version` semver regex below is, rather than as
  * a pass over the class: every field named above holds it in its own string
  * schema, so a document is refused at parse on every seat that reads one -- the
@@ -307,13 +314,20 @@ const freeTextValue = (schema: z.ZodString) =>
   });
 
 /**
- * One name-class value of a terms document, holding the caller's own length
- * floor and ceiling to {@link NAME_SHAPE_PATTERN}. The regex goes on the
- * field's own string schema -- what the caller declares is the whole shape the
- * field has -- rather than a check layered over the class from above, and it is
- * written once so the name fields cannot drift apart.
+ * One name-class value, holding the caller's own length floor and ceiling to
+ * {@link NAME_SHAPE_PATTERN}. The regex goes on the field's own string schema
+ * -- what the caller declares is the whole shape the field has -- rather than a
+ * check layered over the class from above, and it is written once so the name
+ * fields cannot drift apart.
+ *
+ * The payload column lists outside this document name the same columns and take
+ * the same shape through this helper: the invitation token's
+ * `disclosedPayloadColumns` (config/invitation.ts), the exchange spec's
+ * `expectedPayloadColumns` and `disclosedPayloadColumns`
+ * (config/exchangeSpec.ts), and the outbound consent record's `columns`
+ * (config/outboundPayloadConsent.ts).
  */
-const nameValue = (schema: z.ZodString) =>
+export const nameValue = (schema: z.ZodString) =>
   schema.regex(NAME_SHAPE_PATTERN, NAME_SHAPE_MESSAGE);
 
 /**

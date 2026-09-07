@@ -121,7 +121,7 @@ describe("sanitizedColumnsAlert", () => {
       "gone from every name this read takes from the header",
     );
     expect(alert.message).toContain(
-      "does not change a name the linkage terms declare",
+      "does not change a name the linkage terms or a metadata block declare",
     );
     expect(alert.message).not.toContain("and sent to your partner");
     expect(alert.message).not.toContain(
@@ -136,13 +136,27 @@ describe("sanitizedColumnsAlert", () => {
     // one sentence and leaves the remedy to the seat that knows it.
     const alert = sanitizedColumnsAlert([1]);
     expect(alert.message).toContain(
-      "This read does not change a name the linkage terms declare; terms " +
-        "declaring one that holds these characters are refused when they are " +
-        "read.",
+      "This read does not change a name the linkage terms or a metadata " +
+        "block declare: one that holds these characters is refused when the " +
+        "document is read, and a standardization input or output name is not " +
+        "held to that rule.",
     );
     expect(alert.message).not.toContain("configuration");
     expect(alert.message).not.toContain("invitation");
     expect(alert.message).not.toContain("terms for this exchange");
+  });
+
+  test("names the class rather than what the file held", () => {
+    // The positions are the only thing the notice reports about the file. A
+    // header that lost a tab and no text-direction character produces this same
+    // copy, so the clause naming those characters names the class the read
+    // removes rather than asserting one was in the operator's header.
+    const alert = sanitizedColumnsAlert([1]);
+    expect(alert.message).toContain(
+      "invisible control characters, a class that includes the " +
+        "text-direction ones",
+    );
+    expect(alert.message).not.toContain("text-direction ones among them");
   });
 
   test("interpolates no name, only the positions", () => {

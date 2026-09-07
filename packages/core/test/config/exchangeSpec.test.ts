@@ -249,6 +249,37 @@ test("a control character in a metadata name is rejected through this spec path"
   );
 });
 
+test("a name-class character is rejected in every payload column list", () => {
+  // The three local enforcement records list column names rather than terms, so
+  // each holds the same shape a terms payload name does. expected_payload_columns
+  // is written from a partner's invitation and the other two from this party's
+  // own metadata, so this is what keeps the class out of the file whichever side
+  // authored the name. U+202E RLO, written as an escape.
+  const hostile = "risk\u202escore";
+  for (const [key, issuePath] of [
+    ["expected_payload_columns", "expectedPayloadColumns.0"],
+    ["disclosed_payload_columns", "disclosedPayloadColumns.0"],
+  ] as const) {
+    const result = safeParseExchangeSpec({ ...minimalSpec, [key]: [hostile] });
+    expect(result.success).toBe(false);
+    if (result.success) continue;
+    expect(result.error.issues.map((issue) => issue.path.join("."))).toContain(
+      issuePath,
+    );
+    expect(JSON.stringify(result.error.issues)).toContain(NAME_SHAPE_MESSAGE);
+  }
+
+  const consent = safeParseExchangeSpec({
+    ...minimalSpec,
+    outbound_payload_consent: { status: "confirmed", columns: [hostile] },
+  });
+  expect(consent.success).toBe(false);
+  if (consent.success) return;
+  expect(JSON.stringify(consent.error.issues)).toContain(NAME_SHAPE_MESSAGE);
+  // The refusal locates the field and reports none of the name.
+  expect(JSON.stringify(consent.error.issues)).not.toContain("risk");
+});
+
 // --- parse vs safeParse ------------------------------------------------------
 
 test("parseExchangeSpec throws ZodError on invalid input", () => {

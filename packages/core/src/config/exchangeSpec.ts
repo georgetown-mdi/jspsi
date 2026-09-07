@@ -6,6 +6,7 @@ import {
   MAX_NAME_LENGTH,
   MAX_PAYLOAD_ENTRIES,
   MAX_TEXT_LENGTH,
+  nameValue,
 } from "./linkageTermsSchema.js";
 import { AuthenticationSchema, ConnectionConfigSchema } from "./connection.js";
 import { StandardizationSchema } from "./standardizationSchema.js";
@@ -78,10 +79,13 @@ export const ExchangeSpecSchema = z
     // observed). An empty array is a strict "receive nothing"; an absent
     // field reconciles lazily. An observe-on-save writer records only a
     // NON-EMPTY observation, since an observed-empty set is an ambiguous
-    // zero-match run. Bounded like a payload list; names are
+    // zero-match run. Bounded like a payload list, and held to the name shape
+    // (`nameValue`) the invitation this list is written from already holds, so
+    // a partner's control or text-direction character cannot arrive in the
+    // operator's configuration by a hand edit either; names are
     // partner-controlled.
     expectedPayloadColumns: boundedArray(
-      z.string().min(1).max(MAX_NAME_LENGTH),
+      nameValue(z.string().min(1).max(MAX_NAME_LENGTH)),
       MAX_PAYLOAD_ENTRIES,
       `expectedPayloadColumns must not exceed ${MAX_PAYLOAD_ENTRIES} entries`,
     ).optional(),
@@ -98,9 +102,11 @@ export const ExchangeSpecSchema = z
     // partner mid-exchange, attributing the failure to them. The acceptor
     // does not set this (it carries payload.send instead). An empty array
     // is a strict "disclose nothing"; an absent field reconciles lazily.
-    // Bounded like a payload list; names are this party's own.
+    // Bounded like a payload list and held to the name shape (`nameValue`),
+    // which the metadata these names are derived from already holds; names are
+    // this party's own.
     disclosedPayloadColumns: boundedArray(
-      z.string().min(1).max(MAX_NAME_LENGTH),
+      nameValue(z.string().min(1).max(MAX_NAME_LENGTH)),
       MAX_PAYLOAD_ENTRIES,
       `disclosedPayloadColumns must not exceed ${MAX_PAYLOAD_ENTRIES} entries`,
     ).optional(),

@@ -448,11 +448,12 @@ export async function loadInputRows(
  * where the exchange takes that from the header. A name declared outside the
  * header -- a linkage field, an explicit metadata block -- is not read from the
  * header at all, and the name shape is what refuses it: a document declaring
- * such a name fails to parse, naming the field. The line states the terms rule,
- * the one every seat this read serves holds, and stops there. It names no
- * remedy: this read serves every CLI path, including an accept whose declared
- * names are the partner's invitation and a zero-setup run with no configuration
- * at all, so no one document is the operator's to edit.
+ * such a name fails to parse, naming the field. A standardization `input` or
+ * `output` is outside that shape, so the line names it as the one declared name
+ * no refusal reaches. It names no remedy: this read serves every CLI path,
+ * including an accept whose declared names are the partner's invitation and a
+ * zero-setup run with no configuration at all, so no one document is the
+ * operator's to edit.
  */
 export function warnSanitizedColumns(positions: ReadonlyArray<number>): void {
   if (positions.length === 0) return;
@@ -460,14 +461,17 @@ export function warnSanitizedColumns(positions: ReadonlyArray<number>): void {
   getLogger("input").warn(
     `column${plural ? "s" : ""} ${positions.join(", ")} of your CSV input ` +
       `had ${plural ? "names that held" : "a name that held"} invisible ` +
-      `control characters, text-direction ones among them. The characters are ` +
+      `control characters, a class that includes the text-direction ones. ` +
+      `The characters are ` +
       `gone from every name ` +
       `this read takes from the header: the ` +
       `name${plural ? "s" : ""} matched on, and the ` +
       `name${plural ? "s" : ""} sent to your partner where the exchange ` +
       `takes ${plural ? "them" : "it"} from the header. This read does not ` +
-      `change a name declared outside the header; terms declaring one that ` +
-      `holds these characters are refused when they are read. ` +
+      `change a name declared outside the header: a linkage terms name or a ` +
+      `metadata column name that holds these characters is refused when the ` +
+      `document is read, and a standardization input or output name is not ` +
+      `held to that rule. ` +
       `Where that left two columns with the same name, the later one was ` +
       `numbered to keep the two apart. Check that ` +
       `${plural ? "those columns" : "the column"} still ` +
