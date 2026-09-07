@@ -17,6 +17,7 @@ import {
   IDENTITY_LABEL_REQUIRED_REASON,
   IDENTITY_MISSING_PROBLEM,
   IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY,
+  IDENTITY_SHARED_MOUNT_REFUSAL_ADVISORY,
   NO_PARTNER_PIN_PROBLEM,
   PARTNER_FINGERPRINT_PROBLEM,
   RECEIPTS_DEFAULT,
@@ -88,7 +89,7 @@ const RETENTION_NOTE =
 /** The single-mount layout a shared-folder exchange is refused on: the folder
  * the partner syncs into holds the working directory this party's signing key is
  * written to, positively established by the walk (a lexical or filesystem
- * match), so the pre-run refusal covers it and the advisory is withheld. */
+ * match), so the advisory states the refusals in force there. */
 const SHARED_RENDEZVOUS: JobRendezvousConfig = {
   configured: true,
   locator: "psilink",
@@ -1185,22 +1186,46 @@ describe("the receipts card's model", () => {
     expect(IDENTITY_AT_REST_NOTICE).not.toMatch(/JOB_RENDEZVOUS_DIR/);
   });
 
-  test("an established shared mount withholds only the shared-mount half", () => {
-    // A shared-folder exchange on that layout is refused before it runs, so the
-    // advisory would spend the warning channel on a hazard the console already
-    // stops. What survives the suppression is the at-rest notice: the key is
-    // still written into the mounted folder, and a card that said nothing about
-    // that would leave the operator with no word on where their long-lived key
-    // lands.
+  test("an established shared mount states the refusals and the one path they read", () => {
+    // The layout the console refuses on is the layout the operator most needs
+    // the word on, because the refusals read one fixed name in a folder the
+    // partner writes into. Saying nothing there would leave an operator whose
+    // console has cleared every run believing the folder is watched.
     const pinned = draft({
       mode: "certificate",
       ownFingerprint: OWN_FINGERPRINT,
       partnerFingerprint: PARTNER_FINGERPRINT,
     });
     expect(receiptsAdvisories(pinned, SHARED_RENDEZVOUS)).toEqual([
+      { message: IDENTITY_SHARED_MOUNT_REFUSAL_ADVISORY, severity: "warning" },
       { message: IDENTITY_AT_REST_NOTICE, severity: "info" },
       { message: RECEIPT_LOCATION_NOTICE, severity: "info" },
     ]);
+  });
+
+  test("the established shared-mount advisory names both refusals and what neither sees", () => {
+    // Its two halves: what the console does on this layout -- refuse the run
+    // while a file sits at the identity's path, refuse to create one there --
+    // and the reach of the single path both refusals read, which leaves a
+    // renamed copy of the key and a second mount of this folder unseen.
+    expect(IDENTITY_SHARED_MOUNT_REFUSAL_ADVISORY).toMatch(
+      /refuses a shared-folder exchange/,
+    );
+    expect(IDENTITY_SHARED_MOUNT_REFUSAL_ADVISORY).toMatch(
+      /refuses to create a new identity in that folder/,
+    );
+    expect(IDENTITY_SHARED_MOUNT_REFUSAL_ADVISORY).toMatch(
+      /checks that one path and nothing else/,
+    );
+    expect(IDENTITY_SHARED_MOUNT_REFUSAL_ADVISORY).toMatch(
+      /a copy of your key under another name/,
+    );
+    expect(IDENTITY_SHARED_MOUNT_REFUSAL_ADVISORY).toMatch(
+      /mounted a second time under another path/,
+    );
+    expect(IDENTITY_SHARED_MOUNT_REFUSAL_ADVISORY).toMatch(
+      /JOB_RENDEZVOUS_DIR/,
+    );
   });
 
   test("a console that has not answered keeps the shared-mount advisory", () => {

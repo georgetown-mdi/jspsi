@@ -6,7 +6,7 @@ title: "The Console's Signing-Identity Custody"
 
 _Status: decided on the maintainer's ruling; the refusal is built, the identity-location option is not. The behaviour is specified in [SERVER_JOB_API.md](../spec/SERVER_JOB_API.md#refusing-a-run-that-would-publish-the-signing-identity), with the operator-facing account in [CONSOLE.md](../CONSOLE.md#signing-a-receipt-and-noting-where-the-result-is-filed); this note records the posture and why it was taken rather than restating those rows. The CLI's own posture is [signing-identity-custody.md](signing-identity-custody.md), the decision this one was left out of. See [docs/notes/README.md](README.md)._
 
-The console creates and reads this party's signing identity in the one working directory the operator mounts. On a single-mount console that is also the folder a shared-directory exchange rendezvouses out of, because `JOB_RENDEZVOUS_DIR` falls back to `JOB_DATA_ROOT` -- so the long-lived private key sits in the folder the partner writes into, and a shared-directory run publishes it. The console met that with advisory copy on the receipts card, which is what this decision replaces for the one run where the copy was not enough.
+The console creates and reads this party's signing identity in the one working directory the operator mounts. On a single-mount console that is also the folder a shared-directory exchange rendezvouses out of, because `JOB_RENDEZVOUS_DIR` falls back to `JOB_DATA_ROOT` -- so the long-lived private key sits in the folder the partner writes into, and a shared-directory run publishes it. Advisory copy on the receipts card is the console's whole answer to that layout without this decision; the decision adds a refusal for the one run where copy is not enough, and holds the copy to what the refusal does and does not see.
 
 ## Why the default location stays
 
@@ -28,7 +28,18 @@ The refusal stays narrow so that the posture does not spread. It fires only for 
 
 The comparison is the one the rendezvous report already had for `sharesDataRoot`, read per run rather than at boot since the identity is created between runs: each directory as configured, as its real path, and by filesystem identity along the data root's ancestor chain, which is what catches one host folder bind-mounted at two container paths.
 
-One host folder mounted twice, outside that ancestor chain, stays invisible to it -- no path or identity the console can reach expresses the aliasing. That limit is the whole of what the receipts card's remaining advisory now says. The rest of the card's old shared-mount copy is gone: it existed to make the operator weigh a hazard the console now stops.
+One host folder mounted twice, outside that ancestor chain, stays invisible to it -- no path or identity the console can reach expresses the aliasing.
+
+The other half of the create refusal is a presence probe: one fixed file name, directly under the mounted working directory. That name, and whether something is at it, is the whole of what the console knows about the key. The receipts card says so on every layout -- what the refusals cover where the shared layout was established, and what no refusal covers where it was not.
+
+### Limits accepted, not closed
+
+These are accepted under the deployment the console is for: the partner is an authenticated party under a signed agreement, and one writing into the synced folder to attack this party is not the case being designed against. They are recorded here, and in the spec's refusal section, so the refusal is not read as a control against a hostile partner.
+
+- **The probe reads a name, not a key.** It reads that name in the folder the partner writes into. A file a partner plants there refuses a run that would have published nothing -- an unsigned exchange with no identity of this party's anywhere -- and an identity the operator renamed is not seen at all, so a run that would publish it is admitted.
+- **A document at that path is taken as this party's identity.** The console points the CLI at that path for every fingerprint request and for runs on every channel, and the CLI's load-or-create loads whatever is there. A document bound to a different identity label is warned about rather than refused on that load (`warnOnIdentityDivergence`), and the console discards the child's stderr; one bound to the same label -- the label the agreed terms hold, which the partner knows -- diverges from nothing, so `psilink exchange` accepts it too. A partner able to write into the synced folder could therefore put their own signing identity at that path.
+
+The remedy for both is the one the refusal already names: keep the identity outside every folder a partner syncs. The identity-location option below is what would make that routine rather than a mount change.
 
 ## What is left open
 

@@ -2111,6 +2111,34 @@ describe("a filedrop run that would publish the signing identity", () => {
     expect(alert.message).toContain("sign receipts in your name");
   });
 
+  test("the refusal's copy claims the path, not the file at it", () => {
+    // What the check read is the presence of one fixed name in the folder the
+    // partner syncs into -- never the file's contents. Copy calling that file
+    // the operator's signing key asserts what nothing verified, and a partner
+    // who plants a file at that name makes the console say it. So the message
+    // states the path and the run's own key, and offers moving the file out
+    // beside the mount change, since the file may not be the operator's.
+    const alert = failureFor(
+      "config",
+      new JobApiRequestError(
+        400,
+        "POST /api/jobs failed with status 400",
+        undefined,
+        SIGNING_IDENTITY_IN_RENDEZVOUS_REFUSAL,
+      ),
+    );
+    expect(alert.message).toContain("a file at that identity's path");
+    expect(alert.message).toContain(
+      "one already there, or one it would create to sign with",
+    );
+    expect(alert.message).toContain(
+      "Move that file out of every folder you share with a partner",
+    );
+    expect(alert.title).toBe(
+      "This exchange shares your signing identity's folder",
+    );
+  });
+
   describe("the fingerprint request into the same layout", () => {
     test("refuses to mint the identity where a rendezvous leg holds its folder", async () => {
       const root = directory("fingerprint-mint");

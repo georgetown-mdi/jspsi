@@ -20,7 +20,9 @@ import type { JobSigningChoice } from "@jobs/intentSchemas";
  * here ({@link IDENTITY_REGENERATION_NOTICE}); the identity's location is
  * fixed to the console's one mounted working directory
  * ({@link IDENTITY_AT_REST_NOTICE}; what the pre-run refusal for the
- * shared-mount layout cannot see: {@link IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY}).
+ * shared-mount layout does and does not see:
+ * {@link IDENTITY_SHARED_MOUNT_REFUSAL_ADVISORY} and
+ * {@link IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY}).
  */
 
 /**
@@ -274,9 +276,9 @@ export function receiptsProblems(
  *
  * True on every layout, so raised on every one, and an `info` rather than a
  * warning ({@link ReceiptsAdvisorySeverity}) -- it poses no hazard this run
- * makes live. The layout-gated word is
- * {@link IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY}, raised above it where it
- * applies.
+ * makes live. The layout-gated word above it is
+ * {@link IDENTITY_SHARED_MOUNT_REFUSAL_ADVISORY} or
+ * {@link IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY}.
  */
 export const IDENTITY_AT_REST_NOTICE =
   "Your signing key is written into the folder you mounted, beside this " +
@@ -296,8 +298,9 @@ export const IDENTITY_AT_REST_NOTICE =
  * chain, looking like two folders. This advisory is what the operator can act
  * on where the check cannot.
  *
- * Withheld on the layout the check positively established as shared (see
- * {@link receiptsAdvisories}), where the refusal itself is the message.
+ * Raised everywhere the check did not positively establish the shared layout
+ * (see {@link receiptsAdvisories}); that layout takes
+ * {@link IDENTITY_SHARED_MOUNT_REFUSAL_ADVISORY} instead.
  */
 export const IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY =
   "Before a shared-folder exchange runs, psilink checks whether the folder " +
@@ -308,6 +311,31 @@ export const IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY =
   "passes it. Keep the synced folder (JOB_RENDEZVOUS_DIR) separate from the " +
   "folder holding your key, input, and results, and check that the two are not " +
   "one folder under two names.";
+
+/**
+ * What the console says on the layout it positively established as shared: the
+ * two refusals in force there, and the single path both of them read.
+ *
+ * A shared-folder exchange is refused while a file sits at the signing
+ * identity's path in that folder, and a request to create an identity there is
+ * refused too (`JobManager`). Both read that one fixed path in a folder the
+ * partner writes into, so a copy of the key under another name, and this folder
+ * mounted a second time under another container path, are outside what either
+ * of them can see.
+ *
+ * Raised only on that layout (see {@link receiptsAdvisories}); every other one
+ * takes {@link IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY}.
+ */
+export const IDENTITY_SHARED_MOUNT_REFUSAL_ADVISORY =
+  "This console shares the folder your signing key is written into with your " +
+  "partner. While a file sits at your signing identity's path there it refuses " +
+  "a shared-folder exchange, and it refuses to create a new identity in that " +
+  "folder. It checks that one path and nothing else, so a copy of your key " +
+  "under another name, and this folder mounted a second time under another " +
+  "path, are not seen -- and whoever reads your signing key can sign receipts " +
+  "in your name, for every exchange, with every partner. Give the synced " +
+  "folder a mount of its own (JOB_RENDEZVOUS_DIR), separate from the folder " +
+  "holding your key, input, and results.";
 
 /**
  * What the console says about re-keying, so the operator learns it before a
@@ -377,14 +405,15 @@ interface ReceiptsAdvisory {
  * block: every one is a legitimate run the command line accepts too.
  * Grouped by severity; the order here is the order within a group.
  *
- * `rendezvous` is the console's own rendezvous report, deciding the one
- * advisory about the DEPLOYMENT rather than the draft
- * ({@link IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY}): withheld where the report
- * positively establishes that a rendezvous folder holds the mounted working
- * directory, since a shared-folder exchange on that layout is refused before it
- * runs and the refusal is the message; raised everywhere else, including on an
- * unanswered or hedged report, since that is where the pre-run check can be
- * fooled.
+ * `rendezvous` is the console's own rendezvous report, choosing which of the two
+ * advisories about the DEPLOYMENT rather than the draft is raised. A report that
+ * positively establishes a rendezvous folder holding the mounted working
+ * directory takes {@link IDENTITY_SHARED_MOUNT_REFUSAL_ADVISORY}, which states
+ * the refusals in force there and the one path they read; every other report --
+ * a separate mount, a hedged answer, an unread one -- takes
+ * {@link IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY}. One of the two is always raised:
+ * the refusals cover a single path, so no layout leaves the operator with
+ * nothing to act on.
  *
  * A draft the run itself would refuse belongs in {@link receiptsProblems},
  * not here.
@@ -399,14 +428,12 @@ export function receiptsAdvisories(
     rendezvous.sharesDataRoot === true &&
     rendezvous.sharesDataRootUncertain === false;
   return [
-    ...(sharedLayoutEstablished
-      ? []
-      : [
-          {
-            message: IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY,
-            severity: "warning" as const,
-          },
-        ]),
+    {
+      message: sharedLayoutEstablished
+        ? IDENTITY_SHARED_MOUNT_REFUSAL_ADVISORY
+        : IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY,
+      severity: "warning" as const,
+    },
     { message: IDENTITY_AT_REST_NOTICE, severity: "info" },
     { message: RECEIPT_LOCATION_NOTICE, severity: "info" },
   ];

@@ -120,8 +120,8 @@ function stubSigningApi(options: StubOptions = {}): { bodies: Array<string> } {
 let latestDraft: ReceiptsDraft = RECEIPTS_DEFAULT;
 
 /** The default console layout: one mount, so the rendezvous holds the working
- * directory. A shared-folder exchange there is refused before it runs, so the
- * card shows its notices without the shared-mount advisory. */
+ * directory. A shared-folder exchange there is refused before it runs, and the
+ * card's advisory states that refusal and the one path it reads. */
 const SINGLE_MOUNT_RENDEZVOUS: JobRendezvousConfig = {
   configured: true,
   locator: "psilink",
@@ -313,6 +313,35 @@ describe("ReceiptsCard: a request that resolves while the operator edits", () =>
 });
 
 describe("ReceiptsCard: a failed request", () => {
+  test("tells the operator why the identity was not created, and what to change", async () => {
+    // The mint refusal the console raises before any child runs: the folder the
+    // key would land in is one the partner syncs. The whole response body is
+    // the category word, so this copy is the operator's only account of it. It
+    // says "a folder", not "the folder": a rendezvous leg holding the mount is
+    // as much a hold as one equal to it.
+    stubSigningApi({
+      responses: [{ body: { status: "identityInRendezvous" } }],
+    });
+    await renderCard();
+    await chooseCertificateMode();
+
+    await createButton().click();
+
+    await expect
+      .element(
+        page.getByText("Your signing identity was not created, because the", {
+          exact: false,
+        }),
+      )
+      .toBeInTheDocument();
+    expect(app.container.textContent).toContain(
+      "is a folder this console shares with your partner",
+    );
+    expect(app.container.textContent).toContain(
+      "then create your signing identity again",
+    );
+  });
+
   test("leaves no stale failure for the next visit to certificate mode", async () => {
     stubSigningApi({ responses: [{ status: 409 }, { body: okBody() }] });
     await renderCard();

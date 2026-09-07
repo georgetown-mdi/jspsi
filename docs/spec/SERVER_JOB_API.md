@@ -446,6 +446,15 @@ A hold the comparison could not establish -- a path component the console cannot
 
 The rejection is the one `POST /api/jobs` answer with a body: `400` `{ "reason": "signing-identity-in-rendezvous" }`. The token is an enumerated word and the whole body -- no path, no mount name, no message -- because the refusal is about the console's mounts, which the browser never learns, and the copy the operator reads is composed in the browser from the token. A token an older browser does not know reads as no token and falls back to that bundle's generic refusal copy.
 
+#### Stated limits
+
+The key half of the refusal is a presence probe on one fixed file name in the mounted data root, which on the refusing layout is a folder the partner writes into. Two consequences follow, accepted under the deployment's trust in an authenticated partner under a signed agreement rather than closed:
+
+- **The probe reads a name, not a key.** A file a partner plants at that name refuses an unsigned run that would have published nothing, and an identity the operator renamed is not seen, so a run that would publish it is admitted. Neither the file's contents nor its ownership is read.
+- **A document at that path is taken as this party's identity.** It is what `POST /api/jobs/signing/fingerprint` reports the fingerprint of, and what a run on any channel signs with. The CLI's load-or-create warns rather than refuses when the loaded certificate's bound label diverges from the agreed terms, and this endpoint discards that stderr; a document bound to the agreed label diverges from nothing. A partner able to write into the synced folder could therefore substitute one.
+
+The remedy for both is keeping the identity outside every folder a partner syncs (see [console-signing-identity-custody.md](../notes/console-signing-identity-custody.md)).
+
 ## The secrets mount and browsing
 
 `JOB_SECRETS_DIR` names an operator-mounted directory the console browses to pick a connection's credential file. Unlike `JOB_INPUT_DIR` and `JOB_RENDEZVOUS_DIR`, it has no `JOB_DATA_ROOT` fallback: when it is unset the secrets mount is simply unavailable -- a fallback would default the credential-browse surface into the per-job, client-writable data root, the one place a credential directory must never be. It is server-side configuration, never a browser-sent path.

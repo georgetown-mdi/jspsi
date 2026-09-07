@@ -80,7 +80,7 @@ function fingerprintFailureMessage(
     case "identityInRendezvous":
       return (
         "Your signing identity was not created, because the folder it would " +
-        "be written into is the folder this console shares with your partner. " +
+        "be written into is a folder this console shares with your partner. " +
         "A key there is a key your partner reads, and whoever holds it can " +
         "sign receipts in your name -- for every exchange, with every " +
         "partner. Give the shared folder a mount of its own " +
