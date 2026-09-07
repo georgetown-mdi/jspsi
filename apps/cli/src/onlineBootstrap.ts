@@ -443,10 +443,17 @@ export async function loadInputRows(
  * parser numbers the later one (`name`, `name_1`), which is neither position's
  * header and can be the untouched column's.
  *
- * What it says about disclosure is conditioned on the run: this loader serves
- * every CLI read, including an exchange whose config makes that column neither a
- * linkage field nor a payload column, in which case its name is transmitted
- * nowhere. The line states the matching name and any name the run sends.
+ * What it says about disclosure is bounded by what this read reaches: the names
+ * it derives from the header, which are the matching name and the sent name
+ * where the exchange takes that from the header. A name declared outside the
+ * header -- an explicit metadata block, a linkage field, a standardization
+ * output -- is not read from the header at all, keeps these characters, and
+ * reaches the partner wherever the run sends it, so the line says so and stops
+ * there. It names no remedy: this read serves every CLI path, including an
+ * accept whose declared names are the partner's invitation and a zero-setup run
+ * with no configuration at all, so no one document is the operator's to edit.
+ * The seat-specific refusal (`checkLinkageSatisfiability`) names who fixes
+ * it. Refusing such a name is the terms rule's, not this read's.
  */
 export function warnBidiStrippedColumns(
   positions: ReadonlyArray<number>,
@@ -456,9 +463,14 @@ export function warnBidiStrippedColumns(
   getLogger("input").warn(
     `column${plural ? "s" : ""} ${positions.join(", ")} of your CSV input ` +
       `had ${plural ? "names that held" : "a name that held"} invisible ` +
-      `text-direction characters. The characters are gone from the ` +
-      `name${plural ? "s" : ""} used for matching and from any name this ` +
-      `exchange sends your partner. ` +
+      `text-direction characters. The characters are gone from every name ` +
+      `this read takes from the header: the ` +
+      `name${plural ? "s" : ""} matched on, and the ` +
+      `name${plural ? "s" : ""} sent to your partner where the exchange ` +
+      `takes ${plural ? "them" : "it"} from the header. This read does not ` +
+      `change a name declared outside the header; one that holds these ` +
+      `characters is used as declared and reaches your partner wherever the ` +
+      `exchange sends it. ` +
       `Where that left two columns with the same name, the later one was ` +
       `numbered to keep the two apart. Check that ` +
       `${plural ? "those columns" : "the column"} still ` +

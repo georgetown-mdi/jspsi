@@ -112,15 +112,46 @@ describe("sanitizedColumnsAlert", () => {
     expect(alert.message).toContain("edit the header row");
   });
 
-  test("conditions the disclosure claim on what the exchange sends", () => {
-    // A column that is neither a linkage field nor a marked payload column has
-    // its name transmitted nowhere, so the copy states the names this removal
-    // reaches rather than asserting the changed name went to the partner.
+  test("bounds the removal to the names this read takes from the header", () => {
+    // The read reaches the names it derives from the header and nothing else: a
+    // name the linkage terms declare keeps these characters, so the copy claims
+    // no more than the derived names and says the declared one is untouched.
     const alert = sanitizedColumnsAlert([1]);
     expect(alert.message).toContain(
-      "from any name this exchange sends your partner",
+      "gone from every name this read takes from the header",
+    );
+    expect(alert.message).toContain(
+      "does not change a name the linkage terms declare",
     );
     expect(alert.message).not.toContain("and sent to your partner");
+    expect(alert.message).not.toContain(
+      "from any name this exchange sends your partner",
+    );
+  });
+
+  test("states what an untouched declared name costs, and names no remedy", () => {
+    // The consequence is the same on every seat that renders this; the edit is
+    // not. The acceptor seats hold terms the partner declared in an invitation,
+    // and the direct-exchange seats hold no terms at all, so the copy states
+    // one sentence and leaves the remedy to the seat that knows it.
+    const alert = sanitizedColumnsAlert([1]);
+    expect(alert.message).toContain(
+      "This read does not change a name the linkage terms declare; one that " +
+        "holds these characters is used as declared and reaches your partner " +
+        "wherever the exchange sends it.",
+    );
+    expect(alert.message).not.toContain("configuration");
+    expect(alert.message).not.toContain("invitation");
+    expect(alert.message).not.toContain("terms for this exchange");
+  });
+
+  test("interpolates no name, only the positions", () => {
+    // Every fragment is a fixed string or a position, so no header name and no
+    // partner-authored byte can reach the copy through this helper.
+    const alert = sanitizedColumnsAlert([2, 4]);
+    expect(alert.message).toContain("Columns 2, 4");
+    expect(alert.message).toMatch(/^[ -~]*$/);
+    expect(alert.message.match(/\d+/g)).toEqual(["2", "4"]);
   });
 
   test("states the numbering instead of claiming the name is the rest of the header", () => {

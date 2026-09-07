@@ -97,10 +97,16 @@ export function unnameableColumnsAlert(
  * parser numbers the later one (`name`, `name_1`), which is neither position's
  * header and can be the untouched column's.
  *
- * What it says about disclosure is conditioned on the exchange: a column that is
- * neither a linkage field nor a marked payload column has its name transmitted
- * nowhere. The copy states the matching name, the name this screen shows, and
- * any name the exchange sends.
+ * What it says about disclosure is bounded by what this read reaches: the names
+ * it derives from the header, which are the matching name, the name this screen
+ * shows, and the sent name where the exchange takes that from the header. A name
+ * the linkage terms declare is not read from the header at all and keeps these
+ * characters, so the copy states what that costs -- the name is used as declared
+ * and reaches the partner wherever the exchange sends it -- and stops there. It
+ * names no remedy: this notice serves every intake seat, including the acceptor
+ * seats whose terms are the partner's invitation and the direct-exchange seats
+ * with no terms to edit, so no one edit is the operator's to make. Refusing such
+ * a name is the terms rule's, not this read's.
  */
 export function sanitizedColumnsAlert(positions: ReadonlyArray<number>): {
   title: string;
@@ -114,11 +120,15 @@ export function sanitizedColumnsAlert(positions: ReadonlyArray<number>): {
     message:
       `Column${plural ? "s" : ""} ${positions.join(", ")} in your CSV ` +
       `${plural ? "had names that held" : "had a name that held"} invisible ` +
-      `text-direction characters. The characters are gone from the ` +
-      `name${plural ? "s" : ""} used for matching and shown on this screen, ` +
-      `and from any name this exchange sends your partner. Where that left ` +
-      `two columns with the same name, ` +
-      `the later one was numbered to keep the two apart. Check that ` +
+      `text-direction characters. The characters are gone from every name ` +
+      `this read takes from the header: the name${plural ? "s" : ""} matched ` +
+      `on, the name${plural ? "s" : ""} shown on this screen, and the ` +
+      `name${plural ? "s" : ""} sent to your partner where the exchange takes ` +
+      `${plural ? "them" : "it"} from the header. This read does not change a ` +
+      `name the linkage terms declare; one that holds these characters is ` +
+      `used as declared and reaches your partner wherever the exchange sends ` +
+      `it. Where that left two columns with the same name, the later one was ` +
+      `numbered to keep the two apart. Check that ` +
       `${plural ? "those columns" : "the column"} still ` +
       `${plural ? "read" : "reads"} the way your file names ` +
       `${plural ? "them" : "it"}; if not, edit the header row and choose the ` +

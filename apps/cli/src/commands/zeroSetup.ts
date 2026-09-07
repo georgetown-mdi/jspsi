@@ -280,10 +280,20 @@ async function prepareDataset(
 ): Promise<PreparedExchange> {
   const log = getLogger("psilink");
 
-  const { rawRows, columns } = await loadInputRows(input, {
-    allowStdin: true,
-  });
-  const prepared = prepareForExchange({}, identity, rawRows, columns);
+  const { rawRows, columns, sanitizedColumnPositions } = await loadInputRows(
+    input,
+    { allowStdin: true },
+  );
+  // The prepare resolves the metadata from this read's own columns, so it takes
+  // this read's changed positions with them: a header the removal emptied is
+  // refused naming the removal rather than the header-row causes.
+  const prepared = prepareForExchange(
+    {},
+    identity,
+    rawRows,
+    columns,
+    sanitizedColumnPositions,
+  );
   // Apply the operator's --linkage-strategy onto the terms prepareForExchange
   // authored (a no-op for cascade), so it rides into the exchange and the
   // --save spec; it never touches the standardization/dataset already built.

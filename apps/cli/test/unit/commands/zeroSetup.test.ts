@@ -773,6 +773,49 @@ test("handler: an input the prepare refuses exits 64 with no host-key probe", as
   }
 });
 
+test("handler: a header the strip emptied names the removal, not the trailing comma", async () => {
+  // The zero-setup run resolves its metadata from the columns its own read
+  // returned, so that read's changed positions travel with them: the operator's
+  // header held neither a trailing comma nor a blank cell, and the remedy for a
+  // name the removal emptied is a different one.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zerobidi-"));
+  const stderrChunks: string[] = [];
+  const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(((
+    chunk: string | Uint8Array,
+  ) => {
+    stderrChunks.push(String(chunk));
+    return true;
+  }) as never);
+  const exitSpy = captureProcessExit();
+  try {
+    const input = path.join(dir, "input.csv");
+    // U+202E RLO then U+2069 PDI, written as escapes so a fixture about
+    // invisible characters is itself readable.
+    fs.writeFileSync(input, "id,\u202e\u2069,city\n1,x,Springfield\n");
+
+    await expect(
+      handler({
+        _: ["file://localhost/drop", input],
+        $0: "psilink",
+        "config-file": path.join(dir, "psilink.yaml"),
+        "key-file": path.join(dir, ".psilink.key"),
+        identity: "Tester",
+        record: false,
+        "log-level": "error",
+      } as unknown as Arguments),
+    ).rejects.toThrow("exit:64");
+    const stderr = stderrChunks.join("");
+    expect(stderr).toContain("input column 2 has an empty name");
+    expect(stderr).toContain("nothing but invisible text-direction characters");
+    expect(stderr).not.toContain("trailing comma");
+  } finally {
+    getLogger("psilink").setLevel("silent");
+    stderrSpy.mockRestore();
+    exitSpy.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("handler: a credential @path naming a missing file exits 64 with no host-key probe", async () => {
   // The same invariant over the other local refusal the connect path holds: a
   // `--server-password @path` whose file is not there is decided from this

@@ -45,6 +45,13 @@ export interface LinkagePreflightMessaging {
    * and exchange hold terms a partner is held to as well; the mint holds none
    * until the invitation it is about to generate is sent. */
   termsStanding: LinkageTermsStanding;
+  /** Which remedy the declared-name sentence states ({@link
+   * bidiDeclaredNameNote}). The accept path reads the partner's invitation, a
+   * document this operator cannot edit, so telling this operator to declare the
+   * name differently names the wrong party. A configuration holds names this
+   * operator declared, or names an acceptance copied from an invitation
+   * verbatim, so the other seats take a remedy stating both. */
+  declaredNamesAuthor: "this party" | "the partner";
 }
 
 /**
@@ -104,16 +111,28 @@ function declaredNameDiffersOnlyByBidiControls(
 }
 
 /**
- * The sentence a refusal adds when a declared name holds those characters. Fixed
- * copy interpolating only the terms' origin noun: the name itself is terms
- * content, partner-authored on the accept path, and stays on the cause links
- * that carry names.
+ * The sentence a refusal adds when a declared name holds those characters,
+ * stating the remedy the seat can offer: the accept path reads the partner's
+ * invitation, so only a corrected invitation fixes it, while a configuration
+ * can hold either party's name and takes one remedy covering both. Beyond the
+ * origin noun both interpolate nothing -- the name itself is terms content,
+ * partner-authored on the accept path, and stays on the cause links that state
+ * names.
  */
-function bidiDeclaredNameNote(source: string): string {
+function bidiDeclaredNameNote(messaging: LinkagePreflightMessaging): string {
+  if (messaging.declaredNamesAuthor === "the partner")
+    return (
+      ` The ${messaging.source} names a column with invisible text-direction ` +
+      `characters, which this read removes from the CSV header, so no column ` +
+      `of this input matches it. Your partner has to declare that name ` +
+      `without them and send a new invitation.`
+    );
   return (
-    ` A name the ${source} declares holds invisible text-direction characters, ` +
-    `which this read removes from the CSV header, so it matches no column of ` +
-    `this input and has to be declared without them.`
+    ` A name the ${messaging.source} declares holds invisible text-direction ` +
+    `characters, which this read removes from the CSV header, so it matches ` +
+    `no column of this input. Declare it without them, or, if it came from ` +
+    `your partner's invitation, ask them for a new invitation that declares ` +
+    `it without them.`
   );
 }
 
@@ -209,7 +228,7 @@ export function checkLinkageSatisfiability(
     ...verdict.unsatisfiedFields.map((field) => field.name),
     ...(metadata ?? []).map((column) => column.name),
   ])
-    ? bidiDeclaredNameNote(messaging.source)
+    ? bidiDeclaredNameNote(messaging)
     : "";
 
   throw new LinkageTermsUnsatisfiableError(

@@ -614,15 +614,22 @@ export function resolveLinkageCardinality(
  * itself uses, exported so a front end that must inspect either before
  * preparing -- the outbound-payload confirmation -- resolves them exactly
  * as the run does.
+ *
+ * `sanitizedColumnPositions` are the 1-based positions the read that produced
+ * `columnNames` removed bidi control characters from. A caller holding that
+ * read's own positions passes them, so a header the removal emptied is refused
+ * naming it rather than the header-row causes; one handed a column list passes
+ * an empty list, saying so at the call site.
  */
 export function resolveExchangeInputs(
   exchangeDataSpec: ExchangeDataSpec,
   identity: string | undefined,
   columnNames: Array<string>,
+  sanitizedColumnPositions: ReadonlyArray<number>,
 ): { metadata: Metadata; linkageTerms: LinkageTerms } {
-  // A column list this is handed, not a read of its own: the intake that read
-  // the header holds the sanitized positions and refuses an empty name there.
-  const metadata = exchangeDataSpec.metadata ?? inferMetadata(columnNames, []);
+  const metadata =
+    exchangeDataSpec.metadata ??
+    inferMetadata(columnNames, sanitizedColumnPositions);
   return {
     metadata,
     linkageTerms:
@@ -656,12 +663,19 @@ export function resolveExchangeInputs(
  * @param rawRows Parsed CSV rows as plain string maps.
  * @param columnNames Column names from the CSV header (used when `metadata` is
  *                absent from `params`).
+ * @param sanitizedColumnPositions The 1-based positions the read that produced
+ *                `columnNames` removed bidi control characters from, so a header
+ *                the removal emptied is refused naming the removal rather than
+ *                the header-row causes. Defaults to none for a caller handed a
+ *                column list rather than a read of its own, which then states
+ *                those causes.
  */
 export function prepareForExchange(
   exchangeDataSpec: ExchangeDataSpec,
   identity: string | undefined,
   rawRows: Array<CSVRow>,
   columnNames: Array<string>,
+  sanitizedColumnPositions: ReadonlyArray<number> = [],
 ): PreparedExchange {
   const log = getLogger("exchange");
 
@@ -669,6 +683,7 @@ export function prepareForExchange(
     exchangeDataSpec,
     identity,
     columnNames,
+    sanitizedColumnPositions,
   );
 
   // Fail closed on an algorithm with no run path before any credential,

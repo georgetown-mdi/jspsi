@@ -2181,6 +2181,86 @@ function consentContext(): { configPath: string; logFile: string | undefined } {
   return { configPath: configFile, logFile: undefined };
 }
 
+test("prepareDataset: a header the strip emptied names the removal, not the trailing comma", async () => {
+  // This seat resolves its metadata from the columns loadInputRows returned, so
+  // the same read's changed positions have to travel with them: the operator's
+  // header held neither a trailing comma nor a blank cell, and the remedy for a
+  // name the removal emptied is a different one. Both committed shapes are
+  // driven -- terms in the config (the recurring one, whose linkage grading is
+  // handed a column list and would state the header-row causes) and none.
+  // U+202E RLO then U+2069 PDI, written as escapes so a fixture about invisible
+  // characters is itself readable.
+  const input = writeInput("id,\u202e\u2069,city\n1,x,Springfield\n");
+  for (const spec of [{}, { linkageTerms: nameDobTerms }]) {
+    mockState.warnings.length = 0;
+    const err = await prepareDataset(
+      spec,
+      "Test Party",
+      input,
+      consentContext(),
+    ).catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(UsageError);
+    const message = (err as Error).message;
+    expect(message).toContain("input column 2 has an empty name");
+    expect(message).toContain(
+      "nothing but invisible text-direction characters",
+    );
+    expect(message).not.toContain("trailing comma");
+    expect(
+      mockState.warnings.find((line) => line.includes("text-direction")),
+    ).toContain("column 2");
+  }
+});
+
+test("prepareDataset: the declared-name remedy covers whoever declared the name", async () => {
+  // A configuration holds names this operator declared and names `psilink
+  // accept` copied from an invitation verbatim, and nothing in the run tells the
+  // two apart, so the one sentence states both edits -- on a config an
+  // acceptance stands behind (expected_partner_deduplicate, which nothing else
+  // writes) as on one this operator wrote. U+202E RLO, written as an escape so a
+  // fixture about invisible characters is readable.
+  const declared = "n\u202eotes";
+  const terms: LinkageTerms = {
+    ...ssnOnlyTerms,
+    linkageFields: [{ name: declared, type: "ssn" }],
+    linkageKeys: [{ name: "SSN", elements: [{ field: declared }] }],
+  };
+  const input = writeInput("dob,notes\n1990-01-02,none\n");
+
+  for (const spec of [
+    { linkageTerms: terms },
+    { linkageTerms: terms, expectedPartnerDeduplicate: false },
+  ]) {
+    const thrown = await prepareDataset(
+      spec,
+      "Test Party",
+      input,
+      consentContext(),
+    ).catch((e: unknown) => e);
+    expect(thrown).toBeInstanceOf(UsageError);
+    expect(sanitizeErrorForDisplay(thrown)).toContain(
+      "A name the configuration declares holds invisible text-direction " +
+        "characters, which this read removes from the CSV header, so it " +
+        "matches no column of this input. Declare it without them, or, if it " +
+        "came from your partner's invitation, ask them for a new invitation " +
+        "that declares it without them.",
+    );
+    expect((thrown as Error).message).not.toContain("\u202e");
+  }
+});
+
+test("prepareDataset: the read's stripped positions reach prepareForExchange", async () => {
+  // The positions travel to both resolutions the run makes, the pre-flight one
+  // and the prepare itself: a spec with no metadata block infers it inside
+  // prepareForExchange, where a header the removal emptied has to be refused
+  // naming the removal rather than the header-row causes. U+202E RLO, written as
+  // an escape so a fixture about invisible characters is readable.
+  const input = writeInput("id,d\u202eob,city\n1,1990-01-02,Rome\n");
+  vi.mocked(prepareForExchange).mockClear();
+  await prepareDataset({}, "Test Party", input, consentContext());
+  expect(vi.mocked(prepareForExchange).mock.calls[0][4]).toEqual([2]);
+});
+
 test("prepareDataset: refuses (UsageError) naming the field when the CSV satisfies no linkage key", async () => {
   // A first_name-only CSV cannot produce the ssn field the lone key needs, so the
   // run must stop with a usage error rather than reach a silent empty exchange.
