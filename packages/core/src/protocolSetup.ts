@@ -10,6 +10,11 @@ import { MAX_RECORD_COUNT } from "./connection/frameSize";
 import { randomBytes, toBase64Url } from "./utils/crypto";
 import { describeDecodeError } from "./utils/describeDecodeError";
 import { redactPrivateKeyMaterial } from "./utils/sanitizeErrorForDisplay";
+import {
+  errorWithPartnerCauseLinks,
+  partnerOriginTextList,
+} from "./utils/partnerOriginText";
+import type { PartnerOriginTextList } from "./utils/partnerOriginText";
 import { boundedArray } from "./utils/boundedArray";
 import {
   receiveParsed,
@@ -146,11 +151,19 @@ const termsMessage = z.object({
   hostKey: hostKeyField,
 });
 
+// Branded at the decode, so a reason reaches the operator only as the labelled
+// cause link errorWithPartnerCauseLinks builds (utils/partnerOriginText.ts):
+// the reasons are partner-written free text, and a plain `string[]` leaves
+// every composition site free to join them into first-party copy, where one
+// reason's planted marker or unbounded length spends the display budget the
+// sentence beside it needs.
 const abortReasonsField = boundedArray(
   z.string(),
   MAX_ABORT_REASONS,
   `abortReasons must not exceed ${MAX_ABORT_REASONS} entries`,
-).optional();
+)
+  .transform(partnerOriginTextList)
+  .optional();
 
 // `recordCount` is optional here (unlike message 1) because this frame
 // doubles as the responder's abort frame, which holds no role metadata --
@@ -198,6 +211,24 @@ export const TERMS_ENVELOPE_FIELDS: Readonly<Record<string, Array<string>>> = {
 const sharedSecretMessage = z.object({
   sharedSecret: z.string().regex(SHARED_SECRET_REGEX),
 });
+
+// The abort both slots of the terms exchange throw: the same first-party
+// sentence from either side, with each of the partner's reasons on a labelled
+// cause link of its own. The sentence holds no partner byte, so a reason can
+// neither delete it nor spend another reason's display budget.
+const PARTNER_ABORT_MESSAGE = "partner aborted linkage terms exchange";
+const PARTNER_ABORT_REASON_LABEL = "reason the partner gave: ";
+
+const partnerAbortError = (
+  reasons: PartnerOriginTextList | undefined,
+): Error =>
+  reasons === undefined
+    ? new Error(PARTNER_ABORT_MESSAGE)
+    : errorWithPartnerCauseLinks(
+        PARTNER_ABORT_MESSAGE,
+        PARTNER_ABORT_REASON_LABEL,
+        reasons,
+      );
 
 // --- Terms exchange ----------------------------------------------------------
 
@@ -460,18 +491,7 @@ export async function exchangeTerms(
 
     const msg = parseOrProtocolError(termsWithDecisionMessage, rawMsg);
 
-    if (msg.decision === "abort") {
-      // The reasons are partner-written free text joined into one rendered
-      // link, so each is redacted where it is composed: the dangling-BEGIN
-      // rule is fail-closed to the end of that link, and a marker in one
-      // unredacted reason takes every reason behind it with it.
-      throw new Error(
-        "partner aborted linkage terms exchange" +
-          (msg.abortReasons?.length
-            ? `: ${msg.abortReasons.map(redactPrivateKeyMaterial).join("; ")}`
-            : ""),
-      );
-    }
+    if (msg.decision === "abort") throw partnerAbortError(msg.abortReasons);
 
     // A `proceed` frame always holds the partner's record count (only the
     // abort frame omits it; see termsWithDecisionMessage). Its absence here
@@ -607,15 +627,7 @@ export async function exchangeTerms(
     });
 
     const msg = await receiveParsed(conn, decisionMessage);
-    if (msg.decision === "abort") {
-      // Redacted per reason, as in the initiator branch above.
-      throw new Error(
-        "partner aborted linkage terms exchange" +
-          (msg.abortReasons?.length
-            ? `: ${msg.abortReasons.map(redactPrivateKeyMaterial).join("; ")}`
-            : ""),
-      );
-    }
+    if (msg.decision === "abort") throw partnerAbortError(msg.abortReasons);
 
     return {
       partnerTerms: partnerTerms!,
