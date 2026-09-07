@@ -155,6 +155,21 @@ const NORMALIZED = [
     want: "The points:\n\none\n\ntwo",
   },
   {
+    name: "a list under a heading, with no blank line between them",
+    body: "## Steps\n- one\n- two",
+    want: "Steps\n\none\n\ntwo",
+  },
+  {
+    name: "a numbered list under a heading",
+    body: "## Steps\n1. one\n2. two",
+    want: "Steps\n\none\n\ntwo",
+  },
+  {
+    name: "a list under a lead-in whose colon is inside emphasis",
+    body: "**The points:**\n- one\n- two",
+    want: "The points:\n\none\n\ntwo",
+  },
+  {
     name: "prose whose wrapped line opens on a year",
     body: "The release landed and\n2026. The next one is in May.",
     want: "The release landed and 2026. The next one is in May.",
@@ -191,6 +206,34 @@ describe("format-squash-message normalizing", () => {
       const once = normalizeDraft(source);
       expect(normalizeDraft(once), source).toBe(once);
       expect(violations(once, 1374), source).toEqual([]);
+    }
+  });
+});
+
+// Draft shapes the normalizer must leave nothing in for its own check to
+// report: every marker kind above, plus the combinations a `claude -p` answer
+// arrives in -- a list under a heading, a nested item, a fence around prose, an
+// indented block, a paragraph written at some other width.
+const CORPUS = [
+  ...NORMALIZED.map(({ body }) => body),
+  "## Steps\n- one\n  - nested under one\n- two\n\nClosing prose.",
+  "Intro line.\n## A heading mid-block\n- one\n- two",
+  "The points:\n1. one\n2) two\n\n> a quoted line\n\n```\na fenced line\n```",
+  "See [the design](docs/DESIGN.md):\n- **first** point\n- `second` point",
+  "  psilink exchange --config a.yaml\n  psilink doctor",
+  "## Heading\n\n    an indented block under it",
+  "## Heading\n- item\n\n    an indented block after the list",
+  `${"word ".repeat(40)}end`,
+  `Lead-in:\n- ${"word ".repeat(30)}end\n- second`,
+  "A paragraph.\n\n## Another heading\n+ plus item\n+ another",
+];
+
+describe("format-squash-message normalized output", () => {
+  it("leaves nothing for the check to report, whatever the shape", () => {
+    for (const body of CORPUS) {
+      const once = normalizeDraft(draft(body));
+      expect(violations(once, 1374), body).toEqual([]);
+      expect(normalizeDraft(once), body).toBe(once);
     }
   });
 });
@@ -377,6 +420,22 @@ describe("format-squash-message as a command", () => {
     expect(() => readFileSync(target, "utf8")).toThrow();
   });
 
+  // The check over its own output has one shape that reaches it: the wrap put a
+  // marker at the front of a line whose line above ends in a colon, which the
+  // next pass reads as a list. The run fails there rather than write a message
+  // the hook over the file would refuse.
+  it("writes nothing when its own check rejects what it produced", () => {
+    const directory = tempDirectory();
+    const target = join(directory, "1374.txt");
+    const body = `${"word ".repeat(12)}budget: 12. A sentence the wrap pushes onto the next line.`;
+    const result = run(["1374", "--out", target], draft(body));
+    expect(result.status).toBe(2);
+    expect(result.stderr).toContain("bug in the script");
+    expect(result.stderr).toContain("prose, not a list");
+    expect(result.stderr).toContain("Nothing was written");
+    expect(() => readFileSync(target, "utf8")).toThrow();
+  });
+
   it("prints its usage rather than guessing at a bad argument list", () => {
     const result = run([]);
     expect(result.status).toBe(2);
@@ -384,25 +443,69 @@ describe("format-squash-message as a command", () => {
   });
 });
 
-describe("format-squash-message against real commit messages", () => {
-  // The repository's own recent history is the only corpus that proves the
-  // refusals do not fire on messages written under the rules they encode.
-  it("refuses none of the last fifty commits on this branch", () => {
-    const log = execFileSync(
-      "git",
-      ["-C", REPO_ROOT, "log", "-50", "--format=%s%n%n%b%x00"],
-      { encoding: "utf8" },
-    );
-    for (const message of log.split("\0").filter((m) => m.trim() !== "")) {
+/**
+ * The recent commits that landed through a squash merge, each as the draft it
+ * would have been written from: the suffix GitHub appended taken back off. `git
+ * log` ends each record with the NUL and then a newline, so the newline opening
+ * every record after the first is dropped -- keeping it leaves a blank subject
+ * line and a corpus that matches nothing.
+ */
+function landedCommits(count) {
+  const log = execFileSync(
+    "git",
+    ["-C", REPO_ROOT, "log", `-${count}`, "--format=%s%n%n%b%x00"],
+    { encoding: "utf8" },
+  );
+  return log
+    .split("\0")
+    .map((message) => message.replace(/^\n/, ""))
+    .filter((message) => message.trim() !== "")
+    .flatMap((message) => {
       const landed = /^(?<subject>.*?)(?<suffix> \(#(?<number>\d+)\))?$/.exec(
         message.split("\n")[0],
       );
-      if (landed.groups.number === undefined) continue;
-      const withoutSuffix = message.replace(landed.groups.suffix, "");
+      if (landed.groups.number === undefined) return [];
+      return [
+        {
+          subject: landed.groups.subject,
+          message: message.replace(landed.groups.suffix, ""),
+          prNumber: Number(landed.groups.number),
+        },
+      ];
+    });
+}
+
+/**
+ * The problems reported about a message's body. STATED LIMIT: subjects that
+ * landed before this budget was checked run past it, so the history proves the
+ * body rules only; the subject budget is measured on its own above.
+ */
+const bodyProblems = (found) =>
+  found.filter((problem) => !problem.startsWith("The subject is"));
+
+describe("format-squash-message against real commit messages", () => {
+  // The repository's own recent history is the only corpus that proves the
+  // rules do not fire on messages written under them.
+  const landed = landedCommits(50);
+
+  it("reads a corpus of messages rather than an empty list", () => {
+    expect(landed.length).toBeGreaterThan(10);
+  });
+
+  it("refuses no body among the last fifty commits", () => {
+    for (const { subject, message, prNumber } of landed) {
       expect(
-        formatDraft(withoutSuffix, Number(landed.groups.number)).refusals,
-        landed.groups.subject,
+        bodyProblems(formatDraft(message, prNumber).refusals),
+        subject,
       ).toEqual([]);
+    }
+  });
+
+  it("leaves nothing for the check to report on what it normalizes", () => {
+    for (const { subject, message, prNumber } of landed) {
+      const once = normalizeDraft(message);
+      expect(bodyProblems(violations(once, prNumber)), subject).toEqual([]);
+      expect(normalizeDraft(once), subject).toBe(once);
     }
   });
 });

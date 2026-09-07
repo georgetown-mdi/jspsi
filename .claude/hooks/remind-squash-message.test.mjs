@@ -372,8 +372,8 @@ describe("remind-squash-message hook", () => {
     const dir = track(makeRepo(2));
     const path = join(dir, "scratch", "squash-messages", "5.txt");
     expect(context(prCreateEvent(dir, ghOutput(5)))).toContain(
-      `${join(dir, ".claude", "scripts", "format-squash-message.mjs")} 5 ` +
-        `/tmp/squash-message.txt --out ${path}`,
+      `'${join(dir, ".claude", "scripts", "format-squash-message.mjs")}' 5 ` +
+        `/tmp/squash-message.txt --out '${path}'`,
     );
   });
 

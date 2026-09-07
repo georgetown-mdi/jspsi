@@ -10,9 +10,9 @@ push:
   provisions its `node_modules`
 - `squash-message.mjs`, which drafts the squash message a pull request lands as,
   and `format-squash-message.mjs`, which rewraps a draft's body, drops the
-  markdown and list markers a commit message does not take, and reports the two
-  Commit Messages rules it cannot fix without rewriting the message. It holds
-  the subject budget and the wrap column, which the reminder hook and the
+  markdown and list markers a commit message does not take, and reports what it
+  cannot fix without rewriting the message. It holds the subject budget and the
+  wrap column, which the reminder hook and the
   `block-nonconforming-squash-message.mjs` guard both read rather than restate
 - `verify-nonexecutable-delta.mjs`, which decides whether a review attestation
   survives a moved head, and `verify-rebase-invariance.mjs`, which decides the

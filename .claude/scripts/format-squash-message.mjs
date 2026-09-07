@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 //
-// Normalize a squash-and-merge commit message draft, and refuse the two parts of
-// it a machine cannot fix. Reads the draft from a path or stdin, writes the
-// normalized message to stdout or to `--out <path>`.
+// Normalize a squash-and-merge commit message draft, and refuse what a machine
+// cannot fix without rewriting the message. Reads the draft from a path or
+// stdin, writes the normalized message to stdout or to `--out <path>`.
 //
 // Usage:
 //   node format-squash-message.mjs <pr-number|unassigned> [<draft-path>] [--out <path>]
@@ -18,17 +18,20 @@
 // THE SPLIT BETWEEN NORMALIZING AND REFUSING is whether the fix keeps the words.
 // Rewrapping a paragraph, dropping a markdown marker, turning a list item into a
 // paragraph, and putting the blank line under the subject all leave the text
-// saying what it said, so they happen silently. Two things are refused instead:
-// a subject over the budget, which cannot be shortened without dropping
-// something the subject says, and an over-wide line inside an indented block,
-// which cannot be reflowed without destroying the shape it was indented for.
+// saying what it said, so they happen silently. A fix that would not keep them
+// is refused instead: shortening a subject over the budget drops something it
+// says, and reflowing an over-wide line inside an indented block destroys the
+// shape it was indented for. `refusals` below is the enumeration.
 //
 // WHAT A CHECK OVER AN ALREADY-WRITTEN DRAFT ASKS. `violations` is empty
-// exactly when neither refusal fires and the draft is what this script produces
-// from it, character for character, so the hook gating a hand-written file has
-// one question to ask and the file this script writes always passes it. A body
+// exactly when no refusal fires and the draft is what this script produces from
+// it, character for character, so the hook gating a hand-written file has one
+// question to ask and the file this script writes always passes it. A body
 // wrapped by hand at some other column is not what it produces; the fix is one
-// run of this script.
+// run of this script. Both entry points -- this one and squash-message.mjs --
+// run `violations` over what normalizing produced and refuse to hand on output
+// it rejects, so a shape the normalizer mangles is a failed run rather than a
+// mangled message the maintainer pastes.
 //
 // WHAT NORMALIZING DOES TO MARKDOWN. Emphasis and an inline code span lose their
 // markers and keep the text. A heading marker, a code fence line, and a
@@ -161,9 +164,19 @@ function blocksOf(body) {
 }
 
 /**
+ * Whether a line a marker sits under is a line a list is written below: a
+ * heading, which normalizing gives a paragraph of its own, or a lead-in ending
+ * in a colon once its own markers are stripped, so that "The points:" opens one
+ * however it was emphasized.
+ */
+function opensList(above) {
+  return HEADING.test(above) || plainText(above).endsWith(":");
+}
+
+/**
  * Which lines of the block start a list item. A marker at column 0 starts one
  * where the block opens on it, where an item is already open, or where the line
- * above ends in a colon; anywhere else it is a word that happens to sit at the
+ * above opens a list; anywhere else it is a word that happens to sit at the
  * front of a wrapped line, and splitting there would lose it.
  */
 function itemStarts(block) {
@@ -173,7 +186,7 @@ function itemStarts(block) {
     const line = raw.replace(BLOCKQUOTE, "");
     const above = index === 0 ? "" : block[index - 1].replace(BLOCKQUOTE, "");
     const item =
-      TOP_LEVEL_LIST.test(line) && (index === 0 || open || above.endsWith(":"));
+      TOP_LEVEL_LIST.test(line) && (index === 0 || open || opensList(above));
     starts.push(item);
     open ||= item;
   }
@@ -459,6 +472,20 @@ export function refusalReport(broken) {
   );
 }
 
+/**
+ * The report for output `violations` still rejects: normalizing produced a
+ * message its own check refuses, which is a bug here rather than something the
+ * draft's author can reword around.
+ */
+export function selfCheckReport(broken) {
+  return (
+    "format-squash-message.mjs produced a message that breaks the rules it " +
+    "checks for, which is a bug in the script:\n" +
+    broken.map((problem) => `  - ${problem}\n`).join("") +
+    "Write the message by hand under CONTRIBUTING.md's Commit Messages rules.\n"
+  );
+}
+
 // CLI entry: only runs when invoked directly, so the hook and the tests can
 // import the functions above without reading stdin.
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
@@ -477,6 +504,11 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const { text, refusals: broken } = formatDraft(draft, args.prNumber);
   if (broken.length > 0) {
     process.stderr.write(`${refusalReport(broken)}Nothing was written.\n`);
+    process.exit(2);
+  }
+  const remaining = violations(text, args.prNumber);
+  if (remaining.length > 0) {
+    process.stderr.write(`${selfCheckReport(remaining)}Nothing was written.\n`);
     process.exit(2);
   }
   if (args.out === null) {

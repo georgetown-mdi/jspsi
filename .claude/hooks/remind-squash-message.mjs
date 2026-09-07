@@ -167,10 +167,12 @@ const MESSAGE_RULES =
   "the Commit Messages rules in CONTRIBUTING.md (no markdown, no board ids, no " +
   "self-attribution)";
 
+// The script and the target are quoted so that a checkout path holding a space
+// still copies out of the reminder as one argument.
 function normalizerCommand(root, key, path) {
   const script = join(root, NORMALIZER_SUBPATH);
   const prArgument = /^\d+$/.test(key) ? key : "unassigned";
-  return `node ${script} ${prArgument} /tmp/squash-message.txt --out ${path}`;
+  return `node '${script}' ${prArgument} /tmp/squash-message.txt --out '${path}'`;
 }
 
 function fileReminder(count, root, key) {

@@ -1,10 +1,9 @@
 #!/usr/bin/env node
 // PreToolUse hook: refuse a Write or Edit that would leave a squash-and-merge
 // draft under scratch/squash-messages/ that is not what
-// ../scripts/format-squash-message.mjs produces from it, or that breaks one of
-// the two Commit Messages rules the normalizer cannot fix -- a subject over
-// budget once GitHub's " (#NNNN)" suffix is counted, an over-wide line inside an
-// indented block.
+// ../scripts/format-squash-message.mjs produces from it, or that breaks a
+// Commit Messages rule the normalizer cannot fix without rewriting the message
+// -- the `refusals` function there enumerates those.
 //
 // Why this exists: the maintainer pastes one of these files verbatim into the
 // merge box, so what it holds is what lands in the history, and a reminder
@@ -126,8 +125,8 @@ function block(path, prNumber, broken) {
       `Write the draft to /tmp and normalize it from there: \`node ${NORMALIZER} ` +
       `${prArgument} /tmp/squash-message.txt --out '${path}'\`. That rewraps the body at ` +
       `${BODY_WRAP_COLUMNS} columns, strips the markdown and the list markers, reports ` +
-      "the two things it cannot fix without rewriting the message, and writes the file " +
-      "itself, so no Write call is needed.\n",
+      "what it cannot fix without rewriting the message, and writes the file itself, so " +
+      "no Write call is needed.\n",
   );
   process.exit(2);
 }

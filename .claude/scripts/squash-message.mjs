@@ -38,11 +38,12 @@
 //
 // THE DRAFT GOES OUT THROUGH THE NORMALIZER. format-squash-message.mjs rewraps
 // the body at the column CONTRIBUTING.md sets and strips the markdown a `claude
-// -p` run wraps its answer in, a code fence included. It reports the two things
-// it cannot fix without rewriting the message -- an over-budget subject, an
-// over-wide line inside an indented block -- and a draft that trips one of those
-// is printed as the run produced it, with the reasons on stderr and a nonzero
-// exit, rather than half-fixed into something that reads finished.
+// -p` run wraps its answer in, a code fence included. It reports what it cannot
+// fix without rewriting the message, and a draft that trips one of those is
+// printed as the run produced it, with the reasons on stderr and a nonzero exit,
+// rather than half-fixed into something that reads finished. What normalizing
+// does produce goes back through the normalizer's own check, so output that
+// check rejects fails the run instead of reaching stdout.
 //
 // The prompt goes in on STDIN, and each tool list is one comma-joined token.
 // Both are what the real CLI needs rather than preferences: `--allowedTools` and
@@ -54,7 +55,12 @@ import { spawnSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
-import { formatDraft, refusalReport } from "./format-squash-message.mjs";
+import {
+  formatDraft,
+  refusalReport,
+  selfCheckReport,
+  violations,
+} from "./format-squash-message.mjs";
 
 /** Repository root: this script lives at .claude/scripts/ inside it. */
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -200,6 +206,12 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   if (refusals.length > 0) {
     process.stdout.write(drafted);
     process.stderr.write(refusalReport(refusals));
+    process.exit(2);
+  }
+  const remaining = violations(text, prNumber);
+  if (remaining.length > 0) {
+    process.stdout.write(drafted);
+    process.stderr.write(selfCheckReport(remaining));
     process.exit(2);
   }
   process.stdout.write(text);
