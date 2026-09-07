@@ -616,20 +616,22 @@ export function applyManagedExchangeReinviteRotation(
  * chronological.
  *
  * Monotonic on `at`: an entry older than the stored one leaves the record
- * unchanged. The run+rotate lock serializes the runs it binds, but a schedule
- * advance's verdict on a closed window is written outside it, so an entry
- * stamped behind the stored one could otherwise land after -- and mask -- a
- * newer outcome; this guard makes the stale write a no-op instead.
+ * unchanged. The run+rotate lock serializes the runs it binds, but a failing
+ * run's bookkeeping tail ({@link ./managedRun.ts}) is stamped and written after
+ * its lock has released, so an entry stamped behind the stored one could
+ * otherwise land after -- and mask -- a newer outcome; this guard makes the
+ * stale write a no-op instead.
  *
  * A failure never overwrites a success stamped after its own run began:
  * `runStartedAtMs` is the instant the run producing `lastRun` began, and a
  * non-`"succeeded"` outcome is dropped when the stored entry is a
  * `"succeeded"` one stamped at or after it. The `at` comparison alone does not
- * cover this: another context can complete a whole run inside a failing run's
- * peer wait, so the failure is the newer stamp and would land over it. A
- * success is the unrecoverable entry -- nothing re-derives it once overwritten,
- * and a scheduled window that then folds to a miss counts one that was met --
- * so a stamp sharing the run's start instant is kept too. */
+ * cover this: a failing run's tail is stamped after its lock has released, so
+ * another context can run a whole exchange under the lock and record its
+ * success in between, leaving the failure as the newer stamp that would land
+ * over it. A success is the unrecoverable entry -- nothing re-derives it once
+ * overwritten, and a scheduled window that then folds to a miss counts one that
+ * was met -- so a stamp sharing the run's start instant is kept too. */
 export function applyManagedExchangeLastRun(
   record: ManagedExchangeRecord,
   lastRun: ManagedExchangeLastRun,

@@ -249,17 +249,20 @@ and each drops the entry whole rather than writing part of it:
 
 - **Monotonic on `at`.** An entry stamped before the stored one is dropped. The
   [run+rotate lock](#the-secret-is-a-linear-resource) serializes the runs it
-  binds, but not every entry reaches this write from inside it -- a [schedule
-  advance](#catch-up-on-wake)'s verdict on a closed window is written outside
-  the lock -- so an entry stamped behind the stored one can still arrive; this
-  rule makes it a no-op instead.
+  binds, but not every entry reaches this write from inside it -- a run that
+  fails stamps and writes its bookkeeping tail
+  (`apps/web/src/psi/managed/managedRun.ts`) after its lock has released -- so
+  an entry stamped behind the stored one can still arrive; this rule makes it a
+  no-op instead.
 - **A failure MUST NOT overwrite a success stamped after its own run began.**
   Every write states the instant its run began -- stamped before the run's first
   check, so it precedes every act the run makes -- and an entry whose outcome is
   not `"succeeded"` is dropped when the stored entry is a `"succeeded"` one
-  stamped at or after that instant. The rule above does not cover this: another
-  context can complete a whole exchange inside a failing run's peer wait, so the
-  failure is the newer stamp and would otherwise land over the success.
+  stamped at or after that instant. The rule above does not cover this: a
+  failing run's bookkeeping tail is stamped after its lock has released, so
+  another context can run a whole exchange under the lock and record its success
+  in between -- leaving the failure as the newer stamp, which would otherwise
+  land over that success.
 
 The second rule is what makes an inter-attempt yield safe (see [Occupying a due
 window](#occupying-a-due-window)): the free interval it opens is exactly when an
@@ -519,7 +522,12 @@ An operator's own Run can take the lock in any such free interval and rotate
 the shared secret, and the occupancy's later attempts then run against a
 rotated record. Their own `lastRun` cannot land over that run's success: the
 write rule in [Recording a run outcome](#recording-a-run-outcome) holds a
-failing run's entry off a success stamped after that run began. A designed
+failing run's entry off a success stamped after that run began. An attempt that
+instead meets that Run still in flight -- the lock spans its payload exchange --
+is refused rather than queued, since the scheduled path takes the lock
+fail-fast: the window's disposition is `"unattempted"`, the occupancy ends
+there, and the schedule advances past the window, so the window is consumed
+rather than re-attempted against the rotated record. A designed
 inter-attempt yield -- one that makes the free interval wide enough for an
 attended Run to take rather than leaving it to how an attempt happened to
 fail -- is deferred rather than designed away.
@@ -659,6 +667,10 @@ a scheduled attempt are each refused or queued across the whole run, the payload
 exchange included, rather than across its rotation alone. A [hand-off
 spend](#the-backup-marker-the-spent-state-and-the-import-marker-local-siblings-never-in-the-artifact)
 contends for that same lock, so it too is refused while an exchange is in flight.
+A stated limit of that width: the partner influences how long the payload
+exchange takes, and the run's cancel does not cut it (`runExchange` is called
+without the run's `AbortSignal`), so the lock is held until that exchange settles
+or the holding tab is destroyed, which releases it.
 Export/import between devices is **migration, not sync** (the source copy is
 invalidated on export). Both are specified in
 [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md#single-device-ownership).

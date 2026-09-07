@@ -649,9 +649,12 @@ attempt begins as soon as the last one's wait ends, so a runner occupying a
 window holds the lock essentially continuously from the window's open to its
 close -- hours, at the widths the design intends. An operator who opens the app
 during an occupied window and runs the exchange by hand is told a run is already
-in progress, and keeps being told until a run lands or the window closes. That
-is the single-writer property working as intended rather than a fault, and the
-operator's run is available again the moment the window is over.
+in progress, and keeps being told for as long as an attempt holds the lock. That
+is the single-writer property working as intended rather than a fault. An
+attempt's wait for the partner is clamped to the window's close, but a handshake
+that completes just before the close holds the lock through the payload exchange
+that follows, so the operator's Run is available again once the exchange in
+flight settles -- which can be after the window is over.
 
 The lock is a same-profile **liveness guard**, not a persistent claim: it is
 auto-released when the holding tab or worker is destroyed, and it is taken

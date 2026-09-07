@@ -845,10 +845,10 @@ describe("runManagedExchange: persist-before-success end to end", () => {
     const releaseRun = deferred<void>();
 
     // The run parks in its data exchange, holding the lock; its success
-    // bookkeeping will land last, stamped with the older clock. No second run of
-    // this record can be in flight beside it, but a write the lock does not bind
-    // -- a schedule advance's entry on a closed window -- still can, and lands
-    // here with the newer stamp.
+    // bookkeeping will land last, stamped with the older clock. It stands in for
+    // the write the lock does not bind -- a failing run's bookkeeping tail,
+    // stamped and written after its own lock has released (managedRun.ts) --
+    // arriving behind the newer entry written here.
     const run = runManagedExchange({
       record: created,
       runStartedAtMs: Date.now(),
