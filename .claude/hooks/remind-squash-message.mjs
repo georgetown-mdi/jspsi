@@ -18,6 +18,11 @@
 // number has a stable address, and scratch/ is gitignored, so a draft parked
 // there never becomes repository content.
 //
+// THE FORMAT RULES ARE NOT RESTATED HERE. The subject budget and the body wrap
+// live in ../scripts/format-squash-message.mjs, which the reminder names as the
+// step that places the file; block-nonconforming-squash-message.mjs refuses a
+// draft written past it. Prose here would be a second copy of two numbers.
+//
 // THE COUNT IS TAKEN OVER THE BRANCH THE PULL REQUEST IS OPENED FOR, not over
 // the event cwd's HEAD. The repo's by-ref review flow opens pull requests from
 // the main checkout with `--head <branch>` while that checkout sits on staging,
@@ -87,6 +92,11 @@ import { git } from "./lib/shell.mjs";
 
 const PR_BASE = "origin/staging";
 const MESSAGE_SUBDIR = join("scratch", "squash-messages");
+const NORMALIZER_SUBPATH = join(
+  ".claude",
+  "scripts",
+  "format-squash-message.mjs",
+);
 const CANDIDATE_FIELDS = ["output", "stdout", "stderr", "content"];
 
 // A PR URL as `gh pr create` prints it on success, matched loosely enough to
@@ -155,16 +165,25 @@ function mainCheckoutRoot(cwd) {
 const MESSAGE_RULES =
   "an imperative subject plus a prose body summarizing the whole change, under " +
   "the Commit Messages rules in CONTRIBUTING.md (no markdown, no board ids, no " +
-  "self-attribution), with the subject inside CONTRIBUTING.md's 50-character " +
-  'limit, which counts the " (#NNNN)" suffix GitHub appends at squash time';
+  "self-attribution)";
 
-function fileReminder(count, path) {
+function normalizerCommand(root, key, path) {
+  const script = join(root, NORMALIZER_SUBPATH);
+  const prArgument = /^\d+$/.test(key) ? key : "unassigned";
+  return `node ${script} ${prArgument} /tmp/squash-message.txt --out ${path}`;
+}
+
+function fileReminder(count, root, key) {
+  const path = join(root, MESSAGE_SUBDIR, `${key}.txt`);
   return (
     `This PR branch has ${count} commits over ${PR_BASE}. Write a ready-to-paste ` +
-    `squash-and-merge commit message to ${path} -- ${MESSAGE_RULES}. Report only ` +
-    "that path and the subject line in your reply: the maintainer reads the " +
-    "message out of the file when they squash-merge, and a body printed into the " +
-    "transcript is out of reach by then."
+    `squash-and-merge commit message to ${path} -- ${MESSAGE_RULES}. Draft it in ` +
+    `/tmp/squash-message.txt and let the normalizer place it: \`${normalizerCommand(root, key, path)}\`, ` +
+    "which rewraps the body, checks the subject against the budget GitHub's " +
+    "suffix leaves it, and writes the file itself. Report only that path and the " +
+    "subject line in your reply: the maintainer reads the message out of the file " +
+    "when they squash-merge, and a body printed into the transcript is out of " +
+    "reach by then."
   );
 }
 
@@ -172,7 +191,10 @@ function printReminder(count) {
   return (
     `This PR branch has ${count} commits over ${PR_BASE}. Print a ready-to-use ` +
     "squash-and-merge commit message for the maintainer to paste when squash-" +
-    `merging -- ${MESSAGE_RULES}.`
+    `merging -- ${MESSAGE_RULES}. Draft it in /tmp/squash-message.txt and print ` +
+    `what \`node ${NORMALIZER_SUBPATH} <pr-number> /tmp/squash-message.txt\` ` +
+    "returns, which rewraps the body and checks the subject against the budget " +
+    "GitHub's suffix leaves it."
   );
 }
 
@@ -187,9 +209,7 @@ function singleCreateReminder(cwd, command, toolResponse) {
 
   const key = prNumbersFromResponse(toolResponse).at(-1) ?? branchKey(cwd);
   const root = key === null ? null : mainCheckoutRoot(cwd);
-  return root === null
-    ? printReminder(count)
-    : fileReminder(count, join(root, MESSAGE_SUBDIR, `${key}.txt`));
+  return root === null ? printReminder(count) : fileReminder(count, root, key);
 }
 
 // One reminder per created pull request whose branch has more than one
@@ -206,10 +226,10 @@ function multiCreateReminder(cwd, command, toolResponse) {
   const reminders = headRefs
     .map((headRef, index) => ({
       count: commitCountOverBase(cwd, headRef),
-      path: join(root, MESSAGE_SUBDIR, `${prNumbers[index]}.txt`),
+      key: prNumbers[index],
     }))
     .filter(({ count }) => count !== null && count > 1)
-    .map(({ count, path }) => fileReminder(count, path));
+    .map(({ count, key }) => fileReminder(count, root, key));
   return reminders.length === 0 ? null : reminders.join("\n");
 }
 

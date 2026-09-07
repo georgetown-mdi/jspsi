@@ -1,11 +1,5 @@
 import { execFileSync, spawnSync } from "node:child_process";
-import {
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -358,12 +352,13 @@ describe("remind-squash-message hook", () => {
     expect(additionalContext).not.toContain("squash-messages");
   });
 
-  // The subject budget is the rule most easily lost in a later edit of the copy:
-  // GitHub appends " (#NNNN)" when it squash-merges, so a subject drafted to the
-  // full 50 characters lands over the limit.
-  it("names the message rules whichever reminder it emits", () => {
+  // The subject budget and the body wrap live in the normalizer, so what a later
+  // edit of this copy must not lose is the pointer to it: a reminder naming
+  // neither the rules document nor the script leaves the session restating
+  // limits from memory.
+  it("names the rules document and the normalizer in either reminder", () => {
     const dir = track(makeRepo(2));
-    const rules = ["CONTRIBUTING.md", "50-character", '" (#NNNN)"'];
+    const rules = ["CONTRIBUTING.md", "format-squash-message.mjs"];
     const fileContext = context(prCreateEvent(dir, ghOutput(5)));
     execFileSync("git", ["-C", dir, "checkout", "-q", "--detach"]);
     const printContext = context(prCreateEvent(dir, { stdout: "" }));
@@ -373,12 +368,20 @@ describe("remind-squash-message hook", () => {
     }
   });
 
-  it("keeps the subject budget the hook cites in CONTRIBUTING.md", () => {
-    const contributing = readFileSync(
-      join(REPO_ROOT, "CONTRIBUTING.md"),
-      "utf8",
+  it("names the normalizer with the PR number and the file it writes", () => {
+    const dir = track(makeRepo(2));
+    const path = join(dir, "scratch", "squash-messages", "5.txt");
+    expect(context(prCreateEvent(dir, ghOutput(5)))).toContain(
+      `${join(dir, ".claude", "scripts", "format-squash-message.mjs")} 5 ` +
+        `/tmp/squash-message.txt --out ${path}`,
     );
-    expect(contributing).toContain("roughly 42 characters");
+  });
+
+  it("passes unassigned for a branch-keyed draft, which has no number", () => {
+    const dir = track(makeRepo(2, "feature"));
+    const additionalContext = context(prCreateEvent(dir, { stdout: "" }));
+    expect(additionalContext).toContain("unassigned /tmp/squash-message.txt");
+    expect(additionalContext).toContain("branch-feature.txt");
   });
 
   it("names a directory this repository's gitignore covers", () => {

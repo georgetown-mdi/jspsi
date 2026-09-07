@@ -8,7 +8,11 @@ push:
   `lint-issues.mjs`), and `lib/projectItems.mjs` under them
 - `worktree-init.sh`, which places a fresh worktree on its branching base and
   provisions its `node_modules`
-- `squash-message.mjs`, which drafts the squash message a pull request lands as
+- `squash-message.mjs`, which drafts the squash message a pull request lands as,
+  and `format-squash-message.mjs`, which rewraps a draft's body and reports the
+  Commit Messages rules it cannot fix without rewriting the message. It holds
+  the subject budget and the wrap column, which the reminder hook and the
+  `block-nonconforming-squash-message.mjs` guard both read rather than restate
 - `verify-nonexecutable-delta.mjs`, which decides whether a review attestation
   survives a moved head, and `verify-rebase-invariance.mjs`, which decides the
   same question for a head moved by a rebase. `lib/gitFixture.mjs` holds the
