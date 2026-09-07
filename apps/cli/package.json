@@ -27,7 +27,7 @@
     "werift": "0.24.4",
     "yaml": "^2.9.0",
     "yargs": "^18.1.0",
-    "zod": "^4.1.5"
+    "zod": "^4.5.4"
   },
   "devDependencies": {
     "@psilink/testkit": "file:../../packages/testkit",
@@ -35,10 +35,10 @@
     "@rollup/plugin-json": "^6.1.0",
     "@rollup/plugin-node-resolve": "^16.0.1",
     "@rollup/plugin-typescript": "^12.1.4",
-    "@types/ssh2": "~1.15.5",
+    "@types/ssh2": "~1.15.6",
     "@types/ssh2-sftp-client": "^9.0.5",
     "@types/yargs": "^17.0.33",
-    "rollup": "^4.63.0",
+    "rollup": "^4.63.1",
     "tsx": "^4.23.13",
     "vitest": "^4.1.9"
   }
