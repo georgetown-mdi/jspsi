@@ -17,6 +17,7 @@ import {
 } from "@psilink/core";
 
 import {
+  descriptorFor,
   isStepValid,
   pipelineHasInertCoalesce,
 } from "../standardizationAuthoring";
@@ -123,6 +124,19 @@ const UNENCODABLE_KEY_TRANSFORM_MESSAGE =
   "exact form both parties agree on, such as a number too large to store " +
   "precisely. Open that key and correct that transform's parameters, or remove " +
   "the step.";
+
+/** Shown when a linkage key's transform declares a step whose function this build
+ * has no descriptor for. The descriptor table is core's own registry, so a name
+ * absent from it is a name core's pipeline compile refuses at the mint
+ * (`assertTransformsCompile`) -- this gate is that same refusal given at the
+ * moment of choice, not a stricter reading, which is why it holds where the
+ * descriptor param gate, stricter than core, does not. Names no function: an
+ * element transform's `function` is partner-authored free text, the same reason
+ * {@link UNSUPPLYABLE_KEY_MESSAGE} names no field. The step list marks the
+ * offending row, which is where the removal happens. */
+const UNRECOGNIZED_KEY_TRANSFORM_MESSAGE =
+  "A linkage key's transform has a step psilink does not recognize, so it " +
+  "cannot run. Open that key and remove the highlighted step.";
 
 /** Shown when a key's two swapped elements have different cleaning steps: a swap
  * has only the receiver read the pair in the other order, while each element's
@@ -495,6 +509,24 @@ export function validateAdvancedInvite(
     )
   )
     errors.keys = `A linkage key's transform ${FAN_OUT_MESSAGE_BODY}`;
+
+  // The unrecognized-step gate, the key-element counterpart of the descriptor
+  // gate above: a step whose function has no descriptor is one core's compile
+  // refuses at the mint, so the alert the element editor marks that step with
+  // stands beside a Generate that is shut rather than one that mints. Written
+  // under the fan-out message, whose remedy is the same removal on a step this
+  // one does recognize.
+  if (
+    errors.keys === undefined &&
+    terms.linkageKeys.some((key) =>
+      key.elements.some((element) =>
+        (element.transform ?? []).some(
+          (step) => descriptorFor(step.function) === undefined,
+        ),
+      ),
+    )
+  )
+    errors.keys = UNRECOGNIZED_KEY_TRANSFORM_MESSAGE;
 
   // The deduplicating-pair gate, run as core's own refusal rather than a second
   // web-side copy of the pair it names -- the same reading-from-core the fan-out

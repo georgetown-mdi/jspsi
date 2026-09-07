@@ -2072,6 +2072,9 @@ function compiledElementSteps(
  */
 const MAX_TRANSFORMED_VALUE_LENGTH = 4096;
 
+const UNRECOGNIZED_TRANSFORM_FUNCTION_LABEL =
+  "a function this build does not recognize";
+
 // Every number in the refusals below is a derived integer and the step's
 // function name is narrowed to a fixed literal before it is interpolated, so
 // neither the value (this party's own PII) nor partner free text reaches the
@@ -2080,7 +2083,22 @@ const MAX_TRANSFORMED_VALUE_LENGTH = 4096;
 function transformFunctionLabel(functionName: string): string {
   return STANDARDIZATION_FUNCTION_NAMES.includes(functionName)
     ? `"${functionName}"`
-    : "a function this build does not recognize";
+    : UNRECOGNIZED_TRANSFORM_FUNCTION_LABEL;
+}
+
+/**
+ * Whether `label` is one {@link transformFunctionLabel} produces: a quoted name
+ * from {@link STANDARDIZATION_FUNCTION_NAMES}, or the fixed stand-in for a name
+ * this build does not have.
+ *
+ * @internal read by `asTransformRefusal` in `linkageSatisfiability.ts`, which
+ * checks a label reaching it against what the tagging site produced.
+ */
+export function isTransformFunctionLabel(label: string): boolean {
+  return (
+    label === UNRECOGNIZED_TRANSFORM_FUNCTION_LABEL ||
+    STANDARDIZATION_FUNCTION_NAMES.some((name) => `"${name}"` === label)
+  );
 }
 
 // The issue path locating an element in the agreed terms. The key index is
