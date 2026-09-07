@@ -5,6 +5,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import log from "loglevel";
 
 import {
+  describeResolvedMatching,
   describeResolvedRunShape,
   getDefaultLinkageTerms,
   runExchange,
@@ -662,19 +663,20 @@ describe("naming what the agreed terms resolved to", () => {
     await runDriver(new AbortController().signal, onWarning);
 
     expect(onWarning.mock.calls).toEqual([
+      [describeResolvedMatching(OVER_BOUND_SHAPE)],
       [cardinalityNotice],
       [pairTableAdvisory],
     ]);
   });
 
-  test("raises nothing for a one-to-one run within the bound", async () => {
-    // The cardinality that adds no multiplicity is the one every consent surface
-    // already describes, so naming it here would be noise on the ordinary run --
-    // and an unattended seat's noise is a log line nobody asked for.
+  test("states the resolved matching alone on a one-to-one run within the bound", async () => {
+    // The cardinality notice and the projection advisory both stay off this
+    // shape, so the pair the two parties presented is the whole of what an
+    // unattended seat's diagnostic log records about the match it ran under.
     const { mc } = makeParkedCloseMc();
     mockedOpen.mockResolvedValue(mc);
     acquireResources();
-    exchangeConfirming({
+    const shape: ResolvedRunShape = {
       cardinality: "one-to-one",
       localDeduplicate: false,
       partnerDeduplicate: false,
@@ -683,12 +685,13 @@ describe("naming what the agreed terms resolved to", () => {
       partnerRecordCount: 3164,
       localExpectsOutput: true,
       partnerAssociationTableWithheld: false,
-    });
+    };
+    exchangeConfirming(shape);
     const onWarning = vi.fn();
 
     await runDriver(new AbortController().signal, onWarning);
 
-    expect(onWarning).not.toHaveBeenCalled();
+    expect(onWarning.mock.calls).toEqual([[describeResolvedMatching(shape)]]);
   });
 
   test("drops the notices on a run the operator already stopped", async () => {

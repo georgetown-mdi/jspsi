@@ -15,6 +15,7 @@ import {
   OperatorConfigError,
   assertTransformsCompile,
   decodeInvitation,
+  describeResolvedMatching,
   getDefaultLinkageTerms,
 } from "@psilink/core";
 import { minimalPreparedExchange } from "@psilink/core/testing";
@@ -148,6 +149,7 @@ interface CapturedLifecycle {
     };
   }) => void;
   onError: (failure: { category: string; error: unknown }) => void;
+  onWarning: (message: string) => void;
 }
 const lifecycleHarness = vi.hoisted(() => ({
   calls: [] as Array<unknown>,
@@ -1945,6 +1947,46 @@ describe("inviter screen", () => {
         .querySelector('[role="progressbar"]')
         ?.getAttribute("aria-valuenow"),
     ).toBe("80");
+  });
+
+  test("post-create: the resolved matching is readable before the run ends", async () => {
+    // The pre-round notice is the timing half of the statement: an operator can
+    // read what their partner presented while the exchange is still running,
+    // which is the only point at which reading it can change what they do. The
+    // completion panel keeps it, so the sentence stands twice by the end.
+    const matching = {
+      localDeduplicate: false,
+      partnerDeduplicate: true,
+      cardinality: "one-to-many" as const,
+    };
+    const sentence = describeResolvedMatching(matching);
+    const paragraphsSaying = (text: string) =>
+      Array.from(document.querySelectorAll("p")).filter(
+        (el) => el.textContent === text,
+      ).length;
+
+    await createSealedInvitation();
+    const call = lifecycleCall(0);
+    call.onStages(stagesFor(preparedWith("cascade", 2)));
+    call.onStage("confirming protocol");
+    call.onWarning(sentence);
+
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Exchange in progress");
+    await vi.waitFor(() => expect(paragraphsSaying(sentence)).toBe(1));
+
+    call.onResult({
+      kind: "matched" as const,
+      resultsUrl: URL.createObjectURL(new Blob(["a,b\n"])),
+      matchedRecordCount: 12,
+      matching,
+    });
+
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Exchange complete");
+    await vi.waitFor(() => expect(paragraphsSaying(sentence)).toBe(2));
   });
 
   test("post-create: completion offers the three downloads with caveats", async () => {

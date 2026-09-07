@@ -4,6 +4,7 @@ import { beforeAll, expect, inject, test } from "vitest";
 
 import {
   CONFIRMING_PROTOCOL_STAGE_ID,
+  describeResolvedMatching,
   generateSharedSecret,
   prepareForExchange,
 } from "@psilink/core";
@@ -67,7 +68,9 @@ interface CapturedRun {
   results: Array<ExchangeOutputs>;
   /** onError failures (none on success). */
   errors: Array<{ category: ExchangeErrorCategory; error: unknown }>;
-  /** onWarning messages (none on a run whose close reaches the peer). */
+  /** onWarning messages: the pre-round statement of what the agreed
+   * deduplicate pair resolved to, and nothing else on a run whose close
+   * reaches the peer. */
   warnings: Array<string>;
   /** The ExchangeResult generateOutput was handed, captured to verify linkage. */
   result?: ExchangeResult;
@@ -190,11 +193,15 @@ test("both roles complete with a result and no error", (ctx) => {
   // exchange rather than a stub.
   expect(responder.errors).toEqual([]);
   expect(initiator.errors).toEqual([]);
-  // And no warning: each side's teardown waited out a real peer's close, which
-  // is the delivery signal, so a healthy exchange must not tell either operator
-  // to go and check that their partner got the last frame.
-  expect(responder.warnings).toEqual([]);
-  expect(initiator.warnings).toEqual([]);
+  // One notice each, and it is the pre-round statement of what the agreed
+  // deduplicate pair resolved to, raised over a real run rather than a stubbed
+  // callback. Nothing follows it: each side's teardown waited out a real peer's
+  // close, which is the delivery signal, so a healthy exchange must not tell
+  // either operator to go and check that their partner got the last frame.
+  for (const run of [responder, initiator])
+    expect(run.warnings).toEqual([
+      describeResolvedMatching((run.result as ExchangeResult).matching),
+    ]);
   expect(responder.results).toHaveLength(1);
   expect(initiator.results).toHaveLength(1);
   expect(resultsUrlOf(responder.results[0])).toBe("blob:results-responder");

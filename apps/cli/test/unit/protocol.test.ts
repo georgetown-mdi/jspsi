@@ -29,6 +29,15 @@ vi.mock("@openmined/psi.js", () => ({
   default: vi.fn().mockResolvedValue({}),
 }));
 
+// What the agreed deduplicate pair resolved to, on every mocked outcome: the
+// run reads it off the exchange result to state it on the log and on the
+// terminal event, so an outcome without it is not one runExchange can return.
+const STUB_MATCHING = {
+  localDeduplicate: false,
+  partnerDeduplicate: false,
+  cardinality: "one-to-one",
+} as const;
+
 // Default runExchange mock implementation. Polls the drop directory until it
 // is empty, since the receiver deletes each message file after consuming it -
 // an empty directory means the peer consumed the final key-exchange message.
@@ -54,7 +63,11 @@ async function defaultRunExchange(): Promise<unknown> {
       );
     await new Promise<void>((r) => setTimeout(r, 1));
   }
-  return { associationTable: [[], []], partnerPayload: {} };
+  return {
+    associationTable: [[], []],
+    partnerPayload: {},
+    matching: STUB_MATCHING,
+  };
 }
 
 // Block a mocked runExchange until BOTH key files hold a rotated (non-original)
@@ -993,7 +1006,11 @@ test("tells a non-receiving party what the run's completion tells it too", async
       },
       // What core hands a party its terms give no output: no association table,
       // which is what the completion line below reads.
-      { associationTable: undefined, partnerPayload: {} },
+      {
+        associationTable: undefined,
+        partnerPayload: {},
+        matching: STUB_MATCHING,
+      },
     ) as never,
   );
   const output = path.join(tmpDir, "no-output-party.csv");
@@ -1390,7 +1407,11 @@ test("writes no result file for a non-receiving party when the exchange withhold
     // Drain the drop dir exactly as the default mock does, so neither party's
     // cleanup races the other's poller, then return a withheld result.
     await defaultRunExchange();
-    return { associationTable: undefined, partnerPayload: {} };
+    return {
+      associationTable: undefined,
+      partnerPayload: {},
+      matching: STUB_MATCHING,
+    };
   }
   vi.mocked(runExchange).mockImplementation(runExchangeWithheld as never);
   // Other tests in this file call buildOutputTable through runProtocol's normal
@@ -1446,6 +1467,7 @@ function mockCountOnlyRun(resolvedRole: "receiver" | "sender") {
       intersectionCount: 7,
       resolvedRole,
       partnerPayload: {},
+      matching: STUB_MATCHING,
     };
   }
   vi.mocked(runExchange).mockImplementation(runExchangeCountOnly as never);
@@ -3852,7 +3874,11 @@ test("authenticated exchange runs through EncryptedMessageConnection: wire bytes
       received = await conn.receive();
       signalConsumed();
     }
-    return { associationTable: [[], []], partnerPayload: {} };
+    return {
+      associationTable: [[], []],
+      partnerPayload: {},
+      matching: STUB_MATCHING,
+    };
   }
 
   vi.mocked(runExchange).mockImplementation(encryptingExchange as never);
@@ -4711,7 +4737,11 @@ test("a withheld result's terminal event has no count at all", async () => {
   // output table has no count either, so the field is absent rather than zero.
   vi.mocked(runExchange).mockImplementation((async () => {
     await defaultRunExchange();
-    return { associationTable: undefined, partnerPayload: {} };
+    return {
+      associationTable: undefined,
+      partnerPayload: {},
+      matching: STUB_MATCHING,
+    };
   }) as never);
 
   mockFd3Open();
@@ -4815,10 +4845,11 @@ test("an emitter passed instead of the flag receives every event, and no second 
   }
 
   // The whole run reported through the caller's object, terminal event included.
-  // A matched run passes no count, so the terminal call has the written flag
-  // and an absent count (the builder omits the field entirely for it).
+  // A matched run passes no count, so the terminal call has the written flag,
+  // what the deduplicate pair resolved to, and an absent count (the builder
+  // omits the count fields entirely for it).
   expect(emitted.map((e) => e.event)).toEqual(["stages", "metrics", "result"]);
-  expect(emitted[2].args).toEqual([true, undefined]);
+  expect(emitted[2].args).toEqual([true, STUB_MATCHING, undefined]);
   // Nothing re-ran the preflight and nothing reached the descriptor: the
   // already-preflighted emitter was reused rather than re-opened.
   expect(fd3.preflightProbes).toBe(0);

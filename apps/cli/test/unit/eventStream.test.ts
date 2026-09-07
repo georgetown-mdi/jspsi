@@ -45,6 +45,20 @@ afterEach(() => {
 // changing the wire contract.
 
 const CATEGORIES = new Set(["exchange", "output", "security", "config"]);
+const CARDINALITIES = new Set([
+  "one-to-one",
+  "one-to-many",
+  "many-to-one",
+  "many-to-many",
+]);
+
+/** A resolved matching for a result event under test; the pair the two parties
+ * presented and the label it gives this side. */
+const ONE_TO_ONE = {
+  localDeduplicate: false,
+  partnerDeduplicate: false,
+  cardinality: "one-to-one",
+} as const;
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -90,6 +104,12 @@ function validateEvent(event: unknown): event is StreamEvent {
     case "result":
       return (
         typeof event.resultWritten === "boolean" &&
+        // The resolved matching is present on every result: both values are
+        // booleans and the label is one of the four this build defines.
+        isRecord(event.matching) &&
+        typeof event.matching.localDeduplicate === "boolean" &&
+        typeof event.matching.partnerDeduplicate === "boolean" &&
+        CARDINALITIES.has(event.matching.cardinality as string) &&
         // The count-only fields are optional and paired: a present count is a
         // non-negative integer like every other numeric field of this stream,
         // and its provenance flag travels with it or not at all.
@@ -127,10 +147,16 @@ test("every event type validates against the schema and has a version", () => {
     buildStageEndEvent("stage 1 / 2", 1234),
     buildWarningEvent("a terms warning"),
     buildMetricsEvent(1000, 2, 1),
-    buildResultEvent(true),
-    buildResultEvent(false),
-    buildResultEvent(false, { intersectionCount: 7, reportedByPartner: false }),
-    buildResultEvent(false, { intersectionCount: 7, reportedByPartner: true }),
+    buildResultEvent(true, ONE_TO_ONE),
+    buildResultEvent(false, ONE_TO_ONE),
+    buildResultEvent(false, ONE_TO_ONE, {
+      intersectionCount: 7,
+      reportedByPartner: false,
+    }),
+    buildResultEvent(false, ONE_TO_ONE, {
+      intersectionCount: 7,
+      reportedByPartner: true,
+    }),
     buildErrorEvent(new Error("boom"), "run"),
   ];
   for (const event of events) {
@@ -170,7 +196,7 @@ test("the result event has a count-only run's count, and omits the field otherwi
   // The field's PRESENCE is the discriminant between the two resultWritten:false
   // outcomes, so a zero count must be emitted as a present zero rather than
   // collapsing into the withheld shape a missing field means.
-  const counted = buildResultEvent(false, {
+  const counted = buildResultEvent(false, ONE_TO_ONE, {
     intersectionCount: 0,
     reportedByPartner: false,
   });
@@ -180,12 +206,12 @@ test("the result event has a count-only run's count, and omits the field otherwi
   expect(counted.intersectionCount).toBe(0);
   expect(counted.countReportedByPartner).toBe(false);
 
-  const withheld = buildResultEvent(false);
+  const withheld = buildResultEvent(false, ONE_TO_ONE);
   expect(validateEvent(withheld)).toBe(true);
   expect("intersectionCount" in withheld).toBe(false);
   expect("countReportedByPartner" in withheld).toBe(false);
 
-  const written = buildResultEvent(true);
+  const written = buildResultEvent(true, ONE_TO_ONE);
   expect("intersectionCount" in written).toBe(false);
 
   // Serialized, the absence is a field a consumer never sees rather than a null.
@@ -193,15 +219,41 @@ test("the result event has a count-only run's count, and omits the field otherwi
     v: EVENT_STREAM_VERSION,
     type: "result",
     resultWritten: false,
+    matching: ONE_TO_ONE,
   });
+});
+
+test("the result event states what the agreed deduplicate pair resolved to", () => {
+  // The human log states the same three at info level, which a supervisor
+  // reading fd 3 alone -- or a run at a quieter level -- never sees, so the
+  // terminal event is where a machine consumer reads them. Present on every
+  // result, whatever this party received.
+  const matching = {
+    localDeduplicate: false,
+    partnerDeduplicate: true,
+    cardinality: "one-to-many",
+  } as const;
+  for (const event of [
+    buildResultEvent(true, matching),
+    buildResultEvent(false, matching),
+    buildResultEvent(false, matching, {
+      intersectionCount: 3,
+      reportedByPartner: false,
+    }),
+  ]) {
+    expect(validateEvent(event)).toBe(true);
+    expect(event.matching).toEqual(matching);
+  }
 });
 
 test("a malformed count is floored like every other numeric field", () => {
   // The count is the one numeric field a partner can influence (the count-report
   // leg), so the builder floors it rather than trusting the value it is handed.
   const floored = (intersectionCount: number) =>
-    buildResultEvent(false, { intersectionCount, reportedByPartner: false })
-      .intersectionCount;
+    buildResultEvent(false, ONE_TO_ONE, {
+      intersectionCount,
+      reportedByPartner: false,
+    }).intersectionCount;
   expect(floored(-3)).toBe(0);
   expect(floored(Number.NaN)).toBe(0);
   expect(floored(4.7)).toBe(4);
@@ -401,7 +453,10 @@ test("every event serializes to a printable-ASCII line", () => {
     buildStageEndEvent(hostile, 1234),
     buildWarningEvent(hostile),
     buildMetricsEvent(1000, 2, 1),
-    buildResultEvent(false, { intersectionCount: 7, reportedByPartner: true }),
+    buildResultEvent(false, ONE_TO_ONE, {
+      intersectionCount: 7,
+      reportedByPartner: true,
+    }),
     buildErrorEvent(new Error(hostile), "run"),
   ];
   for (const event of events)
@@ -529,7 +584,7 @@ test("emits one NDJSON object per line to fd 3, each a valid event", () => {
   emitter.stageEnd("stage 1 / 1", 42);
   emitter.warning("a warning");
   emitter.metrics(500, 1, 2);
-  emitter.result(true);
+  emitter.result(true, ONE_TO_ONE);
 
   const lines = cap.lines();
   expect(lines).toHaveLength(6);
@@ -580,8 +635,8 @@ test("a broken pipe stops the writer without throwing into the exchange", () => 
   // One emitter, so one writer: the broken flag has to survive between the two
   // emissions below for the retry to be suppressed.
   const emitter = openEventStreamWithFdWired();
-  expect(() => emitter.result(true)).not.toThrow();
+  expect(() => emitter.result(true, ONE_TO_ONE)).not.toThrow();
   // A later emit does not retry the write once the stream is marked broken.
-  emitter.result(false);
+  emitter.result(false, ONE_TO_ONE);
   expect(calls).toBe(1);
 });

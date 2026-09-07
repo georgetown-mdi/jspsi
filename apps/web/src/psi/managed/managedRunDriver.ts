@@ -29,6 +29,7 @@ import log from "loglevel";
 import PSI from "@openmined/psi.js/psi_wasm_web";
 
 import {
+  describeResolvedMatching,
   describeResolvedRunShape,
   loadPsiBackend,
   runExchange,
@@ -116,7 +117,9 @@ export interface ManagedRunDriverConfig {
    * keep their default budget. */
   peerWaitTimeoutMs?: number;
   /** A non-fatal, operator-relevant notice raised mid-run, from three sources: what
-   * the agreed terms resolved to ({@link describeResolvedRunShape}); the clean
+   * the agreed terms resolved to ({@link describeResolvedMatching} on every run,
+   * and {@link describeResolvedRunShape} for the cardinality and projection
+   * notices); the clean
    * close ending on an exit with no delivery signal ({@link CLOSE_OUTCOME_WARNINGS});
    * and {@link DISCLOSURE_NOT_FILED_WARNING}. Optional: a caller with no notice
    * surface omits it and all are dropped. Never a terminal -- the run still settles
@@ -287,14 +290,20 @@ export function runManagedExchangeInBrowser(
               // What the agreed terms resolved to, raised here as for every other
               // seat: an unattended re-run is where an unnoticed widening of the
               // match matters most, since nobody is watching and the terms are a
-              // standing record. Core composes both strings and raises neither --
-              // that is a front end's discretion (docs/spec/PROTOCOL.md, "The
-              // both-sided expansion has no ceiling of its own") -- so they take
-              // this wiring's own notice slot.
+              // standing record. The matching sentence leads, on every run; the
+              // cardinality and projection notices follow where the shape
+              // raises them. Core composes all three and raises none -- a front
+              // end's discretion (docs/spec/PROTOCOL.md, "The both-sided
+              // expansion has no ceiling of its own") -- so they take this
+              // wiring's own notice slot.
               onProtocolConfirmed: (_partnerTerms, _resolvedRole, runShape) => {
                 const { cardinalityNotice, pairTableAdvisory } =
                   describeResolvedRunShape(runShape);
-                for (const notice of [cardinalityNotice, pairTableAdvisory])
+                for (const notice of [
+                  describeResolvedMatching(runShape),
+                  cardinalityNotice,
+                  pairTableAdvisory,
+                ])
                   if (notice !== undefined) emitRunNotice(notice);
               },
             },

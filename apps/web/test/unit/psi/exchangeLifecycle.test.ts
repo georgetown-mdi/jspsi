@@ -9,6 +9,7 @@ import {
   StandardizationTermsError,
   StandardizedDataset,
   UsageError,
+  describeResolvedMatching,
   describeResolvedRunShape,
   getDefaultLinkageTerms,
   runExchange,
@@ -941,8 +942,8 @@ describe("runExchangeLifecycle", () => {
   test("raises the run's resolved-shape notices ahead of its own terminal", async () => {
     // The operator has to be able to read what the terms resolved to while the
     // run is still going, so these arrive at the callback that produced them
-    // rather than with the result. Core composes both strings; this seat only
-    // routes them to the notice slot its transport warnings already take.
+    // rather than with the result. Core composes all three strings; this seat
+    // only routes them to the notice slot its transport warnings already take.
     const { mc } = makeFakeMc();
     mockedOpen.mockResolvedValue(mc);
     const { acquired } = makeResources();
@@ -964,7 +965,12 @@ describe("runExchangeLifecycle", () => {
       ...s,
     });
 
-    expect(order).toEqual([cardinalityNotice, pairTableAdvisory, "<result>"]);
+    expect(order).toEqual([
+      describeResolvedMatching(OVER_BOUND_SHAPE),
+      cardinalityNotice,
+      pairTableAdvisory,
+      "<result>",
+    ]);
   });
 
   test("raises the pre-round notices on a run that then fails", async () => {
@@ -990,30 +996,33 @@ describe("runExchangeLifecycle", () => {
     });
 
     expect(s.onWarning.mock.calls).toEqual([
+      [describeResolvedMatching(OVER_BOUND_SHAPE)],
       [cardinalityNotice],
       [pairTableAdvisory],
     ]);
     expect(s.onError).toHaveBeenCalledTimes(1);
   });
 
-  test("raises no notice for a one-to-one run within the advisory bound", async () => {
+  test("states the resolved matching alone on a one-to-one run within the bound", async () => {
+    // The run shape raises neither the cardinality notice nor the projection
+    // advisory here, so this is the seat where the operator would otherwise
+    // read nothing about the pair until the exchange had finished.
     const { mc } = makeFakeMc();
     mockedOpen.mockResolvedValue(mc);
     const { acquired } = makeResources();
     const acquire: Acquire = () => Promise.resolve(acquired);
     const s = seams();
-    mockedRunExchange.mockImplementation(
-      runExchangeConfirming({
-        cardinality: "one-to-one",
-        localDeduplicate: false,
-        partnerDeduplicate: false,
-        localRecordCount: 3163,
-        localDeclaredRecordCount: 3163,
-        partnerRecordCount: 3163,
-        localExpectsOutput: true,
-        partnerAssociationTableWithheld: false,
-      }),
-    );
+    const shape: ResolvedRunShape = {
+      cardinality: "one-to-one",
+      localDeduplicate: false,
+      partnerDeduplicate: false,
+      localRecordCount: 3163,
+      localDeclaredRecordCount: 3163,
+      partnerRecordCount: 3163,
+      localExpectsOutput: true,
+      partnerAssociationTableWithheld: false,
+    };
+    mockedRunExchange.mockImplementation(runExchangeConfirming(shape));
 
     await runExchangeLifecycle({
       acquire,
@@ -1023,7 +1032,7 @@ describe("runExchangeLifecycle", () => {
     });
 
     expect(s.onResult).toHaveBeenCalledTimes(1);
-    expect(s.onWarning).not.toHaveBeenCalled();
+    expect(s.onWarning.mock.calls).toEqual([[describeResolvedMatching(shape)]]);
   });
 
   test("raises the cardinality alone when the projection is within the bound", async () => {
@@ -1052,6 +1061,7 @@ describe("runExchangeLifecycle", () => {
     });
 
     expect(s.onWarning.mock.calls).toEqual([
+      [describeResolvedMatching(shape)],
       [describeResolvedRunShape(shape).cardinalityNotice],
     ]);
   });

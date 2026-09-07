@@ -354,6 +354,55 @@ describe("createServerJobExchangeDriver event mapping", () => {
     expect(outputs.kind).not.toBe("withheld");
   });
 
+  test("the console seat states what the agreed deduplicate pair resolved to", async () => {
+    // The CLI states the same three on an info log line, which no relay event
+    // holds and a console seat never sees, so the terminal event is the only
+    // route to this seat's completion panel. Read on all three outcome shapes:
+    // the panel states the pair whatever this party received.
+    const matching = {
+      localDeduplicate: false,
+      partnerDeduplicate: true,
+      cardinality: "one-to-many",
+    };
+    for (const event of [
+      { ...result(true), matching },
+      { ...result(false), matching },
+      { ...countOnlyResult(42), matching },
+    ]) {
+      const { client } = scriptedClient([event]);
+      const events = driverEvents(new AbortController().signal);
+      await createServerJobExchangeDriver(driverConfig(), client).run(events);
+      expect((events.onResult.mock.calls[0][0] as RunOutputs).matching).toEqual(
+        matching,
+      );
+    }
+  });
+
+  test("a matching the relay frame malforms leaves the panel stating none", async () => {
+    // The relay forwards the CLI's fields verbatim, so the shape is checked
+    // rather than assumed: an unknown label, a non-boolean value, or a
+    // non-object leaves the seat with no matching rather than a label this
+    // build cannot define.
+    for (const matching of [
+      { localDeduplicate: false, partnerDeduplicate: true, cardinality: "1:n" },
+      {
+        localDeduplicate: "false",
+        partnerDeduplicate: true,
+        cardinality: "one-to-many",
+      },
+      { partnerDeduplicate: true, cardinality: "one-to-many" },
+      "one-to-many",
+      null,
+    ]) {
+      const { client } = scriptedClient([{ ...result(true), matching }]);
+      const events = driverEvents(new AbortController().signal);
+      await createServerJobExchangeDriver(driverConfig(), client).run(events);
+      expect(
+        (events.onResult.mock.calls[0][0] as RunOutputs).matching,
+      ).toBeUndefined();
+    }
+  });
+
   test("a security error passes its category through VERBATIM", async () => {
     // The single most important fidelity requirement: a CLI-classified security
     // terminal must never be downgraded to the retryable 'exchange'.

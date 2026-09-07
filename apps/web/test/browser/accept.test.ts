@@ -12,6 +12,7 @@ import { createElement } from "react";
 import "@mantine/core/styles.css";
 
 import {
+  describeResolvedMatching,
   encodeInvitation,
   generateSharedSecret,
   getDefaultLinkageTerms,
@@ -136,6 +137,7 @@ interface CapturedLifecycle {
     };
   }) => void;
   onError: (failure: { category: string; error: unknown }) => void;
+  onWarning: (message: string) => void;
 }
 const lifecycleHarness = vi.hoisted(() => ({
   calls: [] as Array<unknown>,
@@ -1862,6 +1864,46 @@ describe("acceptor screen: run and completion", () => {
       );
     });
     expect(currentStepLabel()).toBe("Link keys");
+  });
+
+  test("the resolved matching is readable before the run ends", async () => {
+    // The acceptor's mirror of the inviting seat's pre-round statement: the pair
+    // is readable while the exchange is still running, not only once it has
+    // finished, and the completion panel keeps it -- so the sentence stands
+    // twice by the end.
+    const matching = {
+      localDeduplicate: true,
+      partnerDeduplicate: false,
+      cardinality: "many-to-one" as const,
+    };
+    const sentence = describeResolvedMatching(matching);
+    const paragraphsSaying = (text: string) =>
+      Array.from(document.querySelectorAll("p")).filter(
+        (el) => el.textContent === text,
+      ).length;
+
+    await reachRun();
+    const call = lifecycleCall(0);
+    call.onStages(stagesFor(preparedWith("cascade", 2), "acceptor"));
+    call.onStage("confirming protocol");
+    call.onWarning(sentence);
+
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Exchange in progress");
+    await vi.waitFor(() => expect(paragraphsSaying(sentence)).toBe(1));
+
+    call.onResult({
+      kind: "matched" as const,
+      resultsUrl: URL.createObjectURL(new Blob(["a,b\n"])),
+      matchedRecordCount: 12,
+      matching,
+    });
+
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Exchange complete");
+    await vi.waitFor(() => expect(paragraphsSaying(sentence)).toBe(2));
   });
 
   test("completion offers downloads and fixes the past-tense ledger", async () => {

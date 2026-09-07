@@ -2,6 +2,7 @@ import {
   ConnectionError,
   LinkageTermsUnsatisfiableError,
   OperatorConfigError,
+  describeResolvedMatching,
   describeResolvedRunShape,
   getLogger,
   runExchange,
@@ -205,9 +206,10 @@ interface ExchangeOutputsBase {
   record?: RecordDownloads;
   /** What the two parties' agreed `deduplicate` values resolved to
    * ({@link ExchangeResult.matching}), so the completion panel states the
-   * partner's value and the cardinality the pair gave this run. Absent on the
-   * server-job path, where the console holds the run and relays an outcome
-   * rather than an exchange result, and the panel then states neither. */
+   * partner's value and the cardinality the pair gave this run. A console seat
+   * takes it off the run's relayed `result` event; it is absent there only
+   * when the relayed object fails the shape check, and the panel then states
+   * no matching rather than a label this build does not define. */
   matching?: ResolvedMatching;
 }
 
@@ -294,7 +296,9 @@ interface RunExchangeLifecycleOptions<
   /** A non-fatal, operator-relevant notice raised mid-run. Two sources, arriving
    * at opposite ends of the run: what the agreed terms resolved to, raised
    * right after the terms resolve and before the first round, composed by core
-   * ({@link describeResolvedRunShape}); and the clean close ending on any exit
+   * ({@link describeResolvedMatching} on every run, and
+   * {@link describeResolvedRunShape} for the cardinality and projection
+   * notices); and the clean close ending on any exit
    * that has no delivery signal rather than on the peer's close
    * ({@link CLOSE_OUTCOME_WARNINGS}), which is raised only on a run that reported
    * its result. Optional: an owner with no warning sink omits it and the
@@ -519,17 +523,21 @@ export async function runExchangeLifecycle<
       ),
       onStage: emitStage,
       // What the agreed terms resolved to, named for the operator after the
-      // terms exchange and before the first round: a deduplicating cardinality
-      // and, where the both-sided one projects a pair table past the advisory
-      // bound, what each side contributes to that projection. Core composes both
-      // and raises neither -- the advisory is a front end's discretion
+      // terms exchange and before the first round, the earliest point that can
+      // name it. The matching sentence leads: it is stated on every run, and
+      // the CLI seat states the same one at the same point. Core composes all
+      // three and raises none -- the advisory is a front end's discretion
       // (docs/spec/PROTOCOL.md, The both-sided expansion has no ceiling of its
       // own) -- so this seat renders them through the same notice slot its
       // transport warnings take, and the owning hook escapes what it folds.
       onProtocolConfirmed: (_partnerTerms, _resolvedRole, runShape) => {
         const { cardinalityNotice, pairTableAdvisory } =
           describeResolvedRunShape(runShape);
-        for (const notice of [cardinalityNotice, pairTableAdvisory])
+        for (const notice of [
+          describeResolvedMatching(runShape),
+          cardinalityNotice,
+          pairTableAdvisory,
+        ])
           if (notice !== undefined) emitRunNotice(notice);
       },
     });

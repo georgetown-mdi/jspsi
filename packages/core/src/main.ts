@@ -238,6 +238,7 @@ export {
 export type { ExchangeSpec } from "./config/exchangeSpec";
 export {
   DEDUPLICATE_IMPLEMENTED_BY_STRATEGY,
+  LINKAGE_CARDINALITIES,
   assertDeduplicateImplemented,
   countOnlyShapeViolation,
   swapPairTransformsDiffer,
