@@ -6,16 +6,13 @@ import {
 import { beforeEach, describe, expect, test } from "vitest";
 
 import {
+  ATTEMPT_LOCK_STANDDOWN_MS,
   ATTEMPT_PEER_WAIT_MS,
-  ATTEMPT_RATE_GAP_MS,
   MAX_WINDOW_ATTEMPTS,
   tickManagedSchedules,
 } from "@psi/managed/managedScheduleRunner";
 import {
-  ManagedExchangeCustodyUnreadableError,
-  ManagedExchangeSpentError,
-} from "@psi/managed/managedExchangeRun";
-import {
+  MAX_SCHEDULE_WINDOW_SECONDS,
   applyManagedExchangeLastRun,
   applyManagedExchangeLocalEdits,
   applyManagedExchangeScheduleAdvance,
@@ -24,6 +21,14 @@ import {
   parseManagedExchangeRecord,
 } from "@psi/managed/managedExchangeRecord";
 import {
+  ManagedExchangeCustodyUnreadableError,
+  ManagedExchangeSpentError,
+} from "@psi/managed/managedExchangeRun";
+import {
+  RotationPersistError,
+  succeededRun,
+} from "@psi/managed/managedRunRotate";
+import {
   encodeManagedExchangeArtifact,
   reconstructRecordFromArtifact,
 } from "@psi/managed/managedExchangeArtifact";
@@ -31,7 +36,6 @@ import { ManagedExchangeExpiredError } from "@psi/managed/managedExpiry";
 import { ManagedExchangeLockUnavailableError } from "@psi/managed/managedExchangeLock";
 import { ManagedInputError } from "@psi/managed/managedInputGuard";
 import { PartnerNoShowError } from "@psi/transport/waitForConnection";
-import { RotationPersistError } from "@psi/managed/managedRunRotate";
 import { managedScheduleWindow } from "@psi/managed/managedSchedule";
 
 import type {
@@ -96,6 +100,7 @@ interface RecordedAttempt {
   source: ManagedScheduleAttempt["source"];
   peerWaitTimeoutMs: number;
   startedAtMs: number;
+  sharedSecret: string;
 }
 
 /** How one attempt behaves, in order; the last entry repeats for every further
@@ -145,6 +150,12 @@ function harness(options: {
    * advance lands, standing in for another tab's edit between this tick's
    * snapshot and its write. */
   concurrentEdit?: (record: ManagedExchangeRecord) => ManagedExchangeRecord;
+  /** A write applied to the stored record during a stand-down, standing in for
+   * whatever another context did in the interval the runner holds no lock. */
+  duringStandDown?: (
+    record: ManagedExchangeRecord,
+    nowMs: number,
+  ) => ManagedExchangeRecord;
 }): Harness {
   const script = options.script ?? [];
   const stored = new Map(
@@ -176,6 +187,7 @@ function harness(options: {
       Promise.resolve(
         options.localState ?? new Map<string, ManagedLocalState>(),
       ),
+    readRecord: (id) => Promise.resolve(stored.get(id)),
     persistAdvance: (id, advance) => {
       order.push("advance");
       advances.push({ id, advance });
@@ -196,6 +208,7 @@ function harness(options: {
         source: attempt.source,
         peerWaitTimeoutMs: attempt.peerWaitTimeoutMs,
         startedAtMs: clockMs,
+        sharedSecret: attempt.record.sharedSecret,
       });
       noteFirstAttempt();
       // The last scripted step repeats; a tick that attempts anything with no
@@ -215,6 +228,9 @@ function harness(options: {
       return Promise.reject(step.error);
     },
     delay: (ms) => {
+      const [held] = [...stored.values()];
+      if (options.duringStandDown !== undefined)
+        stored.set(held.id, options.duringStandDown(held, clockMs));
       clockMs += ms;
       return Promise.resolve();
     },
@@ -302,8 +318,10 @@ describe("a due window in the open runtime", () => {
     // Occupancy runs the window out and stops exactly at its close: no attempt
     // starts after it, and the last one's wait ends on it rather than past it.
     expect(runner.nowMs()).toBe(at("2026-01-06T17:00:00.000Z"));
+    // One attempt plus one stand-down per cycle, so a three-hour window takes
+    // the whole of twelve cycles and stops.
     expect(runner.attempts).toHaveLength(
-      (3 * 60 * 60 * 1000) / ATTEMPT_PEER_WAIT_MS,
+      (3 * 60 * 60 * 1000) / (ATTEMPT_PEER_WAIT_MS + ATTEMPT_LOCK_STANDDOWN_MS),
     );
   });
 
@@ -321,18 +339,19 @@ describe("a due window in the open runtime", () => {
 
     expect(entry.attempts).toBe(2);
     expect(entry.disposition).toBe("succeeded");
-    // The retry is paced from the failed attempt's start, so a failure that
-    // reproduces instantly cannot spin the window away.
+    // The stand-down runs from the failed attempt's end, so a failure that
+    // reproduces instantly cannot spin the window away -- and the interval is
+    // one no lock is held across.
     expect(
       runner.attempts[1].startedAtMs - runner.attempts[0].startedAtMs,
-    ).toBe(ATTEMPT_RATE_GAP_MS);
+    ).toBe(ATTEMPT_LOCK_STANDDOWN_MS);
   });
 
   test("paces no further than the window's close, which ends the occupancy anyway", async () => {
     const runner = harness({
       records: [recordWith()],
-      // Half a rate gap before the close, so the full pacing delay would run
-      // past it.
+      // Well inside one stand-down of the close, so the full stand-down would
+      // run past it.
       startAt: "2026-01-06T16:59:30.000Z",
       script: [{ kind: "fail", error: new Error("the broker refused") }],
     });
@@ -395,8 +414,9 @@ describe("a due window in the open runtime", () => {
   });
 
   test("a hand-off confirmed mid-window ends the window where it lands", async () => {
-    // The tick read the sibling state before the window opened, so the hand-off
-    // reaches this occupancy as the run path's own refusal on the second attempt.
+    // The tick read the sibling state before the window opened, and a hand-off
+    // confirmed in a stand-down reaches this occupancy as the run path's own
+    // refusal, taken inside the lock at the start of the second attempt.
     // A retryable failure would otherwise have spun this window to the attempt
     // cap; the refusal is what stops it there.
     const runner = harness({
@@ -420,8 +440,15 @@ describe("a due window in the open runtime", () => {
   });
 
   test("bounds a window whose attempts fail immediately", async () => {
+    // At the schema's widest window: an attempt that fails at once still stands
+    // down, so the window's own close bounds a narrower one, and this is where
+    // the attempt cap is the binding bound.
     const runner = harness({
-      records: [recordWith()],
+      records: [
+        recordWith({
+          schedule: { ...weekly, windowSeconds: MAX_SCHEDULE_WINDOW_SECONDS },
+        }),
+      ],
       startAt: "2026-01-06T14:00:00.000Z",
       script: [{ kind: "fail", error: new Error("the broker refused") }],
     });
@@ -1115,5 +1142,144 @@ describe("the window's own geometry", () => {
       opensAtMs: at("2026-01-06T14:00:00.000Z"),
       closesAtMs: at("2026-01-06T17:00:00.000Z"),
     });
+  });
+});
+
+describe("the stand-down between two attempts", () => {
+  /** The stored record as another context left it in the gap: a rotation
+   * landed, so the secret an attempt carries is not the claimed one. */
+  function rotatedInTheGap(
+    record: ManagedExchangeRecord,
+  ): ManagedExchangeRecord {
+    return parseManagedExchangeRecord({
+      ...record,
+      sharedSecret: generateSharedSecret(),
+    });
+  }
+
+  test("holds no lock, so the next attempt is what takes it back", async () => {
+    // The runner takes no lock of its own: the lock is the run path's, held for
+    // an attempt and released when it settles. The stand-down is measured from
+    // that release, which is what makes it an interval an operator's own Run can
+    // take -- pinned against real Web Locks in test/browser.
+    const runner = harness({
+      records: [recordWith()],
+      startAt: "2026-01-06T14:00:00.000Z",
+      script: noShowScript(),
+    });
+
+    await tickManagedSchedules(runner.seams);
+
+    for (let i = 1; i < runner.attempts.length; i += 1)
+      expect(
+        runner.attempts[i].startedAtMs -
+          (runner.attempts[i - 1].startedAtMs + ATTEMPT_PEER_WAIT_MS),
+      ).toBe(ATTEMPT_LOCK_STANDDOWN_MS);
+  });
+
+  test("carries the record re-read across it, not the one the window was claimed with", async () => {
+    const runner = harness({
+      records: [recordWith()],
+      startAt: "2026-01-06T14:00:00.000Z",
+      script: noShowScript(),
+      duringStandDown: rotatedInTheGap,
+    });
+
+    await tickManagedSchedules(runner.seams);
+
+    // Every attempt after the first runs on the record as the gap before it
+    // left it: a rotation another context landed reaches the next attempt.
+    for (let i = 1; i < runner.attempts.length; i += 1)
+      expect(runner.attempts[i].sharedSecret).not.toBe(
+        runner.attempts[i - 1].sharedSecret,
+      );
+  });
+
+  test("ends the occupancy when the plan moved in it", async () => {
+    const runner = harness({
+      records: [recordWith()],
+      startAt: "2026-01-06T14:00:00.000Z",
+      script: noShowScript(),
+      duringStandDown: (record) =>
+        applyManagedExchangeLocalEdits(record, { schedule: null }),
+    });
+
+    const [entry] = await tickManagedSchedules(runner.seams);
+
+    // The window is no longer this plan's to occupy, so it ends with one
+    // attempt and no disposition rather than running on against a plan the
+    // store does not hold.
+    expect(entry.attempts).toBe(1);
+    expect(entry.disposition).toBeUndefined();
+    expect(entry.skipped).toBe("plan-moved");
+  });
+
+  test("ends the occupancy when the input handle went in it", async () => {
+    const runner = harness({
+      records: [recordWith()],
+      startAt: "2026-01-06T14:00:00.000Z",
+      script: noShowScript(),
+      duringStandDown: (record) => {
+        const next = { ...record };
+        delete next.inputFileHandle;
+        return parseManagedExchangeRecord(next);
+      },
+    });
+
+    const [entry] = await tickManagedSchedules(runner.seams);
+
+    // There is no unattended read of the input without a handle, exactly as at
+    // the tick's own start.
+    expect(entry.attempts).toBe(1);
+    expect(entry.skipped).toBe("no-input-handle");
+  });
+
+  test("credits a run that completed in it, counting the window met", async () => {
+    const runner = harness({
+      records: [recordWith()],
+      startAt: "2026-01-06T14:00:00.000Z",
+      script: noShowScript(),
+      duringStandDown: (record, nowMs) =>
+        applyManagedExchangeLastRun(record, succeededRun(nowMs), nowMs - 1_000),
+    });
+
+    const [entry] = await tickManagedSchedules(runner.seams);
+
+    // An attended run inside the window met it, so the occupancy stops there
+    // and the window counts no miss rather than being run a second time.
+    expect(entry.attempts).toBe(1);
+    expect(entry.disposition).toBe("succeeded");
+    expect(runner.advances[0].advance.schedule.consecutiveMisses).toBe(0);
+    expect(runner.advances[0].advance.lastRun).toBeUndefined();
+  });
+
+  test("folds a window met after the last attempt to that success, not a miss", async () => {
+    // The success lands too late for any re-read -- after the attempt that ends
+    // the occupancy -- so the disposition is read once more against the store
+    // before it is written.
+    const record = recordWith();
+    const runner = harness({
+      records: [record],
+      // One peer wait before the close, so a single attempt ends the window.
+      startAt: "2026-01-06T16:50:00.000Z",
+      script: noShowScript(),
+    });
+    const seams: ManagedScheduleTickSeams = {
+      ...runner.seams,
+      readRecord: (id) => {
+        const held = runner.stored.get(id);
+        if (held === undefined) return Promise.resolve(undefined);
+        const metAt = runner.nowMs() - 1_000;
+        return Promise.resolve(
+          applyManagedExchangeLastRun(held, succeededRun(metAt), metAt - 1_000),
+        );
+      },
+    };
+
+    const [entry] = await tickManagedSchedules(seams);
+
+    expect(entry.attempts).toBe(1);
+    expect(entry.disposition).toBe("succeeded");
+    expect(runner.advances[0].advance.schedule.consecutiveMisses).toBe(0);
   });
 });

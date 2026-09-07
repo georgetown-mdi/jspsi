@@ -38,6 +38,12 @@
  *   boundary ({@link ./managedExchangeRun.ts}'s `onDataExchangeStart`) gates the
  *   retry rather than the failure's kind, since a re-attempt after payload flow
  *   could have started would disclose a second time.
+ * - The lock is yielded between attempts: an attempt holds the single-writer
+ *   lock for its whole peer wait, so without a stand-down between them an
+ *   occupied window is a window an operator's own Run cannot take at all. The
+ *   stand-down is what makes it takeable, and every attempt after the first
+ *   re-reads the record before running so the yield's own gap is accounted for
+ *   ({@link readWindowState}).
  */
 
 import {
@@ -87,21 +93,30 @@ import type { ManagedLocalState } from "./managedLocalStateShape";
 export const ATTEMPT_PEER_WAIT_MS = DEFAULT_PEER_WAIT_TIMEOUT_MS;
 
 /**
- * The minimum spacing between two attempts at the same window, measured from
- * one attempt's start to the next. An attempt that spends its whole peer wait
- * has already outlasted this and the next one starts immediately; an attempt
- * that fails at once waits out the remainder, so a failure that reproduces
- * instantly cannot spin the window away.
+ * How long the runner stands down between two attempts at the same window,
+ * measured from one attempt's END: the interval in which it holds no lock, so
+ * an operator's own Run can take one. Measured from the end rather than the
+ * start because an attempt spends its whole peer wait inside the lock, which
+ * already outlasts any start-anchored spacing -- leaving a free interval of
+ * milliseconds, which no operator can hit.
+ *
+ * Half the peer wait, which fixes both bounds this has to satisfy. Two runners
+ * at any relative phase each listen {@link ATTEMPT_PEER_WAIT_MS} out of every
+ * `ATTEMPT_PEER_WAIT_MS + ATTEMPT_LOCK_STANDDOWN_MS`, and two intervals that
+ * long inside a period that short must overlap by at least the stand-down
+ * itself, so yielding cannot cost the partnership a window. And it is the same
+ * bound on the other side: a failure that reproduces instantly cannot spin the
+ * window away, which is what the spacing between attempts existed for.
  */
-export const ATTEMPT_RATE_GAP_MS = 60_000;
+export const ATTEMPT_LOCK_STANDDOWN_MS = ATTEMPT_PEER_WAIT_MS / 2;
 
 /**
  * The most attempts one window takes. The window's own close is what ends an
  * ordinary occupancy -- at the peer wait above, a window would have to stay open
  * for the better part of a day to reach this -- so the cap does not cut a
  * realistic window short. It bounds the other case: an attempt failing
- * immediately, paced by {@link ATTEMPT_RATE_GAP_MS}, would otherwise keep the
- * runner in a wide window for its whole width.
+ * immediately, paced by {@link ATTEMPT_LOCK_STANDDOWN_MS}, would otherwise keep
+ * the runner in a wide window for its whole width.
  */
 export const MAX_WINDOW_ATTEMPTS = 64;
 
@@ -150,6 +165,11 @@ export interface ManagedScheduleTickSeams {
     id: string,
     advance: ManagedExchangeScheduleAdvance,
   ) => Promise<ManagedExchangeRecord>;
+  /** One record by id, re-read across the stand-down between attempts. The
+   * record a window was claimed with is as old as the gap the runner just
+   * yielded, in which another context can have rotated the secret, re-pointed
+   * the input handle, edited the plan, or run the exchange to completion. */
+  readRecord: (id: string) => Promise<ManagedExchangeRecord | undefined>;
   /** Run one attempt to completion, resolving on a completed exchange and
    * rejecting with the run path's own error otherwise. */
   runAttempt: (attempt: ManagedScheduleAttempt) => Promise<unknown>;
@@ -327,19 +347,59 @@ async function occupyDueWindow(
   const occupancy = await occupyWindow(claimed, handle, due, seams);
   entry.attempts = occupancy.attempts;
   if (occupancy.disposition === undefined)
-    return { ...entry, skipped: seams.stopped() ? "stopped" : "window-closed" };
+    return {
+      ...entry,
+      skipped:
+        occupancy.skipped ?? (seams.stopped() ? "stopped" : "window-closed"),
+    };
+  // Held from here on even if the settling read below fails: the occupancy did
+  // reach this disposition, and the catch above reports what happened.
   entry.disposition = occupancy.disposition;
+  entry.disposition = await settleWindowDisposition(
+    record.id,
+    occupancy.disposition,
+    due,
+    seams,
+  );
 
   await seams.persistAdvance(record.id, {
     schedule: advanceManagedScheduleAfterWindow(
       planned,
       due,
-      occupancy.disposition,
+      entry.disposition,
     ),
     fromNextWindow: planned.nextWindow,
     fromConsecutiveMisses: planned.consecutiveMisses,
   });
   return { ...entry };
+}
+
+/**
+ * Read the window's disposition once more against the stored record before it
+ * is written. A run that completed inside this window -- an attended one taken
+ * during a stand-down, whose success can land after the attempt that missed the
+ * partner it had already met -- MET the window, so writing this occupancy's own
+ * miss would count one against a window that was met and could escalate the
+ * repeated-miss surface a window early.
+ *
+ * The reading is a point in time, so a success landing after it still leaves
+ * this occupancy's verdict standing; that residual is the next wake's, which
+ * reads the window before `nextWindow` by the same rule (see
+ * docs/spec/MANAGED_EXCHANGE_RECORD.md, "Catch-up on wake"). A read that fails
+ * raises, joining the window's other bookkeeping failures.
+ */
+async function settleWindowDisposition(
+  id: string,
+  occupied: ManagedScheduleWindowDisposition,
+  window: ManagedScheduleWindow,
+  seams: ManagedScheduleTickSeams,
+): Promise<ManagedScheduleWindowDisposition> {
+  if (occupied === "succeeded" || occupied === "unattempted") return occupied;
+  const record = await seams.readRecord(id);
+  if (record === undefined) return occupied;
+  return windowMetBySuccess(record, window, seams.now())
+    ? "succeeded"
+    : occupied;
 }
 
 /** What occupying one window produced: how many attempts it took and the
@@ -348,29 +408,96 @@ async function occupyDueWindow(
 interface WindowOccupancy {
   attempts: number;
   disposition?: ManagedScheduleWindowDisposition;
+  /** Why the occupancy ended with no disposition, when a re-read between two
+   * attempts decided it rather than the window's own close. */
+  skipped?: ManagedScheduleSkipReason;
+}
+
+/**
+ * Whether a record's stored bookkeeping shows a run completing the exchange
+ * inside this window -- an attempt of this occupancy, or another context's run
+ * during a stand-down. Such a window was met, so nothing more is attempted in
+ * it and it counts no miss. A stamp from before the window opened, or one
+ * stamped ahead of the reading instant, decides nothing -- the same reading
+ * rule catch-up holds (docs/spec/MANAGED_EXCHANGE_RECORD.md).
+ */
+function windowMetBySuccess(
+  record: ManagedExchangeRecord,
+  window: ManagedScheduleWindow,
+  nowMs: number,
+): boolean {
+  const lastRun = record.lastRun;
+  if (lastRun?.outcome !== "succeeded") return false;
+  const at = parseStoredInstant(lastRun.at);
+  return at >= window.opensAtMs && at <= nowMs;
+}
+
+/** What a re-read before an attempt found: the record to attempt with and the
+ * handle to read its input through, or how this occupancy ends here -- with a
+ * disposition when the window was met, and with the skip reason the tick
+ * reports otherwise. */
+type WindowState =
+  | {
+      attempt: true;
+      record: ManagedExchangeRecord;
+      handle: FileSystemFileHandle;
+    }
+  | { attempt: false; disposition: ManagedScheduleWindowDisposition }
+  | { attempt: false; skipped: ManagedScheduleSkipReason };
+
+/**
+ * Re-read the record across a stand-down and decide whether the next attempt
+ * still stands. The gap the yield opens is one another context can run in, so
+ * the claimed record is not what the next attempt should carry: it holds the
+ * pre-rotation secret, the handle as it was, and the plan as it was.
+ *
+ * The occupancy ends here on any of four readings, none of them this runner's
+ * window to account for: the record is gone, its schedule is gone or moved off
+ * this window, its input handle is gone (there is no unattended read without
+ * one), or the window was met by a run that completed inside it -- which is the
+ * one that yields a disposition, since a met window resets the miss count.
+ */
+async function readWindowState(
+  id: string,
+  window: ManagedScheduleWindow,
+  seams: ManagedScheduleTickSeams,
+): Promise<WindowState> {
+  const record = await seams.readRecord(id);
+  if (record === undefined) return { attempt: false, skipped: "plan-moved" };
+  if (windowMetBySuccess(record, window, seams.now()))
+    return { attempt: false, disposition: "succeeded" };
+  const schedule = record.schedule;
+  if (
+    schedule === undefined ||
+    parseStoredInstant(schedule.nextWindow) !== window.opensAtMs
+  )
+    return { attempt: false, skipped: "plan-moved" };
+  const handle = record.inputFileHandle;
+  if (handle === undefined)
+    return { attempt: false, skipped: "no-input-handle" };
+  return { attempt: true, record, handle };
 }
 
 /**
  * Occupy one open window with bounded re-attempts.
  *
  * Each attempt waits for the partner up to {@link ATTEMPT_PEER_WAIT_MS},
- * clamped to what is left of the window; a retryable failure starts another
- * attempt no sooner than {@link ATTEMPT_RATE_GAP_MS} after the last one began,
- * and no later than the window's close, which ends the occupancy anyway.
+ * clamped to what is left of the window; a retryable failure stands down for
+ * {@link ATTEMPT_LOCK_STANDDOWN_MS} from that attempt's end, holding no lock,
+ * and no later than the window's close, which ends the occupancy anyway. Every
+ * attempt after the first re-reads the record across that gap
+ * ({@link readWindowState}).
  * The window's disposition folds every attempt rather than reading the last one
  * (see {@link foldWindowDisposition}).
  */
 async function occupyWindow(
-  record: ManagedExchangeRecord,
-  handle: FileSystemFileHandle,
+  claimed: ManagedExchangeRecord,
+  claimedHandle: FileSystemFileHandle,
   window: ManagedScheduleWindow,
   seams: ManagedScheduleTickSeams,
 ): Promise<WindowOccupancy> {
-  const source: ManagedInputSource = {
-    kind: "handle",
-    handle,
-    attendance: "unattended",
-  };
+  let record = claimed;
+  let handle = claimedHandle;
   let attempts = 0;
   let partnerWasAbsent = false;
   let contactWasProven = false;
@@ -381,15 +508,20 @@ async function occupyWindow(
     // would count a miss the partner may yet have been met in. A later wake
     // decides it from the stored plan.
     if (seams.stopped()) return { attempts };
-    const startedAtMs = seams.now();
-    const remainingMs = window.closesAtMs - startedAtMs;
+    const remainingMs = window.closesAtMs - seams.now();
     if (remainingMs <= 0 || attempts >= MAX_WINDOW_ATTEMPTS) break;
+    if (attempts > 0) {
+      const state = await readWindowState(record.id, window, seams);
+      if (!state.attempt) return { attempts, ...state };
+      record = state.record;
+      handle = state.handle;
+    }
     attempts += 1;
     let dataExchangeStarted = false;
     try {
       await seams.runAttempt({
         record,
-        source,
+        source: { kind: "handle", handle, attendance: "unattended" },
         peerWaitTimeoutMs: Math.min(ATTEMPT_PEER_WAIT_MS, remainingMs),
         onDataExchangeStart: () => {
           dataExchangeStarted = true;
@@ -411,18 +543,15 @@ async function occupyWindow(
         };
       disposition = verdict.disposition;
     }
-    // Paced from the failed attempt's start, and clamped to the window's own
+    // Stood down from the failed attempt's END, and clamped to the window's own
     // close: the loop head is what ends an occupancy, so a delay outlasting the
     // window would hold this record's tick open past the close for nothing --
     // and past the moment the next wake could have found the record free.
-    const pacedFromMs = seams.now();
+    const endedAtMs = seams.now();
     await seams.delay(
       Math.max(
         0,
-        Math.min(
-          ATTEMPT_RATE_GAP_MS - (pacedFromMs - startedAtMs),
-          window.closesAtMs - pacedFromMs,
-        ),
+        Math.min(ATTEMPT_LOCK_STANDDOWN_MS, window.closesAtMs - endedAtMs),
       ),
     );
   }

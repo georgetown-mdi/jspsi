@@ -499,28 +499,56 @@ attempt.
 A window catch-up lands on and finds open is **occupied**, not waited out in one
 call. The runner makes bounded re-attempts across it: each attempt waits for the
 partner's runner up to the human-timescale budget both one-shot roles share,
-clamped to what is left of the window, and the next attempt begins no sooner than
-a fixed pacing interval after the last one started, up to a cap on attempts per
-window. One window-long wait would put the whole window on a single broker
-registration surviving that long; the pacing and the cap are what keep an attempt
-that fails immediately from spending the window in a loop. The pacing interval is
-itself bounded by the close, which ends the occupancy in any case.
+clamped to what is left of the window, and a **stand-down** separates two
+attempts, up to a cap on attempts per window. One window-long wait would put the
+whole window on a single broker registration surviving that long; the stand-down
+and the cap are what keep an attempt that fails immediately from spending the
+window in a loop. The stand-down is itself bounded by the close, which ends the
+occupancy in any case.
 
-**A limit of the occupancy.** The lock is held per attempt, not per window. An
-attempt that spends its full peer wait outlasts the pacing interval, so the next
-attempt takes the [single-writer lock](#the-secret-is-a-linear-resource) back at
-once. But an attempt that fails fast leaves the lock free for the rest of its
-pacing gap, and a window whose attempt cap runs out before the close leaves it
-free for the tail (see
+##### The stand-down is a lock yield
+
+The [single-writer lock](#the-secret-is-a-linear-resource) is the run path's,
+held per attempt: taken when an attempt begins and released when its rotation
+persists or it fails. An attempt spends its whole partner wait inside it, so
+without a deliberate interval between attempts the lock is free for the
+milliseconds a bookkeeping write takes and an operator's own Run cannot take it
+for the width of the window. The stand-down is that interval, and it is measured
+from an attempt's **end** for exactly that reason. What it makes possible is one
+thing: a Run the operator takes during an occupied window proceeds (see
 [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md#cross-tab-single-writer-locking-web-locks)).
-An operator's own Run can take the lock in any such free interval and rotate
-the shared secret, and the occupancy's later attempts then run against a
-rotated record. Their own `lastRun` cannot land over that run's success: the
-write rule in [Recording a run outcome](#recording-a-run-outcome) holds a
-failing run's entry off a success stamped after that run began. A designed
-inter-attempt yield -- one that makes the free interval wide enough for an
-attended Run to take rather than leaving it to how an attempt happened to
-fail -- is deferred rather than designed away.
+
+The stand-down is **half the partner wait**, which is what bounds it on both
+sides:
+
+- **It cannot cost the partnership a window.** Two runners at any relative phase
+  each listen for the partner wait out of every partner-wait-plus-stand-down,
+  and two intervals that long inside a period that short must overlap by at
+  least the stand-down itself. So the two runners are listening at the same time
+  in every cycle, whatever their phase.
+- **It is long enough to be taken.** An operator's Run is a single fail-fast
+  acquisition at a moment of their choosing, so the interval has to be a human
+  one, not a scheduling artifact.
+
+##### What the next attempt re-reads
+
+The stand-down is an interval another context can run in, so the record the
+window was claimed with is stale by the time the next attempt begins. Every
+attempt after the first re-reads it, and four readings end the occupancy rather
+than attempting on it -- the record gone, its schedule gone or moved off this
+window, its input handle gone, or a `"succeeded"` `lastRun` stamped inside this
+window, which is a window already met. A run's own refusals are read inside the
+lock as they always were: a hand-off confirmed in the gap yields that attempt's
+existing `handed-off` outcome rather than a run.
+
+The re-read is a point-in-time reading, not the guarantee. A success landing
+after it -- while the next attempt is already waiting on the partner -- is
+covered where it has to be, at the write: [Recording a run
+outcome](#recording-a-run-outcome) holds a failing run's entry off a success
+stamped after that run began, so the attended run's success cannot be erased by
+the no-show that follows it. The window's own disposition is read against the
+store once more before it is written, so a window met that way counts no miss;
+a success landing after even that is credited by the next wake's catch-up.
 
 An occupancy belongs to one record. Each wake dispatches every due record that is
 not already occupying its window, so an exchange holding its own window open for
@@ -560,17 +588,22 @@ rather than once per attempt:
 
 | Disposition | The window | `consecutiveMisses` | Advance has a `lastRun` |
 | ----------- | ---------- | ------------------- | --------------------------- |
-| `"succeeded"` | an attempt completed the exchange | reset to 0 | no -- the run recorded its own |
+| `"succeeded"` | an attempt completed the exchange, or a run in another context completed it inside this window | reset to 0 | no -- the run recorded its own |
 | `"missed"` | none did, at least one found the partner absent, and none failed in a way that proves the partner was met | incremented | no -- the run recorded its own |
 | `"failed"` | its attempts failed, none of them on an absent partner -- or one of them proved the partner was met | unchanged | no -- the run recorded its own |
 | `"unattempted"` | its last attempt was refused the single-writer lock, held by another context | unchanged | no -- the window has no bookkeeping |
 
 The `"missed"` row folds rather than reading the last attempt because an attempt
 that spent its whole peer wait has already answered the question the miss count
-asks -- whether the two runners met in this window -- and pacing starts the next
-attempt at once after a wait that long. Reading the last verdict alone would
-therefore let one trailing transient failure record a window of no-show waits as
-`"failed"`, which leaves the count untouched and loses the miss entirely.
+asks -- whether the two runners met in this window. Reading the last verdict
+alone would therefore let one trailing transient failure record a window of
+no-show waits as `"failed"`, which leaves the count untouched and loses the miss
+entirely.
+
+The `"succeeded"` row is the one an attempt does not have to earn: a window an
+operator's own Run met during a stand-down was met, so folding it to a miss
+would count one against a window that was not missed and could raise the
+repeated-miss surface a window early.
 
 A failure that **proves the partner was met** decides the same question the
 other way, and outranks any absence the window found earlier. A handshake that

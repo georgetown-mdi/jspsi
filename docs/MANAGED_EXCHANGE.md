@@ -642,15 +642,14 @@ so a hand-off and a run exclude each other as two runs do. Whichever takes the l
 first wins the ordering: a confirmation meeting a run is refused and told to wait,
 and a run meeting a confirmation waits for it and then finds the copy handed off.
 
-On the scheduled path that refusal lasts as long as the run window does. Each
-attempt holds the lock across its whole wait for the partner, and the next
-attempt begins as soon as the last one's wait ends, so a runner occupying a
-window holds the lock essentially continuously from the window's open to its
-close -- hours, at the widths the design intends. An operator who opens the app
-during an occupied window and runs the exchange by hand is told a run is already
-in progress, and keeps being told until a run lands or the window closes. That
-is the single-writer property working as intended rather than a fault, and the
-operator's run is available again the moment the window is over.
+On the scheduled path an attempt holds the lock across its whole wait for the
+partner, so an operator who opens the app during one and runs the exchange by
+hand is told a run is already in progress. Between two attempts the runner
+stands down and holds no lock, and a Run taken in that interval proceeds
+normally: it takes the lock, runs the exchange, and the scheduled runner's next
+attempt then finds the window already met and stops occupying it. So the wait
+for an occupied window is one attempt's partner wait rather than the rest of the
+window, and pressing Run again after being told to wait is the way through it.
 
 The lock is a same-profile **liveness guard**, not a persistent claim: it is
 auto-released when the holding tab or worker is destroyed, and it is taken
