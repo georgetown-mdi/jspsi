@@ -99,7 +99,7 @@ const PROVISION_ROWS = [
   },
 ];
 
-const RECORD_VERSION = "psilink-exchange-record/v6";
+const RECORD_VERSION = "psilink-exchange-record/v7";
 
 let work: string;
 let originalCwd: string;

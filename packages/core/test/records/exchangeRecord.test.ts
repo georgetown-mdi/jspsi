@@ -526,6 +526,11 @@ describe("governance metadata", () => {
         { name: "dose", description: "Administered dose in milligrams." },
       ],
       payloadReceived: [{ name: "status" }],
+      matching: {
+        localDeduplicate: false,
+        partnerDeduplicate: false,
+        cardinality: "one-to-one",
+      },
     });
     // A column the data dictionary does not describe omits the key rather than
     // including an undefined one -- a distinction the structural equality above
@@ -738,6 +743,12 @@ describe("governance metadata", () => {
       "matchingBasis",
       "payloadSent",
       "payloadReceived",
+      "matching",
+    ]);
+    onlyKeys(g.matching, [
+      "localDeduplicate",
+      "partnerDeduplicate",
+      "cardinality",
     ]);
     onlyKeys(g.legalAgreement!, ["reference", "purpose", "expirationDate"]);
     for (const field of g.matchingBasis) {
@@ -974,7 +985,7 @@ describe("serialize / parse", () => {
 
   test("parseExchangeRecord rejects an unrecognized version", async () => {
     const { record } = await buildExchangeRecord(baseInputs, fixedRandomness);
-    const bumped = { ...record, version: "psilink-exchange-record/v7" };
+    const bumped = { ...record, version: "psilink-exchange-record/v8" };
     expect(() => parseExchangeRecord(bumped)).toThrow();
   });
 

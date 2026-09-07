@@ -4,7 +4,10 @@ import { Alert, Button, CopyButton, Group, Modal } from "@mantine/core";
 import { IconAlertCircle, IconAlertTriangle } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
 
-import { DEFAULT_PEER_TIMEOUT_MS } from "@psilink/core";
+import {
+  DEFAULT_PEER_TIMEOUT_MS,
+  describeResolvedMatching,
+} from "@psilink/core";
 
 import { dateTimeLabel } from "@psi/formatting";
 import styles from "@styles/app.module.css";
@@ -254,9 +257,17 @@ export function completionOutcome(
 }
 
 /** The completion panel: the big "Exchange complete" line naming whatever this run
- * produced ({@link completionOutcome}), and the finished-at timestamp. It takes the
+ * produced ({@link completionOutcome}), what the two parties' agreed
+ * `deduplicate` values resolved to, and the finished-at timestamp. It takes the
  * whole outputs shape rather than a bare number so the three outcomes cannot
- * collapse into one another here. */
+ * collapse into one another here.
+ *
+ * The matching statement is core's own composition
+ * (`describeResolvedMatching`), the same sentence the CLI seat states and the
+ * same one a browser-conducted run already showed on its running screen, so no
+ * two sinks drift on what a run resolved to. It is omitted where the outputs
+ * hold no resolved matching, rather than standing in a default for a pair this
+ * seat did not read. */
 export function DonePanel({
   outputs,
   finishedAt,
@@ -283,6 +294,11 @@ export function DonePanel({
           </>
         )}
       </p>
+      {outputs?.matching !== undefined && (
+        <p className={`${styles.small} ${styles.sub}`}>
+          {describeResolvedMatching(outputs.matching)}
+        </p>
+      )}
       {finishedAt !== undefined && (
         <p className={`${styles.small} ${styles.sub} ${styles.mono}`}>
           Finished {dateTimeLabel(finishedAt)}

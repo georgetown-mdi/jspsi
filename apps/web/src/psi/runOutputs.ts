@@ -111,6 +111,10 @@ export function buildRunOutputs(
                 matchedRecordCount: rows.length,
               };
             })();
+    // What the agreed deduplicate pair resolved to, taken from the result
+    // rather than re-derived from the two terms documents, so the completion
+    // panel states what the run itself matched under.
+    generated.matching = result.matching;
     // The record downloads are produced only when the audit pair exists;
     // absent if building the record failed after a successful exchange, in
     // which case they are intentionally omitted without a blocking alert.

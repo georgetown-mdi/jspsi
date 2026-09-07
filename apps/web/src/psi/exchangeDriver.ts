@@ -7,6 +7,7 @@ import type {
   GenerateOutput,
   StageDefinition,
 } from "./exchangeLifecycle";
+import type { ResolvedMatching } from "@psilink/core";
 
 /** The typed lifecycle events a driver emits over a single run, plus the run's
  * {@link AbortSignal}. This is the whole surface a consumer sees: a driver runs
@@ -48,6 +49,15 @@ export interface ExchangeDriverEvents<
    * terminal: the run still ends in exactly one `onResult`/`onError`, though a
    * teardown notice can arrive after it. */
   onWarning?: (message: string) => void;
+  /** What the two parties' agreed `deduplicate` values resolved to, reported
+   * once by the in-browser driver at the post-terms, pre-round boundary
+   * {@link runExchangeLifecycle} names it at, so the consumer states the pair on
+   * the running screen rather than waiting for the result. Optional -- a
+   * consumer that states it only at completion omits it -- and never terminal.
+   * A console-conducted run takes the pair off its terminal result event
+   * instead (`serverJobExchangeDriver`), the only relayed frame that holds
+   * it. */
+  onResolvedMatching?: (matching: ResolvedMatching) => void;
 }
 
 /** A per-channel exchange driver: a `run` that conducts one exchange and
@@ -91,7 +101,15 @@ export function createBrowserExchangeDriver<
   const { acquire, exchangeRole, sharedSecret, expires, generateOutput } =
     config;
   return {
-    run: ({ signal, onStages, onStage, onResult, onError, onWarning }) =>
+    run: ({
+      signal,
+      onStages,
+      onStage,
+      onResult,
+      onError,
+      onWarning,
+      onResolvedMatching,
+    }) =>
       runExchangeLifecycle<TOutputs>({
         acquire,
         exchangeRole,
@@ -104,6 +122,7 @@ export function createBrowserExchangeDriver<
         onResult,
         onError,
         onWarning,
+        onResolvedMatching,
       }),
   };
 }

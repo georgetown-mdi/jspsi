@@ -12,6 +12,7 @@ import { createElement } from "react";
 import "@mantine/core/styles.css";
 
 import {
+  describeResolvedMatching,
   encodeInvitation,
   generateSharedSecret,
   getDefaultLinkageTerms,
@@ -122,6 +123,12 @@ interface CapturedLifecycle {
     intersectionCount?: number;
     countReportedByPartner?: boolean;
     matchedRecordCount?: number;
+    matching?: {
+      localDeduplicate: boolean;
+      partnerDeduplicate: boolean;
+      cardinality:
+        "one-to-one" | "one-to-many" | "many-to-one" | "many-to-many";
+    };
     record?: {
       recordUrl: string;
       recordFileName: string;
@@ -130,6 +137,11 @@ interface CapturedLifecycle {
     };
   }) => void;
   onError: (failure: { category: string; error: unknown }) => void;
+  onResolvedMatching: (matching: {
+    localDeduplicate: boolean;
+    partnerDeduplicate: boolean;
+    cardinality: "one-to-one" | "one-to-many" | "many-to-one" | "many-to-many";
+  }) => void;
 }
 const lifecycleHarness = vi.hoisted(() => ({
   calls: [] as Array<unknown>,
@@ -1858,6 +1870,54 @@ describe("acceptor screen: run and completion", () => {
     expect(currentStepLabel()).toBe("Link keys");
   });
 
+  test("the resolved matching is readable before the run ends", async () => {
+    // The acceptor's mirror of the inviting seat's pre-round statement: the pair
+    // is readable while the exchange is still running, not only once it has
+    // finished, and it reads as plain run status rather than through the
+    // warnings alert, which an ordinary one-to-one run never raises.
+    const matching = {
+      localDeduplicate: false,
+      partnerDeduplicate: false,
+      cardinality: "one-to-one" as const,
+    };
+    const sentence = describeResolvedMatching(matching);
+    const paragraphsSaying = (text: string) =>
+      Array.from(document.querySelectorAll("p")).filter(
+        (el) => el.textContent === text,
+      );
+
+    await reachRun();
+    const call = lifecycleCall(0);
+    call.onStages(stagesFor(preparedWith("cascade", 2), "acceptor"));
+    call.onStage("confirming protocol");
+    call.onResolvedMatching(matching);
+
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Exchange in progress");
+    await vi.waitFor(() => expect(paragraphsSaying(sentence)).toHaveLength(1));
+    expect(paragraphsSaying(sentence)[0].closest('[role="status"]')).toBeNull();
+    expect(
+      page.getByText("The exchange reported a warning").query(),
+    ).toBeNull();
+
+    call.onResult({
+      kind: "matched" as const,
+      resultsUrl: URL.createObjectURL(new Blob(["a,b\n"])),
+      matchedRecordCount: 12,
+      matching,
+    });
+
+    // The completion panel takes the sentence over, so it still stands once.
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Exchange complete");
+    await vi.waitFor(() => expect(paragraphsSaying(sentence)).toHaveLength(1));
+    expect(
+      page.getByText("The exchange reported a warning").query(),
+    ).toBeNull();
+  });
+
   test("completion offers downloads and fixes the past-tense ledger", async () => {
     await reachRun();
     const call = lifecycleCall(0);
@@ -1868,6 +1928,11 @@ describe("acceptor screen: run and completion", () => {
       kind: "matched" as const,
       resultsUrl: URL.createObjectURL(new Blob(["a,b\n"])),
       matchedRecordCount: 1847,
+      matching: {
+        localDeduplicate: true,
+        partnerDeduplicate: false,
+        cardinality: "many-to-one" as const,
+      },
       record: {
         recordUrl: URL.createObjectURL(new Blob(["{}"])),
         recordFileName: "psilink-record-2026-07-08T14-32.json",
@@ -1879,6 +1944,17 @@ describe("acceptor screen: run and completion", () => {
     await expect
       .element(page.getByRole("heading", { level: 1 }))
       .toHaveTextContent("Exchange complete");
+    // The mirror of the inviting seat's statement, on the same panel: both seats
+    // state the partner's value and the label their own side resolved to.
+    await expect
+      .element(
+        page.getByText(
+          "Deduplication as agreed at the terms exchange: you declared " +
+            "deduplicate true, your partner declared deduplicate false. This " +
+            "run matches many-to-one.",
+        ),
+      )
+      .toBeInTheDocument();
     await expect
       .element(page.getByText(/1,847.*matched records/))
       .toBeInTheDocument();

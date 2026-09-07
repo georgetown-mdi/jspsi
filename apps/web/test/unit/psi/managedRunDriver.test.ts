@@ -634,8 +634,35 @@ describe("naming what the agreed terms resolved to", () => {
     );
   }
 
+  /** Run the driver capturing both slots the protocol-confirmation callback
+   * reports through: the notice slot, and the status slot the resolved pair
+   * takes. */
+  async function runCapturingBothSlots(signal: AbortSignal) {
+    const onWarning = vi.fn();
+    const onResolvedMatching = vi.fn();
+    await runManagedExchangeInBrowser({
+      record: RECORD,
+      source: SOURCE,
+      signal,
+      urls: URLS,
+      onWarning,
+      onResolvedMatching,
+    });
+    return { onWarning, onResolvedMatching };
+  }
+
+  /** The three fields of a run shape the status slot is handed: the record
+   * counts the shape also holds are the notices' input, not the pair's. */
+  const matchingOf = (shape: ResolvedRunShape) => ({
+    localDeduplicate: shape.localDeduplicate,
+    partnerDeduplicate: shape.partnerDeduplicate,
+    cardinality: shape.cardinality,
+  });
+
   const OVER_BOUND_SHAPE: ResolvedRunShape = {
     cardinality: "many-to-many",
+    localDeduplicate: true,
+    partnerDeduplicate: true,
     localRecordCount: 3163,
     localDeclaredRecordCount: 3163,
     partnerRecordCount: 3164,
@@ -653,54 +680,66 @@ describe("naming what the agreed terms resolved to", () => {
     mockedOpen.mockResolvedValue(mc);
     acquireResources();
     exchangeConfirming(OVER_BOUND_SHAPE);
-    const onWarning = vi.fn();
     const { cardinalityNotice, pairTableAdvisory } =
       describeResolvedRunShape(OVER_BOUND_SHAPE);
 
-    await runDriver(new AbortController().signal, onWarning);
+    const { onWarning, onResolvedMatching } = await runCapturingBothSlots(
+      new AbortController().signal,
+    );
 
     expect(onWarning.mock.calls).toEqual([
       [cardinalityNotice],
       [pairTableAdvisory],
     ]);
+    expect(onResolvedMatching.mock.calls).toEqual([
+      [matchingOf(OVER_BOUND_SHAPE)],
+    ]);
   });
 
-  test("raises nothing for a one-to-one run within the bound", async () => {
-    // The cardinality that adds no multiplicity is the one every consent surface
-    // already describes, so naming it here would be noise on the ordinary run --
-    // and an unattended seat's noise is a log line nobody asked for.
+  test("states the resolved matching alone on a one-to-one run within the bound", async () => {
+    // The cardinality notice and the projection advisory both stay off this
+    // shape, so an ordinary re-run raises no notice at all and the pair the two
+    // parties presented is the whole of what this callback reports.
     const { mc } = makeParkedCloseMc();
     mockedOpen.mockResolvedValue(mc);
     acquireResources();
-    exchangeConfirming({
+    const shape: ResolvedRunShape = {
       cardinality: "one-to-one",
+      localDeduplicate: false,
+      partnerDeduplicate: false,
       localRecordCount: 3163,
       localDeclaredRecordCount: 3163,
       partnerRecordCount: 3164,
       localExpectsOutput: true,
       partnerAssociationTableWithheld: false,
-    });
-    const onWarning = vi.fn();
+    };
+    exchangeConfirming(shape);
 
-    await runDriver(new AbortController().signal, onWarning);
+    const { onWarning, onResolvedMatching } = await runCapturingBothSlots(
+      new AbortController().signal,
+    );
 
     expect(onWarning).not.toHaveBeenCalled();
+    expect(onResolvedMatching.mock.calls).toEqual([[matchingOf(shape)]]);
   });
 
   test("drops the notices on a run the operator already stopped", async () => {
     // The live gate every call site of this wiring takes: a cancelled run's notices
-    // are noise, and the caller's surface may be gone.
+    // are noise, and the caller's surface may be gone. The resolved pair takes the
+    // same gate -- the surface that would state it is gone with the rest.
     const { mc } = makeParkedCloseMc();
     mockedOpen.mockResolvedValue(mc);
     acquireResources();
     exchangeConfirming(OVER_BOUND_SHAPE);
-    const onWarning = vi.fn();
     const controller = new AbortController();
     controller.abort();
 
-    await runDriver(controller.signal, onWarning);
+    const { onWarning, onResolvedMatching } = await runCapturingBothSlots(
+      controller.signal,
+    );
 
     expect(onWarning).not.toHaveBeenCalled();
+    expect(onResolvedMatching).not.toHaveBeenCalled();
   });
 });
 

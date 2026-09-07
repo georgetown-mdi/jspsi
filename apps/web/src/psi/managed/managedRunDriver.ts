@@ -52,7 +52,11 @@ import { beginManagedRendezvous } from "./managedRendezvous";
 
 import { acquireValidatedManagedInput } from "./managedInputHandle";
 
-import type { BuiltExchangeRecord, MessageConnection } from "@psilink/core";
+import type {
+  BuiltExchangeRecord,
+  MessageConnection,
+  ResolvedMatching,
+} from "@psilink/core";
 import type { DataConnection } from "peerjs";
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 import type Peer from "peerjs";
@@ -115,13 +119,20 @@ export interface ManagedRunDriverConfig {
    * instead ({@link ./managedRun.ts}, `rerunFailureLastRun`). Absent, both flows
    * keep their default budget. */
   peerWaitTimeoutMs?: number;
-  /** A non-fatal, operator-relevant notice raised mid-run, from three sources: what
-   * the agreed terms resolved to ({@link describeResolvedRunShape}); the clean
+  /** A non-fatal, operator-relevant notice raised mid-run, from three sources: the
+   * deduplicating cardinality and the pair-table projection the agreed terms
+   * resolved to ({@link describeResolvedRunShape}); the clean
    * close ending on an exit with no delivery signal ({@link CLOSE_OUTCOME_WARNINGS});
    * and {@link DISCLOSURE_NOT_FILED_WARNING}. Optional: a caller with no notice
    * surface omits it and all are dropped. Never a terminal -- the run still settles
    * exactly once, and a notice from the teardown's close can arrive after it. */
   onWarning?: (message: string) => void;
+  /** What the two parties' agreed `deduplicate` values resolved to, reported
+   * once the terms are agreed and before the first round. It states the run's
+   * own terms rather than raising a notice, so an attended re-run shows it as
+   * run status. Optional: an unattended run has nobody reading it as it goes
+   * and omits it, and its own record holds the same three afterwards. */
+  onResolvedMatching?: (matching: ResolvedMatching) => void;
 }
 
 /**
@@ -140,7 +151,15 @@ export interface ManagedRunDriverConfig {
 export function runManagedExchangeInBrowser(
   config: ManagedRunDriverConfig,
 ): Promise<ManagedExchangeRunResult<RunOutputs>> {
-  const { record, source, signal, urls, onWarning, peerWaitTimeoutMs } = config;
+  const {
+    record,
+    source,
+    signal,
+    urls,
+    onWarning,
+    onResolvedMatching,
+    peerWaitTimeoutMs,
+  } = config;
   const exchangeRole = HANDSHAKE_ROLE_FOR_SIDE[record.side];
 
   // Two gates on the notices this run's close can raise. This run's own outputs
@@ -284,14 +303,24 @@ export function runManagedExchangeInBrowser(
               psiEngineFactory: createBrowserPsiEngineFactory(
                 defaultSpawnPsiCryptoWorker,
               ),
-              // What the agreed terms resolved to, raised here as for every other
-              // seat: an unattended re-run is where an unnoticed widening of the
-              // match matters most, since nobody is watching and the terms are a
-              // standing record. Core composes both strings and raises neither --
-              // that is a front end's discretion (docs/spec/PROTOCOL.md, "The
-              // both-sided expansion has no ceiling of its own") -- so they take
-              // this wiring's own notice slot.
+              // What the agreed terms resolved to, reported here as for every
+              // other seat: a re-run is where an unnoticed widening of the match
+              // matters most, since the terms are a standing record. The
+              // resolved pair goes to the status slot, on every run; the
+              // deduplicating cardinality and the pair-table projection are
+              // notices and take this wiring's notice slot, where the shape
+              // raises them. Core composes each and raises none -- a front end's
+              // discretion (docs/spec/PROTOCOL.md, "The both-sided expansion has
+              // no ceiling of its own").
               onProtocolConfirmed: (_partnerTerms, _resolvedRole, runShape) => {
+                const { localDeduplicate, partnerDeduplicate, cardinality } =
+                  runShape;
+                if (!signal.aborted)
+                  onResolvedMatching?.({
+                    localDeduplicate,
+                    partnerDeduplicate,
+                    cardinality,
+                  });
                 const { cardinalityNotice, pairTableAdvisory } =
                   describeResolvedRunShape(runShape);
                 for (const notice of [cardinalityNotice, pairTableAdvisory])

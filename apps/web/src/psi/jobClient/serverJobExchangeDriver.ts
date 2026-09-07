@@ -1,4 +1,5 @@
 import {
+  LINKAGE_CARDINALITIES,
   ProcessState,
   getLogger,
   joinErrorCauseChain,
@@ -32,6 +33,7 @@ import type {
   LinkageTerms,
   Metadata,
   OwnColumnSelection,
+  ResolvedMatching,
   Standardization,
 } from "@psilink/core";
 import type { RelayEvent, RelayEventType } from "@jobs/cliDriver";
@@ -768,6 +770,29 @@ function countOnlyResultCount(event: RelayEvent): number | undefined {
     : undefined;
 }
 
+/** What the agreed `deduplicate` pair resolved to, read off a `result` relay
+ * event, or undefined when the run reported nothing this build can read. The
+ * relay forwards the CLI's own fields verbatim (docs/spec/CLI_EVENTS.md,
+ * `result`), so the shape is checked here rather than assumed: both values
+ * must be booleans and the label one of the closed set, and anything else
+ * leaves the console's panel stating no matching at all rather than a label
+ * this build does not define. */
+function resolvedMatchingOf(event: RelayEvent): ResolvedMatching | undefined {
+  const matching = event.matching;
+  if (matching === null || typeof matching !== "object") return undefined;
+  const { localDeduplicate, partnerDeduplicate, cardinality } = matching as {
+    localDeduplicate?: unknown;
+    partnerDeduplicate?: unknown;
+    cardinality?: unknown;
+  };
+  const label = LINKAGE_CARDINALITIES.find((known) => known === cardinality);
+  return typeof localDeduplicate === "boolean" &&
+    typeof partnerDeduplicate === "boolean" &&
+    label !== undefined
+    ? { localDeduplicate, partnerDeduplicate, cardinality: label }
+    : undefined;
+}
+
 /** The base console {@link RunOutputs} for a `result` relay event, before the
  * record pair is attached. A server job writes its result on the console, so
  * `resultsUrl` points at the job's console result endpoint rather than a
@@ -779,18 +804,22 @@ function countOnlyResultCount(event: RelayEvent): number | undefined {
  * count. A present count means a count-only outcome (no result file for
  * either party); its absence means withheld. `countReportedByPartner` caveats
  * the count only on a literal `true`; anything else -- omitted, or a
- * non-boolean -- is treated as this party's own count, per the contract. */
+ * non-boolean -- is treated as this party's own count, per the contract. The
+ * resolved matching rides all three outcomes, since the console seat states
+ * what the pair resolved to whatever this party received. */
 function baseResultOutputs(event: RelayEvent, jobId: string): RunOutputs {
+  const matching = resolvedMatchingOf(event);
   if (event.resultWritten !== false)
-    return { kind: "matched", resultsUrl: jobResultUrl(jobId) };
+    return { kind: "matched", resultsUrl: jobResultUrl(jobId), matching };
   const intersectionCount = countOnlyResultCount(event);
   return intersectionCount !== undefined
     ? {
         kind: "counted",
         intersectionCount,
         countReportedByPartner: event.countReportedByPartner === true,
+        matching,
       }
-    : { kind: "withheld" };
+    : { kind: "withheld", matching };
 }
 
 /** Attach the record-pair downloads to the base outputs, pointed at the

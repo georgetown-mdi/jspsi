@@ -90,6 +90,11 @@ vi.mock("@psilink/core", async (importActual) => {
         associationTable: [[], []],
         intersectionCount: undefined,
         partnerTerms: stubLinkageTerms,
+        matching: {
+          localDeduplicate: false,
+          partnerDeduplicate: false,
+          cardinality: "one-to-one",
+        },
         resolvedRole: "receiver",
         partnerPayload: { columns: [], rowIndices: [], rows: [] },
       } satisfies ExchangeResult;

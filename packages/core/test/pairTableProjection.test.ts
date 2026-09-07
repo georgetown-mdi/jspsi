@@ -38,6 +38,10 @@ const shape = (
   > = {},
 ): ResolvedRunShape => ({
   cardinality,
+  localDeduplicate:
+    cardinality === "many-to-one" || cardinality === "many-to-many",
+  partnerDeduplicate:
+    cardinality === "one-to-many" || cardinality === "many-to-many",
   localRecordCount,
   localDeclaredRecordCount: localRecordCount,
   partnerRecordCount,
@@ -409,6 +413,8 @@ test("hands the resolved shape to the front end before the first round", async (
   // fans out here, so what each declared is what it holds.
   expect(captureA.runShape).toStrictEqual({
     cardinality: "many-to-many",
+    localDeduplicate: true,
+    partnerDeduplicate: true,
     localRecordCount: 4,
     localDeclaredRecordCount: 4,
     partnerRecordCount: 6,
@@ -417,6 +423,8 @@ test("hands the resolved shape to the front end before the first round", async (
   });
   expect(captureB.runShape).toStrictEqual({
     cardinality: "many-to-many",
+    localDeduplicate: true,
+    partnerDeduplicate: true,
     localRecordCount: 6,
     localDeclaredRecordCount: 6,
     partnerRecordCount: 4,
@@ -474,6 +482,8 @@ test("a non-receiving party's own boundary says so, on the cascade", async () =>
 
   expect(captureA.runShape).toStrictEqual({
     cardinality: "many-to-one",
+    localDeduplicate: true,
+    partnerDeduplicate: false,
     localRecordCount: 4,
     localDeclaredRecordCount: 4,
     partnerRecordCount: 6,
@@ -482,6 +492,8 @@ test("a non-receiving party's own boundary says so, on the cascade", async () =>
   });
   expect(captureB.runShape).toStrictEqual({
     cardinality: "one-to-many",
+    localDeduplicate: false,
+    partnerDeduplicate: true,
     localRecordCount: 6,
     localDeclaredRecordCount: 6,
     partnerRecordCount: 4,
@@ -522,6 +534,8 @@ test("a single-pass blind helper is named as reading nothing back", async () => 
 
   expect(captureA.runShape).toStrictEqual({
     cardinality: "many-to-one",
+    localDeduplicate: true,
+    partnerDeduplicate: false,
     localRecordCount: 4,
     localDeclaredRecordCount: 4,
     partnerRecordCount: 6,
@@ -549,6 +563,8 @@ test("an over-bound projection warns and the run completes", async () => {
 
   expect(captureA.runShape).toStrictEqual({
     cardinality: "many-to-many",
+    localDeduplicate: true,
+    partnerDeduplicate: true,
     localRecordCount: rows,
     localDeclaredRecordCount: rows,
     partnerRecordCount: rows,

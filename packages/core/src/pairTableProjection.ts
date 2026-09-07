@@ -1,6 +1,6 @@
 import { MAX_RECORD_COUNT } from "./connection/frameSize.js";
 
-import type { LinkageCardinality } from "./psi/link.js";
+import type { ResolvedMatching } from "./linkageTermsPolicy.js";
 
 /**
  * What a run resolved to at the post-terms, pre-round boundary: the
@@ -27,9 +27,12 @@ import type { LinkageCardinality } from "./psi/link.js";
  * count cannot tell a party whether it receives a result at all, so a
  * notice resting on the cardinality alone would assert an entitlement the
  * run may not have.
+ *
+ * Extends {@link ResolvedMatching}, the same triple the run returns on its
+ * outcome and writes into its self-attested record, so what a seat states
+ * before the first round and what the record holds afterwards are one shape.
  */
-export interface ResolvedRunShape {
-  readonly cardinality: LinkageCardinality;
+export interface ResolvedRunShape extends ResolvedMatching {
   /** This party's own raw dataset record count. */
   readonly localRecordCount: number;
   /**
@@ -172,6 +175,32 @@ export function projectPairTable(
 // separator (a non-breaking space in several) would put there.
 function formatCount(count: number | bigint): string {
   return new Intl.NumberFormat("en-US").format(count);
+}
+
+/**
+ * State what the two parties' agreed `deduplicate` values resolved to: this
+ * party's own declared value, the value its partner presented at the terms
+ * exchange, and the cardinality the pair gives this party.
+ *
+ * Composed for every run, whatever the cardinality, and stated once the terms
+ * are agreed. Nothing earlier can state it: each party's value comes from its
+ * own document, so the pair exists only after the terms exchange, and a seat
+ * that stated only its own value would leave the partner's -- which decides
+ * whether several of the partner's records may match one of this party's --
+ * unread on both sides.
+ *
+ * Both values render as the fixed literals `true` and `false` off a boolean
+ * the terms schema already parsed, and the cardinality as one of the closed
+ * label set, so the sentence holds no partner-authored text and a display sink
+ * escapes it as it escapes any other message.
+ */
+export function describeResolvedMatching(matching: ResolvedMatching): string {
+  return (
+    "Deduplication as agreed at the terms exchange: you declared deduplicate " +
+    `${String(matching.localDeduplicate)}, your partner declared deduplicate ` +
+    `${String(matching.partnerDeduplicate)}. This run matches ` +
+    `${matching.cardinality}.`
+  );
 }
 
 // Exhaustive over the union with no default, so a cardinality added to the

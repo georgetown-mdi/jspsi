@@ -238,6 +238,7 @@ export {
 export type { ExchangeSpec } from "./config/exchangeSpec";
 export {
   DEDUPLICATE_IMPLEMENTED_BY_STRATEGY,
+  LINKAGE_CARDINALITIES,
   assertDeduplicateImplemented,
   countOnlyShapeViolation,
   swapPairTransformsDiffer,
@@ -260,7 +261,10 @@ export {
   deriveAcceptedLinkageTerms,
   validateCompatibility,
 } from "./linkageTermsNegotiation";
-export type { CountOnlyShapeViolation } from "./linkageTermsPolicy";
+export type {
+  CountOnlyShapeViolation,
+  ResolvedMatching,
+} from "./linkageTermsPolicy";
 export type {
   LinkageField,
   LinkageKey,
@@ -478,7 +482,10 @@ export type {
   PreparedExchange,
   RunExchangeOptions,
 } from "./exchange";
-export { describeResolvedRunShape } from "./pairTableProjection";
+export {
+  describeResolvedMatching,
+  describeResolvedRunShape,
+} from "./pairTableProjection";
 export type { ResolvedRunShape } from "./pairTableProjection";
 export {
   EXCHANGE_KEYS_VERSION,
