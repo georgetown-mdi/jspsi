@@ -1282,6 +1282,25 @@ describe("exchange-record-vectors.json", () => {
     expect(vectors.length).toBeGreaterThan(0);
   });
 
+  // The record's cardinality is a function of the two parties' agreed
+  // `deduplicate` values, so pinning all four pairs pins all four labels an
+  // independent implementation has to resolve -- including the mirrored pair,
+  // where reading the wrong side gives the other label.
+  test("the vectors cover every agreed deduplicate pair", () => {
+    const pairs = vectors.map(
+      (v) =>
+        `${String(v.inputs.localTerms.deduplicate)},${String(
+          v.inputs.partnerTerms.deduplicate,
+        )}`,
+    );
+    expect([...new Set(pairs)].sort()).toEqual([
+      "false,false",
+      "false,true",
+      "true,false",
+      "true,true",
+    ]);
+  });
+
   test.each(vectors)(
     "$name: build reproduces the checked-in record and keys",
     async (vector) => {
