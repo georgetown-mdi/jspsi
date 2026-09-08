@@ -1,14 +1,17 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  deriveAcceptedLinkageTerms,
   encodeInvitation,
   generateSharedSecret,
   getDefaultLinkageTerms,
   prepareForExchange,
+  resolveLinkageCardinality,
   validateCompatibility,
 } from "@psilink/core";
 
 import {
+  acceptorDeduplicateRefusal,
   acceptorExchangeDataSpec,
   prepareAcceptedInvitation,
 } from "../../../src/psi/acceptInvitation.js";
@@ -314,5 +317,128 @@ describe("acceptorExchangeDataSpec", () => {
       "last_name",
       "date_of_birth",
     ]);
+  });
+});
+
+describe("the accepting party's own deduplicate at the seat", () => {
+  // The invitation's terms as the seat holds them: a single key, the inviting
+  // party's own `deduplicate` declared on them, and a strategy both parties
+  // adopt.
+  const invitationTerms: LinkageTerms = {
+    version: "1.0.0",
+    identity: "Inviting Org",
+    date: "2025-01-01",
+    algorithm: "psi",
+    linkageStrategy: "cascade",
+    output: { expectsOutput: true, shareWithPartner: true },
+    deduplicate: false,
+    linkageFields: [{ name: "lastName", type: "last_name" }],
+    linkageKeys: [{ name: "LAST", elements: [{ field: "lastName" }] }],
+  };
+
+  test.each([false, true])(
+    "the value the operator sets reaches the terms this party presents (invitation declares %s)",
+    (declared) => {
+      // The operator's own value survives into the spec the run prepares from,
+      // while the invitation's own side is untouched.
+      const terms: LinkageTerms = { ...invitationTerms, deduplicate: declared };
+      const spec = acceptorExchangeDataSpec(
+        terms,
+        "Accepting Org",
+        undefined,
+        true,
+      );
+      expect(spec.linkageTerms?.deduplicate).toBe(true);
+      expect(terms.deduplicate).toBe(declared);
+    },
+  );
+
+  test("an omitted value stays the closed false an accept with no control derives", () => {
+    expect(
+      acceptorExchangeDataSpec(invitationTerms, "Accepting Org").linkageTerms
+        ?.deduplicate,
+    ).toBe(false);
+    expect(
+      acceptorExchangeDataSpec({ ...invitationTerms, deduplicate: true }, "Org")
+        .linkageTerms?.deduplicate,
+    ).toBe(false);
+  });
+
+  test.each([
+    { inviter: false, acceptor: false },
+    { inviter: true, acceptor: false },
+    { inviter: false, acceptor: true },
+    { inviter: true, acceptor: true },
+  ])(
+    "the pair ($inviter, $acceptor) runs under the cascade",
+    ({ inviter, acceptor }) => {
+      // Every combination the schema admits resolves rather than refusing, under
+      // the strategy that pairs the both-sided cardinality.
+      expect(
+        acceptorDeduplicateRefusal(
+          { ...invitationTerms, deduplicate: inviter },
+          acceptor,
+        ),
+      ).toBeUndefined();
+    },
+  );
+
+  test("the both-sided pair under single-pass is refused at the seat", () => {
+    // Refused where the operator sets it, before the run and before any key or
+    // payload moves, rather than surfacing as a mid-run failure. The message is
+    // the run boundary's own, so it names the strategy to change and the
+    // one-sided pair to fall back to.
+    const singlePass: LinkageTerms = {
+      ...invitationTerms,
+      linkageStrategy: "single-pass",
+      deduplicate: true,
+    };
+    const refusal = acceptorDeduplicateRefusal(singlePass, true);
+    expect(refusal).toBeDefined();
+    expect(refusal).toContain("cascade");
+    expect(refusal).toContain("deduplicate to false on one of the two");
+    // One-sided under the same strategy runs, and so does the both-sided pair
+    // under the strategy that pairs it -- the combination is refused, not the
+    // setting.
+    expect(acceptorDeduplicateRefusal(singlePass, false)).toBeUndefined();
+    expect(
+      acceptorDeduplicateRefusal(
+        { ...singlePass, linkageStrategy: "cascade" },
+        true,
+      ),
+    ).toBeUndefined();
+  });
+
+  test("a count-only invitation refuses this party's own deduplicate at the seat", () => {
+    // The count-only shape holds neither party's value open, so the seat states
+    // the same refusal the derivation applies rather than letting it reach the
+    // launch.
+    const countOnly: LinkageTerms = { ...invitationTerms, algorithm: "psi-c" };
+    expect(acceptorDeduplicateRefusal(countOnly, false)).toBeUndefined();
+    expect(acceptorDeduplicateRefusal(countOnly, true)).toContain(
+      "must set deduplicate to false",
+    );
+  });
+
+  test("the seat's refusal agrees with the run boundary over the same pair", () => {
+    // The seat reads `resolveLinkageCardinality`, the boundary the run resolves
+    // the joint cardinality at, so it refuses exactly the pairs the run refuses.
+    const singlePass: LinkageTerms = {
+      ...invitationTerms,
+      linkageStrategy: "single-pass",
+      deduplicate: true,
+    };
+    const acceptorTerms = deriveAcceptedLinkageTerms(
+      singlePass,
+      "Accepting Org",
+      true,
+    );
+    let boundary: string | undefined;
+    try {
+      resolveLinkageCardinality(acceptorTerms, singlePass);
+    } catch (error) {
+      boundary = (error as Error).message;
+    }
+    expect(acceptorDeduplicateRefusal(singlePass, true)).toBe(boundary);
   });
 });

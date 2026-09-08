@@ -12,6 +12,7 @@ import { createElement } from "react";
 import "@mantine/core/styles.css";
 
 import {
+  describeDeduplicatePair,
   describeResolvedMatching,
   encodeInvitation,
   generateSharedSecret,
@@ -2537,5 +2538,75 @@ describe("acceptor screen: run and completion", () => {
       .element(page.getByRole("button", { name: "Start the exchange" }))
       .toBeDisabled();
     expect(lifecycleHarness.calls).toHaveLength(0);
+  });
+});
+
+describe("AcceptorScreen: this party's own deduplicate", () => {
+  // The terms-review step, where this party's own side is authored beside what
+  // the invitation declares for the inviting party's.
+  async function reachReview(linkageTerms: LinkageTerms) {
+    window.location.hash = await encodeAcceptToken(linkageTerms);
+    app.render(createElement(AcceptorScreen));
+    await expect
+      .element(page.getByText("Invitation from County Health Department"))
+      .toBeInTheDocument();
+    await userEvent.click(page.getByRole("button", { name: "Other details" }));
+  }
+
+  const ownSide = () =>
+    page.getByRole("checkbox", {
+      name: "Let several of my records match one of my partner's",
+    });
+
+  test("states the pair the operator's selection makes with the invitation's", async () => {
+    await reachReview({ ...acceptorTerms, deduplicate: true });
+    await expect
+      .element(page.getByText(describeDeduplicatePair(true, false)))
+      .toBeInTheDocument();
+    await userEvent.click(ownSide());
+    await expect
+      .element(page.getByText(describeDeduplicatePair(true, true)))
+      .toBeInTheDocument();
+  });
+
+  test("refuses the both-sided pair under single-pass at the seat, before the run", async () => {
+    // Refused where the operator sets it rather than mid-run: the alert states
+    // the run boundary's own message, and Continue is held with a reason beside
+    // it, since the control sits inside a disclosure the operator may close.
+    await reachReview({
+      ...acceptorTerms,
+      linkageStrategy: "single-pass",
+      deduplicate: true,
+    });
+    const proceed = page.getByRole("button", {
+      name: "Continue: consent & your file",
+    });
+    await expect.element(proceed).toBeEnabled();
+    await userEvent.click(ownSide());
+    await expect
+      .element(page.getByText("These two settings cannot run together"))
+      .toBeInTheDocument();
+    await expect.element(proceed).toBeDisabled();
+    await expect
+      .element(
+        page.getByText(
+          "Resolve the duplicate-matching settings in the terms above to continue.",
+        ),
+      )
+      .toBeInTheDocument();
+    // Clearing this party's own side runs again: the combination is refused,
+    // not the setting.
+    await userEvent.click(ownSide());
+    await expect.element(proceed).toBeEnabled();
+  });
+
+  test("the both-sided pair under the cascade continues", async () => {
+    await reachReview({ ...acceptorTerms, deduplicate: true });
+    await userEvent.click(ownSide());
+    await expect
+      .element(
+        page.getByRole("button", { name: "Continue: consent & your file" }),
+      )
+      .toBeEnabled();
   });
 });

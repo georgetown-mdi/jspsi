@@ -17,7 +17,7 @@
 import { parseLinkageTerms } from "../config/linkageTermsSchema.js";
 import {
   CONSENT_FACTS,
-  DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
+  DEDUPLICATE_ACCEPTOR_WIDENING_NOTE,
   DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,
   DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT,
 } from "./consentFacts.js";
@@ -437,7 +437,7 @@ export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
         name: "both parties receive the result",
         requiredVariantCopy: [
           DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,
-          DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
+          DEDUPLICATE_ACCEPTOR_WIDENING_NOTE,
         ],
         forbiddenVariantCopy: [
           DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT,
@@ -472,7 +472,7 @@ export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
           // reason the direction note is: a reader met by the withholding is
           // entitled to what the rounds still reach in the same place.
           CONSENT_FACTS.duplicateGroupingDisplayLimit.note,
-          DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
+          DEDUPLICATE_ACCEPTOR_WIDENING_NOTE,
         ],
         forbiddenVariantCopy: [
           DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,
@@ -501,7 +501,7 @@ export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
           // presents is entitled, in the same place, to what the exchange holds
           // rather than the client.
           CONSENT_FACTS.duplicateGroupingWithheld.note,
-          DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
+          DEDUPLICATE_ACCEPTOR_WIDENING_NOTE,
         ],
         forbiddenVariantCopy: [
           DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,

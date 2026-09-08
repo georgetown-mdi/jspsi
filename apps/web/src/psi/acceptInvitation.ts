@@ -1,8 +1,10 @@
 import {
+  UsageError,
   assertDeduplicateImplemented,
   decodeInvitation,
   deriveAcceptedLinkageTerms,
   isInvitationExpired,
+  resolveLinkageCardinality,
 } from "@psilink/core";
 
 import type { DeploymentProfile } from "@utils/clientConfig";
@@ -151,22 +153,82 @@ function endpointDrivableHere(
  * names must be declared linkage fields); the editor's own output satisfies it
  * (`getDefaultStandardization`).
  *
+ * `deduplicate` is this party's OWN side, taken from the accept seat's control
+ * rather than from the invitation, which declares only the inviting party's
+ * ({@link acceptorDeduplicateRefusal} answers a pair the run would refuse).
+ * Omitted, it defaults to the closed `false` an acceptance derives with no
+ * control at all.
+ *
  * @param linkageTerms  The inviter's linkage terms from the decoded token.
  * @param acceptorName  The accepting party's name, recorded as the prepared
  *                      terms' identity.
  * @param edits         The acceptor's edited metadata and standardization, when it
  *                      prepared its data; omitted to fall back to CSV inference.
+ * @param deduplicate   Whether several of THIS party's records may match one of
+ *                      the partner's, as the accepting operator set it.
  */
 export function acceptorExchangeDataSpec(
   linkageTerms: LinkageTerms,
   acceptorName: string,
   edits?: AcceptorDataEdits,
+  deduplicate: boolean = false,
 ): ExchangeDataSpec {
   return {
-    linkageTerms: deriveAcceptedLinkageTerms(linkageTerms, acceptorName),
+    linkageTerms: deriveAcceptedLinkageTerms(
+      linkageTerms,
+      acceptorName,
+      deduplicate,
+    ),
     ...(edits && {
       metadata: edits.metadata,
       standardization: edits.standardization,
     }),
   };
+}
+
+/**
+ * The identity the accept seat's pre-run deduplicate check stands the operator's
+ * own name in for. The check reads the two parties' `deduplicate` values and
+ * `linkage_strategy` and nothing else, and it runs while the terms are being
+ * reviewed -- before the name field on the consent step. The stand-in is never
+ * displayed and never run: the launched terms hold the committed name
+ * ({@link acceptorExchangeDataSpec}).
+ */
+const DEDUPLICATE_CHECK_IDENTITY = "you";
+
+/**
+ * The refusal the accepting party's own `deduplicate` value meets against this
+ * invitation, or `undefined` when the pair runs -- read at the seat, before the
+ * run and before any key or payload moves.
+ *
+ * It derives the accepting party's terms exactly as a launch does and hands the
+ * pair to `resolveLinkageCardinality`, the same boundary the run resolves the
+ * joint cardinality at, so the seat refuses exactly the pairs the run refuses
+ * and no others. Today that is the agreed `(true, true)` pair under a strategy
+ * pairing no `many-to-many` (`assertBothSidedDeduplicateImplemented`); the
+ * derivation itself answers a `psi-c` invitation, whose count-only shape holds
+ * neither party's `deduplicate` open.
+ *
+ * The refusal is the combination's, not the setting's: its message names the
+ * strategy to change and the one-sided pair to fall back to, and clearing
+ * either party's value runs.
+ */
+export function acceptorDeduplicateRefusal(
+  linkageTerms: LinkageTerms,
+  deduplicate: boolean,
+): string | undefined {
+  try {
+    resolveLinkageCardinality(
+      deriveAcceptedLinkageTerms(
+        linkageTerms,
+        DEDUPLICATE_CHECK_IDENTITY,
+        deduplicate,
+      ),
+      linkageTerms,
+    );
+    return undefined;
+  } catch (error) {
+    if (error instanceof UsageError) return error.message;
+    throw error;
+  }
 }

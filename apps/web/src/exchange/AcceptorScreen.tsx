@@ -12,6 +12,10 @@ import {
 } from "@psilink/core";
 
 import {
+  acceptorDeduplicateRefusal,
+  prepareAcceptedInvitation,
+} from "@psi/acceptInvitation";
+import {
   emptyColumnPositions,
   overlongCoverageColumns,
   refusedColumnNames,
@@ -25,7 +29,6 @@ import { createManagedExchange } from "@psi/managed/managedExchangeStore";
 import { deleteSftpConnection } from "@psi/jobClient/sftpAuthoringClient";
 import { fetchJobRendezvous } from "@psi/jobClient/workInputClient";
 import { loadCSVFileOffMainThread } from "@psi/workers/csvParseController";
-import { prepareAcceptedInvitation } from "@psi/acceptInvitation";
 
 import { deploymentProfile, isConsoleBuild } from "@utils/clientConfig";
 import { whenDiagnostic } from "@utils/diagnostics";
@@ -197,11 +200,17 @@ function isAcceptorStep(value: string): value is AcceptorStep {
   return value in ACCEPTOR_STEP_SET;
 }
 
-/** The exchange the acceptor launched: the assembled per-party edits. Drives
- * the acceptor's run surface ({@link AcceptorExchangeSection}); the run hook
- * keys on the derived launch object, so a fresh launch restarts the run. */
+/** The exchange the acceptor launched: the assembled per-party edits and this
+ * party's own side of the matching cardinality. Drives the acceptor's run
+ * surface ({@link AcceptorExchangeSection}); the run hook keys on the derived
+ * launch object, so a fresh launch restarts the run.
+ *
+ * `deduplicate` is fixed here for the same reason the committed name is: the
+ * run presents the terms it holds, and the managed-exchange deposit records
+ * them, so neither may drift with a later edit to the control. */
 interface AcceptorLaunched {
   edits: AcceptorDataEdits;
+  deduplicate: boolean;
 }
 
 /** The async decode's outcome: pending while it runs, an error message on a bad
@@ -265,6 +274,11 @@ export function AcceptorScreen() {
     RUN_DIAGNOSTICS_DEFAULT,
   );
   const [runDiagnosticsOpen, setRunDiagnosticsOpen] = useState(false);
+  // This party's own side of the matching cardinality, authored on the terms
+  // review step beside what the invitation declares for the inviting party's.
+  // It starts closed -- the value an acceptance derives with no control at all
+  // -- and is read into the launch, which fixes it for the run.
+  const [acceptorDeduplicate, setAcceptorDeduplicate] = useState(false);
   const [acceptorName, setAcceptorName] = useState("");
   // The name recorded in the exchange record, committed through the consent gate
   // at "Accept and continue" and fixed thereafter -- the run adopts the terms
@@ -377,6 +391,18 @@ export function AcceptorScreen() {
       ? acceptUnsupported(
           decode.invitation.endpoint,
           rendezvous ?? { configured: false },
+        )
+      : undefined;
+
+  // Whether the pair this party's own `deduplicate` makes with the invitation's
+  // is one the run refuses -- read at the seat, from the same boundary the run
+  // resolves the cardinality at, so the operator meets it before any key or
+  // payload moves rather than mid-exchange.
+  const deduplicateRefusal =
+    decode.status === "ready"
+      ? acceptorDeduplicateRefusal(
+          decode.invitation.token.linkageTerms,
+          acceptorDeduplicate,
         )
       : undefined;
 
@@ -812,6 +838,7 @@ export function AcceptorScreen() {
       columns: acquired.columns,
       edits: launched.edits,
       inputSource,
+      deduplicate: launched.deduplicate,
       ...(options !== undefined ? { options } : {}),
       runDiagnostics: runDiagnosticsIntentFields(runDiagnostics),
       receipts: receiptsIntentFields(receipts),
@@ -1078,7 +1105,10 @@ export function AcceptorScreen() {
     // left it, so the fresh launch resets it rather than opening under a refusal
     // the operator has already acted on.
     setManageOffer(MANAGE_OFFER_IDLE);
-    setLaunched(acceptorLaunchPayload(editorState));
+    setLaunched({
+      ...acceptorLaunchPayload(editorState),
+      deduplicate: acceptorDeduplicate,
+    });
     goToStep("launched");
   };
 
@@ -1137,6 +1167,7 @@ export function AcceptorScreen() {
               linkageTerms: deriveAcceptedLinkageTerms(
                 invitationToken.linkageTerms,
                 committedName,
+                launched.deduplicate,
               ),
               metadata: launched.edits.metadata,
               standardization: launched.edits.standardization,
@@ -1221,6 +1252,13 @@ export function AcceptorScreen() {
               }
               inviterRetainsFiles={decode.invitation.token.inviterRetainsFiles}
               connectionEndpoint={decode.invitation.token.connectionEndpoint}
+              acceptorDeduplicate={{
+                value: acceptorDeduplicate,
+                onChange: setAcceptorDeduplicate,
+                ...(deduplicateRefusal !== undefined
+                  ? { refusal: deduplicateRefusal }
+                  : {}),
+              }}
               perspective="review"
               headingOrder={1}
               headingRef={termsHeadingRef}
@@ -1241,9 +1279,21 @@ export function AcceptorScreen() {
               </Alert>
             ) : (
               <div className={styles.workFoot}>
-                <Button onClick={() => goToStep("consent")}>
+                <Button
+                  onClick={() => goToStep("consent")}
+                  disabled={deduplicateRefusal !== undefined}
+                >
                   Continue: consent &amp; your file
                 </Button>
+                {/* The reason beside the disabled button, since the pair that
+                    produced it sits inside a collapsible disclosure the
+                    operator may have closed again. */}
+                {deduplicateRefusal !== undefined && (
+                  <Text size="sm" c="dimmed" mt="xs">
+                    Resolve the duplicate-matching settings in the terms above
+                    to continue.
+                  </Text>
+                )}
               </div>
             )}
           </>

@@ -22,10 +22,11 @@ import type { AcceptorDataEdits } from "@psi/acceptInvitation";
  *
  * The terms-side commitment beside it is `expectedPartnerDeduplicate`, the value
  * the invitation declared for the inviter's own side: the consent screen stated
- * it, the acceptor's own value is derived as false, and nothing in the agreed
- * terms compares the two -- so an inviter presenting a different value at the
- * terms exchange aborts the run before any key or payload moves
- * ({@link assertPresentedDeduplicateMatchesInvitation}).
+ * it, and nothing in the agreed terms compares the two -- so an inviter
+ * presenting a different value at the terms exchange aborts the run before any
+ * key or payload moves ({@link assertPresentedDeduplicateMatchesInvitation}).
+ * It is read off the invitation, never off `deduplicate` below, which is this
+ * party's own side and binds the inviter to nothing.
  *
  * Pure and exported so the commitments and the spec assembly are the tested
  * boundary, pinned without running the run lifecycle.
@@ -37,6 +38,7 @@ export function prepareAcceptorExchange({
   rawRows,
   columns,
   disclosedPayloadColumns,
+  deduplicate,
 }: {
   linkageTerms: LinkageTerms;
   acceptorName: string;
@@ -44,9 +46,12 @@ export function prepareAcceptorExchange({
   rawRows: Array<CSVRow>;
   columns: Array<string>;
   disclosedPayloadColumns: Array<string> | undefined;
+  /** Whether several of THIS party's records may match one of the partner's, as
+   * the accepting operator set it at the seat. */
+  deduplicate: boolean;
 }): PreparedExchange {
   const prepared = prepareForExchange(
-    acceptorExchangeDataSpec(linkageTerms, acceptorName, edits),
+    acceptorExchangeDataSpec(linkageTerms, acceptorName, edits, deduplicate),
     acceptorName,
     rawRows,
     columns,

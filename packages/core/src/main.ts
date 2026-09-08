@@ -411,7 +411,9 @@ export {
   CONSENT_BASIS_MARKERS,
   CONSENT_FACTS,
   COUNT_ONLY_DISCLOSURE_STATEMENT,
+  DEDUPLICATE_ACCEPTOR_SETTABLE_SIDE_NOTE,
   DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
+  DEDUPLICATE_ACCEPTOR_WIDENING_NOTE,
   DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,
   DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT,
   LINKAGE_RULE_SET_VERDICT_COPY,
@@ -419,6 +421,7 @@ export {
   PROPOSED_NOT_APPLIED_NOTES,
   RECORDED_LINKAGE_RULE_SET_CAVEAT,
   UNRECOGNIZED_TRANSFORM_NOTE,
+  describeDeduplicatePair,
   distinctLinkageRuleSetVerdicts,
   linkageRuleSetVerdictNote,
 } from "./consent/consentFacts.js";
@@ -478,6 +481,7 @@ export {
   matchedPairCount,
   prepareForExchange,
   resolveExchangeInputs,
+  resolveLinkageCardinality,
   runExchange,
 } from "./exchange";
 export type {

@@ -510,9 +510,10 @@ export interface InvitationSummary {
    * answers what the strategy would do with a deduplicating term, whether or
    * not these terms declare one. Not covered: the both-sided pair under a
    * strategy that pairs no `many-to-many`, a property of the agreed PAIR
-   * unreadable from an invitation alone -- acceptance derives this party's
-   * own `deduplicate` as false, so no accepted invitation resolves that pair
-   * without the accepting party declaring it afterwards.
+   * unreadable from an invitation alone -- this party's own `deduplicate` is
+   * not the invitation's to set, so no summary of one can answer that pair. A
+   * seat where the accepting party declares its own side reads the pair from
+   * `resolveLinkageCardinality` beside this flag.
    */
   deduplicateApplied: boolean;
   /**

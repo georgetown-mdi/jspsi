@@ -8,6 +8,7 @@ import { createElement } from "react";
 
 import {
   CONSENT_FACTS,
+  DEDUPLICATE_ACCEPTOR_SETTABLE_SIDE_NOTE,
   DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
   DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,
   DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT,
@@ -18,6 +19,7 @@ import {
   MAX_NAME_LENGTH,
   MAX_PAYLOAD_ENTRIES,
   UNRECOGNIZED_TRANSFORM_NOTE,
+  describeDeduplicatePair,
   getDefaultLinkageTerms,
   linkageRuleSetVerdictNote,
   sanitizeForDisplay,
@@ -3102,5 +3104,108 @@ describe("InvitationTerms: no partner-controlled byte reaches the screen", () =>
       },
       [HOSTILE_IDENTITY, `disclo${RLO}sed`],
     );
+  });
+});
+
+describe("InvitationTerms: the accepting party's own deduplicate", () => {
+  // The seat where this party authors its own side renders the control inside the
+  // duplicate-matches block, beside the invitation's own value, so the pair the
+  // two settings make is read where it is set.
+  function renderWithControl(
+    value: boolean,
+    overrides?: Partial<LinkageTerms>,
+    refusal?: string,
+  ) {
+    const changes: Array<boolean> = [];
+    app.render(
+      createElement(InvitationTerms, {
+        linkageTerms: { ...terms, ...overrides },
+        acceptorDeduplicate: {
+          value,
+          onChange: (next: boolean) => changes.push(next),
+          ...(refusal !== undefined ? { refusal } : {}),
+        },
+      }),
+    );
+    return changes;
+  }
+
+  test("states both parties' values and what the pair discloses", async () => {
+    // The invitation declares its own side; the operator has left this party's
+    // closed. Both values are stated, so the reader can tell whose records are
+    // grouped without inferring it from a single number.
+    renderWithControl(false);
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    const collapse = await readyCollapse("Other details");
+    expect(collapse.textContent).toContain(
+      describeDeduplicatePair(true, false),
+    );
+    expect(collapse.textContent).not.toContain(
+      describeDeduplicatePair(true, true),
+    );
+  });
+
+  test("restates the pair when the operator turns its own side on", async () => {
+    renderWithControl(true);
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    const collapse = await readyCollapse("Other details");
+    expect(collapse.textContent).toContain(describeDeduplicatePair(true, true));
+  });
+
+  test("the checkbox reports the operator's selection", async () => {
+    const changes = renderWithControl(false);
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    await toggle("Other details").click();
+    const control = page.getByRole("checkbox", {
+      name: "Let several of my records match one of my partner's",
+    });
+    await expect.element(control).toBeInTheDocument();
+    await control.click();
+    expect(changes).toEqual([true]);
+  });
+
+  test("closes the direction note on the control rather than a configuration file", async () => {
+    // The sentence the note without a control ends on names a route this
+    // operator has no access to, so the seat that offers the control states the
+    // control instead.
+    renderWithControl(false);
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    const collapse = await readyCollapse("Other details");
+    expect(collapse.textContent).toContain(
+      DEDUPLICATE_ACCEPTOR_SETTABLE_SIDE_NOTE,
+    );
+    expect(app.container.textContent).not.toContain(
+      DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
+    );
+  });
+
+  test("states the refusal the pair meets beside the control", async () => {
+    // The refusal is composed at the seat from the run's own boundary and passed
+    // in; it renders with the control that produced it, before the run.
+    const refusal = "these two settings cannot run under this strategy";
+    renderWithControl(true, { linkageStrategy: "single-pass" }, refusal);
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    const collapse = await readyCollapse("Other details");
+    expect(collapse.textContent).toContain(refusal);
+  });
+
+  test("a surface with no control states the invitation's value alone", async () => {
+    // The direct-exchange confirm screen and every other read-only rendering
+    // pass no control, and must not gain a pair statement about a value no one
+    // there sets.
+    renderTerms();
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    const collapse = await readyCollapse("Other details");
+    expect(collapse.textContent).toContain(DEDUPLICATE_ACCEPTOR_SIDE_NOTE);
+    expect(app.container.textContent).not.toContain(
+      describeDeduplicatePair(true, false),
+    );
+    expect(
+      page
+        .getByRole("checkbox", {
+          name: "Let several of my records match one of my partner's",
+        })
+        .query(),
+    ).toBeNull();
   });
 });

@@ -74,6 +74,7 @@ const inputCsv = "first_name,last_name,notes,secret\nAlice,Smith,hi,shh\n";
 
 function configFor() {
   return acceptorServerJobConfig({
+    deduplicate: false,
     token,
     acceptorName: "Accepting Org",
     edits,
@@ -131,6 +132,7 @@ describe("acceptorServerJobConfig", () => {
       modifiedAt: 1_700_000_000_000,
     };
     const config = acceptorServerJobConfig({
+      deduplicate: false,
       token,
       acceptorName: "Accepting Org",
       edits,
@@ -149,6 +151,7 @@ describe("acceptorServerJobConfig", () => {
     // arm has no connection field (the console reads the operator-authored
     // connection off GET /api/jobs/sftp), so only the channel changes here.
     const config = acceptorServerJobConfig({
+      deduplicate: false,
       token,
       acceptorName: "Accepting Org",
       edits,
@@ -227,6 +230,7 @@ describe("acceptorServerJobConfig received-payload commitment", () => {
 
   function configFrom(disclosed: Array<string> | undefined) {
     return acceptorServerJobConfig({
+      deduplicate: false,
       token: tokenWith(disclosed),
       acceptorName: "Accepting Org",
       edits,
@@ -265,6 +269,7 @@ describe("acceptorServerJobConfig received-payload commitment", () => {
 describe("acceptorServerJobConfig terms-side commitment", () => {
   function configWithDeclared(declared: boolean) {
     return acceptorServerJobConfig({
+      deduplicate: false,
       token: {
         ...token,
         linkageTerms: { ...inviterTerms, deduplicate: declared },
@@ -284,5 +289,34 @@ describe("acceptorServerJobConfig terms-side commitment", () => {
       // declared, so reading the binding off them would bind the wrong value.
       expect(config.linkageTerms.deduplicate).toBe(false);
     }
+  });
+});
+
+describe("the accepting party's own deduplicate in the composed job config", () => {
+  test.each([false, true])(
+    "rides the terms the console hands the CLI (invitation declares %s)",
+    (declared) => {
+      // The console runs this config through `psilink exchange` at a separate
+      // invocation, so a value held only in the browser would reach no run. It
+      // travels on the acceptor's own-perspective terms; the binding on the
+      // PARTNER's value stays the invitation's own declaration.
+      const config = acceptorServerJobConfig({
+        deduplicate: true,
+        token: {
+          ...token,
+          linkageTerms: { ...inviterTerms, deduplicate: declared },
+        },
+        acceptorName: "Accepting Org",
+        edits,
+        inputSource: { kind: "inline", csv: inputCsv },
+        transport: { channel: "filedrop" },
+      });
+      expect(config.linkageTerms.deduplicate).toBe(true);
+      expect(config.expectedPartnerDeduplicate).toBe(declared);
+    },
+  );
+
+  test("an omitted control leaves the composed terms one-to-one on this side", () => {
+    expect(configFor().linkageTerms.deduplicate).toBe(false);
   });
 });

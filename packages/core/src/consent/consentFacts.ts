@@ -864,36 +864,53 @@ export const DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT =
   "group sizes and no row positions.";
 
 /**
- * The direction note a surface renders beside whichever of the two disclosure
- * statements above the invitation's output shape selects, for the same
- * deduplicating invitation: whose records the setting groups, and what it still
- * costs the party whose records it does not group.
+ * What an inviting party's `deduplicate` costs the accepting party whose
+ * records it does not group -- the sentence both acceptor-side notes below
+ * hold, and the one the consent-coverage check pins across every surface
+ * (`consent/linkageTermConsentCoverage.ts`).
  *
- * The two are separate facts and a reader is entitled to both: the statement
- * says what a deduplicating match discloses, this says whose records are
- * grouped to disclose it. Accepting does NOT turn the setting on for the
- * accepting party -- `deriveAcceptedLinkageTerms` derives that party's own
- * `deduplicate` as false rather than adopting the invitation's, so the
- * accepting party's rows are never grouped -- and without this note a reader
- * would have no way to tell whether their own file is the one being grouped.
+ * The two notes differ only in the remedy they name, which is a property of
+ * the seat rather than of the disclosure, so the disclosure is stated once
+ * here. It is the outbound half the grouping direction leaves open: more of
+ * the accepting party's records can match than in a one-to-one run of the
+ * same two files, each one disclosing its membership and any payload columns
+ * it sends, on the inviting party's declaration alone. A reader told only
+ * that their records are not grouped would take that as no consequence at
+ * all.
  *
- * What the derivation closes is the grouping direction, not the accepting
- * party's outbound disclosure, which the setting does move: more of that
- * party's records can match than in a one-to-one run of the same two files,
- * each one disclosing its membership and any payload columns it sends, on
- * the inviting party's declaration alone. A reader told only that their
- * records are not grouped would take that as no consequence at all.
+ * It states that OUTCOME, not the mechanism behind it (recorded instead in
+ * docs/notes/deduplicate-matching-semantics.md). It is a widening rather than
+ * a new capability: an inviting party that collapsed its own duplicate rows
+ * before the exchange would match exactly the same records one-to-one, so the
+ * setting buys a hostile inviter nothing it could not do locally.
+ */
+export const DEDUPLICATE_ACCEPTOR_WIDENING_NOTE =
+  "It still widens what the accepting party discloses -- more of its records " +
+  "can match than in a plain one-to-one run of the same two files, each one " +
+  "disclosing its membership and any payload columns it sends.";
+
+/**
+ * The direction note a surface with NO control over the accepting party's own
+ * `deduplicate` renders beside whichever of the two disclosure statements
+ * above the invitation's output shape selects: whose records the setting
+ * groups, what it still costs the other party, and where the other direction
+ * is declared.
  *
- * The note states that OUTCOME, not the mechanism behind it (recorded
- * instead in docs/notes/deduplicate-matching-semantics.md). It is a
- * widening rather than a new capability: an inviting party that collapsed
- * its own duplicate rows before the exchange would match exactly the same
- * records one-to-one, so the setting buys a hostile inviter nothing it
- * could not do locally.
+ * The statement and the direction are separate facts and a reader is entitled
+ * to both: the statement says what a deduplicating match discloses, this says
+ * whose records are grouped to disclose it. On this seat accepting does NOT
+ * turn the setting on for the accepting party -- the caller passes no
+ * `acceptorDeduplicate`, so `deriveAcceptedLinkageTerms` derives that party's
+ * own `deduplicate` as false -- and without this note a reader would have no
+ * way to tell whether their own file is the one being grouped.
  *
- * It names the way to the other direction rather than leaving it unsaid, because
- * the invitation path offers no control for it: each party's own `deduplicate`
+ * It names the way to the other direction rather than leaving it unsaid,
+ * because this seat offers no control for it: each party's own `deduplicate`
  * comes from its own configuration file, and the two run `psilink exchange`.
+ * A seat that DOES offer the control renders
+ * {@link DEDUPLICATE_ACCEPTOR_SETTABLE_SIDE_NOTE} instead, whose closing
+ * sentence names the control rather than a configuration file the operator
+ * may not have.
  *
  * Rendered at the same visibility level as the statement it follows, by the
  * placement rule both surfaces hold: a reader who meets what a deduplicating
@@ -903,11 +920,80 @@ export const DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT =
  */
 export const DEDUPLICATE_ACCEPTOR_SIDE_NOTE =
   "This setting is the inviting party's own: the accepting party's records are " +
-  "never grouped. It still widens what the accepting party discloses -- more " +
-  "of its records can match than in a plain one-to-one run of the same two " +
-  "files, each one disclosing its membership and any payload columns it sends. " +
-  "Grouping the accepting party's records instead is set up from each party's " +
+  "never grouped. " +
+  DEDUPLICATE_ACCEPTOR_WIDENING_NOTE +
+  " Grouping the accepting party's records instead is set up from each party's " +
   "own configuration file, where each party declares its own side.";
+
+/**
+ * The same direction note for a seat where the accepting party sets its own
+ * `deduplicate` in place.
+ *
+ * It drops the "never grouped" clause, which that seat's own pair statement
+ * answers with the two values actually selected
+ * ({@link describeDeduplicatePair}) and which an operator who turns its own
+ * side on would read as false. It keeps the widening the inviting party's
+ * value costs the accepting party either way, and it closes on the control
+ * rather than on a configuration file -- the sentence
+ * {@link DEDUPLICATE_ACCEPTOR_SIDE_NOTE} ends on, which is a dead end for an
+ * operator accepting from a browser.
+ *
+ * Fixed first-party copy naming no value, so a surface may render it verbatim.
+ */
+export const DEDUPLICATE_ACCEPTOR_SETTABLE_SIDE_NOTE =
+  "This setting is the inviting party's own. " +
+  DEDUPLICATE_ACCEPTOR_WIDENING_NOTE +
+  " Grouping the accepting party's records is that party's own setting, which " +
+  "it declares with these terms rather than taking from this invitation.";
+
+/**
+ * What the two parties' `deduplicate` values disclose, as the one sentence
+ * pair a seat where the accepting party sets its own value renders: both
+ * values, then what that combination hands whichever party receives the
+ * result.
+ *
+ * Stated at the seat rather than after the terms exchange, which is where
+ * `describeResolvedMatching` (`pairTableProjection.ts`) states the agreed pair
+ * and the cardinality it resolved to. The two are the same fact at two
+ * moments: this one is what the accepting party consents to, over the value
+ * the invitation declares and the value the operator has selected, and it
+ * runs before any key or payload moves.
+ *
+ * Each branch spells its whole sentence rather than interpolating a phrase a
+ * ternary picked, so every reading is fixed first-party copy naming no
+ * partner-authored value; a surface may render any of them verbatim.
+ */
+export function describeDeduplicatePair(
+  inviterDeduplicate: boolean,
+  acceptorDeduplicate: boolean,
+): string {
+  if (inviterDeduplicate && acceptorDeduplicate)
+    return (
+      "Both parties declare deduplicate true. One matched linkage-key value " +
+      "pairs every one of the accepting party's records holding it with every " +
+      "one of the inviting party's, so the result discloses both parties' " +
+      "groupings and holds one row per matched pair."
+    );
+  if (inviterDeduplicate)
+    return (
+      "The inviting party declares deduplicate true and the accepting party " +
+      "declares deduplicate false. Several of the inviting party's records may " +
+      "match a single one of the accepting party's; none of the accepting " +
+      "party's records are grouped onto one of the inviting party's."
+    );
+  if (acceptorDeduplicate)
+    return (
+      "The inviting party declares deduplicate false and the accepting party " +
+      "declares deduplicate true. Several of the accepting party's records may " +
+      "match a single one of the inviting party's, so whichever party receives " +
+      "the result learns how many of the accepting party's records share a " +
+      "matched linkage-key value and which of its rows they are."
+    );
+  return (
+    "Both parties declare deduplicate false. Each party's records match at " +
+    "most one of the other's, so neither party's file is grouped."
+  );
+}
 
 /**
  * The caveat copy for a term an inviter may declare that today's exchange does

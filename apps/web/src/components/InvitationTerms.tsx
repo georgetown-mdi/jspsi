@@ -1,6 +1,8 @@
 import { useId, useState } from "react";
 
 import {
+  Alert,
+  Checkbox,
   Collapse,
   Group,
   List,
@@ -11,12 +13,13 @@ import {
   VisuallyHidden,
 } from "@mantine/core";
 
-import { IconChevronRight } from "@tabler/icons-react";
+import { IconAlertCircle, IconChevronRight } from "@tabler/icons-react";
 import { useReducedMotion } from "@mantine/hooks";
 
 import {
   CONSENT_FACTS,
   COUNT_ONLY_DISCLOSURE_STATEMENT,
+  DEDUPLICATE_ACCEPTOR_SETTABLE_SIDE_NOTE,
   DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
   DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,
   DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT,
@@ -25,6 +28,7 @@ import {
   OUTBOUND_SEND_NO_PAYLOAD_SENTENCE,
   PROPOSED_NOT_APPLIED_NOTES,
   UNRECOGNIZED_TRANSFORM_NOTE,
+  describeDeduplicatePair,
   distinctLinkageRuleSetVerdicts,
   linkageRuleSetVerdictNote,
   ruleSetCitation,
@@ -378,6 +382,7 @@ export function InvitationTerms({
   inviterRetainsFiles,
   connectionEndpoint,
   outboundColumns,
+  acceptorDeduplicate,
   perspective = "review",
   headingOrder = 2,
   headingRef,
@@ -416,6 +421,23 @@ export function InvitationTerms({
    * where `review` shows a forward-reference instead). Neither value reaches the
    * screen when the invitation gives the inviting party no result. */
   outboundColumns?: Array<string>;
+  /** The accepting party's OWN `deduplicate` value and the control that sets
+   * it, on a seat where that party authors its own side. Supplied, the duplicate
+   * matches block states BOTH parties' values and what the pair discloses
+   * (`describeDeduplicatePair`) and offers the checkbox beneath them; omitted,
+   * the block states the inviting party's value alone, which is what a surface
+   * with no such control runs (`deriveAcceptedLinkageTerms` then derives this
+   * party's side as false).
+   *
+   * `refusal` is the pair's own refusal read at the seat
+   * (`acceptorDeduplicateRefusal`), rendered beside the control so the operator
+   * meets it before the run rather than mid-exchange. The caller holds the
+   * Continue gate on the same value. */
+  acceptorDeduplicate?: {
+    value: boolean;
+    onChange: (value: boolean) => void;
+    refusal?: string;
+  };
   /** Which context this renders in. Drives the heading and intro copy, the
    * viewer-centric blocks (Result sharing, the payload send/receive framing, and
    * the inviter-only sent-columns chips above "Other details"), and the two
@@ -1344,15 +1366,54 @@ export function InvitationTerms({
                   ? "More than one of the inviting party's records may match a single one of the accepting party's records."
                   : "Each of the inviting party's records matches at most one of the accepting party's records."}
               </Text>
-              {/* What a deduplicating match reveals, and whose records are
-                grouped to reveal it -- the inviting party's alone, since
-                acceptance derives the accepting party's own side as false
-                (deriveAcceptedLinkageTerms). Shared wording with the CLI accept
-                prompt; WHICH statement renders follows the output shape: grouping
-                where the inviting party shares the result, none where it is the
-                sole receiver. Rendered for exactly a deduplicating invitation the
-                run applies -- a strategy that cannot deduplicate is refused at
-                acceptance (assertDeduplicateImplemented). */}
+              {/* The pair, on a seat where this party sets its own side: both
+                declared values and what the combination discloses, over the
+                invitation's value and the one the operator has selected. The
+                sentence is core's, the same fact the run states after the terms
+                exchange (describeResolvedMatching), read here before any key or
+                payload moves. */}
+              {acceptorDeduplicate !== undefined && (
+                <>
+                  <Text size="sm">
+                    {describeDeduplicatePair(
+                      summary.deduplicate,
+                      acceptorDeduplicate.value,
+                    )}
+                  </Text>
+                  <Checkbox
+                    mt="xs"
+                    checked={acceptorDeduplicate.value}
+                    onChange={(event) =>
+                      acceptorDeduplicate.onChange(event.currentTarget.checked)
+                    }
+                    label="Let several of my records match one of my partner's"
+                    description="Your own side of this setting. Leave it off and each of your records matches at most one of your partner's."
+                  />
+                  {/* The combination this pair resolves to, refused at the seat
+                    rather than mid-run. Core's own message: it names the
+                    strategy to change and the one-sided pair to fall back to,
+                    so it does not read as a setting that cannot be had. */}
+                  {acceptorDeduplicate.refusal !== undefined && (
+                    <Alert
+                      color="red"
+                      icon={<IconAlertCircle aria-hidden />}
+                      title="These two settings cannot run together"
+                      mt="xs"
+                    >
+                      {acceptorDeduplicate.refusal}
+                    </Alert>
+                  )}
+                </>
+              )}
+              {/* What the INVITING party's deduplicate reveals, and whose
+                records are grouped to reveal it. Shared wording with the CLI
+                accept prompt; WHICH statement renders follows the output shape:
+                grouping where the inviting party shares the result, none where
+                it is the sole receiver. Rendered for exactly a deduplicating
+                invitation the run applies -- a strategy that cannot deduplicate
+                is refused at acceptance (assertDeduplicateImplemented). The
+                accepting party's own side is the pair statement's above, which
+                renders whatever either value is. */}
               {summary.deduplicate && summary.deduplicateApplied && (
                 <>
                   <Text size="xs" c="dimmed">
@@ -1379,8 +1440,16 @@ export function InvitationTerms({
                       }
                     </Text>
                   )}
+                  {/* The direction note, in the variant this seat owes: where
+                    the accepting party sets its own side in place, the note
+                    closes on that control rather than on a configuration file
+                    the operator may not have, and drops the "never grouped"
+                    clause the pair statement above answers with the two values
+                    actually selected. */}
                   <Text size="xs" c="dimmed">
-                    {DEDUPLICATE_ACCEPTOR_SIDE_NOTE}
+                    {acceptorDeduplicate !== undefined
+                      ? DEDUPLICATE_ACCEPTOR_SETTABLE_SIDE_NOTE
+                      : DEDUPLICATE_ACCEPTOR_SIDE_NOTE}
                   </Text>
                 </>
               )}
