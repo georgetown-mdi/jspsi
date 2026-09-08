@@ -50,6 +50,19 @@ const BUSY_FAILURE = "Another fingerprint request is still running.";
 const SYNCING_FAILURE =
   "A shared-folder exchange is still open on this console, and it syncs the folder your signing identity would be written into.";
 
+/** The card's copy for the CLI's exit 64 at the console's default location,
+ * where the identity is in the mounted working directory and this endpoint
+ * creates it there. */
+const REFUSED_DEFAULT =
+  "Your signing identity could not be created or read in the folder you mounted. Check that the folder is writable,";
+
+/** The same refusal where the operator picked a location: the console reads
+ * that file and creates nothing at it, so the copy names the file rather than
+ * the folder's mode -- the folder is the one the deployment guide has them
+ * mount read-only. */
+const REFUSED_PICKED =
+  "Your signing identity could not be read from the file you picked. It may be unreadable, or not a signing identity.";
+
 interface StubbedResponse {
   status?: number;
   body?: unknown;
@@ -523,6 +536,106 @@ describe("ReceiptsCard: a failed request", () => {
       .toBeInTheDocument();
     expect(app.container.textContent).toContain("discard it");
     expect(app.container.textContent).toContain("JOB_RENDEZVOUS_DIR");
+  });
+
+  test("names the folder it creates in when the location is the default", async () => {
+    stubSigningApi({
+      responses: [
+        { body: { status: "refused" } },
+        { body: { status: "timeout" } },
+        { status: 500 },
+      ],
+    });
+    await renderCard();
+    await chooseCertificateMode();
+
+    await createButton().click();
+    await expect
+      .element(page.getByText(REFUSED_DEFAULT, { exact: false }))
+      .toBeInTheDocument();
+    expect(app.container.textContent).toContain(
+      "running 'psilink fingerprint' against the same folder",
+    );
+
+    await createButton().click();
+    await expect
+      .element(
+        page.getByText(
+          "Creating the signing identity took too long and was stopped.",
+          { exact: false },
+        ),
+      )
+      .toBeInTheDocument();
+
+    await createButton().click();
+    await expect
+      .element(
+        page.getByText("The signing identity could not be created or read.", {
+          exact: false,
+        }),
+      )
+      .toBeInTheDocument();
+  });
+
+  test("names the picked file and a read of it when a location is picked", async () => {
+    // The identity is then in the secrets mount, not the data root, and the
+    // console only reads it -- so copy telling the operator to make that folder
+    // writable and to re-run against it sends them to the wrong place, and
+    // against the read-only mount the deployment guide recommends for it.
+    stubSigningApi({
+      secretsEntries: [{ name: PICKED_IDENTITY, kind: "file" }],
+      responses: [
+        { body: { status: "refused" } },
+        { body: { status: "timeout" } },
+        { status: 500 },
+      ],
+    });
+    await renderCard();
+    await chooseCertificateMode();
+    await pickIdentityLocation(PICKED_IDENTITY);
+    const showButton = page.getByRole("button", {
+      name: "Show my fingerprint",
+    });
+
+    await showButton.click();
+    await expect
+      .element(page.getByText(REFUSED_PICKED, { exact: false }))
+      .toBeInTheDocument();
+    expect(app.container.textContent).toContain(
+      "Check that file at the location you picked, or pick another one.",
+    );
+    expect(app.container.textContent).toContain(
+      "'psilink fingerprint --identity-file' pointed at that file",
+    );
+    expect(app.container.textContent).not.toContain("writable");
+    // The psilink.yaml half stays: the child's working directory is the data
+    // root whatever the identity's location, so that file is still the one it
+    // can read.
+    expect(app.container.textContent).toContain(
+      "any psilink.yaml in the folder you mounted is valid YAML",
+    );
+
+    await showButton.click();
+    await expect
+      .element(
+        page.getByText(
+          "Reading the signing identity took too long and was stopped.",
+          { exact: false },
+        ),
+      )
+      .toBeInTheDocument();
+
+    await showButton.click();
+    await expect
+      .element(
+        page.getByText("The signing identity could not be read. Try again.", {
+          exact: false,
+        }),
+      )
+      .toBeInTheDocument();
+    expect(app.container.textContent).not.toContain(
+      "could not be created or read",
+    );
   });
 
   test("leaves no stale failure for the next visit to certificate mode", async () => {

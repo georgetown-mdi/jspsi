@@ -847,14 +847,16 @@ export class JobManager {
    * `identityLocation` is the operator's own location, or absent for the
    * console's default. Creation happens at the DEFAULT only: a location the
    * operator picked is one the console reads, so nothing there is answered
-   * `absent` rather than minted. The console writes nowhere but the data root,
-   * and the operator's own mount is where they keep a key they minted
-   * themselves, read-only if they chose.
+   * `absent` rather than minted. The console writes nowhere but the data root
+   * except through the window below, and the operator's own mount is where they
+   * keep a key they minted themselves, read-only if they chose.
    *
    * Whether anything is there is asked of what the picked path names at its END
    * ({@link signingIdentityTargetExists}): a link with nothing at its end is a
    * name the child would create THROUGH, so it is answered `absent` and no child
-   * runs.
+   * runs. That check and the child's load are two steps, so a file removed
+   * between them is created by the child at the picked path -- the one write
+   * into the operator's own mount, closed by mounting it read-only.
    *
    * @throws {SigningIdentityLocationError} when `identityLocation` does not
    *   resolve in the secrets mount.
