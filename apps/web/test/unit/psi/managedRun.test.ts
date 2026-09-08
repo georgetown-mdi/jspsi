@@ -630,6 +630,23 @@ describe("rerunFailureLastRun: the runner's failure bookkeeping", () => {
     });
   });
 
+  test("a cancel past the data-exchange boundary still records cancelled", () => {
+    // The cancel that cuts a stalled payload exchange: the run's connection is
+    // closed under it, so the failure that arrives is the transport's own close
+    // -- but the operator stopped this run, and that is what the record states.
+    const lastRun = rerunFailureLastRun(
+      new ConnectionError("connection closed", "closed"),
+      AT,
+      true,
+      true,
+    );
+    expect(lastRun).toEqual({
+      at: new Date(AT).toISOString(),
+      outcome: "failed",
+      failureKind: "cancelled",
+    });
+  });
+
   test("a cancelled run records cancelled, even when the error looks like a trust failure", () => {
     // Teardown on an operator abort can provoke a security-shaped error; the
     // abort probe wins so the bookkeeping reads cancelled, not auth.
