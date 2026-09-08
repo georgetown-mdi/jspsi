@@ -1077,8 +1077,7 @@ export const columnsNamedOnce = <Entry>(
  * count at {@link MAX_PAYLOAD_ENTRIES} before {@link columnsNamedOnce} collapses
  * repeats, so a padded list is refused for its authored count. Repeats are
  * normalized rather than refused to keep this build's parse total over the
- * documents it already admits; a partner build that does not collapse still
- * fails closed at compatibility validation, on a differing agreed-terms hash.
+ * documents it already admits.
  */
 const payloadColumnList = (message: string): z.ZodType<PayloadColumn[]> =>
   boundedArray(PayloadColumnSchema, MAX_PAYLOAD_ENTRIES, message).transform(

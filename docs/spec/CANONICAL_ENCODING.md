@@ -178,6 +178,11 @@ distinct, and whitespace is significant, so `dose ` is not `dose`. A reproducer
 that folds any of these collapses entries psilink keeps, and encodes different
 bytes.
 
+The collapse changes the agreed-terms hash for a terms document that carries a
+repeated payload column name: an exchange record or signed receipt a
+pre-collapse build produced over such a document verifies as a terms-hash
+mismatch against this build.
+
 ### Numbers
 
 A number MUST be finite. RFC 8785 section 3.2.2.3 does not restate a number
