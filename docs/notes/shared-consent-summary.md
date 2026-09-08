@@ -427,13 +427,16 @@ inside a disclosure, and the sentence sits with it.
 
 A direction note sits beside whichever statement the shape selects, and the pin
 holds both, because what the setting discloses and whose records are grouped to
-disclose it are separate facts a reader needs together. Acceptance derives the
-accepting party's own `deduplicate` as false rather than adopting the
-invitation's, so the pair an accepted deduplicating invitation resolves to is
-one-sided by construction. A reader met only by the disclosure statement would
-have no way to tell whether their own file is the one being grouped -- and the
-invitation offers no control for the other direction, so the sentence names the
-per-party configuration path that does.
+disclose it are separate facts a reader needs together. The note itself now has
+two variants, selected by whether the seat offers the accepting party a control
+for its own side: a settable variant, read alongside that seat's own pair
+statement naming the two values the operator selected; and a configuration-file
+variant, read alongside the disclosure statement alone, naming the per-party
+configuration path as the way to the other direction. Both keep the shared
+widening sentence, what the inviting party's own declaration costs the
+accepting party regardless of which variant renders. A reader met only by the
+disclosure statement, with neither variant, would have no way to tell whether
+their own file is the one being grouped.
 
 That note states a second fact for the same reason it states the first: what
 the derivation closes is the grouping, not the acceptor's own outbound

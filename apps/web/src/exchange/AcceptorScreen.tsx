@@ -12,6 +12,10 @@ import {
 } from "@psilink/core";
 
 import {
+  acceptorDeduplicateRefusal,
+  prepareAcceptedInvitation,
+} from "@psi/acceptInvitation";
+import {
   emptyColumnPositions,
   overlongCoverageColumns,
   refusedColumnNames,
@@ -25,7 +29,6 @@ import { createManagedExchange } from "@psi/managed/managedExchangeStore";
 import { deleteSftpConnection } from "@psi/jobClient/sftpAuthoringClient";
 import { fetchJobRendezvous } from "@psi/jobClient/workInputClient";
 import { loadCSVFileOffMainThread } from "@psi/workers/csvParseController";
-import { prepareAcceptedInvitation } from "@psi/acceptInvitation";
 
 import { deploymentProfile, isConsoleBuild } from "@utils/clientConfig";
 import { whenDiagnostic } from "@utils/diagnostics";
@@ -197,11 +200,17 @@ function isAcceptorStep(value: string): value is AcceptorStep {
   return value in ACCEPTOR_STEP_SET;
 }
 
-/** The exchange the acceptor launched: the assembled per-party edits. Drives
- * the acceptor's run surface ({@link AcceptorExchangeSection}); the run hook
- * keys on the derived launch object, so a fresh launch restarts the run. */
+/** The exchange the acceptor launched: the assembled per-party edits and this
+ * party's own side of the matching cardinality. Drives the acceptor's run
+ * surface ({@link AcceptorExchangeSection}); the run hook keys on the derived
+ * launch object, so a fresh launch restarts the run.
+ *
+ * `deduplicate` is fixed here for the same reason the committed name is: the
+ * run presents the terms it holds, and the managed-exchange deposit records
+ * them, so neither may drift with a later edit to the control. */
 interface AcceptorLaunched {
   edits: AcceptorDataEdits;
+  deduplicate: boolean;
 }
 
 /** The async decode's outcome: pending while it runs, an error message on a bad
@@ -265,6 +274,11 @@ export function AcceptorScreen() {
     RUN_DIAGNOSTICS_DEFAULT,
   );
   const [runDiagnosticsOpen, setRunDiagnosticsOpen] = useState(false);
+  // This party's own side of the matching cardinality, authored on the terms
+  // review step beside what the invitation declares for the inviting party's.
+  // It starts closed -- the value an acceptance derives with no control at all
+  // -- and is read into the launch, which fixes it for the run.
+  const [acceptorDeduplicate, setAcceptorDeduplicate] = useState(false);
   const [acceptorName, setAcceptorName] = useState("");
   // The name recorded in the exchange record, committed through the consent gate
   // at "Accept and continue" and fixed thereafter -- the run adopts the terms
@@ -380,6 +394,41 @@ export function AcceptorScreen() {
         )
       : undefined;
 
+  // Whether the pair this party's own `deduplicate` makes with the invitation's
+  // is one the run refuses -- read at the seat, from the same boundary the run
+  // resolves the cardinality at, so the operator meets it before any key or
+  // payload moves rather than mid-exchange.
+  const deduplicateRefusal =
+    decode.status === "ready"
+      ? acceptorDeduplicateRefusal(
+          decode.invitation.token.linkageTerms,
+          acceptorDeduplicate,
+        )
+      : undefined;
+  // The pair's own refusal, which the operator resolves by clearing its side:
+  // it renders beside that control and holds Continue. A refusal of the derived
+  // terms is nothing at this seat can resolve, so it blocks the step below
+  // instead.
+  const pairRefusal =
+    deduplicateRefusal?.scope === "pair"
+      ? deduplicateRefusal.message
+      : undefined;
+  // What stops this accept at the review step, in place of the Continue control:
+  // an endpoint this console cannot run, or an invitation whose terms no
+  // acceptance can run at all -- the mirror the schema refuses, which would
+  // otherwise abort the launch after the operator had chosen a file.
+  const reviewBlock:
+    { title: string; message: string; color: "orange" | "red" } | undefined =
+    unsupported !== undefined
+      ? { ...unsupported, color: "orange" }
+      : deduplicateRefusal?.scope === "terms"
+        ? {
+            title: "Cannot accept this invitation",
+            message: deduplicateRefusal.message,
+            color: "red",
+          }
+        : undefined;
+
   // The accepted SFTP endpoint (stable across renders once decode is ready), or
   // undefined for every other accept. The partner-supplied locator narrows to ONLY
   // the credential-free host/port/path, so nothing but the locator reaches the
@@ -425,20 +474,20 @@ export function AcceptorScreen() {
     acceptSftpLocator !== undefined && sftpConnection == null;
 
   // On the review step, move focus to the terms heading once the decode resolves
-  // to ready, to the unsupported notice when this console cannot run this accept,
-  // or to the error alert once it resolves to error, so a screen-reader user is
-  // taken to the revealed terms, the block, or the failure rather than left on the
+  // to ready, to the block when this accept cannot go on from here, or to the
+  // error alert once it resolves to error, so a screen-reader user is taken to
+  // the revealed terms, the block, or the failure rather than left on the
   // spinner. The consent and columns steps own their own heading focus below.
   const termsHeadingRef = useRef<HTMLHeadingElement>(null);
-  const unsupportedRef = useRef<HTMLDivElement>(null);
+  const reviewBlockRef = useRef<HTMLDivElement>(null);
   const errorRef = useRef<HTMLDivElement>(null);
-  const unsupportedShown = unsupported !== undefined;
+  const reviewBlockShown = reviewBlock !== undefined;
   useEffect(() => {
     if (step !== "review") return;
     if (decode.status === "ready")
-      (unsupportedShown ? unsupportedRef : termsHeadingRef).current?.focus();
+      (reviewBlockShown ? reviewBlockRef : termsHeadingRef).current?.focus();
     else if (decode.status === "error") errorRef.current?.focus();
-  }, [decode.status, step, unsupportedShown]);
+  }, [decode.status, step, reviewBlockShown]);
 
   // Moving to the consent step replaces the work column, so focus is sent to the
   // incoming h1 (it has tabIndex -1) or a screen-reader user is left on a control
@@ -812,6 +861,7 @@ export function AcceptorScreen() {
       columns: acquired.columns,
       edits: launched.edits,
       inputSource,
+      deduplicate: launched.deduplicate,
       ...(options !== undefined ? { options } : {}),
       runDiagnostics: runDiagnosticsIntentFields(runDiagnostics),
       receipts: receiptsIntentFields(receipts),
@@ -1074,11 +1124,18 @@ export function AcceptorScreen() {
     // exchange must not start until the operator has authored a connection (with
     // the required host-key fingerprint) to the partner-named server.
     if (sftpConnectionMissing) return;
+    // The same, for a pair the run refuses: the review step disables its own
+    // Continue, but browser history can restore a later step with the refused
+    // value still set, and a launch under it aborts at the terms exchange.
+    if (deduplicateRefusal !== undefined) return;
     // A re-launch reached by browser Back leaves the offer as the prior launch
     // left it, so the fresh launch resets it rather than opening under a refusal
     // the operator has already acted on.
     setManageOffer(MANAGE_OFFER_IDLE);
-    setLaunched(acceptorLaunchPayload(editorState));
+    setLaunched({
+      ...acceptorLaunchPayload(editorState),
+      deduplicate: acceptorDeduplicate,
+    });
     goToStep("launched");
   };
 
@@ -1137,6 +1194,7 @@ export function AcceptorScreen() {
               linkageTerms: deriveAcceptedLinkageTerms(
                 invitationToken.linkageTerms,
                 committedName,
+                launched.deduplicate,
               ),
               metadata: launched.edits.metadata,
               standardization: launched.edits.standardization,
@@ -1221,29 +1279,47 @@ export function AcceptorScreen() {
               }
               inviterRetainsFiles={decode.invitation.token.inviterRetainsFiles}
               connectionEndpoint={decode.invitation.token.connectionEndpoint}
+              acceptorDeduplicate={{
+                value: acceptorDeduplicate,
+                onChange: setAcceptorDeduplicate,
+                ...(pairRefusal !== undefined ? { refusal: pairRefusal } : {}),
+              }}
               perspective="review"
               headingOrder={1}
               headingRef={termsHeadingRef}
             />
-            {/* This console cannot run this endpoint's shape: stop here, before
-                consent or intake, with a state naming where the operator CAN
-                run it rather than a doomed run. */}
-            {unsupported !== undefined ? (
+            {/* This console cannot run this endpoint's shape, or no acceptance
+                can run these terms: stop here, before consent or intake, with a
+                state naming what the operator can do rather than a doomed
+                run. */}
+            {reviewBlock !== undefined ? (
               <Alert
-                color="orange"
+                color={reviewBlock.color}
                 icon={<IconAlertCircle aria-hidden />}
-                title={unsupported.title}
-                ref={unsupportedRef}
+                title={reviewBlock.title}
+                ref={reviewBlockRef}
                 tabIndex={-1}
                 mt="md"
               >
-                {unsupported.message}
+                {reviewBlock.message}
               </Alert>
             ) : (
               <div className={styles.workFoot}>
-                <Button onClick={() => goToStep("consent")}>
+                <Button
+                  onClick={() => goToStep("consent")}
+                  disabled={pairRefusal !== undefined}
+                >
                   Continue: consent &amp; your file
                 </Button>
+                {/* The reason beside the disabled button, since the pair that
+                    produced it sits inside a collapsible disclosure the
+                    operator may have closed again. */}
+                {pairRefusal !== undefined && (
+                  <Text size="sm" c="dimmed" mt="xs">
+                    Resolve the duplicate-matching settings in the terms above
+                    to continue.
+                  </Text>
+                )}
               </div>
             )}
           </>
@@ -1490,11 +1566,22 @@ export function AcceptorScreen() {
             )}
             <div className={styles.workFoot}>
               <Button
-                disabled={!consentGateReady || parsing}
+                disabled={
+                  !consentGateReady || parsing || pairRefusal !== undefined
+                }
                 onClick={() => void acceptAndContinue()}
               >
                 Accept and continue
               </Button>
+              {/* The pair refusal re-read here, since browser history can
+                  restore this step past the review step's own disabled
+                  Continue: the control that clears it is back on the terms. */}
+              {pairRefusal !== undefined && (
+                <Text size="sm" c="dimmed" mt="xs">
+                  Go back to the terms and resolve the duplicate-matching
+                  settings to continue.
+                </Text>
+              )}
             </div>
           </>
         )}
@@ -1524,6 +1611,7 @@ export function AcceptorScreen() {
                   />
                 ) : undefined
               }
+              deduplicatePairRefused={pairRefusal !== undefined}
               connectionBlocked={sftpConnectionMissing}
               exchangeFilesSection={
                 acceptServerJob ? (

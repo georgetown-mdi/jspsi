@@ -58,16 +58,20 @@ import type {
  *   yields an absent acceptor `send` (lazy); an explicit empty inviter
  *   `receive: []` yields an explicit empty acceptor `send: []` (strict),
  *   matching {@link validateCompatibility}'s lazy/strict reading.
- * - `deduplicate` is DEFAULTED to false, neither copied nor mirrored: it is
- *   per-party and declares that several of the DECLARING party's own
- *   records may match the partner's, so it is never the inviter's to set
- *   for the acceptor -- copying it would let a hostile inviter claim
+ * - `deduplicate` is the ACCEPTOR's own, taken from `acceptorDeduplicate`
+ *   and defaulting to false, neither copied nor mirrored: it is per-party
+ *   and declares that several of the DECLARING party's own records may
+ *   match the partner's, so it is never the inviter's to set for the
+ *   acceptor -- copying it would let a hostile inviter claim
  *   `deduplicate: true` to put the acceptor on the "many" side, then
- *   present `false` at the terms exchange. The invitation's declared value
- *   for the inviter's own side is retained separately by a caller holding
- *   the token, as `expectedPartnerDeduplicate` (`PreparedExchange`,
- *   exchange.ts); its widened-disclosure consequence for the acceptor is
- *   stated on the consent surfaces (`DEDUPLICATE_ACCEPTOR_SIDE_NOTE`).
+ *   present `false` at the terms exchange. A seat where the accepting
+ *   party authors its own side passes its operator's value; a caller with
+ *   no such control passes none and gets the closed default. The
+ *   invitation's declared value for the inviter's own side is retained
+ *   separately by a caller holding the token, as
+ *   `expectedPartnerDeduplicate` (`PreparedExchange`, exchange.ts); what
+ *   the resulting pair discloses is stated on the consent surfaces
+ *   (`describeDeduplicatePair`, `consent/consentFacts.ts`).
  *
  * Metadata and standardization stay per-party and local; this function
  * shapes only the agreed linkage terms.
@@ -75,32 +79,45 @@ import type {
  * It fails closed: a config valid for the INVITER can mirror to one
  * incoherent for the acceptor (an inviter that is the sole receiver may
  * have a `payload.send` that needs the acceptor to receive output, but the
- * acceptor mirrors to `expectsOutput: false`). The derived terms are
- * re-checked against {@link LinkageTermsSchema} and an incoherent result
- * throws, aborting acceptance cleanly. The re-check's message names no
- * partner-controlled value: `identity` -- the one substituted value, and the
+ * acceptor mirrors to `expectsOutput: false`), and an `acceptorDeduplicate`
+ * the mirrored document cannot hold is refused the same way -- the schema
+ * takes `deduplicate: true` only from a party that receives the result, so a
+ * sole-receiver invitation admits no value but the closed default, which a
+ * seat offering a control for this party's own side reads before offering
+ * it. The derived terms are re-checked against {@link LinkageTermsSchema}
+ * and an incoherent result throws, aborting acceptance cleanly, under the
+ * SCHEMA's own issues rather than an account of one shape, so the refusal
+ * names the rule the derived document broke. Each issue is delimited
+ * ({@link quoteTermsValueList}), so a value one of them names cannot spell a
+ * clause of psilink's own; `identity` -- the one substituted value, and the
  * accepting operator's own -- is refused above under an account naming the
- * local input if it fails its own rules, so nothing the operator supplied
- * reaches this message.
+ * local input if it fails its own rules.
  *
  * It also refuses a `psi-c` document outside the count-only shape
  * ({@link assertCountOnlyTermsShape}) and a deduplicating invitation under a
  * strategy that cannot match one ({@link assertDeduplicateImplemented}),
  * both read from the INVITER's terms before the mirror is built, so the
  * refusal names the rule the received document breaks and keeps such an
- * invitation off the consent surfaces and off the wire.
+ * invitation off the consent surfaces and off the wire. Both rules are
+ * asserted again over the DERIVED document, which is what answers an
+ * `acceptorDeduplicate` the accepting party's own side cannot hold: a
+ * count-only document sets it false, and a strategy matching no
+ * deduplicating cardinality takes it from neither party.
  *
  * @throws {UsageError} when `acceptorIdentity` contains a control or
  *   text-direction character, is empty, or exceeds {@link MAX_TEXT_LENGTH},
- *   or when the inviter's terms are `psi-c` outside the count-only shape or
+ *   or when either party's terms are `psi-c` outside the count-only shape or
  *   declare `deduplicate` under a strategy that matches no deduplicating
  *   cardinality.
- * @throws {Error} when the inviter's terms cannot be coherently accepted
- *   for the mirrored output direction.
+ * @throws {Error} when the derived document fails
+ *   {@link LinkageTermsSchema}: the inviter's terms cannot be coherently
+ *   accepted for the mirrored output direction, or `acceptorDeduplicate` is
+ *   a value that document cannot hold.
  */
 export function deriveAcceptedLinkageTerms(
   inviterTerms: LinkageTerms,
   acceptorIdentity: string,
+  acceptorDeduplicate: boolean = false,
 ): LinkageTerms {
   // This party's own name takes the rules the schema holds a party `identity` to
   // here, before it is substituted (see the doc comment): left to the re-check at
@@ -135,9 +152,9 @@ export function deriveAcceptedLinkageTerms(
     // This party's own side of the cardinality, which the invitation does
     // not pass to it: whether SEVERAL of this party's records may match one
     // of the partner's is a disclosure about this party's own data, so it
-    // starts closed and is authored in this party's own configuration (see
-    // the doc comment).
-    deduplicate: false,
+    // starts closed and is the accepting party's alone to open (see the doc
+    // comment).
+    deduplicate: acceptorDeduplicate,
     output: {
       expectsOutput: inviterTerms.output.shareWithPartner,
       shareWithPartner: inviterTerms.output.expectsOutput,
@@ -156,17 +173,30 @@ export function deriveAcceptedLinkageTerms(
       mirrored.receive = inviterTerms.payload.send;
     derived.payload = mirrored;
   }
+  // The same two rules over the derived document: the checks above read the
+  // inviter's terms, where the accepting party's own `deduplicate` does not
+  // appear, so a value that document cannot hold is refused here.
+  assertCountOnlyTermsShape(derived);
+  assertDeduplicateImplemented(derived);
   // Fail closed on an inviter config that mirrors to an incoherent acceptor config
   // (see the doc comment). safeParse is a validity gate only; return the object we
   // built, not parsed.data, so the canonical/agreed-terms bytes are unchanged.
-  if (!LinkageTermsSchema.safeParse(derived).success) {
+  const recheck = LinkageTermsSchema.safeParse(derived);
+  if (!recheck.success) {
     throw new Error(
-      "the invitation's linkage terms cannot be accepted unchanged: mirroring " +
-        "the output direction for the accepting party produced an incompatible " +
-        "configuration. The inviter is the sole receiver of the matched result, " +
-        "yet its terms also have the accepting party receive payload columns " +
-        "the inviter sends -- which no party that receives no result can do. " +
-        "Ask the inviter to share the result, or to drop those columns.",
+      "the invitation's linkage terms cannot be accepted unchanged: the terms " +
+        "derived for the accepting party -- the invitation's output direction " +
+        "and payload mirrored, this party's own deduplicate applied -- are not " +
+        "a valid linkage terms document: " +
+        quoteTermsValueList(
+          recheck.error.issues.map((issue) =>
+            issue.path.length > 0
+              ? `${issue.path.join(".")}: ${issue.message}`
+              : issue.message,
+          ),
+        ) +
+        ". Ask the inviting party for terms the accepting party can run, or " +
+        "clear the deduplicate this party declares for its own side.",
     );
   }
   return derived;

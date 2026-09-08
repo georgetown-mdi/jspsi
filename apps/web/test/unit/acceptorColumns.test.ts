@@ -386,6 +386,7 @@ describe("acceptor launch gates", () => {
 
   test("a device reporting offline disables launch and names the shared reason", () => {
     const blocks = {
+      deduplicatePairRefused: false,
       connectionBlocked: false,
       exchangeFilesBlocked: false,
       connectionTuningBlocked: false,
@@ -412,6 +413,40 @@ describe("acceptor launch gates", () => {
     ).toBeUndefined();
   });
 
+  test("a refused duplicate-matching pair disables launch from a later step", () => {
+    // The review step disables its own Continue on the pair, but the browser can
+    // restore a later step straight from history: a Forward past that button
+    // would otherwise reach the launch with the refused value still set. The
+    // remedy is back on the terms, so the sentence sends the operator there.
+    const blocks = {
+      offline: false,
+      connectionBlocked: false,
+      exchangeFilesBlocked: false,
+      connectionTuningBlocked: false,
+      runDiagnosticsBlocked: false,
+      receiptsBlocked: false,
+    };
+    expect(
+      acceptorLaunchBlockedReason(
+        satisfiableVerdict,
+        satisfiable.editorState,
+        nameTerms,
+        { ...blocks, deduplicatePairRefused: true },
+      ),
+    ).toBe(
+      "Go back to the terms and resolve the duplicate-matching settings " +
+        "before you can start.",
+    );
+    expect(
+      acceptorLaunchBlockedReason(
+        satisfiableVerdict,
+        satisfiable.editorState,
+        nameTerms,
+        { ...blocks, deduplicatePairRefused: false },
+      ),
+    ).toBeUndefined();
+  });
+
   test("offline speaks ahead of the screen's own problems, which no edit here can outrun", () => {
     // A file that can match nothing is a fix the operator makes on this screen;
     // no network is not, so it is the sentence they meet first rather than the
@@ -423,6 +458,7 @@ describe("acceptor launch gates", () => {
     expect(
       acceptorLaunchBlockedReason(verdict, editorState, nameTerms, {
         offline: true,
+        deduplicatePairRefused: false,
         connectionBlocked: false,
         exchangeFilesBlocked: false,
         connectionTuningBlocked: false,
@@ -440,6 +476,7 @@ describe("acceptor launch gates", () => {
         nameTerms,
         {
           offline: false,
+          deduplicatePairRefused: false,
           connectionBlocked: true,
           exchangeFilesBlocked: false,
           connectionTuningBlocked: false,
@@ -462,6 +499,7 @@ describe("acceptor launch gates", () => {
         nameTerms,
         {
           offline: false,
+          deduplicatePairRefused: false,
           connectionBlocked: false,
           exchangeFilesBlocked: false,
           connectionTuningBlocked: false,
@@ -484,6 +522,7 @@ describe("acceptor launch gates", () => {
         nameTerms,
         {
           offline: false,
+          deduplicatePairRefused: false,
           connectionBlocked: false,
           exchangeFilesBlocked: true,
           connectionTuningBlocked: false,
@@ -502,6 +541,7 @@ describe("acceptor launch gates", () => {
     // the flags by hand.
     const stepBlocks = {
       offline: false,
+      deduplicatePairRefused: false,
       connectionBlocked: false,
       exchangeFilesBlocked:
         exchangeFilesProblems(EXCHANGE_FILES_DEFAULT, CONFIG_EXCHANGE_FILES)
@@ -544,6 +584,7 @@ describe("acceptor launch gates", () => {
         nameTerms,
         {
           offline: false,
+          deduplicatePairRefused: false,
           connectionBlocked: false,
           exchangeFilesBlocked: false,
           connectionTuningBlocked: false,
@@ -566,6 +607,7 @@ describe("acceptor launch gates", () => {
     expect(
       acceptorLaunchBlockedReason(verdict, editorState, nameTerms, {
         offline: false,
+        deduplicatePairRefused: false,
         connectionBlocked: true,
         exchangeFilesBlocked: true,
         connectionTuningBlocked: true,

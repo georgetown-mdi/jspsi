@@ -724,10 +724,11 @@ export function displayInvitation(params: {
   // follows the output shape: this party reads it where the inviter
   // shares the result, and reads nothing where the inviter is the sole
   // receiver. The direction note follows at the same level: the setting is
-  // the inviting party's own (`deriveAcceptedLinkageTerms` derives this
-  // party's side as false), so it scopes to a ONE-SIDED run -- a
-  // two-sided grouping takes each party declaring its own side in its own
-  // configuration, outside what accepting this invitation produces.
+  // the inviting party's own, and this command offers no control over this
+  // party's side, so `deriveAcceptedLinkageTerms` leaves it false and the
+  // note scopes to a ONE-SIDED run -- a two-sided grouping takes each party
+  // declaring its own side in its own configuration, outside what accepting
+  // this invitation on the command line produces.
   //
   // Gated on the applied flag too: an invitation whose strategy matches no
   // deduplicating cardinality is refused at acceptance

@@ -415,10 +415,11 @@ Two states, not three: the empty case has no analogue here.
   against a presented `true` is the widening the record exists to refuse.
 
 The field is distinct from `linkage_terms.deduplicate` beside it,
-which is *this* party's own side: `deriveAcceptedLinkageTerms` sets an
-acceptance's own value to `false` and retains nothing of the inviter's, so a run
-that read the binding off its own terms would refuse the legitimate differing
-pair. The two are read from separate keys and never derived from one another.
+which is *this* party's own side: `deriveAcceptedLinkageTerms` takes an
+acceptance's own value from the accepting party -- `false` where its seat offers
+no control -- and retains nothing of the inviter's, so a run that read the
+binding off its own terms would refuse the legitimate differing pair. The two are
+read from separate keys and never derived from one another.
 
 Every path that reaches an acceptance records it: the CLI's offline accept writes
 it into the config it composes, the online accept includes it in the bootstrap's

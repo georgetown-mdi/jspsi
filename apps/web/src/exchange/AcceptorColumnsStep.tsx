@@ -94,6 +94,7 @@ export function AcceptorColumnsStep({
   columnsState,
   editorState,
   verdict,
+  deduplicatePairRefused = false,
   connectionSection,
   connectionBlocked = false,
   exchangeFilesSection,
@@ -123,6 +124,11 @@ export function AcceptorColumnsStep({
   /** The effective `{ metadata, standardization }` the verdict and launch consume. */
   editorState: { metadata: Metadata; standardization: Standardization };
   verdict: AcceptorVerdictViewModel;
+  /** Whether the two parties' `deduplicate` values make a pair the run refuses,
+   * as the review step read it. Gates the launch exactly as
+   * {@link connectionBlocked} does: the control that clears it is on the review
+   * step, which a browser Forward can step past. */
+  deduplicatePairRefused?: boolean;
   /** The transport-connection surface an accepted SFTP invitation needs authored
    * before launch (the {@link AcceptorSftpConnectionCard}), rendered below the
    * column surface and above the launch action. Absent for a browser or file-drop
@@ -276,6 +282,7 @@ export function AcceptorColumnsStep({
       // launch is held while the browser reports no network -- named in the same
       // line every other blocker speaks through.
       offline: !online,
+      deduplicatePairRefused,
       connectionBlocked,
       exchangeFilesBlocked,
       connectionTuningBlocked,
