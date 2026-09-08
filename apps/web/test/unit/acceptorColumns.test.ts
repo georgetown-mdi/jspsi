@@ -23,6 +23,7 @@ import {
   acceptorSendingExpectedColumnsCostsKey,
   acceptorUnsatisfiedTypes,
   acceptorVerdict,
+  acceptorWidenableDeclaredColumnCount,
 } from "@exchange/acceptorColumnsModel";
 
 import {
@@ -1030,6 +1031,24 @@ describe("the invitation's declared payload set against the marks", () => {
     ).metadata;
     expect(acceptorPayloadDeclarationConflict(terms, widened)).toBeUndefined();
     expect(widened.some((column) => column.role === "identifier")).toBe(false);
+  });
+
+  test("a declaration naming the same held-but-unsent column twice widens it once", () => {
+    // A declaration may name one column twice; that is still one column to list,
+    // one to mark, and one the widening offer marks.
+    const identifierColumns = ["first_name", "last_name", "record_id"];
+    const terms: LinkageTerms = {
+      ...nameTerms,
+      payload: { receive: [{ name: "record_id" }, { name: "record_id" }] },
+    };
+    const { editorState } = editorFor(identifierColumns, terms);
+    expect(
+      acceptorPayloadDeclarationConflict(terms, editorState.metadata)
+        ?.declaredButNotSent,
+    ).toEqual([{ displayName: "record_id", inFile: true }]);
+    expect(
+      acceptorWidenableDeclaredColumnCount(terms, editorState.metadata),
+    ).toBe(1);
   });
 
   test("the offer costs an agreed key when a declared column is one this file matches on", () => {
