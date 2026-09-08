@@ -39,6 +39,8 @@ import {
 import { ColumnChips } from "@components/ColumnChips";
 import { ColumnName } from "@components/ColumnName";
 
+import { acceptorMaySetDeduplicate } from "@psi/acceptInvitation";
+
 import type { ReactNode, Ref } from "react";
 
 import type {
@@ -422,12 +424,13 @@ export function InvitationTerms({
    * screen when the invitation gives the inviting party no result. */
   outboundColumns?: Array<string>;
   /** The accepting party's OWN `deduplicate` value and the control that sets
-   * it, on a seat where that party authors its own side. Supplied, the duplicate
+   * it, on a seat where that party authors its own side. Supplied AND admitted
+   * by the invitation ({@link acceptorMaySetDeduplicate}), the duplicate
    * matches block states BOTH parties' values and what the pair discloses
-   * (`describeDeduplicatePair`) and offers the checkbox beneath them; omitted,
-   * the block states the inviting party's value alone, which is what a surface
-   * with no such control runs (`deriveAcceptedLinkageTerms` then derives this
-   * party's side as false).
+   * (`describeDeduplicatePair`) and offers the checkbox beneath them;
+   * otherwise the block states the inviting party's value alone, which is what
+   * an accept with no such control runs (`deriveAcceptedLinkageTerms` then
+   * derives this party's side as false).
    *
    * `refusal` is the pair's own refusal read at the seat
    * (`acceptorDeduplicateRefusal`), rendered beside the control so the operator
@@ -468,6 +471,14 @@ export function InvitationTerms({
     inviterRetainsFiles,
     connectionEndpoint,
   });
+  // This party's own side WHERE THE INVITATION ADMITS ONE: a sole-receiver
+  // invitation mirrors the accepting party to expectsOutput false, which the
+  // schema takes no deduplicate from, so that accept gets no control and no
+  // sentence stating a value this party sets -- it runs the closed default the
+  // derivation applies (acceptorMaySetDeduplicate).
+  const ownDeduplicate = acceptorMaySetDeduplicate(linkageTerms)
+    ? acceptorDeduplicate
+    : undefined;
   // A count of the columns the inviter requests FROM the acceptor (the acceptor's
   // own data egress). A count, not names: the length is a bounded integer
   // (MAX_PAYLOAD_ENTRIES at decode), so no partner free text enters the
@@ -1372,38 +1383,40 @@ export function InvitationTerms({
                 sentence is core's, the same fact the run states after the terms
                 exchange (describeResolvedMatching), read here before any key or
                 payload moves. */}
-              {acceptorDeduplicate !== undefined && (
+              {ownDeduplicate !== undefined && (
                 <>
                   <Text size="sm">
                     {describeDeduplicatePair(
                       summary.deduplicate,
-                      acceptorDeduplicate.value,
+                      ownDeduplicate.value,
                     )}
                   </Text>
                   <Checkbox
                     mt="xs"
-                    checked={acceptorDeduplicate.value}
+                    checked={ownDeduplicate.value}
                     onChange={(event) =>
-                      acceptorDeduplicate.onChange(event.currentTarget.checked)
+                      ownDeduplicate.onChange(event.currentTarget.checked)
                     }
                     label="Let several of my records match one of my partner's"
                     description="Your own side of this setting. Leave it off and each of your records matches at most one of your partner's."
                   />
-                  {/* The combination this pair resolves to, refused at the seat
-                    rather than mid-run. Core's own message: it names the
-                    strategy to change and the one-sided pair to fall back to,
-                    so it does not read as a setting that cannot be had. */}
-                  {acceptorDeduplicate.refusal !== undefined && (
-                    <Alert
-                      color="red"
-                      icon={<IconAlertCircle aria-hidden />}
-                      title="These two settings cannot run together"
-                      mt="xs"
-                    >
-                      {acceptorDeduplicate.refusal}
-                    </Alert>
-                  )}
                 </>
+              )}
+              {/* The combination this pair resolves to, refused at the seat
+                rather than mid-run. Core's own message: it names the strategy
+                to change and the one-sided pair to fall back to, so it does not
+                read as a setting that cannot be had. Gated on the refusal
+                alone, not on the control: a pair the caller refuses is stated
+                whether or not this invitation admits a control. */}
+              {acceptorDeduplicate?.refusal !== undefined && (
+                <Alert
+                  color="red"
+                  icon={<IconAlertCircle aria-hidden />}
+                  title="These two settings cannot run together"
+                  mt="xs"
+                >
+                  {acceptorDeduplicate.refusal}
+                </Alert>
               )}
               {/* What the INVITING party's deduplicate reveals, and whose
                 records are grouped to reveal it. Shared wording with the CLI
@@ -1447,7 +1460,7 @@ export function InvitationTerms({
                     clause the pair statement above answers with the two values
                     actually selected. */}
                   <Text size="xs" c="dimmed">
-                    {acceptorDeduplicate !== undefined
+                    {ownDeduplicate !== undefined
                       ? DEDUPLICATE_ACCEPTOR_SETTABLE_SIDE_NOTE
                       : DEDUPLICATE_ACCEPTOR_SIDE_NOTE}
                   </Text>

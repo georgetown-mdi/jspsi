@@ -5,6 +5,7 @@ import {
   deriveAcceptedLinkageTerms,
   isInvitationExpired,
   resolveLinkageCardinality,
+  sanitizeErrorForDisplay,
 } from "@psilink/core";
 
 import type { DeploymentProfile } from "@utils/clientConfig";
@@ -197,6 +198,40 @@ export function acceptorExchangeDataSpec(
 const DEDUPLICATE_CHECK_IDENTITY = "you";
 
 /**
+ * Whether the ACCEPTING party may declare a `deduplicate` of its own against
+ * this invitation.
+ *
+ * The schema takes `deduplicate: true` only from a party that receives the
+ * result, and the accepting party's `expectsOutput` is the inviting party's
+ * `shareWithPartner` mirrored (`deriveAcceptedLinkageTerms`). So a
+ * sole-receiver invitation leaves this party no value to set: acceptance
+ * applies the closed default, and a document declaring anything else is
+ * refused by that derivation. A seat offers the control only where this
+ * holds, so the operator meets no control whose value the accept would
+ * refuse.
+ */
+export function acceptorMaySetDeduplicate(linkageTerms: LinkageTerms): boolean {
+  return linkageTerms.output.shareWithPartner;
+}
+
+/**
+ * A refusal the accept seat reads before the run, and which side of the accept
+ * it belongs to.
+ *
+ * `pair` is the two parties' `deduplicate` values against this invitation's
+ * strategy: the accepting operator resolves it by clearing its own side, so it
+ * renders beside that control and holds the step's Continue.
+ *
+ * `terms` is the invitation mirroring to a document no acceptance can run,
+ * whatever this party sets -- nothing at the seat resolves it, so it blocks the
+ * accept the way an endpoint this build cannot drive does.
+ */
+export interface AcceptorDeduplicateRefusal {
+  scope: "pair" | "terms";
+  message: string;
+}
+
+/**
  * The refusal the accepting party's own `deduplicate` value meets against this
  * invitation, or `undefined` when the pair runs -- read at the seat, before the
  * run and before any key or payload moves.
@@ -207,16 +242,21 @@ const DEDUPLICATE_CHECK_IDENTITY = "you";
  * and no others. Today that is the agreed `(true, true)` pair under a strategy
  * pairing no `many-to-many` (`assertBothSidedDeduplicateImplemented`); the
  * derivation itself answers a `psi-c` invitation, whose count-only shape holds
- * neither party's `deduplicate` open.
+ * neither party's `deduplicate` open. A `pair` refusal is the combination's,
+ * not the setting's: its message names the strategy to change and the one-sided
+ * pair to fall back to, and clearing either party's value runs.
  *
- * The refusal is the combination's, not the setting's: its message names the
- * strategy to change and the one-sided pair to fall back to, and clearing
- * either party's value runs.
+ * It returns for every invitation this build decoded rather than throwing for
+ * some of them: the accept screen reads it in its render body, where a throw
+ * takes the whole route to its error boundary instead of the refusal the
+ * operator can act on. So an error the derivation raises -- a mirror the schema
+ * refuses, which no value at this seat resolves -- comes back as a `terms`
+ * refusal, escaped for display at the one boundary that holds it.
  */
 export function acceptorDeduplicateRefusal(
   linkageTerms: LinkageTerms,
   deduplicate: boolean,
-): string | undefined {
+): AcceptorDeduplicateRefusal | undefined {
   try {
     resolveLinkageCardinality(
       deriveAcceptedLinkageTerms(
@@ -228,7 +268,8 @@ export function acceptorDeduplicateRefusal(
     );
     return undefined;
   } catch (error) {
-    if (error instanceof UsageError) return error.message;
-    throw error;
+    if (error instanceof UsageError)
+      return { scope: "pair", message: error.message };
+    return { scope: "terms", message: sanitizeErrorForDisplay(error) };
   }
 }

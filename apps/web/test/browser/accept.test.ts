@@ -2609,4 +2609,45 @@ describe("AcceptorScreen: this party's own deduplicate", () => {
       )
       .toBeEnabled();
   });
+
+  test("offers no control where this party receives no result", async () => {
+    // A sole-receiver invitation mirrors this party to expectsOutput false, and
+    // the schema takes no deduplicate from a party that receives no result --
+    // so the seat offers no control rather than one whose value the accept
+    // would refuse, and the accept goes on under the closed default.
+    await reachReview({
+      ...acceptorTerms,
+      output: { expectsOutput: true, shareWithPartner: false },
+    });
+    expect(ownSide().query()).toBeNull();
+    await expect
+      .element(
+        page.getByRole("button", { name: "Continue: consent & your file" }),
+      )
+      .toBeEnabled();
+  });
+
+  test("blocks the accept when the invitation mirrors to terms no acceptance can run", async () => {
+    // A sole-receiver invitation that also declares a payload.send mirrors to a
+    // receive this party may not hold: the derivation refuses it on decode, with
+    // no operator action. The seat reads that refusal in its render body, so it
+    // must reach the operator as this step's own block -- naming the rule the
+    // document broke -- rather than as a crash to the route's error page.
+    await reachReview({
+      ...acceptorTerms,
+      output: { expectsOutput: true, shareWithPartner: false },
+      payload: { send: [{ name: "dose" }] },
+    });
+    await expect
+      .element(page.getByText("Cannot accept this invitation"))
+      .toBeInTheDocument();
+    expect(app.container.textContent).toContain(
+      "payload.receive must be empty when expectsOutput is false",
+    );
+    expect(
+      page
+        .getByRole("button", { name: "Continue: consent & your file" })
+        .query(),
+    ).toBeNull();
+  });
 });

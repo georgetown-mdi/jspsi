@@ -13,6 +13,7 @@ import {
 import {
   acceptorDeduplicateRefusal,
   acceptorExchangeDataSpec,
+  acceptorMaySetDeduplicate,
   prepareAcceptedInvitation,
 } from "../../../src/psi/acceptInvitation.js";
 import { selectExchangeDriver } from "../../../src/psi/exchangeDriverSelection.js";
@@ -394,9 +395,11 @@ describe("the accepting party's own deduplicate at the seat", () => {
       deduplicate: true,
     };
     const refusal = acceptorDeduplicateRefusal(singlePass, true);
-    expect(refusal).toBeDefined();
-    expect(refusal).toContain("cascade");
-    expect(refusal).toContain("deduplicate to false on one of the two");
+    expect(refusal?.scope).toBe("pair");
+    expect(refusal?.message).toContain("cascade");
+    expect(refusal?.message).toContain(
+      "deduplicate to false on one of the two",
+    );
     // One-sided under the same strategy runs, and so does the both-sided pair
     // under the strategy that pairs it -- the combination is refused, not the
     // setting.
@@ -415,7 +418,7 @@ describe("the accepting party's own deduplicate at the seat", () => {
     // launch.
     const countOnly: LinkageTerms = { ...invitationTerms, algorithm: "psi-c" };
     expect(acceptorDeduplicateRefusal(countOnly, false)).toBeUndefined();
-    expect(acceptorDeduplicateRefusal(countOnly, true)).toContain(
+    expect(acceptorDeduplicateRefusal(countOnly, true)?.message).toContain(
       "must set deduplicate to false",
     );
   });
@@ -439,6 +442,69 @@ describe("the accepting party's own deduplicate at the seat", () => {
     } catch (error) {
       boundary = (error as Error).message;
     }
-    expect(acceptorDeduplicateRefusal(singlePass, true)).toBe(boundary);
+    expect(acceptorDeduplicateRefusal(singlePass, true)?.message).toBe(
+      boundary,
+    );
+  });
+});
+
+describe("an invitation whose mirror admits no deduplicate from this party", () => {
+  // A sole-receiver invitation: the inviting party keeps the result, so the
+  // accepting party mirrors to expectsOutput false -- which the schema takes no
+  // deduplicate from.
+  const soleReceiver: LinkageTerms = {
+    version: "1.0.0",
+    identity: "Inviting Org",
+    date: "2025-01-01",
+    algorithm: "psi",
+    linkageStrategy: "cascade",
+    output: { expectsOutput: true, shareWithPartner: false },
+    deduplicate: false,
+    linkageFields: [{ name: "lastName", type: "last_name" }],
+    linkageKeys: [{ name: "LAST", elements: [{ field: "lastName" }] }],
+  };
+
+  test("offers this party no side of its own to set", () => {
+    // What the seat reads before rendering a control: the value would be refused
+    // by the derivation, so no control is offered for it.
+    expect(acceptorMaySetDeduplicate(soleReceiver)).toBe(false);
+    expect(
+      acceptorMaySetDeduplicate({
+        ...soleReceiver,
+        output: { expectsOutput: true, shareWithPartner: true },
+      }),
+    ).toBe(true);
+  });
+
+  test("refuses rather than throws when the derivation refuses the mirror", () => {
+    // The accept screen reads this in its render body, where a throw takes the
+    // whole route to its error boundary instead of a refusal the operator can
+    // read. Both shapes the derivation refuses come back as values: this party's
+    // own deduplicate against a sole-receiver invitation, and a sole-receiver
+    // invitation that also declares a payload.send -- which mirrors to a receive
+    // this party may not hold, on decode, with no operator action at all.
+    const ownSide = acceptorDeduplicateRefusal(soleReceiver, true);
+    expect(ownSide?.scope).toBe("terms");
+    expect(ownSide?.message).toContain(
+      "expectsOutput must be true when deduplicate is true",
+    );
+    const payloadToNonReceiver = acceptorDeduplicateRefusal(
+      { ...soleReceiver, payload: { send: [{ name: "dose" }] } },
+      false,
+    );
+    expect(payloadToNonReceiver?.scope).toBe("terms");
+    expect(payloadToNonReceiver?.message).toContain(
+      "payload.receive must be empty when expectsOutput is false",
+    );
+  });
+
+  test("runs the closed default the derivation applies", () => {
+    // The invitation itself is acceptable; only a value this party cannot hold
+    // is refused, so the accept with no control at all goes on.
+    expect(acceptorDeduplicateRefusal(soleReceiver, false)).toBeUndefined();
+    expect(
+      acceptorExchangeDataSpec(soleReceiver, "Accepting Org").linkageTerms
+        ?.deduplicate,
+    ).toBe(false);
   });
 });

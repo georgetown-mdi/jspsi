@@ -3189,6 +3189,30 @@ describe("InvitationTerms: the accepting party's own deduplicate", () => {
     expect(collapse.textContent).toContain(refusal);
   });
 
+  test("offers no control where the accepting party receives no result", async () => {
+    // The schema takes deduplicate only from a party that receives the result,
+    // and this party's expectsOutput is the inviting party's shareWithPartner
+    // mirrored -- so a sole-receiver invitation gets no control, no pair
+    // statement, and the note that names a configuration file rather than a
+    // control the operator does not have.
+    renderWithControl(false, {
+      output: { expectsOutput: true, shareWithPartner: false },
+    });
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    const collapse = await readyCollapse("Other details");
+    expect(
+      page
+        .getByRole("checkbox", {
+          name: "Let several of my records match one of my partner's",
+        })
+        .query(),
+    ).toBeNull();
+    expect(app.container.textContent).not.toContain(
+      describeDeduplicatePair(true, false),
+    );
+    expect(collapse.textContent).toContain(DEDUPLICATE_ACCEPTOR_SIDE_NOTE);
+  });
+
   test("a surface with no control states the invitation's value alone", async () => {
     // The direct-exchange confirm screen and every other read-only rendering
     // pass no control, and must not gain a pair statement about a value no one

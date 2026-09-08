@@ -945,6 +945,41 @@ test("deriveAcceptedLinkageTerms fails closed when the mirror is incoherent (pay
   // thing refused, so the account stays the invitation's.
   expect((thrown as Error).message).toContain("cannot be accepted unchanged");
   expect((thrown as Error).message).not.toContain(TEXT_CONTROL_CHAR_MESSAGE);
+  // The schema's own issue, named rather than described: a caller rendering
+  // this reads which rule the derived document broke, and a second shape below
+  // reaches the same check with a different rule.
+  expect((thrown as Error).message).toContain(
+    "payload.receive: payload.receive must be empty when expectsOutput is false",
+  );
+});
+
+test("deriveAcceptedLinkageTerms names the schema issue for an acceptorDeduplicate the mirror cannot hold", () => {
+  // The second shape reaching the same coherence check: the accepting party
+  // declares deduplicate against a sole-receiver invitation, which mirrors it to
+  // expectsOutput: false -- a combination the schema refuses. A seat that offers
+  // a control for this party's own side reads the same rule before offering it
+  // (acceptorMaySetDeduplicate, apps/web/src/psi/acceptInvitation.ts).
+  const inviterTerms: LinkageTerms = {
+    ...inviterBase,
+    output: { expectsOutput: true, shareWithPartner: false },
+  };
+  let thrown: unknown;
+  try {
+    deriveAcceptedLinkageTerms(inviterTerms, "Accepting Org", true);
+  } catch (e) {
+    thrown = e;
+  }
+  expect((thrown as Error).message).toContain(
+    "output.expectsOutput: expectsOutput must be true when deduplicate is true",
+  );
+  // This invitation declares no payload, so a message naming one would be an
+  // account of a shape that is not here.
+  expect((thrown as Error).message).not.toContain("payload.receive");
+  // The same invitation accepted with the closed default runs, so what is
+  // refused is the value, not the invitation.
+  expect(() =>
+    deriveAcceptedLinkageTerms(inviterTerms, "Accepting Org"),
+  ).not.toThrow();
 });
 
 test("deriveAcceptedLinkageTerms refuses a control character in the ACCEPTOR's own identity", () => {

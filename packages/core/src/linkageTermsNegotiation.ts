@@ -79,13 +79,19 @@ import type {
  * It fails closed: a config valid for the INVITER can mirror to one
  * incoherent for the acceptor (an inviter that is the sole receiver may
  * have a `payload.send` that needs the acceptor to receive output, but the
- * acceptor mirrors to `expectsOutput: false`). The derived terms are
- * re-checked against {@link LinkageTermsSchema} and an incoherent result
- * throws, aborting acceptance cleanly. The re-check's message names no
- * partner-controlled value: `identity` -- the one substituted value, and the
+ * acceptor mirrors to `expectsOutput: false`), and an `acceptorDeduplicate`
+ * the mirrored document cannot hold is refused the same way -- the schema
+ * takes `deduplicate: true` only from a party that receives the result, so a
+ * sole-receiver invitation admits no value but the closed default, which a
+ * seat offering a control for this party's own side reads before offering
+ * it. The derived terms are re-checked against {@link LinkageTermsSchema}
+ * and an incoherent result throws, aborting acceptance cleanly, under the
+ * SCHEMA's own issues rather than an account of one shape, so the refusal
+ * names the rule the derived document broke. Each issue is delimited
+ * ({@link quoteTermsValueList}), so a value one of them names cannot spell a
+ * clause of psilink's own; `identity` -- the one substituted value, and the
  * accepting operator's own -- is refused above under an account naming the
- * local input if it fails its own rules, so nothing the operator supplied
- * reaches this message.
+ * local input if it fails its own rules.
  *
  * It also refuses a `psi-c` document outside the count-only shape
  * ({@link assertCountOnlyTermsShape}) and a deduplicating invitation under a
@@ -103,8 +109,10 @@ import type {
  *   or when either party's terms are `psi-c` outside the count-only shape or
  *   declare `deduplicate` under a strategy that matches no deduplicating
  *   cardinality.
- * @throws {Error} when the inviter's terms cannot be coherently accepted
- *   for the mirrored output direction.
+ * @throws {Error} when the derived document fails
+ *   {@link LinkageTermsSchema}: the inviter's terms cannot be coherently
+ *   accepted for the mirrored output direction, or `acceptorDeduplicate` is
+ *   a value that document cannot hold.
  */
 export function deriveAcceptedLinkageTerms(
   inviterTerms: LinkageTerms,
@@ -173,14 +181,22 @@ export function deriveAcceptedLinkageTerms(
   // Fail closed on an inviter config that mirrors to an incoherent acceptor config
   // (see the doc comment). safeParse is a validity gate only; return the object we
   // built, not parsed.data, so the canonical/agreed-terms bytes are unchanged.
-  if (!LinkageTermsSchema.safeParse(derived).success) {
+  const recheck = LinkageTermsSchema.safeParse(derived);
+  if (!recheck.success) {
     throw new Error(
-      "the invitation's linkage terms cannot be accepted unchanged: mirroring " +
-        "the output direction for the accepting party produced an incompatible " +
-        "configuration. The inviter is the sole receiver of the matched result, " +
-        "yet its terms also have the accepting party receive payload columns " +
-        "the inviter sends -- which no party that receives no result can do. " +
-        "Ask the inviter to share the result, or to drop those columns.",
+      "the invitation's linkage terms cannot be accepted unchanged: the terms " +
+        "derived for the accepting party -- the invitation's output direction " +
+        "and payload mirrored, this party's own deduplicate applied -- are not " +
+        "a valid linkage terms document: " +
+        quoteTermsValueList(
+          recheck.error.issues.map((issue) =>
+            issue.path.length > 0
+              ? `${issue.path.join(".")}: ${issue.message}`
+              : issue.message,
+          ),
+        ) +
+        ". Ask the inviting party for terms the accepting party can run, or " +
+        "clear the deduplicate this party declares for its own side.",
     );
   }
   return derived;
