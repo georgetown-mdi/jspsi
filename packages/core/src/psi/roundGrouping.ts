@@ -120,15 +120,34 @@ export interface RoundGroupingBounds {
   readonly ownerLists: boolean;
 }
 
+// The range the slot index below addresses. A position names an element of
+// the round's own set, which is memory-bound orders of magnitude short of
+// this, so no legitimate exchange reaches it; the bound the position list
+// passes upstream is the partner's declared element count, which does reach
+// past it, so the ceiling is stated here rather than assumed.
+const POSITION_RANGE = 2 ** 31;
+
 // The matched positions the grouping partitions, ascending. Distinctness is
 // enforced upstream on both frames -- an association table's local half may
 // not repeat an entry and the original-index list is held to the same rule
 // (utils/partnerIndices.ts) -- and is re-checked here so this module's
 // slotting cannot silently mis-attribute a position a caller admitted twice.
+// A position the index cannot hold exactly is refused before it is stored.
 function sortedPositions(
   participantId: string,
   matchedPositions: ReadonlyArray<number>,
 ): Int32Array {
+  for (const position of matchedPositions)
+    if (
+      !Number.isInteger(position) ||
+      position < 0 ||
+      position >= POSITION_RANGE
+    )
+      throw partnerProtocolError(
+        participantId,
+        "the round's grouping partitions a position list naming a position " +
+          "outside that round's candidate set",
+      );
   const positions = Int32Array.from(matchedPositions).sort();
   for (let t = 1; t < positions.length; ++t)
     if (positions[t] === positions[t - 1])

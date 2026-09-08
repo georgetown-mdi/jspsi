@@ -7,11 +7,30 @@ import PSI from "@openmined/psi.js";
 // (CANDIDATE_SET_IMPLEMENTED_BY_STRATEGY, linkageTermsPolicy.ts). Flipping the
 // entry changes nothing for the fan-out-free runs the rest of this file
 // drives: a round holding one value per record takes the same path either way.
+// The few cases that pin a refusal on the shipped setting close the gate for
+// their own run through withCandidateSetGate below.
+const candidateSetGate = vi.hoisted(() => ({ open: true }));
+
 vi.mock("../src/linkageTermsPolicy", async (importOriginal) => {
   const original =
     await importOriginal<typeof import("../src/linkageTermsPolicy")>();
-  return { ...original, candidateSetIsImplementedForStrategy: () => true };
+  return {
+    ...original,
+    candidateSetIsImplementedForStrategy: () => candidateSetGate.open,
+  };
 });
+
+async function withCandidateSetGate<T>(
+  open: boolean,
+  run: () => Promise<T>,
+): Promise<T> {
+  candidateSetGate.open = open;
+  try {
+    return await run();
+  } finally {
+    candidateSetGate.open = true;
+  }
+}
 
 import { PSIParticipant } from "../src/psi/participant";
 import {
@@ -1307,4 +1326,72 @@ test("the round refuses a mapped-element entry naming a non-canonical position",
     ),
   );
   expectProtocolRefusal(err, /names a position other than the canonical one/);
+});
+
+// --- A position beyond what a round's slot index addresses --------------------
+// Every bound a round position passes upstream is the partner's own declared
+// element count, which reaches far past the range an index holds, so the round
+// itself refuses a position at or above 2^31 rather than letting one wrap into
+// its slot index. Both roles read a position list -- the starter the
+// association table's partner half, the joiner the original-index list -- and
+// both take the refusal whether or not the strategy allowlist admits a
+// candidate set.
+
+const BEYOND_INDEX_RANGE = 2 ** 31;
+
+// One entry of the list moved past the range, the rest left as the honest
+// partner computed them, so the frame breaks nothing else.
+function nameBeyondIndexRange(list: Array<number>): Array<number> {
+  return list.map((position, entry) =>
+    entry === 0 ? BEYOND_INDEX_RANGE : position,
+  );
+}
+
+const beyondRangeOnRoundTable = onRoundTable((table) => [
+  nameBeyondIndexRange(table[0]),
+  ...table.slice(1),
+]);
+
+const beyondRangeOnRoundIndexList = onRoundIndexList((list, grouping) =>
+  grouping === undefined
+    ? nameBeyondIndexRange(list)
+    : [nameBeyondIndexRange(list), grouping],
+);
+
+// One value per record, so the round runs on the gate's shipped setting too.
+const FLAT_STARTER_KEYS: Cells = [["A", "B", "C"]];
+const FLAT_JOINER_KEYS: Cells = [["A", "B", "C"]];
+
+test("the round refuses a position beyond what its slot index addresses", async () => {
+  const err = await widenedRound("starter", beyondRangeOnRoundTable);
+  expectProtocolRefusal(err, /outside that round's candidate set/);
+});
+
+test("the mirror role refuses the same position on the original-index list", async () => {
+  const err = await widenedRound("joiner", beyondRangeOnRoundIndexList);
+  expectProtocolRefusal(err, /outside that round's candidate set/);
+});
+
+test("the round refuses that position with the candidate-set gate closed", async () => {
+  const err = await withCandidateSetGate(false, () =>
+    widenedRound(
+      "starter",
+      beyondRangeOnRoundTable,
+      FLAT_STARTER_KEYS,
+      FLAT_JOINER_KEYS,
+    ),
+  );
+  expectProtocolRefusal(err, /outside that round's candidate set/);
+});
+
+test("the mirror role refuses it with the candidate-set gate closed", async () => {
+  const err = await withCandidateSetGate(false, () =>
+    widenedRound(
+      "joiner",
+      beyondRangeOnRoundIndexList,
+      FLAT_STARTER_KEYS,
+      FLAT_JOINER_KEYS,
+    ),
+  );
+  expectProtocolRefusal(err, /outside that round's candidate set/);
 });
