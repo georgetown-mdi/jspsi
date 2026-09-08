@@ -285,7 +285,19 @@ function readOwnerLists(
     }
     starts[t + 1] = flattened.length;
   }
+  // The ordinals run 0 through k - 1 with each appearing at least once, so k
+  // can never exceed the entry count the frame holds. Applied here it is the
+  // completeness check below read as a frame-local ceiling, and it runs BEFORE
+  // anything is sized by an ordinal: the partner's declared record count is
+  // authenticated but reaches MAX_RECORD_COUNT, so one entry naming a high
+  // ordinal would otherwise size an allocation the frame never paid for.
   const recordCount = highest + 1;
+  if (recordCount > flattened.length)
+    throw partnerProtocolError(
+      participantId,
+      "the round's grouping skips an ordinal, so it names a rank no record " +
+        "holds",
+    );
   if (recordCount > bounds.partnerRecordCount)
     throw partnerProtocolError(
       participantId,
@@ -331,10 +343,13 @@ function readOwnerLists(
  *
  * Every failure is a classified `protocol` error raised at the round rather
  * than after the last one (docs/spec/PROTOCOL.md, The checks stay local).
- * Nothing here is bounded by a quantity read off the frame under check: the
+ * No check here takes its ceiling from the frame under check: the
  * matched-position count is the index list the round's own checks already
  * bounded, the per-record ceiling is derived from the agreed terms, and the
- * record count is the one the partner declared on the terms exchange.
+ * record count is the one the partner declared on the terms exchange. No
+ * allocation is sized by a partner value either: the ragged form's record
+ * count is held to the frame's own entry count before it sizes anything, so
+ * the memory a round spends stays proportional to the bytes it received.
  *
  * @param field - The grouping as it arrived, or `undefined` where the frame
  *   omitted it, which states one run of 1 per matched position.

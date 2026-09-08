@@ -19,6 +19,7 @@ import {
   linkViaSinglePassPSI,
   type LinkageCardinality,
 } from "../src/psi/link";
+import { readPartnerRoundGrouping } from "../src/psi/roundGrouping";
 import { UNBOUNDED_PSI_ELEMENTS } from "./utils/psiElementBounds";
 import {
   MAX_RECORD_COUNT,
@@ -1214,6 +1215,65 @@ test("the round refuses a grouping naming more records than the partner counted"
 test("the round refuses run lengths where an owner list is due", async () => {
   const err = await raggedRound(onRoundIndexList((list) => [list, [2, 1, 1]]));
   expectProtocolRefusal(err, /states run lengths where its side/);
+});
+
+test("the round refuses an ordinal above the entries the grouping holds", async () => {
+  const err = await raggedRound(
+    onRoundIndexList((list) => [list, [[0, 1], [0], [5_000_000]]]),
+  );
+  expectProtocolRefusal(err, /skips an ordinal/);
+});
+
+// --- What a grouping may size ------------------------------------------------
+// An ordinal is the partner's own word and the record count it is held to
+// reaches MAX_RECORD_COUNT, so a read that sized a structure by an ordinal
+// before checking it would let one entry reserve gigabytes. The probe counts
+// every Int32Array the read constructs and holds each to the frame's own size.
+
+function int32ArrayLengths(run: () => unknown): {
+  outcome: unknown;
+  lengths: Array<number>;
+} {
+  const lengths: Array<number> = [];
+  const real = globalThis.Int32Array;
+  globalThis.Int32Array = new Proxy(real, {
+    construct(target, args: Array<unknown>) {
+      if (typeof args[0] === "number") lengths.push(args[0]);
+      return Reflect.construct(target, args) as object;
+    },
+  }) as Int32ArrayConstructor;
+  try {
+    return { outcome: run(), lengths };
+  } catch (err: unknown) {
+    return { outcome: err, lengths };
+  } finally {
+    globalThis.Int32Array = real;
+  }
+}
+
+const HIGH_ORDINAL_POSITIONS = [0, 1, 2];
+
+function readHighOrdinalGrouping(): unknown {
+  return readPartnerRoundGrouping(
+    [[0], [1], [5_000_000]],
+    HIGH_ORDINAL_POSITIONS,
+    {
+      participantId: "party",
+      maxPositionsPerRecord: 20,
+      partnerRecordCount: MAX_RECORD_COUNT,
+      ownerLists: true,
+    },
+  );
+}
+
+test("an ordinal far above the frame's own size allocates nothing on its scale", () => {
+  const { outcome, lengths } = int32ArrayLengths(readHighOrdinalGrouping);
+  expectProtocolRefusal(outcome, /skips an ordinal/);
+  // The slot boundaries are the widest thing a grouping of three positions
+  // legitimately needs; nothing is sized by the ordinal itself.
+  expect(Math.max(...lengths)).toBeLessThanOrEqual(
+    HIGH_ORDINAL_POSITIONS.length + 1,
+  );
 });
 
 // One ordinal in more positions than the key's candidate count, which needs a
