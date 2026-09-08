@@ -706,6 +706,15 @@ describe("console direct re-attaches on a busy create", () => {
       .toHaveTextContent(
         "You are back on an exchange this console already holds.",
       );
+    // Body text unique to the visible notice, absent from the hidden
+    // announcement region, so this fails if the notice itself never mounts.
+    await expect
+      .element(
+        page.getByText(
+          "This exchange was already running here -- from another tab or an earlier visit -- so you are watching it rather than starting a new one.",
+        ),
+      )
+      .toBeVisible();
     expect(
       page
         .getByText("This console is already running an exchange", {

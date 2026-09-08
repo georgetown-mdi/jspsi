@@ -850,6 +850,15 @@ describe("console acceptor re-attaches on a busy create", () => {
       .toHaveTextContent(
         "You are back on an exchange this console already holds.",
       );
+    // Body text unique to the visible notice, absent from the hidden
+    // announcement region, so this fails if the notice itself never mounts.
+    await expect
+      .element(
+        page.getByText(
+          "This exchange was already running here -- from another tab or an earlier visit -- so you are watching it rather than starting a new one.",
+        ),
+      )
+      .toBeVisible();
 
     // The resolved id was probed live and its event stream re-attached to.
     await vi.waitFor(() =>
