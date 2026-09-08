@@ -409,6 +409,8 @@ Unlike the [offline invitation](#offline-invitation), the online path does not s
 
 Linkage keys, metadata, and cleaning transformations are therefore inferred from the input file. If the partner accepts the invitation that configuration is saved; otherwise it is discarded because the partner did not accept.
 
+Those inferred terms are graded on the same verdict the [offline invitation](#offline-invitation) applies to a configuration's, before the token is minted and before any connection is opened: an input whose columns support no linkage key at all -- none of the field types the built-in rules match on, such as name, date of birth, or SSN -- stops the command with an error (exit 64) naming the input file it derived the terms from. Because these terms are your own draft and no partner has seen them, the remedy is an input file that covers the required field types, not a renegotiation.
+
 If `--key-file` is not used and a key file exists at the default path, the user is warned about its existence and told to either delete it or specify a different key file in case reusing that secret was not their intention.
 
 ## Online acceptance

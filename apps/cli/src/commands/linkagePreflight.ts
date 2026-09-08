@@ -44,6 +44,28 @@ export interface LinkagePreflightMessaging {
    * and exchange hold terms a partner is held to as well; the mint holds none
    * until the invitation it is about to generate is sent. */
   termsStanding: LinkageTermsStanding;
+  /** The keyless refusal's remedy lead, for a seat the standing's own lead does
+   * not fit. The online mint derives its terms from the input's columns, so
+   * neither agreeing nor declaring a key is a step its operator can take;
+   * it takes {@link COVER_REQUIRED_FIELD_TYPES}, the lead the shortfall
+   * refusal already gives that same operator. Omitted on the seats whose terms
+   * are a document someone authored. */
+  keylessRemedyLead?: string;
+}
+
+/**
+ * The remedy for a shortfall the input side closes: the columns are what the
+ * declared field types resolve from, so a CSV covering them satisfies the key.
+ * Shared by the shortfall refusal and by the seats whose terms are derived from
+ * those same columns and so have no terms document to correct instead.
+ */
+export const COVER_REQUIRED_FIELD_TYPES =
+  "provide a CSV that covers the required field types";
+
+/** A remedy lead as it opens its cause link. The leads are written lowercase so
+ * they can be joined into one, and the link states the result as a sentence. */
+function asSentenceLead(remedy: string): string {
+  return `${remedy.charAt(0).toUpperCase()}${remedy.slice(1)}`;
 }
 
 /**
@@ -126,11 +148,14 @@ export function checkLinkageSatisfiability(
       {
         cause: chainDetailCauses([
           // Declaring a key is an agreement on the seats a partner is already
-          // held to, and this operator's own edit on the seat that has none.
-          (messaging.termsStanding === "agreed"
-            ? "Agree linkage terms declaring at least one linkage key, "
-            : "Declare at least one linkage key in these terms, ") +
-            messaging.blockRemedy,
+          // held to, and this operator's own edit on the seat that authors its
+          // terms; a seat that derives them from its columns states its own.
+          `${asSentenceLead(
+            messaging.keylessRemedyLead ??
+              (messaging.termsStanding === "agreed"
+                ? "agree linkage terms declaring at least one linkage key"
+                : "declare at least one linkage key in these terms"),
+          )}, ${messaging.blockRemedy}`,
         ]),
       },
     );
@@ -164,7 +189,7 @@ export function checkLinkageSatisfiability(
   // cannot satisfy at all, which differs by where the terms came from.
   const remedyLeads: string[] = [];
   if (verdict.unsatisfiableKeys.length > 0)
-    remedyLeads.push("provide a CSV that covers the required field types");
+    remedyLeads.push(COVER_REQUIRED_FIELD_TYPES);
   if (verdict.deadKeys.length > 0)
     remedyLeads.push("correct the cleaning steps those keys declare");
   const remedy = remedyLeads.join(" and ");
@@ -175,7 +200,7 @@ export function checkLinkageSatisfiability(
       messaging.blockConsequence,
     {
       cause: chainDetailCauses([
-        `${remedy.charAt(0).toUpperCase()}${remedy.slice(1)}, ${messaging.blockRemedy}`,
+        `${asSentenceLead(remedy)}, ${messaging.blockRemedy}`,
         ...fitDetailLinks(
           details,
           "details of the terms this CSV cannot satisfy",

@@ -481,7 +481,7 @@ export function warnSanitizedColumns(positions: ReadonlyArray<number>): void {
 }
 
 /** Name an input in a refusal message: a path as given, or stdin as what it is. */
-function describeInputSource(input: string): string {
+export function describeInputSource(input: string): string {
   return input === "-" ? "the CSV read from stdin" : `the CSV input ${input}`;
 }
 
