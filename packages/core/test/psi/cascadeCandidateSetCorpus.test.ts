@@ -39,6 +39,11 @@ import {
 // with a shape it cannot state would abort there instead, blaming a conforming
 // partner after its own list had gone out, which is what this corpus is sized
 // to find.
+//
+// Every fixture also runs with the two parties' roles exchanged, since which
+// party opens the PSI exchange decides which one permutes its own set and
+// which reads the other's positions. The two assignments owe the same verdict,
+// and the same pairs read from the other side.
 
 const psiLibrary = await PSI();
 
@@ -121,6 +126,17 @@ function randomCorpus(count: number): Array<Fixture> {
   return corpus;
 }
 
+// The same input with the PSI roles exchanged: the party that opens the
+// exchange takes the joiner's columns, and each party's cardinality follows
+// its columns.
+function mirroredAssignment(fixture: Fixture): Fixture {
+  return {
+    cardinality: mirrorCardinality(fixture.cardinality),
+    starterKeys: fixture.joinerKeys,
+    joinerKeys: fixture.starterKeys,
+  };
+}
+
 function describeFixture(fixture: Fixture): string {
   const cell = (value: string | Set<string> | undefined): string =>
     value === undefined
@@ -145,6 +161,12 @@ function canonicalPairs(table: AssociationTable): string {
       .map((local, i): [number, number] => [local, table[1][i]])
       .sort((a, b) => a[0] - b[0] || a[1] - b[1]),
   );
+}
+
+// The same pairs read from the other side, which is the form the party holding
+// these rows under the mirrored assignment states them in.
+function flippedPairs(table: AssociationTable): string {
+  return canonicalPairs([table[1], table[0]]);
 }
 
 // A frame of the mapped-element exchange: the entries a party states for its
@@ -297,7 +319,18 @@ test(
     for (const fixture of randomCorpus(700)) {
       const where = describeFixture(fixture);
       const cascade = await runCascade(fixture);
+      const mirrored = await runCascade(mirroredAssignment(fixture));
       const refusals = [cascade.starter, cascade.joiner].filter(isRoundRefusal);
+      const mirroredRefusals = [mirrored.starter, mirrored.joiner].filter(
+        isRoundRefusal,
+      );
+      if (refusals.length !== mirroredRefusals.length) {
+        problems.push(
+          `${where}: ${refusals.length} part(ies) refused the round, ` +
+            `${mirroredRefusals.length} with the roles exchanged`,
+        );
+        continue;
+      }
       if (refusals.length === 1) {
         problems.push(`${where}: one party refused the round alone`);
         continue;
@@ -316,6 +349,16 @@ test(
         problems.push(
           `${where}: starter ${reportOf(cascade.starter)}, joiner ` +
             reportOf(cascade.joiner),
+        );
+        continue;
+      }
+      if (
+        mirrored.starter instanceof Error ||
+        mirrored.joiner instanceof Error
+      ) {
+        problems.push(
+          `${where}: with the roles exchanged, starter ` +
+            `${reportOf(mirrored.starter)}, joiner ${reportOf(mirrored.joiner)}`,
         );
         continue;
       }
@@ -348,6 +391,25 @@ test(
         problems.push(
           `${where}: joiner cascade ${cascadeTables[1]} vs single-pass ` +
             singleTables[1],
+        );
+
+      const mirroredTables = [
+        canonicalPairs(mirrored.starter as AssociationTable),
+        canonicalPairs(mirrored.joiner as AssociationTable),
+      ];
+      if (
+        mirroredTables[0] !== flippedPairs(cascade.starter as AssociationTable)
+      )
+        problems.push(
+          `${where}: with the roles exchanged, starter ${mirroredTables[0]} ` +
+            `vs ${flippedPairs(cascade.starter as AssociationTable)}`,
+        );
+      if (
+        mirroredTables[1] !== flippedPairs(cascade.joiner as AssociationTable)
+      )
+        problems.push(
+          `${where}: with the roles exchanged, joiner ${mirroredTables[1]} ` +
+            `vs ${flippedPairs(cascade.joiner as AssociationTable)}`,
         );
     }
 
