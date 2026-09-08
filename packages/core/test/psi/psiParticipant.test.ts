@@ -6,6 +6,8 @@ import {
   PSIParticipant,
   associationTableMessage,
   numberArrayMessage,
+  roundAssociationTableMessage,
+  roundOriginalIndexListMessage,
 } from "../../src/psi/participant";
 import { InProcessPsiEngine } from "../../src/psi/psiEngine";
 
@@ -423,4 +425,64 @@ test("cascade identifyIntersection (joiner) rejects a non-Raw server setup frame
   );
   await serverConn.send(new Uint8Array([0]));
   await expect(run).rejects.toThrow(/server setup is not a Raw data structure/);
+});
+
+// --- the round's grouped frames, and the frame that stays at two elements ------
+// The cascade round's two position-naming frames gained a grouping element.
+// associationTableMessage is ALSO single-pass's resolved-table frame, which the
+// spec keeps at two elements, so the round reads its own schemas rather than a
+// widened one.
+
+test("single-pass's resolved-table frame rejects a third element", () => {
+  expect(associationTableMessage.safeParse([[0], [0]]).success).toBe(true);
+  expect(associationTableMessage.safeParse([[0], [0], [1]]).success).toBe(
+    false,
+  );
+});
+
+test("the round's association table admits the grouping and nothing past it", () => {
+  expect(roundAssociationTableMessage.safeParse([[0], [0]]).success).toBe(true);
+  expect(roundAssociationTableMessage.safeParse([[0], [0], [1]]).success).toBe(
+    true,
+  );
+  expect(
+    roundAssociationTableMessage.safeParse([[0], [0], [[0]]]).success,
+  ).toBe(true);
+  expect(
+    roundAssociationTableMessage.safeParse([[0], [0], [1], [1]]).success,
+  ).toBe(false);
+  expect(
+    roundAssociationTableMessage.safeParse([[0], [0], ["x"]]).success,
+  ).toBe(false);
+});
+
+test("the round's original-index list reads both the bare and the grouped form", () => {
+  expect(roundOriginalIndexListMessage.safeParse([0, 1, 2]).success).toBe(true);
+  expect(roundOriginalIndexListMessage.safeParse([]).success).toBe(true);
+  expect(roundOriginalIndexListMessage.safeParse([[0, 1], [2]]).success).toBe(
+    true,
+  );
+  expect(
+    roundOriginalIndexListMessage.safeParse([
+      [0, 1],
+      [[0], [0]],
+    ]).success,
+  ).toBe(true);
+  expect(
+    roundOriginalIndexListMessage.safeParse([[0, 1], [2], [3]]).success,
+  ).toBe(false);
+  expect(roundOriginalIndexListMessage.safeParse(["x"]).success).toBe(false);
+});
+
+test("a pathological-count grouping fails cleanly, not with a RangeError", async () => {
+  // The grouping is partner-controlled and rides the same frame the index
+  // lists do, so it takes the same single-issue validation: one issue however
+  // many invalid entries it holds.
+  const [connA, connB] = createMessagePipe();
+  const parsed = receiveParsed(connA, roundAssociationTableMessage);
+  await connB.send([[], [], Array.from({ length: 300_000 }, () => "x")]);
+  const err = await parsed.catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("protocol");
+  expect((err as ConnectionError).cause).not.toBeInstanceOf(RangeError);
 });

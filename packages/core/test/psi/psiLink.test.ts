@@ -19,7 +19,14 @@ import {
   FAN_OUT_CANDIDATES_PER_ELEMENT,
   MAX_KEY_CANDIDATE_WIDTH,
 } from "../../src/fanOutFunctions";
-import { MAX_LINKAGE_ENTRIES } from "../../src/config/linkageTermsSchema";
+import {
+  MAX_LINKAGE_ENTRIES,
+  type LinkageStrategy,
+} from "../../src/config/linkageTermsSchema";
+import {
+  candidateSetIsImplementedForStrategy,
+  CANDIDATE_SET_IMPLEMENTED_BY_STRATEGY,
+} from "../../src/linkageTermsPolicy";
 import {
   MAX_FRAME_SIZE_BYTES,
   MAX_SINGLE_PASS_CELLS,
@@ -350,12 +357,12 @@ test("single-pass reproduces the cascade's survivor-relative uniqueness", async 
 
 // --- the cascade: a record holding several candidates is refused -------------
 // Key realization holds every candidate a record realizes (buildKeyStrings).
-// Fan-out matching is specified for single-pass and for it alone, so the cascade
-// refuses the record where it would consume it rather than narrowing to one
-// candidate or dropping the record, either of which matches on less than the terms
-// declare. A fan-out declared under the cascade is refused before the exchange
-// runs (assertFanOutImplemented); this is the same fail-closed behavior at the
-// point of harm, for a candidate set that reached a round anyway.
+// Which strategies resolve one is an allowlist, so a linkage_strategy the
+// resolution is not written for refuses the record where it would consume it
+// rather than narrowing to one candidate or dropping it, either of which
+// matches on less than the terms declare. The cascade's own resolution is
+// built and its entry is false, so this is the fail-closed behavior at the
+// point of harm for a candidate set that reached a round anyway.
 test("a candidate set reaching the cascade is refused, not narrowed", async () => {
   const withCandidateSet: Array<Array<string | Set<string> | undefined>> = [
     ["A", new Set(["B", "C"])],
@@ -382,6 +389,65 @@ test("a candidate set reaching the cascade is refused, not narrowed", async () =
     );
   await expect(run()).rejects.toThrow(UsageError);
   await expect(run()).rejects.toThrow(/fan-out/);
+});
+
+test("the allowlist is what decides, one entry per strategy", () => {
+  expect(CANDIDATE_SET_IMPLEMENTED_BY_STRATEGY).toStrictEqual({
+    cascade: false,
+    "single-pass": true,
+  });
+  for (const strategy of Object.keys(
+    CANDIDATE_SET_IMPLEMENTED_BY_STRATEGY,
+  ) as Array<LinkageStrategy>)
+    expect(candidateSetIsImplementedForStrategy(strategy)).toBe(
+      CANDIDATE_SET_IMPLEMENTED_BY_STRATEGY[strategy],
+    );
+});
+
+test("the cascade's boundary refusal lifts with its own entry", async () => {
+  // The refusal above is the table's verdict rather than a strategy named in
+  // the round, so flipping the entry the cascade's realization waits on runs
+  // the candidate set instead of refusing it. The resolution behind that entry
+  // is exercised at length in cascadeCandidateSets.test.ts.
+  const withCandidateSet: Array<Array<string | Set<string> | undefined>> = [
+    [new Set(["B", "C"])],
+  ];
+  const shipped = CANDIDATE_SET_IMPLEMENTED_BY_STRATEGY.cascade;
+  CANDIDATE_SET_IMPLEMENTED_BY_STRATEGY.cascade = true;
+  try {
+    const [starterConn, joinerConn] = createMessagePipe();
+    const [starterTable] = await Promise.all([
+      linkViaPSI(
+        { cardinality: "one-to-one" },
+        new PSIParticipant(
+          "server",
+          psiLibrary,
+          { role: "starter", verbose: -1 },
+          UNBOUNDED_PSI_ELEMENTS,
+        ),
+        starterConn,
+        withCandidateSet,
+        fanOutFreeBounds(1, 1),
+        -1,
+      ),
+      linkViaPSI(
+        { cardinality: "one-to-one" },
+        new PSIParticipant(
+          "client",
+          psiLibrary,
+          { role: "joiner", verbose: -1 },
+          UNBOUNDED_PSI_ELEMENTS,
+        ),
+        joinerConn,
+        [["C"]],
+        fanOutFreeBounds(1, 1),
+        -1,
+      ),
+    ]);
+    expect(starterTable).toStrictEqual([[0], [0]]);
+  } finally {
+    CANDIDATE_SET_IMPLEMENTED_BY_STRATEGY.cascade = shipped;
+  }
 });
 
 test("single-pass refuses a candidate set wider than its declaration admits", async () => {
