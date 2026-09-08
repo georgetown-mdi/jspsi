@@ -1068,25 +1068,12 @@ const columnsNamedOnce = (
 };
 
 /**
- * One direction of the payload data dictionary: the columns count-bounded at
- * {@link MAX_PAYLOAD_ENTRIES} before per-element validation (see
- * {@link boundedArray} and docs/spec/CHANNEL_SECURITY.md, "Application-layer
- * parsed-input bounds"), then normalized by {@link columnsNamedOnce}.
- *
- * The count gate stands ahead of the normalization, so a list padded with one
- * name repeated is refused by its authored count rather than admitted for the
- * count it collapses to.
- *
- * A repeated column is normalized rather than refused: the list travels inside
- * a partner-authored invitation, and a duplicate names a column the terms
- * already declare -- nothing about the disclosure changes by reading it once,
- * while a refusal would be a wire-compatibility change, failing a document a
- * partner's build encodes and accepts. Applied here so every seat inherits it -- the operator's own config load, the
- * post-handshake wire re-parse, the invitation-token decode, and the
- * exchange-file and job-intent schemas that embed {@link LinkageTermsSchema} --
- * and so the consent surfaces, the cross-party mirror
- * (`validateCompatibility`), and the exchange record each read one entry per
- * column.
+ * One direction of the payload data dictionary: {@link boundedArray} bounds
+ * the count at {@link MAX_PAYLOAD_ENTRIES} before {@link columnsNamedOnce}
+ * collapses repeats, so a padded list is refused for its authored count. The
+ * first entry naming a column stands; later entries naming it are dropped,
+ * normalized rather than refused since a refusal would fail a document a
+ * partner's build already encodes and accepts.
  */
 const payloadColumnList = (message: string): z.ZodType<PayloadColumn[]> =>
   boundedArray(PayloadColumnSchema, MAX_PAYLOAD_ENTRIES, message).transform(
