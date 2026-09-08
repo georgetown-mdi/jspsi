@@ -175,6 +175,24 @@ from the bytes that flow. Each field is bounded to `MAX_PAYLOAD_ENTRIES` entries
 of `MAX_NAME_LENGTH` each, the same bounds a `payload.send`/`receive` list
 holds.
 
+The two top-level lists, `expected_payload_columns` and
+`disclosed_payload_columns`, and the token's `disclosedPayloadColumns` each name
+a column at most once: a repeated name parses to one entry, the first occurrence
+standing and a later one naming it dropped, the collapse a
+`payload.send`/`receive` list takes. Names are compared code unit for code unit,
+with no Unicode normalization and no case folding -- the equality
+[CANONICAL_ENCODING.md](CANONICAL_ENCODING.md) makes normative for those terms
+lists, whose collapse changes the agreed-terms hash. None of the three fields
+here enters that hash, computed over the linkage terms alone. The count bound is
+applied to the AUTHORED count, ahead of the collapse, so a list padded past
+`MAX_PAYLOAD_ENTRIES` with one name repeated is refused rather than admitted for
+what it would collapse to.
+
+Collapsing rather than refusing keeps a hand-authored repeat -- which declares
+nothing the set does not already hold -- from reaching
+`reconcileReceivedPayload` as a partner-attributed `protocol` abort long after
+the config holding it loaded cleanly.
+
 ### Absent, empty, present: one rule for every field
 
 The three states are distinct at every one of these fields, and the distinction
