@@ -141,7 +141,8 @@ export class SigningIdentityLocationError extends Error {
  * `secretsDir` -- admitted segment by segment, the parent re-confined by
  * realpath -- and the file it names need NOT exist: whether an identity is
  * there is the caller's question to ask and the operator's to answer, since
- * the console creates nothing outside the data root.
+ * the console creates nothing outside the data root apart from the
+ * file-removed-between-check-and-read exception a read-only mount closes.
  *
  * @throws {SigningIdentityLocationError} when the console has no secrets mount,
  *   or the segments do not resolve inside it.

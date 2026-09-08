@@ -33,7 +33,8 @@ import type { JobCreateIntent } from "@jobs/intentSchemas";
 // The signing identity's LOCATION as a console option: what the operator's
 // picked mount locator resolves to, which directory the two refusals compare
 // against once it is not the data root, and the one rule that makes a read-only
-// secrets mount usable -- the console writes nothing into it, on any path.
+// secrets mount usable -- the console creates nothing at a picked path on the
+// paths these cases drive.
 //
 // The default location's own behaviour is unchanged and asserted in
 // jobManager.unit.test.ts and consoleReceipts.unit.test.ts; what is here is
@@ -572,7 +573,7 @@ describe("a picked location is read, never created", () => {
   });
 });
 
-describe("no console path writes into the secrets mount", () => {
+describe("the console creates nothing at a picked path on the paths these cases drive", () => {
   test("the fingerprint request, the export, and the run leave a read-only mount untouched", async () => {
     const root = directory("readonly-mount");
     const secrets = directory("readonly-mount-secrets");

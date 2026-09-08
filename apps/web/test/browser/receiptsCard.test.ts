@@ -57,9 +57,10 @@ const REFUSED_DEFAULT =
   "Your signing identity could not be created or read in the folder you mounted. Check that the folder is writable,";
 
 /** The same refusal where the operator picked a location: the console reads
- * that file and creates nothing at it, so the copy names the file rather than
- * the folder's mode -- the folder is the one the deployment guide has them
- * mount read-only. */
+ * that file and creates nothing at it, apart from a file removed between the
+ * check and the read, so the copy names the file rather than the folder's
+ * mode -- the folder is the one the deployment guide has them mount
+ * read-only. */
 const REFUSED_PICKED =
   "Your signing identity could not be read from the file you picked. It may be unreadable, or not a signing identity.";
 

@@ -37,9 +37,11 @@ import type { JobSigningIdentityLocation } from "@jobs/intentSchemas";
  *   exchange finish and discard it, or to give the synced folder a mount of its
  *   own, not to go looking at the folder's contents.
  * - `absent`: the operator picked a location of their own and no identity is at
- *   it. The console reads a picked location and never creates there, so this is
- *   an answer rather than a failure: the remedy is to create the identity with
- *   `psilink fingerprint` at that path, or to pick the file that holds one.
+ *   it. The console reads a picked location and never creates there, apart
+ *   from a file removed between the check and the read (closed by a
+ *   read-only mount), so this is an answer rather than a failure: the remedy
+ *   is to create the identity with `psilink fingerprint` at that path, or to
+ *   pick the file that holds one.
  * - `invalid`: a `400` -- the label was malformed; `message` is the server's
  *   field-path-only reason, safe to show.
  * - `busy`: a `409` -- a request is already running; the operator can retry.

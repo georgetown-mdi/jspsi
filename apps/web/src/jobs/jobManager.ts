@@ -675,7 +675,8 @@ export class JobManager {
    *
    * Asked of the path the create would land at, which is the console's default
    * in the data root: a configured location is read and never created
-   * ({@link resolveSigningFingerprint}), so no other path is ever written.
+   * ({@link resolveSigningFingerprint}, apart from the file-removed exception
+   * it documents), so no other path is ever written.
    *
    * Reading an identity already there is not this case -- the key is on disk
    * whatever this request does -- so only the create is refused, and only while

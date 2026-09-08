@@ -69,8 +69,9 @@ const MODE_CHOICES: ReadonlyArray<{
  * names the command that puts an identity there. Where the operator picked a
  * location, the messages that would otherwise name the mounted folder and a
  * create name that file and a read instead: the identity is not in the data
- * root, nothing is created at the picked path, and the folder holding it may be
- * mounted read-only. */
+ * root, nothing is created at the picked path except through the
+ * file-removed-mid-check window a read-only mount closes, and the folder
+ * holding it may be mounted read-only. */
 function fingerprintFailureMessage(
   outcome: Exclude<SigningFingerprintOutcome, { kind: "ok" }>,
   identityLocationPicked: boolean,
