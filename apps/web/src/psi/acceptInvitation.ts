@@ -266,7 +266,10 @@ export interface AcceptorDeduplicateRefusal {
  * some of them: the accept screen reads it in its render body, where a throw
  * takes the whole route to its error boundary instead of the refusal the
  * operator can act on. Either scope's message is escaped for display at this
- * boundary, the one that holds it.
+ * boundary, the one that holds it. A `pair` message comes from the two
+ * cardinality assertions, which core states as fixed literals over its own
+ * strategy table, so the call is hygiene on that arm: it holds the display
+ * bound if a later refusal interpolates partner text.
  */
 export function acceptorDeduplicateRefusal(
   linkageTerms: LinkageTerms,

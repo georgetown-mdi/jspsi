@@ -2697,6 +2697,80 @@ describe("AcceptorScreen: this party's own deduplicate", () => {
       .toBeInTheDocument();
   });
 
+  // The click handler React holds on a rendered element, the one route to an
+  // action React's own event dispatch makes unreachable: it drops a click
+  // handler while the element's disabled prop stands, so no event -- real or
+  // dispatched -- reaches an action behind a disabled button.
+  function reactClickHandler(element: Element): () => void {
+    const propsKey = Object.keys(element).find((name) =>
+      name.startsWith("__reactProps$"),
+    );
+    expect(propsKey, "React's props key on the rendered element").toBeDefined();
+    const props = (
+      element as unknown as Record<string, { onClick?: () => void }>
+    )[propsKey as string];
+    expect(props.onClick).toBeTypeOf("function");
+    return props.onClick as () => void;
+  }
+
+  test("the accept action refuses a refused pair, past its disabled button", async () => {
+    // The disabled state is not the refusal: the handler re-reads the pair, so
+    // an invocation that reaches it anyway -- what a scripted submit, or a
+    // later edit dropping the pair from the button's disabled state, would do
+    // -- commits no file and advances no step. Everything else the gate asks
+    // for is satisfied here, so the pair is the only thing holding the accept.
+    await reachReview({
+      ...acceptorTerms,
+      linkageStrategy: "single-pass",
+      deduplicate: true,
+    });
+    await userEvent.click(
+      page.getByRole("button", { name: "Continue: consent & your file" }),
+    );
+    await consentAndName();
+    const fileInput = document.querySelector('input[type="file"]');
+    await userEvent.upload(
+      page.elementLocator(fileInput as HTMLElement),
+      csvFile("first_name,last_name\nAlice,Smith\n"),
+    );
+    await expect
+      .element(page.getByText("cohort_intake.csv"))
+      .toBeInTheDocument();
+
+    // Refuse the pair from the terms step, then return to this step the way
+    // browser history does, around the terms step's own disabled Continue.
+    window.history.back();
+    await expect
+      .element(page.getByRole("button", { name: "Other details" }))
+      .toBeInTheDocument();
+    await userEvent.click(page.getByRole("button", { name: "Other details" }));
+    await userEvent.click(ownSide());
+    window.history.forward();
+    const accept = page.getByRole("button", { name: "Accept and continue" });
+    await expect.element(accept).toBeDisabled();
+
+    // Straight to the action the disabled button holds.
+    reactClickHandler(accept.element())();
+
+    await expect
+      .element(
+        page.getByText(
+          "Go back to the terms and resolve the duplicate-matching settings to continue.",
+        ),
+      )
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Consent & your file");
+    expect(
+      page.getByRole("heading", { name: "Confirm your columns" }).query(),
+    ).toBeNull();
+    // The parse is the first thing behind the gate, so an untouched loader is
+    // the accept committing nothing.
+    expect(csvLoadHarness.called).toBe(0);
+    expect(lifecycleHarness.calls).toHaveLength(0);
+  });
+
   // The consent gate, from the review step through to the confirm-columns step
   // that holds the launch.
   async function acceptThroughToColumns() {

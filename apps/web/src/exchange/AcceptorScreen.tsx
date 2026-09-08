@@ -403,14 +403,20 @@ export function AcceptorScreen() {
   // Whether the pair this party's own `deduplicate` makes with the invitation's
   // is one the run refuses -- read at the seat, from the same boundary the run
   // resolves the cardinality at, so the operator meets it before any key or
-  // payload moves rather than mid-exchange.
-  const deduplicateRefusal =
-    decode.status === "ready"
-      ? acceptorDeduplicateRefusal(
-          decode.invitation.token.linkageTerms,
-          acceptorDeduplicate,
-        )
-      : undefined;
+  // payload moves rather than mid-exchange. Held across renders on the decoded
+  // token and this party's value: the answer derives a terms document and
+  // resolves a cardinality over partner-supplied terms, which only those two
+  // inputs change.
+  const deduplicateRefusal = useMemo(
+    () =>
+      decode.status === "ready"
+        ? acceptorDeduplicateRefusal(
+            decode.invitation.token.linkageTerms,
+            acceptorDeduplicate,
+          )
+        : undefined,
+    [decode, acceptorDeduplicate],
+  );
   // The pair's own refusal, which the operator resolves by clearing its side:
   // it renders beside that control and holds Continue. A refusal of the derived
   // terms is nothing at this seat can resolve, so it blocks the step below
@@ -666,8 +672,9 @@ export function AcceptorScreen() {
     // The pair the run refuses, re-checked in the handler for the same reason
     // the consent gate is: browser history can restore this step past the review
     // step's disabled Continue, and committing there would fix a value no run
-    // takes. The step states the refusal beside its own disabled button.
-    if (deduplicateRefusal !== undefined) return;
+    // takes. Read from the same refusal the button's disabled state is, so a
+    // submit that reaches this handler meets exactly what the step shows.
+    if (pairRefusal !== undefined) return;
     const name = acceptorConsentName({ consented, name: acceptorName });
     // The shape of the name the run would adopt, re-checked here for the same
     // reason the consent gate is: the disabled state alone is not the refusal.
