@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useId, useRef } from "react";
+import { Fragment, useEffect, useId, useMemo, useRef } from "react";
 
 import {
   Alert,
@@ -40,6 +40,7 @@ import {
   acceptorSendingExpectedColumnsCostsKey,
   acceptorStandardizationValid,
   acceptorUnsatisfiedTypes,
+  acceptorWidenableDeclaredColumnCount,
 } from "./acceptorColumnsModel";
 
 import type {
@@ -211,19 +212,30 @@ export function AcceptorColumnsStep({
   // Which remedies the declared-but-unsent half even has: a column this file does
   // not hold cannot be marked at all, so only the columns it does hold get the
   // offer to widen the disclosure, and only the ones it lacks get "choose another
-  // file".
-  const expectedInFile =
-    declarationConflict?.declaredButNotSent.filter((gap) => gap.inFile) ?? [];
+  // file". The widening's side is counted in COLUMNS rather than declaration
+  // entries, since a declaration may name the same held column twice and the
+  // sentence below is about the columns the operator would set.
+  const expectedInFileCount = useMemo(
+    () =>
+      acceptorWidenableDeclaredColumnCount(linkageTerms, editorState.metadata),
+    [linkageTerms, editorState.metadata],
+  );
   const expectedMissingFromFile =
     declarationConflict?.declaredButNotSent.filter((gap) => !gap.inFile) ?? [];
-  // Whether taking that offer would cost an agreed linkage key: a column this file
-  // matches on stops matching once it is sent, and the run is refused for the key it
-  // fed. Read from the model, over the whole declared set rather than the names
-  // painted below, so the offer's cost is the one the operator would meet.
-  const sendingCostsLinkageKey = acceptorSendingExpectedColumnsCostsKey(
-    columns,
-    linkageTerms,
-    columnsState,
+  // Whether taking that offer would cost an agreed linkage key: the widened marks
+  // leave fewer keys satisfiable than the current marks do. Read from the model,
+  // over the whole declared set rather than the names painted below, so the offer's
+  // cost is the one the operator would meet. Memoized on the inputs the grading
+  // reads: it re-marks every offered column and grades twice, which a render that
+  // changed none of them must not pay again.
+  const sendingCostsLinkageKey = useMemo(
+    () =>
+      acceptorSendingExpectedColumnsCostsKey(
+        columns,
+        linkageTerms,
+        columnsState,
+      ),
+    [columns, linkageTerms, columnsState],
   );
   // The cap keeps a flooded declaration from putting the metadata grid the operator
   // has to edit, and the launch control below it, past a screenful of partner text.
@@ -564,10 +576,10 @@ export function AcceptorColumnsStep({
                           : "those columns"
                       }`}
                     .
-                    {expectedInFile.length > 0 &&
+                    {expectedInFileCount > 0 &&
                       (!sendingCostsLinkageKey
                         ? ' Where your file does have such a column, you can set it to "Sent to your partner" below instead - that discloses more than you have marked so far, and each column has a single use, so sending it replaces the use it has now.'
-                        : expectedInFile.length === 1
+                        : expectedInFileCount === 1
                           ? ' Setting the column your file does have to "Sent to your partner" below will not start the exchange: that column is used to match, and each column has a single use, so sending it would leave an agreed linkage key with no column to match on.'
                           : ' Setting the columns your file does have to "Sent to your partner" below will not start the exchange: at least one of them is used to match, and each column has a single use, so sending them would leave an agreed linkage key with no column to match on.')}
                   </>

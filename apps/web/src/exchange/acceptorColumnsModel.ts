@@ -670,12 +670,40 @@ function declarationConflictWording(
 }
 
 /**
+ * The distinct columns the notice's widening offer would mark: the declared names
+ * this party's marks do not send that the operator's file HAS, in declaration order.
+ * A declaration may name the same column twice, which is one column to mark and one
+ * column to speak about, so the repeat is dropped here.
+ */
+function widenableDeclaredColumns(
+  linkageTerms: LinkageTerms,
+  metadata: Metadata,
+): Array<string> {
+  return [...new Set(declaredNotSentNames(linkageTerms, metadata))].filter(
+    (name) => metadata.some((column) => column.name === name),
+  );
+}
+
+/**
+ * How many columns the notice's widening offer would mark
+ * ({@link widenableDeclaredColumns}), which is what its wording is about: a
+ * declaration naming one held column twice offers one column, not two.
+ */
+export function acceptorWidenableDeclaredColumnCount(
+  linkageTerms: LinkageTerms,
+  metadata: Metadata,
+): number {
+  return widenableDeclaredColumns(linkageTerms, metadata).length;
+}
+
+/**
  * Whether taking the notice's widening offer would cost an agreed linkage key:
- * marking every declared-but-unsent column this file HAS to "Sent to your partner"
- * leaves fewer keys satisfiable than the current marks do. Each column has a single
- * use, so a column the file matches on stops matching once it is sent, and the run
- * is then refused for a key the input can no longer satisfy -- the offer would move
- * the operator from one refusal to the next.
+ * marking every declared-but-unsent column this file HAS
+ * ({@link widenableDeclaredColumns}) to "Sent to your partner" leaves fewer keys
+ * satisfiable than the current marks do. Each column has a single use, so a column
+ * the file matches on stops matching once it is sent, and the run is then refused
+ * for a key the input can no longer satisfy -- the offer would move the operator
+ * from one refusal to the next.
  *
  * Measured over the WHOLE declared-but-unsent set, not the names the notice paints,
  * so the cost is the one the operator can actually take on under a declaration
@@ -696,9 +724,7 @@ export function acceptorSendingExpectedColumnsCostsKey(
   linkageTerms: LinkageTerms,
   state: AcceptorColumnsState,
 ): boolean {
-  const widenable = declaredNotSentNames(linkageTerms, state.metadata).filter(
-    (name) => state.metadata.some((column) => column.name === name),
-  );
+  const widenable = widenableDeclaredColumns(linkageTerms, state.metadata);
   if (widenable.length === 0) return false;
   const widened = widenable.reduce(
     (metadata, name) => setColumnDisclosure(metadata, name, "payload").metadata,

@@ -16,6 +16,7 @@ import {
   MAX_DECLARED_NAMES_SHOWN,
   MAX_NAME_LENGTH,
   MAX_PAYLOAD_ENTRIES,
+  safeParseLinkageTerms,
   sanitizeForDisplay,
 } from "@psilink/core";
 
@@ -275,6 +276,36 @@ describe("acceptor columns step: a disagreeing non-empty declaration", () => {
     );
   });
 
+  test("speaks about a held column the declaration names twice as the one column it is", async () => {
+    // Nothing stops a declaration from naming the same column twice, so the entry
+    // count and the column count part company: the list and the title below count
+    // entries, while the offer is about the operator's own columns and there is one
+    // column here to set.
+    const terms: LinkageTerms = {
+      ...acceptorTerms,
+      payload: {
+        receive: [
+          { name: "notes" },
+          { name: "first_name" },
+          { name: "first_name" },
+        ],
+      },
+    };
+    expect(safeParseLinkageTerms(terms).success).toBe(true);
+    mountStep(terms, columns);
+    await expect
+      .element(
+        page.getByText("Your partner expects columns you are not sending"),
+      )
+      .toBeInTheDocument();
+    expect(app.container.textContent).toContain(
+      `${PARTNER_REMEDY} ${WIDENING_COSTS_A_KEY}`,
+    );
+    expect(app.container.textContent).not.toContain(
+      WIDENING_COSTS_A_KEY_PLURAL,
+    );
+  });
+
   test("offers the same widening, at the same stated cost, for a column the file keeps as its record identifier", async () => {
     // The role the offer's cost must not be written against: `record_id` is this
     // file's record identifier, so it is neither matched on nor sent, and a cost
@@ -391,6 +422,7 @@ describe("acceptor columns step: a disagreeing non-empty declaration", () => {
     expect(notice.textContent).toContain(
       `or choose a file that has those columns. ${WIDENING_COSTS_A_KEY_PLURAL}`,
     );
+    expect(notice.textContent.length).toBeLessThanOrEqual(NOTICE_CEILING);
   });
 
   test("escapes a declared name the file also has, while the grid row it points at renders that header verbatim", async () => {
