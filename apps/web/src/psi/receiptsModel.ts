@@ -380,8 +380,10 @@ export const IDENTITY_DEFAULT_PATH_LEFTOVER_CAVEAT =
   "Picking a location does not move a key you already have: one created " +
   "earlier at the console's default path stays in your mounted working " +
   "directory, and a shared-folder exchange is refused while a key sits in a " +
-  "folder your partner syncs. Delete that file, or move it to the file you " +
-  "picked.";
+  "folder your partner syncs. Move that file to the location you picked, " +
+  "or remove it if that key is not one you use, knowing that a " +
+  "replacement has a new fingerprint every partner who pinned the old " +
+  "one must be sent before their verification works again.";
 
 /**
  * The whole picked-location notice: what the console does at the picked file,

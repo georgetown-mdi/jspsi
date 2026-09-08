@@ -1483,7 +1483,7 @@ describe("the receipts card's model", () => {
         /a shared-folder exchange is refused while a key sits in a folder your partner syncs/,
       );
       expect(raised?.message).toMatch(
-        /Delete that file, or move it to the file you picked/,
+        /Move that file to the location you picked, or remove it if that key is not one you use/,
       );
     }
   });
