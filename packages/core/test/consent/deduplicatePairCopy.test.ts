@@ -5,6 +5,7 @@ import {
   DEDUPLICATE_ACCEPTOR_SETTABLE_SIDE_NOTE,
   DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
   DEDUPLICATE_ACCEPTOR_WIDENING_NOTE,
+  DEDUPLICATE_PARTNER_DECLARED_SIDE_NOTE,
   describeDeduplicatePair,
 } from "../../src/consent/consentFacts";
 
@@ -201,6 +202,37 @@ describe("the acceptor-side direction notes", () => {
     expect(DEDUPLICATE_ACCEPTOR_SIDE_NOTE).toContain("never grouped");
     expect(DEDUPLICATE_ACCEPTOR_SETTABLE_SIDE_NOTE).not.toContain(
       "never grouped",
+    );
+  });
+});
+
+describe("the partner-declared direction note", () => {
+  test("holds the same widening as its acceptor-side siblings", () => {
+    expect(DEDUPLICATE_PARTNER_DECLARED_SIDE_NOTE).toContain(
+      DEDUPLICATE_ACCEPTOR_WIDENING_NOTE,
+    );
+  });
+
+  test("drops the claim the accepting party's records are never grouped, because this seat cannot know the other side", () => {
+    // Unlike the settable note, this seat drops the clause not because it
+    // states the pair itself, but because the partner declares its own value
+    // on its own run: asserting "never grouped" here would state a fact
+    // nothing on this seat decides.
+    expect(DEDUPLICATE_PARTNER_DECLARED_SIDE_NOTE).not.toContain(
+      "never grouped",
+    );
+  });
+
+  test("closes on the partner's own run rather than on a configuration file or these terms", () => {
+    // This seat offers no control and holds no invitation, so the note
+    // neither points to a configuration file (the route with no control at
+    // all) nor claims the accepting party's value is read from these terms
+    // (the route that offers the control).
+    expect(DEDUPLICATE_PARTNER_DECLARED_SIDE_NOTE).not.toContain(
+      "configuration file",
+    );
+    expect(DEDUPLICATE_PARTNER_DECLARED_SIDE_NOTE).toContain(
+      "declares on its own run rather than reading from these terms",
     );
   });
 });
