@@ -120,3 +120,26 @@ timing defect stands as stated -- the final exchange presupposes the
 resolution the grouping would compute, and forfeits the per-round fail-fast.
 The `cascade` refusal stands as the shipped behavior until the realization
 lands.
+
+## The final pass is extended too
+
+The sketch above moved the grouping off the final exchange and left that
+pass's own shape alone. Measurement then found pairings one position per
+accepted record cannot state: a candidate set under a one-sided deduplicating
+cardinality reaches rounds where one record is accepted against two of the
+partner's groups, and where one group splits across two of the partner's
+records, both of which `single-pass` resolves on the same inputs. Three ways
+out were weighed -- refusing those rounds and recording the boundary as
+unsupported, scoping the single-pass equivalence to the shapes the narrower
+entry can state, and extending the entry -- and the entry was extended, on the
+ground that both parties commit over the association table, so a table that
+depends on which strategy produced it invites a divergence claim between
+partners.
+
+[PROTOCOL.md](../spec/PROTOCOL.md#the-per-round-grouping-the-two-frames-hold)
+holds the extended entry and the preconditions the pass reads it under, and
+[the normative double-match case](../spec/PROTOCOL.md#the-normative-double-match-case)
+holds a worked case of each shape; this note does not restate them. The finding above is
+unaffected: what cannot ride the final exchange is still the grouping, and
+what the final pass states is the resolution the per-round grouping already
+produced.
