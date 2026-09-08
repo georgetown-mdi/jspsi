@@ -374,9 +374,10 @@ export function readPartnerRoundGrouping(
  *
  * The field is omitted for a round in which each matched position is the
  * only one its record owns -- the case a party no producer widened is always
- * in, whatever the resolved cardinality -- so such a round puts exactly the
- * bytes the single-valued cascade puts on the wire, on both frames
- * (docs/spec/PROTOCOL.md, An absent grouping is all ones).
+ * in, whatever the resolved cardinality -- so such a round puts on both frames
+ * what the single-valued cascade puts there, entry for entry once each frame's
+ * own order is canonicalized (docs/spec/PROTOCOL.md, An absent grouping is all
+ * ones).
  *
  * @param ownerLists - Whether this party's own side of the resolved
  *   cardinality deduplicates, which fixes the form it sends.

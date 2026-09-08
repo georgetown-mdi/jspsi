@@ -366,9 +366,11 @@ test("a widened round adds no frame", async () => {
   expect(widened.length).toBe(plain.length);
 });
 
-test("a round no producer widened puts the single-valued cascade's bytes on the wire", async () => {
-  // Same key count, same matches, no candidate set: every frame is what the
-  // fan-out-free cascade sends, the grouping being omitted on both frames.
+test("a round no producer widened puts the single-valued cascade's frames on the wire", async () => {
+  // Same key count, same matches, no candidate set: the grouping is omitted on
+  // both frames, leaving each the shape the fan-out-free cascade sends. The
+  // property is identity entry for entry once each frame's own order is
+  // canonicalized, the library returning an intersection in no fixed order.
   const plain = await recordedStarterFrames([["a", "b"]], [["a", "b"]]);
   const groupingFrames = plain.filter(
     (frame) => Array.isArray(frame) && Array.isArray(frame[1]),
@@ -406,7 +408,7 @@ test("a deduplicating party states an owner list per matched position", async ()
 
 test("a deduplicating party no producer widened still omits its grouping", async () => {
   // Each of its records owns exactly one matched position, whatever the group
-  // behind that position, so the round stays byte-identical to today's.
+  // behind that position, so the round puts no grouping on either frame.
   const sent = await recordedStarterFrames(
     [["shared", "shared"]],
     [["shared"]],

@@ -100,8 +100,10 @@ const roundGroupingElement = singleIssueArray<number | Array<number>>(
 // resolved-table frame and stays at two elements: widening that one in place
 // would admit a grouping on a frame the spec keeps at two. A round whose
 // sender omits its grouping puts the two-element form on the wire, so a round
-// no producer widened is byte-identical to the single-valued cascade's
-// (docs/spec/PROTOCOL.md, An absent grouping is all ones).
+// no producer widened states what the single-valued cascade states, pair for
+// pair once the table's pair order is canonicalized -- the library returns an
+// intersection in no fixed order (docs/spec/PROTOCOL.md, An absent grouping is
+// all ones).
 /** @internal exported for the round-frame schema tests. */
 export const roundAssociationTableMessage = z.tuple([
   numberArrayMessage,
@@ -111,9 +113,10 @@ export const roundAssociationTableMessage = z.tuple([
 
 // The cascade round's frame 5, the sender's original-index list, with its own
 // grouping beside it. The bare-array branch is the whole of what an ungrouped
-// round sends, so that round stays byte-identical to the single-valued
-// cascade's; the two branches are told apart by their first element's type,
-// which no legitimate frame leaves ambiguous.
+// round sends, so that round states what the single-valued cascade states,
+// entry for entry once the list's order is canonicalized; the two branches are
+// told apart by their first element's type, which no legitimate frame leaves
+// ambiguous.
 /** @internal exported for the round-frame schema tests. */
 export const roundOriginalIndexListMessage = z.union([
   numberArrayMessage,
