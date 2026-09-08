@@ -20,6 +20,7 @@ import styles from "@styles/app.module.css";
 import { MountLoading, MountStateNotice, RefreshButton } from "./mountListing";
 import { breadcrumbTrail, enterSubdir, fileSubPath } from "./mountNavigation";
 
+import type { ReactNode } from "react";
 import type { SecretsEntriesResult } from "@psi/jobClient/sftpAuthoringClient";
 
 /** The mount-root breadcrumb label. */
@@ -40,25 +41,33 @@ function secretsLiveMessage(listing: SecretsEntriesResult | "loading"): string {
 }
 
 /**
- * The console's credential-file picker: a navigable browse of the operator-mounted
- * secrets directory ({@link fetchSecretsEntries}). It lists the directory's
- * subdirectories and files, descends into a `dir` entry (breadcrumb to go back),
- * and yields a `{ mount: "secrets", subPath }` locator when the operator picks a
- * `file` -- the server later resolves that locator to an absolute `@path`, so no
- * container-absolute path is ever shown or sent. No file bytes are read; this is a
- * name browse only (SSH key material and password files, not profiled).
+ * The console's secrets-mount file picker: a navigable browse of the
+ * operator-mounted secrets directory ({@link fetchSecretsEntries}), used to point
+ * an SFTP connection at a credential file and to point the signing identity at
+ * the file that holds it. It lists the directory's subdirectories and files,
+ * descends into a `dir` entry (breadcrumb to go back), and yields a
+ * `{ mount: "secrets", subPath }` locator when the operator picks a `file` -- the
+ * server resolves that locator against its own mount, so no container-absolute
+ * path is ever shown or sent. No file bytes are read; this is a name browse only
+ * (SSH key material, password files, and the signing identity, none profiled).
  *
  * A missing or unreadable secrets mount is shown as a named config gap (name
  * `JOB_SECRETS_DIR`), not a dead end, reusing the shared listing shell
- * ({@link MountStateNotice}). A polite status region announces each resolved
- * listing, and focus follows a navigation so a screen-reader user is not stranded.
+ * ({@link MountStateNotice}). The remedy differs by caller, so an unconfigured
+ * mount's copy is the caller's ({@link unconfiguredNotice}). A polite status
+ * region announces each resolved listing, and focus follows a navigation so a
+ * screen-reader user is not stranded.
  */
 export function SecretsFilePicker({
   onSelect,
+  unconfiguredNotice,
 }: {
   /** Commit a picked credential file's locator subPath (the directory segments
    * plus the file name). */
   onSelect: (subPath: Array<string>) => void;
+  /** What the "no separate secrets directory" notice says, when the caller has
+   * a different remedy from the credential field's typed `@`-file fallback. */
+  unconfiguredNotice?: ReactNode;
 }) {
   const [subPath, setSubPath] = useState<Array<string>>([]);
   const [listing, setListing] = useState<SecretsEntriesResult | "loading">(
@@ -105,7 +114,7 @@ export function SecretsFilePicker({
         {secretsLiveMessage(listing)}
       </VisuallyHidden>
       <div ref={stageRef} tabIndex={-1} style={{ outline: "none" }}>
-        {renderListing(listing, subPath, {
+        {renderListing(listing, subPath, unconfiguredNotice, {
           onEnter: (name) => setSubPath(enterSubdir(subPath, name)),
           onNavigate: (next) => setSubPath(next),
           onSelect: (name) => onSelect(fileSubPath(subPath, name)),
@@ -119,6 +128,7 @@ export function SecretsFilePicker({
 function renderListing(
   listing: SecretsEntriesResult | "loading",
   subPath: Array<string>,
+  unconfiguredNotice: ReactNode,
   actions: {
     onEnter: (name: string) => void;
     onNavigate: (subPath: Array<string>) => void;
@@ -141,7 +151,7 @@ function renderListing(
         action={refresh}
       >
         The job API is off because JOB_DATA_ROOT is not set, so this console
-        cannot browse credential files. Set it to the mounted data root and
+        cannot browse the secrets directory. Set it to the mounted data root and
         restart the console -- see the{" "}
         <Anchor
           inherit
@@ -168,9 +178,9 @@ function renderListing(
     );
 
   // An unset JOB_SECRETS_DIR means there is no separate secrets mount to browse.
-  // It is not a dead end: the operator can still reference a credential file in
-  // their mounted folder by typing an @-file reference. A separate read-only
-  // secrets directory is recommended hardening, not a requirement.
+  // It is not a dead end -- each caller has its own remedy, which is why the
+  // body is theirs. A separate read-only secrets directory is recommended
+  // hardening, not a requirement.
   if (!listing.configured)
     return (
       <MountStateNotice
@@ -178,11 +188,15 @@ function renderListing(
         title="No separate secrets directory"
         action={refresh}
       >
-        This console has no separate secrets directory to browse, so type a file
-        reference below to a credential file (a password file or an SSH private
-        key) in your mounted folder. For better isolation, mount a separate
-        read-only directory as JOB_SECRETS_DIR and reference the file there
-        instead, then restart the console.
+        {unconfiguredNotice ?? (
+          <>
+            This console has no separate secrets directory to browse, so type a
+            file reference below to a credential file (a password file or an SSH
+            private key) in your mounted folder. For better isolation, mount a
+            separate read-only directory as JOB_SECRETS_DIR and reference the
+            file there instead, then restart the console.
+          </>
+        )}
       </MountStateNotice>
     );
 

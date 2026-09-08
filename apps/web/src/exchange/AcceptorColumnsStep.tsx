@@ -1,4 +1,4 @@
-import { Fragment, useEffect, useId, useRef } from "react";
+import { Fragment, useEffect, useId, useMemo, useRef } from "react";
 
 import {
   Alert,
@@ -37,8 +37,10 @@ import {
   acceptorLaunchBlockedReason,
   acceptorOverlongDisclosedColumns,
   acceptorPayloadDeclarationConflict,
+  acceptorSendingExpectedColumnsCostsKey,
   acceptorStandardizationValid,
   acceptorUnsatisfiedTypes,
+  acceptorWidenableDeclaredColumnCount,
 } from "./acceptorColumnsModel";
 
 import type {
@@ -216,11 +218,29 @@ export function AcceptorColumnsStep({
   // Which remedies the declared-but-unsent half even has: a column this file does
   // not hold cannot be marked at all, so only the columns it does hold get the
   // offer to widen the disclosure, and only the ones it lacks get "choose another
-  // file".
-  const expectedInFile =
-    declarationConflict?.declaredButNotSent.filter((gap) => gap.inFile) ?? [];
+  // file". Both sides count COLUMNS rather than declaration entries, which is what
+  // the model's declared-but-unsent set holds and what the sentences below are
+  // about: the columns the operator would set, or the ones they would go and find.
+  const expectedInFileCount = useMemo(
+    () =>
+      acceptorWidenableDeclaredColumnCount(linkageTerms, editorState.metadata),
+    [linkageTerms, editorState.metadata],
+  );
   const expectedMissingFromFile =
     declarationConflict?.declaredButNotSent.filter((gap) => !gap.inFile) ?? [];
+  // Whether taking that offer would cost an agreed linkage key: the widened marks
+  // leave fewer keys satisfiable than the current marks do. Read from the model,
+  // over the whole declared set rather than the names painted below, so the offer's
+  // cost is the one the operator would meet.
+  const sendingCostsLinkageKey = useMemo(
+    () =>
+      acceptorSendingExpectedColumnsCostsKey(
+        columns,
+        linkageTerms,
+        columnsState,
+      ),
+    [columns, linkageTerms, columnsState],
+  );
   // The cap keeps a flooded declaration from putting the metadata grid the operator
   // has to edit, and the launch control below it, past a screenful of partner text.
   // What it leaves out is counted rather than dropped, so the operator is still told
@@ -531,8 +551,8 @@ export function AcceptorColumnsStep({
                     {/* The invitation's OWN names, which the model has already
                         escaped for this sink -- partner-controlled text, unlike
                         the operator's headers above, and so also the half this
-                        screen bounds by count. Keyed by position: nothing stops a
-                        declaration naming the same column twice. */}
+                        screen bounds by count. Keyed by position: a static list,
+                        rebuilt whole, whose items hold no state of their own. */}
                     <List size="sm" withPadding listStyleType="circle" my={4}>
                       {shownDeclaredGaps.map((gap, index) => (
                         <List.Item key={index}>
@@ -546,13 +566,12 @@ export function AcceptorColumnsStep({
                         {unshownDeclaredNamesLine(unshownDeclaredCount)}
                       </Text>
                     )}
-                    {/* The remedy here is mostly the partner's: widening the
-                        operator's own disclosure to match is offered only where the
-                        column exists, and never as the fix. Its cost is stated
-                        without naming a role: one sentence covers a list whose
-                        columns can sit at different uses -- one matching, one the
-                        record identifier, one ignored -- and the grid row it points
-                        at is where the use each of them gives up is shown. */}
+                    {/* The remedy here is mostly the partner's; the widening
+                        below is a secondary offer, made only where the column
+                        exists. Its cost is graded by the same verdict the
+                        launch gate runs, over the whole declaration rather
+                        than the (possibly capped) list painted above, so the
+                        caveat cannot understate what taking it would cost. */}
                     Ask your partner for an invitation that expects what your
                     file sends
                     {expectedMissingFromFile.length > 0 &&
@@ -562,8 +581,12 @@ export function AcceptorColumnsStep({
                           : "those columns"
                       }`}
                     .
-                    {expectedInFile.length > 0 &&
-                      ' Where your file does have such a column, you can set it to "Sent to your partner" below instead - that discloses more than you have marked so far, and each column has a single use, so sending it replaces the use it has now.'}
+                    {expectedInFileCount > 0 &&
+                      (!sendingCostsLinkageKey
+                        ? ' Where your file does have such a column, you can set it to "Sent to your partner" below instead - that discloses more than you have marked so far, and each column has a single use, so sending it replaces the use it has now.'
+                        : expectedInFileCount === 1
+                          ? ' Setting the column your file does have to "Sent to your partner" below will not start the exchange: that column is used to match, and each column has a single use, so sending it would leave an agreed linkage key with no column to match on.'
+                          : ' Setting the columns your file does have to "Sent to your partner" below will not start the exchange: at least one of them is used to match, and each column has a single use, so sending them would leave an agreed linkage key with no column to match on.')}
                   </>
                 )}
               </>

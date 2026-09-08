@@ -14,6 +14,8 @@ import {
 } from "@mantine/core";
 import { IconAlertTriangle, IconInfoCircle } from "@tabler/icons-react";
 
+import { sanitizeForDisplay } from "@psilink/core";
+
 import { resolveSigningFingerprint } from "@psi/jobClient/signingIdentityClient";
 
 import {
@@ -29,6 +31,8 @@ import {
 import styles from "@styles/app.module.css";
 
 import { DisclosureSection } from "../components/DisclosureSection";
+
+import { SigningIdentityLocationField } from "./SigningIdentityLocationField";
 
 import type { ReceiptsDraft, ReceiptsSigningMode } from "@psi/receiptsModel";
 import type { JobRendezvousConfig } from "@psi/jobClient/workInputClient";
@@ -60,23 +64,52 @@ const MODE_CHOICES: ReadonlyArray<{
  * `refused` message holds the whole CLI exit-64 class, unsplittable once stderr
  * is discarded (`runSigningFingerprint` in `jobs/signingIdentity.ts`); one member
  * is a malformed `psilink.yaml` a partner can write when the mount is also the
- * synced folder, so the copy sends the operator to read that file too. */
+ * synced folder, so the copy sends the operator to read that file too. The
+ * `absent` message answers a read of a picked location holding nothing, and
+ * names the command that puts an identity there. Where the operator picked a
+ * location, the messages that would otherwise name the mounted folder and a
+ * create name that file and a read instead: the identity is not in the data
+ * root, nothing is created at the picked path except through the
+ * file-removed-mid-check window a read-only mount closes, and the folder
+ * holding it may be mounted read-only. */
 function fingerprintFailureMessage(
   outcome: Exclude<SigningFingerprintOutcome, { kind: "ok" }>,
+  identityLocationPicked: boolean,
 ): string {
   switch (outcome.kind) {
-    case "refused":
+    case "absent":
       return (
-        "Your signing identity could not be created or read in the folder you " +
-        "mounted. Check that the folder is writable, that any signing identity " +
-        "already in it is intact, and that any psilink.yaml there is valid " +
-        "YAML. If that folder is also the one your partner syncs into, the " +
-        "psilink.yaml may be theirs, so read it before changing your own " +
-        "setup. A psilink.yaml your partner wrote cannot move where your " +
-        "key is written or change whose name it binds, because both are " +
-        "passed explicitly here. Fix what you find and try again -- running " +
-        "'psilink fingerprint' against the same folder prints the reason."
+        "There is no signing identity at the file you picked. The console " +
+        "reads that location and creates no key there, except a file removed " +
+        "between this check and the read that follows it. So create the " +
+        "identity yourself at the command line -- " +
+        "'psilink fingerprint --identity-file' pointed at that path -- then " +
+        "show the fingerprint again. Or pick the file that already holds your " +
+        "identity."
       );
+    case "refused":
+      return identityLocationPicked
+        ? "Your signing identity could not be read from the file you picked. " +
+            "It may be unreadable, or not a signing identity. Check that file at " +
+            "the location you picked, or pick another one. Check too that any " +
+            "psilink.yaml in the folder you mounted is valid YAML. If that " +
+            "folder is also the one your partner syncs into, the psilink.yaml " +
+            "may be theirs, so read it before changing your own setup. A " +
+            "psilink.yaml your partner wrote cannot move where your key is read " +
+            "from or change whose name it binds, because both are passed " +
+            "explicitly here. Fix what you find and try again -- running " +
+            "'psilink fingerprint --identity-file' pointed at that file prints " +
+            "the reason."
+        : "Your signing identity could not be created or read in the folder " +
+            "you mounted. Check that the folder is writable, that any signing " +
+            "identity already in it is intact, and that any psilink.yaml there " +
+            "is valid YAML. If that folder is also the one your partner syncs " +
+            "into, the psilink.yaml may be theirs, so read it before changing " +
+            "your own setup. A psilink.yaml your partner wrote cannot move " +
+            "where your key is written or change whose name it binds, because " +
+            "both are passed explicitly here. Fix what you find and try again " +
+            "-- running 'psilink fingerprint' against the same folder prints " +
+            "the reason.";
     case "syncing":
       return (
         "A shared-folder exchange is still open on this console, and it syncs " +
@@ -90,11 +123,15 @@ function fingerprintFailureMessage(
     case "busy":
       return "Another fingerprint request is still running. Try again in a moment.";
     case "timeout":
-      return "Creating the signing identity took too long and was stopped. Try again.";
+      return identityLocationPicked
+        ? "Reading the signing identity took too long and was stopped. Try again."
+        : "Creating the signing identity took too long and was stopped. Try again.";
     case "disabled":
       return "This build does not run exchanges here, so it has no signing identity to create.";
     case "error":
-      return "The signing identity could not be created or read. Try again.";
+      return identityLocationPicked
+        ? "The signing identity could not be read. Try again."
+        : "The signing identity could not be created or read. Try again.";
   }
 }
 
@@ -140,8 +177,13 @@ export function ReceiptsCard({
   const requestProblemId = useId();
   const [resolving, setResolving] = useState(false);
   const [failure, setFailure] = useState<string>();
+  const [locationPickerOpen, setLocationPickerOpen] = useState(false);
   const [exportCertificate, setExportCertificate] = useState(false);
   const [exportedName, setExportedName] = useState<string>();
+  // At a picked location this is the name of the file the operator chose in the
+  // browse, which admits any character but a control one or a separator, so it
+  // is escaped where it renders below -- the browse's own listing escapes it the
+  // same way.
   const [identityFileName, setIdentityFileName] = useState<string>();
   const [justCreated, setJustCreated] = useState(false);
   // The draft as of this render, so a resolved fingerprint merges into whatever
@@ -190,15 +232,16 @@ export function ReceiptsCard({
     const seq = (seqRef.current += 1);
     setResolving(true);
     setFailure(undefined);
-    const outcome = await resolveSigningFingerprint(
-      identity.trim(),
+    const location = draftRef.current.identityLocation;
+    const outcome = await resolveSigningFingerprint(identity.trim(), {
       exportCertificate,
-    );
+      ...(location !== undefined ? { identityLocation: location } : {}),
+    });
     // Discard a superseded result: the mode changed, or a newer request started.
     if (seqRef.current !== seq) return;
     setResolving(false);
     if (outcome.kind !== "ok") {
-      setFailure(fingerprintFailureMessage(outcome));
+      setFailure(fingerprintFailureMessage(outcome, location !== undefined));
       return;
     }
     setIdentityFileName(outcome.identityFileName);
@@ -246,13 +289,22 @@ export function ReceiptsCard({
 
         {draft.mode === "certificate" && (
           <>
+            <SigningIdentityLocationField
+              location={draft.identityLocation}
+              pickerOpen={locationPickerOpen}
+              onPickerOpen={() => setLocationPickerOpen(true)}
+              onPickerClose={() => setLocationPickerOpen(false)}
+              onChange={(location) => set("identityLocation", location)}
+            />
+
             <Stack gap="xs">
               <Text size="sm" fw={600}>
                 Your fingerprint, to share with your partner
               </Text>
               <Text size="xs" c="dimmed">
-                This creates your signing identity if you do not have one yet,
-                and shows the same fingerprint every time after that.
+                {draft.identityLocation === undefined
+                  ? "This creates your signing identity if you do not have one yet, and shows the same fingerprint every time after that."
+                  : "This reads the identity at the file you picked and shows its fingerprint. A file that is not yet in place is reported rather than created, with one exception: a file removed between that check and the read is created again at that path."}
               </Text>
               <Checkbox
                 checked={exportCertificate}
@@ -272,9 +324,11 @@ export function ReceiptsCard({
                   }
                   onClick={() => void resolveFingerprint()}
                 >
-                  {draft.ownFingerprint === undefined
-                    ? "Create or show my fingerprint"
-                    : "Show it again"}
+                  {draft.ownFingerprint !== undefined
+                    ? "Show it again"
+                    : draft.identityLocation === undefined
+                      ? "Create or show my fingerprint"
+                      : "Show my fingerprint"}
                 </Button>
               </div>
               {requestProblem !== undefined && (
@@ -316,7 +370,11 @@ export function ReceiptsCard({
                       ? "Your signing identity was created"
                       : "Your signing identity was already set up"}
                     {identityFileName !== undefined
-                      ? ` (${identityFileName} in your mounted folder)`
+                      ? ` (${sanitizeForDisplay(identityFileName)} in ${
+                          draft.identityLocation === undefined
+                            ? "your mounted folder"
+                            : "your secrets folder"
+                        })`
                       : ""}
                     . Send this fingerprint over a channel you trust -- not the
                     same message as the invitation.

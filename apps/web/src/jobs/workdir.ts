@@ -154,6 +154,25 @@ export function jobPathPresent(filePath: string): boolean {
   }
 }
 
+/**
+ * Whether anything is at the END of the given path: a `stat` that follows a
+ * symlink, so a link whose target is not there counts as nothing, and an
+ * unreadable file still counts (a `stat` needs no read permission on the file
+ * itself).
+ *
+ * The question a read asks: a link with nothing at its end is nothing to read,
+ * while {@link jobPathPresent} counts it so a refusal cannot be evaded by one. A
+ * path this process cannot stat at all counts as nothing too, since a read of it
+ * would find nothing either.
+ */
+export function jobTargetPresent(filePath: string): boolean {
+  try {
+    return fs.statSync(filePath, { throwIfNoEntry: false }) !== undefined;
+  } catch {
+    return false;
+  }
+}
+
 /** Whether a job's result file exists and is readable. */
 export function resultFileExists(outputPath: string): boolean {
   return jobFileExists(outputPath);

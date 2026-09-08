@@ -49,18 +49,18 @@ describe("the request has the label and the toggle only", () => {
    * with and answers a well-formed body. */
   async function captureRequest(
     identity: string,
-    exportCertificate?: boolean,
+    options: Parameters<typeof resolveSigningFingerprint>[1] = {},
   ): Promise<{ url: unknown; init: RequestInit | undefined }> {
     let url: unknown;
     let init: RequestInit | undefined;
-    const recording: typeof fetch = (input, options) => {
+    const recording: typeof fetch = (input, requestInit) => {
       url = input;
-      init = options;
+      init = requestInit;
       return Promise.resolve(
         new Response(JSON.stringify(okBody()), { status: 200 }),
       );
     };
-    await resolveSigningFingerprint(identity, exportCertificate, recording);
+    await resolveSigningFingerprint(identity, options, recording);
     return { url, init };
   }
 
@@ -73,8 +73,25 @@ describe("the request has the label and the toggle only", () => {
     });
   });
 
+  test("a picked location rides as a locator, and still names no path", async () => {
+    // The operator's own identity location is the mount id and the segments
+    // they picked. The server resolves it against its own JOB_SECRETS_DIR, so
+    // what leaves the browser is what the browse handed it and nothing else.
+    const { init } = await captureRequest("Agency A", {
+      identityLocation: { mount: "secrets", subPath: [".ssh", "id.json"] },
+    });
+    const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+    expect(body).toEqual({
+      identity: "Agency A",
+      identityLocation: { mount: "secrets", subPath: [".ssh", "id.json"] },
+    });
+    expect(String(init?.body)).not.toContain("/.ssh");
+  });
+
   test("the export toggle adds one boolean, and no path field ever appears", async () => {
-    const { init } = await captureRequest("Agency A", true);
+    const { init } = await captureRequest("Agency A", {
+      exportCertificate: true,
+    });
     const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
     expect(body).toEqual({ identity: "Agency A", exportCertificate: true });
     // The server composes every path; nothing name- or path-shaped is
@@ -89,7 +106,7 @@ describe("the ok body is re-validated field by field", () => {
     expect(
       await resolveSigningFingerprint(
         "Agency A",
-        true,
+        { exportCertificate: true },
         answering(okBody({ certificateFileName: CERTIFICATE_FILE })),
       ),
     ).toEqual({
@@ -104,7 +121,7 @@ describe("the ok body is re-validated field by field", () => {
   test("an absent certificate name stays absent rather than becoming a key", async () => {
     const outcome = await resolveSigningFingerprint(
       "Agency A",
-      false,
+      {},
       answering(okBody({ created: false })),
     );
     expect(outcome).toEqual({
@@ -130,7 +147,7 @@ describe("the ok body is re-validated field by field", () => {
       expect(
         await resolveSigningFingerprint(
           "Agency A",
-          false,
+          {},
           answering(okBody({ fingerprint })),
         ),
       ).toEqual({ kind: "error" });
@@ -146,7 +163,7 @@ describe("the ok body is re-validated field by field", () => {
       expect(
         await resolveSigningFingerprint(
           "Agency A",
-          false,
+          {},
           answering(okBody({ created })),
         ),
       ).toEqual({ kind: "error" });
@@ -171,7 +188,7 @@ describe("the ok body is re-validated field by field", () => {
       expect(
         await resolveSigningFingerprint(
           "Agency A",
-          false,
+          {},
           answering(okBody({ identityFileName })),
         ),
       ).toEqual({ kind: "error" });
@@ -183,7 +200,7 @@ describe("the ok body is re-validated field by field", () => {
     expect(
       await resolveSigningFingerprint(
         "Agency A",
-        false,
+        {},
         answering(okBody({ identityFileName })),
       ),
     ).toMatchObject({ kind: "ok", identityFileName });
@@ -195,7 +212,7 @@ describe("the ok body is re-validated field by field", () => {
     expect(
       await resolveSigningFingerprint(
         "Agency A",
-        true,
+        { exportCertificate: true },
         answering(
           okBody({ certificateFileName: "../psilink-certificate.json" }),
         ),
@@ -210,7 +227,7 @@ describe("the ok body is re-validated field by field", () => {
     ["a number", 200],
   ])("a 200 body that is %s is an error", async (_label, body) => {
     expect(
-      await resolveSigningFingerprint("Agency A", false, answering(body)),
+      await resolveSigningFingerprint("Agency A", {}, answering(body)),
     ).toEqual({ kind: "error" });
   });
 });
@@ -219,10 +236,11 @@ describe("the outcome is read from the body's status, not from the HTTP status",
   test.each([
     ["refused", { kind: "refused" }],
     ["syncing", { kind: "syncing" }],
+    ["absent", { kind: "absent" }],
     ["timeout", { kind: "timeout" }],
   ])("a 200 holding status %s is that category", async (status, expected) => {
     expect(
-      await resolveSigningFingerprint("Agency A", false, answering({ status })),
+      await resolveSigningFingerprint("Agency A", {}, answering({ status })),
     ).toEqual(expected);
   });
 
@@ -234,7 +252,7 @@ describe("the outcome is read from the body's status, not from the HTTP status",
     "a 200 holding %s degrades to an error rather than an empty ok",
     async (_label, body) => {
       expect(
-        await resolveSigningFingerprint("Agency A", false, answering(body)),
+        await resolveSigningFingerprint("Agency A", {}, answering(body)),
       ).toEqual({ kind: "error" });
     },
   );
@@ -245,17 +263,13 @@ describe("the HTTP status dispatches before the body is read", () => {
     // A hosted build serves the whole job API 404, so the status decides even
     // when a body that looks like a success rides along.
     expect(
-      await resolveSigningFingerprint(
-        "Agency A",
-        false,
-        answering(okBody(), 404),
-      ),
+      await resolveSigningFingerprint("Agency A", {}, answering(okBody(), 404)),
     ).toEqual({ kind: "disabled" });
   });
 
   test("a 409 is the retryable busy state", async () => {
     expect(
-      await resolveSigningFingerprint("Agency A", false, answering(null, 409)),
+      await resolveSigningFingerprint("Agency A", {}, answering(null, 409)),
     ).toEqual({ kind: "busy" });
   });
 
@@ -263,7 +277,7 @@ describe("the HTTP status dispatches before the body is read", () => {
     expect(
       await resolveSigningFingerprint(
         "Agency A",
-        false,
+        {},
         answering({ error: "identity: must not begin with '-'" }, 400),
       ),
     ).toEqual({
@@ -280,7 +294,7 @@ describe("the HTTP status dispatches before the body is read", () => {
   ])(
     "a 400 whose body holds %s falls back to a fixed message",
     async (_label, body) => {
-      const outcome = await resolveSigningFingerprint("Agency A", false, () =>
+      const outcome = await resolveSigningFingerprint("Agency A", {}, () =>
         Promise.resolve(new Response(body, { status: 400 })),
       );
       expect(outcome).toEqual({
@@ -298,7 +312,7 @@ describe("the HTTP status dispatches before the body is read", () => {
     expect(
       await resolveSigningFingerprint(
         "Agency A",
-        false,
+        {},
         answering({ status: "ok" }, status),
       ),
     ).toEqual({ kind: "error" });
@@ -306,7 +320,7 @@ describe("the HTTP status dispatches before the body is read", () => {
 
   test("a fetch that never completes is an error, not a rejection the card must catch", async () => {
     expect(
-      await resolveSigningFingerprint("Agency A", false, () =>
+      await resolveSigningFingerprint("Agency A", {}, () =>
         Promise.reject(new Error("network down")),
       ),
     ).toEqual({ kind: "error" });
