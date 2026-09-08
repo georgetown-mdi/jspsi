@@ -592,6 +592,14 @@ the protocol suppresses the frame on. One label carries both, since what the lin
 answers -- what the partner learns about its own records -- is the same question
 either way.
 
+The payload declaration the second condition rests on cannot disagree with the
+disclosed subset the same token holds, whoever authored it: the token schema
+refuses both pairings that would state one disclosure two ways, at decode as
+well as at the mint
+([FILE_SYNC.md](../spec/FILE_SYNC.md#disclosed-columns-subset-on-the-token)).
+So a surface reading the declaration for this line and the subset for the
+receive line beside it cannot be made to state both at once.
+
 ## A fact that outlives the run, and the negative it does not state
 
 The retain declaration is the first entry keyed on something the token holds
