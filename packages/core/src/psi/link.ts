@@ -433,60 +433,120 @@ function roundAcceptance(
   };
 }
 
-// Holds each rank against the one canonical position on the other side it was
-// first accepted against, reporting whether this pair names a second one.
-function heldAgainstAnotherPosition(
-  held: Map<number, number>,
-  rank: number,
-  position: number,
-): boolean {
-  const already = held.get(rank);
-  if (already === undefined) {
-    held.set(rank, position);
-    return false;
+// The mapped-element entry each of one side's accepted records would state:
+// the canonical position of the partner record it was accepted against, one
+// entry per record (docs/spec/PROTOCOL.md, The final mapped-element entry
+// names a canonical position). A record accepted against partner records at
+// two DIFFERENT canonical positions has no such entry, and the map is
+// withheld rather than picking one of them.
+function entriesAcceptedRecordsWouldState(
+  acceptedRanks: ReadonlyArray<number>,
+  partnerRanks: ReadonlyArray<number>,
+  partnerCanonicalPosition: Int32Array,
+): Map<number, number> | undefined {
+  const named = new Map<number, number>();
+  for (let p = 0; p < acceptedRanks.length; ++p) {
+    const position = partnerCanonicalPosition[partnerRanks[p]];
+    const already = named.get(acceptedRanks[p]);
+    if (already === undefined) named.set(acceptedRanks[p], position);
+    else if (already !== position) return undefined;
   }
-  return already !== position;
+  return named;
 }
 
-// One record accepted against partner records the round's grouping puts at two
-// different canonical positions, which a cascade round has no form to report:
-// each accepted record names ONE position in the partner's candidate set
-// (docs/spec/PROTOCOL.md, The final mapped-element entry names a canonical
-// position). Both parties resolve the same accepted pairs from the same two
-// groupings, so both refuse the same round; a conforming partner reaches the
-// shape from the two parties' own data, so this is no partnerProtocolError.
-function assertOnePartnerPositionPerAcceptedRecord(
+// Whether the pass reading those entries recovers the round's accepted records
+// one at a time. It takes each entry for the WHOLE group behind the position it
+// names, so the named groups have to be disjoint and hold accepted records
+// only, together covering every one of them; and a naming side that keeps no
+// duplicates may not name one position twice, holding one record per position
+// to name it with (docs/spec/PROTOCOL.md, Deriving one table from the exchanged
+// association maps).
+function entriesStateEachRecordOnce(
+  entries: Map<number, number>,
+  namingSideKeepsDuplicates: boolean,
+  readerOwnership: RoundOwnership,
+  readerAccepted: ReadonlySet<number>,
+): boolean {
+  const namedPositions = new Set<number>();
+  const covered = new Set<number>();
+  for (const position of entries.values()) {
+    if (namedPositions.has(position)) {
+      if (!namingSideKeepsDuplicates) return false;
+      continue;
+    }
+    namedPositions.add(position);
+    const slot = readerOwnership.slotOfPosition.get(position);
+    if (slot === undefined) return false;
+    for (
+      let o = readerOwnership.starts[slot];
+      o < readerOwnership.starts[slot + 1];
+      ++o
+    ) {
+      const ordinal = readerOwnership.ordinals[o];
+      if (!readerAccepted.has(ordinal) || covered.has(ordinal)) return false;
+      covered.add(ordinal);
+    }
+  }
+  return covered.size === readerAccepted.size;
+}
+
+// A round whose accepted pairs the two mapped-element lists have no way to
+// state: one record accepted against two of the partner's candidate groups,
+// two records sharing a group accepted against different partner records, or
+// any sibling shape leaving an entry per record naming one canonical position
+// short of the round's pairs. Both parties resolve the same accepted pairs from
+// the same two groupings, so both refuse the same round rather than one
+// stranding the other, and a conforming partner reaches every one of these
+// shapes from the two parties' own data, so none is a partnerProtocolError.
+function assertRoundStatesEachRecordOnce(
   participantId: string,
   resolved: ResolvedRound,
-  senderCanonicalPosition: Int32Array,
-  receiverCanonicalPosition: Int32Array,
+  sides: MultiplicitySides,
+  localIsSender: boolean,
+  localOwnership: RoundOwnership,
+  partnerOwnership: RoundOwnership,
 ): void {
-  const positionForSender = new Map<number, number>();
-  const positionForReceiver = new Map<number, number>();
-  for (let p = 0; p < resolved.acceptedSenderRanks.length; ++p) {
-    const sender = resolved.acceptedSenderRanks[p];
-    const receiver = resolved.acceptedReceiverRanks[p];
-    if (
-      heldAgainstAnotherPosition(
-        positionForSender,
-        sender,
-        receiverCanonicalPosition[receiver],
-      ) ||
-      heldAgainstAnotherPosition(
-        positionForReceiver,
-        receiver,
-        senderCanonicalPosition[sender],
-      )
+  const [senderOwnership, receiverOwnership] = localIsSender
+    ? [localOwnership, partnerOwnership]
+    : [partnerOwnership, localOwnership];
+  const [senderKeeps, receiverKeeps] = localIsSender
+    ? [sides.localKeepsDuplicates, sides.partnerKeepsDuplicates]
+    : [sides.partnerKeepsDuplicates, sides.localKeepsDuplicates];
+  const senderEntries = entriesAcceptedRecordsWouldState(
+    resolved.acceptedSenderRanks,
+    resolved.acceptedReceiverRanks,
+    receiverOwnership.canonicalPosition,
+  );
+  const receiverEntries = entriesAcceptedRecordsWouldState(
+    resolved.acceptedReceiverRanks,
+    resolved.acceptedSenderRanks,
+    senderOwnership.canonicalPosition,
+  );
+  if (
+    senderEntries !== undefined &&
+    receiverEntries !== undefined &&
+    entriesStateEachRecordOnce(
+      senderEntries,
+      senderKeeps,
+      receiverOwnership,
+      new Set(resolved.acceptedReceiverRanks),
+    ) &&
+    entriesStateEachRecordOnce(
+      receiverEntries,
+      receiverKeeps,
+      senderOwnership,
+      new Set(resolved.acceptedSenderRanks),
     )
-      throw new ConnectionError(
-        `${participantId}: a linkage key matched one record against two of ` +
-          "the partner's candidate groups, and a cascade exchange reports " +
-          "one partner match per record. Run these linkage terms under the " +
-          "single-pass linkage strategy, or remove the step that expands one " +
-          "value into several match candidates.",
-        "protocol",
-      );
-  }
+  )
+    return;
+  throw new ConnectionError(
+    `${participantId}: a linkage key matched records a cascade exchange ` +
+      "cannot report one at a time: it names one of the partner's candidate " +
+      "groups per matched record. Run these linkage terms under the " +
+      "single-pass linkage strategy, or remove the step that expands one " +
+      "value into several match candidates.",
+    "protocol",
+  );
 }
 
 function stillInCandidacy(outOfCandidacy: Uint8Array): Array<number> {
@@ -791,19 +851,18 @@ export async function linkViaPSI(
       receiverRanks,
       acceptance,
     );
-    // A record can be accepted against two of the partner's groups only where
-    // it owns two of the round's matched positions, so a round no candidate
-    // set widened skips the pass rather than tallying every accepted pair.
+    // The round's accepted pairs stop being statable one record at a time only
+    // where a record owns two of the round's matched positions, so a round no
+    // candidate set widened skips the pass rather than walking every accepted
+    // pair and every named group.
     if (ownsSeveralPositions(local.ownership) || ownsSeveralPositions(partner))
-      assertOnePartnerPositionPerAcceptedRecord(
+      assertRoundStatesEachRecordOnce(
         participant.id,
         resolved,
-        localIsSender
-          ? local.ownership.canonicalPosition
-          : partner.canonicalPosition,
-        localIsSender
-          ? partner.canonicalPosition
-          : local.ownership.canonicalPosition,
+        sides,
+        localIsSender,
+        local.ownership,
+        partner,
       );
     const localAccepted = localIsSender
       ? resolved.acceptedSenderRanks

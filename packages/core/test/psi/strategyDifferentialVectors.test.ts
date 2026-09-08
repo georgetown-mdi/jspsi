@@ -233,23 +233,33 @@ test("many-to-one, the one side keeps its own within-round uniqueness rule", asy
   );
 });
 
-// The one shape the two strategies do NOT agree on, pinned here rather than
-// left to be discovered. A candidate set on the side a deduplicating
-// cardinality relaxes pairs one record with records in two different matched
-// groups. Single-pass names both pairs in the table its receiver resolves,
-// while a cascade round reports one partner position per matched record and so
-// has no form for the second pairing: it refuses the round instead of dropping
-// one of the two. docs/spec/PROTOCOL.md fixes both the sweep that accepts the
-// two pairs (The per-side rules, Resolution) and the pass that names one
+// The shapes the two strategies do NOT agree on, pinned here rather than left
+// to be discovered. Single-pass names every accepted pair in the table its
+// receiver resolves, while a cascade round reports one partner match per
+// matched record, naming one candidate group of the partner's: where the
+// round's accepted pairs do not divide that way it refuses the round instead of
+// dropping one of them. docs/spec/PROTOCOL.md fixes both the sweep that accepts
+// the pairs (The per-side rules, Resolution) and the pass that names one
 // position per accepted record (The final mapped-element entry names a
-// canonical position), and this fixture is where the two meet.
+// canonical position), and these fixtures are where the two meet.
+async function expectCascadeRefusesWhatSinglePassResolves(
+  starterKeys: Array<Column>,
+  joinerKeys: Array<Column>,
+): Promise<Tables> {
+  const outcome = await runCascade("many-to-one", starterKeys, joinerKeys).then(
+    () => undefined,
+    (err: unknown) => err,
+  );
+  expect(outcome).toBeInstanceOf(ConnectionError);
+  expect((outcome as ConnectionError).kind).toBe("protocol");
+  return runSinglePass("many-to-one", starterKeys, joinerKeys);
+}
+
 test("a candidate set on the one side splits the two strategies", async () => {
-  const manySide: Array<Column> = [["a", "b"]];
-  const oneSide: Array<Column> = [[new Set(["a", "b"])]];
-  const [starter, joiner] = await runSinglePass(
-    "many-to-one",
-    manySide,
-    oneSide,
+  // One record accepted against records in two different matched groups.
+  const [starter, joiner] = await expectCascadeRefusesWhatSinglePassResolves(
+    [["a", "b"]],
+    [[new Set(["a", "b"])]],
   );
   expect(starter).toStrictEqual([
     [0, 1],
@@ -259,11 +269,22 @@ test("a candidate set on the one side splits the two strategies", async () => {
     [0, 0],
     [0, 1],
   ]);
+});
 
-  const outcome = await runCascade("many-to-one", manySide, oneSide).then(
-    () => undefined,
-    (err: unknown) => err,
+test("a candidate set on the many side can collide two records on one position", async () => {
+  // The sub-shape the MUST vector above avoids: "V2" is the lowest matched
+  // position of both of the many side's records, so the one side's list names
+  // that position once per accepted record and the cascade has no form for it.
+  const [starter, joiner] = await expectCascadeRefusesWhatSinglePassResolves(
+    [[new Set(["V2", "V1"]), new Set(["V0", "V2"])]],
+    [["V1", "V0", "V2"]],
   );
-  expect(outcome).toBeInstanceOf(ConnectionError);
-  expect((outcome as ConnectionError).kind).toBe("protocol");
+  expect(starter).toStrictEqual([
+    [0, 1],
+    [0, 1],
+  ]);
+  expect(joiner).toStrictEqual([
+    [0, 1],
+    [0, 1],
+  ]);
 });

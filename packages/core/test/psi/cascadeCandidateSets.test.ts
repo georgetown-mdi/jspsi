@@ -418,17 +418,41 @@ test("a deduplicating party no producer widened still omits its grouping", async
   expect(grouped).toStrictEqual([]);
 });
 
-// --- a record reaching two of the partner's matched groups --------------------
-// A candidate set on the side a deduplicating cardinality relaxes can pair one
-// record with records in two DIFFERENT matched groups: the sweep accepts a
-// record against every member of a group whatever it has already taken, and
-// its candidates may reach two of them. A cascade round reports one partner
-// position per matched record, so it refuses the shape rather than dropping
-// one of the two pairings -- and both parties, resolving the same accepted
-// pairs from the same two groupings, refuse the same round.
+// --- rounds no mapped-element list can state ----------------------------------
+// A cascade round reports one partner match per record, naming one candidate
+// group of the partner's, and a candidate set can produce accepted pairs that
+// form does not hold. Each shape below is refused AT THE ROUND, on both parties
+// -- they resolve the same accepted pairs from the same two groupings -- rather
+// than reaching the post-round pass, where one party would abort blaming a
+// conforming partner after its own list had gone out.
 
+// One record accepted against records in two DIFFERENT matched groups: the
+// sweep accepts a record against every member of a group whatever it has
+// already taken, and its candidates may reach two of them.
 const CROSS_GROUP_ONE_SIDE: Array<Column> = [[new Set(["a", "b"])]];
 const CROSS_GROUP_MANY_SIDE: Array<Column> = [["a", "b"]];
+
+// Two accepted records of the deduplicating side sharing one canonical
+// position: "V2" is the lowest matched position of both records, so the "one"
+// side's list names that one position once per accepted record.
+const SHARED_CANONICAL_MANY_SIDE: Array<Column> = [
+  [new Set(["V2", "V1"]), new Set(["V0", "V2"])],
+];
+const SHARED_CANONICAL_ONE_SIDE: Array<Column> = [["V1", "V0", "V2"]];
+
+// The same collision as the randomized corpus first reached it: rows that sit
+// the round out, and a value two of the "one" side's records hold, which that
+// side therefore drops.
+const MINIMAL_MANY_SIDE: Array<Column> = [
+  [undefined, new Set(["V2", "V1"]), new Set(["V0", "V2"]), undefined],
+];
+const MINIMAL_ONE_SIDE: Array<Column> = [["V1", "V0", "V0", "V2"]];
+
+// The sibling shape: no two accepted records share a canonical position, but
+// one record's group holds a record canonicalized at a lower position, so the
+// two named groups overlap and the pass would count that record twice.
+const OVERLAPPING_MANY_SIDE: Array<Column> = [[new Set(["V0", "V2"]), "V2"]];
+const OVERLAPPING_ONE_SIDE: Array<Column> = [["V0", "V2"]];
 
 async function settledCascade(
   starterKeys: Array<Column>,
@@ -468,30 +492,42 @@ async function settledCascade(
   return outcomes;
 }
 
-function expectCrossGroupRefusal(outcome: unknown): void {
+function expectRoundRefusal(outcome: unknown): void {
   expect(outcome).toBeInstanceOf(ConnectionError);
   expect((outcome as ConnectionError).kind).toBe("protocol");
   expect((outcome as ConnectionError).message).toMatch(
-    /matched one record against two of the partner's candidate groups/,
+    /matched records a cascade exchange cannot report one at a time/,
   );
 }
 
-test("both parties refuse a record reaching two groups, the one side starting", async () => {
-  const outcomes = await settledCascade(
-    CROSS_GROUP_ONE_SIDE,
-    CROSS_GROUP_MANY_SIDE,
-    "one-to-many",
-  );
-  for (const outcome of outcomes) expectCrossGroupRefusal(outcome);
+// Each shape in both role assignments: the sweep's order is role-derived, so a
+// refusal decided by the resolved pairs has to land whichever party holds the
+// PSI sender role.
+async function expectBothPartiesRefuse(
+  manySide: Array<Column>,
+  oneSide: Array<Column>,
+): Promise<void> {
+  for (const outcome of await settledCascade(manySide, oneSide, "many-to-one"))
+    expectRoundRefusal(outcome);
+  for (const outcome of await settledCascade(oneSide, manySide, "one-to-many"))
+    expectRoundRefusal(outcome);
+}
+
+test("both parties refuse a record reaching two of the partner's groups", async () => {
+  await expectBothPartiesRefuse(CROSS_GROUP_MANY_SIDE, CROSS_GROUP_ONE_SIDE);
 });
 
-test("both parties refuse a record reaching two groups, the many side starting", async () => {
-  // The same data in the other role assignment: the refusal is decided by the
-  // resolved pairs rather than by which party holds the PSI sender role.
-  const outcomes = await settledCascade(
-    CROSS_GROUP_MANY_SIDE,
-    CROSS_GROUP_ONE_SIDE,
-    "many-to-one",
+test("both parties refuse two accepted records sharing a canonical position", async () => {
+  await expectBothPartiesRefuse(
+    SHARED_CANONICAL_MANY_SIDE,
+    SHARED_CANONICAL_ONE_SIDE,
   );
-  for (const outcome of outcomes) expectCrossGroupRefusal(outcome);
+});
+
+test("both parties refuse the collision the randomized corpus first reached", async () => {
+  await expectBothPartiesRefuse(MINIMAL_MANY_SIDE, MINIMAL_ONE_SIDE);
+});
+
+test("both parties refuse two named groups that overlap", async () => {
+  await expectBothPartiesRefuse(OVERLAPPING_MANY_SIDE, OVERLAPPING_ONE_SIDE);
 });
