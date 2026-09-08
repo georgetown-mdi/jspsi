@@ -19,6 +19,16 @@ import type { DataConnection } from "peerjs";
 
 const CHUNKED_MTU = 16_300;
 
+/**
+ * Bound for the overflow case below: it packs, chunks and reassembles a
+ * 200000-entry frame synchronously, with no wait in it. It runs 0.6s alone
+ * against vitest's 5s default, and 11.0s with the rest of the unit suite
+ * competing for the same cores, which is the contention that reddened it. Sized
+ * well past that worst measurement, this stays a hang safety check rather than a
+ * claim about how fast the packer runs.
+ */
+const OVERFLOW_FRAME_TIMEOUT_MS = 60_000;
+
 /** The real packer's bytes for `value`. `pack` returns a promise only for a
  * `Blob`, which no frame here is, so the synchronous branch is the only
  * reachable one -- asserted rather than assumed, since an awaited-by-accident
@@ -150,19 +160,23 @@ describe("packOutboundFramesIteratively", () => {
     expect(reassemble(fake.datagrams)).toEqual(libraryBytes(frame));
   });
 
-  test("sends a frame the pinned packer overflows the stack on", () => {
-    const { fake, conn } = standIn();
-    const frame = iterationMap(200_000);
-    expect(() => pack(frame as Packable)).toThrow(RangeError);
+  test(
+    "sends a frame the pinned packer overflows the stack on",
+    () => {
+      const { fake, conn } = standIn();
+      const frame = iterationMap(200_000);
+      expect(() => pack(frame as Packable)).toThrow(RangeError);
 
-    packOutboundFramesIteratively(conn);
-    fake.send(frame);
+      packOutboundFramesIteratively(conn);
+      fake.send(frame);
 
-    const reassembled = reassemble(fake.datagrams);
-    expect(unpack<Unpackable>(reassembled as unknown as ArrayBuffer)).toEqual(
-      frame,
-    );
-  });
+      const reassembled = reassemble(fake.datagrams);
+      expect(unpack<Unpackable>(reassembled as unknown as ArrayBuffer)).toEqual(
+        frame,
+      );
+    },
+    OVERFLOW_FRAME_TIMEOUT_MS,
+  );
 
   test("leaves the in-band close sentinel byte-identical", () => {
     const { fake, conn } = standIn();

@@ -38,6 +38,16 @@ const ENTRY_OVERHEAD_BYTES = 128;
  */
 const ADMITTED_STEPS_PER_TRANSFORMATION = 16;
 
+/**
+ * Bound for the two cases that compose an intent at every schema maximum: they
+ * are synchronous walks of the widest spec the boundary admits, with no wait in
+ * them. The heaviest runs 1.1s alone against vitest's 5s default, and 16.2s with
+ * the rest of the unit suite competing for the same cores, which is the
+ * contention that reddened it. Sized well past that worst measurement, this
+ * stays a hang safety check rather than a claim about how fast a compose runs.
+ */
+const WIDEST_COMPOSE_TIMEOUT_MS = 60_000;
+
 function paddedName(prefix: string, index: number): string {
   const head = `${prefix}${index}_`;
   return head + "x".repeat(MAX_NAME_LENGTH - head.length);
@@ -95,33 +105,41 @@ describe("the hand-off cap covers the create intent's schema maxima", () => {
     expect(MAX_JOB_HANDOFF_RESPONSE_BYTES).toBeGreaterThan(derived);
   });
 
-  test("the widest template the compose admits reaches the client under the cap", async () => {
-    const handoff = buildJobHandoff(
-      widestIntent(ADMITTED_STEPS_PER_TRANSFORMATION),
-      testSftpServerEntry(),
-      { credentialPasted: false, filedropSplit: false },
-    );
-    const body = JSON.stringify(handoff);
-    expect(new TextEncoder().encode(body).byteLength).toBeLessThan(
-      MAX_JOB_HANDOFF_RESPONSE_BYTES,
-    );
-    const parsed = await fetchRecurringHandoff("job-1", () =>
-      Promise.resolve(jobJsonResponse(handoff)),
-    );
-    expect(parsed).not.toBeNull();
-    expect(parsed?.template).toEqual(handoff.template);
-  });
-
-  test("a standardization block past the compose's node budget mints no hand-off at all", () => {
-    // The steps a schema-valid intent may carry outrun what core's compose
-    // walks, so that intent fails at job creation rather than composing a
-    // template no cap covers.
-    expect(() =>
-      buildJobHandoff(
-        widestIntent(MAX_STANDARDIZATION_STEPS),
+  test(
+    "the widest template the compose admits reaches the client under the cap",
+    async () => {
+      const handoff = buildJobHandoff(
+        widestIntent(ADMITTED_STEPS_PER_TRANSFORMATION),
         testSftpServerEntry(),
         { credentialPasted: false, filedropSplit: false },
-      ),
-    ).toThrow(/node count/);
-  });
+      );
+      const body = JSON.stringify(handoff);
+      expect(new TextEncoder().encode(body).byteLength).toBeLessThan(
+        MAX_JOB_HANDOFF_RESPONSE_BYTES,
+      );
+      const parsed = await fetchRecurringHandoff("job-1", () =>
+        Promise.resolve(jobJsonResponse(handoff)),
+      );
+      expect(parsed).not.toBeNull();
+      expect(parsed?.template).toEqual(handoff.template);
+    },
+    WIDEST_COMPOSE_TIMEOUT_MS,
+  );
+
+  test(
+    "a standardization block past the compose's node budget mints no hand-off at all",
+    () => {
+      // The steps a schema-valid intent may carry outrun what core's compose
+      // walks, so that intent fails at job creation rather than composing a
+      // template no cap covers.
+      expect(() =>
+        buildJobHandoff(
+          widestIntent(MAX_STANDARDIZATION_STEPS),
+          testSftpServerEntry(),
+          { credentialPasted: false, filedropSplit: false },
+        ),
+      ).toThrow(/node count/);
+    },
+    WIDEST_COMPOSE_TIMEOUT_MS,
+  );
 });
