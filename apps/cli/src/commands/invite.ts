@@ -79,6 +79,7 @@ import {
 import {
   buildDataSpec,
   connectionFromEndpoint,
+  describeInputSource,
   endpointFromConnection,
   DEFAULT_ACCEPT_TIMEOUT_SECONDS,
   expiresFromNow,
@@ -229,9 +230,11 @@ function mintPreflightMessaging(configPath: string): LinkagePreflightMessaging {
 /**
  * The same mint-time wording for the online path, whose linkage terms are
  * derived from the input file's own columns rather than read from a
- * configuration: `inputPath` names that file, composed raw like `configPath`
- * above. Nobody has authored a terms document here, so the keyless refusal
- * leads with the input-side remedy the shortfall refusal already gives.
+ * configuration: `inputPath` names that file, unlike `configPath` above the
+ * online path's input may be the stdin sentinel `-`, so it is named through
+ * {@link describeInputSource} rather than composed raw. Nobody has authored
+ * a terms document here, so the keyless refusal leads with the input-side
+ * remedy the shortfall refusal already gives.
  */
 function onlineMintPreflightMessaging(
   inputPath: string,
@@ -244,7 +247,7 @@ function onlineMintPreflightMessaging(
       "accepted them.",
     blockRemedy:
       "then generate the invitation again; these terms are derived from " +
-      `${inputPath}.`,
+      `${describeInputSource(inputPath)}.`,
     termsStanding: "draft",
     keylessRemedyLead: COVER_REQUIRED_FIELD_TYPES,
   };

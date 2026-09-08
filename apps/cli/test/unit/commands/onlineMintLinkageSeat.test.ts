@@ -39,6 +39,7 @@ import {
   runOnlineBootstrap,
 } from "../../../src/onlineBootstrap";
 import type { CommonBootstrapOptions } from "../../../src/optionDefinitions";
+import { streamOf, withStdin } from "../../stdinStream";
 
 const silentLog = getLogger("online-mint-linkage-seat-test");
 silentLog.setLevel("silent");
@@ -104,7 +105,7 @@ test("the online mint states a draft shortfall without claiming an agreement", a
   // input side can act on, and it names the file the terms came from.
   expect(rendered).toContain(
     "Provide a CSV that covers the required field types, then generate the " +
-      `invitation again; these terms are derived from ${input}.`,
+      `invitation again; these terms are derived from the CSV input ${input}.`,
   );
   // Nobody has agreed to these terms and nobody has seen them, so the refusal
   // may neither call them agreed nor send the operator to renegotiate.
@@ -116,6 +117,37 @@ test("the online mint states a draft shortfall without claiming an agreement", a
   // boundary, where it is stated on the agreed standing. The mint refuses
   // first, so on this path that grading is never entered for a shortfall.
   expect(prepareForOnlineExchange).not.toHaveBeenCalled();
+});
+
+test("the online mint names the stdin source, not the `-` sentinel, when the input is piped", async () => {
+  const { options } = fixture(UNLINKABLE_CSV);
+  let thrown: unknown;
+  try {
+    await withStdin(streamOf(UNLINKABLE_CSV), () =>
+      validateInvite({
+        resolved: {
+          mode: "online",
+          url: new URL("sftp://host/drop"),
+          input: "-",
+        },
+        options,
+        acceptTimeout: 900,
+        log: silentLog,
+      }),
+    );
+  } catch (err) {
+    thrown = err;
+  }
+  expect(thrown).toBeInstanceOf(LinkageTermsUnsatisfiableError);
+  const rendered = sanitizeErrorForDisplay(thrown);
+  // The input positional may be the stdin sentinel `-`; the remedy names what
+  // it stands for rather than the sentinel itself.
+  expect(rendered).toContain(
+    "Provide a CSV that covers the required field types, then generate the " +
+      "invitation again; these terms are derived from the CSV read from " +
+      "stdin.",
+  );
+  expect(rendered).not.toContain("derived from -.");
 });
 
 test("the refused online mint prints no invitation and opens no connection", async () => {
