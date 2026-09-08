@@ -11,6 +11,7 @@ import {
   disclosedColumnNames,
   hasMultipleIdentifiers,
   normalizeForEditor,
+  setColumnDisclosure,
 } from "@psi/metadataEditing";
 
 import {
@@ -534,11 +535,35 @@ interface AcceptorPayloadDeclarationConflict {
   sentButNotDeclared: Array<string>;
   /**
    * Columns the declaration names that the marks do not send -- core's
-   * OVER-declaration, in the order the declaration lists them. Partner-controlled
-   * names ({@link AcceptorDeclaredColumnGap}), whose remedy leads with a corrected
+   * OVER-declaration, distinct and in the order the declaration first lists them
+   * ({@link declaredNotSentNames}). Partner-controlled names
+   * ({@link AcceptorDeclaredColumnGap}), whose remedy leads with a corrected
    * invitation or a different file.
    */
   declaredButNotSent: Array<AcceptorDeclaredColumnGap>;
+}
+
+/**
+ * The declaration's column names this party's marks do not send, raw and in
+ * declaration order -- partner-controlled text, escaped by whichever sink paints it
+ * ({@link AcceptorDeclaredColumnGap}). The one derivation of that set: the notice's
+ * list, its remedies and the cost of taking its widening offer
+ * ({@link acceptorSendingExpectedColumnsCostsKey}) read the same names, whole,
+ * whatever the notice paints.
+ *
+ * DISTINCT, keeping each name's first position: a declaration may name the same
+ * column twice, which is still one column to list, one to mark and one to speak
+ * about, so every consumer counts columns rather than declaration entries.
+ */
+function declaredNotSentNames(
+  invitationTerms: LinkageTerms,
+  metadata: Metadata,
+): Array<string> {
+  const disclosed = new Set(acceptorDisclosedColumns(metadata));
+  const declared = new Set(
+    (invitationTerms.payload?.receive ?? []).map((column) => column.name),
+  );
+  return [...declared].filter((name) => !disclosed.has(name));
 }
 
 /**
@@ -575,14 +600,14 @@ export function acceptorPayloadDeclarationConflict(
   const declaredNames = declared.map((column) => column.name);
   const disclosed = acceptorDisclosedColumns(metadata);
   const declaredSet = new Set(declaredNames);
-  const disclosedSet = new Set(disclosed);
   const sentButNotDeclared = disclosed.filter((name) => !declaredSet.has(name));
-  const declaredButNotSent = declaredNames
-    .filter((name) => !disclosedSet.has(name))
-    .map((name) => ({
-      displayName: sanitizeForDisplay(name),
-      inFile: metadata.some((column) => column.name === name),
-    }));
+  const declaredButNotSent = declaredNotSentNames(
+    invitationTerms,
+    metadata,
+  ).map((name) => ({
+    displayName: sanitizeForDisplay(name),
+    inFile: metadata.some((column) => column.name === name),
+  }));
   if (sentButNotDeclared.length === 0 && declaredButNotSent.length === 0)
     return undefined;
   return {
@@ -648,6 +673,88 @@ function declarationConflictWording(
     launchBlockedReason:
       "Resolve the columns that do not match what your partner expects above before you can start.",
   };
+}
+
+/**
+ * The columns the notice's widening offer would mark: the declared names this
+ * party's marks do not send that the operator's file HAS, distinct and in
+ * declaration order ({@link declaredNotSentNames}).
+ */
+function widenableDeclaredColumns(
+  linkageTerms: LinkageTerms,
+  metadata: Metadata,
+): Array<string> {
+  return declaredNotSentNames(linkageTerms, metadata).filter((name) =>
+    metadata.some((column) => column.name === name),
+  );
+}
+
+/**
+ * How many columns the notice's widening offer would mark
+ * ({@link widenableDeclaredColumns}), which is what its wording is about: a
+ * declaration naming one held column twice offers one column, not two.
+ */
+export function acceptorWidenableDeclaredColumnCount(
+  linkageTerms: LinkageTerms,
+  metadata: Metadata,
+): number {
+  return widenableDeclaredColumns(linkageTerms, metadata).length;
+}
+
+/**
+ * Whether taking the notice's widening offer would cost an agreed linkage key:
+ * marking every declared-but-unsent column this file HAS
+ * ({@link widenableDeclaredColumns}) to "Sent to your partner" leaves fewer keys
+ * satisfiable than the current marks do. Each column has a single use, so a column
+ * the file matches on stops matching once it is sent, and the run is then refused
+ * for a key the input can no longer satisfy -- the offer would move the operator
+ * from one refusal to the next.
+ *
+ * Measured over the WHOLE declared-but-unsent set, not the names the notice paints,
+ * so the cost is the one the operator can actually take on under a declaration
+ * longer than the notice's list bound.
+ *
+ * The hypothetical marks are the operator's own edit ({@link setColumnDisclosure},
+ * the call the grid's "How it is used" control makes) and are graded by the same
+ * derivation the gate runs ({@link acceptorColumnsEditorState} then
+ * {@link acceptorVerdict}), so the caveat cannot state a cost the run does not
+ * charge. Both gradings read no rows: rows fix only the date-of-birth input format
+ * the cleaning parses with, which grades a key dead rather than unsatisfiable, and
+ * the count compared here is of satisfiable keys. The prediction is held to the
+ * operator's real post-edit state, rows included, in
+ * apps/web/test/unit/acceptorColumns.test.ts.
+ */
+export function acceptorSendingExpectedColumnsCostsKey(
+  columns: Array<string>,
+  linkageTerms: LinkageTerms,
+  state: AcceptorColumnsState,
+): boolean {
+  const widenable = widenableDeclaredColumns(linkageTerms, state.metadata);
+  if (widenable.length === 0) return false;
+  const widened = widenable.reduce(
+    (metadata, name) => setColumnDisclosure(metadata, name, "payload").metadata,
+    state.metadata,
+  );
+  return (
+    satisfiableKeysUnderMarks(columns, linkageTerms, {
+      ...state,
+      metadata: widened,
+    }) < satisfiableKeysUnderMarks(columns, linkageTerms, state)
+  );
+}
+
+/** How many agreed keys the marks in `state` leave satisfiable, through the
+ * derivation the step's own verdict runs. */
+function satisfiableKeysUnderMarks(
+  columns: Array<string>,
+  linkageTerms: LinkageTerms,
+  state: AcceptorColumnsState,
+): number {
+  return acceptorVerdict(
+    columns,
+    linkageTerms,
+    acceptorColumnsEditorState(state, linkageTerms, []),
+  ).satisfiableKeyCount;
 }
 
 /** Whether the metadata has more than one identifier column, shown as the
