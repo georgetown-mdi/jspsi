@@ -1,9 +1,45 @@
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 
 import PSI from "@openmined/psi.js";
 
+// The grouping cases below drive a round a candidate set widened, which the
+// strategy allowlist keeps unreachable in the shipped build
+// (CANDIDATE_SET_IMPLEMENTED_BY_STRATEGY, linkageTermsPolicy.ts). Flipping the
+// entry changes nothing for the fan-out-free runs the rest of this file
+// drives: a round holding one value per record takes the same path either way.
+// The few cases that pin a refusal on the shipped setting close the gate for
+// their own run through withCandidateSetGate below.
+const candidateSetGate = vi.hoisted(() => ({ open: true }));
+
+vi.mock("../src/linkageTermsPolicy", async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import("../src/linkageTermsPolicy")>();
+  return {
+    ...original,
+    candidateSetIsImplementedForStrategy: () => candidateSetGate.open,
+  };
+});
+
+async function withCandidateSetGate<T>(
+  open: boolean,
+  run: () => Promise<T>,
+): Promise<T> {
+  candidateSetGate.open = open;
+  try {
+    return await run();
+  } finally {
+    candidateSetGate.open = true;
+  }
+}
+
 import { PSIParticipant } from "../src/psi/participant";
-import { linkViaPSI, linkViaSinglePassPSI } from "../src/psi/link";
+import {
+  linkViaPSI,
+  linkViaSinglePassPSI,
+  type LinkageCardinality,
+} from "../src/psi/link";
+import { readPartnerRoundGrouping } from "../src/psi/roundGrouping";
+import { UNBOUNDED_PSI_ELEMENTS } from "./utils/psiElementBounds";
 import {
   MAX_RECORD_COUNT,
   psiElementBounds,
@@ -114,7 +150,7 @@ async function cascadeWithDeviation(deviate: Deviation): Promise<unknown> {
     makeParticipant("starter"),
     deviatingInbound(starterConn, deviate),
     starterKeys,
-    ROWS,
+    fanOutFreeBounds(starterKeys.length, ROWS),
     -1,
   );
   const joinerRun = linkViaPSI(
@@ -122,7 +158,7 @@ async function cascadeWithDeviation(deviate: Deviation): Promise<unknown> {
     makeParticipant("joiner"),
     joinerConn,
     joinerKeys,
-    ROWS,
+    fanOutFreeBounds(joinerKeys.length, ROWS),
     -1,
   );
   const outcome = await starterRun.then(
@@ -146,7 +182,7 @@ async function cascadeWithJoinerDeviation(
     makeParticipant("starter"),
     starterConn,
     starterKeys,
-    ROWS,
+    fanOutFreeBounds(starterKeys.length, ROWS),
     -1,
   );
   const joinerRun = linkViaPSI(
@@ -158,7 +194,7 @@ async function cascadeWithJoinerDeviation(
         : frame,
     ),
     joinerKeys,
-    ROWS,
+    fanOutFreeBounds(joinerKeys.length, ROWS),
     -1,
   );
   const outcome = await joinerRun.then(
@@ -942,7 +978,7 @@ test("an untouched exchange is unaffected by the checks", async () => {
       makeParticipant("starter"),
       starterConn,
       starterKeys,
-      ROWS,
+      fanOutFreeBounds(starterKeys.length, ROWS),
       -1,
     ),
     linkViaPSI(
@@ -950,11 +986,412 @@ test("an untouched exchange is unaffected by the checks", async () => {
       makeParticipant("joiner"),
       joinerConn,
       joinerKeys,
-      ROWS,
+      fanOutFreeBounds(joinerKeys.length, ROWS),
       -1,
     ),
   ]);
   expect(starterResult[0]).toStrictEqual([1, 2]);
   expect(starterResult[1]).toStrictEqual(joinerResult[0]);
   expect(joinerResult[1]).toStrictEqual(starterResult[0]);
+});
+
+// --- The round's per-round grouping -------------------------------------------
+// A cascade round a candidate set widened holds each party's own grouping on
+// the frame it sends: the receiver's association table as a third element, the
+// sender's original-index list as a second beside it. The grouping is the
+// partner's own word, bounded but not verifiable, so every bound below is a
+// quantity the checking party already holds -- the frame's own already-checked
+// index list, the width the agreed terms declare, and the record count the
+// partner declared on the terms exchange (docs/spec/PROTOCOL.md, The checks
+// stay local).
+
+type Cells = Array<Array<string | Set<string> | undefined>>;
+
+// Each party's row 0 realizes two candidates and row 1 one, so both send the
+// run-length grouping [2, 1] over three matched positions.
+const WIDENED_STARTER_KEYS: Cells = [[new Set(["A", "B"]), "C"]];
+const WIDENED_JOINER_KEYS: Cells = [[new Set(["A", "B"]), "C"]];
+
+type Grouping = Array<number | Array<number>>;
+
+// Frame 4 as a widened round sends it: the association table's two index halves
+// with the sending party's grouping beside them.
+function onRoundTable(
+  transform: (table: [number[], number[], Grouping | undefined]) => unknown,
+): Deviation {
+  return (frame) =>
+    Array.isArray(frame) && Array.isArray(frame[0]) && Array.isArray(frame[1])
+      ? transform(frame as [number[], number[], Grouping | undefined])
+      : frame;
+}
+
+// Frame 5 as a widened round sends it, and as an unwidened one does: the
+// original-index list alone, or that list with the grouping beside it.
+function onRoundIndexList(
+  transform: (list: Array<number>, grouping: Grouping | undefined) => unknown,
+): Deviation {
+  return (frame) => {
+    if (!Array.isArray(frame)) return frame;
+    if (frame.length > 0 && frame.every((entry) => typeof entry === "number"))
+      return transform(frame as Array<number>, undefined);
+    if (
+      frame.length === 2 &&
+      Array.isArray(frame[0]) &&
+      Array.isArray(frame[1])
+    )
+      return transform(frame[0] as Array<number>, frame[1] as Grouping);
+    return frame;
+  };
+}
+
+// Width one, so the per-record ceiling is the bare fan-out factor and a
+// deviation can cross it inside a three-position round.
+async function widenedRound(
+  party: "starter" | "joiner",
+  deviate: Deviation,
+  starterKeys: Cells = WIDENED_STARTER_KEYS,
+  joinerKeys: Cells = WIDENED_JOINER_KEYS,
+  starterCardinality: LinkageCardinality = "one-to-one",
+): Promise<unknown> {
+  const [starterConn, joinerConn] = createMessagePipe();
+  const bounds = (partnerRows: number) => ({
+    partnerRecordCount: partnerRows,
+    keyWidths: [1],
+  });
+  // The element bound is the round's own, derived per message; a widened round
+  // legitimately encrypts more elements than its row count, so these fixtures
+  // are not the place to pin it.
+  const wideParticipant = (role: "starter" | "joiner") =>
+    new PSIParticipant(
+      role === "starter" ? "server" : "client",
+      psiLibrary,
+      { role, verbose: -1 },
+      UNBOUNDED_PSI_ELEMENTS,
+    );
+  const starterRun = linkViaPSI(
+    { cardinality: starterCardinality },
+    wideParticipant("starter"),
+    party === "starter" ? deviatingInbound(starterConn, deviate) : starterConn,
+    starterKeys,
+    bounds(joinerKeys[0].length),
+    -1,
+  );
+  const joinerRun = linkViaPSI(
+    {
+      cardinality:
+        starterCardinality === "many-to-one"
+          ? "one-to-many"
+          : starterCardinality === "one-to-many"
+            ? "many-to-one"
+            : starterCardinality,
+    },
+    wideParticipant("joiner"),
+    party === "joiner" ? deviatingInbound(joinerConn, deviate) : joinerConn,
+    joinerKeys,
+    bounds(starterKeys[0].length),
+    -1,
+  );
+  const under = party === "starter" ? starterRun : joinerRun;
+  const outcome = await under.then(
+    () => undefined,
+    (err: unknown) => err,
+  );
+  await starterConn.close();
+  await joinerRun.catch(() => undefined);
+  await starterRun.catch(() => undefined);
+  return outcome;
+}
+
+test("a widened round runs untouched", async () => {
+  expect(await widenedRound("starter", (frame) => frame)).toBeUndefined();
+});
+
+test("the round refuses a grouping with a zero-length run", async () => {
+  const err = await widenedRound(
+    "starter",
+    onRoundTable((table) => [table[0], table[1], [0, 3]]),
+  );
+  expectProtocolRefusal(err, /not a positive whole number/);
+});
+
+test("the round refuses a grouping whose runs sum short", async () => {
+  const err = await widenedRound(
+    "starter",
+    onRoundTable((table) => [table[0], table[1], [2]]),
+  );
+  expectProtocolRefusal(err, /summing to 2, not the 3 matched position/);
+});
+
+test("the round refuses a grouping whose runs sum long", async () => {
+  const err = await widenedRound(
+    "starter",
+    onRoundTable((table) => [table[0], table[1], [2, 2]]),
+  );
+  expectProtocolRefusal(err, /summing past the matched positions/);
+});
+
+test("the round refuses a run longer than the key's candidate count", async () => {
+  const err = await widenedRound(
+    "starter",
+    onRoundTable((table) => [table[0], table[1], [21]]),
+  );
+  expectProtocolRefusal(err, /longer than the candidate count one record may/);
+});
+
+test("the round refuses a fractional run length", async () => {
+  const err = await widenedRound(
+    "starter",
+    onRoundTable((table) => [table[0], table[1], [1.5, 1.5]]),
+  );
+  expectProtocolRefusal(err, /not a positive whole number/);
+});
+
+test("the round refuses an owner list where run lengths are due", async () => {
+  const err = await widenedRound(
+    "starter",
+    onRoundTable((table) => [table[0], table[1], [[0], [0], [1]]]),
+  );
+  expectProtocolRefusal(err, /states an owner list where its side/);
+});
+
+test("the mirror role refuses the same grouping on the original-index list", async () => {
+  const err = await widenedRound(
+    "joiner",
+    onRoundIndexList((list) => [list, [0, 3]]),
+  );
+  expectProtocolRefusal(err, /not a positive whole number/);
+});
+
+test("the mirror role refuses a grouping the frame's own length contradicts", async () => {
+  const err = await widenedRound(
+    "joiner",
+    onRoundIndexList((list) => [list, [1, 1]]),
+  );
+  expectProtocolRefusal(err, /summing to 2, not the 3 matched position/);
+});
+
+// The ragged form: the starter deduplicates and fans out, so one of its matched
+// positions is owned by several records while one of its records owns several
+// positions. The joiner reads that form, its side of the resolved cardinality
+// fixing which one is due.
+const RAGGED_STARTER_KEYS: Cells = [[new Set(["A", "B"]), "A", "C"]];
+const RAGGED_JOINER_KEYS: Cells = [["A", "B", "C"]];
+
+function raggedRound(deviate: Deviation): Promise<unknown> {
+  return widenedRound(
+    "joiner",
+    deviate,
+    RAGGED_STARTER_KEYS,
+    RAGGED_JOINER_KEYS,
+    "many-to-one",
+  );
+}
+
+test("a ragged round runs untouched", async () => {
+  expect(await raggedRound((frame) => frame)).toBeUndefined();
+});
+
+test("the round refuses an owner list per position that misses a position", async () => {
+  const err = await raggedRound(onRoundIndexList((list) => [list, [[0, 1]]]));
+  expectProtocolRefusal(err, /1 owner list\(s\), not the 3 matched position/);
+});
+
+test("the round refuses a matched position with no owner", async () => {
+  const err = await raggedRound(
+    onRoundIndexList((list) => [list, [[0, 1], [], [2]]]),
+  );
+  expectProtocolRefusal(err, /leaves a matched position with no owner/);
+});
+
+test("the round refuses an owner list that is not strictly ascending", async () => {
+  const err = await raggedRound(
+    onRoundIndexList((list) => [list, [[1, 0], [0], [2]]]),
+  );
+  expectProtocolRefusal(err, /not a strictly ascending list of whole numbers/);
+});
+
+test("the round refuses an owner list repeating one ordinal", async () => {
+  const err = await raggedRound(
+    onRoundIndexList((list) => [list, [[0, 0], [0], [2]]]),
+  );
+  expectProtocolRefusal(err, /not a strictly ascending list of whole numbers/);
+});
+
+test("the round refuses a grouping that skips an ordinal", async () => {
+  const err = await raggedRound(
+    onRoundIndexList((list) => [list, [[0, 2], [0], [2]]]),
+  );
+  expectProtocolRefusal(err, /skips an ordinal/);
+});
+
+test("the round refuses a grouping naming more records than the partner counted", async () => {
+  const err = await raggedRound(
+    onRoundIndexList((list) => [list, [[0, 1], [0], [3]]]),
+  );
+  expectProtocolRefusal(err, /names 4 record\(s\), more than the 3 record/);
+});
+
+test("the round refuses run lengths where an owner list is due", async () => {
+  const err = await raggedRound(onRoundIndexList((list) => [list, [2, 1, 1]]));
+  expectProtocolRefusal(err, /states run lengths where its side/);
+});
+
+test("the round refuses an ordinal above the entries the grouping holds", async () => {
+  const err = await raggedRound(
+    onRoundIndexList((list) => [list, [[0, 1], [0], [5_000_000]]]),
+  );
+  expectProtocolRefusal(err, /skips an ordinal/);
+});
+
+// --- What a grouping may size ------------------------------------------------
+// An ordinal is the partner's own word and the record count it is held to
+// reaches MAX_RECORD_COUNT, so a read that sized a structure by an ordinal
+// before checking it would let one entry reserve gigabytes. The probe counts
+// every Int32Array the read constructs and holds each to the frame's own size.
+
+function int32ArrayLengths(run: () => unknown): {
+  outcome: unknown;
+  lengths: Array<number>;
+} {
+  const lengths: Array<number> = [];
+  const real = globalThis.Int32Array;
+  globalThis.Int32Array = new Proxy(real, {
+    construct(target, args: Array<unknown>) {
+      if (typeof args[0] === "number") lengths.push(args[0]);
+      return Reflect.construct(target, args) as object;
+    },
+  }) as Int32ArrayConstructor;
+  try {
+    return { outcome: run(), lengths };
+  } catch (err: unknown) {
+    return { outcome: err, lengths };
+  } finally {
+    globalThis.Int32Array = real;
+  }
+}
+
+const HIGH_ORDINAL_POSITIONS = [0, 1, 2];
+
+function readHighOrdinalGrouping(): unknown {
+  return readPartnerRoundGrouping(
+    [[0], [1], [5_000_000]],
+    HIGH_ORDINAL_POSITIONS,
+    {
+      participantId: "party",
+      maxPositionsPerRecord: 20,
+      partnerRecordCount: MAX_RECORD_COUNT,
+      ownerLists: true,
+    },
+  );
+}
+
+test("an ordinal far above the frame's own size allocates nothing on its scale", () => {
+  const { outcome, lengths } = int32ArrayLengths(readHighOrdinalGrouping);
+  expectProtocolRefusal(outcome, /skips an ordinal/);
+  // The slot boundaries are the widest thing a grouping of three positions
+  // legitimately needs; nothing is sized by the ordinal itself.
+  expect(Math.max(...lengths)).toBeLessThanOrEqual(
+    HIGH_ORDINAL_POSITIONS.length + 1,
+  );
+});
+
+// One ordinal in more positions than the key's candidate count, which needs a
+// round wider than that count to state at all: 21 matched positions against a
+// per-record ceiling of 20.
+const WIDE_VALUES = Array.from({ length: 21 }, (_unused, i) => `V${i}`);
+
+test("the round refuses a grouping giving one record more positions than the key admits", async () => {
+  const err = await widenedRound(
+    "joiner",
+    onRoundIndexList((list) => [list, WIDE_VALUES.map(() => [0])]),
+    [WIDE_VALUES],
+    [WIDE_VALUES],
+    "many-to-one",
+  );
+  expectProtocolRefusal(err, /more positions than the candidate count/);
+});
+
+// --- The mapped-element pass's canonical position -----------------------------
+
+test("the round refuses a mapped-element entry naming a non-canonical position", async () => {
+  // Position 1 is one the starter's row 0 owns, but its canonical position --
+  // the lowest of the round's matched positions it owns -- is 0. Without the
+  // canonical rule the injectivity the pass rests on does not hold.
+  const err = await widenedRound(
+    "starter",
+    onMappedElementList(1, (list) =>
+      list.map((entry) =>
+        entry.theirIndex === 0 ? { ...entry, theirIndex: 1 } : entry,
+      ),
+    ),
+  );
+  expectProtocolRefusal(err, /names a position other than the canonical one/);
+});
+
+// --- A position beyond what a round's slot index addresses --------------------
+// Every bound a round position passes upstream is the partner's own declared
+// element count, which reaches far past the range an index holds, so the round
+// itself refuses a position at or above 2^31 rather than letting one wrap into
+// its slot index. Both roles read a position list -- the starter the
+// association table's partner half, the joiner the original-index list -- and
+// both take the refusal whether or not the strategy allowlist admits a
+// candidate set.
+
+const BEYOND_INDEX_RANGE = 2 ** 31;
+
+// One entry of the list moved past the range, the rest left as the honest
+// partner computed them, so the frame breaks nothing else.
+function nameBeyondIndexRange(list: Array<number>): Array<number> {
+  return list.map((position, entry) =>
+    entry === 0 ? BEYOND_INDEX_RANGE : position,
+  );
+}
+
+const beyondRangeOnRoundTable = onRoundTable((table) => [
+  nameBeyondIndexRange(table[0]),
+  ...table.slice(1),
+]);
+
+const beyondRangeOnRoundIndexList = onRoundIndexList((list, grouping) =>
+  grouping === undefined
+    ? nameBeyondIndexRange(list)
+    : [nameBeyondIndexRange(list), grouping],
+);
+
+// One value per record, so the round runs on the gate's shipped setting too.
+const FLAT_STARTER_KEYS: Cells = [["A", "B", "C"]];
+const FLAT_JOINER_KEYS: Cells = [["A", "B", "C"]];
+
+test("the round refuses a position beyond what its slot index addresses", async () => {
+  const err = await widenedRound("starter", beyondRangeOnRoundTable);
+  expectProtocolRefusal(err, /outside that round's candidate set/);
+});
+
+test("the mirror role refuses the same position on the original-index list", async () => {
+  const err = await widenedRound("joiner", beyondRangeOnRoundIndexList);
+  expectProtocolRefusal(err, /outside that round's candidate set/);
+});
+
+test("the round refuses that position with the candidate-set gate closed", async () => {
+  const err = await withCandidateSetGate(false, () =>
+    widenedRound(
+      "starter",
+      beyondRangeOnRoundTable,
+      FLAT_STARTER_KEYS,
+      FLAT_JOINER_KEYS,
+    ),
+  );
+  expectProtocolRefusal(err, /outside that round's candidate set/);
+});
+
+test("the mirror role refuses it with the candidate-set gate closed", async () => {
+  const err = await withCandidateSetGate(false, () =>
+    widenedRound(
+      "joiner",
+      beyondRangeOnRoundIndexList,
+      FLAT_STARTER_KEYS,
+      FLAT_JOINER_KEYS,
+    ),
+  );
+  expectProtocolRefusal(err, /outside that round's candidate set/);
 });

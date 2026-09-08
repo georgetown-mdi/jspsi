@@ -1,6 +1,27 @@
-import { associationTableMessage, type PSIParticipant } from "./participant";
+import {
+  associationTableMessage,
+  type PSIParticipant,
+  type RoundGroupingExchange,
+} from "./participant";
+import {
+  candidatePositionCount,
+  describeLocalRoundGrouping,
+  ownsSeveralPositions,
+  positionRowRange,
+  readPartnerRoundGrouping,
+  type LocalRoundGrouping,
+  type RoundCandidates,
+  type RoundGroupingField,
+  type RoundOwnership,
+} from "./roundGrouping";
+import {
+  resolveRoundCandidatePairs,
+  type ResolvedRound,
+  type RoundAcceptance,
+} from "./roundResolution";
 import type { AssociationTable } from "../types";
 import {
+  ConnectionError,
   receiveParsed,
   parseOrProtocolError,
   type MessageConnection,
@@ -31,6 +52,7 @@ import {
   type PartnerIndexRules,
 } from "../utils/partnerIndices";
 import {
+  candidateSetIsImplementedForStrategy,
   COUNT_ONLY_SHAPE_REFUSALS,
   manyToManyIsImplementedForStrategy,
 } from "../linkageTermsPolicy";
@@ -73,106 +95,80 @@ interface IndexableIterable<T> extends Iterable<T> {
   [index: number]: T | undefined;
 }
 
-// The cascade and the count-only round run one value per record, so a record
-// with several candidates is refused rather than narrowed to one candidate or
-// dropped -- either would match on less than the terms declare. Key
+// The value a round that resolves no candidate set reads a record through: a
+// record holding several is refused rather than narrowed to one candidate or
+// dropped, either of which would match on less than the terms declare. Key
 // realization holds the whole candidate set (buildKeyStrings), so this is the
-// one point those two strategies read a record's value through; single-pass,
-// the one strategy fan-out matching is specified for, consumes the set
-// instead (docs/spec/PROTOCOL.md, Fan-out matching).
+// point a round applies the refusal at. A count-only round is held to it
+// unconditionally -- psi-c counts matched VALUES where the resolution accepts
+// at most one pair per record, so a candidate set would over-report the
+// linkage the count is used to justify -- while the cascade applies it behind
+// the strategy allowlist (docs/spec/PROTOCOL.md, The combinations that stay
+// unsupported).
 function requireSingleCandidate(value: KeyCandidates): string | undefined {
   if (value === undefined || typeof value === "string") return value;
   throw fanOutReachedMatchingRefusal();
 }
 
-function getUnidentifiedIndices(
-  indexIterationMap: IndexIterationMap,
-): Array<number> {
-  return indexIterationMap.reduce((acc, x, i) => {
-    if (!x) acc.push(i);
-    return acc;
-  }, [] as Array<number>);
-}
+/** @internal re-exported for the round-construction tests. */
+export { candidatePositionCount };
 
-// Maps each value occurring exactly once in valueAt(0..count-1) to its index,
-// in first-appearance order -- callers rely on this order to build identical
-// outputs. Undefined values are ignored. Keeps one first-seen-index map plus
-// a set of the recurring values rather than three maps: deleting a recurring
-// value from the map preserves the survivors' insertion order, so the
-// first-appearance order holds without a separate pass.
-function reduceToSingletons<T>(
-  count: number,
-  valueAt: (index: number) => T | undefined,
-): Map<T, number> {
-  const firstIndex = new Map<T, number>();
-  const recurring = new Set<T>();
-  for (let i = 0; i < count; ++i) {
-    const value = valueAt(i);
-    if (value === undefined) continue;
-    if (firstIndex.has(value)) recurring.add(value);
-    else firstIndex.set(value, i);
+// Walks this party's rows in ascending order, visiting each candidate value a
+// row contributes to the round in the order realization produced them. That
+// walk is what makes the candidate lists below ROW-MAJOR: one record's
+// candidates are contiguous and records ascend, so ascending position order is
+// ascending own-row order (docs/spec/PROTOCOL.md, The round's candidate list is
+// row-major). `undefined` means the row has no value for this key -- "" is a
+// real value and is kept (docs/spec/PROTOCOL.md, Key input data).
+function forEachCandidate(
+  data: ReadonlyArray<KeyCandidates>,
+  visit: (row: number, value: string) => void,
+): void {
+  for (let i = 0; i < data.length; ++i) {
+    const candidates = data[i];
+    if (candidates === undefined) continue;
+    if (typeof candidates === "string") visit(i, candidates);
+    else for (const value of candidates) visit(i, value);
   }
-  for (const value of recurring) firstIndex.delete(value);
-  return firstIndex;
 }
 
-// Adapts reduceToSingletons for the cascade: undefined means "no value for this
-// key" (but "" is a real value, kept). `permutation` maps a survivor's index back
-// to its original row when the input is a carried-forward subset of a later round.
-// See docs/spec/PROTOCOL.md (Key input data).
-/** @internal */
+/**
+ * The round's candidate list for a party that DROPS its within-round
+ * duplicates: each value exactly one of this party's candidate records holds,
+ * against that record.
+ *
+ * The uniqueness rule applies per VALUE rather than per record, so a record
+ * whose other candidates are unique keeps them, and a record whose every
+ * candidate is a duplicate participates with nothing
+ * (docs/spec/PROTOCOL.md, Value-level round participation). Keeps one
+ * first-seen-row map plus a set of the recurring values rather than three
+ * maps: deleting a recurring value preserves the survivors' insertion order,
+ * which is the row-major order.
+ *
+ * `permutation` maps a survivor's index back to its original row when the
+ * input is a carried-forward subset of a later round.
+ *
+ * @internal
+ */
 export function removeDuplicatesAndUndefineds(
-  dataWithDuplicatesAndUndefineds: Array<string | undefined>,
+  dataWithDuplicatesAndUndefineds: ReadonlyArray<KeyCandidates>,
   permutation?: Array<number>,
 ): [Array<string>, Array<number>] {
-  const singletons = reduceToSingletons<string>(
-    dataWithDuplicatesAndUndefineds.length,
-    (i) => dataWithDuplicatesAndUndefineds[i],
-  );
+  const firstRow = new Map<string, number>();
+  const recurring = new Set<string>();
+  forEachCandidate(dataWithDuplicatesAndUndefineds, (row, value) => {
+    const first = firstRow.get(value);
+    if (first === undefined) firstRow.set(value, row);
+    else if (first !== row) recurring.add(value);
+  });
+  for (const value of recurring) firstRow.delete(value);
   const data: Array<string> = [];
   const originalIndices: Array<number> = [];
-  for (const [value, i] of singletons) {
+  for (const [value, i] of firstRow) {
     data.push(value);
     originalIndices.push(permutation ? permutation[i] : i);
   }
   return [data, originalIndices];
-}
-
-/**
- * One round's `(record, value)` incidence for this party: position `k` of the
- * round's PSI set stands for the local rows at
- * `rows[groupStarts[k] .. groupStarts[k + 1])`, ascending.
- *
- * `groupStarts` is absent where every position stands for exactly one row (a
- * non-deduplicating party, which drops a value two or more of its rows
- * hold). A deduplicating ("many") party keeps such a value once, standing it
- * for the group of rows holding it (docs/spec/PROTOCOL.md, Matching
- * multiplicity: the (record, value) incidence).
- *
- * @internal exported for the round-construction tests.
- */
-interface RoundCandidates {
-  readonly rows: Array<number>;
-  readonly groupStarts?: Array<number>;
-}
-
-/** @internal how many positions this round's PSI set holds. */
-export function candidatePositionCount(candidates: RoundCandidates): number {
-  return candidates.groupStarts
-    ? candidates.groupStarts.length - 1
-    : candidates.rows.length;
-}
-
-// The half-open slice of `rows` that position `position` stands for. Without
-// groups a position IS its row, so the slice is the one-element `[k, k + 1)` and
-// the two layouts read through one loop.
-function positionRowRange(
-  candidates: RoundCandidates,
-  position: number,
-): [number, number] {
-  return candidates.groupStarts
-    ? [candidates.groupStarts[position], candidates.groupStarts[position + 1]]
-    : [position, position + 1];
 }
 
 /**
@@ -190,15 +186,13 @@ function positionRowRange(
  * @internal exported for the round-construction tests.
  */
 export function groupDuplicatesAndRemoveUndefineds(
-  dataWithDuplicatesAndUndefineds: Array<string | undefined>,
+  dataWithDuplicatesAndUndefineds: ReadonlyArray<KeyCandidates>,
   permutation?: Array<number>,
 ): [Array<string>, RoundCandidates] {
   const positionOf = new Map<string, number>();
   const data: Array<string> = [];
   const rowsByPosition: Array<Array<number>> = [];
-  for (let i = 0; i < dataWithDuplicatesAndUndefineds.length; ++i) {
-    const value = dataWithDuplicatesAndUndefineds[i];
-    if (value === undefined) continue;
+  forEachCandidate(dataWithDuplicatesAndUndefineds, (i, value) => {
     let position = positionOf.get(value);
     if (position === undefined) {
       position = data.length;
@@ -206,8 +200,10 @@ export function groupDuplicatesAndRemoveUndefineds(
       data.push(value);
       rowsByPosition.push([]);
     }
-    rowsByPosition[position].push(permutation ? permutation[i] : i);
-  }
+    const group = rowsByPosition[position];
+    const row = permutation ? permutation[i] : i;
+    if (group[group.length - 1] !== row) group.push(row);
+  });
   const rows: Array<number> = [];
   const groupStarts: Array<number> = new Array(rowsByPosition.length + 1);
   groupStarts[0] = 0;
@@ -381,6 +377,245 @@ export function attributableRoundMatches(
 }
 
 /**
+ * The authenticated session state a linkage run derives its per-round bounds
+ * from: the per-key widths the AGREED terms declare, which both parties
+ * derive identically with no advertisement, and the partner's declared
+ * record count, exchanged over the encrypted channel. Nothing here is read
+ * from an inbound linkage frame.
+ */
+export interface SessionBounds {
+  /**
+   * The partner's declared record count, exchanged over the encrypted channel
+   * during role resolution. It is the partner's row count times its own local
+   * fan-out factor.
+   */
+  readonly partnerRecordCount: number;
+  /**
+   * The candidate values one record may contribute to each agreed linkage
+   * key, positionally aligned with `data` and derived from the agreed terms
+   * alone ({@link declaredKeyWidth}), so both parties hold the identical
+   * vector.
+   */
+  readonly keyWidths: ReadonlyArray<number>;
+}
+
+// The most of a round's matched positions one record may own: the width the
+// agreed terms declare for the key, times the factor a party's own
+// standardization may declare. That factor is admitted unconditionally, the
+// cascade holding no quotient to recover it with as single-pass does from its
+// reply's row count (docs/spec/PROTOCOL.md, The checks stay local).
+function keyWidthBound(bounds: SessionBounds, key: number): number {
+  const width = bounds.keyWidths[key];
+  if (!Number.isInteger(width) || width < 1)
+    throw new InternalConsistencyError(
+      `a linkage round needs a declared width for key ${key + 1}`,
+    );
+  return width * FAN_OUT_CANDIDATES_PER_ELEMENT;
+}
+
+// A side is held to one accepted pair per round exactly when it is NOT the
+// "one" side of a deduplicating cardinality -- which is to say, when the other
+// side does not hold the multiplicity. Both parties derive the same pair from
+// their mirror labels and their own PSI role.
+function roundAcceptance(
+  sides: MultiplicitySides,
+  localIsSender: boolean,
+): RoundAcceptance {
+  const senderKeeps = localIsSender
+    ? sides.localKeepsDuplicates
+    : sides.partnerKeepsDuplicates;
+  const receiverKeeps = localIsSender
+    ? sides.partnerKeepsDuplicates
+    : sides.localKeepsDuplicates;
+  return {
+    senderAcceptsOnce: !receiverKeeps,
+    receiverAcceptsOnce: !senderKeeps,
+  };
+}
+
+// The mapped-element entry each of one side's accepted records would state:
+// the canonical position of the partner record it was accepted against, one
+// entry per record (docs/spec/PROTOCOL.md, The final mapped-element entry
+// names a canonical position). A record accepted against partner records at
+// two DIFFERENT canonical positions has no such entry, and the map is
+// withheld rather than picking one of them.
+function entriesAcceptedRecordsWouldState(
+  acceptedRanks: ReadonlyArray<number>,
+  partnerRanks: ReadonlyArray<number>,
+  partnerCanonicalPosition: Int32Array,
+): Map<number, number> | undefined {
+  const named = new Map<number, number>();
+  for (let p = 0; p < acceptedRanks.length; ++p) {
+    const position = partnerCanonicalPosition[partnerRanks[p]];
+    const already = named.get(acceptedRanks[p]);
+    if (already === undefined) named.set(acceptedRanks[p], position);
+    else if (already !== position) return undefined;
+  }
+  return named;
+}
+
+// Whether the pass reading those entries recovers the round's accepted records
+// one at a time. It takes each entry for the WHOLE group behind the position it
+// names, so the named groups have to be disjoint and hold accepted records
+// only, together covering every one of them; and a naming side that keeps no
+// duplicates may not name one position twice, holding one record per position
+// to name it with (docs/spec/PROTOCOL.md, Deriving one table from the exchanged
+// association maps).
+function entriesStateEachRecordOnce(
+  entries: Map<number, number>,
+  namingSideKeepsDuplicates: boolean,
+  readerOwnership: RoundOwnership,
+  readerAccepted: ReadonlySet<number>,
+): boolean {
+  const namedPositions = new Set<number>();
+  const covered = new Set<number>();
+  for (const position of entries.values()) {
+    if (namedPositions.has(position)) {
+      if (!namingSideKeepsDuplicates) return false;
+      continue;
+    }
+    namedPositions.add(position);
+    const slot = readerOwnership.slotOfPosition.get(position);
+    if (slot === undefined) return false;
+    for (
+      let o = readerOwnership.starts[slot];
+      o < readerOwnership.starts[slot + 1];
+      ++o
+    ) {
+      const ordinal = readerOwnership.ordinals[o];
+      if (!readerAccepted.has(ordinal) || covered.has(ordinal)) return false;
+      covered.add(ordinal);
+    }
+  }
+  return covered.size === readerAccepted.size;
+}
+
+// A round whose accepted pairs the two mapped-element lists have no way to
+// state: one record accepted against two of the partner's candidate groups,
+// two records sharing a group accepted against different partner records, or
+// any sibling shape leaving an entry per record naming one canonical position
+// short of the round's pairs. Both parties resolve the same accepted pairs from
+// the same two groupings, so both refuse the same round rather than one
+// stranding the other, and a conforming partner reaches every one of these
+// shapes from the two parties' own data, so none is a partnerProtocolError.
+function assertRoundStatesEachRecordOnce(
+  participantId: string,
+  resolved: ResolvedRound,
+  sides: MultiplicitySides,
+  localIsSender: boolean,
+  localOwnership: RoundOwnership,
+  partnerOwnership: RoundOwnership,
+): void {
+  const [senderOwnership, receiverOwnership] = localIsSender
+    ? [localOwnership, partnerOwnership]
+    : [partnerOwnership, localOwnership];
+  const [senderKeeps, receiverKeeps] = localIsSender
+    ? [sides.localKeepsDuplicates, sides.partnerKeepsDuplicates]
+    : [sides.partnerKeepsDuplicates, sides.localKeepsDuplicates];
+  const senderEntries = entriesAcceptedRecordsWouldState(
+    resolved.acceptedSenderRanks,
+    resolved.acceptedReceiverRanks,
+    receiverOwnership.canonicalPosition,
+  );
+  const receiverEntries = entriesAcceptedRecordsWouldState(
+    resolved.acceptedReceiverRanks,
+    resolved.acceptedSenderRanks,
+    senderOwnership.canonicalPosition,
+  );
+  if (
+    senderEntries !== undefined &&
+    receiverEntries !== undefined &&
+    entriesStateEachRecordOnce(
+      senderEntries,
+      senderKeeps,
+      receiverOwnership,
+      new Set(resolved.acceptedReceiverRanks),
+    ) &&
+    entriesStateEachRecordOnce(
+      receiverEntries,
+      receiverKeeps,
+      senderOwnership,
+      new Set(resolved.acceptedSenderRanks),
+    )
+  )
+    return;
+  throw new ConnectionError(
+    `${participantId}: a linkage key matched records a cascade exchange ` +
+      "cannot report one at a time: it names one of the partner's candidate " +
+      "groups per matched record. Run these linkage terms under the " +
+      "single-pass linkage strategy, or remove the step that expands one " +
+      "value into several match candidates.",
+    "protocol",
+  );
+}
+
+function stillInCandidacy(outOfCandidacy: Uint8Array): Array<number> {
+  const rows: Array<number> = [];
+  for (let i = 0; i < outOfCandidacy.length; ++i)
+    if (!outOfCandidacy[i]) rows.push(i);
+  return rows;
+}
+
+// One round's two groupings: this party's own, built from the candidate list
+// it holds and put on the frame it sends, and the partner's, checked as it
+// arrives and read into the partition the sweep runs over
+// (docs/spec/PROTOCOL.md, The per-round grouping the two frames hold). Where
+// the strategy allowlist admits no candidate set neither frame holds one, and
+// the round drives both sides from its own output instead: the partner's is
+// then the one-owner-per-position partition an absent grouping states.
+class RoundGrouping implements RoundGroupingExchange {
+  private localGrouping: LocalRoundGrouping | undefined;
+  private partnerOwnership: RoundOwnership | undefined;
+
+  constructor(
+    private readonly participantId: string,
+    private readonly candidates: RoundCandidates,
+    private readonly sides: MultiplicitySides,
+    private readonly maxPositionsPerRecord: number,
+    private readonly partnerRecordCount: number,
+  ) {}
+
+  describe(
+    matchedPositions: ReadonlyArray<number>,
+  ): RoundGroupingField | undefined {
+    this.localGrouping = describeLocalRoundGrouping(
+      this.candidates,
+      matchedPositions,
+      this.sides.localKeepsDuplicates,
+    );
+    return this.localGrouping.field;
+  }
+
+  accept(
+    field: RoundGroupingField | undefined,
+    matchedPositions: ReadonlyArray<number>,
+  ): void {
+    this.partnerOwnership = readPartnerRoundGrouping(field, matchedPositions, {
+      participantId: this.participantId,
+      maxPositionsPerRecord: this.maxPositionsPerRecord,
+      partnerRecordCount: this.partnerRecordCount,
+      ownerLists: this.sides.partnerKeepsDuplicates,
+    });
+  }
+
+  local(): LocalRoundGrouping {
+    if (this.localGrouping === undefined)
+      throw new InternalConsistencyError(
+        "a linkage round resolved before it stated its own grouping",
+      );
+    return this.localGrouping;
+  }
+
+  partner(): RoundOwnership {
+    if (this.partnerOwnership === undefined)
+      throw new InternalConsistencyError(
+        "a linkage round resolved before it read the partner's grouping",
+      );
+    return this.partnerOwnership;
+  }
+}
+
+/**
  * Runs the PSI linkage protocol over one or more linkage keys and returns the
  * matched row indices.
  *
@@ -410,13 +645,11 @@ export function attributableRoundMatches(
  * @param conn - Open connection to the exchange partner.
  * @param data - One entry per linkage key: an iterable over all local
  *   records yielding each record's value for that key, or `undefined` if it
- *   has none. A record yielding a candidate SET is refused -- fan-out
- *   matching runs under single-pass only (docs/spec/PROTOCOL.md, Fan-out
- *   matching).
- * @param partnerRecordCount - The partner's declared record count (its rows
- *   times its own fan-out factor), exchanged during role resolution. Bounds
- *   the partner-returned row indices before they reach the returned table
- *   (utils/partnerIndices.ts).
+ *   has none. A record yielding a candidate SET is resolved by the round's
+ *   grouping where the strategy allowlist admits one and refused where it
+ *   does not (docs/spec/PROTOCOL.md, Per-round candidacy under cascade).
+ * @param bounds - The authenticated session state the round's checks read;
+ *   see {@link SessionBounds}.
  * @param verbosity - Log verbosity level (default 0).
  * @param setStage - Optional callback invoked with a progress label at each
  *   key round.
@@ -436,13 +669,14 @@ export async function linkViaPSI(
   participant: PSIParticipant,
   conn: MessageConnection,
   data: Array<IndexableIterable<KeyCandidates>>,
-  partnerRecordCount: number,
+  bounds: SessionBounds,
   verbosity: number = 0,
   setStage?: (id: string) => void,
 ) {
   if (participant.config.role === "either")
     throw new Error("participants role is unresolved");
   const sendFirst = participant.config.role === "starter";
+  const { partnerRecordCount } = bounds;
 
   const log = getLoggerForVerbosity("psiLink", verbosity);
   setStage = setStage ?? (() => {});
@@ -450,31 +684,58 @@ export async function linkViaPSI(
   log.debug(`${participant.id}: linking using ${data.length} key(s) via PSI`);
 
   const sides = multiplicitySides(protocol.cardinality);
+  // Under the cascade the starter is the PSI sender and the joiner the
+  // receiver, so the canonical (sender row, receiver row) order the resolution
+  // fixes is the starter/joiner one and both parties read it the same way.
+  const localIsSender = sendFirst;
+  const acceptance = roundAcceptance(sides, localIsSender);
+  // A candidate set reaches a round only under a strategy whose resolution for
+  // one is built; the gate is the allowlist, so a linkage_strategy added later
+  // refuses one until its own resolution is written
+  // (docs/spec/PROTOCOL.md, The combinations that stay unsupported). The same
+  // entry gates the grouping's place on the round's two position-naming
+  // frames, so a closed entry leaves both frames as the single-valued cascade
+  // sends and reads them.
+  const resolvesCandidateSets = candidateSetIsImplementedForStrategy("cascade");
+  const readCandidates: (value: KeyCandidates) => KeyCandidates =
+    resolvesCandidateSets ? (value) => value : requireSingleCandidate;
+
   let indexIterationMap: IndexIterationMap = [];
+  // Matched and out-of-candidacy diverge once a candidate set widens a round: a
+  // record whose candidates matched but which the sweep left unpaired ends the
+  // exchange unmatched and still must not enter a later round
+  // (docs/spec/PROTOCOL.md, Removal on a potential match). Without a widening
+  // the two coincide.
+  let outOfCandidacy = new Uint8Array(0);
   const candidatesByIter: Array<RoundCandidates> = [];
-  // The count of POSITIONS this party matched, which the count of matched
-  // RECORDS below exceeds only on the "many" side, where one position stands for
-  // a group. It is what a list arriving from the "one" side is held to, that side
-  // naming each matched position exactly once.
-  let numMatchedPositions = 0;
+  // The lowest of the round's matched positions each of this party's accepted
+  // records owns, which is the position the partner's mapped-element entry for
+  // that record names (docs/spec/PROTOCOL.md, The final mapped-element entry
+  // names a canonical position).
+  let canonicalPositionOf = new Int32Array(0);
+  // The count of the PARTNER's records this round accepted -- one per accepted
+  // pair on that side -- which is what its mapped-element list is held to. It
+  // reads accepted records rather than matched positions because a candidate
+  // set puts several positions behind one record (docs/spec/PROTOCOL.md, The
+  // round's symmetry check reads accepted records).
+  let numPartnerAcceptedRecords = 0;
 
   for (let j = 0; j < data.length; ++j) {
     setStage(`stage ${j + 1} / ${data.length}`);
-    let dataWithDuplicatesAndUndefineds: Array<string | undefined>;
+    let dataWithDuplicatesAndUndefineds: Array<KeyCandidates>;
     let unidentifiedIndices: Array<number> | undefined;
     if (j === 0) {
-      dataWithDuplicatesAndUndefineds = Array.from(
-        data[j],
-        requireSingleCandidate,
-      );
+      dataWithDuplicatesAndUndefineds = Array.from(data[j], readCandidates);
       indexIterationMap = Array(dataWithDuplicatesAndUndefineds.length).fill(
         undefined,
       );
+      outOfCandidacy = new Uint8Array(indexIterationMap.length);
+      canonicalPositionOf = new Int32Array(indexIterationMap.length).fill(-1);
       log.debug(`${participant.id}: ${indexIterationMap.length} total records`);
     } else {
-      unidentifiedIndices = getUnidentifiedIndices(indexIterationMap);
+      unidentifiedIndices = stillInCandidacy(outOfCandidacy);
       dataWithDuplicatesAndUndefineds = unidentifiedIndices.map((i) => {
-        return requireSingleCandidate(data[j][i]);
+        return readCandidates(data[j][i]);
       });
     }
     // The within-round rule this party applies to its own values, which is the
@@ -513,43 +774,131 @@ export async function linkViaPSI(
     log.debug(
       `${participant.id}: running psi on key ${j + 1} / ${data.length}:`,
     );
+    const round = new RoundGrouping(
+      participant.id,
+      candidates,
+      sides,
+      keyWidthBound(bounds, j),
+      partnerRecordCount,
+    );
     const [myIndices, theirIndices] = await participant.identifyIntersection(
       conn,
       data_j,
+      resolvesCandidateSets ? round : undefined,
     );
+    if (!resolvesCandidateSets) {
+      // With the grouping off the wire each party derives the partition an
+      // absent grouping states -- one owner per matched position -- from its
+      // own round output, which is what the round holds where no candidate
+      // set widened it (docs/spec/PROTOCOL.md, An absent grouping is all
+      // ones).
+      round.describe(myIndices);
+      round.accept(undefined, theirIndices);
+    }
 
     log.debug(
       `${participant.id}: key ${j + 1}/${data.length}: ${myIndices.length} ` +
         "match(es) found",
     );
 
-    if (sides.localKeepsDuplicates) {
-      // A match on a position is attributed to EVERY record in the group behind
-      // it, which is the whole of the widening; the group leaves candidacy with
-      // it, so multiplicity stays within-round and a later, weaker key cannot add
-      // a link onto a group an earlier key formed.
-      const attributable = attributableRoundMatches(myIndices, theirIndices);
-      numMatchedPositions += attributable.size;
-      for (const [position, partnerPosition] of attributable) {
-        const [from, to] = positionRowRange(candidates, position);
-        for (let r = from; r < to; ++r) {
-          indexIterationMap[candidates.rows[r]] = {
-            theirIndex: partnerPosition,
-            iteration: j,
-          };
-        }
-      }
-    } else {
-      numMatchedPositions += myIndices.length;
-      for (let ii = 0; ii < myIndices.length; ++ii) {
-        const i = candidates.rows[myIndices[ii]];
+    // A position of ours the partner named MORE THAN ONCE is a value two or
+    // more of its records hold: where the "one" side did not drop it, the
+    // "many" party applies that rule on its behalf and the group behind the
+    // value stays eligible for later keys.
+    const attributable = sides.localKeepsDuplicates
+      ? attributableRoundMatches(myIndices, theirIndices)
+      : undefined;
+    const localPositions = attributable
+      ? [...attributable.keys()]
+      : (myIndices as ReadonlyArray<number>);
+    const partnerPositions = attributable
+      ? [...attributable.values()]
+      : (theirIndices as ReadonlyArray<number>);
 
-        indexIterationMap[i] = {
-          theirIndex: theirIndices[ii],
-          iteration: j,
-        };
-      }
+    const local = round.local();
+    const partner = round.partner();
+    const senderRanks: Array<number> = [];
+    const receiverRanks: Array<number> = [];
+    for (let m = 0; m < localPositions.length; ++m) {
+      // Both groupings partition the very index lists the round's frames
+      // named, so every matched position of either party has a slot.
+      const mine = local.ownership.slotOfPosition.get(localPositions[m]);
+      const theirs = partner.slotOfPosition.get(partnerPositions[m]);
+      if (mine === undefined || theirs === undefined)
+        throw new InternalConsistencyError(
+          "a linkage round matched a position no grouping of the round names",
+        );
+      for (
+        let a = local.ownership.starts[mine];
+        a < local.ownership.starts[mine + 1];
+        ++a
+      )
+        for (
+          let b = partner.starts[theirs];
+          b < partner.starts[theirs + 1];
+          ++b
+        ) {
+          senderRanks.push(
+            localIsSender ? local.ownership.ordinals[a] : partner.ordinals[b],
+          );
+          receiverRanks.push(
+            localIsSender ? partner.ordinals[b] : local.ownership.ordinals[a],
+          );
+        }
     }
+    const resolved = resolveRoundCandidatePairs(
+      senderRanks,
+      receiverRanks,
+      acceptance,
+    );
+    // The round's accepted pairs stop being statable one record at a time only
+    // where a record owns two of the round's matched positions, so a round no
+    // candidate set widened skips the pass rather than walking every accepted
+    // pair and every named group.
+    if (ownsSeveralPositions(local.ownership) || ownsSeveralPositions(partner))
+      assertRoundStatesEachRecordOnce(
+        participant.id,
+        resolved,
+        sides,
+        localIsSender,
+        local.ownership,
+        partner,
+      );
+    const localAccepted = localIsSender
+      ? resolved.acceptedSenderRanks
+      : resolved.acceptedReceiverRanks;
+    const partnerAccepted = localIsSender
+      ? resolved.acceptedReceiverRanks
+      : resolved.acceptedSenderRanks;
+    const partnerAcceptedRecords = new Set<number>();
+    for (let p = 0; p < localAccepted.length; ++p) {
+      partnerAcceptedRecords.add(partnerAccepted[p]);
+      const row = local.rowOfOrdinal[localAccepted[p]];
+      // The entry names the partner's canonical position, which both parties
+      // derive identically from the round's grouping.
+      const theirIndex = partner.canonicalPosition[partnerAccepted[p]];
+      const already = indexIterationMap[row];
+      if (already !== undefined) {
+        if (already.theirIndex !== theirIndex)
+          throw new InternalConsistencyError(
+            "a cascade round accepted one record against two partner " +
+              "positions, which the mapped-element passes cannot state",
+          );
+        continue;
+      }
+      indexIterationMap[row] = { theirIndex, iteration: j };
+      canonicalPositionOf[row] =
+        local.ownership.canonicalPosition[localAccepted[p]];
+    }
+    numPartnerAcceptedRecords += partnerAcceptedRecords.size;
+
+    // Every record standing in ANY of the round's candidate pairs leaves
+    // candidacy, accepted or discarded.
+    const touched = localIsSender
+      ? resolved.touchedSenderRanks
+      : resolved.touchedReceiverRanks;
+    for (const ordinal of touched)
+      outOfCandidacy[local.rowOfOrdinal[ordinal]] = 1;
   }
 
   const [identifiedIndexIterationMap, originalIndices] =
@@ -612,7 +961,7 @@ export async function linkViaPSI(
       participant.id,
       "the partner's mapped-element list",
       theirIdentifiedIndexIterationMap.length,
-      numMatchedPositions,
+      numPartnerAcceptedRecords,
     );
   }
   // Where a position of ours stands for a group, translating an entry EXPANDS it
@@ -666,6 +1015,19 @@ export async function linkViaPSI(
         participant.id,
         "the partner's mapped-element list names a record this side did not " +
           "match on that round",
+      );
+    // Where a candidate set widened this party, one record owns several of the
+    // round's matched positions and only the lowest names it. Without that the
+    // injectivity the pass rests on does not hold, so a position the record
+    // merely owns is refused (docs/spec/PROTOCOL.md, The final mapped-element
+    // entry names a canonical position). A position standing for a GROUP of
+    // this party's records names the group rather than one record, and the
+    // group is what the coverage rule below reads.
+    if (!sides.localKeepsDuplicates && canonicalPositionOf[i] !== e.theirIndex)
+      throw partnerProtocolError(
+        participant.id,
+        "the partner's mapped-element list names a position other than the " +
+          "canonical one of the record it matched",
       );
     if (named[i] === 1) {
       if (!sides.partnerKeepsDuplicates)
@@ -1039,20 +1401,7 @@ export function withholdsSenderAssociationTable(
  * linkage frame, so both parties compute the same numbers and reach the same
  * verdicts.
  */
-export interface SinglePassSessionBounds {
-  /**
-   * The partner's declared record count, exchanged over the encrypted channel
-   * during role resolution. It is the partner's row count times its own local
-   * fan-out factor, which is why the reply's own record count is held to it as an
-   * upper bound rather than an equality.
-   */
-  readonly partnerRecordCount: number;
-  /**
-   * The candidate values one record may contribute to each agreed linkage key,
-   * positionally aligned with `data` and derived from the agreed terms alone
-   * ({@link declaredKeyWidth}), so both parties hold the identical vector.
-   */
-  readonly keyWidths: ReadonlyArray<number>;
+export interface SinglePassSessionBounds extends SessionBounds {
   /**
    * The factor this party's own standardization multiplies its record count
    * by (`localFanOutFactor`, fanOutFunctions.ts). This party's DECLARED
@@ -2084,9 +2433,12 @@ export function replaySinglePassCascade(
           numSenderRecords,
           senderOut,
         );
-    const touchedReceiverRows: Array<number> = [];
-    const touchedSenderRows: Array<number> = [];
-    const acceptedReceiverRows = new Set<number>();
+    // The round's record-level candidate pairs, emitted in the canonical
+    // order the shared sweep resolves them in: the ascending sender-row loop
+    // with each row's receiver candidates sorted. Rows ARE their own ranks
+    // here, this strategy holding both parties' rows.
+    const pairSenderRows: Array<number> = [];
+    const pairReceiverRows: Array<number> = [];
 
     for (let senderRow = 0; senderRow < numSenderRecords; ++senderRow) {
       if (senderOut[senderRow]) continue;
@@ -2106,32 +2458,26 @@ export function replaySinglePassCascade(
         receiverOwners.appendOwners(receiverValue, receiverCandidates);
       }
       if (receiverCandidates.length === 0) continue;
-      // Ascending here plus the ascending sender-row loop is exactly the normative
-      // lexicographic order. Each of the sender row's values, at most the width
-      // its key declares, contributes one receiver row, or the group behind it
-      // where the receiver deduplicates.
       receiverCandidates.sort((a, b) => a - b);
-      touchedSenderRows.push(senderRow);
-      let previous = -1;
-      let senderAccepted = false;
       for (const receiverRow of receiverCandidates) {
-        // Several equal value pairs between the same two records are one
-        // candidate pair.
-        if (receiverRow === previous) continue;
-        previous = receiverRow;
-        touchedReceiverRows.push(receiverRow);
-        if (senderAcceptsOnce && senderAccepted) continue;
-        if (receiverAcceptsOnce) {
-          if (acceptedReceiverRows.has(receiverRow)) continue;
-          acceptedReceiverRows.add(receiverRow);
-        }
-        acceptPair(receiverRow, senderRow);
-        senderAccepted = true;
+        pairSenderRows.push(senderRow);
+        pairReceiverRows.push(receiverRow);
       }
     }
 
-    for (const row of touchedReceiverRows) receiverOut[row] = 1;
-    for (const row of touchedSenderRows) senderOut[row] = 1;
+    const resolved = resolveRoundCandidatePairs(
+      pairSenderRows,
+      pairReceiverRows,
+      { senderAcceptsOnce, receiverAcceptsOnce },
+    );
+    for (let p = 0; p < resolved.acceptedSenderRanks.length; ++p)
+      acceptPair(
+        resolved.acceptedReceiverRanks[p],
+        resolved.acceptedSenderRanks[p],
+      );
+
+    for (const row of resolved.touchedReceiverRanks) receiverOut[row] = 1;
+    for (const row of resolved.touchedSenderRanks) senderOut[row] = 1;
   }
 
   // Walking the receiver's rows ascending, and each row's further sender rows in

@@ -4,6 +4,7 @@ import PSI from "@openmined/psi.js";
 
 import { PSIParticipant } from "../../src/psi/participant";
 import { linkViaPSI } from "../../src/psi/link";
+import { fanOutFreeBounds } from "../utils/singlePassBounds";
 import {
   createMessagePipe,
   ConnectionError,
@@ -113,7 +114,7 @@ async function runCascade(
       makeParticipant("starter"),
       connFor("starter", starterConn),
       starterKeys,
-      joinerKeys[0].length,
+      fanOutFreeBounds(starterKeys.length, joinerKeys[0].length),
       -1,
     ),
   );
@@ -123,7 +124,7 @@ async function runCascade(
       makeParticipant("joiner"),
       connFor("joiner", joinerConn),
       joinerKeys,
-      starterKeys[0].length,
+      fanOutFreeBounds(joinerKeys.length, starterKeys[0].length),
       -1,
     ),
   );
@@ -526,7 +527,7 @@ async function runAgainstNonConformingStarter(
     makeParticipant("joiner"),
     joinerConn,
     joinerKeys,
-    starterValues.length,
+    fanOutFreeBounds(joinerKeys.length, starterValues.length),
     -1,
   ).then(
     (table) => table,
