@@ -6,6 +6,7 @@ import {
 import {
   candidatePositionCount,
   describeLocalRoundGrouping,
+  ownsSeveralPositions,
   positionRowRange,
   readPartnerRoundGrouping,
   type LocalRoundGrouping,
@@ -15,10 +16,12 @@ import {
 } from "./roundGrouping";
 import {
   resolveRoundCandidatePairs,
+  type ResolvedRound,
   type RoundAcceptance,
 } from "./roundResolution";
 import type { AssociationTable } from "../types";
 import {
+  ConnectionError,
   receiveParsed,
   parseOrProtocolError,
   type MessageConnection,
@@ -430,6 +433,62 @@ function roundAcceptance(
   };
 }
 
+// Holds each rank against the one canonical position on the other side it was
+// first accepted against, reporting whether this pair names a second one.
+function heldAgainstAnotherPosition(
+  held: Map<number, number>,
+  rank: number,
+  position: number,
+): boolean {
+  const already = held.get(rank);
+  if (already === undefined) {
+    held.set(rank, position);
+    return false;
+  }
+  return already !== position;
+}
+
+// One record accepted against partner records the round's grouping puts at two
+// different canonical positions, which a cascade round has no form to report:
+// each accepted record names ONE position in the partner's candidate set
+// (docs/spec/PROTOCOL.md, The final mapped-element entry names a canonical
+// position). Both parties resolve the same accepted pairs from the same two
+// groupings, so both refuse the same round; a conforming partner reaches the
+// shape from the two parties' own data, so this is no partnerProtocolError.
+function assertOnePartnerPositionPerAcceptedRecord(
+  participantId: string,
+  resolved: ResolvedRound,
+  senderCanonicalPosition: Int32Array,
+  receiverCanonicalPosition: Int32Array,
+): void {
+  const positionForSender = new Map<number, number>();
+  const positionForReceiver = new Map<number, number>();
+  for (let p = 0; p < resolved.acceptedSenderRanks.length; ++p) {
+    const sender = resolved.acceptedSenderRanks[p];
+    const receiver = resolved.acceptedReceiverRanks[p];
+    if (
+      heldAgainstAnotherPosition(
+        positionForSender,
+        sender,
+        receiverCanonicalPosition[receiver],
+      ) ||
+      heldAgainstAnotherPosition(
+        positionForReceiver,
+        receiver,
+        senderCanonicalPosition[sender],
+      )
+    )
+      throw new ConnectionError(
+        `${participantId}: a linkage key matched one record against two of ` +
+          "the partner's candidate groups, and a cascade exchange reports " +
+          "one partner match per record. Run these linkage terms under the " +
+          "single-pass linkage strategy, or remove the step that expands one " +
+          "value into several match candidates.",
+        "protocol",
+      );
+  }
+}
+
 function stillInCandidacy(outOfCandidacy: Uint8Array): Array<number> {
   const rows: Array<number> = [];
   for (let i = 0; i < outOfCandidacy.length; ++i)
@@ -732,6 +791,20 @@ export async function linkViaPSI(
       receiverRanks,
       acceptance,
     );
+    // A record can be accepted against two of the partner's groups only where
+    // it owns two of the round's matched positions, so a round no candidate
+    // set widened skips the pass rather than tallying every accepted pair.
+    if (ownsSeveralPositions(local.ownership) || ownsSeveralPositions(partner))
+      assertOnePartnerPositionPerAcceptedRecord(
+        participant.id,
+        resolved,
+        localIsSender
+          ? local.ownership.canonicalPosition
+          : partner.canonicalPosition,
+        localIsSender
+          ? partner.canonicalPosition
+          : local.ownership.canonicalPosition,
+      );
     const localAccepted = localIsSender
       ? resolved.acceptedSenderRanks
       : resolved.acceptedReceiverRanks;

@@ -17,7 +17,10 @@ import {
   linkViaSinglePassPSI,
   type LinkageCardinality,
 } from "../../src/psi/link";
-import { createMessagePipe } from "../../src/connection/messageConnection";
+import {
+  createMessagePipe,
+  ConnectionError,
+} from "../../src/connection/messageConnection";
 import type { AssociationTable } from "../../src/types";
 import { sortAssociationTable } from "../../src/testing";
 import { UNBOUNDED_PSI_ELEMENTS } from "../utils/psiElementBounds";
@@ -228,4 +231,39 @@ test("many-to-one, the one side keeps its own within-round uniqueness rule", asy
     [[new Set(["U", "V"]), "U"]],
     [["D", "D", "U"]],
   );
+});
+
+// The one shape the two strategies do NOT agree on, pinned here rather than
+// left to be discovered. A candidate set on the side a deduplicating
+// cardinality relaxes pairs one record with records in two different matched
+// groups. Single-pass names both pairs in the table its receiver resolves,
+// while a cascade round reports one partner position per matched record and so
+// has no form for the second pairing: it refuses the round instead of dropping
+// one of the two. docs/spec/PROTOCOL.md fixes both the sweep that accepts the
+// two pairs (The per-side rules, Resolution) and the pass that names one
+// position per accepted record (The final mapped-element entry names a
+// canonical position), and this fixture is where the two meet.
+test("a candidate set on the one side splits the two strategies", async () => {
+  const manySide: Array<Column> = [["a", "b"]];
+  const oneSide: Array<Column> = [[new Set(["a", "b"])]];
+  const [starter, joiner] = await runSinglePass(
+    "many-to-one",
+    manySide,
+    oneSide,
+  );
+  expect(starter).toStrictEqual([
+    [0, 1],
+    [0, 0],
+  ]);
+  expect(joiner).toStrictEqual([
+    [0, 0],
+    [0, 1],
+  ]);
+
+  const outcome = await runCascade("many-to-one", manySide, oneSide).then(
+    () => undefined,
+    (err: unknown) => err,
+  );
+  expect(outcome).toBeInstanceOf(ConnectionError);
+  expect((outcome as ConnectionError).kind).toBe("protocol");
 });

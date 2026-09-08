@@ -429,14 +429,24 @@ export function describeLocalRoundGrouping(
   };
 }
 
-// Every ordinal owning exactly one position is what "each matched position is
-// the only one its record owns" comes to, so the whole partition is the
-// default reading and the field is left off.
+/**
+ * Whether any of this party's records owns more than one of the round's
+ * matched positions -- the widening a candidate set produces, and the whole of
+ * what makes a grouping worth stating: where no record does, every matched
+ * position is the only one its record owns and the default reading is the
+ * partition (docs/spec/PROTOCOL.md, An absent grouping is all ones).
+ *
+ * @internal
+ */
+export function ownsSeveralPositions(ownership: RoundOwnership): boolean {
+  return ownership.ordinals.length !== ownership.recordCount;
+}
+
 function groupingField(
   ownership: RoundOwnership,
   ownerLists: boolean,
 ): RoundGroupingField | undefined {
-  if (ownership.ordinals.length === ownership.recordCount) return undefined;
+  if (!ownsSeveralPositions(ownership)) return undefined;
   if (ownerLists) {
     const owners: Array<Array<number>> = [];
     for (let t = 0; t < ownership.positions.length; ++t)

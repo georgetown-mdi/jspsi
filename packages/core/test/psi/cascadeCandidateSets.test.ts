@@ -23,6 +23,7 @@ import {
 } from "../../src/psi/link";
 import {
   createMessagePipe,
+  ConnectionError,
   type MessageConnection,
 } from "../../src/connection/messageConnection";
 import type { AssociationTable } from "../../src/types";
@@ -415,4 +416,82 @@ test("a deduplicating party no producer widened still omits its grouping", async
     (frame) => Array.isArray(frame) && Array.isArray(frame[1]),
   );
   expect(grouped).toStrictEqual([]);
+});
+
+// --- a record reaching two of the partner's matched groups --------------------
+// A candidate set on the side a deduplicating cardinality relaxes can pair one
+// record with records in two DIFFERENT matched groups: the sweep accepts a
+// record against every member of a group whatever it has already taken, and
+// its candidates may reach two of them. A cascade round reports one partner
+// position per matched record, so it refuses the shape rather than dropping
+// one of the two pairings -- and both parties, resolving the same accepted
+// pairs from the same two groupings, refuse the same round.
+
+const CROSS_GROUP_ONE_SIDE: Array<Column> = [[new Set(["a", "b"])]];
+const CROSS_GROUP_MANY_SIDE: Array<Column> = [["a", "b"]];
+
+async function settledCascade(
+  starterKeys: Array<Column>,
+  joinerKeys: Array<Column>,
+  starterCardinality: LinkageCardinality,
+): Promise<Array<unknown>> {
+  const [starterConn, joinerConn] = createMessagePipe();
+  const keyWidths = declaredKeyWidths(starterKeys, joinerKeys);
+  const settle = (run: Promise<unknown>): Promise<unknown> =>
+    run.then(
+      (table) => table,
+      (err: unknown) => err,
+    );
+  const outcomes = await Promise.all([
+    settle(
+      linkViaPSI(
+        { cardinality: starterCardinality },
+        makeParticipant("starter"),
+        starterConn,
+        starterKeys,
+        candidateSetBounds(joinerKeys[0].length, keyWidths),
+        -1,
+      ),
+    ),
+    settle(
+      linkViaPSI(
+        { cardinality: mirrorCardinality(starterCardinality) },
+        makeParticipant("joiner"),
+        joinerConn,
+        joinerKeys,
+        candidateSetBounds(starterKeys[0].length, keyWidths),
+        -1,
+      ),
+    ),
+  ]);
+  await starterConn.close();
+  return outcomes;
+}
+
+function expectCrossGroupRefusal(outcome: unknown): void {
+  expect(outcome).toBeInstanceOf(ConnectionError);
+  expect((outcome as ConnectionError).kind).toBe("protocol");
+  expect((outcome as ConnectionError).message).toMatch(
+    /matched one record against two of the partner's candidate groups/,
+  );
+}
+
+test("both parties refuse a record reaching two groups, the one side starting", async () => {
+  const outcomes = await settledCascade(
+    CROSS_GROUP_ONE_SIDE,
+    CROSS_GROUP_MANY_SIDE,
+    "one-to-many",
+  );
+  for (const outcome of outcomes) expectCrossGroupRefusal(outcome);
+});
+
+test("both parties refuse a record reaching two groups, the many side starting", async () => {
+  // The same data in the other role assignment: the refusal is decided by the
+  // resolved pairs rather than by which party holds the PSI sender role.
+  const outcomes = await settledCascade(
+    CROSS_GROUP_MANY_SIDE,
+    CROSS_GROUP_ONE_SIDE,
+    "many-to-one",
+  );
+  for (const outcome of outcomes) expectCrossGroupRefusal(outcome);
 });
