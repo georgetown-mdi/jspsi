@@ -17,6 +17,7 @@ import {
 } from "@psi/linkageStrategyChoice";
 
 import {
+  ReattachNotice,
   UNDESCRIBABLE_RECORD_CONFIRM_BODY,
   UNTAKEN_RECORD_CONFIRM_BODY,
 } from "@exchange/RunSurface";
@@ -691,13 +692,29 @@ describe("console direct re-attaches on a busy create", () => {
         }),
       )
       .toBeInTheDocument();
+    // The lead reads twice -- the polite region announces it, the visible notice
+    // leads with it -- so the visible one is the last of the two.
+    await expect
+      .element(
+        page
+          .getByText("You are back on an exchange this console already holds.")
+          .last(),
+      )
+      .toBeVisible();
+    await expect
+      .element(page.getByTestId("reattach-announcement"))
+      .toHaveTextContent(
+        "You are back on an exchange this console already holds.",
+      );
+    // Body text unique to the visible notice, absent from the hidden
+    // announcement region, so this fails if the notice itself never mounts.
     await expect
       .element(
         page.getByText(
-          "You are back on an exchange this console already holds.",
+          "This exchange was already running here -- from another tab or an earlier visit -- so you are watching it rather than starting a new one.",
         ),
       )
-      .toBeInTheDocument();
+      .toBeVisible();
     expect(
       page
         .getByText("This console is already running an exchange", {
@@ -765,16 +782,19 @@ describe("console direct re-attaches on a busy create", () => {
         }),
       )
       .toBeInTheDocument();
-    await vi.waitFor(() => {
-      const region = Array.from(
-        document.querySelectorAll('[role="status"]'),
-      ).find((el) =>
-        el.textContent.includes(
-          "Reconnecting to the exchange this console already holds",
-        ),
+    await expect
+      .element(page.getByTestId("reattach-announcement"))
+      .toHaveTextContent(
+        "Reconnecting to the exchange this console already holds",
       );
-      expect(region).toBeDefined();
-    });
+    // The visible notice holds no live role of its own: the region announces,
+    // and the notice's body stays in reading order.
+    expect(
+      page
+        .getByText("This console already holds an exchange", { exact: false })
+        .element()
+        .closest('[role="status"], [role="alert"]'),
+    ).toBeNull();
     // No fresh-run keep-open framing flashes during the interim.
     expect(page.getByText("Keep this tab open.").query()).toBeNull();
 
@@ -1214,5 +1234,53 @@ describe("console lobby recurring-exchange surface", () => {
     expect(
       page.getByText("Cleared this browser", { exact: false }).query(),
     ).toBeNull();
+  });
+});
+
+describe("the re-attachment announcement", () => {
+  test("the region is mounted empty and the same node takes each notice", async () => {
+    app.render(
+      createElement(ReattachNotice, {
+        reattaching: false,
+        reattachedRun: false,
+        state: "running",
+      }),
+    );
+
+    // Present through the ordinary fresh run, holding nothing: a region that
+    // appears with its notice is a freshly inserted node rather than a change to
+    // one an assistive technology is already observing.
+    const region = page.getByTestId("reattach-announcement");
+    await expect.element(region).toBeInTheDocument();
+    expect(region.element().textContent).toBe("");
+    const mounted = region.element();
+
+    app.render(
+      createElement(ReattachNotice, {
+        reattaching: true,
+        reattachedRun: false,
+        state: "running",
+      }),
+    );
+    await expect
+      .element(region)
+      .toHaveTextContent(
+        "Reconnecting to the exchange this console already holds",
+      );
+    expect(region.element()).toBe(mounted);
+
+    app.render(
+      createElement(ReattachNotice, {
+        reattaching: false,
+        reattachedRun: true,
+        state: "running",
+      }),
+    );
+    await expect
+      .element(region)
+      .toHaveTextContent(
+        "You are back on an exchange this console already holds.",
+      );
+    expect(region.element()).toBe(mounted);
   });
 });

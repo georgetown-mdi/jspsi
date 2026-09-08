@@ -62,6 +62,25 @@ vi.mock("@tanstack/react-router", async () =>
   }),
 );
 
+// Hold the invitation decode for one test, so the pending phase -- which the
+// screen otherwise leaves within a commit or two of mount -- is observable. With
+// the flag unset it delegates to the real preparation.
+const decodeHarness = vi.hoisted(() => ({ hold: false }));
+vi.mock("@psi/acceptInvitation", async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return {
+    ...actual,
+    prepareAcceptedInvitation: (...args: Array<unknown>) =>
+      decodeHarness.hold
+        ? new Promise(() => undefined)
+        : (
+            actual.prepareAcceptedInvitation as (
+              ...a: Array<unknown>
+            ) => Promise<unknown>
+          )(...args),
+  };
+});
+
 // Defer or fail the CSV parse per-test to observe the parse-behind-consent gate
 // (the loader is untouched until "Accept and continue" fires with consent) and
 // the read-failure path, which a real parse of an inline File cannot reach
@@ -277,6 +296,7 @@ afterEach(() => {
   vi.useRealTimers();
   app.unmount();
   navigation.calls.length = 0;
+  decodeHarness.hold = false;
   csvLoadHarness.defer = false;
   csvLoadHarness.fail = undefined;
   csvLoadHarness.called = 0;
@@ -354,6 +374,22 @@ describe("acceptor screen: decode gate", () => {
     // No rail or ledger on a failed decode -- nothing to review.
     expect(document.querySelector("nav")).toBeNull();
     expect(document.querySelector("aside")).toBeNull();
+  });
+
+  test("the pending line has no live role, so it announces nothing", async () => {
+    decodeHarness.hold = true;
+    window.location.hash = await encodeAcceptToken();
+    app.render(createElement(AcceptorScreen));
+
+    const pending = page.getByText("Reading your invitation...");
+    await expect.element(pending).toBeVisible();
+    // The decode runs once on mount, so this sentence is initial page content
+    // that no later change reaches: a live role on it would assert an
+    // announcement nothing performs. The settle takes focus to the terms, the
+    // block, or the error alert, which is what the other tests here pin.
+    expect(
+      pending.element().closest('[aria-live], [role="status"], [role="alert"]'),
+    ).toBeNull();
   });
 
   test("an empty fragment renders the cannot-accept alert", async () => {

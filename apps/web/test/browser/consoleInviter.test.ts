@@ -891,6 +891,13 @@ describe("console inviter mint and run", () => {
       )
       .toBeInTheDocument();
 
+    // The run-warnings region stands through the whole run, empty until a warning
+    // arrives, so an arrival is a change to a region already being observed
+    // rather than a freshly inserted node.
+    const warningsRegion = page.getByTestId("run-warnings-announcement");
+    await expect.element(warningsRegion).toBeInTheDocument();
+    expect(warningsRegion.element().textContent).toBe("");
+
     // A relay warning (the host-key divergence notice the security review requires
     // the operator to see) appears in the run UI without ending the run.
     api.emitEvent({
@@ -898,9 +905,22 @@ describe("console inviter mint and run", () => {
       type: "warning",
       message: "the two parties pinned different host keys for this server",
     });
+    // The headline reads twice -- the region announces it, the visible Alert is
+    // titled with it -- so the visible one is the last of the two.
     await expect
-      .element(page.getByText("The exchange reported a warning"))
-      .toBeInTheDocument();
+      .element(page.getByText("The exchange reported a warning").last())
+      .toBeVisible();
+    await expect
+      .element(warningsRegion)
+      .toHaveTextContent("The exchange reported a warning");
+    // The region announces the headline alone; the Alert holding the message has
+    // no live role that would voice it a second time.
+    expect(
+      page
+        .getByText("the two parties pinned different host keys for this server")
+        .element()
+        .closest('[role="alert"], [role="status"]'),
+    ).toBeNull();
 
     // The result completes the run on the console's endpoint.
     api.emitEvent({ v: 1, type: "result", resultWritten: true });
@@ -1389,13 +1409,29 @@ describe("console inviter re-attaches on a busy create", () => {
         }),
       )
       .toBeInTheDocument();
+    // The lead reads twice -- the polite region announces it, the visible notice
+    // leads with it -- so the visible one is the last of the two.
+    await expect
+      .element(
+        page
+          .getByText("You are back on an exchange this console already holds.")
+          .last(),
+      )
+      .toBeVisible();
+    await expect
+      .element(page.getByTestId("reattach-announcement"))
+      .toHaveTextContent(
+        "You are back on an exchange this console already holds.",
+      );
+    // Body text unique to the visible notice, absent from the hidden
+    // announcement region, so this fails if the notice itself never mounts.
     await expect
       .element(
         page.getByText(
-          "You are back on an exchange this console already holds.",
+          "This exchange was already running here -- from another tab or an earlier visit -- so you are watching it rather than starting a new one.",
         ),
       )
-      .toBeInTheDocument();
+      .toBeVisible();
     expect(
       page
         .getByText("This console already holds an exchange", { exact: false })

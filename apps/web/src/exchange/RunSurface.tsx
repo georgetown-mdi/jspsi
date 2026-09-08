@@ -1,6 +1,13 @@
 import { useEffect, useRef, useState } from "react";
 
-import { Alert, Button, CopyButton, Group, Modal } from "@mantine/core";
+import {
+  Alert,
+  Button,
+  CopyButton,
+  Group,
+  Modal,
+  VisuallyHidden,
+} from "@mantine/core";
 import { IconAlertCircle, IconAlertTriangle } from "@tabler/icons-react";
 import { Link } from "@tanstack/react-router";
 
@@ -11,6 +18,7 @@ import {
 
 import { dateTimeLabel } from "@psi/formatting";
 import styles from "@styles/app.module.css";
+import { useDeferredAnnouncement } from "@components/useDeferredAnnouncement";
 
 import type { NoResultFileOutputs, RunOutputs } from "@psi/runOutputs";
 import type { JobExchangeRecordOfferState } from "./useJobExchangeRecordOffer";
@@ -722,43 +730,84 @@ export function FailureRecoveryButton({
 }
 
 /**
+ * What the run-warnings region announces for `count` warnings. It states the
+ * count rather than the alert's plural title so each further arrival is a
+ * distinct string: a region set to the text it already holds has not changed,
+ * and a second identical value is silent.
+ */
+function runWarningsAnnouncement(count: number): string {
+  if (count === 0) return "";
+  return count === 1
+    ? "The exchange reported a warning"
+    : `The exchange reported ${count} warnings`;
+}
+
+/**
  * The run's non-fatal warnings, accumulated in arrival order -- the
  * driver's `onWarning` slot rendered for the operator (e.g. the CLI's
  * cross-party host-key divergence notice, which must reach the console
  * operator). Not a terminal and not dismissible: it stays up through
  * completion or failure so a warning cannot be scrolled away by the run
- * finishing. Renders nothing while no warning has arrived. Messages are
- * sanitized by the owning hook at its display boundary before they reach
- * this prop.
+ * finishing. Messages are sanitized by the owning hook at its display
+ * boundary before they reach this prop.
+ *
+ * The polite region is mounted through every phase of the run and announces
+ * the headline alone; the visible Alert holds the messages and takes
+ * `role="presentation"` to displace Mantine's `role="alert"` default, which
+ * would announce each message a second time. Nothing visible renders while no
+ * warning has arrived.
  */
 export function RunWarningsAlert({
   warnings,
 }: {
   warnings: ReadonlyArray<string>;
 }) {
-  if (warnings.length === 0) return null;
+  const announcement = useDeferredAnnouncement(
+    runWarningsAnnouncement(warnings.length),
+  );
   return (
-    <Alert
-      color="yellow"
-      icon={<IconAlertTriangle aria-hidden />}
-      title={
-        warnings.length === 1
-          ? "The exchange reported a warning"
-          : "The exchange reported warnings"
-      }
-      role="status"
-      mb="md"
-    >
-      {warnings.map((message, index) => (
-        // Index keys are stable here: the list is append-only per run and
-        // resets only with the whole run.
-        <p key={index} style={{ whiteSpace: "pre-line", margin: 0 }}>
-          {message}
-        </p>
-      ))}
-    </Alert>
+    <>
+      <VisuallyHidden
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        data-testid="run-warnings-announcement"
+      >
+        {announcement}
+      </VisuallyHidden>
+      {warnings.length > 0 && (
+        <Alert
+          color="yellow"
+          icon={<IconAlertTriangle aria-hidden />}
+          title={
+            warnings.length === 1
+              ? "The exchange reported a warning"
+              : "The exchange reported warnings"
+          }
+          role="presentation"
+          mb="md"
+        >
+          {warnings.map((message, index) => (
+            // Index keys are stable here: the list is append-only per run and
+            // resets only with the whole run.
+            <p key={index} style={{ whiteSpace: "pre-line", margin: 0 }}>
+              {message}
+            </p>
+          ))}
+        </Alert>
+      )}
+    </>
   );
 }
+
+/** The re-attachment notice's lead line, and the whole of what its polite
+ * region announces. */
+const REATTACHED_RUN_LEAD =
+  "You are back on an exchange this console already holds.";
+
+/** The reconnecting notice's lead line, announced the same way. */
+const REATTACHING_LEAD =
+  "Reconnecting to the exchange this console already holds...";
 
 /** The three states a re-attached run can be in, and the control-neutral
  * recovery heading each shows -- shared with the strand-recovery panel
@@ -790,14 +839,13 @@ export function recoveredExchangeHeading(state: ReattachedRunState): string {
  * fresh-run keep-open callout would have. It references no Stop/Discard
  * controls, unlike the strand-recovery panel's body -- the console run
  * column has its own (Try again, Set up another exchange) -- so it stays
- * control-neutral. `role="status"` announces the swap into recovery.
+ * control-neutral. It has no live role: {@link ReattachNotice}'s region
+ * announces the swap into recovery.
  */
-export function ReattachedRunNotice({ state }: { state: ReattachedRunState }) {
+function ReattachedRunNotice({ state }: { state: ReattachedRunState }) {
   return (
-    <div className={styles.callout} role="status">
-      <p className={styles.calloutLead}>
-        You are back on an exchange this console already holds.
-      </p>
+    <div className={styles.callout}>
+      <p className={styles.calloutLead}>{REATTACHED_RUN_LEAD}</p>
       <p className={styles.small}>
         {state === "finished"
           ? "This exchange was already running here -- from another tab or an earlier visit -- and has finished. Its results are below."
@@ -824,23 +872,57 @@ export const RECONNECTING_HEADING = "Reconnecting to your exchange";
 /**
  * The interim notice shown the moment a busy (409) create is detected,
  * before the liveness probe resolves: it stands in for the fresh-run share
- * block (which is suppressed the same instant, so it never flashes) and
- * announces (`role="status"`) that the surface is reconnecting to the
- * exchange already holding the console's slot. It gives way to the full
- * recovery view on a live probe, or to the run's alert when no live
- * exchange is found.
+ * block (which is suppressed the same instant, so it never flashes). It
+ * gives way to the full recovery view on a live probe, or to the run's alert
+ * when no live exchange is found. It has no live role:
+ * {@link ReattachNotice}'s region announces the reconnection.
  */
-export function ReattachingNotice() {
+function ReattachingNotice() {
   return (
-    <div className={styles.callout} role="status">
-      <p className={styles.calloutLead}>
-        Reconnecting to the exchange this console already holds...
-      </p>
+    <div className={styles.callout}>
+      <p className={styles.calloutLead}>{REATTACHING_LEAD}</p>
       <p className={styles.small}>
         This console already holds an exchange. Reconnecting so you can watch it
         here.
       </p>
     </div>
+  );
+}
+
+/**
+ * The re-attachment notice for the state a console run column is in, and the
+ * polite region that announces it. The region is mounted in every phase --
+ * including the ordinary fresh run, where it holds nothing -- so a
+ * re-attachment reaches an assistive technology as a change to a region it is
+ * already observing rather than as a freshly inserted node. The notices
+ * themselves have no live role, so what is announced is the lead line alone;
+ * their bodies stay in reading order.
+ */
+export function ReattachNotice({
+  reattaching,
+  reattachedRun,
+  state,
+}: {
+  reattaching: boolean;
+  reattachedRun: boolean;
+  state: ReattachedRunState;
+}) {
+  const announcement = useDeferredAnnouncement(
+    reattachedRun ? REATTACHED_RUN_LEAD : reattaching ? REATTACHING_LEAD : "",
+  );
+  return (
+    <>
+      <VisuallyHidden
+        role="status"
+        aria-live="polite"
+        aria-atomic="true"
+        data-testid="reattach-announcement"
+      >
+        {announcement}
+      </VisuallyHidden>
+      {reattachedRun && <ReattachedRunNotice state={state} />}
+      {reattaching && !reattachedRun && <ReattachingNotice />}
+    </>
   );
 }
 
