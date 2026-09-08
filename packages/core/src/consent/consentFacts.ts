@@ -1008,6 +1008,48 @@ export const DEDUPLICATE_ACCEPTOR_SETTABLE_SIDE_NOTE =
   "it declares with these terms rather than taking from this invitation.";
 
 /**
+ * The disclosure statement {@link DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT}
+ * makes, written for a seat where each party declares its own `deduplicate`
+ * against terms it read from its own file and no invitation stands between the
+ * two.
+ *
+ * The party-named form cannot be used there. Nothing on that seat tells the
+ * reader which of the two roles is theirs, so a reader mapping "the inviting
+ * party" onto their partner reads the disclosure direction inverted -- the one
+ * thing the sentence exists to state. Here the reader is the party that
+ * declared the setting, and its partner is the party whose matched records the
+ * grouping reaches.
+ *
+ * It states the same three things the party-named form fixes, the integrity
+ * limit it closes on included: the count is the declaring party's own
+ * declaration rather than a fact psilink checks against its data, so dropping
+ * or softening that clause would state a guarantee no check makes.
+ *
+ * Fixed first-party copy naming no value, so a surface may render it verbatim.
+ */
+export const DEDUPLICATE_PARTNER_DECLARED_DISCLOSURE_STATEMENT =
+  "Grouping is what a deduplicating match discloses: for each of your " +
+  "partner's matched records, your partner learns how many of your records " +
+  "share the matched linkage-key value and which of your rows they are -- a " +
+  "count and row positions, never the value behind them, and only for groups " +
+  "that matched. That count is your own declaration, which psilink does not " +
+  "check against your data.";
+
+/**
+ * The widening {@link DEDUPLICATE_ACCEPTOR_WIDENING_NOTE} states, for the seat
+ * whose copy is written in the second person.
+ *
+ * The same disclosure and the same direction: the party paying it is the one
+ * that did not declare the setting, which on this seat is the reader's partner.
+ *
+ * Fixed first-party copy naming no value, so a surface may render it verbatim.
+ */
+export const DEDUPLICATE_PARTNER_DECLARED_WIDENING_NOTE =
+  "It still widens what your partner discloses -- more of its records can " +
+  "match than in a plain one-to-one run of the same two files, each one " +
+  "disclosing its membership and any payload columns it sends.";
+
+/**
  * The same direction note for a seat where each party declares its own
  * `deduplicate` against terms it read from its own file, and no document
  * states the other party's -- the exchange both parties run against an
@@ -1021,13 +1063,17 @@ export const DEDUPLICATE_ACCEPTOR_SETTABLE_SIDE_NOTE =
  * It keeps the widening this party's value costs the partner, and it closes
  * on where the other direction is declared.
  *
+ * Written in the second person, like the statement it follows there, for the
+ * reason {@link DEDUPLICATE_PARTNER_DECLARED_DISCLOSURE_STATEMENT} gives: no
+ * invitation on this seat tells the reader which party role is theirs.
+ *
  * Fixed first-party copy naming no value, so a surface may render it verbatim.
  */
 export const DEDUPLICATE_PARTNER_DECLARED_SIDE_NOTE =
-  "This setting is the inviting party's own. " +
-  DEDUPLICATE_ACCEPTOR_WIDENING_NOTE +
-  " Grouping the accepting party's records is that party's own setting, " +
-  "which it declares on its own run rather than reading from these terms.";
+  "This setting is your own. " +
+  DEDUPLICATE_PARTNER_DECLARED_WIDENING_NOTE +
+  " Grouping your partner's records is that party's own setting, which it " +
+  "declares on its own run rather than reading from these terms.";
 
 /**
  * The two parties' `deduplicate` values against the output shape they are

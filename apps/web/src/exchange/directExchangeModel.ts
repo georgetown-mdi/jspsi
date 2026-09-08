@@ -1,12 +1,11 @@
 import {
   UsageError,
+  assertBothSidedDeduplicateImplemented,
   assessLinkageSatisfiability,
   decideLinkageTermsVerdict,
   getDefaultLinkageTerms,
   inferMetadata,
   overlongDisclosedColumnPositions,
-  resolveLinkageCardinality,
-  sanitizeErrorForDisplay,
 } from "@psilink/core";
 
 import {
@@ -139,28 +138,30 @@ export function directDeduplicateIntentFields(deduplicate: boolean): {
  * `acceptorDeduplicateRefusal` does, where the invitation declares the
  * partner's side and the pair is settled. What it can state exactly is the
  * pair BOTH sides declaring the term resolves to, read from
- * `resolveLinkageCardinality` -- the same boundary the run resolves the joint
- * cardinality at, after the terms exchange and before any key or payload
- * moves -- so the screen names the combination the run would refuse and no
- * others. Today that is the agreed `(true, true)` pair under `single-pass`;
- * core's own message names the strategy to move to and the one-sided pair to
- * fall back to.
+ * `assertBothSidedDeduplicateImplemented` -- the one refusal the run's
+ * cardinality resolution makes over the pair, which the screen's own title
+ * names -- so it states the combination the run would refuse and no others.
+ * Every other refusal `resolveLinkageCardinality` makes reads one document
+ * alone, and titling it as the partner's doing would misattribute it.
+ * Today the pair refused is the agreed `(true, true)` one under
+ * `single-pass`; core's own message names the strategy to move to and the
+ * one-sided pair to fall back to.
  *
- * Returns for every terms document rather than throwing for some: the confirm
- * screen reads it in its render body, where a throw takes the whole route to
- * its error boundary instead of the notice the operator can act on.
+ * Returns that refusal rather than throwing it: the confirm screen reads this
+ * in its render body, where a throw takes the whole route to its error
+ * boundary instead of the notice the operator can act on. Anything else the
+ * assert can raise is left to throw, being a fault rather than a combination
+ * the operator chose.
  */
 export function directBothSidedDeduplicateNotice(
   linkageTerms: LinkageTerms,
 ): string | undefined {
-  if (!linkageTerms.deduplicate) return undefined;
   try {
-    resolveLinkageCardinality(linkageTerms, linkageTerms);
+    assertBothSidedDeduplicateImplemented(linkageTerms, linkageTerms);
     return undefined;
   } catch (error) {
-    return error instanceof UsageError
-      ? error.message
-      : sanitizeErrorForDisplay(error);
+    if (error instanceof UsageError) return error.message;
+    throw error;
   }
 }
 
@@ -265,7 +266,7 @@ export function previewInferredTerms(
   columns: Array<string>,
   identity: string,
   linkageStrategy: LinkageStrategy,
-  deduplicate: boolean = DIRECT_DEDUPLICATE_DEFAULT,
+  deduplicate: boolean,
 ): DirectTermsPreview {
   // Preview over columns the file step already committed: it read the header,
   // holds the sanitized positions, and refuses an empty name before this runs.

@@ -51,6 +51,7 @@ describe("previewInferredTerms", () => {
       LINKABLE_COLUMNS,
       "County Health",
       DIRECT_LINKAGE_STRATEGY_DEFAULT,
+      DIRECT_DEDUPLICATE_DEFAULT,
     );
     const core = getDefaultLinkageTerms(
       "County Health",
@@ -68,6 +69,7 @@ describe("previewInferredTerms", () => {
       LINKABLE_COLUMNS,
       DEFAULT_PREVIEW_IDENTITY,
       DIRECT_LINKAGE_STRATEGY_DEFAULT,
+      DIRECT_DEDUPLICATE_DEFAULT,
     );
     const disclosed = disclosedColumnNames(inferMetadata(LINKABLE_COLUMNS, []));
 
@@ -91,6 +93,7 @@ describe("previewInferredTerms", () => {
       [...LINKABLE_COLUMNS, past],
       "x",
       DIRECT_LINKAGE_STRATEGY_DEFAULT,
+      DIRECT_DEDUPLICATE_DEFAULT,
     );
     expect(preview.overlongDisclosedColumns).toEqual([6]);
     expect(preview.disclosedPayloadColumns).toContain(past);
@@ -102,6 +105,7 @@ describe("previewInferredTerms", () => {
       [...LINKABLE_COLUMNS, atCeiling],
       "x",
       DIRECT_LINKAGE_STRATEGY_DEFAULT,
+      DIRECT_DEDUPLICATE_DEFAULT,
     );
     expect(preview.disclosedPayloadColumns).toContain(atCeiling);
     expect(preview.overlongDisclosedColumns).toEqual([]);
@@ -116,6 +120,7 @@ describe("previewInferredTerms", () => {
       [...LINKABLE_COLUMNS, astral],
       "x",
       DIRECT_LINKAGE_STRATEGY_DEFAULT,
+      DIRECT_DEDUPLICATE_DEFAULT,
     );
     expect(preview.overlongDisclosedColumns).toEqual([6]);
   });
@@ -128,6 +133,7 @@ describe("previewInferredTerms", () => {
       ["notes", "comment"],
       "x",
       DIRECT_LINKAGE_STRATEGY_DEFAULT,
+      DIRECT_DEDUPLICATE_DEFAULT,
     );
     expect(preview.linkageTerms.linkageKeys).toEqual([]);
     expect(preview.refusal?.kind).toBe("no-linkable-key");
@@ -144,6 +150,7 @@ describe("previewInferredTerms", () => {
       ["first_name", "last_name", "date_of_birth"],
       "x",
       DIRECT_LINKAGE_STRATEGY_DEFAULT,
+      DIRECT_DEDUPLICATE_DEFAULT,
     );
     expect(preview.refusal).toBeUndefined();
     expect(
@@ -176,21 +183,35 @@ describe("the direct-exchange linkage strategy", () => {
     // not use -- and would withhold the single-pass disclosure the terms panel
     // raises off this very field.
     expect(
-      previewInferredTerms(LINKABLE_COLUMNS, "x", "single-pass").linkageTerms
-        .linkageStrategy,
+      previewInferredTerms(
+        LINKABLE_COLUMNS,
+        "x",
+        "single-pass",
+        DIRECT_DEDUPLICATE_DEFAULT,
+      ).linkageTerms.linkageStrategy,
     ).toBe("single-pass");
     expect(
-      previewInferredTerms(LINKABLE_COLUMNS, "x", "cascade").linkageTerms
-        .linkageStrategy,
+      previewInferredTerms(
+        LINKABLE_COLUMNS,
+        "x",
+        "cascade",
+        DIRECT_DEDUPLICATE_DEFAULT,
+      ).linkageTerms.linkageStrategy,
     ).toBe("cascade");
   });
 
   test("the strategy does not disturb the inferred keys, fields, or disclosed set", () => {
-    const cascade = previewInferredTerms(LINKABLE_COLUMNS, "x", "cascade");
+    const cascade = previewInferredTerms(
+      LINKABLE_COLUMNS,
+      "x",
+      "cascade",
+      DIRECT_DEDUPLICATE_DEFAULT,
+    );
     const singlePass = previewInferredTerms(
       LINKABLE_COLUMNS,
       "x",
       "single-pass",
+      DIRECT_DEDUPLICATE_DEFAULT,
     );
     expect(singlePass.linkageTerms.linkageKeys).toEqual(
       cascade.linkageTerms.linkageKeys,
@@ -226,13 +247,13 @@ describe("the direct-exchange deduplicate control", () => {
         .deduplicate,
     ).toBe(true);
     expect(
-      previewInferredTerms(LINKABLE_COLUMNS, "x", "cascade").linkageTerms
+      previewInferredTerms(LINKABLE_COLUMNS, "x", "cascade", false).linkageTerms
         .deduplicate,
-    ).toBe(DIRECT_DEDUPLICATE_DEFAULT);
+    ).toBe(false);
   });
 
   test("the selection does not disturb the inferred keys, fields, or disclosed set", () => {
-    const plain = previewInferredTerms(LINKABLE_COLUMNS, "x", "cascade");
+    const plain = previewInferredTerms(LINKABLE_COLUMNS, "x", "cascade", false);
     const grouped = previewInferredTerms(
       LINKABLE_COLUMNS,
       "x",

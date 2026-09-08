@@ -11,7 +11,9 @@ import "@mantine/core/styles.css";
 
 import {
   DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
+  DEDUPLICATE_PARTNER_DECLARED_DISCLOSURE_STATEMENT,
   DEDUPLICATE_PARTNER_DECLARED_SIDE_NOTE,
+  DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,
   LINKAGE_RULE_SET_VERDICT_COPY,
 } from "@psilink/core";
 
@@ -682,23 +684,32 @@ describe("direct exchange confirm and run", () => {
     app.render(createElement(DirectExchangeScreen));
     await reachConfirm();
 
-    // The closed default, which is what a run with no flag at all applies.
+    // The closed default, which is what a run with no flag at all applies. The
+    // seat holds no invitation, so the sentence names the operator and its
+    // partner rather than the two declared roles.
     await expect.element(deduplicateControl()).not.toBeChecked();
     expect(app.container.textContent).toContain(DIRECT_DEDUPLICATE_SIDE_NOTICE);
     expect(app.container.textContent).toContain(
-      "Each of the inviting party's records matches at most one",
+      "Each of your records matches at most one of your partner's records.",
     );
 
     await deduplicateControl().click();
     // The preview is the terms the run presents, so the terms panel states this
     // party's own selection rather than the one-to-one match it does not run.
     expect(app.container.textContent).toContain(
-      "More than one of the inviting party's records may match",
+      "More than one of your records may match a single one of your partner's",
     );
-    // The direction note this seat owes: the partner declares its own side on
-    // its own run, so nothing here asserts that side is never grouped.
+    // What the grouping discloses and the direction it runs in, both in the
+    // roles this seat's reader holds: the partner declares its own side on its
+    // own run, so nothing here asserts that side is never grouped.
+    expect(app.container.textContent).toContain(
+      DEDUPLICATE_PARTNER_DECLARED_DISCLOSURE_STATEMENT,
+    );
     expect(app.container.textContent).toContain(
       DEDUPLICATE_PARTNER_DECLARED_SIDE_NOTE,
+    );
+    expect(app.container.textContent).not.toContain(
+      DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,
     );
     expect(app.container.textContent).not.toContain(
       DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
