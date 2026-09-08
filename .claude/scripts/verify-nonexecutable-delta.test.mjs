@@ -1045,19 +1045,30 @@ const runScript = (args, cwd = dirname(SCRIPT)) => {
 // unreachable from a subprocess -- it needs a TypeScript whose printer fails a
 // probe -- and is covered only by the soundness-probe test above.
 describe("the script as an agent runs it", () => {
-  it("prints usage and exits 2 unless given exactly two refs", () => {
-    for (const args of [[], ["only-one"], ["one", "two", "three"]]) {
-      const result = runScript(args);
-      expect(result.status).toBe(2);
-      expect(result.stderr).toMatch(
-        /^Usage: node \.claude\/scripts\/verify-nonexecutable-delta\.mjs /,
-      );
-      expect(result.stderr).toMatch(
-        /resolve in the git worktree this is run from/,
-      );
-      expect(result.stdout).toBe("");
-    }
-  });
+  // Three cold Node spawns in one case: 0.8s together alone against vitest's 5s
+  // default, and 6.6s with the rest of the script suites competing for the same
+  // cores, which is the contention that reddened it. Sized well past that worst
+  // measurement, this stays a hang safety check rather than a claim about how
+  // fast a process starts.
+  const USAGE_SPAWN_TIMEOUT_MS = 60_000;
+
+  it(
+    "prints usage and exits 2 unless given exactly two refs",
+    () => {
+      for (const args of [[], ["only-one"], ["one", "two", "three"]]) {
+        const result = runScript(args);
+        expect(result.status).toBe(2);
+        expect(result.stderr).toMatch(
+          /^Usage: node \.claude\/scripts\/verify-nonexecutable-delta\.mjs /,
+        );
+        expect(result.stderr).toMatch(
+          /resolve in the git worktree this is run from/,
+        );
+        expect(result.stdout).toBe("");
+      }
+    },
+    USAGE_SPAWN_TIMEOUT_MS,
+  );
 
   it("exits 2 when a ref does not resolve, rather than reporting a verdict", () => {
     const result = runScript(["HEAD", "no-such-ref-9f3c1a"]);

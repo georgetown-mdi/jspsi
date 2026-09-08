@@ -16,6 +16,15 @@ import {
 // label valid at one route could fail at the other, or a certificate could bind
 // a label the terms can never hold.
 
+/**
+ * Bound for the plane sweep below: 65536 synchronous pattern verdicts with no
+ * wait in them. It runs 0.6s alone against vitest's 5s default, and 6.9s with
+ * the rest of the unit suite competing for the same cores, which is the
+ * contention that reddened it. Sized well past that worst measurement, this
+ * stays a hang safety check rather than a claim about how fast the sweep runs.
+ */
+const PLANE_SWEEP_TIMEOUT_MS = 60_000;
+
 test("the label rule and the terms free-text rule are the same pattern", () => {
   expect(IDENTITY_CONTROL_CHAR_PATTERN.source).toBe(
     TEXT_CONTROL_CHAR_PATTERN.source,
@@ -34,27 +43,31 @@ test("the label direction rule and the terms direction rule are the same pattern
   );
 });
 
-test("the label contract and the terms rules agree on every code point in the plane", () => {
-  // Source equality alone would pass two patterns written differently apart; this
-  // sweeps every code point of the basic multilingual plane -- the ranges both
-  // rules are drawn over, and the letters, marks and punctuation between them --
-  // and compares the verdict a label holding each single character gets from the
-  // two rules together, which is what each boundary applies.
-  for (let codePoint = 0; codePoint <= 0xffff; codePoint++) {
-    const label = `Agency${String.fromCodePoint(codePoint)}A`;
-    expect({
-      codePoint,
-      refused:
-        IDENTITY_CONTROL_CHAR_PATTERN.test(label) ||
-        IDENTITY_DIRECTION_CHAR_PATTERN.test(label),
-    }).toStrictEqual({
-      codePoint,
-      refused:
-        TEXT_CONTROL_CHAR_PATTERN.test(label) ||
-        BIDI_CONTROL_PATTERN.test(label),
-    });
-  }
-});
+test(
+  "the label contract and the terms rules agree on every code point in the plane",
+  () => {
+    // Source equality alone would pass two patterns written differently apart; this
+    // sweeps every code point of the basic multilingual plane -- the ranges both
+    // rules are drawn over, and the letters, marks and punctuation between them --
+    // and compares the verdict a label holding each single character gets from the
+    // two rules together, which is what each boundary applies.
+    for (let codePoint = 0; codePoint <= 0xffff; codePoint++) {
+      const label = `Agency${String.fromCodePoint(codePoint)}A`;
+      expect({
+        codePoint,
+        refused:
+          IDENTITY_CONTROL_CHAR_PATTERN.test(label) ||
+          IDENTITY_DIRECTION_CHAR_PATTERN.test(label),
+      }).toStrictEqual({
+        codePoint,
+        refused:
+          TEXT_CONTROL_CHAR_PATTERN.test(label) ||
+          BIDI_CONTROL_PATTERN.test(label),
+      });
+    }
+  },
+  PLANE_SWEEP_TIMEOUT_MS,
+);
 
 test("the direction marks are admitted and the nine formatting characters are not", () => {
   // The verdict sweep above holds the two sides equal; this pins WHICH verdict

@@ -437,22 +437,33 @@ const runScript = (args, cwd = dirname(SCRIPT)) => {
 };
 
 describe("the script as an agent runs it", () => {
-  it("prints usage and exits 2 unless given exactly four refs", () => {
-    for (const args of [
-      [],
-      ["a"],
-      ["a", "b"],
-      ["a", "b", "c"],
-      "abcde".split(""),
-    ]) {
-      const result = runScript(args);
-      expect(result.status).toBe(2);
-      expect(result.stderr).toMatch(
-        /^Usage: node \.claude\/scripts\/verify-rebase-invariance\.mjs /,
-      );
-      expect(result.stdout).toBe("");
-    }
-  });
+  // Five cold Node spawns in one case: 1.4s together alone against vitest's 5s
+  // default, and 11.4s with the rest of the script suites competing for the same
+  // cores, which is the contention that reddened it. Sized well past that worst
+  // measurement, this stays a hang safety check rather than a claim about how
+  // fast a process starts.
+  const USAGE_SPAWN_TIMEOUT_MS = 60_000;
+
+  it(
+    "prints usage and exits 2 unless given exactly four refs",
+    () => {
+      for (const args of [
+        [],
+        ["a"],
+        ["a", "b"],
+        ["a", "b", "c"],
+        "abcde".split(""),
+      ]) {
+        const result = runScript(args);
+        expect(result.status).toBe(2);
+        expect(result.stderr).toMatch(
+          /^Usage: node \.claude\/scripts\/verify-rebase-invariance\.mjs /,
+        );
+        expect(result.stdout).toBe("");
+      }
+    },
+    USAGE_SPAWN_TIMEOUT_MS,
+  );
 
   // Measured alone at 360-490ms across repeated runs, and past vitest's 5s
   // default -- an outright timeout -- once under contention with the full
