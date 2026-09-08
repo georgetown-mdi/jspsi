@@ -539,15 +539,12 @@ export interface InvitationSummary {
    */
   fanOutApplied: boolean;
   /**
-   * Whether the exchange this invitation proposes suppresses the accepting
-   * party's half of the matched-pair table entirely, so that party's own
-   * process never receives which of its records matched, nor how many of the
-   * inviting party's records stand behind one of them.
-   *
-   * {@link withholdsAcceptorAssociationTable}'s verdict, read once here so
-   * both surfaces select the same consent fact from it: the exchange's own
-   * non-receipt where this is true, the display-scoped limit where it is
-   * false.
+   * Whether the exchange suppresses the accepting party's half of the
+   * matched-pair table: that party's process receives neither which of its
+   * records matched nor how many of the inviting party's stand behind one.
+   * {@link withholdsAcceptorAssociationTable}'s verdict, read once so both
+   * surfaces select one fact from it -- which each does only under the
+   * deduplicate headline, leaving the same withholding unstated elsewhere.
    */
   acceptorTableWithheld: boolean;
   /**
