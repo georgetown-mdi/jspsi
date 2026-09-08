@@ -1331,14 +1331,16 @@ export function withholdsAcceptorAssociationTable(
  *   does -- so a run that reaches the linkage discloses none. An absent
  *   `send` binds nothing and so reads as disclosure.
  *
- * Read at the seat where the ACCEPTING party declares a grouping of its own:
- * there the inviting party is the one handed no result, and what its process
- * still reads of that grouping is the fact beside the pair statement
- * (`partnerReadsDuplicateGrouping` and `partnerDuplicateGroupingWithheld`).
- * A deduplicating cardinality neither adds a condition nor removes one; the
- * "one" party as a no-output helper is exactly the composition
- * docs/spec/PROTOCOL.md covers under Where the "one" party receives no
- * output.
+ * Read once so two surfaces select from it. The CLI accept prompt and the web
+ * non-proposing seat pick the own-membership fact
+ * (`partnerLearnsOwnMembership` / `partnerOwnMembershipWithheld`) wherever a
+ * `psi` invitation hands the inviting party no result. The seat where the
+ * ACCEPTING party declares a grouping of its own reads the same verdict for
+ * the fact beside the pair statement (`partnerReadsDuplicateGrouping` and
+ * `partnerDuplicateGroupingWithheld`). A deduplicating cardinality neither
+ * adds a condition nor removes one; the "one" party as a no-output helper is
+ * exactly the composition docs/spec/PROTOCOL.md covers under Where the "one"
+ * party receives no output.
  */
 export function withholdsInviterAssociationTable(terms: LinkageTerms): boolean {
   if (terms.linkageStrategy !== "single-pass") return false;
