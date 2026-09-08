@@ -169,6 +169,15 @@ agreed-terms hash MUST apply the same collapse before encoding, and MUST apply
 it to both lists, since a document holding a repeat encodes to different bytes
 with and without it.
 
+Two entries name the same column when their `name` strings are equal **code unit
+for code unit**, the comparison the member ordering above uses. No Unicode
+normalization is applied: a name holding U+00E9 (NFC) and one holding `e`
+followed by the combining acute U+0301 (NFD) are two distinct columns, and both
+entries stand. Names are not case folded either, so `dose` and `Dose` are
+distinct, and whitespace is significant, so `dose ` is not `dose`. A reproducer
+that folds any of these collapses entries psilink keeps, and encodes different
+bytes.
+
 ### Numbers
 
 A number MUST be finite. RFC 8785 section 3.2.2.3 does not restate a number

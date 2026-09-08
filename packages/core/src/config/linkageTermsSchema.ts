@@ -1050,34 +1050,39 @@ export interface Payload {
 }
 
 /**
- * The columns of `send` or `receive` with each name kept once: the first entry
+ * One list of disclosed columns with each name kept once: the first entry
  * naming a column stands, with its own description, and a later entry repeating
  * that name is dropped. A column's identity is its `name` -- the thing disclosed
  * -- so two entries naming it are one declaration written twice however their
- * descriptions differ.
+ * descriptions differ. `nameOf` reads that name, since a list of the same
+ * columns is written as entries here and as bare names on an invitation token.
+ * Names are compared by code unit, the equality docs/spec/CANONICAL_ENCODING.md
+ * makes normative for a third party reproducing the agreed-terms hash.
  */
-const columnsNamedOnce = (
-  columns: readonly PayloadColumn[],
-): PayloadColumn[] => {
+export const columnsNamedOnce = <Entry>(
+  columns: readonly Entry[],
+  nameOf: (column: Entry) => string,
+): Entry[] => {
   const kept = new Set<string>();
   return columns.filter((column) => {
-    if (kept.has(column.name)) return false;
-    kept.add(column.name);
+    const name = nameOf(column);
+    if (kept.has(name)) return false;
+    kept.add(name);
     return true;
   });
 };
 
 /**
- * One direction of the payload data dictionary: {@link boundedArray} bounds
- * the count at {@link MAX_PAYLOAD_ENTRIES} before {@link columnsNamedOnce}
- * collapses repeats, so a padded list is refused for its authored count. The
- * first entry naming a column stands; later entries naming it are dropped,
- * normalized rather than refused since a refusal would fail a document a
- * partner's build already encodes and accepts.
+ * One direction of the payload data dictionary: {@link boundedArray} bounds the
+ * count at {@link MAX_PAYLOAD_ENTRIES} before {@link columnsNamedOnce} collapses
+ * repeats, so a padded list is refused for its authored count. Repeats are
+ * normalized rather than refused to keep this build's parse total over the
+ * documents it already admits; a partner build that does not collapse still
+ * fails closed at compatibility validation, on a differing agreed-terms hash.
  */
 const payloadColumnList = (message: string): z.ZodType<PayloadColumn[]> =>
   boundedArray(PayloadColumnSchema, MAX_PAYLOAD_ENTRIES, message).transform(
-    columnsNamedOnce,
+    (columns) => columnsNamedOnce(columns, (column) => column.name),
   );
 
 const PayloadSchema: z.ZodType<Payload> = z.object({

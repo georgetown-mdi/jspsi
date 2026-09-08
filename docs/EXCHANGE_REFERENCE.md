@@ -449,7 +449,7 @@ linkage_terms:
 
 A party that declares it receives no output (`output.expects_output: false`) may not list `payload.receive` columns: it cannot receive payload for matched records it never gets, so the combination is refused. A non-receiving party is sent no payload and refuses any it is sent regardless, so a non-receiving helper never receives the partner's disclosed columns. It may still `send` payload (to a partner that does receive output).
 
-Each list names a column once. If `send` or `receive` names the same column twice -- in your own file or in a partner's invitation -- psilink reads it once: the first entry stands, with its description, and the repeat is dropped. So the dictionary shown on the consent screen, cross-checked against your partner's list, and written into the [exchange record](spec/EXCHANGE_RECORD.md) lists the column a single time, and a duplicate does not fail the exchange.
+Each list names a column once. If `send` or `receive` names the same column twice -- in your own file or in a partner's invitation -- psilink reads it once: the first entry stands, with its description, and the repeat is dropped. So the dictionary shown on the consent screen and cross-checked against your partner's list names the column a single time, and a duplicate does not fail the exchange.
 
 Five fields govern payload, and they sit at two different levels of the file. `payload.send` and `payload.receive` are members of this `linkage_terms.payload` block: they are the exchanged data dictionary -- what this party will disclose, and what it expects to receive -- and are cross-checked as a mirror, one party's `send` against the other's `receive`.
 

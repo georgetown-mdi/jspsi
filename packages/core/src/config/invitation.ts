@@ -1,5 +1,6 @@
 import { z } from "zod";
 import {
+  columnsNamedOnce,
   LinkageTermsSchema,
   MAX_NAME_LENGTH,
   MAX_PARAMS_ENTRIES,
@@ -544,11 +545,19 @@ const InvitationTokenBodySchema = z.object({
   // metadata discloses no payload column, which reconcileReceivedPayload
   // enforces (a later non-empty payload aborts) -- so it must not be rejected
   // at decode. Only an omitted field reconciles lazily.
+  //
+  // A name the list holds twice is kept once (`columnsNamedOnce`, the collapse
+  // the payload dictionary applies), after the count cap so a padded list is
+  // still refused for its authored count. The acceptor consents to the column
+  // once and writes it once as `expectedPayloadColumns`, which
+  // reconcileReceivedPayload compares against the set the partner transmits.
   disclosedPayloadColumns: boundedArray(
     nameValue(z.string().min(1).max(MAX_NAME_LENGTH)),
     MAX_PAYLOAD_ENTRIES,
     `disclosedPayloadColumns must not exceed ${MAX_PAYLOAD_ENTRIES} entries`,
-  ).optional(),
+  )
+    .transform((names) => columnsNamedOnce(names, (name) => name))
+    .optional(),
   // The inviter's retain-mode declaration (see the interface field). A plain
   // optional boolean at the top level, so an older decoder's non-strict z.object
   // ignores it rather than rejecting the token -- the backward-compatible shape
