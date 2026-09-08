@@ -107,6 +107,7 @@ export function failureFor(
   inputSource?: JobInputSource,
   channel?: Transport,
   seat: ExchangeSeat = "inviter",
+  identityLocationPicked = false,
 ): RunFailure {
   // The console already holds an exchange (its single slot is occupied), so the
   // create was rejected 409 -- the driver categorizes it retryable `exchange`. The
@@ -135,11 +136,14 @@ export function failureFor(
   // The console refused the run before it started: a file sits at one of the two
   // paths it reads this party's signing identity from -- the picked location and
   // the default in the data root a pick leaves behind -- in a folder the exchange
-  // shares with the partner. The token names neither, so the copy names both and
-  // what to do with each, claiming only presence: the console reads the path and
-  // never the file. Classified `config`: the layout is what has to change, so the
-  // alert offers start-over, not a retry that would refuse identically. Above the
-  // mounted-file branch, whose 400 copy is about the file rather than the mounts.
+  // shares with the partner. The token names neither, and the client holds which
+  // layout the draft is in, so the copy is chosen here: naming a location the
+  // operator never picked calls their only signing key a leftover and offers an
+  // action they cannot take. Both claim presence alone -- the console reads the
+  // path and never the file. Classified `config`: the layout is what has to
+  // change, so the alert offers start-over, not a retry that would refuse
+  // identically. Above the mounted-file branch, whose 400 copy is about the file
+  // rather than the mounts.
   if (
     error instanceof JobApiRequestError &&
     error.refusalReason === SIGNING_IDENTITY_IN_RENDEZVOUS_REFUSAL
@@ -147,18 +151,30 @@ export function failureFor(
     return {
       category: "config",
       title: "This exchange shares your signing identity's folder",
-      message:
-        "The console did not start it. A file sits at a path this console " +
-        "reads your signing identity from, in a folder this exchange shares " +
-        "with your partner: either the location you picked, or the console's " +
-        "default in your mounted working directory, which picking a location " +
-        "leaves behind. Whoever reads a signing key there can sign receipts in " +
-        "your name -- for every exchange, with every partner. Move the file at " +
-        "the location you picked out of every folder you share with a partner, " +
-        "and remove or move the file left at the console's default path. You " +
-        "can also give the shared folder a mount of its own " +
-        "(JOB_RENDEZVOUS_DIR), separate from the folder holding your key, " +
-        "input, and results, then run the exchange again.",
+      message: identityLocationPicked
+        ? "The console did not start it. A file sits at a path this console " +
+          "reads your signing identity from, in a folder this exchange shares " +
+          "with your partner: either the location you picked, or the " +
+          "console's default in your mounted working directory, which picking " +
+          "a location leaves behind. Whoever reads a signing key there can " +
+          "sign receipts in your name -- for every exchange, with every " +
+          "partner. Move the file at the location you picked out of every " +
+          "folder you share with a partner, and move the file left at the " +
+          "console's default path to the location you picked -- or remove it, " +
+          "if that key is not one you use, knowing that a replacement has a " +
+          "new fingerprint every partner who pinned the old one must be sent " +
+          "before their verification works again. You can also give the " +
+          "shared folder a mount of its own (JOB_RENDEZVOUS_DIR), separate " +
+          "from the folder holding your key, input, and results, then run the " +
+          "exchange again."
+        : "The console did not start it. A file sits at your signing " +
+          "identity's path, in a folder this exchange shares with your " +
+          "partner. Whoever reads a signing key there can sign receipts in " +
+          "your name -- for every exchange, with every partner. Move that " +
+          "file out of every folder you share with a partner, or give the " +
+          "shared folder a mount of its own (JOB_RENDEZVOUS_DIR), separate " +
+          "from the folder holding your key, input, and results, then run the " +
+          "exchange again.",
     };
   // A console job create rejected the mounted file: a 400 the driver categorizes
   // `config`. The file is the likely fault, so the alert names it -- except on
@@ -629,9 +645,20 @@ export function useInviterExchange({
     ).kind;
 
     // Raise a failure's alert and freeze the run: the terminal path for every
-    // error except a busy (409) create, which re-attaches instead.
+    // error except a busy (409) create, which re-attaches instead. Whether a
+    // location was picked is the draft's own field, never anything the refusal
+    // reports, and it chooses that refusal's copy.
     const raiseFailure = (category: ExchangeErrorCategory, error: unknown) => {
-      setFailure(failureFor(category, error, inputSource, channel));
+      setFailure(
+        failureFor(
+          category,
+          error,
+          inputSource,
+          channel,
+          "inviter",
+          receipts?.signing?.identityLocation !== undefined,
+        ),
+      );
       setRun((current) => runWithFailure(current));
     };
 

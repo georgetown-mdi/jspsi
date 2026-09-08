@@ -501,10 +501,19 @@ export function useAcceptorExchange({
     }
 
     // Raise a failure's alert and freeze the run: the terminal path for every
-    // error except a busy (409) create, which re-attaches instead.
+    // error except a busy (409) create, which re-attaches instead. Whether a
+    // location was picked is the draft's own field, never anything the refusal
+    // reports, and it chooses that refusal's copy.
     const raiseFailure = (category: ExchangeErrorCategory, error: unknown) => {
       setFailure(
-        failureFor(category, error, jobInputSource, channel, "acceptor"),
+        failureFor(
+          category,
+          error,
+          jobInputSource,
+          channel,
+          "acceptor",
+          receipts?.signing?.identityLocation !== undefined,
+        ),
       );
       setRun((prev) => runWithFailure(prev));
     };

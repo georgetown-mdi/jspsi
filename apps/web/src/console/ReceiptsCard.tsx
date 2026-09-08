@@ -74,10 +74,12 @@ function fingerprintFailureMessage(
     case "absent":
       return (
         "There is no signing identity at the file you picked. The console " +
-        "reads that location and never writes to it, so create the identity " +
-        "yourself at the command line -- 'psilink fingerprint --identity-file' " +
-        "pointed at that path -- then show the fingerprint again. Or pick the " +
-        "file that already holds your identity."
+        "reads that location and creates no key there, except a file removed " +
+        "between this check and the read that follows it. So create the " +
+        "identity yourself at the command line -- " +
+        "'psilink fingerprint --identity-file' pointed at that path -- then " +
+        "show the fingerprint again. Or pick the file that already holds your " +
+        "identity."
       );
     case "refused":
       return (
@@ -281,7 +283,7 @@ export function ReceiptsCard({
               <Text size="xs" c="dimmed">
                 {draft.identityLocation === undefined
                   ? "This creates your signing identity if you do not have one yet, and shows the same fingerprint every time after that."
-                  : "This reads the identity at the file you picked and shows its fingerprint. It never writes there, so a file that is not yet in place is reported rather than created."}
+                  : "This reads the identity at the file you picked and shows its fingerprint. A file that is not yet in place is reported rather than created, with one exception: a file removed between that check and the read is created again at that path."}
               </Text>
               <Checkbox
                 checked={exportCertificate}

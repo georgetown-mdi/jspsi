@@ -64,7 +64,7 @@ Two properties follow from the console creating the identity at its default loca
 - **A picked location is read.** With nothing at it, the console reports that rather than minting a key in a directory the operator keeps their own way. That is what lets the directory be mounted read-only, which is the posture the deployment guide recommends for key material -- and read-only is also what closes the gap between the console's presence check and the child's load, where a file removed in between would otherwise be created.
 - **The console writes nowhere but the data root.** The certificate export lands there, and the fingerprint child's working directory is pinned there whatever the identity's location, so a `psilink.yaml` in the browsed mount never becomes the child's config.
 
-The refusal reads both the identity this run loads and the default in the data root. Moving the option does not move the file, and a key left behind in a folder the partner syncs is a key the partner reads whether or not this run is the one that loads it.
+The refusal reads both the identity this run loads and the default in the data root. Moving the option does not move the file, and a key left behind in a folder the partner syncs is a key the partner reads whether or not this run is the one that loads it. The card therefore raises that leftover key at the weight the layout gives it: where the rendezvous report says the folder is shared or cannot rule it out, the caveat is a warning of its own -- the weight the identical disclosure takes with no location picked -- rather than a line inside the picked-location notice. Where the rendezvous has a mount of its own it stays inside that notice, because nothing about the key is then in a folder the partner reads.
 
 ## See also
 

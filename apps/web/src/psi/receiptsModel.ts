@@ -342,31 +342,54 @@ export const IDENTITY_AT_REST_NOTICE =
 /**
  * What the console says once the operator picked a location of their own: the
  * console reads that file rather than creating one, so the identity is theirs
- * to create and to look after. The one write the spec accepts there -- an
- * identity removed between the presence check and the run's load is created by
- * the run at that path (`docs/spec/SERVER_JOB_API.md`) -- is stated with the
- * read-only mount that closes it.
+ * to create and to look after. The one write the spec accepts there is the
+ * fingerprint request's -- its presence check and the child's load are two
+ * steps, so a file removed between them is created by that child at the picked
+ * path (`docs/spec/SERVER_JOB_API.md`) -- and it is stated with the read-only
+ * mount that closes it. The exchange run creates nothing anywhere: it refuses
+ * when nothing is at the identity file (`resolveSigningPersist` in `apps/cli`).
  *
- * An `info`, and the only location advisory raised in that case: the key this
- * run loads is not in the mounted working directory, so neither shared-mount
- * warning is about it. A picked location inside a folder the partner syncs is
- * refused before the run starts, on the same comparison the default location
- * takes. A key created earlier at the default path stays where it is, so the
- * notice carries that caveat itself: the card is the only place the operator
- * hears of it before a shared-folder run refuses.
+ * An `info`: the key this run loads is not in the mounted working directory, so
+ * neither shared-mount warning is about it. A picked location inside a folder
+ * the partner syncs is refused before the run starts, on the same comparison
+ * the default location takes.
  */
-export const IDENTITY_PICKED_LOCATION_NOTICE =
+const IDENTITY_PICKED_LOCATION_READ_NOTICE =
   "Your signing key is read from the file you picked in your secrets folder, " +
-  "and the console creates no key there, with one exception: a file removed " +
-  "between the console's check and the run's read is created again at that " +
-  "path by the run. Create it once at the command line -- " +
-  "'psilink fingerprint --identity-file' pointed at that path -- and mount the " +
-  "folder read-only afterwards, which closes that case too. Keep it out of " +
-  "every folder your partner syncs. Picking a location does not move a key you " +
-  "already have: one created earlier at the console's default path stays in " +
-  "your mounted working directory, and a shared-folder exchange is refused " +
-  "while a key sits in a folder your partner syncs. Delete that file, or move " +
-  "it to the file you picked.";
+  "and the console creates no key there, with one exception: showing your " +
+  "fingerprint checks that the file is there and then reads it, so a file " +
+  "removed between those two steps is created again at that path. Create it " +
+  "once at the command line -- 'psilink fingerprint --identity-file' pointed " +
+  "at that path -- and mount the folder read-only afterwards, which closes " +
+  "that case too. Keep it out of every folder your partner syncs.";
+
+/**
+ * What the console says about a key created earlier at the console's default
+ * path: picking a location moves the option and not the file, and a
+ * shared-folder exchange is refused while that key sits in a folder the partner
+ * syncs. The card is the only place the operator hears of it before such a run
+ * refuses.
+ *
+ * Raised as a `warning` of its own where the rendezvous report says the folder
+ * is shared or cannot rule it out ({@link receiptsAdvisories}) -- the weight the
+ * identical disclosure takes with no location picked. Where the rendezvous has a
+ * mount of its own the key is in no folder the partner reads, and this stays a
+ * line inside {@link IDENTITY_PICKED_LOCATION_NOTICE}.
+ */
+export const IDENTITY_DEFAULT_PATH_LEFTOVER_CAVEAT =
+  "Picking a location does not move a key you already have: one created " +
+  "earlier at the console's default path stays in your mounted working " +
+  "directory, and a shared-folder exchange is refused while a key sits in a " +
+  "folder your partner syncs. Delete that file, or move it to the file you " +
+  "picked.";
+
+/**
+ * The whole picked-location notice: what the console does at the picked file,
+ * then the caveat about a key left at the default path. The `info` raised where
+ * the rendezvous has a mount of its own; the other layouts take the read half
+ * alone and the caveat as a warning ({@link receiptsAdvisories}).
+ */
+export const IDENTITY_PICKED_LOCATION_NOTICE = `${IDENTITY_PICKED_LOCATION_READ_NOTICE} ${IDENTITY_DEFAULT_PATH_LEFTOVER_CAVEAT}`;
 
 /**
  * What the console says about the one shared-folder layout its pre-run check
@@ -504,6 +527,11 @@ interface ReceiptsAdvisory {
  * report takes {@link IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY}, since that is where
  * the pre-run check can be fooled.
  *
+ * A picked location withdraws both of those and takes
+ * {@link IDENTITY_PICKED_LOCATION_NOTICE}, whose caveat about the key left at the
+ * default path is raised as a warning of its own on the same layouts the
+ * shared-mount warnings cover ({@link IDENTITY_DEFAULT_PATH_LEFTOVER_CAVEAT}).
+ *
  * A draft the run itself would refuse belongs in {@link receiptsProblems},
  * not here.
  */
@@ -512,19 +540,34 @@ export function receiptsAdvisories(
   rendezvous: JobRendezvousConfig | undefined,
 ): Array<ReceiptsAdvisory> {
   if (draft.mode !== "certificate") return [];
-  // A picked location takes the key this run loads out of the mounted working
-  // directory, so neither shared-mount warning is about it: both are about a key
-  // in the folder the rendezvous falls back to. A key left at the default path
-  // is still in that folder, which the picked-location notice states itself. A
-  // pick inside a folder the partner syncs is refused before the run starts, on
-  // the same comparison.
-  if (draft.identityLocation !== undefined)
-    return [
-      { message: IDENTITY_PICKED_LOCATION_NOTICE, severity: "info" },
-      { message: RECEIPT_LOCATION_NOTICE, severity: "info" },
-    ];
   const separatelyMounted =
     rendezvous?.configured === true && rendezvous.sharesDataRoot === false;
+  // A picked location takes the key this run loads out of the mounted working
+  // directory, so neither shared-mount warning is about it: both are about a key
+  // in the folder the rendezvous falls back to. A pick inside a folder the
+  // partner syncs is refused before the run starts, on the same comparison. What
+  // a pick leaves behind is the key at the default path, which is in the folder
+  // the partner reads on every layout but a separately mounted rendezvous -- so
+  // on those the caveat is raised at the weight that disclosure takes with no
+  // location picked, rather than as a line inside the notice.
+  if (draft.identityLocation !== undefined)
+    return [
+      ...(separatelyMounted
+        ? []
+        : [
+            {
+              message: IDENTITY_DEFAULT_PATH_LEFTOVER_CAVEAT,
+              severity: "warning" as const,
+            },
+          ]),
+      {
+        message: separatelyMounted
+          ? IDENTITY_PICKED_LOCATION_NOTICE
+          : IDENTITY_PICKED_LOCATION_READ_NOTICE,
+        severity: "info",
+      },
+      { message: RECEIPT_LOCATION_NOTICE, severity: "info" },
+    ];
   const sharedLayoutEstablished =
     rendezvous?.configured === true &&
     rendezvous.sharesDataRoot === true &&

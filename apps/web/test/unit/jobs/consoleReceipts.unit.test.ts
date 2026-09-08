@@ -15,6 +15,7 @@ import {
 import {
   IDENTITY_AT_REST_NOTICE,
   IDENTITY_DEFAULT_LOCATION_LABEL,
+  IDENTITY_DEFAULT_PATH_LEFTOVER_CAVEAT,
   IDENTITY_LABEL_REQUIRED_REASON,
   IDENTITY_MISSING_PROBLEM,
   IDENTITY_PICKED_LOCATION_NOTICE,
@@ -1391,10 +1392,10 @@ describe("the receipts card's model", () => {
   });
 
   test("a picked location withdraws the shared-mount warning it answers", () => {
-    // Both warnings are about a key in the folder the rendezvous falls back to.
-    // With the key out of that folder they are about no hazard this run makes
-    // live, and a warning shown on the safe layout too tells the operator
-    // nothing about which layout they are in.
+    // Both warnings are about the key this run loads, in the folder the
+    // rendezvous falls back to. With that key out of the folder they are about
+    // no hazard this run makes live, and a warning shown on the safe layout too
+    // tells the operator nothing about which layout they are in.
     const located = draft({
       mode: "certificate",
       ownFingerprint: OWN_FINGERPRINT,
@@ -1404,12 +1405,17 @@ describe("the receipts card's model", () => {
     for (const rendezvous of [
       SHARED_RENDEZVOUS,
       UNCERTAIN_SHARED_RENDEZVOUS,
+      SEPARATE_RENDEZVOUS,
       undefined,
-    ])
-      expect(receiptsAdvisories(located, rendezvous)).toEqual([
-        { message: IDENTITY_PICKED_LOCATION_NOTICE, severity: "info" },
-        { message: RECEIPT_LOCATION_NOTICE, severity: "info" },
-      ]);
+    ]) {
+      const messages = receiptsAdvisories(located, rendezvous).map(
+        (advisory) => advisory.message,
+      );
+      expect(messages).not.toContain(IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY);
+      expect(messages).not.toContain(IDENTITY_SHARED_MOUNT_REFUSAL_ADVISORY);
+      expect(messages).not.toContain(IDENTITY_AT_REST_NOTICE);
+      expect(messages).toContain(RECEIPT_LOCATION_NOTICE);
+    }
   });
 
   test("each location advisory names the remedy the other one is", () => {
@@ -1423,16 +1429,21 @@ describe("the receipts card's model", () => {
     expect(IDENTITY_PICKED_LOCATION_NOTICE).toMatch(/your partner syncs/);
   });
 
-  test("the picked-location notice qualifies the write the spec accepts", () => {
-    // SERVER_JOB_API.md accepts one write into the secrets mount: the presence
-    // check and the run's load are two steps, so an identity removed between
-    // them is created at the picked path. Copy stating an unqualified "never
-    // writes there" about key material is stronger than the console behaves, and
-    // the read-only mount that closes the window is what the sentence has to
-    // keep, since it is the recommended layout.
+  test("the picked-location notice attributes the write the spec accepts", () => {
+    // SERVER_JOB_API.md accepts one write into the secrets mount, and it is the
+    // fingerprint request's: the presence check and the child's load are two
+    // steps, so a file removed between them is created by that child. The
+    // exchange run creates nothing anywhere -- resolveSigningPersist refuses when
+    // nothing is at the identity file -- so copy attributing the write to the run
+    // names a write that cannot happen while leaving the control that can write
+    // unqualified. The read-only mount that closes the case is what the sentence
+    // has to keep, since it is the recommended layout.
     expect(IDENTITY_PICKED_LOCATION_NOTICE).not.toMatch(/never writes/);
+    expect(IDENTITY_PICKED_LOCATION_NOTICE).not.toMatch(
+      /by the run|run's read/,
+    );
     expect(IDENTITY_PICKED_LOCATION_NOTICE).toMatch(
-      /a file removed between the console's check and the run's read is created again at that path/,
+      /showing your fingerprint checks that the file is there and then reads it, so a file removed between those two steps is created again at that path/,
     );
     expect(IDENTITY_PICKED_LOCATION_NOTICE).toMatch(
       /mount the folder read-only afterwards/,
@@ -1442,29 +1453,36 @@ describe("the receipts card's model", () => {
   test("a picked location keeps the word on a key left at the default path", () => {
     // Picking a location moves the option, not the file: the usual single-mount
     // flow created the first key at the default path, in the folder the partner
-    // syncs, and it stays there. With both shared-mount warnings withdrawn the
-    // notice is the only word the card has on it, and without that word the
-    // operator meets the hazard as a refusal mid-run or not at all.
+    // syncs, and it stays there. With both shared-mount warnings withdrawn this
+    // caveat is the only word the card has on it, and without it the operator
+    // meets the hazard as a refusal mid-run or not at all. Where the report says
+    // that folder is shared or cannot rule it out the disclosure is live, so the
+    // caveat is raised at the weight it takes with no location picked; where the
+    // rendezvous has a mount of its own the key is in no folder the partner
+    // reads, and it stays inside the notice.
     const located = draft({
       mode: "certificate",
       ownFingerprint: OWN_FINGERPRINT,
       partnerFingerprint: PARTNER_FINGERPRINT,
       identityLocation: { mount: "secrets", subPath: ["identity.json"] },
     });
-    for (const rendezvous of [
-      SHARED_RENDEZVOUS,
-      UNCERTAIN_SHARED_RENDEZVOUS,
-      undefined,
-    ]) {
-      const caveat = receiptsAdvisories(located, rendezvous)
-        .map((advisory) => advisory.message)
-        .find((message) => /console's default path/.test(message));
-      expect(caveat).toBeDefined();
-      expect(caveat).toMatch(/does not move a key you already have/);
-      expect(caveat).toMatch(
+    for (const [rendezvous, severity] of [
+      [SHARED_RENDEZVOUS, "warning"],
+      [UNCERTAIN_SHARED_RENDEZVOUS, "warning"],
+      [undefined, "warning"],
+      [SEPARATE_RENDEZVOUS, "info"],
+    ] as const) {
+      const raised = receiptsAdvisories(located, rendezvous).find((advisory) =>
+        /console's default path/.test(advisory.message),
+      );
+      expect(raised).toBeDefined();
+      expect(raised?.severity).toBe(severity);
+      expect(raised?.message).toContain(IDENTITY_DEFAULT_PATH_LEFTOVER_CAVEAT);
+      expect(raised?.message).toMatch(/does not move a key you already have/);
+      expect(raised?.message).toMatch(
         /a shared-folder exchange is refused while a key sits in a folder your partner syncs/,
       );
-      expect(caveat).toMatch(
+      expect(raised?.message).toMatch(
         /Delete that file, or move it to the file you picked/,
       );
     }

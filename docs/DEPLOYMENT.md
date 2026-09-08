@@ -441,7 +441,7 @@ psilink resolves no location for it. Name the path with `signing.identity_file` 
 
 **Give it a mount of its own, and mount that read-only.** The identity is created once, by `psilink fingerprint`, which is the only command that writes it; an exchange and a `psilink verify-receipt` read the file and write neither it, its directory, nor anything beside it. That is the reason it does not go in the `/run/secrets` mount above: the rotating key file is what makes that mount read-write, and the identity has no reason to inherit the requirement.
 
-The console holds the same rule against a signing identity it reads from the mount it browses: it creates the identity only at its own default location in the data root, so a directory named through the console's identity option is read and never written -- the certificate export goes to the data root, and no `psilink.yaml` in that directory ever becomes the child's config. Mount it read-only there too.
+The console holds the same rule against a signing identity it reads from the mount it browses: it creates the identity only at its own default location in the data root, so a directory named through the console's identity option is read and not written, with one exception -- an identity removed between the console's presence check and the `psilink fingerprint` child's load, which that child creates at the picked path. The certificate export goes to the data root, and no `psilink.yaml` in that directory ever becomes the child's config. Mount it read-only there too, which closes that one case.
 
 Provision it once, against a directory writable for that one command:
 
