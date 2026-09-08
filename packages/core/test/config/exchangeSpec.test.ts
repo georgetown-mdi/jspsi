@@ -7,10 +7,12 @@ import {
 } from "../../src/config/exchangeSpec";
 import { METADATA_NAME_SHAPE_MESSAGE } from "../../src/config/metadata";
 import {
+  MAX_PAYLOAD_ENTRIES,
   MAX_TEXT_LENGTH,
   MAX_TRANSFORM_PARAM_LENGTH,
   NAME_SHAPE_MESSAGE,
 } from "../../src/config/linkageTermsSchema";
+import { reconcileReceivedPayload } from "../../src/payloadExchange";
 
 // Minimal valid components used as a base.
 const minimalLinkageTerms = {
@@ -278,6 +280,66 @@ test("a name-class character is rejected in every payload column list", () => {
   expect(JSON.stringify(consent.error.issues)).toContain(NAME_SHAPE_MESSAGE);
   // The refusal locates the field and reports none of the name.
   expect(JSON.stringify(consent.error.issues)).not.toContain("risk");
+});
+
+// --- Payload column-name duplicate normalization -----------------------------
+// The two top-level lists name each column once, the treatment the negotiated
+// payload dictionary already applies. Both are hand-authorable in a recurring
+// config, and both are compared against a set of columns holding each name
+// once, so a repeat left standing refuses the run for the operator's own typo.
+
+test("expectedPayloadColumns: a column named twice parses to one entry", () => {
+  expect(
+    parseExchangeSpec({
+      ...minimalSpec,
+      expected_payload_columns: ["notes", "member_id", "notes"],
+    }).expectedPayloadColumns,
+  ).toEqual(["notes", "member_id"]);
+});
+
+test("disclosedPayloadColumns: a column named twice parses to one entry", () => {
+  expect(
+    parseExchangeSpec({
+      ...minimalSpec,
+      disclosed_payload_columns: ["diagnosis", "diagnosis", "dose"],
+    }).disclosedPayloadColumns,
+  ).toEqual(["diagnosis", "dose"]);
+});
+
+test("a payload column list over the maximum count is refused by its authored count, not normalized under it", () => {
+  // The count gate stands ahead of the collapse on both lists: a list padded
+  // with one name repeated is refused for the count it was authored with rather
+  // than admitted for the single entry it would collapse to.
+  for (const key of [
+    "expected_payload_columns",
+    "disclosed_payload_columns",
+  ] as const) {
+    const padded = Array.from(
+      { length: MAX_PAYLOAD_ENTRIES + 1 },
+      () => "dose",
+    );
+    const result = safeParseExchangeSpec({ ...minimalSpec, [key]: padded });
+    expect(result.success).toBe(false);
+    if (result.success) continue;
+    expect(JSON.stringify(result.error.issues)).toContain("must not exceed");
+  }
+});
+
+test("expectedPayloadColumns: a repeat does not reach payload reconciliation as a mismatch", () => {
+  // The parsed list is what reconcileReceivedPayload compares the partner's
+  // transmitted columns against, element-wise over the sorted names. The second
+  // assertion is the uncollapsed control: a doubled entry reaching that
+  // comparison is a length mismatch, aborting with a protocol error that
+  // attributes the operator's own typo to the partner.
+  const declared = parseExchangeSpec({
+    ...minimalSpec,
+    expected_payload_columns: ["notes", "notes"],
+  }).expectedPayloadColumns;
+  const received = { columns: ["notes"], rowIndices: [0], rows: [["a note"]] };
+  expect(() => reconcileReceivedPayload(received, declared)).not.toThrow();
+  expect(() => reconcileReceivedPayload(received, ["notes", "notes"])).toThrow(
+    /payload disclosure mismatch/,
+  );
 });
 
 // --- parse vs safeParse ------------------------------------------------------
