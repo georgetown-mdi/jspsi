@@ -230,21 +230,51 @@ export const CONSENT_FACTS = {
     basis: "enforced",
     reason:
       "An intrinsic property of an identifier-revealing match rather than a " +
-      "matter of conduct: under `psi` a non-receiving partner learns its own " +
-      "records' membership however honestly it behaves. Bounded to that -- " +
-      "never which of the viewer's records they met, nor anything about the " +
-      "rest of the set beyond its size. Scoped by the ALGORITHM and not by the " +
-      "linkage strategy: it holds for a one-sided `psi` exchange under both " +
-      "strategies, and for no `psi-c` exchange at all, since the role rule " +
-      "makes the non-receiving party of a count-only run the sender -- which " +
-      "computes nothing from the round and is sent no count-report frame " +
-      "(docs/spec/PROTOCOL.md, PSI-C), so it learns no membership to state. " +
-      "Both surfaces therefore render this for `psi` alone, and what a " +
-      "count-only run does disclose is the `countOnly*` tier's to state.",
+      "matter of conduct: under `psi` a non-receiving partner whose half of " +
+      "the association table the run returns learns its own records' " +
+      "membership however honestly it behaves. Bounded to that -- never which " +
+      "of the viewer's records they met, nor anything about the rest of the " +
+      "set beyond its size. Gated first on the ALGORITHM: no `psi-c` exchange " +
+      "states it at all, since the role rule makes the non-receiving party of " +
+      "a count-only run the sender -- which computes nothing from the round " +
+      "and is sent no count-report frame (docs/spec/PROTOCOL.md, PSI-C), so it " +
+      "learns no membership to state, and what a count-only run does disclose " +
+      "is the `countOnly*` tier's. Within `psi` it is the case where that half " +
+      "is returned at all: a single-pass run that withholds the partner's half " +
+      "discloses no membership either, and `partnerOwnMembershipWithheld` " +
+      "below is that case, selected from the run's own resolution rather than " +
+      "from a second reading of the strategy and the payload declaration.",
     note:
       "Even when honored, your partner learns which of its own records are in " +
       "your data (not which of yours). This is inherent to a match that " +
       "reveals identifiers, not a breach.",
+  },
+  partnerOwnMembershipWithheld: {
+    basis: "enforced",
+    reason:
+      "The other case of the same line, on the one combination the exchange " +
+      "closes itself: a single-pass run whose sole receiver is the VIEWER, " +
+      "leaving the partner entitled to no result, over a document declaring " +
+      "that partner's payload direction present and empty. Role resolution " +
+      "seats the party entitled to the result as the receiver, so the partner " +
+      "is the sender the withholding covers, and the receiver suppresses that " +
+      "party's half of the association table entirely while it skips awaiting " +
+      "it, both sides deriving the decision from the same authenticated " +
+      "session state -- so the partner's process never receives, and so never " +
+      "learns, which of its own records the viewer also holds " +
+      "(docs/spec/PROTOCOL.md, Withholding the sender's table from a blind " +
+      "helper). The declared-empty direction is what binds the partner to " +
+      "disclosing no column, which is the second condition the rule asks. " +
+      "Resolved off the run's own predicate -- " +
+      "`withholdsInviterAssociationTable` where the partner is the inviting " +
+      "party and `withholdsAcceptorAssociationTable` where it is the " +
+      "accepting party (consent/invitationSummary.ts) -- so a surface never " +
+      "states this basis for a run that does not withhold.",
+    note:
+      "This exchange withholds your partner's half of the matched-pair table, " +
+      "so its process is never sent which of its own records are in your " +
+      "data. Withholding it is a limit of the exchange rather than a choice " +
+      "of the software your partner runs.",
   },
   duplicateMatches: {
     basis: "enforced",

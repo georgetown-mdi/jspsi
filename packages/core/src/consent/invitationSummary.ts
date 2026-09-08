@@ -544,17 +544,20 @@ export interface InvitationSummary {
    * matched-pair table: that party's process receives neither which of its
    * records matched nor how many of the inviting party's stand behind one.
    * {@link withholdsAcceptorAssociationTable}'s verdict, read once so both
-   * surfaces select one fact from it -- which each does only under the
-   * deduplicate headline, leaving the same withholding unstated elsewhere.
+   * surfaces select one fact from it -- under the deduplicate headline, and
+   * for the own-membership pair on the seat where the accepting party is the
+   * partner the fact speaks about.
    */
   acceptorTableWithheld: boolean;
   /**
    * The same verdict for the other direction: whether the exchange suppresses
    * the INVITING party's half of the matched-pair table, leaving its process
-   * blind to which of the accepting party's records matched and to the size of
-   * any group standing behind one. {@link withholdsInviterAssociationTable}'s
-   * verdict, read once for the seat where the accepting party declares a
-   * grouping of its own.
+   * blind to which of its own records matched, to which of the accepting
+   * party's records they matched, and to the size of any group standing behind
+   * one. {@link withholdsInviterAssociationTable}'s verdict, read once so both
+   * surfaces select from it -- the grouping pair at the seat where the
+   * accepting party declares a grouping of its own, and the own-membership
+   * pair wherever a `psi` invitation hands the inviting party no result.
    */
   inviterTableWithheld: boolean;
   /**
