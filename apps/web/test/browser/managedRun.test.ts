@@ -9,6 +9,10 @@ import {
 import { afterEach, beforeEach, describe, expect, test } from "vitest";
 
 import {
+  ManagedExchangeLockUnavailableError,
+  withManagedExchangeLock,
+} from "@psi/managed/managedExchangeLock";
+import {
   clearManagedExchanges,
   createManagedExchange,
   getManagedExchange,
@@ -76,6 +80,20 @@ function fakeSeams(
       return "exchanged";
     },
   };
+}
+
+/** Whether an operator's own Run could take this record's lock right now, on the
+ * attended surface's own fail-fast discipline. */
+async function attendedRunCouldStart(id: string): Promise<boolean> {
+  try {
+    await withManagedExchangeLock(id, () => Promise.resolve(), {
+      ifAvailable: true,
+    });
+    return true;
+  } catch (error) {
+    if (error instanceof ManagedExchangeLockUnavailableError) return false;
+    throw error;
+  }
 }
 
 beforeEach(async () => {
@@ -233,6 +251,56 @@ describe("runManagedRerun: the runner's failure bookkeeping", () => {
     ).rejects.toThrow("torn down mid-listen");
 
     const stored = await getManagedExchange(created.id);
+    expect(stored?.lastRun?.outcome).toBe("failed");
+    expect(stored?.lastRun?.failureKind).toBe("cancelled");
+  });
+
+  test("a cancel cutting a stalled payload exchange frees the lock and records cancelled", async () => {
+    // The recovery a partner that stops mid-payload would otherwise leave
+    // nowhere but closing the tab: the lock spans the payload exchange, so the
+    // run holds it while a wait the partner's silence sustains stands. The
+    // cancel reaches that wait by closing the run's connection, whose `closed`
+    // rejection is what the exchange below stands in for (the driver's own half
+    // is pinned in test/unit/psi/managedRunDriver.test.ts). What this holds is
+    // everything after it, on real Web Locks and real IndexedDB.
+    const created = await createManagedExchange(newExchange());
+    const rotatedSecret = generateSharedSecret();
+    const controller = new AbortController();
+    let reachedExchange!: () => void;
+    const exchanging = new Promise<void>((resolve) => {
+      reachedExchange = resolve;
+    });
+
+    const running = runManagedRerun(
+      created,
+      {
+        acquireInput: () => Promise.resolve(undefined),
+        handshake: () => Promise.resolve({ rotatedSecret, handshake: "c" }),
+        dataExchange: async () => {
+          reachedExchange();
+          await new Promise<void>((resolve) => {
+            controller.signal.addEventListener("abort", () => resolve(), {
+              once: true,
+            });
+          });
+          throw new ConnectionError("connection closed", "closed");
+        },
+      },
+      { aborted: () => controller.signal.aborted },
+    );
+
+    await exchanging;
+    // The run is stalled in its exchange with the lock in its hands.
+    expect(await attendedRunCouldStart(created.id)).toBe(false);
+    controller.abort();
+    await expect(running).rejects.toThrow("connection closed");
+
+    // Free for the next run, without the tab that held it being destroyed.
+    expect(await attendedRunCouldStart(created.id)).toBe(true);
+    const stored = await getManagedExchange(created.id);
+    // Where a failed run leaves the record: the rotation stands, the outcome is
+    // the operator's cancel, and no success was stamped over it.
+    expect(stored?.sharedSecret).toBe(rotatedSecret);
     expect(stored?.lastRun?.outcome).toBe("failed");
     expect(stored?.lastRun?.failureKind).toBe("cancelled");
   });

@@ -5,6 +5,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import log from "loglevel";
 
 import {
+  ConnectionError,
   describeResolvedRunShape,
   getDefaultLinkageTerms,
   runExchange,
@@ -221,6 +222,33 @@ function makeParkedCloseMc() {
   };
 }
 
+/** A message connection standing in for a partner that stopped sending
+ * mid-payload: the exchange over it never settles until the connection is
+ * closed, which rejects it with the `closed` error core's own close raises for
+ * a parked receive. `stalled` is what the exchange returns while that stands. */
+function makeStalledExchangeMc() {
+  let cutExchange: ((error: Error) => void) | undefined;
+  const stalled = new Promise<never>((_resolve, reject) => {
+    cutExchange = reject;
+  });
+  // Marked handled here, so the rejection the close raises is not reported
+  // before the run's own await reaches it.
+  void stalled.catch(() => undefined);
+  const close = vi.fn(() => {
+    cutExchange?.(new ConnectionError("connection closed", "closed"));
+    return Promise.resolve();
+  });
+  return {
+    mc: {
+      close,
+      receive: vi.fn(),
+      send: vi.fn(),
+    } as unknown as MessageConnection,
+    close,
+    stalled,
+  };
+}
+
 function acquireResources(side: RendezvousRole = "acceptor") {
   const peer = { disconnect: vi.fn(), destroy: vi.fn() };
   const conn = { close: vi.fn() };
@@ -384,6 +412,49 @@ describe("runManagedExchangeInBrowser", () => {
       onCloseOutcome: expect.any(Function),
       signal: controller.signal,
     });
+  });
+
+  test("a cancel cuts an exchange the partner has stalled mid-payload", async () => {
+    // The recovery a stalled partner would otherwise leave nowhere but closing
+    // the tab. The exchange is parked on a receive whose duration the partner
+    // picks, and the run holds the record's single-writer lock across it; core's
+    // exchange takes no signal, so closing the connection is what ends it.
+    const { mc, close, stalled } = makeStalledExchangeMc();
+    mockedOpen.mockResolvedValue(mc);
+    const { peer } = acquireResources();
+    mockedRunExchange.mockReturnValueOnce(stalled);
+    const controller = new AbortController();
+
+    const running = runDriver(controller.signal);
+    await tick();
+    // The run is in its exchange with nothing torn down: the cancel below is
+    // what reaches it.
+    expect(mockedRunExchange).toHaveBeenCalledTimes(1);
+    expect(close).not.toHaveBeenCalled();
+    controller.abort();
+
+    await expect(running).rejects.toThrow("connection closed");
+    expect(close).toHaveBeenCalled();
+    expect(peer.disconnect).toHaveBeenCalled();
+  });
+
+  test("a cancel that landed while the channel was opening cuts the exchange too", async () => {
+    // An aborted signal never fires its listener again, so a cancel arriving
+    // before there was a connection to close has to be read once more when one
+    // exists -- otherwise this run exchanges with the partner and holds the
+    // record's lock across it, having already been cancelled.
+    const { mc, close, stalled } = makeStalledExchangeMc();
+    mockedOpen.mockResolvedValue(mc);
+    acquireResources();
+    mockedRunExchange.mockReturnValueOnce(stalled);
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(runDriver(controller.signal)).rejects.toThrow(
+      "connection closed",
+    );
+
+    expect(close).toHaveBeenCalled();
   });
 
   test("yields its outputs on a run cancelled during the drain", async () => {

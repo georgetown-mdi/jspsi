@@ -101,7 +101,9 @@ export interface ManagedRunDriverConfig {
    * prompt once for a gone permission), or an operator-re-selected file. Its
    * contents are never taken from the record. */
   source: ManagedInputSource;
-  /** Cancels the rendezvous, the connection, and the exchange on unmount. */
+  /** Cancels the rendezvous, the connection, and the exchange on unmount. It
+   * reaches the exchange by closing the run's open connection, which is what
+   * ends the waits the partner holds (see {@link runManagedExchangeInBrowser}). */
   signal: AbortSignal;
   /** The object-URL boundary the outputs are built through -- `window.URL` in the
    * app, a recording fake in tests. */
@@ -185,6 +187,25 @@ export function runManagedExchangeInBrowser(
     onWarning?.(message);
   };
 
+  // How the operator's cancel reaches the exchange itself. Every wait the run
+  // makes once the channel is open is a parked receive whose duration the
+  // partner chooses, up to the connection's inactivity budget, and core's
+  // MessageConnection takes no signal: closing the connection is what rejects
+  // those receives. The run's single-writer lock spans the payload exchange, so
+  // without this a partner that stalls mid-payload holds the record's lock
+  // until it moves or the tab is destroyed.
+  //
+  // Published as soon as the handshake opens the channel, so a cancel during
+  // the authentication reaches it too. It does not stand in for the run's own
+  // teardown, which still runs on the failure path this close provokes.
+  let openTransport:
+    { peer: Peer; conn: DataConnection; mc: MessageConnection } | undefined;
+  const cutRunOnCancel = () => {
+    if (openTransport !== undefined)
+      void teardown(openTransport.peer, openTransport.conn, openTransport.mc);
+  };
+  signal.addEventListener("abort", cutRunOnCancel);
+
   return runManagedRerun<ManagedRerunInput, ManagedRerunCarried, RunOutputs>(
     record,
     {
@@ -260,6 +281,11 @@ export function runManagedExchangeInBrowser(
             onCloseOutcome: emitCloseWarning,
             signal,
           });
+          openTransport = { peer, conn, mc };
+          // A cancel that landed while the channel was opening fired the
+          // listener above with nothing yet to close, and an aborted signal
+          // never fires it again, so the state is read once here.
+          if (signal.aborted) cutRunOnCancel();
           // record.expires stays enforced at the handshake (core's pre- and
           // post-handshake guards), covering a bound that lapses between the
           // pre-connection expiry check and here; the orchestration re-maps that
@@ -354,7 +380,9 @@ export function runManagedExchangeInBrowser(
       // operator-torn-down run is recorded as cancelled, not a transport fault.
       aborted: () => signal.aborted,
     },
-  );
+  ).finally(() => {
+    signal.removeEventListener("abort", cutRunOnCancel);
+  });
 }
 
 /** The notice a run raises when its disclosure could not be filed: the exchange

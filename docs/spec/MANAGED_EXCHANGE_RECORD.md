@@ -667,10 +667,14 @@ a scheduled attempt are each refused or queued across the whole run, the payload
 exchange included, rather than across its rotation alone. A [hand-off
 spend](#the-backup-marker-the-spent-state-and-the-import-marker-local-siblings-never-in-the-artifact)
 contends for that same lock, so it too is refused while an exchange is in flight.
-A stated limit of that width: the partner influences how long the payload
-exchange takes, and the run's cancel does not cut it (`runExchange` is called
-without the run's `AbortSignal`), so the lock is held until that exchange settles
-or the holding tab is destroyed, which releases it.
+The partner influences how long the payload exchange takes, so the run's cancel
+reaches that width: it closes the run's connection, which rejects the wait the
+exchange is parked in, so the run ends and the lock releases without the holding
+tab being destroyed. Two limits of that remain. The cancel lands at the run's
+next act on the connection, so one arriving inside a local PSI round takes effect
+when that round next reads or writes. And a run nobody cancels holds the lock for
+as long as the partner takes, up to the connection's inactivity budget; a
+destroyed tab still releases it.
 Export/import between devices is **migration, not sync** (the source copy is
 invalidated on export). Both are specified in
 [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md#single-device-ownership).
