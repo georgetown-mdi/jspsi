@@ -254,37 +254,65 @@ export const CONSENT_FACTS = {
       "duplicates take part, and a pair no strategy matches aborts the " +
       "exchange rather than matching looser. The marker carries that fact and " +
       "no more. Where the invitation makes the inviting party the sole " +
-      "receiver, what the accepting party is presented of the grouping is this " +
-      "client's doing rather than the run's, and that limit is " +
-      "`duplicateGroupingDisplayLimit` below -- a fact of its own in the other " +
-      "register, so this marker is never read as covering it.",
+      "receiver, what reaches the accepting party of the grouping is a further " +
+      "fact of its own -- `duplicateGroupingWithheld` where the exchange " +
+      "closes it, `duplicateGroupingDisplayLimit` in the other register where " +
+      "the client alone does -- so this marker is never read as covering " +
+      "either.",
   },
   duplicateGroupingDisplayLimit: {
     basis: "trust-contingent",
     reason:
       "What a sole-receiver acceptance is not handed is the RESULT, and the " +
-      "entitlement gate on the table `runExchange` returns holds that. The " +
-      "grouping itself still reaches the accepting party's process on the paths " +
-      "this basis is measured over. Under cascade its rounds carry each matched " +
-      "position once per group member. Under single-pass the one wire-level " +
-      "withholding (`withholdsSenderAssociationTable`) can close that -- the " +
-      "sole receiver being the party entitled to output, role resolution makes " +
-      "the acceptor the sender the withholding covers -- but only where that " +
-      "party also transmits no payload column, and an invitation requesting one " +
-      "of it leaves the table exchanged. So presenting none of the grouping is " +
-      "the client's doing rather than the exchange's wherever the exchange has " +
-      "not closed it, and what an operator on that side is shown rests on the " +
-      "software that side runs -- the partner's register, not the run's. The " +
-      "note states that general case and so never claims a protection a " +
-      "particular run withholds beyond it. Carried as a fact of its own rather " +
-      "than inside DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT: it renders " +
-      "beside that statement, under the same enforced headline, but as a " +
-      "classified fact of its own rather than as a clause of a sentence whose " +
-      "basis is the headline's.",
+      "entitlement gate on the table `runExchange` returns holds that. On the " +
+      "runs this basis is measured over the grouping still reaches the " +
+      "accepting party's process: under cascade the rounds carry each matched " +
+      "position once per group member, and under single-pass the wire-level " +
+      "withholding does not reach a party that transmits a payload column of " +
+      "its own or is left free to. So presenting none of the grouping is the " +
+      "client's doing rather than the exchange's, and what an operator on that " +
+      "side is shown rests on the software that side runs -- the partner's " +
+      "register, not the run's. The combination the exchange does close is " +
+      "`duplicateGroupingWithheld` below, resolved from the run's own rule " +
+      "(`withholdsAcceptorAssociationTable`) rather than from a second reading " +
+      "here, so neither entry claims the other's ground. Carried as a fact of " +
+      "its own rather than inside " +
+      "DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT: it renders beside that " +
+      "statement, under the same enforced headline, but as a classified fact " +
+      "of its own rather than as a clause of a sentence whose basis is the " +
+      "headline's.",
     note:
       "psilink receives the group sizes and row positions and does not show " +
       "them to you. Withholding them is this software's choice rather than a " +
       "limit of the exchange, so other software on this side could show them.",
+  },
+  duplicateGroupingWithheld: {
+    basis: "enforced",
+    reason:
+      "The other case of the same line, on the one combination the exchange " +
+      "itself closes: a single-pass run whose sole receiver is the inviting " +
+      "party and whose invitation requests no payload column of the accepting " +
+      "party. The receiver suppresses the accepting party's half of the " +
+      "association table entirely and that party skips awaiting it, both sides " +
+      "deriving the decision from the same authenticated session state, so its " +
+      "process is sent neither the group sizes and row positions nor its own " +
+      "records' membership (docs/spec/PROTOCOL.md, Withholding the sender's " +
+      "table from a blind helper, and its composition with a deduplicating " +
+      'cardinality under Where the "one" party receives no output). Enforced ' +
+      "in the register's own sense rather than merely likely: the empty " +
+      "payload request mirrors to an empty `payload.send` for the accepting " +
+      "party, which is held to exactly the columns its metadata discloses " +
+      "before any data moves, so a run whose file would disclose a column " +
+      "stops there instead of reaching the linkage with the table exchanged. " +
+      "The condition is resolved by `withholdsAcceptorAssociationTable` " +
+      "(consent/invitationSummary.ts) off the run's own predicate, so a " +
+      "surface never states this basis for a run that does not withhold.",
+    note:
+      "This exchange withholds your half of the matched-pair table: psilink " +
+      "on this side never reads it, and a partner running psilink never sends " +
+      "it. You are shown no group sizes, no row positions, and nothing about " +
+      "which of your own records matched. Withholding them is a limit of the " +
+      "exchange rather than this software's choice.",
   },
   matchedFields: {
     basis: "enforced",
@@ -803,12 +831,14 @@ export const DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT =
  * party's own output entitlement, so a sole-receiver acceptance is handed
  * none (pinned in packages/core/test/config/linkageCardinality.test.ts). The
  * statement therefore says what this client presents and stops there. What
- * the wire does NOT withhold is a fact of its own, held by the
- * `duplicateGroupingDisplayLimit` entry of {@link CONSENT_FACTS} and
- * rendered beside this statement: it belongs to the partner's register
- * rather than the run's, so folding it in here would leave a
- * trust-contingent fact unclassified inside a sentence under an enforced
- * headline.
+ * the exchange itself does with the grouping is a fact of its own, rendered
+ * beside this statement and selected between two {@link CONSENT_FACTS}
+ * entries by the run's own resolution
+ * ({@link withholdsAcceptorAssociationTable}): the enforced
+ * `duplicateGroupingWithheld` where the wire suppresses the accepting party's
+ * half, and the trust-contingent `duplicateGroupingDisplayLimit` where it
+ * does not. Folding either in here would leave a fact of one register
+ * unclassified inside a sentence whose basis is the headline's.
  *
  * That split is what keeps the `duplicateMatches` marker at `enforced` while the
  * limit is marked for what it is. The marker states its headline's own fact --

@@ -20,11 +20,13 @@ import type { InvitationToken } from "../config/invitation.js";
 import { checkLinkageRuleSetCitation } from "../defaults/builtInLinkageTerms.js";
 import type { LinkageRuleSetCitationVerdict } from "../defaults/builtInLinkageTerms.js";
 import { deduplicateIsImplementedForStrategy } from "../linkageTermsPolicy.js";
+import { withholdsSenderAssociationTable } from "../psi/link.js";
 import type {
   LinkageField,
   LinkageKey,
   LinkageKeyElement,
   LinkageStrategy,
+  LinkageTerms,
   TransformStep,
 } from "../config/linkageTermsSchema.js";
 import type { Algorithm } from "../types.js";
@@ -536,6 +538,15 @@ export interface InvitationSummary {
    * which of the two fan-out consent facts a surface renders.
    */
   fanOutApplied: boolean;
+  /**
+   * Whether the exchange suppresses the accepting party's half of the
+   * matched-pair table: that party's process receives neither which of its
+   * records matched nor how many of the inviting party's stand behind one.
+   * {@link withholdsAcceptorAssociationTable}'s verdict, read once so both
+   * surfaces select one fact from it -- which each does only under the
+   * deduplicate headline, leaving the same withholding unstated elsewhere.
+   */
+  acceptorTableWithheld: boolean;
   /**
    * Linkage keys (records are matched on these), in the inviter's order, each
    * holding its ordered elements and matching rules.
@@ -1229,6 +1240,63 @@ function summarizeKey(
 }
 
 /**
+ * Whether the exchange an invitation proposes withholds the ACCEPTING party's
+ * half of the association table at the wire, leaving that party's process
+ * blind to which of its own records matched and to the size of any group of
+ * the inviting party's records standing behind one of them.
+ *
+ * The rule itself is {@link withholdsSenderAssociationTable}, asked here
+ * rather than restated. What this adds is the reading of an invitation's own
+ * terms that puts the accepting party on that rule's withheld side, which
+ * takes three conditions:
+ *
+ * - The strategy is `single-pass`. It is the only strategy with a frame to
+ *   suppress: a cascade's rounds carry each party's matched positions as they
+ *   go (docs/spec/PROTOCOL.md, Withholding the sender's table from a blind
+ *   helper).
+ * - The inviting party is entitled to output and the accepting party is not.
+ *   Role resolution gives the party entitled to the result the receiver seat
+ *   whatever the record counts, so the accepting party is the sender the
+ *   withholding covers -- pinned against `resolveRole` itself in
+ *   `test/consent/invitationSummary.test.ts` rather than asserted here.
+ * - The invitation requests no payload column from the accepting party AND
+ *   requests it as a declaration -- `payload.receive` present and empty --
+ *   rather than leaving that direction lazy. The declaration mirrors to the
+ *   acceptor's own empty `payload.send`, which `assertPayloadSendDisclosed`
+ *   holds to exactly the columns its metadata discloses before any data
+ *   moves, so a run that reaches the linkage at all discloses none. An absent
+ *   `receive` binds nothing and so reads as disclosure, the same direction
+ *   the run defaults an unadvertised partner flag in: neither may blind a
+ *   helper that needs its half back.
+ *
+ * A deduplicating term neither adds a condition nor removes one; the
+ * multiplicity bears on neither reason a helper needs its half (docs/spec/
+ * PROTOCOL.md, Where the "one" party receives no output).
+ *
+ * A document no acceptance can reach describes no run, so it resolves false
+ * whatever the conditions above say. Where the inviting party keeps the
+ * result, the accepting party mirrors to no entitlement, and a `payload.send`
+ * the invitation declares mirrors to a `receive` that party may not hold, so
+ * `deriveAcceptedLinkageTerms` refuses the document before any surface
+ * consents to it -- pinned against that refusal in
+ * `test/consent/invitationSummary.test.ts` rather than restated here.
+ */
+export function withholdsAcceptorAssociationTable(
+  terms: LinkageTerms,
+): boolean {
+  if (terms.linkageStrategy !== "single-pass") return false;
+  if (!terms.output.expectsOutput) return false;
+  if (!terms.output.shareWithPartner && (terms.payload?.send?.length ?? 0) > 0)
+    return false;
+  const requestsNoPayload =
+    terms.payload?.receive !== undefined && terms.payload.receive.length === 0;
+  return withholdsSenderAssociationTable(
+    terms.output.shareWithPartner,
+    !requestsNoPayload,
+  );
+}
+
+/**
  * Build a display-ready {@link InvitationSummary} from an invitation's
  * linkage terms, optional expiry, and optional held disclosed-columns
  * subset. The parameter is a structural subset of {@link InvitationToken}
@@ -1353,6 +1421,7 @@ export function summarizeInvitation(
     deduplicateApplied,
     fansOut: terms.linkageKeys.some((key) => key.elements.some(declaresFanOut)),
     fanOutApplied: fanOutMatches,
+    acceptorTableWithheld: withholdsAcceptorAssociationTable(terms),
     linkageKeys: terms.linkageKeys.map((key) =>
       summarizeKey(key, fieldByName, fanOutMatches),
     ),

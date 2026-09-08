@@ -742,12 +742,23 @@ export function displayInvitation(params: {
       }`,
     );
     // The sole-receiver statement covers the withholding this client
-    // makes; what the rounds still disclose to this party's own process is
-    // the separate fact beside it, read from the shared table with its own
-    // basis. Printed only in that shape: where the inviter shares the
-    // result, this party already sees the grouping directly.
+    // makes; what the exchange itself does with the grouping is the
+    // separate fact beside it, read from the shared table with its own
+    // basis. WHICH of the two prints follows core's resolution of the run
+    // (`acceptorTableWithheld`), never a reading of the strategy and the
+    // payload request made here. Printed only in that shape: where the
+    // inviter shares the result, this party already sees the grouping
+    // directly.
     if (!summary.inviterSharesResult)
-      emit(`    ${CONSENT_FACTS.duplicateGroupingDisplayLimit.note}`);
+      emit(
+        `    ${
+          CONSENT_FACTS[
+            summary.acceptorTableWithheld
+              ? "duplicateGroupingWithheld"
+              : "duplicateGroupingDisplayLimit"
+          ].note
+        }`,
+      );
     emit(`    ${DEDUPLICATE_ACCEPTOR_SIDE_NOTE}`);
   }
 
