@@ -535,8 +535,9 @@ interface AcceptorPayloadDeclarationConflict {
   sentButNotDeclared: Array<string>;
   /**
    * Columns the declaration names that the marks do not send -- core's
-   * OVER-declaration, in the order the declaration lists them. Partner-controlled
-   * names ({@link AcceptorDeclaredColumnGap}), whose remedy leads with a corrected
+   * OVER-declaration, distinct and in the order the declaration first lists them
+   * ({@link declaredNotSentNames}). Partner-controlled names
+   * ({@link AcceptorDeclaredColumnGap}), whose remedy leads with a corrected
    * invitation or a different file.
    */
   declaredButNotSent: Array<AcceptorDeclaredColumnGap>;
@@ -546,18 +547,23 @@ interface AcceptorPayloadDeclarationConflict {
  * The declaration's column names this party's marks do not send, raw and in
  * declaration order -- partner-controlled text, escaped by whichever sink paints it
  * ({@link AcceptorDeclaredColumnGap}). The one derivation of that set: the notice's
- * list and the cost of taking its widening offer
+ * list, its remedies and the cost of taking its widening offer
  * ({@link acceptorSendingExpectedColumnsCostsKey}) read the same names, whole,
  * whatever the notice paints.
+ *
+ * DISTINCT, keeping each name's first position: a declaration may name the same
+ * column twice, which is still one column to list, one to mark and one to speak
+ * about, so every consumer counts columns rather than declaration entries.
  */
 function declaredNotSentNames(
   invitationTerms: LinkageTerms,
   metadata: Metadata,
 ): Array<string> {
   const disclosed = new Set(acceptorDisclosedColumns(metadata));
-  return (invitationTerms.payload?.receive ?? [])
-    .map((column) => column.name)
-    .filter((name) => !disclosed.has(name));
+  const declared = new Set(
+    (invitationTerms.payload?.receive ?? []).map((column) => column.name),
+  );
+  return [...declared].filter((name) => !disclosed.has(name));
 }
 
 /**
@@ -670,17 +676,16 @@ function declarationConflictWording(
 }
 
 /**
- * The distinct columns the notice's widening offer would mark: the declared names
- * this party's marks do not send that the operator's file HAS, in declaration order.
- * A declaration may name the same column twice, which is one column to mark and one
- * column to speak about, so the repeat is dropped here.
+ * The columns the notice's widening offer would mark: the declared names this
+ * party's marks do not send that the operator's file HAS, distinct and in
+ * declaration order ({@link declaredNotSentNames}).
  */
 function widenableDeclaredColumns(
   linkageTerms: LinkageTerms,
   metadata: Metadata,
 ): Array<string> {
-  return [...new Set(declaredNotSentNames(linkageTerms, metadata))].filter(
-    (name) => metadata.some((column) => column.name === name),
+  return declaredNotSentNames(linkageTerms, metadata).filter((name) =>
+    metadata.some((column) => column.name === name),
   );
 }
 

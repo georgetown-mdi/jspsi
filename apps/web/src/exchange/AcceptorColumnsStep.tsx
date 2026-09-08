@@ -212,9 +212,9 @@ export function AcceptorColumnsStep({
   // Which remedies the declared-but-unsent half even has: a column this file does
   // not hold cannot be marked at all, so only the columns it does hold get the
   // offer to widen the disclosure, and only the ones it lacks get "choose another
-  // file". The widening's side is counted in COLUMNS rather than declaration
-  // entries, since a declaration may name the same held column twice and the
-  // sentence below is about the columns the operator would set.
+  // file". Both sides count COLUMNS rather than declaration entries, which is what
+  // the model's declared-but-unsent set holds and what the sentences below are
+  // about: the columns the operator would set, or the ones they would go and find.
   const expectedInFileCount = useMemo(
     () =>
       acceptorWidenableDeclaredColumnCount(linkageTerms, editorState.metadata),
@@ -225,9 +225,7 @@ export function AcceptorColumnsStep({
   // Whether taking that offer would cost an agreed linkage key: the widened marks
   // leave fewer keys satisfiable than the current marks do. Read from the model,
   // over the whole declared set rather than the names painted below, so the offer's
-  // cost is the one the operator would meet. Memoized on the inputs the grading
-  // reads: it re-marks every offered column and grades twice, which a render that
-  // changed none of them must not pay again.
+  // cost is the one the operator would meet.
   const sendingCostsLinkageKey = useMemo(
     () =>
       acceptorSendingExpectedColumnsCostsKey(
@@ -546,8 +544,8 @@ export function AcceptorColumnsStep({
                     {/* The invitation's OWN names, which the model has already
                         escaped for this sink -- partner-controlled text, unlike
                         the operator's headers above, and so also the half this
-                        screen bounds by count. Keyed by position: nothing stops a
-                        declaration naming the same column twice. */}
+                        screen bounds by count. Keyed by position: a static list,
+                        rebuilt whole, whose items hold no state of their own. */}
                     <List size="sm" withPadding listStyleType="circle" my={4}>
                       {shownDeclaredGaps.map((gap, index) => (
                         <List.Item key={index}>

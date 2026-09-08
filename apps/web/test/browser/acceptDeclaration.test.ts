@@ -277,10 +277,9 @@ describe("acceptor columns step: a disagreeing non-empty declaration", () => {
   });
 
   test("speaks about a held column the declaration names twice as the one column it is", async () => {
-    // Nothing stops a declaration from naming the same column twice, so the entry
-    // count and the column count part company: the list and the title below count
-    // entries, while the offer is about the operator's own columns and there is one
-    // column here to set.
+    // Nothing stops a declaration from naming the same column twice, and the whole
+    // notice is about the operator's own columns: one name to read, one column to
+    // set, and a title and an offer that both say one.
     const terms: LinkageTerms = {
       ...acceptorTerms,
       payload: {
@@ -295,14 +294,50 @@ describe("acceptor columns step: a disagreeing non-empty declaration", () => {
     mountStep(terms, columns);
     await expect
       .element(
-        page.getByText("Your partner expects columns you are not sending"),
+        page.getByText("Your partner expects a column you are not sending"),
       )
       .toBeInTheDocument();
+    const painted = Array.from(declarationNotice().querySelectorAll("li")).map(
+      (item) => item.textContent,
+    );
+    expect(painted).toEqual(["first_name"]);
     expect(app.container.textContent).toContain(
       `${PARTNER_REMEDY} ${WIDENING_COSTS_A_KEY}`,
     );
     expect(app.container.textContent).not.toContain(
       WIDENING_COSTS_A_KEY_PLURAL,
+    );
+  });
+
+  test("speaks about an absent column the declaration names twice as the one column it is", async () => {
+    // The same repeat where the file does not have the column: the remedy is a
+    // different file, and it is one column that file has to have.
+    const terms: LinkageTerms = {
+      ...acceptorTerms,
+      payload: {
+        receive: [
+          { name: "notes" },
+          { name: "risk_score" },
+          { name: "risk_score" },
+        ],
+      },
+    };
+    expect(safeParseLinkageTerms(terms).success).toBe(true);
+    mountStep(terms, columns);
+    await expect
+      .element(
+        page.getByText("Your partner expects a column you are not sending"),
+      )
+      .toBeInTheDocument();
+    const painted = Array.from(declarationNotice().querySelectorAll("li")).map(
+      (item) => item.textContent,
+    );
+    expect(painted).toEqual(["risk_score - not a column in this file"]);
+    expect(app.container.textContent).toContain(
+      "or choose a file that has that column",
+    );
+    expect(app.container.textContent).not.toContain(
+      "or choose a file that has those columns",
     );
   });
 
