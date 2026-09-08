@@ -387,6 +387,7 @@ describe("acceptor launch gates", () => {
   test("a device reporting offline disables launch and names the shared reason", () => {
     const blocks = {
       deduplicatePairRefused: false,
+      deduplicateChangedAfterConsent: false,
       connectionBlocked: false,
       exchangeFilesBlocked: false,
       connectionTuningBlocked: false,
@@ -420,6 +421,7 @@ describe("acceptor launch gates", () => {
     // remedy is back on the terms, so the sentence sends the operator there.
     const blocks = {
       offline: false,
+      deduplicateChangedAfterConsent: false,
       connectionBlocked: false,
       exchangeFilesBlocked: false,
       connectionTuningBlocked: false,
@@ -447,6 +449,50 @@ describe("acceptor launch gates", () => {
     ).toBeUndefined();
   });
 
+  test("a duplicate-matching value moved since consent disables launch", () => {
+    // The run presents the value the consent gate committed, so the two must
+    // agree before it starts: launching would run a value the terms step no
+    // longer shows, and the control alone changes nothing the operator
+    // consented to.
+    const blocks = {
+      offline: false,
+      deduplicatePairRefused: false,
+      connectionBlocked: false,
+      exchangeFilesBlocked: false,
+      connectionTuningBlocked: false,
+      runDiagnosticsBlocked: false,
+      receiptsBlocked: false,
+    };
+    expect(
+      acceptorLaunchBlockedReason(
+        satisfiableVerdict,
+        satisfiable.editorState,
+        nameTerms,
+        { ...blocks, deduplicateChangedAfterConsent: true },
+      ),
+    ).toBe(
+      "This exchange runs with the duplicate-matching setting you accepted, " +
+        "which is not the one now on the terms step. Accept again to apply " +
+        "the change, or set the control back.",
+    );
+    // The refused pair speaks first: its own control clears both.
+    expect(
+      acceptorLaunchBlockedReason(
+        satisfiableVerdict,
+        satisfiable.editorState,
+        nameTerms,
+        {
+          ...blocks,
+          deduplicatePairRefused: true,
+          deduplicateChangedAfterConsent: true,
+        },
+      ),
+    ).toBe(
+      "Go back to the terms and resolve the duplicate-matching settings " +
+        "before you can start.",
+    );
+  });
+
   test("offline speaks ahead of the screen's own problems, which no edit here can outrun", () => {
     // A file that can match nothing is a fix the operator makes on this screen;
     // no network is not, so it is the sentence they meet first rather than the
@@ -459,6 +505,7 @@ describe("acceptor launch gates", () => {
       acceptorLaunchBlockedReason(verdict, editorState, nameTerms, {
         offline: true,
         deduplicatePairRefused: false,
+        deduplicateChangedAfterConsent: false,
         connectionBlocked: false,
         exchangeFilesBlocked: false,
         connectionTuningBlocked: false,
@@ -477,6 +524,7 @@ describe("acceptor launch gates", () => {
         {
           offline: false,
           deduplicatePairRefused: false,
+          deduplicateChangedAfterConsent: false,
           connectionBlocked: true,
           exchangeFilesBlocked: false,
           connectionTuningBlocked: false,
@@ -500,6 +548,7 @@ describe("acceptor launch gates", () => {
         {
           offline: false,
           deduplicatePairRefused: false,
+          deduplicateChangedAfterConsent: false,
           connectionBlocked: false,
           exchangeFilesBlocked: false,
           connectionTuningBlocked: false,
@@ -523,6 +572,7 @@ describe("acceptor launch gates", () => {
         {
           offline: false,
           deduplicatePairRefused: false,
+          deduplicateChangedAfterConsent: false,
           connectionBlocked: false,
           exchangeFilesBlocked: true,
           connectionTuningBlocked: false,
@@ -542,6 +592,7 @@ describe("acceptor launch gates", () => {
     const stepBlocks = {
       offline: false,
       deduplicatePairRefused: false,
+      deduplicateChangedAfterConsent: false,
       connectionBlocked: false,
       exchangeFilesBlocked:
         exchangeFilesProblems(EXCHANGE_FILES_DEFAULT, CONFIG_EXCHANGE_FILES)
@@ -585,6 +636,7 @@ describe("acceptor launch gates", () => {
         {
           offline: false,
           deduplicatePairRefused: false,
+          deduplicateChangedAfterConsent: false,
           connectionBlocked: false,
           exchangeFilesBlocked: false,
           connectionTuningBlocked: false,
@@ -608,6 +660,7 @@ describe("acceptor launch gates", () => {
       acceptorLaunchBlockedReason(verdict, editorState, nameTerms, {
         offline: false,
         deduplicatePairRefused: false,
+        deduplicateChangedAfterConsent: false,
         connectionBlocked: true,
         exchangeFilesBlocked: true,
         connectionTuningBlocked: true,

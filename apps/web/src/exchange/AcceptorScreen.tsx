@@ -205,9 +205,10 @@ function isAcceptorStep(value: string): value is AcceptorStep {
  * surface ({@link AcceptorExchangeSection}); the run hook keys on the derived
  * launch object, so a fresh launch restarts the run.
  *
- * `deduplicate` is fixed here for the same reason the committed name is: the
- * run presents the terms it holds, and the managed-exchange deposit records
- * them, so neither may drift with a later edit to the control. */
+ * `deduplicate` is the value the consent gate committed, carried here for the
+ * same reason the committed name is: the run presents the terms it holds, and
+ * the managed-exchange deposit records them, so neither may drift with a later
+ * edit to the control. */
 interface AcceptorLaunched {
   edits: AcceptorDataEdits;
   deduplicate: boolean;
@@ -276,14 +277,19 @@ export function AcceptorScreen() {
   const [runDiagnosticsOpen, setRunDiagnosticsOpen] = useState(false);
   // This party's own side of the matching cardinality, authored on the terms
   // review step beside what the invitation declares for the inviting party's.
-  // It starts closed -- the value an acceptance derives with no control at all
-  // -- and is read into the launch, which fixes it for the run.
+  // It starts closed -- the value an acceptance derives with no control at all.
   const [acceptorDeduplicate, setAcceptorDeduplicate] = useState(false);
   const [acceptorName, setAcceptorName] = useState("");
   // The name recorded in the exchange record, committed through the consent gate
   // at "Accept and continue" and fixed thereafter -- the run adopts the terms
   // under this identity, so it must not drift with a later edit to the input.
   const [committedName, setCommittedName] = useState("");
+  // This party's own deduplicate value as the same gate committed it, and the
+  // only one the run presents: the consent surface states what the pair
+  // discloses, so a value the operator sets after passing that gate reaches the
+  // run only by passing it again (the columns step holds the launch while the
+  // two disagree).
+  const [committedDeduplicate, setCommittedDeduplicate] = useState(false);
   const [file, setFile] = useState<File>();
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [rejectionMessage, setRejectionMessage] = useState<string>();
@@ -413,6 +419,11 @@ export function AcceptorScreen() {
     deduplicateRefusal?.scope === "pair"
       ? deduplicateRefusal.message
       : undefined;
+  // Whether the control stands somewhere other than the value the consent gate
+  // committed, which is the value the run presents. Only meaningful past that
+  // gate: the columns step and the launch, the two places it is read.
+  const deduplicateChangedAfterConsent =
+    acceptorDeduplicate !== committedDeduplicate;
   // What stops this accept at the review step, in place of the Continue control:
   // an endpoint this console cannot run, or an invitation whose terms no
   // acceptance can run at all -- the mirror the schema refuses, which would
@@ -652,6 +663,11 @@ export function AcceptorScreen() {
   // no parse). Only a clean commit advances to the confirm-columns step.
   async function acceptAndContinue() {
     if (decode.status !== "ready") return;
+    // The pair the run refuses, re-checked in the handler for the same reason
+    // the consent gate is: browser history can restore this step past the review
+    // step's disabled Continue, and committing there would fix a value no run
+    // takes. The step states the refusal beside its own disabled button.
+    if (deduplicateRefusal !== undefined) return;
     const name = acceptorConsentName({ consented, name: acceptorName });
     // The shape of the name the run would adopt, re-checked here for the same
     // reason the consent gate is: the disabled state alone is not the refusal.
@@ -675,10 +691,11 @@ export function AcceptorScreen() {
       // The console reads the file itself: the profile was committed and
       // the columns seeded via the picker, so there is no browser parse behind the
       // gate. Build the acquired shape from the profile (rows withheld) and advance,
-      // committing the gate-checked name so the run records it even if the input is
-      // later edited.
+      // committing the gate-checked name and deduplicate value for the reason the
+      // hosted branch below states.
       if (consoleSource === undefined) return;
       setCommittedName(name);
+      setCommittedDeduplicate(acceptorDeduplicate);
       setAcquired(
         consoleAcquiredCsv({
           fileName: consoleSource.name,
@@ -716,9 +733,11 @@ export function AcceptorScreen() {
       }
       // Store the parsed CSV (not discard it) and seed the columns-step editor from
       // its columns; the verdict and launch payload derive from this state. Commit
-      // the gate-checked name here so the run records it even if the input is later
-      // edited (the input stays editable; the committed identity does not drift).
+      // the gate-checked name and this party's own deduplicate value here, so the
+      // run records and presents what passed the gate even if either control is
+      // later edited.
       setCommittedName(name);
+      setCommittedDeduplicate(acceptorDeduplicate);
       setAcceptedFile(file);
       setSourceHandle(capturedInputHandle(file));
       setAcquired({
@@ -1128,13 +1147,17 @@ export function AcceptorScreen() {
     // Continue, but browser history can restore a later step with the refused
     // value still set, and a launch under it aborts at the terms exchange.
     if (deduplicateRefusal !== undefined) return;
+    // And for a control the operator moved after consenting: the run presents
+    // the committed value, so it starts only while the terms step shows that
+    // same value.
+    if (deduplicateChangedAfterConsent) return;
     // A re-launch reached by browser Back leaves the offer as the prior launch
     // left it, so the fresh launch resets it rather than opening under a refusal
     // the operator has already acted on.
     setManageOffer(MANAGE_OFFER_IDLE);
     setLaunched({
       ...acceptorLaunchPayload(editorState),
-      deduplicate: acceptorDeduplicate,
+      deduplicate: committedDeduplicate,
     });
     goToStep("launched");
   };
@@ -1612,6 +1635,7 @@ export function AcceptorScreen() {
                 ) : undefined
               }
               deduplicatePairRefused={pairRefusal !== undefined}
+              deduplicateChangedAfterConsent={deduplicateChangedAfterConsent}
               connectionBlocked={sftpConnectionMissing}
               exchangeFilesSection={
                 acceptServerJob ? (

@@ -302,6 +302,12 @@ interface AcceptorLaunchStepBlocks {
    * Continue would otherwise reach this step with the refused value and launch
    * it. Cleared on the review step alone, which holds the control. */
   deduplicatePairRefused: boolean;
+  /** Whether this party's own `deduplicate` control stands somewhere other than
+   * the value the consent gate committed, which is the one the run presents.
+   * Held rather than resolved silently either way: launching would present a
+   * value the terms step no longer shows, and adopting the control's value
+   * would present one no consent gate passed. */
+  deduplicateChangedAfterConsent: boolean;
   /** An SFTP accept whose transport connection is not authored yet. */
   connectionBlocked: boolean;
   /** A file-handling combination core refuses. */
@@ -326,6 +332,7 @@ interface AcceptorLaunchStepBlocks {
 const NO_STEP_BLOCKS: AcceptorLaunchStepBlocks = {
   offline: false,
   deduplicatePairRefused: false,
+  deduplicateChangedAfterConsent: false,
   connectionBlocked: false,
   exchangeFilesBlocked: false,
   connectionTuningBlocked: false,
@@ -351,13 +358,14 @@ const NO_STEP_BLOCKS: AcceptorLaunchStepBlocks = {
  * declaration conflict holds that shape across its own variants too: its title and
  * the button's reason are chosen in a single place.
  *
- * Checks run in the step's own reading order, with the two nothing on this
- * screen clears first: offline, then the refused duplicate-matching pair, whose
- * control is back on the review step. Then the verdict, the count-only refusal,
- * the declaration conflict, the over-long name notice, the identifier rule, the
- * cleaning steps, the connection, the split rendezvous's retain-mode
- * requirement, and the file-handling and connection-tuning cards -- so an operator
- * working down the screen is sent to the first unresolved card. Each reason is
+ * Checks run in the step's own reading order, with the three nothing on this
+ * screen clears first: offline, then the refused duplicate-matching pair and a
+ * duplicate-matching setting moved since consent, whose control is back on the
+ * review step. Then the verdict, the count-only refusal, the declaration
+ * conflict, the over-long name notice, the identifier rule, the cleaning steps,
+ * the connection, the split rendezvous's retain-mode requirement, and the
+ * file-handling and connection-tuning cards -- so an operator working down the
+ * screen is sent to the first unresolved card. Each reason is
  * worded from the notice it points at, and none names a partner-controlled key.
  */
 export function acceptorLaunchBlockedReason(
@@ -371,6 +379,12 @@ export function acceptorLaunchBlockedReason(
     return (
       "Go back to the terms and resolve the duplicate-matching settings " +
       "before you can start."
+    );
+  if (stepBlocks.deduplicateChangedAfterConsent)
+    return (
+      "This exchange runs with the duplicate-matching setting you accepted, " +
+      "which is not the one now on the terms step. Accept again to apply the " +
+      "change, or set the control back."
     );
   if (!verdict.fullySatisfied) {
     if (verdict.satisfiableKeyCount === 0)

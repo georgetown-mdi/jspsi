@@ -437,14 +437,20 @@ interface AcceptStubOptions {
 // POST plus event stream the console run reads. With `conflict` the POST returns a
 // busy (409) so the accept re-attaches to the occupying exchange instead. Unmatched
 // URLs fall through to the real fetch so the runner's own traffic is untouched.
+// Each request is recorded with its body, so a test can read the intent a launch
+// hands the console.
 function stubServerJobAccept(options: AcceptStubOptions = {}): {
-  captured: Array<{ url: string; method: string }>;
+  captured: Array<{ url: string; method: string; body?: BodyInit | null }>;
   emitEvent: (event: object) => void;
   closeEvents: () => void;
   hasEventStream: () => boolean;
   resolveProbe: () => void;
 } {
-  const captured: Array<{ url: string; method: string }> = [];
+  const captured: Array<{
+    url: string;
+    method: string;
+    body?: BodyInit | null;
+  }> = [];
   const realFetch = window.fetch.bind(window);
   const encoder = new TextEncoder();
   let sse: ReadableStreamDefaultController<Uint8Array> | undefined;
@@ -474,7 +480,7 @@ function stubServerJobAccept(options: AcceptStubOptions = {}): {
     (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
       const url = String(input);
       if (!url.startsWith("/api/jobs")) return realFetch(input, init);
-      captured.push({ url, method: init?.method ?? "GET" });
+      captured.push({ url, method: init?.method ?? "GET", body: init?.body });
       if (url === "/api/jobs/rendezvous")
         return Promise.resolve(
           jsonResponse(
@@ -1143,5 +1149,34 @@ describe("console acceptor recoveries against the run's exchange record", () => 
         ),
       ).toBe(true),
     );
+  });
+});
+
+describe("console acceptor's own deduplicate", () => {
+  test("the console runs the value the consent gate committed", async () => {
+    // This party's own side reaches the intent the console conducts the
+    // exchange from, so the run presents the value that passed the consent
+    // gate rather than the closed default an accept with no control derives.
+    const api = stubServerJobAccept();
+    window.location.hash = await encodeToken(FILEDROP_ENDPOINT);
+    app.render(createElement(AcceptorScreen));
+    await page.getByRole("button", { name: "Other details" }).click();
+    await userEvent.click(
+      page.getByRole("checkbox", {
+        name: "Let several of my records match one of my partner's",
+      }),
+    );
+    await reachAcceptStart();
+
+    const create = api.captured.find(
+      (request) => request.url === "/api/jobs" && request.method === "POST",
+    );
+    const intent = JSON.parse(String(create?.body)) as {
+      linkageTerms: { deduplicate: boolean };
+      expectedPartnerDeduplicate?: boolean;
+    };
+    expect(intent.linkageTerms.deduplicate).toBe(true);
+    // The invitation's own declared side is untouched by this party's control.
+    expect(intent.expectedPartnerDeduplicate).toBe(false);
   });
 });
