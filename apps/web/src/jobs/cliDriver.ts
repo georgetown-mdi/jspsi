@@ -264,7 +264,9 @@ export function spawnExchangeJob(args: {
  * {@link zeroSetupOptionsArgv}; every credential in them is an `@path`
  * reference, so no secret byte is on argv. `identity` and `linkageStrategy`
  * forward as single `--flag=value` tokens so a `-`-leading value cannot be
- * misparsed by yargs as its own flag.
+ * misparsed by yargs as its own flag. `deduplicate` forwards as the bare
+ * `--deduplicate` and only when set: the flag defaults to off in the CLI and a
+ * zero-setup run loads no configuration file for a `--no-` form to override.
  *
  * Shares the post-spawn tail with {@link spawnExchangeJob} through
  * {@link runCliChild}; the two differ only in the argv they build.
@@ -282,13 +284,15 @@ export function spawnZeroSetupJob(args: {
   runControls: CliRunControls;
   identity?: string;
   linkageStrategy?: "cascade" | "single-pass";
+  /** This party's own side of the matching cardinality; emitted only when set. */
+  deduplicate?: boolean;
   /** See {@link spawnExchangeJob}'s `extraEnv`; identical server-only channel. */
   extraEnv?: NodeJS.ProcessEnv;
   handlers: CliDriverHandlers;
 }): CliDriverHandle {
   const { binaryPath, connectionArgs, inputPath, outputPath } = args;
   const { recordPath, workdir, handlers, eventStream, extraEnv } = args;
-  const { identity, linkageStrategy, optionArgs } = args;
+  const { identity, linkageStrategy, deduplicate, optionArgs } = args;
 
   // The URL is the first positional (connectionArgs[0]); input and output are the
   // trailing positionals. Every value-bearing flag is a single `--flag=value`
@@ -303,6 +307,7 @@ export function spawnZeroSetupJob(args: {
     ...(linkageStrategy !== undefined
       ? [`--linkage-strategy=${linkageStrategy}`]
       : []),
+    ...(deduplicate === true ? ["--deduplicate"] : []),
     `--record-file=${recordPath}`,
     ...runControlArgv(args.runControls),
     ...(eventStream ? ["--event-stream"] : []),

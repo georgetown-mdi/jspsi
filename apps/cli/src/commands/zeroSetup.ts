@@ -2,6 +2,7 @@ import type { Argv, Arguments } from "yargs";
 import fs from "node:fs";
 
 import {
+  assertDeduplicateImplemented,
   getLogger,
   prepareForExchange,
   sanitizeErrorForDisplay,
@@ -50,6 +51,7 @@ import {
   observedReceivedColumnsForSave,
   parseLinkageStrategyFlag,
   singlePassDisclosureNotice,
+  withDeduplicate,
   withLinkageStrategy,
 } from "../onlineBootstrap";
 import {
@@ -142,6 +144,20 @@ export function builder(cmd: Argv): Argv {
         "-- on its own it is rejected. Only use when you intend to discard the " +
         "transcript",
     })
+    .option("deduplicate", {
+      type: "boolean",
+      default: false,
+      describe:
+        "let several of your records match a single one of your partner's " +
+        "(default: off, each of your records matches at most one). This is " +
+        "your own side of the setting: your partner declares its own on its " +
+        "own run, and neither side is read from the other. Setting it widens " +
+        "what your partner discloses -- more of its records can match than in " +
+        "a one-to-one run of the same two files. Both parties setting it " +
+        "under --linkage-strategy single-pass is refused before matching " +
+        "begins. See https://github.com/georgetown-mdi/jspsi/blob/main/docs/" +
+        "EXCHANGE_REFERENCE.md (linkage_terms.deduplicate).",
+    })
     .option("linkage-strategy", {
       type: "string",
       describe:
@@ -171,6 +187,10 @@ interface ZeroSetupArgs extends CommonBootstrapOptions {
   // The operator's --linkage-strategy selection, applied to the terms this
   // command authors from its input (see prepareDataset).
   linkageStrategy?: LinkageStrategy;
+  // This party's own side of the matching cardinality, applied to those same
+  // terms. Resolved to a definite boolean here: the terms schema makes the
+  // field mandatory, and there is no config layer to merge an unset flag with.
+  deduplicate: boolean;
 }
 
 function parseArgs(argv: Arguments): ZeroSetupArgs {
@@ -199,6 +219,7 @@ function parseArgs(argv: Arguments): ZeroSetupArgs {
     // value is a clean usage error (exit 64) before any side effect; singleValue
     // rejects a repeat first. Undefined when unset, leaving the cascade default.
     linkageStrategy: parseLinkageStrategyFlag(argv),
+    deduplicate: (argv["deduplicate"] as boolean | undefined) ?? false,
   };
 }
 
@@ -277,6 +298,7 @@ async function prepareDataset(
   identity: string | undefined,
   input: string,
   linkageStrategy: LinkageStrategy | undefined,
+  deduplicate: boolean,
 ): Promise<PreparedExchange> {
   const log = getLogger("psilink");
 
@@ -294,15 +316,20 @@ async function prepareDataset(
     columns,
     sanitizedColumnPositions,
   );
-  // Apply the operator's --linkage-strategy onto the terms prepareForExchange
-  // authored (a no-op for cascade), so it rides into the exchange and the
-  // --save spec; it never touches the standardization/dataset already built.
-  // Reports the disclosure tradeoff at selection like invite -- zero-setup
-  // never sources terms from a config, so the note always reflects what runs.
-  prepared.linkageTerms = withLinkageStrategy(
-    prepared.linkageTerms,
-    linkageStrategy,
+  // Apply the operator's --linkage-strategy and --deduplicate onto the terms
+  // prepareForExchange authored (a no-op for cascade and for the closed
+  // default), so both ride into the exchange and the --save spec; neither
+  // touches the standardization/dataset already built. Reports the disclosure
+  // tradeoff at selection like invite -- zero-setup never sources terms from a
+  // config, so the note always reflects what runs.
+  prepared.linkageTerms = withDeduplicate(
+    withLinkageStrategy(prepared.linkageTerms, linkageStrategy),
+    deduplicate,
   );
+  // Both selections land after prepareForExchange ran its own checks over the
+  // inferred terms, so the pair they leave is put back through the one that
+  // reads them together rather than left unasserted.
+  assertDeduplicateImplemented(prepared.linkageTerms);
   if (linkageStrategy === "single-pass") log.info(singlePassDisclosureNotice());
   warnOnValueConstraints(prepared, log);
   return prepared;
@@ -499,6 +526,7 @@ export async function handler(argv: Arguments): Promise<void> {
     forceRetainSweep,
     eventStream,
     linkageStrategy,
+    deduplicate,
     ...options
   } = parsed;
 
@@ -626,6 +654,7 @@ export async function handler(argv: Arguments): Promise<void> {
         optionalIdentity(options.identity),
         input,
         linkageStrategy,
+        deduplicate,
       );
       // Read the files any `@path` credential ref names, holding the values
       // aside rather than applying them: `connection` must keep the reference so

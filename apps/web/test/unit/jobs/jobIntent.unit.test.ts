@@ -1274,6 +1274,23 @@ describe("jobZeroSetupIntentSchema accepts the allowed fields", () => {
       ).toBe(true);
   });
 
+  test("accepts this party's own deduplicate, either way round", () => {
+    // The zero-setup mode's own side of the matching cardinality, forwarded to
+    // the CLI's --deduplicate. Not the exchange mode's expectedPartnerDeduplicate,
+    // which binds the partner's presented value and has no place here.
+    for (const deduplicate of [true, false])
+      expect(
+        jobZeroSetupIntentSchema.safeParse(
+          validZeroSetupIntent({ deduplicate }),
+        ).success,
+      ).toBe(true);
+  });
+
+  test("rejects a non-boolean deduplicate", () => {
+    const intent = { ...validZeroSetupIntent(), deduplicate: "yes" };
+    expect(jobZeroSetupIntentSchema.safeParse(intent).success).toBe(false);
+  });
+
   test("accepts a mounted inputFile reference in place of inputCsv", () => {
     const intent = {
       mode: "zeroSetup",

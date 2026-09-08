@@ -5,6 +5,9 @@ import {
   DEDUPLICATE_ACCEPTOR_SETTABLE_SIDE_NOTE,
   DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
   DEDUPLICATE_ACCEPTOR_WIDENING_NOTE,
+  DEDUPLICATE_PARTNER_DECLARED_DISCLOSURE_STATEMENT,
+  DEDUPLICATE_PARTNER_DECLARED_SIDE_NOTE,
+  DEDUPLICATE_PARTNER_DECLARED_WIDENING_NOTE,
   describeDeduplicatePair,
 } from "../../src/consent/consentFacts";
 
@@ -201,6 +204,73 @@ describe("the acceptor-side direction notes", () => {
     expect(DEDUPLICATE_ACCEPTOR_SIDE_NOTE).toContain("never grouped");
     expect(DEDUPLICATE_ACCEPTOR_SETTABLE_SIDE_NOTE).not.toContain(
       "never grouped",
+    );
+  });
+});
+
+describe("the partner-declared seat's copy", () => {
+  test("names no invitation role, since no invitation tells the reader which is theirs", () => {
+    // The seat's reader holds neither declared role: a sentence naming them
+    // reads the disclosure direction inverted for a reader who maps them the
+    // other way round.
+    for (const copy of [
+      DEDUPLICATE_PARTNER_DECLARED_DISCLOSURE_STATEMENT,
+      DEDUPLICATE_PARTNER_DECLARED_SIDE_NOTE,
+      DEDUPLICATE_PARTNER_DECLARED_WIDENING_NOTE,
+    ]) {
+      expect(copy).not.toContain("inviting party");
+      expect(copy).not.toContain("accepting party");
+    }
+  });
+
+  test("states the same disclosure as the statement it stands in for", () => {
+    // The bound and the integrity limit the party-named statement fixes: the
+    // count and row positions never reach the value behind them, only matched
+    // groups are counted, and the count is the declaring party's own word.
+    expect(DEDUPLICATE_PARTNER_DECLARED_DISCLOSURE_STATEMENT).toContain(
+      "a count and row positions, never the value behind them, and only for " +
+        "groups that matched",
+    );
+    expect(DEDUPLICATE_PARTNER_DECLARED_DISCLOSURE_STATEMENT).toContain(
+      "That count is your own declaration, which psilink does not check " +
+        "against your data",
+    );
+  });
+
+  test("holds the same widening as the acceptor-side notes, in the second person", () => {
+    expect(DEDUPLICATE_PARTNER_DECLARED_SIDE_NOTE).toContain(
+      DEDUPLICATE_PARTNER_DECLARED_WIDENING_NOTE,
+    );
+    // One sentence, one role swapped: the widening the seats state cannot
+    // drift apart into two different disclosures.
+    expect(
+      DEDUPLICATE_PARTNER_DECLARED_WIDENING_NOTE.replace(
+        "your partner",
+        "the accepting party",
+      ),
+    ).toBe(DEDUPLICATE_ACCEPTOR_WIDENING_NOTE);
+  });
+
+  test("drops the claim the partner's records are never grouped, because this seat cannot know the other side", () => {
+    // Unlike the settable note, this seat drops the clause not because it
+    // states the pair itself, but because the partner declares its own value
+    // on its own run: asserting "never grouped" here would state a fact
+    // nothing on this seat decides.
+    expect(DEDUPLICATE_PARTNER_DECLARED_SIDE_NOTE).not.toContain(
+      "never grouped",
+    );
+  });
+
+  test("closes on the partner's own run rather than on a configuration file or these terms", () => {
+    // This seat offers no control and holds no invitation, so the note
+    // neither points to a configuration file (the route with no control at
+    // all) nor claims the partner's value is read from these terms (the route
+    // that offers the control).
+    expect(DEDUPLICATE_PARTNER_DECLARED_SIDE_NOTE).not.toContain(
+      "configuration file",
+    );
+    expect(DEDUPLICATE_PARTNER_DECLARED_SIDE_NOTE).toContain(
+      "declares on its own run rather than reading from these terms",
     );
   });
 });

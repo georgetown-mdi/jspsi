@@ -48,6 +48,7 @@ export function useDirectExchange({
   inputSource,
   identity,
   linkageStrategy,
+  deduplicate,
   options,
   runDiagnostics,
 }: {
@@ -63,6 +64,10 @@ export function useDirectExchange({
   identity?: string;
   /** The optional linkage strategy forwarded to the CLI's `--linkage-strategy`. */
   linkageStrategy?: JobZeroSetupLinkageStrategy;
+  /** This party's own side of the matching cardinality, forwarded to the CLI's
+   * `--deduplicate`. Omitted when the operator leaves the closed default, which
+   * is the value a run with no flag at all applies. */
+  deduplicate?: boolean;
   /** The agreed-server step's file-handling choices, already resolved through
    * core's retain-mode implication. They reach the run as CLI flags, a zero-setup
    * command with no configuration document; undefined when the operator
@@ -161,6 +166,7 @@ export function useDirectExchange({
       inputSource,
       ...(identity !== undefined ? { identity } : {}),
       ...(linkageStrategy !== undefined ? { linkageStrategy } : {}),
+      ...(deduplicate !== undefined ? { deduplicate } : {}),
       ...(options !== undefined ? { options } : {}),
       ...(runDiagnostics !== undefined ? { runDiagnostics } : {}),
       // Persist the created job's id so a reload or hard tab close can re-attach,

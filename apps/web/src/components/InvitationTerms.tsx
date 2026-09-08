@@ -21,6 +21,8 @@ import {
   COUNT_ONLY_DISCLOSURE_STATEMENT,
   DEDUPLICATE_ACCEPTOR_SETTABLE_SIDE_NOTE,
   DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
+  DEDUPLICATE_PARTNER_DECLARED_DISCLOSURE_STATEMENT,
+  DEDUPLICATE_PARTNER_DECLARED_SIDE_NOTE,
   DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,
   DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT,
   LINKAGE_RULE_SET_VERDICT_COPY,
@@ -39,6 +41,10 @@ import {
 import { ColumnChips } from "@components/ColumnChips";
 import { ColumnName } from "@components/ColumnName";
 
+import {
+  DEDUPLICATE_CONTROL_DESCRIPTION,
+  DEDUPLICATE_CONTROL_LABEL,
+} from "@psi/deduplicateChoice";
 import { acceptorMaySetDeduplicate } from "@psi/acceptInvitation";
 
 import type { ReactNode, Ref } from "react";
@@ -80,6 +86,31 @@ const ruleSetValueStyle = {
   borderRadius: "var(--mantine-radius-sm)",
   padding: "2px 6px",
   wordBreak: "break-all",
+} as const;
+
+/**
+ * The matching-multiplicity headline, in the roles the reading seat holds.
+ *
+ * A seat holding an invitation names the two parties that document declares. The
+ * seat where each party declares its own side against terms read from its own
+ * file (`partnerDeclaresOwnDeduplicate`) holds no invitation naming either role,
+ * so a reader mapping the roles the other way would read the direction inverted
+ * -- there the sentence names the reader and its partner instead, like the
+ * consent copy beneath it.
+ */
+const DUPLICATE_MATCHES_HEADLINE = {
+  invitationRoles: {
+    deduplicating:
+      "More than one of the inviting party's records may match a single one of the accepting party's records.",
+    oneToOne:
+      "Each of the inviting party's records matches at most one of the accepting party's records.",
+  },
+  partnerDeclared: {
+    deduplicating:
+      "More than one of your records may match a single one of your partner's records.",
+    oneToOne:
+      "Each of your records matches at most one of your partner's records.",
+  },
 } as const;
 
 /** A labelled block: a bold caption above its value(s). When `captionId` is set it
@@ -385,6 +416,7 @@ export function InvitationTerms({
   connectionEndpoint,
   outboundColumns,
   acceptorDeduplicate,
+  partnerDeclaresOwnDeduplicate,
   perspective = "review",
   headingOrder = 2,
   headingRef,
@@ -441,6 +473,13 @@ export function InvitationTerms({
     onChange: (value: boolean) => void;
     refusal?: string;
   };
+  /** Whether the PARTNER declares its own `deduplicate` on its own run rather
+   * than reading it from these terms -- the direct exchange, where each party
+   * infers terms from its own file and no invitation states either side. The
+   * duplicate-matches block then closes on
+   * {@link DEDUPLICATE_PARTNER_DECLARED_SIDE_NOTE}, which asserts nothing about
+   * a side this seat cannot know, in place of the accept seat's notes. */
+  partnerDeclaresOwnDeduplicate?: boolean;
   /** Which context this renders in. Drives the heading and intro copy, the
    * viewer-centric blocks (Result sharing, the payload send/receive framing, and
    * the inviter-only sent-columns chips above "Other details"), and the two
@@ -1381,9 +1420,13 @@ export function InvitationTerms({
                 ticks its own side. */}
               {ownDeduplicate === undefined && (
                 <Text size="sm">
-                  {summary.deduplicate
-                    ? "More than one of the inviting party's records may match a single one of the accepting party's records."
-                    : "Each of the inviting party's records matches at most one of the accepting party's records."}
+                  {
+                    DUPLICATE_MATCHES_HEADLINE[
+                      partnerDeclaresOwnDeduplicate
+                        ? "partnerDeclared"
+                        : "invitationRoles"
+                    ][summary.deduplicate ? "deduplicating" : "oneToOne"]
+                  }
                 </Text>
               )}
               {/* The pair, on a seat where this party sets its own side: both
@@ -1407,8 +1450,8 @@ export function InvitationTerms({
                     onChange={(event) =>
                       ownDeduplicate.onChange(event.currentTarget.checked)
                     }
-                    label="Let several of my records match one of my partner's"
-                    description="Your own side of this setting. Leave it off and each of your records matches at most one of your partner's."
+                    label={DEDUPLICATE_CONTROL_LABEL}
+                    description={DEDUPLICATE_CONTROL_DESCRIPTION}
                   />
                 </>
               )}
@@ -1439,10 +1482,18 @@ export function InvitationTerms({
                 renders whatever either value is. */}
               {summary.deduplicate && summary.deduplicateApplied && (
                 <>
+                  {/* The seat where the partner declares its own side reads the
+                    shared-result account in the second person, for the reason
+                    the headline above is written that way: no invitation there
+                    tells the reader which party role is theirs. The
+                    sole-receiver account has that one form, so a document of
+                    that shape keeps it. */}
                   <Text size="xs" c="dimmed">
-                    {summary.inviterSharesResult
-                      ? DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT
-                      : DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT}
+                    {!summary.inviterSharesResult
+                      ? DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT
+                      : partnerDeclaresOwnDeduplicate
+                        ? DEDUPLICATE_PARTNER_DECLARED_DISCLOSURE_STATEMENT
+                        : DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT}
                   </Text>
                   {/* The sole-receiver statement states the withholding this
                     client makes; what the exchange itself does with the grouping
@@ -1468,11 +1519,16 @@ export function InvitationTerms({
                     closes on that control rather than on a configuration file
                     the operator may not have, and drops the "never grouped"
                     clause the pair statement above answers with the two values
-                    actually selected. */}
+                    actually selected. Where the partner declares its own side
+                    on its own run, the note drops that clause too -- nothing
+                    here decides the other side -- and closes on where it is
+                    declared. */}
                   <Text size="xs" c="dimmed">
                     {ownDeduplicate !== undefined
                       ? DEDUPLICATE_ACCEPTOR_SETTABLE_SIDE_NOTE
-                      : DEDUPLICATE_ACCEPTOR_SIDE_NOTE}
+                      : partnerDeclaresOwnDeduplicate
+                        ? DEDUPLICATE_PARTNER_DECLARED_SIDE_NOTE
+                        : DEDUPLICATE_ACCEPTOR_SIDE_NOTE}
                   </Text>
                 </>
               )}

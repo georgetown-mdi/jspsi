@@ -237,8 +237,8 @@ function buildExchangeHandoffTemplate(
  * Compose the zero-setup mode's portable command tokens: `psilink` plus the
  * connection portion (sftp's `sftp://` URL and `--server-*` flags with the
  * credential `@path` placeholdered, or filedrop's placeholder `file://`
- * locator), the run's tuning flags, its identity and linkage-strategy
- * selectors when set, and the input/output positionals.
+ * locator), the run's tuning flags, its identity, linkage-strategy, and
+ * deduplicate selectors when set, and the input/output positionals.
  *
  * The sftp arm reuses {@link zeroSetupSftpArgv} against a
  * placeholder-credential entry, so the URL, username, and mandatory
@@ -277,6 +277,7 @@ function buildZeroSetupHandoffTemplate(
     ...(intent.linkageStrategy !== undefined
       ? [`--linkage-strategy=${intent.linkageStrategy}`]
       : []),
+    ...(intent.deduplicate === true ? ["--deduplicate"] : []),
     HANDOFF_INPUT_NAME,
     HANDOFF_OUTPUT_NAME,
   ];

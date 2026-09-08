@@ -508,6 +508,26 @@ export function withLinkageStrategy(
 }
 
 /**
+ * Apply this party's own `deduplicate` selection onto CLI-authored default
+ * terms. A no-op when the value already equals the terms' current one; since
+ * CLI-authored default terms declare `false`, in practice only an explicit
+ * `--deduplicate` changes anything. Returns a fresh object so the caller's
+ * input is not mutated.
+ *
+ * Kept beside {@link withLinkageStrategy} because the two are applied together
+ * over the same terms: the pair decides whether the run has a deduplicating
+ * cardinality to match at all (`assertDeduplicateImplemented`), and a caller
+ * applying one without the other would assert over half a selection.
+ */
+export function withDeduplicate(
+  terms: LinkageTerms,
+  deduplicate: boolean,
+): LinkageTerms {
+  if (deduplicate === terms.deduplicate) return terms;
+  return { ...terms, deduplicate };
+}
+
+/**
  * Parse the optional `--linkage-strategy` flag to a validated
  * {@link LinkageStrategy}, or `undefined` when the operator did not select one
  * (the caller then leaves the authored terms at their `cascade` default). A
