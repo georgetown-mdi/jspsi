@@ -332,13 +332,44 @@ export interface JobInputFileReference {
 type JobSigningMode = "none" | "certificate";
 
 /**
+ * Where this party's signing identity file is, as a locator the operator
+ * picked in the console's secrets browse: the mount id and the path segments
+ * under it, exactly the shape an SFTP credential's `mountRef` takes
+ * (`AuthoredMountRefCredential` in `sftpServer.ts`). The SERVER resolves it
+ * against `JOB_SECRETS_DIR`, so no container-absolute path is ever sent or
+ * shown.
+ *
+ * Absent means the console's default: the fixed name in the mounted data root
+ * ({@link SIGNING_IDENTITY_FILE_NAME}), which is the location the console
+ * creates on demand. A location NAMED here is read, never created.
+ */
+export interface JobSigningIdentityLocation {
+  mount: "secrets";
+  subPath: Array<string>;
+}
+
+/**
+ * A single secrets mount only, as the credential locator has: `mount` is the
+ * literal id, so an unknown one fails the parse naming the field, and each
+ * segment is a non-empty string the mount resolution re-admits by shape and
+ * re-confines by realpath.
+ */
+export const jobSigningIdentityLocationSchema: z.ZodType<JobSigningIdentityLocation> =
+  z.strictObject({
+    mount: z.literal("secrets"),
+    subPath: z.array(z.string().min(1)).min(1),
+  });
+
+/**
  * The receipt-signing choices a client may set on an exchange job: the mode,
- * and the partner fingerprint to pin under `certificate`.
+ * the partner fingerprint to pin under `certificate`, and where this party's
+ * signing identity is kept.
  *
  * The two PATH fields of core's {@link SigningConfig} -- `identity_file` and
  * `receipt_output` -- are not representable here: the server owns every path
  * a job's CLI child is pointed at. They are supplied at composition from
- * {@link JobSigningPaths}.
+ * {@link JobSigningPaths}. `identityLocation` is not an exception: it is a
+ * mount id and path segments the server resolves, never a path.
  *
  * `partnerFingerprint` is the one free-text field: core's
  * {@link FINGERPRINT_REGEX} admits exactly a canonical 43-character unpadded
@@ -350,6 +381,7 @@ type JobSigningMode = "none" | "certificate";
 export interface JobSigningChoice {
   mode: JobSigningMode;
   partnerFingerprint?: string;
+  identityLocation?: JobSigningIdentityLocation;
 }
 
 const jobSigningChoiceSchema: z.ZodType<JobSigningChoice> = z
@@ -363,8 +395,22 @@ const jobSigningChoiceSchema: z.ZodType<JobSigningChoice> = z
           "characters), as 'psilink fingerprint' prints it",
       )
       .optional(),
+    identityLocation: jobSigningIdentityLocationSchema.optional(),
   })
   .strict()
+  // A run that signs nothing loads no identity, so a location beside
+  // `mode: none` names a file nothing would read. Refused rather than
+  // composed, so exactly one path answers "which identity would this run
+  // publish" -- the default, on an unsigned run.
+  .refine(
+    (signing) =>
+      signing.mode === "certificate" || signing.identityLocation === undefined,
+    {
+      message:
+        "identityLocation is only admissible with signing mode 'certificate'",
+      path: ["identityLocation"],
+    },
+  )
   // A pin is meaningful only where a certificate is verified against it, so
   // a fingerprint beside `mode: none` is refused rather than composed into a
   // config whose pin nothing reads.

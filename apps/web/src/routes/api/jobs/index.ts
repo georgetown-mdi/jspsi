@@ -15,6 +15,7 @@ import {
 import { jobEmptyResponse, jobJsonResponse } from "@jobs/gate";
 import { JobInputNotFoundError } from "@jobs/workInputs";
 import { SIGNING_IDENTITY_IN_RENDEZVOUS_REFUSAL } from "@jobs/jobCreateRefusal";
+import { SigningIdentityLocationError } from "@jobs/signingIdentity";
 import { jobCreateIntentSchema } from "@jobs/intentSchemas";
 
 /**
@@ -42,8 +43,9 @@ import { jobCreateIntentSchema } from "@jobs/intentSchemas";
  * an unparseable one a 400) before schema validation runs.
  *
  * The unavailable rejection is EMPTY-bodied: an sftp intent with no connection
- * authored, a filedrop intent with no rendezvous directory, and a filedrop intent
- * a split-provisioned console cannot run without retain mode are each 400. The busy
+ * authored, a filedrop intent with no rendezvous directory, a filedrop intent
+ * a split-provisioned console cannot run without retain mode, and a signing
+ * identity location naming nothing in the secrets mount are each 400. The busy
  * rejection is a 409 containing only the occupying exchange's id (nothing else about
  * it), disclosed to the same-origin operator on their own loopback console.
  *
@@ -88,13 +90,16 @@ export const Route = createFileRoute("/api/jobs/")({
             );
           // A mounted input that names no regular file, a filedrop intent with no
           // rendezvous directory configured, a filedrop intent on a
-          // split-provisioned console without retain mode, or an sftp intent with
-          // no connection authored is a 400 (the manager left no workdir behind).
+          // split-provisioned console without retain mode, an sftp intent with
+          // no connection authored, or a signing identity location that names
+          // nothing in the secrets mount is a 400 (the manager left no workdir
+          // behind).
           if (
             error instanceof JobInputNotFoundError ||
             error instanceof JobRendezvousUnavailableError ||
             error instanceof JobRendezvousRetainRequiredError ||
-            error instanceof SftpUnavailableError
+            error instanceof SftpUnavailableError ||
+            error instanceof SigningIdentityLocationError
           )
             return jobEmptyResponse(400);
           // Workdir creation or an input write failed (the manager has already

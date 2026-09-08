@@ -2198,7 +2198,82 @@ describe("a filedrop run that would publish the signing identity", () => {
     // operator's signing key asserts what nothing verified, and a partner who
     // plants a file at that name makes the console say it. So the message states
     // the path alone, and offers moving the file out beside the mount change,
-    // since the file may not be the operator's.
+    // since the file may not be the operator's. True of both layouts' copy.
+    for (const [picked, sentence] of [
+      [false, "A file sits at your signing identity's path"],
+      [
+        true,
+        "A file sits at a path this console reads your signing identity from",
+      ],
+    ] as const) {
+      const alert = failureFor(
+        "config",
+        new JobApiRequestError(
+          400,
+          "POST /api/jobs failed with status 400",
+          undefined,
+          SIGNING_IDENTITY_IN_RENDEZVOUS_REFUSAL,
+        ),
+        undefined,
+        undefined,
+        "inviter",
+        picked,
+      );
+      expect(alert.message).toContain(sentence);
+      expect(alert.message).not.toMatch(/create|mint/);
+      expect(alert.title).toBe(
+        "This exchange shares your signing identity's folder",
+      );
+    }
+  });
+
+  test("the refusal's copy names both paths the check reads", () => {
+    // With a location picked the refusal fires on the identity this run loads OR
+    // on the key left at the console's default path, and the token names neither.
+    // An operator who moved their identity into the secrets mount and is refused
+    // over the leftover key would inspect the file they picked -- which is in no
+    // synced folder -- and read the console as wrong, leaving the disclosed key
+    // where it is. So the copy names both causes and what to do with each, and
+    // the remedy that removes the leftover states what removing a signing key
+    // costs, since a partner pinned its fingerprint.
+    const alert = failureFor(
+      "config",
+      new JobApiRequestError(
+        400,
+        "POST /api/jobs failed with status 400",
+        undefined,
+        SIGNING_IDENTITY_IN_RENDEZVOUS_REFUSAL,
+      ),
+      undefined,
+      undefined,
+      "inviter",
+      true,
+    );
+    expect(alert.message).toContain("either the location you picked");
+    expect(alert.message).toContain(
+      "the console's default in your mounted working directory",
+    );
+    expect(alert.message).toContain(
+      "Move the file at the location you picked out of every folder you " +
+        "share with a partner",
+    );
+    expect(alert.message).toContain(
+      "move the file left at the console's default path to the location you " +
+        "picked",
+    );
+    expect(alert.message).toContain(
+      "a replacement has a new fingerprint every partner who pinned the old " +
+        "one must be sent",
+    );
+  });
+
+  test("the refusal's copy on the default layout names one path", () => {
+    // With no location picked there is one path the check reads, and the file at
+    // it is this party's only signing key rather than a leftover: copy telling
+    // the operator to move a file at a location they never picked names an
+    // action they cannot take, and a removal remedy costs them the key every
+    // partner pinned. Which layout the operator is in is the client's own draft
+    // field, not anything the refusal reports, so the copy is chosen from it.
     const alert = failureFor(
       "config",
       new JobApiRequestError(
@@ -2208,14 +2283,11 @@ describe("a filedrop run that would publish the signing identity", () => {
         SIGNING_IDENTITY_IN_RENDEZVOUS_REFUSAL,
       ),
     );
-    expect(alert.message).toContain("A file sits at your signing identity's");
-    expect(alert.message).not.toMatch(/create|mint/);
     expect(alert.message).toContain(
       "Move that file out of every folder you share with a partner",
     );
-    expect(alert.title).toBe(
-      "This exchange shares your signing identity's folder",
-    );
+    expect(alert.message).not.toMatch(/location you picked/);
+    expect(alert.message).not.toMatch(/remove|delete/i);
   });
 
   describe("the fingerprint request into the same layout", () => {
