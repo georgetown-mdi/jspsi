@@ -549,6 +549,15 @@ export interface InvitationSummary {
    */
   acceptorTableWithheld: boolean;
   /**
+   * The same verdict for the other direction: whether the exchange suppresses
+   * the INVITING party's half of the matched-pair table, leaving its process
+   * blind to which of the accepting party's records matched and to the size of
+   * any group standing behind one. {@link withholdsInviterAssociationTable}'s
+   * verdict, read once for the seat where the accepting party declares a
+   * grouping of its own.
+   */
+  inviterTableWithheld: boolean;
+  /**
    * Linkage keys (records are matched on these), in the inviter's order, each
    * holding its ordered elements and matching rules.
    */
@@ -1298,6 +1307,49 @@ export function withholdsAcceptorAssociationTable(
 }
 
 /**
+ * Whether the exchange an invitation proposes withholds the INVITING party's
+ * half of the association table at the wire, leaving that party's process
+ * blind to which of the accepting party's records matched and to the size of
+ * any group of them standing behind one.
+ *
+ * The mirror of {@link withholdsAcceptorAssociationTable}, asking the same
+ * rule ({@link withholdsSenderAssociationTable}) with the inviting party in
+ * the sender's seat, which takes three conditions:
+ *
+ * - The strategy is `single-pass`, the only strategy with a frame to
+ *   suppress.
+ * - The accepting party is entitled to output and the inviting party is not,
+ *   so role resolution seats the accepting party as the receiver and leaves
+ *   the inviting party the sender the withholding covers.
+ * - The invitation declares an empty `payload.send`. That declaration binds
+ *   the inviting party to disclosing no column -- `assertPayloadSendDisclosed`
+ *   holds a present-but-empty dictionary to exactly what metadata discloses
+ *   whenever the terms share the result with the partner, which this shape
+ *   does -- so a run that reaches the linkage discloses none. An absent
+ *   `send` binds nothing and so reads as disclosure.
+ *
+ * Read at the seat where the ACCEPTING party declares a grouping of its own:
+ * there the inviting party is the one handed no result, and what its process
+ * still reads of that grouping is the fact beside the pair statement
+ * (`partnerReadsDuplicateGrouping` and `partnerDuplicateGroupingWithheld`).
+ * A deduplicating cardinality neither adds a condition nor removes one; the
+ * "one" party as a no-output helper is exactly the composition
+ * docs/spec/PROTOCOL.md covers under Where the "one" party receives no
+ * output.
+ */
+export function withholdsInviterAssociationTable(terms: LinkageTerms): boolean {
+  if (terms.linkageStrategy !== "single-pass") return false;
+  if (terms.output.expectsOutput) return false;
+  if (!terms.output.shareWithPartner) return false;
+  const disclosesNoPayload =
+    terms.payload?.send !== undefined && terms.payload.send.length === 0;
+  return withholdsSenderAssociationTable(
+    terms.output.expectsOutput,
+    !disclosesNoPayload,
+  );
+}
+
+/**
  * Build a display-ready {@link InvitationSummary} from an invitation's
  * linkage terms, optional expiry, and optional held disclosed-columns
  * subset. The parameter is a structural subset of {@link InvitationToken}
@@ -1423,6 +1475,7 @@ export function summarizeInvitation(
     fansOut: terms.linkageKeys.some((key) => key.elements.some(declaresFanOut)),
     fanOutApplied: fanOutMatches,
     acceptorTableWithheld: withholdsAcceptorAssociationTable(terms),
+    inviterTableWithheld: withholdsInviterAssociationTable(terms),
     linkageKeys: terms.linkageKeys.map((key) =>
       summarizeKey(key, fieldByName, fanOutMatches),
     ),

@@ -2558,14 +2558,23 @@ describe("AcceptorScreen: this party's own deduplicate", () => {
       name: "Let several of my records match one of my partner's",
     });
 
+  // The pair sentence core resolves for this fixture's output shape, where both
+  // parties are entitled to the result.
+  const pairSentence = (inviter: boolean, acceptor: boolean): string =>
+    describeDeduplicatePair({
+      inviterDeduplicate: inviter,
+      acceptorDeduplicate: acceptor,
+      inviterReceivesResult: true,
+    });
+
   test("states the pair the operator's selection makes with the invitation's", async () => {
     await reachReview({ ...acceptorTerms, deduplicate: true });
     await expect
-      .element(page.getByText(describeDeduplicatePair(true, false)))
+      .element(page.getByText(pairSentence(true, false)))
       .toBeInTheDocument();
     await userEvent.click(ownSide());
     await expect
-      .element(page.getByText(describeDeduplicatePair(true, true)))
+      .element(page.getByText(pairSentence(true, true)))
       .toBeInTheDocument();
   });
 
@@ -2625,6 +2634,67 @@ describe("AcceptorScreen: this party's own deduplicate", () => {
         page.getByRole("button", { name: "Continue: consent & your file" }),
       )
       .toBeEnabled();
+  });
+
+  test("offers no control on a count-only invitation, whose shape admits none", async () => {
+    // A psi-c invitation that shares the result satisfies the output rule, but
+    // the count-only shape takes no deduplicate from either party: a control
+    // here would be one whose only admissible value is the one it starts at,
+    // and ticking it would meet a refusal whose remedy (change the algorithm)
+    // is not this operator's to take.
+    await reachReview({
+      ...acceptorTerms,
+      algorithm: "psi-c",
+      linkageKeys: [acceptorTerms.linkageKeys[0]],
+    });
+    expect(ownSide().query()).toBeNull();
+    await expect
+      .element(
+        page.getByRole("button", { name: "Continue: consent & your file" }),
+      )
+      .toBeEnabled();
+  });
+
+  test("a refused pair holds the launch from a step browser Forward restores", async () => {
+    // Step position is restored straight from history, so Forward walks around
+    // the review step's disabled Continue. The later steps re-read the refusal
+    // rather than trusting the step they were reached from.
+    await reachReview({
+      ...acceptorTerms,
+      linkageStrategy: "single-pass",
+      deduplicate: true,
+    });
+    await userEvent.click(
+      page.getByRole("button", { name: "Continue: consent & your file" }),
+    );
+    await userEvent.click(
+      page.getByRole("checkbox", {
+        name: "I have reviewed the terms my partner proposed and I consent to this exchange",
+      }),
+    );
+    await userEvent.fill(page.getByLabelText("Your name"), "Sam Alvarez");
+    const accept = page.getByRole("button", { name: "Accept and continue" });
+    await expect.element(accept).toBeEnabled();
+
+    window.history.back();
+    await expect
+      .element(page.getByRole("button", { name: "Other details" }))
+      .toBeInTheDocument();
+    await userEvent.click(page.getByRole("button", { name: "Other details" }));
+    await expect.element(ownSide()).toBeInTheDocument();
+    await userEvent.click(ownSide());
+    window.history.forward();
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Consent & your file");
+    await expect.element(accept).toBeDisabled();
+    await expect
+      .element(
+        page.getByText(
+          "Go back to the terms and resolve the duplicate-matching settings to continue.",
+        ),
+      )
+      .toBeInTheDocument();
   });
 
   test("blocks the accept when the invitation mirrors to terms no acceptance can run", async () => {

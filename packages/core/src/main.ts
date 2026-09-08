@@ -408,6 +408,7 @@ export type {
 // fact the acceptance surfaces state is enforced by the exchange or rests on the
 // partner's word, and the fixed sentences both surfaces render for it.
 export {
+  ACCEPTOR_DEDUPLICATE_CONTROL_FACTS,
   CONSENT_BASIS_MARKERS,
   CONSENT_FACTS,
   COUNT_ONLY_DISCLOSURE_STATEMENT,
@@ -425,7 +426,11 @@ export {
   distinctLinkageRuleSetVerdicts,
   linkageRuleSetVerdictNote,
 } from "./consent/consentFacts.js";
-export type { ConsentFact, ConsentFactId } from "./consent/consentFacts.js";
+export type {
+  ConsentFact,
+  ConsentFactId,
+  DeduplicatePair,
+} from "./consent/consentFacts.js";
 // The count every acceptance surface paints a partner-declared name list under,
 // and the sentence a bounded list closes on: one cut and one wording across the
 // CLI accept prompt and the two web surfaces.

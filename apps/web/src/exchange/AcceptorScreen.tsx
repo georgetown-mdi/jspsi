@@ -1124,6 +1124,10 @@ export function AcceptorScreen() {
     // exchange must not start until the operator has authored a connection (with
     // the required host-key fingerprint) to the partner-named server.
     if (sftpConnectionMissing) return;
+    // The same, for a pair the run refuses: the review step disables its own
+    // Continue, but browser history can restore a later step with the refused
+    // value still set, and a launch under it aborts at the terms exchange.
+    if (deduplicateRefusal !== undefined) return;
     // A re-launch reached by browser Back leaves the offer as the prior launch
     // left it, so the fresh launch resets it rather than opening under a refusal
     // the operator has already acted on.
@@ -1562,11 +1566,22 @@ export function AcceptorScreen() {
             )}
             <div className={styles.workFoot}>
               <Button
-                disabled={!consentGateReady || parsing}
+                disabled={
+                  !consentGateReady || parsing || pairRefusal !== undefined
+                }
                 onClick={() => void acceptAndContinue()}
               >
                 Accept and continue
               </Button>
+              {/* The pair refusal re-read here, since browser history can
+                  restore this step past the review step's own disabled
+                  Continue: the control that clears it is back on the terms. */}
+              {pairRefusal !== undefined && (
+                <Text size="sm" c="dimmed" mt="xs">
+                  Go back to the terms and resolve the duplicate-matching
+                  settings to continue.
+                </Text>
+              )}
             </div>
           </>
         )}
@@ -1596,6 +1611,7 @@ export function AcceptorScreen() {
                   />
                 ) : undefined
               }
+              deduplicatePairRefused={pairRefusal !== undefined}
               connectionBlocked={sftpConnectionMissing}
               exchangeFilesSection={
                 acceptServerJob ? (

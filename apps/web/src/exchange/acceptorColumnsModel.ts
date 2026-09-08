@@ -294,6 +294,13 @@ interface AcceptorLaunchStepBlocks {
    * a device reporting online is no promise the partner is reachable (see
    * `apps/web/src/utils/networkStatus.ts`). */
   offline: boolean;
+  /** Whether the two parties' `deduplicate` values make a pair the run refuses,
+   * read at the review step from the same boundary the run resolves the
+   * cardinality at (`acceptorDeduplicateRefusal`). Re-read here because step
+   * position is restored from browser history: a Forward past the disabled
+   * Continue would otherwise reach this step with the refused value and launch
+   * it. Cleared on the review step alone, which holds the control. */
+  deduplicatePairRefused: boolean;
   /** An SFTP accept whose transport connection is not authored yet. */
   connectionBlocked: boolean;
   /** A file-handling combination core refuses. */
@@ -317,6 +324,7 @@ interface AcceptorLaunchStepBlocks {
 
 const NO_STEP_BLOCKS: AcceptorLaunchStepBlocks = {
   offline: false,
+  deduplicatePairRefused: false,
   connectionBlocked: false,
   exchangeFilesBlocked: false,
   connectionTuningBlocked: false,
@@ -342,10 +350,11 @@ const NO_STEP_BLOCKS: AcceptorLaunchStepBlocks = {
  * declaration conflict holds that shape across its own variants too: its title and
  * the button's reason are chosen in a single place.
  *
- * Checks run in the step's own reading order -- offline first, since it is not on
- * the screen at all and no edit here clears it, then the verdict, the count-only
- * refusal, the declaration conflict, the over-long name notice, the identifier
- * rule, the cleaning steps, the connection, the split rendezvous's retain-mode
+ * Checks run in the step's own reading order, with the two nothing on this
+ * screen clears first: offline, then the refused duplicate-matching pair, whose
+ * control is back on the review step. Then the verdict, the count-only refusal,
+ * the declaration conflict, the over-long name notice, the identifier rule, the
+ * cleaning steps, the connection, the split rendezvous's retain-mode
  * requirement, and the file-handling and connection-tuning cards -- so an operator
  * working down the screen is sent to the first unresolved card. Each reason is
  * worded from the notice it points at, and none names a partner-controlled key.
@@ -357,6 +366,11 @@ export function acceptorLaunchBlockedReason(
   stepBlocks: AcceptorLaunchStepBlocks = NO_STEP_BLOCKS,
 ): string | undefined {
   if (stepBlocks.offline) return OFFLINE_EXCHANGE_REASON;
+  if (stepBlocks.deduplicatePairRefused)
+    return (
+      "Go back to the terms and resolve the duplicate-matching settings " +
+      "before you can start."
+    );
   if (!verdict.fullySatisfied) {
     if (verdict.satisfiableKeyCount === 0)
       return "Set your columns to the missing field types above before you can start.";

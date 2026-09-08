@@ -423,6 +423,26 @@ describe("the accepting party's own deduplicate at the seat", () => {
     );
   });
 
+  test("a count-only invitation offers no control at all", () => {
+    // The shape rule refuses the accepting party's value on a psi-c document as
+    // firmly as the mirror rule does on a sole-receiver one, so the seat asks
+    // both before offering a control: a count-only invitation that shares the
+    // result satisfies the output test alone, and the operator would meet a
+    // checkbox whose only admissible value is the one it starts at.
+    const countOnly: LinkageTerms = {
+      ...invitationTerms,
+      algorithm: "psi-c",
+      linkageStrategy: "cascade",
+    };
+    expect(countOnly.output.shareWithPartner).toBe(true);
+    expect(acceptorMaySetDeduplicate(countOnly)).toBe(false);
+    // And the rule it asks is the schema's own: the same document under `psi`
+    // does offer one.
+    expect(acceptorMaySetDeduplicate({ ...countOnly, algorithm: "psi" })).toBe(
+      true,
+    );
+  });
+
   test("the seat's refusal agrees with the run boundary over the same pair", () => {
     // The seat reads `resolveLinkageCardinality`, the boundary the run resolves
     // the joint cardinality at, so it refuses exactly the pairs the run refuses.

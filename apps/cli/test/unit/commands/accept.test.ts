@@ -8,6 +8,7 @@ import type { Arguments } from "yargs";
 import logLibrary from "loglevel";
 import YAML from "yaml";
 import {
+  ACCEPTOR_DEDUPLICATE_CONTROL_FACTS,
   CONSENT_FACTS,
   DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
   DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,
@@ -3534,8 +3535,16 @@ describe("displayInvitation: the declared terms it discloses (columns, citations
     const render = (linkageTerms: LinkageTerms): string =>
       renderDisplayInvitation(log, { ...token, linkageTerms });
 
-    const probes = consentRepresentationProbes();
+    // The shapes that name the accepting party's own `deduplicate` are not
+    // measured here: this prompt offers no control over that value, so the
+    // accept it describes derives that party's side as false and the pair such
+    // a shape states is one it never runs. Held non-vacuous both ways below.
+    const allProbes = consentRepresentationProbes();
+    const probes = allProbes.filter(
+      (probe) => probe.acceptorDeduplicate === undefined,
+    );
     expect(probes.length).toBeGreaterThan(0);
+    expect(allProbes.length).toBeGreaterThan(probes.length);
     expect(
       probes
         .filter((probe) => render(probe.base) === render(probe.variant))
@@ -3990,7 +3999,20 @@ describe("displayInvitation: the declared terms it discloses (columns, citations
     // The whole table, rather than a list restated here: a caveat this renderer
     // authored for itself instead of reading is absent from the rendering and fails,
     // and one the web reworded on its own side fails there for the same reason.
-    const classified: Array<ConsentFact> = Object.values(CONSENT_FACTS);
+    // Bar the facts core marks as reachable only from a seat where the
+    // ACCEPTING party declares a grouping of its own: this prompt offers no
+    // such control, so the run they state is one it never conducts. The set is
+    // core's judgment, not this test's, so the web seat that does render them
+    // is held to the same list.
+    const classified: Array<ConsentFact> = Object.entries(CONSENT_FACTS)
+      .filter(
+        ([id]) =>
+          !(
+            ACCEPTOR_DEDUPLICATE_CONTROL_FACTS as ReadonlyArray<string>
+          ).includes(id),
+      )
+      .map(([, fact]) => fact);
+    expect(classified.length).toBeLessThan(Object.keys(CONSENT_FACTS).length);
     const notes = classified
       .map((fact) => fact.note)
       .filter((note) => note !== undefined);

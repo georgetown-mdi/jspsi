@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  CONSENT_FACTS,
   DEDUPLICATE_ACCEPTOR_SETTABLE_SIDE_NOTE,
   DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
   DEDUPLICATE_ACCEPTOR_WIDENING_NOTE,
@@ -19,13 +20,23 @@ describe("describeDeduplicatePair", () => {
     { inviter: true, acceptor: true },
   ] as const;
 
+  // The output shape the sentences above are read under, where the inviting
+  // party is entitled to the result. The shape where it is not is measured on
+  // its own below, since only there does the pair change what the sentence owes.
+  const describePair = (inviter: boolean, acceptor: boolean): string =>
+    describeDeduplicatePair({
+      inviterDeduplicate: inviter,
+      acceptorDeduplicate: acceptor,
+      inviterReceivesResult: true,
+    });
+
   test.each(pairs)(
     "names both values for the ($inviter, $acceptor) pair",
     ({ inviter, acceptor }) => {
       // A reader is entitled to BOTH values wherever one of them is theirs to
       // set: a sentence naming only the invitation's would leave the operator
       // unable to tell what its own selection changed.
-      const sentence = describeDeduplicatePair(inviter, acceptor);
+      const sentence = describePair(inviter, acceptor);
       const inviterClause = inviter
         ? "inviting party declares deduplicate true"
         : "inviting party declares deduplicate false";
@@ -50,30 +61,110 @@ describe("describeDeduplicatePair", () => {
   test("gives each pair its own account of what is disclosed", () => {
     // Four distinct sentences, so no pair is described by another's disclosure.
     const sentences = pairs.map(({ inviter, acceptor }) =>
-      describeDeduplicatePair(inviter, acceptor),
+      describePair(inviter, acceptor),
     );
     expect(new Set(sentences).size).toBe(pairs.length);
   });
 
   test("names the grouped party in each one-sided pair", () => {
-    expect(describeDeduplicatePair(true, false)).toContain(
+    expect(describePair(true, false)).toContain(
       "Several of the inviting party's records may match a single one of the accepting party's",
     );
-    expect(describeDeduplicatePair(false, true)).toContain(
+    expect(describePair(false, true)).toContain(
       "Several of the accepting party's records may match a single one of the inviting party's",
     );
   });
 
   test("states the pair-wise result for the both-sided pair", () => {
-    expect(describeDeduplicatePair(true, true)).toContain(
-      "one row per matched pair",
-    );
+    expect(describePair(true, true)).toContain("one row per matched pair");
   });
 
   test("states that neither file is grouped where neither party declares it", () => {
-    expect(describeDeduplicatePair(false, false)).toContain(
+    expect(describePair(false, false)).toContain(
       "neither party's file is grouped",
     );
+  });
+});
+
+describe("the pair where the inviting party receives no result", () => {
+  // output.expects_output false with share_with_partner true: the accepting
+  // party is the only party these terms hand a result, and it is a shape the
+  // seat offers the control on, so its sentence cannot be the both-receive one.
+  const soleAcceptorReceiver = describeDeduplicatePair({
+    inviterDeduplicate: false,
+    acceptorDeduplicate: true,
+    inviterReceivesResult: false,
+  });
+  const bothReceive = describeDeduplicatePair({
+    inviterDeduplicate: false,
+    acceptorDeduplicate: true,
+    inviterReceivesResult: true,
+  });
+
+  test("takes a sentence of its own rather than the both-receive one", () => {
+    expect(soleAcceptorReceiver).not.toBe(bothReceive);
+    expect(bothReceive).toContain("both parties receive a result");
+  });
+
+  test("names the accepting party as the only party the result reaches", () => {
+    // The sentence it replaces said "whichever party receives the result",
+    // which in this shape names the reader alone and so reads as nobody else
+    // learning the grouping.
+    expect(soleAcceptorReceiver).toContain(
+      "These terms hand that result to the accepting party alone",
+    );
+    expect(soleAcceptorReceiver).not.toContain("whichever party receives");
+  });
+
+  test("still names both declared values and the grouped party", () => {
+    expect(soleAcceptorReceiver).toContain(
+      "inviting party declares deduplicate false",
+    );
+    expect(soleAcceptorReceiver).toContain(
+      "accepting party declares deduplicate true",
+    );
+    expect(soleAcceptorReceiver).toContain(
+      "Several of the accepting party's records may match a single one of the inviting party's",
+    );
+  });
+
+  test("leaves the partner's process to the classified facts beside it", () => {
+    // The register split the surfaces hold: what the exchange does with the
+    // grouping is an enforced or trust-contingent fact of its own, so the
+    // sentence states neither.
+    expect(soleAcceptorReceiver).not.toContain("process");
+    expect(CONSENT_FACTS.partnerReadsDuplicateGrouping.basis).toBe(
+      "trust-contingent",
+    );
+    expect(CONSENT_FACTS.partnerDuplicateGroupingWithheld.basis).toBe(
+      "enforced",
+    );
+    expect(CONSENT_FACTS.partnerReadsDuplicateGrouping.note).toContain(
+      "Your partner's process is sent the group sizes and row positions",
+    );
+    expect(CONSENT_FACTS.partnerDuplicateGroupingWithheld.note).toContain(
+      "withholds your partner's half of the matched-pair table",
+    );
+  });
+
+  test("leaves the pairs the schema cannot reach at the both-receive reading", () => {
+    // A party declaring deduplicate must be entitled to output, so an inviting
+    // party that receives no result declares false: the other two branches are
+    // the same sentence under either output shape.
+    for (const acceptor of [true, false])
+      expect(
+        describeDeduplicatePair({
+          inviterDeduplicate: true,
+          acceptorDeduplicate: acceptor,
+          inviterReceivesResult: false,
+        }),
+      ).toBe(
+        describeDeduplicatePair({
+          inviterDeduplicate: true,
+          acceptorDeduplicate: acceptor,
+          inviterReceivesResult: true,
+        }),
+      );
   });
 });
 

@@ -1372,11 +1372,20 @@ export function InvitationTerms({
             )}
 
             <Term label="Duplicate matches">
-              <Text size="sm">
-                {summary.deduplicate
-                  ? "More than one of the inviting party's records may match a single one of the accepting party's records."
-                  : "Each of the inviting party's records matches at most one of the accepting party's records."}
-              </Text>
+              {/* The invitation's own value, on a seat with no control over
+                this party's side: there the accepting party's side is the
+                closed default, so the sentence reads the run. Where the
+                control exists the pair statement below states the run
+                instead, over both declared values, and this reading of the
+                invitation alone would contradict it the moment the operator
+                ticks its own side. */}
+              {ownDeduplicate === undefined && (
+                <Text size="sm">
+                  {summary.deduplicate
+                    ? "More than one of the inviting party's records may match a single one of the accepting party's records."
+                    : "Each of the inviting party's records matches at most one of the accepting party's records."}
+                </Text>
+              )}
               {/* The pair, on a seat where this party sets its own side: both
                 declared values and what the combination discloses, over the
                 invitation's value and the one the operator has selected. The
@@ -1386,10 +1395,11 @@ export function InvitationTerms({
               {ownDeduplicate !== undefined && (
                 <>
                   <Text size="sm">
-                    {describeDeduplicatePair(
-                      summary.deduplicate,
-                      ownDeduplicate.value,
-                    )}
+                    {describeDeduplicatePair({
+                      inviterDeduplicate: summary.deduplicate,
+                      acceptorDeduplicate: ownDeduplicate.value,
+                      inviterReceivesResult: summary.inviterReceivesOutput,
+                    })}
                   </Text>
                   <Checkbox
                     mt="xs"
@@ -1466,6 +1476,27 @@ export function InvitationTerms({
                   </Text>
                 </>
               )}
+              {/* The other direction of the same line, for the shape where
+                this party groups its own records and the INVITING party is
+                entitled to no result: the pair statement above states what
+                the result holds, and this states what the exchange still
+                sends the partner's process. WHICH of the two renders follows
+                core's resolution of the run (inviterTableWithheld), never a
+                reading of the strategy and the payload declaration made
+                here. */}
+              {ownDeduplicate?.value === true &&
+                !summary.inviterReceivesOutput &&
+                summary.deduplicateApplied && (
+                  <Text size="xs" c="dimmed">
+                    {
+                      CONSENT_FACTS[
+                        summary.inviterTableWithheld
+                          ? "partnerDuplicateGroupingWithheld"
+                          : "partnerReadsDuplicateGrouping"
+                      ].note
+                    }
+                  </Text>
+                )}
             </Term>
           </Stack>
         </Collapse>

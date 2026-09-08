@@ -156,11 +156,21 @@ function renderTerms(
     connectionEndpoint?: ConnectionEndpoint;
     outboundColumns?: Array<string>;
     headingOrder?: 1 | 2 | 3;
+    /** The accepting party's own `deduplicate`, rendering the seat's control. */
+    acceptorDeduplicate?: boolean;
   },
 ) {
   app.render(
     createElement(InvitationTerms, {
       linkageTerms,
+      ...(options?.acceptorDeduplicate !== undefined
+        ? {
+            acceptorDeduplicate: {
+              value: options.acceptorDeduplicate,
+              onChange: () => {},
+            },
+          }
+        : {}),
       ...(options?.perspective ? { perspective: options.perspective } : {}),
       ...(options?.inviterRetainsFiles !== undefined
         ? { inviterRetainsFiles: options.inviterRetainsFiles }
@@ -2709,16 +2719,31 @@ describe("InvitationTerms: a qualifying sentence sits at its headline's visibili
     expect(pinnedDisclosureProbes.length).toBeGreaterThan(0);
   });
 
+  // A probe's two sides, each rendered under the accepting party's own value
+  // where the shape names one -- the seat's control, which no field of the
+  // invitation carries.
+  const renderProbeSide = async (
+    probe: (typeof pinnedDisclosureProbes)[number],
+    side: "base" | "variant",
+  ): Promise<void> => {
+    renderTerms(
+      probe[side],
+      probe.acceptorDeduplicate !== undefined
+        ? { acceptorDeduplicate: probe.acceptorDeduplicate }
+        : undefined,
+    );
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    // Every required and forbidden copy here belongs to the deduplicate term,
+    // which sits inside "Other details" (see the co-hidden test above), so
+    // waiting for that panel's content to commit is enough to read the whole
+    // container safely.
+    await readyPanel("Other details");
+  };
+
   test.each(pinnedDisclosureProbes)(
     "renders every pinned disclosure sentence for $label",
     async (probe) => {
-      renderTerms(probe.variant);
-      await expect.element(toggle("Other details")).toBeInTheDocument();
-      // Every required and forbidden copy here belongs to the deduplicate term,
-      // which sits inside "Other details" (see the co-hidden test above), so
-      // waiting for that panel's content to commit is enough to read the whole
-      // container safely.
-      await readyPanel("Other details");
+      await renderProbeSide(probe, "variant");
       // Per probe, not only over the set: an entry with an empty list would
       // otherwise pass by rendering nothing at all.
       const copies = probe.requiredVariantCopy ?? [];
@@ -2732,6 +2757,30 @@ describe("InvitationTerms: a qualifying sentence sits at its headline's visibili
         expect(app.container.textContent).not.toContain(copy);
     },
   );
+
+  test.each(pinnedDisclosureProbes)(
+    "withholds every pinned disclosure sentence from the base of $label",
+    async (probe) => {
+      // The other half of the pin, which the CLI prompt's own coverage test
+      // holds too: a sentence the screen prints for every document would satisfy
+      // the check above while saying nothing about the setting.
+      await renderProbeSide(probe, "base");
+      const copies = probe.requiredVariantCopy ?? [];
+      expect(copies.length).toBeGreaterThan(0);
+      for (const copy of copies)
+        expect(app.container.textContent).not.toContain(copy);
+    },
+  );
+
+  test("the coverage check measures at least one shape under this party's own value", () => {
+    // Without this the acceptor-side rendering above would pass by never
+    // meeting a shape that names one.
+    expect(
+      pinnedDisclosureProbes.filter(
+        (probe) => probe.acceptorDeduplicate !== undefined,
+      ).length,
+    ).toBeGreaterThan(0);
+  });
 
   test("the coverage check measures at least one term under shapes owing different sentences", () => {
     // Without this the forbidden-copy half of the per-probe test above would pass
@@ -3111,6 +3160,15 @@ describe("InvitationTerms: the accepting party's own deduplicate", () => {
   // The seat where this party authors its own side renders the control inside the
   // duplicate-matches block, beside the invitation's own value, so the pair the
   // two settings make is read where it is set.
+  // The pair sentence core resolves for the probe base's output shape, where
+  // both parties are entitled to the result.
+  const pairSentence = (inviter: boolean, acceptor: boolean): string =>
+    describeDeduplicatePair({
+      inviterDeduplicate: inviter,
+      acceptorDeduplicate: acceptor,
+      inviterReceivesResult: true,
+    });
+
   function renderWithControl(
     value: boolean,
     overrides?: Partial<LinkageTerms>,
@@ -3137,19 +3195,15 @@ describe("InvitationTerms: the accepting party's own deduplicate", () => {
     renderWithControl(false);
     await expect.element(toggle("Other details")).toBeInTheDocument();
     const collapse = await readyCollapse("Other details");
-    expect(collapse.textContent).toContain(
-      describeDeduplicatePair(true, false),
-    );
-    expect(collapse.textContent).not.toContain(
-      describeDeduplicatePair(true, true),
-    );
+    expect(collapse.textContent).toContain(pairSentence(true, false));
+    expect(collapse.textContent).not.toContain(pairSentence(true, true));
   });
 
   test("restates the pair when the operator turns its own side on", async () => {
     renderWithControl(true);
     await expect.element(toggle("Other details")).toBeInTheDocument();
     const collapse = await readyCollapse("Other details");
-    expect(collapse.textContent).toContain(describeDeduplicatePair(true, true));
+    expect(collapse.textContent).toContain(pairSentence(true, true));
   });
 
   test("the checkbox reports the operator's selection", async () => {
@@ -3207,10 +3261,100 @@ describe("InvitationTerms: the accepting party's own deduplicate", () => {
         })
         .query(),
     ).toBeNull();
-    expect(app.container.textContent).not.toContain(
-      describeDeduplicatePair(true, false),
-    );
+    expect(app.container.textContent).not.toContain(pairSentence(true, false));
     expect(collapse.textContent).toContain(DEDUPLICATE_ACCEPTOR_SIDE_NOTE);
+  });
+
+  test("reads the resolved pair rather than the invitation's declaration alone", async () => {
+    // The headline sentence of this block reads the invitation only, so on a
+    // seat that offers the control it would contradict the pair statement the
+    // moment the operator ticks its own side: an inviter-one-to-one invitation
+    // still matches several of THIS party's records to one of the partner's.
+    renderWithControl(true, { deduplicate: false });
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    const collapse = await readyCollapse("Other details");
+    expect(collapse.textContent).toContain(pairSentence(false, true));
+    expect(app.container.textContent).not.toContain(
+      "Each of the inviting party's records matches at most one of the accepting party's records.",
+    );
+  });
+
+  test("keeps the invitation's own declaration where no control can move it", async () => {
+    // The other side of the same sentence: with no control this party's side is
+    // the closed default, so the invitation's declaration IS the run and the
+    // block states it.
+    renderTerms({ ...terms, deduplicate: false });
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    const collapse = await readyCollapse("Other details");
+    expect(collapse.textContent).toContain(
+      "Each of the inviting party's records matches at most one of the accepting party's records.",
+    );
+  });
+
+  test("names what the partner's process still reads where it receives no result", async () => {
+    // output.expects_output false with share_with_partner true: this party is
+    // the only party the terms hand a result, so a sentence naming the result's
+    // receivers would name the reader alone and read as nobody else learning the
+    // grouping. The pair sentence states the audience and the fact beside it
+    // states what the run still sends the partner's process.
+    renderWithControl(true, {
+      deduplicate: false,
+      output: { expectsOutput: false, shareWithPartner: true },
+    });
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    const collapse = await readyCollapse("Other details");
+    expect(collapse.textContent).toContain(
+      describeDeduplicatePair({
+        inviterDeduplicate: false,
+        acceptorDeduplicate: true,
+        inviterReceivesResult: false,
+      }),
+    );
+    expect(collapse.textContent).toContain(
+      CONSENT_FACTS.partnerReadsDuplicateGrouping.note,
+    );
+    expect(app.container.textContent).not.toContain(
+      CONSENT_FACTS.partnerDuplicateGroupingWithheld.note,
+    );
+  });
+
+  test("states the exchange's own withholding where the run closes it", async () => {
+    // The one combination in this direction the exchange closes itself:
+    // single-pass, the accepting party the only party entitled to the result,
+    // and an invitation declaring no column of its own to send. WHICH of the two
+    // facts renders is core's resolution of the run, not a reading of the
+    // strategy made here.
+    renderWithControl(true, {
+      deduplicate: false,
+      linkageStrategy: "single-pass",
+      output: { expectsOutput: false, shareWithPartner: true },
+      payload: { send: [], receive: [] },
+    });
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    const collapse = await readyCollapse("Other details");
+    expect(collapse.textContent).toContain(
+      CONSENT_FACTS.partnerDuplicateGroupingWithheld.note,
+    );
+    expect(app.container.textContent).not.toContain(
+      CONSENT_FACTS.partnerReadsDuplicateGrouping.note,
+    );
+  });
+
+  test("states neither partner-process fact where this party sets nothing", async () => {
+    // Non-vacuous the other way: both sentences are the accepting party's own
+    // grouping talking, so an untouched control states neither.
+    renderWithControl(false, {
+      deduplicate: false,
+      output: { expectsOutput: false, shareWithPartner: true },
+    });
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    await readyPanel("Other details");
+    expect(app.container.textContent).not.toContain(
+      CONSENT_FACTS.partnerReadsDuplicateGrouping.note,
+    );
+    expect(app.container.textContent).not.toContain(
+      CONSENT_FACTS.partnerDuplicateGroupingWithheld.note,
+    );
   });
 
   test("a surface with no control states the invitation's value alone", async () => {
@@ -3221,9 +3365,7 @@ describe("InvitationTerms: the accepting party's own deduplicate", () => {
     await expect.element(toggle("Other details")).toBeInTheDocument();
     const collapse = await readyCollapse("Other details");
     expect(collapse.textContent).toContain(DEDUPLICATE_ACCEPTOR_SIDE_NOTE);
-    expect(app.container.textContent).not.toContain(
-      describeDeduplicatePair(true, false),
-    );
+    expect(app.container.textContent).not.toContain(pairSentence(true, false));
     expect(
       page
         .getByRole("checkbox", {

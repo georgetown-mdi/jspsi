@@ -1,6 +1,7 @@
 import {
   UsageError,
   assertDeduplicateImplemented,
+  countOnlyShapeViolation,
   decodeInvitation,
   deriveAcceptedLinkageTerms,
   isInvitationExpired,
@@ -206,12 +207,21 @@ const DEDUPLICATE_CHECK_IDENTITY = "you";
  * `shareWithPartner` mirrored (`deriveAcceptedLinkageTerms`). So a
  * sole-receiver invitation leaves this party no value to set: acceptance
  * applies the closed default, and a document declaring anything else is
- * refused by that derivation. A seat offers the control only where this
- * holds, so the operator meets no control whose value the accept would
- * refuse.
+ * refused by that derivation.
+ *
+ * The count-only shape refuses `deduplicate` on the same document for a
+ * reason of its own -- a `psi-c` run reports a size and pairs no records --
+ * so the shape rule is asked as well, over the document this party would
+ * present. Both are core's own rules rather than restatements of them, so a
+ * seat offers the control exactly where the accept would take the value, and
+ * the operator meets no control whose value it would refuse.
  */
 export function acceptorMaySetDeduplicate(linkageTerms: LinkageTerms): boolean {
-  return linkageTerms.output.shareWithPartner;
+  return (
+    linkageTerms.output.shareWithPartner &&
+    countOnlyShapeViolation({ ...linkageTerms, deduplicate: true }) ===
+      undefined
+  );
 }
 
 /**
