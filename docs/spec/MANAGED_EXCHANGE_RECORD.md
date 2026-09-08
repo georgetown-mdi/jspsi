@@ -670,11 +670,24 @@ contends for that same lock, so it too is refused while an exchange is in flight
 The partner influences how long the payload exchange takes, so the run's cancel
 reaches that width: it closes the run's connection, which rejects the wait the
 exchange is parked in, so the run ends and the lock releases without the holding
-tab being destroyed. Two limits of that remain. The cancel lands at the run's
-next act on the connection, so one arriving inside a local PSI round takes effect
-when that round next reads or writes. And a run nobody cancels holds the lock for
-as long as the partner takes, up to the connection's inactivity budget; a
-destroyed tab still releases it.
+tab being destroyed. Three limits of that remain. Between the channel being
+acquired and the transport open resolving, the cancel reaches nothing: the
+connection-open wait takes no signal of its own, so only its own 30-second
+ceiling ends it, partner-influenced only up to that same ceiling, and the run
+holds the record's single-writer lock throughout that handshake phase. The
+cancel lands at the run's next act on the connection, so one arriving inside a
+local PSI round takes effect when that round next reads or writes. And a run
+nobody cancels holds the lock for as long as the partner takes, up to the
+connection's inactivity budget; a destroyed tab still releases it.
+A cancelled run also files no entry in the [accounting of
+disclosures](#the-accounting-of-disclosures), even though payload frames
+already handed to the transport may have reached the partner -- the same holds
+for any mid-exchange transport drop, since the entry is appended only once a
+completed exchange yields its result, so a partial exchange files nothing there
+while the record's own `lastRun` still stamps the run `"failed"`, with
+`failureKind` `"cancelled"` or `"transport"`. And the cancel does not discard
+what the transport already holds buffered: the teardown's close flushes rather
+than drops, so a cancel does not mean nothing further leaves the device.
 Export/import between devices is **migration, not sync** (the source copy is
 invalidated on export). Both are specified in
 [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md#single-device-ownership).
