@@ -4,7 +4,11 @@ import path from "node:path";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 import { parse as parseYaml } from "yaml";
 
-import { JobManager, JobSigningIdentityExposedError } from "@jobs/jobManager";
+import {
+  ExchangeBusyError,
+  JobManager,
+  JobSigningIdentityExposedError,
+} from "@jobs/jobManager";
 import {
   SIGNING_CERTIFICATE_FILE_NAME,
   SIGNING_IDENTITY_FILE_NAME,
@@ -334,6 +338,26 @@ describe("the job resolves the identity through the option", () => {
       manager.createJob(signedIntent(["missing-dir", PICKED_IDENTITY_NAME])),
     ).rejects.toBeInstanceOf(SigningIdentityLocationError);
     expect(fs.readdirSync(root)).toEqual([]);
+  });
+
+  test("an occupied console answers the busy rejection, location or not", async () => {
+    // The busy rejection holds the running exchange's id, which is the console's
+    // way back to a run whose page the operator lost. Deciding the location
+    // first would answer the unresolvable one with a 400 and leave that run
+    // unreachable from this create.
+    const root = directory("job-unresolvable-busy");
+    const manager = makeManager({
+      dataRoot: root,
+      jobSecretsDir: directory("job-unresolvable-busy-secrets"),
+      jobRendezvousDir: directory("job-unresolvable-busy-rvz"),
+      delayMs: 800,
+    });
+    const running = await manager.createJob(validIntent());
+    const error = await manager
+      .createJob(signedIntent(["missing-dir", PICKED_IDENTITY_NAME]))
+      .catch((thrown: unknown) => thrown);
+    expect(error).toBeInstanceOf(ExchangeBusyError);
+    expect((error as ExchangeBusyError).activeJobId).toBe(running);
   });
 });
 

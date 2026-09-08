@@ -2208,13 +2208,41 @@ describe("a filedrop run that would publish the signing identity", () => {
         SIGNING_IDENTITY_IN_RENDEZVOUS_REFUSAL,
       ),
     );
-    expect(alert.message).toContain("A file sits at your signing identity's");
-    expect(alert.message).not.toMatch(/create|mint/);
     expect(alert.message).toContain(
-      "Move that file out of every folder you share with a partner",
+      "A file sits at a path this console reads your signing identity from",
     );
+    expect(alert.message).not.toMatch(/create|mint/);
     expect(alert.title).toBe(
       "This exchange shares your signing identity's folder",
+    );
+  });
+
+  test("the refusal's copy names both paths the check reads", () => {
+    // The refusal fires on the identity this run loads OR on the key left at the
+    // console's default path, and the token names neither. An operator who moved
+    // their identity into the secrets mount and is refused over the leftover key
+    // would inspect the file they picked -- which is in no synced folder -- and
+    // read the console as wrong, leaving the disclosed key where it is. So the
+    // copy names both causes and what to do with each.
+    const alert = failureFor(
+      "config",
+      new JobApiRequestError(
+        400,
+        "POST /api/jobs failed with status 400",
+        undefined,
+        SIGNING_IDENTITY_IN_RENDEZVOUS_REFUSAL,
+      ),
+    );
+    expect(alert.message).toContain("either the location you picked");
+    expect(alert.message).toContain(
+      "the console's default in your mounted working directory",
+    );
+    expect(alert.message).toContain(
+      "Move the file at the location you picked out of every folder you " +
+        "share with a partner",
+    );
+    expect(alert.message).toContain(
+      "remove or move the file left at the console's default path",
     );
   });
 

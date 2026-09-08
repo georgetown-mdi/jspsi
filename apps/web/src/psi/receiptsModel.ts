@@ -341,19 +341,32 @@ export const IDENTITY_AT_REST_NOTICE =
 
 /**
  * What the console says once the operator picked a location of their own: the
- * console reads that file and writes nothing there, so the identity is theirs
- * to create and to look after.
+ * console reads that file rather than creating one, so the identity is theirs
+ * to create and to look after. The one write the spec accepts there -- an
+ * identity removed between the presence check and the run's load is created by
+ * the run at that path (`docs/spec/SERVER_JOB_API.md`) -- is stated with the
+ * read-only mount that closes it.
  *
- * An `info`, and the only location advisory raised in that case: the key is not
- * in the mounted working directory, so neither shared-mount warning is about
- * this run. A picked location inside a folder the partner syncs is refused
- * before the run starts, on the same comparison the default location takes.
+ * An `info`, and the only location advisory raised in that case: the key this
+ * run loads is not in the mounted working directory, so neither shared-mount
+ * warning is about it. A picked location inside a folder the partner syncs is
+ * refused before the run starts, on the same comparison the default location
+ * takes. A key created earlier at the default path stays where it is, so the
+ * notice carries that caveat itself: the card is the only place the operator
+ * hears of it before a shared-folder run refuses.
  */
 export const IDENTITY_PICKED_LOCATION_NOTICE =
   "Your signing key is read from the file you picked in your secrets folder, " +
-  "and the console never writes there. Create it once at the command line -- " +
+  "and the console creates no key there, with one exception: a file removed " +
+  "between the console's check and the run's read is created again at that " +
+  "path by the run. Create it once at the command line -- " +
   "'psilink fingerprint --identity-file' pointed at that path -- and mount the " +
-  "folder read-only afterwards. Keep it out of every folder your partner syncs.";
+  "folder read-only afterwards, which closes that case too. Keep it out of " +
+  "every folder your partner syncs. Picking a location does not move a key you " +
+  "already have: one created earlier at the console's default path stays in " +
+  "your mounted working directory, and a shared-folder exchange is refused " +
+  "while a key sits in a folder your partner syncs. Delete that file, or move " +
+  "it to the file you picked.";
 
 /**
  * What the console says about the one shared-folder layout its pre-run check
@@ -499,10 +512,12 @@ export function receiptsAdvisories(
   rendezvous: JobRendezvousConfig | undefined,
 ): Array<ReceiptsAdvisory> {
   if (draft.mode !== "certificate") return [];
-  // A picked location takes the key out of the mounted working directory, so
-  // neither shared-mount warning is about this run: both are about a key in the
-  // folder the rendezvous falls back to. A pick inside a folder the partner
-  // syncs is refused before the run starts, on the same comparison.
+  // A picked location takes the key this run loads out of the mounted working
+  // directory, so neither shared-mount warning is about it: both are about a key
+  // in the folder the rendezvous falls back to. A key left at the default path
+  // is still in that folder, which the picked-location notice states itself. A
+  // pick inside a folder the partner syncs is refused before the run starts, on
+  // the same comparison.
   if (draft.identityLocation !== undefined)
     return [
       { message: IDENTITY_PICKED_LOCATION_NOTICE, severity: "info" },

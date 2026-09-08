@@ -527,16 +527,16 @@ export class JobManager {
         throw new JobRendezvousRetainRequiredError();
     }
 
-    // Resolved before the slot is claimed, so an identity location naming no
-    // path in the secrets mount is a rejection that leaves the console free
-    // rather than one taken against an occupied slot.
-    const identityPath = this.identityPathFor(intent);
-
     // Claim the slot with no await between the null check and the assignment --
-    // the signing refusal in between is synchronous -- so two concurrent POSTs
-    // cannot both observe a free slot. The busy rejection holds the occupying
-    // exchange's id so the caller can re-attach to it.
+    // the identity resolution and the signing refusal in between are both
+    // synchronous -- so two concurrent POSTs cannot both observe a free slot.
+    // The busy rejection holds the occupying exchange's id so the caller can
+    // re-attach to it.
     if (this.slot !== null) throw new ExchangeBusyError(this.slotId()!);
+    // Resolved after the busy check for the reason the refusal below states,
+    // and before the slot is claimed, so a location naming no path in the
+    // secrets mount leaves the console free rather than mid-create.
+    const identityPath = this.identityPathFor(intent);
     // Refused rather than warned: the run would copy this party's long-lived
     // private key to the partner, and no wording recovers a disclosed key.
     // After the busy check, so a create posted to recover a lost attachment on

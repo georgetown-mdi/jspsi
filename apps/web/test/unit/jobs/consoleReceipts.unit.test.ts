@@ -1418,9 +1418,56 @@ describe("the receipts card's model", () => {
     expect(IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY).toMatch(/secrets folder/);
     expect(IDENTITY_SHARED_MOUNT_REFUSAL_ADVISORY).toMatch(/secrets folder/);
     expect(IDENTITY_AT_REST_NOTICE).toMatch(/secrets folder/);
-    expect(IDENTITY_PICKED_LOCATION_NOTICE).toMatch(/never writes there/);
+    expect(IDENTITY_PICKED_LOCATION_NOTICE).toMatch(/creates no key there/);
     expect(IDENTITY_PICKED_LOCATION_NOTICE).toMatch(/psilink fingerprint/);
     expect(IDENTITY_PICKED_LOCATION_NOTICE).toMatch(/your partner syncs/);
+  });
+
+  test("the picked-location notice qualifies the write the spec accepts", () => {
+    // SERVER_JOB_API.md accepts one write into the secrets mount: the presence
+    // check and the run's load are two steps, so an identity removed between
+    // them is created at the picked path. Copy stating an unqualified "never
+    // writes there" about key material is stronger than the console behaves, and
+    // the read-only mount that closes the window is what the sentence has to
+    // keep, since it is the recommended layout.
+    expect(IDENTITY_PICKED_LOCATION_NOTICE).not.toMatch(/never writes/);
+    expect(IDENTITY_PICKED_LOCATION_NOTICE).toMatch(
+      /a file removed between the console's check and the run's read is created again at that path/,
+    );
+    expect(IDENTITY_PICKED_LOCATION_NOTICE).toMatch(
+      /mount the folder read-only afterwards/,
+    );
+  });
+
+  test("a picked location keeps the word on a key left at the default path", () => {
+    // Picking a location moves the option, not the file: the usual single-mount
+    // flow created the first key at the default path, in the folder the partner
+    // syncs, and it stays there. With both shared-mount warnings withdrawn the
+    // notice is the only word the card has on it, and without that word the
+    // operator meets the hazard as a refusal mid-run or not at all.
+    const located = draft({
+      mode: "certificate",
+      ownFingerprint: OWN_FINGERPRINT,
+      partnerFingerprint: PARTNER_FINGERPRINT,
+      identityLocation: { mount: "secrets", subPath: ["identity.json"] },
+    });
+    for (const rendezvous of [
+      SHARED_RENDEZVOUS,
+      UNCERTAIN_SHARED_RENDEZVOUS,
+      undefined,
+    ]) {
+      const caveat = receiptsAdvisories(located, rendezvous)
+        .map((advisory) => advisory.message)
+        .find((message) => /console's default path/.test(message));
+      expect(caveat).toBeDefined();
+      expect(caveat).toMatch(/does not move a key you already have/);
+      expect(caveat).toMatch(
+        /a shared-folder exchange is refused while a key sits in a folder your partner syncs/,
+      );
+      expect(caveat).toMatch(
+        /Delete that file, or move it to the file you picked/,
+      );
+    }
   });
 });
 
