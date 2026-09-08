@@ -159,6 +159,16 @@ emits only camelCase keys, so a token it produced is already in this normal form
 the fold is observable only for a hand-authored or third-party token containing
 `snake_case` keys.
 
+A second parse-layer rewrite is byte-significant in the same way. A
+`payload.send` or `payload.receive` list naming a column more than once parses
+to one entry per name at every path that produces a `LinkageTerms`: the first
+entry naming a column stands, with its own `description`, and a later entry
+naming it is dropped. The encoder is handed a list holding each column once and
+preserves its order as given. A third-party implementation reproducing the
+agreed-terms hash MUST apply the same collapse before encoding, and MUST apply
+it to both lists, since a document holding a repeat encodes to different bytes
+with and without it.
+
 ### Numbers
 
 A number MUST be finite. RFC 8785 section 3.2.2.3 does not restate a number

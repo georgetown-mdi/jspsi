@@ -305,6 +305,29 @@ test("decodeInvitation normalizes snake_case transform.params keys to camelCase"
   ).toEqual({ inputFormat: "MM/DD/YYYY", outputFormat: "YYYYMMDD" });
 });
 
+test("decodeInvitation reads a payload column named twice as one entry", async () => {
+  // The payload lists reach this party from a partner-authored token, which may
+  // name a column twice. The decode chokepoint embeds LinkageTermsSchema, so the
+  // normalization the config load applies holds here too and the consent screen
+  // shown before acceptance counts the column once.
+  const token = {
+    ...baseToken,
+    linkageTerms: {
+      ...baseTerms,
+      payload: {
+        send: [
+          { name: "dose", description: "Dose administered" },
+          { name: "dose", description: "Dose, second declaration" },
+        ],
+      },
+    },
+  };
+  const decoded = await decodeInvitation(await encodeRaw(token));
+  expect(decoded.linkageTerms.payload?.send).toEqual([
+    { name: "dose", description: "Dose administered" },
+  ]);
+});
+
 test("decodeInvitation screens a snake_case parse_date inputFormat for length (the fold precedes the screen)", async () => {
   // The per-step length screen reads the camelCase `inputFormat`. Because the
   // decode fold runs BEFORE validation, a snake_case `input_format` over the
