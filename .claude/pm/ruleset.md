@@ -303,7 +303,8 @@ Ratified by the owner:
   states its out-of-container requirement at the point of use.
 - **Core Functionality** (board 9) -- Done is: no linkage term the schema admits
   is parsed, displayed, or agreed without the run applying it -- every
-  declared-but-inert path implemented or refused.
+  declared-but-inert path implemented or refused -- and no local option the
+  config admits changes the result file without the run composing it.
 - **Application Encryption** (board 9) -- Done is:
   escape-once-at-the-display-sink and bound-at-composition hold across every
   operator-facing sink, carried by checks rather than by a fix per fragment.
