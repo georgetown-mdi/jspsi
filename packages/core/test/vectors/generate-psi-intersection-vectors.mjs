@@ -117,6 +117,12 @@ function mirrorCardinality(cardinality) {
       : cardinality;
 }
 
+// The session bounds a fan-out-free cascade holds: every key has width one,
+// which is what declaredKeyWidth returns for a key with no expanding step.
+function cascadeBounds(keyCount, partnerRecordCount) {
+  return { partnerRecordCount, keyWidths: new Array(keyCount).fill(1) };
+}
+
 // linkViaPSI driver: a cascade of key rounds (each round an array of per-row
 // string | undefined). Accepts either plain arrays or StandardizedKeyIterables,
 // both of which satisfy the IndexableIterable interface linkViaPSI reads.
@@ -128,7 +134,7 @@ async function runLink(cardinality, starterKeys, joinerKeys) {
       makeParticipant("starter"),
       starterConn,
       starterKeys,
-      joinerKeys[0].length,
+      cascadeBounds(starterKeys.length, joinerKeys[0].length),
       -1,
     ),
     linkViaPSI(
@@ -136,7 +142,7 @@ async function runLink(cardinality, starterKeys, joinerKeys) {
       makeParticipant("joiner"),
       joinerConn,
       joinerKeys,
-      starterKeys[0].length,
+      cascadeBounds(joinerKeys.length, starterKeys[0].length),
       -1,
     ),
   ]);

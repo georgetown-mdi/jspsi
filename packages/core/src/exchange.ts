@@ -1726,7 +1726,7 @@ export async function runExchange(
               participant,
               conn,
               linkageKeyIterables,
-              partnerRecordCount,
+              singlePassBounds,
               verbosity,
               onStage,
             );

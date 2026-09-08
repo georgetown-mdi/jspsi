@@ -128,7 +128,7 @@ async function runCascade(
       makeParticipant("starter"),
       connFor("starter", starterConn),
       starterKeys,
-      joinerKeys[0].length,
+      fanOutFreeBounds(starterKeys.length, joinerKeys[0].length),
       -1,
     ),
   );
@@ -138,7 +138,7 @@ async function runCascade(
       makeParticipant("joiner"),
       connFor("joiner", joinerConn),
       joinerKeys,
-      starterKeys[0].length,
+      fanOutFreeBounds(joinerKeys.length, starterKeys[0].length),
       -1,
     ),
   );
@@ -461,7 +461,7 @@ async function runAgainstNonConformingStarter(
     makeParticipant("joiner"),
     joinerConn,
     joinerKeys,
-    starterValues.length,
+    fanOutFreeBounds(joinerKeys.length, starterValues.length),
     -1,
   ).then(
     (table) => table,
@@ -1129,7 +1129,7 @@ async function runManyKeysAgainstNonConformingStarter(
     makeParticipant("joiner"),
     joinerConn,
     joinerKeys,
-    starterColumns[0].length,
+    fanOutFreeBounds(joinerKeys.length, starterColumns[0].length),
     -1,
   ).then(
     (table) => table,

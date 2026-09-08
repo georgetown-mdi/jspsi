@@ -78,7 +78,7 @@ let [serverResult, clientResult] = await (async () => {
       server,
       serverConn,
       serverData,
-      clientData[0].length,
+      fanOutFreeBounds(serverData.length, clientData[0].length),
       -1,
     ),
     linkViaPSI(
@@ -86,7 +86,7 @@ let [serverResult, clientResult] = await (async () => {
       client,
       clientConn,
       clientData,
-      serverData[0].length,
+      fanOutFreeBounds(clientData.length, serverData[0].length),
       -1,
     ),
   ]);
@@ -132,7 +132,7 @@ test("a deduplicating cardinality leaves an unmatched duplicate group's table un
       mServer,
       mServerConn,
       serverData,
-      clientData[0].length,
+      fanOutFreeBounds(serverData.length, clientData[0].length),
       -1,
     ),
     // The partner's view of the same exchange is the mirror label.
@@ -141,7 +141,7 @@ test("a deduplicating cardinality leaves an unmatched duplicate group's table un
       mClient,
       mClientConn,
       clientData,
-      serverData[0].length,
+      fanOutFreeBounds(clientData.length, serverData[0].length),
       -1,
     ),
   ]);
@@ -173,7 +173,7 @@ test("many-to-many pairs in the cascade and is refused by single-pass", async ()
       ),
       starterConn,
       bothSided,
-      2,
+      fanOutFreeBounds(bothSided.length, 2),
       -1,
     ),
     linkViaPSI(
@@ -186,7 +186,7 @@ test("many-to-many pairs in the cascade and is refused by single-pass", async ()
       ),
       joinerConn,
       bothSided,
-      2,
+      fanOutFreeBounds(bothSided.length, 2),
       -1,
     ),
   ]);
@@ -324,7 +324,7 @@ test("single-pass reproduces the cascade's survivor-relative uniqueness", async 
   };
 
   const [cascadeSender, cascadeReceiver] = await run((protocol, p, c, d) =>
-    linkViaPSI(protocol, p, c, d, 2, -1),
+    linkViaPSI(protocol, p, c, d, fanOutFreeBounds(d.length, 2), -1),
   );
   // Both sender rows match -- reachable only under survivor-relative uniqueness.
   expect(cascadeSender).toStrictEqual([
@@ -377,7 +377,7 @@ test("a candidate set reaching the cascade is refused, not narrowed", async () =
       participant,
       conn,
       withCandidateSet,
-      1,
+      fanOutFreeBounds(withCandidateSet.length, 1),
       -1,
     );
   await expect(run()).rejects.toThrow(UsageError);
@@ -440,7 +440,7 @@ test("a single-candidate row is unaffected by that refusal", async () => {
       sender,
       senderConn,
       senderData,
-      2,
+      fanOutFreeBounds(senderData.length, 2),
       -1,
     ),
     linkViaPSI(
@@ -448,7 +448,7 @@ test("a single-candidate row is unaffected by that refusal", async () => {
       receiver,
       receiverConn,
       receiverData,
-      2,
+      fanOutFreeBounds(receiverData.length, 2),
       -1,
     ),
   ]);

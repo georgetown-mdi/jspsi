@@ -7,6 +7,7 @@ import {
 } from "../../src/standardization";
 import { PSIParticipant } from "../../src/psi/participant";
 import { linkViaPSI } from "../../src/psi/link";
+import { fanOutFreeBounds } from "../utils/singlePassBounds";
 import type { LinkageTerms } from "../../src/config/linkageTermsSchema";
 import type { ColumnMetadata } from "../../src/config/metadata";
 
@@ -160,7 +161,7 @@ test("rules match in order", async () => {
       server,
       serverConn,
       serverKeys,
-      clientKeys[0].length,
+      fanOutFreeBounds(serverKeys.length, clientKeys[0].length),
       -1,
     ),
     linkViaPSI(
@@ -168,7 +169,7 @@ test("rules match in order", async () => {
       client,
       clientConn,
       clientKeys,
-      serverKeys[0].length,
+      fanOutFreeBounds(clientKeys.length, serverKeys[0].length),
       -1,
     ),
   ]);

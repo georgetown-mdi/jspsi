@@ -114,7 +114,7 @@ async function cascadeWithDeviation(deviate: Deviation): Promise<unknown> {
     makeParticipant("starter"),
     deviatingInbound(starterConn, deviate),
     starterKeys,
-    ROWS,
+    fanOutFreeBounds(starterKeys.length, ROWS),
     -1,
   );
   const joinerRun = linkViaPSI(
@@ -122,7 +122,7 @@ async function cascadeWithDeviation(deviate: Deviation): Promise<unknown> {
     makeParticipant("joiner"),
     joinerConn,
     joinerKeys,
-    ROWS,
+    fanOutFreeBounds(joinerKeys.length, ROWS),
     -1,
   );
   const outcome = await starterRun.then(
@@ -146,7 +146,7 @@ async function cascadeWithJoinerDeviation(
     makeParticipant("starter"),
     starterConn,
     starterKeys,
-    ROWS,
+    fanOutFreeBounds(starterKeys.length, ROWS),
     -1,
   );
   const joinerRun = linkViaPSI(
@@ -158,7 +158,7 @@ async function cascadeWithJoinerDeviation(
         : frame,
     ),
     joinerKeys,
-    ROWS,
+    fanOutFreeBounds(joinerKeys.length, ROWS),
     -1,
   );
   const outcome = await joinerRun.then(
@@ -942,7 +942,7 @@ test("an untouched exchange is unaffected by the checks", async () => {
       makeParticipant("starter"),
       starterConn,
       starterKeys,
-      ROWS,
+      fanOutFreeBounds(starterKeys.length, ROWS),
       -1,
     ),
     linkViaPSI(
@@ -950,7 +950,7 @@ test("an untouched exchange is unaffected by the checks", async () => {
       makeParticipant("joiner"),
       joinerConn,
       joinerKeys,
-      ROWS,
+      fanOutFreeBounds(joinerKeys.length, ROWS),
       -1,
     ),
   ]);

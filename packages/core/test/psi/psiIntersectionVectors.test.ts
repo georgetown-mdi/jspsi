@@ -6,6 +6,7 @@ import PSI from "@openmined/psi.js";
 
 import { PSIParticipant } from "../../src/psi/participant";
 import { linkViaPSI } from "../../src/psi/link";
+import { fanOutFreeBounds } from "../utils/singlePassBounds";
 import { createMessagePipe } from "../../src/connection/messageConnection";
 import type { AssociationTable } from "../../src/types";
 import { sortAssociationTable } from "../../src/testing";
@@ -133,7 +134,10 @@ async function runLink(
       makeParticipant("starter"),
       starterConn,
       withUndefined(v.starterKeys),
-      v.joinerKeys[0].length,
+      fanOutFreeBounds(
+        withUndefined(v.starterKeys).length,
+        v.joinerKeys[0].length,
+      ),
       -1,
     ),
     linkViaPSI(
@@ -141,7 +145,10 @@ async function runLink(
       makeParticipant("joiner"),
       joinerConn,
       withUndefined(v.joinerKeys),
-      v.starterKeys[0].length,
+      fanOutFreeBounds(
+        withUndefined(v.joinerKeys).length,
+        v.starterKeys[0].length,
+      ),
       -1,
     ),
   ]);

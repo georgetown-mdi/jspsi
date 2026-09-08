@@ -220,6 +220,47 @@ export function assertDeduplicateImplemented(terms: LinkageTerms): void {
 }
 
 /**
+ * Which linkage strategies resolve a per-(record, key) CANDIDATE SET -- a
+ * `split_on` fan-out, a `generate_fuzzy_comparisons` expansion, or a key
+ * declaring `swap` -- one entry per strategy.
+ *
+ * `single-pass` does: its receiver holds the sender's whole per-key candidate
+ * structure and replays the cascade locally, so it is the only resolver in the
+ * exchange (`linkViaSinglePassPSI`). The cascade's own realization -- the
+ * per-round grouping on both of the round's position-naming frames, the shared
+ * sweep, and the differential vectors -- is built but not lit: the entry stays
+ * `false` until the refusals that stand at authoring, prepare, and the run
+ * boundary come down with it, so nothing an operator can configure reaches the
+ * new path meanwhile.
+ *
+ * A total table over {@link LinkageStrategy} rather than a comparison against
+ * one named strategy, so a `linkage_strategy` added later refuses a candidate
+ * set until its own resolution is written rather than inheriting either of the
+ * two specified ones (docs/spec/PROTOCOL.md, The combinations that stay
+ * unsupported). Typed `boolean` rather than the literal values so each
+ * reader's gate gives a genuine runtime branch.
+ *
+ * @internal exported for the tests that drive its readers over every strategy.
+ */
+export const CANDIDATE_SET_IMPLEMENTED_BY_STRATEGY: Record<
+  LinkageStrategy,
+  boolean
+> = {
+  cascade: false,
+  "single-pass": true,
+};
+
+/**
+ * Whether an exchange on `strategy` resolves a per-(record, key) candidate
+ * set, or refuses one at the boundary that would otherwise match it.
+ */
+export function candidateSetIsImplementedForStrategy(
+  strategy: LinkageStrategy,
+): boolean {
+  return CANDIDATE_SET_IMPLEMENTED_BY_STRATEGY[strategy];
+}
+
+/**
  * Which linkage strategies pair the BOTH-sided deduplicating cardinality,
  * one entry per strategy. The cascade does, applying the "many" rule to
  * each party so a matched value contributes the two groups' product;
