@@ -440,7 +440,10 @@ function stillInCandidacy(outOfCandidacy: Uint8Array): Array<number> {
 // One round's two groupings: this party's own, built from the candidate list
 // it holds and put on the frame it sends, and the partner's, checked as it
 // arrives and read into the partition the sweep runs over
-// (docs/spec/PROTOCOL.md, The per-round grouping the two frames hold).
+// (docs/spec/PROTOCOL.md, The per-round grouping the two frames hold). Where
+// the strategy allowlist admits no candidate set neither frame holds one, and
+// the round drives both sides from its own output instead: the partner's is
+// then the one-owner-per-position partition an absent grouping states.
 class RoundGrouping implements RoundGroupingExchange {
   private localGrouping: LocalRoundGrouping | undefined;
   private partnerOwnership: RoundOwnership | undefined;
@@ -570,11 +573,13 @@ export async function linkViaPSI(
   // A candidate set reaches a round only under a strategy whose resolution for
   // one is built; the gate is the allowlist, so a linkage_strategy added later
   // refuses one until its own resolution is written
-  // (docs/spec/PROTOCOL.md, The combinations that stay unsupported).
+  // (docs/spec/PROTOCOL.md, The combinations that stay unsupported). The same
+  // entry gates the grouping's place on the round's two position-naming
+  // frames, so a closed entry leaves both frames as the single-valued cascade
+  // sends and reads them.
+  const resolvesCandidateSets = candidateSetIsImplementedForStrategy("cascade");
   const readCandidates: (value: KeyCandidates) => KeyCandidates =
-    candidateSetIsImplementedForStrategy("cascade")
-      ? (value) => value
-      : requireSingleCandidate;
+    resolvesCandidateSets ? (value) => value : requireSingleCandidate;
 
   let indexIterationMap: IndexIterationMap = [];
   // Matched and out-of-candidacy diverge once a candidate set widens a round: a
@@ -660,8 +665,17 @@ export async function linkViaPSI(
     const [myIndices, theirIndices] = await participant.identifyIntersection(
       conn,
       data_j,
-      round,
+      resolvesCandidateSets ? round : undefined,
     );
+    if (!resolvesCandidateSets) {
+      // With the grouping off the wire each party derives the partition an
+      // absent grouping states -- one owner per matched position -- from its
+      // own round output, which is what the round holds where no candidate
+      // set widened it (docs/spec/PROTOCOL.md, An absent grouping is all
+      // ones).
+      round.describe(myIndices);
+      round.accept(undefined, theirIndices);
+    }
 
     log.debug(
       `${participant.id}: key ${j + 1}/${data.length}: ${myIndices.length} ` +

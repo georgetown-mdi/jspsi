@@ -23,6 +23,7 @@ import type { AssociationTable } from "../../src/types";
 import { singlePassReplyByteCap } from "../../src/connection/frameSize";
 import { UNBOUNDED_PSI_ELEMENTS } from "../utils/psiElementBounds";
 import { fanOutFreeBounds } from "../utils/singlePassBounds";
+import { recordingConnection } from "../utils/recordingConnection";
 
 // Deduplicating matching: a "many" party keeps a value several of its records
 // hold, contributes it once to the round, and attributes a match on it to every
@@ -1169,4 +1170,98 @@ test("rows of a group the resolver dropped stay eligible for a later key", async
     [0, 1, 2],
     [1, 0, 2],
   ]);
+});
+
+// --- The round's frames while the candidate-set gate is closed ----------------
+// The per-round grouping rides the round's two position-naming frames only
+// where the strategy allowlist admits a candidate set
+// (CANDIDATE_SET_IMPLEMENTED_BY_STRATEGY, linkageTermsPolicy.ts). Nothing in
+// this file mocks that entry, so the cases below run the shipped verdict over a
+// DEDUPLICATING round -- the widest shape an operator can configure today --
+// and pin both halves of the wire: the frames a round sends are the
+// single-valued cascade's, and a grouping arriving on either of them is
+// refused.
+
+// The starter is the "many" side and both its rows hold one value, so the
+// round's frames are as short as a cascade round gets: one matched position
+// each, one group behind the starter's.
+const GATED_STARTER_KEYS: Keys = [["shared", "shared"]];
+const GATED_JOINER_KEYS: Keys = [["shared"]];
+
+async function recordedGatedRound(): Promise<{
+  starter: Array<unknown>;
+  joiner: Array<unknown>;
+}> {
+  const [starterConn, joinerConn] = createMessagePipe();
+  const starterRecorder = recordingConnection(starterConn);
+  const joinerRecorder = recordingConnection(joinerConn);
+  await Promise.all([
+    linkViaPSI(
+      { cardinality: "many-to-one" },
+      makeParticipant("starter"),
+      starterRecorder.conn,
+      GATED_STARTER_KEYS,
+      fanOutFreeBounds(1, GATED_JOINER_KEYS[0].length),
+      -1,
+    ),
+    linkViaPSI(
+      { cardinality: "one-to-many" },
+      makeParticipant("joiner"),
+      joinerRecorder.conn,
+      GATED_JOINER_KEYS,
+      fanOutFreeBounds(1, GATED_STARTER_KEYS[0].length),
+      -1,
+    ),
+  ]);
+  return { starter: starterRecorder.sent, joiner: joinerRecorder.sent };
+}
+
+test("a deduplicating round sends the sender's original-index list bare", async () => {
+  const sent = await recordedGatedRound();
+  // The starter's third frame is the round's original-index list: the list
+  // alone, with no grouping beside it.
+  expect(sent.starter[2]).toStrictEqual([0]);
+});
+
+test("a deduplicating round sends the receiver's association table at two elements", async () => {
+  const sent = await recordedGatedRound();
+  // The joiner's second frame is the round's association table, which the
+  // grouping would have joined as a third element.
+  expect(sent.joiner[1]).toStrictEqual([[0], [0]]);
+});
+
+test("a deduplicating round refuses a grouping on the association table", async () => {
+  const run = await runCascade(
+    "starter",
+    GATED_STARTER_KEYS,
+    GATED_JOINER_KEYS,
+    {
+      party: "starter",
+      deviation: (frame) =>
+        Array.isArray(frame) && frame.length === 2 && Array.isArray(frame[0])
+          ? [frame[0], frame[1], [1]]
+          : frame,
+    },
+  );
+  expect(run.starter).toBeInstanceOf(ConnectionError);
+  expect((run.starter as ConnectionError).kind).toBe("protocol");
+});
+
+test("a deduplicating round refuses a grouping on the original-index list", async () => {
+  const run = await runCascade(
+    "starter",
+    GATED_STARTER_KEYS,
+    GATED_JOINER_KEYS,
+    {
+      party: "joiner",
+      deviation: (frame) =>
+        Array.isArray(frame) &&
+        frame.length > 0 &&
+        frame.every((entry) => typeof entry === "number")
+          ? [frame, [[0]]]
+          : frame,
+    },
+  );
+  expect(run.joiner).toBeInstanceOf(ConnectionError);
+  expect((run.joiner as ConnectionError).kind).toBe("protocol");
 });

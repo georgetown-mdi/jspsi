@@ -429,8 +429,9 @@ export class PSIParticipant {
    * Returns an association table with elements [localIndices, partnerIndices]
    *
    * @param grouping - The round's per-round grouping exchange, where the
-   *   caller resolves a candidate set. Omitted, both frames keep the shape
-   *   the single-valued cascade puts on the wire.
+   *   caller resolves a candidate set. Omitted, neither frame sends a grouping
+   *   nor admits one, so both keep the shape the single-valued cascade puts on
+   *   the wire and accept exactly what it accepts.
    */
   public async identifyIntersection(
     conn: MessageConnection,
@@ -462,10 +463,16 @@ export class PSIParticipant {
       await conn.send(serverResponse);
 
       // The partner sends [theirIndices, ourIndices]; the swapped names
-      // restore our-first order. A third element is the partner's own
-      // grouping for the round.
-      const [partnerIndices, localIndices, partnerGrouping] =
-        await receiveParsed(conn, roundAssociationTableMessage);
+      // restore our-first order. A third element is the partner's own grouping
+      // for the round, admitted only where the caller states one of its own:
+      // a round without a grouping neither sends nor accepts one.
+      const [partnerIndices, localIndices, partnerGrouping]: [
+        Array<number>,
+        Array<number>,
+        (RoundGroupingField | undefined)?,
+      ] = grouping
+        ? await receiveParsed(conn, roundAssociationTableMessage)
+        : [...(await receiveParsed(conn, associationTableMessage)), undefined];
       this.log.debug(`${this.id}: received association table`);
 
       // The round's matches, as computed by the partner: our half indexes the
@@ -563,11 +570,11 @@ export class PSIParticipant {
       // The partner's own matched records, in its input order: one per pair we
       // reported, each indexing the set it encrypted -- bounded by the element
       // count its masked set may declare, which is authenticated session state.
-      // A two-element frame holds the partner's own grouping beside the list.
-      const frame = parseOrProtocolError(
-        roundOriginalIndexListMessage,
-        rawData,
-      );
+      // A two-element frame holds the partner's own grouping beside the list,
+      // read only where the caller resolves a candidate set.
+      const frame = grouping
+        ? parseOrProtocolError(roundOriginalIndexListMessage, rawData)
+        : parseOrProtocolError(numberArrayMessage, rawData);
       const [partnerIndices, partnerGrouping] = Array.isArray(frame[0])
         ? (frame as [Array<number>, RoundGroupingField])
         : [frame as Array<number>, undefined];

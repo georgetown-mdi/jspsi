@@ -231,7 +231,10 @@ export function assertDeduplicateImplemented(terms: LinkageTerms): void {
  * sweep, and the differential vectors -- is built but not lit: the entry stays
  * `false` until the refusals that stand at authoring, prepare, and the run
  * boundary come down with it, so nothing an operator can configure reaches the
- * new path meanwhile.
+ * new path meanwhile. The entry gates the frames with the resolution: while it
+ * is `false` a cascade round neither sends a grouping nor admits one, so every
+ * exchange an operator can run -- a deduplicating one included -- puts the
+ * single-valued cascade's frames on the wire and accepts what it accepts.
  *
  * A total table over {@link LinkageStrategy} rather than a comparison against
  * one named strategy, so a `linkage_strategy` added later refuses a candidate
