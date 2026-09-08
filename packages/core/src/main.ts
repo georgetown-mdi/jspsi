@@ -147,6 +147,10 @@ export {
   CanonicalEncodingError,
 } from "./utils/canonical";
 export type { CanonicalValue } from "./utils/canonical";
+// The package's one reading of a well-formed UTF-16 string, shared so an editor
+// naming the fault before a parse, the terms schema, and the encoder that would
+// throw all refuse the same strings.
+export { loneSurrogateIndex } from "./utils/wellFormedString";
 export {
   sanitizeForDisplay,
   displayText,

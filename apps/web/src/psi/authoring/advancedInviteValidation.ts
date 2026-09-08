@@ -4,6 +4,7 @@ import {
   FAN_OUT_FUNCTION_NAMES,
   INVITATION_LIFETIME_SECONDS,
   MAX_INVITATION_LIFETIME_SECONDS,
+  MAX_NAME_LENGTH,
   NAME_SHAPE_PATTERN,
   TEXT_CONTROL_CHAR_MESSAGE,
   TEXT_DIRECTION_MESSAGE,
@@ -14,6 +15,7 @@ import {
   countOnlyTransmitsColumn,
   decideLinkageTermsVerdict,
   disclosedColumnNames,
+  loneSurrogateIndex,
   safeParseLinkageTerms,
   summarizeLinkageShortfall,
   swapPairTransformsDiffer,
@@ -156,21 +158,41 @@ const SWAP_TRANSFORM_MISMATCH_MESSAGE =
   "different cleaning steps. Open that key and give both fields the same steps, " +
   "or turn off matching them in either order.";
 
-/** Shown when a linkage key's transform names a parameter holding a character a
- * terms name may not contain, which the schema refuses on the `linkageKeys` path
- * -- collapsed by the generic mapping to "Enable at least one linkage key." on a
- * draft whose keys are all enabled, so this message must be set ahead of that
- * mapping. Renaming is not offered as a way out: this editor's own step controls
- * write the parameter names their functions take, so such a name arrives only on
- * an imported document, whose parameters the operator does not edit one by one.
- * Names neither the key nor the parameter, the same reason
- * {@link UNSUPPLYABLE_KEY_MESSAGE} names no field -- and here the name is the
- * offending text itself, so quoting it would put those characters on the
- * screen. */
-const REFUSED_PARAM_NAME_MESSAGE =
-  "A linkage key's transform names a parameter with a control or " +
-  "text-direction character in it, which these terms cannot carry. Open that " +
-  "key and remove that step, or turn the key off.";
+/** What the terms schema refuses about a transform's parameter name: the length
+ * ceiling every name is held to, the name-class character rule, and the
+ * well-formedness walk that refuses an unpaired UTF-16 surrogate anywhere in the
+ * document, a `params` record key included. */
+type ParamNameRefusal = "too-long" | "control-character" | "lone-surrogate";
+
+/** The one remedy every refused parameter name takes. Renaming is not offered as
+ * a way out: this editor's own step controls write the parameter names their
+ * functions take, so such a name arrives only on an imported document, whose
+ * parameters the operator does not edit one by one. */
+const REFUSED_PARAM_NAME_REMEDY =
+  "Open that key and remove that step, or turn the key off.";
+
+/** Shown when a linkage key's transform names a parameter the schema refuses,
+ * which it does on the `linkageKeys` path -- collapsed by the generic mapping to
+ * "Enable at least one linkage key." on a draft whose keys are all enabled, so
+ * one of these must be set ahead of that mapping. Each names its own class: the
+ * three faults have different fixes in the document the operator holds. None
+ * names the key or the parameter, the same reason {@link UNSUPPLYABLE_KEY_MESSAGE}
+ * names no field -- and here the name is the offending text itself, so quoting it
+ * would put those characters on the screen. */
+const REFUSED_PARAM_NAME_MESSAGES: Record<ParamNameRefusal, string> = {
+  "too-long":
+    `A linkage key's transform names a parameter longer than ${String(MAX_NAME_LENGTH)} ` +
+    "characters, which these terms cannot carry. " +
+    REFUSED_PARAM_NAME_REMEDY,
+  "control-character":
+    "A linkage key's transform names a parameter with a control or " +
+    "text-direction character in it, which these terms cannot carry. " +
+    REFUSED_PARAM_NAME_REMEDY,
+  "lone-surrogate":
+    "A linkage key's transform names a parameter with an incomplete character " +
+    "in it, which these terms cannot carry. " +
+    REFUSED_PARAM_NAME_REMEDY,
+};
 
 /** Shown when the built terms cannot be canonically encoded and the offending
  * value is not in any enabled key's transform -- the residual the editor's own
@@ -249,20 +271,32 @@ function isCanonicallyEncodable(value: unknown): boolean {
   }
 }
 
-/** Whether any of the built terms' transform steps names a parameter outside
- * {@link NAME_SHAPE_PATTERN}, which the terms schema holds every name to. Asked
- * of the same pattern the schema applies, so the editor and the schema cannot
- * disagree about which parameter names are refused. */
-function namesRefusedParam(terms: LinkageTerms): boolean {
-  return terms.linkageKeys.some((key) =>
-    key.elements.some((element) =>
-      (element.transform ?? []).some((step) =>
-        Object.keys(step.params ?? {}).some(
-          (name) => !NAME_SHAPE_PATTERN.test(name),
-        ),
-      ),
-    ),
-  );
+/** What the schema refuses about one parameter name, or undefined for a name it
+ * accepts. Asked of the bound, the pattern, and the surrogate reading the schema
+ * itself applies, so the editor and the schema cannot disagree about which names
+ * are refused. A name breaking several rules takes the first, in the order the
+ * schema reaches them: the record key's length ceiling and shape, then the
+ * document-wide well-formedness walk. */
+function paramNameRefusalOf(name: string): ParamNameRefusal | undefined {
+  if (name.length > MAX_NAME_LENGTH) return "too-long";
+  if (!NAME_SHAPE_PATTERN.test(name)) return "control-character";
+  if (loneSurrogateIndex(name) >= 0) return "lone-surrogate";
+  return undefined;
+}
+
+/** What the schema refuses about the first parameter name it refuses in the
+ * built terms' transform steps, or undefined when it refuses none. */
+function firstParamNameRefusal(
+  terms: LinkageTerms,
+): ParamNameRefusal | undefined {
+  for (const key of terms.linkageKeys)
+    for (const element of key.elements)
+      for (const step of element.transform ?? [])
+        for (const name of Object.keys(step.params ?? {})) {
+          const refusal = paramNameRefusalOf(name);
+          if (refusal !== undefined) return refusal;
+        }
+  return undefined;
 }
 
 /**
@@ -356,6 +390,16 @@ export function validateAdvancedInvite(
     errors.keys = UNSUPPLYABLE_KEY_MESSAGE;
   }
 
+  // A transform parameter name the schema refuses -- for its length, a character
+  // a terms name may not hold, or an unpaired UTF-16 surrogate -- is refused on
+  // the same `linkageKeys` path, and needs its own message ahead of the mapping
+  // for the reason the checks above do. Ahead of the encode dry run below too:
+  // the encoder refuses a lone-surrogate name as well, under a message that
+  // names a different fault and a remedy that does not reach this one.
+  const paramNameRefusal = firstParamNameRefusal(terms);
+  if (errors.keys === undefined && paramNameRefusal !== undefined)
+    errors.keys = REFUSED_PARAM_NAME_MESSAGES[paramNameRefusal];
+
   // Canonical-encode dry run: the terms are hashed into the cross-party agreement
   // in this byte form, and a value outside the reproducible domain throws here
   // rather than desyncing two parties. Run up front so this message wins over the
@@ -389,14 +433,6 @@ export function validateAdvancedInvite(
     terms.linkageKeys.some(swapPairTransformsDiffer)
   )
     errors.keys = SWAP_TRANSFORM_MISMATCH_MESSAGE;
-
-  // A transform parameter named with a character a terms name may not hold is
-  // refused on the same `linkageKeys` path, and needs its own message ahead of
-  // the mapping for the reason the checks above do. Ordered after them because
-  // it is the narrowest fault: each of those is a property of the key the
-  // operator is looking at, while this one is a name inside one of its steps.
-  if (errors.keys === undefined && namesRefusedParam(terms))
-    errors.keys = REFUSED_PARAM_NAME_MESSAGE;
 
   // The "non-receiving-party-cannot-receive" rule, enforced live: sending payload
   // to a partner that receives no result is incoherent, since the partner has no
@@ -662,7 +698,7 @@ function fieldForIssuePath(path: ReadonlyArray<PropertyKey>): AdvancedField {
  * Their own messages because the generic ones tell an operator who pasted such a
  * value to enter a value they have already entered. Neither echoes any part of
  * it: the offending text is the value itself, so quoting it would put those
- * characters on the screen -- the reason {@link REFUSED_PARAM_NAME_MESSAGE}
+ * characters on the screen -- the reason {@link REFUSED_PARAM_NAME_MESSAGES}
  * names no parameter. */
 const REFUSED_CHARACTER_MESSAGES: Partial<
   Record<AdvancedField, { control: string; direction: string }>
