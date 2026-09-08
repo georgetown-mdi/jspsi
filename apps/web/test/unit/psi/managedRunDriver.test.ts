@@ -222,10 +222,11 @@ function makeParkedCloseMc() {
   };
 }
 
-/** A message connection standing in for a partner that stopped sending
- * mid-payload: the exchange over it never settles until the connection is
- * closed, which rejects it with the `closed` error core's own close raises for
- * a parked receive. `stalled` is what the exchange returns while that stands. */
+/** A message connection standing in for a partner that stopped sending, in the
+ * authentication or mid-payload: a call parked on it never settles until the
+ * connection is closed, which rejects it with the `closed` error core's own
+ * close raises for a parked receive. `stalled` is what the parked call returns
+ * while that stands. */
 function makeStalledExchangeMc() {
   let cutExchange: ((error: Error) => void) | undefined;
   const stalled = new Promise<never>((_resolve, reject) => {
@@ -436,6 +437,33 @@ describe("runManagedExchangeInBrowser", () => {
     await expect(running).rejects.toThrow("connection closed");
     expect(close).toHaveBeenCalled();
     expect(peer.disconnect).toHaveBeenCalled();
+  });
+
+  test("a cancel cuts a run the partner has stalled in the authentication", async () => {
+    // The same recovery one phase earlier: the connection is published to the
+    // cancel path as soon as the channel opens, so a partner who answers ICE and
+    // then never completes the handshake is cut the same way a mid-payload stall
+    // is, rather than parking until the inactivity budget expires.
+    const { mc, close, stalled } = makeStalledExchangeMc();
+    mockedOpen.mockResolvedValue(mc);
+    const { peer } = acquireResources();
+    mockedAuthenticate.mockReturnValueOnce(stalled);
+    const controller = new AbortController();
+
+    const running = runDriver(controller.signal);
+    await tick();
+    // The stall stands and nothing is torn down: the cancel below is what
+    // reaches it.
+    expect(mockedAuthenticate).toHaveBeenCalledTimes(1);
+    expect(close).not.toHaveBeenCalled();
+    controller.abort();
+
+    await expect(running).rejects.toThrow("connection closed");
+    expect(close).toHaveBeenCalled();
+    expect(peer.disconnect).toHaveBeenCalled();
+    // Nothing stamped this run a success: the cut landed ahead of the exchange.
+    expect(mockedRunExchange).not.toHaveBeenCalled();
+    expect(mockedAppendDisclosure).not.toHaveBeenCalled();
   });
 
   test("a cancel that landed while the channel was opening cuts the exchange too", async () => {

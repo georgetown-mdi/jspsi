@@ -187,17 +187,11 @@ export function runManagedExchangeInBrowser(
     onWarning?.(message);
   };
 
-  // How the operator's cancel reaches the exchange itself. Every wait the run
-  // makes once the channel is open is a parked receive whose duration the
-  // partner chooses, up to the connection's inactivity budget, and core's
-  // MessageConnection takes no signal: closing the connection is what rejects
-  // those receives. The run's single-writer lock spans the payload exchange, so
-  // without this a partner that stalls mid-payload holds the record's lock
-  // until it moves or the tab is destroyed.
-  //
-  // Published as soon as the handshake opens the channel, so a cancel during
-  // the authentication reaches it too. It does not stand in for the run's own
-  // teardown, which still runs on the failure path this close provokes.
+  // How the operator's cancel reaches the exchange itself: core's
+  // MessageConnection takes no signal, so closing the connection is the only
+  // lever that rejects a receive parked for a duration the partner chooses. The
+  // run's single-writer lock spans the payload exchange, so a partner that
+  // stalls holds the record's lock until this close cuts the wait.
   let openTransport:
     { peer: Peer; conn: DataConnection; mc: MessageConnection } | undefined;
   const cutRunOnCancel = () => {
