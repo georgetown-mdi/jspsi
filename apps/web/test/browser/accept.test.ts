@@ -2697,6 +2697,160 @@ describe("AcceptorScreen: this party's own deduplicate", () => {
       .toBeInTheDocument();
   });
 
+  // The click handler React holds on a rendered element, the one route to an
+  // action React's own event dispatch makes unreachable: it drops a click
+  // handler while the element's disabled prop stands, so no event -- real or
+  // dispatched -- reaches an action behind a disabled button.
+  function reactClickHandler(element: Element): () => void {
+    const propsKey = Object.keys(element).find((name) =>
+      name.startsWith("__reactProps$"),
+    );
+    expect(propsKey, "React's props key on the rendered element").toBeDefined();
+    const props = (
+      element as unknown as Record<string, { onClick?: () => void }>
+    )[propsKey as string];
+    expect(props.onClick).toBeTypeOf("function");
+    return props.onClick as () => void;
+  }
+
+  test("the accept action refuses a refused pair, past its disabled button", async () => {
+    // The disabled state is not the refusal: the handler re-reads the pair, so
+    // an invocation that reaches it anyway -- what a scripted submit, or a
+    // later edit dropping the pair from the button's disabled state, would do
+    // -- commits no file and advances no step. Everything else the gate asks
+    // for is satisfied here, so the pair is the only thing holding the accept.
+    await reachReview({
+      ...acceptorTerms,
+      linkageStrategy: "single-pass",
+      deduplicate: true,
+    });
+    await userEvent.click(
+      page.getByRole("button", { name: "Continue: consent & your file" }),
+    );
+    await consentAndName();
+    const fileInput = document.querySelector('input[type="file"]');
+    await userEvent.upload(
+      page.elementLocator(fileInput as HTMLElement),
+      csvFile("first_name,last_name\nAlice,Smith\n"),
+    );
+    await expect
+      .element(page.getByText("cohort_intake.csv"))
+      .toBeInTheDocument();
+
+    // Refuse the pair from the terms step, then return to this step the way
+    // browser history does, around the terms step's own disabled Continue.
+    window.history.back();
+    await expect
+      .element(page.getByRole("button", { name: "Other details" }))
+      .toBeInTheDocument();
+    await userEvent.click(page.getByRole("button", { name: "Other details" }));
+    await userEvent.click(ownSide());
+    window.history.forward();
+    const accept = page.getByRole("button", { name: "Accept and continue" });
+    await expect.element(accept).toBeDisabled();
+
+    // Straight to the action the disabled button holds.
+    reactClickHandler(accept.element())();
+
+    await expect
+      .element(
+        page.getByText(
+          "Go back to the terms and resolve the duplicate-matching settings to continue.",
+        ),
+      )
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Consent & your file");
+    expect(
+      page.getByRole("heading", { name: "Confirm your columns" }).query(),
+    ).toBeNull();
+    // The parse is the first thing behind the gate, so an untouched loader is
+    // the accept committing nothing.
+    expect(csvLoadHarness.called).toBe(0);
+    expect(lifecycleHarness.calls).toHaveLength(0);
+  });
+
+  // The consent gate, from the review step through to the confirm-columns step
+  // that holds the launch.
+  async function acceptThroughToColumns() {
+    await userEvent.click(
+      page.getByRole("button", { name: "Continue: consent & your file" }),
+    );
+    await consentAndName();
+    const fileInput = document.querySelector('input[type="file"]');
+    await userEvent.upload(
+      page.elementLocator(fileInput as HTMLElement),
+      csvFile("first_name,last_name\nAlice,Smith\n"),
+    );
+    await expect
+      .element(page.getByText("cohort_intake.csv"))
+      .toBeInTheDocument();
+    await userEvent.click(
+      page.getByRole("button", { name: "Accept and continue" }),
+    );
+    await expect
+      .element(page.getByRole("heading", { name: "Confirm your columns" }))
+      .toBeInTheDocument();
+  }
+
+  // Back from the confirm-columns step to the control on the terms step, and
+  // forward again, the way browser history moves between them.
+  async function backToTermsControl() {
+    window.history.back();
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Consent & your file");
+    window.history.back();
+    await userEvent.click(page.getByRole("button", { name: "Other details" }));
+    await expect.element(ownSide()).toBeInTheDocument();
+  }
+
+  async function forwardToColumns() {
+    window.history.forward();
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Consent & your file");
+    window.history.forward();
+    await expect
+      .element(page.getByRole("heading", { name: "Confirm your columns" }))
+      .toBeInTheDocument();
+  }
+
+  test("a value moved after consent holds the launch until the two agree", async () => {
+    // The run presents the value the consent gate committed, so a control moved
+    // after that gate -- reached by a browser Back, and returned from by a
+    // Forward that steps around the gate -- launches nothing until the operator
+    // accepts again or restores what they accepted.
+    await reachReview(acceptorTerms);
+    await acceptThroughToColumns();
+    await backToTermsControl();
+    await userEvent.click(ownSide());
+    await forwardToColumns();
+
+    const start = page.getByRole("button", { name: "Start the exchange" });
+    await expect.element(start).toBeDisabled();
+    await expect
+      .element(
+        page.getByText(
+          "This exchange runs with the duplicate-matching setting you " +
+            "accepted, which is not the one now on the terms step. Accept " +
+            "again to apply the change, or set the control back.",
+        ),
+      )
+      .toBeInTheDocument();
+    expect(lifecycleHarness.calls).toHaveLength(0);
+
+    // Restoring the accepted value runs: what the operator consented to is what
+    // the exchange presents.
+    await backToTermsControl();
+    await userEvent.click(ownSide());
+    await forwardToColumns();
+    await expect.element(start).toBeEnabled();
+    await userEvent.click(start);
+    await vi.waitFor(() => expect(lifecycleHarness.calls).toHaveLength(1));
+  });
+
   test("blocks the accept when the invitation mirrors to terms no acceptance can run", async () => {
     // A sole-receiver invitation that also declares a payload.send mirrors to a
     // receive this party may not hold: the derivation refuses it on decode, with

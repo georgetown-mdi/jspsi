@@ -466,6 +466,26 @@ describe("the accepting party's own deduplicate at the seat", () => {
       boundary,
     );
   });
+
+  test("a refusal the invitation's own document raises blocks the accept", () => {
+    // The derivation refuses a count-only invitation outside the specified
+    // shape over the INVITATION's own terms, before this party's value is
+    // applied: the closed default meets it too, so no control at this seat
+    // clears it and it blocks the accept rather than pointing at one.
+    const countOnlyOffCascade: LinkageTerms = {
+      ...invitationTerms,
+      algorithm: "psi-c",
+      linkageStrategy: "single-pass",
+    };
+    for (const deduplicate of [false, true]) {
+      const refusal = acceptorDeduplicateRefusal(
+        countOnlyOffCascade,
+        deduplicate,
+      );
+      expect(refusal?.scope).toBe("terms");
+      expect(refusal?.message).toContain("must set the linkage strategy to");
+    }
+  });
 });
 
 describe("an invitation whose mirror admits no deduplicate from this party", () => {

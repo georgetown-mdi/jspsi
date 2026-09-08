@@ -256,30 +256,66 @@ export interface AcceptorDeduplicateRefusal {
  * not the setting's: its message names the strategy to change and the one-sided
  * pair to fall back to, and clearing either party's value runs.
  *
+ * The two scopes are told apart by what clearing this party's side does, not by
+ * the error's type alone: a refusal the closed default meets as well stands
+ * whatever this party sets -- the invitation's own `deduplicate` against its own
+ * strategy, or a mirror the schema refuses -- so it is `terms`, and the seat
+ * blocks the accept rather than pointing at a control that cannot clear it.
+ *
  * It returns for every invitation this build decoded rather than throwing for
  * some of them: the accept screen reads it in its render body, where a throw
  * takes the whole route to its error boundary instead of the refusal the
- * operator can act on. So an error the derivation raises -- a mirror the schema
- * refuses, which no value at this seat resolves -- comes back as a `terms`
- * refusal, escaped for display at the one boundary that holds it.
+ * operator can act on. Either scope's message is escaped for display at this
+ * boundary, the one that holds it. A `pair` message comes from the two
+ * cardinality assertions, which core states as fixed literals over its own
+ * strategy table, so the call is hygiene on that arm: it holds the display
+ * bound if a later refusal interpolates partner text.
  */
 export function acceptorDeduplicateRefusal(
   linkageTerms: LinkageTerms,
   deduplicate: boolean,
 ): AcceptorDeduplicateRefusal | undefined {
   try {
-    resolveLinkageCardinality(
-      deriveAcceptedLinkageTerms(
-        linkageTerms,
-        DEDUPLICATE_CHECK_IDENTITY,
-        deduplicate,
-      ),
-      linkageTerms,
-    );
+    resolvePresentedCardinality(linkageTerms, deduplicate);
     return undefined;
   } catch (error) {
-    if (error instanceof UsageError)
-      return { scope: "pair", message: error.message };
-    return { scope: "terms", message: sanitizeErrorForDisplay(error) };
+    const clearingRuns = deduplicate && acceptorClosedDefaultRuns(linkageTerms);
+    return {
+      scope: error instanceof UsageError && clearingRuns ? "pair" : "terms",
+      message: sanitizeErrorForDisplay(error),
+    };
+  }
+}
+
+/**
+ * Resolve the joint cardinality of the pair this party's `deduplicate` makes
+ * with the invitation, at the boundary the run resolves it at, throwing what
+ * the run would throw.
+ */
+function resolvePresentedCardinality(
+  linkageTerms: LinkageTerms,
+  deduplicate: boolean,
+): void {
+  resolveLinkageCardinality(
+    deriveAcceptedLinkageTerms(
+      linkageTerms,
+      DEDUPLICATE_CHECK_IDENTITY,
+      deduplicate,
+    ),
+    linkageTerms,
+  );
+}
+
+/**
+ * Whether this invitation runs with the accepting party's side closed -- the
+ * value an acceptance derives with no control at all -- which is what makes a
+ * refusal one this party's own control can clear.
+ */
+function acceptorClosedDefaultRuns(linkageTerms: LinkageTerms): boolean {
+  try {
+    resolvePresentedCardinality(linkageTerms, false);
+    return true;
+  } catch {
+    return false;
   }
 }

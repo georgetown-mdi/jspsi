@@ -95,6 +95,7 @@ export function AcceptorColumnsStep({
   editorState,
   verdict,
   deduplicatePairRefused = false,
+  deduplicateChangedAfterConsent = false,
   connectionSection,
   connectionBlocked = false,
   exchangeFilesSection,
@@ -129,6 +130,11 @@ export function AcceptorColumnsStep({
    * {@link connectionBlocked} does: the control that clears it is on the review
    * step, which a browser Forward can step past. */
   deduplicatePairRefused?: boolean;
+  /** Whether this party's own `deduplicate` control stands somewhere other than
+   * the value the consent gate committed. Gates the launch for the same reason
+   * {@link deduplicatePairRefused} does, and is cleared on the same two steps:
+   * the control on the review step, or the consent gate that commits it. */
+  deduplicateChangedAfterConsent?: boolean;
   /** The transport-connection surface an accepted SFTP invitation needs authored
    * before launch (the {@link AcceptorSftpConnectionCard}), rendered below the
    * column surface and above the launch action. Absent for a browser or file-drop
@@ -283,6 +289,7 @@ export function AcceptorColumnsStep({
       // line every other blocker speaks through.
       offline: !online,
       deduplicatePairRefused,
+      deduplicateChangedAfterConsent,
       connectionBlocked,
       exchangeFilesBlocked,
       connectionTuningBlocked,
