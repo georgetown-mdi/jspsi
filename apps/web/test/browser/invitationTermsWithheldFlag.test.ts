@@ -12,14 +12,19 @@ import { InvitationTerms } from "@components/InvitationTerms";
 
 import { createAppMount } from "./renderApp";
 
+import type { ReactNode } from "react";
+
 import type * as PsilinkCore from "@psilink/core";
 
 import type { InvitationToken, LinkageTerms } from "@psilink/core";
 
-// The flag the mocked summarizer answers with, read fresh on every call so one
-// test can drive both directions. Hoisted because vi.mock's factory is lifted
-// above every declaration in the file.
-const forced = vi.hoisted(() => ({ acceptorTableWithheld: false }));
+// The two withholding flags the mocked summarizer answers with, read fresh on
+// every call so one test can drive both directions. Hoisted because vi.mock's
+// factory is lifted above every declaration in the file.
+const forced = vi.hoisted(() => ({
+  acceptorTableWithheld: false,
+  inviterTableWithheld: false,
+}));
 
 // InvitationTerms summarizes the terms it is handed, so a summary that
 // contradicts those terms can only reach the screen by answering for the
@@ -32,6 +37,7 @@ vi.mock("@psilink/core", async (importOriginal) => {
     summarizeInvitation: (token: InvitationToken) => ({
       ...actual.summarizeInvitation(token),
       acceptorTableWithheld: forced.acceptorTableWithheld,
+      inviterTableWithheld: forced.inviterTableWithheld,
     }),
   };
 });
@@ -74,6 +80,28 @@ const WITHHOLDING_TERMS = soleReceiverTerms({
   payload: { send: [], receive: [] },
 });
 
+// The mirrored pair, for the own-membership fact: the accepting party is the
+// sole receiver, so the INVITING party is the helper whose half of the table
+// the exchange may withhold.
+function blindHelperTerms(overrides: Partial<LinkageTerms>): LinkageTerms {
+  return soleReceiverTerms({
+    deduplicate: false,
+    output: { expectsOutput: false, shareWithPartner: true },
+    payload: { send: [{ name: "risk_score" }], receive: [] },
+    ...overrides,
+  });
+}
+
+// A cascade returns the inviting party its matched positions as the rounds go.
+const HELPER_CASCADE_TERMS = blindHelperTerms({ linkageStrategy: "cascade" });
+
+// Single-pass with the inviting party declaring no column of its own to send:
+// the one combination the exchange closes at the wire.
+const HELPER_WITHHOLDING_TERMS = blindHelperTerms({
+  linkageStrategy: "single-pass",
+  payload: { send: [], receive: [] },
+});
+
 function tokenFor(linkageTerms: LinkageTerms): InvitationToken {
   return {
     version: "1",
@@ -99,6 +127,15 @@ async function readyOtherDetails(): Promise<HTMLElement> {
   const panel = id ? document.getElementById(id) : null;
   if (!panel) throw new Error("disclosure panel not found for Other details");
   return panel;
+}
+
+// The mounted screen's text, read once React has committed the render: the root
+// renders concurrently, so a synchronous read can see an empty container and
+// pass a negative assertion vacuously.
+async function renderedText(node: ReactNode): Promise<string> {
+  app.render(node);
+  await expect.poll(() => app.container.textContent.trim()).not.toBe("");
+  return app.container.textContent;
 }
 
 describe("InvitationTerms: the deduplicate variant's one input", () => {
@@ -143,6 +180,92 @@ describe("InvitationTerms: the deduplicate variant's one input", () => {
     );
     expect(app.container.textContent).not.toContain(
       CONSENT_FACTS.duplicateGroupingWithheld.note,
+    );
+  });
+});
+
+describe("InvitationTerms: the own-membership variant's one input", () => {
+  test("the honest-helper membership sentence follows core's resolved flag against the terms rendered beside it", async () => {
+    // What a non-receiving partner learns of its own records is stated as a
+    // disclosure only where the run returns that party its half of the table,
+    // and the whole of what this seat reads that from is inviterTableWithheld.
+    // Both documents render under the OPPOSITE flag to the one their own terms
+    // derive, so a screen re-deriving the verdict from the strategy and the
+    // payload declaration shows the other sentence and fails.
+    const core = await vi.importActual<typeof PsilinkCore>("@psilink/core");
+
+    // Non-vacuity: each fixture contradicts the flag it renders under, so
+    // neither case can pass by the two agreeing.
+    expect(
+      core.summarizeInvitation(tokenFor(HELPER_CASCADE_TERMS))
+        .inviterTableWithheld,
+    ).toBe(false);
+    expect(
+      core.summarizeInvitation(tokenFor(HELPER_WITHHOLDING_TERMS))
+        .inviterTableWithheld,
+    ).toBe(true);
+
+    forced.inviterTableWithheld = true;
+    const cascadeUnderWithheld = await renderedText(
+      createElement(InvitationTerms, { linkageTerms: HELPER_CASCADE_TERMS }),
+    );
+    expect(cascadeUnderWithheld).toContain(
+      CONSENT_FACTS.partnerOwnMembershipWithheld.note,
+    );
+    expect(cascadeUnderWithheld).not.toContain(
+      CONSENT_FACTS.partnerLearnsOwnMembership.note,
+    );
+
+    app.unmount();
+    forced.inviterTableWithheld = false;
+    const withholdingUnderDisclosure = await renderedText(
+      createElement(InvitationTerms, {
+        linkageTerms: HELPER_WITHHOLDING_TERMS,
+      }),
+    );
+    expect(withholdingUnderDisclosure).toContain(
+      CONSENT_FACTS.partnerLearnsOwnMembership.note,
+    );
+    expect(withholdingUnderDisclosure).not.toContain(
+      CONSENT_FACTS.partnerOwnMembershipWithheld.note,
+    );
+  });
+
+  test("reads the accepting party's half of the verdict on the seat proposing its own terms", async () => {
+    // There the partner the fact speaks about is the ACCEPTING party, so the
+    // sentence follows acceptorTableWithheld: a seat reading the inviting
+    // party's verdict would state the wrong half's withholding. The fixtures
+    // are the deduplicate pair's own, whose terms make the accepting party the
+    // helper, and each again renders under the opposite flag.
+    forced.inviterTableWithheld = true;
+    forced.acceptorTableWithheld = false;
+    const exchangedHalf = await renderedText(
+      createElement(InvitationTerms, {
+        linkageTerms: WITHHOLDING_TERMS,
+        perspective: "proposing",
+      }),
+    );
+    expect(exchangedHalf).toContain(
+      CONSENT_FACTS.partnerLearnsOwnMembership.note,
+    );
+    expect(exchangedHalf).not.toContain(
+      CONSENT_FACTS.partnerOwnMembershipWithheld.note,
+    );
+
+    app.unmount();
+    forced.inviterTableWithheld = false;
+    forced.acceptorTableWithheld = true;
+    const withheldHalf = await renderedText(
+      createElement(InvitationTerms, {
+        linkageTerms: CASCADE_TERMS,
+        perspective: "proposing",
+      }),
+    );
+    expect(withheldHalf).toContain(
+      CONSENT_FACTS.partnerOwnMembershipWithheld.note,
+    );
+    expect(withheldHalf).not.toContain(
+      CONSENT_FACTS.partnerLearnsOwnMembership.note,
     );
   });
 });

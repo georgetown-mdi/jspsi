@@ -705,11 +705,20 @@ export function displayInvitation(params: {
   // and is sent no count-report frame (docs/spec/PROTOCOL.md, PSI-C), so
   // it learns no membership of its own records. What a count-only run
   // does disclose is the tier `logDecisionFacts` prints above.
+  //
+  // Under `psi`, WHICH of the two sentences prints follows core's
+  // resolution of the run (`inviterTableWithheld`), never a reading of the
+  // strategy and the payload declaration made here: the single-pass
+  // combination the exchange closes leaves the partner's process no
+  // membership to learn, so the disclosure sentence would overstate it.
   if (!summary.inviterReceivesOutput && summary.algorithm !== "psi-c") {
+    const fact = summary.inviterTableWithheld
+      ? "partnerOwnMembershipWithheld"
+      : "partnerLearnsOwnMembership";
     emit(
-      `  ${marked("what your partner learns either way", "partnerLearnsOwnMembership")}:`,
+      `  ${marked("what your partner learns about its own records", fact)}:`,
     );
-    emit(`    ${CONSENT_FACTS.partnerLearnsOwnMembership.note}`);
+    emit(`    ${CONSENT_FACTS[fact].note}`);
   }
   emit(
     `  ${marked("duplicate matches", "duplicateMatches")}: ` +

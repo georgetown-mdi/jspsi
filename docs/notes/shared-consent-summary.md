@@ -568,14 +568,37 @@ count-report frame ([PROTOCOL.md](../spec/PROTOCOL.md#psi-c)). Stated there, the
 fact would tell an acceptor that a disclosure happens which the algorithm
 forecloses -- directly under a headline saying only the count is revealed.
 
-So the fact is scoped by the ALGORITHM and not by the linkage strategy: it holds
-for a one-sided `psi` exchange under both strategies and for no `psi-c` exchange
-at all. Both surfaces withhold it for any `psi-c` invitation, off the same reading
-of the algorithm that reaches the tier's own five sentences -- one gate, so the
-fact and its replacement cannot both be shown or both be missing. What a
-count-only run does disclose is the tier's to state, and it already does: the
-round disclosures beside the count, and the enforced half that hands neither
-party a pairing.
+So the ALGORITHM is the first gate, and it is a gate rather than a variant: no
+`psi-c` exchange states the fact at all. Both surfaces withhold it for any
+`psi-c` invitation, off the same reading of the algorithm that reaches the
+tier's own five sentences -- one gate, so the fact and its replacement cannot
+both be shown or both be missing. What a count-only run does disclose is the
+tier's to state, and it already does: the round disclosures beside the count,
+and the enforced half that hands neither party a pairing.
+
+Within `psi` the fact then splits, on the same wire question the sole-receiver
+pair above turns on. The disclosure is intrinsic because the run hands the
+helper its half of the association table -- so on the one combination where the
+exchange suppresses that half entirely, the helper's process never receives, and
+so never learns, its own membership
+([PROTOCOL.md](../spec/PROTOCOL.md#linkage-strategies-cascade-and-single-pass)).
+Stated there, the disclosure sentence would name a leak the wire has closed,
+directly under a marker reading `enforced`. So the line holds two sentences, one
+per case, and the pick is the run's own verdict on the partner's half rather than
+a reading of the strategy and the payload declaration made at a surface: the
+accept seat reads `withholdsInviterAssociationTable`, the seat proposing its own
+terms reads `withholdsAcceptorAssociationTable`, and each is the same predicate
+the protocol suppresses the frame on. One label carries both, since what the line
+answers -- what the partner learns about its own records -- is the same question
+either way.
+
+The payload declaration the second condition rests on cannot disagree with the
+disclosed subset the same token holds, whoever authored it: the token schema
+refuses both pairings that would state one disclosure two ways, at decode as
+well as at the mint
+([FILE_SYNC.md](../spec/FILE_SYNC.md#disclosed-columns-subset-on-the-token)).
+So a surface reading the declaration for this line and the subset for the
+receive line beside it cannot be made to state both at once.
 
 ## A fact that outlives the run, and the negative it does not state
 

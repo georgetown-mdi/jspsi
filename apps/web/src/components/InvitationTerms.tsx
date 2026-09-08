@@ -568,6 +568,15 @@ export function InvitationTerms({
     perspective === "proposing"
       ? "Your partner will receive the result"
       : "Your partner (the inviter) will receive the result";
+  // Whether the exchange withholds the PARTNER's half of the association table,
+  // on the same viewer-relative swap as the receipt fields above: the partner is
+  // the accepting party under "proposing" and the inviting party otherwise, and
+  // core resolves a verdict for each half. It selects which own-membership
+  // sentence the block below states.
+  const partnerTableWithheld =
+    perspective === "proposing"
+      ? summary.acceptorTableWithheld
+      : summary.inviterTableWithheld;
   // The outbound-send slot holds whichever block states what this viewer's own data
   // leaving amounts to: count-only (no payload moves) takes precedence, then a
   // partner receiving no result (nothing is transmitted, gated on
@@ -960,14 +969,23 @@ export function InvitationTerms({
                   cooperative caveat above: this states what an HONEST partner learns
                   intrinsically. A non-receiving partner in a `psi` exchange learns
                   which of ITS OWN records are in the viewer's data -- membership --
-                  under both linkage strategies (docs/notes/one-sided-disclosure.md).
-                  Bounded so it cannot overstate: never which of the viewer's records
-                  they matched, nor anything about the rest of the set beyond its
-                  size. Not disclosed under `psi-c`, whose non-receiving party is the
-                  sender and learns no membership. */}
+                  wherever the run returns it that half of the table
+                  (docs/notes/one-sided-disclosure.md). Bounded so it cannot
+                  overstate: never which of the viewer's records they matched, nor
+                  anything about the rest of the set beyond its size. Not disclosed
+                  under `psi-c`, whose non-receiving party is the sender and learns no
+                  membership. WHICH of the two sentences renders follows core's
+                  resolution of the run (partnerTableWithheld), never a reading of the
+                  strategy and the payload declaration made here. */}
               {summary.algorithm !== "psi-c" && (
                 <Text size="xs" c="dimmed">
-                  {CONSENT_FACTS.partnerLearnsOwnMembership.note}
+                  {
+                    CONSENT_FACTS[
+                      partnerTableWithheld
+                        ? "partnerOwnMembershipWithheld"
+                        : "partnerLearnsOwnMembership"
+                    ].note
+                  }
                 </Text>
               )}
             </>

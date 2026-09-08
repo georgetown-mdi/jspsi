@@ -549,6 +549,127 @@ test("decodeInvitation keeps an ordinary disclosed column name", async () => {
   expect(empty.disclosedPayloadColumns).toEqual([]);
 });
 
+// The terms shape whose acceptance surfaces read the disclosed subset and the
+// `payload.send` declaration at once: a single-pass `psi` invitation handing
+// the result to the accepting party alone, where the empty declaration is what
+// selects the withheld-table fact (withholdsInviterAssociationTable).
+const helperInviterTerms = {
+  ...baseTerms,
+  linkageStrategy: "single-pass" as const,
+  output: { expectsOutput: false, shareWithPartner: true },
+};
+
+test.each([
+  { half: "encodeInvitation", run: encodeInvitation },
+  {
+    half: "decodeInvitation",
+    run: async (token: InvitationToken) =>
+      decodeInvitation(await encodeRaw(token)),
+  },
+])(
+  "$half refuses a disclosed column beside an empty payload.send",
+  async ({ run }) => {
+    // The two state one disclosure -- what the inviting party transmits for a
+    // matched record -- so a token naming a column in the subset while
+    // declaring it discloses none states a disclosure no run of it could make,
+    // and the acceptance surfaces would read one side each: the receive line
+    // from the subset, the withheld-table fact from the declaration.
+    const token: InvitationToken = {
+      ...baseToken,
+      linkageTerms: { ...helperInviterTerms, payload: { send: [] } },
+      disclosedPayloadColumns: ["risk_score"],
+    };
+    await expect(run(token)).rejects.toThrow(
+      /disclosedPayloadColumns names a column while the linkage terms declare an empty payload.send/,
+    );
+  },
+);
+
+test.each([
+  { half: "encodeInvitation", run: encodeInvitation },
+  {
+    half: "decodeInvitation",
+    run: async (token: InvitationToken) =>
+      decodeInvitation(await encodeRaw(token)),
+  },
+])(
+  "$half refuses an empty disclosed set beside a payload.send naming a column",
+  async ({ run }) => {
+    // The reverse pairing, refused on the same ground and without the output
+    // gate below: assertPayloadSendDisclosed holds a non-empty `send` to
+    // exactly what metadata discloses whichever way the result runs, so no
+    // mint can produce this pair either.
+    const token: InvitationToken = {
+      ...baseToken,
+      linkageTerms: {
+        ...helperInviterTerms,
+        payload: { send: [{ name: "risk_score" }] },
+      },
+      disclosedPayloadColumns: [],
+    };
+    await expect(run(token)).rejects.toThrow(
+      /disclosedPayloadColumns is empty while the linkage terms declare a payload.send naming a column/,
+    );
+  },
+);
+
+test("an empty payload.send and a matching empty or absent subset still decode", async () => {
+  // The shape the refusal must not catch, and the one the withheld-table fact
+  // is selected from: a helper inviter disclosing nothing, with the subset
+  // stating the same thing or left lazy. Both decode, and both still select
+  // the withholding.
+  for (const disclosed of [[], undefined]) {
+    const decoded = await decodeInvitation(
+      await encodeRaw({
+        ...baseToken,
+        linkageTerms: { ...helperInviterTerms, payload: { send: [] } },
+        ...(disclosed !== undefined
+          ? { disclosedPayloadColumns: disclosed }
+          : {}),
+      }),
+    );
+    expect(decoded.disclosedPayloadColumns).toEqual(disclosed);
+    expect(summarizeInvitation(decoded).inviterTableWithheld).toBe(true);
+  }
+});
+
+test("a payload.send and a subset naming the same column still decode", async () => {
+  // The ordinary disclosing invitation: the declaration and the subset agree,
+  // which is what every mint path emits.
+  const decoded = await decodeInvitation(
+    await encodeRaw({
+      ...baseToken,
+      linkageTerms: {
+        ...helperInviterTerms,
+        payload: { send: [{ name: "risk_score" }] },
+      },
+      disclosedPayloadColumns: ["risk_score"],
+    }),
+  );
+  expect(decoded.disclosedPayloadColumns).toEqual(["risk_score"]);
+  expect(summarizeInvitation(decoded).inviterTableWithheld).toBe(false);
+});
+
+test("a disclosed column beside an empty send decodes where the partner gets no result", async () => {
+  // The control the output gate exists for, measured against the mint rule
+  // itself: assertPayloadSendDisclosed admits an empty `payload.send` beside
+  // disclosing metadata when `shareWithPartner` is false, since the run then
+  // transmits no column at all, so a psilink mint stamps exactly this pair and
+  // decode must keep taking it.
+  const decoded = await decodeInvitation(
+    await encodeRaw({
+      ...baseToken,
+      linkageTerms: {
+        ...helperInviterTerms,
+        output: { expectsOutput: true, shareWithPartner: false },
+        payload: { send: [] },
+      },
+      disclosedPayloadColumns: ["risk_score"],
+    }),
+  );
+  expect(decoded.disclosedPayloadColumns).toEqual(["risk_score"]);
+});
+
 test("decodeInvitation rejects a deeply-nested transform.params at decode (bounded fold)", async () => {
   // transform.params is z.unknown() content, so a one-key-per-level params decodes
   // structurally (parseBoundedJson admits up to 4096 levels). The camelCase fold is

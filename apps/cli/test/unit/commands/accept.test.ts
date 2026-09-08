@@ -4012,6 +4012,19 @@ describe("displayInvitation: the declared terms it discloses (columns, citations
         payload: { send: [], receive: [] },
       },
     });
+    // The own-membership pair's enforced half is the ninth: the same one-sided
+    // shape as the second rendering, on the combination that leaves the inviting
+    // party blind at the wire. Neither the strategy nor the declared-empty send
+    // it takes is reachable by any variation of `output` above.
+    const inviterLearnsNoMembership = renderDisplayInvitation(log, {
+      ...sampleToken(FUTURE()),
+      linkageTerms: {
+        ...CONSENT_PROBE_TERMS,
+        linkageStrategy: "single-pass",
+        output: { expectsOutput: false, shareWithPartner: true },
+        payload: { send: [], receive: [] },
+      },
+    });
     const rendered = [
       acceptorWithheld,
       inviterWithheld,
@@ -4021,6 +4034,7 @@ describe("displayInvitation: the declared terms it discloses (columns, citations
       fanOutRefused,
       deduplicatingSoleReceiver,
       deduplicatingTableWithheld,
+      inviterLearnsNoMembership,
     ].join("\n");
 
     // The whole table, rather than a list restated here: a caveat this renderer
@@ -4067,10 +4081,12 @@ describe("displayInvitation: the declared terms it discloses (columns, citations
     );
     // The honest-helper disclosure is its own fact, not a rider on the cooperative
     // caveat: it holds however honestly the partner behaves, so it has the
-    // opposite basis and may not inherit that line's marker.
-    expect(inviterWithheld).toContain(
-      "  what your partner learns either way (enforced):",
-    );
+    // opposite basis and may not inherit that line's marker. One label carries
+    // both cases of it, so a reader meets the same line whichever the run is.
+    for (const document of [inviterWithheld, inviterLearnsNoMembership])
+      expect(document).toContain(
+        "  what your partner learns about its own records (enforced):",
+      );
     // The remaining marked lines, each on the register it belongs to.
     expect(rendered).toContain(`  ${INVITING_PARTY_LABEL}: `);
     expect(rendered).toContain(
@@ -4203,9 +4219,16 @@ describe("the count-only tier", () => {
       linkageTerms: { ...COUNT_ONLY_PROBE_TERMS, output: partnerWithheld },
     });
     expect(countOnly).toContain("PSI algorithm (enforced): psi-c");
-    expect(countOnly).not.toContain("what your partner learns either way");
+    // The algorithm gate stands ahead of BOTH cases of the fact, so neither the
+    // disclosure sentence nor its withheld counterpart reaches a count-only run.
+    expect(countOnly).not.toContain(
+      "what your partner learns about its own records",
+    );
     expect(countOnly).not.toContain(
       CONSENT_FACTS.partnerLearnsOwnMembership.note,
+    );
+    expect(countOnly).not.toContain(
+      CONSENT_FACTS.partnerOwnMembershipWithheld.note,
     );
     // Not the whole block going missing: the line the membership fact sits beneath is
     // still stated, on the register it belongs to.
@@ -4231,7 +4254,7 @@ describe("the count-only tier", () => {
       },
     });
     expect(revealing).toContain(
-      "  what your partner learns either way (enforced):",
+      "  what your partner learns about its own records (enforced):",
     );
     expect(revealing).toContain(
       `    ${CONSENT_FACTS.partnerLearnsOwnMembership.note}`,
