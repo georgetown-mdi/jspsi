@@ -1033,6 +1033,9 @@ const PayloadColumnSchema: z.ZodType<PayloadColumn> = z.object({
  * over the established encrypted channel. Each party independently specifies
  * their own send/receive lists; the partner's send list is shared as a data
  * dictionary.
+ *
+ * Each list names a column at most once: a repeated name is normalized away at
+ * parse rather than refused (see {@link payloadColumnList}).
  */
 export interface Payload {
   /** Columns this party will transmit for matched records. */
@@ -1046,18 +1049,46 @@ export interface Payload {
   receive?: PayloadColumn[];
 }
 
+/**
+ * One list of disclosed columns with each name kept once: the first entry
+ * naming a column stands, with its own description, and a later entry repeating
+ * that name is dropped. A column's identity is its `name` -- the thing disclosed
+ * -- so two entries naming it are one declaration written twice however their
+ * descriptions differ. `nameOf` reads that name, since a list of the same
+ * columns is written as entries here and as bare names on an invitation token.
+ * Names are compared by code unit, the equality docs/spec/CANONICAL_ENCODING.md
+ * makes normative for a third party reproducing the agreed-terms hash.
+ */
+export const columnsNamedOnce = <Entry>(
+  columns: readonly Entry[],
+  nameOf: (column: Entry) => string,
+): Entry[] => {
+  const kept = new Set<string>();
+  return columns.filter((column) => {
+    const name = nameOf(column);
+    if (kept.has(name)) return false;
+    kept.add(name);
+    return true;
+  });
+};
+
+/**
+ * One direction of the payload data dictionary: {@link boundedArray} bounds the
+ * count at {@link MAX_PAYLOAD_ENTRIES} before {@link columnsNamedOnce} collapses
+ * repeats, so a padded list is refused for its authored count. Repeats are
+ * normalized rather than refused to keep this build's parse total over the
+ * documents it already admits.
+ */
+const payloadColumnList = (message: string): z.ZodType<PayloadColumn[]> =>
+  boundedArray(PayloadColumnSchema, MAX_PAYLOAD_ENTRIES, message).transform(
+    (columns) => columnsNamedOnce(columns, (column) => column.name),
+  );
+
 const PayloadSchema: z.ZodType<Payload> = z.object({
-  // The column COUNT is bounded at MAX_PAYLOAD_ENTRIES before per-element
-  // validation; see boundedArray and docs/spec/CHANNEL_SECURITY.md,
-  // "Application-layer parsed-input bounds".
-  send: boundedArray(
-    PayloadColumnSchema,
-    MAX_PAYLOAD_ENTRIES,
+  send: payloadColumnList(
     `send must not exceed ${MAX_PAYLOAD_ENTRIES} entries`,
   ).optional(),
-  receive: boundedArray(
-    PayloadColumnSchema,
-    MAX_PAYLOAD_ENTRIES,
+  receive: payloadColumnList(
     `receive must not exceed ${MAX_PAYLOAD_ENTRIES} entries`,
   ).optional(),
 });
@@ -1208,6 +1239,8 @@ const LinkageRuleSetReferenceSchema: z.ZodType<LinkageRuleSetReference> =
  * - `output.expectsOutput: false` requires `payload.receive` to be empty: a
  *   party that receives no output cannot receive payload for matched records it
  *   never gets.
+ * - `payload.send` and `payload.receive` each name a column at most once: a
+ *   repeated name parses to one entry rather than being refused.
  * - `linkageFields[].name` must be unique across all linkage fields.
  * - `linkageKeys[].name` must be unique across all linkage keys.
  * - Within each linkage key, the effective element identifier (`element.name`

@@ -22,6 +22,7 @@ import {
   MAX_NAME_LENGTH,
   MAX_TEXT_LENGTH,
   MAX_LINKAGE_ENTRIES,
+  MAX_PAYLOAD_ENTRIES,
   MAX_DATE_FORMAT_LENGTH,
   MAX_TRANSFORM_PARAM_LENGTH,
   NAME_SHAPE_MESSAGE,
@@ -303,6 +304,69 @@ test("decodeInvitation normalizes snake_case transform.params keys to camelCase"
   expect(
     decoded.linkageTerms.linkageKeys[0].elements[0].transform?.[0].params,
   ).toEqual({ inputFormat: "MM/DD/YYYY", outputFormat: "YYYYMMDD" });
+});
+
+test("decodeInvitation reads a payload column named twice as one entry", async () => {
+  // The payload lists reach this party from a partner-authored token, which may
+  // name a column twice. The decode chokepoint embeds LinkageTermsSchema, so the
+  // normalization the config load applies holds here too and the consent screen
+  // shown before acceptance counts the column once.
+  const token = {
+    ...baseToken,
+    linkageTerms: {
+      ...baseTerms,
+      payload: {
+        send: [
+          { name: "dose", description: "Dose administered" },
+          { name: "dose", description: "Dose, second declaration" },
+        ],
+      },
+    },
+  };
+  const decoded = await decodeInvitation(await encodeRaw(token));
+  expect(decoded.linkageTerms.payload?.send).toEqual([
+    { name: "dose", description: "Dose administered" },
+  ]);
+});
+
+test("decodeInvitation reads a disclosed column named twice as one entry, and the consent summary shows it once", async () => {
+  // The held disclosed subset is what the acceptor consents to and then
+  // enforces: summarizeInvitation prefers it over the authored payload.send,
+  // and an acceptance writes it verbatim as expectedPayloadColumns. A partner
+  // token naming a column twice there must therefore collapse at decode, or the
+  // acceptor consents to a two-item list and expects a set the partner's own
+  // transmission cannot match.
+  const token = {
+    ...baseToken,
+    linkageTerms: {
+      ...baseTerms,
+      payload: { send: [{ name: "dose", description: "Dose administered" }] },
+    },
+    disclosedPayloadColumns: ["dose", "dose"],
+  };
+  const decoded = await decodeInvitation(await encodeRaw(token));
+  expect(decoded.disclosedPayloadColumns).toEqual(["dose"]);
+  const summary = summarizeInvitation(decoded);
+  expect(summary.payload).toMatchObject({
+    send: ["dose"],
+    sendFromCarriedSubset: true,
+  });
+});
+
+test("decodeInvitation refuses an over-count disclosed list by its authored count, not the count it collapses to", async () => {
+  // The count cap stands ahead of the collapse, as it does on the payload
+  // lists: a list padded with one name repeated is refused for the count it was
+  // authored with rather than admitted for the single entry it would leave.
+  const token = {
+    ...baseToken,
+    disclosedPayloadColumns: Array.from(
+      { length: MAX_PAYLOAD_ENTRIES + 1 },
+      () => "dose",
+    ),
+  };
+  await expect(decodeInvitation(await encodeRaw(token))).rejects.toThrow(
+    /disclosedPayloadColumns must not exceed/,
+  );
 });
 
 test("decodeInvitation screens a snake_case parse_date inputFormat for length (the fold precedes the screen)", async () => {

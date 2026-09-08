@@ -1630,6 +1630,33 @@ describe("accepting and running a webrtc exchange in one command", () => {
     }
   });
 
+  test("validateAccept: a column the invitation discloses twice is expected once", async () => {
+    // The acceptance writes the invitation's disclosed set as what it will
+    // receive, and the run aborts when the partner's transmitted set differs
+    // (reconcileReceivedPayload). A name written twice is one declaration;
+    // encodeInvitation collapses it once at mint, so this test pins that
+    // mint-side collapse. The decode-side case, a raw partner token minted
+    // outside encodeInvitation, is pinned by
+    // packages/core/test/config/invitation.test.ts's encodeRaw test.
+    const input = writeInputCSV(["first_name", "last_name", "dob", "ssn"]);
+    try {
+      const encoded = await encodeInvitation({
+        ...sampleToken(FUTURE(), WEBRTC_ENDPOINT),
+        disclosedPayloadColumns: ["diagnosis", "diagnosis"],
+      });
+      const ready = await validateAccept({
+        resolved: { mode: "offline", invitation: encoded, input },
+        options: testOptions(),
+        log: silentLog,
+      });
+      expect(ready.mode).toBe("endpointRun");
+      if (ready.mode !== "endpointRun") return;
+      expect(ready.prepared.expectedPayloadColumns).toEqual(["diagnosis"]);
+    } finally {
+      fs.rmSync(input, { force: true });
+    }
+  });
+
   test("validateAccept: --peer-timeout bounds the acceptance that runs the exchange", async () => {
     // This acceptance conducts the exchange itself, so the budget flag is the
     // operator's only lever on how long it waits for a partner who never

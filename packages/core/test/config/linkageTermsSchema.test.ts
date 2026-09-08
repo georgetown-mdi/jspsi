@@ -3081,6 +3081,54 @@ test("a pathological-count payload receive list is rejected by the node budget, 
   );
 });
 
+// --- Payload duplicate normalization -----------------------------------------
+// A payload list holds each column name once. The lists are partner-authored on
+// an accepted invitation, and a repeated name declares nothing the terms do not
+// already hold, so the schema normalizes it away at parse rather than refusing a
+// document a partner's build encodes. Pinned at the parse boundary because
+// every seat -- the config load, the wire re-parse, the invitation decode, the
+// exchange-file and job-intent schemas -- reads what this schema returns: a
+// column counted and rendered once on the consent surfaces, and compared once
+// against the partner's list.
+
+test("a payload send list naming a column twice parses to one entry", () => {
+  const result = parseLinkageTerms(
+    sendTerms([
+      { name: "dose", description: "Dose administered" },
+      { name: "visit_date" },
+      { name: "dose", description: "Dose, second declaration" },
+    ]),
+  );
+  expect(result.payload?.send).toEqual([
+    { name: "dose", description: "Dose administered" },
+    { name: "visit_date" },
+  ]);
+});
+
+test("a payload receive list naming a column twice parses to one entry", () => {
+  const result = parseLinkageTerms(
+    receiveTerms([
+      { name: "case_id", description: "Partner case identifier" },
+      { name: "program_status" },
+      { name: "case_id", description: "Partner case identifier, restated" },
+    ]),
+  );
+  expect(result.payload?.receive).toEqual([
+    { name: "case_id", description: "Partner case identifier" },
+    { name: "program_status" },
+  ]);
+});
+
+test("a payload send list over the maximum count is rejected by its authored count, not normalized under it", () => {
+  // The count gate stands ahead of the normalization: a list padded with one
+  // name repeated is refused for the count it was authored with rather than
+  // admitted for the single entry it would collapse to.
+  const send = Array.from({ length: MAX_PAYLOAD_ENTRIES + 1 }, () => ({
+    name: "dose",
+  }));
+  expect(() => parseLinkageTerms(sendTerms(send))).toThrow(ZodError);
+});
+
 // --- Top-level linkageFields / linkageKeys count bounds ----------------------
 // These two flat top-level arrays sit directly below the root, so a pathological
 // count does not overflow the call stack -- but a partner array of millions of
