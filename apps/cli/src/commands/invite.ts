@@ -50,6 +50,7 @@ import { configureLogging } from "../util/logging";
 import { redactUrlCredentials } from "../util/connectionUrl";
 import {
   checkLinkageSatisfiability,
+  COVER_REQUIRED_FIELD_TYPES,
   type LinkagePreflightMessaging,
 } from "./linkagePreflight";
 import { assertNoProvisionConflicts, provisionConfigAndKey } from "./provision";
@@ -78,6 +79,7 @@ import {
 import {
   buildDataSpec,
   connectionFromEndpoint,
+  describeInputSource,
   endpointFromConnection,
   DEFAULT_ACCEPT_TIMEOUT_SECONDS,
   expiresFromNow,
@@ -222,6 +224,32 @@ function mintPreflightMessaging(configPath: string): LinkagePreflightMessaging {
       "they had accepted them.",
     blockRemedy: `then generate the invitation again; these terms come from ${configPath}.`,
     termsStanding: "draft",
+  };
+}
+
+/**
+ * The same mint-time wording for the online path, whose linkage terms are
+ * derived from the input file's own columns rather than read from a
+ * configuration: `inputPath` names that file, unlike `configPath` above the
+ * online path's input may be the stdin sentinel `-`, so it is named through
+ * {@link describeInputSource} rather than composed raw. Nobody has authored
+ * a terms document here, so the keyless refusal leads with the input-side
+ * remedy the shortfall refusal already gives.
+ */
+function onlineMintPreflightMessaging(
+  inputPath: string,
+): LinkagePreflightMessaging {
+  return {
+    source: "input file",
+    blockConsequence:
+      "Generating an invitation would hand your partner terms that the " +
+      "exchange it starts refuses to run, discovered only after they had " +
+      "accepted them.",
+    blockRemedy:
+      "then generate the invitation again; these terms are derived from " +
+      `${describeInputSource(inputPath)}.`,
+    termsStanding: "draft",
+    keylessRemedyLead: COVER_REQUIRED_FIELD_TYPES,
   };
 }
 
@@ -487,6 +515,18 @@ export async function validateInvite(params: {
       rows,
       linkageStrategy,
     });
+    // Grade the derived terms before the token is minted and before any
+    // connection is opened: the same verdict prepareForExchange enforces at the
+    // run boundary, where it is stated on the agreed standing rather than on
+    // this seat's draft one. The standardization and metadata are the ones that
+    // grading reads, so the refusal lands exactly where the run's would.
+    checkLinkageSatisfiability(
+      rows.columns,
+      builtDataSpec.linkageTerms,
+      onlineMintPreflightMessaging(input),
+      builtDataSpec.standardization,
+      builtDataSpec.metadata,
+    );
     noteSinglePassSelection(linkageStrategy, log);
 
     // The metadata this party's disclosure is read from: the same one
