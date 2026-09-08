@@ -701,14 +701,20 @@ export type JobZeroSetupLinkageStrategy = "cascade" | "single-pass";
  *
  * - `linkageStrategy` is a closed enum forwarded to the CLI's
  *   `--linkage-strategy`.
+ * - `deduplicate` is a boolean forwarded to the CLI's `--deduplicate`: this
+ *   party's own side of the matching cardinality, which the zero-setup command
+ *   applies over the terms it infers. It is not the exchange mode's
+ *   `expectedPartnerDeduplicate`, which binds the PARTNER's presented value
+ *   against an accepted invitation; a zero-setup run holds no invitation to
+ *   bind one to.
  * - `identity` is a bounded operator label forwarded to the CLI's
  *   `--identity` (the party name/org/contact string), bounded by
  *   {@link MAX_IDENTITY_LENGTH} and held to the shared label contract's three
  *   shape rules: no leading `-`, no control character, and no text-direction
  *   character.
  *
- * Neither is a path, host, or credential. Exactly one of `inputCsv` or
- * `inputFile` is set (enforced by {@link jobZeroSetupIntentSchema}),
+ * None of the three is a path, host, or credential. Exactly one of `inputCsv`
+ * or `inputFile` is set (enforced by {@link jobZeroSetupIntentSchema}),
  * identically to the exchange mode.
  */
 interface JobZeroSetupIntentBase {
@@ -720,6 +726,7 @@ interface JobZeroSetupIntentBase {
   diagnosticRun?: boolean;
   sweepExchangeFiles?: boolean;
   linkageStrategy?: JobZeroSetupLinkageStrategy;
+  deduplicate?: boolean;
   identity?: string;
 }
 
@@ -1077,7 +1084,7 @@ export const jobExchangeIntentSchema: z.ZodType<JobExchangeIntent> = z
 // The zero-setup common fields hold NONE of the exchange mode's credential
 // or terms material -- no sharedSecret, linkageTerms, metadata,
 // standardization, expectedPayloadColumns, or expectedPartnerDeduplicate --
-// only an input source, the tuning options, the event toggle, and the two
+// only an input source, the tuning options, the event toggle, and the three
 // bounded selectors. `inputCsv` reuses the exchange mode's cap.
 const jobZeroSetupIntentCommonFields = {
   ...jobRunControlFields,
@@ -1085,6 +1092,7 @@ const jobZeroSetupIntentCommonFields = {
   inputFile: jobInputFileReferenceSchema.optional(),
   eventStream: z.boolean().optional(),
   linkageStrategy: z.enum(["cascade", "single-pass"]).optional(),
+  deduplicate: z.boolean().optional(),
   // Free text, unlike the closed strategy enum, so it takes the shared label
   // contract's three shape rules (`@jobs/intentSchemas`): no leading `-`, no
   // control character, and no text-direction character. The driver emits it as

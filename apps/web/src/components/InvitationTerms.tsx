@@ -21,6 +21,7 @@ import {
   COUNT_ONLY_DISCLOSURE_STATEMENT,
   DEDUPLICATE_ACCEPTOR_SETTABLE_SIDE_NOTE,
   DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
+  DEDUPLICATE_PARTNER_DECLARED_SIDE_NOTE,
   DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,
   DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT,
   LINKAGE_RULE_SET_VERDICT_COPY,
@@ -39,6 +40,10 @@ import {
 import { ColumnChips } from "@components/ColumnChips";
 import { ColumnName } from "@components/ColumnName";
 
+import {
+  DEDUPLICATE_CONTROL_DESCRIPTION,
+  DEDUPLICATE_CONTROL_LABEL,
+} from "@psi/deduplicateChoice";
 import { acceptorMaySetDeduplicate } from "@psi/acceptInvitation";
 
 import type { ReactNode, Ref } from "react";
@@ -385,6 +390,7 @@ export function InvitationTerms({
   connectionEndpoint,
   outboundColumns,
   acceptorDeduplicate,
+  partnerDeclaresOwnDeduplicate,
   perspective = "review",
   headingOrder = 2,
   headingRef,
@@ -441,6 +447,13 @@ export function InvitationTerms({
     onChange: (value: boolean) => void;
     refusal?: string;
   };
+  /** Whether the PARTNER declares its own `deduplicate` on its own run rather
+   * than reading it from these terms -- the direct exchange, where each party
+   * infers terms from its own file and no invitation states either side. The
+   * duplicate-matches block then closes on
+   * {@link DEDUPLICATE_PARTNER_DECLARED_SIDE_NOTE}, which asserts nothing about
+   * a side this seat cannot know, in place of the accept seat's notes. */
+  partnerDeclaresOwnDeduplicate?: boolean;
   /** Which context this renders in. Drives the heading and intro copy, the
    * viewer-centric blocks (Result sharing, the payload send/receive framing, and
    * the inviter-only sent-columns chips above "Other details"), and the two
@@ -1407,8 +1420,8 @@ export function InvitationTerms({
                     onChange={(event) =>
                       ownDeduplicate.onChange(event.currentTarget.checked)
                     }
-                    label="Let several of my records match one of my partner's"
-                    description="Your own side of this setting. Leave it off and each of your records matches at most one of your partner's."
+                    label={DEDUPLICATE_CONTROL_LABEL}
+                    description={DEDUPLICATE_CONTROL_DESCRIPTION}
                   />
                 </>
               )}
@@ -1468,11 +1481,16 @@ export function InvitationTerms({
                     closes on that control rather than on a configuration file
                     the operator may not have, and drops the "never grouped"
                     clause the pair statement above answers with the two values
-                    actually selected. */}
+                    actually selected. Where the partner declares its own side
+                    on its own run, the note drops that clause too -- nothing
+                    here decides the other side -- and closes on where it is
+                    declared. */}
                   <Text size="xs" c="dimmed">
                     {ownDeduplicate !== undefined
                       ? DEDUPLICATE_ACCEPTOR_SETTABLE_SIDE_NOTE
-                      : DEDUPLICATE_ACCEPTOR_SIDE_NOTE}
+                      : partnerDeclaresOwnDeduplicate
+                        ? DEDUPLICATE_PARTNER_DECLARED_SIDE_NOTE
+                        : DEDUPLICATE_ACCEPTOR_SIDE_NOTE}
                   </Text>
                 </>
               )}

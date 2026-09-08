@@ -980,7 +980,7 @@ function intentFor(config: ServerJobExchangeDriverConfig): JobExchangeIntent {
  * `expectedPartnerDeduplicate`), because both parties infer terms from their
  * own files and there is no application-layer encryption to key. It supplies
  * only the channel, input source, tuning subset, and the zero-setup intent's
- * two optional bounded selectors. */
+ * three optional bounded selectors. */
 export interface ServerJobZeroSetupDriverConfig {
   transport: ServerJobExchangeTransport;
   /** Where the console reads this party's input from ({@link JobInputSource}):
@@ -999,6 +999,9 @@ export interface ServerJobZeroSetupDriverConfig {
   /** The optional linkage strategy forwarded to the CLI's `--linkage-strategy`
    * (a closed enum); omitted for the cascade default. */
   linkageStrategy?: JobZeroSetupLinkageStrategy;
+  /** This party's own side of the matching cardinality, forwarded to the CLI's
+   * `--deduplicate`; omitted for the closed default. */
+  deduplicate?: boolean;
   /** Invoked with the created job's id the moment `POST /api/jobs` resolves,
    * before the event stream opens -- the same strand-recovery call site the
    * exchange driver exposes. */
@@ -1015,7 +1018,8 @@ export interface ServerJobZeroSetupDriverConfig {
 function zeroSetupIntentFor(
   config: ServerJobZeroSetupDriverConfig,
 ): JobZeroSetupIntent {
-  const { transport, inputSource, options, identity, linkageStrategy } = config;
+  const { transport, inputSource, options, identity } = config;
+  const { linkageStrategy, deduplicate } = config;
   const shared = {
     mode: "zeroSetup" as const,
     ...(inputSource.kind === "inline"
@@ -1025,6 +1029,7 @@ function zeroSetupIntentFor(
     ...config.runDiagnostics,
     ...(identity !== undefined ? { identity } : {}),
     ...(linkageStrategy !== undefined ? { linkageStrategy } : {}),
+    ...(deduplicate !== undefined ? { deduplicate } : {}),
     eventStream: true,
   };
   return transport.channel === "sftp"

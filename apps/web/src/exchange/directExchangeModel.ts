@@ -1,9 +1,12 @@
 import {
+  UsageError,
   assessLinkageSatisfiability,
   decideLinkageTermsVerdict,
   getDefaultLinkageTerms,
   inferMetadata,
   overlongDisclosedColumnPositions,
+  resolveLinkageCardinality,
+  sanitizeErrorForDisplay,
 } from "@psilink/core";
 
 import {
@@ -95,6 +98,72 @@ export function directLinkageStrategyIntentFields(strategy: LinkageStrategy): {
     : { linkageStrategy: strategy };
 }
 
+/** This party's own side of the matching cardinality until the operator chooses
+ * otherwise: the value a zero-setup run applies with no `--deduplicate` at all,
+ * and the one an accepting party derives with no control (`deriveAcceptedLinkageTerms`). */
+export const DIRECT_DEDUPLICATE_DEFAULT = false;
+
+/**
+ * What the confirm screen states beside the deduplicate control, where the
+ * strategy above it states the agreement it needs. A direct exchange has no
+ * invitation declaring either party's value, so the two values need not agree
+ * and neither run reads the other's: the pair is settled when the exchange
+ * runs, which is also when it is refused if no strategy matches it.
+ */
+export const DIRECT_DEDUPLICATE_SIDE_NOTICE =
+  "Your partner sets its own side on its own run. The two of you need not " +
+  "choose alike, and neither reads the other's choice until the exchange " +
+  "runs.";
+
+/**
+ * The deduplicate field a zero-setup intent holds for the operator's choice,
+ * emitted only for a non-default one for the reason
+ * {@link directLinkageStrategyIntentFields} states: the CLI flag defaults to
+ * off and a zero-setup run loads no configuration file for it to override, so
+ * the graduated command line stays the shortest one that runs what was
+ * prototyped.
+ */
+export function directDeduplicateIntentFields(deduplicate: boolean): {
+  deduplicate?: boolean;
+} {
+  return deduplicate === DIRECT_DEDUPLICATE_DEFAULT ? {} : { deduplicate };
+}
+
+/**
+ * What the run refuses if the PARTNER also declares `deduplicate` against
+ * these terms, or `undefined` when the pair runs whatever the partner sets.
+ *
+ * The direct spine cannot read the partner's value: each party declares its
+ * own on its own run, and there is no invitation between them. So this states
+ * a consequence rather than gating the run the way the accept seat's
+ * `acceptorDeduplicateRefusal` does, where the invitation declares the
+ * partner's side and the pair is settled. What it can state exactly is the
+ * pair BOTH sides declaring the term resolves to, read from
+ * `resolveLinkageCardinality` -- the same boundary the run resolves the joint
+ * cardinality at, after the terms exchange and before any key or payload
+ * moves -- so the screen names the combination the run would refuse and no
+ * others. Today that is the agreed `(true, true)` pair under `single-pass`;
+ * core's own message names the strategy to move to and the one-sided pair to
+ * fall back to.
+ *
+ * Returns for every terms document rather than throwing for some: the confirm
+ * screen reads it in its render body, where a throw takes the whole route to
+ * its error boundary instead of the notice the operator can act on.
+ */
+export function directBothSidedDeduplicateNotice(
+  linkageTerms: LinkageTerms,
+): string | undefined {
+  if (!linkageTerms.deduplicate) return undefined;
+  try {
+    resolveLinkageCardinality(linkageTerms, linkageTerms);
+    return undefined;
+  } catch (error) {
+    return error instanceof UsageError
+      ? error.message
+      : sanitizeErrorForDisplay(error);
+  }
+}
+
 /** What the agreed-server step is waiting on, by the reading order of the screen
  * itself: the transport at the top, then the two authoring cards below it, then
  * the retain-mode precondition stated just above the button. */
@@ -181,8 +250,9 @@ interface DirectTermsPreview {
  * rows, columns)`) so the preview matches what actually runs; `payload.send`
  * is authored from the inferred metadata's disclosed set, so the "columns
  * sent" display is accurate rather than empty. The operator's selected
- * `linkageStrategy` is applied over the inferred terms, mirroring how the CLI
- * applies `--linkage-strategy` over `prepareForExchange`'s terms.
+ * `linkageStrategy` and `deduplicate` are applied over the inferred terms,
+ * mirroring how the CLI applies `--linkage-strategy` and `--deduplicate` over
+ * `prepareForExchange`'s terms.
  *
  * The refusal grades the PREVIEWED terms with the inferred metadata and no
  * authored standardization -- the same inputs `prepareForExchange` grades --
@@ -195,6 +265,7 @@ export function previewInferredTerms(
   columns: Array<string>,
   identity: string,
   linkageStrategy: LinkageStrategy,
+  deduplicate: boolean = DIRECT_DEDUPLICATE_DEFAULT,
 ): DirectTermsPreview {
   // Preview over columns the file step already committed: it read the header,
   // holds the sanitized positions, and refuses an empty name before this runs.
@@ -202,6 +273,7 @@ export function previewInferredTerms(
   const linkageTerms = {
     ...getDefaultLinkageTerms(identity, metadata),
     linkageStrategy,
+    deduplicate,
   };
   const payload = payloadSendForMetadata(metadata);
   if (payload !== undefined) linkageTerms.payload = payload;

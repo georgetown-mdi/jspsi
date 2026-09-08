@@ -1008,6 +1008,28 @@ export const DEDUPLICATE_ACCEPTOR_SETTABLE_SIDE_NOTE =
   "it declares with these terms rather than taking from this invitation.";
 
 /**
+ * The same direction note for a seat where each party declares its own
+ * `deduplicate` against terms it read from its own file, and no document
+ * states the other party's -- the exchange both parties run against an
+ * agreed server with no invitation between them.
+ *
+ * It drops the "never grouped" clause for a different reason than
+ * {@link DEDUPLICATE_ACCEPTOR_SETTABLE_SIDE_NOTE} does: not because the seat
+ * states the pair, but because this seat cannot know the other side. The
+ * partner declares its own value on its own run, so a surface asserting that
+ * party's records are never grouped would state a fact nothing here decides.
+ * It keeps the widening this party's value costs the partner, and it closes
+ * on where the other direction is declared.
+ *
+ * Fixed first-party copy naming no value, so a surface may render it verbatim.
+ */
+export const DEDUPLICATE_PARTNER_DECLARED_SIDE_NOTE =
+  "This setting is the inviting party's own. " +
+  DEDUPLICATE_ACCEPTOR_WIDENING_NOTE +
+  " Grouping the accepting party's records is that party's own setting, " +
+  "which it declares on its own run rather than reading from these terms.";
+
+/**
  * The two parties' `deduplicate` values against the output shape they are
  * declared under -- the whole of what {@link describeDeduplicatePair} reads.
  */

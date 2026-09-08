@@ -1087,6 +1087,9 @@ export class JobManager {
         ...(intent.linkageStrategy !== undefined
           ? { linkageStrategy: intent.linkageStrategy }
           : {}),
+        ...(intent.deduplicate !== undefined
+          ? { deduplicate: intent.deduplicate }
+          : {}),
         ...(extraEnv !== undefined ? { extraEnv } : {}),
         handlers: args.handlers,
       });

@@ -316,6 +316,48 @@ describe(
       );
     });
 
+    test("the terms selectors survive a real parse, deduplicate as a bare flag", async () => {
+      // The three selectors the Direct confirm step authors reach the child as
+      // flags and nothing else. Whether the CLI takes `--deduplicate` bare --
+      // the console emits no value for it, and no `--no-` form for the default
+      // -- is the tool's answer to give, not this file's.
+      const dir = scratchDir("zs-terms");
+      const argv = await captureZeroSetupArgv({
+        workdir: dir,
+        connectionArgs: [RENDEZVOUS_URL],
+        eventStream: true,
+        identity: "county-health",
+        linkageStrategy: "single-pass",
+        deduplicate: true,
+        timeoutMs: CHILD_EXIT_TIMEOUT_MS,
+      });
+      expect(argv).toContain("--identity=county-health");
+      expect(argv).toContain("--linkage-strategy=single-pass");
+      expect(argv).toContain("--deduplicate");
+      expect(argv).not.toContain("--deduplicate=true");
+
+      const parsed = parseWithRealCli(argv, dir);
+      expect(parsed.stderr).not.toContain("Unknown argument");
+      expect(parsed.status).not.toBe(EXIT_USAGE);
+      expect(parsed.stderr).toContain("input.csv does not exist");
+    });
+
+    test("the console emits no deduplicate token for the closed default", async () => {
+      // A zero-setup run loads no configuration file for a flag to override, so
+      // the unset flag and an explicit off select the same side; emitting one
+      // would lengthen every graduated command line for nothing.
+      const dir = scratchDir("zs-terms-default");
+      const argv = await captureZeroSetupArgv({
+        workdir: dir,
+        connectionArgs: [RENDEZVOUS_URL],
+        eventStream: true,
+        deduplicate: false,
+        timeoutMs: CHILD_EXIT_TIMEOUT_MS,
+      });
+      expect(argv).not.toContain("--deduplicate");
+      expect(argv).not.toContain("--no-deduplicate");
+    });
+
     test("every emitted connection-tuning token survives a real parse", async () => {
       // The console composes durations in the units its own controls offer; the
       // CLI's duration flags have two different grammars (only the poll interval

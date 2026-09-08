@@ -127,12 +127,14 @@ The identity question follows that decision, so a run that leaves the existing f
 ## Zero-setup exchange
 
 ```sh
-psilink [--identity IDENTITY] [--save] [--linkage-strategy STRATEGY] [--sweep-exchange-files [--force-retain-sweep]] URL INPUT_FILE [OUTPUT_FILE]
+psilink [--identity IDENTITY] [--save] [--linkage-strategy STRATEGY] [--deduplicate] [--sweep-exchange-files [--force-retain-sweep]] URL INPUT_FILE [OUTPUT_FILE]
 ```
 
 Both parties run this command against the same server. Linkage terms, metadata, and data standardizing transformations are inferred from each party's input file; if the inferred terms disagree, the exchange fails with an error. Users are expected to prepare files with matching schemas before running. The server coordinates their connection and the exchange proceeds immediately without any prior configuration. By default, no configuration files are written. This mode is suitable for one-off exchanges and for onboarding sessions where both parties are in direct communication. Security relies on the transport authentication layer and file system controls rather than a pre-shared secret. If there is no end-to-end encryption (e.g. SFTP or file-drop), then implicitly trust is placed in the server administrator.
 
 `--linkage-strategy STRATEGY` chooses the linkage strategy (`cascade` or `single-pass`) exactly as for [`psilink invite`](#offline-invitation), with the same `single-pass` disclosure tradeoff. Because each party infers its own terms here rather than one party authoring them for both, both parties must pass the same value: the strategy is a mandatory-consistency term, so a mismatch aborts the exchange. An unknown value is a usage error before any connection is attempted.
+
+`--deduplicate` lets several of THIS party's records match a single one of the partner's, the [`linkage_terms.deduplicate`](EXCHANGE_REFERENCE.md#linkage_termsdeduplicate) a configured exchange declares. It is off by default, and it is each party's own: unlike the strategy the two values need not agree, neither party reads the other's from its own command line, and the pair decides the exchange's cardinality once the terms are exchanged. Setting it widens what the partner discloses -- more of its records can match than in a one-to-one run of the same two files. Both parties setting it under `--linkage-strategy single-pass` resolves to a many-to-many match that strategy does not pair, and is refused after the terms exchange and before any linkage-key or payload data moves, on both sides; a one-sided pair runs under either strategy. With `--save`, the value is written into the saved configuration, so a later recurring `psilink exchange` runs the setting that was prototyped.
 
 The URL scheme determines the transport channel:
 

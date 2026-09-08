@@ -171,6 +171,7 @@ function maximalZeroSetupIntent(): JobZeroSetupSftpIntent {
     sweepExchangeFiles: true,
     identity: "County Health",
     linkageStrategy: "single-pass",
+    deduplicate: true,
   });
 }
 
@@ -282,6 +283,7 @@ const ZERO_SETUP_INTENT_ROUTES: Record<
     carries: "argvToken",
     token: "--linkage-strategy=single-pass",
   },
+  deduplicate: { carries: "argvToken", token: "--deduplicate" },
 };
 
 /** The maximal exchange hand-off's template, as YAML text. */
@@ -382,6 +384,7 @@ describe("every authorable option graduates into the hand-off", () => {
       "--connection-per-poll",
       "--identity=County Health",
       "--linkage-strategy=single-pass",
+      "--deduplicate",
       "input.csv",
       "results.csv",
     ]);

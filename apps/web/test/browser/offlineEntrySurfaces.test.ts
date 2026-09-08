@@ -16,7 +16,10 @@ import {
 import { AcceptorColumnsStep } from "@exchange/AcceptorColumnsStep";
 import { Lobby } from "@exchange/Lobby";
 
-import { DIRECT_LINKAGE_STRATEGY_DEFAULT } from "@exchange/directExchangeModel";
+import {
+  DIRECT_DEDUPLICATE_DEFAULT,
+  DIRECT_LINKAGE_STRATEGY_DEFAULT,
+} from "@exchange/directExchangeModel";
 import { DirectConfirmSection } from "@exchange/DirectConfirmSection";
 import { InviterScreen } from "@exchange/InviterScreen";
 import { OFFLINE_EXCHANGE_REASON } from "@psi/offlineExchangeGate";
@@ -176,6 +179,8 @@ function mountDirectConfirmSection() {
       onIdentity: noop,
       linkageStrategy: DIRECT_LINKAGE_STRATEGY_DEFAULT,
       onLinkageStrategy: noop,
+      deduplicate: DIRECT_DEDUPLICATE_DEFAULT,
+      onDeduplicate: noop,
       affirmed: true,
       onAffirm: noop,
       onRun: noop,
