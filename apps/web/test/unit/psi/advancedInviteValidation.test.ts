@@ -6,6 +6,7 @@ import {
   DEDUPLICATE_IMPLEMENTED_BY_STRATEGY,
   FAN_OUT_FUNCTION_NAMES,
   MAX_INVITATION_LIFETIME_SECONDS,
+  MAX_NAME_LENGTH,
   StandardizedField,
   assertTransformsCompile,
   authoredLinkageFields,
@@ -490,10 +491,12 @@ describe("a transform params key the terms schema refuses", () => {
   // The key is the one segment of a terms issue path an operator or a partner
   // authors, so a mint that echoed its path would put those bytes on the screen.
   // This editor maps an issue to the control that owns it and shows that
-  // control's own message, so the path reaches no rendering at all.
+  // control's own message, so the path reaches no rendering at all. One case per
+  // class the schema refuses a name over: its length, its characters, and the
+  // well-formedness walk.
   const now = new Date("2026-01-01T00:00:00Z");
 
-  test("blocks Generate against the key list and echoes no part of the key", () => {
+  test("names the character class and echoes no part of the key", () => {
     const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
     const badKey = "de\x1b[31m\u202elimiter-unrepeatable-key";
     const imported = withFirstElementTransform(draft, [
@@ -517,6 +520,60 @@ describe("a transform params key the terms schema refuses", () => {
     expect(rendered).not.toContain("unrepeatable-key");
     expect(rendered).not.toContain("\x1b");
     expect(rendered).not.toContain("\u202e");
+    expect(rendered).not.toContain("params");
+  });
+
+  test("names the length class and echoes no part of the key", () => {
+    const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    const badKey = `${"d".repeat(MAX_NAME_LENGTH)}-unrepeatable-key`;
+    const imported = withFirstElementTransform(draft, [
+      { function: "trim", params: { [badKey]: 1 } },
+    ]);
+    // The assumption this rests on: the schema is what refuses the document, so
+    // the mapping below is running on a real schema issue.
+    expect(safeParseLinkageTerms(buildAdvancedTerms(imported)).success).toBe(
+      false,
+    );
+
+    const result = validateAdvancedInvite(imported, seed, now);
+    expect(result.canGenerate).toBe(false);
+    expect(result.terms).toBeUndefined();
+    // The bound the name broke, not the character rule the key holds to and not
+    // the generic mapping's "Enable at least one linkage key.", which this draft
+    // has already done.
+    expect(result.errors.keys).toMatch(
+      new RegExp(`longer than ${String(MAX_NAME_LENGTH)} characters`),
+    );
+    expect(result.errors.keys).not.toMatch(/control or text-direction/);
+    expect(result.errors.keys).not.toMatch(/Enable at least one linkage key/);
+    const rendered = Object.values(result.errors).join("\n");
+    expect(rendered).not.toContain("unrepeatable-key");
+    expect(rendered).not.toContain("params");
+  });
+
+  test("names the incomplete-character class and echoes no part of the key", () => {
+    const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    const badKey = "de\ud800limiter-unrepeatable-key";
+    const imported = withFirstElementTransform(draft, [
+      { function: "trim", params: { [badKey]: 1 } },
+    ]);
+    // The assumptions this rests on: the schema refuses the document, and the
+    // encoder refuses it too -- so the message below is this name's own rather
+    // than the un-encodable-transform one, whose remedy asks the operator to
+    // correct a parameter this editor gives them no way to rename.
+    const terms = buildAdvancedTerms(imported);
+    expect(safeParseLinkageTerms(terms).success).toBe(false);
+    expect(() => canonicalString(terms)).toThrow(CanonicalEncodingError);
+
+    const result = validateAdvancedInvite(imported, seed, now);
+    expect(result.canGenerate).toBe(false);
+    expect(result.terms).toBeUndefined();
+    expect(result.errors.keys).toMatch(/incomplete character/);
+    expect(result.errors.keys).not.toMatch(/cannot be recorded in the exact/);
+    expect(result.errors.keys).not.toMatch(/Enable at least one linkage key/);
+    const rendered = Object.values(result.errors).join("\n");
+    expect(rendered).not.toContain("unrepeatable-key");
+    expect(rendered).not.toContain("\ud800");
     expect(rendered).not.toContain("params");
   });
 });
