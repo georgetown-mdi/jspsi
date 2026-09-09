@@ -82,17 +82,7 @@ const REQUIRED_INPUTS = [
 // compared against the file, so an entry the step it names does not match
 // fails instead of standing as an exemption for a reason the step has
 // dropped.
-const RECORDED_FAILURE_MODES = [
-  {
-    site: ".github/workflows/image_smoke.yaml smoke vulnerability_scan",
-    condition:
-      "${{ matrix.fips == 'false' || github.event_name != 'pull_request' }}",
-    continueOnError: "${{ matrix.fips == 'true' }}",
-    jobContinueOnError: null,
-    reason:
-      "The FIPS variant's pinned base rootfs has fixable HIGH findings no pin movement clears, so that leg is skipped on a pull request and reports without failing the run on every other trigger. The base image bump that clears the findings drops both keys and this entry with them.",
-  },
-];
+const RECORDED_FAILURE_MODES = [];
 
 /**
  * What names one step across the tree: its file, the job it sits in, and its

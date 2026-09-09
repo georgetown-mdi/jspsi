@@ -782,29 +782,28 @@ jobs:
       # base image" in docs/spec/DEPENDENCY_PINS.md. A finding under /app is in
       # this repository's own production tree, which the lockfile moves.
       #
-      # The pull-request path runs this on the default leg alone: the variant's
-      # pinned base rootfs has fixable HIGH findings no pin movement can reach
-      # (the amazonlinux:2023 tag has not been rebuilt onto a snapshot that has
-      # the fixes), and a check red on every product PR for weeks teaches
-      # reviewers to ignore it. Off that path -- the weekly schedule, and a
-      # dispatch on the branch of a base bump -- the variant is scanned too, and
-      # reports rather than gates: a weekly run red on findings no release can
-      # clear teaches the same lesson. What makes it report-only is
-      # `continue-on-error` rather than a slackened `exit-code`, so the threshold
-      # below stays the one every invocation of this scanner is held to.
+      # Both legs gate, on every trigger: a finding at this threshold fails the
+      # run whichever image it is in. The variant's leg can only hold that while
+      # its pinned base and release snapshot name a rootfs whose closure scans
+      # clean, which is one of the things the coordinated base move above is for
+      # -- a leg red for weeks on findings no release can clear would teach
+      # reviewers to ignore it, and scoping it out again is the answer to that
+      # rather than an entry in .github/trivyignore.yaml.
       #
-      # What refuses to publish those findings is release.yaml, which gates BOTH
-      # images ahead of its registry login. Accepting them in
+      # What refuses to publish a finding is release.yaml, which gates BOTH
+      # images ahead of its registry login. Accepting one in
       # .github/trivyignore.yaml instead would make this leg green everywhere and
       # take that refusal with it: both images' release gate reads that same file.
-      #
-      # The base digest + AL2023_RELEASEVER bump that clears the findings drops
-      # this step's `if:` and `continue-on-error` in its own diff, leaving one
-      # gating scan per leg on every trigger.
+      # `!cancelled()` rather than no condition at all: the scan is the only
+      # step whose subject is the image's package surface rather than its
+      # behaviour, so a functional smoke that failed above is a reason to want
+      # the scan's answer too and not a reason to lose it. It is
+      # the condition the published-tag leg below runs under, and it keeps this
+      # invocation answering for the same runs as the release workflow's two
+      # (`scripts/trivy-threshold-parity.test.mjs`).
       - name: Scan the image for vulnerable packages
         id: vulnerability_scan
-        if: ${{ matrix.fips == 'false' || github.event_name != 'pull_request' }}
-        continue-on-error: ${{ matrix.fips == 'true' }}
+        if: ${{ !cancelled() }}
         uses: aquasecurity/trivy-action@v0.36.0
         with:
           scan-type: image
@@ -854,32 +853,6 @@ jobs:
           && steps.vulnerability_scan.outcome != 'skipped'
           && steps.image_scan_upload.outcome != 'success' }}
         run: cat trivy-image.sarif
-
-      # The variant leg passes whatever it found, so the run's summary states
-      # what a green run there does and does not say. The default leg's outcome
-      # is the job's own and needs no restatement.
-      - name: Record the variant's scan in the run summary
-        if: >-
-          ${{ !cancelled()
-          && matrix.fips == 'true'
-          && steps.vulnerability_scan.outcome != 'skipped' }}
-        env:
-          SCAN_OUTCOME: ${{ steps.vulnerability_scan.outcome }}
-          UPLOAD_OUTCOME: ${{ steps.image_scan_upload.outcome }}
-        run: |
-          set -euo pipefail
-          {
-            echo "## FIPS variant image vulnerability scan"
-            echo
-            echo "Scan outcome: **$SCAN_OUTCOME**, code scanning upload: **$UPLOAD_OUTCOME**. Fixable HIGH and CRITICAL vulnerabilities in the OS and language packages of the variant image built by this job, with the exceptions in \`.github/trivyignore.yaml\` applied."
-            echo
-            echo "This leg reports and gates nothing: a failed scan here leaves the run"
-            echo "green, and the findings are code-scanning alerts under"
-            echo "\`container-image-fips\`. What refuses to publish them is the release"
-            echo "workflow's own gate. A finding here is one of the signals a base move"
-            echo "answers to (\"Bumping the FIPS base image\" in"
-            echo "docs/spec/DEPENDENCY_PINS.md)."
-          } >> "$GITHUB_STEP_SUMMARY"
 
   # docs/DEPLOYMENT.md hands the operator a restricted-egress recipe for the
   # containerized roles -- a dedicated network with a subnet they pin, an

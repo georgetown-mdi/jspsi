@@ -68,30 +68,45 @@ HKDF.
 
 ## What was rejected, and why
 
-**Certificate 5438, whose certified build is `openssl-fips-provider-latest` at
-an older NVR.** It has 14 months more nominal runway (sunset 2031-07-26 against
-5021's 2030-05-25) and avoids a cross-version module/libcrypto pairing question
-entirely, since its module and libcrypto are both 3.2.2. It was rejected on
-measurement. Scanned side by side against the same vulnerability database, the
-5438 image has 145 more OS-layer findings and 56 more CVEs than the 5021
-image, and AWS has published a fix for every one of those 56; the pin is what
-forbids taking them. Thirty-three of them land on `openssl`, `openssl-libs` and
-the provider package itself, which is the one component a FIPS variant exists to
-be careful about. Worse, the pin fails silently in both directions: unpinned, a
-plain `dnf update` replaces the certified module with an uncertified one and
-exits 0; pinned with `versionlock` or `exclude=`, `dnf update` still exits 0 and
-prints `Complete!` while changing not one package in the image. A 5438 image is
-not incrementally patchable and does not say so. 5021's certified module is a
-*separate* package name, so `openssl-libs` stays free to float: after a full
-`dnf update --releasever=latest` that image scans at zero OS-layer findings and
-still loads module `3.0.8-d694bfa693b76001`.
+**Certificate 5438, whose certified module AWS now also serves under the
+`-certified` package name.** It has 14 months more nominal runway (sunset
+2031-07-26 against 5021's 2030-05-25). It was first rejected on two measured
+grounds -- a 145-finding, 56-CVE vulnerability delta against the 5021 image, and
+a pin that could not be patched without silently replacing the certified module.
+Both were artifacts of the `openssl-fips-provider-latest` packaging that froze
+the whole openssl stack, and neither reproduces once the bumped snapshot is in
+place: it first serves 5438's module under the `-certified` package name, and
+re-measured against that package the vulnerability delta is zero on every scan
+setting and both architectures, and 5438 is incrementally patchable exactly as
+5021 is -- `openssl-libs` floats, `dnf update` moves real packages, and the
+certified module stays put (measured 2026-09-09, `scratch/fips-5438-remeasure/`).
+What holds instead is the inversion: `-certified` now serves two NVRs, so a
+full `dnf update` inside the 5021 image moves its provider from
+`3.0.8-d694bfa693b76001` up to 5438's `3.2.2-799901ad7ab41d45` -- the build runs
+no update, and its read-back assertion fails on any module its pins do not name.
+
+The decision to stay on 5021 (owner, 2026-09-09) rests on the security policy
+instead. 5438's Caveat raises section 11.1's install-and-FIPS-mode-verification
+requirement to a certificate-level condition the variant image cannot satisfy --
+it often cannot even read the host's FIPS mode -- so the environment gap these
+notes argue around becomes a condition the certificate states and the image
+fails; its tested operational environment count drops from 6 to 4; and its
+section 2.10 no longer states the HKDF SP 800-56C attribution prose that
+[CONTAINER_IMAGES.md](../spec/CONTAINER_IMAGES.md) resolves its Cr1-vs-Cr2
+citation from. Against that stands only the runway, on a certificate active until
+2030; the same-version module/libcrypto pairing does not exist under a floating
+`openssl-libs`, and every algorithm the scoped claim names is on 5438's approved
+table with no category moved -- a close call decided on the caveat, not an
+algorithm gap. Revisit only if AWS retires 5021 early or publishes a tested
+operational environment that includes a container or a VM.
 
 **Replacing the default image rather than adding a variant.** No certificate
 reaches musl or Alpine, so the default image cannot support this claim -- but
 the variant does not come free either. By default **SFTP does not work in it at
 all** (below), so every SFTP configuration in the field would need a new key and
-any Ed25519 host-key pin would need replacing; and the image is 1.84x the size
-with a userland holding GPL-3.0 terms Alpine's does not. That is an
+any Ed25519 host-key pin would need replacing; and the image is roughly 1.1x
+the size on `x86_64` and 1.4x on `aarch64`, with a userland holding GPL-3.0
+terms Alpine's does not. That is an
 operator-burden argument for a second artifact, not an impossibility argument
 against one image, and it is how the field resolves the same question: vendors
 who ship the crypto inside their artifact ship a variant (Chainguard, HashiCorp
@@ -552,22 +567,25 @@ worth moving to are listed in
 [the procedure in DEPENDENCY_PINS.md](../spec/DEPENDENCY_PINS.md#bumping-the-fips-base-image),
 and one of them arrives weekly rather than filed: `image_smoke.yaml`'s scheduled
 run scans the built variant and reports what it finds as code-scanning alerts.
-That scan reports rather than gates, and no pull request runs one over the
-variant at all, because the pinned rootfs has findings no pin movement can reach
-and a check red on every run is one reviewers learn to ignore. So the gate is at
-release while the signal is weekly.
+That scan gates, on the schedule and on a pull request alike, so a finding
+against a pin nothing has touched reddens the weekly run rather than waiting for
+a release to refuse it.
 
 ## What it costs
 
-Measured on the reference build of this image, against the Alpine image built
-the same day: **576 MB to 1056 MB (+480 MB, 1.84x)** and **63 to 167 OS
-packages**. Of those 167, **39 have a GPL-3.0 or LGPL-3.0 term** -- the samba
-client stack that the default image already pays for, plus a GPLv3 base userland
-Alpine's busybox and musl do not have (`bash`, `coreutils-single`, `diffutils`,
-`findutils`, `gawk`, `grep`, `gzip`, `sed`, `tar`, `readline`, `gnupg2-minimal`,
-`gnutls`) and the LGPL-3.0 samba record stores. Whether that breadth changes
-this project's distribution posture is a licensing call, not a measurement, and
-it is open. The per-package inventory and the caveats on those figures are in
+Measured on the shipped build at the pins above, re-measured 2026-09-09
+(`scratch/fips-5438-remeasure/`): **63 to 165 OS packages**, and an image of
+653 MB on `x86_64` and 802 MB on `aarch64` against the Alpine image's 576 MB. Of
+those 165, **37 have a GPL-3.0 or LGPL-3.0 term** -- the samba client stack that
+the default image already pays for, plus a GPLv3 base userland Alpine's busybox
+and musl do not have (`bash`, `coreutils-single`, `diffutils`, `findutils`,
+`gawk`, `grep`, `gzip`, `sed`, `tar`, `readline`, `gnupg2-minimal`, `gnutls`) and
+the LGPL-3.0 samba record stores. The count is 37 rather than the older
+reference build's 39 because the shipped build installs neither `binutils` nor
+its `elfutils-debuginfod-client` dependency, both of which hold a v3 term. Whether
+that breadth changes this project's distribution posture is a licensing call, not
+a measurement, and it is open. The per-package inventory, the older reference
+build's figures, and the caveats on all of them are in
 [CONTAINER_IMAGES.md](../spec/CONTAINER_IMAGES.md#measured-inventories).
 
 The Node runtime is the other cost, and it is a supply-chain one rather than a

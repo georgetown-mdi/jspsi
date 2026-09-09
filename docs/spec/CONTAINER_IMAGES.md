@@ -201,10 +201,10 @@ it pins beyond that, and the second OS-package inventory that comes with it.
 
 | Pin | Value | How it is held |
 | --- | --- | --- |
-| Release snapshot | `--releasever=2023.12.20260727` on every `dnf` transaction | Shape-checked as a dated snapshot in `scripts/dockerfile-freeze.test.mjs`; compared against the base rootfs's own `system-release` version, asserted in the build |
+| Release snapshot | `--releasever=2023.12.20260817` on every `dnf` transaction | Shape-checked as a dated snapshot in `scripts/dockerfile-freeze.test.mjs`; compared against the base rootfs's own `system-release` version, asserted in the build |
 | Provider package and version | `openssl-fips-provider-certified` at `3.0.8-1.amzn2023.0.1` | `rpm -qf` on the installed `fips.so`, asserted in the build |
 | Module version string | `3.0.8-d694bfa693b76001` | `openssl list -providers` read back, asserted in the build |
-| Base image | `amazonlinux:2023@sha256:694092ae18877ed4e3cb9b643759ba95df1f12af12528fefa18f60f79d4c1568`, the multi-arch index digest | Named in the `FROM` instead of the tag; the literal held in `scripts/dockerfile-freeze.test.mjs` |
+| Base image | `amazonlinux:2023@sha256:181f98c48832fe926f8ca3b6ffeafcce128e96e77b93d08fbe9a9bc9403ce284`, the multi-arch index digest | Named in the `FROM` instead of the tag; the literal held in `scripts/dockerfile-freeze.test.mjs` |
 | Node runtime tarball, `x64` | `982aa24dd8be4c889c6a8ab337ddff3b0896645b20f4239356e80552c16277ee` | `sha256sum -c` against the literal committed in the fetching `RUN`; the literal held in `scripts/dockerfile-freeze.test.mjs` |
 | Node runtime tarball, `arm64` | `afc7a004018485092ac8985b817b0d5684472bd9472e0b57d2ab88737e50090d` | as above |
 
@@ -261,12 +261,20 @@ name determines nothing:
 
     3.2.2-1.amzn2023.0.1 -> 3.2.2-799901ad7ab41d45   <- the one certificate 5438 names
     3.2.2-1.amzn2023.0.2 -> 3.2.2-6a2d04a6952ab14a
-    3.5.5-1.amzn2023.0.5 -> 3.5.5-f06cf76f53649b34   <- stock in amazonlinux:2023
-    3.5.7-2.amzn2023.0.1 -> 3.5.7-89ade9f4d5e93a4c
+    3.5.5-1.amzn2023.0.5 -> 3.5.5-f06cf76f53649b34
+    3.5.7-2.amzn2023.0.1 -> 3.5.7-89ade9f4d5e93a4c   <- stock in amazonlinux:2023
 
-The `-certified` name this image uses is a different package with one published
-NVR, so a `dnf update` has nothing to move it to; the assertion is what catches
-a future one that is not certified.
+The `-certified` name this image uses is a different package, which is what
+leaves `openssl-libs` free to float beside the pin, and the snapshot above
+serves it at two NVRs holding two certified modules:
+
+    3.0.8-1.amzn2023.0.1 -> 3.0.8-d694bfa693b76001   <- what this image pins, certificate 5021
+    3.2.2-1.amzn2023     -> 3.2.2-799901ad7ab41d45   <- the module certificate 5438 names
+
+The second is the higher version, so a `dnf update` inside the image would take
+it. Nothing in the build runs one -- the `swap` names an NVR and the assertions
+read the installed module back -- and both halves of that read are what catch a
+module the pins do not name, certified or not.
 
 The security policy is the other reason that pin does the work, because it
 names no package this image installs and does not agree with itself about the
@@ -286,10 +294,10 @@ coupled: a base far newer than the pinned snapshot can put that snapshot's
 packages in conflict with what the base already holds. The digest in the table
 above closes that. It is the multi-arch index digest, which is what a
 multi-platform build can resolve -- a platform-specific manifest digest names one
-architecture and fails on the other -- and it was resolved on 2026-08-06 with
+architecture and fails on the other -- and it was resolved on 2026-09-09 with
 `docker buildx imagetools inspect amazonlinux:2023`, both of whose per-arch
-manifests state `org.opencontainers.image.created: 2026-08-04`. The rootfs at
-that digest reports `PRETTY_NAME="Amazon Linux 2023.12.20260727"` on `amd64` and
+manifests state `org.opencontainers.image.created: 2026-08-20`. The rootfs at
+that digest reports `PRETTY_NAME="Amazon Linux 2023.12.20260817"` on `amd64` and
 `arm64` alike, which is the release `AL2023_RELEASEVER` names, so the base and
 the packages are the same snapshot rather than two compatible ones.
 
@@ -740,15 +748,25 @@ derived from the other's.
 
 ### The FIPS reference build's inventory
 
-These figures measure the reference build `Dockerfile.fips` was derived from,
-on `aarch64`, against the Alpine image built the same day. That reference
-installed `binutils` (29,160,927 bytes installed) to read the module version out
-of `fips.so` with `strings`, which this build does not need because it reads the
-version back through `openssl list` instead, so the reference's package count and
-size run above what `Dockerfile.fips` produces. Nothing has been measured on
-`x86_64`.
+The shipped `Dockerfile.fips` build at the pins above, re-measured 2026-09-09
+(`scratch/fips-5438-remeasure/`), installs **165 OS packages** and weighs
+652,525,047 bytes (653 MB) on `x86_64` and 801,698,635 bytes (802 MB) on
+`aarch64`. Of those 165, **37 hold a GPL-3.0 or LGPL-3.0 term** -- the
+reference build's 39 (enumerated below) minus `binutils` and its
+`elfutils-debuginfod-client` dependency, both of which hold a v3 term and
+neither of which the shipped build installs.
 
-| | Alpine image | FIPS variant (reference build) |
+The table below is the older one-off reference build `Dockerfile.fips` was
+derived from, measured on `aarch64` against the Alpine image built the same day.
+That reference installed `binutils` (29,160,927 bytes installed) to read the
+module version out of `fips.so` with `strings`, which the shipped build does not
+need because it reads the version back through `openssl list` instead.
+`binutils` and its `elfutils-debuginfod-client` dependency are the only two
+packages the reference installs that the shipped build does not, so it holds 167
+packages against the shipped 165; its absolute size is a separate earlier
+measurement, not the shipped build's size plus `binutils`.
+
+| | Alpine image | FIPS variant (reference build, with binutils) |
 | --- | --- | --- |
 | Image size | 575,506,781 bytes (576 MB) | 1,055,721,059 bytes (1056 MB) |
 | OS packages | 63 | 167 |
@@ -777,6 +795,8 @@ Four more have an unconditional v3 term from elsewhere in the closure:
 normal case for a linked C++ runtime. The remaining six of the 39 --
 `elfutils-libelf`, `elfutils-libs`, `elfutils-default-yama-scope`, `gmp`,
 `libunistring` and `nettle` -- offer a GPLv2-or-later arm beside the LGPLv3 one,
-so they have a v3 term only under the arm taken. Whether that breadth changes
+so they have a v3 term only under the arm taken. The shipped build installs
+neither `binutils` nor `elfutils-debuginfod-client`, so its own count is the 37
+named above rather than this reference build's 39. Whether that breadth changes
 this project's distribution posture is a licensing call rather than a
 measurement, and it is not settled here.

@@ -316,7 +316,7 @@ const DEFAULT_BASE =
 // The variant's base rootfs is coupled to the release snapshot its dnf lines
 // pin: the two are the same Amazon Linux release, not merely compatible ones.
 const FIPS_BASE =
-  "amazonlinux:2023@sha256:694092ae18877ed4e3cb9b643759ba95df1f12af12528fefa18f60f79d4c1568";
+  "amazonlinux:2023@sha256:181f98c48832fe926f8ca3b6ffeafcce128e96e77b93d08fbe9a9bc9403ce284";
 
 // Each image's whole OS-package surface, frozen by literal the way the .npmrc
 // COPY above is. The npm tree is copied from the builder and resolves nothing,

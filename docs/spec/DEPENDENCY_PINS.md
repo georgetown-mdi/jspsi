@@ -758,9 +758,9 @@ what holds the base either way.
 
 - The Trivy scan the release workflow runs over the built variant,
   which gates every publish, so a snapshot with fixable high or critical
-  findings blocks a release rather than shipping. `image_smoke.yaml`'s weekly
-  build asks the same question of the variant between releases and reports
-  the answer without gating on it (below).
+  findings blocks a release rather than shipping. `image_smoke.yaml`'s Trivy
+  scan of the variant asks the same question on every trigger, pull requests
+  included, and gates on it the same way (below).
 - An advisory, or a certificate-lifecycle event, read by hand against the pins
   in [CONTAINER_IMAGES.md](CONTAINER_IMAGES.md#the-fips-variant-images-pins).
 
@@ -825,24 +825,23 @@ image, and the setuid/setgid inventory recorded in
 A new base whose package closure gains or loses one of those bits reddens that
 step, and the inventory is re-recorded in the same diff.
 
-Two limits sit between a green run there and a bump being proved:
+That workflow's Trivy scan gates on the variant leg on every trigger, the
+pull-request path included, so a bump taken in order to clear a scan finding is
+confirmed by the pull request's own run rather than by a dispatch beside it.
+That posture holds only while the pinned base and snapshot name a rootfs whose
+closure scans clean: a base carrying fixable findings no pin movement can reach
+takes the leg back off the pull-request path in the same diff that pins it,
+because a check red on every product PR for weeks teaches reviewers to ignore
+it. Accepting such a finding in `.github/trivyignore.yaml` is not the
+alternative -- the release workflow's gate reads that same file, so an entry
+there stops it refusing to publish too. Either way the findings arrive as
+code-scanning alerts under `container-image-fips`, and scanning the built
+variant by hand (OS and language packages, `vuln` scanner, high and above,
+fixable only, against `.github/trivyignore.yaml`) answers the same question
+off CI.
 
-- **The variant's PR-time scan is temporarily scoped out.** The Trivy scan in
-  that workflow runs on the variant leg off the pull-request path only -- the
-  weekly schedule and a `workflow_dispatch` run -- while the variant's pinned
-  base rootfs has fixable findings no pin movement can reach: a check red on
-  every product PR for weeks teaches reviewers to ignore it. The legs it does
-  run on report rather than gate, for the same reason applied to a weekly red
-  no release can clear, so their findings arrive as code-scanning alerts under
-  `container-image-fips` and fail no run. The release workflow gates both
-  images on the same scanner ahead of publishing, so nothing unscanned ships.
-  A base bump taken in order to clear a scan finding is therefore confirmed at
-  pull request time by dispatching that workflow on the bump's own branch,
-  whose variant leg scans the image it builds and states the outcome on the run
-  summary, or by scanning the built variant by hand -- OS and language
-  packages, `vuln` scanner, high and above, fixable only, against
-  `.github/trivyignore.yaml`. The re-widening to a gating variant leg on every
-  trigger travels in the bump's own diff.
+One limit sits between a green run there and a bump being proved:
+
 - **The build is single-arch.** That workflow builds native `amd64` with no
   QEMU, and no release workflow builds this image at all, so the release
   assertion speaks for the `amd64` rootfs at the new digest and not for the
@@ -899,10 +898,8 @@ not a defect in the pull request.
 lists `Dockerfile`, so the pull request runs the full matrix: both the
 default and the FIPS legs rebuild, even though only the default base moved.
 The default leg's Trivy scan (`vuln`, OS and language packages,
-high/CRITICAL, fixable findings only, against `.github/trivyignore.yaml`) is
-not scoped out the way the FIPS leg's currently is
-(see [Bumping the FIPS base image](#bumping-the-fips-base-image)),
-so it runs on this pull request as it does on every other -- a new snapshot
+high/CRITICAL, fixable findings only, against `.github/trivyignore.yaml`) runs
+on this pull request as it does on every other -- a new snapshot
 with a fixable finding fails the pull request rather than shipping. The same
 job also drives the assertions the freeze test cannot
 reach, because they read a running container rather than the Dockerfile text.
