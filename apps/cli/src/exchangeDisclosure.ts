@@ -26,15 +26,16 @@ import type {
 
 /**
  * The heading the display leads with. It states what has been sent so far and
- * nothing about connection order: an unpinned SFTP configuration establishes
- * first-use host-key trust over a credential-free probe before this point, so a
- * heading promising that nothing has connected would not hold there.
+ * nothing about connection order: this display runs before an unpinned SFTP
+ * configuration establishes first-use host-key trust over a credential-free
+ * probe, so a heading promising that nothing has connected would go stale
+ * moments later.
  */
 const DISCLOSURE_HEADING =
   "What this exchange sends and matches on. Nothing has been sent yet:";
 
-/** The label the outbound column list holds, spelled as the acceptance display
- * and the outbound-payload confirmation spell the same fact. */
+/** The label the outbound column list holds, spelled the way the acceptance
+ * display and the outbound-payload confirmation both spell this same fact. */
 const OUTBOUND_COLUMNS_LABEL = "columns you will send";
 
 /**
