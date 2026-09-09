@@ -466,7 +466,7 @@ An exchange you authored yourself -- your own configuration and your partner's, 
 - whether several of your records may match a single one of your partner's, and what that grouping tells your partner;
 - the fields the run matches on, and the linkage keys it combines them into.
 
-It asks nothing and refuses nothing: a run that is valid without it stays valid. The lines print whether or not a terminal is attached, so a scheduled run records them like any other diagnostic output and `--log-file` keeps a copy.
+It asks nothing and refuses nothing: a run that is valid without it stays valid. The lines print on standard error whether or not a terminal is attached and whatever `--log-level` you set, so a scheduled run shows them too; `--log-file` keeps a copy.
 
 An exchange you accepted an invitation for prints none of this once acceptance has recorded the columns you send: accepting showed you the same facts, and [Confirming what you send](#confirming-what-you-send) below shows the columns again on any run whose set is not the one you confirmed. An acceptance whose partner is entitled to no result records no columns, because none are sent to it; those runs print the display like any other.
 

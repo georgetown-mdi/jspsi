@@ -15,7 +15,11 @@ import {
   withholdsPartnerAssociationTable,
 } from "@psilink/core";
 
-import { marked, type ConsentSurfaceSink } from "./invitationDisplay";
+import {
+  consentSurfaceSink,
+  marked,
+  type ConsentSurfaceSink,
+} from "./invitationDisplay";
 import { singlePassDisclosureNotice } from "./onlineBootstrap";
 
 import type {
@@ -224,8 +228,10 @@ export function renderExchangeDisclosure(
  *
  * It asks nothing and refuses nothing: a run that is valid without it stays
  * valid, and every invocation renders the same lines whether or not a terminal
- * is attached. The lines are ordinary diagnostic output, so a `--log-file`
- * keeps a copy of what the operator was shown.
+ * is attached. Rendered through {@link consentSurfaceSink} on the prompt
+ * stream, like the outbound-payload confirmation beside it: this is the only
+ * account this party gets of what its run discloses, so a raised
+ * `--log-level` must not drop it. A `--log-file` keeps a copy.
  *
  * A no-op for a configuration written by accepting an invitation, which holds
  * an outbound-payload consent record: that party read these facts when it
@@ -245,14 +251,14 @@ export function displayExchangeDisclosure(params: {
   metadata: Metadata;
   /** The terms this run resolved, which decide what it matches on. */
   linkageTerms: LinkageTerms;
+  /** The operator's `--log-file`, so the log keeps a copy of the surface. */
+  logFile: string | undefined;
   log: ReturnType<typeof getLogger>;
 }): void {
-  const { spec, metadata, linkageTerms, log } = params;
+  const { spec, metadata, linkageTerms, logFile, log } = params;
   if (spec.outboundPayloadConsent !== undefined) return;
   renderExchangeDisclosure(
-    (line) => {
-      log.info(line);
-    },
+    consentSurfaceSink({ log, logFile, toPromptStream: true }),
     linkageTerms,
     metadata,
   );

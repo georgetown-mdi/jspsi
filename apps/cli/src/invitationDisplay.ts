@@ -49,14 +49,20 @@ export type ConsentSurfaceSink = (line: string) => void;
 export type ConsentSurfaceLevel = "info" | "warn";
 
 /**
- * The sink {@link displayInvitation} renders through, resolved from the
- * operator's diagnostic routing and whether acceptance will prompt.
+ * The sink a consent surface renders through, resolved from the operator's
+ * diagnostic routing and whether the surface has to reach them whatever that
+ * routing is.
  *
- * When `willPrompt`, every line goes to {@link writePromptLine} unformatted,
- * regardless of `--log-level`, plus the log at `level` when `logFile` is
- * set (so the run's record gets a copy without a second print to the
- * terminal). Otherwise lines are ordinary diagnostic output at `level`,
- * filtered by `--log-level` as usual.
+ * When `toPromptStream`, every line goes to {@link writePromptLine}
+ * unformatted, regardless of `--log-level` and whether a terminal is
+ * attached, plus the log at `level` when `logFile` is set (so the run's
+ * record gets a copy without a second print to the terminal). Otherwise
+ * lines are ordinary diagnostic output at `level`, filtered by
+ * `--log-level` as usual.
+ *
+ * A caller passes it true for a surface a prompt is answered against, so
+ * consent is never asked for terms this run did not show, and for one the
+ * operator is owed on every run whatever they set.
  *
  * Pass the resolved `--log-file` value: the installed log sink cannot be
  * asked where it writes, so a caller must feed the same value to
@@ -65,12 +71,12 @@ export type ConsentSurfaceLevel = "info" | "warn";
 export function consentSurfaceSink(params: {
   log: ReturnType<typeof getLogger>;
   logFile: string | undefined;
-  willPrompt: boolean;
+  toPromptStream: boolean;
   level?: ConsentSurfaceLevel;
 }): ConsentSurfaceSink {
-  const { log, logFile, willPrompt, level = "info" } = params;
+  const { log, logFile, toPromptStream, level = "info" } = params;
   return (line: string) => {
-    if (!willPrompt) {
+    if (!toPromptStream) {
       log[level](line);
       return;
     }

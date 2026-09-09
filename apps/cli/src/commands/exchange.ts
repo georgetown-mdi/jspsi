@@ -674,7 +674,10 @@ export function tokenExpiringAdvisory(
 export interface OutboundConsentContext {
   /** The config this run loaded, where a confirmation is written back. */
   configPath: string;
-  /** The operator's `--log-file`, so the surface routes like every diagnostic. */
+  /**
+   * The operator's `--log-file`, so the log keeps a copy of what the two
+   * disclosure surfaces here printed on the prompt stream.
+   */
   logFile: string | undefined;
 }
 
@@ -736,6 +739,7 @@ export async function prepareDataset(
     spec: exchangeDataSpec,
     metadata: resolved.metadata,
     linkageTerms: resolved.linkageTerms,
+    logFile: outboundConsent.logFile,
     log,
   });
 

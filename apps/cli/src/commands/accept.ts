@@ -396,7 +396,7 @@ export async function validateAccept(params: {
           notify: consentSurfaceSink({
             log,
             logFile: options.logFile,
-            willPrompt: !consentToTerms,
+            toPromptStream: !consentToTerms,
             level: "warn",
           }),
         })
@@ -1090,7 +1090,7 @@ export async function handler(argv: Arguments): Promise<void> {
       const consentSurface = consentSurfaceSink({
         log,
         logFile: options.logFile,
-        willPrompt: !consentToTerms,
+        toPromptStream: !consentToTerms,
       });
       displayInvitation({
         token: ready.token,

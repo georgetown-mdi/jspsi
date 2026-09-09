@@ -16,7 +16,10 @@ import type { ExchangeDataSpec, LinkageTerms, Metadata } from "@psilink/core";
 
 import { prepareDataset } from "../../src/commands/exchange";
 import { renderExchangeDisclosure } from "../../src/exchangeDisclosure";
-import { snapshotDiagnosticSinkAndLevel } from "../loggingTestSupport";
+import {
+  captureStdio,
+  snapshotDiagnosticSinkAndLevel,
+} from "../loggingTestSupport";
 import { streamOf, ttyStream, withStdin } from "../stdinStream";
 
 snapshotDiagnosticSinkAndLevel();
@@ -81,6 +84,7 @@ let dir: string;
 let configFile: string;
 let input: string;
 let logged: string[];
+let promptWrites: string;
 
 beforeEach(() => {
   dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-exchange-disclosure-"));
@@ -88,6 +92,7 @@ beforeEach(() => {
   input = path.join(dir, "in.csv");
   fs.writeFileSync(input, "first_name,last_name,diagnosis\nAda,Lovelace,A\n");
   logged = [];
+  promptWrites = "";
   setDiagnosticSink((_method, _prefix, args) => {
     logged.push(args.map((arg) => String(arg)).join(" "));
   });
@@ -99,23 +104,38 @@ afterEach(() => {
 });
 
 /**
- * Prepare a dataset from `spec` over the CSV above, collecting what the run
- * logged. `interactive` decides only whether a terminal is attached, which is
- * what the display must not read.
+ * Prepare a dataset from `spec` over the CSV above, collecting both channels a
+ * consent surface can land on. `interactive` decides only whether a terminal is
+ * attached, which is what the display must not read. Standard error is captured
+ * rather than left to reach the runner's own output: the display writes there,
+ * where the confirmation beside it asks.
  */
 async function prepare(
   spec: ExchangeDataSpec,
   interactive: boolean,
 ): Promise<unknown> {
-  return withStdin(interactive ? ttyStream() : streamOf(""), () =>
-    prepareDataset(spec, "County Health", input, {
-      configPath: configFile,
-      logFile: undefined,
-    }).then(
-      () => undefined,
-      (e: unknown) => e,
-    ),
-  );
+  const stdio = captureStdio();
+  try {
+    return await withStdin(interactive ? ttyStream() : streamOf(""), () =>
+      prepareDataset(spec, "County Health", input, {
+        configPath: configFile,
+        logFile: undefined,
+      }).then(
+        () => undefined,
+        (e: unknown) => e,
+      ),
+    );
+  } finally {
+    promptWrites = stdio.stderrWrites.join("");
+    stdio.restore();
+  }
+}
+
+/** Everything the last {@link prepare} put in front of the operator, on either
+ * channel: the prompt stream a consent surface prints on, and the diagnostic
+ * log a run with no `--log-file` routes the rest of its output to. */
+function shownToOperator(): string {
+  return [...logged, promptWrites].join("\n");
 }
 
 // --- A locally authored configuration ----------------------------------------
@@ -125,7 +145,7 @@ test("a two-config run shows what it sends and what it matches on", async () => 
   // the terms their own file commits them to, nor the columns their input file
   // makes transmittable by default.
   expect(await prepare({ linkageTerms: localTerms }, true)).toBe(undefined);
-  const output = logged.join("\n");
+  const output = shownToOperator();
   expect(output).toContain(DISCLOSURE_HEADING);
   expect(output).toContain("columns you will send (enforced):");
   expect(output).toContain("\n    - diagnosis");
@@ -147,11 +167,22 @@ test("a run with no terminal to ask on shows the same lines, and asks nothing", 
   // The scheduled run is the one the display exists for: it discloses exactly
   // as much as an attended one, and there is nothing to answer either way.
   expect(await prepare({ linkageTerms: localTerms }, true)).toBe(undefined);
-  const attended = [...logged];
-  logged = [];
+  const attended = promptWrites;
   expect(await prepare({ linkageTerms: localTerms }, false)).toBe(undefined);
-  expect(logged).toEqual(attended);
-  expect(logged.join("\n")).toContain(DISCLOSURE_HEADING);
+  expect(promptWrites).toBe(attended);
+  expect(promptWrites).toContain(DISCLOSURE_HEADING);
+});
+
+test("a log level that drops diagnostics still shows the display", async () => {
+  // The only account this party gets of what its run discloses. An operator who
+  // quieted the run's diagnostics quieted its progress reporting, not the one
+  // surface stating what leaves their machine.
+  logLibrary.getLogger("exchange").setLevel("warn");
+  expect(await prepare({ linkageTerms: localTerms }, false)).toBe(undefined);
+  expect(logged).toEqual([]);
+  expect(promptWrites).toContain(DISCLOSURE_HEADING);
+  expect(promptWrites).toContain("columns you will send (enforced):");
+  expect(promptWrites).toContain("\n    - diagnosis");
 });
 
 // --- A configuration written by accepting an invitation ----------------------
@@ -164,7 +195,7 @@ test("an accept-derived configuration is not shown the facts a second time", asy
     outboundPayloadConsent: { status: "confirmed", columns: ["diagnosis"] },
   };
   expect(await prepare(spec, true)).toBe(undefined);
-  expect(logged.join("\n")).not.toContain(DISCLOSURE_HEADING);
+  expect(shownToOperator()).not.toContain(DISCLOSURE_HEADING);
 });
 
 test("a set the confirmation surface asks about is shown once, by that surface", async () => {
@@ -173,7 +204,7 @@ test("a set the confirmation surface asks about is shown once, by that surface",
     outboundPayloadConsent: { status: "pending" },
   };
   expect(await prepare(spec, false)).toBeInstanceOf(UsageError);
-  const output = logged.join("\n");
+  const output = shownToOperator();
   expect(output).toContain(CONFIRMATION_HEADING);
   expect(output).not.toContain(DISCLOSURE_HEADING);
   expect(output.match(/columns you will send \(enforced\)/g)).toHaveLength(1);
@@ -291,6 +322,11 @@ test("a run that withholds the partner's half of the table says so instead", () 
   );
   expect(lines).toContain(
     "By agreement, not enforced: your agreed terms declare no disclosure",
+  );
+  // And the sentence says when a partner whose input discloses one anyway is
+  // caught, which is after its process has been sent the half.
+  expect(lines).toContain(
+    "its process is sent that half while the exchange runs, and the run stops only afterwards",
   );
   expect(lines).not.toContain(
     "your partner learns which of its own records are in your data",

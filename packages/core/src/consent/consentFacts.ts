@@ -308,8 +308,9 @@ export const CONSENT_FACTS = {
       "agreed declaration, not a run property this side can enforce.",
     note:
       "By agreement, not enforced: your agreed terms declare no disclosure " +
-      "of your partner's half of the matched-pair table, and the run stops " +
-      "if your partner's input turns out to disclose one.",
+      "of your partner's half of the matched-pair table. If your partner's " +
+      "own input discloses one anyway, its process is sent that half while " +
+      "the exchange runs, and the run stops only afterwards.",
   },
   duplicateMatches: {
     basis: "enforced",
@@ -658,6 +659,29 @@ export const ACCEPTOR_DEDUPLICATE_CONTROL_FACTS = [
   "partnerReadsDuplicateGrouping",
   "partnerDuplicateGroupingWithheld",
   "acceptorDeduplicateRefused",
+] as const satisfies ReadonlyArray<ConsentFactId>;
+
+/**
+ * The facts only the seat reading linkage terms it WROTE ITSELF can reach: a
+ * run whose two configurations the parties authored between them, with no
+ * invitation and so no acceptance record behind either one.
+ *
+ * Each restates a fact an acceptance surface already states, on the basis
+ * this seat can back rather than the one that seat holds -- the outbound set
+ * derived with no recorded consent to differ from, and a withholding resting
+ * on the partner's declared payload direction rather than on a run property
+ * this side enforces. An acceptance surface rendering either sentence would
+ * state a basis its own run does not hold. The per-surface checks that hold a
+ * surface to every fact's note read this set rather than each excluding by
+ * hand, so which surface owes which sentence stays one judgment.
+ *
+ * Every member's id ends in `SelfAuthored`, after the fact it restates; a
+ * core test holds the set to that naming, so a further one cannot be added to
+ * the table and left out of this list.
+ */
+export const SELF_AUTHORED_EXCHANGE_FACTS = [
+  "outboundSendSelfAuthored",
+  "partnerOwnMembershipWithheldSelfAuthored",
 ] as const satisfies ReadonlyArray<ConsentFactId>;
 
 /**
