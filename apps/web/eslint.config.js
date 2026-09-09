@@ -46,6 +46,39 @@ const linkageComparisonChokepointBan = {
     "Ask rule-set membership about a draft through src/psi/linkageComparison.ts (encodeKeyForComparison / isOptInDraftKey / isDraftDrawnFromLinkageRuleSet / linkageRuleSetReferenceForDraft, re-exported from @psi/authoring/advancedInvite), not core's strict predicates: those compare by canonical byte equality, which reads an explicitly-`undefined` optional property -- what a draft rebuild spreads in -- as a difference and silently drops the key's opt-in badge and the terms' rule-set citation.",
 };
 
+// The one message both halves of the fetched-body ban report: the `.json` property
+// ban below and the `.text()` / `.arrayBuffer()` selector beside it.
+const fetchedBodyReadMessage =
+  "Read a fetched body through the bounded read in src/psi/jobClient/jobApiBody.ts (readBoundedJson / readJsonOrNull, under the cap the endpoint's answer needs): .json(), .text() and .arrayBuffer() each buffer whatever the server sends before anything measures it. A read of a locally chosen File, or one that needs no cap: eslint-disable-next-line with a one-line justification.";
+
+// The `.text()` / `.arrayBuffer()` half of the fetched-body ban. Both methods
+// buffer a whole body, and both are declared on `Response` and on `Blob`/`File`
+// alike, so nothing in the syntax says which receiver a read has: the app reads a
+// fetched body off a variable a selector cannot resolve, and reads an operator's
+// locally chosen file off `file` and `source.file`.
+//
+// The two are told apart by the RECEIVER'S NAME, as an allowlist: a read passes
+// only when the name immediately before the method is `file` or ends in `File`
+// (`csvFile`, `receiptFile`) -- either as an identifier or as the last property of
+// a member expression. Every other receiver is treated as a fetched body and
+// refused. `profile.text()` is refused, since its `file` is lowercase and not a
+// segment of its own; a File reached through a computed access (`files[0].text()`)
+// is refused too, and takes an eslint-disable with its one-line why.
+//
+// The selector matches a MemberExpression rather than a CallExpression, so an
+// alias (`const read = response.text;`) is refused on sight like the property ban's
+// alias case. A destructure (`const { text } = response;`) is not a member
+// expression and is outside its reach. The shapes it does and does not catch are
+// pinned in scripts/eslint-web-json-parse-ban.test.mjs.
+const fetchedBodyReadBan = {
+  selector:
+    "MemberExpression" +
+    ":matches([property.name=/^(text|arrayBuffer)$/],[property.value=/^(text|arrayBuffer)$/])" +
+    ":not([object.name=/^(file|.*File)$/])" +
+    ":not([object.property.name=/^(file|.*File)$/])",
+  message: fetchedBodyReadMessage,
+};
+
 // Confine reads of an acquired CSV's `rawRows` to the enumerated file-intake, draft,
 // and coverage/preview consumers. The console acquires only a server-side profile
 // (row count, date format, column samples) and never the rows, so its acquired shape
@@ -94,23 +127,29 @@ const seatWarningSinkBan = {
     "Fold an onWarning message through appendSanitizedRunWarning (src/psi/runWarnings.ts): it is the one display boundary the run surfaces share, and the manager composes its warnings raw because that boundary escapes them exactly once.",
 };
 
-// The files that legitimately read `.rawRows`: the hosted file-intake and draft
-// consumers plus the exchange-run and coverage-worker internals that read rawRows off
-// non-acquired shapes (a prepared/minted invitation, a worker request, the
-// controller's own field).
-// The dependency direction between the app's layers. src/psi (the protocol and
-// the run models) and src/components (the React pieces more than one product
-// renders) sit BELOW the three product directories -- src/exchange, src/recurring
-// and src/console -- so neither may import from them. Direction is what keeps the
-// headless scheduled runner out of the screens' graph: the runner enters through
-// src/psi, and one import of a screen from there pulls the whole product tree in
-// behind it. A module two layers need belongs in src/psi when it is React-free
-// and in src/components when it is not.
+// The dependency direction between the app's layers. Four directories sit BELOW
+// the three product directories -- src/exchange, src/recurring and src/console --
+// so none of them may import from a product: src/psi (the protocol and the run
+// models), src/components (the React pieces more than one product renders),
+// src/jobs (the console server's job intent, schemas and route support) and
+// src/utils (the helpers every layer shares). Direction is what keeps the headless
+// scheduled runner out of the screens' graph: the runner enters through src/psi,
+// and one import of a screen from there pulls the whole product tree in behind it.
+// src/jobs is the same shape on the server side -- a route handler's graph has no
+// reason to reach a screen. A module two layers need belongs in src/psi when it is
+// React-free, in src/components when it is not, and in src/utils when it is
+// neither protocol nor React.
 const productDirectories = ["console", "exchange", "recurring"];
 
+const belowProductDirectories = ["components", "jobs", "psi", "utils"];
+
+const belowProductFiles = belowProductDirectories.map(
+  (dir) => `src/${dir}/**/*.{ts,tsx}`,
+);
+
 const productDirectoryBanMessage = (target) =>
-  `src/psi and src/components sit below the product directories; neither may import from ${target}. ` +
-  "Move what both layers need into src/psi (React-free) or src/components (React), and import it from there.";
+  `src/components, src/jobs, src/psi and src/utils sit below the product directories; none may import from ${target}. ` +
+  "Move what a lower layer needs into src/psi (React-free), src/components (React) or src/utils, and import it from there.";
 
 // A second, coarser statement of the same ban, kept beside the selector below.
 // The `../` groups need a climb immediately before the directory; the src-rooted
@@ -141,8 +180,7 @@ const productDirectoryBans = productDirectories.map((dir) => ({
 // (`@components/exchangeRecord`) has no `/` or end after it and is not matched. The
 // ImportExpression arm is required rather than hypothetical: no-restricted-imports
 // reads static declarations only, and the app loads modules dynamically
-// (ScheduledExchangeRunner, csvParseController). A dynamic import whose argument is
-// a template literal or a concatenation is outside what either rule sees.
+// (ScheduledExchangeRunner, csvParseController).
 const productDirectoryBanPattern = `(^@|\\/)(${productDirectories.join("|")})(\\/|$)`;
 
 const productDirectorySpecifierBan = {
@@ -154,6 +192,22 @@ const productDirectorySpecifierBan = {
   ),
 };
 
+// What closes the one route around the specifier ban above: it reads string
+// literals, so a dynamic import given a template literal or a concatenation names
+// a module neither it nor no-restricted-imports sees. Below the products, an
+// import() takes a plain string literal and nothing else -- the app's own lazy
+// loads are written that way -- so the composed specifier is refused where it is
+// written rather than going unread.
+const dynamicImportLiteralBan = {
+  selector: "ImportExpression:not([source.value=type(string)])",
+  message:
+    "Give a dynamic import below the products a plain string literal: the layer-direction ban reads string specifiers only, so a template literal or a concatenation loads a module past it. Write each branch as its own import() with a literal specifier.",
+};
+
+// The files that legitimately read `.rawRows`: the hosted file-intake and draft
+// consumers plus the exchange-run and coverage-worker internals that read rawRows
+// off non-acquired shapes (a prepared/minted invitation, a worker request, the
+// controller's own field).
 const rawRowsConsumers = [
   "src/exchange/AcceptorScreen.tsx",
   "src/exchange/InviterScreen.tsx",
@@ -162,6 +216,22 @@ const rawRowsConsumers = [
   "src/psi/runOutputs.ts",
   "src/psi/workers/nonEmptyAggregate.worker.ts",
   "src/psi/workers/nonEmptyAggregateController.ts",
+];
+
+// The syntax bans every file under src/ and server/ takes, whatever else its block
+// sets. Flat config replaces -- does not merge -- a rule's options across blocks,
+// so a block restating no-restricted-syntax spreads this array rather than
+// re-listing its members, and cannot drop one of them by omission.
+const sharedSyntaxBans = [
+  sensitiveYamlParseBan,
+  fetchedBodyReadBan,
+  seatWarningSinkBan,
+];
+
+// The two bans a file below the products takes on top of the shared set.
+const layerDirectionBans = [
+  dynamicImportLiteralBan,
+  productDirectorySpecifierBan,
 ];
 
 export default [
@@ -216,12 +286,7 @@ export default [
     plugins: { "filled-primary-contrast": filledPrimaryContrastScope },
     rules: {
       "filled-primary-contrast/filled-primary-contrast-scope": "error",
-      "no-restricted-syntax": [
-        "error",
-        sensitiveYamlParseBan,
-        rawRowsAccessBan,
-        seatWarningSinkBan,
-      ],
+      "no-restricted-syntax": ["error", ...sharedSyntaxBans, rawRowsAccessBan],
       "no-restricted-imports": [
         "error",
         {
@@ -250,18 +315,18 @@ export default [
     // A parse of a value this process serialized itself opts out with an
     // eslint-disable-next-line carrying a one-line why.
     //
-    // Beside it, the `json` ban closes ONE route to a fetched body: the platform
-    // `.json()`, which a JSON.parse ban does not see, since that parse happens
-    // inside the method. It does not reach a `response.text()` or
-    // `response.arrayBuffer()` read, each of which buffers the whole body before
-    // any parse; what a client takes instead of either is the bounded read in
-    // src/psi/jobClient/jobApiBody.ts, and docs/spec/SERVER_JOB_API.md (Size caps) states
-    // that limit. It is a property ban with no object name, because the receiver
-    // of a `.json()` is a variable a selector cannot resolve -- so it also
-    // matches `Response.json()` the response builder, which this app does not
-    // use (it builds responses through `jobJsonResponse`). Nothing under src/ or
-    // server/ reads a `.json` property for any other reason, so the ban has no
-    // standing exemption.
+    // Beside it, the `json` ban closes the platform `.json()`, which a JSON.parse
+    // ban does not see, since that parse happens inside the method. What a client
+    // takes instead is the bounded read in src/psi/jobClient/jobApiBody.ts, and
+    // docs/spec/SERVER_JOB_API.md (Size caps) states that limit. It is a property
+    // ban with no object name, because the receiver of a `.json()` is a variable a
+    // selector cannot resolve -- so it also matches `Response.json()` the response
+    // builder, which this app does not use (it builds responses through
+    // `jobJsonResponse`). Nothing under src/ or server/ reads a `.json` property
+    // for any other reason, so the ban has no standing exemption. The other two
+    // whole-body reads, `.text()` and `.arrayBuffer()`, are refused under the same
+    // message by `fetchedBodyReadBan` above, which a property ban cannot state
+    // because a File declares both methods too.
     files: ["src/**/*.{ts,tsx}", "server/**/*.ts"],
     // Fail CI on a stray or rule-silencing disable so an untrusted parse cannot
     // be quietly exempted (a bare `eslint .` only warns). The sibling block above
@@ -279,8 +344,7 @@ export default [
         },
         {
           property: "json",
-          message:
-            "Read a fetched body through the bounded read in src/psi/jobClient/jobApiBody.ts (readBoundedJson / readJsonOrNull, under the cap the endpoint's answer needs); Response.json() buffers whatever the server sends and hands it to a raw JSON.parse. A read that genuinely needs neither: eslint-disable-next-line with a one-line justification.",
+          message: fetchedBodyReadMessage,
         },
       ],
     },
@@ -328,32 +392,27 @@ export default [
     // written here later is covered without a config edit.
     files: rawRowsConsumers,
     rules: {
-      "no-restricted-syntax": [
-        "error",
-        sensitiveYamlParseBan,
-        seatWarningSinkBan,
-      ],
+      "no-restricted-syntax": ["error", ...sharedSyntaxBans],
     },
   },
   {
-    // The layer-direction ban (see productDirectoryBans above), over the two
+    // The layer-direction ban (see productDirectoryBans above), over the four
     // directories below the products. A block of its own rather than an entry on
     // the src/ blocks above, because those cover the product directories too, and
     // it re-carries every group and path they set for these files: flat config
     // replaces a rule's whole options across blocks. The chokepoint module is
     // spared here for the reason the block above spares it, and takes the same
     // direction ban in its own block below.
-    files: ["src/psi/**/*.{ts,tsx}", "src/components/**/*.{ts,tsx}"],
+    files: belowProductFiles,
     ignores: ["src/psi/linkageComparison.ts"],
     rules: {
-      // The specifier ban, re-carrying the three selectors the src/ block sets
-      // for these files.
+      // The direction bans, re-carrying the selectors the src/ block sets for
+      // these files.
       "no-restricted-syntax": [
         "error",
-        sensitiveYamlParseBan,
+        ...sharedSyntaxBans,
         rawRowsAccessBan,
-        seatWarningSinkBan,
-        productDirectorySpecifierBan,
+        ...layerDirectionBans,
       ],
       "no-restricted-imports": [
         "error",
@@ -369,16 +428,14 @@ export default [
     // while keeping their rawRows exemption: the block above re-carries
     // rawRowsAccessBan, and would otherwise replace their options and restore it.
     // Their import ban comes from that block, which this one leaves alone.
-    files: rawRowsConsumers.filter(
-      (file) =>
-        file.startsWith("src/psi/") || file.startsWith("src/components/"),
+    files: rawRowsConsumers.filter((file) =>
+      belowProductDirectories.some((dir) => file.startsWith(`src/${dir}/`)),
     ),
     rules: {
       "no-restricted-syntax": [
         "error",
-        sensitiveYamlParseBan,
-        seatWarningSinkBan,
-        productDirectorySpecifierBan,
+        ...sharedSyntaxBans,
+        ...layerDirectionBans,
       ],
     },
   },
@@ -390,10 +447,9 @@ export default [
     rules: {
       "no-restricted-syntax": [
         "error",
-        sensitiveYamlParseBan,
+        ...sharedSyntaxBans,
         rawRowsAccessBan,
-        seatWarningSinkBan,
-        productDirectorySpecifierBan,
+        ...layerDirectionBans,
       ],
       "no-restricted-imports": [
         "error",

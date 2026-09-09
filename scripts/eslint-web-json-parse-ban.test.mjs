@@ -11,12 +11,16 @@ import {
   withoutTypeAwareLayer,
 } from "./eslint-strip-type-aware-layer.mjs";
 
-// Coverage of the two parse bans in apps/web/eslint.config.js, which share one
+// Coverage of the parse bans in apps/web/eslint.config.js. Two share one
 // no-restricted-properties block: JSON this app did not produce is parsed
 // through @psilink/core's parseBoundedJson, and a fetched body is read through
 // the bounded read in src/psi/jobClient/jobApiBody.ts rather than Response.json(). The
 // property-access form of each (the same form packages/core/src uses) closes the
 // alias, computed-access, and destructure routes around a direct call as well.
+// The third, `fetchedBodyReadBan`, is a no-restricted-syntax selector covering
+// the other two whole-body reads -- `.text()` and `.arrayBuffer()` -- which a
+// property ban cannot state, because a locally chosen `File` declares both
+// methods too and must keep passing.
 //
 // A ban fails silently: a `files` pattern or an object/property name that stops
 // matching keeps reporting zero problems, which reads exactly like clean source.
@@ -48,6 +52,18 @@ async function parseHits(filePath, source) {
   }
   return result.messages.filter(
     (message) => message.ruleId === "no-restricted-properties",
+  );
+}
+
+/** no-restricted-syntax messages reported for `source` linted as `filePath`. */
+async function syntaxHits(filePath, source) {
+  const [result] = await eslint.lintText(source, { filePath });
+  const fatal = result.messages.filter((message) => message.fatal);
+  if (fatal.length > 0) {
+    throw new Error(`${filePath}: ${fatal.map((m) => m.message).join("; ")}`);
+  }
+  return result.messages.filter(
+    (message) => message.ruleId === "no-restricted-syntax",
   );
 }
 
@@ -235,19 +251,14 @@ describe("the web Response.json ban", { timeout: 60_000 }, () => {
 
   // The reach the property form does not have: a body read as text and parsed
   // elsewhere never names `json` at all, so only the JSON.parse half of the block
-  // catches it -- which it does, and that is what this pins.
+  // catches it -- which it does, and that is what this pins. The read itself is
+  // the fetched-body selector's, covered below.
   it("catches a text-then-parse read through the JSON.parse half", async () => {
     const hits = await parseHits(
       WEB_SRC,
       "const value = JSON.parse(await response.text());\n",
     );
     expect(hits).not.toHaveLength(0);
-  });
-
-  it("leaves a non-json body read alone", async () => {
-    expect(
-      await parseHits(WEB_SRC, "const text = await response.text();\n"),
-    ).toHaveLength(0);
   });
 
   it("carries its own unused-disable-directive setting", () => {
@@ -272,3 +283,141 @@ describe("the web Response.json ban", { timeout: 60_000 }, () => {
     expect(result.errorCount).toBe(0);
   });
 });
+
+// The other two whole-body reads. `.text()` and `.arrayBuffer()` buffer a body
+// exactly as `.json()` does, but a `File` the operator chose declares both
+// methods too, so a property ban with no object name would refuse the app's own
+// file intake. The selector tells the two apart by the RECEIVER'S NAME, as an
+// allowlist: `file`, or a name ending in `File`. Both halves of that -- what it
+// refuses and what it must keep accepting -- are pinned here, because a name
+// pattern that stops matching fails in whichever direction is silent.
+describe(
+  "the web fetched-body text/arrayBuffer ban",
+  { timeout: 60_000 },
+  () => {
+    /** Whether a no-restricted-syntax entry is the fetched-body read ban. */
+    const isFetchedBodyReadBan = (entry) =>
+      /property\.name=\/\^\(text\|arrayBuffer\)\$\//.test(entry.selector ?? "");
+
+    it("resolves the ban for the shipped trees and not the test tree", async () => {
+      for (const [filePath, expected] of [
+        [WEB_SRC, true],
+        [WEB_SERVER, true],
+        [WEB_TEST, false],
+      ]) {
+        const config = await eslint.calculateConfigForFile(filePath);
+        const [, ...entries] = config.rules["no-restricted-syntax"] ?? [];
+        expect(
+          entries.some(isFetchedBodyReadBan),
+          `${filePath}: the resolved no-restricted-syntax options do not carry the fetched-body read ban, so linting it reports zero however the read is written`,
+        ).toBe(expected);
+      }
+    });
+
+    it("reports it under the same message as the .json() half", async () => {
+      const [textHit] = await syntaxHits(
+        WEB_SRC,
+        "const body = await response.text();\n",
+      );
+      const [jsonHit] = await parseHits(
+        WEB_SRC,
+        "const body = await response.json();\n",
+      );
+      expect(textHit?.message).toBeDefined();
+      // no-restricted-properties prefixes its own "'json' is restricted from
+      // being used." before the configured text; the selector reports the text
+      // alone, so the shared message is the tail of the property ban's.
+      expect(jsonHit.message).toContain(textHit.message);
+    });
+
+    for (const [shape, source] of [
+      ["a text read", "const body = await response.text();"],
+      ["an arrayBuffer read", "const body = await response.arrayBuffer();"],
+      [
+        "a read off an inline fetch",
+        "const body = await (await fetch(u)).text();",
+      ],
+      ["an alias", "const read = response.text;"],
+      ["a computed access", 'const body = await response["text"]();'],
+      [
+        "a read off a deep property",
+        "const body = await answer.payload.text();",
+      ],
+      // A receiver whose name merely ENDS in a lowercase "file" is not the File
+      // shape the allowlist admits, and is refused like any other receiver.
+      [
+        "a lowercase-file-suffixed receiver",
+        "const body = await profile.text();",
+      ],
+    ]) {
+      it(`refuses ${shape} in apps/web/src`, async () => {
+        expect(await syntaxHits(WEB_SRC, `${source}\n`)).not.toHaveLength(0);
+      });
+
+      it(`refuses ${shape} in apps/web/server`, async () => {
+        expect(await syntaxHits(WEB_SERVER, `${source}\n`)).not.toHaveLength(0);
+      });
+
+      it(`accepts ${shape} in the web test tree`, async () => {
+        expect(await syntaxHits(WEB_TEST, `${source}\n`)).toHaveLength(0);
+      });
+    }
+
+    // The File reads the app already writes, plus the two other spellings the
+    // allowlist admits. These are the cases the widening must not break.
+    for (const [shape, source] of [
+      ["a File read", "const text = await file.text();"],
+      ["a File read off a property", "const text = await source.file.text();"],
+      ["a File arrayBuffer read", "const bytes = await file.arrayBuffer();"],
+      ["a name ending in File", "const text = await csvFile.text();"],
+      ["a bare File binding", "const text = await File.text();"],
+      ["a File's own text property", "const text = file.text;"],
+    ]) {
+      it(`accepts ${shape} in apps/web/src`, async () => {
+        expect(await syntaxHits(WEB_SRC, `${source}\n`)).toHaveLength(0);
+      });
+    }
+
+    // The reach the selector does not have. A destructure names no member
+    // expression, so unlike the `.json()` property ban this one cannot see it; a
+    // File reached through a computed index has no name to match and is refused,
+    // taking a disable rather than a silent pass. Both are left to review, and
+    // pinned so a later widening reports here rather than in a surprise.
+    it("does not reach a destructured read", async () => {
+      expect(
+        await syntaxHits(WEB_SRC, "const { text } = response;\n"),
+      ).toHaveLength(0);
+    });
+
+    it("refuses a File reached through a computed index", async () => {
+      expect(
+        await syntaxHits(WEB_SRC, "const text = await files[0].text();\n"),
+      ).not.toHaveLength(0);
+    });
+
+    it("carries its own unused-disable-directive setting", () => {
+      const block = webConfig.find((candidate) => {
+        const rule = candidate.rules?.["no-restricted-syntax"];
+        return Array.isArray(rule) && rule.slice(1).some(isFetchedBodyReadBan);
+      });
+      expect(
+        block,
+        "no apps/web block carries the fetched-body read ban",
+      ).toBeDefined();
+      expect(block.linterOptions?.reportUnusedDisableDirectives).toBe("error");
+    });
+
+    it("takes a disable directive with a one-line why", async () => {
+      const [result] = await eslint.lintText(
+        "// eslint-disable-next-line no-restricted-syntax -- a body this process built itself\nconst body = await response.text();\n",
+        { filePath: WEB_SRC },
+      );
+      expect(
+        result.messages.filter(
+          (message) => message.ruleId === "no-restricted-syntax",
+        ),
+      ).toHaveLength(0);
+      expect(result.errorCount).toBe(0);
+    });
+  },
+);

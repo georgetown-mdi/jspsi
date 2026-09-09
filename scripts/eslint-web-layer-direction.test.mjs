@@ -11,8 +11,10 @@ import {
 } from "./eslint-strip-type-aware-layer.mjs";
 
 // Coverage of the web app's layer-direction ban (productDirectorySpecifierBan and
-// productDirectoryBans in apps/web/eslint.config.js): src/psi and src/components
-// sit below the three product directories and may not import from them. A
+// productDirectoryBans in apps/web/eslint.config.js): src/components, src/jobs,
+// src/psi and src/utils sit below the three product directories and may not
+// import from them, plus the dynamic-import shape the ban depends on being able
+// to read (dynamicImportLiteralBan, below the products only). A
 // specifier pattern that stops matching fails silently -- it keeps reporting zero
 // problems, which is indistinguishable from clean source -- and the ban is folded
 // into eslint blocks that also re-carry the cross-workspace groups and the two
@@ -57,11 +59,13 @@ async function directionHits(filePath, source) {
   );
 }
 
-// The two directories below the products, plus the chokepoint module that takes
+// The four directories below the products, plus the chokepoint module that takes
 // the ban from a block of its own (it is spared the ban on calling core's
 // comparison predicates, so it cannot share the block that carries that one).
 const PSI = resolve(repoRoot, "apps/web/src/psi/exchangeLifecycle.ts");
 const COMPONENTS = resolve(repoRoot, "apps/web/src/components/ColumnName.tsx");
+const JOBS = resolve(repoRoot, "apps/web/src/jobs/intentSchemas.ts");
+const UTILS = resolve(repoRoot, "apps/web/src/utils/boundedJsonBody.ts");
 const CHOKEPOINT = resolve(repoRoot, "apps/web/src/psi/linkageComparison.ts");
 
 // A product file, to pin that the ban is scoped BELOW the products rather than
@@ -98,6 +102,8 @@ const CSV_PARSE_CONTROLLER = resolve(
 const BELOW = [
   ["src/psi", PSI],
   ["src/components", COMPONENTS],
+  ["src/jobs", JOBS],
+  ["src/utils", UTILS],
   ["src/psi (the chokepoint)", CHOKEPOINT],
 ];
 
@@ -195,6 +201,11 @@ const ACCEPTED = [
   ["src/psi", PSI, "@components/ColumnName"],
   ["src/psi", PSI, "./runOutputs"],
   ["src/components", COMPONENTS, "@psi/authoring/advancedInvite"],
+  ["src/jobs", JOBS, "@psilink/core"],
+  ["src/jobs", JOBS, "@utils/boundedJsonBody"],
+  ["src/jobs", JOBS, "./workInputName"],
+  ["src/utils", UTILS, "@psilink/core"],
+  ["src/utils", UTILS, "@jobs/intentSchemas"],
   ["src/exchange", PRODUCT, "@console/mountListing"],
   ["src/exchange", PRODUCT, "@recurring/SavedExchanges"],
   // Specifiers whose segment merely BEGINS with a product directory's name: what
@@ -283,6 +294,12 @@ describe("the web app's layer-direction ban", { timeout: 60_000 }, () => {
           .map((option) => option.selector)
           .filter((selector) => /console\|exchange\|recurring/.test(selector)),
         `${layer}: the direction selector is not among the no-restricted-syntax options at ${filePath}, and it is the half that reads every import form`,
+      ).toHaveLength(1);
+      expect(
+        syntax
+          .map((option) => option.selector)
+          .filter((selector) => /^ImportExpression:not/.test(selector)),
+        `${layer}: the plain-string-literal requirement on a dynamic import is not among the no-restricted-syntax options at ${filePath}, so a composed specifier goes unread by the direction ban and unreported by this one`,
       ).toHaveLength(1);
     }
   });
@@ -398,3 +415,66 @@ describe("the web app's layer-direction ban", { timeout: 60_000 }, () => {
     });
   }
 });
+
+// The specifier ban above reads string literals, so a dynamic import given a
+// template literal or a concatenation names a module it cannot see -- the one
+// route around it that needs no `eslint-disable`. Below the products an
+// `import()` therefore takes a plain string literal and nothing else, which is
+// how the app's own two lazy loads are already written. Every composed shape is
+// planted here, and the plain-literal loads are planted again to pin that the
+// refusal is the argument's shape rather than the form.
+describe(
+  "the dynamic-import specifier shape below the products",
+  { timeout: 60_000 },
+  () => {
+    const COMPOSED = [
+      ["a template literal with a substitution", "`@psi/${name}`"],
+      ["a plain template literal", "`@psi/runOutputs`"],
+      ["a concatenation", '"@psi/" + name'],
+      ["a bare identifier", "name"],
+      ["a conditional", 'flag ? "./a" : "./b"'],
+    ];
+
+    for (const [layer, filePath] of BELOW) {
+      for (const [shape, argument] of COMPOSED) {
+        it(`refuses ${shape} from ${layer}`, async () => {
+          expect(
+            await directionHits(
+              filePath,
+              `export const load = (name: string, flag: boolean) =>\n  import(${argument});\n`,
+            ),
+          ).not.toHaveLength(0);
+        });
+      }
+    }
+
+    // The ban is scoped below the products, exactly as the direction ban it
+    // protects is: a screen composing a specifier reaches nothing the direction
+    // ban is stated over.
+    for (const [shape, argument] of COMPOSED) {
+      it(`leaves ${shape} alone in a product directory`, async () => {
+        expect(
+          await directionHits(
+            PRODUCT,
+            `export const load = (name: string, flag: boolean) =>\n  import(${argument});\n`,
+          ),
+        ).toHaveLength(0);
+      });
+    }
+
+    it("leaves the app's own lazy loads alone", async () => {
+      for (const [filePath, specifier] of [
+        [RUNNER, "@psi/managed/managedScheduleRuntime"],
+        [CSV_PARSE_CONTROLLER, "./csvParseWorkerClient"],
+      ]) {
+        expect(
+          await directionHits(
+            filePath,
+            `export const load = () => import("${specifier}");\n`,
+          ),
+          `${filePath}: the shipped lazy load is refused`,
+        ).toHaveLength(0);
+      }
+    });
+  },
+);

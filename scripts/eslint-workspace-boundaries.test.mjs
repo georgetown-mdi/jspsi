@@ -170,10 +170,16 @@ describe("the cross-workspace import ban", { timeout: 60_000 }, () => {
         `${filePath}: a type-aware rule survived the strip`,
       ).toEqual([]);
       const [, options] = config.rules["no-restricted-imports"] ?? [];
+      // Containment rather than equality: apps/web adds the layer-direction
+      // groups on top of these for the four directories below its products
+      // (src/components, src/jobs, src/psi, src/utils), and WEB_SRC is one of
+      // them. That those groups are present where they belong is
+      // scripts/eslint-web-layer-direction.test.mjs's claim; this one is that
+      // the cross-workspace groups survive whatever a block sets beside them.
       expect(
         options?.patterns,
         `${tree}: the cross-workspace import ban is not among the no-restricted-imports options at ${filePath}, so linting it reports zero however the specifier is written`,
-      ).toEqual(expectedPatterns);
+      ).toEqual(expect.arrayContaining(expectedPatterns));
     }
   });
 
