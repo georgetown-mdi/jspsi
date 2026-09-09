@@ -429,9 +429,12 @@ export const CONSENT_FACTS = {
       "one key, not what the partner does with it. Every candidate enters that " +
       "key's round as its own entry; a record appearing in any of the round's " +
       "candidate pairs leaves candidacy for every later key, paired or not; and " +
-      "the index table the single-pass receiver holds carries each sender " +
-      "record's candidate grouping for every key, matched or not. All three are " +
-      "properties of the round rather than of anyone's conduct. The normative " +
+      "each strategy pays a grouping disclosure of its own -- the index table " +
+      "the single-pass receiver holds carries each sender record's candidate " +
+      "grouping for every key, matched or not, where a cascade round states " +
+      "each party's grouping of that round's matched values alone. All three " +
+      "are properties of the round rather than of anyone's conduct. The " +
+      "normative " +
       "rows are docs/spec/PROTOCOL.md's (Fan-out matching, and the disclosure " +
       "delta fan-out pays), so a row reclassified there and not here is a " +
       "divergence between a specification and the sentence an acceptor consents " +
@@ -442,28 +445,31 @@ export const CONSENT_FACTS = {
       "That match can rest on one candidate out of a name rather than on the " +
       "whole value, which is weaker evidence. A record matched this way is " +
       "paired at most once and is then left out of the later, less precise " +
-      "keys, whether or not that pairing stands. Splitting runs under " +
-      "single-pass linkage, so the party that receives the other's key " +
-      "structure also learns how many candidates each of the other's records " +
-      "produced for each key and which of its values came from the same " +
-      "record.",
+      "keys, whether or not that pairing stands. Under single-pass linkage the " +
+      "party that receives the other's key structure also learns how many " +
+      "candidates each of the other's records produced for each key and which " +
+      "of its values came from the same record; under cascade linkage each " +
+      "party learns instead how the other's matched values group into records, " +
+      "round by round, for the records still in the running.",
   },
   fanOutRefused: {
     basis: "enforced",
     reason:
       "The other case of the same line, and enforced for the same reason the " +
-      "`deduplicate` refusal is: matching on several candidates per record is " +
-      "specified for the single-pass strategy alone, so terms declaring one " +
-      "under any other strategy are refused when they are authored or minted, " +
-      "at the local prepare step, and again at the agreed-terms run boundary. " +
-      "The exchange this invitation proposes does not run at all, which is a " +
-      "fact of the run rather than of the partner's conduct.",
+      "`deduplicate` refusal is: a count-only exchange counts matched values " +
+      "where the matching pairs each record at most once, and a linkage " +
+      "strategy with no resolution written for a candidate set matches one " +
+      "value per record, so terms declaring one under either are refused when " +
+      "they are authored or minted, at the local prepare step, and again at " +
+      "the agreed-terms run boundary. The exchange this invitation proposes " +
+      "does not run at all, which is a fact of the run rather than of the " +
+      "partner's conduct.",
     note:
       "Your partner proposes splitting a value into several candidates to match " +
-      "on, which runs under single-pass linkage only, and this invitation names " +
-      "a different linkage strategy -- so the exchange will refuse to run. Ask " +
-      "your partner for an invitation that either drops the split or uses " +
-      "single-pass linkage.",
+      "on, which the algorithm and linkage strategy this invitation names do " +
+      "not match on -- so the exchange will refuse to run. Ask your partner for " +
+      "an invitation that either drops the split or names terms that match on " +
+      "each candidate.",
   },
   inboundPayloadColumnsCarried: {
     basis: "enforced",

@@ -258,25 +258,32 @@ describe("the consent summary's fan-out register", () => {
     ],
   };
 
-  test("a fan-out element under single-pass is marked as matching on several values", () => {
-    // The element matches on every candidate it realizes, so the header marker
-    // names that breadth. The two flags beside it are what selects the consent
-    // fact each surface renders.
-    const summary = summarizeInvitation({
-      linkageTerms: { ...fanOutTerms, linkageStrategy: "single-pass" },
-    });
-    expect(summary.linkageKeys[0].headerFields).toEqual([
-      "last name (multiple)",
-    ]);
-    expect(summary.fansOut).toBe(true);
-    expect(summary.fanOutApplied).toBe(true);
-  });
+  test.each(["cascade", "single-pass"] as const)(
+    "a fan-out element under %s is marked as matching on several values",
+    (linkageStrategy) => {
+      // Both strategies match on every candidate the element realizes, so the
+      // header marker names that breadth under either. The two flags beside it
+      // are what selects the consent fact each surface renders.
+      const summary = summarizeInvitation({
+        linkageTerms: { ...fanOutTerms, linkageStrategy },
+      });
+      expect(summary.linkageKeys[0].headerFields).toEqual([
+        "last name (multiple)",
+      ]);
+      expect(summary.fansOut).toBe(true);
+      expect(summary.fanOutApplied).toBe(true);
+    },
+  );
 
-  test("the same element under cascade is marked as not supported", () => {
+  test("the same element under the count-only algorithm is marked as not supported", () => {
     // Refused before the exchange runs, so no matching of any breadth happens
     // and naming one would describe a run that does not occur.
     const summary = summarizeInvitation({
-      linkageTerms: { ...fanOutTerms, linkageStrategy: "cascade" },
+      linkageTerms: {
+        ...fanOutTerms,
+        algorithm: "psi-c",
+        linkageStrategy: "cascade",
+      },
     });
     expect(summary.linkageKeys[0].headerFields).toEqual([
       "last name (not supported)",

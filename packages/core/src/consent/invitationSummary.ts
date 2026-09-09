@@ -19,7 +19,10 @@ import { endpointRequiresRetainedFiles } from "../config/invitation.js";
 import type { InvitationToken } from "../config/invitation.js";
 import { checkLinkageRuleSetCitation } from "../defaults/builtInLinkageTerms.js";
 import type { LinkageRuleSetCitationVerdict } from "../defaults/builtInLinkageTerms.js";
-import { deduplicateIsImplementedForStrategy } from "../linkageTermsPolicy.js";
+import {
+  candidateSetIsImplementedForStrategy,
+  deduplicateIsImplementedForStrategy,
+} from "../linkageTermsPolicy.js";
 import { withholdsSenderAssociationTable } from "../psi/link.js";
 import type {
   LinkageField,
@@ -532,11 +535,12 @@ export interface InvitationSummary {
    * Whether the exchange this invitation proposes matches on those
    * candidates.
    *
-   * True exactly for `single-pass`, the one strategy fan-out matching is
-   * specified for (docs/spec/PROTOCOL.md, Fan-out runs under single-pass
-   * only); under any other, terms declaring a fan-out are refused before the
-   * exchange runs. Meaningful only alongside {@link fansOut}, selecting
-   * which of the two fan-out consent facts a surface renders.
+   * True for a combination that resolves a candidate set -- either linkage
+   * strategy under the identifier-revealing algorithm (docs/spec/PROTOCOL.md,
+   * Fan-out runs under both linkage strategies); under one that does not,
+   * terms declaring a fan-out are refused before the exchange runs.
+   * Meaningful only alongside {@link fansOut}, selecting which of the two
+   * fan-out consent facts a surface renders.
    */
   fanOutApplied: boolean;
   /**
@@ -1454,11 +1458,15 @@ export function summarizeInvitation(
   // is shown even though the run does not yet apply the expansion. The
   // *Applied flags below report that gap to the renderer; the displayed
   // terms are what the acceptor agrees to.
-  // Which of the two fan-out registers this invitation is in: the strategy
+  // Which of the two fan-out registers this invitation is in: a combination
   // that matches a candidate set, or one that refuses the terms outright.
-  // Read once here so the element markers, the key summaries, and the
-  // consent fact a surface shows all follow the same verdict.
-  const fanOutMatches = terms.linkageStrategy === "single-pass";
+  // Read from the refusal's OWN predicates rather than restated here, so the
+  // copy cannot stay in the refusing register for a combination the refusal
+  // has stopped refusing, and read once so the element markers, the key
+  // summaries, and the consent fact a surface shows all follow one verdict.
+  const fanOutMatches =
+    terms.algorithm !== "psi-c" &&
+    candidateSetIsImplementedForStrategy(terms.linkageStrategy);
   // Whether the strategy this invitation names matches the deduplicating
   // cardinality its term asks for; a strategy that does not is refused at
   // acceptance rather than run. Read from the refusal's OWN predicate
