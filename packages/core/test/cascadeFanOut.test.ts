@@ -1,9 +1,10 @@
 import { expect, test, describe, vi } from "vitest";
 
 // A `swap` key's second order and a `generate_fuzzy_comparisons` expansion are
-// gated on APPLIED_SETTINGS.fuzzyComparisons, false in the shipped build. This
-// file drives the flag on so those two candidate-set producers run end to end
-// under the cascade beside `split_on`, which needs no flag.
+// gated on APPLIED_SETTINGS.fuzzyComparisons, true in the shipped build. This
+// file's mock pins the flag on regardless, so those two candidate-set
+// producers run end to end under the cascade beside `split_on`, which needs
+// no flag.
 vi.mock("../src/consent/appliedSettings", () => ({
   APPLIED_SETTINGS: { deduplicate: true, fuzzyComparisons: true },
 }));
