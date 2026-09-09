@@ -2,9 +2,9 @@ import { expect, test, vi } from "vitest";
 
 import PSI from "@openmined/psi.js";
 
-// The cascade's candidate-set resolution is built behind the strategy
-// allowlist (CANDIDATE_SET_IMPLEMENTED_BY_STRATEGY, linkageTermsPolicy.ts).
-// This corpus runs at the link boundary, below every terms-level refusal.
+// This corpus runs at the link boundary, below every terms-level refusal, with
+// the strategy allowlist held open so a fixture reads the resolution rather
+// than an entry (CANDIDATE_SET_IMPLEMENTED_BY_STRATEGY, linkageTermsPolicy.ts).
 vi.mock("../../src/linkageTermsPolicy", async (importOriginal) => {
   const original =
     await importOriginal<typeof import("../../src/linkageTermsPolicy")>();
@@ -17,10 +17,7 @@ import {
   linkViaSinglePassPSI,
   type LinkageCardinality,
 } from "../../src/psi/link";
-import {
-  createMessagePipe,
-  ConnectionError,
-} from "../../src/connection/messageConnection";
+import { createMessagePipe } from "../../src/connection/messageConnection";
 import type { AssociationTable } from "../../src/types";
 import { UNBOUNDED_PSI_ELEMENTS } from "../utils/psiElementBounds";
 import { recordingConnection } from "../utils/recordingConnection";
@@ -31,21 +28,24 @@ import {
   type Column,
 } from "../utils/candidateSetBounds";
 
-// A randomized corpus over the two shapes a cascade round has to reach a
-// verdict on before it sends anything: the rounds it resolves, which owe the
-// table single-pass produces on the same input, and the rounds it cannot state
-// one record at a time, which owe a refusal on BOTH parties and no
-// mapped-element list on either wire. A round that reached the post-round pass
-// with a shape it cannot state would abort there instead, blaming a conforming
-// partner after its own list had gone out, which is what this corpus is sized
-// to find.
+// The conformance corpus over ragged and fanned-out inputs together that
+// docs/spec/PROTOCOL.md requires (What the cascade realization owes), asserting
+// for every fixture the one verdict the specification admits: both parties
+// resolving, each party's table equal to the one single-pass computes on the
+// same inputs. No shape the sweep resolves is refused, so a refusal anywhere in
+// the corpus is a failure.
 //
 // Every fixture also runs with the two parties' roles exchanged, since which
 // party opens the PSI exchange decides which one permutes its own set and
-// which reads the other's positions. The two assignments owe the same verdict,
-// and the same pairs read from the other side.
+// which reads the other's positions. The two assignments owe the same table,
+// read from the other side.
 
 const psiLibrary = await PSI();
+
+// Enough fixtures to reach the ragged and fanned-out shapes together many times
+// over at the row counts and alphabet below, and to keep reaching them as the
+// generator is widened.
+const CORPUS_SIZE = 700;
 
 function makeParticipant(role: "starter" | "joiner"): PSIParticipant {
   return new PSIParticipant(
@@ -183,17 +183,6 @@ function holdsMappedElements(frame: unknown): boolean {
   );
 }
 
-// The round refusal this corpus admits as a verdict, told from every other
-// failure by its classification and its message: a round-time refusal on both
-// parties, not a post-round abort blaming the partner.
-function isRoundRefusal(outcome: unknown): boolean {
-  return (
-    outcome instanceof ConnectionError &&
-    outcome.kind === "protocol" &&
-    /cannot report one at a time/.test(outcome.message)
-  );
-}
-
 // A party that neither resolves nor refuses is the failure this corpus exists
 // to catch, so each one is bounded rather than left to stall the whole run.
 const PARTY_SETTLE_MS = 20_000;
@@ -308,43 +297,17 @@ function reportOf(outcome: unknown): string {
 }
 
 test(
-  "every ragged fan-out fixture either resolves as single-pass does or refuses at the round",
+  "every ragged fan-out fixture resolves to the table single-pass computes",
   { timeout: 600_000 },
   async () => {
     const problems: Array<string> = [];
     let resolvedFixtures = 0;
-    let refusedFixtures = 0;
     let fixturesStatingMappedElements = 0;
 
-    for (const fixture of randomCorpus(700)) {
+    for (const fixture of randomCorpus(CORPUS_SIZE)) {
       const where = describeFixture(fixture);
       const cascade = await runCascade(fixture);
       const mirrored = await runCascade(mirroredAssignment(fixture));
-      const refusals = [cascade.starter, cascade.joiner].filter(isRoundRefusal);
-      const mirroredRefusals = [mirrored.starter, mirrored.joiner].filter(
-        isRoundRefusal,
-      );
-      if (refusals.length !== mirroredRefusals.length) {
-        problems.push(
-          `${where}: ${refusals.length} part(ies) refused the round, ` +
-            `${mirroredRefusals.length} with the roles exchanged`,
-        );
-        continue;
-      }
-      if (refusals.length === 1) {
-        problems.push(`${where}: one party refused the round alone`);
-        continue;
-      }
-      if (refusals.length === 2) {
-        ++refusedFixtures;
-        // The refusal lands at the round, before either party has stated a
-        // mapped-element list the other would have to make sense of.
-        if (cascade.starterSent.some(holdsMappedElements))
-          problems.push(`${where}: the starter stated its mapped elements`);
-        if (cascade.joinerSent.some(holdsMappedElements))
-          problems.push(`${where}: the joiner stated its mapped elements`);
-        continue;
-      }
       if (cascade.starter instanceof Error || cascade.joiner instanceof Error) {
         problems.push(
           `${where}: starter ${reportOf(cascade.starter)}, joiner ` +
@@ -414,10 +377,12 @@ test(
     }
 
     expect(problems).toStrictEqual([]);
-    // Non-vacuity on both verdicts, and on the mapped-element frame the
-    // refusing fixtures are asserted NOT to hold.
-    expect(resolvedFixtures).toBeGreaterThan(400);
-    expect(refusedFixtures).toBeGreaterThan(0);
+    // Every fixture resolves: no shape the sweep reaches is refused, and the
+    // count is the corpus size rather than a floor, so a fixture that stopped
+    // resolving would fail here even if it also stopped being compared.
+    expect(resolvedFixtures).toBe(CORPUS_SIZE);
+    // Non-vacuity on the mapped-element frames, which a fixture matching
+    // nothing puts on neither wire.
     expect(fixturesStatingMappedElements).toBeGreaterThan(0);
   },
 );

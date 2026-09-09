@@ -255,6 +255,37 @@ export function declaredKeyWidth(key: LinkageKey, keyIndex?: number): number {
 }
 
 /**
+ * Whether a linkage key declares a per-(record, key) CANDIDATE SET: a
+ * `split_on` fan-out on one of its elements, a `generate_fuzzy_comparisons`
+ * expansion, or a `swap` naming both orders.
+ *
+ * The structural reading of {@link declaredKeyWidth} above 1, taken over the
+ * same three producers and gated on the same applied setting, so the two
+ * cannot come to different verdicts about whether a key expands. Separate from
+ * the width because the refusals that read it run where a width may not be
+ * derivable at all: `declaredKeyWidth` refuses terms above
+ * {@link MAX_KEY_CANDIDATE_WIDTH}, and a gate answering "does this expand"
+ * must answer for those terms too.
+ */
+export function keyDeclaresCandidateSet(key: LinkageKey): boolean {
+  if (APPLIED_SETTINGS.fuzzyComparisons && key.swap !== undefined) return true;
+  return key.elements.some(
+    (element) =>
+      declaredFanOutFunction(element.transform) !== undefined ||
+      (APPLIED_SETTINGS.fuzzyComparisons &&
+        element.generateFuzzyComparisons !== undefined),
+  );
+}
+
+/**
+ * Whether any of a terms document's linkage keys declares a candidate set
+ * ({@link keyDeclaresCandidateSet}).
+ */
+export function termsDeclareCandidateSet(terms: LinkageTerms): boolean {
+  return terms.linkageKeys.some(keyDeclaresCandidateSet);
+}
+
+/**
  * A party's **effective key count**: the sum of {@link declaredKeyWidth}
  * over the agreed linkage keys. Equals the plain key count exactly when no
  * key's elements declare an expansion (docs/spec/PROTOCOL.md, The width

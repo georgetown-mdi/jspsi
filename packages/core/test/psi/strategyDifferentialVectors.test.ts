@@ -17,10 +17,7 @@ import {
   linkViaSinglePassPSI,
   type LinkageCardinality,
 } from "../../src/psi/link";
-import {
-  createMessagePipe,
-  ConnectionError,
-} from "../../src/connection/messageConnection";
+import { createMessagePipe } from "../../src/connection/messageConnection";
 import type { AssociationTable } from "../../src/types";
 import { sortAssociationTable } from "../../src/testing";
 import { UNBOUNDED_PSI_ELEMENTS } from "../utils/psiElementBounds";
@@ -233,31 +230,19 @@ test("many-to-one, the one side keeps its own within-round uniqueness rule", asy
   );
 });
 
-// The shapes the two strategies do NOT agree on, pinned here rather than left
-// to be discovered. Single-pass names every accepted pair in the table its
-// receiver resolves, while a cascade round reports one partner match per
-// matched record, naming one candidate group of the partner's: where the
-// round's accepted pairs do not divide that way it refuses the round instead of
-// dropping one of them. docs/spec/PROTOCOL.md fixes both the sweep that accepts
-// the pairs (The per-side rules, Resolution) and the pass that names one
-// position per accepted record (The final mapped-element entry names a
-// canonical position), and these fixtures are where the two meet.
-async function expectCascadeRefusesWhatSinglePassResolves(
-  starterKeys: Array<Column>,
-  joinerKeys: Array<Column>,
-): Promise<Tables> {
-  const outcome = await runCascade("many-to-one", starterKeys, joinerKeys).then(
-    () => undefined,
-    (err: unknown) => err,
-  );
-  expect(outcome).toBeInstanceOf(ConnectionError);
-  expect((outcome as ConnectionError).kind).toBe("protocol");
-  return runSinglePass("many-to-one", starterKeys, joinerKeys);
-}
+// The two shapes the widened mapped-element entry exists for, which the spec
+// makes normative in both role assignments (docs/spec/PROTOCOL.md, Two cases a
+// deduplicating cardinality adds). Each names positions no single canonical one
+// could stand in for, so each is where the entry's set form is what keeps the
+// two strategies equal.
 
-test("a candidate set on the one side splits the two strategies", async () => {
-  // One record accepted against records in two different matched groups.
-  const [starter, joiner] = await expectCascadeRefusesWhatSinglePassResolves(
+test("many-to-one, a record accepted against two of the partner's groups", async () => {
+  // The "one" side's record matches both of the many side's records, holding
+  // different values: the relaxed acceptance clause stops only the many side
+  // from repeating, so its entry names both positions and comes back as two
+  // rows.
+  const [starter, joiner] = await expectStrategiesAgree(
+    "many-to-one",
     [["a", "b"]],
     [[new Set(["a", "b"])]],
   );
@@ -271,11 +256,30 @@ test("a candidate set on the one side splits the two strategies", async () => {
   ]);
 });
 
-test("a candidate set on the many side can collide two records on one position", async () => {
-  // The sub-shape the MUST vector above avoids: "V2" is the lowest matched
-  // position of both of the many side's records, so the one side's list names
-  // that position once per accepted record and the cascade has no form for it.
-  const [starter, joiner] = await expectCascadeRefusesWhatSinglePassResolves(
+test("many-to-one, a group split across two of the one side's records", async () => {
+  // The many side's position for "ab" is owned by both its records; the sweep
+  // accepts one of them on a value of its own earlier, so the entry naming that
+  // position stands for the record accepted with it alone, not the group.
+  const [starter, joiner] = await expectStrategiesAgree(
+    "many-to-one",
+    [[new Set(["ab", "cd"]), "ab"]],
+    [["cd", "ab"]],
+  );
+  expect(starter).toStrictEqual([
+    [0, 1],
+    [0, 1],
+  ]);
+  expect(joiner).toStrictEqual([
+    [0, 1],
+    [0, 1],
+  ]);
+});
+
+test("many-to-one, two accepted records of the many side sharing a position", async () => {
+  // "V2" is the lowest matched position of both of the many side's records, so
+  // one canonical position per accepted record could not tell them apart.
+  const [starter, joiner] = await expectStrategiesAgree(
+    "many-to-one",
     [[new Set(["V2", "V1"]), new Set(["V0", "V2"])]],
     [["V1", "V0", "V2"]],
   );

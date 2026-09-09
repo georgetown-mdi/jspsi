@@ -85,7 +85,10 @@ function makeParticipant(role: "starter" | "joiner"): PSIParticipant {
   );
 }
 
-type MappedElement = { theirIndex: number; iteration: number };
+type MappedElement = {
+  theirIndex: number | Array<number>;
+  iteration: number;
+};
 type Deviation = (frame: unknown) => unknown;
 
 // Interpose on one party's INBOUND frames, leaving both parties' own behavior
@@ -615,22 +618,28 @@ test("cascade refuses a mapped-element entry naming a negative candidate positio
 
 test("cascade refuses a mapped-element entry naming a record this side did not match", async () => {
   // Candidate position 0 is row 0 (Alice), which took part in the round but
-  // matched nothing. An honest partner names only the records this side matched,
-  // so a probe at an unmatched one is refused rather than answered.
+  // matched nothing. An honest partner states the positions its accepted pairs
+  // rest on, so a probe at an unmatched one is refused rather than answered.
   const err = await cascadeWithDeviation(
     onMappedElementList(1, (list) => [
       { theirIndex: 0, iteration: 0 },
       ...list.slice(1),
     ]),
   );
-  expectProtocolRefusal(err, /names a record this side did not match/);
+  expectProtocolRefusal(
+    err,
+    /names positions other than the ones that round's accepted pairs rest on/,
+  );
 });
 
 test("cascade refuses a mapped-element list naming one record twice", async () => {
   const err = await cascadeWithDeviation(
     onMappedElementList(1, (list) => [list[0], { ...list[0] }]),
   );
-  expectProtocolRefusal(err, /names one record twice/);
+  expectProtocolRefusal(
+    err,
+    /names positions other than the ones that round's accepted pairs rest on/,
+  );
 });
 
 test("cascade refuses a mapped-element list longer than this side's match count", async () => {
@@ -639,7 +648,7 @@ test("cascade refuses a mapped-element list longer than this side's match count"
   );
   expectProtocolRefusal(
     err,
-    /partner's mapped-element list has 3 entries, expected 2/,
+    /states more entries for a key round than the records it accepted there/,
   );
 });
 
@@ -778,7 +787,7 @@ const refusalFrom = (run: () => void): unknown => {
 test("a repeat is admitted within one group and refused across two", () => {
   // Entries 0 and 1 named one position, entry 2 another.
   const rules = {
-    repeatsGroupedBy: { rounds: [0, 0, 0], positions: [0, 0, 1] },
+    repeatsGroupedBy: { rounds: [0, 0, 0], groups: [0, 0, 1] },
   };
   expect(() =>
     assertPartnerIndices("me", "the list", [2, 2, 1], ROWS, rules),
@@ -787,25 +796,25 @@ test("a repeat is admitted within one group and refused across two", () => {
     refusalFrom(() =>
       assertPartnerIndices("me", "the list", [2, 2, 2], ROWS, rules),
     ),
-    /the list names one partner row for two positions this side matched/,
+    /the list names one partner row for two of the partner's records this side matched/,
   );
   expectProtocolRefusal(
     refusalFrom(() =>
       assertPartnerIndices("me", "the list", [2, 1, 0], ROWS, rules),
     ),
-    /the list names two partner rows for one position this side matched/,
+    /the list names two partner rows for one of the partner's records this side matched/,
   );
 });
 
 test("one position of each round is a group of its own", () => {
   // A position number means nothing across rounds: each round has its own
   // candidate set, so the same number in two rounds is two groups.
-  const rules = { repeatsGroupedBy: { rounds: [0, 1], positions: [0, 0] } };
+  const rules = { repeatsGroupedBy: { rounds: [0, 1], groups: [0, 0] } };
   expectProtocolRefusal(
     refusalFrom(() =>
       assertPartnerIndices("me", "the list", [1, 1], ROWS, rules),
     ),
-    /names one partner row for two positions this side matched/,
+    /names one partner row for two of the partner's records this side matched/,
   );
   expect(() =>
     assertPartnerIndices("me", "the list", [1, 2], ROWS, rules),
@@ -818,7 +827,7 @@ test("a grouping that does not run parallel to the list is a caller fault", () =
   // the partner's protocol violation.
   const err = refusalFrom(() =>
     assertPartnerIndices("me", "the list", [0, 1], ROWS, {
-      repeatsGroupedBy: { rounds: [0], positions: [0] },
+      repeatsGroupedBy: { rounds: [0], groups: [0] },
     }),
   );
   expect(err).toBeInstanceOf(Error);
@@ -846,7 +855,7 @@ test("runs of one group must be identical and runs of two must be disjoint", () 
   const rules = {
     repeatsGroupedByRuns: {
       rounds: [0, 0, 0],
-      positions: [0, 0, 1],
+      groups: [0, 0, 1],
       runLengths: [2, 2, 1],
     },
   };
@@ -857,13 +866,13 @@ test("runs of one group must be identical and runs of two must be disjoint", () 
     refusalFrom(() =>
       assertPartnerIndices("me", "the list", [2, 1, 2, 1, 2], ROWS, rules),
     ),
-    /the list names one partner row for two positions this side matched/,
+    /the list names one partner row for two of the partner's records this side matched/,
   );
   expectProtocolRefusal(
     refusalFrom(() =>
       assertPartnerIndices("me", "the list", [2, 1, 2, 0, 1], ROWS, rules),
     ),
-    /the list names two partner rows for one position this side matched/,
+    /the list names two partner rows for one of the partner's records this side matched/,
   );
 });
 
@@ -876,7 +885,7 @@ test("a run naming one partner row twice is refused within the run", () => {
       assertPartnerIndices("me", "the list", [2, 2], ROWS, {
         repeatsGroupedByRuns: {
           rounds: [0],
-          positions: [0],
+          groups: [0],
           runLengths: [2],
         },
       }),
@@ -891,7 +900,7 @@ test("one position of each round is a group of its own under the run rule", () =
   const rules = {
     repeatsGroupedByRuns: {
       rounds: [0, 1],
-      positions: [0, 0],
+      groups: [0, 0],
       runLengths: [1, 1],
     },
   };
@@ -899,7 +908,7 @@ test("one position of each round is a group of its own under the run rule", () =
     refusalFrom(() =>
       assertPartnerIndices("me", "the list", [1, 1], ROWS, rules),
     ),
-    /names one partner row for two positions this side matched/,
+    /names one partner row for two of the partner's records this side matched/,
   );
   expect(() =>
     assertPartnerIndices("me", "the list", [1, 2], ROWS, rules),
@@ -916,7 +925,7 @@ test("run lengths that do not cover the list are a caller fault", () => {
       assertPartnerIndices("me", "the list", [0, 1, 2], ROWS, {
         repeatsGroupedByRuns: {
           rounds: [0, 0],
-          positions: [0, 1],
+          groups: [0, 1],
           runLengths: [1, 1],
         },
       }),
@@ -927,7 +936,7 @@ test("run lengths that do not cover the list are a caller fault", () => {
       assertPartnerIndices("me", "the list", [0, 1], ROWS, {
         repeatsGroupedByRuns: {
           rounds: [0, 0],
-          positions: [0],
+          groups: [0],
           runLengths: [1, 1],
         },
       }),
@@ -938,11 +947,11 @@ test("run lengths that do not cover the list are a caller fault", () => {
       assertPartnerIndices("me", "the list", [0, 1, 2], ROWS, {
         repeatsGroupedByRuns: {
           rounds: [0, 0],
-          positions: [0, 0],
+          groups: [0, 0],
           runLengths: [1, 2],
         },
       }),
-    /one run length per position this side matched, given 1 and 2/,
+    /one run length per partner record this side matched, given 1 and 2/,
   );
 });
 
@@ -952,14 +961,14 @@ test("the run rule cannot be combined with either other relaxation", () => {
   // and getting neither rule's guarantee.
   for (const other of [
     { repeats: true },
-    { repeatsGroupedBy: { rounds: [0], positions: [0] } },
+    { repeatsGroupedBy: { rounds: [0], groups: [0] } },
   ])
     expectCallerFault(
       () =>
         assertPartnerIndices("me", "the list", [0], ROWS, {
           repeatsGroupedByRuns: {
             rounds: [0],
-            positions: [0],
+            groups: [0],
             runLengths: [1],
           },
           ...other,
@@ -1146,6 +1155,14 @@ test("the round refuses a fractional run length", async () => {
   expectProtocolRefusal(err, /not a positive whole number/);
 });
 
+test("the round refuses runs naming more records than the partner counted", async () => {
+  const err = await widenedRound(
+    "starter",
+    onRoundTable((table) => [table[0], table[1], [1, 1, 1]]),
+  );
+  expectProtocolRefusal(err, /more runs than the 2 record\(s\) the partner/);
+});
+
 test("the round refuses an owner list where run lengths are due", async () => {
   const err = await widenedRound(
     "starter",
@@ -1311,21 +1328,56 @@ test("the round refuses a grouping giving one record more positions than the key
   expectProtocolRefusal(err, /more positions than the candidate count/);
 });
 
-// --- The mapped-element pass's canonical position -----------------------------
+// --- The mapped-element pass's widened entry ----------------------------------
+// A round's entries must be exactly the ones its accepted pairs state, entry
+// for entry in the order sent, and each entry's positions distinct and
+// ascending (docs/spec/PROTOCOL.md, The reading pass's preconditions, at the
+// widened entry). Row 0 of each party matches both "A" and "B", so its entry
+// names two positions and the deviations below reach shapes a single position
+// could not.
 
-test("the round refuses a mapped-element entry naming a non-canonical position", async () => {
-  // Position 1 is one the starter's row 0 owns, but its canonical position --
-  // the lowest of the round's matched positions it owns -- is 0. Without the
-  // canonical rule the injectivity the pass rests on does not hold.
+test("the round refuses a mapped-element entry naming fewer positions than its pairs rest on", async () => {
   const err = await widenedRound(
     "starter",
     onMappedElementList(1, (list) =>
       list.map((entry) =>
-        entry.theirIndex === 0 ? { ...entry, theirIndex: 1 } : entry,
+        Array.isArray(entry.theirIndex)
+          ? { ...entry, theirIndex: entry.theirIndex[0] }
+          : entry,
       ),
     ),
   );
-  expectProtocolRefusal(err, /names a position other than the canonical one/);
+  expectProtocolRefusal(
+    err,
+    /names positions other than the ones that round's accepted pairs rest on/,
+  );
+});
+
+test("the round refuses a mapped-element entry whose positions descend", async () => {
+  const err = await widenedRound(
+    "starter",
+    onMappedElementList(1, (list) =>
+      list.map((entry) =>
+        Array.isArray(entry.theirIndex)
+          ? { ...entry, theirIndex: [...entry.theirIndex].reverse() }
+          : entry,
+      ),
+    ),
+  );
+  expectProtocolRefusal(
+    err,
+    /holds an entry whose positions are not in strictly ascending order/,
+  );
+});
+
+test("the round refuses a mapped-element entry naming no position", async () => {
+  const err = await widenedRound(
+    "starter",
+    onMappedElementList(1, (list) =>
+      list.map((entry) => ({ ...entry, theirIndex: [] })),
+    ),
+  );
+  expectProtocolRefusal(err, /holds an entry naming no position/);
 });
 
 // --- A position beyond what a round's slot index addresses --------------------

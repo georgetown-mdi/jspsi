@@ -26,10 +26,18 @@ import type {
 import { inferMetadata } from "./config/metadata.js";
 import type { ColumnMetadata } from "./config/metadata.js";
 import { DEFAULT_DATE_OUTPUT_FORMAT } from "./keyElementWidth.js";
-import { declaredFanOutFunction } from "./fanOutFunctions.js";
+import {
+  declaredFanOutFunction,
+  termsDeclareCandidateSet,
+} from "./fanOutFunctions.js";
+import {
+  candidateSetIsImplementedForStrategy,
+  COUNT_ONLY_SHAPE_REFUSALS,
+} from "./linkageTermsPolicy.js";
 import { redactPrivateKeyMaterial } from "./utils/sanitizeErrorForDisplay.js";
 import {
   applyStep,
+  candidateSetUnderStrategyMessage,
   commitCompiledTransforms,
   compileSteps,
   fanOutDeclaredMessage,
@@ -133,29 +141,35 @@ export function assertStandardizationMatchesTerms(
 }
 
 /**
- * Refuse transforms that declare a fan-out step under a linkage strategy that
- * matches a single value per record, before any matching begins.
+ * Refuse terms that declare a per-(record, key) candidate set -- a `split_on`
+ * fan-out, a `generate_fuzzy_comparisons` expansion, or a `swap` naming both
+ * orders -- under a combination that has no resolution for one, before any
+ * matching begins.
  *
- * Fan-out matching is specified for the single-pass strategy and for it alone
- * (docs/spec/PROTOCOL.md, Fan-out runs under single-pass only), so terms naming
- * anything else are refused here: the cascade -- the schema default -- has no
- * fan-out realization, and a candidate set reaching it would be narrowed to less
- * than the terms declare. The gate is an ALLOWLIST rather than a cascade-named
- * denylist, so a strategy later added to `LinkageStrategySchema` refuses a
- * fan-out until it too realizes one. It is the fan-out sibling of
- * `assertAlgorithmImplemented` and `assertDeduplicateImplemented` in
- * `exchange.ts`, and it runs at the three points those use: when terms are
- * authored or minted, at the local prepare step, and at the agreed-terms run
- * boundary.
+ * Two combinations reach it. A `linkage_strategy` off the candidate-set
+ * allowlist ({@link candidateSetIsImplementedForStrategy}): the gate is an
+ * ALLOWLIST rather than a named denylist, so a strategy later added to
+ * `LinkageStrategySchema` refuses a candidate set until its own resolution is
+ * written (docs/spec/PROTOCOL.md, The combinations that stay unsupported). And
+ * `psi-c`, whose count-only round counts matched VALUES where the resolution
+ * pairs each record at most once, so the count would over-report the linkage it
+ * is used to justify. The third unsupported combination reads both parties'
+ * documents and has its own boundary
+ * ({@link assertCandidateSetCardinalityImplemented}).
  *
- * Both authoring surfaces a fan-out step can reach are checked, because both
- * realize a candidate set: a standardization transformation feeds
- * {@link StandardizedField}, and a linkage-key element transform feeds
+ * It is the candidate-set sibling of `assertAlgorithmImplemented` and
+ * `assertDeduplicateImplemented` in `exchange.ts`, and it runs at the three
+ * points those use: when terms are authored or minted, at the local prepare
+ * step, and at the agreed-terms run boundary.
+ *
+ * Both authoring surfaces a candidate set can reach are checked: a
+ * standardization transformation feeds {@link StandardizedField}, and a
+ * linkage-key element transform, fuzzy declaration, or swap feeds
  * {@link buildKeyStrings}; either way the candidates cross into the key's
- * candidate set. `standardization` is omitted where the caller no longer holds one
- * (the run boundary reads a prepared exchange, which retains the built dataset
- * rather than the spec); what covers that half there is
- * {@link fanOutReachedMatchingRefusal} on the cascade, and on single-pass the
+ * candidate set. `standardization` is omitted where the caller no longer holds
+ * one (the run boundary reads a prepared exchange, which retains the built
+ * dataset rather than the spec); what covers that half there is
+ * {@link fanOutReachedMatchingRefusal} at the round, and on single-pass the
  * declared-width check its table build runs -- both at the point of harm, but
  * after this party's terms have gone on the wire.
  *
@@ -165,42 +179,93 @@ export function assertStandardizationMatchesTerms(
  * per-party and local, so a partner cannot derive its refusal and would be left
  * waiting on a run this party is about to abort.
  *
- * The two surfaces share the same message under DIFFERENT error classes,
- * because they differ in whose content the fault is. A `standardization` is
- * only ever this party's own: no invitation holds one (it is per-party and
- * local), and the
- * accept path derives its own from the adopted terms through
- * `getDefaultStandardization`, whose steps come from the fixed per-type pipelines
- * and never include a fan-out function. So that half is an
- * {@link OperatorConfigError} -- the membership rule for the actionable "config"
- * category both front ends key off -- like `assertSigningModeImplemented`, and
- * raised as the base class because no narrower member fits (this is an
- * unimplemented-feature refusal, not the terms inconsistency
- * {@link StandardizationTermsError} names). A linkage-key element transform is
- * adopted verbatim from the partner's invitation on the accept path, so that half
- * stays a plain {@link UsageError} whose message the web's generic alert swallows,
- * for the same reason as `assertAlgorithmImplemented`. Either way the message names
- * only the fan-out functions this module recognizes -- a declared name reaches it
- * having already matched one -- so no partner free text is interpolated, and the
- * CLI classifies both as a usage error (exit 64) through the base class.
+ * The two surfaces take DIFFERENT error classes, because they differ in whose
+ * content the fault is. A `standardization` is only ever this party's own: no
+ * invitation holds one (it is per-party and local), and the accept path derives
+ * its own from the adopted terms through `getDefaultStandardization`, whose
+ * steps come from the fixed per-type pipelines and never include a fan-out
+ * function. So that half is an {@link OperatorConfigError} -- the membership
+ * rule for the actionable "config" category both front ends key off -- like
+ * `assertSigningModeImplemented`, and raised as the base class because no
+ * narrower member fits (this is an unimplemented-feature refusal, not the terms
+ * inconsistency {@link StandardizationTermsError} names). A linkage key is
+ * adopted verbatim from the partner's invitation on the accept path, so that
+ * half stays a plain {@link UsageError} whose message the web's generic alert
+ * swallows, for the same reason as `assertAlgorithmImplemented`. Either way the
+ * message names only the fan-out functions this module recognizes -- a declared
+ * name reaches it having already matched one -- so no partner free text is
+ * interpolated, and the CLI classifies both as a usage error (exit 64) through
+ * the base class.
  */
 export function assertFanOutImplemented(
   terms: LinkageTerms,
   standardization?: Standardization,
 ): void {
-  if (terms.linkageStrategy === "single-pass") return;
+  const countOnly = terms.algorithm === "psi-c";
+  if (!countOnly && candidateSetIsImplementedForStrategy(terms.linkageStrategy))
+    return;
   for (const transformation of standardization ?? []) {
     const declared = declaredFanOutFunction(transformation.steps);
     if (declared !== undefined)
-      throw new OperatorConfigError(fanOutDeclaredMessage(declared));
+      throw new OperatorConfigError(
+        countOnly
+          ? COUNT_ONLY_SHAPE_REFUSALS.candidateSet
+          : fanOutDeclaredMessage(declared),
+      );
   }
-  for (const key of terms.linkageKeys) {
-    for (const element of key.elements) {
-      const declared = declaredFanOutFunction(element.transform);
-      if (declared !== undefined)
-        throw new UsageError(fanOutDeclaredMessage(declared));
-    }
-  }
+  if (termsDeclareCandidateSet(terms))
+    throw new UsageError(
+      countOnly
+        ? COUNT_ONLY_SHAPE_REFUSALS.candidateSet
+        : candidateSetUnderStrategyMessage(),
+    );
+}
+
+/**
+ * Refuse a candidate set under the `many-to-many` cardinality the two parties'
+ * agreed `deduplicate` values resolve to, before any matching begins.
+ *
+ * `single-pass` refuses `many-to-many` outright, so a cascade realization of
+ * the pair would have no single-pass table to be identical to and the
+ * equivalence obligation that pins the resolution would have no referent
+ * (docs/spec/PROTOCOL.md, The combinations that stay unsupported).
+ * `many-to-one` and `one-to-many` are not refused with it: a candidate set on
+ * either side of those runs under both strategies.
+ *
+ * The combination takes BOTH parties' documents, so unlike
+ * {@link assertFanOutImplemented} it cannot be decided from one. It is applied
+ * at each point the pair is knowable: the accept boundary, where the accepting
+ * party holds the inviter's document and sets its own `deduplicate`
+ * (`deriveAcceptedLinkageTerms`), and the agreed-terms run boundary
+ * (`resolveLinkageCardinality`), which reads both documents and so refuses
+ * symmetrically, both parties aborting at the same point. Below them the
+ * strategy's own fail-closed half refuses a candidate set reaching a
+ * `many-to-many` round ({@link fanOutReachedMatchingRefusal}).
+ *
+ * A plain {@link UsageError}, not an {@link OperatorConfigError}: this reads
+ * the PARTNER's document as well as this party's, so the fault is not
+ * unconditionally this operator's own. The message holds only fixed literals.
+ */
+export function assertCandidateSetCardinalityImplemented(
+  localTerms: LinkageTerms,
+  partnerTerms: LinkageTerms,
+): void {
+  if (!(localTerms.deduplicate && partnerTerms.deduplicate)) return;
+  if (
+    !termsDeclareCandidateSet(localTerms) &&
+    !termsDeclareCandidateSet(partnerTerms)
+  )
+    return;
+  throw new UsageError(
+    "these linkage terms expand one value into several match candidates while " +
+      "both parties set deduplicate to true, which resolves to a many-to-many " +
+      "match. A record of either party could then be matched through several " +
+      "of its candidates at once, and no linkage strategy pairs that " +
+      "combination, so the exchange is refused before matching begins rather " +
+      "than matched to less than the terms declare. Set deduplicate to false " +
+      "on one of the two parties, or remove the expanding step, the fuzzy " +
+      "comparison and the swapped key order from every linkage key.",
+  );
 }
 
 /**

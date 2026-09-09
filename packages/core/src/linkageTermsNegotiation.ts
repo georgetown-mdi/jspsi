@@ -19,6 +19,7 @@ import {
   assertCountOnlyTermsShape,
   assertDeduplicateImplemented,
 } from "./linkageTermsPolicy.js";
+import { assertCandidateSetCardinalityImplemented } from "./linkageSatisfiability.js";
 import {
   LinkageTermsSchema,
   MAX_TEXT_LENGTH,
@@ -178,6 +179,11 @@ export function deriveAcceptedLinkageTerms(
   // appear, so a value that document cannot hold is refused here.
   assertCountOnlyTermsShape(derived);
   assertDeduplicateImplemented(derived);
+  // The accept boundary is the first point the `deduplicate` PAIR is knowable,
+  // this party holding the inviter's document and setting its own side, so the
+  // combination that takes both is refused here rather than left to the run
+  // boundary (docs/spec/PROTOCOL.md, The combinations that stay unsupported).
+  assertCandidateSetCardinalityImplemented(derived, inviterTerms);
   // Fail closed on an inviter config that mirrors to an incoherent acceptor config
   // (see the doc comment). safeParse is a validity gate only; return the object we
   // built, not parsed.data, so the canonical/agreed-terms bytes are unchanged.

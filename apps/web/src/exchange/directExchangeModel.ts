@@ -138,11 +138,12 @@ export function directDeduplicateIntentFields(deduplicate: boolean): {
  * `acceptorDeduplicateRefusal` does, where the invitation declares the
  * partner's side and the pair is settled. What it can state exactly is the
  * pair BOTH sides declaring the term resolves to, read from
- * `assertBothSidedDeduplicateImplemented` -- the one refusal the run's
- * cardinality resolution makes over the pair, which the screen's own title
- * names -- so it states the combination the run would refuse and no others.
- * Every other refusal `resolveLinkageCardinality` makes reads one document
- * alone, and titling it as the partner's doing would misattribute it.
+ * `assertBothSidedDeduplicateImplemented`, which the screen's own title
+ * names -- the notice is that refusal alone, not a totalizing one.
+ * `resolveLinkageCardinality`'s other pair-wide check,
+ * `assertCandidateSetCardinalityImplemented`, cannot fire on this spine: its
+ * terms come from `previewInferredTerms` over the file's columns and declare
+ * no candidate set.
  * Today the pair refused is the agreed `(true, true)` one under
  * `single-pass`; core's own message names the strategy to move to and the
  * one-sided pair to fall back to.

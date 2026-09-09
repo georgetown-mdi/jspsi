@@ -49,6 +49,7 @@ import {
   hostileVariants,
 } from "@psilink/core/testing";
 import type {
+  Algorithm,
   ConnectionConfig,
   ConnectionEndpoint,
   ConsentFact,
@@ -196,12 +197,14 @@ function splitEndpointToken(
 function splittingKeyToken(
   expires: string,
   linkageStrategy: LinkageStrategy,
+  algorithm: Algorithm = "psi",
 ): InvitationToken {
   const token = sampleToken(expires);
   return {
     ...token,
     linkageTerms: {
       ...token.linkageTerms,
+      algorithm,
       linkageStrategy,
       linkageKeys: [
         {
@@ -3513,24 +3516,27 @@ describe("displayInvitation: the declared terms it discloses (columns, citations
 
   test("displayInvitation: states what a splitting key does, in the register its strategy puts it in", () => {
     // A key element that splits its value is matched on each candidate, which is
-    // both a widening and a disclosure -- and under a strategy that matches one
-    // value per record it is a refusal instead. The sentence for each case comes
-    // from core's shared classification, so this prompt and the web consent screen
-    // state the consequence in the same words rather than two accounts of it.
+    // both a widening and a disclosure -- and under a combination that matches
+    // one value per record it is a refusal instead. The sentence for each case
+    // comes from core's shared classification, so this prompt and the web consent
+    // screen state the consequence in the same words rather than two accounts of
+    // it.
     const log = getLogger("accept-display-fan-out-test");
     log.setLevel("silent");
 
-    const matched = renderDisplayInvitation(
-      log,
-      splittingKeyToken(FUTURE(), "single-pass"),
-    );
-    expect(matched).toContain("several values per record (enforced):");
-    expect(matched).toContain(CONSENT_FACTS.fanOutCandidates.note);
-    expect(matched).toContain("(multiple)");
+    for (const linkageStrategy of ["cascade", "single-pass"] as const) {
+      const matched = renderDisplayInvitation(
+        log,
+        splittingKeyToken(FUTURE(), linkageStrategy),
+      );
+      expect(matched).toContain("several values per record (enforced):");
+      expect(matched).toContain(CONSENT_FACTS.fanOutCandidates.note);
+      expect(matched).toContain("(multiple)");
+    }
 
     const refused = renderDisplayInvitation(
       log,
-      splittingKeyToken(FUTURE(), "cascade"),
+      splittingKeyToken(FUTURE(), "cascade", "psi-c"),
     );
     expect(refused).toContain("several values per record (enforced):");
     expect(refused).toContain(CONSENT_FACTS.fanOutRefused.note);
@@ -3977,14 +3983,15 @@ describe("displayInvitation: the declared terms it discloses (columns, citations
     });
     // The fan-out pair is the fifth and sixth, for the same reason again: both are
     // raised by a linkage key that splits its element's value, and which of the two
-    // follows the strategy, so no variation above reaches either.
+    // follows the algorithm and the strategy together, so no variation above
+    // reaches either.
     const fanOutMatched = renderDisplayInvitation(
       log,
       splittingKeyToken(FUTURE(), "single-pass"),
     );
     const fanOutRefused = renderDisplayInvitation(
       log,
-      splittingKeyToken(FUTURE(), "cascade"),
+      splittingKeyToken(FUTURE(), "cascade", "psi-c"),
     );
     // The sole receiver's display limit is the seventh, for the reason the pair
     // above is a pair: it is raised only by a DEDUPLICATING invitation whose

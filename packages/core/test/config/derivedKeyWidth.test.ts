@@ -21,6 +21,7 @@ import {
   declaredEffectiveKeyCount,
   declaredKeyWidth,
   FAN_OUT_CANDIDATES_PER_ELEMENT,
+  keyDeclaresCandidateSet,
   MAX_KEY_CANDIDATE_WIDTH,
   SWAP_VARIANT_WIDTH_FACTOR,
 } from "../../src/fanOutFunctions";
@@ -862,15 +863,15 @@ describe("a party whose own cleaning fans out", () => {
   });
 });
 
-describe("a declared width off single-pass", () => {
+describe("a declared width under a strategy that matches one value per record", () => {
+  // Both shipped strategies resolve a candidate set, so the run boundary's
+  // refusal is reached only by a strategy this build does not recognize. Cast
+  // because no such member exists yet -- which is the case this pins.
+  const unlistedStrategyTerms = (base: LinkageTerms): LinkageTerms =>
+    ({ ...base, linkageStrategy: "two-pass" }) as unknown as LinkageTerms;
+
   test("runExchange refuses it before anything goes on the wire", async () => {
-    // A fuzzy comparison declares a width without naming a fan-out step, so
-    // assertFanOutImplemented does not reach it: this is the guard that refuses a
-    // candidate set on a strategy that matches one value per record.
-    const cascadeTerms: LinkageTerms = {
-      ...termsWithFuzzyKey("adjacent_years"),
-      linkageStrategy: "cascade",
-    };
+    const fuzzyTerms = termsWithFuzzyKey("adjacent_years");
     const metadata: Metadata = [
       {
         name: "last_name",
@@ -880,12 +881,18 @@ describe("a declared width off single-pass", () => {
       },
       { name: "ssn", type: "ssn", role: "linkage", isPayload: false },
     ];
+    // Prepared under a strategy that resolves a candidate set, then given the
+    // unrecognized one, the way a caller that skipped prepareForExchange could.
     const prepared = prepareForExchange(
-      { linkageTerms: cascadeTerms, metadata },
+      {
+        linkageTerms: { ...fuzzyTerms, linkageStrategy: "single-pass" },
+        metadata,
+      },
       "Party",
       [{ last_name: "SMITH", ssn: "123456789" }],
       ["last_name", "ssn"],
     );
+    prepared.linkageTerms = unlistedStrategyTerms(fuzzyTerms);
     const failIfUsed = (): never => {
       throw new Error("the connection was used past the width refusal");
     };
@@ -896,7 +903,45 @@ describe("a declared width off single-pass", () => {
       { psiLibrary },
     );
     await expect(run).rejects.toThrow(UsageError);
-    await expect(run).rejects.toThrow(/candidate value slot\(s\) per record/);
+    await expect(run).rejects.toThrow(/matches a single value per record/);
     await expect(run).rejects.not.toThrow(/partner/);
+  });
+
+  test("the structural reading and the derived width agree on every producer", () => {
+    // The run boundary carries both readings -- the producer list
+    // (keyDeclaresCandidateSet) and the number (declaredKeyWidth) -- so a key
+    // one calls expanding and the other does not would slip past whichever ran
+    // second. Driven over each producer and over a key declaring none.
+    const keys: Array<LinkageKey> = [
+      { name: "plain", elements: [{ field: "last_name" }] },
+      {
+        name: "fan-out",
+        elements: [
+          {
+            field: "last_name",
+            transform: [{ function: "split_on", params: { delimiter: "-" } }],
+          },
+        ],
+      },
+      {
+        name: "fuzzy",
+        elements: [
+          {
+            field: "last_name",
+            transform: [
+              { function: "substring", params: { start: 1, length: 4 } },
+            ],
+            generateFuzzyComparisons: "transpositions",
+          },
+        ],
+      },
+      {
+        name: "swap",
+        elements: [{ field: "last_name" }, { field: "ssn" }],
+        swap: ["last_name", "ssn"],
+      },
+    ];
+    for (const key of keys)
+      expect(keyDeclaresCandidateSet(key)).toBe(declaredKeyWidth(key) > 1);
   });
 });

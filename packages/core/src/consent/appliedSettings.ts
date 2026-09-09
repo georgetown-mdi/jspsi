@@ -24,7 +24,7 @@
  * A key's `swap` term rides this same flag even though it is not
  * `generateFuzzyComparisons`: its full variant has the receiver build the
  * key in both orders (docs/notes/one-sided-fuzzy-expansion.md), which is
- * a candidate set like any other strategy but single-pass refuses. With
+ * a candidate set both linkage strategies resolve. With
  * the flag false the receiver builds the exchanged order alone, so the
  * operator-facing "matched in either order" copy overstates the current
  * behavior.

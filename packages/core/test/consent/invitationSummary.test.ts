@@ -258,25 +258,32 @@ describe("the consent summary's fan-out register", () => {
     ],
   };
 
-  test("a fan-out element under single-pass is marked as matching on several values", () => {
-    // The element matches on every candidate it realizes, so the header marker
-    // names that breadth. The two flags beside it are what selects the consent
-    // fact each surface renders.
-    const summary = summarizeInvitation({
-      linkageTerms: { ...fanOutTerms, linkageStrategy: "single-pass" },
-    });
-    expect(summary.linkageKeys[0].headerFields).toEqual([
-      "last name (multiple)",
-    ]);
-    expect(summary.fansOut).toBe(true);
-    expect(summary.fanOutApplied).toBe(true);
-  });
+  test.each(["cascade", "single-pass"] as const)(
+    "a fan-out element under %s is marked as matching on several values",
+    (linkageStrategy) => {
+      // Both strategies match on every candidate the element realizes, so the
+      // header marker names that breadth under either. The two flags beside it
+      // are what selects the consent fact each surface renders.
+      const summary = summarizeInvitation({
+        linkageTerms: { ...fanOutTerms, linkageStrategy },
+      });
+      expect(summary.linkageKeys[0].headerFields).toEqual([
+        "last name (multiple)",
+      ]);
+      expect(summary.fansOut).toBe(true);
+      expect(summary.fanOutApplied).toBe(true);
+    },
+  );
 
-  test("the same element under cascade is marked as not supported", () => {
+  test("the same element under the count-only algorithm is marked as not supported", () => {
     // Refused before the exchange runs, so no matching of any breadth happens
     // and naming one would describe a run that does not occur.
     const summary = summarizeInvitation({
-      linkageTerms: { ...fanOutTerms, linkageStrategy: "cascade" },
+      linkageTerms: {
+        ...fanOutTerms,
+        algorithm: "psi-c",
+        linkageStrategy: "cascade",
+      },
     });
     expect(summary.linkageKeys[0].headerFields).toEqual([
       "last name (not supported)",
@@ -340,6 +347,70 @@ describe("the consent summary's fan-out register", () => {
       /each able to match independently/,
     );
     expect(TRANSFORM_FUNCTION_GLOSSARY.split_on).not.toMatch(/refuses/);
+  });
+});
+
+describe("the consent summary's refused-pair register", () => {
+  const metadata = inferMetadata(LINKAGE_ONLY_COLUMNS, []);
+  const baseTerms = getDefaultLinkageTerms("Inviter", metadata);
+  const fanOutKeys = [
+    {
+      name: "last name",
+      elements: [
+        {
+          field: "last_name",
+          transform: [{ function: "split_on", params: { delimiter: " " } }],
+        },
+      ],
+    },
+  ];
+
+  // Whether an acceptance declaring this party's own `deduplicate` is refused,
+  // driven through the boundary the accept action itself runs rather than
+  // through a second reading of the terms.
+  const acceptRefuses = (
+    terms: LinkageTerms,
+    deduplicate: boolean,
+  ): boolean => {
+    try {
+      deriveAcceptedLinkageTerms(terms, "Acceptor", deduplicate);
+      return false;
+    } catch {
+      return true;
+    }
+  };
+
+  test("states the refusal where the invitation holds both halves of the pair", () => {
+    // The seat reads this before the operator sets the one value the
+    // invitation does not hold, so the flag and the accept's own verdict on
+    // that value are driven together.
+    const terms = { ...baseTerms, deduplicate: true, linkageKeys: fanOutKeys };
+    expect(
+      summarizeInvitation({ linkageTerms: terms }).acceptorDeduplicateRefused,
+    ).toBe(true);
+    expect(acceptRefuses(terms, true)).toBe(true);
+    expect(acceptRefuses(terms, false)).toBe(false);
+  });
+
+  test("withholds it where the inviting party declares no deduplicate", () => {
+    // Half the pair is the invitation's own: a candidate set alone leaves this
+    // party's value free, and stating a refusal for it would name one the
+    // accept does not make.
+    const terms = { ...baseTerms, linkageKeys: fanOutKeys };
+    expect(
+      summarizeInvitation({ linkageTerms: terms }).acceptorDeduplicateRefused,
+    ).toBe(false);
+    expect(acceptRefuses(terms, true)).toBe(false);
+  });
+
+  test("withholds it where the terms declare no candidate set", () => {
+    // The other half: a deduplicating invitation whose keys expand nothing
+    // pairs a both-sided cardinality the cascade matches.
+    const terms = { ...baseTerms, deduplicate: true };
+    expect(
+      summarizeInvitation({ linkageTerms: terms }).acceptorDeduplicateRefused,
+    ).toBe(false);
+    expect(acceptRefuses(terms, true)).toBe(false);
   });
 });
 

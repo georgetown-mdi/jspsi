@@ -133,12 +133,11 @@ export function DirectConfirmSection({
     [profile, linkageStrategy, deduplicate],
   );
 
-  // What the run refuses if the partner declares the term too. Read from the
-  // same boundary the run resolves the joint cardinality at, so the screen
-  // names the combination the run would refuse and no others. It states a
-  // consequence rather than holding Run: this spine reads no partner
-  // declaration, so a one-sided pair -- which runs under either strategy -- is
-  // the operator's to choose.
+  // What the run refuses if the partner declares the term too: the
+  // both-sided deduplicate refusal, read from the same boundary the run
+  // resolves the joint cardinality at. It states a consequence rather than
+  // holding Run: this spine reads no partner declaration, so a one-sided
+  // pair -- which runs under either strategy -- is the operator's to choose.
   const bothSidedNotice = directBothSidedDeduplicateNotice(
     preview.linkageTerms,
   );

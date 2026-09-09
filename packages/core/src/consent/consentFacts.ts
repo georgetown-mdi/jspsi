@@ -387,6 +387,33 @@ export const CONSENT_FACTS = {
       "matched records. Withholding them is a limit of the exchange rather " +
       "than a choice of the software your partner runs.",
   },
+  acceptorDeduplicateRefused: {
+    basis: "enforced",
+    reason:
+      "What this party's own `deduplicate` would do against an invitation " +
+      "that declares both a candidate set and the inviting party's own " +
+      "`deduplicate`: the pair resolves to a many-to-many match, which no " +
+      "linkage strategy pairs with a candidate set, so the accept boundary " +
+      "refuses it (`assertCandidateSetCardinalityImplemented`, reached from " +
+      "`deriveAcceptedLinkageTerms`) and the agreed-terms run boundary " +
+      "refuses it again (`resolveLinkageCardinality`). Both of the " +
+      "conditions this party does not set are the invitation's own, so the " +
+      "consequence is stated before the value that completes the " +
+      "combination is set rather than met at the accept. Resolved by " +
+      "`acceptorDeduplicateRefused` (consent/invitationSummary.ts) off the " +
+      "refusal's own predicates, so a surface never states it for an " +
+      "invitation the accept would take. The exchange does not run at all, " +
+      "which is a fact of the run rather than of the partner's conduct.",
+    note:
+      "Your partner declares that several of its records may match one of " +
+      "yours, and these terms expand one value into several match candidates " +
+      "for a linkage key. With duplicate matching set for your own records " +
+      "as well, each party's records could group the other's while matching " +
+      "through several candidates at once, which no linkage strategy pairs " +
+      "-- so the exchange will refuse to run. Leave your own setting off to " +
+      "run these terms, or ask your partner for an invitation that drops " +
+      "either the expansion or its own duplicate matching.",
+  },
   matchedFields: {
     basis: "enforced",
     reason:
@@ -429,9 +456,12 @@ export const CONSENT_FACTS = {
       "one key, not what the partner does with it. Every candidate enters that " +
       "key's round as its own entry; a record appearing in any of the round's " +
       "candidate pairs leaves candidacy for every later key, paired or not; and " +
-      "the index table the single-pass receiver holds carries each sender " +
-      "record's candidate grouping for every key, matched or not. All three are " +
-      "properties of the round rather than of anyone's conduct. The normative " +
+      "each strategy pays a grouping disclosure of its own -- the index table " +
+      "the single-pass receiver holds carries each sender record's candidate " +
+      "grouping for every key, matched or not, where a cascade round states " +
+      "each party's grouping of that round's matched values alone. All three " +
+      "are properties of the round rather than of anyone's conduct. The " +
+      "normative " +
       "rows are docs/spec/PROTOCOL.md's (Fan-out matching, and the disclosure " +
       "delta fan-out pays), so a row reclassified there and not here is a " +
       "divergence between a specification and the sentence an acceptor consents " +
@@ -442,28 +472,31 @@ export const CONSENT_FACTS = {
       "That match can rest on one candidate out of a name rather than on the " +
       "whole value, which is weaker evidence. A record matched this way is " +
       "paired at most once and is then left out of the later, less precise " +
-      "keys, whether or not that pairing stands. Splitting runs under " +
-      "single-pass linkage, so the party that receives the other's key " +
-      "structure also learns how many candidates each of the other's records " +
-      "produced for each key and which of its values came from the same " +
-      "record.",
+      "keys, whether or not that pairing stands. Under single-pass linkage the " +
+      "party that receives the other's key structure also learns how many " +
+      "candidates each of the other's records produced for each key and which " +
+      "of its values came from the same record; under cascade linkage each " +
+      "party learns instead how the other's matched values group into records, " +
+      "round by round, for the records still in the running.",
   },
   fanOutRefused: {
     basis: "enforced",
     reason:
       "The other case of the same line, and enforced for the same reason the " +
-      "`deduplicate` refusal is: matching on several candidates per record is " +
-      "specified for the single-pass strategy alone, so terms declaring one " +
-      "under any other strategy are refused when they are authored or minted, " +
-      "at the local prepare step, and again at the agreed-terms run boundary. " +
-      "The exchange this invitation proposes does not run at all, which is a " +
-      "fact of the run rather than of the partner's conduct.",
+      "`deduplicate` refusal is: a count-only exchange counts matched values " +
+      "where the matching pairs each record at most once, and a linkage " +
+      "strategy with no resolution written for a candidate set matches one " +
+      "value per record, so terms declaring one under either are refused when " +
+      "they are authored or minted, at the local prepare step, and again at " +
+      "the agreed-terms run boundary. The exchange this invitation proposes " +
+      "does not run at all, which is a fact of the run rather than of the " +
+      "partner's conduct.",
     note:
       "Your partner proposes splitting a value into several candidates to match " +
-      "on, which runs under single-pass linkage only, and this invitation names " +
-      "a different linkage strategy -- so the exchange will refuse to run. Ask " +
-      "your partner for an invitation that either drops the split or uses " +
-      "single-pass linkage.",
+      "on, which the algorithm and linkage strategy this invitation names do " +
+      "not match on -- so the exchange will refuse to run. Ask your partner for " +
+      "an invitation that either drops the split or names terms that match on " +
+      "each candidate.",
   },
   inboundPayloadColumnsCarried: {
     basis: "enforced",
@@ -579,15 +612,17 @@ export type ConsentFactId = keyof typeof CONSENT_FACTS;
  * A surface offering no such control accepts with that party's side derived
  * false ({@link deriveAcceptedLinkageTerms}), so the run these state -- the
  * accepting party grouping its own records while the inviting party is
- * entitled to no result -- is one it never conducts, and rendering either
- * sentence there would state a disclosure that acceptance does not make. The
- * per-surface checks that hold a surface to every fact's note read this set
- * rather than each excluding by hand, so which surface owes which sentence
- * stays one judgment.
+ * entitled to no result, and the refusal that party's own `deduplicate`
+ * completes -- is one it never conducts, and rendering any of these sentences
+ * there would state a disclosure or a refusal that acceptance does not make.
+ * The per-surface checks that hold a surface to every fact's note read this
+ * set rather than each excluding by hand, so which surface owes which
+ * sentence stays one judgment.
  */
 export const ACCEPTOR_DEDUPLICATE_CONTROL_FACTS = [
   "partnerReadsDuplicateGrouping",
   "partnerDuplicateGroupingWithheld",
+  "acceptorDeduplicateRefused",
 ] as const satisfies ReadonlyArray<ConsentFactId>;
 
 /**

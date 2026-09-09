@@ -2,12 +2,10 @@ import { expect, test, vi } from "vitest";
 
 import PSI from "@openmined/psi.js";
 
-// The cascade's realization of a candidate set is built but not lit: the
-// strategy allowlist answers false for it, so the refusals standing at
-// authoring, prepare, and the run boundary have nothing to slip past
-// (CANDIDATE_SET_IMPLEMENTED_BY_STRATEGY, linkageTermsPolicy.ts). This file
-// pins the resolution behind that entry, exactly as the fuzzy-expansion tests
-// pin the key-building half behind APPLIED_SETTINGS.
+// This file drives the cascade's resolution of a candidate set at the link
+// boundary, below every terms-level refusal, with the strategy allowlist held
+// open so a fixture reads the resolution rather than an entry
+// (CANDIDATE_SET_IMPLEMENTED_BY_STRATEGY, linkageTermsPolicy.ts).
 vi.mock("../../src/linkageTermsPolicy", async (importOriginal) => {
   const original =
     await importOriginal<typeof import("../../src/linkageTermsPolicy")>();
@@ -18,12 +16,12 @@ import { PSIParticipant } from "../../src/psi/participant";
 import {
   groupDuplicatesAndRemoveUndefineds,
   linkViaPSI,
+  linkViaSinglePassPSI,
   removeDuplicatesAndUndefineds,
   type LinkageCardinality,
 } from "../../src/psi/link";
 import {
   createMessagePipe,
-  ConnectionError,
   type MessageConnection,
 } from "../../src/connection/messageConnection";
 import type { AssociationTable } from "../../src/types";
@@ -420,13 +418,14 @@ test("a deduplicating party no producer widened still omits its grouping", async
   expect(grouped).toStrictEqual([]);
 });
 
-// --- rounds no mapped-element list can state ----------------------------------
-// A cascade round reports one partner match per record, naming one candidate
-// group of the partner's, and a candidate set can produce accepted pairs that
-// form does not hold. Each shape below is refused AT THE ROUND, on both parties
-// -- they resolve the same accepted pairs from the same two groupings -- rather
-// than reaching the post-round pass, where one party would abort blaming a
-// conforming partner after its own list had gone out.
+// --- the shapes the widened mapped-element entry exists for -------------------
+// A cascade round states, per accepted record, the SET of the partner's
+// positions that record's accepted pairs rest on, so an accepted pair set no
+// single canonical position could name is reported rather than refused
+// (docs/spec/PROTOCOL.md, The final mapped-element entry names the positions
+// its record's pairs rest on). Each shape below reaches one of those forms, and
+// each is asserted to resolve on BOTH parties, to the same pairs, in both role
+// assignments.
 
 // One record accepted against records in two DIFFERENT matched groups: the
 // sweep accepts a record against every member of a group whatever it has
@@ -434,102 +433,110 @@ test("a deduplicating party no producer widened still omits its grouping", async
 const CROSS_GROUP_ONE_SIDE: Array<Column> = [[new Set(["a", "b"])]];
 const CROSS_GROUP_MANY_SIDE: Array<Column> = [["a", "b"]];
 
-// Two accepted records of the deduplicating side sharing one canonical
-// position: "V2" is the lowest matched position of both records, so the "one"
-// side's list names that one position once per accepted record.
+// Two accepted records of the deduplicating side sharing one lowest matched
+// position: "V2" is the lowest of both records, so one canonical position per
+// accepted record could not tell them apart.
 const SHARED_CANONICAL_MANY_SIDE: Array<Column> = [
   [new Set(["V2", "V1"]), new Set(["V0", "V2"])],
 ];
 const SHARED_CANONICAL_ONE_SIDE: Array<Column> = [["V1", "V0", "V2"]];
 
-// The same collision as the randomized corpus first reached it: rows that sit
-// the round out, and a value two of the "one" side's records hold, which that
-// side therefore drops.
+// The same shape as the randomized corpus first reached it: rows that sit the
+// round out, and a value two of the "one" side's records hold, which that side
+// therefore drops.
 const MINIMAL_MANY_SIDE: Array<Column> = [
   [undefined, new Set(["V2", "V1"]), new Set(["V0", "V2"]), undefined],
 ];
 const MINIMAL_ONE_SIDE: Array<Column> = [["V1", "V0", "V0", "V2"]];
 
-// The sibling shape: no two accepted records share a canonical position, but
-// one record's group holds a record canonicalized at a lower position, so the
-// two named groups overlap and the pass would count that record twice.
+// A group split across two of the "one" side's records: the many side's
+// position for "V2" is owned by both its records, and each is accepted with a
+// different partner record.
 const OVERLAPPING_MANY_SIDE: Array<Column> = [[new Set(["V0", "V2"]), "V2"]];
 const OVERLAPPING_ONE_SIDE: Array<Column> = [["V0", "V2"]];
 
-async function settledCascade(
+async function runSinglePass(
   starterKeys: Array<Column>,
   joinerKeys: Array<Column>,
   starterCardinality: LinkageCardinality,
-): Promise<Array<unknown>> {
+): Promise<CascadeRun> {
   const [starterConn, joinerConn] = createMessagePipe();
   const keyWidths = declaredKeyWidths(starterKeys, joinerKeys);
-  const settle = (run: Promise<unknown>): Promise<unknown> =>
-    run.then(
-      (table) => table,
-      (err: unknown) => err,
-    );
-  const outcomes = await Promise.all([
-    settle(
-      linkViaPSI(
-        { cardinality: starterCardinality },
-        makeParticipant("starter"),
-        starterConn,
-        starterKeys,
-        candidateSetBounds(joinerKeys[0].length, keyWidths),
-        -1,
-      ),
+  const [starter, joiner] = await Promise.all([
+    linkViaSinglePassPSI(
+      { cardinality: starterCardinality },
+      makeParticipant("starter"),
+      starterConn,
+      starterKeys,
+      {
+        ...candidateSetBounds(joinerKeys[0].length, keyWidths),
+        localFanOutFactor: 1,
+      },
+      false,
+      -1,
     ),
-    settle(
-      linkViaPSI(
-        { cardinality: mirrorCardinality(starterCardinality) },
-        makeParticipant("joiner"),
-        joinerConn,
-        joinerKeys,
-        candidateSetBounds(starterKeys[0].length, keyWidths),
-        -1,
-      ),
+    linkViaSinglePassPSI(
+      { cardinality: mirrorCardinality(starterCardinality) },
+      makeParticipant("joiner"),
+      joinerConn,
+      joinerKeys,
+      {
+        ...candidateSetBounds(starterKeys[0].length, keyWidths),
+        localFanOutFactor: 1,
+      },
+      false,
+      -1,
     ),
   ]);
-  await starterConn.close();
-  return outcomes;
-}
-
-function expectRoundRefusal(outcome: unknown): void {
-  expect(outcome).toBeInstanceOf(ConnectionError);
-  expect((outcome as ConnectionError).kind).toBe("protocol");
-  expect((outcome as ConnectionError).message).toMatch(
-    /matched records a cascade exchange cannot report one at a time/,
-  );
+  return { starter, joiner };
 }
 
 // Each shape in both role assignments: the sweep's order is role-derived, so a
-// refusal decided by the resolved pairs has to land whichever party holds the
-// PSI sender role.
-async function expectBothPartiesRefuse(
+// pairing decided by the resolved ranks has to land whichever party holds the
+// PSI sender role. The table single-pass computes is what each is held to.
+async function expectBothPartiesResolveAsSinglePass(
   manySide: Array<Column>,
   oneSide: Array<Column>,
 ): Promise<void> {
-  for (const outcome of await settledCascade(manySide, oneSide, "many-to-one"))
-    expectRoundRefusal(outcome);
-  for (const outcome of await settledCascade(oneSide, manySide, "one-to-many"))
-    expectRoundRefusal(outcome);
+  for (const [starterKeys, joinerKeys, cardinality] of [
+    [manySide, oneSide, "many-to-one"],
+    [oneSide, manySide, "one-to-many"],
+  ] as Array<[Array<Column>, Array<Column>, LinkageCardinality]>) {
+    const cascade = await runCascade(starterKeys, joinerKeys, cardinality);
+    const single = await runSinglePass(starterKeys, joinerKeys, cardinality);
+    expect(sortAssociationTable(cascade.starter)).toStrictEqual(
+      sortAssociationTable(single.starter),
+    );
+    expect(sortAssociationTable(cascade.joiner)).toStrictEqual(
+      sortAssociationTable(single.joiner),
+    );
+  }
 }
 
-test("both parties refuse a record reaching two of the partner's groups", async () => {
-  await expectBothPartiesRefuse(CROSS_GROUP_MANY_SIDE, CROSS_GROUP_ONE_SIDE);
+test("a record reaching two of the partner's groups resolves as single-pass does", async () => {
+  await expectBothPartiesResolveAsSinglePass(
+    CROSS_GROUP_MANY_SIDE,
+    CROSS_GROUP_ONE_SIDE,
+  );
 });
 
-test("both parties refuse two accepted records sharing a canonical position", async () => {
-  await expectBothPartiesRefuse(
+test("two accepted records sharing a lowest position resolve as single-pass does", async () => {
+  await expectBothPartiesResolveAsSinglePass(
     SHARED_CANONICAL_MANY_SIDE,
     SHARED_CANONICAL_ONE_SIDE,
   );
 });
 
-test("both parties refuse the collision the randomized corpus first reached", async () => {
-  await expectBothPartiesRefuse(MINIMAL_MANY_SIDE, MINIMAL_ONE_SIDE);
+test("the shape the randomized corpus first reached resolves as single-pass does", async () => {
+  await expectBothPartiesResolveAsSinglePass(
+    MINIMAL_MANY_SIDE,
+    MINIMAL_ONE_SIDE,
+  );
 });
 
-test("both parties refuse two named groups that overlap", async () => {
-  await expectBothPartiesRefuse(OVERLAPPING_MANY_SIDE, OVERLAPPING_ONE_SIDE);
+test("a group split across two of the one side's records resolves as single-pass does", async () => {
+  await expectBothPartiesResolveAsSinglePass(
+    OVERLAPPING_MANY_SIDE,
+    OVERLAPPING_ONE_SIDE,
+  );
 });
