@@ -748,16 +748,25 @@ derived from the other's.
 
 ### The FIPS reference build's inventory
 
-These figures measure the reference build `Dockerfile.fips` was derived from,
-on `aarch64`, against the Alpine image built the same day. That reference
-installed `binutils` (29,160,927 bytes installed) to read the module version out
-of `fips.so` with `strings`, which this build does not need because it reads the
-version back through `openssl list` instead, so the reference's package count and
-size run above what `Dockerfile.fips` produces: at the pins above it installs
-165 packages on `aarch64` against the reference's 167. Nothing has been measured
-on `x86_64`.
+The shipped `Dockerfile.fips` build at the pins above, re-measured 2026-09-09
+(`scratch/fips-5438-remeasure/`), installs **165 OS packages** and weighs
+652,525,047 bytes (653 MB) on `x86_64` and 801,698,635 bytes (802 MB) on
+`aarch64`. Of those 165, **37 hold a GPL-3.0 or LGPL-3.0 term** -- the
+reference build's 39 (enumerated below) minus `binutils` and its
+`elfutils-debuginfod-client` dependency, both of which hold a v3 term and
+neither of which the shipped build installs.
 
-| | Alpine image | FIPS variant (reference build) |
+The table below is the older one-off reference build `Dockerfile.fips` was
+derived from, measured on `aarch64` against the Alpine image built the same day.
+That reference installed `binutils` (29,160,927 bytes installed) to read the
+module version out of `fips.so` with `strings`, which the shipped build does not
+need because it reads the version back through `openssl list` instead.
+`binutils` and its `elfutils-debuginfod-client` dependency are the only two
+packages the reference installs that the shipped build does not, so it holds 167
+packages against the shipped 165; its absolute size is a separate earlier
+measurement, not the shipped build's size plus `binutils`.
+
+| | Alpine image | FIPS variant (reference build, with binutils) |
 | --- | --- | --- |
 | Image size | 575,506,781 bytes (576 MB) | 1,055,721,059 bytes (1056 MB) |
 | OS packages | 63 | 167 |
@@ -786,6 +795,8 @@ Four more have an unconditional v3 term from elsewhere in the closure:
 normal case for a linked C++ runtime. The remaining six of the 39 --
 `elfutils-libelf`, `elfutils-libs`, `elfutils-default-yama-scope`, `gmp`,
 `libunistring` and `nettle` -- offer a GPLv2-or-later arm beside the LGPLv3 one,
-so they have a v3 term only under the arm taken. Whether that breadth changes
+so they have a v3 term only under the arm taken. The shipped build installs
+neither `binutils` nor `elfutils-debuginfod-client`, so its own count is the 37
+named above rather than this reference build's 39. Whether that breadth changes
 this project's distribution posture is a licensing call rather than a
 measurement, and it is not settled here.

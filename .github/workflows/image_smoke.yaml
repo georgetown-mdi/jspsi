@@ -794,10 +794,10 @@ jobs:
       # images ahead of its registry login. Accepting one in
       # .github/trivyignore.yaml instead would make this leg green everywhere and
       # take that refusal with it: both images' release gate reads that same file.
-      # `!cancelled()` rather than no condition at all: this is the last step of
-      # the job and the only one whose subject is the image's package surface
-      # rather than its behaviour, so a functional smoke that failed above is a
-      # reason to want the scan's answer too and not a reason to lose it. It is
+      # `!cancelled()` rather than no condition at all: the scan is the only
+      # step whose subject is the image's package surface rather than its
+      # behaviour, so a functional smoke that failed above is a reason to want
+      # the scan's answer too and not a reason to lose it. It is
       # the condition the published-tag leg below runs under, and it keeps this
       # invocation answering for the same runs as the release workflow's two
       # (`scripts/trivy-threshold-parity.test.mjs`).
