@@ -8,7 +8,7 @@ import {
   redactAndSanitizeForDisplay,
   sanitizeErrorForDisplay,
 } from "@psilink/core";
-import type { ExchangeStageDefinition } from "@psilink/core";
+import type { ExchangeStageDefinition, ResolvedMatching } from "@psilink/core";
 
 /**
  * The fixed file descriptor the opt-in machine-readable event stream is written
@@ -170,6 +170,19 @@ export interface ResultEvent extends EventBase {
    * neither; absent means there was no count to qualify.
    */
   countReportedByPartner?: boolean;
+  /**
+   * What the two parties' agreed `deduplicate` values resolved to for this
+   * party ({@link ResolvedMatching}): the pair as presented and the cardinality
+   * it gives this side. Present on every successful run.
+   *
+   * On the stream because the human log states it at info level, which a
+   * supervisor discarding stderr -- or running at a quieter level -- never
+   * reads, and a console seat watching the run reads nothing else. Both
+   * booleans and the closed cardinality label are this party's own values,
+   * derived from terms the run boundary already parsed, so no partner free
+   * text rides the field.
+   */
+  matching: ResolvedMatching;
 }
 
 /** The failure terminal event. Exactly one terminal event fires per run. */
@@ -311,15 +324,27 @@ export function buildMetricsEvent(
  * count-only outcome off, so a zero count and an absent one must stay
  * distinguishable. The tally and its provenance travel as one argument so the
  * stream cannot hold a count without saying whose reading it is.
+ *
+ * `matching` is required rather than optional so no caller can emit a success
+ * terminal without it: it is the only channel a consumer that reads fd 3 alone
+ * has for what the agreed `deduplicate` pair resolved to.
  */
 export function buildResultEvent(
   resultWritten: boolean,
+  matching: ResolvedMatching,
   count?: { intersectionCount: number; reportedByPartner: boolean },
 ): ResultEvent {
   return {
     v: EVENT_STREAM_VERSION,
     type: "result",
     resultWritten,
+    // Copied field by field, so a caller's object holding anything beyond the
+    // three cannot widen the emitted line past this stream's closed contract.
+    matching: {
+      localDeduplicate: matching.localDeduplicate,
+      partnerDeduplicate: matching.partnerDeduplicate,
+      cardinality: matching.cardinality,
+    },
     // The one numeric field of this stream that a partner can influence (the
     // count-report leg sends the receiver's tally to the sender), so it takes
     // the same non-negative whole-number floor the metrics counters take. Core
@@ -430,6 +455,7 @@ export interface EventStreamEmitter {
   ): void;
   result(
     resultWritten: boolean,
+    matching: ResolvedMatching,
     count?: { intersectionCount: number; reportedByPartner: boolean },
   ): void;
   error(error: unknown, phase: ErrorPhase): void;
@@ -455,8 +481,8 @@ function createEventStreamEmitter(): EventStreamEmitter {
       writer.emit(
         buildMetricsEvent(recordsProcessed, transportRetries, reconnects),
       ),
-    result: (resultWritten, count) =>
-      writer.emit(buildResultEvent(resultWritten, count)),
+    result: (resultWritten, matching, count) =>
+      writer.emit(buildResultEvent(resultWritten, matching, count)),
     error: (error, phase) => writer.emit(buildErrorEvent(error, phase)),
   };
 }

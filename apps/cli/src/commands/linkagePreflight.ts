@@ -7,7 +7,6 @@ import {
   LinkageTermsUnsatisfiableError,
   MAX_ERROR_CAUSE_DEPTH,
   redactAndSanitizeForDisplay,
-  stripBidiControls,
   summarizeLinkageShortfall,
 } from "@psilink/core";
 import type {
@@ -45,13 +44,28 @@ export interface LinkagePreflightMessaging {
    * and exchange hold terms a partner is held to as well; the mint holds none
    * until the invitation it is about to generate is sent. */
   termsStanding: LinkageTermsStanding;
-  /** Which remedy the declared-name sentence states ({@link
-   * bidiDeclaredNameNote}). The accept path reads the partner's invitation, a
-   * document this operator cannot edit, so telling this operator to declare the
-   * name differently names the wrong party. A configuration holds names this
-   * operator declared, or names an acceptance copied from an invitation
-   * verbatim, so the other seats take a remedy stating both. */
-  declaredNamesAuthor: "this party" | "the partner";
+  /** The keyless refusal's remedy lead, for a seat the standing's own lead does
+   * not fit. The online mint derives its terms from the input's columns, so
+   * neither agreeing nor declaring a key is a step its operator can take;
+   * it takes {@link COVER_REQUIRED_FIELD_TYPES}, the lead the shortfall
+   * refusal already gives that same operator. Omitted on the seats whose terms
+   * are a document someone authored. */
+  keylessRemedyLead?: string;
+}
+
+/**
+ * The remedy for a shortfall the input side closes: the columns are what the
+ * declared field types resolve from, so a CSV covering them satisfies the key.
+ * Shared by the shortfall refusal and by the seats whose terms are derived from
+ * those same columns and so have no terms document to correct instead.
+ */
+export const COVER_REQUIRED_FIELD_TYPES =
+  "provide a CSV that covers the required field types";
+
+/** A remedy lead as it opens its cause link. The leads are written lowercase so
+ * they can be joined into one, and the link states the result as a sentence. */
+function asSentenceLead(remedy: string): string {
+  return `${remedy.charAt(0).toUpperCase()}${remedy.slice(1)}`;
 }
 
 /**
@@ -87,53 +101,6 @@ function fitDetailLinks(details: string[], overflowNoun: string): string[] {
     `and ${details.length - shown} more ${overflowNoun} ` +
       `(${details.length} in total)`,
   ];
-}
-
-/**
- * Whether a name the terms or the committed metadata declare matches a column of
- * this input only once the bidi control characters the CSV read removes are
- * taken out of it.
- *
- * The read strips those characters from the header before anything matches on
- * it, so a document naming a column by the header as typed declares a name no
- * column has -- a shortfall whose stated causes (a column the file lacks,
- * cleaning that drops every record) are all wrong for it. True here is what
- * lets the refusal say so.
- */
-function declaredNameDiffersOnlyByBidiControls(
-  columns: ReadonlyArray<string>,
-  declaredNames: ReadonlyArray<string>,
-): boolean {
-  const present = new Set(columns);
-  return declaredNames.some(
-    (name) => !present.has(name) && present.has(stripBidiControls(name)),
-  );
-}
-
-/**
- * The sentence a refusal adds when a declared name holds those characters,
- * stating the remedy the seat can offer: the accept path reads the partner's
- * invitation, so only a corrected invitation fixes it, while a configuration
- * can hold either party's name and takes one remedy covering both. Beyond the
- * origin noun both interpolate nothing -- the name itself is terms content,
- * partner-authored on the accept path, and stays on the cause links that state
- * names.
- */
-function bidiDeclaredNameNote(messaging: LinkagePreflightMessaging): string {
-  if (messaging.declaredNamesAuthor === "the partner")
-    return (
-      ` The ${messaging.source} names a column with invisible text-direction ` +
-      `characters, which this read removes from the CSV header, so no column ` +
-      `of this input matches it. Your partner has to declare that name ` +
-      `without them and send a new invitation.`
-    );
-  return (
-    ` A name the ${messaging.source} declares holds invisible text-direction ` +
-    `characters, which this read removes from the CSV header, so it matches ` +
-    `no column of this input. Declare it without them, or, if it came from ` +
-    `your partner's invitation, ask them for a new invitation that declares ` +
-    `it without them.`
-  );
 }
 
 /**
@@ -181,11 +148,14 @@ export function checkLinkageSatisfiability(
       {
         cause: chainDetailCauses([
           // Declaring a key is an agreement on the seats a partner is already
-          // held to, and this operator's own edit on the seat that has none.
-          (messaging.termsStanding === "agreed"
-            ? "Agree linkage terms declaring at least one linkage key, "
-            : "Declare at least one linkage key in these terms, ") +
-            messaging.blockRemedy,
+          // held to, and this operator's own edit on the seat that authors its
+          // terms; a seat that derives them from its columns states its own.
+          `${asSentenceLead(
+            messaging.keylessRemedyLead ??
+              (messaging.termsStanding === "agreed"
+                ? "agree linkage terms declaring at least one linkage key"
+                : "declare at least one linkage key in these terms"),
+          )}, ${messaging.blockRemedy}`,
         ]),
       },
     );
@@ -219,26 +189,18 @@ export function checkLinkageSatisfiability(
   // cannot satisfy at all, which differs by where the terms came from.
   const remedyLeads: string[] = [];
   if (verdict.unsatisfiableKeys.length > 0)
-    remedyLeads.push("provide a CSV that covers the required field types");
+    remedyLeads.push(COVER_REQUIRED_FIELD_TYPES);
   if (verdict.deadKeys.length > 0)
     remedyLeads.push("correct the cleaning steps those keys declare");
   const remedy = remedyLeads.join(" and ");
 
-  const bidiNote = declaredNameDiffersOnlyByBidiControls(columns, [
-    ...verdict.unsatisfiedFields.map((field) => field.name),
-    ...(metadata ?? []).map((column) => column.name),
-  ])
-    ? bidiDeclaredNameNote(messaging)
-    : "";
-
   throw new LinkageTermsUnsatisfiableError(
     `this CSV cannot satisfy every linkage key the ${messaging.source} ` +
       `declares: ${summarizeLinkageShortfall(verdict, messaging.termsStanding)}. ` +
-      messaging.blockConsequence +
-      bidiNote,
+      messaging.blockConsequence,
     {
       cause: chainDetailCauses([
-        `${remedy.charAt(0).toUpperCase()}${remedy.slice(1)}, ${messaging.blockRemedy}`,
+        `${asSentenceLead(remedy)}, ${messaging.blockRemedy}`,
         ...fitDetailLinks(
           details,
           "details of the terms this CSV cannot satisfy",

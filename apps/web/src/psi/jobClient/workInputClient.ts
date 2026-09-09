@@ -126,10 +126,12 @@ function isStringArray(value: unknown): value is Array<string> {
 }
 
 /** A 1-based column-position list as the profile reports it. Positive integers
- * within the header the same body reports, and no more of them than it has
- * columns, so a malformed body degrades to the unavailable state rather than
- * putting a fraction, a negative index, a position past the last column, or an
- * unbounded list into the operator's notice. */
+ * within the header the same body reports, each named once, and no more of them
+ * than it has columns, so a malformed body degrades to the unavailable state
+ * rather than putting a fraction, a negative index, a position past the last
+ * column, a position named twice, or an unbounded list into the operator's
+ * notice. The list identifies columns, so a repeat is not a second fact about
+ * the file: it renders the same number twice in the notice's sentence. */
 function isColumnPositionArray(
   value: unknown,
   columnCount: number,
@@ -137,6 +139,7 @@ function isColumnPositionArray(
   return (
     Array.isArray(value) &&
     value.length <= columnCount &&
+    new Set(value).size === value.length &&
     value.every(
       (entry) =>
         typeof entry === "number" &&
@@ -188,7 +191,7 @@ function jobInputProfileOf(body: unknown): ProfiledJobInput | null {
     return null;
   if (typeof rowCount !== "number" || !Number.isInteger(rowCount)) return null;
   if (!isStringArray(columns)) return null;
-  if (!isColumnPositionArray(body.bidiStrippedColumns, columns.length))
+  if (!isColumnPositionArray(body.sanitizedColumnPositions, columns.length))
     return null;
   if (!Array.isArray(columnSamples)) return null;
   const samples = new Map<string, Array<string>>();
@@ -208,7 +211,7 @@ function jobInputProfileOf(body: unknown): ProfiledJobInput | null {
     modifiedAt,
     rowCount,
     columns,
-    bidiStrippedColumns: body.bidiStrippedColumns,
+    sanitizedColumnPositions: body.sanitizedColumnPositions,
     columnSamples: samples,
     ...(dateInputFormat !== undefined ? { dateInputFormat } : {}),
   };

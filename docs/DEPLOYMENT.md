@@ -219,7 +219,7 @@ docker run --rm --user "$(id -u):$(id -g)" -v "$PWD":/work vdorie/psi-link excha
 
 The container then runs as an account the image knows nothing about, and `HOME` is not a question that arises. psilink chooses no path under the home directory for anything: it reaches for the home directory only to expand a `~` you wrote yourself, so an ephemeral or unset `HOME` changes no path psilink picks. It still resolves the ones you spell with a `~` against whatever home the container has, which in an ephemeral one is a different directory on every run -- so write those paths out in full. The signing identity, the one long-lived credential the CLI holds, is written and read only where you name it (see [Mounting the signing identity](#mounting-the-signing-identity)).
 
-**The console takes the same route.** `serve` keeps the signing identity in the mounted data root. Its one container-internal write outside the mounts is the directory a pasted SFTP credential is materialized to, which the image creates under root-owned `/run` for its own account; point `JOB_SFTP_CREDENTIAL_DIR` at a path the account you named can create instead:
+**The console takes the same route.** `serve` keeps the signing identity in the mounted data root by default, or at a file the operator picks in the secrets mount, and refuses a shared-directory exchange whose rendezvous folder holds the identity's folder, since the run would publish the key (see [CONSOLE.md](CONSOLE.md#signing-a-receipt-and-noting-where-the-result-is-filed)). Its one container-internal write outside the mounts is the directory a pasted SFTP credential is materialized to, which the image creates under root-owned `/run` for its own account; point `JOB_SFTP_CREDENTIAL_DIR` at a path the account you named can create instead:
 
 ```sh
 docker run --rm -p 127.0.0.1:3000:3000 \
@@ -441,6 +441,8 @@ psilink resolves no location for it. Name the path with `signing.identity_file` 
 
 **Give it a mount of its own, and mount that read-only.** The identity is created once, by `psilink fingerprint`, which is the only command that writes it; an exchange and a `psilink verify-receipt` read the file and write neither it, its directory, nor anything beside it. That is the reason it does not go in the `/run/secrets` mount above: the rotating key file is what makes that mount read-write, and the identity has no reason to inherit the requirement.
 
+The console holds the same rule against a signing identity it reads from the mount it browses: it creates the identity only at its own default location in the data root, so a directory named through the console's identity option is read and not written, with one exception -- an identity removed between the console's presence check and the `psilink fingerprint` child's load, which that child creates at the picked path. The certificate export goes to the data root, and no `psilink.yaml` in that directory ever becomes the child's config. Mount it read-only there too, which closes that one case.
+
 Provision it once, against a directory writable for that one command:
 
 ```sh
@@ -480,7 +482,7 @@ containers:
 Two more things, whichever platform you are on:
 
 - **Make the host directory durable, and back it up.** Losing the file means minting a new identity with a new fingerprint, which every partner must re-pin before your receipts verify again.
-- **Never put it in a directory the partner writes into.** In a file-drop exchange the rendezvous directory is exactly that, and a signing identity there hands the partner the private key that signs for you with every partner, not only the one you share the folder with.
+- **Never put it in a directory the partner writes into.** In a file-drop exchange the rendezvous directory is exactly that, and a signing identity there hands the partner the private key that signs for you with every partner, not only the one you share the folder with. On the command line nothing checks this for you: the path is the one you named. The console does check its own mounts and refuses such a run, whichever directory holds the identity it was pointed at (see [CONSOLE.md](CONSOLE.md#signing-a-receipt-and-noting-where-the-result-is-filed)).
 
 ## See also
 

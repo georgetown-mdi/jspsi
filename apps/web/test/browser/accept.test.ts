@@ -12,6 +12,9 @@ import { createElement } from "react";
 import "@mantine/core/styles.css";
 
 import {
+  CONSENT_FACTS,
+  describeDeduplicatePair,
+  describeResolvedMatching,
   encodeInvitation,
   generateSharedSecret,
   getDefaultLinkageTerms,
@@ -60,6 +63,25 @@ vi.mock("@tanstack/react-router", async () =>
     onNavigate: (options) => navigation.calls.push(options),
   }),
 );
+
+// Hold the invitation decode for one test, so the pending phase -- which the
+// screen otherwise leaves within a commit or two of mount -- is observable. With
+// the flag unset it delegates to the real preparation.
+const decodeHarness = vi.hoisted(() => ({ hold: false }));
+vi.mock("@psi/acceptInvitation", async (importOriginal) => {
+  const actual = await importOriginal<Record<string, unknown>>();
+  return {
+    ...actual,
+    prepareAcceptedInvitation: (...args: Array<unknown>) =>
+      decodeHarness.hold
+        ? new Promise(() => undefined)
+        : (
+            actual.prepareAcceptedInvitation as (
+              ...a: Array<unknown>
+            ) => Promise<unknown>
+          )(...args),
+  };
+});
 
 // Defer or fail the CSV parse per-test to observe the parse-behind-consent gate
 // (the loader is untouched until "Accept and continue" fires with consent) and
@@ -122,6 +144,12 @@ interface CapturedLifecycle {
     intersectionCount?: number;
     countReportedByPartner?: boolean;
     matchedRecordCount?: number;
+    matching?: {
+      localDeduplicate: boolean;
+      partnerDeduplicate: boolean;
+      cardinality:
+        "one-to-one" | "one-to-many" | "many-to-one" | "many-to-many";
+    };
     record?: {
       recordUrl: string;
       recordFileName: string;
@@ -130,6 +158,11 @@ interface CapturedLifecycle {
     };
   }) => void;
   onError: (failure: { category: string; error: unknown }) => void;
+  onResolvedMatching: (matching: {
+    localDeduplicate: boolean;
+    partnerDeduplicate: boolean;
+    cardinality: "one-to-one" | "one-to-many" | "many-to-one" | "many-to-many";
+  }) => void;
 }
 const lifecycleHarness = vi.hoisted(() => ({
   calls: [] as Array<unknown>,
@@ -265,6 +298,7 @@ afterEach(() => {
   vi.useRealTimers();
   app.unmount();
   navigation.calls.length = 0;
+  decodeHarness.hold = false;
   csvLoadHarness.defer = false;
   csvLoadHarness.fail = undefined;
   csvLoadHarness.called = 0;
@@ -344,6 +378,22 @@ describe("acceptor screen: decode gate", () => {
     expect(document.querySelector("aside")).toBeNull();
   });
 
+  test("the pending line has no live role, so it announces nothing", async () => {
+    decodeHarness.hold = true;
+    window.location.hash = await encodeAcceptToken();
+    app.render(createElement(AcceptorScreen));
+
+    const pending = page.getByText("Reading your invitation...");
+    await expect.element(pending).toBeVisible();
+    // The decode runs once on mount, so this sentence is initial page content
+    // that no later change reaches: a live role on it would assert an
+    // announcement nothing performs. The settle takes focus to the terms, the
+    // block, or the error alert, which is what the other tests here pin.
+    expect(
+      pending.element().closest('[aria-live], [role="status"], [role="alert"]'),
+    ).toBeNull();
+  });
+
   test("an empty fragment renders the cannot-accept alert", async () => {
     window.location.hash = "";
     app.render(createElement(AcceptorScreen));
@@ -394,6 +444,72 @@ describe("acceptor screen: decode gate", () => {
     // The raw blob is `JSON.stringify(issues)`, which always has a "code"
     // key; the readable one-liner never does.
     expect(text).not.toContain('"code"');
+  });
+
+  // The name class the CSV header read removes is refused where a partner's
+  // token is decoded, and this seat is where a browser acceptor meets that
+  // refusal. Each case plants an ASCII marker beside the character, so a name
+  // that reached the notice shows as printable text rather than an invisible
+  // byte, and asserts the rendered notice is plain ASCII: neither the marker
+  // nor the character itself survives.
+  const MARKER = "MARKERWORD";
+
+  test("a disclosed payload column holding the name class renders no partner byte", async () => {
+    window.location.hash = await encodeRaw({
+      version: "1",
+      linkageTerms: acceptorTerms,
+      sharedSecret: generateSharedSecret(),
+      disclosedPayloadColumns: [`risk\u202e${MARKER}`],
+      connectionEndpoint: {
+        channel: "webrtc",
+        host: "127.0.0.1",
+        port: 3000,
+        path: "/api/",
+      },
+    });
+    app.render(createElement(AcceptorScreen));
+
+    await expect
+      .element(page.getByText("Cannot accept this invitation"))
+      .toBeInTheDocument();
+    const text = document.body.textContent;
+    expect(text).toContain("disclosedPayloadColumns.0:");
+    expect(text).not.toContain(MARKER);
+    expect(text).toMatch(/^[\x20-\x7e\n]*$/);
+  });
+
+  test("a linkage field name holding the name class renders no partner byte", async () => {
+    const hostileName = `first\u001b${MARKER}`;
+    window.location.hash = await encodeRaw({
+      version: "1",
+      linkageTerms: {
+        ...acceptorTerms,
+        linkageFields: [
+          { name: hostileName, type: "first_name" },
+          { name: "lastName", type: "last_name" },
+        ],
+        linkageKeys: [
+          { name: "first", elements: [{ field: hostileName }] },
+          { name: "last", elements: [{ field: "lastName" }] },
+        ],
+      },
+      sharedSecret: generateSharedSecret(),
+      connectionEndpoint: {
+        channel: "webrtc",
+        host: "127.0.0.1",
+        port: 3000,
+        path: "/api/",
+      },
+    });
+    app.render(createElement(AcceptorScreen));
+
+    await expect
+      .element(page.getByText("Cannot accept this invitation"))
+      .toBeInTheDocument();
+    const text = document.body.textContent;
+    expect(text).toContain("linkageFields.0.name:");
+    expect(text).not.toContain(MARKER);
+    expect(text).toMatch(/^[\x20-\x7e\n]*$/);
   });
 });
 
@@ -1036,7 +1152,9 @@ describe("acceptor screen: confirm your columns (verdict, mapper, launch)", () =
       .not.toBeInTheDocument();
     await expect
       .element(
-        page.getByText("A formatting character was removed from a column name"),
+        page.getByText(
+          "An invisible control character was removed from a column name",
+        ),
       )
       .toBeInTheDocument();
   });
@@ -1050,7 +1168,9 @@ describe("acceptor screen: confirm your columns (verdict, mapper, launch)", () =
     );
     await expect
       .element(
-        page.getByText("A formatting character was removed from a column name"),
+        page.getByText(
+          "An invisible control character was removed from a column name",
+        ),
       )
       .toBeInTheDocument();
     await expect
@@ -1236,7 +1356,7 @@ describe("acceptor columns step: one column name across the screen", () => {
       createElement(AcceptorColumnsStep, {
         linkageTerms: acceptorTerms,
         columns,
-        bidiStrippedColumns: [],
+        sanitizedColumnPositions: [],
         columnsState,
         editorState,
         verdict: acceptorVerdict(columns, acceptorTerms, editorState),
@@ -1511,7 +1631,7 @@ describe("acceptor columns step: the send summary is gated on the inviting party
       createElement(AcceptorColumnsStep, {
         linkageTerms,
         columns,
-        bidiStrippedColumns: [],
+        sanitizedColumnPositions: [],
         columnsState,
         editorState,
         verdict: acceptorVerdict(columns, linkageTerms, editorState),
@@ -1625,7 +1745,7 @@ describe("acceptor columns step: the columns the invitation will not accept", ()
       createElement(AcceptorColumnsStep, {
         linkageTerms,
         columns,
-        bidiStrippedColumns: [],
+        sanitizedColumnPositions: [],
         columnsState,
         editorState,
         verdict: acceptorVerdict(columns, linkageTerms, editorState),
@@ -1788,6 +1908,54 @@ describe("acceptor screen: run and completion", () => {
     expect(currentStepLabel()).toBe("Link keys");
   });
 
+  test("the resolved matching is readable before the run ends", async () => {
+    // The acceptor's mirror of the inviting seat's pre-round statement: the pair
+    // is readable while the exchange is still running, not only once it has
+    // finished, and it reads as plain run status rather than through the
+    // warnings alert, which an ordinary one-to-one run never raises.
+    const matching = {
+      localDeduplicate: false,
+      partnerDeduplicate: false,
+      cardinality: "one-to-one" as const,
+    };
+    const sentence = describeResolvedMatching(matching);
+    const paragraphsSaying = (text: string) =>
+      Array.from(document.querySelectorAll("p")).filter(
+        (el) => el.textContent === text,
+      );
+
+    await reachRun();
+    const call = lifecycleCall(0);
+    call.onStages(stagesFor(preparedWith("cascade", 2), "acceptor"));
+    call.onStage("confirming protocol");
+    call.onResolvedMatching(matching);
+
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Exchange in progress");
+    await vi.waitFor(() => expect(paragraphsSaying(sentence)).toHaveLength(1));
+    expect(paragraphsSaying(sentence)[0].closest('[role="status"]')).toBeNull();
+    expect(
+      page.getByText("The exchange reported a warning").query(),
+    ).toBeNull();
+
+    call.onResult({
+      kind: "matched" as const,
+      resultsUrl: URL.createObjectURL(new Blob(["a,b\n"])),
+      matchedRecordCount: 12,
+      matching,
+    });
+
+    // The completion panel takes the sentence over, so it still stands once.
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Exchange complete");
+    await vi.waitFor(() => expect(paragraphsSaying(sentence)).toHaveLength(1));
+    expect(
+      page.getByText("The exchange reported a warning").query(),
+    ).toBeNull();
+  });
+
   test("completion offers downloads and fixes the past-tense ledger", async () => {
     await reachRun();
     const call = lifecycleCall(0);
@@ -1798,6 +1966,11 @@ describe("acceptor screen: run and completion", () => {
       kind: "matched" as const,
       resultsUrl: URL.createObjectURL(new Blob(["a,b\n"])),
       matchedRecordCount: 1847,
+      matching: {
+        localDeduplicate: true,
+        partnerDeduplicate: false,
+        cardinality: "many-to-one" as const,
+      },
       record: {
         recordUrl: URL.createObjectURL(new Blob(["{}"])),
         recordFileName: "psilink-record-2026-07-08T14-32.json",
@@ -1809,6 +1982,17 @@ describe("acceptor screen: run and completion", () => {
     await expect
       .element(page.getByRole("heading", { level: 1 }))
       .toHaveTextContent("Exchange complete");
+    // The mirror of the inviting seat's statement, on the same panel: both seats
+    // state the partner's value and the label their own side resolved to.
+    await expect
+      .element(
+        page.getByText(
+          "Deduplication as agreed at the terms exchange: you declared " +
+            "deduplicate true, your partner declared deduplicate false. This " +
+            "run matches many-to-one.",
+        ),
+      )
+      .toBeInTheDocument();
     await expect
       .element(page.getByText(/1,847.*matched records/))
       .toBeInTheDocument();
@@ -2355,5 +2539,397 @@ describe("acceptor screen: run and completion", () => {
       .element(page.getByRole("button", { name: "Start the exchange" }))
       .toBeDisabled();
     expect(lifecycleHarness.calls).toHaveLength(0);
+  });
+});
+
+describe("AcceptorScreen: this party's own deduplicate", () => {
+  // The terms-review step, where this party's own side is authored beside what
+  // the invitation declares for the inviting party's.
+  async function reachReview(linkageTerms: LinkageTerms) {
+    window.location.hash = await encodeAcceptToken(linkageTerms);
+    app.render(createElement(AcceptorScreen));
+    await expect
+      .element(page.getByText("Invitation from County Health Department"))
+      .toBeInTheDocument();
+    await userEvent.click(page.getByRole("button", { name: "Other details" }));
+  }
+
+  const ownSide = () =>
+    page.getByRole("checkbox", {
+      name: "Let several of my records match one of my partner's",
+    });
+
+  // The pair sentence core resolves for this fixture's output shape, where both
+  // parties are entitled to the result.
+  const pairSentence = (inviter: boolean, acceptor: boolean): string =>
+    describeDeduplicatePair({
+      inviterDeduplicate: inviter,
+      acceptorDeduplicate: acceptor,
+      inviterReceivesResult: true,
+    });
+
+  test("states the pair the operator's selection makes with the invitation's", async () => {
+    await reachReview({ ...acceptorTerms, deduplicate: true });
+    await expect
+      .element(page.getByText(pairSentence(true, false)))
+      .toBeInTheDocument();
+    await userEvent.click(ownSide());
+    await expect
+      .element(page.getByText(pairSentence(true, true)))
+      .toBeInTheDocument();
+  });
+
+  test("refuses the both-sided pair under single-pass at the seat, before the run", async () => {
+    // Refused where the operator sets it rather than mid-run: the alert states
+    // the run boundary's own message, and Continue is held with a reason beside
+    // it, since the control sits inside a disclosure the operator may close.
+    await reachReview({
+      ...acceptorTerms,
+      linkageStrategy: "single-pass",
+      deduplicate: true,
+    });
+    const proceed = page.getByRole("button", {
+      name: "Continue: consent & your file",
+    });
+    await expect.element(proceed).toBeEnabled();
+    await userEvent.click(ownSide());
+    await expect
+      .element(page.getByText("These two settings cannot run together"))
+      .toBeInTheDocument();
+    await expect.element(proceed).toBeDisabled();
+    await expect
+      .element(
+        page.getByText(
+          "Resolve the duplicate-matching settings in the terms above to continue.",
+        ),
+      )
+      .toBeInTheDocument();
+    // Clearing this party's own side runs again: the combination is refused,
+    // not the setting.
+    await userEvent.click(ownSide());
+    await expect.element(proceed).toBeEnabled();
+  });
+
+  // An invitation holding both halves of a pair no strategy runs: its linkage
+  // key splits a value into several match candidates, and the inviting party
+  // declares a deduplicate of its own. This party's own value is the only
+  // thing left to complete it.
+  const refusedPairTerms: LinkageTerms = {
+    ...acceptorTerms,
+    deduplicate: true,
+    linkageKeys: [
+      {
+        name: "first",
+        elements: [
+          {
+            field: "firstName",
+            transform: [{ function: "split_on", params: { delimiter: " " } }],
+          },
+        ],
+      },
+      acceptorTerms.linkageKeys[1],
+    ],
+  };
+
+  test("states what this party's own side would refuse before it is set", async () => {
+    await reachReview(refusedPairTerms);
+    // On screen while the control still stands at the closed default, so the
+    // operator meets the consequence rather than the accept action's refusal.
+    await expect
+      .element(page.getByText(CONSENT_FACTS.acceptorDeduplicateRefused.note))
+      .toBeInTheDocument();
+    const proceed = page.getByRole("button", {
+      name: "Continue: consent & your file",
+    });
+    await expect.element(proceed).toBeEnabled();
+    // And the refusal itself is unmoved: setting the value the sentence names
+    // still stops the accept.
+    await userEvent.click(ownSide());
+    await expect
+      .element(page.getByText("These two settings cannot run together"))
+      .toBeInTheDocument();
+    await expect.element(proceed).toBeDisabled();
+  });
+
+  test("says nothing of that refusal where the invitation declares no side of its own", async () => {
+    // The other half of the pair is the invitation's: a splitting key alone
+    // leaves this party's value free, and the accept takes either value.
+    await reachReview({ ...refusedPairTerms, deduplicate: false });
+    await expect.element(ownSide()).toBeInTheDocument();
+    expect(app.container.textContent).not.toContain(
+      CONSENT_FACTS.acceptorDeduplicateRefused.note,
+    );
+    await userEvent.click(ownSide());
+    await expect
+      .element(
+        page.getByRole("button", { name: "Continue: consent & your file" }),
+      )
+      .toBeEnabled();
+  });
+
+  test("the both-sided pair under the cascade continues", async () => {
+    await reachReview({ ...acceptorTerms, deduplicate: true });
+    await userEvent.click(ownSide());
+    await expect
+      .element(
+        page.getByRole("button", { name: "Continue: consent & your file" }),
+      )
+      .toBeEnabled();
+  });
+
+  test("offers no control where this party receives no result", async () => {
+    // A sole-receiver invitation mirrors this party to expectsOutput false, and
+    // the schema takes no deduplicate from a party that receives no result --
+    // so the seat offers no control rather than one whose value the accept
+    // would refuse, and the accept goes on under the closed default.
+    await reachReview({
+      ...acceptorTerms,
+      output: { expectsOutput: true, shareWithPartner: false },
+    });
+    expect(ownSide().query()).toBeNull();
+    await expect
+      .element(
+        page.getByRole("button", { name: "Continue: consent & your file" }),
+      )
+      .toBeEnabled();
+  });
+
+  test("offers no control on a count-only invitation, whose shape admits none", async () => {
+    // A psi-c invitation that shares the result satisfies the output rule, but
+    // the count-only shape takes no deduplicate from either party: a control
+    // here would be one whose only admissible value is the one it starts at,
+    // and ticking it would meet a refusal whose remedy (change the algorithm)
+    // is not this operator's to take.
+    await reachReview({
+      ...acceptorTerms,
+      algorithm: "psi-c",
+      linkageKeys: [acceptorTerms.linkageKeys[0]],
+    });
+    expect(ownSide().query()).toBeNull();
+    await expect
+      .element(
+        page.getByRole("button", { name: "Continue: consent & your file" }),
+      )
+      .toBeEnabled();
+  });
+
+  test("a refused pair holds the launch from a step browser Forward restores", async () => {
+    // Step position is restored straight from history, so Forward walks around
+    // the review step's disabled Continue. The later steps re-read the refusal
+    // rather than trusting the step they were reached from.
+    await reachReview({
+      ...acceptorTerms,
+      linkageStrategy: "single-pass",
+      deduplicate: true,
+    });
+    await userEvent.click(
+      page.getByRole("button", { name: "Continue: consent & your file" }),
+    );
+    await userEvent.click(
+      page.getByRole("checkbox", {
+        name: "I have reviewed the terms my partner proposed and I consent to this exchange",
+      }),
+    );
+    await userEvent.fill(page.getByLabelText("Your name"), "Sam Alvarez");
+    const accept = page.getByRole("button", { name: "Accept and continue" });
+    await expect.element(accept).toBeEnabled();
+
+    window.history.back();
+    await expect
+      .element(page.getByRole("button", { name: "Other details" }))
+      .toBeInTheDocument();
+    await userEvent.click(page.getByRole("button", { name: "Other details" }));
+    await expect.element(ownSide()).toBeInTheDocument();
+    await userEvent.click(ownSide());
+    window.history.forward();
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Consent & your file");
+    await expect.element(accept).toBeDisabled();
+    await expect
+      .element(
+        page.getByText(
+          "Go back to the terms and resolve the duplicate-matching settings to continue.",
+        ),
+      )
+      .toBeInTheDocument();
+  });
+
+  // The click handler React holds on a rendered element, the one route to an
+  // action React's own event dispatch makes unreachable: it drops a click
+  // handler while the element's disabled prop stands, so no event -- real or
+  // dispatched -- reaches an action behind a disabled button.
+  function reactClickHandler(element: Element): () => void {
+    const propsKey = Object.keys(element).find((name) =>
+      name.startsWith("__reactProps$"),
+    );
+    expect(propsKey, "React's props key on the rendered element").toBeDefined();
+    const props = (
+      element as unknown as Record<string, { onClick?: () => void }>
+    )[propsKey as string];
+    expect(props.onClick).toBeTypeOf("function");
+    return props.onClick as () => void;
+  }
+
+  test("the accept action refuses a refused pair, past its disabled button", async () => {
+    // The disabled state is not the refusal: the handler re-reads the pair, so
+    // an invocation that reaches it anyway -- what a scripted submit, or a
+    // later edit dropping the pair from the button's disabled state, would do
+    // -- commits no file and advances no step. Everything else the gate asks
+    // for is satisfied here, so the pair is the only thing holding the accept.
+    await reachReview({
+      ...acceptorTerms,
+      linkageStrategy: "single-pass",
+      deduplicate: true,
+    });
+    await userEvent.click(
+      page.getByRole("button", { name: "Continue: consent & your file" }),
+    );
+    await consentAndName();
+    const fileInput = document.querySelector('input[type="file"]');
+    await userEvent.upload(
+      page.elementLocator(fileInput as HTMLElement),
+      csvFile("first_name,last_name\nAlice,Smith\n"),
+    );
+    await expect
+      .element(page.getByText("cohort_intake.csv"))
+      .toBeInTheDocument();
+
+    // Refuse the pair from the terms step, then return to this step the way
+    // browser history does, around the terms step's own disabled Continue.
+    window.history.back();
+    await expect
+      .element(page.getByRole("button", { name: "Other details" }))
+      .toBeInTheDocument();
+    await userEvent.click(page.getByRole("button", { name: "Other details" }));
+    await userEvent.click(ownSide());
+    window.history.forward();
+    const accept = page.getByRole("button", { name: "Accept and continue" });
+    await expect.element(accept).toBeDisabled();
+
+    // Straight to the action the disabled button holds.
+    reactClickHandler(accept.element())();
+
+    await expect
+      .element(
+        page.getByText(
+          "Go back to the terms and resolve the duplicate-matching settings to continue.",
+        ),
+      )
+      .toBeInTheDocument();
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Consent & your file");
+    expect(
+      page.getByRole("heading", { name: "Confirm your columns" }).query(),
+    ).toBeNull();
+    // The parse is the first thing behind the gate, so an untouched loader is
+    // the accept committing nothing.
+    expect(csvLoadHarness.called).toBe(0);
+    expect(lifecycleHarness.calls).toHaveLength(0);
+  });
+
+  // The consent gate, from the review step through to the confirm-columns step
+  // that holds the launch.
+  async function acceptThroughToColumns() {
+    await userEvent.click(
+      page.getByRole("button", { name: "Continue: consent & your file" }),
+    );
+    await consentAndName();
+    const fileInput = document.querySelector('input[type="file"]');
+    await userEvent.upload(
+      page.elementLocator(fileInput as HTMLElement),
+      csvFile("first_name,last_name\nAlice,Smith\n"),
+    );
+    await expect
+      .element(page.getByText("cohort_intake.csv"))
+      .toBeInTheDocument();
+    await userEvent.click(
+      page.getByRole("button", { name: "Accept and continue" }),
+    );
+    await expect
+      .element(page.getByRole("heading", { name: "Confirm your columns" }))
+      .toBeInTheDocument();
+  }
+
+  // Back from the confirm-columns step to the control on the terms step, and
+  // forward again, the way browser history moves between them.
+  async function backToTermsControl() {
+    window.history.back();
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Consent & your file");
+    window.history.back();
+    await userEvent.click(page.getByRole("button", { name: "Other details" }));
+    await expect.element(ownSide()).toBeInTheDocument();
+  }
+
+  async function forwardToColumns() {
+    window.history.forward();
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Consent & your file");
+    window.history.forward();
+    await expect
+      .element(page.getByRole("heading", { name: "Confirm your columns" }))
+      .toBeInTheDocument();
+  }
+
+  test("a value moved after consent holds the launch until the two agree", async () => {
+    // The run presents the value the consent gate committed, so a control moved
+    // after that gate -- reached by a browser Back, and returned from by a
+    // Forward that steps around the gate -- launches nothing until the operator
+    // accepts again or restores what they accepted.
+    await reachReview(acceptorTerms);
+    await acceptThroughToColumns();
+    await backToTermsControl();
+    await userEvent.click(ownSide());
+    await forwardToColumns();
+
+    const start = page.getByRole("button", { name: "Start the exchange" });
+    await expect.element(start).toBeDisabled();
+    await expect
+      .element(
+        page.getByText(
+          "This exchange runs with the duplicate-matching setting you " +
+            "accepted, which is not the one now on the terms step. Accept " +
+            "again to apply the change, or set the control back.",
+        ),
+      )
+      .toBeInTheDocument();
+    expect(lifecycleHarness.calls).toHaveLength(0);
+
+    // Restoring the accepted value runs: what the operator consented to is what
+    // the exchange presents.
+    await backToTermsControl();
+    await userEvent.click(ownSide());
+    await forwardToColumns();
+    await expect.element(start).toBeEnabled();
+    await userEvent.click(start);
+    await vi.waitFor(() => expect(lifecycleHarness.calls).toHaveLength(1));
+  });
+
+  test("blocks the accept when the invitation mirrors to terms no acceptance can run", async () => {
+    // A sole-receiver invitation that also declares a payload.send mirrors to a
+    // receive this party may not hold: the derivation refuses it on decode, with
+    // no operator action. The seat reads that refusal in its render body, so it
+    // must reach the operator as this step's own block -- naming the rule the
+    // document broke -- rather than as a crash to the route's error page.
+    await reachReview({
+      ...acceptorTerms,
+      output: { expectsOutput: true, shareWithPartner: false },
+      payload: { send: [{ name: "dose" }] },
+    });
+    await expect
+      .element(page.getByText("Cannot accept this invitation"))
+      .toBeInTheDocument();
+    expect(app.container.textContent).toContain(
+      "payload.receive must be empty when expectsOutput is false",
+    );
+    expect(
+      page
+        .getByRole("button", { name: "Continue: consent & your file" })
+        .query(),
+    ).toBeNull();
   });
 });

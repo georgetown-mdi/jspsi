@@ -17,7 +17,6 @@
 
 import { APPLIED_SETTINGS } from "./consent/appliedSettings.js";
 import { MAX_LINKAGE_ENTRIES } from "./config/linkageTermsSchema.js";
-import { partyFansOut } from "./connection/frameSize.js";
 import type { LinkageKey, LinkageTerms } from "./config/linkageTermsSchema.js";
 import { UsageError } from "./errors.js";
 import { fuzzyCandidateCeiling } from "./fuzzyComparisons.js";
@@ -256,6 +255,37 @@ export function declaredKeyWidth(key: LinkageKey, keyIndex?: number): number {
 }
 
 /**
+ * Whether a linkage key declares a per-(record, key) CANDIDATE SET: a
+ * `split_on` fan-out on one of its elements, a `generate_fuzzy_comparisons`
+ * expansion, or a `swap` naming both orders.
+ *
+ * The structural reading of {@link declaredKeyWidth} above 1, taken over the
+ * same three producers and gated on the same applied setting, so the two
+ * cannot come to different verdicts about whether a key expands. Separate from
+ * the width because the refusals that read it run where a width may not be
+ * derivable at all: `declaredKeyWidth` refuses terms above
+ * {@link MAX_KEY_CANDIDATE_WIDTH}, and a gate answering "does this expand"
+ * must answer for those terms too.
+ */
+export function keyDeclaresCandidateSet(key: LinkageKey): boolean {
+  if (APPLIED_SETTINGS.fuzzyComparisons && key.swap !== undefined) return true;
+  return key.elements.some(
+    (element) =>
+      declaredFanOutFunction(element.transform) !== undefined ||
+      (APPLIED_SETTINGS.fuzzyComparisons &&
+        element.generateFuzzyComparisons !== undefined),
+  );
+}
+
+/**
+ * Whether any of a terms document's linkage keys declares a candidate set
+ * ({@link keyDeclaresCandidateSet}).
+ */
+export function termsDeclareCandidateSet(terms: LinkageTerms): boolean {
+  return terms.linkageKeys.some(keyDeclaresCandidateSet);
+}
+
+/**
  * A party's **effective key count**: the sum of {@link declaredKeyWidth}
  * over the agreed linkage keys. Equals the plain key count exactly when no
  * key's elements declare an expansion (docs/spec/PROTOCOL.md, The width
@@ -287,57 +317,6 @@ export function declaredEffectiveKeyCount(terms: LinkageTerms): number {
         "of their elements.",
     );
   return effectiveKeyCount;
-}
-
-/**
- * Whether `terms` declare a per-record candidate set the linkage strategy they
- * name cannot match: a declared width above their key count
- * ({@link partyFansOut}) under a strategy that matches a single value per
- * record, which is every strategy but single-pass (docs/spec/PROTOCOL.md,
- * Fan-out runs under single-pass only).
- *
- * The verdict {@link assertDeclaredWidthMatchesStrategy} refuses on, readable
- * without its throw so a surface that authors or mints terms answers the
- * question the run boundary answers rather than deriving the width a second
- * time.
- *
- * @throws {UsageError} if the declared width breaks a bound of its own
- * ({@link declaredKeyWidth}, {@link declaredEffectiveKeyCount}) -- terms
- * refused under every strategy, so a caller that offers the strategy as a
- * remedy states that refusal separately from this verdict.
- */
-export function strategyCannotMatchDeclaredWidth(terms: LinkageTerms): boolean {
-  if (terms.linkageStrategy === "single-pass") return false;
-  return partyFansOut(terms.linkageKeys.length, {
-    effectiveKeyCount: declaredEffectiveKeyCount(terms),
-  });
-}
-
-/**
- * Refuse agreed terms that declare a per-record candidate width on a strategy
- * matching a single value per record
- * ({@link strategyCannotMatchDeclaredWidth}), before anything goes on the
- * wire. Covers the width a fuzzy comparison declares, which
- * `assertFanOutImplemented` does not reach by step name.
- *
- * Called at the run boundary (`runExchange`) for the agreed terms, and read
- * through its predicate at the surfaces that author them. A
- * {@link UsageError}: the width is a function of terms the accept path adopts
- * wholesale.
- */
-export function assertDeclaredWidthMatchesStrategy(terms: LinkageTerms): void {
-  if (!strategyCannotMatchDeclaredWidth(terms)) return;
-  const effectiveKeyCount = declaredEffectiveKeyCount(terms);
-  throw new UsageError(
-    "these linkage terms declare " +
-      `${effectiveKeyCount} candidate value slot(s) per record against their ` +
-      `${terms.linkageKeys.length} linkage key(s), so a record may realize ` +
-      "several candidates for a key, while they name a strategy that matches " +
-      "a single value per record. Matching a candidate set runs under the " +
-      "single-pass linkage strategy only. Remove the expanding step or fuzzy " +
-      "comparison from the key's elements, or agree terms whose " +
-      "linkage_strategy is single-pass.",
-  );
 }
 
 /**

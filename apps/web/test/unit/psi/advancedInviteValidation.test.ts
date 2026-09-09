@@ -6,7 +6,9 @@ import {
   DEDUPLICATE_IMPLEMENTED_BY_STRATEGY,
   FAN_OUT_FUNCTION_NAMES,
   MAX_INVITATION_LIFETIME_SECONDS,
+  MAX_NAME_LENGTH,
   StandardizedField,
+  assertTransformsCompile,
   authoredLinkageFields,
   canonicalString,
   pipelineAlwaysDrops,
@@ -485,6 +487,175 @@ describe("the canonical-encode gate (the byte form both parties hash)", () => {
   });
 });
 
+describe("a transform params key the terms schema refuses", () => {
+  // The key is the one segment of a terms issue path an operator or a partner
+  // authors, so a mint that echoed its path would put those bytes on the screen.
+  // This editor maps an issue to the control that owns it and shows that
+  // control's own message, so the path reaches no rendering at all. One case per
+  // class the schema refuses a name over: its length, its characters, and the
+  // well-formedness walk.
+  const now = new Date("2026-01-01T00:00:00Z");
+
+  test("names the character class and echoes no part of the key", () => {
+    const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    const badKey = "de\x1b[31m\u202elimiter-unrepeatable-key";
+    const imported = withFirstElementTransform(draft, [
+      { function: "trim", params: { [badKey]: 1 } },
+    ]);
+    // The assumption this rests on: the schema is what refuses the document, so
+    // the mapping below is running on a real schema issue.
+    expect(safeParseLinkageTerms(buildAdvancedTerms(imported)).success).toBe(
+      false,
+    );
+
+    const result = validateAdvancedInvite(imported, seed, now);
+    expect(result.canGenerate).toBe(false);
+    expect(result.terms).toBeUndefined();
+    // The message states the fault. The generic mapping would answer a
+    // linkageKeys-path issue with "Enable at least one linkage key.", which this
+    // draft has already done.
+    expect(result.errors.keys).toMatch(/control or text-direction character/);
+    expect(result.errors.keys).not.toMatch(/Enable at least one linkage key/);
+    const rendered = Object.values(result.errors).join("\n");
+    expect(rendered).not.toContain("unrepeatable-key");
+    expect(rendered).not.toContain("\x1b");
+    expect(rendered).not.toContain("\u202e");
+    expect(rendered).not.toContain("params");
+  });
+
+  test("names the length class and echoes no part of the key", () => {
+    const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    const badKey = `${"d".repeat(MAX_NAME_LENGTH)}-unrepeatable-key`;
+    const imported = withFirstElementTransform(draft, [
+      { function: "trim", params: { [badKey]: 1 } },
+    ]);
+    // The assumption this rests on: the schema is what refuses the document, so
+    // the mapping below is running on a real schema issue.
+    expect(safeParseLinkageTerms(buildAdvancedTerms(imported)).success).toBe(
+      false,
+    );
+
+    const result = validateAdvancedInvite(imported, seed, now);
+    expect(result.canGenerate).toBe(false);
+    expect(result.terms).toBeUndefined();
+    // The bound the name broke, not the character rule the key holds to and not
+    // the generic mapping's "Enable at least one linkage key.", which this draft
+    // has already done.
+    expect(result.errors.keys).toMatch(
+      new RegExp(`longer than ${String(MAX_NAME_LENGTH)} characters`),
+    );
+    expect(result.errors.keys).not.toMatch(/control or text-direction/);
+    expect(result.errors.keys).not.toMatch(/Enable at least one linkage key/);
+    const rendered = Object.values(result.errors).join("\n");
+    expect(rendered).not.toContain("unrepeatable-key");
+    expect(rendered).not.toContain("params");
+  });
+
+  test("names the incomplete-character class and echoes no part of the key", () => {
+    const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    const badKey = "de\ud800limiter-unrepeatable-key";
+    const imported = withFirstElementTransform(draft, [
+      { function: "trim", params: { [badKey]: 1 } },
+    ]);
+    // The assumptions this rests on: the schema refuses the document, and the
+    // encoder refuses it too -- so the message below is this name's own rather
+    // than the un-encodable-transform one, whose remedy asks the operator to
+    // correct a parameter this editor gives them no way to rename.
+    const terms = buildAdvancedTerms(imported);
+    expect(safeParseLinkageTerms(terms).success).toBe(false);
+    expect(() => canonicalString(terms)).toThrow(CanonicalEncodingError);
+
+    const result = validateAdvancedInvite(imported, seed, now);
+    expect(result.canGenerate).toBe(false);
+    expect(result.terms).toBeUndefined();
+    expect(result.errors.keys).toMatch(/incomplete character/);
+    expect(result.errors.keys).not.toMatch(/cannot be recorded in the exact/);
+    expect(result.errors.keys).not.toMatch(/Enable at least one linkage key/);
+    const rendered = Object.values(result.errors).join("\n");
+    expect(rendered).not.toContain("unrepeatable-key");
+    expect(rendered).not.toContain("\ud800");
+    expect(rendered).not.toContain("params");
+  });
+});
+
+describe("a free-text value holding a character the terms refuse", () => {
+  // The schema refuses two character classes in the free-text values a record
+  // holds verbatim, and both arrive by paste rather than by typing. The generic
+  // message for each control answers such a value by asking for one the operator
+  // has already entered, so each class gets the control's own words -- naming no
+  // part of the value, which is the offending text itself.
+  const now = new Date("2026-01-01T00:00:00Z");
+
+  test("names the class on the identity control and echoes no part of the name", () => {
+    const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    const pasted = "Org\u202eunrepeatable-name";
+    // The assumption this rests on: the schema is what refuses the document.
+    expect(
+      safeParseLinkageTerms(buildAdvancedTerms({ ...draft, identity: pasted }))
+        .success,
+    ).toBe(false);
+
+    const result = validateAdvancedInvite(
+      { ...draft, identity: pasted },
+      seed,
+      now,
+    );
+    expect(result.canGenerate).toBe(false);
+    expect(result.errors.identity).toMatch(/text-direction characters/);
+    expect(result.errors.identity).not.toMatch(/Enter a name/);
+    const rendered = Object.values(result.errors).join("\n");
+    expect(rendered).not.toContain("unrepeatable-name");
+    expect(rendered).not.toContain("\u202e");
+  });
+
+  test("names the class on the purpose control and echoes no part of the purpose", () => {
+    const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    const legalAgreement = {
+      reference: "MOU-1",
+      purpose: "Audit\u0007unrepeatable-purpose",
+      expirationDate: "2026-12-31",
+    };
+    expect(
+      safeParseLinkageTerms(buildAdvancedTerms({ ...draft, legalAgreement }))
+        .success,
+    ).toBe(false);
+
+    const result = validateAdvancedInvite(
+      { ...draft, legalAgreement },
+      seed,
+      now,
+    );
+    expect(result.canGenerate).toBe(false);
+    expect(result.errors.legalPurpose).toMatch(/control characters/);
+    expect(result.errors.legalPurpose).not.toMatch(/Enter the purpose/);
+    const rendered = Object.values(result.errors).join("\n");
+    expect(rendered).not.toContain("unrepeatable-purpose");
+    expect(rendered).not.toContain("\u0007");
+  });
+
+  test("the third such field, a payload column description, is one the built terms never hold", () => {
+    // Why the columns control needs no wording of its own: the payload is
+    // authored from the disclosed column NAMES alone, so a description an
+    // operator could hold in metadata reaches no terms document this editor
+    // builds, and no issue of either class can report against that control.
+    const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    const described = {
+      ...draft,
+      metadata: draft.metadata.map((column) => ({
+        ...column,
+        isPayload: true,
+        description: "sent\u202eunrepeatable-description",
+      })),
+    };
+
+    const terms = buildAdvancedTerms(described);
+    expect(terms.payload?.send?.length).toBeGreaterThan(0);
+    for (const column of terms.payload?.send ?? [])
+      expect(column.description).toBeUndefined();
+    expect(validateAdvancedInvite(described, seed, now).canGenerate).toBe(true);
+  });
+});
+
 describe("a key-element transform core cannot build", () => {
   // The pass leaves the compile question to the mint (core's
   // `assertTransformsCompile`, driven in invitation.test.ts and core's own
@@ -495,17 +666,30 @@ describe("a key-element transform core cannot build", () => {
   // transforms cost to compile.
   const now = new Date("2026-01-01T00:00:00Z");
 
-  // One step per shape a factory refuses: an absent required param, a param the
-  // factory checks past its type, an unimplemented enum member, and a function
-  // name outside the registry.
-  const uncompilable: Array<TransformStep> = [
+  // One step per shape a factory refuses whose function this build does have:
+  // an absent required param, a param the factory checks past its type, and an
+  // unimplemented enum member. Answering any of them needs the compile the pass
+  // does not run.
+  const uncompilableParams: Array<TransformStep> = [
     { function: "pad_left", params: {} },
     { function: "pad_left", params: { length: 4, char: "ab" } },
     { function: "phonetic", params: { algorithm: "metaphone" } },
-    { function: "no_such_function", params: {} },
   ];
 
-  test.each(uncompilable)("passes %j through to the mint", (step) => {
+  // The fourth shape a factory refuses: a function name outside the registry.
+  // It needs no compile to spot -- the descriptor table is core's own registry
+  // -- so it is the one the pass answers itself, below.
+  const unrecognizedFunction: TransformStep = {
+    function: "no_such_function",
+    params: {},
+  };
+
+  const uncompilable: Array<TransformStep> = [
+    ...uncompilableParams,
+    unrecognizedFunction,
+  ];
+
+  test.each(uncompilableParams)("passes %j through to the mint", (step) => {
     const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
     const authored = withFirstElementTransform(draft, [step]);
     // Nothing else here answers the question either: the terms schema admits the
@@ -516,6 +700,56 @@ describe("a key-element transform core cannot build", () => {
     expect(() => canonicalString(terms)).not.toThrow();
 
     const result = validateAdvancedInvite(authored, seed, now);
+    expect(result.canGenerate).toBe(true);
+    expect(result.errors.keys).toBeUndefined();
+  });
+
+  test("blocks Generate on a key element naming a function core cannot run", () => {
+    // The one compile question the pass answers itself, so the step editor's
+    // alert on that row does not stand beside an open Generate: removing the
+    // step is the only way out, and the mint would refuse it anyway. The
+    // message names no function -- an element transform's is partner-authored
+    // free text -- and points at the row the editor marks.
+    const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    const authored = withFirstElementTransform(draft, [unrecognizedFunction]);
+    const result = validateAdvancedInvite(authored, seed, now);
+    expect(result.canGenerate).toBe(false);
+    expect(result.errors.keys).toMatch(
+      /psilink does not recognize.*remove the highlighted step/i,
+    );
+    expect(result.errors.keys).not.toMatch(/no_such_function/);
+    // Core's own verdict on the same document, so the gate gives advance notice
+    // of the mint's refusal rather than holding a reading of its own.
+    expect(() =>
+      assertTransformsCompile(buildAdvancedTerms(authored)),
+    ).toThrow();
+  });
+
+  test("a disabled key's unrecognized step does not block Generate", () => {
+    // The gate reads the built terms, so a step on a key the draft does not
+    // enable declares nothing the mint would refuse, exactly as the fan-out
+    // gate above reads them.
+    const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    const parked = {
+      ...draft,
+      keys: draft.keys.map((entry, index) =>
+        index === draft.keys.length - 1
+          ? {
+              ...entry,
+              enabled: false,
+              key: {
+                ...entry.key,
+                elements: entry.key.elements.map((element, position) =>
+                  position === 0
+                    ? { ...element, transform: [unrecognizedFunction] }
+                    : element,
+                ),
+              },
+            }
+          : entry,
+      ),
+    };
+    const result = validateAdvancedInvite(parked, seed, now);
     expect(result.canGenerate).toBe(true);
     expect(result.errors.keys).toBeUndefined();
   });

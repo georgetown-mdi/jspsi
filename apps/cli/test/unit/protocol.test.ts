@@ -29,6 +29,15 @@ vi.mock("@openmined/psi.js", () => ({
   default: vi.fn().mockResolvedValue({}),
 }));
 
+// What the agreed deduplicate pair resolved to, on every mocked outcome: the
+// run reads it off the exchange result to state it on the log and on the
+// terminal event, so an outcome without it is not one runExchange can return.
+const STUB_MATCHING = {
+  localDeduplicate: false,
+  partnerDeduplicate: false,
+  cardinality: "one-to-one",
+} as const;
+
 // Default runExchange mock implementation. Polls the drop directory until it
 // is empty, since the receiver deletes each message file after consuming it -
 // an empty directory means the peer consumed the final key-exchange message.
@@ -54,7 +63,11 @@ async function defaultRunExchange(): Promise<unknown> {
       );
     await new Promise<void>((r) => setTimeout(r, 1));
   }
-  return { associationTable: [[], []], partnerPayload: {} };
+  return {
+    associationTable: [[], []],
+    partnerPayload: {},
+    matching: STUB_MATCHING,
+  };
 }
 
 // Block a mocked runExchange until BOTH key files hold a rotated (non-original)
@@ -242,6 +255,7 @@ import {
   isPeerWaitTimeout,
   sanitizeErrorForDisplay,
   sanitizeForDisplay,
+  describeResolvedMatching,
   describeResolvedRunShape,
   getDefaultLinkageTerms,
   DEFAULT_MAX_DISPLAY_LENGTH,
@@ -805,6 +819,8 @@ test("names a deduplicating cardinality and warns on an over-bound projection", 
   // machine-interface stream a supervisor or a console seat reads instead of it.
   const runShape: ResolvedRunShape = {
     cardinality: "many-to-many",
+    localDeduplicate: true,
+    partnerDeduplicate: true,
     localRecordCount: 3163,
     localDeclaredRecordCount: 3163,
     partnerRecordCount: 3163,
@@ -875,6 +891,8 @@ test("leaves the pre-round boundary silent on a one-to-one run", async () => {
   vi.mocked(runExchange).mockImplementation(
     runExchangeConfirming({
       cardinality: "one-to-one",
+      localDeduplicate: false,
+      partnerDeduplicate: false,
       localRecordCount: 3163,
       localDeclaredRecordCount: 3163,
       partnerRecordCount: 3163,
@@ -912,6 +930,62 @@ test("leaves the pre-round boundary silent on a one-to-one run", async () => {
   expect(mockState.warnings).toStrictEqual([]);
 }, 20_000);
 
+test("states the partner's deduplicate value and the resolved cardinality on every run", async () => {
+  // The partner's value comes from its own document, so nothing before the terms
+  // exchange states it. Asserted on the one-to-one run above all: that shape
+  // raises no notice, so without this line the operator reads neither fact.
+  vi.mocked(runExchange).mockImplementation(
+    runExchangeConfirming({
+      cardinality: "one-to-one",
+      localDeduplicate: false,
+      partnerDeduplicate: false,
+      localRecordCount: 4,
+      localDeclaredRecordCount: 4,
+      partnerRecordCount: 6,
+      localExpectsOutput: true,
+      partnerAssociationTableWithheld: false,
+    }) as never,
+  );
+  await Promise.all([
+    runProtocol({
+      connection: {
+        channel: "filedrop",
+        path: dropDir,
+        options: TWO_PARTY_OPTIONS,
+      },
+      auth: null,
+      prepared: minimalPrepared,
+      output: undefined,
+      verbosity: -1,
+      loggerName: "test-a",
+    }),
+    runProtocol({
+      connection: {
+        channel: "filedrop",
+        path: dropDir,
+        options: TWO_PARTY_OPTIONS,
+      },
+      auth: null,
+      prepared: minimalPrepared,
+      output: undefined,
+      verbosity: -1,
+      loggerName: "test-b",
+    }),
+  ]);
+
+  // Composed by core and rendered here unchanged, so the CLI and the browser
+  // seats cannot drift into two wordings of the one fact. It is an info line,
+  // not a warning: it states what the run proceeds on rather than an exception
+  // to it, which is why the one-to-one run above still raises nothing.
+  const expected = describeResolvedMatching({
+    localDeduplicate: false,
+    partnerDeduplicate: false,
+    cardinality: "one-to-one",
+  });
+  expect(mockState.infos).toContain(expected);
+  expect(mockState.warnings).toStrictEqual([]);
+}, 20_000);
+
 test("tells a non-receiving party what the run's completion tells it too", async () => {
   // The contradiction this closes, end to end on one seat: only the declaring
   // "many" party is required to expect output, so the "one" party of a
@@ -922,6 +996,8 @@ test("tells a non-receiving party what the run's completion tells it too", async
     runExchangeConfirming(
       {
         cardinality: "one-to-many",
+        localDeduplicate: false,
+        partnerDeduplicate: true,
         localRecordCount: 4,
         localDeclaredRecordCount: 4,
         partnerRecordCount: 6,
@@ -930,7 +1006,11 @@ test("tells a non-receiving party what the run's completion tells it too", async
       },
       // What core hands a party its terms give no output: no association table,
       // which is what the completion line below reads.
-      { associationTable: undefined, partnerPayload: {} },
+      {
+        associationTable: undefined,
+        partnerPayload: {},
+        matching: STUB_MATCHING,
+      },
     ) as never,
   );
   const output = path.join(tmpDir, "no-output-party.csv");
@@ -952,7 +1032,7 @@ test("tells a non-receiving party what the run's completion tells it too", async
 // --- Self-attested record persistence via runProtocol ------------------------
 
 const sampleRecord: ExchangeRecord = {
-  version: "psilink-exchange-record/v6",
+  version: "psilink-exchange-record/v7",
   outcome: "completed",
   createdAt: "2026-01-02T03:04:05.000Z",
   termsHash: "hQi6gjL9Z0RFtfz2TZVqXmUF1Cu8PaBFbClOJ9R8l_Q",
@@ -963,6 +1043,11 @@ const sampleRecord: ExchangeRecord = {
     matchingBasis: [{ name: "ssn", type: "ssn" }],
     payloadSent: [],
     payloadReceived: [],
+    matching: {
+      localDeduplicate: false,
+      partnerDeduplicate: false,
+      cardinality: "one-to-one",
+    },
   },
   recordsExposed: 5,
   bindingNonce: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
@@ -1322,7 +1407,11 @@ test("writes no result file for a non-receiving party when the exchange withhold
     // Drain the drop dir exactly as the default mock does, so neither party's
     // cleanup races the other's poller, then return a withheld result.
     await defaultRunExchange();
-    return { associationTable: undefined, partnerPayload: {} };
+    return {
+      associationTable: undefined,
+      partnerPayload: {},
+      matching: STUB_MATCHING,
+    };
   }
   vi.mocked(runExchange).mockImplementation(runExchangeWithheld as never);
   // Other tests in this file call buildOutputTable through runProtocol's normal
@@ -1378,6 +1467,7 @@ function mockCountOnlyRun(resolvedRole: "receiver" | "sender") {
       intersectionCount: 7,
       resolvedRole,
       partnerPayload: {},
+      matching: STUB_MATCHING,
     };
   }
   vi.mocked(runExchange).mockImplementation(runExchangeCountOnly as never);
@@ -3784,7 +3874,11 @@ test("authenticated exchange runs through EncryptedMessageConnection: wire bytes
       received = await conn.receive();
       signalConsumed();
     }
-    return { associationTable: [[], []], partnerPayload: {} };
+    return {
+      associationTable: [[], []],
+      partnerPayload: {},
+      matching: STUB_MATCHING,
+    };
   }
 
   vi.mocked(runExchange).mockImplementation(encryptingExchange as never);
@@ -4643,7 +4737,11 @@ test("a withheld result's terminal event has no count at all", async () => {
   // output table has no count either, so the field is absent rather than zero.
   vi.mocked(runExchange).mockImplementation((async () => {
     await defaultRunExchange();
-    return { associationTable: undefined, partnerPayload: {} };
+    return {
+      associationTable: undefined,
+      partnerPayload: {},
+      matching: STUB_MATCHING,
+    };
   }) as never);
 
   mockFd3Open();
@@ -4747,10 +4845,11 @@ test("an emitter passed instead of the flag receives every event, and no second 
   }
 
   // The whole run reported through the caller's object, terminal event included.
-  // A matched run passes no count, so the terminal call has the written flag
-  // and an absent count (the builder omits the field entirely for it).
+  // A matched run passes no count, so the terminal call has the written flag,
+  // what the deduplicate pair resolved to, and an absent count (the builder
+  // omits the count fields entirely for it).
   expect(emitted.map((e) => e.event)).toEqual(["stages", "metrics", "result"]);
-  expect(emitted[2].args).toEqual([true, undefined]);
+  expect(emitted[2].args).toEqual([true, STUB_MATCHING, undefined]);
   // Nothing re-ran the preflight and nothing reached the descriptor: the
   // already-preflighted emitter was reused rather than re-opened.
   expect(fd3.preflightProbes).toBe(0);

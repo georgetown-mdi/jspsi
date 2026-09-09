@@ -42,18 +42,30 @@ export function Alerted({ failure }: { failure: RunFailure }) {
 }
 `;
 
+// Bound for the case that walks the whole web source tree: it parses every
+// module in it, with no wait in it. It runs 0.7s alone against vitest's 5s
+// default, and 9.0s with the rest of the script suites competing for the same
+// cores, which is the contention that reddened it. Sized well past that worst
+// measurement, this stays a hang safety check -- a walk that never terminates
+// still fails here -- rather than a claim about how fast the scan runs.
+const TREE_SCAN_TIMEOUT_MS = 60_000;
+
 describe("RunFailure display-sink check", () => {
-  it("the tree as it stands renders every RunFailure message through the sink", () => {
-    const offSink = [];
-    let throughSink = 0;
-    for (const file of sourceModules(WEB_SOURCE_DIR))
-      for (const render of failureMessageRenders(parseFile(file))) {
-        if (render.throughSink) throughSink += 1;
-        else offSink.push(`${file}:${render.line}: ${render.text}`);
-      }
-    expect(offSink).toEqual([]);
-    expect(throughSink).toBeGreaterThan(0);
-  });
+  it(
+    "the tree as it stands renders every RunFailure message through the sink",
+    () => {
+      const offSink = [];
+      let throughSink = 0;
+      for (const file of sourceModules(WEB_SOURCE_DIR))
+        for (const render of failureMessageRenders(parseFile(file))) {
+          if (render.throughSink) throughSink += 1;
+          else offSink.push(`${file}:${render.line}: ${render.text}`);
+        }
+      expect(offSink).toEqual([]);
+      expect(throughSink).toBeGreaterThan(0);
+    },
+    TREE_SCAN_TIMEOUT_MS,
+  );
 
   it("the type this check scans for still stands where it says", () => {
     expect(declaresType(parseFile(FAILURE_TYPE_FILE), FAILURE_TYPE_NAME)).toBe(

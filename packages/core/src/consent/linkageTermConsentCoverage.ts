@@ -17,9 +17,11 @@
 import { parseLinkageTerms } from "../config/linkageTermsSchema.js";
 import {
   CONSENT_FACTS,
+  DEDUPLICATE_ACCEPTOR_SETTABLE_SIDE_NOTE,
   DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
   DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,
   DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT,
+  describeDeduplicatePair,
 } from "./consentFacts.js";
 
 import type {
@@ -129,6 +131,18 @@ interface ConsentProbeShape {
    * under test alone. Absent where the shape is the prepared base as it stands.
    */
   shape?: (terms: LinkageTerms) => LinkageTerms;
+  /**
+   * The ACCEPTING party's own `deduplicate` value both sides of this shape are
+   * rendered under -- the accept seat's control, which is no field of the
+   * invitation and so cannot be varied like one. Present only for a shape whose
+   * copy turns on it.
+   *
+   * A surface offering no such control does not measure a shape that names one:
+   * its accept derives that party's side as `false`, so the pair the shape
+   * describes is one it never runs. The surface tests filter on it, each with
+   * its own non-vacuity guard.
+   */
+  acceptorDeduplicate?: boolean;
   /**
    * Copy every surface MUST render for this shape's variant and MUST NOT render
    * for its base, exactly as {@link ConsentRelevantTerm.requiredVariantCopy}.
@@ -322,6 +336,32 @@ export const COUNT_ONLY_PROBE_TERMS: LinkageTerms = {
 /**
  * @internal
  *
+ * The pair sentence a seat renders where the accepting party declares a
+ * grouping of its own and the invitation declares none, and the one where
+ * both parties declare it -- the base and the variant of the acceptor-side
+ * shapes below.
+ *
+ * Taken from {@link describeDeduplicatePair} rather than written out, so the
+ * pin is the sentence core resolves rather than a copy of it that a reworded
+ * sentence would leave behind. Both read the probe base's output shape, where
+ * the inviting party receives the result.
+ */
+const ACCEPTOR_ONLY_PAIR_SENTENCE = describeDeduplicatePair({
+  inviterDeduplicate: false,
+  acceptorDeduplicate: true,
+  inviterReceivesResult: true,
+});
+
+/** @internal */
+const BOTH_SIDED_PAIR_SENTENCE = describeDeduplicatePair({
+  inviterDeduplicate: true,
+  acceptorDeduplicate: true,
+  inviterReceivesResult: true,
+});
+
+/**
+ * @internal
+ *
  * Every field path the `LinkageTerms` declaration reaches, classified as
  * one an acceptor's consent turns on or one it does not. Keyed by the
  * paths derived from that declaration, with array and tuple indices
@@ -424,11 +464,14 @@ export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
       "the acceptor's, which changes how many records the intersection holds " +
       "-- and discloses to whichever party receives the result how the " +
       "inviter's records group onto each matched record of the acceptor's.",
-    // Which party reads the grouping follows the output shape, so the two shapes
-    // a deduplicating document can take are measured separately. The schema
+    // Which party reads the grouping follows the output shape, so the shapes a
+    // deduplicating document can take are measured separately. The schema
     // requires the declaring party to receive output, so `shareWithPartner` is
-    // the whole of the remaining axis: both parties receive, or the inviter
-    // alone does.
+    // the whole of that axis: both parties receive, or the inviter alone does.
+    // The sole-receiver case then splits again on what the accepting party is
+    // told about the rounds, which the exchange settles rather than the display
+    // (`withholdsAcceptorAssociationTable`), so it is measured on both sides of
+    // that verdict.
     shapes: [
       {
         name: "both parties receive the result",
@@ -438,21 +481,24 @@ export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
         ],
         forbiddenVariantCopy: [
           DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT,
-          // The display limit belongs to the sole-receiver shape alone: this
-          // shape presents the accepting party the grouping, so a sentence
+          // Both sole-receiver sentences belong to the shapes below: this one
+          // presents the accepting party the grouping, so either sentence
           // saying what it is NOT shown would name a withholding that does not
           // happen.
           CONSENT_FACTS.duplicateGroupingDisplayLimit.note,
+          CONSENT_FACTS.duplicateGroupingWithheld.note,
         ],
       },
       {
-        name: "the inviting party is the sole receiver",
+        name: "the inviting party is the sole receiver and the table is exchanged",
         // The acceptor mirrors to a party that receives nothing, so the inviter
         // may transmit no payload to it: an invitation declaring a `send` here
         // is one deriveAcceptedLinkageTerms refuses, and the probe would measure
         // the surfaces on a document no acceptance can reach. The request FROM
         // the acceptor stays, since that direction is exactly what the widening
-        // the side note states reaches.
+        // the side note states reaches -- and it is also what leaves the
+        // accepting party's half of the table exchanged under either strategy,
+        // which is what separates this shape from the one below.
         shape: (terms) =>
           edited(terms, (draft) => {
             draft.output.shareWithPartner = false;
@@ -468,7 +514,90 @@ export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
           CONSENT_FACTS.duplicateGroupingDisplayLimit.note,
           DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
         ],
-        forbiddenVariantCopy: [DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT],
+        forbiddenVariantCopy: [
+          DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,
+          // The enforced sentence is the other shape's: claiming it for a run
+          // that exchanges the table would put a protection under an `enforced`
+          // basis the run does not make.
+          CONSENT_FACTS.duplicateGroupingWithheld.note,
+        ],
+      },
+      {
+        name: "the inviting party is the sole receiver and the table is withheld",
+        // The one combination the exchange closes itself: single-pass, the
+        // inviting party the only party entitled to output, and no column
+        // requested of the accepting party -- a declared-empty request, which
+        // binds that party's own disclosure where an absent one would not.
+        shape: (terms) =>
+          edited(terms, (draft) => {
+            draft.linkageStrategy = "single-pass";
+            draft.output.shareWithPartner = false;
+            draft.payload = { send: [], receive: [] };
+          }),
+        requiredVariantCopy: [
+          DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT,
+          // Same placement as the display limit above, and the same reason for
+          // pinning it across both surfaces: the reader met by what this client
+          // presents is entitled, in the same place, to what the exchange holds
+          // rather than the client.
+          CONSENT_FACTS.duplicateGroupingWithheld.note,
+          DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
+        ],
+        forbiddenVariantCopy: [
+          DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,
+          // And the display-scoped sentence must not reach this shape: it would
+          // tell a reader whose grouping the wire withholds that other software
+          // on their side could show it.
+          CONSENT_FACTS.duplicateGroupingDisplayLimit.note,
+        ],
+      },
+      {
+        name: "the accepting party declares a grouping of its own under the cascade",
+        // The seat where that party sets its own side: the base pair is
+        // (false, true) and the variant (true, true), so the two pair sentences
+        // the control can reach are measured against each other. Neither is
+        // readable from the invitation alone, which is why the shape names the
+        // accepting party's value rather than varying a field.
+        acceptorDeduplicate: true,
+        requiredVariantCopy: [
+          BOTH_SIDED_PAIR_SENTENCE,
+          DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,
+          // The direction note in the variant a seat with the control owes: the
+          // one that closes on the control rather than on a configuration file.
+          DEDUPLICATE_ACCEPTOR_SETTABLE_SIDE_NOTE,
+        ],
+        forbiddenVariantCopy: [
+          // The base's own pair sentence, which a surface rendering one sentence
+          // for every pair would state here too.
+          ACCEPTOR_ONLY_PAIR_SENTENCE,
+          DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT,
+          // The note for a seat with no control: it claims the accepting party's
+          // records are never grouped, which this pair falsifies.
+          DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
+        ],
+      },
+      {
+        name: "the accepting party declares a grouping of its own under single-pass",
+        // The same pair under the other strategy the schema admits, so neither
+        // sentence can be gated on the strategy: both strategies match a
+        // deduplicating cardinality (`deduplicateIsImplementedForStrategy`), and
+        // what the run does with the both-sided pair is the seat's own refusal to
+        // state rather than a reason to withhold the copy.
+        acceptorDeduplicate: true,
+        shape: (terms) =>
+          edited(terms, (draft) => {
+            draft.linkageStrategy = "single-pass";
+          }),
+        requiredVariantCopy: [
+          BOTH_SIDED_PAIR_SENTENCE,
+          DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,
+          DEDUPLICATE_ACCEPTOR_SETTABLE_SIDE_NOTE,
+        ],
+        forbiddenVariantCopy: [
+          ACCEPTOR_ONLY_PAIR_SENTENCE,
+          DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT,
+          DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
+        ],
       },
     ],
     vary: (terms) =>
@@ -782,6 +911,12 @@ interface ConsentRepresentationProbe {
    * under one shape.
    */
   forbiddenVariantCopy?: ReadonlyArray<string>;
+  /**
+   * {@link ConsentProbeShape.acceptorDeduplicate}: the accepting party's own
+   * value both sides are rendered under, present only where the shape names
+   * one. A surface with no control over that value skips these pairs.
+   */
+  acceptorDeduplicate?: boolean;
   /** {@link ConsentRelevantTerm.unrepresented} for the field, never absent. */
   unrepresented: Partial<Record<ConsentSurfaceName, string>>;
 }
@@ -837,6 +972,9 @@ export function consentRepresentationProbes(
         ...(requiredVariantCopy !== undefined ? { requiredVariantCopy } : {}),
         ...(shape?.forbiddenVariantCopy !== undefined
           ? { forbiddenVariantCopy: shape.forbiddenVariantCopy }
+          : {}),
+        ...(shape?.acceptorDeduplicate !== undefined
+          ? { acceptorDeduplicate: shape.acceptorDeduplicate }
           : {}),
         unrepresented: entry.unrepresented ?? {},
       });

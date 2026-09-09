@@ -269,6 +269,21 @@ describe("ledger tracks step-2 edits", () => {
     expect(identifierProblem(editor.draft)).toBe(false);
   });
 
+  test("a count-only draft's receive row promises no matched rows", () => {
+    // A psi-c run produces the overlap size and no result table for anyone, so
+    // the row the inviter reads before minting cannot promise matched rows and
+    // the partner's shared columns.
+    const countOnly = editorWithAlgorithm(editorFromCsv("Dana", csv), "psi-c");
+    expect(ledgerValue(countOnly, "You will receive").value).toBe(
+      "How many records you have in common - no matched rows and no shared " +
+        "columns",
+    );
+    // The identifier-revealing draft keeps the promise it can keep.
+    expect(
+      ledgerValue(editorFromCsv("Dana", csv), "You will receive").value,
+    ).toBe("Matched rows + your partner's shared columns");
+  });
+
   test("a name edit relabels the identity without touching the keys", () => {
     const seeded = editorFromCsv("Dana", csv);
     const renamed = editorWithIdentity(seeded, "Riverbend County");
@@ -1057,6 +1072,19 @@ describe("after the exchange completes", () => {
         "You will receive",
       )?.value,
     ).toBe("1,847 matched rows + shared columns");
+  });
+
+  test("a matched result with no count says so rather than displaying as zero", () => {
+    // The console holds a server job's result and counts none of its rows, which
+    // is why the completion headline names no figure there. The row states the
+    // count is missing and where to get it; a zero would report an empty match
+    // the run never reported.
+    const value = outcomeRow({ kind: "matched" }, "You will receive")?.value;
+    expect(value).toBe(
+      "Matched rows + shared columns - row count not available; " +
+        "download the result to count them",
+    );
+    expect(value).not.toContain("0 matched rows");
   });
 
   test("a withheld result states the caveat rather than a count", () => {

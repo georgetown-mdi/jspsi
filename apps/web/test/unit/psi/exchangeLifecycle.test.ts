@@ -117,6 +117,11 @@ const STUB_EXCHANGE_RESULT = {
   associationTable: undefined,
   intersectionCount: undefined,
   partnerTerms: STUB_LINKAGE_TERMS,
+  matching: {
+    localDeduplicate: false,
+    partnerDeduplicate: false,
+    cardinality: "one-to-one",
+  },
   resolvedRole: "receiver",
   partnerPayload: { columns: [], rowIndices: [], rows: [] },
 } satisfies ExchangeResult;
@@ -189,6 +194,7 @@ function seams() {
     onResult: vi.fn(),
     onError: vi.fn(),
     onWarning: vi.fn(),
+    onResolvedMatching: vi.fn(),
     generateOutput: vi.fn(() => OUTPUTS),
   };
 }
@@ -922,8 +928,18 @@ describe("runExchangeLifecycle", () => {
     };
   }
 
+  /** The three fields of a run shape the status slot is handed: the record
+   * counts the shape also holds are the notices' input, not the pair's. */
+  const matchingOf = (shape: ResolvedRunShape) => ({
+    localDeduplicate: shape.localDeduplicate,
+    partnerDeduplicate: shape.partnerDeduplicate,
+    cardinality: shape.cardinality,
+  });
+
   const OVER_BOUND_SHAPE: ResolvedRunShape = {
     cardinality: "many-to-many",
+    localDeduplicate: true,
+    partnerDeduplicate: true,
     localRecordCount: 3163,
     localDeclaredRecordCount: 3163,
     partnerRecordCount: 3163,
@@ -935,7 +951,8 @@ describe("runExchangeLifecycle", () => {
     // The operator has to be able to read what the terms resolved to while the
     // run is still going, so these arrive at the callback that produced them
     // rather than with the result. Core composes both strings; this seat only
-    // routes them to the notice slot its transport warnings already take.
+    // routes them to the notice slot its transport warnings already take, and
+    // the resolved pair to the status slot ahead of them.
     const { mc } = makeFakeMc();
     mockedOpen.mockResolvedValue(mc);
     const { acquired } = makeResources();
@@ -944,6 +961,7 @@ describe("runExchangeLifecycle", () => {
     const { cardinalityNotice, pairTableAdvisory } =
       describeResolvedRunShape(OVER_BOUND_SHAPE);
     const order: Array<string> = [];
+    s.onResolvedMatching.mockImplementation(() => order.push("<matching>"));
     s.onWarning.mockImplementation((message: string) => order.push(message));
     s.onResult.mockImplementation(() => order.push("<result>"));
     mockedRunExchange.mockImplementation(
@@ -957,7 +975,12 @@ describe("runExchangeLifecycle", () => {
       ...s,
     });
 
-    expect(order).toEqual([cardinalityNotice, pairTableAdvisory, "<result>"]);
+    expect(order).toEqual([
+      "<matching>",
+      cardinalityNotice,
+      pairTableAdvisory,
+      "<result>",
+    ]);
   });
 
   test("raises the pre-round notices on a run that then fails", async () => {
@@ -986,25 +1009,33 @@ describe("runExchangeLifecycle", () => {
       [cardinalityNotice],
       [pairTableAdvisory],
     ]);
+    expect(s.onResolvedMatching.mock.calls).toEqual([
+      [matchingOf(OVER_BOUND_SHAPE)],
+    ]);
     expect(s.onError).toHaveBeenCalledTimes(1);
   });
 
-  test("raises no notice for a one-to-one run within the advisory bound", async () => {
+  test("states the resolved matching alone on a one-to-one run within the bound", async () => {
+    // The run shape raises neither the cardinality notice nor the projection
+    // advisory here, so an ordinary run carries no warning at all -- and the
+    // pair, which the operator would otherwise read nothing about until the
+    // exchange had finished, goes to the status slot on its own.
     const { mc } = makeFakeMc();
     mockedOpen.mockResolvedValue(mc);
     const { acquired } = makeResources();
     const acquire: Acquire = () => Promise.resolve(acquired);
     const s = seams();
-    mockedRunExchange.mockImplementation(
-      runExchangeConfirming({
-        cardinality: "one-to-one",
-        localRecordCount: 3163,
-        localDeclaredRecordCount: 3163,
-        partnerRecordCount: 3163,
-        localExpectsOutput: true,
-        partnerAssociationTableWithheld: false,
-      }),
-    );
+    const shape: ResolvedRunShape = {
+      cardinality: "one-to-one",
+      localDeduplicate: false,
+      partnerDeduplicate: false,
+      localRecordCount: 3163,
+      localDeclaredRecordCount: 3163,
+      partnerRecordCount: 3163,
+      localExpectsOutput: true,
+      partnerAssociationTableWithheld: false,
+    };
+    mockedRunExchange.mockImplementation(runExchangeConfirming(shape));
 
     await runExchangeLifecycle({
       acquire,
@@ -1015,6 +1046,7 @@ describe("runExchangeLifecycle", () => {
 
     expect(s.onResult).toHaveBeenCalledTimes(1);
     expect(s.onWarning).not.toHaveBeenCalled();
+    expect(s.onResolvedMatching.mock.calls).toEqual([[matchingOf(shape)]]);
   });
 
   test("raises the cardinality alone when the projection is within the bound", async () => {
@@ -1025,6 +1057,8 @@ describe("runExchangeLifecycle", () => {
     const s = seams();
     const shape: ResolvedRunShape = {
       cardinality: "one-to-many",
+      localDeduplicate: false,
+      partnerDeduplicate: true,
       localRecordCount: 3163,
       localDeclaredRecordCount: 3163,
       partnerRecordCount: 3163,
@@ -1043,5 +1077,6 @@ describe("runExchangeLifecycle", () => {
     expect(s.onWarning.mock.calls).toEqual([
       [describeResolvedRunShape(shape).cardinalityNotice],
     ]);
+    expect(s.onResolvedMatching.mock.calls).toEqual([[matchingOf(shape)]]);
   });
 });

@@ -41,10 +41,10 @@ describe("unnameableColumnsAlert", () => {
   });
 
   test("blames the removal, not a blank cell, when the read emptied the name", () => {
-    // A header made only of text-direction characters is neither a trailing
+    // A header made only of control characters is neither a trailing
     // comma nor a blank cell, so the stated cause and remedy must not be those.
     const alert = unnameableColumnsAlert([2], [2]);
-    expect(alert.message).toContain("invisible text-direction characters");
+    expect(alert.message).toContain("invisible control characters");
     expect(alert.message).toContain("ordinary characters");
     expect(alert.message).not.toContain("trailing comma");
   });
@@ -53,14 +53,14 @@ describe("unnameableColumnsAlert", () => {
     const alert = unnameableColumnsAlert([2, 5], [2]);
     expect(alert.message).toContain("Columns 2, 5");
     expect(alert.message).toContain("Column 2 held");
-    expect(alert.message).toContain("invisible text-direction characters");
+    expect(alert.message).toContain("invisible control characters");
     expect(alert.message).toContain("trailing comma");
   });
 
   test("keeps the blank-cell cause when the removal touched other columns only", () => {
     const alert = unnameableColumnsAlert([4], [2]);
     expect(alert.message).toContain("trailing comma");
-    expect(alert.message).not.toContain("text-direction");
+    expect(alert.message).not.toContain("invisible control characters");
   });
 });
 
@@ -93,7 +93,7 @@ describe("sanitizedColumnsAlert", () => {
   test("names a single column position in the singular", () => {
     const alert = sanitizedColumnsAlert([3]);
     expect(alert.title).toBe(
-      "A formatting character was removed from a column name",
+      "An invisible control character was removed from a column name",
     );
     expect(alert.message).toContain("Column 3");
     expect(alert.message).toContain("had a name that held");
@@ -101,7 +101,9 @@ describe("sanitizedColumnsAlert", () => {
 
   test("pluralizes the title and message for multiple positions", () => {
     const alert = sanitizedColumnsAlert([2, 5]);
-    expect(alert.title).toBe("Formatting characters removed from column names");
+    expect(alert.title).toBe(
+      "Invisible control characters removed from column names",
+    );
     expect(alert.message).toContain("Columns 2, 5");
     expect(alert.message).toContain("had names that held");
   });
@@ -121,7 +123,7 @@ describe("sanitizedColumnsAlert", () => {
       "gone from every name this read takes from the header",
     );
     expect(alert.message).toContain(
-      "does not change a name the linkage terms declare",
+      "does not change a name the linkage terms or a metadata block declare",
     );
     expect(alert.message).not.toContain("and sent to your partner");
     expect(alert.message).not.toContain(
@@ -129,20 +131,34 @@ describe("sanitizedColumnsAlert", () => {
     );
   });
 
-  test("states what an untouched declared name costs, and names no remedy", () => {
+  test("states where an untouched declared name is refused, and names no remedy", () => {
     // The consequence is the same on every seat that renders this; the edit is
     // not. The acceptor seats hold terms the partner declared in an invitation,
     // and the direct-exchange seats hold no terms at all, so the copy states
     // one sentence and leaves the remedy to the seat that knows it.
     const alert = sanitizedColumnsAlert([1]);
     expect(alert.message).toContain(
-      "This read does not change a name the linkage terms declare; one that " +
-        "holds these characters is used as declared and reaches your partner " +
-        "wherever the exchange sends it.",
+      "This read does not change a name the linkage terms or a metadata " +
+        "block declare: one that holds these characters is refused when the " +
+        "document is read, and a standardization input or output name is not " +
+        "held to that rule.",
     );
     expect(alert.message).not.toContain("configuration");
     expect(alert.message).not.toContain("invitation");
     expect(alert.message).not.toContain("terms for this exchange");
+  });
+
+  test("names the class rather than what the file held", () => {
+    // The positions are the only thing the notice reports about the file. A
+    // header that lost a tab and no text-direction character produces this same
+    // copy, so the clause naming those characters names the class the read
+    // removes rather than asserting one was in the operator's header.
+    const alert = sanitizedColumnsAlert([1]);
+    expect(alert.message).toContain(
+      "invisible control characters, a class that includes the " +
+        "text-direction ones",
+    );
+    expect(alert.message).not.toContain("text-direction ones among them");
   });
 
   test("interpolates no name, only the positions", () => {

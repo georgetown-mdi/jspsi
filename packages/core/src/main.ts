@@ -88,7 +88,6 @@ export {
   MAX_CHUNKS_PER_REASSEMBLY,
   MAX_CONCURRENT_REASSEMBLIES,
   MAX_WEBRTC_FRAME_BYTES,
-  MAX_WEBRTC_FRAME_STRUCTURE_BYTES,
   MAX_WEBRTC_REASSEMBLY_DEPTH,
   MAX_WEBRTC_STRING_BYTES,
   MIN_CHUNK_RESIDENT_BYTES,
@@ -96,6 +95,10 @@ export {
   scanFrameStructure,
 } from "./connection/binaryPackBounds";
 export type { FrameStructureRefusal } from "./connection/binaryPackBounds";
+// The send-side half of the same wire. Barrelled for the same reason: both
+// WebRTC transports encode their outbound frames outside this package, and one
+// implementation has to produce the bytes a partner's BinaryPack reads.
+export { encodeBinaryPackValue } from "./connection/binaryPackEncode";
 export {
   getLogger,
   getLoggerForVerbosity,
@@ -144,6 +147,10 @@ export {
   CanonicalEncodingError,
 } from "./utils/canonical";
 export type { CanonicalValue } from "./utils/canonical";
+// The package's one reading of a well-formed UTF-16 string, shared so an editor
+// naming the fault before a parse, the terms schema, and the encoder that would
+// throw all refuse the same strings.
+export { loneSurrogateIndex } from "./utils/wellFormedString";
 export {
   sanitizeForDisplay,
   displayText,
@@ -238,6 +245,8 @@ export {
 export type { ExchangeSpec } from "./config/exchangeSpec";
 export {
   DEDUPLICATE_IMPLEMENTED_BY_STRATEGY,
+  LINKAGE_CARDINALITIES,
+  assertBothSidedDeduplicateImplemented,
   assertDeduplicateImplemented,
   countOnlyShapeViolation,
   swapPairTransformsDiffer,
@@ -249,8 +258,11 @@ export {
   MAX_PAYLOAD_ENTRIES,
   MAX_TEXT_LENGTH,
   MAX_TRANSFORM_PATTERN_LENGTH,
+  NAME_SHAPE_MESSAGE,
+  NAME_SHAPE_PATTERN,
   TEXT_CONTROL_CHAR_MESSAGE,
   TEXT_CONTROL_CHAR_PATTERN,
+  TEXT_DIRECTION_MESSAGE,
   referencedLinkageFieldNames,
   safeParseLinkageTerms,
 } from "./config/linkageTermsSchema";
@@ -258,7 +270,10 @@ export {
   deriveAcceptedLinkageTerms,
   validateCompatibility,
 } from "./linkageTermsNegotiation";
-export type { CountOnlyShapeViolation } from "./linkageTermsPolicy";
+export type {
+  CountOnlyShapeViolation,
+  ResolvedMatching,
+} from "./linkageTermsPolicy";
 export type {
   LinkageField,
   LinkageKey,
@@ -349,11 +364,9 @@ export {
   STANDARDIZATION_FUNCTION_NAMES,
   StandardizedDataset,
   StandardizedField,
-  assertDeclaredWidthMatchesStrategy,
   buildKeyStrings,
   buildStandardizedDataset,
   runPipeline,
-  strategyCannotMatchDeclaredWidth,
 } from "./standardization";
 export {
   assertFanOutImplemented,
@@ -365,6 +378,7 @@ export {
   pipelineAlwaysDrops,
   stepCanEmptyRealizedValue,
   summarizeLinkageShortfall,
+  transformRefusalIn,
   validateStandardizationAgainstTerms,
 } from "./linkageSatisfiability";
 export {
@@ -379,6 +393,7 @@ export type {
   LinkageKeyFitness,
   LinkageTermsStanding,
   LinkageTermsVerdict,
+  TransformRefusal,
 } from "./linkageSatisfiability";
 
 // The one display model both acceptance surfaces render the inviter's proposed
@@ -398,10 +413,16 @@ export type {
 // fact the acceptance surfaces state is enforced by the exchange or rests on the
 // partner's word, and the fixed sentences both surfaces render for it.
 export {
+  ACCEPTOR_DEDUPLICATE_CONTROL_FACTS,
   CONSENT_BASIS_MARKERS,
   CONSENT_FACTS,
   COUNT_ONLY_DISCLOSURE_STATEMENT,
+  DEDUPLICATE_ACCEPTOR_SETTABLE_SIDE_NOTE,
   DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
+  DEDUPLICATE_ACCEPTOR_WIDENING_NOTE,
+  DEDUPLICATE_PARTNER_DECLARED_DISCLOSURE_STATEMENT,
+  DEDUPLICATE_PARTNER_DECLARED_SIDE_NOTE,
+  DEDUPLICATE_PARTNER_DECLARED_WIDENING_NOTE,
   DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,
   DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT,
   LINKAGE_RULE_SET_VERDICT_COPY,
@@ -409,10 +430,15 @@ export {
   PROPOSED_NOT_APPLIED_NOTES,
   RECORDED_LINKAGE_RULE_SET_CAVEAT,
   UNRECOGNIZED_TRANSFORM_NOTE,
+  describeDeduplicatePair,
   distinctLinkageRuleSetVerdicts,
   linkageRuleSetVerdictNote,
 } from "./consent/consentFacts.js";
-export type { ConsentFact, ConsentFactId } from "./consent/consentFacts.js";
+export type {
+  ConsentFact,
+  ConsentFactId,
+  DeduplicatePair,
+} from "./consent/consentFacts.js";
 // The count every acceptance surface paints a partner-declared name list under,
 // and the sentence a bounded list closes on: one cut and one wording across the
 // CLI accept prompt and the two web surfaces.
@@ -432,13 +458,15 @@ export {
   CsvRowParseError,
 } from "./file";
 export type { CSVRow, CSVParseMeta } from "./file";
-// The bidi control characters no name may hold, and the strip the CSV header
-// transform applies. Shared so the ingestion boundary and any schema tightening
-// the same class agree on what a name may contain.
+// The characters no name may hold, the text-direction half of that class, and
+// the strip the CSV header transform applies. Shared so the ingestion boundary,
+// the terms schema's name shape, and the surfaces mirroring the identity rule
+// agree on what a name and a recorded free-text value may contain.
 export {
   BIDI_CONTROL_PATTERN,
-  stripBidiControls,
-} from "./utils/bidiControls.js";
+  NAME_CONTROL_CHAR_PATTERN,
+  stripNameControlChars,
+} from "./utils/nameControls.js";
 export {
   inferDateInputFormatFromSource,
   inferDateOfBirthColumn,
@@ -466,6 +494,7 @@ export {
   matchedPairCount,
   prepareForExchange,
   resolveExchangeInputs,
+  resolveLinkageCardinality,
   runExchange,
 } from "./exchange";
 export type {
@@ -476,7 +505,10 @@ export type {
   PreparedExchange,
   RunExchangeOptions,
 } from "./exchange";
-export { describeResolvedRunShape } from "./pairTableProjection";
+export {
+  describeResolvedMatching,
+  describeResolvedRunShape,
+} from "./pairTableProjection";
 export type { ResolvedRunShape } from "./pairTableProjection";
 export {
   EXCHANGE_KEYS_VERSION,

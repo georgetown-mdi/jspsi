@@ -10,6 +10,7 @@ import {
   exchangeRecordOwedButUnbuilt,
   countIsPartnerReported,
   buildOutputTable,
+  describeResolvedMatching,
   describeResolvedRunShape,
   authenticateConnection,
   assertSharedSecretReadyForHandshake,
@@ -633,6 +634,11 @@ async function runExchangeStage(params: {
           emit((e) => e.warning(UNNAMED_PARTNER_ACCOUNTING_NOTE));
         } else log.info(...line);
         log.info("role:", resolvedRole);
+        // Each party's deduplicate value comes from its own document, so the
+        // pair -- and the cardinality it resolves to -- exists only now. Stated
+        // on the info line beside the role rather than on the warning channel
+        // below: it is what every run proceeds on, not an exception to it.
+        log.info(describeResolvedMatching(runShape));
 
         // What the agreed terms actually resolved to, named here because
         // nothing earlier states it: the consent surfaces show each
@@ -2106,7 +2112,8 @@ export async function runProtocol(
     // operator must not re-run it, so the catch classifies it as "output".
     terminalPhase = "output";
 
-    const { associationTable, intersectionCount, resolvedRole } = outcome;
+    const { associationTable, intersectionCount, matching, resolvedRole } =
+      outcome;
     await writeExchangeOutputs({
       outcome,
       prepared,
@@ -2130,12 +2137,15 @@ export async function runProtocol(
     // result CSV was produced. The count rides the same event so the two
     // resultWritten:false outcomes stay distinguishable to a supervisor
     // reading only fd 3, and it states the same trust posture (partner-
-    // vs. self-reported) the human line does. The metrics summary
-    // precedes it so the terminal event stays last on the stream.
+    // vs. self-reported) the human line does. What the agreed deduplicate
+    // pair resolved to rides it for the same reason: the line stating it
+    // is an info line, unread on fd 3 alone or at a quieter log level.
+    // The metrics summary precedes it so the terminal event stays last.
     emitMetrics();
     emit((e) =>
       e.result(
         associationTable !== undefined,
+        matching,
         intersectionCount === undefined
           ? undefined
           : {

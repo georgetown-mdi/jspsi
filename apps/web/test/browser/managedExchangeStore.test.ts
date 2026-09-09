@@ -456,10 +456,14 @@ describe("field-scoped rotation write", () => {
 describe("field-scoped lastRun write", () => {
   test("records the outcome, leaving the secret and document untouched", async () => {
     const created = await createManagedExchange(newExchange());
-    const updated = await recordManagedExchangeLastRun(created.id, {
-      at: "2026-07-14T12:00:00.000Z",
-      outcome: "succeeded",
-    });
+    const updated = await recordManagedExchangeLastRun(
+      created.id,
+      {
+        at: "2026-07-14T12:00:00.000Z",
+        outcome: "succeeded",
+      },
+      Date.parse("2026-07-14T12:00:00.000Z"),
+    );
     expect(updated.lastRun).toEqual({
       at: "2026-07-14T12:00:00.000Z",
       outcome: "succeeded",
@@ -475,11 +479,15 @@ describe("field-scoped lastRun write", () => {
       sharedSecret: rotatedSecret,
       expires: null,
     });
-    const updated = await recordManagedExchangeLastRun(created.id, {
-      at: "2026-07-14T12:00:00.000Z",
-      outcome: "failed",
-      failureKind: "storage",
-    });
+    const updated = await recordManagedExchangeLastRun(
+      created.id,
+      {
+        at: "2026-07-14T12:00:00.000Z",
+        outcome: "failed",
+        failureKind: "storage",
+      },
+      Date.parse("2026-07-14T12:00:00.000Z"),
+    );
     // The lastRun read the freshest record: the rotated secret survives.
     expect(updated.sharedSecret).toBe(rotatedSecret);
     expect(updated.lastRun?.failureKind).toBe("storage");
@@ -792,10 +800,14 @@ describe("one-step delete leaves nothing behind", () => {
         schedule,
       }),
     );
-    await recordManagedExchangeLastRun(created.id, {
-      at: "2026-02-01T14:00:00.000Z",
-      outcome: "succeeded",
-    });
+    await recordManagedExchangeLastRun(
+      created.id,
+      {
+        at: "2026-02-01T14:00:00.000Z",
+        outcome: "succeeded",
+      },
+      Date.parse("2026-02-01T14:00:00.000Z"),
+    );
     // Also stamp both sibling markers, so the delete must clear the local-state
     // entry as well as the record -- the two stores the browser holds an exchange
     // in.

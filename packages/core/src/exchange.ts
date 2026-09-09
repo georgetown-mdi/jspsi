@@ -8,11 +8,13 @@ import {
   assertBothSidedDeduplicateImplemented,
   assertCountOnlyTermsShape,
   assertDeduplicateImplemented,
+  candidateSetIsImplementedForStrategy,
+  COUNT_ONLY_SHAPE_REFUSALS,
+  resolvedMatchingFromTerms,
 } from "./linkageTermsPolicy.js";
 import { getDefaultLinkageTerms } from "./defaults/builtInLinkageTerms.js";
 import { getDefaultStandardization } from "./defaults/builtInStandardization.js";
 import {
-  assertDeclaredWidthMatchesStrategy,
   buildStandardizedDataset,
   declaredEffectiveKeyCount,
   declaredKeyWidth,
@@ -20,6 +22,7 @@ import {
   StandardizedKeyIterable,
 } from "./standardization.js";
 import {
+  assertCandidateSetCardinalityImplemented,
   assertFanOutImplemented,
   assertLinkageTermsSatisfiable,
   assertStandardizationMatchesTerms,
@@ -48,6 +51,7 @@ import {
 } from "./psi/link.js";
 import type { LinkageCardinality } from "./psi/link.js";
 import type { ResolvedRunShape } from "./pairTableProjection.js";
+import type { ResolvedMatching } from "./linkageTermsPolicy.js";
 import { InProcessPsiEngine } from "./psi/psiEngine.js";
 import {
   partyFansOut,
@@ -78,6 +82,8 @@ import {
 } from "./records/signedReceipt.js";
 import { OperatorConfigError, UsageError, causeChainSome } from "./errors.js";
 import type { Metadata, OwnColumnSelection } from "./config/metadata.js";
+import { TEXT_CONTROL_CHAR_PATTERN } from "./config/linkageTermsSchema.js";
+import { BIDI_CONTROL_PATTERN } from "./utils/nameControls.js";
 import type { LinkageTerms } from "./config/linkageTermsSchema.js";
 import type { StandardizedDataset } from "./standardization.js";
 import type {
@@ -316,6 +322,39 @@ export function matchedPairCount(associationTable: AssociationTable): number {
 }
 
 /**
+ * Refuse agreed terms that declare a per-record candidate width
+ * ({@link partyFansOut}) under a combination with no resolution for one,
+ * before anything goes on the wire: a `linkage_strategy` off the
+ * candidate-set allowlist, or the count-only algorithm
+ * (docs/spec/PROTOCOL.md, The combinations that stay unsupported).
+ *
+ * The numeric reading of what `assertFanOutImplemented` refuses structurally,
+ * kept beside it so a width the derivation produces and the producer list does
+ * not cannot slip past both. A {@link UsageError}: the width is a function of
+ * terms the accept path adopts wholesale.
+ */
+function assertDeclaredWidthMatchesStrategy(
+  terms: LinkageTerms,
+  effectiveKeyCount: number,
+): void {
+  const countOnly = terms.algorithm === "psi-c";
+  if (!countOnly && candidateSetIsImplementedForStrategy(terms.linkageStrategy))
+    return;
+  const keyCount = terms.linkageKeys.length;
+  if (!partyFansOut(keyCount, { effectiveKeyCount })) return;
+  if (countOnly) throw new UsageError(COUNT_ONLY_SHAPE_REFUSALS.candidateSet);
+  throw new UsageError(
+    "these linkage terms declare " +
+      `${effectiveKeyCount} candidate value slot(s) per record against their ` +
+      `${keyCount} linkage key(s), so a record may realize several candidates ` +
+      "for a key, while they name a strategy that matches a single value per " +
+      "record. Remove the expanding step, the fuzzy comparison or the swapped " +
+      "key order from the key's elements, or agree terms whose " +
+      "linkage_strategy matches a candidate set.",
+  );
+}
+
+/**
  * Refuse a `signing.mode` the exchange has no run path for, before it
  * runs. Allowlists `certificate` (signs and swaps a dual-signed receipt)
  * and `none`; `session-derived` and any other value would otherwise
@@ -435,12 +474,36 @@ export function assertSignedReceiptNamesBothParties(
  * not {@link ReceiptVerificationError}: both disagreeing values are this
  * party's own, nothing partner-controlled. The message names both values,
  * last, after the remedy.
+ *
+ * A certificate bound to a label holding one of the two character classes
+ * the terms refuse in `identity` (`TEXT_CONTROL_CHAR_PATTERN` and
+ * `BIDI_CONTROL_PATTERN`, config/linkageTermsSchema.ts) takes a message of
+ * its own: no terms document can name that label, so the remedy above is
+ * one its holder cannot perform, and the exit is a re-key under a label the
+ * terms admit followed by a re-pin at every partner. It names no part of
+ * the label -- the label is the offending text itself, so quoting it would
+ * put those characters on the screen, the discipline the binding check
+ * keeps at the other boundary (`psilink fingerprint`).
  */
 export function assertLocalCertificateAuthorizesAgreedIdentity(
   certificate: CertificateBody,
   agreedIdentity: string,
 ): void {
   if (certificateAuthorizesIdentity(certificate, agreedIdentity)) return;
+  if (
+    TEXT_CONTROL_CHAR_PATTERN.test(certificate.identity) ||
+    BIDI_CONTROL_PATTERN.test(certificate.identity)
+  )
+    throw new OperatorConfigError(
+      "this party's signing certificate is bound to a label the linkage " +
+        "terms cannot state -- it holds a control or text-direction " +
+        "character -- so this run cannot finish: the partner authorizes the " +
+        "presented certificate against the name in the agreed terms, and no " +
+        "terms document may name this one. Re-key the signing identity with " +
+        "'psilink fingerprint --force --identity' under a label the terms " +
+        "admit, then have every partner re-pin the new fingerprint before " +
+        `receipts verify again. The agreed terms name "${agreedIdentity}".`,
+    );
   throw new OperatorConfigError(
     "this party's signing certificate does not authorize the identity it " +
       "agreed terms under, so it cannot finish: a certificate is trusted by " +
@@ -557,27 +620,30 @@ export function assertPresentedDeduplicateMatchesInvitation(
 }
 
 /**
- * Resolve the matching cardinality {@link runExchange} passes to the
- * linkage strategies, from the two parties' agreed `deduplicate`
- * settings. The label is read from the calling party's own side, so the
- * two parties hold mirror labels for one procedure
- * (docs/spec/PROTOCOL.md, Deduplicating cardinalities): `(true, false)`
- * gives the declaring party `many-to-one`; `(true, true)` gives
- * `many-to-many`, which {@link assertBothSidedDeduplicateImplemented}
- * requires a matching strategy for. A refusal is symmetric and aborts
- * both parties at this point.
+ * Resolve what the two parties' agreed `deduplicate` settings gave this
+ * run: the cardinality {@link runExchange} passes to the linkage
+ * strategies, beside the two values it was resolved from. The label is read
+ * from the calling party's own side, so the two parties hold mirror labels
+ * for one procedure (docs/spec/PROTOCOL.md, Deduplicating cardinalities):
+ * `(true, false)` gives the declaring party `many-to-one`; `(true, true)`
+ * gives `many-to-many`, which {@link assertBothSidedDeduplicateImplemented}
+ * requires a matching strategy for and
+ * {@link assertCandidateSetCardinalityImplemented} refuses a candidate set
+ * under. A refusal is symmetric and aborts both parties at this point.
+ *
+ * The refusals are this function's own; the derivation beneath them is
+ * {@link resolvedMatchingFromTerms}, which the self-attested record reads
+ * too, so a record cannot name a cardinality its run did not resolve to.
  */
 export function resolveLinkageCardinality(
   localTerms: LinkageTerms,
   partnerTerms: LinkageTerms,
-): LinkageCardinality {
+): ResolvedMatching {
   assertDeduplicateImplemented(localTerms);
   assertDeduplicateImplemented(partnerTerms);
   assertBothSidedDeduplicateImplemented(localTerms, partnerTerms);
-  if (localTerms.deduplicate && partnerTerms.deduplicate) return "many-to-many";
-  if (localTerms.deduplicate) return "many-to-one";
-  if (partnerTerms.deduplicate) return "one-to-many";
-  return "one-to-one";
+  assertCandidateSetCardinalityImplemented(localTerms, partnerTerms);
+  return resolvedMatchingFromTerms(localTerms, partnerTerms);
 }
 
 /**
@@ -975,6 +1041,18 @@ export interface ExchangeResult {
   intersectionCount: number | undefined;
   /** Linkage terms received from the partner during the handshake. */
   partnerTerms: LinkageTerms;
+  /**
+   * What the two parties' agreed `deduplicate` values resolved to for this
+   * party: its own declared value, the value the partner presented at the
+   * terms exchange, and the cardinality the pair gives this party
+   * ({@link resolveLinkageCardinality}).
+   *
+   * The same triple the self-attested record holds, so a completion surface
+   * states what the run resolved to without re-deriving it from the two
+   * terms documents and without waiting for the record to be built -- a run
+   * whose record build failed still reports it.
+   */
+  matching: ResolvedMatching;
   /** The PSI role assigned to this party (sender or receiver). */
   resolvedRole: PsiRole;
   /** Payload data received from the partner after linkage. */
@@ -1367,7 +1445,7 @@ export async function runExchange(
 
   // Refuse a declared width on a strategy that cannot match a candidate set,
   // before anything goes on the wire. See assertDeclaredWidthMatchesStrategy.
-  assertDeclaredWidthMatchesStrategy(linkageTerms);
+  assertDeclaredWidthMatchesStrategy(linkageTerms, effectiveKeyCount);
 
   onStage(CONFIRMING_PROTOCOL_STAGE_ID);
   const {
@@ -1441,7 +1519,8 @@ export async function runExchange(
   // none, or the both-sided pair under one that pairs no many-to-many) aborts
   // BOTH parties at this same point -- before the bootstrap frame and the PSI
   // rounds -- rather than desyncing the lockstep. See resolveLinkageCardinality.
-  const cardinality = resolveLinkageCardinality(linkageTerms, partnerTerms);
+  const matching = resolveLinkageCardinality(linkageTerms, partnerTerms);
+  const { cardinality } = matching;
 
   // Resolve which disclosure this exchange runs from both parties' agreed terms, at
   // the same point and for the same reason as the cardinality above: the resolution
@@ -1534,7 +1613,7 @@ export async function runExchange(
   // half is the withheld one -- the single-pass blind-helper case above, which the
   // cascade never reaches.
   onProtocolConfirmed(partnerTerms, resolvedRole, {
-    cardinality,
+    ...matching,
     localRecordCount: rowCount,
     localDeclaredRecordCount: declaredRecordCount,
     partnerRecordCount,
@@ -1657,7 +1736,7 @@ export async function runExchange(
               participant,
               conn,
               linkageKeyIterables,
-              partnerRecordCount,
+              singlePassBounds,
               verbosity,
               onStage,
             );
@@ -1915,6 +1994,7 @@ export async function runExchange(
     // the only thing standing between a helper and a count.
     intersectionCount: heldResult ? intersectionCount : undefined,
     partnerTerms,
+    matching,
     resolvedRole,
     partnerPayload,
     audit,

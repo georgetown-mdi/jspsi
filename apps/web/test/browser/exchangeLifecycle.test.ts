@@ -25,7 +25,11 @@ import type {
   ExchangeErrorCategory,
   ExchangeOutputs,
 } from "../../src/psi/exchangeLifecycle.js";
-import type { ExchangeResult, PreparedExchange } from "@psilink/core";
+import type {
+  ExchangeResult,
+  PreparedExchange,
+  ResolvedMatching,
+} from "@psilink/core";
 import type { DataConnection } from "peerjs";
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 import type Peer from "peerjs";
@@ -69,6 +73,9 @@ interface CapturedRun {
   errors: Array<{ category: ExchangeErrorCategory; error: unknown }>;
   /** onWarning messages (none on a run whose close reaches the peer). */
   warnings: Array<string>;
+  /** onResolvedMatching payloads: one, holding what the agreed deduplicate
+   * pair resolved to for this role. */
+  matchings: Array<ResolvedMatching>;
   /** The ExchangeResult generateOutput was handed, captured to verify linkage. */
   result?: ExchangeResult;
 }
@@ -99,6 +106,7 @@ async function driveRole(
     results: [],
     errors: [],
     warnings: [],
+    matchings: [],
   };
   // Never aborted: let the exchange run to completion; the lifecycle's own
   // finally-latch tears the connection down before it resolves.
@@ -126,6 +134,7 @@ async function driveRole(
     onResult: (outputs) => captured.results.push(outputs),
     onError: (failure) => captured.errors.push(failure),
     onWarning: (message) => captured.warnings.push(message),
+    onResolvedMatching: (matching) => captured.matchings.push(matching),
   });
   return captured;
 }
@@ -192,9 +201,14 @@ test("both roles complete with a result and no error", (ctx) => {
   expect(initiator.errors).toEqual([]);
   // And no warning: each side's teardown waited out a real peer's close, which
   // is the delivery signal, so a healthy exchange must not tell either operator
-  // to go and check that their partner got the last frame.
-  expect(responder.warnings).toEqual([]);
-  expect(initiator.warnings).toEqual([]);
+  // to go and check that their partner got the last frame. What the agreed
+  // deduplicate pair resolved to arrives on its own slot instead, once per side
+  // and over a real run rather than a stubbed callback -- the run status each
+  // seat states before the first round.
+  for (const run of [responder, initiator]) {
+    expect(run.warnings).toEqual([]);
+    expect(run.matchings).toEqual([(run.result as ExchangeResult).matching]);
+  }
   expect(responder.results).toHaveLength(1);
   expect(initiator.results).toHaveLength(1);
   expect(resultsUrlOf(responder.results[0])).toBe("blob:results-responder");

@@ -21,6 +21,7 @@ import type {
   MessageConnection,
   PreparedExchange,
   ProcessState,
+  ResolvedMatching,
 } from "@psilink/core";
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 
@@ -202,6 +203,13 @@ interface ExchangeOutputsBase {
    * and a helper alike -- the helper's record is produced even though it does not
    * bind the result table. */
   record?: RecordDownloads;
+  /** What the two parties' agreed `deduplicate` values resolved to
+   * ({@link ExchangeResult.matching}), so the completion panel states the
+   * partner's value and the cardinality the pair gave this run. A console seat
+   * takes it off the run's relayed `result` event; it is absent there only
+   * when the relayed object fails the shape check, and the panel then states
+   * no matching rather than a label this build does not define. */
+  matching?: ResolvedMatching;
 }
 
 /** A receiver's outputs: the matched results file (CSV), plus the optional record
@@ -285,16 +293,23 @@ interface RunExchangeLifecycleOptions<
     error: unknown;
   }) => void;
   /** A non-fatal, operator-relevant notice raised mid-run. Two sources, arriving
-   * at opposite ends of the run: what the agreed terms resolved to, raised
-   * right after the terms resolve and before the first round, composed by core
-   * ({@link describeResolvedRunShape}); and the clean close ending on any exit
-   * that has no delivery signal rather than on the peer's close
+   * at opposite ends of the run: the deduplicating cardinality and the pair-table
+   * projection, raised right after the terms resolve and before the first round,
+   * composed by core ({@link describeResolvedRunShape}); and the clean close
+   * ending on any exit that has no delivery signal rather than on the peer's close
    * ({@link CLOSE_OUTCOME_WARNINGS}), which is raised only on a run that reported
    * its result. Optional: an owner with no warning sink omits it and the
    * notice is dropped. Never a terminal; the run still ends in exactly one
    * `onResult`/`onError`, and a notice raised during teardown arrives after
    * that one. */
   onWarning?: (message: string) => void;
+  /** What the two parties' agreed `deduplicate` values resolved to, reported
+   * once the terms are agreed and before the first round -- the earliest point
+   * that can name it, since each party's value comes from its own document. It
+   * is a neutral statement of the run's own terms rather than a notice, so it
+   * goes to its own slot and the owner states it as run status. Optional: an
+   * owner that states nothing before completion omits it. */
+  onResolvedMatching?: (matching: ResolvedMatching) => void;
 }
 
 /**
@@ -339,6 +354,7 @@ export async function runExchangeLifecycle<
     onResult,
     onError,
     onWarning,
+    onResolvedMatching,
   } = options;
 
   // Every owner-driven React callback is a no-op once the signal aborts, so an
@@ -374,6 +390,9 @@ export async function runExchangeLifecycle<
   // describes, or drop it entirely on a run that fails -- exactly the run
   // whose resolved shape the operator most needs to read.
   const emitRunNotice = ifLive((message: string) => onWarning?.(message));
+  const emitResolvedMatching = ifLive((matching: ResolvedMatching) =>
+    onResolvedMatching?.(matching),
+  );
 
   let acquired: AcquiredExchange;
   try {
@@ -512,14 +531,21 @@ export async function runExchangeLifecycle<
       ),
       onStage: emitStage,
       // What the agreed terms resolved to, named for the operator after the
-      // terms exchange and before the first round: a deduplicating cardinality
-      // and, where the both-sided one projects a pair table past the advisory
-      // bound, what each side contributes to that projection. Core composes both
-      // and raises neither -- the advisory is a front end's discretion
-      // (docs/spec/PROTOCOL.md, The both-sided expansion has no ceiling of its
-      // own) -- so this seat renders them through the same notice slot its
-      // transport warnings take, and the owning hook escapes what it folds.
+      // terms exchange and before the first round, the earliest point that can
+      // name it. The resolved pair goes to the status slot, since it states the
+      // run's own terms and is reported on every run; the deduplicating
+      // cardinality and the pair-table projection are notices, and take the
+      // slot this seat's transport warnings take. Core composes each and raises
+      // none -- the advisory is a front end's discretion (docs/spec/PROTOCOL.md,
+      // The both-sided expansion has no ceiling of its own) -- and the owning
+      // hook escapes what it folds.
       onProtocolConfirmed: (_partnerTerms, _resolvedRole, runShape) => {
+        const { localDeduplicate, partnerDeduplicate, cardinality } = runShape;
+        emitResolvedMatching({
+          localDeduplicate,
+          partnerDeduplicate,
+          cardinality,
+        });
         const { cardinalityNotice, pairTableAdvisory } =
           describeResolvedRunShape(runShape);
         for (const notice of [cardinalityNotice, pairTableAdvisory])

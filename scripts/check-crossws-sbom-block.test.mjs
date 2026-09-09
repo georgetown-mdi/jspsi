@@ -167,30 +167,46 @@ describe("checkCrossbomBlock, with the npm invocation injected", () => {
   });
 });
 
+// Bound for the two cases that drive the real `npm sbom` against the committed
+// lockfile, one of them through a second Node process. They run 0.8s and 0.4s
+// alone against vitest's 5s default, and 7.2s with the rest of the script suites
+// competing for the same cores, which is the contention that reddened them.
+// Sized well past that worst measurement, this stays a hang safety check rather
+// than a claim about how fast `npm sbom` runs.
+const REAL_SBOM_TIMEOUT_MS = 60_000;
+
 describe("the real repository", () => {
-  it("is blocked with the flag prescribed, and passes on that state", () => {
-    // Drives the actual npm sbom invocation against the committed lockfile
-    // (package-lock-only, confirmed offline in the script's own header)
-    // rather than mocking it. Both facts the verdict rests on are pinned, not
-    // just its `ok`: the check passes in three of the four states, so a bare
-    // pass would hold just as well on a tree the assessment does not describe.
-    expect(releasesPrescribesFlag(readRoot("docs/RELEASES.md"))).toBe(true);
-    expect(() => runUnflaggedSbom(repoRoot)).toThrow();
+  it(
+    "is blocked with the flag prescribed, and passes on that state",
+    () => {
+      // Drives the actual npm sbom invocation against the committed lockfile
+      // (package-lock-only, confirmed offline in the script's own header)
+      // rather than mocking it. Both facts the verdict rests on are pinned, not
+      // just its `ok`: the check passes in three of the four states, so a bare
+      // pass would hold just as well on a tree the assessment does not describe.
+      expect(releasesPrescribesFlag(readRoot("docs/RELEASES.md"))).toBe(true);
+      expect(() => runUnflaggedSbom(repoRoot)).toThrow();
 
-    const verdict = checkCrossbomBlock({ root: repoRoot });
-    expect(verdict.ok, verdict.message).toBe(true);
-    expect(verdict.message).toContain("still refuses");
-    expect(verdict.message).toContain("still prescribes");
-  });
+      const verdict = checkCrossbomBlock({ root: repoRoot });
+      expect(verdict.ok, verdict.message).toBe(true);
+      expect(verdict.message).toContain("still refuses");
+      expect(verdict.message).toContain("still prescribes");
+    },
+    REAL_SBOM_TIMEOUT_MS,
+  );
 
-  it("exits 0 from the CLI entry point", () => {
-    const output = execFileSync(
-      process.execPath,
-      [resolve(here, "check-crossws-sbom-block.mjs")],
-      { encoding: "utf8", cwd: repoRoot },
-    );
-    expect(output).toContain("crossws SBOM block check passed");
-  });
+  it(
+    "exits 0 from the CLI entry point",
+    () => {
+      const output = execFileSync(
+        process.execPath,
+        [resolve(here, "check-crossws-sbom-block.mjs")],
+        { encoding: "utf8", cwd: repoRoot },
+      );
+      expect(output).toContain("crossws SBOM block check passed");
+    },
+    REAL_SBOM_TIMEOUT_MS,
+  );
 
   it("names the exact command docs/RELEASES.md step 9 prescribes, less the flag", () => {
     // Step 9's command is this check's argv with the workaround flag inserted

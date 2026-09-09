@@ -8,6 +8,7 @@ import type { Arguments } from "yargs";
 import logLibrary from "loglevel";
 import YAML from "yaml";
 import {
+  ACCEPTOR_DEDUPLICATE_CONTROL_FACTS,
   CONSENT_FACTS,
   DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
   DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,
@@ -48,6 +49,7 @@ import {
   hostileVariants,
 } from "@psilink/core/testing";
 import type {
+  Algorithm,
   ConnectionConfig,
   ConnectionEndpoint,
   ConsentFact,
@@ -108,6 +110,7 @@ import {
   PLACEHOLDER_IDENTITY,
 } from "../../../src/partyIdentity";
 import { saveConfig } from "../../../src/config";
+import { webRtcDialFrom } from "../../../src/protocol";
 import {
   CONNECTION_BLOCK_DOC_URL,
   CONNECTION_BLOCK_NOTICE,
@@ -119,6 +122,11 @@ import { ttyStream } from "../../stdinStream";
 
 const promptConfirmMock = vi.mocked(promptConfirm);
 const promptFreeTextMock = vi.mocked(promptFreeText);
+
+// Beside the ESC, RLO and BEL the shared fixtures hold: an invisible character
+// every terms field admits, for a case whose value is read back through the
+// schema. Written as an escape so this source holds no raw invisible byte.
+const ZWJ = "\u200d";
 
 const silentLog = getLogger("accept-test");
 silentLog.setLevel("silent");
@@ -189,12 +197,14 @@ function splitEndpointToken(
 function splittingKeyToken(
   expires: string,
   linkageStrategy: LinkageStrategy,
+  algorithm: Algorithm = "psi",
 ): InvitationToken {
   const token = sampleToken(expires);
   return {
     ...token,
     linkageTerms: {
       ...token.linkageTerms,
+      algorithm,
       linkageStrategy,
       linkageKeys: [
         {
@@ -1123,7 +1133,10 @@ describe("the count-only shape, at the accept boundary", () => {
     // so the configuration this acceptance writes cannot run (prepareForExchange
     // refuses it before any data is sent). One warning, however many columns, naming them
     // and both remedies, while the operator can still decline.
-    const hostile = `notes${ESC}[0m`;
+    // A zero-width joiner rather than an ESC: this name comes from the CSV
+    // header, which the read strips every control character from, and the
+    // joiner is outside that class and still needs escaping here.
+    const hostile = `notes\u200d[0m`;
     const { warnings, ready } = await acceptWarnings({
       token: tokenDeclaringReceive([]),
       columns: [...LINKAGE_COLUMNS, "diagnosis", hostile],
@@ -1139,7 +1152,7 @@ describe("the count-only shape, at the accept boundary", () => {
     expect(refused).toContain(`\n  - ${sanitizeForDisplay(hostile)}`);
     // The names are the operator's own file's and reach the log sink without ever
     // becoming an Error, so the sink is where they are escaped.
-    expect(refused).not.toContain(ESC);
+    expect(refused).not.toContain("\u200d");
     // Offline acceptance completes, so it says where the refusal actually arrives.
     expect(refused).toContain("psilink exchange");
   });
@@ -1263,6 +1276,44 @@ describe("the count-only shape, at the accept boundary", () => {
     } finally {
       warnSpy.mockRestore();
       fs.rmSync(input, { force: true });
+    }
+  });
+
+  test("validateAccept: offline reports an ignored --server-* override before an aborting input read", async () => {
+    // The warning is emitted ahead of the config reconciliation and the input
+    // read, both of which abort: an operator whose accept fails on the CSV still
+    // reads that the --server-* flags they passed have no effect, rather than
+    // rerunning with a fixed CSV to learn it.
+    const missingInput = path.join(
+      tmpdir(),
+      `psilink-accept-absent-${process.pid}-${optionsCounter++}.csv`,
+    );
+    const log = getLogger("accept-offline-override-warn-before-abort");
+    log.setLevel("silent");
+    const warnSpy = vi.spyOn(log, "warn");
+    try {
+      const encoded = await encodeInvitation(sampleToken(FUTURE()));
+      await expect(
+        validateAccept({
+          resolved: {
+            mode: "offline",
+            invitation: encoded,
+            input: missingInput,
+          },
+          options: testOptions({ serverUsername: "alice" }),
+          log,
+        }),
+      ).rejects.toThrow(/does not exist/);
+      expect(
+        warnSpy.mock.calls.some(
+          (c) =>
+            typeof c[0] === "string" &&
+            c[0].includes("--server-username") &&
+            c[0].includes("no effect on an offline invite/accept"),
+        ),
+      ).toBe(true);
+    } finally {
+      warnSpy.mockRestore();
     }
   });
 
@@ -1577,6 +1628,117 @@ describe("accepting and running a webrtc exchange in one command", () => {
       expect(ready.prepared.expectedPartnerDeduplicate).toBe(
         token.linkageTerms.deduplicate,
       );
+    } finally {
+      fs.rmSync(input, { force: true });
+    }
+  });
+
+  test("validateAccept: a column the invitation discloses twice is expected once", async () => {
+    // The acceptance writes the invitation's disclosed set as what it will
+    // receive, and the run aborts when the partner's transmitted set differs
+    // (reconcileReceivedPayload). A name written twice is one declaration;
+    // encodeInvitation collapses it once at mint, so this test pins that
+    // mint-side collapse. The decode-side case, a raw partner token minted
+    // outside encodeInvitation, is pinned by
+    // packages/core/test/config/invitation.test.ts's encodeRaw test.
+    const input = writeInputCSV(["first_name", "last_name", "dob", "ssn"]);
+    try {
+      const encoded = await encodeInvitation({
+        ...sampleToken(FUTURE(), WEBRTC_ENDPOINT),
+        disclosedPayloadColumns: ["diagnosis", "diagnosis"],
+      });
+      const ready = await validateAccept({
+        resolved: { mode: "offline", invitation: encoded, input },
+        options: testOptions(),
+        log: silentLog,
+      });
+      expect(ready.mode).toBe("endpointRun");
+      if (ready.mode !== "endpointRun") return;
+      expect(ready.prepared.expectedPayloadColumns).toEqual(["diagnosis"]);
+    } finally {
+      fs.rmSync(input, { force: true });
+    }
+  });
+
+  test("validateAccept: --peer-timeout bounds the acceptance that runs the exchange", async () => {
+    // This acceptance conducts the exchange itself, so the budget flag is the
+    // operator's only lever on how long it waits for a partner who never
+    // arrives; it is applied to the connection rather than reported ignored.
+    const input = writeInputCSV(["first_name", "last_name", "dob", "ssn"]);
+    const messages: string[] = [];
+    try {
+      const encoded = await encodeInvitation(
+        sampleToken(FUTURE(), WEBRTC_ENDPOINT),
+      );
+      const ready = await validateAccept({
+        resolved: { mode: "offline", invitation: encoded, input },
+        options: testOptions({ peerTimeout: 10 }),
+        log: recordingLog(messages),
+      });
+      expect(ready.mode).toBe("endpointRun");
+      if (ready.mode !== "endpointRun") return;
+      // Seconds at the flag, milliseconds in the connection this run dials and
+      // the bootstrap writes.
+      expect(ready.connection.options?.peerTimeoutMs).toBe(10_000);
+      expect(
+        messages.some((m) => m.includes("--peer-timeout")),
+        "the running acceptance reported the flag it just applied as ignored",
+      ).toBe(false);
+      // What that one value buys on this transport: the wait for the partner to
+      // arrive, the wait for the channel to open, and the peer silence after.
+      const { options } = webRtcDialFrom(
+        ready.connection,
+        generateSharedSecret(),
+      );
+      expect(options.rendezvousTimeoutMs).toBe(10_000);
+      expect(options.channelOpenTimeoutMs).toBe(10_000);
+      expect(options.inactivityTimeoutMs).toBe(10_000);
+    } finally {
+      fs.rmSync(input, { force: true });
+    }
+  });
+
+  test("validateAccept: --peer-timeout stays reported ignored on an acceptance that writes a configuration", async () => {
+    // The write-only branch applies no connection override: the block it writes
+    // is one the operator edits, so a budget flag would be silently dropped and
+    // is named instead. Both shapes that reach it -- no input file to exchange,
+    // and an endpoint on a channel whose credentials the operator supplies --
+    // report it.
+    const input = writeInputCSV(["first_name", "last_name", "dob", "ssn"]);
+    try {
+      for (const resolved of [
+        {
+          invitation: await encodeInvitation(
+            sampleToken(FUTURE(), WEBRTC_ENDPOINT),
+          ),
+        },
+        {
+          invitation: await encodeInvitation(
+            sampleToken(FUTURE(), {
+              channel: "sftp" as const,
+              host: "sftp.example.org",
+              path: "/exchange",
+            }),
+          ),
+          input,
+        },
+      ]) {
+        const messages: string[] = [];
+        const ready = await validateAccept({
+          resolved: { mode: "offline", ...resolved },
+          options: testOptions({ peerTimeout: 10 }),
+          log: recordingLog(messages),
+        });
+        expect(ready.mode).toBe("offline");
+        if (ready.mode !== "offline") return;
+        expect(ready.connection.options?.peerTimeoutMs).toBeUndefined();
+        expect(
+          messages.some(
+            (m) =>
+              m.includes("--peer-timeout") && m.includes("connection.options"),
+          ),
+        ).toBe(true);
+      }
     } finally {
       fs.rmSync(input, { force: true });
     }
@@ -2112,7 +2274,11 @@ describe("reconciling a pre-existing config", () => {
     // out of a file, and the consent-surface sink this notice takes is their
     // display boundary.
     const flag = `Agency B${ESC}[0m`;
-    const stored = `Acceptor Org${RLO}`;
+    // The stored label is read back through the config schema, which refuses a
+    // control character and a text-direction one in an identity, so the value
+    // that needs escaping here is the zero-width joiner: invisible, outside both
+    // refused classes, and stored exactly as the operator typed it.
+    const stored = `Acceptor Org${ZWJ}`;
     const { promptWrites } = await acceptOverKeptConfig({
       terms: sampleTerms(stored),
       identity: flag,
@@ -2124,7 +2290,7 @@ describe("reconciling a pre-existing config", () => {
     expect(notice).toContain(sanitizeForDisplay(flag));
     expect(notice).toContain(sanitizeForDisplay(stored));
     expect(notice).not.toContain(ESC);
-    expect(notice).not.toContain(RLO);
+    expect(notice).not.toContain(ZWJ);
   });
 
   test("validateAccept: a reused config's rule-set citation is checked against its own rules", async () => {
@@ -3350,24 +3516,27 @@ describe("displayInvitation: the declared terms it discloses (columns, citations
 
   test("displayInvitation: states what a splitting key does, in the register its strategy puts it in", () => {
     // A key element that splits its value is matched on each candidate, which is
-    // both a widening and a disclosure -- and under a strategy that matches one
-    // value per record it is a refusal instead. The sentence for each case comes
-    // from core's shared classification, so this prompt and the web consent screen
-    // state the consequence in the same words rather than two accounts of it.
+    // both a widening and a disclosure -- and under a combination that matches
+    // one value per record it is a refusal instead. The sentence for each case
+    // comes from core's shared classification, so this prompt and the web consent
+    // screen state the consequence in the same words rather than two accounts of
+    // it.
     const log = getLogger("accept-display-fan-out-test");
     log.setLevel("silent");
 
-    const matched = renderDisplayInvitation(
-      log,
-      splittingKeyToken(FUTURE(), "single-pass"),
-    );
-    expect(matched).toContain("several values per record (enforced):");
-    expect(matched).toContain(CONSENT_FACTS.fanOutCandidates.note);
-    expect(matched).toContain("(multiple)");
+    for (const linkageStrategy of ["cascade", "single-pass"] as const) {
+      const matched = renderDisplayInvitation(
+        log,
+        splittingKeyToken(FUTURE(), linkageStrategy),
+      );
+      expect(matched).toContain("several values per record (enforced):");
+      expect(matched).toContain(CONSENT_FACTS.fanOutCandidates.note);
+      expect(matched).toContain("(multiple)");
+    }
 
     const refused = renderDisplayInvitation(
       log,
-      splittingKeyToken(FUTURE(), "cascade"),
+      splittingKeyToken(FUTURE(), "cascade", "psi-c"),
     );
     expect(refused).toContain("several values per record (enforced):");
     expect(refused).toContain(CONSENT_FACTS.fanOutRefused.note);
@@ -3399,8 +3568,16 @@ describe("displayInvitation: the declared terms it discloses (columns, citations
     const render = (linkageTerms: LinkageTerms): string =>
       renderDisplayInvitation(log, { ...token, linkageTerms });
 
-    const probes = consentRepresentationProbes();
+    // The shapes that name the accepting party's own `deduplicate` are not
+    // measured here: this prompt offers no control over that value, so the
+    // accept it describes derives that party's side as false and the pair such
+    // a shape states is one it never runs. Held non-vacuous both ways below.
+    const allProbes = consentRepresentationProbes();
+    const probes = allProbes.filter(
+      (probe) => probe.acceptorDeduplicate === undefined,
+    );
     expect(probes.length).toBeGreaterThan(0);
+    expect(allProbes.length).toBeGreaterThan(probes.length);
     expect(
       probes
         .filter((probe) => render(probe.base) === render(probe.variant))
@@ -3590,8 +3767,53 @@ describe("displayInvitation: the declared terms it discloses (columns, citations
     expect(CONSENT_FACTS.duplicateGroupingDisplayLimit.basis).toBe(
       "trust-contingent",
     );
+    // The cascade this token names carries the grouping to this party's own
+    // process, so the enforced sentence must not stand in for the one above.
+    expect(soleReceiver).not.toContain(
+      CONSENT_FACTS.duplicateGroupingWithheld.note,
+    );
     expect(soleReceiver).toContain(`    ${DEDUPLICATE_ACCEPTOR_SIDE_NOTE}`);
     expect(soleReceiver).not.toContain(
+      DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,
+    );
+  });
+
+  test("displayInvitation: a sole-receiver deduplicating term states the exchange's own non-receipt where the run withholds the table", () => {
+    // The third shape a deduplicating invitation takes: the sole-receiver
+    // output under single-pass with no column requested of this party, which
+    // is the one combination the exchange closes itself rather than this
+    // client choosing not to show it. The prompt reads which of the two
+    // sentences that is from core's resolution of the run, so the register an
+    // acceptor is told stays the register the run actually holds.
+    const log = getLogger("accept-display-deduplicate-table-withheld-test");
+    log.setLevel("silent");
+    const base = sampleToken(FUTURE());
+    const withheld = renderDisplayInvitation(log, {
+      ...base,
+      linkageTerms: {
+        ...base.linkageTerms,
+        deduplicate: true,
+        linkageStrategy: "single-pass",
+        output: { expectsOutput: true, shareWithPartner: false },
+        payload: { send: [], receive: [] },
+      },
+    });
+
+    expect(withheld).toContain(
+      `    ${DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT}`,
+    );
+    expect(withheld).toContain(
+      `    ${CONSENT_FACTS.duplicateGroupingWithheld.note}`,
+    );
+    expect(CONSENT_FACTS.duplicateGroupingWithheld.basis).toBe("enforced");
+    // And the display-scoped sentence stays off a run whose wire holds the
+    // withholding: it would tell this party that other software on its own
+    // side could show it what the exchange never sends.
+    expect(withheld).not.toContain(
+      CONSENT_FACTS.duplicateGroupingDisplayLimit.note,
+    );
+    expect(withheld).toContain(`    ${DEDUPLICATE_ACCEPTOR_SIDE_NOTE}`);
+    expect(withheld).not.toContain(
       DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,
     );
   });
@@ -3763,14 +3985,15 @@ describe("displayInvitation: the declared terms it discloses (columns, citations
     });
     // The fan-out pair is the fifth and sixth, for the same reason again: both are
     // raised by a linkage key that splits its element's value, and which of the two
-    // follows the strategy, so no variation above reaches either.
+    // follows the algorithm and the strategy together, so no variation above
+    // reaches either.
     const fanOutMatched = renderDisplayInvitation(
       log,
       splittingKeyToken(FUTURE(), "single-pass"),
     );
     const fanOutRefused = renderDisplayInvitation(
       log,
-      splittingKeyToken(FUTURE(), "cascade"),
+      splittingKeyToken(FUTURE(), "cascade", "psi-c"),
     );
     // The sole receiver's display limit is the seventh, for the reason the pair
     // above is a pair: it is raised only by a DEDUPLICATING invitation whose
@@ -3785,6 +4008,32 @@ describe("displayInvitation: the declared terms it discloses (columns, citations
         payload: { ...CONSENT_PROBE_TERMS.payload, receive: [] },
       },
     });
+    // And its enforced counterpart is the eighth: the same sole-receiver shape
+    // on the one combination the exchange closes itself, which the seventh's
+    // cascade cannot reach.
+    const deduplicatingTableWithheld = renderDisplayInvitation(log, {
+      ...sampleToken(FUTURE()),
+      linkageTerms: {
+        ...CONSENT_PROBE_TERMS,
+        deduplicate: true,
+        linkageStrategy: "single-pass",
+        output: { expectsOutput: true, shareWithPartner: false },
+        payload: { send: [], receive: [] },
+      },
+    });
+    // The own-membership pair's enforced half is the ninth: the same one-sided
+    // shape as the second rendering, on the combination that leaves the inviting
+    // party blind at the wire. Neither the strategy nor the declared-empty send
+    // it takes is reachable by any variation of `output` above.
+    const inviterLearnsNoMembership = renderDisplayInvitation(log, {
+      ...sampleToken(FUTURE()),
+      linkageTerms: {
+        ...CONSENT_PROBE_TERMS,
+        linkageStrategy: "single-pass",
+        output: { expectsOutput: false, shareWithPartner: true },
+        payload: { send: [], receive: [] },
+      },
+    });
     const rendered = [
       acceptorWithheld,
       inviterWithheld,
@@ -3793,12 +4042,27 @@ describe("displayInvitation: the declared terms it discloses (columns, citations
       fanOutMatched,
       fanOutRefused,
       deduplicatingSoleReceiver,
+      deduplicatingTableWithheld,
+      inviterLearnsNoMembership,
     ].join("\n");
 
     // The whole table, rather than a list restated here: a caveat this renderer
     // authored for itself instead of reading is absent from the rendering and fails,
     // and one the web reworded on its own side fails there for the same reason.
-    const classified: Array<ConsentFact> = Object.values(CONSENT_FACTS);
+    // Bar the facts core marks as reachable only from a seat where the
+    // ACCEPTING party declares a grouping of its own: this prompt offers no
+    // such control, so the run they state is one it never conducts. The set is
+    // core's judgment, not this test's, so the web seat that does render them
+    // is held to the same list.
+    const classified: Array<ConsentFact> = Object.entries(CONSENT_FACTS)
+      .filter(
+        ([id]) =>
+          !(
+            ACCEPTOR_DEDUPLICATE_CONTROL_FACTS as ReadonlyArray<string>
+          ).includes(id),
+      )
+      .map(([, fact]) => fact);
+    expect(classified.length).toBeLessThan(Object.keys(CONSENT_FACTS).length);
     const notes = classified
       .map((fact) => fact.note)
       .filter((note) => note !== undefined);
@@ -3826,10 +4090,12 @@ describe("displayInvitation: the declared terms it discloses (columns, citations
     );
     // The honest-helper disclosure is its own fact, not a rider on the cooperative
     // caveat: it holds however honestly the partner behaves, so it has the
-    // opposite basis and may not inherit that line's marker.
-    expect(inviterWithheld).toContain(
-      "  what your partner learns either way (enforced):",
-    );
+    // opposite basis and may not inherit that line's marker. One label carries
+    // both cases of it, so a reader meets the same line whichever the run is.
+    for (const document of [inviterWithheld, inviterLearnsNoMembership])
+      expect(document).toContain(
+        "  what your partner learns about its own records (enforced):",
+      );
     // The remaining marked lines, each on the register it belongs to.
     expect(rendered).toContain(`  ${INVITING_PARTY_LABEL}: `);
     expect(rendered).toContain(
@@ -3962,9 +4228,16 @@ describe("the count-only tier", () => {
       linkageTerms: { ...COUNT_ONLY_PROBE_TERMS, output: partnerWithheld },
     });
     expect(countOnly).toContain("PSI algorithm (enforced): psi-c");
-    expect(countOnly).not.toContain("what your partner learns either way");
+    // The algorithm gate stands ahead of BOTH cases of the fact, so neither the
+    // disclosure sentence nor its withheld counterpart reaches a count-only run.
+    expect(countOnly).not.toContain(
+      "what your partner learns about its own records",
+    );
     expect(countOnly).not.toContain(
       CONSENT_FACTS.partnerLearnsOwnMembership.note,
+    );
+    expect(countOnly).not.toContain(
+      CONSENT_FACTS.partnerOwnMembershipWithheld.note,
     );
     // Not the whole block going missing: the line the membership fact sits beneath is
     // still stated, on the register it belongs to.
@@ -3990,7 +4263,7 @@ describe("the count-only tier", () => {
       },
     });
     expect(revealing).toContain(
-      "  what your partner learns either way (enforced):",
+      "  what your partner learns about its own records (enforced):",
     );
     expect(revealing).toContain(
       `    ${CONSENT_FACTS.partnerLearnsOwnMembership.note}`,
@@ -4880,6 +5153,48 @@ describe("handler: '--consent-to-terms' gates the confirmation prompt", () => {
       // The acceptor observes nothing it must crystallize: its received set is the
       // one the invitation declared, which it already has.
       expect(passed.persistObservedReceivedPayload).toBeUndefined();
+    } finally {
+      exit.mockRestore();
+      runOnlineBootstrapMock.mockReset();
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("handler: --peer-timeout reaches the run and the configuration it writes", async () => {
+    // One connection is both the run's and the bootstrap's, so the value the
+    // dial waits on is the peer_timeout_ms the written configuration holds and
+    // a later unattended `psilink exchange` inherits. No run-only override is
+    // passed, which is what keeps the two the same value.
+    const { dir, input, configFile, keyFile } = offlineAcceptFixture();
+    const runOnlineBootstrapMock = vi.mocked(runOnlineBootstrap);
+    runOnlineBootstrapMock.mockResolvedValue({ configWriteError: undefined });
+    const exit = vi
+      .spyOn(process, "exit")
+      .mockImplementation((() => undefined) as never);
+    try {
+      const encoded = await encodeInvitation(
+        sampleToken(FUTURE(), {
+          channel: "webrtc",
+          host: "peer.example.org",
+          path: "/psi",
+        }),
+      );
+      await acceptHandler({
+        _: [],
+        $0: "psilink",
+        identity: "Agency B",
+        args: [encoded, input, path.join(dir, "results.csv")],
+        "consent-to-terms": true,
+        "config-file": configFile,
+        "key-file": keyFile,
+        "peer-timeout": "10s",
+        "log-level": "silent",
+        record: false,
+      } as unknown as Arguments);
+      expect(exit).not.toHaveBeenCalled();
+      const passed = runOnlineBootstrapMock.mock.calls[0][0];
+      expect(passed.connection.options?.peerTimeoutMs).toBe(10_000);
+      expect(passed.runOnlyPeerTimeoutSeconds).toBeUndefined();
     } finally {
       exit.mockRestore();
       runOnlineBootstrapMock.mockReset();
@@ -5858,16 +6173,34 @@ describe("handler: the prompt's copy has the redaction on its own", () => {
     promptConfirmMock.mockResolvedValue(false);
     try {
       // Unlike the render-boundary walk, this route goes through the token's own
-      // validation, so the hostile code points ride the fields a decoded token can
-      // still hold: the key name takes the two control characters, since the terms'
-      // free text is refused one at parse, and the identity takes the bidi
-      // override, which is not a control character.
+      // validation, so the hostile code points ride the one field a decoded token
+      // can still hold them in: a transform param value, a data value the schema
+      // length-bounds and holds to no character rule. Everything else is out --
+      // every name is held to NAME_SHAPE_PATTERN, and the identity, the purpose
+      // and a payload description refuse the control characters and the bidi
+      // override alike.
       const encoded = await encodeInvitation({
         ...sampleToken(FUTURE()),
         linkageTerms: {
-          ...sampleTerms(`InviterOrg${RLO}`),
+          ...sampleTerms("InviterOrg"),
           linkageKeys: [
-            { name: `ssn${BEL}${ESC}[31m`, elements: [{ field: "ssn" }] },
+            {
+              name: "ssn",
+              elements: [
+                {
+                  field: "ssn",
+                  transform: [
+                    {
+                      function: "replace_regex",
+                      params: {
+                        pattern: "-",
+                        replacement: `${BEL}${ESC}[31m${RLO}`,
+                      },
+                    },
+                  ],
+                },
+              ],
+            },
           ],
         },
       });
@@ -6469,9 +6802,12 @@ describe("accept-reuse warns when the re-acceptance drops the commitment", () =>
 
   test("validateAccept: the dropped commitment's column names are escaped for display", async () => {
     // The recorded set is the partner's namespace, brought into the config by an
-    // earlier acceptance, so a name planted with a terminal escape must not reach
-    // the operator raw when this warning reads it back out.
-    const hostile = `notes${ESC}[0m`;
+    // earlier acceptance, so a name planted to disturb the terminal must not
+    // reach the operator raw when this warning reads it back out. A zero-width
+    // joiner rather than an ESC: the recorded list holds the name shape, which
+    // refuses a control character outright (the case below), and the joiner is
+    // outside that class and still needs escaping here.
+    const hostile = "notes\u200d[0m";
     const warnings = await reuseLockInWarnings({
       recorded: [hostile],
       disclosed: undefined,
@@ -6479,7 +6815,22 @@ describe("accept-reuse warns when the re-acceptance drops the commitment", () =>
     });
     const dropped = droppedLockInWarning(warnings);
     expect(dropped).toContain(sanitizeForDisplay(hostile));
-    expect(dropped).not.toContain(ESC);
+    expect(dropped).not.toContain("\u200d");
+  });
+
+  test("validateAccept: a recorded commitment holding the name class is refused", async () => {
+    // The class the header read strips and every name field refuses cannot sit
+    // in the recorded set either: the config read this reuse path makes holds
+    // the list to the same shape, so the acceptance stops at the config rather
+    // than warning about a name no honest writer could have put there. The
+    // refusal names the field and prints none of the value.
+    await expect(
+      reuseLockInWarnings({
+        recorded: [`notes${ESC}[0m`],
+        disclosed: undefined,
+        loggerName: "accept-lockin-drop-refused",
+      }),
+    ).rejects.toThrow(/expectedPayloadColumns\.0: a linkage terms name/);
   });
 });
 

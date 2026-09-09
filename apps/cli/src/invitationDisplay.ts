@@ -705,11 +705,20 @@ export function displayInvitation(params: {
   // and is sent no count-report frame (docs/spec/PROTOCOL.md, PSI-C), so
   // it learns no membership of its own records. What a count-only run
   // does disclose is the tier `logDecisionFacts` prints above.
+  //
+  // Under `psi`, WHICH of the two sentences prints follows core's
+  // resolution of the run (`inviterTableWithheld`), never a reading of the
+  // strategy and the payload declaration made here: the single-pass
+  // combination the exchange closes leaves the partner's process no
+  // membership to learn, so the disclosure sentence would overstate it.
   if (!summary.inviterReceivesOutput && summary.algorithm !== "psi-c") {
+    const fact = summary.inviterTableWithheld
+      ? "partnerOwnMembershipWithheld"
+      : "partnerLearnsOwnMembership";
     emit(
-      `  ${marked("what your partner learns either way", "partnerLearnsOwnMembership")}:`,
+      `  ${marked("what your partner learns about its own records", fact)}:`,
     );
-    emit(`    ${CONSENT_FACTS.partnerLearnsOwnMembership.note}`);
+    emit(`    ${CONSENT_FACTS[fact].note}`);
   }
   emit(
     `  ${marked("duplicate matches", "duplicateMatches")}: ` +
@@ -724,10 +733,11 @@ export function displayInvitation(params: {
   // follows the output shape: this party reads it where the inviter
   // shares the result, and reads nothing where the inviter is the sole
   // receiver. The direction note follows at the same level: the setting is
-  // the inviting party's own (`deriveAcceptedLinkageTerms` derives this
-  // party's side as false), so it scopes to a ONE-SIDED run -- a
-  // two-sided grouping takes each party declaring its own side in its own
-  // configuration, outside what accepting this invitation produces.
+  // the inviting party's own, and this command offers no control over this
+  // party's side, so `deriveAcceptedLinkageTerms` leaves it false and the
+  // note scopes to a ONE-SIDED run -- a two-sided grouping takes each party
+  // declaring its own side in its own configuration, outside what accepting
+  // this invitation on the command line produces.
   //
   // Gated on the applied flag too: an invitation whose strategy matches no
   // deduplicating cardinality is refused at acceptance
@@ -742,12 +752,23 @@ export function displayInvitation(params: {
       }`,
     );
     // The sole-receiver statement covers the withholding this client
-    // makes; what the rounds still disclose to this party's own process is
-    // the separate fact beside it, read from the shared table with its own
-    // basis. Printed only in that shape: where the inviter shares the
-    // result, this party already sees the grouping directly.
+    // makes; what the exchange itself does with the grouping is the
+    // separate fact beside it, read from the shared table with its own
+    // basis. WHICH of the two prints follows core's resolution of the run
+    // (`acceptorTableWithheld`), never a reading of the strategy and the
+    // payload request made here. Printed only in that shape: where the
+    // inviter shares the result, this party already sees the grouping
+    // directly.
     if (!summary.inviterSharesResult)
-      emit(`    ${CONSENT_FACTS.duplicateGroupingDisplayLimit.note}`);
+      emit(
+        `    ${
+          CONSENT_FACTS[
+            summary.acceptorTableWithheld
+              ? "duplicateGroupingWithheld"
+              : "duplicateGroupingDisplayLimit"
+          ].note
+        }`,
+      );
     emit(`    ${DEDUPLICATE_ACCEPTOR_SIDE_NOTE}`);
   }
 

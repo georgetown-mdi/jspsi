@@ -4,11 +4,9 @@ import { pack, unpack } from "peerjs-js-binarypack";
 
 import {
   MAX_WEBRTC_FRAME_BYTES,
-  MAX_WEBRTC_FRAME_STRUCTURE_BYTES,
   MAX_WEBRTC_STRING_BYTES,
   scanFrameStructure,
 } from "@psilink/core";
-import { WEBRTC_VALUE_WEIGHTS } from "@psilink/core/testing";
 
 import { normalizeBinary } from "@psilink/testkit/webrtcInboundFrames";
 
@@ -132,9 +130,9 @@ class FakeChunkedConnection {
   };
 }
 
-/** Install the bound guard with the production structural budget and per-string
- * cap, so a rejection would mean the pre-scan diverged from the real unpacker on a
- * legitimate frame -- not that a tiny test budget fired. */
+/** Install the bound guard with the production per-string cap, so a refusal would
+ * mean the pre-scan diverged from the real unpacker on a legitimate frame -- not
+ * that a tight test limit fired. */
 function installProduction(conn: FakeChunkedConnection) {
   const fail = vi.fn();
   boundChunkReassembly(conn as unknown as DataConnection, fail, {
@@ -143,24 +141,6 @@ function installProduction(conn: FakeChunkedConnection) {
     maxFrameBytes: Number.MAX_SAFE_INTEGER,
     maxChunks: Number.MAX_SAFE_INTEGER,
     minChunkResidentBytes: 0,
-    maxStructureBytes: MAX_WEBRTC_FRAME_STRUCTURE_BYTES,
-    maxStringBytes: MAX_WEBRTC_STRING_BYTES,
-  });
-  return fail;
-}
-
-/** Install the guard with a chosen structural budget, every other bound held wide,
- * so only the pre-scan can fail a frame. */
-function installAtBudget(
-  conn: FakeChunkedConnection,
-  maxStructureBytes: number,
-) {
-  const fail = vi.fn();
-  boundChunkReassembly(conn as unknown as DataConnection, fail, {
-    maxFrameBytes: Number.MAX_SAFE_INTEGER,
-    maxChunks: Number.MAX_SAFE_INTEGER,
-    minChunkResidentBytes: 0,
-    maxStructureBytes,
     maxStringBytes: MAX_WEBRTC_STRING_BYTES,
   });
   return fail;
@@ -353,9 +333,9 @@ function wideContainerFrame(marker: number, count: number, body: Uint8Array) {
 
 /** Wire frames for the wide BinaryPack container/scalar markers the size-bounded
  * corpus above never crosses (`map16`, `map32`, `array32`, `str32`, `raw32`). The
- * `array32`/`map32` amplification vectors are exactly what the structural budget
- * exists to bound, so the differential must charge them the same inventory the real
- * unpacker builds. `map16`, `str32`, and `raw32` are packed from real values;
+ * `array32`/`map32` markers are the ones a container can amplify through, so the
+ * differential has to read their declared counts the way the real unpacker does.
+ * `map16`, `str32`, and `raw32` are packed from real values;
  * `array32`/`map32` are assembled by {@link wideContainerFrame} because the pinned
  * packer cannot emit them. All content is deterministic. */
 async function wideMarkerCorpus(): Promise<
@@ -521,57 +501,37 @@ describe("boundedReassembly differential: real peerjs-js-binarypack", () => {
 });
 
 describe("scanFrameStructure differential: agrees with the real unpacker", () => {
-  test("never rejects a real-encoded corpus frame under the production budget", async () => {
+  test("never refuses a real-encoded corpus frame under the production limits", async () => {
     // The pre-scan is a defensive superset of the real unpacker's marker dispatch:
-    // any frame the real unpacker accepts within the memory envelope, the scan must
-    // admit (no false rejection). Every corpus value is a legitimate, small frame far
-    // under the production budget, so a refusal here is a divergence -- a marker the
-    // scan mis-reads relative to `Unpacker.unpack`.
+    // any frame the real unpacker accepts, the scan must admit (no false refusal).
+    // Every corpus value is a legitimate, small frame, so a refusal here is a
+    // divergence -- a marker the scan mis-reads relative to `Unpacker.unpack`.
     for (const { label, packed } of await corpus()) {
       expect(
-        scanFrameStructure(
-          packed,
-          MAX_WEBRTC_FRAME_STRUCTURE_BYTES,
-          256,
-          MAX_WEBRTC_STRING_BYTES,
-        ),
-        `${label}: scan rejected a frame the real unpacker accepts`,
+        scanFrameStructure(packed, 256, MAX_WEBRTC_STRING_BYTES),
+        `${label}: scan refused a frame the real unpacker accepts`,
       ).toBeUndefined();
     }
   });
 
-  test("charges exactly the modelled cost of the frame's real marker inventory", async () => {
-    // A stronger differential than "does not reject": the pre-scan's accept/reject
-    // boundary must sit at the exact cost the frame's real marker inventory implies
-    // under the published weights. An independent walk (referenceWalk, mirroring
-    // Unpacker.unpack's dispatch) sums each value's WEBRTC_VALUE_WEIGHTS cost from
-    // the real-encoded bytes; scanFrameStructure must accept at exactly that budget
-    // and reject one byte below it. Both sides score by the same weight model, so
-    // this pins the scan to the model rather than the model to the heap; every kind
-    // the corpus holds is scored, `bin`/`raw` included.
+  test("reads every corpus frame's marker widths as an independent walk does", async () => {
+    // The scan skips each marker's payload by a width it reads off the wire, so a
+    // width it reads differently than the library would shift every later value
+    // onto the wrong byte. An independent walk (referenceWalk, mirroring
+    // Unpacker.unpack's dispatch) must land on the frame's last byte, and must
+    // find no map key the scan would refuse -- the assumption the corpus rests on,
+    // established on this oracle rather than only through the scan admitting the
+    // frame.
     for (const { label, packed } of await corpus()) {
-      const { cost, endOffset, nonStringKey } = referenceWalk(packed);
-      // The reference walk must consume the whole real-encoded frame; a short read
-      // would mean the reference itself mis-modeled a marker, invalidating `cost`.
+      const { endOffset, nonStringKey } = referenceWalk(packed);
       expect(
         endOffset,
         `${label}: reference walk did not consume the frame`,
       ).toBe(packed.length);
-      // The assumption the cost comparison rests on -- no corpus frame the real
-      // packer emits holds a map key the scan refuses -- established on this
-      // independent oracle rather than only through the scan accepting the frame.
       expect(
         nonStringKey,
         `${label}: the real packer emitted a non-string map key`,
       ).toBe(false);
-      expect(
-        scanFrameStructure(packed, cost, 256, MAX_WEBRTC_STRING_BYTES),
-        `${label}: scan rejected at its own reference cost`,
-      ).toBeUndefined();
-      expect(
-        scanFrameStructure(packed, cost - 1, 256, MAX_WEBRTC_STRING_BYTES),
-        `${label}: scan accepted one byte below its reference cost`,
-      ).toEqual({ rule: "structure-bytes", limit: cost - 1 });
     }
   });
 });
@@ -585,10 +545,13 @@ describe("boundedReassembly on the shapes the wire size understates", () => {
   // name -- driven through the web wrap rather than against the scan alone, so the
   // enforcement this transport actually installs is what the assertions see.
 
-  test("fails closed on a nested chain whose reserved stores exceed the production budget", () => {
+  test("fails closed on a nested chain whose reserved stores outrun its wire size", () => {
+    // 200 byte-backed levels of 700,000 declared children each, under a megabyte
+    // of wire, which the real unpacker turns into 1.1 GB of reserved stores by
+    // reserving that width once per level. Every other rule is met -- each level
+    // has the bytes it declares behind it -- so the cumulative element rule is
+    // what refuses it, and the failure names that rule.
     const frame = nestedArrayFrame(200, 700_000, 700_000);
-    // Far below the wire-byte cap, so nothing but the structural pre-scan can be
-    // what refuses it.
     expect(frame.byteLength).toBeLessThan(1024 * 1024);
 
     const conn = new FakeChunkedConnection();
@@ -596,32 +559,35 @@ describe("boundedReassembly on the shapes the wire size understates", () => {
     for (const chunk of chunkAtMtu(frame, 1)) conn._handleChunk(chunk);
 
     expect(fail).toHaveBeenCalledTimes(1);
+    expect((fail.mock.calls[0][0] as ConnectionError).message).toBe(
+      "inbound WebRTC frame declares more elements across the whole frame than its bytes can encode",
+    );
     expect(conn.delivered).toHaveLength(0);
   });
 
-  test("fails closed on a frame whose declared bin/raw views exceed the budget", async () => {
-    // A `bin`/`raw` element is one wire byte here and decodes to a view of its own,
-    // so this frame's retained cost is decided by the count it declares rather than
-    // by its size. Driven through the wrap at the production structural budget, with
-    // the wire-byte and chunk caps held wide, so the structural pre-scan is the only
-    // bound that can refuse it.
-    const frame = await binaryArrayFrame(5_000_000);
-    expect(frame.byteLength).toBeLessThan(MAX_WEBRTC_FRAME_BYTES);
+  test("delivers the same declared counts backed at one level", () => {
+    // The refused chain's near neighbour: one level declaring the same 700,000
+    // children over the same 700,000 element bytes. The rule turns on a count the
+    // frame declares more than once, not on the count itself.
+    const frame = nestedArrayFrame(1, 700_000, 700_000);
 
     const conn = new FakeChunkedConnection();
     const fail = installProduction(conn);
     for (const chunk of chunkAtMtu(frame, 1)) conn._handleChunk(chunk);
 
-    expect(fail).toHaveBeenCalledTimes(1);
-    expect(conn.delivered).toHaveLength(0);
+    expect(fail).not.toHaveBeenCalled();
+    expect(conn.delivered).toHaveLength(1);
+    expect(unpackFrame(conn.delivered[0])).toHaveLength(700_000);
   });
 
-  test("delivers the same shape while its declared views stay within the budget", async () => {
-    // The refusal above is the budget acting on the declared count, not the wrap
-    // refusing binary content: the identical shape an order of magnitude smaller is
-    // delivered, and the real unpacker builds one retained view per element from it.
+  test("delivers a frame of declared bin/raw views far under the wire cap", async () => {
+    // A `bin`/`raw` element is one wire byte here and decodes to a view of its own,
+    // so half a million views arrive in half a megabyte of wire. The wrap delivers
+    // it, and the real unpacker builds one retained view per element from what it
+    // delivered.
     const count = 500_000;
     const frame = await binaryArrayFrame(count);
+    expect(frame.byteLength).toBeLessThan(MAX_WEBRTC_FRAME_BYTES);
 
     const conn = new FakeChunkedConnection();
     const fail = installProduction(conn);
@@ -638,34 +604,30 @@ describe("boundedReassembly on the shapes the wire size understates", () => {
   test("fails closed on a non-string-key map a string-keyed one of the same width passes", async () => {
     // Two maps of the same pair count and near-identical wire size: one keyed by
     // real-packed strings, one by real-packed doubles. The string-keyed frame is
-    // costed and passes at its own budget; the numeric-keyed one is refused for its
-    // keys, so it does not get through at that budget or at any other.
+    // delivered; the numeric-keyed one is refused for its keys alone.
     const pairs = 100;
     const stringKeys = await keyedMapFrame(pairs, (i) => `k${i.toString()}`);
     const numericKeys = await keyedMapFrame(pairs, (i) => (i + 1) * Math.PI);
-    const budget = referenceWalk(stringKeys).cost;
     expect(referenceWalk(stringKeys).nonStringKey).toBe(false);
     expect(referenceWalk(numericKeys).nonStringKey).toBe(true);
 
     const accepting = new FakeChunkedConnection();
-    const acceptFail = installAtBudget(accepting, budget);
+    const acceptFail = installProduction(accepting);
     for (const chunk of chunkAtMtu(stringKeys, 1))
       accepting._handleChunk(chunk);
     expect(acceptFail).not.toHaveBeenCalled();
     expect(accepting.delivered).toHaveLength(1);
 
-    for (const wideBudget of [budget, MAX_WEBRTC_FRAME_STRUCTURE_BYTES]) {
-      const refusing = new FakeChunkedConnection();
-      const refuseFail = installAtBudget(refusing, wideBudget);
-      for (const chunk of chunkAtMtu(numericKeys, 1))
-        refusing._handleChunk(chunk);
-      expect(refuseFail).toHaveBeenCalledTimes(1);
-      // The failure names the key rule rather than the budget it was not over.
-      expect((refuseFail.mock.calls[0][0] as ConnectionError).message).toBe(
-        "inbound WebRTC frame keys a map with a value that is not a string",
-      );
-      expect(refusing.delivered).toHaveLength(0);
-    }
+    const refusing = new FakeChunkedConnection();
+    const refuseFail = installProduction(refusing);
+    for (const chunk of chunkAtMtu(numericKeys, 1))
+      refusing._handleChunk(chunk);
+    expect(refuseFail).toHaveBeenCalledTimes(1);
+    // The failure names the key rule rather than a limit the frame was not over.
+    expect((refuseFail.mock.calls[0][0] as ConnectionError).message).toBe(
+      "inbound WebRTC frame keys a map with a value that is not a string",
+    );
+    expect(refusing.delivered).toHaveLength(0);
   });
 
   test("fails closed on a non-string key whose subtree underruns the frame", () => {
@@ -713,63 +675,35 @@ describe("boundedReassembly on the shapes the wire size understates", () => {
   });
 });
 
-/** Resident-byte weight of a string of `declaredBytes` wire bytes under the
- * published cost model (a SeqString header plus its UTF-16 characters). */
-function stringWeightOf(declaredBytes: number): number {
-  return (
-    WEBRTC_VALUE_WEIGHTS.stringBase +
-    WEBRTC_VALUE_WEIGHTS.stringPerByte * declaredBytes
-  );
-}
-
 /**
- * Walks `bytes` with the real unpacker's marker semantics and sums the retained
- * cost under the published `WEBRTC_VALUE_WEIGHTS`: each container its own weight
- * plus a backing slot per declared child, each string its header-plus-per-byte
- * weight, each `bin`/`raw` value the fixed view overhead, and each number marker
- * wider than 16 bits the heap number it may box; a value charged no more than its
- * container's slot adds nothing further. `cost` is the exact budget the production
- * scan should charge; `endOffset` is where the real unpacker finishes. Not derived
- * from `scanFrameStructure`, so a marker-dispatch bug there shows as a boundary
- * mismatch here rather than being masked by a shared walk.
+ * Walks `bytes` with the real unpacker's marker semantics: `endOffset` is the
+ * offset that walk finishes at, so a marker whose payload width or child count
+ * the production scan reads differently lands somewhere else. Not derived from
+ * `scanFrameStructure`, so a marker-dispatch bug there shows as a mismatch here
+ * rather than being masked by a shared walk.
  *
- * `nonStringKey` reports the frame's map keys: the scan refuses a frame holding a
- * non-string key at any budget, so a flagged frame has no `cost` comparison to
- * make.
+ * `nonStringKey` reports the frame's map keys, the one thing that makes the scan
+ * refuse a frame the packer produced.
  */
 function referenceWalk(bytes: Uint8Array): {
-  cost: number;
   endOffset: number;
   nonStringKey: boolean;
 } {
   let i = 0;
-  let cost = 0;
   let nonStringKey = false;
   const u8 = (): number => bytes[i++];
   const u16 = (): number => u8() * 0x100 + u8();
   const u32 = (): number =>
     u8() * 0x1000000 + u8() * 0x10000 + u8() * 0x100 + u8();
 
-  /** A value the weights charge no more than the slot its container already charged.
-   * At a key position it is a key the scan refuses. */
+  /** A value that declares no children of its own, which at a key position is a
+   * key the scan refuses. */
   const slotOnly = (atKeyPosition: boolean): void => {
     if (atKeyPosition) nonStringKey = true;
   };
 
-  /** A `bin`/`raw` value: the fixed per-value overhead of the view `unpack_raw`
-   * returns, charged on top of its container's slot. Its payload is charged nothing,
-   * being ~1x the value's wire bytes and bounded by the wire-byte cap. At a key
-   * position it is a key the scan refuses. */
+  /** A `bin`/`raw` value, which at a key position is a key the scan refuses. */
   const binaryValue = (atKeyPosition: boolean): void => {
-    cost += WEBRTC_VALUE_WEIGHTS.binary;
-    if (atKeyPosition) nonStringKey = true;
-  };
-
-  /** A number marker wider than 16 bits: the heap number its value is held in when
-   * the container's slot cannot hold it, charged on top of that slot whatever the
-   * marker holds. At a key position it is a key the scan refuses. */
-  const boxedNumber = (atKeyPosition: boolean): void => {
-    cost += WEBRTC_VALUE_WEIGHTS.boxedNumber;
     if (atKeyPosition) nonStringKey = true;
   };
 
@@ -790,16 +724,15 @@ function referenceWalk(bytes: Uint8Array): {
       return;
     }
     if ((size = type ^ 0xb0) <= 0x0f) {
-      i += size; // fixstr: a string is its own property name, charged in full
-      cost += stringWeightOf(size);
+      i += size; // fixstr
       return;
     }
     if ((size = type ^ 0x90) <= 0x0f) {
-      container(size, WEBRTC_VALUE_WEIGHTS.array, false, atKeyPosition); // fixarray
+      container(size, false, atKeyPosition); // fixarray
       return;
     }
     if ((size = type ^ 0x80) <= 0x0f) {
-      container(size * 2, WEBRTC_VALUE_WEIGHTS.object, true, atKeyPosition); // fixmap
+      container(size * 2, true, atKeyPosition); // fixmap
       return;
     }
     switch (type) {
@@ -827,26 +760,24 @@ function referenceWalk(bytes: Uint8Array): {
       case 0xce: // uint32
       case 0xd2: // int32
         i += 4;
-        boxedNumber(atKeyPosition);
+        slotOnly(atKeyPosition);
         return;
       case 0xcb: // double
       case 0xcf: // uint64
       case 0xd3: // int64
         i += 8;
-        boxedNumber(atKeyPosition);
+        slotOnly(atKeyPosition);
         return;
       case 0xd8: {
         // str16
         const size16 = u16();
         i += size16;
-        cost += stringWeightOf(size16);
         return;
       }
       case 0xd9: {
         // str32
         const size32 = u32();
         i += size32;
-        cost += stringWeightOf(size32);
         return;
       }
       case 0xda: {
@@ -864,16 +795,16 @@ function referenceWalk(bytes: Uint8Array): {
         return;
       }
       case 0xdc: // array16
-        container(u16(), WEBRTC_VALUE_WEIGHTS.array, false, atKeyPosition);
+        container(u16(), false, atKeyPosition);
         return;
       case 0xdd: // array32
-        container(u32(), WEBRTC_VALUE_WEIGHTS.array, false, atKeyPosition);
+        container(u32(), false, atKeyPosition);
         return;
       case 0xde: // map16
-        container(u16() * 2, WEBRTC_VALUE_WEIGHTS.object, true, atKeyPosition);
+        container(u16() * 2, true, atKeyPosition);
         return;
       case 0xdf: // map32
-        container(u32() * 2, WEBRTC_VALUE_WEIGHTS.object, true, atKeyPosition);
+        container(u32() * 2, true, atKeyPosition);
         return;
       default:
         slotOnly(atKeyPosition);
@@ -881,16 +812,14 @@ function referenceWalk(bytes: Uint8Array): {
     }
   }
 
-  /** A container of `children` declared child values: its base weight, a backing
-   * slot per declared child, then the children themselves. A map's children
-   * alternate key, value, so its even-indexed children are the key positions. */
+  /** A container of `children` declared child values, then the children
+   * themselves. A map's children alternate key, value, so its even-indexed
+   * children are the key positions. */
   function container(
     children: number,
-    base: number,
     isMap: boolean,
     atKeyPosition: boolean,
   ): void {
-    cost += base + children * WEBRTC_VALUE_WEIGHTS.scalar;
     if (atKeyPosition) nonStringKey = true;
     for (let k = 0; k < children; k++) {
       one(isMap && k % 2 === 0);
@@ -898,5 +827,5 @@ function referenceWalk(bytes: Uint8Array): {
   }
 
   one(false);
-  return { cost, endOffset: i, nonStringKey };
+  return { endOffset: i, nonStringKey };
 }

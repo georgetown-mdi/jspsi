@@ -293,14 +293,16 @@ describe("dialAsAcceptor", () => {
     stubWindow();
     const fake = new FakePeer();
     const cap = captureFactory(fake);
-    // The backoff (10s) is wider than the total budget (50ms): only the first
-    // attempt fits, so the no-show branch is reached on the budget, not a race.
-    // The rejection handler is attached before the dial runs, since the budget
-    // timer could otherwise expire first.
+    // The backoff outlasts the total budget, so the first `peer-unavailable`
+    // spends it and the no-show branch is reached without any timer expiring.
+    // The budget is nonetheless wide, because the per-attempt open timeout is
+    // clamped to what is left of it: a budget near `vi.waitFor`'s own poll
+    // interval leaves the two racing within a millisecond, and a loaded runner
+    // then fails the dial on the open timeout instead.
     const rejection = dialAsAcceptor(generateSharedSecret(), endpoint, {
       peerFactory: cap.factory,
-      retryDelayMs: 10_000,
-      totalTimeoutMs: 50,
+      retryDelayMs: 120_000,
+      totalTimeoutMs: 60_000,
     }).catch((error: unknown) => error);
 
     await vi.waitFor(() =>

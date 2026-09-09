@@ -16,6 +16,7 @@ import {
   MAX_RECONNECT_ATTEMPTS,
   MAX_TEXT_LENGTH,
   MAX_TIMEOUT_SECONDS,
+  MAX_TRANSFORM_PATTERN_LENGTH,
   MetadataSchema,
   OwnColumnSelectionSchema,
   SHARED_SECRET_REGEX,
@@ -60,7 +61,9 @@ export const MAX_IDENTITY_LENGTH = 1024;
  * the four free-text fields of a linkage-terms document, the party `identity`
  * among them, which a label accepted here becomes; the two patterns are held
  * equal by test/unit/jobs/identityLabelParity.test.ts. This contract is
- * stricter: it also refuses a leading `-`.
+ * stricter in one direction, also refusing a leading `-`, and it refuses the
+ * text-direction class beside this one
+ * ({@link IDENTITY_DIRECTION_CHAR_PATTERN}), as core's `identity` does.
  */
 export const IDENTITY_CONTROL_CHAR_PATTERN =
   // eslint-disable-next-line no-control-regex
@@ -74,6 +77,36 @@ export const IDENTITY_CONTROL_CHAR_PATTERN =
  */
 export const IDENTITY_CONTROL_CHAR_MESSAGE =
   "identity must not contain control characters";
+
+/**
+ * The second class an `identity` label may not contain: the nine Unicode
+ * bidirectional embedding, override and isolate characters (U+202A-U+202E and
+ * U+2066-U+2069, Unicode UAX #9). One of them opens a layout scope that
+ * outlives the label and reorders the copy it is placed beside, and the label
+ * is bound into a long-lived certificate a partner pins and DISPLAYS, and is
+ * written into both parties' exchange records as the terms state it. Nothing in
+ * a party name needs one: a right-to-left name lays out from its own letters.
+ *
+ * The implicit marks U+200E LRM, U+200F RLM and U+061C ALM stay admitted: each
+ * sets a direction for the neutral characters around it and opens no scope
+ * reaching past them.
+ *
+ * Core's `BIDI_CONTROL_PATTERN` (packages/core/src/utils/nameControls.ts) is
+ * the same class over the terms document's recorded free-text fields, the party
+ * `identity` among them; the two patterns are held equal by
+ * test/unit/jobs/identityLabelParity.test.ts.
+ */
+export const IDENTITY_DIRECTION_CHAR_PATTERN = /[\u202a-\u202e\u2066-\u2069]/u;
+
+/**
+ * The reason every boundary reports for a label containing one, naming a field
+ * path and a shape reason and never the submitted bytes, for the reason
+ * {@link IDENTITY_CONTROL_CHAR_MESSAGE} gives. Its own sentence rather than a
+ * shared one, since the two rules refuse different characters and an operator
+ * fixing one is not told about the other.
+ */
+export const IDENTITY_DIRECTION_CHAR_MESSAGE =
+  "identity must not contain text-direction characters";
 
 /**
  * Upper bound on a `peer_id`. It prefixes every filename this party writes into
@@ -299,13 +332,44 @@ export interface JobInputFileReference {
 type JobSigningMode = "none" | "certificate";
 
 /**
+ * Where this party's signing identity file is, as a locator the operator
+ * picked in the console's secrets browse: the mount id and the path segments
+ * under it, exactly the shape an SFTP credential's `mountRef` takes
+ * (`AuthoredMountRefCredential` in `sftpServer.ts`). The SERVER resolves it
+ * against `JOB_SECRETS_DIR`, so no container-absolute path is ever sent or
+ * shown.
+ *
+ * Absent means the console's default: the fixed name in the mounted data root
+ * ({@link SIGNING_IDENTITY_FILE_NAME}), which is the location the console
+ * creates on demand. A location NAMED here is read, never created.
+ */
+export interface JobSigningIdentityLocation {
+  mount: "secrets";
+  subPath: Array<string>;
+}
+
+/**
+ * A single secrets mount only, as the credential locator has: `mount` is the
+ * literal id, so an unknown one fails the parse naming the field, and each
+ * segment is a non-empty string the mount resolution re-admits by shape and
+ * re-confines by realpath.
+ */
+export const jobSigningIdentityLocationSchema: z.ZodType<JobSigningIdentityLocation> =
+  z.strictObject({
+    mount: z.literal("secrets"),
+    subPath: z.array(z.string().min(1)).min(1),
+  });
+
+/**
  * The receipt-signing choices a client may set on an exchange job: the mode,
- * and the partner fingerprint to pin under `certificate`.
+ * the partner fingerprint to pin under `certificate`, and where this party's
+ * signing identity is kept.
  *
  * The two PATH fields of core's {@link SigningConfig} -- `identity_file` and
  * `receipt_output` -- are not representable here: the server owns every path
  * a job's CLI child is pointed at. They are supplied at composition from
- * {@link JobSigningPaths}.
+ * {@link JobSigningPaths}. `identityLocation` is not an exception: it is a
+ * mount id and path segments the server resolves, never a path.
  *
  * `partnerFingerprint` is the one free-text field: core's
  * {@link FINGERPRINT_REGEX} admits exactly a canonical 43-character unpadded
@@ -317,6 +381,7 @@ type JobSigningMode = "none" | "certificate";
 export interface JobSigningChoice {
   mode: JobSigningMode;
   partnerFingerprint?: string;
+  identityLocation?: JobSigningIdentityLocation;
 }
 
 const jobSigningChoiceSchema: z.ZodType<JobSigningChoice> = z
@@ -330,8 +395,22 @@ const jobSigningChoiceSchema: z.ZodType<JobSigningChoice> = z
           "characters), as 'psilink fingerprint' prints it",
       )
       .optional(),
+    identityLocation: jobSigningIdentityLocationSchema.optional(),
   })
   .strict()
+  // A run that signs nothing loads no identity, so a location beside
+  // `mode: none` names a file nothing would read. Refused rather than
+  // composed, so exactly one path answers "which identity would this run
+  // publish" -- the default, on an unsigned run.
+  .refine(
+    (signing) =>
+      signing.mode === "certificate" || signing.identityLocation === undefined,
+    {
+      message:
+        "identityLocation is only admissible with signing mode 'certificate'",
+      path: ["identityLocation"],
+    },
+  )
   // A pin is meaningful only where a certificate is verified against it, so
   // a fingerprint beside `mode: none` is refused rather than composed into a
   // config whose pin nothing reads.
@@ -622,13 +701,20 @@ export type JobZeroSetupLinkageStrategy = "cascade" | "single-pass";
  *
  * - `linkageStrategy` is a closed enum forwarded to the CLI's
  *   `--linkage-strategy`.
+ * - `deduplicate` is a boolean forwarded to the CLI's `--deduplicate`: this
+ *   party's own side of the matching cardinality, which the zero-setup command
+ *   applies over the terms it infers. It is not the exchange mode's
+ *   `expectedPartnerDeduplicate`, which binds the PARTNER's presented value
+ *   against an accepted invitation; a zero-setup run holds no invitation to
+ *   bind one to.
  * - `identity` is a bounded operator label forwarded to the CLI's
  *   `--identity` (the party name/org/contact string), bounded by
- *   {@link MAX_IDENTITY_LENGTH} and held to the shared label contract's two
- *   shape rules: no leading `-` and no control character.
+ *   {@link MAX_IDENTITY_LENGTH} and held to the shared label contract's three
+ *   shape rules: no leading `-`, no control character, and no text-direction
+ *   character.
  *
- * Neither is a path, host, or credential. Exactly one of `inputCsv` or
- * `inputFile` is set (enforced by {@link jobZeroSetupIntentSchema}),
+ * None of the three is a path, host, or credential. Exactly one of `inputCsv`
+ * or `inputFile` is set (enforced by {@link jobZeroSetupIntentSchema}),
  * identically to the exchange mode.
  */
 interface JobZeroSetupIntentBase {
@@ -640,6 +726,7 @@ interface JobZeroSetupIntentBase {
   diagnosticRun?: boolean;
   sweepExchangeFiles?: boolean;
   linkageStrategy?: JobZeroSetupLinkageStrategy;
+  deduplicate?: boolean;
   identity?: string;
 }
 
@@ -739,6 +826,50 @@ const boundedMetadataSchema = MetadataSchema.refine(
     ),
   { message: "a metadata column description exceeds the length cap" },
 );
+
+/**
+ * The standardization functions whose named param is compiled to a
+ * linear-time regex at pipeline construction (`compileLinearRegex` in core's
+ * standardization.ts), paired with that param's camelCase name -- the only
+ * sources whose length drives the super-linear RE2 compile the coverage route
+ * bounds. A plain-string param (coalesce's `default`, null_if's
+ * `value`/`values`) is never compiled and is unbounded elsewhere, so capping
+ * it would 400 a pipeline that runs fine everywhere else. `parse_date`'s
+ * format param also compiles, but the coverage accumulator already bounds it
+ * via `isStepValid` before any compile.
+ */
+const REGEX_SOURCE_PARAM_BY_FUNCTION: Record<string, string> = {
+  replace_regex: "pattern",
+  extract_regex: "pattern",
+  filter_regex: "pattern",
+  split_on: "delimiter",
+};
+
+/**
+ * Whether every standardization step's compiled regex source in `transformation`
+ * stays within {@link MAX_TRANSFORM_PATTERN_LENGTH}. The count bounds below do
+ * not reach pattern length, and RE2JS compile cost lands on the console's event
+ * loop before any row streams, so the coverage route caps the source length of
+ * exactly the params that reach regex compilation
+ * ({@link REGEX_SOURCE_PARAM_BY_FUNCTION}) -- a compute-DoS bound on the
+ * browser-supplied standardization body, not an access perimeter over the
+ * operator's own directory. Shared with the editor, which reads it to decide
+ * whether an unavailable coverage sweep is the input header's doing.
+ */
+export function stepPatternsWithinCap(
+  transformation: Standardization[number],
+): boolean {
+  for (const step of transformation.steps ?? []) {
+    if (!Object.hasOwn(REGEX_SOURCE_PARAM_BY_FUNCTION, step.function)) continue;
+    const value = step.params?.[REGEX_SOURCE_PARAM_BY_FUNCTION[step.function]];
+    if (
+      typeof value === "string" &&
+      value.length > MAX_TRANSFORM_PATTERN_LENGTH
+    )
+      return false;
+  }
+  return true;
+}
 
 const boundedStandardizationSchema = StandardizationSchema.refine(
   (transformations) =>
@@ -953,7 +1084,7 @@ export const jobExchangeIntentSchema: z.ZodType<JobExchangeIntent> = z
 // The zero-setup common fields hold NONE of the exchange mode's credential
 // or terms material -- no sharedSecret, linkageTerms, metadata,
 // standardization, expectedPayloadColumns, or expectedPartnerDeduplicate --
-// only an input source, the tuning options, the event toggle, and the two
+// only an input source, the tuning options, the event toggle, and the three
 // bounded selectors. `inputCsv` reuses the exchange mode's cap.
 const jobZeroSetupIntentCommonFields = {
   ...jobRunControlFields,
@@ -961,10 +1092,12 @@ const jobZeroSetupIntentCommonFields = {
   inputFile: jobInputFileReferenceSchema.optional(),
   eventStream: z.boolean().optional(),
   linkageStrategy: z.enum(["cascade", "single-pass"]).optional(),
+  deduplicate: z.boolean().optional(),
   // Free text, unlike the closed strategy enum, so it takes the shared label
-  // contract's two shape rules (`@jobs/intentSchemas`): no leading `-` and no
-  // control character. The driver emits it as a single `--identity=<value>`
-  // token, which parses a `-`-leading value verbatim regardless.
+  // contract's three shape rules (`@jobs/intentSchemas`): no leading `-`, no
+  // control character, and no text-direction character. The driver emits it as
+  // a single `--identity=<value>` token, which parses a `-`-leading value
+  // verbatim regardless.
   identity: z
     .string()
     .min(1)
@@ -972,6 +1105,9 @@ const jobZeroSetupIntentCommonFields = {
     .regex(/^[^-]/, "identity must not begin with '-'")
     .refine((label) => !IDENTITY_CONTROL_CHAR_PATTERN.test(label), {
       message: IDENTITY_CONTROL_CHAR_MESSAGE,
+    })
+    .refine((label) => !IDENTITY_DIRECTION_CHAR_PATTERN.test(label), {
+      message: IDENTITY_DIRECTION_CHAR_MESSAGE,
     })
     .optional(),
 };

@@ -16,7 +16,10 @@ import {
 import { AcceptorColumnsStep } from "@exchange/AcceptorColumnsStep";
 import { Lobby } from "@exchange/Lobby";
 
-import { DIRECT_LINKAGE_STRATEGY_DEFAULT } from "@exchange/directExchangeModel";
+import {
+  DIRECT_DEDUPLICATE_DEFAULT,
+  DIRECT_LINKAGE_STRATEGY_DEFAULT,
+} from "@exchange/directExchangeModel";
 import { DirectConfirmSection } from "@exchange/DirectConfirmSection";
 import { InviterScreen } from "@exchange/InviterScreen";
 import { OFFLINE_EXCHANGE_REASON } from "@psi/offlineExchangeGate";
@@ -134,7 +137,7 @@ function mountAcceptorColumnsStep() {
     createElement(AcceptorColumnsStep, {
       linkageTerms: acceptorTerms,
       columns,
-      bidiStrippedColumns: [],
+      sanitizedColumnPositions: [],
       columnsState,
       editorState,
       verdict: acceptorVerdict(columns, acceptorTerms, editorState),
@@ -155,7 +158,7 @@ const directProfile: ProfiledJobInput = {
   modifiedAt: 1_700_000_000_000,
   rowCount: 2,
   columns: ["client_id", "first_name", "last_name", "dob", "program_code"],
-  bidiStrippedColumns: [],
+  sanitizedColumnPositions: [],
   columnSamples: new Map([
     ["client_id", ["1", "2"]],
     ["first_name", ["Ann", "Bo"]],
@@ -176,6 +179,8 @@ function mountDirectConfirmSection() {
       onIdentity: noop,
       linkageStrategy: DIRECT_LINKAGE_STRATEGY_DEFAULT,
       onLinkageStrategy: noop,
+      deduplicate: DIRECT_DEDUPLICATE_DEFAULT,
+      onDeduplicate: noop,
       affirmed: true,
       onAffirm: noop,
       onRun: noop,

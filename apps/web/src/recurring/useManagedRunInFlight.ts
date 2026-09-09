@@ -26,10 +26,9 @@ interface ManagedRunInFlight {
  *
  * Two signals, because neither covers the other. The record's run+rotate lock
  * ({@link managedExchangeRunLockHeld}) is origin-wide, so it is what sees a run this
- * surface did not start -- but it is held only across the window in which a run can
- * still rotate the secret, and it is a poll rather than an event. `runningHere` is
- * this surface's own run state: instant, and standing for the run's whole life
- * including the data exchange the lock is not held across.
+ * surface did not start -- but it is a poll rather than an event, and it is released
+ * the moment that run ends. `runningHere` is this surface's own run state: instant,
+ * and standing for the run's whole life including the tail past the lock's release.
  *
  * What this gates is presentation. The lock can be taken or released between the poll
  * and the click that follows it, so a hand-off that spends the secret decides its own

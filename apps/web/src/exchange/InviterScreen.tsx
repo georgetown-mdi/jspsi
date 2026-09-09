@@ -7,6 +7,7 @@ import {
   mintExchangeFile,
   sanitizeErrorForDisplay,
   sanitizeForDisplay,
+  transformRefusalIn,
 } from "@psilink/core";
 
 import {
@@ -18,7 +19,10 @@ import {
 import {
   emptyColumnPositions,
   overlongColumnsAlert,
+  overlongCoverageColumns,
+  refusedColumnNames,
   sanitizedColumnsAlert,
+  savedExchangeColumnRefusalAlert,
   unnameableColumnsAlert,
 } from "@psi/columnNames";
 import { capturedInputHandle } from "@psi/managed/managedInputHandle";
@@ -135,11 +139,11 @@ import { useBeforeUnloadPrompt, useUnloadGuard } from "./useUnloadGuard";
 import { AgreementTab } from "./AgreementTab";
 import { WorkShell } from "./WorkShell";
 
+import { MANAGE_OFFER_IDLE, ManageExchangeOffer } from "./ManageExchangeOffer";
 import { CleaningTab } from "./CleaningTab";
 import { InviterExchangeSection } from "./InviterExchangeSection";
 import { KeysTab } from "./KeysTab";
 import { Ledger } from "./Ledger";
-import { ManageExchangeOffer } from "./ManageExchangeOffer";
 import { MatchingSharingSection } from "./MatchingSharingSection";
 import { Problems } from "./Problems";
 import { RecoveredExchangePanel } from "./RecoveredExchangePanel";
@@ -178,14 +182,19 @@ import type { ConnectionTuningDraft } from "@console/connectionTuningModel";
 import type { DisclosureChoice } from "@psi/metadataEditing";
 import type { ExchangeFilesDraft } from "@console/exchangeFilesModel";
 import type { ManageOfferChoices } from "./manageOfferModel";
-import type { ManageOfferStatus } from "./ManageExchangeOffer";
+import type { ManageOfferState } from "./ManageExchangeOffer";
 import type { ReceiptsDraft } from "@psi/receiptsModel";
 import type { RunDiagnosticsDraft } from "@psi/runDiagnosticsModel";
 import type { SavedExchange } from "./SaveExchangeSection";
 import type { Section } from "./stepRestore";
 import type { SftpConnectionProjection } from "@jobs/jobManager";
 
-import type { CSVRow, SemanticType, Standardization } from "@psilink/core";
+import type {
+  CSVRow,
+  SemanticType,
+  Standardization,
+  TransformRefusal,
+} from "@psilink/core";
 
 type SpineStep = "file" | "columns" | "review";
 
@@ -237,6 +246,39 @@ function invitationFileAlert(failure: InvitationFileFailure): AlertContent {
       return overlongColumnsAlert(failure.positions);
     case "unlinkable":
       return unlinkableFileAlert(failure.refusal);
+  }
+}
+
+/**
+ * The alert for a mint the transform check refused. Both mint surfaces render this
+ * one composition, as they do {@link invitationFileAlert}, and it is exhaustive over
+ * {@link TransformRefusal}, so a refusal core adds cannot reach either surface as
+ * the generic "something went wrong".
+ *
+ * The words are this app's own and interpolate only what core narrowed for it -- a
+ * step label that is a build literal, and two counts -- so an imported terms
+ * document, which a partner may have authored, cannot echo a byte of itself here.
+ */
+function transformRefusalAlert(refusal: TransformRefusal): AlertContent {
+  switch (refusal.reason) {
+    case "uncompilable-step":
+      return {
+        title: "A transform step cannot be built",
+        message:
+          `One transform step (${refusal.stepLabel}) cannot be built from the ` +
+          "settings it declares, so the exchange would stop before it matched " +
+          "anything. Open that step in your linkage keys or cleaning steps and " +
+          "correct its settings, or remove the step.",
+      };
+    case "too-many-steps":
+      return {
+        title: "These terms declare too many transform steps",
+        message:
+          `Your linkage keys and cleaning steps declare ${refusal.declaredSteps} ` +
+          `transform steps together, more than the limit of ${refusal.maxSteps}. ` +
+          "Reduce the number of linkage keys, key elements, or transform steps " +
+          "they declare.",
+      };
   }
 }
 
@@ -358,7 +400,11 @@ export function InviterScreen() {
   const [receipts, setReceipts] = useState<ReceiptsDraft>(RECEIPTS_DEFAULT);
   const [receiptsOpen, setReceiptsOpen] = useState(false);
   const [demoActive, setDemoActive] = useState(false);
-  const [manageStatus, setManageStatus] = useState<ManageOfferStatus>("idle");
+  // The offer's progress and, for a failed deposit, what it was about when a
+  // column name explains it. Held as one value so no reset can leave a refusal
+  // standing over an idle offer.
+  const [manageOffer, setManageOffer] =
+    useState<ManageOfferState>(MANAGE_OFFER_IDLE);
 
   // Fetch the console's authored SFTP connection once on a console build; one
   // fetch per console serves the session, and the default transport reads its
@@ -499,6 +545,19 @@ export function InviterScreen() {
     rates,
     ratesUnavailable,
   );
+  // The columns whose header the console's coverage sweep refuses over its length,
+  // so the unavailable notice names what tripped the bound. Empty off the console:
+  // the hosted sweep runs in this browser, under no such bound.
+  const coverageRefusedColumns = useMemo(
+    () =>
+      consoleSource === undefined
+        ? []
+        : overlongCoverageColumns(
+            editor?.draft.standardization ?? EMPTY_STANDARDIZATION,
+            consoleSource.columns,
+          ),
+    [consoleSource, editor],
+  );
   const coverageProblems = cleaningCoverageProblems(editor, rates);
 
   // The operator authored an SFTP connection in-console (its credential-free
@@ -534,7 +593,7 @@ export function InviterScreen() {
     setInvitation(undefined);
     setAcceptKitExchange(undefined);
     setSavedExchange(undefined);
-    setManageStatus("idle");
+    setManageOffer(MANAGE_OFFER_IDLE);
     goTo("review");
   }
 
@@ -548,7 +607,7 @@ export function InviterScreen() {
   // Manage, so there is no discard path here.
   async function manageExchange(choices: ManageOfferChoices) {
     if (invitation === undefined || editor === undefined) return;
-    setManageStatus("depositing");
+    setManageOffer({ status: "depositing" });
     try {
       const connection = webrtcLocatorFromEndpoint(
         webrtcEndpointFromLocation(invitationLocation()),
@@ -583,7 +642,7 @@ export function InviterScreen() {
           Date.now(),
         ),
       );
-      setManageStatus("deposited");
+      setManageOffer({ status: "deposited" });
     } catch (error) {
       console.error(
         "managed exchange deposit failed:",
@@ -592,7 +651,16 @@ export function InviterScreen() {
       whenDiagnostic(() =>
         console.error("managed exchange deposit failed (detail):", error),
       );
-      setManageStatus("error");
+      // The alert names the column out of the document's own metadata, which is
+      // what the refused parse read; a failure no column explains leaves the
+      // generic copy standing.
+      const refused = refusedColumnNames(invitation.metadata);
+      setManageOffer({
+        status: "error",
+        ...(refused.length > 0
+          ? { refusal: savedExchangeColumnRefusalAlert(refused) }
+          : {}),
+      });
     }
   }
 
@@ -748,7 +816,7 @@ export function InviterScreen() {
       });
       if (id !== parseId.current) return;
       const columns = result.meta.fields ?? [];
-      const stripped = result.meta.bidiStrippedColumns;
+      const stripped = result.meta.sanitizedColumnPositions;
       const emptyPositions = emptyColumnPositions(columns);
       if (emptyPositions.length > 0) {
         // Set after discardRead clears it: the refusal names the columns the
@@ -799,7 +867,7 @@ export function InviterScreen() {
   // keeps the authored draft when its columns are unchanged and only refreshes
   // the profile-derived facts; otherwise it reseeds from the profile.
   function commitConsoleFile(profile: ProfiledJobInput) {
-    const stripped = profile.bidiStrippedColumns;
+    const stripped = profile.sanitizedColumnPositions;
     const emptyPositions = emptyColumnPositions(profile.columns);
     if (emptyPositions.length > 0) {
       discardRead(unnameableColumnsAlert(emptyPositions, stripped));
@@ -893,7 +961,7 @@ export function InviterScreen() {
     setSavedExchange(undefined);
     setInvitation(undefined);
     setAcceptKitExchange(undefined);
-    setManageStatus("idle");
+    setManageOffer(MANAGE_OFFER_IDLE);
     goTo("file");
   }
 
@@ -1043,7 +1111,7 @@ export function InviterScreen() {
               locklessRendezvous: runOptions?.locklessRendezvous === true,
             },
       );
-      setManageStatus("idle");
+      setManageOffer(MANAGE_OFFER_IDLE);
       goTo("share");
     } catch (error) {
       if (error instanceof InvitationFileError) {
@@ -1053,22 +1121,33 @@ export function InviterScreen() {
         // shared alerts rather than a generic failure.
         setCreateAlert(invitationFileAlert(error.failure));
       } else {
-        // Internal and non-user-actionable: a fixed message avoids echoing
-        // internals into a secret-bearing flow, the default log states only
-        // the error type, and the detail reaches the console only under
-        // diagnostic mode.
-        console.error(
-          "invitation creation failed:",
-          error instanceof Error ? error.name : typeof error,
-        );
-        whenDiagnostic(() =>
-          console.error("invitation creation failed (detail):", error),
-        );
-        setCreateAlert({
-          title: "Could not create the invitation",
-          message:
-            "Something went wrong while creating the invitation. Your terms are unchanged - try again.",
-        });
+        // The tag is read after the class test rather than before it: the read
+        // walks `.cause` links, and an accessor that throws there propagates
+        // out of this handler, which must not cost a file error its alert.
+        const transformRefusal = transformRefusalIn(error);
+        if (transformRefusal !== undefined) {
+          // A document the transform check refused: the operator holds the
+          // terms and the remedy is an edit, so retrying the same click cannot
+          // clear it.
+          setCreateAlert(transformRefusalAlert(transformRefusal));
+        } else {
+          // Internal and non-user-actionable: a fixed message avoids echoing
+          // internals into a secret-bearing flow, the default log states only
+          // the error type, and the detail reaches the console only under
+          // diagnostic mode.
+          console.error(
+            "invitation creation failed:",
+            error instanceof Error ? error.name : typeof error,
+          );
+          whenDiagnostic(() =>
+            console.error("invitation creation failed (detail):", error),
+          );
+          setCreateAlert({
+            title: "Could not create the invitation",
+            message:
+              "Something went wrong while creating the invitation. Your terms are unchanged - try again.",
+          });
+        }
       }
     } finally {
       setMinting(false);
@@ -1116,21 +1195,28 @@ export function InviterScreen() {
       if (error instanceof InvitationFileError) {
         setSaveAlert(invitationFileAlert(error.failure));
       } else {
-        // Internal and non-user-actionable (a schema/encoding fault): a fixed
-        // message keeps internals out of a secret-bearing flow, the default
-        // log states only the error type, and the detail is diagnostic-gated.
-        console.error(
-          "exchange file save failed:",
-          error instanceof Error ? error.name : typeof error,
-        );
-        whenDiagnostic(() =>
-          console.error("exchange file save failed (detail):", error),
-        );
-        setSaveAlert({
-          title: "Could not save the exchange file",
-          message:
-            "Something went wrong while saving. Your terms are unchanged - try again.",
-        });
+        // The tag is read after the class test here too, for the reason the
+        // create click's handler states.
+        const transformRefusal = transformRefusalIn(error);
+        if (transformRefusal !== undefined) {
+          setSaveAlert(transformRefusalAlert(transformRefusal));
+        } else {
+          // Internal and non-user-actionable (a schema/encoding fault): a fixed
+          // message keeps internals out of a secret-bearing flow, the default
+          // log states only the error type, and the detail is diagnostic-gated.
+          console.error(
+            "exchange file save failed:",
+            error instanceof Error ? error.name : typeof error,
+          );
+          whenDiagnostic(() =>
+            console.error("exchange file save failed (detail):", error),
+          );
+          setSaveAlert({
+            title: "Could not save the exchange file",
+            message:
+              "Something went wrong while saving. Your terms are unchanged - try again.",
+          });
+        }
       }
     } finally {
       setSaving(false);
@@ -1423,6 +1509,7 @@ export function InviterScreen() {
               rates={rates}
               pending={ratesPending}
               coverageUnavailable={ratesUnavailable}
+              coverageRefusedColumns={coverageRefusedColumns}
               onFieldSteps={(output, fieldSteps) =>
                 applyEditor(editorWithFieldSteps(editor, output, fieldSteps))
               }
@@ -1532,7 +1619,8 @@ export function InviterScreen() {
               failure === undefined &&
               !demoActive && (
                 <ManageExchangeOffer
-                  status={manageStatus}
+                  status={manageOffer.status}
+                  refusal={manageOffer.refusal}
                   handleCaptured={sourceHandle !== undefined}
                   onManage={(choices) => void manageExchange(choices)}
                 />

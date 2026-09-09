@@ -32,9 +32,18 @@
 //
 // The prompt is left in the maintainer's own words rather than elaborated. It
 // names CONTRIBUTING.md with an `@` mention because that is what the interactive
-// ritual does, and the conventions it must follow (imperative subject, 50
-// characters or fewer, prose body, no markdown) live there rather than being
-// restated into the prompt where they would drift from the document.
+// ritual does, and the conventions it must follow (imperative subject, prose
+// body, no markdown) live there rather than being restated into the prompt where
+// they would drift from the document.
+//
+// THE DRAFT GOES OUT THROUGH THE NORMALIZER. format-squash-message.mjs rewraps
+// the body at the column CONTRIBUTING.md sets and strips the markdown a `claude
+// -p` run wraps its answer in, a code fence included. It reports what it cannot
+// fix without rewriting the message, and a draft that trips one of those is
+// printed as the run produced it, with the reasons on stderr and a nonzero exit,
+// rather than half-fixed into something that reads finished. What normalizing
+// does produce goes back through the normalizer's own check, so output that
+// check rejects fails the run instead of reaching stdout.
 //
 // The prompt goes in on STDIN, and each tool list is one comma-joined token.
 // Both are what the real CLI needs rather than preferences: `--allowedTools` and
@@ -45,6 +54,13 @@
 import { spawnSync } from "node:child_process";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+
+import {
+  formatDraft,
+  refusalReport,
+  selfCheckReport,
+  violations,
+} from "./format-squash-message.mjs";
 
 /** Repository root: this script lives at .claude/scripts/ inside it. */
 const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
@@ -174,11 +190,30 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const run = spawnSync("claude", claudeArgs(), {
     cwd: ROOT,
     input: prompt(prNumber),
-    stdio: ["pipe", "inherit", "inherit"],
+    encoding: "utf8",
+    stdio: ["pipe", "pipe", "inherit"],
   });
   if (run.error) {
     process.stderr.write(`could not run claude: ${run.error.message}\n`);
     process.exit(1);
   }
-  process.exit(run.status ?? 1);
+  const drafted = run.stdout ?? "";
+  if (run.status !== 0) {
+    process.stdout.write(drafted);
+    process.exit(run.status ?? 1);
+  }
+  const { text, refusals } = formatDraft(drafted, prNumber);
+  if (refusals.length > 0) {
+    process.stdout.write(drafted);
+    process.stderr.write(refusalReport(refusals));
+    process.exit(2);
+  }
+  const remaining = violations(text, prNumber);
+  if (remaining.length > 0) {
+    process.stdout.write(drafted);
+    process.stderr.write(selfCheckReport(remaining));
+    process.exit(2);
+  }
+  process.stdout.write(text);
+  process.exit(0);
 }

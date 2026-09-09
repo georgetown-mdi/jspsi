@@ -89,6 +89,24 @@ What managed does **not** add:
   origin-isolated, never a server. There is no profile-split persistence provider
   to choose between.
 
+### When a column name stops the save
+
+The stored document holds every column name the exchange declares, bounds each
+one's length, refuses a name holding an invisible control or text-direction
+character, and refuses a name a second column already uses. The length bound is
+in
+[CHANNEL_SECURITY.md](spec/CHANNEL_SECURITY.md#application-layer-parsed-input-bounds)
+and the character class in its
+[name-class rule](spec/CHANNEL_SECURITY.md#linkage-terms-name-class-character-rule).
+The bound covers **every** declared column, including one the exchange never
+sends: a wide vendor export whose header exceeds it can run as a one-off
+exchange and still not be storable as a recurring one.
+
+The save says which column. The offer names the column's position in the file,
+shows the name itself, and states which of those rules it broke, so the fix is
+the header row rather than a retry -- the same document is refused every time.
+The one-off exchange that just completed is unaffected; nothing was stored.
+
 ## The automation goal and its platform envelope
 
 The design goal is a **fully automated recurring exchange**: once an exchange
@@ -632,10 +650,11 @@ Two mechanisms uphold it:
 
 The **run+rotate** critical section is guarded by a single-writer lock (the Web
 Locks API, `navigator.locks`) keyed to the managed record's id, held for the whole
-window from "begin this run" through "rotated secret durably persisted". Two tabs
-of the same origin cannot both enter it: the second waits or is refused, so a
-scheduled run and an operator-opened tab -- or two tabs -- on one device cannot
-fork the secret by racing a run.
+window from "begin this run" through the success that run records -- the exchange
+with the partner included. Two tabs of the same origin cannot both enter it: the
+second waits or is refused, so a scheduled run and an operator-opened tab -- or
+two tabs -- on one device cannot fork the secret by racing a run, and no two of
+them exchange with the partner for one record at the same time.
 
 A hand-off's confirmation takes the same lock before it spends this device's copy,
 so a hand-off and a run exclude each other as two runs do. Whichever takes the lock
@@ -648,9 +667,12 @@ attempt begins as soon as the last one's wait ends, so a runner occupying a
 window holds the lock essentially continuously from the window's open to its
 close -- hours, at the widths the design intends. An operator who opens the app
 during an occupied window and runs the exchange by hand is told a run is already
-in progress, and keeps being told until a run lands or the window closes. That
-is the single-writer property working as intended rather than a fault, and the
-operator's run is available again the moment the window is over.
+in progress, and keeps being told for as long as an attempt holds the lock. That
+is the single-writer property working as intended rather than a fault. An
+attempt's wait for the partner is clamped to the window's close, but a handshake
+that completes just before the close holds the lock through the payload exchange
+that follows, so the operator's Run is available again once the exchange in
+flight settles -- which can be after the window is over.
 
 The lock is a same-profile **liveness guard**, not a persistent claim: it is
 auto-released when the holding tab or worker is destroyed, and it is taken
@@ -726,8 +748,8 @@ are withheld while this tab is running the exchange, and while a run in any
 other context holds the [single-writer
 lock](#cross-tab-single-writer-locking-web-locks), which is how a second tab's
 run or a scheduled one reaches them. The surface names the run as the reason;
-the hand-offs return when this tab's run ends or, for another context, when its
-lock releases at the rotation persist.
+the hand-offs return when this tab's run ends or, for another context, when that
+run ends and releases its lock.
 
 That withholding is a reading of the lock taken every so often, so it can miss a
 run that starts between two readings. Nothing rests on it: confirming a hand-off

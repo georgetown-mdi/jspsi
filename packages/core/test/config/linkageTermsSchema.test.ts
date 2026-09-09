@@ -11,7 +11,9 @@ import {
   safeParseLinkageTerms,
   MAX_NAME_LENGTH,
   MAX_TEXT_LENGTH,
+  NAME_SHAPE_MESSAGE,
   TEXT_CONTROL_CHAR_MESSAGE,
+  TEXT_DIRECTION_MESSAGE,
   LONE_SURROGATE_MESSAGE,
   LinkageTermsSchema,
   NESTING_DEPTH_MESSAGE,
@@ -1797,6 +1799,9 @@ test("rejects an over-long constraint exclude value", () => {
 // cases below pin the reach (every one of the four refuses) and the two edges
 // the rule is drawn at: a control character is refused wherever it sits, and a
 // value written in letters outside ASCII is not.
+//
+// The three of the four a record holds verbatim refuse a second class the
+// section after this one covers: the nine text-direction characters.
 
 const NUL = "\u0000";
 const ESC = "\u001b";
@@ -1910,6 +1915,390 @@ test("the control-character refusal names the field by path, not the value", () 
   const rendered = JSON.stringify(result.error.issues);
   expect(rendered).toContain(TEXT_CONTROL_CHAR_MESSAGE);
   expect(rendered).not.toContain("unrepeatable-label");
+});
+
+// --- Recorded free-text text-direction rule ----------------------------------
+// The three free-text fields a record holds verbatim -- the party `identity`,
+// the legal agreement's `purpose`, and a payload column's `description` --
+// refuse the nine bidirectional embedding, override and isolate characters
+// beside the control class above, since a layout scope opened in one of them
+// reorders the copy the record is read beside. The fourth free-text field, a
+// constraint `exclude` value, is a data value the run matches a field's
+// contents against and keeps them.
+
+// Written as escapes, never as raw bytes, so this source about invisible
+// characters is itself readable.
+const RLO = "\u202e";
+const LRM = "\u200e";
+const BIDI_CONTROLS: Array<[string, string]> = [
+  ["a left-to-right embedding", "\u202a"],
+  ["a right-to-left embedding", "\u202b"],
+  ["a pop directional formatting", "\u202c"],
+  ["a left-to-right override", "\u202d"],
+  ["a right-to-left override", RLO],
+  ["a left-to-right isolate", "\u2066"],
+  ["a right-to-left isolate", "\u2067"],
+  ["a first-strong isolate", "\u2068"],
+  ["a pop directional isolate", "\u2069"],
+];
+
+// The implicit marks, outside the refused class: each sets a direction for the
+// neutral characters around it and opens no scope reaching past them, so a
+// party writing a right-to-left sentence keeps them.
+const DIRECTION_MARKS: Array<[string, string]> = [
+  ["a left-to-right mark", LRM],
+  ["a right-to-left mark", "\u200f"],
+  ["an arabic letter mark", "\u061c"],
+];
+
+// One document per field, with the issue path a refusal locates that field by.
+const RECORDED_FREE_TEXT_FIELDS: Array<
+  [string, (value: string) => unknown, string]
+> = [
+  [
+    "a party identity",
+    (value) => freeTextTerms({ identity: value }),
+    "identity",
+  ],
+  [
+    "a legal agreement purpose",
+    (value) => freeTextTerms({ purpose: value }),
+    "legalAgreement.purpose",
+  ],
+  [
+    "a payload column description",
+    (value) => freeTextTerms({ description: value }),
+    "payload.send.0.description",
+  ],
+];
+
+test.each(
+  RECORDED_FREE_TEXT_FIELDS.flatMap(([field, terms]) =>
+    BIDI_CONTROLS.map(
+      ([character, value]) =>
+        [`${field} holding ${character}`, terms, value] as const,
+    ),
+  ),
+)("rejects %s", (_label, terms, character) => {
+  expect(() => parseLinkageTerms(terms(`Agency${character}A`))).toThrow(
+    ZodError,
+  );
+});
+
+test.each(RECORDED_FREE_TEXT_FIELDS)(
+  "the text-direction refusal names %s by path, not the value",
+  (_label, terms, path) => {
+    // The same split the control-character refusal takes: the field is located
+    // by issue path, and neither the submitted text nor the character it holds
+    // appears in what the parse reports.
+    const result = safeParseLinkageTerms(
+      terms(`Agency${RLO}unrepeatable-label`),
+    );
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.path.join("."))).toContain(
+      path,
+    );
+    const rendered = JSON.stringify(result.error.issues);
+    expect(rendered).toContain(TEXT_DIRECTION_MESSAGE);
+    expect(rendered).not.toContain("unrepeatable-label");
+    expect(rendered).not.toContain(RLO);
+  },
+);
+
+test.each(DIRECTION_MARKS)(
+  "every free-text field admits %s",
+  (_label, mark) => {
+    expect(() =>
+      parseLinkageTerms(
+        freeTextTerms({
+          identity: `${mark}Agency A`,
+          purpose: `${mark}Audit of the State tutoring program`,
+          description: `${mark}Date of enrollment`,
+          exclude: `${mark}123456789`,
+        }),
+      ),
+    ).not.toThrow();
+  },
+);
+
+test.each(BIDI_CONTROLS)(
+  "a constraint exclude value admits %s",
+  (_label, character) => {
+    // The one free-text field outside this rule. What an exclude entry may hold
+    // is what the data it is matched against may hold, as a transform param
+    // value and an allowedCharacters class are, and no record holds it.
+    expect(() =>
+      parseLinkageTerms(freeTextTerms({ exclude: `123${character}456789` })),
+    ).not.toThrow();
+  },
+);
+
+// --- Name-class shape rule ---------------------------------------------------
+// Every MAX_NAME_LENGTH-bounded name of the document holds NAME_SHAPE_PATTERN
+// in its own shape: no free-text control character, and none of the nine bidi
+// formatting characters the CSV read strips from a header. The cases below pin
+// one accepted and two refused values per field in scope, the edges of both
+// refused classes, and the two values the rule leaves out by design -- a
+// transform param value and an allowedCharacters class.
+
+// The two refused classes, one representative each: the control half written as
+// an escape here, the direction half `RLO` above.
+const BEL = "\u0007";
+// Accepted beside them: the zero-width joiner, and the left-to-right mark `LRM`
+// above.
+const ZWJ = "\u200d";
+
+// A name exercising what the rule leaves alone: letters in three scripts, an
+// astral character, and the two admitted invisibles above.
+const ADMISSIBLE_NAME = `Ministère ${ZWJ}厚生労働省${LRM} \u{1f600}`;
+
+// One coherent document per name-class field, with that field holding `name` and
+// every other left valid, so a case is about the field it names. Where a name is
+// a reference (an element `field`, a `swap` entry) the thing it references takes
+// the same value, since a dangling reference would refuse the accepted case for
+// a reason that is not this rule.
+const NAME_FIELDS: Array<[string, (name: string) => unknown]> = [
+  [
+    "a linkage field name",
+    (name) => ({
+      ...base,
+      linkageFields: [
+        { name: "ssn", type: "ssn" },
+        { name, type: "ssn4" },
+      ],
+    }),
+  ],
+  [
+    "a linkage key name",
+    (name) => ({
+      ...base,
+      linkageKeys: [{ name, elements: [{ field: "ssn" }] }],
+    }),
+  ],
+  [
+    "a linkage key element field reference",
+    (name) => ({
+      ...base,
+      linkageFields: [{ name, type: "ssn" }],
+      linkageKeys: [{ name: "SSN", elements: [{ field: name }] }],
+    }),
+  ],
+  [
+    "a linkage key element name",
+    (name) => ({
+      ...base,
+      linkageKeys: [{ name: "SSN", elements: [{ field: "ssn", name }] }],
+    }),
+  ],
+  [
+    "a linkage key swap reference",
+    (name) => ({
+      ...base,
+      linkageFields: [
+        { name: "ssn", type: "ssn" },
+        { name: "ssn4", type: "ssn4" },
+      ],
+      linkageKeys: [
+        {
+          name: "SSN",
+          elements: [{ field: "ssn", name }, { field: "ssn4" }],
+          swap: [name, "ssn4"],
+        },
+      ],
+    }),
+  ],
+  [
+    "a transform function name",
+    (name) => ({
+      ...base,
+      linkageKeys: [
+        {
+          name: "SSN",
+          elements: [{ field: "ssn", transform: [{ function: name }] }],
+        },
+      ],
+    }),
+  ],
+  [
+    "a payload column name",
+    (name) => ({ ...base, payload: { send: [{ name }] } }),
+  ],
+  [
+    "a legal agreement reference",
+    (name) => ({
+      ...base,
+      legalAgreement: {
+        reference: name,
+        purpose: "Audit of the State tutoring program",
+        expirationDate: "2030-12-31",
+      },
+    }),
+  ],
+  [
+    "a linkage rule set name",
+    (name) => ({
+      ...base,
+      linkageRuleSet: {
+        fieldSet: { name, version: "1.0.0" },
+        keySet: { name: "baseline-keys", version: "1.0.0" },
+      },
+    }),
+  ],
+];
+
+test.each(NAME_FIELDS)("accepts %s written in letters", (_label, terms) => {
+  expect(() => parseLinkageTerms(terms(ADMISSIBLE_NAME))).not.toThrow();
+});
+
+test.each(NAME_FIELDS)(
+  "rejects %s holding a control character",
+  (_label, terms) => {
+    expect(() => parseLinkageTerms(terms(`ssn${BEL}4`))).toThrow(ZodError);
+  },
+);
+
+test.each(NAME_FIELDS)(
+  "rejects %s holding a bidi override",
+  (_label, terms) => {
+    expect(() => parseLinkageTerms(terms(`ssn${RLO}4`))).toThrow(ZodError);
+  },
+);
+
+test.each([
+  ["a NUL", NUL],
+  ["an ESC", ESC],
+  ["a DEL", DEL],
+  ["a C1 control", C1_NEXT_LINE],
+  ["a tab", "\t"],
+  ["a line feed", "\n"],
+  ["a carriage return", "\r"],
+  ...BIDI_CONTROLS,
+])("rejects a payload column name holding %s", (_label, character) => {
+  expect(() =>
+    parseLinkageTerms({
+      ...base,
+      payload: { send: [{ name: `id${character}` }] },
+    }),
+  ).toThrow(ZodError);
+});
+
+// A `split_on` step whose params record holds whatever the case supplies, so
+// each case below is a step an exchange would really run.
+const splitOnParamsTerms = (params: Record<string, unknown>) => ({
+  ...base,
+  linkageKeys: [
+    {
+      name: "SSN",
+      elements: [
+        { field: "ssn", transform: [{ function: "split_on", params }] },
+      ],
+    },
+  ],
+});
+
+test("a transform param value is length-bounded only", () => {
+  // The recorded exclusion on the params record. A value is data a step matches
+  // or substitutes with -- a tab is a plausible delimiter, a line feed a
+  // plausible replacement -- so refusing one would refuse legitimate terms.
+  expect(() =>
+    parseLinkageTerms(
+      splitOnParamsTerms({ delimiter: "\t", replacement: `line\nbreak` }),
+    ),
+  ).not.toThrow();
+});
+
+test("a transform params key holding no refused character is accepted", () => {
+  expect(() =>
+    parseLinkageTerms(splitOnParamsTerms({ delimiter: "," })),
+  ).not.toThrow();
+});
+
+test.each([
+  ["a control character", BEL],
+  ["a text-direction character", RLO],
+])("rejects a transform params key holding %s", (_label, character) => {
+  expect(() =>
+    parseLinkageTerms(splitOnParamsTerms({ [`de${character}limiter`]: "," })),
+  ).toThrow(ZodError);
+});
+
+test("the params key refusal is the fixed message at the key's own path", () => {
+  // The key is the last path segment, so the entry is located without the
+  // message naming it -- the same split every other name refusal takes. Zod
+  // wraps a record-key failure in an `invalid_key` issue whose own message is
+  // fixed text about the record; the name-class message sits on the nested
+  // issue, which is where the fixed literal is asserted.
+  const key = `de${BEL}limiter-unrepeatable-key`;
+  const result = safeParseLinkageTerms(splitOnParamsTerms({ [key]: "," }));
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  const issue = result.error.issues[0] as {
+    code: string;
+    message: string;
+    path: PropertyKey[];
+    issues?: Array<{ message: string }>;
+  };
+  expect(issue.code).toBe("invalid_key");
+  expect(issue.path.join(".")).toBe(
+    `linkageKeys.0.elements.0.transform.0.params.${key}`,
+  );
+  expect(issue.issues?.map((nested) => nested.message)).toEqual([
+    NAME_SHAPE_MESSAGE,
+  ]);
+  // The message text names no submitted value; only the path holds the key,
+  // and describeDecodeError escapes each segment of it.
+  expect(issue.message).not.toContain("unrepeatable-key");
+  const relayed = describeDecodeError(result.error);
+  expect(relayed).toContain("\\x07");
+  expect(relayed).not.toContain(BEL);
+});
+
+test("an allowedCharacters class is length-bounded only", () => {
+  // A partner-authored character class, behind the dialect gate: what it names is
+  // the data it admits, so a tab in it is a tab the field's values may hold.
+  expect(() =>
+    parseLinkageTerms({
+      ...base,
+      linkageFields: [
+        {
+          name: "firstName",
+          type: "first_name",
+          constraints: { allowedCharacters: "A-Z\t" },
+        },
+      ],
+      linkageKeys: [{ name: "FN", elements: [{ field: "firstName" }] }],
+    }),
+  ).not.toThrow();
+});
+
+test.each([
+  ["a control character", BEL],
+  ["a bidi override", RLO],
+])(
+  "the version regex already refuses %s, needing no shape of its own",
+  (_label, character) => {
+    // The rule's documentation states this rather than adding a second check that
+    // could never fire; the claim is measured here.
+    expect(() =>
+      parseLinkageTerms({ ...base, version: `1.0.0${character}` }),
+    ).toThrow(ZodError);
+  },
+);
+
+test("the name refusal names the field by path, not the value", () => {
+  const result = safeParseLinkageTerms({
+    ...base,
+    payload: { send: [{ name: `id${BEL}unrepeatable-name` }] },
+  });
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  expect(result.error.issues.map((issue) => issue.path.join("."))).toContain(
+    "payload.send.0.name",
+  );
+  const rendered = JSON.stringify(result.error.issues);
+  expect(rendered).toContain(NAME_SHAPE_MESSAGE);
+  expect(rendered).not.toContain("unrepeatable-name");
 });
 
 test("rejects an over-long linkage key swap reference", () => {
@@ -2690,6 +3079,54 @@ test("a pathological-count payload receive list is rejected by the node budget, 
   expect(result?.success === false && result.error.issues[0]?.message).toBe(
     `input node count exceeds the maximum of ${MAX_NODE_COUNT}`,
   );
+});
+
+// --- Payload duplicate normalization -----------------------------------------
+// A payload list holds each column name once. The lists are partner-authored on
+// an accepted invitation, and a repeated name declares nothing the terms do not
+// already hold, so the schema normalizes it away at parse rather than refusing a
+// document a partner's build encodes. Pinned at the parse boundary because
+// every seat -- the config load, the wire re-parse, the invitation decode, the
+// exchange-file and job-intent schemas -- reads what this schema returns: a
+// column counted and rendered once on the consent surfaces, and compared once
+// against the partner's list.
+
+test("a payload send list naming a column twice parses to one entry", () => {
+  const result = parseLinkageTerms(
+    sendTerms([
+      { name: "dose", description: "Dose administered" },
+      { name: "visit_date" },
+      { name: "dose", description: "Dose, second declaration" },
+    ]),
+  );
+  expect(result.payload?.send).toEqual([
+    { name: "dose", description: "Dose administered" },
+    { name: "visit_date" },
+  ]);
+});
+
+test("a payload receive list naming a column twice parses to one entry", () => {
+  const result = parseLinkageTerms(
+    receiveTerms([
+      { name: "case_id", description: "Partner case identifier" },
+      { name: "program_status" },
+      { name: "case_id", description: "Partner case identifier, restated" },
+    ]),
+  );
+  expect(result.payload?.receive).toEqual([
+    { name: "case_id", description: "Partner case identifier" },
+    { name: "program_status" },
+  ]);
+});
+
+test("a payload send list over the maximum count is rejected by its authored count, not normalized under it", () => {
+  // The count gate stands ahead of the normalization: a list padded with one
+  // name repeated is refused for the count it was authored with rather than
+  // admitted for the single entry it would collapse to.
+  const send = Array.from({ length: MAX_PAYLOAD_ENTRIES + 1 }, () => ({
+    name: "dose",
+  }));
+  expect(() => parseLinkageTerms(sendTerms(send))).toThrow(ZodError);
 });
 
 // --- Top-level linkageFields / linkageKeys count bounds ----------------------

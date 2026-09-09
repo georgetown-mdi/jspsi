@@ -3,6 +3,8 @@ import { useEffect, useRef, useState } from "react";
 import { Alert, Button, CopyButton, FileButton, Loader } from "@mantine/core";
 import { Link, useNavigate } from "@tanstack/react-router";
 
+import { describeResolvedMatching } from "@psilink/core";
+
 import { triggerBlobDownload } from "@components/blobDownload";
 import { useOnlineStatus } from "@components/useOnlineStatus";
 
@@ -72,6 +74,7 @@ import { ManagedExchangeDetail } from "./ManagedExchangeDetail";
 import { useManagedRunInFlight } from "./useManagedRunInFlight";
 
 import type { Ref } from "react";
+import type { ResolvedMatching } from "@psilink/core";
 
 import type {
   ManagedExchangeLocalEdits,
@@ -183,6 +186,10 @@ export function ManagedRunSurface({ id }: { id: string }) {
   // a run that produced its outputs, and its close resolves after those outputs
   // reach here, so a notice lands on the completion surface beside the results.
   const [runWarnings, setRunWarnings] = useState<ReadonlyArray<string>>([]);
+  // What the agreed `deduplicate` values resolved to, reported by the driver
+  // once the terms are agreed: the running copy states the pair while the run
+  // is still going, and the completion panel restates it from the outputs.
+  const [matching, setMatching] = useState<ResolvedMatching>();
   // The Tier-2 confirmation gate: once the operator confirms a real partner-side
   // failure, the surface proceeds to re-invite; a "does not add up" reply routes to
   // the compromise-response copy instead.
@@ -324,6 +331,7 @@ export function ManagedRunSurface({ id }: { id: string }) {
     setRunning(true);
     setFailure(undefined);
     setRunWarnings([]);
+    setMatching(undefined);
     setConfirmationGated(false);
     setCompromiseResponse(false);
     setReinvite(undefined);
@@ -364,6 +372,7 @@ export function ManagedRunSurface({ id }: { id: string }) {
             setRunWarnings((current) =>
               appendSanitizedRunWarning(current, message),
             ),
+          onResolvedMatching: setMatching,
         });
         // The run can resolve after the surface unmounts; the getter can flip true
         // across the await even though the launch check above narrowed it (ESLint
@@ -864,6 +873,9 @@ export function ManagedRunSurface({ id }: { id: string }) {
                 Connecting to your partner and running the exchange. Keep this
                 tab open.
               </p>
+            )}
+            {running && matching !== undefined && (
+              <p className={styles.sub}>{describeResolvedMatching(matching)}</p>
             )}
             <BackupPanel
               marker={backupMarker}

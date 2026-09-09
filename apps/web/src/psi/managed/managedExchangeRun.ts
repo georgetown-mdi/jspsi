@@ -21,10 +21,13 @@
  *
  * - **Single-writer exclusion.** The Web Locks lock keyed to the record's id
  *   ({@link ./managedExchangeLock.ts}) is held from "begin this run" through
- *   "rotated secret durably persisted", so a second same-origin context (a
- *   second tab, or a tab and a scheduled run) cannot double-rotate and desync
- *   the two parties. The same lock is what a hand-off spend takes, so a
- *   spend and a run exclude each other.
+ *   the run's success stamp, the payload exchange included, so one exchange of
+ *   a record is in flight at a time in a browser profile: a second tab, a
+ *   second attended Run, or a scheduled attempt is refused or queued for the
+ *   whole run rather than for its rotation alone, and cannot double-rotate or
+ *   exchange a second time against the partner. The same lock is what a
+ *   hand-off spend takes, so a spend is refused while an exchange is in
+ *   flight.
  *
  * - **A handed-off copy does not run.** The locked window's first act is to
  *   re-read the record's sibling spent state and refuse a copy an export has
@@ -109,6 +112,17 @@ interface ManagedExchangeRunPhases<TInput, THandshake, TExchange> {
    * field-scoped store writes; `tokenMaxAgeDays` restamps `expires`. */
   record: { id: string; tokenMaxAgeDays?: number };
   /**
+   * The instant this run began, UTC milliseconds -- before the lock was
+   * requested, so it precedes every act the run makes. Passed to every
+   * bookkeeping write so a failure outcome cannot overwrite a success another
+   * context stamped after that instant (see
+   * {@link ./managedExchangeStore.ts}, `recordManagedExchangeLastRun`). The
+   * caller supplies it rather than this module reading the clock, so the
+   * pre-connection checks it makes first are inside the run this instant
+   * opens.
+   */
+  runStartedAtMs: number;
+  /**
    * Acquire and validate the input file before any connection: read it
    * through the persisted handle (or re-selected file), then reject a
    * missing file, a gone permission, or a column shape the standing terms
@@ -128,8 +142,8 @@ interface ManagedExchangeRunPhases<TInput, THandshake, TExchange> {
    * persist resolves. Receives the value the handshake produced. */
   dataExchange: (handshake: THandshake) => Promise<TExchange>;
   /** Invoked once, synchronously, at the instant the data exchange begins
-   * (after the persist resolves and the lock releases, immediately before
-   * {@link dataExchange}). Marks the phase boundary a failure classifier
+   * (after the persist resolves, immediately before {@link dataExchange},
+   * with the lock still held). Marks the phase boundary a failure classifier
    * reads to tell a pre-data-exchange failure from one that could postdate
    * the first peer-visible payload: a `security`-kind error before this
    * fires is the handshake failing closed, one after it can arise on a
@@ -143,9 +157,10 @@ interface ManagedExchangeRunPhases<TInput, THandshake, TExchange> {
 }
 
 /** The outcome of a completed managed exchange run: the data-exchange result and
- * the `succeeded` `lastRun` this run stamped. The store keeps the newest entry
- * across racing runs' tails (the monotonic guard in the bookkeeping write), so
- * this is this run's outcome, not necessarily the stored one. */
+ * the `succeeded` `lastRun` this run stamped. The store's write rules decide
+ * which of two racing runs' tails it keeps ({@link ./managedExchangeStore.ts},
+ * `recordManagedExchangeLastRun`), so this is this run's outcome, not
+ * necessarily the stored one. */
 export interface ManagedExchangeRunResult<TExchange> {
   /** The data-exchange phase's return value. */
   exchange: TExchange;
@@ -156,19 +171,19 @@ export interface ManagedExchangeRunResult<TExchange> {
 /**
  * Run a managed exchange's run+rotate critical section (the module header
  * states the four invariants this enforces). The single-writer lock covers
- * "begin this run" through "rotated secret durably persisted"; the data
- * exchange runs after the lock releases and cannot begin before the persist
- * resolves.
+ * "begin this run" through the success stamp, so the payload exchange runs
+ * inside it; the data exchange still cannot begin before the persist resolves.
  *
  * A spent check, then the input guard, run first inside the lock and refuse
  * before any connection is opened, recording the `handed-off` or benign
  * input `lastRun` respectively. A persist failure after rotation records a
  * `storage`-kind `lastRun`; a handshake or data-exchange failure propagates
- * unchanged for the runner to classify. The bookkeeping tail is monotonic on
- * `at` ({@link recordManagedExchangeLastRun}), and the success stamp is an
- * unlocked, individually failable write -- its failure degrades the next
- * run's tiering (Tier-2), not a correctness break, since the rotated secret
- * is already durable.
+ * unchanged for the runner to classify. Every bookkeeping write states
+ * `runStartedAtMs`, so the store's write rules
+ * ({@link recordManagedExchangeLastRun}) hold a failure off a success another
+ * context stamped after this run began; the success stamp is an individually
+ * failable write -- its failure degrades the next run's tiering (Tier-2), not
+ * a correctness break, since the rotated secret is already durable.
  *
  * @throws {ManagedExchangeLockUnavailableError} if `lock.ifAvailable` is set
  *   and a run is already in progress on this device.
@@ -188,16 +203,16 @@ export interface ManagedExchangeRunResult<TExchange> {
 export async function runManagedExchange<TInput, THandshake, TExchange>(
   phases: ManagedExchangeRunPhases<TInput, THandshake, TExchange>,
 ): Promise<ManagedExchangeRunResult<TExchange>> {
-  const { record } = phases;
+  const { record, runStartedAtMs } = phases;
   const now = phases.now ?? Date.now;
 
-  const gate = await withManagedExchangeLock(
+  return await withManagedExchangeLock(
     record.id,
     async () => {
       // A copy an export handed off is refused before anything else this window
       // does: the sibling state is read here rather than trusted from whatever a
       // caller loaded, so a hand-off confirmed since that load stops this run.
-      await refuseHandedOffCopy(record.id, now);
+      await refuseHandedOffCopy(record.id, now, runStartedAtMs);
       // The input guard runs before the handshake opens any connection. A benign
       // input rejection records its classified kind inside the lock (this run's
       // record until the lock releases), then re-raises with no handshake attempted.
@@ -217,6 +232,7 @@ export async function runManagedExchange<TInput, THandshake, TExchange>(
                 "failed",
                 managedInputFailureKind(error.rejection),
               ),
+              runStartedAtMs,
             );
           } catch {
             // Swallowed: the ManagedInputError still reaches the runner on the rethrow.
@@ -224,19 +240,17 @@ export async function runManagedExchange<TInput, THandshake, TExchange>(
         }
         throw error;
       }
-      try {
-        return await runRotationCriticalSection<THandshake>({
-          handshake: () => phases.handshake(input),
-          persist: (writeBack: RotationWriteBack) =>
-            persistRotation(record.id, writeBack),
-          tokenMaxAgeDays: record.tokenMaxAgeDays,
-          now,
-        });
-      } catch (error) {
-        // A persist failure after rotation is the one failure this section
-        // records itself: the `storage` bookkeeping steers the next handshake
-        // failure to the benign tier. Every other failure is the runner's to
-        // classify and record.
+      // A persist failure after rotation is the one failure this section
+      // records itself: the `storage` bookkeeping steers the next handshake
+      // failure to the benign tier. Every other failure is the runner's to
+      // classify and record.
+      const gate = await runRotationCriticalSection<THandshake>({
+        handshake: () => phases.handshake(input),
+        persist: (writeBack: RotationWriteBack) =>
+          persistRotation(record.id, writeBack),
+        tokenMaxAgeDays: record.tokenMaxAgeDays,
+        now,
+      }).catch(async (error: unknown) => {
         if (error instanceof RotationPersistError) {
           // Best-effort: the storage subsystem that just failed the rotation
           // persist may fail this write too, and a second storage rejection must
@@ -244,26 +258,26 @@ export async function runManagedExchange<TInput, THandshake, TExchange>(
           // classification, and the storage lastRun the error itself holds,
           // depend on the original propagating.
           try {
-            await recordLastRun(record.id, error.lastRun);
+            await recordLastRun(record.id, error.lastRun, runStartedAtMs);
           } catch {
             // Swallowed: error.lastRun still reaches the runner on the rethrow.
           }
         }
         throw error;
-      }
+      });
+      // The peer-visible data exchange and the success stamp run inside the
+      // single-writer window, so no second context can exchange against the
+      // partner for this record while this one is. The boundary is marked
+      // before the first peer-visible payload, so a classifier can tell a
+      // handshake failure from one that could postdate it.
+      phases.onDataExchangeStart?.();
+      const exchange = await phases.dataExchange(gate.handshake);
+      const lastRun = succeededRun(now());
+      await recordLastRun(record.id, lastRun, runStartedAtMs);
+      return { exchange, lastRun };
     },
     phases.lock,
   );
-
-  // Lock released: the peer-visible data exchange runs outside the single-writer
-  // window, then the success outcome is recorded. The boundary is marked before
-  // the first peer-visible payload, so a classifier can tell a handshake failure
-  // from one that could postdate it.
-  phases.onDataExchangeStart?.();
-  const exchange = await phases.dataExchange(gate.handshake);
-  const lastRun = succeededRun(now());
-  await recordLastRun(record.id, lastRun);
-  return { exchange, lastRun };
 }
 
 /**
@@ -285,16 +299,25 @@ export async function runManagedExchange<TInput, THandshake, TExchange>(
 async function refuseHandedOffCopy(
   id: string,
   now: () => number,
+  runStartedAtMs: number,
 ): Promise<void> {
   let local: ManagedLocalState | undefined;
   try {
     local = await getManagedLocalState(id);
   } catch (error) {
-    await recordRefusal(id, failedRun(now(), "failed", "custody-unreadable"));
+    await recordRefusal(
+      id,
+      failedRun(now(), "failed", "custody-unreadable"),
+      runStartedAtMs,
+    );
     throw new ManagedExchangeCustodyUnreadableError(id, error);
   }
   if (local?.spent === undefined) return;
-  await recordRefusal(id, failedRun(now(), "failed", "handed-off"));
+  await recordRefusal(
+    id,
+    failedRun(now(), "failed", "handed-off"),
+    runStartedAtMs,
+  );
   throw new ManagedExchangeSpentError(id);
 }
 
@@ -303,9 +326,10 @@ async function refuseHandedOffCopy(
 async function recordRefusal(
   id: string,
   lastRun: ManagedExchangeLastRun,
+  runStartedAtMs: number,
 ): Promise<void> {
   try {
-    await recordLastRun(id, lastRun);
+    await recordLastRun(id, lastRun, runStartedAtMs);
   } catch {
     // Swallowed: the refusal still reaches the runner.
   }
@@ -326,6 +350,7 @@ async function persistRotation(
 async function recordLastRun(
   id: string,
   lastRun: ManagedExchangeLastRun,
+  runStartedAtMs: number,
 ): Promise<void> {
-  await recordManagedExchangeLastRun(id, lastRun);
+  await recordManagedExchangeLastRun(id, lastRun, runStartedAtMs);
 }

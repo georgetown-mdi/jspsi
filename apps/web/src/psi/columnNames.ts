@@ -1,4 +1,13 @@
-import { MAX_NAME_LENGTH } from "@psilink/core";
+import { MAX_NAME_LENGTH, NAME_SHAPE_PATTERN } from "@psilink/core";
+
+import {
+  MAX_STANDARDIZATION_STEPS,
+  MAX_STANDARDIZATION_TRANSFORMATIONS,
+  stepPatternsWithinCap,
+} from "@jobs/intentSchemas";
+import { isolatedColumnName } from "@components/ColumnName";
+
+import type { Standardization } from "@psilink/core";
 
 /**
  * The 1-based positions of columns with an empty (zero-length) name, in column
@@ -29,8 +38,8 @@ export function emptyColumnPositions(
  * the structural {@link AlertContent} (`{ title, message }`) every caller assigns
  * it to, restated inline so this leaf helper does not depend on the component layer.
  *
- * `sanitizedPositions` are the positions the parse removed bidi control
- * characters from (`meta.bidiStrippedColumns`). An unnamed position among them
+ * `sanitizedPositions` are the positions the parse removed control characters
+ * from (`meta.sanitizedColumnPositions`). An unnamed position among them
  * held nothing but those characters, so the trailing-comma cause is wrong for it
  * and the removal is stated instead -- the operator's header was neither blank
  * nor trailing, and the remedy differs. Required rather than defaulted: an
@@ -57,12 +66,12 @@ export function unnameableColumnsAlert(
         `field${plural ? "s" : ""} -- and choose the file again.`
       : strippedEmpty.length === positions.length
         ? `${plural ? "Those names held" : "That name held"} nothing but ` +
-          `invisible text-direction characters, which this read removes, ` +
-          `leaving no name to match on or send to your partner. Fix the header ` +
+          `invisible control characters, which this read removes, leaving no ` +
+          `name to match on or send to your partner. Fix the header ` +
           `row -- give ${plural ? "those columns names" : "that column a name"} ` +
           `made of ordinary characters -- and choose the file again.`
         : `Column${strippedPlural ? "s" : ""} ${strippedEmpty.join(", ")} held ` +
-          `nothing but invisible text-direction characters, which this read ` +
+          `nothing but invisible control characters, which this read ` +
           `removes; a trailing comma, a blank cell, or a leading delimiter in ` +
           `the header row produces the rest. An unnamed column cannot be used ` +
           `for matching or sent to your partner. Fix the header row -- give ` +
@@ -79,10 +88,10 @@ export function unnameableColumnsAlert(
 }
 
 /**
- * The operator-facing notice for a file whose header held bidi control
- * characters, shared by every intake seat so the wording cannot drift. Core's
+ * The operator-facing notice for a file whose header held control characters,
+ * shared by every intake seat so the wording cannot drift. Core's
  * CSV parse removes them from the name before anything matches on it or sends
- * it, and reports the 1-based positions it changed (`meta.bidiStrippedColumns`,
+ * it, and reports the 1-based positions it changed (`meta.sanitizedColumnPositions`,
  * `packages/core/src/file.ts`); this is how the operator is told.
  *
  * A notice, not a refusal: the header is the operator's own, an operator who
@@ -100,13 +109,13 @@ export function unnameableColumnsAlert(
  * What it says about disclosure is bounded by what this read reaches: the names
  * it derives from the header, which are the matching name, the name this screen
  * shows, and the sent name where the exchange takes that from the header. A name
- * the linkage terms declare is not read from the header at all and keeps these
- * characters, so the copy states what that costs -- the name is used as declared
- * and reaches the partner wherever the exchange sends it -- and stops there. It
- * names no remedy: this notice serves every intake seat, including the acceptor
- * seats whose terms are the partner's invitation and the direct-exchange seats
- * with no terms to edit, so no one edit is the operator's to make. Refusing such
- * a name is the terms rule's, not this read's.
+ * the linkage terms or a `metadata` block declare is not read from the header at
+ * all; refusing it is the schema's, not this read's, so the copy states that
+ * refusal, and names a standardization `input` or `output` as the one declared
+ * name it does not reach. It names no remedy: this notice serves
+ * every intake seat, including the acceptor seats whose terms are the partner's
+ * invitation and the direct-exchange seats with no terms to edit, so no one edit
+ * is the operator's to make.
  */
 export function sanitizedColumnsAlert(positions: ReadonlyArray<number>): {
   title: string;
@@ -115,19 +124,22 @@ export function sanitizedColumnsAlert(positions: ReadonlyArray<number>): {
   const plural = positions.length > 1;
   return {
     title: plural
-      ? "Formatting characters removed from column names"
-      : "A formatting character was removed from a column name",
+      ? "Invisible control characters removed from column names"
+      : "An invisible control character was removed from a column name",
     message:
       `Column${plural ? "s" : ""} ${positions.join(", ")} in your CSV ` +
       `${plural ? "had names that held" : "had a name that held"} invisible ` +
-      `text-direction characters. The characters are gone from every name ` +
+      `control characters, a class that includes the text-direction ones. ` +
+      `The characters are ` +
+      `gone from every name ` +
       `this read takes from the header: the name${plural ? "s" : ""} matched ` +
       `on, the name${plural ? "s" : ""} shown on this screen, and the ` +
       `name${plural ? "s" : ""} sent to your partner where the exchange takes ` +
       `${plural ? "them" : "it"} from the header. This read does not change a ` +
-      `name the linkage terms declare; one that holds these characters is ` +
-      `used as declared and reaches your partner wherever the exchange sends ` +
-      `it. Where that left two columns with the same name, the later one was ` +
+      `name the linkage terms or a metadata block declare: one that holds ` +
+      `these characters is refused when the document is read, and a ` +
+      `standardization input or output name is not held to that rule. ` +
+      `Where that left two columns with the same name, the later one was ` +
       `numbered to keep the two apart. Check that ` +
       `${plural ? "those columns" : "the column"} still ` +
       `${plural ? "read" : "reads"} the way your file names ` +
@@ -170,5 +182,254 @@ export function overlongColumnsAlert(positions: ReadonlyArray<number>): {
       `your partner's copy of psilink refuses a name that long, so the exchange ` +
       `cannot start. Shorten the header${plural ? "s" : ""} in your file, or set ` +
       `${plural ? "those columns" : "that column"} so ${plural ? "they are" : "it is"} not sent.`,
+  };
+}
+
+/**
+ * What a whole-document schema refused about one declared column name. The four
+ * rules `ColumnMetadata.name` is held to (packages/core/src/config/metadata.ts):
+ * the length ceiling, the name-class character rule, the non-empty floor, and the
+ * block's uniqueness refine.
+ */
+export type ColumnNameRefusal =
+  "too-long" | "control-character" | "unnamed" | "repeated";
+
+/**
+ * One column a whole-document refusal is about: its 1-based place in the block
+ * the refusal came from, the name as declared, and what the schema refused about
+ * it. The name is the operator's own header, held raw here and cut at the display
+ * boundary ({@link refusedColumnsSentence}).
+ */
+export interface RefusedColumnName {
+  /** 1-based position in the metadata block, or in the file's header for a
+   * refusal located against the header. */
+  position: number;
+  /** The name as declared, before the display cut. */
+  name: string;
+  /** What the schema refused about it. */
+  refusal: ColumnNameRefusal;
+}
+
+/** What the schema refuses about a declared name, or undefined when the name
+ * breaks none of the rules this module can name. */
+function refusalOf(name: string): ColumnNameRefusal | undefined {
+  if (name.length === 0) return "unnamed";
+  if (name.length > MAX_NAME_LENGTH) return "too-long";
+  if (!NAME_SHAPE_PATTERN.test(name)) return "control-character";
+  return undefined;
+}
+
+/** The 1-based positions of the entries repeating a name an earlier entry
+ * already used -- what the block's uniqueness refine fires on, which reports its
+ * issue against the whole block and so names no column itself. */
+function repeatedNamePositions(
+  metadata: ReadonlyArray<{ name: string }>,
+): Array<number> {
+  const seen = new Set<string>();
+  const repeated: Array<number> = [];
+  metadata.forEach((column, index) => {
+    if (seen.has(column.name)) repeated.push(index + 1);
+    else seen.add(column.name);
+  });
+  return repeated;
+}
+
+/**
+ * The columns a whole-document parse refuses over a declared name, scanned out of
+ * the block the caller tried to write. The one mapper behind every point that
+ * would otherwise report a whole-document failure holding nothing the operator
+ * can act on.
+ *
+ * Read from the block rather than from the failure: the four rules
+ * `ColumnMetadata.name` is held to are pure functions of the names, core's
+ * `MetadataSchema` fails exactly when one of them is broken, and every call site
+ * holds the array that was parsed. An issue path would only relocate the same
+ * answer, and its tail cannot tell core's uniqueness refine from the console's
+ * own column-count and description-length refines, which report at that path too.
+ * A block whose names break none of the rules yields nothing, so the caller falls
+ * back to its own whole-document copy rather than naming a column it can say
+ * nothing true about; an absent block yields nothing for the same reason.
+ *
+ * The parity this rests on -- refused if and only if `MetadataSchema` refuses --
+ * is pinned in apps/web/test/unit/psi/columnNameRefusal.test.ts.
+ */
+export function refusedColumnNames(
+  metadata: ReadonlyArray<{ name: string }> | undefined,
+): Array<RefusedColumnName> {
+  if (metadata === undefined) return [];
+  const byPosition = new Map<number, RefusedColumnName>();
+  metadata.forEach((column, index) => {
+    const refusal = refusalOf(column.name);
+    if (refusal !== undefined)
+      byPosition.set(index + 1, {
+        position: index + 1,
+        name: column.name,
+        refusal,
+      });
+  });
+  // A name the rules above already refuse keeps that refusal: it is the header
+  // edit the operator makes, and the repeat goes with it.
+  for (const position of repeatedNamePositions(metadata))
+    if (!byPosition.has(position))
+      byPosition.set(position, {
+        position,
+        name: metadata[position - 1].name,
+        refusal: "repeated",
+      });
+  return [...byPosition.values()].sort((a, b) => a.position - b.position);
+}
+
+/** A column located by its oversized header alone -- what the coverage sweep
+ * refuses over and the only refusal its copy names a remedy for. */
+export type OverlongColumnName = RefusedColumnName & { refusal: "too-long" };
+
+/**
+ * Whether `standardization` breaks a coverage bound other than an input column's
+ * name length: the transformation and step counts, an `output` name, or a step's
+ * compiled regex source. The sweep's schema
+ * (`coverageStandardizationSchema`, apps/web/src/jobs/workInputs.ts) refuses on
+ * any of them, none is enforced in the editor, and shortening a header fixes
+ * none of them.
+ */
+function tripsOtherCoverageBound(
+  standardization: ReadonlyArray<Standardization[number]>,
+): boolean {
+  if (standardization.length > MAX_STANDARDIZATION_TRANSFORMATIONS) return true;
+  return standardization.some(
+    (transformation) =>
+      (transformation.steps?.length ?? 0) > MAX_STANDARDIZATION_STEPS ||
+      transformation.output.length > MAX_NAME_LENGTH ||
+      !stepPatternsWithinCap(transformation),
+  );
+}
+
+/**
+ * The columns a cleaning field reads whose header is longer than
+ * {@link MAX_NAME_LENGTH}, located in the file's own header. The console's
+ * coverage sweep bounds every standardization `input` and `output` at that
+ * ceiling (`apps/web/src/jobs/workInputs.ts`), so a header past it settles the
+ * sweep with no result; this is what names the column behind that.
+ *
+ * Scoped to the `input` side, which is a column of the file: an `output` is a
+ * linkage field's name, and naming it as a column would be wrong. A cleaning
+ * field whose input matches no header entry is left out for the same reason.
+ *
+ * Empty while the same standardization breaks another of the sweep's bounds
+ * ({@link tripsOtherCoverageBound}), whichever one settled it: an oversized
+ * header alongside a tripped count or pattern cap is not what the operator has
+ * to fix, so the caller keeps its generic unavailable copy.
+ */
+export function overlongCoverageColumns(
+  standardization: ReadonlyArray<Standardization[number]>,
+  columns: ReadonlyArray<string>,
+): Array<OverlongColumnName> {
+  if (tripsOtherCoverageBound(standardization)) return [];
+  const byPosition = new Map<number, OverlongColumnName>();
+  for (const transformation of standardization) {
+    if (transformation.input.length <= MAX_NAME_LENGTH) continue;
+    const index = columns.indexOf(transformation.input);
+    if (index < 0) continue;
+    byPosition.set(index + 1, {
+      position: index + 1,
+      name: transformation.input,
+      refusal: "too-long",
+    });
+  }
+  return [...byPosition.values()].sort((a, b) => a.position - b.position);
+}
+
+/** What each refusal says about the column, completing the sentence below. */
+const REFUSAL_CLAUSES: Record<ColumnNameRefusal, string> = {
+  "too-long": `has a name longer than ${MAX_NAME_LENGTH} characters`,
+  "control-character":
+    "has a name holding an invisible control or text-direction character",
+  unnamed: "has no name",
+  repeated: "repeats a name an earlier column already uses",
+};
+
+/**
+ * The sentence naming each refused column and what was refused about it, shared
+ * by every refusal point so the identification cannot drift. The position locates
+ * the column in the block the refusal came from; the name follows it through the
+ * display cut every operator-facing column name takes
+ * ({@link isolatedColumnName}), which bounds an oversized header and isolates a
+ * text-direction one.
+ *
+ * A name is shown here where {@link overlongColumnsAlert} shows only positions,
+ * because that alert asks the operator to choose what to send while this one asks
+ * them to find a column in a document whose parse failed. An unnamed column has
+ * nothing to show between the commas, so the clause naming it is left out and the
+ * position alone locates the column.
+ */
+export function refusedColumnsSentence(
+  refused: ReadonlyArray<RefusedColumnName>,
+): string {
+  return refused
+    .map((column) =>
+      column.name.length === 0
+        ? `Column ${column.position} ${REFUSAL_CLAUSES[column.refusal]}.`
+        : `Column ${column.position}, ${isolatedColumnName(column.name)}, ` +
+          `${REFUSAL_CLAUSES[column.refusal]}.`,
+    )
+    .join(" ");
+}
+
+/**
+ * The operator-facing alert for a recurring-exchange save refused over a column
+ * name: the identification, then what it cost and what to do. Replaces the
+ * generic "try again" copy, which is wrong here -- the same document refuses
+ * identically however many times it is saved.
+ */
+export function savedExchangeColumnRefusalAlert(
+  refused: ReadonlyArray<RefusedColumnName>,
+): {
+  title: string;
+  message: string;
+} {
+  return {
+    title: "Could not save this recurring exchange",
+    message:
+      `${refusedColumnsSentence(refused)} A recurring exchange stores your ` +
+      `column names, so it was not stored. Your one-off exchange is ` +
+      `unaffected. Fix the header row in your file, then set the exchange up ` +
+      `again to save it.`,
+  };
+}
+
+/**
+ * The way back each seat's failure alert offers, named as that seat's own
+ * control names it: the inviter's alert offers a start-over that reaches the
+ * file picker, while the acceptor's offers only "Back to your columns", which
+ * keeps every column-step input and re-selects the file from there.
+ */
+const CONSOLE_REFUSAL_RECOVERY: Record<"inviter" | "acceptor", string> = {
+  inviter:
+    "Fix the header row in your file, choose the file again, and start over.",
+  acceptor:
+    "Fix the header row in your file, go back to your columns, and choose the file again.",
+};
+
+/**
+ * The operator-facing alert for a console job the browser refuses to submit over
+ * a column name. Raised before the POST, so the job API's empty-bodied `400` is
+ * never what the operator meets and no route's answer changes.
+ *
+ * `seat` picks the recovery sentence, and is required rather than defaulted: a
+ * seat that fell through to the other's wording would name a control its own
+ * alert does not offer.
+ */
+export function consoleJobColumnRefusalAlert(
+  refused: ReadonlyArray<RefusedColumnName>,
+  seat: "inviter" | "acceptor",
+): {
+  title: string;
+  message: string;
+} {
+  return {
+    title: "The console could not start this exchange",
+    message:
+      `${refusedColumnsSentence(refused)} The console cannot run an exchange ` +
+      `over a column name it cannot record, so nothing was started and ` +
+      `nothing left this machine. ${CONSOLE_REFUSAL_RECOVERY[seat]}`,
   };
 }

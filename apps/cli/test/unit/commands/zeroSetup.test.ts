@@ -806,7 +806,7 @@ test("handler: a header the strip emptied names the removal, not the trailing co
     ).rejects.toThrow("exit:64");
     const stderr = stderrChunks.join("");
     expect(stderr).toContain("input column 2 has an empty name");
-    expect(stderr).toContain("nothing but invisible text-direction characters");
+    expect(stderr).toContain("nothing but invisible control characters");
     expect(stderr).not.toContain("trailing comma");
   } finally {
     getLogger("psilink").setLevel("silent");
@@ -1025,6 +1025,137 @@ test("handler: zero-setup shows the single-pass disclosure note at selection", a
   } finally {
     getLogger("psilink").setLevel("silent");
     stderrSpy.mockRestore();
+    exitSpy.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// --- this party's own deduplicate --------------------------------------------
+
+/** The linkage terms the handler handed runProtocol, for a run whose flags the
+ * caller supplies. The presented terms are what the partner meets at the terms
+ * exchange, so a selection that does not reach them does not reach the run. */
+async function termsFromZeroSetupFlags(
+  dir: string,
+  flags: Record<string, unknown>,
+): Promise<LinkageTerms> {
+  const input = path.join(dir, "input.csv");
+  fs.writeFileSync(
+    input,
+    "first_name,last_name,date_of_birth\nBob,Jones,1990-01-02\n",
+  );
+  let prepared: PreparedExchange | undefined;
+  vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) => {
+    prepared = optionsArg(callArgs).prepared;
+    return driveCompletedExchange(callArgs, { partnerSaveIntent: false });
+  }) as never);
+
+  await handler({
+    _: ["sftp://userb@localhost:2222/drop", input],
+    $0: "psilink",
+    "config-file": path.join(dir, "psilink.yaml"),
+    "key-file": path.join(dir, ".psilink.key"),
+    identity: "Tester",
+    record: false,
+    "log-level": "silent",
+    ...flags,
+  } as unknown as Arguments);
+
+  if (prepared === undefined)
+    throw new Error("the run never reached runProtocol");
+  return prepared.linkageTerms;
+}
+
+test("handler: --deduplicate reaches the terms this party presents", async () => {
+  // The flag is this party's own side of the matching cardinality, applied over
+  // the terms inferred from the input file; the partner meets it at the terms
+  // exchange, where resolveLinkageCardinality reads the pair.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zerodedup-"));
+  const exitSpy = captureProcessExit();
+  try {
+    expect(
+      (await termsFromZeroSetupFlags(dir, { deduplicate: true })).deduplicate,
+    ).toBe(true);
+  } finally {
+    exitSpy.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("handler: omitting --deduplicate leaves the closed default", async () => {
+  // A party that leaves the flag off runs exactly what it ran before the flag
+  // existed: the false the inferred terms declare.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zerodedupdef-"));
+  const exitSpy = captureProcessExit();
+  try {
+    expect((await termsFromZeroSetupFlags(dir, {})).deduplicate).toBe(false);
+    expect(
+      (await termsFromZeroSetupFlags(dir, { deduplicate: false })).deduplicate,
+    ).toBe(false);
+  } finally {
+    exitSpy.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("handler: --deduplicate rides single-pass, which matches a one-sided pair", async () => {
+  // Only the agreed both-sided pair is refused under single-pass, and that pair
+  // takes the partner's declaration too -- so this party's own selection is
+  // applied here rather than refused at prepare time.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zerodedupsp-"));
+  const exitSpy = captureProcessExit();
+  try {
+    const terms = await termsFromZeroSetupFlags(dir, {
+      deduplicate: true,
+      "linkage-strategy": "single-pass",
+    });
+    expect(terms.deduplicate).toBe(true);
+    expect(terms.linkageStrategy).toBe("single-pass");
+  } finally {
+    exitSpy.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("handler --save: the selection flows into the saved config", async () => {
+  // Graduation: the config a --save run writes is the one a later recurring
+  // `psilink exchange` loads, so the setting the operator prototyped under must
+  // be in it rather than re-declared by hand.
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zerodedupsave-"));
+  const exitSpy = captureProcessExit();
+  vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) =>
+    driveCompletedExchange(callArgs, { partnerSaveIntent: false })) as never);
+  try {
+    const input = path.join(dir, "input.csv");
+    fs.writeFileSync(
+      input,
+      "first_name,last_name,date_of_birth\nBob,Jones,1990-01-02\n",
+    );
+    const runSave = async (
+      configFile: string,
+      deduplicate: boolean,
+    ): Promise<string> => {
+      await handler({
+        _: ["sftp://userb@localhost:2222/drop", input],
+        $0: "psilink",
+        save: true,
+        deduplicate,
+        "config-file": configFile,
+        "key-file": path.join(dir, path.basename(configFile) + ".key"),
+        identity: "Tester",
+        record: false,
+        "log-level": "silent",
+      } as unknown as Arguments);
+      return fs.readFileSync(configFile, "utf8");
+    };
+
+    expect(await runSave(path.join(dir, "dedup.yaml"), true)).toContain(
+      "deduplicate: true",
+    );
+    expect(await runSave(path.join(dir, "plain.yaml"), false)).toContain(
+      "deduplicate: false",
+    );
+  } finally {
     exitSpy.mockRestore();
     fs.rmSync(dir, { recursive: true, force: true });
   }

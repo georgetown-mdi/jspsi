@@ -79,35 +79,65 @@ afterEach(async () => {
 });
 
 describe("the shell says what is unavailable", () => {
+  // The offline title reads twice while the strip is up: the shell's polite
+  // region announces it and the visible Alert is titled with it. The region is
+  // rendered first, so `.last()` is the visible one.
+  const offlineTitle = () => page.getByText("You are offline");
+
   test("an offline browser is told, and told what still works", async () => {
     setConnectivity(false);
 
     app.render(createElement(AppShellStatus));
 
-    await expect.element(page.getByText("You are offline")).toBeInTheDocument();
+    await expect.element(offlineTitle().last()).toBeVisible();
     await expect
       .element(page.getByText(/open without a connection/))
       .toBeInTheDocument();
+    // The announcement lands in the region the shell already held, and the
+    // visible strip has no live role that would voice it a second time.
+    await expect
+      .element(page.getByRole("status"))
+      .toHaveTextContent("You are offline");
+    expect(app.container.querySelector('[role="alert"]')).toBeNull();
   });
 
-  test("nothing is said while the browser has a connection", () => {
+  test("nothing is said while the browser has a connection", async () => {
     setConnectivity(true);
 
     app.render(createElement(AppShellStatus));
 
-    expect(app.container.textContent).toBe("");
+    // The region stays mounted and empty through the ordinary case: one that
+    // appears with its strip is a freshly inserted node rather than a change to
+    // something an assistive technology is already observing.
+    await vi.waitFor(() => {
+      expect(app.container.querySelector('[role="status"]')).not.toBeNull();
+    });
+    expect(app.container.querySelector('[role="status"]')?.textContent).toBe(
+      "",
+    );
+    // Nothing is said either way: neither strip stands, and neither title is
+    // announced.
+    expect(offlineTitle().query()).toBeNull();
+    expect(
+      page.getByText("A new version of psilink is ready").query(),
+    ).toBeNull();
   });
 
   test("the notice clears when the connection comes back", async () => {
     setConnectivity(false);
     app.render(createElement(AppShellStatus));
-    await expect.element(page.getByText("You are offline")).toBeInTheDocument();
+    await expect.element(offlineTitle().last()).toBeVisible();
 
     setConnectivity(true);
 
-    await expect
-      .element(page.getByText("You are offline"))
-      .not.toBeInTheDocument();
+    await expect.element(offlineTitle()).not.toBeInTheDocument();
+    // The region outlives the flip, emptied rather than unmounted, so the next
+    // strip is a change to it.
+    await vi.waitFor(() => {
+      const region = app.container.querySelector('[role="status"]');
+      expect(region).not.toBeNull();
+      expect(region?.textContent).toBe("");
+    });
   });
 });
 

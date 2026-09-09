@@ -16,6 +16,7 @@ import type {
   LinkageStrategy,
   LinkageTerms,
 } from "./config/linkageTermsSchema.js";
+import type { LinkageCardinality } from "./psi/link.js";
 
 /**
  * Which of the count-only shape rules a `psi-c` terms document breaks. The
@@ -43,7 +44,10 @@ export type CountOnlyShapeViolation =
  * The rules and the reasoning behind each: docs/spec/PROTOCOL.md, PSI-C.
  */
 export const COUNT_ONLY_SHAPE_REFUSALS: Readonly<
-  Record<CountOnlyShapeViolation | "transmittedColumns", string>
+  Record<
+    CountOnlyShapeViolation | "transmittedColumns" | "candidateSet",
+    string
+  >
 > = {
   linkageKeys:
     'count-only ("psi-c") linkage terms must declare exactly one linkage ' +
@@ -69,6 +73,13 @@ export const COUNT_ONLY_SHAPE_REFUSALS: Readonly<
     "intersection and nothing else, so it sends no data column whichever " +
     "party the terms entitle to the count. Remove the payload send and " +
     'receive columns, or set the algorithm to "psi".',
+  candidateSet:
+    'a count-only ("psi-c") exchange matches one value per record, but these ' +
+    "linkage terms declare a step that expands one value into several match " +
+    "candidates. A count-only round counts matched values where the matching " +
+    "pairs each record at most once, so the count would report more links " +
+    "than the exchange stands for. Remove the expanding step, the fuzzy " +
+    'comparison, or the swapped key order, or set the algorithm to "psi".',
   transmittedColumns:
     'a count-only ("psi-c") exchange transmits no data columns, but this ' +
     "input's metadata marks one or more columns to send to the partner. The " +
@@ -219,6 +230,54 @@ export function assertDeduplicateImplemented(terms: LinkageTerms): void {
 }
 
 /**
+ * Which linkage strategies resolve a per-(record, key) CANDIDATE SET -- a
+ * `split_on` fan-out, a `generate_fuzzy_comparisons` expansion, or a key
+ * declaring `swap` -- one entry per strategy.
+ *
+ * `single-pass` does: its receiver holds the sender's whole per-key candidate
+ * structure and replays the cascade locally, so it is the only resolver in the
+ * exchange (`linkViaSinglePassPSI`). The cascade does too: each round states
+ * both parties' groupings on its two position-naming frames, both parties run
+ * the one shared sweep over them, and the final pass states every position an
+ * accepted record's pairs rest on (docs/spec/PROTOCOL.md, Per-round candidacy
+ * under cascade). The entry gates the frames with the resolution: a strategy
+ * answering `false` neither sends a grouping nor admits one, so its rounds
+ * put the single-valued cascade's frames on the wire and accept what it
+ * accepts.
+ *
+ * The strategy is one of two conditions a candidate set runs under; the other
+ * is the resolved cardinality, `many-to-many` refusing one whatever the
+ * strategy ({@link assertCandidateSetCardinalityImplemented},
+ * linkageSatisfiability.ts).
+ *
+ * A total table over {@link LinkageStrategy} rather than a comparison against
+ * one named strategy, so a `linkage_strategy` added later refuses a candidate
+ * set until its own resolution is written rather than inheriting either of the
+ * two specified ones (docs/spec/PROTOCOL.md, The combinations that stay
+ * unsupported). Typed `boolean` rather than the literal values so each
+ * reader's gate gives a genuine runtime branch.
+ *
+ * @internal exported for the tests that drive its readers over every strategy.
+ */
+export const CANDIDATE_SET_IMPLEMENTED_BY_STRATEGY: Record<
+  LinkageStrategy,
+  boolean
+> = {
+  cascade: true,
+  "single-pass": true,
+};
+
+/**
+ * Whether an exchange on `strategy` resolves a per-(record, key) candidate
+ * set, or refuses one at the boundary that would otherwise match it.
+ */
+export function candidateSetIsImplementedForStrategy(
+  strategy: LinkageStrategy,
+): boolean {
+  return CANDIDATE_SET_IMPLEMENTED_BY_STRATEGY[strategy];
+}
+
+/**
  * Which linkage strategies pair the BOTH-sided deduplicating cardinality,
  * one entry per strategy. The cascade does, applying the "many" rule to
  * each party so a matched value contributes the two groups' product;
@@ -314,6 +373,74 @@ export function assertBothSidedDeduplicateImplemented(
           `or set ${oneSidedRemedy}`
         : `Set ${oneSidedRemedy}`),
   );
+}
+
+/**
+ * Every {@link LinkageCardinality}, as a schema's accepted value set.
+ *
+ * The label set is closed: a record naming a cardinality this build does not
+ * define is not a record this build can read, so its reader rejects the value
+ * rather than passing it through.
+ */
+export const LINKAGE_CARDINALITIES = [
+  "one-to-one",
+  "one-to-many",
+  "many-to-one",
+  "many-to-many",
+] as const satisfies readonly LinkageCardinality[];
+
+// The matching cardinality an agreed `deduplicate` pair resolves to, read from
+// the LOCAL party's own side, so the two parties of one deduplicating exchange
+// hold mirror labels for the single procedure they run (docs/spec/PROTOCOL.md,
+// Deduplicating cardinalities).
+function linkageCardinalityFromDeduplicate(
+  localDeduplicate: boolean,
+  partnerDeduplicate: boolean,
+): LinkageCardinality {
+  if (localDeduplicate && partnerDeduplicate) return "many-to-many";
+  if (localDeduplicate) return "many-to-one";
+  if (partnerDeduplicate) return "one-to-many";
+  return "one-to-one";
+}
+
+/**
+ * What the two parties' agreed `deduplicate` values resolved to for one
+ * party: its own declared value, the value its partner presented at the terms
+ * exchange, and the cardinality the pair gives this party.
+ *
+ * The two values are recorded beside the label rather than left implicit in
+ * it, since the label is mirrored and a party reading `one-to-many` off its
+ * own record cannot otherwise tell which side declared what.
+ */
+export interface ResolvedMatching {
+  readonly localDeduplicate: boolean;
+  readonly partnerDeduplicate: boolean;
+  readonly cardinality: LinkageCardinality;
+}
+
+/**
+ * The {@link ResolvedMatching} for a party holding `localTerms` against a
+ * partner presenting `partnerTerms`.
+ *
+ * The one derivation the run boundary, the returned outcome, and the
+ * self-attested record all read, so a party's record cannot name a cardinality
+ * its run did not resolve to. It applies none of the refusals
+ * `resolveLinkageCardinality` (`exchange.ts`) applies: a caller reaching the
+ * run boundary passes through those first, and the record builder derives this
+ * from terms that boundary already admitted.
+ */
+export function resolvedMatchingFromTerms(
+  localTerms: LinkageTerms,
+  partnerTerms: LinkageTerms,
+): ResolvedMatching {
+  return {
+    localDeduplicate: localTerms.deduplicate,
+    partnerDeduplicate: partnerTerms.deduplicate,
+    cardinality: linkageCardinalityFromDeduplicate(
+      localTerms.deduplicate,
+      partnerTerms.deduplicate,
+    ),
+  };
 }
 
 // The two elements a key's `swap` names, or undefined when the key declares no

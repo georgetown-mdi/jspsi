@@ -1,9 +1,16 @@
-import { FINGERPRINT_REGEX, MAX_TEXT_LENGTH } from "@psilink/core";
+import {
+  FINGERPRINT_REGEX,
+  MAX_TEXT_LENGTH,
+  sanitizeForDisplay,
+} from "@psilink/core";
 
 import { NOTE_CONTROL_CHAR_PATTERN } from "@jobs/intentSchemas";
 
+import type {
+  JobSigningChoice,
+  JobSigningIdentityLocation,
+} from "@jobs/intentSchemas";
 import type { JobRendezvousConfig } from "./jobClient/workInputClient";
-import type { JobSigningChoice } from "@jobs/intentSchemas";
 
 /**
  * The pure model behind the console's "Receipts and record keeping" card:
@@ -17,10 +24,13 @@ import type { JobSigningChoice } from "@jobs/intentSchemas";
  * same module as the server schema that enforces it.
  *
  * Regenerating the signing identity is a command-line action, not offered
- * here ({@link IDENTITY_REGENERATION_NOTICE}); the identity's location is
- * fixed to the console's one mounted working directory
- * ({@link IDENTITY_AT_REST_NOTICE}; shared-mount hazard:
- * {@link IDENTITY_SHARED_MOUNT_ADVISORY}).
+ * here ({@link IDENTITY_REGENERATION_NOTICE}); the identity's location
+ * defaults to the console's one mounted working directory
+ * ({@link IDENTITY_AT_REST_NOTICE}) and the operator may point it at a file in
+ * the secrets mount instead ({@link IDENTITY_PICKED_LOCATION_NOTICE}). What the
+ * pre-run refusal for the shared-mount layout does and does not see:
+ * {@link IDENTITY_SHARED_MOUNT_REFUSAL_ADVISORY} and
+ * {@link IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY}.
  */
 
 /**
@@ -53,6 +63,13 @@ export interface ReceiptsDraft {
   partnerFingerprint: string;
   /** The retention/disposition note as raw field text; blank means no note. */
   retentionDisposition: string;
+  /**
+   * Where this party's signing identity is kept, as a locator picked in the
+   * console's secrets browse. Absent is the console's default: the fixed name
+   * in the mounted working directory, created there on demand. A locator, never
+   * a path -- the browser never learns one.
+   */
+  identityLocation?: JobSigningIdentityLocation;
 }
 
 /**
@@ -70,7 +87,10 @@ export const RECEIPTS_DEFAULT: ReceiptsDraft = {
  * The draft with one field set. Clearing certificate mode also drops this
  * party's resolved fingerprint, so a later return to certificate mode
  * re-asks the console rather than showing a stale value -- the identity file
- * lives in a mount the operator can edit between visits.
+ * lives in a mount the operator can edit between visits. Changing the
+ * identity's LOCATION drops it for the same reason and a sharper one: a
+ * fingerprint read at one location says nothing about the key at another, and
+ * showing it beside the new location would misreport which key signs.
  */
 export function receiptsWithField<TField extends keyof ReceiptsDraft>(
   draft: ReceiptsDraft,
@@ -78,9 +98,38 @@ export function receiptsWithField<TField extends keyof ReceiptsDraft>(
   value: ReceiptsDraft[TField],
 ): ReceiptsDraft {
   const changed: ReceiptsDraft = { ...draft, [field]: value };
+  if (field === "identityLocation") {
+    const { ownFingerprint: _stale, ...moved } = changed;
+    return moved;
+  }
   if (changed.mode === "certificate") return changed;
   const { ownFingerprint: _dropped, ...rest } = changed;
   return { ...rest, partnerFingerprint: "" };
+}
+
+/**
+ * The signing identity's location as the console names it to the operator: the
+ * mount id and the segments they picked, joined for display, or the default
+ * folder's own words. Never a container path -- the browser holds a locator and
+ * shows exactly that.
+ */
+export const IDENTITY_DEFAULT_LOCATION_LABEL =
+  "The folder you mounted (default)";
+
+/**
+ * The picked location as one displayable line: the mount id then each segment,
+ * every part escaped for display. A segment is a name the mount browse admits,
+ * which bars a control character and nothing else outside ASCII -- a
+ * text-direction override among them -- so the escape is what keeps the line
+ * reading as the file the operator picked.
+ */
+export function identityLocationLabel(
+  location: JobSigningIdentityLocation | undefined,
+): string {
+  if (location === undefined) return IDENTITY_DEFAULT_LOCATION_LABEL;
+  return [location.mount, ...location.subPath]
+    .map((segment) => sanitizeForDisplay(segment))
+    .join(" / ");
 }
 
 /** The subset of a job intent this card contributes. Both fields are present
@@ -112,6 +161,9 @@ export function receiptsIntentFields(
           signing: {
             mode: "certificate" as const,
             ...(pin !== "" ? { partnerFingerprint: pin } : {}),
+            ...(draft.identityLocation !== undefined
+              ? { identityLocation: draft.identityLocation }
+              : {}),
           },
         }
       : {}),
@@ -268,59 +320,132 @@ export function receiptsProblems(
 }
 
 /**
- * What the console says about where the signing identity lands, before the
- * operator asks for one: the console's one mounted working directory,
- * because the key must outlive the job.
+ * What the console says about where the signing identity lands under the
+ * DEFAULT location, before the operator asks for one: the console's one mounted
+ * working directory, because the key must outlive the job.
  *
- * True on every layout, so raised on every one, and an `info` rather than a
- * warning ({@link ReceiptsAdvisorySeverity}) -- it poses no hazard this run
- * makes live. The layout-gated hazard is
- * {@link IDENTITY_SHARED_MOUNT_ADVISORY}, raised above it where it applies.
+ * True on every layout the default is in force on, so raised on every one, and
+ * an `info` rather than a warning ({@link ReceiptsAdvisorySeverity}) -- it poses
+ * no hazard this run makes live. The layout-gated word above it, where the
+ * layout raises one, is {@link IDENTITY_SHARED_MOUNT_REFUSAL_ADVISORY} or
+ * {@link IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY}. A picked location takes
+ * {@link IDENTITY_PICKED_LOCATION_NOTICE} instead.
  */
 export const IDENTITY_AT_REST_NOTICE =
   "Your signing key is written into the folder you mounted, beside this " +
   "exchange's other files, because it has to outlive the run and be a file you " +
   "still have afterwards. Treat that folder like the results themselves: keep " +
-  "it readable only by you, and do not put it on shared storage.";
+  "it readable only by you, and do not put it on shared storage. To keep it " +
+  "somewhere else, change where your signing identity is kept above and pick " +
+  "a file in your secrets folder.";
 
 /**
- * What the console says where the folder the key is written into is also the
- * folder the partner syncs: the rendezvous directory falls back to the data
- * root when not separately provisioned (`jobRendezvous.ts`), so a
- * shared-folder exchange on a single-mount console syncs the key's own
- * folder -- and its disclosure lets the holder forge receipts under this
- * party's identity for every exchange, not just the one shared.
+ * What the console says once the operator picked a location of their own: the
+ * console reads that file rather than creating one, so the identity is theirs
+ * to create and to look after. The one write the spec accepts there is the
+ * fingerprint request's -- its presence check and the child's load are two
+ * steps, so a file removed between them is created by that child at the picked
+ * path (`docs/spec/SERVER_JOB_API.md`) -- and it is stated with the read-only
+ * mount that closes it. The exchange run creates nothing anywhere: it refuses
+ * when nothing is at the identity file (`resolveSigningPersist` in `apps/cli`).
  *
- * Raised only on that layout (see {@link receiptsAdvisories}); withheld
- * where the rendezvous has a mount of its own. This is the established
- * variant, for a report that positively determined the layout
- * ({@link JobRendezvousConfig.sharesDataRootUncertain} false); the hedged
- * sibling is {@link IDENTITY_SHARED_MOUNT_ADVISORY_UNCERTAIN}.
+ * An `info`: the key this run loads is not in the mounted working directory, so
+ * neither shared-mount warning is about it. A picked location inside a folder
+ * the partner syncs is refused before the run starts, on the same comparison
+ * the default location takes.
  */
-export const IDENTITY_SHARED_MOUNT_ADVISORY =
-  "This console rendezvouses out of the folder you mounted, so a " +
-  "shared-folder exchange here syncs the very folder your signing key sits in. " +
-  "On a run like that your long-lived private key sits where your partner " +
-  "writes, and whoever reads it can sign receipts in your name -- for every " +
-  "exchange, with every partner. Give the synced folder a mount of its own " +
-  "(JOB_RENDEZVOUS_DIR), separate from this one, before you sign an exchange " +
-  "that runs over it.";
+const IDENTITY_PICKED_LOCATION_READ_NOTICE =
+  "Your signing key is read from the file you picked in your secrets folder, " +
+  "and the console creates no key there, with one exception: showing your " +
+  "fingerprint checks that the file is there and then reads it, so a file " +
+  "removed between those two steps is created again at that path. Create it " +
+  "once at the command line -- 'psilink fingerprint --identity-file' pointed " +
+  "at that path -- and mount the folder read-only afterwards, which closes " +
+  "that case too. Keep it out of every folder your partner syncs.";
 
 /**
- * The hedged sibling of {@link IDENTITY_SHARED_MOUNT_ADVISORY}, raised where
- * the rendezvous report could not rule out the shared layout rather than
- * positively establishing it. States the layout as unruled-out rather than
- * established: an operator who checks and finds the folders separate must
- * not be told flatly that they are not.
+ * What the console says about a key created earlier at the console's default
+ * path: picking a location moves the option and not the file, and a
+ * shared-folder exchange is refused while that key sits in a folder the partner
+ * syncs. The card is the only place the operator hears of it before such a run
+ * refuses.
+ *
+ * Raised as a `warning` of its own where the rendezvous report says the folder
+ * is shared or cannot rule it out ({@link receiptsAdvisories}) -- the weight the
+ * identical disclosure takes with no location picked. Where the rendezvous has a
+ * mount of its own the key is in no folder the partner reads, and this stays a
+ * line inside {@link IDENTITY_PICKED_LOCATION_NOTICE}.
  */
-export const IDENTITY_SHARED_MOUNT_ADVISORY_UNCERTAIN =
-  "psilink cannot rule out that this console rendezvouses out of the folder " +
-  "you mounted, and on that layout a shared-folder exchange syncs the very " +
-  "folder your signing key sits in. On a run like that your long-lived private " +
-  "key sits where your partner writes, and whoever reads it can sign receipts " +
-  "in your name -- for every exchange, with every partner. Give the synced " +
-  "folder a mount of its own (JOB_RENDEZVOUS_DIR), separate from this one, " +
-  "before you sign an exchange that runs over it.";
+export const IDENTITY_DEFAULT_PATH_LEFTOVER_CAVEAT =
+  "Picking a location does not move a key you already have: one created " +
+  "earlier at the console's default path stays in your mounted working " +
+  "directory, and a shared-folder exchange is refused while a key sits in a " +
+  "folder your partner syncs. Move that file to the location you picked, " +
+  "or remove it if that key is not one you use, knowing that a " +
+  "replacement has a new fingerprint every partner who pinned the old " +
+  "one must be sent before their verification works again.";
+
+/**
+ * The whole picked-location notice: what the console does at the picked file,
+ * then the caveat about a key left at the default path. The `info` raised where
+ * the rendezvous has a mount of its own; the other layouts take the read half
+ * alone and the caveat as a warning ({@link receiptsAdvisories}).
+ */
+export const IDENTITY_PICKED_LOCATION_NOTICE = `${IDENTITY_PICKED_LOCATION_READ_NOTICE} ${IDENTITY_DEFAULT_PATH_LEFTOVER_CAVEAT}`;
+
+/**
+ * What the console says about the one shared-folder layout its pre-run check
+ * can miss.
+ *
+ * A shared-folder exchange whose synced folder holds the signing identity is
+ * refused before it starts (`JobManager.createJob`), so the operator is never
+ * left to weigh that layout themselves. The check compares mount paths, the
+ * real paths symlinks resolve them to, and folder identity -- which leaves one
+ * host folder mounted twice under two container paths, outside the ancestor
+ * chain, looking like two folders. This advisory is what the operator can act
+ * on where the check cannot.
+ *
+ * Raised on a hedged or unread report (see {@link receiptsAdvisories}); the
+ * established shared layout takes {@link IDENTITY_SHARED_MOUNT_REFUSAL_ADVISORY}
+ * instead, and a rendezvous with a mount of its own raises neither.
+ */
+export const IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY =
+  "Before a shared-folder exchange runs, psilink checks whether the folder " +
+  "your partner writes into holds your signing key, and refuses the run if it " +
+  "does: your long-lived private key there lets whoever reads it sign receipts " +
+  "in your name -- for every exchange, with every partner. That check compares " +
+  "folder locations and identity, so one folder mounted twice under two names " +
+  "passes it. Keep the synced folder (JOB_RENDEZVOUS_DIR) separate from the " +
+  "folder holding your key, input, and results, and check that the two are not " +
+  "one folder under two names. You can also move the key out of the way here: " +
+  "change where your signing identity is kept above and pick a file in your " +
+  "secrets folder, outside every folder your partner syncs.";
+
+/**
+ * What the console says on the layout it positively established as shared: the
+ * refusal in force there, and the single path it reads.
+ *
+ * A shared-folder exchange is refused while a file sits at the signing
+ * identity's path in that folder (`JobManager.createJob`). That is the one fixed
+ * path it reads, in a folder the partner writes into, so a copy of the key under
+ * another name, and this folder mounted a second time under another container
+ * path, are outside what it can see.
+ *
+ * Raised only on that layout (see {@link receiptsAdvisories}); a hedged or unread
+ * report takes {@link IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY}, and a rendezvous
+ * with a mount of its own raises neither.
+ */
+export const IDENTITY_SHARED_MOUNT_REFUSAL_ADVISORY =
+  "This console shares the folder your signing key is written into with your " +
+  "partner. While a file sits at your signing identity's path there it refuses " +
+  "a shared-folder exchange. It checks that one path and nothing else, so a " +
+  "copy of your key under another name, and this folder mounted a second time " +
+  "under another path, are not seen -- and whoever reads your signing key can " +
+  "sign receipts in your name, for every exchange, with every partner. Give " +
+  "the synced folder a mount of its own (JOB_RENDEZVOUS_DIR), separate from " +
+  "the folder holding your key, input, and results -- or change where your " +
+  "signing identity is kept above and pick a file in your secrets folder, " +
+  "outside every folder your partner syncs.";
 
 /**
  * What the console says about re-keying, so the operator learns it before a
@@ -356,10 +481,13 @@ export const RECEIPT_LOCATION_NOTICE =
   "it afterwards.";
 
 /** What the console says about the certificate export, so an operator who
- * ticks it knows what leaves the console. */
+ * ticks it knows what leaves the console. It lands in the mounted working
+ * directory wherever the identity itself is kept: that is the one folder the
+ * console writes to. */
 export const CERTIFICATE_EXPORT_NOTICE =
   "The export is the public certificate only -- never your private key -- and " +
-  "it lands in the same mounted folder. Your partner needs only the fingerprint " +
+  "it lands in the folder you mounted, there even when your signing identity " +
+  "is kept elsewhere. Your partner needs only the fingerprint " +
   "to pin you; the certificate file is for an auditor who wants to check a " +
   "receipt without either party's help.";
 
@@ -390,14 +518,21 @@ interface ReceiptsAdvisory {
  * block: every one is a legitimate run the command line accepts too.
  * Grouped by severity; the order here is the order within a group.
  *
- * `rendezvous` is the console's own rendezvous report, deciding the one
- * advisory about the DEPLOYMENT rather than the draft
- * ({@link IDENTITY_SHARED_MOUNT_ADVISORY} /
- * {@link IDENTITY_SHARED_MOUNT_ADVISORY_UNCERTAIN}): raised only where the
- * rendezvous folder holds the mounted working directory, and withheld only
- * on a report that positively says otherwise -- an unanswered or failed
- * probe keeps it. Which of the two messages shows follows the same report
- * (`sharesDataRootUncertain`).
+ * `rendezvous` is the console's own rendezvous report, deciding the one advisory
+ * about the DEPLOYMENT rather than the draft. A report that positively says the
+ * rendezvous has a mount of its own -- the recommended layout, where the key is
+ * not in a folder anyone syncs -- raises neither: a warning on the layout with no
+ * hazard live is what leaves an operator unable to tell the two states apart. A
+ * report that positively establishes a rendezvous folder holding the mounted
+ * working directory takes {@link IDENTITY_SHARED_MOUNT_REFUSAL_ADVISORY}, which
+ * states the refusal in force there and the one path it reads; a hedged or unread
+ * report takes {@link IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY}, since that is where
+ * the pre-run check can be fooled.
+ *
+ * A picked location withdraws both of those and takes
+ * {@link IDENTITY_PICKED_LOCATION_NOTICE}, whose caveat about the key left at the
+ * default path is raised as a warning of its own on the same layouts the
+ * shared-mount warnings cover ({@link IDENTITY_DEFAULT_PATH_LEFTOVER_CAVEAT}).
  *
  * A draft the run itself would refuse belongs in {@link receiptsProblems},
  * not here.
@@ -409,6 +544,32 @@ export function receiptsAdvisories(
   if (draft.mode !== "certificate") return [];
   const separatelyMounted =
     rendezvous?.configured === true && rendezvous.sharesDataRoot === false;
+  // A picked location takes the key this run loads out of the mounted working
+  // directory, so neither shared-mount warning is about it: both are about a key
+  // in the folder the rendezvous falls back to. A pick inside a folder the
+  // partner syncs is refused before the run starts, on the same comparison. What
+  // a pick leaves behind is the key at the default path, which is in the folder
+  // the partner reads on every layout but a separately mounted rendezvous -- so
+  // on those the caveat is raised at the weight that disclosure takes with no
+  // location picked, rather than as a line inside the notice.
+  if (draft.identityLocation !== undefined)
+    return [
+      ...(separatelyMounted
+        ? []
+        : [
+            {
+              message: IDENTITY_DEFAULT_PATH_LEFTOVER_CAVEAT,
+              severity: "warning" as const,
+            },
+          ]),
+      {
+        message: separatelyMounted
+          ? IDENTITY_PICKED_LOCATION_NOTICE
+          : IDENTITY_PICKED_LOCATION_READ_NOTICE,
+        severity: "info",
+      },
+      { message: RECEIPT_LOCATION_NOTICE, severity: "info" },
+    ];
   const sharedLayoutEstablished =
     rendezvous?.configured === true &&
     rendezvous.sharesDataRoot === true &&
@@ -419,8 +580,8 @@ export function receiptsAdvisories(
       : [
           {
             message: sharedLayoutEstablished
-              ? IDENTITY_SHARED_MOUNT_ADVISORY
-              : IDENTITY_SHARED_MOUNT_ADVISORY_UNCERTAIN,
+              ? IDENTITY_SHARED_MOUNT_REFUSAL_ADVISORY
+              : IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY,
             severity: "warning" as const,
           },
         ]),

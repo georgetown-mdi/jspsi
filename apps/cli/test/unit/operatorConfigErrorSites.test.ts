@@ -133,6 +133,16 @@ const RECORDED_SITES: readonly ConfigErrorSite[] = [
     file: "packages/core/src/exchange.ts",
     anchor: "assertLocalCertificateAuthorizesAgreedIdentity",
     raises: "OperatorConfigError",
+    interpolates: ["agreedIdentity"],
+    provenance:
+      "the refusal for a certificate bound to a label a terms document cannot " +
+      "state names only `agreedIdentity`, whose provenance the entry below " +
+      "reaches; the bound label is not quoted here at all.",
+  },
+  {
+    file: "packages/core/src/exchange.ts",
+    anchor: "assertLocalCertificateAuthorizesAgreedIdentity",
+    raises: "OperatorConfigError",
     interpolates: ["agreedIdentity", "certificate.identity"],
     provenance:
       "both names are this party's own. `certificate.identity` is bound into " +
@@ -186,14 +196,18 @@ const RECORDED_SITES: readonly ConfigErrorSite[] = [
     file: "packages/core/src/linkageSatisfiability.ts",
     anchor: "assertFanOutImplemented",
     raises: "OperatorConfigError",
-    interpolates: ["fanOutDeclaredMessage(declared)"],
+    interpolates: [
+      "COUNT_ONLY_SHAPE_REFUSALS.candidateSet",
+      "fanOutDeclaredMessage(declared)",
+    ],
     provenance:
       "`declared` is read off this party's own standardization argument and is " +
       "matched against FAN_OUT_FUNCTION_NAMES before it reaches the message, so " +
-      "what the callee interpolates is a build literal. The sibling arm over " +
-      "the agreed terms' element transforms, which the accept path adopts " +
-      "wholesale, deliberately raises a plain UsageError instead and is " +
-      "correctly absent from this ledger.",
+      "what the callee interpolates is a build literal; the count-only arm " +
+      "beside it holds a module constant of fixed prose and quotes no value at " +
+      "all. The sibling arm over the agreed terms' linkage keys, which the " +
+      "accept path adopts wholesale, deliberately raises a plain UsageError " +
+      "instead and is correctly absent from this ledger.",
   },
   {
     file: "packages/core/src/linkageSatisfiability.ts",
@@ -244,6 +258,16 @@ const RECORDED_SITES: readonly ConfigErrorSite[] = [
     provenance:
       "the message is SIGNING_IDENTITY_FILE_UNSET_REFUSAL, a module constant of " +
       "fixed prose; not even the configured path is quoted.",
+  },
+  {
+    file: "apps/cli/src/signingIdentityDivergence.ts",
+    anchor: "assertIdentityMatchesAgreedTerms",
+    raises: "OperatorConfigError",
+    interpolates: ["termsIdentity"],
+    provenance:
+      "the refusal for a certificate bound to a label the linkage terms " +
+      "cannot state names only `termsIdentity`, whose provenance the entry " +
+      "below reaches; the bound label is not quoted here at all.",
   },
   {
     file: "apps/cli/src/signingIdentityDivergence.ts",

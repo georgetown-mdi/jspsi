@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  MAX_DECLARED_NAMES_SHOWN,
   MAX_NAME_LENGTH,
   assertDisclosedNamesCarriable,
   assertPayloadSendDisclosed,
@@ -19,8 +20,10 @@ import {
   acceptorLaunchPayload,
   acceptorOverlongDisclosedColumns,
   acceptorPayloadDeclarationConflict,
+  acceptorSendingExpectedColumnsCostsKey,
   acceptorUnsatisfiedTypes,
   acceptorVerdict,
+  acceptorWidenableDeclaredColumnCount,
 } from "@exchange/acceptorColumnsModel";
 
 import {
@@ -383,6 +386,8 @@ describe("acceptor launch gates", () => {
 
   test("a device reporting offline disables launch and names the shared reason", () => {
     const blocks = {
+      deduplicatePairRefused: false,
+      deduplicateChangedAfterConsent: false,
       connectionBlocked: false,
       exchangeFilesBlocked: false,
       connectionTuningBlocked: false,
@@ -409,6 +414,85 @@ describe("acceptor launch gates", () => {
     ).toBeUndefined();
   });
 
+  test("a refused duplicate-matching pair disables launch from a later step", () => {
+    // The review step disables its own Continue on the pair, but the browser can
+    // restore a later step straight from history: a Forward past that button
+    // would otherwise reach the launch with the refused value still set. The
+    // remedy is back on the terms, so the sentence sends the operator there.
+    const blocks = {
+      offline: false,
+      deduplicateChangedAfterConsent: false,
+      connectionBlocked: false,
+      exchangeFilesBlocked: false,
+      connectionTuningBlocked: false,
+      runDiagnosticsBlocked: false,
+      receiptsBlocked: false,
+    };
+    expect(
+      acceptorLaunchBlockedReason(
+        satisfiableVerdict,
+        satisfiable.editorState,
+        nameTerms,
+        { ...blocks, deduplicatePairRefused: true },
+      ),
+    ).toBe(
+      "Go back to the terms and resolve the duplicate-matching settings " +
+        "before you can start.",
+    );
+    expect(
+      acceptorLaunchBlockedReason(
+        satisfiableVerdict,
+        satisfiable.editorState,
+        nameTerms,
+        { ...blocks, deduplicatePairRefused: false },
+      ),
+    ).toBeUndefined();
+  });
+
+  test("a duplicate-matching value moved since consent disables launch", () => {
+    // The run presents the value the consent gate committed, so the two must
+    // agree before it starts: launching would run a value the terms step no
+    // longer shows, and the control alone changes nothing the operator
+    // consented to.
+    const blocks = {
+      offline: false,
+      deduplicatePairRefused: false,
+      connectionBlocked: false,
+      exchangeFilesBlocked: false,
+      connectionTuningBlocked: false,
+      runDiagnosticsBlocked: false,
+      receiptsBlocked: false,
+    };
+    expect(
+      acceptorLaunchBlockedReason(
+        satisfiableVerdict,
+        satisfiable.editorState,
+        nameTerms,
+        { ...blocks, deduplicateChangedAfterConsent: true },
+      ),
+    ).toBe(
+      "This exchange runs with the duplicate-matching setting you accepted, " +
+        "which is not the one now on the terms step. Accept again to apply " +
+        "the change, or set the control back.",
+    );
+    // The refused pair speaks first: its own control clears both.
+    expect(
+      acceptorLaunchBlockedReason(
+        satisfiableVerdict,
+        satisfiable.editorState,
+        nameTerms,
+        {
+          ...blocks,
+          deduplicatePairRefused: true,
+          deduplicateChangedAfterConsent: true,
+        },
+      ),
+    ).toBe(
+      "Go back to the terms and resolve the duplicate-matching settings " +
+        "before you can start.",
+    );
+  });
+
   test("offline speaks ahead of the screen's own problems, which no edit here can outrun", () => {
     // A file that can match nothing is a fix the operator makes on this screen;
     // no network is not, so it is the sentence they meet first rather than the
@@ -420,6 +504,8 @@ describe("acceptor launch gates", () => {
     expect(
       acceptorLaunchBlockedReason(verdict, editorState, nameTerms, {
         offline: true,
+        deduplicatePairRefused: false,
+        deduplicateChangedAfterConsent: false,
         connectionBlocked: false,
         exchangeFilesBlocked: false,
         connectionTuningBlocked: false,
@@ -437,6 +523,8 @@ describe("acceptor launch gates", () => {
         nameTerms,
         {
           offline: false,
+          deduplicatePairRefused: false,
+          deduplicateChangedAfterConsent: false,
           connectionBlocked: true,
           exchangeFilesBlocked: false,
           connectionTuningBlocked: false,
@@ -459,6 +547,8 @@ describe("acceptor launch gates", () => {
         nameTerms,
         {
           offline: false,
+          deduplicatePairRefused: false,
+          deduplicateChangedAfterConsent: false,
           connectionBlocked: false,
           exchangeFilesBlocked: false,
           connectionTuningBlocked: false,
@@ -481,6 +571,8 @@ describe("acceptor launch gates", () => {
         nameTerms,
         {
           offline: false,
+          deduplicatePairRefused: false,
+          deduplicateChangedAfterConsent: false,
           connectionBlocked: false,
           exchangeFilesBlocked: true,
           connectionTuningBlocked: false,
@@ -499,6 +591,8 @@ describe("acceptor launch gates", () => {
     // the flags by hand.
     const stepBlocks = {
       offline: false,
+      deduplicatePairRefused: false,
+      deduplicateChangedAfterConsent: false,
       connectionBlocked: false,
       exchangeFilesBlocked:
         exchangeFilesProblems(EXCHANGE_FILES_DEFAULT, CONFIG_EXCHANGE_FILES)
@@ -541,6 +635,8 @@ describe("acceptor launch gates", () => {
         nameTerms,
         {
           offline: false,
+          deduplicatePairRefused: false,
+          deduplicateChangedAfterConsent: false,
           connectionBlocked: false,
           exchangeFilesBlocked: false,
           connectionTuningBlocked: false,
@@ -563,6 +659,8 @@ describe("acceptor launch gates", () => {
     expect(
       acceptorLaunchBlockedReason(verdict, editorState, nameTerms, {
         offline: false,
+        deduplicatePairRefused: false,
+        deduplicateChangedAfterConsent: false,
         connectionBlocked: true,
         exchangeFilesBlocked: true,
         connectionTuningBlocked: true,
@@ -1028,6 +1126,202 @@ describe("the invitation's declared payload set against the marks", () => {
     ).metadata;
     expect(acceptorPayloadDeclarationConflict(terms, widened)).toBeUndefined();
     expect(widened.some((column) => column.role === "identifier")).toBe(false);
+  });
+
+  test("a declaration naming the same held-but-unsent column twice widens it once", () => {
+    // A declaration may name one column twice; that is still one column to list,
+    // one to mark, and one the widening offer marks.
+    const identifierColumns = ["first_name", "last_name", "record_id"];
+    const terms: LinkageTerms = {
+      ...nameTerms,
+      payload: { receive: [{ name: "record_id" }, { name: "record_id" }] },
+    };
+    const { editorState } = editorFor(identifierColumns, terms);
+    expect(
+      acceptorPayloadDeclarationConflict(terms, editorState.metadata)
+        ?.declaredButNotSent,
+    ).toEqual([{ displayName: "record_id", inFile: true }]);
+    expect(
+      acceptorWidenableDeclaredColumnCount(terms, editorState.metadata),
+    ).toBe(1);
+  });
+
+  test("the offer costs an agreed key when a declared column is one this file matches on", () => {
+    // The case the offer is unusable in: the column the partner expects is one this
+    // file matches on, so taking the offer trades the key for the disclosure and the
+    // run is refused for a key the input can no longer satisfy.
+    const terms = invitation(
+      "acceptsTheDisclosedColumnAndOneMarkedForMatching",
+    );
+    const { state, editorState } = editorFor(columns, terms);
+    expect(
+      acceptorPayloadDeclarationConflict(terms, editorState.metadata)
+        ?.declaredButNotSent,
+    ).toEqual([{ displayName: "first_name", inFile: true }]);
+    expect(acceptorSendingExpectedColumnsCostsKey(columns, terms, state)).toBe(
+      true,
+    );
+  });
+
+  test("the offer costs no key for a declared column that feeds none", () => {
+    // The two uses a declared column can sit at without feeding a key: the record
+    // identifier, and a column used for nothing. Sending either replaces that use
+    // and leaves every agreed key where it was, so the offer stands as it was.
+    for (const { use, declaredName, metadata } of [
+      {
+        use: "the record identifier",
+        declaredName: "record_id",
+        metadata: inferredMarks,
+      },
+      {
+        use: "a column used for nothing",
+        declaredName: "notes",
+        metadata: setColumnDisclosure(inferredMarks, "notes", "ignored")
+          .metadata,
+      },
+    ]) {
+      const terms: LinkageTerms = {
+        ...nameTerms,
+        payload: { receive: [{ name: declaredName }] },
+      };
+      const { state, editorState } = editorFor(columns, terms, { metadata });
+      expect(
+        acceptorPayloadDeclarationConflict(terms, editorState.metadata)
+          ?.declaredButNotSent,
+        use,
+      ).toEqual([{ displayName: declaredName, inFile: true }]);
+      expect(
+        acceptorSendingExpectedColumnsCostsKey(columns, terms, state),
+        use,
+      ).toBe(false);
+    }
+  });
+
+  test("the cost is read from the whole declaration, past the names a notice paints", () => {
+    // A surface paints at most MAX_DECLARED_NAMES_SHOWN of these names, so a cost
+    // read per painted name would go quiet exactly where the declaration is long.
+    // The column that costs the key sits past that bound here.
+    const absent = Array.from(
+      { length: MAX_DECLARED_NAMES_SHOWN + 1 },
+      (_, index) => `absent_${index}`,
+    );
+    const terms: LinkageTerms = {
+      ...nameTerms,
+      payload: {
+        receive: [...absent, "first_name"].map((name) => ({ name })),
+      },
+    };
+    expect(safeParseLinkageTerms(terms).success).toBe(true);
+    const { state, editorState } = editorFor(columns, terms);
+    const gaps =
+      acceptorPayloadDeclarationConflict(terms, editorState.metadata)
+        ?.declaredButNotSent ?? [];
+    expect(
+      gaps.slice(0, MAX_DECLARED_NAMES_SHOWN).some((gap) => gap.inFile),
+    ).toBe(false);
+    expect(acceptorSendingExpectedColumnsCostsKey(columns, terms, state)).toBe(
+      true,
+    );
+  });
+
+  test("the cost the offer states is the one taking it charges", () => {
+    // The cost is a prediction about a state one edit away, so it is checked
+    // against that state as the console derives it: the operator's own re-mark,
+    // over the file's real rows -- which the prediction does not read, so a file
+    // whose rows fix the date-of-birth format is among the offers driven here.
+    const dobColumns = ["date_of_birth", "first_name", "notes"];
+    const dobTerms: LinkageTerms = {
+      ...nameTerms,
+      linkageFields: [
+        { name: "dob", type: "date_of_birth" },
+        { name: "firstName", type: "first_name" },
+      ],
+      linkageKeys: [
+        { name: "d", elements: [{ field: "dob" }] },
+        { name: "f", elements: [{ field: "firstName" }] },
+      ],
+      payload: {
+        receive: [{ name: "notes" }, { name: "date_of_birth" }],
+      },
+    };
+    const offers: Array<{
+      use: string;
+      columns: Array<string>;
+      terms: LinkageTerms;
+      rows: Array<CSVRow>;
+      offered: Array<string>;
+    }> = [
+      {
+        use: "a column the file matches on",
+        columns,
+        terms: invitation("acceptsTheDisclosedColumnAndOneMarkedForMatching"),
+        rows: rows(columns),
+        offered: ["first_name"],
+      },
+      {
+        use: "the file's record identifier",
+        columns: ["first_name", "last_name", "record_id"],
+        terms: { ...nameTerms, payload: { receive: [{ name: "record_id" }] } },
+        rows: rows(["first_name", "last_name", "record_id"]),
+        offered: ["record_id"],
+      },
+      {
+        use: "a date-of-birth column whose format the rows fix",
+        columns: dobColumns,
+        terms: dobTerms,
+        rows: [{ date_of_birth: "1980-01-02", first_name: "Ann", notes: "x" }],
+        offered: ["date_of_birth"],
+      },
+    ];
+    for (const offer of offers) {
+      expect(safeParseLinkageTerms(offer.terms).success, offer.use).toBe(true);
+      const state = acceptorInitialColumnsState(offer.columns);
+      const before = acceptorColumnsEditorState(state, offer.terms, offer.rows);
+      // What taking the offer does, in full: the declared columns this file has are
+      // exactly the ones re-marked below.
+      expect(
+        acceptorPayloadDeclarationConflict(offer.terms, before.metadata)
+          ?.declaredButNotSent.filter((gap) => gap.inFile)
+          .map((gap) => gap.displayName),
+        offer.use,
+      ).toEqual(offer.offered);
+      const taken = offer.offered.reduce(
+        (metadata, name) =>
+          setColumnDisclosure(metadata, name, "payload").metadata,
+        state.metadata,
+      );
+      const after = acceptorColumnsEditorState(
+        { ...state, metadata: taken },
+        offer.terms,
+        offer.rows,
+      );
+      const charged =
+        acceptorVerdict(offer.columns, offer.terms, after).satisfiableKeyCount <
+        acceptorVerdict(offer.columns, offer.terms, before).satisfiableKeyCount;
+      expect(
+        acceptorSendingExpectedColumnsCostsKey(
+          offer.columns,
+          offer.terms,
+          state,
+        ),
+        offer.use,
+      ).toBe(charged);
+      // Where it is charged, the operator who takes the offer meets the linkage
+      // gate rather than a started exchange; where it is not, the screen clears.
+      expect(
+        acceptorLaunchBlockedReason(
+          acceptorVerdict(offer.columns, offer.terms, after),
+          after,
+          offer.terms,
+        ),
+        offer.use,
+      ).toBe(
+        charged
+          ? "Cover the remaining agreed linkage keys above before you can start, " +
+              "or agree terms with your partner over the keys both files can supply."
+          : undefined,
+      );
+    }
   });
 
   test("both directions at once are stated together, and clearing one leaves the other named", () => {

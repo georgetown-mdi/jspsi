@@ -270,6 +270,7 @@ export async function captureZeroSetupArgv(args: {
   eventStream: boolean;
   identity?: string;
   linkageStrategy?: "cascade" | "single-pass";
+  deduplicate?: boolean;
   /** The run's diagnostic/recovery controls; defaults to neither, the shape
    * every caller predating them drives. */
   runControls?: CliRunControls;
@@ -295,6 +296,9 @@ export async function captureZeroSetupArgv(args: {
         ...(args.identity !== undefined ? { identity: args.identity } : {}),
         ...(args.linkageStrategy !== undefined
           ? { linkageStrategy: args.linkageStrategy }
+          : {}),
+        ...(args.deduplicate !== undefined
+          ? { deduplicate: args.deduplicate }
           : {}),
         extraEnv: { STUB_ARGV_FILE: argvFile, STUB_EXIT_CODE: "0" },
         handlers: {

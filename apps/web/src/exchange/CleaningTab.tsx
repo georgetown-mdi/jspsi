@@ -7,8 +7,8 @@ import { SEMANTIC_TYPE_LABELS } from "@psi/metadataEditing";
 import { isSilentEmpty } from "@psi/workers/nonEmptyAggregate";
 
 import {
-  COVERAGE_UNAVAILABLE_MESSAGE,
   FieldCoverage,
+  coverageUnavailableMessage,
 } from "@components/FieldCoverage";
 import { CleaningErrorBoundary } from "@components/CleaningErrorBoundary";
 import { StandardizationCards } from "@components/StandardizationCards";
@@ -20,6 +20,7 @@ import type { LinkageField, StandardizationStep } from "@psilink/core";
 import type { ColumnSamples } from "@psi/columnSamples";
 import type { FieldValueCoverage } from "@psi/workers/nonEmptyAggregate";
 import type { InviterEditor } from "@psi/inviterEditor";
+import type { OverlongColumnName } from "@psi/columnNames";
 
 /**
  * The Cleaning tab: per-field pipelines with previews and whole-file coverage,
@@ -34,6 +35,7 @@ export function CleaningTab({
   rates,
   pending,
   coverageUnavailable,
+  coverageRefusedColumns,
   onFieldSteps,
   onFieldInput,
   onFieldAdded,
@@ -61,6 +63,13 @@ export function CleaningTab({
   /** Whether the last sweep failed for good (a deterministic coverage failure), so the
    * tab shows an explicit "coverage unavailable" notice rather than a blank readout. */
   coverageUnavailable: boolean;
+  /** The columns whose header the console's coverage sweep refuses, so the
+   * unavailable notice names what tripped the bound instead of stating only that
+   * the check did not run. Required rather than defaulted: an omitted list is
+   * indistinguishable from "no column explains it", and a host that forgot to
+   * derive it would state that silently. Empty on the hosted build, whose sweep
+   * runs in the browser under no such bound. */
+  coverageRefusedColumns: ReadonlyArray<OverlongColumnName>;
   onFieldSteps: (output: string, steps: Array<StandardizationStep>) => void;
   onFieldInput: (output: string, input: string) => void;
   onFieldAdded: (type: LinkageField["type"]) => void;
@@ -102,8 +111,9 @@ export function CleaningTab({
     }
     return [...labels];
   }, [rates, editor.draft.standardization, fieldTypeByName]);
+  const unavailableMessage = coverageUnavailableMessage(coverageRefusedColumns);
   const coverageAnnouncement = coverageUnavailable
-    ? COVERAGE_UNAVAILABLE_MESSAGE
+    ? unavailableMessage
     : silentEmptyLabels.length === 0
       ? ""
       : `Coverage warning: ${silentEmptyLabels.join(", ")} ${
@@ -142,7 +152,7 @@ export function CleaningTab({
           title="Could not check coverage"
           mb="md"
         >
-          {COVERAGE_UNAVAILABLE_MESSAGE}
+          {unavailableMessage}
         </Alert>
       )}
       <CleaningErrorBoundary onReset={onResetCleaning} resetKey={resetKey}>

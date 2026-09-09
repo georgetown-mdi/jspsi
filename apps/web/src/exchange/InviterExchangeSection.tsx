@@ -2,6 +2,8 @@ import { useEffect, useRef } from "react";
 
 import { Button } from "@mantine/core";
 
+import { describeResolvedMatching } from "@psilink/core";
+
 import { dateTimeLabel, invitationUsable } from "@psi/formatting";
 import { RecurringHandoff } from "@recurring/RecurringHandoff";
 import styles from "@styles/app.module.css";
@@ -15,8 +17,7 @@ import {
   FailureAlert,
   FailureRecoveryButton,
   RECONNECTING_HEADING,
-  ReattachedRunNotice,
-  ReattachingNotice,
+  ReattachNotice,
   RunDownloads,
   RunWarningsAlert,
   SERVER_JOB_KEEP_OPEN_BODY,
@@ -200,8 +201,17 @@ export function InviterExchangeSection({
       <h1 tabIndex={-1} ref={headingRef}>
         {title}
       </h1>
-      {reattachedRun && <ReattachedRunNotice state={reattachState} />}
-      {reattaching && !reattachedRun && <ReattachingNotice />}
+      {/* Run status rather than a notice: the pair the terms exchange fixed
+          reads beneath the heading from the moment it is known, and the
+          completion panel restates it. */}
+      {phase !== "done" && run.matching !== undefined && (
+        <p className={styles.sub}>{describeResolvedMatching(run.matching)}</p>
+      )}
+      <ReattachNotice
+        reattaching={reattaching}
+        reattachedRun={reattachedRun}
+        state={reattachState}
+      />
       {failure !== undefined && (
         <FailureAlert failure={failure}>
           {retryable && (

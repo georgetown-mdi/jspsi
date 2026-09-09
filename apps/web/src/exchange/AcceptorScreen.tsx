@@ -12,8 +12,15 @@ import {
 } from "@psilink/core";
 
 import {
+  acceptorDeduplicateRefusal,
+  prepareAcceptedInvitation,
+} from "@psi/acceptInvitation";
+import {
   emptyColumnPositions,
+  overlongCoverageColumns,
+  refusedColumnNames,
   sanitizedColumnsAlert,
+  savedExchangeColumnRefusalAlert,
   unnameableColumnsAlert,
 } from "@psi/columnNames";
 import { capturedInputHandle } from "@psi/managed/managedInputHandle";
@@ -22,7 +29,6 @@ import { createManagedExchange } from "@psi/managed/managedExchangeStore";
 import { deleteSftpConnection } from "@psi/jobClient/sftpAuthoringClient";
 import { fetchJobRendezvous } from "@psi/jobClient/workInputClient";
 import { loadCSVFileOffMainThread } from "@psi/workers/csvParseController";
-import { prepareAcceptedInvitation } from "@psi/acceptInvitation";
 
 import { deploymentProfile, isConsoleBuild } from "@utils/clientConfig";
 import { whenDiagnostic } from "@utils/diagnostics";
@@ -114,8 +120,8 @@ import { AcceptorColumnsStep } from "./AcceptorColumnsStep";
 import { AcceptorExchangeSection } from "./AcceptorExchangeSection";
 import { WorkShell } from "./WorkShell";
 
+import { MANAGE_OFFER_IDLE, ManageExchangeOffer } from "./ManageExchangeOffer";
 import { Ledger } from "./Ledger";
-import { ManageExchangeOffer } from "./ManageExchangeOffer";
 import { RecoveredExchangePanel } from "./RecoveredExchangePanel";
 import { TopBar } from "./TopBar";
 import { acceptorTimelineSteps } from "./exchangeRun";
@@ -153,7 +159,7 @@ import type { ExchangeFilesDraft } from "@console/exchangeFilesModel";
 import type { FieldStepOverride } from "@psi/standardizationAuthoring";
 import type { FileRejection } from "@mantine/dropzone";
 import type { ManageOfferChoices } from "./manageOfferModel";
-import type { ManageOfferStatus } from "./ManageExchangeOffer";
+import type { ManageOfferState } from "./ManageExchangeOffer";
 import type { RailStep } from "@psi/rail";
 import type { ReceiptsDraft } from "@psi/receiptsModel";
 import type { RunDiagnosticsDraft } from "@psi/runDiagnosticsModel";
@@ -194,11 +200,18 @@ function isAcceptorStep(value: string): value is AcceptorStep {
   return value in ACCEPTOR_STEP_SET;
 }
 
-/** The exchange the acceptor launched: the assembled per-party edits. Drives
- * the acceptor's run surface ({@link AcceptorExchangeSection}); the run hook
- * keys on the derived launch object, so a fresh launch restarts the run. */
+/** The exchange the acceptor launched: the assembled per-party edits and this
+ * party's own side of the matching cardinality. Drives the acceptor's run
+ * surface ({@link AcceptorExchangeSection}); the run hook keys on the derived
+ * launch object, so a fresh launch restarts the run.
+ *
+ * `deduplicate` is the value the consent gate committed, carried here for the
+ * same reason the committed name is: the run presents the terms it holds, and
+ * the managed-exchange deposit records them, so neither may drift with a later
+ * edit to the control. */
 interface AcceptorLaunched {
   edits: AcceptorDataEdits;
+  deduplicate: boolean;
 }
 
 /** The async decode's outcome: pending while it runs, an error message on a bad
@@ -262,11 +275,21 @@ export function AcceptorScreen() {
     RUN_DIAGNOSTICS_DEFAULT,
   );
   const [runDiagnosticsOpen, setRunDiagnosticsOpen] = useState(false);
+  // This party's own side of the matching cardinality, authored on the terms
+  // review step beside what the invitation declares for the inviting party's.
+  // It starts closed -- the value an acceptance derives with no control at all.
+  const [acceptorDeduplicate, setAcceptorDeduplicate] = useState(false);
   const [acceptorName, setAcceptorName] = useState("");
   // The name recorded in the exchange record, committed through the consent gate
   // at "Accept and continue" and fixed thereafter -- the run adopts the terms
   // under this identity, so it must not drift with a later edit to the input.
   const [committedName, setCommittedName] = useState("");
+  // This party's own deduplicate value as the same gate committed it, and the
+  // only one the run presents: the consent surface states what the pair
+  // discloses, so a value the operator sets after passing that gate reaches the
+  // run only by passing it again (the columns step holds the launch while the
+  // two disagree).
+  const [committedDeduplicate, setCommittedDeduplicate] = useState(false);
   const [file, setFile] = useState<File>();
   const [fieldErrors, setFieldErrors] = useState<FieldErrors>({});
   const [rejectionMessage, setRejectionMessage] = useState<string>();
@@ -276,12 +299,12 @@ export function AcceptorScreen() {
   // columns step and its verdict derive from it; and the layered column-step editor
   // state (metadata + override layers), seeded once from the acquired columns.
   const [acquired, setAcquired] = useState<AcceptorAcquiredCsv>();
-  // The 1-based positions the parse stripped bidi control characters from, held
+  // The 1-based positions the parse stripped control characters from, held
   // beside the acquired file so the confirm-columns step states what was removed
   // on the screen where the names are read and marked.
-  const [bidiStrippedColumns, setBidiStrippedColumns] = useState<Array<number>>(
-    [],
-  );
+  const [sanitizedColumnPositions, setSanitizedColumnPositions] = useState<
+    Array<number>
+  >([]);
   // The original file whose parse produced `acquired`, captured at the same commit
   // so the server-job path submits the exact bytes the browser path parsed (no
   // re-serialization of rawRows). Fixed alongside `acquired` and the committed name.
@@ -311,7 +334,11 @@ export function AcceptorScreen() {
   // the credential-free locator. An accepted SFTP exchange is blocked from launch
   // until this holds a connection.
   const [sftpInfo, setSftpInfo] = useState<SftpConnectionInfo>();
-  const [manageStatus, setManageStatus] = useState<ManageOfferStatus>("idle");
+  // The offer's progress and, for a failed deposit, what it was about when a
+  // column name explains it. Held as one value so no reset can leave a refusal
+  // standing over an idle offer.
+  const [manageOffer, setManageOffer] =
+    useState<ManageOfferState>(MANAGE_OFFER_IDLE);
   // The launched exchange (the assembled edits + optional advisory).
   const [launched, setLaunched] = useState<AcceptorLaunched>();
 
@@ -373,6 +400,52 @@ export function AcceptorScreen() {
         )
       : undefined;
 
+  // Whether the pair this party's own `deduplicate` makes with the invitation's
+  // is one the run refuses -- read at the seat, from the same boundary the run
+  // resolves the cardinality at, so the operator meets it before any key or
+  // payload moves rather than mid-exchange. Held across renders on the decoded
+  // token and this party's value: the answer derives a terms document and
+  // resolves a cardinality over partner-supplied terms, which only those two
+  // inputs change.
+  const deduplicateRefusal = useMemo(
+    () =>
+      decode.status === "ready"
+        ? acceptorDeduplicateRefusal(
+            decode.invitation.token.linkageTerms,
+            acceptorDeduplicate,
+          )
+        : undefined,
+    [decode, acceptorDeduplicate],
+  );
+  // The pair's own refusal, which the operator resolves by clearing its side:
+  // it renders beside that control and holds Continue. A refusal of the derived
+  // terms is nothing at this seat can resolve, so it blocks the step below
+  // instead.
+  const pairRefusal =
+    deduplicateRefusal?.scope === "pair"
+      ? deduplicateRefusal.message
+      : undefined;
+  // Whether the control stands somewhere other than the value the consent gate
+  // committed, which is the value the run presents. Only meaningful past that
+  // gate: the columns step and the launch, the two places it is read.
+  const deduplicateChangedAfterConsent =
+    acceptorDeduplicate !== committedDeduplicate;
+  // What stops this accept at the review step, in place of the Continue control:
+  // an endpoint this console cannot run, or an invitation whose terms no
+  // acceptance can run at all -- the mirror the schema refuses, which would
+  // otherwise abort the launch after the operator had chosen a file.
+  const reviewBlock:
+    { title: string; message: string; color: "orange" | "red" } | undefined =
+    unsupported !== undefined
+      ? { ...unsupported, color: "orange" }
+      : deduplicateRefusal?.scope === "terms"
+        ? {
+            title: "Cannot accept this invitation",
+            message: deduplicateRefusal.message,
+            color: "red",
+          }
+        : undefined;
+
   // The accepted SFTP endpoint (stable across renders once decode is ready), or
   // undefined for every other accept. The partner-supplied locator narrows to ONLY
   // the credential-free host/port/path, so nothing but the locator reaches the
@@ -418,20 +491,20 @@ export function AcceptorScreen() {
     acceptSftpLocator !== undefined && sftpConnection == null;
 
   // On the review step, move focus to the terms heading once the decode resolves
-  // to ready, to the unsupported notice when this console cannot run this accept,
-  // or to the error alert once it resolves to error, so a screen-reader user is
-  // taken to the revealed terms, the block, or the failure rather than left on the
+  // to ready, to the block when this accept cannot go on from here, or to the
+  // error alert once it resolves to error, so a screen-reader user is taken to
+  // the revealed terms, the block, or the failure rather than left on the
   // spinner. The consent and columns steps own their own heading focus below.
   const termsHeadingRef = useRef<HTMLHeadingElement>(null);
-  const unsupportedRef = useRef<HTMLDivElement>(null);
+  const reviewBlockRef = useRef<HTMLDivElement>(null);
   const errorRef = useRef<HTMLDivElement>(null);
-  const unsupportedShown = unsupported !== undefined;
+  const reviewBlockShown = reviewBlock !== undefined;
   useEffect(() => {
     if (step !== "review") return;
     if (decode.status === "ready")
-      (unsupportedShown ? unsupportedRef : termsHeadingRef).current?.focus();
+      (reviewBlockShown ? reviewBlockRef : termsHeadingRef).current?.focus();
     else if (decode.status === "error") errorRef.current?.focus();
-  }, [decode.status, step, unsupportedShown]);
+  }, [decode.status, step, reviewBlockShown]);
 
   // Moving to the consent step replaces the work column, so focus is sent to the
   // incoming h1 (it has tabIndex -1) or a screen-reader user is left on a control
@@ -514,7 +587,7 @@ export function AcceptorScreen() {
   function selectFile(chosen: File) {
     setRejectionMessage(undefined);
     setParseAlert(undefined);
-    setBidiStrippedColumns([]);
+    setSanitizedColumnPositions([]);
     setFieldErrors((current) => ({ ...current, file: false }));
     setFile(chosen);
   }
@@ -562,11 +635,14 @@ export function AcceptorScreen() {
     // Before the refusal below, not after it: the same read that emptied a name
     // changed the positions this notice states, and a refused file never reaches
     // the columns step where the notice is otherwise shown.
-    setBidiStrippedColumns(profile.bidiStrippedColumns);
+    setSanitizedColumnPositions(profile.sanitizedColumnPositions);
     const emptyPositions = emptyColumnPositions(profile.columns);
     if (emptyPositions.length > 0) {
       setParseAlert(
-        unnameableColumnsAlert(emptyPositions, profile.bidiStrippedColumns),
+        unnameableColumnsAlert(
+          emptyPositions,
+          profile.sanitizedColumnPositions,
+        ),
       );
       return;
     }
@@ -593,6 +669,12 @@ export function AcceptorScreen() {
   // no parse). Only a clean commit advances to the confirm-columns step.
   async function acceptAndContinue() {
     if (decode.status !== "ready") return;
+    // The pair the run refuses, re-checked in the handler for the same reason
+    // the consent gate is: browser history can restore this step past the review
+    // step's disabled Continue, and committing there would fix a value no run
+    // takes. Read from the same refusal the button's disabled state is, so a
+    // submit that reaches this handler meets exactly what the step shows.
+    if (pairRefusal !== undefined) return;
     const name = acceptorConsentName({ consented, name: acceptorName });
     // The shape of the name the run would adopt, re-checked here for the same
     // reason the consent gate is: the disabled state alone is not the refusal.
@@ -616,10 +698,11 @@ export function AcceptorScreen() {
       // The console reads the file itself: the profile was committed and
       // the columns seeded via the picker, so there is no browser parse behind the
       // gate. Build the acquired shape from the profile (rows withheld) and advance,
-      // committing the gate-checked name so the run records it even if the input is
-      // later edited.
+      // committing the gate-checked name and deduplicate value for the reason the
+      // hosted branch below states.
       if (consoleSource === undefined) return;
       setCommittedName(name);
+      setCommittedDeduplicate(acceptorDeduplicate);
       setAcquired(
         consoleAcquiredCsv({
           fileName: consoleSource.name,
@@ -647,9 +730,9 @@ export function AcceptorScreen() {
       });
       if (id !== parseId.current) return;
       const columns = result.meta.fields ?? [];
-      const stripped = result.meta.bidiStrippedColumns;
+      const stripped = result.meta.sanitizedColumnPositions;
       // Before the refusal below, for the reason commitConsoleAcceptFile states.
-      setBidiStrippedColumns(stripped);
+      setSanitizedColumnPositions(stripped);
       const emptyPositions = emptyColumnPositions(columns);
       if (emptyPositions.length > 0) {
         setParseAlert(unnameableColumnsAlert(emptyPositions, stripped));
@@ -657,9 +740,11 @@ export function AcceptorScreen() {
       }
       // Store the parsed CSV (not discard it) and seed the columns-step editor from
       // its columns; the verdict and launch payload derive from this state. Commit
-      // the gate-checked name here so the run records it even if the input is later
-      // edited (the input stays editable; the committed identity does not drift).
+      // the gate-checked name and this party's own deduplicate value here, so the
+      // run records and presents what passed the gate even if either control is
+      // later edited.
       setCommittedName(name);
+      setCommittedDeduplicate(acceptorDeduplicate);
       setAcceptedFile(file);
       setSourceHandle(capturedInputHandle(file));
       setAcquired({
@@ -688,8 +773,8 @@ export function AcceptorScreen() {
   // well as the columns step: a read that also left a column unnamed refuses
   // there, and the columns step that otherwise holds the notice is never reached.
   const sanitizedNotice =
-    bidiStrippedColumns.length > 0
-      ? sanitizedColumnsAlert(bidiStrippedColumns)
+    sanitizedColumnPositions.length > 0
+      ? sanitizedColumnsAlert(sanitizedColumnPositions)
       : undefined;
 
   const ready = decode.status === "ready";
@@ -802,6 +887,7 @@ export function AcceptorScreen() {
       columns: acquired.columns,
       edits: launched.edits,
       inputSource,
+      deduplicate: launched.deduplicate,
       ...(options !== undefined ? { options } : {}),
       runDiagnostics: runDiagnosticsIntentFields(runDiagnostics),
       receipts: receiptsIntentFields(receipts),
@@ -892,6 +978,19 @@ export function AcceptorScreen() {
           ratesUnavailable,
         )
       : undefined;
+  // The columns whose header the console's coverage sweep refuses over its length,
+  // so the unavailable notice names what tripped the bound. Empty off the console:
+  // the hosted sweep runs in this browser, under no such bound.
+  const coverageRefusedColumns = useMemo(
+    () =>
+      consoleSource === undefined
+        ? []
+        : overlongCoverageColumns(
+            editorState?.standardization ?? EMPTY_STANDARDIZATION,
+            consoleSource.columns,
+          ),
+    [consoleSource, editorState],
+  );
 
   const spineSteps: Array<RailStep> =
     step === "launched"
@@ -1051,7 +1150,22 @@ export function AcceptorScreen() {
     // exchange must not start until the operator has authored a connection (with
     // the required host-key fingerprint) to the partner-named server.
     if (sftpConnectionMissing) return;
-    setLaunched(acceptorLaunchPayload(editorState));
+    // The same, for a pair the run refuses: the review step disables its own
+    // Continue, but browser history can restore a later step with the refused
+    // value still set, and a launch under it aborts at the terms exchange.
+    if (deduplicateRefusal !== undefined) return;
+    // And for a control the operator moved after consenting: the run presents
+    // the committed value, so it starts only while the terms step shows that
+    // same value.
+    if (deduplicateChangedAfterConsent) return;
+    // A re-launch reached by browser Back leaves the offer as the prior launch
+    // left it, so the fresh launch resets it rather than opening under a refusal
+    // the operator has already acted on.
+    setManageOffer(MANAGE_OFFER_IDLE);
+    setLaunched({
+      ...acceptorLaunchPayload(editorState),
+      deduplicate: committedDeduplicate,
+    });
     goToStep("launched");
   };
 
@@ -1082,7 +1196,7 @@ export function AcceptorScreen() {
     // the re-launch. A no-op on a browser accept.
     abandonRun();
     setLaunched(undefined);
-    setManageStatus("idle");
+    setManageOffer(MANAGE_OFFER_IDLE);
     goToStep("columns");
   };
 
@@ -1100,7 +1214,7 @@ export function AcceptorScreen() {
     if (decode.status !== "ready" || launched === undefined) return;
     const { token: invitationToken, endpoint } = decode.invitation;
     if (endpoint.channel !== "webrtc") return;
-    setManageStatus("depositing");
+    setManageOffer({ status: "depositing" });
     try {
       await createManagedExchange(
         buildManagedDeposit(
@@ -1110,6 +1224,7 @@ export function AcceptorScreen() {
               linkageTerms: deriveAcceptedLinkageTerms(
                 invitationToken.linkageTerms,
                 committedName,
+                launched.deduplicate,
               ),
               metadata: launched.edits.metadata,
               standardization: launched.edits.standardization,
@@ -1132,7 +1247,7 @@ export function AcceptorScreen() {
           Date.now(),
         ),
       );
-      setManageStatus("deposited");
+      setManageOffer({ status: "deposited" });
     } catch (error) {
       console.error(
         "managed exchange deposit failed:",
@@ -1141,7 +1256,16 @@ export function AcceptorScreen() {
       whenDiagnostic(() =>
         console.error("managed exchange deposit failed (detail):", error),
       );
-      setManageStatus("error");
+      // The alert names the column out of the document's own metadata, which is
+      // what the refused parse read; a failure no column explains leaves the
+      // generic copy standing.
+      const refused = refusedColumnNames(launched.edits.metadata);
+      setManageOffer({
+        status: "error",
+        ...(refused.length > 0
+          ? { refusal: savedExchangeColumnRefusalAlert(refused) }
+          : {}),
+      });
     }
   }
 
@@ -1159,9 +1283,10 @@ export function AcceptorScreen() {
             step, before consent and file): a way back to an exchange still running
             from a prior visit. Renders nothing when there is none to recover. */}
         {consoleBuild && step === "review" && <RecoveredExchangePanel />}
-        {decode.status === "pending" && (
-          <p aria-live="polite">Reading your invitation...</p>
-        )}
+        {/* No live role: the decode runs once on mount, so this sentence is
+            initial page content that no later change reaches, and the settle
+            moves focus to the terms, the block, or the error alert. */}
+        {decode.status === "pending" && <p>Reading your invitation...</p>}
         {decode.status === "error" && (
           <Alert
             color="red"
@@ -1184,29 +1309,47 @@ export function AcceptorScreen() {
               }
               inviterRetainsFiles={decode.invitation.token.inviterRetainsFiles}
               connectionEndpoint={decode.invitation.token.connectionEndpoint}
+              acceptorDeduplicate={{
+                value: acceptorDeduplicate,
+                onChange: setAcceptorDeduplicate,
+                ...(pairRefusal !== undefined ? { refusal: pairRefusal } : {}),
+              }}
               perspective="review"
               headingOrder={1}
               headingRef={termsHeadingRef}
             />
-            {/* This console cannot run this endpoint's shape: stop here, before
-                consent or intake, with a state naming where the operator CAN
-                run it rather than a doomed run. */}
-            {unsupported !== undefined ? (
+            {/* This console cannot run this endpoint's shape, or no acceptance
+                can run these terms: stop here, before consent or intake, with a
+                state naming what the operator can do rather than a doomed
+                run. */}
+            {reviewBlock !== undefined ? (
               <Alert
-                color="orange"
+                color={reviewBlock.color}
                 icon={<IconAlertCircle aria-hidden />}
-                title={unsupported.title}
-                ref={unsupportedRef}
+                title={reviewBlock.title}
+                ref={reviewBlockRef}
                 tabIndex={-1}
                 mt="md"
               >
-                {unsupported.message}
+                {reviewBlock.message}
               </Alert>
             ) : (
               <div className={styles.workFoot}>
-                <Button onClick={() => goToStep("consent")}>
+                <Button
+                  onClick={() => goToStep("consent")}
+                  disabled={pairRefusal !== undefined}
+                >
                   Continue: consent &amp; your file
                 </Button>
+                {/* The reason beside the disabled button, since the pair that
+                    produced it sits inside a collapsible disclosure the
+                    operator may have closed again. */}
+                {pairRefusal !== undefined && (
+                  <Text size="sm" c="dimmed" mt="xs">
+                    Resolve the duplicate-matching settings in the terms above
+                    to continue.
+                  </Text>
+                )}
               </div>
             )}
           </>
@@ -1453,11 +1596,22 @@ export function AcceptorScreen() {
             )}
             <div className={styles.workFoot}>
               <Button
-                disabled={!consentGateReady || parsing}
+                disabled={
+                  !consentGateReady || parsing || pairRefusal !== undefined
+                }
                 onClick={() => void acceptAndContinue()}
               >
                 Accept and continue
               </Button>
+              {/* The pair refusal re-read here, since browser history can
+                  restore this step past the review step's own disabled
+                  Continue: the control that clears it is back on the terms. */}
+              {pairRefusal !== undefined && (
+                <Text size="sm" c="dimmed" mt="xs">
+                  Go back to the terms and resolve the duplicate-matching
+                  settings to continue.
+                </Text>
+              )}
             </div>
           </>
         )}
@@ -1472,7 +1626,7 @@ export function AcceptorScreen() {
             <AcceptorColumnsStep
               linkageTerms={linkageTerms}
               columns={acquired.columns}
-              bidiStrippedColumns={bidiStrippedColumns}
+              sanitizedColumnPositions={sanitizedColumnPositions}
               columnsState={columnsState}
               editorState={editorState}
               verdict={verdict}
@@ -1487,6 +1641,8 @@ export function AcceptorScreen() {
                   />
                 ) : undefined
               }
+              deduplicatePairRefused={pairRefusal !== undefined}
+              deduplicateChangedAfterConsent={deduplicateChangedAfterConsent}
               connectionBlocked={sftpConnectionMissing}
               exchangeFilesSection={
                 acceptServerJob ? (
@@ -1562,6 +1718,7 @@ export function AcceptorScreen() {
               rates={rates}
               ratesPending={ratesPending}
               coverageUnavailable={ratesUnavailable}
+              coverageRefusedColumns={coverageRefusedColumns}
               deadKeyCount={verdict.deadKeyCount}
               cleaningResetKey={cleaningResetKey}
               {...(consoleSource !== undefined
@@ -1597,7 +1754,8 @@ export function AcceptorScreen() {
               launched !== undefined &&
               failure === undefined && (
                 <ManageExchangeOffer
-                  status={manageStatus}
+                  status={manageOffer.status}
+                  refusal={manageOffer.refusal}
                   handleCaptured={sourceHandle !== undefined}
                   onManage={(choices) => void manageExchange(choices)}
                 />

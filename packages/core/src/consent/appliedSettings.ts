@@ -19,14 +19,14 @@
  * rather than as the setting, so one party's `deduplicate: true` runs
  * under either strategy. `fuzzyComparisons`: `buildKeyStrings` expands
  * each declared element into its candidate set on the party the kind
- * designates, and the single-pass strategy matches the whole set
+ * designates, and both linkage strategies match the whole set
  * (docs/notes/one-sided-fuzzy-expansion.md).
  *
  * A key's `swap` term rides this same flag even though it is not
  * `generateFuzzyComparisons`: its full variant has the receiver build the
  * key in both orders (docs/notes/one-sided-fuzzy-expansion.md), which is
- * a candidate set like any other strategy but single-pass refuses, so it
- * lands with the expansion rather than ahead of it.
+ * a candidate set both linkage strategies resolve, so it lands with the
+ * expansion rather than ahead of it.
  *
  * Typed `boolean`, not the literal values, so a consumer's gate is
  * treated as a genuine runtime branch rather than code a dead-code lint

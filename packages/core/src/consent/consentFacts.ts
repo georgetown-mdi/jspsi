@@ -230,21 +230,51 @@ export const CONSENT_FACTS = {
     basis: "enforced",
     reason:
       "An intrinsic property of an identifier-revealing match rather than a " +
-      "matter of conduct: under `psi` a non-receiving partner learns its own " +
-      "records' membership however honestly it behaves. Bounded to that -- " +
-      "never which of the viewer's records they met, nor anything about the " +
-      "rest of the set beyond its size. Scoped by the ALGORITHM and not by the " +
-      "linkage strategy: it holds for a one-sided `psi` exchange under both " +
-      "strategies, and for no `psi-c` exchange at all, since the role rule " +
-      "makes the non-receiving party of a count-only run the sender -- which " +
-      "computes nothing from the round and is sent no count-report frame " +
-      "(docs/spec/PROTOCOL.md, PSI-C), so it learns no membership to state. " +
-      "Both surfaces therefore render this for `psi` alone, and what a " +
-      "count-only run does disclose is the `countOnly*` tier's to state.",
+      "matter of conduct: under `psi` a non-receiving partner whose half of " +
+      "the association table the run returns learns its own records' " +
+      "membership however honestly it behaves. Bounded to that -- never which " +
+      "of the viewer's records they met, nor anything about the rest of the " +
+      "set beyond its size. Gated first on the ALGORITHM: no `psi-c` exchange " +
+      "states it at all, since the role rule makes the non-receiving party of " +
+      "a count-only run the sender -- which computes nothing from the round " +
+      "and is sent no count-report frame (docs/spec/PROTOCOL.md, PSI-C), so it " +
+      "learns no membership to state, and what a count-only run does disclose " +
+      "is the `countOnly*` tier's. Within `psi` it is the case where that half " +
+      "is returned at all: a single-pass run that withholds the partner's half " +
+      "discloses no membership either, and `partnerOwnMembershipWithheld` " +
+      "below is that case, selected from the run's own resolution rather than " +
+      "from a second reading of the strategy and the payload declaration.",
     note:
       "Even when honored, your partner learns which of its own records are in " +
       "your data (not which of yours). This is inherent to a match that " +
       "reveals identifiers, not a breach.",
+  },
+  partnerOwnMembershipWithheld: {
+    basis: "enforced",
+    reason:
+      "The other case of the same line, on the one combination the exchange " +
+      "closes itself: a single-pass run whose sole receiver is the VIEWER, " +
+      "leaving the partner entitled to no result, over a document declaring " +
+      "that partner's payload direction present and empty. Role resolution " +
+      "seats the party entitled to the result as the receiver, so the partner " +
+      "is the sender the withholding covers, and the receiver suppresses that " +
+      "party's half of the association table entirely while it skips awaiting " +
+      "it, both sides deriving the decision from the same authenticated " +
+      "session state -- so the partner's process never receives, and so never " +
+      "learns, which of its own records the viewer also holds " +
+      "(docs/spec/PROTOCOL.md, Withholding the sender's table from a blind " +
+      "helper). The declared-empty direction is what binds the partner to " +
+      "disclosing no column, which is the second condition the rule asks. " +
+      "Resolved off the run's own predicate -- " +
+      "`withholdsInviterAssociationTable` where the partner is the inviting " +
+      "party and `withholdsAcceptorAssociationTable` where it is the " +
+      "accepting party (consent/invitationSummary.ts) -- so a surface never " +
+      "states this basis for a run that does not withhold.",
+    note:
+      "This exchange withholds your partner's half of the matched-pair table, " +
+      "so its process is never sent which of its own records are in your " +
+      "data. Withholding it is a limit of the exchange rather than a choice " +
+      "of the software your partner runs.",
   },
   duplicateMatches: {
     basis: "enforced",
@@ -254,37 +284,135 @@ export const CONSENT_FACTS = {
       "duplicates take part, and a pair no strategy matches aborts the " +
       "exchange rather than matching looser. The marker carries that fact and " +
       "no more. Where the invitation makes the inviting party the sole " +
-      "receiver, what the accepting party is presented of the grouping is this " +
-      "client's doing rather than the run's, and that limit is " +
-      "`duplicateGroupingDisplayLimit` below -- a fact of its own in the other " +
-      "register, so this marker is never read as covering it.",
+      "receiver, what reaches the accepting party of the grouping is a further " +
+      "fact of its own -- `duplicateGroupingWithheld` where the exchange " +
+      "closes it, `duplicateGroupingDisplayLimit` in the other register where " +
+      "the client alone does -- so this marker is never read as covering " +
+      "either.",
   },
   duplicateGroupingDisplayLimit: {
     basis: "trust-contingent",
     reason:
       "What a sole-receiver acceptance is not handed is the RESULT, and the " +
-      "entitlement gate on the table `runExchange` returns holds that. The " +
-      "grouping itself still reaches the accepting party's process on the paths " +
-      "this basis is measured over. Under cascade its rounds carry each matched " +
-      "position once per group member. Under single-pass the one wire-level " +
-      "withholding (`withholdsSenderAssociationTable`) can close that -- the " +
-      "sole receiver being the party entitled to output, role resolution makes " +
-      "the acceptor the sender the withholding covers -- but only where that " +
-      "party also transmits no payload column, and an invitation requesting one " +
-      "of it leaves the table exchanged. So presenting none of the grouping is " +
-      "the client's doing rather than the exchange's wherever the exchange has " +
-      "not closed it, and what an operator on that side is shown rests on the " +
-      "software that side runs -- the partner's register, not the run's. The " +
-      "note states that general case and so never claims a protection a " +
-      "particular run withholds beyond it. Carried as a fact of its own rather " +
-      "than inside DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT: it renders " +
-      "beside that statement, under the same enforced headline, but as a " +
-      "classified fact of its own rather than as a clause of a sentence whose " +
-      "basis is the headline's.",
+      "entitlement gate on the table `runExchange` returns holds that. On the " +
+      "runs this basis is measured over the grouping still reaches the " +
+      "accepting party's process: under cascade the rounds carry each matched " +
+      "position once per group member, and under single-pass the wire-level " +
+      "withholding does not reach a party that transmits a payload column of " +
+      "its own or is left free to. So presenting none of the grouping is the " +
+      "client's doing rather than the exchange's, and what an operator on that " +
+      "side is shown rests on the software that side runs -- the partner's " +
+      "register, not the run's. The combination the exchange does close is " +
+      "`duplicateGroupingWithheld` below, resolved from the run's own rule " +
+      "(`withholdsAcceptorAssociationTable`) rather than from a second reading " +
+      "here, so neither entry claims the other's ground. Carried as a fact of " +
+      "its own rather than inside " +
+      "DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT: it renders beside that " +
+      "statement, under the same enforced headline, but as a classified fact " +
+      "of its own rather than as a clause of a sentence whose basis is the " +
+      "headline's.",
     note:
       "psilink receives the group sizes and row positions and does not show " +
       "them to you. Withholding them is this software's choice rather than a " +
       "limit of the exchange, so other software on this side could show them.",
+  },
+  duplicateGroupingWithheld: {
+    basis: "enforced",
+    reason:
+      "The other case of the same line, on the one combination the exchange " +
+      "itself closes: a single-pass run whose sole receiver is the inviting " +
+      "party and whose invitation requests no payload column of the accepting " +
+      "party. The receiver suppresses the accepting party's half of the " +
+      "association table entirely and that party skips awaiting it, both sides " +
+      "deriving the decision from the same authenticated session state, so its " +
+      "process is sent neither the group sizes and row positions nor its own " +
+      "records' membership (docs/spec/PROTOCOL.md, Withholding the sender's " +
+      "table from a blind helper, and its composition with a deduplicating " +
+      'cardinality under Where the "one" party receives no output). Enforced ' +
+      "in the register's own sense rather than merely likely: the empty " +
+      "payload request mirrors to an empty `payload.send` for the accepting " +
+      "party, which is held to exactly the columns its metadata discloses " +
+      "before any data moves, so a run whose file would disclose a column " +
+      "stops there instead of reaching the linkage with the table exchanged. " +
+      "The condition is resolved by `withholdsAcceptorAssociationTable` " +
+      "(consent/invitationSummary.ts) off the run's own predicate, so a " +
+      "surface never states this basis for a run that does not withhold.",
+    note:
+      "This exchange withholds your half of the matched-pair table: psilink " +
+      "on this side never reads it, and a partner running psilink never sends " +
+      "it. You are shown no group sizes, no row positions, and nothing about " +
+      "which of your own records matched. Withholding them is a limit of the " +
+      "exchange rather than this software's choice.",
+  },
+  partnerReadsDuplicateGrouping: {
+    basis: "trust-contingent",
+    reason:
+      "The same two registers as the pair above, read from the other side: " +
+      "the ACCEPTING party groups its own records and the inviting party is " +
+      "entitled to no result. The result gate hands that party none, but the " +
+      "run still reaches its process -- under cascade the rounds carry each " +
+      "matched position once per group member, and under single-pass the " +
+      "wire-level withholding does not reach a party that transmits a payload " +
+      "column of its own or is left free to. So what a partner is shown of " +
+      "the grouping rests on the software it runs, which is the partner's " +
+      "register rather than the run's. The combination the exchange does " +
+      "close is `partnerDuplicateGroupingWithheld` below, resolved from the " +
+      "run's own rule (`withholdsInviterAssociationTable`) rather than from a " +
+      "second reading here.",
+    note:
+      "Your partner's process is sent the group sizes and row positions your " +
+      "matched records fall into, though these terms hand it no result. What " +
+      "it shows of them rests on the software your partner runs.",
+  },
+  partnerDuplicateGroupingWithheld: {
+    basis: "enforced",
+    reason:
+      "The other case of the same line: a single-pass run whose sole receiver " +
+      "is the ACCEPTING party and whose inviting party declares an empty " +
+      "`payload.send`. Role resolution seats the party entitled to the result " +
+      "as the receiver, so the inviting party is the sender the withholding " +
+      "covers, and the receiver suppresses its half of the association table " +
+      "entirely while that party skips awaiting it, both sides deriving the " +
+      "decision from the same authenticated session state (docs/spec/" +
+      "PROTOCOL.md, Withholding the sender's table from a blind helper, and " +
+      'its composition with a deduplicating cardinality under Where the "one" ' +
+      "party receives no output). The declared-empty send is what binds the " +
+      "inviting party to disclosing no column, which is the second condition " +
+      "the rule asks. Resolved by `withholdsInviterAssociationTable` " +
+      "(consent/invitationSummary.ts) off the run's own predicate, so a " +
+      "surface never states this basis for a run that does not withhold.",
+    note:
+      "This exchange withholds your partner's half of the matched-pair table, " +
+      "so its process is sent no group sizes and no row positions for your " +
+      "matched records. Withholding them is a limit of the exchange rather " +
+      "than a choice of the software your partner runs.",
+  },
+  acceptorDeduplicateRefused: {
+    basis: "enforced",
+    reason:
+      "What this party's own `deduplicate` would do against an invitation " +
+      "that declares both a candidate set and the inviting party's own " +
+      "`deduplicate`: the pair resolves to a many-to-many match, which no " +
+      "linkage strategy pairs with a candidate set, so the accept boundary " +
+      "refuses it (`assertCandidateSetCardinalityImplemented`, reached from " +
+      "`deriveAcceptedLinkageTerms`) and the agreed-terms run boundary " +
+      "refuses it again (`resolveLinkageCardinality`). Both of the " +
+      "conditions this party does not set are the invitation's own, so the " +
+      "consequence is stated before the value that completes the " +
+      "combination is set rather than met at the accept. Resolved by " +
+      "`acceptorDeduplicateRefused` (consent/invitationSummary.ts) off the " +
+      "refusal's own predicates, so a surface never states it for an " +
+      "invitation the accept would take. The exchange does not run at all, " +
+      "which is a fact of the run rather than of the partner's conduct.",
+    note:
+      "Your partner declares that several of its records may match one of " +
+      "yours, and these terms expand one value into several match candidates " +
+      "for a linkage key. With duplicate matching set for your own records " +
+      "as well, each party's records could group the other's while matching " +
+      "through several candidates at once, which no linkage strategy pairs " +
+      "-- so the exchange will refuse to run. Leave your own setting off to " +
+      "run these terms, or ask your partner for an invitation that drops " +
+      "either the expansion or its own duplicate matching.",
   },
   matchedFields: {
     basis: "enforced",
@@ -328,9 +456,12 @@ export const CONSENT_FACTS = {
       "one key, not what the partner does with it. Every candidate enters that " +
       "key's round as its own entry; a record appearing in any of the round's " +
       "candidate pairs leaves candidacy for every later key, paired or not; and " +
-      "the index table the single-pass receiver holds carries each sender " +
-      "record's candidate grouping for every key, matched or not. All three are " +
-      "properties of the round rather than of anyone's conduct. The normative " +
+      "each strategy pays a grouping disclosure of its own -- the index table " +
+      "the single-pass receiver holds carries each sender record's candidate " +
+      "grouping for every key, matched or not, where a cascade round states " +
+      "each party's grouping of that round's matched values alone. All three " +
+      "are properties of the round rather than of anyone's conduct. The " +
+      "normative " +
       "rows are docs/spec/PROTOCOL.md's (Fan-out matching, and the disclosure " +
       "delta fan-out pays), so a row reclassified there and not here is a " +
       "divergence between a specification and the sentence an acceptor consents " +
@@ -341,28 +472,31 @@ export const CONSENT_FACTS = {
       "That match can rest on one candidate out of a name rather than on the " +
       "whole value, which is weaker evidence. A record matched this way is " +
       "paired at most once and is then left out of the later, less precise " +
-      "keys, whether or not that pairing stands. Splitting runs under " +
-      "single-pass linkage, so the party that receives the other's key " +
-      "structure also learns how many candidates each of the other's records " +
-      "produced for each key and which of its values came from the same " +
-      "record.",
+      "keys, whether or not that pairing stands. Under single-pass linkage the " +
+      "party that receives the other's key structure also learns how many " +
+      "candidates each of the other's records produced for each key and which " +
+      "of its values came from the same record; under cascade linkage each " +
+      "party learns instead how the other's matched values group into records, " +
+      "round by round, for the records still in the running.",
   },
   fanOutRefused: {
     basis: "enforced",
     reason:
       "The other case of the same line, and enforced for the same reason the " +
-      "`deduplicate` refusal is: matching on several candidates per record is " +
-      "specified for the single-pass strategy alone, so terms declaring one " +
-      "under any other strategy are refused when they are authored or minted, " +
-      "at the local prepare step, and again at the agreed-terms run boundary. " +
-      "The exchange this invitation proposes does not run at all, which is a " +
-      "fact of the run rather than of the partner's conduct.",
+      "`deduplicate` refusal is: a count-only exchange counts matched values " +
+      "where the matching pairs each record at most once, and a linkage " +
+      "strategy with no resolution written for a candidate set matches one " +
+      "value per record, so terms declaring one under either are refused when " +
+      "they are authored or minted, at the local prepare step, and again at " +
+      "the agreed-terms run boundary. The exchange this invitation proposes " +
+      "does not run at all, which is a fact of the run rather than of the " +
+      "partner's conduct.",
     note:
       "Your partner proposes splitting a value into several candidates to match " +
-      "on, which runs under single-pass linkage only, and this invitation names " +
-      "a different linkage strategy -- so the exchange will refuse to run. Ask " +
-      "your partner for an invitation that either drops the split or uses " +
-      "single-pass linkage.",
+      "on, which the algorithm and linkage strategy this invitation names do " +
+      "not match on -- so the exchange will refuse to run. Ask your partner for " +
+      "an invitation that either drops the split or names terms that match on " +
+      "each candidate.",
   },
   inboundPayloadColumnsCarried: {
     basis: "enforced",
@@ -470,6 +604,26 @@ export const CONSENT_FACTS = {
 
 /** A key of {@link CONSENT_FACTS}. */
 export type ConsentFactId = keyof typeof CONSENT_FACTS;
+
+/**
+ * The facts only a seat where the ACCEPTING party declares a `deduplicate` of
+ * its own can reach.
+ *
+ * A surface offering no such control accepts with that party's side derived
+ * false ({@link deriveAcceptedLinkageTerms}), so the run these state -- the
+ * accepting party grouping its own records while the inviting party is
+ * entitled to no result, and the refusal that party's own `deduplicate`
+ * completes -- is one it never conducts, and rendering any of these sentences
+ * there would state a disclosure or a refusal that acceptance does not make.
+ * The per-surface checks that hold a surface to every fact's note read this
+ * set rather than each excluding by hand, so which surface owes which
+ * sentence stays one judgment.
+ */
+export const ACCEPTOR_DEDUPLICATE_CONTROL_FACTS = [
+  "partnerReadsDuplicateGrouping",
+  "partnerDuplicateGroupingWithheld",
+  "acceptorDeduplicateRefused",
+] as const satisfies ReadonlyArray<ConsentFactId>;
 
 /**
  * The terse marker a surface with no styling budget puts on a fact's own label to
@@ -803,12 +957,14 @@ export const DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT =
  * party's own output entitlement, so a sole-receiver acceptance is handed
  * none (pinned in packages/core/test/config/linkageCardinality.test.ts). The
  * statement therefore says what this client presents and stops there. What
- * the wire does NOT withhold is a fact of its own, held by the
- * `duplicateGroupingDisplayLimit` entry of {@link CONSENT_FACTS} and
- * rendered beside this statement: it belongs to the partner's register
- * rather than the run's, so folding it in here would leave a
- * trust-contingent fact unclassified inside a sentence under an enforced
- * headline.
+ * the exchange itself does with the grouping is a fact of its own, rendered
+ * beside this statement and selected between two {@link CONSENT_FACTS}
+ * entries by the run's own resolution
+ * ({@link withholdsAcceptorAssociationTable}): the enforced
+ * `duplicateGroupingWithheld` where the wire suppresses the accepting party's
+ * half, and the trust-contingent `duplicateGroupingDisplayLimit` where it
+ * does not. Folding either in here would leave a fact of one register
+ * unclassified inside a sentence whose basis is the headline's.
  *
  * That split is what keeps the `duplicateMatches` marker at `enforced` while the
  * limit is marked for what it is. The marker states its headline's own fact --
@@ -834,36 +990,53 @@ export const DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT =
   "group sizes and no row positions.";
 
 /**
- * The direction note a surface renders beside whichever of the two disclosure
- * statements above the invitation's output shape selects, for the same
- * deduplicating invitation: whose records the setting groups, and what it still
- * costs the party whose records it does not group.
+ * What an inviting party's `deduplicate` costs the accepting party whose
+ * records it does not group -- the sentence both acceptor-side notes below
+ * hold, and the one the consent-coverage check pins across every surface
+ * (`consent/linkageTermConsentCoverage.ts`).
  *
- * The two are separate facts and a reader is entitled to both: the statement
- * says what a deduplicating match discloses, this says whose records are
- * grouped to disclose it. Accepting does NOT turn the setting on for the
- * accepting party -- `deriveAcceptedLinkageTerms` derives that party's own
- * `deduplicate` as false rather than adopting the invitation's, so the
- * accepting party's rows are never grouped -- and without this note a reader
- * would have no way to tell whether their own file is the one being grouped.
+ * The two notes differ only in the remedy they name, which is a property of
+ * the seat rather than of the disclosure, so the disclosure is stated once
+ * here. It is the outbound half the grouping direction leaves open: more of
+ * the accepting party's records can match than in a one-to-one run of the
+ * same two files, each one disclosing its membership and any payload columns
+ * it sends, on the inviting party's declaration alone. A reader told only
+ * that their records are not grouped would take that as no consequence at
+ * all.
  *
- * What the derivation closes is the grouping direction, not the accepting
- * party's outbound disclosure, which the setting does move: more of that
- * party's records can match than in a one-to-one run of the same two files,
- * each one disclosing its membership and any payload columns it sends, on
- * the inviting party's declaration alone. A reader told only that their
- * records are not grouped would take that as no consequence at all.
+ * It states that OUTCOME, not the mechanism behind it (recorded instead in
+ * docs/notes/deduplicate-matching-semantics.md). It is a widening rather than
+ * a new capability: an inviting party that collapsed its own duplicate rows
+ * before the exchange would match exactly the same records one-to-one, so the
+ * setting buys a hostile inviter nothing it could not do locally.
+ */
+export const DEDUPLICATE_ACCEPTOR_WIDENING_NOTE =
+  "It still widens what the accepting party discloses -- more of its records " +
+  "can match than in a plain one-to-one run of the same two files, each one " +
+  "disclosing its membership and any payload columns it sends.";
+
+/**
+ * The direction note a surface with NO control over the accepting party's own
+ * `deduplicate` renders beside whichever of the two disclosure statements
+ * above the invitation's output shape selects: whose records the setting
+ * groups, what it still costs the other party, and where the other direction
+ * is declared.
  *
- * The note states that OUTCOME, not the mechanism behind it (recorded
- * instead in docs/notes/deduplicate-matching-semantics.md). It is a
- * widening rather than a new capability: an inviting party that collapsed
- * its own duplicate rows before the exchange would match exactly the same
- * records one-to-one, so the setting buys a hostile inviter nothing it
- * could not do locally.
+ * The statement and the direction are separate facts and a reader is entitled
+ * to both: the statement says what a deduplicating match discloses, this says
+ * whose records are grouped to disclose it. On this seat accepting does NOT
+ * turn the setting on for the accepting party -- the caller passes no
+ * `acceptorDeduplicate`, so `deriveAcceptedLinkageTerms` derives that party's
+ * own `deduplicate` as false -- and without this note a reader would have no
+ * way to tell whether their own file is the one being grouped.
  *
- * It names the way to the other direction rather than leaving it unsaid, because
- * the invitation path offers no control for it: each party's own `deduplicate`
+ * It names the way to the other direction rather than leaving it unsaid,
+ * because this seat offers no control for it: each party's own `deduplicate`
  * comes from its own configuration file, and the two run `psilink exchange`.
+ * A seat that DOES offer the control renders
+ * {@link DEDUPLICATE_ACCEPTOR_SETTABLE_SIDE_NOTE} instead, whose closing
+ * sentence names the control rather than a configuration file the operator
+ * may not have.
  *
  * Rendered at the same visibility level as the statement it follows, by the
  * placement rule both surfaces hold: a reader who meets what a deduplicating
@@ -873,11 +1046,184 @@ export const DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT =
  */
 export const DEDUPLICATE_ACCEPTOR_SIDE_NOTE =
   "This setting is the inviting party's own: the accepting party's records are " +
-  "never grouped. It still widens what the accepting party discloses -- more " +
-  "of its records can match than in a plain one-to-one run of the same two " +
-  "files, each one disclosing its membership and any payload columns it sends. " +
-  "Grouping the accepting party's records instead is set up from each party's " +
+  "never grouped. " +
+  DEDUPLICATE_ACCEPTOR_WIDENING_NOTE +
+  " Grouping the accepting party's records instead is set up from each party's " +
   "own configuration file, where each party declares its own side.";
+
+/**
+ * The same direction note for a seat where the accepting party sets its own
+ * `deduplicate` in place.
+ *
+ * It drops the "never grouped" clause, which that seat's own pair statement
+ * answers with the two values actually selected
+ * ({@link describeDeduplicatePair}) and which an operator who turns its own
+ * side on would read as false. It keeps the widening the inviting party's
+ * value costs the accepting party either way, and it closes on the control
+ * rather than on a configuration file -- the sentence
+ * {@link DEDUPLICATE_ACCEPTOR_SIDE_NOTE} ends on, which is a dead end for an
+ * operator accepting from a browser.
+ *
+ * Fixed first-party copy naming no value, so a surface may render it verbatim.
+ */
+export const DEDUPLICATE_ACCEPTOR_SETTABLE_SIDE_NOTE =
+  "This setting is the inviting party's own. " +
+  DEDUPLICATE_ACCEPTOR_WIDENING_NOTE +
+  " Grouping the accepting party's records is that party's own setting, which " +
+  "it declares with these terms rather than taking from this invitation.";
+
+/**
+ * The disclosure statement {@link DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT}
+ * makes, written for a seat where each party declares its own `deduplicate`
+ * against terms it read from its own file and no invitation stands between the
+ * two.
+ *
+ * The party-named form cannot be used there. Nothing on that seat tells the
+ * reader which of the two roles is theirs, so a reader mapping "the inviting
+ * party" onto their partner reads the disclosure direction inverted -- the one
+ * thing the sentence exists to state. Here the reader is the party that
+ * declared the setting, and its partner is the party whose matched records the
+ * grouping reaches.
+ *
+ * It states the same three things the party-named form fixes, the integrity
+ * limit it closes on included: the count is the declaring party's own
+ * declaration rather than a fact psilink checks against its data, so dropping
+ * or softening that clause would state a guarantee no check makes.
+ *
+ * Fixed first-party copy naming no value, so a surface may render it verbatim.
+ */
+export const DEDUPLICATE_PARTNER_DECLARED_DISCLOSURE_STATEMENT =
+  "Grouping is what a deduplicating match discloses: for each of your " +
+  "partner's matched records, your partner learns how many of your records " +
+  "share the matched linkage-key value and which of your rows they are -- a " +
+  "count and row positions, never the value behind them, and only for groups " +
+  "that matched. That count is your own declaration, which psilink does not " +
+  "check against your data.";
+
+/**
+ * The widening {@link DEDUPLICATE_ACCEPTOR_WIDENING_NOTE} states, for the seat
+ * whose copy is written in the second person.
+ *
+ * The same disclosure and the same direction: the party paying it is the one
+ * that did not declare the setting, which on this seat is the reader's partner.
+ *
+ * Fixed first-party copy naming no value, so a surface may render it verbatim.
+ */
+export const DEDUPLICATE_PARTNER_DECLARED_WIDENING_NOTE =
+  "It still widens what your partner discloses -- more of its records can " +
+  "match than in a plain one-to-one run of the same two files, each one " +
+  "disclosing its membership and any payload columns it sends.";
+
+/**
+ * The same direction note for a seat where each party declares its own
+ * `deduplicate` against terms it read from its own file, and no document
+ * states the other party's -- the exchange both parties run against an
+ * agreed server with no invitation between them.
+ *
+ * It drops the "never grouped" clause for a different reason than
+ * {@link DEDUPLICATE_ACCEPTOR_SETTABLE_SIDE_NOTE} does: not because the seat
+ * states the pair, but because this seat cannot know the other side. The
+ * partner declares its own value on its own run, so a surface asserting that
+ * party's records are never grouped would state a fact nothing here decides.
+ * It keeps the widening this party's value costs the partner, and it closes
+ * on where the other direction is declared.
+ *
+ * Written in the second person, like the statement it follows there, for the
+ * reason {@link DEDUPLICATE_PARTNER_DECLARED_DISCLOSURE_STATEMENT} gives: no
+ * invitation on this seat tells the reader which party role is theirs.
+ *
+ * Fixed first-party copy naming no value, so a surface may render it verbatim.
+ */
+export const DEDUPLICATE_PARTNER_DECLARED_SIDE_NOTE =
+  "This setting is your own. " +
+  DEDUPLICATE_PARTNER_DECLARED_WIDENING_NOTE +
+  " Grouping your partner's records is that party's own setting, which it " +
+  "declares on its own run rather than reading from these terms.";
+
+/**
+ * The two parties' `deduplicate` values against the output shape they are
+ * declared under -- the whole of what {@link describeDeduplicatePair} reads.
+ */
+export interface DeduplicatePair {
+  /** The value the invitation declares for the inviting party. */
+  inviterDeduplicate: boolean;
+  /** The value the accepting party declares for itself at the seat. */
+  acceptorDeduplicate: boolean;
+  /**
+   * Whether the invitation's `output.expectsOutput` entitles the inviting
+   * party to the result. False leaves the accepting party the only party
+   * these terms hand one, which changes who reads a grouping of the accepting
+   * party's records. A deduplicating party must be entitled to output, so this
+   * is false only where {@link inviterDeduplicate} is.
+   */
+  inviterReceivesResult: boolean;
+}
+
+/**
+ * What the two parties' `deduplicate` values disclose, as the one sentence
+ * pair a seat where the accepting party sets its own value renders: both
+ * values, then what that combination hands the parties the result reaches.
+ *
+ * Stated at the seat rather than after the terms exchange, which is where
+ * `describeResolvedMatching` (`pairTableProjection.ts`) states the agreed pair
+ * and the cardinality it resolved to. The two are the same fact at two
+ * moments: this one is what the accepting party consents to, over the value
+ * the invitation declares and the value the operator has selected, and it
+ * runs before any key or payload moves.
+ *
+ * The accepting party's own grouping takes two sentences, one per output
+ * shape: where the inviting party is entitled to the result both parties read
+ * the grouping, and where it is not, the accepting party is the only party
+ * handed one -- so a sentence naming the result's receivers would there name
+ * the reader alone and read as nobody else learning it. What the inviting
+ * party's PROCESS still reads in that shape is a fact of its own beside this
+ * sentence, `partnerReadsDuplicateGrouping` or the enforced
+ * `partnerDuplicateGroupingWithheld`, selected by the run's own resolution
+ * (`withholdsInviterAssociationTable`); folding either in here would leave a
+ * fact of one register unclassified inside a sentence carrying no basis.
+ *
+ * Each branch spells its whole sentence rather than interpolating a phrase a
+ * ternary picked, so every reading is fixed first-party copy naming no
+ * partner-authored value; a surface may render any of them verbatim.
+ */
+export function describeDeduplicatePair({
+  inviterDeduplicate,
+  acceptorDeduplicate,
+  inviterReceivesResult,
+}: DeduplicatePair): string {
+  if (inviterDeduplicate && acceptorDeduplicate)
+    return (
+      "Both parties declare deduplicate true. One matched linkage-key value " +
+      "pairs every one of the accepting party's records holding it with every " +
+      "one of the inviting party's, so the result discloses both parties' " +
+      "groupings and holds one row per matched pair."
+    );
+  if (inviterDeduplicate)
+    return (
+      "The inviting party declares deduplicate true and the accepting party " +
+      "declares deduplicate false. Several of the inviting party's records may " +
+      "match a single one of the accepting party's; none of the accepting " +
+      "party's records are grouped onto one of the inviting party's."
+    );
+  if (acceptorDeduplicate)
+    return inviterReceivesResult
+      ? "The inviting party declares deduplicate false and the accepting " +
+          "party declares deduplicate true. Several of the accepting party's " +
+          "records may match a single one of the inviting party's, so both " +
+          "parties receive a result stating how many of the accepting party's " +
+          "records share a matched linkage-key value and which of its rows " +
+          "they are."
+      : "The inviting party declares deduplicate false and the accepting " +
+          "party declares deduplicate true. Several of the accepting party's " +
+          "records may match a single one of the inviting party's, so the " +
+          "result states how many of the accepting party's records share a " +
+          "matched linkage-key value and which of its rows they are. These " +
+          "terms hand that result to the accepting party alone.";
+  return (
+    "Both parties declare deduplicate false. Each party's records match at " +
+    "most one of the other's, so neither party's file is grouped."
+  );
+}
 
 /**
  * The caveat copy for a term an inviter may declare that today's exchange does

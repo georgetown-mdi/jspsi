@@ -4,7 +4,7 @@ import {
   describeExchangeStages,
 } from "@psilink/core";
 
-import type { PreparedExchange } from "@psilink/core";
+import type { PreparedExchange, ResolvedMatching } from "@psilink/core";
 import type { StageDefinition } from "@psi/exchangeLifecycle";
 
 /**
@@ -108,6 +108,12 @@ export interface ExchangeRun {
   visits: Array<StageVisit>;
   finishedAt?: Date;
   failed: boolean;
+  /** What the two parties' agreed `deduplicate` values resolved to, set from the
+   * in-browser driver's protocol-confirmation report, so the running screen
+   * states the pair while the run is still going. Unset until that report; a
+   * console-conducted run takes the pair off its terminal result instead, where
+   * it reaches the completion panel through the run's outputs. */
+  matching?: ResolvedMatching;
 }
 
 export function initialRun(seat: ExchangeSeat = "inviter"): ExchangeRun {
@@ -168,6 +174,15 @@ export function runWithCompletion(run: ExchangeRun, at: Date): ExchangeRun {
     ],
     finishedAt: at,
   };
+}
+
+/** Record what the agreed `deduplicate` values resolved to, reported once at
+ * protocol confirmation and read by the running screen. */
+export function runWithMatching(
+  run: ExchangeRun,
+  matching: ResolvedMatching,
+): ExchangeRun {
+  return { ...run, matching };
 }
 
 /** Mark the run failed: the timeline and history freeze where they stand and

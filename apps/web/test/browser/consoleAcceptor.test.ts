@@ -395,7 +395,7 @@ const ACCEPT_PROFILE = {
   ...ACCEPT_FILE,
   rowCount: 2,
   columns: ["first_name", "last_name"],
-  bidiStrippedColumns: [],
+  sanitizedColumnPositions: [],
   dateInputFormat: "%m/%d/%Y",
   columnSamples: [
     { column: "first_name", values: ["Ann", "Bo"] },
@@ -437,14 +437,20 @@ interface AcceptStubOptions {
 // POST plus event stream the console run reads. With `conflict` the POST returns a
 // busy (409) so the accept re-attaches to the occupying exchange instead. Unmatched
 // URLs fall through to the real fetch so the runner's own traffic is untouched.
+// Each request is recorded with its body, so a test can read the intent a launch
+// hands the console.
 function stubServerJobAccept(options: AcceptStubOptions = {}): {
-  captured: Array<{ url: string; method: string }>;
+  captured: Array<{ url: string; method: string; body?: BodyInit | null }>;
   emitEvent: (event: object) => void;
   closeEvents: () => void;
   hasEventStream: () => boolean;
   resolveProbe: () => void;
 } {
-  const captured: Array<{ url: string; method: string }> = [];
+  const captured: Array<{
+    url: string;
+    method: string;
+    body?: BodyInit | null;
+  }> = [];
   const realFetch = window.fetch.bind(window);
   const encoder = new TextEncoder();
   let sse: ReadableStreamDefaultController<Uint8Array> | undefined;
@@ -474,7 +480,7 @@ function stubServerJobAccept(options: AcceptStubOptions = {}): {
     (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
       const url = String(input);
       if (!url.startsWith("/api/jobs")) return realFetch(input, init);
-      captured.push({ url, method: init?.method ?? "GET" });
+      captured.push({ url, method: init?.method ?? "GET", body: init?.body });
       if (url === "/api/jobs/rendezvous")
         return Promise.resolve(
           jsonResponse(
@@ -589,7 +595,7 @@ describe("console acceptor sanitized-header notice", () => {
     // the names are read and marked. Positions only -- echoing the header would
     // put the removed characters back into the notice.
     stubServerJobAccept({
-      profile: { ...ACCEPT_PROFILE, bidiStrippedColumns: [2] },
+      profile: { ...ACCEPT_PROFILE, sanitizedColumnPositions: [2] },
     });
     window.location.hash = await encodeToken(FILEDROP_ENDPOINT);
     app.render(createElement(AcceptorScreen));
@@ -597,7 +603,9 @@ describe("console acceptor sanitized-header notice", () => {
 
     await expect
       .element(
-        page.getByText("A formatting character was removed from a column name"),
+        page.getByText(
+          "An invisible control character was removed from a column name",
+        ),
       )
       .toBeInTheDocument();
     await expect
@@ -641,7 +649,9 @@ describe("console acceptor unnamed-column refusal", () => {
       .not.toBeInTheDocument();
     await expect
       .element(
-        page.getByText("A formatting character was removed from a column name"),
+        page.getByText(
+          "An invisible control character was removed from a column name",
+        ),
       )
       .toBeInTheDocument();
   });
@@ -832,13 +842,29 @@ describe("console acceptor re-attaches on a busy create", () => {
         }),
       )
       .toBeInTheDocument();
+    // The lead reads twice -- the polite region announces it, the visible notice
+    // leads with it -- so the visible one is the last of the two.
+    await expect
+      .element(
+        page
+          .getByText("You are back on an exchange this console already holds.")
+          .last(),
+      )
+      .toBeVisible();
+    await expect
+      .element(page.getByTestId("reattach-announcement"))
+      .toHaveTextContent(
+        "You are back on an exchange this console already holds.",
+      );
+    // Body text unique to the visible notice, absent from the hidden
+    // announcement region, so this fails if the notice itself never mounts.
     await expect
       .element(
         page.getByText(
-          "You are back on an exchange this console already holds.",
+          "This exchange was already running here -- from another tab or an earlier visit -- so you are watching it rather than starting a new one.",
         ),
       )
-      .toBeInTheDocument();
+      .toBeVisible();
 
     // The resolved id was probed live and its event stream re-attached to.
     await vi.waitFor(() =>
@@ -1004,9 +1030,14 @@ describe("console acceptor run warnings", () => {
       message: "the rendezvous directory is not empty",
     });
     api.closeEvents();
+    // The headline reads twice while the alert stands -- the polite region
+    // announces it, the visible Alert is titled with it.
     await expect
-      .element(page.getByText("The exchange reported a warning"))
-      .toBeInTheDocument();
+      .element(page.getByText("The exchange reported a warning").last())
+      .toBeVisible();
+    await expect
+      .element(page.getByTestId("run-warnings-announcement"))
+      .toHaveTextContent("The exchange reported a warning");
     await expect.element(page.getByText(NOT_EMPTY_LEAD)).toBeInTheDocument();
   });
 });
@@ -1118,5 +1149,34 @@ describe("console acceptor recoveries against the run's exchange record", () => 
         ),
       ).toBe(true),
     );
+  });
+});
+
+describe("console acceptor's own deduplicate", () => {
+  test("the console runs the value the consent gate committed", async () => {
+    // This party's own side reaches the intent the console conducts the
+    // exchange from, so the run presents the value that passed the consent
+    // gate rather than the closed default an accept with no control derives.
+    const api = stubServerJobAccept();
+    window.location.hash = await encodeToken(FILEDROP_ENDPOINT);
+    app.render(createElement(AcceptorScreen));
+    await page.getByRole("button", { name: "Other details" }).click();
+    await userEvent.click(
+      page.getByRole("checkbox", {
+        name: "Let several of my records match one of my partner's",
+      }),
+    );
+    await reachAcceptStart();
+
+    const create = api.captured.find(
+      (request) => request.url === "/api/jobs" && request.method === "POST",
+    );
+    const intent = JSON.parse(String(create?.body)) as {
+      linkageTerms: { deduplicate: boolean };
+      expectedPartnerDeduplicate?: boolean;
+    };
+    expect(intent.linkageTerms.deduplicate).toBe(true);
+    // The invitation's own declared side is untouched by this party's control.
+    expect(intent.expectedPartnerDeduplicate).toBe(false);
   });
 });

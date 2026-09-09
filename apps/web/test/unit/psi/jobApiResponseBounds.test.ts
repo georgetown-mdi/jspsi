@@ -247,7 +247,7 @@ describe("a status body over its cap fails the reader safely", () => {
       identityFileName: ".psilink-signing-identity.json",
     });
     await expect(
-      resolveSigningFingerprint("me", false, answering(body)),
+      resolveSigningFingerprint("me", {}, answering(body)),
     ).resolves.toEqual({ kind: "error" });
   });
 });
@@ -376,7 +376,7 @@ describe("a body that fails part-way through the stream fails the reader safely"
 
   test("a signing-fingerprint request reports an error", async () => {
     await expect(
-      resolveSigningFingerprint("me", false, answeringWithFailingStream()),
+      resolveSigningFingerprint("me", {}, answeringWithFailingStream()),
     ).resolves.toEqual({ kind: "error" });
   });
 });

@@ -11,7 +11,13 @@ import { createElement } from "react";
 // bound and blankets the top bar, intercepting unrelated clicks.
 import "@mantine/core/styles.css";
 
-import { decodeInvitation, getDefaultLinkageTerms } from "@psilink/core";
+import {
+  OperatorConfigError,
+  assertTransformsCompile,
+  decodeInvitation,
+  describeResolvedMatching,
+  getDefaultLinkageTerms,
+} from "@psilink/core";
 import { minimalPreparedExchange } from "@psilink/core/testing";
 
 import { STEP_STATE_KEY } from "@exchange/stepHistory";
@@ -32,7 +38,11 @@ import { isolatedColumnName } from "@components/ColumnName";
 import { createAppMount, flushPendingUpdates } from "./renderApp";
 import { captureDownloads } from "./captureDownloads";
 
-import type { PreparedExchange } from "@psilink/core";
+import type {
+  LinkageTerms,
+  PreparedExchange,
+  TransformStep,
+} from "@psilink/core";
 
 // The grid's control labels isolate the header they name (the treatment
 // MatchingSharingSection applies), so selectors derive the label from the
@@ -125,6 +135,12 @@ interface CapturedLifecycle {
     intersectionCount?: number;
     countReportedByPartner?: boolean;
     matchedRecordCount?: number;
+    matching?: {
+      localDeduplicate: boolean;
+      partnerDeduplicate: boolean;
+      cardinality:
+        "one-to-one" | "one-to-many" | "many-to-one" | "many-to-many";
+    };
     record?: {
       recordUrl: string;
       recordFileName: string;
@@ -133,6 +149,11 @@ interface CapturedLifecycle {
     };
   }) => void;
   onError: (failure: { category: string; error: unknown }) => void;
+  onResolvedMatching: (matching: {
+    localDeduplicate: boolean;
+    partnerDeduplicate: boolean;
+    cardinality: "one-to-one" | "one-to-many" | "many-to-one" | "many-to-many";
+  }) => void;
 }
 const lifecycleHarness = vi.hoisted(() => ({
   calls: [] as Array<unknown>,
@@ -233,6 +254,92 @@ async function reachReviewCreate() {
   await expect
     .element(page.getByRole("heading", { level: 1 }))
     .toHaveTextContent("Review & create");
+}
+
+// The refusals the mint's transform check raises, built by driving the real
+// check rather than written by hand: what the screen has to map is what the mint
+// throws. The marker is planted at every site an imported document names -- the
+// key's name, the element's field, the step's function, and a param's name and
+// value -- so a rendered alert can be measured against the document it refused:
+// an imported one may be partner-authored, and none of its bytes may reach the
+// copy.
+const REFUSAL_MARKER = "ZZTRANSFORMMARK";
+
+const MARKED_PARAMS: Record<string, unknown> = {
+  [`${REFUSAL_MARKER}_setting`]: REFUSAL_MARKER,
+};
+
+function markedTerms(transform: Array<TransformStep>): LinkageTerms {
+  return {
+    ...getDefaultLinkageTerms("Refusal fixture"),
+    linkageKeys: [
+      {
+        name: `${REFUSAL_MARKER} key`,
+        elements: [{ field: `${REFUSAL_MARKER}_field`, transform }],
+      },
+    ],
+  };
+}
+
+function refusalFrom(
+  terms: LinkageTerms,
+  budget: { totalBudgetMs?: number } | undefined,
+  what: string,
+): Error {
+  try {
+    assertTransformsCompile(terms, undefined, budget);
+  } catch (error) {
+    return error as Error;
+  }
+  throw new Error(`expected the transform check to refuse: ${what}`);
+}
+
+function transformCheckRefusal(
+  reason: "uncompilable-step" | "unrecognized-function" | "too-many-steps",
+): Error {
+  // A multi-character pad fill throws where the step compiles, as does a
+  // function name this build does not have; 600 steps is over the check's
+  // 512-step count bound, which it answers before any compile.
+  const transform: Array<TransformStep> =
+    reason === "uncompilable-step"
+      ? [
+          {
+            function: "pad_left",
+            params: { ...MARKED_PARAMS, length: 4, char: REFUSAL_MARKER },
+          },
+        ]
+      : reason === "unrecognized-function"
+        ? [{ function: `${REFUSAL_MARKER}_function`, params: MARKED_PARAMS }]
+        : Array.from({ length: 600 }, () => ({
+            function: "to_upper_case",
+            params: MARKED_PARAMS,
+          }));
+  return refusalFrom(markedTerms(transform), undefined, reason);
+}
+
+// The check's third refusal, driven at a zero budget: it reports what the walk
+// did not check rather than a fault in the document, so it holds no tag and has
+// to read as the generic failure at both clicks.
+function budgetRefusal(): Error {
+  return refusalFrom(
+    markedTerms([{ function: "to_upper_case", params: MARKED_PARAMS }]),
+    { totalBudgetMs: 0 },
+    "the compile budget",
+  );
+}
+
+// A tag no mint of this build wrote, on a cause link of a plain failure. Core
+// reads a step label only where it is one this build renders, so this reaches
+// the screen as an untagged failure and takes the generic message.
+function spoofedRefusalChain(): Error {
+  return new Error("mint failed", {
+    cause: {
+      psilinkTransformRefusal: {
+        reason: "uncompilable-step",
+        stepLabel: `${REFUSAL_MARKER} step`,
+      },
+    },
+  });
 }
 
 // stagesFor reads only the linkage terms off the prepared exchange (the unit
@@ -1373,6 +1480,206 @@ describe("inviter screen", () => {
       .toHaveTextContent("Your invitation is ready");
   });
 
+  test("a refused transform names the step and the change at the create click", async () => {
+    // Neither refusal is cleared by retrying the same click: the terms hold the
+    // fault and the operator holds the terms, so each says which term and what
+    // to change instead of the fixed message an internal failure gets.
+    await reachReviewCreate();
+    const createButton = page.getByRole("button", {
+      name: "Create the invitation",
+    });
+
+    mintHarness.fail = transformCheckRefusal("uncompilable-step");
+    await createButton.click();
+    await expect
+      .element(page.getByText("A transform step cannot be built"))
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText('One transform step ("pad_left")', { exact: false }),
+      )
+      .toBeInTheDocument();
+
+    mintHarness.fail = transformCheckRefusal("unrecognized-function");
+    await createButton.click();
+    await expect
+      .element(
+        page.getByText(
+          "One transform step (a function this build does not recognize)",
+          { exact: false },
+        ),
+      )
+      .toBeInTheDocument();
+
+    mintHarness.fail = transformCheckRefusal("too-many-steps");
+    await createButton.click();
+    await expect
+      .element(page.getByText("These terms declare too many transform steps"))
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText("600 transform steps together, more than the limit", {
+          exact: false,
+        }),
+      )
+      .toBeInTheDocument();
+
+    // No alert is the generic dead end, and none echoes a byte of the document
+    // that was refused -- as rendered text or as markup around it.
+    await expect
+      .element(
+        page.getByText("Something went wrong while creating", { exact: false }),
+      )
+      .not.toBeInTheDocument();
+    expect(document.body.textContent).not.toContain(REFUSAL_MARKER);
+    expect(document.body.innerHTML).not.toContain(REFUSAL_MARKER);
+
+    // The terms were never sealed, so a corrected document still mints.
+    mintHarness.fail = undefined;
+    await createButton.click();
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Your invitation is ready");
+  });
+
+  test("a refused transform names the step and the change at the save click", async () => {
+    // The second mint boundary, whose refusal has to read the same: a
+    // command-line transport mints nothing at Create and everything at Save.
+    await reachReviewCreate();
+    await page
+      .getByLabelText("Over SFTP, run by the psilink command-line tool")
+      .click();
+    await page.getByRole("button", { name: "Create the invitation" }).click();
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Save your exchange file");
+    await userEvent.fill(
+      page.getByLabelText("SFTP server host"),
+      "sftp.riverbend.example.gov",
+    );
+    const save = page.getByRole("button", { name: "Save exchange file" });
+
+    mintHarness.fail = transformCheckRefusal("uncompilable-step");
+    await save.click();
+    await expect
+      .element(page.getByText("A transform step cannot be built"))
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText('One transform step ("pad_left")', { exact: false }),
+      )
+      .toBeInTheDocument();
+
+    mintHarness.fail = transformCheckRefusal("unrecognized-function");
+    await save.click();
+    await expect
+      .element(
+        page.getByText(
+          "One transform step (a function this build does not recognize)",
+          { exact: false },
+        ),
+      )
+      .toBeInTheDocument();
+
+    mintHarness.fail = transformCheckRefusal("too-many-steps");
+    await save.click();
+    await expect
+      .element(page.getByText("These terms declare too many transform steps"))
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByText("600 transform steps together, more than the limit", {
+          exact: false,
+        }),
+      )
+      .toBeInTheDocument();
+
+    await expect
+      .element(
+        page.getByText("Something went wrong while saving", { exact: false }),
+      )
+      .not.toBeInTheDocument();
+    expect(document.body.textContent).not.toContain(REFUSAL_MARKER);
+    expect(document.body.innerHTML).not.toContain(REFUSAL_MARKER);
+  });
+
+  // The three mint failures that look like a refusal and are not: the check's
+  // budget refusal, which judges the machine rather than the document; a config
+  // error the check never tagged; and a tag on a cause link no mint of this
+  // build wrote. Each has to take the fixed message, since none tells the author
+  // a term to change, and none may echo the text it holds.
+  const untaggedFailures = (): Array<[string, Error]> => [
+    ["the compile budget refusal", budgetRefusal()],
+    [
+      "an untagged config error",
+      new OperatorConfigError(`config fault ${REFUSAL_MARKER}`),
+    ],
+    ["a spoofed refusal tag", spoofedRefusalChain()],
+  ];
+
+  test("a mint failure the check did not tag keeps the fixed message at the create click", async () => {
+    await reachReviewCreate();
+    const createButton = page.getByRole("button", {
+      name: "Create the invitation",
+    });
+
+    for (const [what, failure] of untaggedFailures()) {
+      mintHarness.fail = failure;
+      await createButton.click();
+      await expect
+        .element(page.getByText("Could not create the invitation"))
+        .toBeInTheDocument();
+      await expect
+        .element(
+          page.getByText(
+            "Something went wrong while creating the invitation. Your terms are unchanged - try again.",
+          ),
+        )
+        .toBeInTheDocument();
+      await expect
+        .element(page.getByText("A transform step cannot be built"))
+        .not.toBeInTheDocument();
+      expect(document.body.textContent, what).not.toContain(REFUSAL_MARKER);
+      expect(document.body.innerHTML, what).not.toContain(REFUSAL_MARKER);
+    }
+  });
+
+  test("a mint failure the check did not tag keeps the fixed message at the save click", async () => {
+    await reachReviewCreate();
+    await page
+      .getByLabelText("Over SFTP, run by the psilink command-line tool")
+      .click();
+    await page.getByRole("button", { name: "Create the invitation" }).click();
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Save your exchange file");
+    await userEvent.fill(
+      page.getByLabelText("SFTP server host"),
+      "sftp.riverbend.example.gov",
+    );
+    const save = page.getByRole("button", { name: "Save exchange file" });
+
+    for (const [what, failure] of untaggedFailures()) {
+      mintHarness.fail = failure;
+      await save.click();
+      await expect
+        .element(page.getByText("Could not save the exchange file"))
+        .toBeInTheDocument();
+      await expect
+        .element(
+          page.getByText(
+            "Something went wrong while saving. Your terms are unchanged - try again.",
+          ),
+        )
+        .toBeInTheDocument();
+      await expect
+        .element(page.getByText("A transform step cannot be built"))
+        .not.toBeInTheDocument();
+      expect(document.body.textContent, what).not.toContain(REFUSAL_MARKER);
+      expect(document.body.innerHTML, what).not.toContain(REFUSAL_MARKER);
+    }
+  });
+
   test("a header the strip emptied is refused by that cause, notice beside it", async () => {
     // The inviter's own browser read, driven through the real parser. A refused
     // file never reaches the terms step, so the notice for what that read
@@ -1406,7 +1713,9 @@ describe("inviter screen", () => {
       .not.toBeInTheDocument();
     await expect
       .element(
-        page.getByText("A formatting character was removed from a column name"),
+        page.getByText(
+          "An invisible control character was removed from a column name",
+        ),
       )
       .toBeInTheDocument();
     // The read is discarded with it: no file card, and no way forward.
@@ -1644,6 +1953,55 @@ describe("inviter screen", () => {
     ).toBe("80");
   });
 
+  test("post-create: the resolved matching is readable before the run ends", async () => {
+    // The pre-round statement is the timing half: an operator can read what
+    // their partner presented while the exchange is still running, which is the
+    // only point at which reading it can change what they do. It states the
+    // run's own terms, so it reads as plain run status -- an ordinary
+    // one-to-one run raises no warning, and the warnings alert never mounts.
+    const matching = {
+      localDeduplicate: false,
+      partnerDeduplicate: false,
+      cardinality: "one-to-one" as const,
+    };
+    const sentence = describeResolvedMatching(matching);
+    const paragraphsSaying = (text: string) =>
+      Array.from(document.querySelectorAll("p")).filter(
+        (el) => el.textContent === text,
+      );
+
+    await createSealedInvitation();
+    const call = lifecycleCall(0);
+    call.onStages(stagesFor(preparedWith("cascade", 2)));
+    call.onStage("confirming protocol");
+    call.onResolvedMatching(matching);
+
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Exchange in progress");
+    await vi.waitFor(() => expect(paragraphsSaying(sentence)).toHaveLength(1));
+    expect(paragraphsSaying(sentence)[0].closest('[role="status"]')).toBeNull();
+    expect(
+      page.getByText("The exchange reported a warning").query(),
+    ).toBeNull();
+
+    call.onResult({
+      kind: "matched" as const,
+      resultsUrl: URL.createObjectURL(new Blob(["a,b\n"])),
+      matchedRecordCount: 12,
+      matching,
+    });
+
+    // The completion panel takes the sentence over, so it still stands once.
+    await expect
+      .element(page.getByRole("heading", { level: 1 }))
+      .toHaveTextContent("Exchange complete");
+    await vi.waitFor(() => expect(paragraphsSaying(sentence)).toHaveLength(1));
+    expect(
+      page.getByText("The exchange reported a warning").query(),
+    ).toBeNull();
+  });
+
   test("post-create: completion offers the three downloads with caveats", async () => {
     await createSealedInvitation();
     const call = lifecycleCall(0);
@@ -1654,6 +2012,11 @@ describe("inviter screen", () => {
       kind: "matched" as const,
       resultsUrl: URL.createObjectURL(new Blob(["a,b\n"])),
       matchedRecordCount: 1847,
+      matching: {
+        localDeduplicate: false,
+        partnerDeduplicate: true,
+        cardinality: "one-to-many" as const,
+      },
       record: {
         recordUrl: URL.createObjectURL(new Blob(["{}"])),
         recordFileName: "psilink-record-2026-07-08T14-32.json",
@@ -1667,6 +2030,18 @@ describe("inviter screen", () => {
       .toHaveTextContent("Exchange complete");
     await expect
       .element(page.getByText(/1,847.*matched records/))
+      .toBeInTheDocument();
+    // The partner's own deduplicate value and the cardinality the pair resolved
+    // to: this seat consented to no document of its partner's, so the completion
+    // panel is where it reads what the partner presented.
+    await expect
+      .element(
+        page.getByText(
+          "Deduplication as agreed at the terms exchange: you declared " +
+            "deduplicate false, your partner declared deduplicate true. This " +
+            "run matches one-to-many.",
+        ),
+      )
       .toBeInTheDocument();
     await expect.element(page.getByText(/^Finished /)).toBeInTheDocument();
     // The status label's live region reaches the final "Done".

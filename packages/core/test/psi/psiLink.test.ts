@@ -8,6 +8,7 @@ import {
   linkViaSinglePassPSI,
   withholdsSenderAssociationTable,
   associationAndIterationArray,
+  mappedElementArray,
   encodeInt32LE,
   decodeInt32LE,
   encodeSinglePassReply,
@@ -19,7 +20,14 @@ import {
   FAN_OUT_CANDIDATES_PER_ELEMENT,
   MAX_KEY_CANDIDATE_WIDTH,
 } from "../../src/fanOutFunctions";
-import { MAX_LINKAGE_ENTRIES } from "../../src/config/linkageTermsSchema";
+import {
+  MAX_LINKAGE_ENTRIES,
+  type LinkageStrategy,
+} from "../../src/config/linkageTermsSchema";
+import {
+  candidateSetIsImplementedForStrategy,
+  CANDIDATE_SET_IMPLEMENTED_BY_STRATEGY,
+} from "../../src/linkageTermsPolicy";
 import {
   MAX_FRAME_SIZE_BYTES,
   MAX_SINGLE_PASS_CELLS,
@@ -78,7 +86,7 @@ let [serverResult, clientResult] = await (async () => {
       server,
       serverConn,
       serverData,
-      clientData[0].length,
+      fanOutFreeBounds(serverData.length, clientData[0].length),
       -1,
     ),
     linkViaPSI(
@@ -86,7 +94,7 @@ let [serverResult, clientResult] = await (async () => {
       client,
       clientConn,
       clientData,
-      serverData[0].length,
+      fanOutFreeBounds(clientData.length, serverData[0].length),
       -1,
     ),
   ]);
@@ -132,7 +140,7 @@ test("a deduplicating cardinality leaves an unmatched duplicate group's table un
       mServer,
       mServerConn,
       serverData,
-      clientData[0].length,
+      fanOutFreeBounds(serverData.length, clientData[0].length),
       -1,
     ),
     // The partner's view of the same exchange is the mirror label.
@@ -141,7 +149,7 @@ test("a deduplicating cardinality leaves an unmatched duplicate group's table un
       mClient,
       mClientConn,
       clientData,
-      serverData[0].length,
+      fanOutFreeBounds(clientData.length, serverData[0].length),
       -1,
     ),
   ]);
@@ -173,7 +181,7 @@ test("many-to-many pairs in the cascade and is refused by single-pass", async ()
       ),
       starterConn,
       bothSided,
-      2,
+      fanOutFreeBounds(bothSided.length, 2),
       -1,
     ),
     linkViaPSI(
@@ -186,7 +194,7 @@ test("many-to-many pairs in the cascade and is refused by single-pass", async ()
       ),
       joinerConn,
       bothSided,
-      2,
+      fanOutFreeBounds(bothSided.length, 2),
       -1,
     ),
   ]);
@@ -324,7 +332,7 @@ test("single-pass reproduces the cascade's survivor-relative uniqueness", async 
   };
 
   const [cascadeSender, cascadeReceiver] = await run((protocol, p, c, d) =>
-    linkViaPSI(protocol, p, c, d, 2, -1),
+    linkViaPSI(protocol, p, c, d, fanOutFreeBounds(d.length, 2), -1),
   );
   // Both sender rows match -- reachable only under survivor-relative uniqueness.
   expect(cascadeSender).toStrictEqual([
@@ -348,15 +356,15 @@ test("single-pass reproduces the cascade's survivor-relative uniqueness", async 
   expect(singlePassReceiver).toStrictEqual(cascadeReceiver);
 });
 
-// --- the cascade: a record holding several candidates is refused -------------
+// --- the cascade: which candidate sets reach a round -------------------------
 // Key realization holds every candidate a record realizes (buildKeyStrings).
-// Fan-out matching is specified for single-pass and for it alone, so the cascade
-// refuses the record where it would consume it rather than narrowing to one
-// candidate or dropping the record, either of which matches on less than the terms
-// declare. A fan-out declared under the cascade is refused before the exchange
-// runs (assertFanOutImplemented); this is the same fail-closed behavior at the
-// point of harm, for a candidate set that reached a round anyway.
-test("a candidate set reaching the cascade is refused, not narrowed", async () => {
+// Two readings decide whether a round consumes one: an allowlist over the
+// strategies whose resolution is written, and the resolved cardinality,
+// `many-to-many` having no single-pass table for the equivalence obligation to
+// name. A combination outside them refuses the record where it would consume
+// it rather than narrowing to one candidate or dropping it, either of which
+// matches on less than the terms declare.
+test("a candidate set reaching a many-to-many round is refused, not narrowed", async () => {
   const withCandidateSet: Array<Array<string | Set<string> | undefined>> = [
     ["A", new Set(["B", "C"])],
   ];
@@ -373,15 +381,80 @@ test("a candidate set reaching the cascade is refused, not narrowed", async () =
   // asserted too -- the CLI classifies a UsageError as a configuration fault.
   const run = () =>
     linkViaPSI(
-      { cardinality: "one-to-one" },
+      { cardinality: "many-to-many" },
       participant,
       conn,
       withCandidateSet,
-      1,
+      fanOutFreeBounds(withCandidateSet.length, 1),
       -1,
     );
   await expect(run()).rejects.toThrow(UsageError);
-  await expect(run()).rejects.toThrow(/fan-out/);
+  await expect(run()).rejects.toThrow(/several match candidates/);
+});
+
+test("the allowlist is what decides, one entry per strategy", () => {
+  expect(CANDIDATE_SET_IMPLEMENTED_BY_STRATEGY).toStrictEqual({
+    cascade: true,
+    "single-pass": true,
+  });
+  for (const strategy of Object.keys(
+    CANDIDATE_SET_IMPLEMENTED_BY_STRATEGY,
+  ) as Array<LinkageStrategy>)
+    expect(candidateSetIsImplementedForStrategy(strategy)).toBe(
+      CANDIDATE_SET_IMPLEMENTED_BY_STRATEGY[strategy],
+    );
+});
+
+test("the cascade resolves a candidate set, and its entry is what decides", async () => {
+  // The round reads the table rather than naming a strategy, so closing the
+  // cascade's entry returns the fail-closed refusal a strategy with no written
+  // resolution meets. The resolution behind the open entry is exercised at
+  // length in cascadeCandidateSets.test.ts.
+  const withCandidateSet: Array<Array<string | Set<string> | undefined>> = [
+    [new Set(["B", "C"])],
+  ];
+  const link = async (): Promise<AssociationTable> => {
+    const [starterConn, joinerConn] = createMessagePipe();
+    const [starterTable] = await Promise.all([
+      linkViaPSI(
+        { cardinality: "one-to-one" },
+        new PSIParticipant(
+          "server",
+          psiLibrary,
+          { role: "starter", verbose: -1 },
+          UNBOUNDED_PSI_ELEMENTS,
+        ),
+        starterConn,
+        withCandidateSet,
+        fanOutFreeBounds(1, 1),
+        -1,
+      ),
+      linkViaPSI(
+        { cardinality: "one-to-one" },
+        new PSIParticipant(
+          "client",
+          psiLibrary,
+          { role: "joiner", verbose: -1 },
+          UNBOUNDED_PSI_ELEMENTS,
+        ),
+        joinerConn,
+        [["C"]],
+        fanOutFreeBounds(1, 1),
+        -1,
+      ),
+    ]);
+    return starterTable;
+  };
+
+  expect(await link()).toStrictEqual([[0], [0]]);
+
+  const shipped = CANDIDATE_SET_IMPLEMENTED_BY_STRATEGY.cascade;
+  CANDIDATE_SET_IMPLEMENTED_BY_STRATEGY.cascade = false;
+  try {
+    await expect(link()).rejects.toThrow(UsageError);
+  } finally {
+    CANDIDATE_SET_IMPLEMENTED_BY_STRATEGY.cascade = shipped;
+  }
 });
 
 test("single-pass refuses a candidate set wider than its declaration admits", async () => {
@@ -440,7 +513,7 @@ test("a single-candidate row is unaffected by that refusal", async () => {
       sender,
       senderConn,
       senderData,
-      2,
+      fanOutFreeBounds(senderData.length, 2),
       -1,
     ),
     linkViaPSI(
@@ -448,7 +521,7 @@ test("a single-candidate row is unaffected by that refusal", async () => {
       receiver,
       receiverConn,
       receiverData,
-      2,
+      fanOutFreeBounds(receiverData.length, 2),
       -1,
     ),
   ]);
@@ -748,6 +821,83 @@ test("a mapped-elements element that is an array (not a plain object) is rejecte
   }
   expect(err).toBeInstanceOf(ConnectionError);
   expect((err as ConnectionError).kind).toBe("protocol");
+});
+
+// --- mappedElementArray: the widened entry's bounds ---------------------------
+// The first pass's frame is partner-controlled on the same scale, and a
+// candidate set widens its theirIndex from a number to a list of positions. The
+// same single-issue bound must hold over the wider shape, and the predicate
+// must not recurse into the list -- a frame nesting arrays inside one is a
+// clean rejection, not a stack overflow.
+const pathologicalEntries = () => Array.from({ length: 4_000_000 }, () => 1);
+
+test("receiveParsed: a pathological-count mapped-element frame fails cleanly", async () => {
+  const [connA, connB] = createMessagePipe();
+  const parsed = receiveParsed(connA, mappedElementArray);
+  await connB.send(pathologicalEntries());
+  const err = await parsed.catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("protocol");
+  expect((err as ConnectionError).cause).not.toBeInstanceOf(RangeError);
+});
+
+test("direct parse: a pathological-count mapped-element frame fails cleanly, not with a bare RangeError", () => {
+  let err: unknown;
+  try {
+    parseOrProtocolError(mappedElementArray, pathologicalEntries());
+  } catch (e) {
+    err = e;
+  }
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("protocol");
+  expect((err as ConnectionError).cause).not.toBeInstanceOf(RangeError);
+});
+
+test("a legitimately large mapped-element frame of position lists parses", async () => {
+  const n = 200_000;
+  const [connA, connB] = createMessagePipe();
+  const parsed = receiveParsed(connA, mappedElementArray);
+  await connB.send(
+    Array.from({ length: n }, (_, i) => ({
+      theirIndex: i % 2 === 0 ? i : [i, i + 1],
+      iteration: 0,
+    })),
+  );
+  expect(await parsed).toHaveLength(n);
+});
+
+test("a mapped-element entry whose position list holds an array is rejected", () => {
+  let err: unknown;
+  try {
+    parseOrProtocolError(mappedElementArray, [
+      { theirIndex: [[0]], iteration: 0 },
+    ]);
+  } catch (e) {
+    err = e;
+  }
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("protocol");
+});
+
+test("a frame of nested-array position lists is one clean rejection", () => {
+  // Every entry nests an array where a position is due, at 200k -- past the
+  // ~130k where the array frames of a `z.array` element schema overflow Zod's
+  // call stack spreading one issue per element (utils/singleIssueArray.ts).
+  let err: unknown;
+  try {
+    parseOrProtocolError(
+      mappedElementArray,
+      Array.from({ length: 200_000 }, () => ({
+        theirIndex: [[0]],
+        iteration: 0,
+      })),
+    );
+  } catch (e) {
+    err = e;
+  }
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("protocol");
+  expect((err as ConnectionError).cause).not.toBeInstanceOf(RangeError);
 });
 
 // --- single-pass reply codec and the receiver's frame-length tie --------------

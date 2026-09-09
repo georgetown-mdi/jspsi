@@ -77,10 +77,9 @@ export { AEAD_ENVELOPE_VERSION } from "./connection/encryptedMessageConnection.j
 export { createMessagePipe } from "./connection/messageConnection.js";
 
 // The input bounds a suite drives at their edge: the invitation decode's host,
-// path, and whole-token limits, the WebRTC frame pre-scan's per-kind weights,
-// and the CSV line ceiling. They stay out of the main entry point: core's own
-// parse enforces each, and a caller meets the refusal rather than the number.
-export { WEBRTC_VALUE_WEIGHTS } from "./connection/binaryPackBounds.js";
+// path, and whole-token limits, and the CSV line ceiling. They stay out of the
+// main entry point: core's own parse enforces each, and a caller meets the
+// refusal rather than the number.
 export {
   MAX_ENDPOINT_HOST_LENGTH,
   MAX_ENDPOINT_PATH_LENGTH,
@@ -156,7 +155,8 @@ export function minimalPreparedExchange(
 /**
  * The smallest complete {@link ExchangeResult}: no association table or
  * intersection count, the built-in default linkage terms standing in for the
- * partner's, a receiver role, and an empty partner payload. `overrides`
+ * partner's, a one-to-one resolved matching (neither party deduplicating), a
+ * receiver role, and an empty partner payload. `overrides`
  * replaces whichever fields a test's own assertions read. Stays out of the
  * main entry point for the same reason as {@link minimalPreparedExchange}: it
  * stands in for a real `runExchange` result in a test whose mocked
@@ -169,6 +169,11 @@ export function minimalExchangeResult(
     associationTable: undefined,
     intersectionCount: undefined,
     partnerTerms: getDefaultLinkageTerms("Minimal exchange-result fixture"),
+    matching: {
+      localDeduplicate: false,
+      partnerDeduplicate: false,
+      cardinality: "one-to-one",
+    },
     resolvedRole: "receiver",
     partnerPayload: { columns: [], rowIndices: [], rows: [] },
     ...overrides,

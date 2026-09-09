@@ -111,6 +111,31 @@ describe("jobExchangeIntentSchema validates metadata and standardization", () =>
     expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(false);
   });
 
+  test("rejects a control character or a bidi override in a terms name", () => {
+    // The intent embeds core's LinkageTermsSchema, so the name shape reaches the
+    // console's own boundary: a name the CLI would refuse at its config load is
+    // refused before the child is spawned rather than after.
+    for (const name of ["risk\u0007score", "risk\u202escore"]) {
+      const intent = validIntent({
+        linkageTerms: {
+          ...validLinkageTerms(),
+          payload: { send: [{ name }] },
+        },
+      });
+      expect(jobExchangeIntentSchema.safeParse(intent).success).toBe(false);
+    }
+    expect(
+      jobExchangeIntentSchema.safeParse(
+        validIntent({
+          linkageTerms: {
+            ...validLinkageTerms(),
+            payload: { send: [{ name: "risk_score" }] },
+          },
+        }),
+      ).success,
+    ).toBe(true);
+  });
+
   test("still rejects an unknown top-level key alongside the new fields", () => {
     const intent = {
       ...validIntent({ metadata: editedMetadata }),
@@ -1247,6 +1272,23 @@ describe("jobZeroSetupIntentSchema accepts the allowed fields", () => {
           validZeroSetupIntent({ linkageStrategy, identity: "county-health" }),
         ).success,
       ).toBe(true);
+  });
+
+  test("accepts this party's own deduplicate, either way round", () => {
+    // The zero-setup mode's own side of the matching cardinality, forwarded to
+    // the CLI's --deduplicate. Not the exchange mode's expectedPartnerDeduplicate,
+    // which binds the partner's presented value and has no place here.
+    for (const deduplicate of [true, false])
+      expect(
+        jobZeroSetupIntentSchema.safeParse(
+          validZeroSetupIntent({ deduplicate }),
+        ).success,
+      ).toBe(true);
+  });
+
+  test("rejects a non-boolean deduplicate", () => {
+    const intent = { ...validZeroSetupIntent(), deduplicate: "yes" };
+    expect(jobZeroSetupIntentSchema.safeParse(intent).success).toBe(false);
   });
 
   test("accepts a mounted inputFile reference in place of inputCsv", () => {

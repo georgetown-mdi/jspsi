@@ -14,6 +14,7 @@ import {
 } from "./transformRegexDialect.js";
 import { exceedsOwnKeyCount } from "../utils/objectKeyCount.js";
 import { loneSurrogateIndex } from "../utils/wellFormedString.js";
+import { BIDI_CONTROL_PATTERN } from "../utils/nameControls.js";
 import {
   COUNT_ONLY_SHAPE_REFUSALS,
   countOnlyShapeViolation,
@@ -44,6 +45,9 @@ import {
  * a payload column `name`, a legal-agreement `reference`, the `version`
  * string, and a name-constraint `allowedCharacters` class. Also reused by the
  * operator-local metadata `ColumnMetadata.name` (config/metadata.ts).
+ *
+ * Most of that list holds a character shape beside this length cap; which do
+ * and which do not is {@link NAME_SHAPE_PATTERN}'s to state.
  */
 export const MAX_NAME_LENGTH = 256;
 
@@ -52,7 +56,9 @@ export const MAX_NAME_LENGTH = 256;
  * `identity`, a legal-agreement `purpose`, a payload column `description`, or
  * a constraint `exclude` value. Larger than {@link MAX_NAME_LENGTH} since
  * these hold a sentence or a long data value rather than a single label. The
- * same four fields apply {@link TEXT_CONTROL_CHAR_PATTERN} without exception.
+ * same four fields apply {@link TEXT_CONTROL_CHAR_PATTERN} without exception,
+ * and the three of them a record holds also apply `BIDI_CONTROL_PATTERN`
+ * (see {@link TEXT_DIRECTION_MESSAGE}).
  */
 export const MAX_TEXT_LENGTH = 1024;
 
@@ -61,7 +67,8 @@ export const MAX_TEXT_LENGTH = 1024;
  * free-text field of a terms document -- party `identity`, legal-agreement
  * `purpose`, payload column `description`, and each constraint `exclude`
  * entry: the C0 range (NUL included), DEL, and C1, with no exception for tab,
- * line feed, or carriage return.
+ * line feed, or carriage return. The three of those fields a record holds
+ * refuse a second class beside this one ({@link TEXT_DIRECTION_MESSAGE}).
  *
  * Enforced once at parse so every seat that reads a live document -- the
  * operator's own config load, the post-handshake wire re-parse
@@ -78,7 +85,11 @@ export const MAX_TEXT_LENGTH = 1024;
  * The web console applies these same ranges to an operator's `--identity`
  * label (`IDENTITY_CONTROL_CHAR_PATTERN`, apps/web/src/jobs/intentSchemas.ts,
  * held equal by apps/web/test/unit/jobs/identityLabelParity.test.ts) and is
- * stricter, also refusing a leading `-`.
+ * stricter in one direction, also refusing a leading `-`. That label and the
+ * CLI's `psilink fingerprint` argument reach a certificate without passing
+ * through this schema, so each refuses this class and the text-direction one
+ * ({@link TEXT_DIRECTION_MESSAGE}) at its own boundary: a label bound into a
+ * certificate holds only what this document's `identity` may hold.
  */
 export const TEXT_CONTROL_CHAR_PATTERN = /[\u0000-\u001f\u007f-\u009f]/;
 
@@ -91,6 +102,115 @@ export const TEXT_CONTROL_CHAR_PATTERN = /[\u0000-\u001f\u007f-\u009f]/;
  */
 export const TEXT_CONTROL_CHAR_MESSAGE =
   "a linkage terms free-text value must not contain control characters";
+
+/**
+ * The second class the three free-text fields a record holds verbatim refuse
+ * beside {@link TEXT_CONTROL_CHAR_PATTERN}: the nine Unicode bidirectional
+ * embedding, override and isolate characters `BIDI_CONTROL_PATTERN`
+ * (utils/nameControls.ts) names. The three are the party `identity`, the
+ * legal-agreement `purpose`, and a payload column `description`, each written
+ * into both parties' exchange records as submitted (records/exchangeRecord.ts)
+ * and read there by tooling that is not psilink, where no display boundary of
+ * ours stands. A layout scope opened in one of them outlives the value and
+ * reorders the copy it is placed beside, and none of the three needs one: a
+ * right-to-left sentence lays out from its own letters.
+ *
+ * The implicit marks U+200E LRM, U+200F RLM and U+061C ALM stay admitted, as
+ * they do in a name: each sets a direction for the neutral characters around
+ * it and opens no scope reaching past them.
+ *
+ * A constraint `exclude` value is outside this rule, so it is applied at the
+ * three fields rather than through {@link freeTextValue}, which shapes all
+ * four. An `exclude` entry is a data value the run matches a field's contents
+ * against -- the same footing a transform `params` value and a name-constraint
+ * `allowedCharacters` class stand on -- so what it may hold is what the data
+ * may hold, and it reaches no record: a record holds names, descriptions and
+ * references, never a value (docs/spec/EXCHANGE_RECORD.md).
+ *
+ * A fixed literal naming no submitted value, for the reason
+ * {@link TEXT_CONTROL_CHAR_MESSAGE} gives.
+ */
+export const TEXT_DIRECTION_MESSAGE =
+  "a linkage terms free-text value must not contain a text-direction character";
+
+/**
+ * The shape a name-class value of a terms document must match, beyond its
+ * {@link MAX_NAME_LENGTH} cap: a linkage field, key, or element `name`, an
+ * element `field` reference, an element-`swap` reference, a transform
+ * `function` name and a transform `params` record KEY, a payload column
+ * `name`, a legal-agreement `reference`, and a rule-set set `name`. It admits
+ * everything but two classes -- the control characters
+ * {@link TEXT_CONTROL_CHAR_PATTERN} refuses in a free-text field
+ * (C0 with NUL, DEL, C1, tab, line feed and carriage return included), and the
+ * nine Unicode bidirectional formatting characters `BIDI_CONTROL_PATTERN`
+ * (utils/nameControls.ts) names. Letters are untouched, so a name written in
+ * any script passes.
+ *
+ * The operator's own explicit metadata block takes the same shape on its
+ * column `name` (config/metadata.ts), under a message naming that block: a
+ * declared column name is a name rather than a data value, and each disclosed
+ * one reaches the partner in the invitation's payload column list.
+ *
+ * The payload column lists that name those same columns hold it too -- the
+ * invitation token's `disclosedPayloadColumns`, which a partner authors and an
+ * acceptance writes into the operator's configuration, and the configuration's
+ * own `expectedPayloadColumns`, `disclosedPayloadColumns`, and outbound consent
+ * `columns` -- so a column name reaches a party's disk under this shape from
+ * either direction.
+ *
+ * Applied at each FIELD, as the `version` semver regex below is, rather than as
+ * a pass over the class: every field named above holds it in its own string
+ * schema, so a document is refused at parse on every seat that reads one -- the
+ * operator's own config load, the post-handshake wire re-parse
+ * (`parseLinkageTerms`), the invitation-token decode, and the exchange-file and
+ * job-intent schemas that embed {@link LinkageTermsSchema}.
+ *
+ * One anchored literal rather than a composition of those two patterns, so
+ * source about invisible characters stays readable. The union is held exact by
+ * a sweep over every BMP code point
+ * (packages/core/test/config/nameShapeParity.test.ts),
+ * which fails if either class moves without this one.
+ *
+ * The same class the CSV read strips from a header at ingestion
+ * (`NAME_CONTROL_CHAR_PATTERN`, utils/nameControls.ts), which is what keeps this
+ * schema's notion of a name and that read's in agreement: no name derived from a
+ * header meets this refusal, and no character a name may keep is taken out of a
+ * header. The BMP sweep above holds that equality in both directions.
+ *
+ * A `params` record KEY takes the shape and the value it names does not. The
+ * key is the parameter's name -- the label a step's implementation is looked up
+ * by, and the path segment a refusal locates the offending entry as -- so it is
+ * a name in the same sense the `function` name beside it is.
+ *
+ * What stays outside the rule, and why:
+ * - A transform `params` string value and a name-constraint
+ *   `allowedCharacters` class are length-bounded only. Each is data a step
+ *   matches or substitutes with rather than a name -- a tab is a plausible
+ *   delimiter and a line feed a plausible replacement -- so a character rule
+ *   there would refuse legitimate terms.
+ * - `version` needs nothing: its semver regex admits neither class already, and
+ *   a second check on it could never fire.
+ * - A reader of an already-recorded value -- the exchange-record reader
+ *   (exchangeRecord.ts) and the wire-certificate schema (signedReceipt.ts) --
+ *   stays permissive toward what a possibly different-version writer recorded
+ *   and relies on display escaping at its render sites.
+ *
+ * The rule is not redundant with that escaping. A name reaches each party's
+ * exchange record verbatim -- the matching-basis account names each field, the
+ * payload accounts each column -- and a record is read by tooling that is not
+ * psilink, where no display boundary of ours stands.
+ */
+export const NAME_SHAPE_PATTERN =
+  /^[^\u0000-\u001f\u007f-\u009f\u202a-\u202e\u2066-\u2069]*$/u;
+
+/**
+ * Shared refusal message for every name-class shape rejection, so the document
+ * reports the same thing about the same class of value wherever it fires. A
+ * fixed literal naming no submitted value, for the reason
+ * {@link TEXT_CONTROL_CHAR_MESSAGE} gives.
+ */
+export const NAME_SHAPE_MESSAGE =
+  "a linkage terms name must not contain a control or text-direction character";
 
 /**
  * Shared refusal message for a terms string -- a member value, an array
@@ -236,6 +356,40 @@ const freeTextValue = (schema: z.ZodString) =>
   });
 
 /**
+ * One free-text value a record holds verbatim -- the party `identity`, the
+ * legal-agreement `purpose`, a payload column `description` -- holding
+ * {@link freeTextValue}'s control-character rule and the text-direction rule
+ * {@link TEXT_DIRECTION_MESSAGE} states, written once so the three cannot
+ * drift apart. A constraint `exclude` value takes the first rule alone, for
+ * the reason recorded with that message.
+ *
+ * Two checks rather than one over the union, so a refusal names the class the
+ * value holds, and a control character in any of the four free-text fields
+ * still reports the one thing {@link TEXT_CONTROL_CHAR_MESSAGE} says.
+ */
+const recordedFreeTextValue = (schema: z.ZodString) =>
+  freeTextValue(schema).refine((value) => !BIDI_CONTROL_PATTERN.test(value), {
+    message: TEXT_DIRECTION_MESSAGE,
+  });
+
+/**
+ * One name-class value, holding the caller's own length floor and ceiling to
+ * {@link NAME_SHAPE_PATTERN}. The regex goes on the field's own string schema
+ * -- what the caller declares is the whole shape the field has -- rather than a
+ * check layered over the class from above, and it is written once so the name
+ * fields cannot drift apart.
+ *
+ * The payload column lists outside this document name the same columns and take
+ * the same shape through this helper: the invitation token's
+ * `disclosedPayloadColumns` (config/invitation.ts), the exchange spec's
+ * `expectedPayloadColumns` and `disclosedPayloadColumns`
+ * (config/exchangeSpec.ts), and the outbound consent record's `columns`
+ * (config/outboundPayloadConsent.ts).
+ */
+export const nameValue = (schema: z.ZodString) =>
+  schema.regex(NAME_SHAPE_PATTERN, NAME_SHAPE_MESSAGE);
+
+/**
  * What the well-formedness walk refused, and where: a string -- a member value,
  * an array element, or an object KEY -- holding an unpaired UTF-16 surrogate,
  * or a value nested past the depth the walk goes to.
@@ -306,8 +460,10 @@ function firstWellFormednessRefusal(
 
 /**
  * A constraint `exclude` denylist: partner-controlled free-text values, each
- * length-bounded and control-character-refused like every other free-text string
- * ({@link freeTextValue}), with the entry COUNT bounded at
+ * length-bounded and control-character-refused ({@link freeTextValue}), and
+ * held to that rule alone -- the text-direction rule the three recorded
+ * free-text fields take is not this value's, for the reason
+ * {@link TEXT_DIRECTION_MESSAGE} records. The entry COUNT is bounded at
  * {@link MAX_EXCLUDE_ENTRIES} before per-element validation (see
  * {@link boundedArray}). Shared by all four constraint schemas so the bound is
  * defined once.
@@ -428,7 +584,7 @@ const AnyConstraintsSchema: z.ZodType<AnyConstraints> = z.object({
 
 // Shared fields for all linkage field variants.
 const linkageFieldBase = <C>(constraints: z.ZodType<C>) => ({
-  name: z.string().min(1).max(MAX_NAME_LENGTH),
+  name: nameValue(z.string().min(1).max(MAX_NAME_LENGTH)),
   constraints: constraints.optional(),
 });
 
@@ -582,10 +738,10 @@ const TransformParamValueSchema = z
 // Not annotated as ZodType<TransformStep> because the concrete ZodObject is the
 // base the pad_left refine below chains onto (mirrors LinkageTermsBaseSchema).
 const TransformStepBaseSchema = z.object({
-  function: z.string().min(1).max(MAX_NAME_LENGTH),
-  // The record's keys (parameter names) are length-bounded like every other
-  // free-text string, and each string value is length-bounded by
-  // TransformParamValueSchema above. The entry count is bounded at
+  function: nameValue(z.string().min(1).max(MAX_NAME_LENGTH)),
+  // The record's keys (parameter names) take the name shape beside their length
+  // bound, for the reason NAME_SHAPE_PATTERN records; each string value is
+  // length-bounded only, by TransformParamValueSchema above. The entry count is bounded at
   // MAX_PARAMS_ENTRIES by a bare key count (exceedsOwnKeyCount) that runs
   // before the per-key length check -- the same permissive-stage +
   // count-refine + pipe shape as boundedArray, so an over-count record is
@@ -605,7 +761,12 @@ const TransformStepBaseSchema = z.object({
         abort: true,
       },
     )
-    .pipe(z.record(z.string().max(MAX_NAME_LENGTH), TransformParamValueSchema))
+    .pipe(
+      z.record(
+        nameValue(z.string().max(MAX_NAME_LENGTH)),
+        TransformParamValueSchema,
+      ),
+    )
     .optional(),
 });
 
@@ -763,8 +924,8 @@ export interface LinkageKeyElement {
 }
 
 const LinkageKeyElementSchema: z.ZodType<LinkageKeyElement> = z.object({
-  field: z.string().min(1).max(MAX_NAME_LENGTH),
-  name: z.string().max(MAX_NAME_LENGTH).optional(),
+  field: nameValue(z.string().min(1).max(MAX_NAME_LENGTH)),
+  name: nameValue(z.string().max(MAX_NAME_LENGTH)).optional(),
   generateFuzzyComparisons: GenerateFuzzyComparisonsSchema.optional(),
   // The step COUNT is bounded at MAX_TRANSFORM_STEPS before per-element
   // validation; see boundedArray and the untrusted-input bounds note.
@@ -800,7 +961,7 @@ export interface LinkageKey {
 }
 
 const LinkageKeySchema: z.ZodType<LinkageKey> = z.object({
-  name: z.string().min(1).max(MAX_NAME_LENGTH),
+  name: nameValue(z.string().min(1).max(MAX_NAME_LENGTH)),
   // The element COUNT is bounded at MAX_KEY_ELEMENTS before per-element
   // validation, with the existing .min(1) floor preserved; see boundedArray and
   // the untrusted-input bounds note.
@@ -811,7 +972,10 @@ const LinkageKeySchema: z.ZodType<LinkageKey> = z.object({
     1,
   ),
   swap: z
-    .tuple([z.string().max(MAX_NAME_LENGTH), z.string().max(MAX_NAME_LENGTH)])
+    .tuple([
+      nameValue(z.string().max(MAX_NAME_LENGTH)),
+      nameValue(z.string().max(MAX_NAME_LENGTH)),
+    ])
     .optional(),
 });
 
@@ -858,8 +1022,10 @@ export interface PayloadColumn {
 }
 
 const PayloadColumnSchema: z.ZodType<PayloadColumn> = z.object({
-  name: z.string().min(1).max(MAX_NAME_LENGTH),
-  description: freeTextValue(z.string().max(MAX_TEXT_LENGTH)).optional(),
+  name: nameValue(z.string().min(1).max(MAX_NAME_LENGTH)),
+  description: recordedFreeTextValue(
+    z.string().max(MAX_TEXT_LENGTH),
+  ).optional(),
 });
 
 /**
@@ -867,6 +1033,9 @@ const PayloadColumnSchema: z.ZodType<PayloadColumn> = z.object({
  * over the established encrypted channel. Each party independently specifies
  * their own send/receive lists; the partner's send list is shared as a data
  * dictionary.
+ *
+ * Each list names a column at most once: a repeated name is normalized away at
+ * parse rather than refused (see {@link payloadColumnList}).
  */
 export interface Payload {
   /** Columns this party will transmit for matched records. */
@@ -880,18 +1049,46 @@ export interface Payload {
   receive?: PayloadColumn[];
 }
 
+/**
+ * One list of disclosed columns with each name kept once: the first entry
+ * naming a column stands, with its own description, and a later entry repeating
+ * that name is dropped. A column's identity is its `name` -- the thing disclosed
+ * -- so two entries naming it are one declaration written twice however their
+ * descriptions differ. `nameOf` reads that name, since a list of the same
+ * columns is written as entries here and as bare names on an invitation token.
+ * Names are compared by code unit, the equality docs/spec/CANONICAL_ENCODING.md
+ * makes normative for a third party reproducing the agreed-terms hash.
+ */
+export const columnsNamedOnce = <Entry>(
+  columns: readonly Entry[],
+  nameOf: (column: Entry) => string,
+): Entry[] => {
+  const kept = new Set<string>();
+  return columns.filter((column) => {
+    const name = nameOf(column);
+    if (kept.has(name)) return false;
+    kept.add(name);
+    return true;
+  });
+};
+
+/**
+ * One direction of the payload data dictionary: {@link boundedArray} bounds the
+ * count at {@link MAX_PAYLOAD_ENTRIES} before {@link columnsNamedOnce} collapses
+ * repeats, so a padded list is refused for its authored count. Repeats are
+ * normalized rather than refused to keep this build's parse total over the
+ * documents it already admits.
+ */
+const payloadColumnList = (message: string): z.ZodType<PayloadColumn[]> =>
+  boundedArray(PayloadColumnSchema, MAX_PAYLOAD_ENTRIES, message).transform(
+    (columns) => columnsNamedOnce(columns, (column) => column.name),
+  );
+
 const PayloadSchema: z.ZodType<Payload> = z.object({
-  // The column COUNT is bounded at MAX_PAYLOAD_ENTRIES before per-element
-  // validation; see boundedArray and docs/spec/CHANNEL_SECURITY.md,
-  // "Application-layer parsed-input bounds".
-  send: boundedArray(
-    PayloadColumnSchema,
-    MAX_PAYLOAD_ENTRIES,
+  send: payloadColumnList(
     `send must not exceed ${MAX_PAYLOAD_ENTRIES} entries`,
   ).optional(),
-  receive: boundedArray(
-    PayloadColumnSchema,
-    MAX_PAYLOAD_ENTRIES,
+  receive: payloadColumnList(
     `receive must not exceed ${MAX_PAYLOAD_ENTRIES} entries`,
   ).optional(),
 });
@@ -922,8 +1119,8 @@ interface LegalAgreement {
 }
 
 const LegalAgreementSchema: z.ZodType<LegalAgreement> = z.object({
-  reference: z.string().min(1).max(MAX_NAME_LENGTH),
-  purpose: freeTextValue(z.string().min(1).max(MAX_TEXT_LENGTH)),
+  reference: nameValue(z.string().min(1).max(MAX_NAME_LENGTH)),
+  purpose: recordedFreeTextValue(z.string().min(1).max(MAX_TEXT_LENGTH)),
   expirationDate: z.iso.date(),
 });
 
@@ -967,7 +1164,7 @@ export interface LinkageSetIdentity {
 }
 
 const LinkageSetIdentitySchema: z.ZodType<LinkageSetIdentity> = z.object({
-  name: z.string().min(1).max(MAX_NAME_LENGTH),
+  name: nameValue(z.string().min(1).max(MAX_NAME_LENGTH)),
   version: z
     .string()
     .max(MAX_NAME_LENGTH)
@@ -1042,6 +1239,8 @@ const LinkageRuleSetReferenceSchema: z.ZodType<LinkageRuleSetReference> =
  * - `output.expectsOutput: false` requires `payload.receive` to be empty: a
  *   party that receives no output cannot receive payload for matched records it
  *   never gets.
+ * - `payload.send` and `payload.receive` each name a column at most once: a
+ *   repeated name parses to one entry rather than being refused.
  * - `linkageFields[].name` must be unique across all linkage fields.
  * - `linkageKeys[].name` must be unique across all linkage keys.
  * - Within each linkage key, the effective element identifier (`element.name`
@@ -1136,10 +1335,12 @@ const LinkageTermsBaseSchema = z.object({
     .max(MAX_NAME_LENGTH)
     .regex(/^\d+\.\d+\.\d+$/, "version must be a valid semver string"),
   // Optional, and bounded where it is present: a party that names itself is held
-  // to a non-empty, length-capped, control-character-free label, and a party that
-  // supplies none omits the field rather than sending an empty string or a
-  // placeholder.
-  identity: freeTextValue(z.string().min(1).max(MAX_TEXT_LENGTH)).optional(),
+  // to a non-empty, length-capped label with no control or text-direction
+  // character in it, and a party that supplies none omits the field rather than
+  // sending an empty string or a placeholder.
+  identity: recordedFreeTextValue(
+    z.string().min(1).max(MAX_TEXT_LENGTH),
+  ).optional(),
   date: z.iso.date(),
   algorithm: AlgorithmSchema,
   linkageStrategy: LinkageStrategySchema.default("cascade"),

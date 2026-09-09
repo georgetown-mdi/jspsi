@@ -3,8 +3,17 @@ import path from "node:path";
 
 import { FINGERPRINT_REGEX } from "@psilink/core";
 
-import { WORKDIR_MODE, jobFileExists, resolveWorkdirFile } from "./workdir";
+import {
+  WORKDIR_MODE,
+  jobFileExists,
+  jobPathPresent,
+  jobTargetPresent,
+  resolveWorkdirFile,
+} from "./workdir";
+import { resolveMountPath } from "./mountBrowse";
 import { runCapturedCliChild } from "./capturedCliChild";
+
+import type { JobSigningIdentityLocation } from "./intentSchemas";
 
 /**
  * The console's signing-identity driver. It spawns the CLI's `fingerprint`
@@ -60,9 +69,101 @@ export function signingIdentityPath(dataRoot: string): string {
   return mountFilePath(dataRoot, SIGNING_IDENTITY_FILE_NAME);
 }
 
-/** The exported certificate's absolute path under the same mount. */
+/**
+ * The exported certificate's absolute path in the mounted data root -- always
+ * there, never beside the identity file. The operator may keep the identity in
+ * a read-only mount of its own, where an export would fail; the data root is
+ * the one directory the console writes to, and the certificate is the artifact
+ * they are meant to find and hand over.
+ */
 export function signingCertificatePath(dataRoot: string): string {
   return mountFilePath(dataRoot, SIGNING_CERTIFICATE_FILE_NAME);
+}
+
+/**
+ * The directory a signing identity file sits in.
+ *
+ * Read by the pre-run check that refuses a file-sync exchange whose rendezvous
+ * directory holds this directory ({@link JobManager.createJob}): what the
+ * partner syncs is a directory, so the comparison is against the identity's
+ * directory rather than the file.
+ */
+export function signingIdentityDirectory(identityPath: string): string {
+  return path.dirname(identityPath);
+}
+
+/**
+ * Whether a signing identity file is at the given path. The private key the
+ * pre-run refusal is about is a file that is there or is not: with no identity
+ * yet, a file-sync exchange over its directory publishes no key.
+ *
+ * Presence, never readability ({@link jobPathPresent}): a key the console's own
+ * uid cannot open is a key the partner's sync copies all the same, so an
+ * unreadable identity file must refuse the run rather than be treated as absent.
+ */
+export function signingIdentityExists(identityPath: string): boolean {
+  return jobPathPresent(identityPath);
+}
+
+/**
+ * Whether an identity file is at the end of the given path, following a symlink
+ * to its target ({@link jobTargetPresent}).
+ *
+ * The question a READ of a location the operator picked asks. The refusal above
+ * keeps counting a link, since it is about a key the partner's sync copies; a
+ * read has the opposite need -- a link with nothing at its end is nothing to
+ * read, and counting it present hands the create-or-reuse child a name it would
+ * create THROUGH, into whatever directory the link points at.
+ */
+export function signingIdentityTargetExists(identityPath: string): boolean {
+  return jobTargetPresent(identityPath);
+}
+
+/**
+ * Why a configured identity location does not name a file on this console. The
+ * message names the field and a shape reason only, never a resolved path or a
+ * mount name, on the discipline every authoring rejection keeps.
+ */
+export class SigningIdentityLocationError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "SigningIdentityLocationError";
+  }
+}
+
+/**
+ * The absolute path of the signing identity file this console reads, from the
+ * operator's configured location.
+ *
+ * An absent `location` is the console's default: the fixed name in the mounted
+ * data root, which is where the identity is created on demand. A location the
+ * operator picked in the secrets browse is resolved server-side against
+ * `secretsDir` -- admitted segment by segment, the parent re-confined by
+ * realpath -- and the file it names need NOT exist: whether an identity is
+ * there is the caller's question to ask and the operator's to answer, since
+ * the console creates nothing outside the data root apart from the
+ * file-removed-between-check-and-read exception a read-only mount closes.
+ *
+ * @throws {SigningIdentityLocationError} when the console has no secrets mount,
+ *   or the segments do not resolve inside it.
+ */
+export function resolveSigningIdentityPath(args: {
+  dataRoot: string;
+  secretsDir: string | undefined;
+  location: JobSigningIdentityLocation | undefined;
+}): string {
+  if (args.location === undefined) return signingIdentityPath(args.dataRoot);
+  if (args.secretsDir === undefined)
+    throw new SigningIdentityLocationError(
+      "identityLocation names the secrets mount, which is not configured on " +
+        "this console",
+    );
+  const resolved = resolveMountPath(args.secretsDir, args.location.subPath);
+  if (resolved === null)
+    throw new SigningIdentityLocationError(
+      "identityLocation.subPath does not name a path in the secrets mount",
+    );
+  return resolved.absolutePath;
 }
 
 /**
@@ -111,6 +212,13 @@ const FINGERPRINT_SIGKILL_GRACE_MS = 5_000;
  *   write, or a malformed default `psilink.yaml`; see
  *   {@link runSigningFingerprint}) -- not distinguishable here since stderr
  *   is discarded, so all are reported as one category.
+ * - `syncing`: no child ran. Creating the identity would have written the
+ *   private key into a folder a live file-drop exchange is syncing to the
+ *   partner ({@link JobManager.resolveSigningFingerprint}).
+ * - `absent`: no child ran. The operator configured an identity location of
+ *   their own and nothing is at it. The console creates an identity only at
+ *   its default location, so a configured one is read and its absence
+ *   reported ({@link JobManager.resolveSigningFingerprint}).
  * - `timeout`: the watchdog killed the child.
  * - `error`: any other non-zero exit, no valid fingerprint line, or the
  *   child could not be spawned.
@@ -123,6 +231,8 @@ export type SigningFingerprintResult =
       certificateExported: boolean;
     }
   | { kind: "refused" }
+  | { kind: "syncing" }
+  | { kind: "absent" }
   | { kind: "timeout" }
   | { kind: "error" };
 
@@ -203,10 +313,12 @@ export function fingerprintArgv(args: {
  * `created` is read from the identity file's presence before the child
  * runs, not from its stderr banner, which this boundary discards.
  *
- * The child's cwd is pinned to the identity file's directory rather than
- * inherited, since an inherited cwd would let an unmounted `psilink.yaml`
- * decide the CLI's default config lookup. The directory is created if
- * missing, owner-only.
+ * The child's cwd is `dataRoot` rather than inherited, and rather than the
+ * identity's own directory: an inherited cwd would let an unmounted
+ * `psilink.yaml` decide the CLI's default config lookup, and the identity's
+ * directory is the operator's secrets mount whenever they configured a
+ * location of their own, which would make a document there the child's
+ * config. The data root is created if missing, owner-only.
  *
  * @throws {Error} synchronously, before any child spawns, when the export
  *   path names the identity file ({@link assertExportPathDistinct}) -- a
@@ -215,6 +327,7 @@ export function fingerprintArgv(args: {
  */
 export function runSigningFingerprint(args: {
   binaryPath: string;
+  dataRoot: string;
   identityPath: string;
   identityLabel: string;
   exportPath?: string;
@@ -225,7 +338,7 @@ export function runSigningFingerprint(args: {
   if (args.exportPath !== undefined)
     assertExportPathDistinct(args.identityPath, args.exportPath);
   const created = !jobFileExists(args.identityPath);
-  const childCwd = path.dirname(path.resolve(args.identityPath));
+  const childCwd = path.resolve(args.dataRoot);
   try {
     fs.mkdirSync(childCwd, { recursive: true, mode: WORKDIR_MODE });
   } catch {

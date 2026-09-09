@@ -1,4 +1,5 @@
 import {
+  LINKAGE_CARDINALITIES,
   ProcessState,
   getLogger,
   joinErrorCauseChain,
@@ -10,7 +11,10 @@ import {
   MAX_SFTP_CONNECTION_RESPONSE_BYTES,
   readBoundedJson,
 } from "@psi/jobClient/jobApiBody";
+import { isJobCreateRefusalReason } from "@jobs/jobCreateRefusal";
+import { jobCreateIntentSchema } from "@jobs/intentSchemas";
 import { jobRecordDownloads } from "@psi/jobClient/jobExchangeRecord";
+import { refusedColumnNames } from "@psi/columnNames";
 import { whenDiagnostic } from "@utils/diagnostics";
 
 import { ERROR_MESSAGE_CHAIN_FIELD } from "../relayErrorChain";
@@ -32,10 +36,13 @@ import type {
   LinkageTerms,
   Metadata,
   OwnColumnSelection,
+  ResolvedMatching,
   Standardization,
 } from "@psilink/core";
 import type { RelayEvent, RelayEventType } from "@jobs/cliDriver";
+import type { JobCreateRefusalReason } from "@jobs/jobCreateRefusal";
 import type { ReceiptsIntentFields } from "../receiptsModel";
+import type { RefusedColumnName } from "@psi/columnNames";
 import type { RunDiagnosticsIntentFields } from "../runDiagnosticsModel";
 import type { RunOutputs } from "../runOutputs";
 import type { SftpConnectionProjection } from "@jobs/jobManager";
@@ -213,15 +220,33 @@ export type JobStatusProbe =
  * create includes {@link activeJobId}, the id of the exchange occupying the
  * console's single slot, parsed from the response body -- the browser
  * re-attaches to it rather than surfacing the "already running" alert (see
- * `exchange/reattachOnBusy`). Present only on a 409 whose body held one. */
+ * `exchange/reattachOnBusy`). Present only on a 409 whose body held one.
+ * {@link JobApiRequestError.refusalReason} is the counterpart on a refused (400)
+ * create: the fixed token naming a refusal about the console's own mounts, which
+ * the intent this browser holds cannot explain. Present only on a 400 whose body
+ * held one this bundle knows. */
 export class JobApiRequestError extends Error {
   constructor(
     readonly status: number,
     message: string,
     readonly activeJobId?: string,
+    readonly refusalReason?: JobCreateRefusalReason,
   ) {
     super(message);
     this.name = "JobApiRequestError";
+  }
+}
+
+/**
+ * The pre-POST refusal for an intent the console's own schema would reject over a
+ * column name: raised in the browser, which holds the intent it is about to send,
+ * so the operator meets a diagnostic naming the column rather than the job API's
+ * empty-bodied `400`. No route's answer changes, and nothing is sent.
+ */
+export class JobIntentColumnNameError extends Error {
+  constructor(readonly columns: Array<RefusedColumnName>) {
+    super("job intent refused over a column name");
+    this.name = "JobIntentColumnNameError";
   }
 }
 
@@ -269,6 +294,11 @@ export function createFetchJobApiClient(
           // single slot -- so the caller can re-attach to it. Absent on every
           // other status (an empty-bodied 400/413/500 is treated as no id).
           response.status === 409 ? await readBodyJobId(response) : undefined,
+          // A refused (400) body may hold `{ reason }`; every other 400 is
+          // empty-bodied and reads as no reason.
+          response.status === 400
+            ? await readBodyRefusalReason(response)
+            : undefined,
         );
       const body: unknown = await readBoundedJson(
         response,
@@ -351,6 +381,24 @@ async function readBodyJobId(response: Response): Promise<string | undefined> {
     );
     const id = (body as { id?: unknown }).id;
     return typeof id === "string" && id.length > 0 ? id : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/** Read a `{ reason }` refusal token off a refused create's body, or undefined
+ * when the body is absent, unparseable, or names no token this bundle knows. The
+ * token selects fixed console copy; nothing from the body is displayed. */
+async function readBodyRefusalReason(
+  response: Response,
+): Promise<JobCreateRefusalReason | undefined> {
+  try {
+    const body: unknown = await readBoundedJson(
+      response,
+      MAX_JOB_STATUS_RESPONSE_BYTES,
+    );
+    const reason = (body as { reason?: unknown }).reason;
+    return isJobCreateRefusalReason(reason) ? reason : undefined;
   } catch {
     return undefined;
   }
@@ -768,6 +816,29 @@ function countOnlyResultCount(event: RelayEvent): number | undefined {
     : undefined;
 }
 
+/** What the agreed `deduplicate` pair resolved to, read off a `result` relay
+ * event, or undefined when the run reported nothing this build can read. The
+ * relay forwards the CLI's own fields verbatim (docs/spec/CLI_EVENTS.md,
+ * `result`), so the shape is checked here rather than assumed: both values
+ * must be booleans and the label one of the closed set, and anything else
+ * leaves the console's panel stating no matching at all rather than a label
+ * this build does not define. */
+function resolvedMatchingOf(event: RelayEvent): ResolvedMatching | undefined {
+  const matching = event.matching;
+  if (matching === null || typeof matching !== "object") return undefined;
+  const { localDeduplicate, partnerDeduplicate, cardinality } = matching as {
+    localDeduplicate?: unknown;
+    partnerDeduplicate?: unknown;
+    cardinality?: unknown;
+  };
+  const label = LINKAGE_CARDINALITIES.find((known) => known === cardinality);
+  return typeof localDeduplicate === "boolean" &&
+    typeof partnerDeduplicate === "boolean" &&
+    label !== undefined
+    ? { localDeduplicate, partnerDeduplicate, cardinality: label }
+    : undefined;
+}
+
 /** The base console {@link RunOutputs} for a `result` relay event, before the
  * record pair is attached. A server job writes its result on the console, so
  * `resultsUrl` points at the job's console result endpoint rather than a
@@ -779,18 +850,22 @@ function countOnlyResultCount(event: RelayEvent): number | undefined {
  * count. A present count means a count-only outcome (no result file for
  * either party); its absence means withheld. `countReportedByPartner` caveats
  * the count only on a literal `true`; anything else -- omitted, or a
- * non-boolean -- is treated as this party's own count, per the contract. */
+ * non-boolean -- is treated as this party's own count, per the contract. The
+ * resolved matching rides all three outcomes, since the console seat states
+ * what the pair resolved to whatever this party received. */
 function baseResultOutputs(event: RelayEvent, jobId: string): RunOutputs {
+  const matching = resolvedMatchingOf(event);
   if (event.resultWritten !== false)
-    return { kind: "matched", resultsUrl: jobResultUrl(jobId) };
+    return { kind: "matched", resultsUrl: jobResultUrl(jobId), matching };
   const intersectionCount = countOnlyResultCount(event);
   return intersectionCount !== undefined
     ? {
         kind: "counted",
         intersectionCount,
         countReportedByPartner: event.countReportedByPartner === true,
+        matching,
       }
-    : { kind: "withheld" };
+    : { kind: "withheld", matching };
 }
 
 /** Attach the record-pair downloads to the base outputs, pointed at the
@@ -905,7 +980,7 @@ function intentFor(config: ServerJobExchangeDriverConfig): JobExchangeIntent {
  * `expectedPartnerDeduplicate`), because both parties infer terms from their
  * own files and there is no application-layer encryption to key. It supplies
  * only the channel, input source, tuning subset, and the zero-setup intent's
- * two optional bounded selectors. */
+ * three optional bounded selectors. */
 export interface ServerJobZeroSetupDriverConfig {
   transport: ServerJobExchangeTransport;
   /** Where the console reads this party's input from ({@link JobInputSource}):
@@ -924,6 +999,9 @@ export interface ServerJobZeroSetupDriverConfig {
   /** The optional linkage strategy forwarded to the CLI's `--linkage-strategy`
    * (a closed enum); omitted for the cascade default. */
   linkageStrategy?: JobZeroSetupLinkageStrategy;
+  /** This party's own side of the matching cardinality, forwarded to the CLI's
+   * `--deduplicate`; omitted for the closed default. */
+  deduplicate?: boolean;
   /** Invoked with the created job's id the moment `POST /api/jobs` resolves,
    * before the event stream opens -- the same strand-recovery call site the
    * exchange driver exposes. */
@@ -940,7 +1018,8 @@ export interface ServerJobZeroSetupDriverConfig {
 function zeroSetupIntentFor(
   config: ServerJobZeroSetupDriverConfig,
 ): JobZeroSetupIntent {
-  const { transport, inputSource, options, identity, linkageStrategy } = config;
+  const { transport, inputSource, options, identity } = config;
+  const { linkageStrategy, deduplicate } = config;
   const shared = {
     mode: "zeroSetup" as const,
     ...(inputSource.kind === "inline"
@@ -950,11 +1029,24 @@ function zeroSetupIntentFor(
     ...config.runDiagnostics,
     ...(identity !== undefined ? { identity } : {}),
     ...(linkageStrategy !== undefined ? { linkageStrategy } : {}),
+    ...(deduplicate !== undefined ? { deduplicate } : {}),
     eventStream: true,
   };
   return transport.channel === "sftp"
     ? { channel: "sftp", ...shared }
     : { channel: "filedrop", ...shared };
+}
+
+/** The columns the console's create schema refuses this intent over, empty when
+ * the intent's column names are all admissible (and for a zero-setup intent,
+ * which declares no metadata). The schema is still what decides whether the
+ * intent goes, so the browser cannot refuse what the route would accept; the
+ * scan only names the column behind a refusal the schema already made. */
+function refusedIntentColumns(
+  intent: JobCreateIntent,
+): Array<RefusedColumnName> {
+  if (jobCreateIntentSchema.safeParse(intent).success) return [];
+  return refusedColumnNames("metadata" in intent ? intent.metadata : undefined);
 }
 
 /**
@@ -980,6 +1072,19 @@ async function runCreatedJob(
   // is not narrowed to a constant by the first guard.
   const aborted = () => signal.aborted;
   if (aborted()) return;
+
+  // The console's own create schema, run here over the intent this browser holds.
+  // The route answers a schema refusal with an empty body by design, so a metadata
+  // column name it cannot record would otherwise reach the operator as a bare
+  // "could not use this file"; this names the column before anything is sent.
+  const refusedColumns = refusedIntentColumns(intent);
+  if (refusedColumns.length > 0) {
+    events.onError({
+      category: "config",
+      error: new JobIntentColumnNameError(refusedColumns),
+    });
+    return;
+  }
 
   let jobId: string;
   try {

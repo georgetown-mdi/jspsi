@@ -8,24 +8,29 @@ import {
 import {
   coalesceSubstitutesConstant,
   CONSENT_VERDICT_PARAM_NAMES,
+  gradeElementPipeline,
   parseDateInputDropsEveryRecord,
-  pipelineAlwaysDrops,
-  substringCollapsesParsedDateToConstant,
 } from "../linkageSatisfiability.js";
 import { displayText } from "../utils/sanitizeForDisplay.js";
 import { redactAndSanitizeForDisplay } from "../utils/sanitizeErrorForDisplay.js";
 import { redactAndDisplayPartyIdentity } from "../records/partyIdentityDisplay.js";
 
+import { termsDeclareCandidateSet } from "../fanOutFunctions.js";
 import { endpointRequiresRetainedFiles } from "../config/invitation.js";
 import type { InvitationToken } from "../config/invitation.js";
 import { checkLinkageRuleSetCitation } from "../defaults/builtInLinkageTerms.js";
 import type { LinkageRuleSetCitationVerdict } from "../defaults/builtInLinkageTerms.js";
-import { deduplicateIsImplementedForStrategy } from "../linkageTermsPolicy.js";
+import {
+  candidateSetIsImplementedForStrategy,
+  deduplicateIsImplementedForStrategy,
+} from "../linkageTermsPolicy.js";
+import { withholdsSenderAssociationTable } from "../psi/link.js";
 import type {
   LinkageField,
   LinkageKey,
   LinkageKeyElement,
   LinkageStrategy,
+  LinkageTerms,
   TransformStep,
 } from "../config/linkageTermsSchema.js";
 import type { Algorithm } from "../types.js";
@@ -509,9 +514,10 @@ export interface InvitationSummary {
    * answers what the strategy would do with a deduplicating term, whether or
    * not these terms declare one. Not covered: the both-sided pair under a
    * strategy that pairs no `many-to-many`, a property of the agreed PAIR
-   * unreadable from an invitation alone -- acceptance derives this party's
-   * own `deduplicate` as false, so no accepted invitation resolves that pair
-   * without the accepting party declaring it afterwards.
+   * unreadable from an invitation alone -- this party's own `deduplicate` is
+   * not the invitation's to set, so no summary of one can answer that pair. A
+   * seat where the accepting party declares its own side reads the pair from
+   * `resolveLinkageCardinality` beside this flag.
    */
   deduplicateApplied: boolean;
   /**
@@ -530,13 +536,51 @@ export interface InvitationSummary {
    * Whether the exchange this invitation proposes matches on those
    * candidates.
    *
-   * True exactly for `single-pass`, the one strategy fan-out matching is
-   * specified for (docs/spec/PROTOCOL.md, Fan-out runs under single-pass
-   * only); under any other, terms declaring a fan-out are refused before the
-   * exchange runs. Meaningful only alongside {@link fansOut}, selecting
-   * which of the two fan-out consent facts a surface renders.
+   * True for a combination that resolves a candidate set -- either linkage
+   * strategy under the identifier-revealing algorithm (docs/spec/PROTOCOL.md,
+   * Fan-out runs under both linkage strategies); under one that does not,
+   * terms declaring a fan-out are refused before the exchange runs.
+   * Meaningful only alongside {@link fansOut}, selecting which of the two
+   * fan-out consent facts a surface renders.
    */
   fanOutApplied: boolean;
+  /**
+   * Whether a `deduplicate: true` the ACCEPTING party declares for itself
+   * against this invitation is refused: these terms declare a candidate set
+   * and the inviting party declares a `deduplicate` of its own, so the pair
+   * that party's own value completes resolves to the `many-to-many`
+   * cardinality no strategy pairs with a candidate set.
+   *
+   * Both conditions are the invitation's own, which is what makes the
+   * consequence statable at a seat before that value is set; the pair itself
+   * is refused at the accept boundary (`assertCandidateSetCardinalityImplemented`,
+   * reached from `deriveAcceptedLinkageTerms`) and again at the agreed-terms
+   * run boundary (`resolveLinkageCardinality`). Read by the seat that offers
+   * the accepting party a control over its own side; a surface offering none
+   * accepts with that side derived false, which this combination needs true.
+   */
+  acceptorDeduplicateRefused: boolean;
+  /**
+   * Whether the exchange suppresses the accepting party's half of the
+   * matched-pair table: that party's process receives neither which of its
+   * records matched nor how many of the inviting party's stand behind one.
+   * {@link withholdsAcceptorAssociationTable}'s verdict, read once so both
+   * surfaces select one fact from it -- under the deduplicate headline, and
+   * for the own-membership pair on the seat where the accepting party is the
+   * partner the fact speaks about.
+   */
+  acceptorTableWithheld: boolean;
+  /**
+   * The same verdict for the other direction: whether the exchange suppresses
+   * the INVITING party's half of the matched-pair table, leaving its process
+   * blind to which of its own records matched, to which of the accepting
+   * party's records they matched, and to the size of any group standing behind
+   * one. {@link withholdsInviterAssociationTable}'s verdict, read once so both
+   * surfaces select from it -- the grouping pair at the seat where the
+   * accepting party declares a grouping of its own, and the own-membership
+   * pair wherever a `psi` invitation hands the inviting party no result.
+   */
+  inviterTableWithheld: boolean;
   /**
    * Linkage keys (records are matched on these), in the inviter's order, each
    * holding its ordered elements and matching rules.
@@ -865,9 +909,8 @@ const DEFAULT_PARSE_DATE_INPUT = "MM/DD/YYYY";
  * run following this one can read a window that holds only the format's own
  * characters, collapsing every date exactly as a tokenless output does.
  * That verdict is a property of the steps together, so
- * {@link elementBreadthMarker} takes it from core's
- * {@link substringCollapsesParsedDateToConstant} instead of this per-step
- * classification.
+ * {@link elementBreadthMarker} takes it from the collapse verdict of core's
+ * {@link gradeElementPipeline} instead of this per-step classification.
  *
  * A `parse_date` whose input format omits a component core requires drops
  * EVERY record, so the element matches nothing, not more, and earns no
@@ -966,7 +1009,7 @@ const LITERAL_CORRESPONDENCE_BREAKING_FUNCTIONS: ReadonlySet<string> = new Set([
  *
  * - "any date": a `parse_date` whose output layout holds no date token, or
  *   whose output a later `substring` run is measured to leave constant for
- *   every date ({@link substringCollapsesParsedDateToConstant}) -- the
+ *   every date (the collapse verdict of {@link gradeElementPipeline}) -- the
  *   maximal collapse, checked first since it dominates any other rule the
  *   element also holds.
  * - "fallback": a `coalesce` that substitutes a constant on every record an
@@ -1002,16 +1045,16 @@ const LITERAL_CORRESPONDENCE_BREAKING_FUNCTIONS: ReadonlySet<string> = new Set([
  * window landing in the fill in fact collapses every short record onto one
  * constant. Neither masking shape is reachable from the built-in key sets
  * (only `substring` and `swap` appear there). Second: the date-collapse
- * measurement ({@link substringCollapsesParsedDateToConstant}) runs probe
- * dates through the steps between a `parse_date` and the end of a
- * substring run; it cannot see a value-DEPENDENT drop (a `filter_regex` or
- * `null_if` that passes the probes but drops a real record), so such an
- * element earns "any date" while some records it would have collapsed are
- * in fact dropped -- the same tradeoff {@link pipelineAlwaysDrops} makes,
- * to avoid flagging a legitimate pipeline as dead. The probe dates ship in
- * public source, so a dropped or unmeasurable probe resolves to the
- * collapse word, never the milder one; both halves are held by tests
- * driving the shipped pipeline, not by this note.
+ * measurement ({@link gradeElementPipeline}) runs probe dates through the
+ * steps between a `parse_date` and the end of a substring run; it cannot
+ * see a value-DEPENDENT drop (a `filter_regex` or `null_if` that passes the
+ * probes but drops a real record), so such an element earns "any date"
+ * while some records it would have collapsed are in fact dropped -- the
+ * same tradeoff the grading's drop verdict makes, to avoid flagging a
+ * legitimate pipeline as dead. The probe dates ship in public source, so a
+ * dropped or unmeasurable probe resolves to the collapse word, never the
+ * milder one; both halves are held by tests driving the shipped pipeline,
+ * not by this note.
  */
 function elementBreadthMarker(
   element: LinkageKeyElement,
@@ -1023,18 +1066,18 @@ function elementBreadthMarker(
   if (declaresFanOut(element))
     return fanOutMatches ? displayText`multiple` : displayText`not supported`;
   // Tier 2: a pipeline that matches nothing earns no marker. Deferred to
-  // core's pipelineAlwaysDrops, which accounts for a rescuing `coalesce`.
-  if (pipelineAlwaysDrops(element.transform)) return undefined;
+  // core's drop verdict, which accounts for a rescuing `coalesce`. Its grading
+  // also answers tier 3a below, off one walk of the element's steps.
+  const grading = gradeElementPipeline(steps);
+  if (grading.alwaysDrops()) return undefined;
   // Tier 3a: "any date" -- checked before every other rule since it is the
-  // maximal collapse. Every step index is offered to
-  // substringCollapsesParsedDateToConstant because the predicate itself
-  // decides which one ends a maximal substring run.
+  // maximal collapse. The whole pipeline is offered at once because core
+  // decides which step ends a maximal substring run, and reads every run of one
+  // element in a single walk.
   const parseDateBreadths = steps.map(parseDateBreadth);
   if (
     parseDateBreadths.includes("any date") ||
-    steps.some((_step, index) =>
-      substringCollapsesParsedDateToConstant(steps, index),
-    )
+    grading.collapsesParsedDateToConstant()
   )
     return displayText`any date`;
   // Tier 3b: "fallback" -- gated on core's position-aware predicate so the
@@ -1231,6 +1274,108 @@ function summarizeKey(
 }
 
 /**
+ * Whether the exchange an invitation proposes withholds the ACCEPTING party's
+ * half of the association table at the wire, leaving that party's process
+ * blind to which of its own records matched and to the size of any group of
+ * the inviting party's records standing behind one of them.
+ *
+ * The rule itself is {@link withholdsSenderAssociationTable}, asked here
+ * rather than restated. What this adds is the reading of an invitation's own
+ * terms that puts the accepting party on that rule's withheld side, which
+ * takes three conditions:
+ *
+ * - The strategy is `single-pass`. It is the only strategy with a frame to
+ *   suppress: a cascade's rounds carry each party's matched positions as they
+ *   go (docs/spec/PROTOCOL.md, Withholding the sender's table from a blind
+ *   helper).
+ * - The inviting party is entitled to output and the accepting party is not.
+ *   Role resolution gives the party entitled to the result the receiver seat
+ *   whatever the record counts, so the accepting party is the sender the
+ *   withholding covers -- pinned against `resolveRole` itself in
+ *   `test/consent/invitationSummary.test.ts` rather than asserted here.
+ * - The invitation requests no payload column from the accepting party AND
+ *   requests it as a declaration -- `payload.receive` present and empty --
+ *   rather than leaving that direction lazy. The declaration mirrors to the
+ *   acceptor's own empty `payload.send`, which `assertPayloadSendDisclosed`
+ *   holds to exactly the columns its metadata discloses before any data
+ *   moves, so a run that reaches the linkage at all discloses none. An absent
+ *   `receive` binds nothing and so reads as disclosure, the same direction
+ *   the run defaults an unadvertised partner flag in: neither may blind a
+ *   helper that needs its half back.
+ *
+ * A deduplicating term neither adds a condition nor removes one; the
+ * multiplicity bears on neither reason a helper needs its half (docs/spec/
+ * PROTOCOL.md, Where the "one" party receives no output).
+ *
+ * A document no acceptance can reach describes no run, so it resolves false
+ * whatever the conditions above say. Where the inviting party keeps the
+ * result, the accepting party mirrors to no entitlement, and a `payload.send`
+ * the invitation declares mirrors to a `receive` that party may not hold, so
+ * `deriveAcceptedLinkageTerms` refuses the document before any surface
+ * consents to it -- pinned against that refusal in
+ * `test/consent/invitationSummary.test.ts` rather than restated here.
+ */
+export function withholdsAcceptorAssociationTable(
+  terms: LinkageTerms,
+): boolean {
+  if (terms.linkageStrategy !== "single-pass") return false;
+  if (!terms.output.expectsOutput) return false;
+  if (!terms.output.shareWithPartner && (terms.payload?.send?.length ?? 0) > 0)
+    return false;
+  const requestsNoPayload =
+    terms.payload?.receive !== undefined && terms.payload.receive.length === 0;
+  return withholdsSenderAssociationTable(
+    terms.output.shareWithPartner,
+    !requestsNoPayload,
+  );
+}
+
+/**
+ * Whether the exchange an invitation proposes withholds the INVITING party's
+ * half of the association table at the wire, leaving that party's process
+ * blind to which of the accepting party's records matched and to the size of
+ * any group of them standing behind one.
+ *
+ * The mirror of {@link withholdsAcceptorAssociationTable}, asking the same
+ * rule ({@link withholdsSenderAssociationTable}) with the inviting party in
+ * the sender's seat, which takes three conditions:
+ *
+ * - The strategy is `single-pass`, the only strategy with a frame to
+ *   suppress.
+ * - The accepting party is entitled to output and the inviting party is not,
+ *   so role resolution seats the accepting party as the receiver and leaves
+ *   the inviting party the sender the withholding covers.
+ * - The invitation declares an empty `payload.send`. That declaration binds
+ *   the inviting party to disclosing no column -- `assertPayloadSendDisclosed`
+ *   holds a present-but-empty dictionary to exactly what metadata discloses
+ *   whenever the terms share the result with the partner, which this shape
+ *   does -- so a run that reaches the linkage discloses none. An absent
+ *   `send` binds nothing and so reads as disclosure.
+ *
+ * Read once so two surfaces select from it. The CLI accept prompt and the web
+ * non-proposing seat pick the own-membership fact
+ * (`partnerLearnsOwnMembership` / `partnerOwnMembershipWithheld`) wherever a
+ * `psi` invitation hands the inviting party no result. The seat where the
+ * ACCEPTING party declares a grouping of its own reads the same verdict for
+ * the fact beside the pair statement (`partnerReadsDuplicateGrouping` and
+ * `partnerDuplicateGroupingWithheld`). A deduplicating cardinality neither
+ * adds a condition nor removes one; the "one" party as a no-output helper is
+ * exactly the composition docs/spec/PROTOCOL.md covers under Where the "one"
+ * party receives no output.
+ */
+export function withholdsInviterAssociationTable(terms: LinkageTerms): boolean {
+  if (terms.linkageStrategy !== "single-pass") return false;
+  if (terms.output.expectsOutput) return false;
+  if (!terms.output.shareWithPartner) return false;
+  const disclosesNoPayload =
+    terms.payload?.send !== undefined && terms.payload.send.length === 0;
+  return withholdsSenderAssociationTable(
+    terms.output.expectsOutput,
+    !disclosesNoPayload,
+  );
+}
+
+/**
  * Build a display-ready {@link InvitationSummary} from an invitation's
  * linkage terms, optional expiry, and optional held disclosed-columns
  * subset. The parameter is a structural subset of {@link InvitationToken}
@@ -1329,11 +1474,15 @@ export function summarizeInvitation(
   // what today's exchange executes: a term the run would not apply is shown
   // all the same, and the *Applied flags below report the gap to the
   // renderer. The displayed terms are what the acceptor agrees to.
-  // Which of the two fan-out registers this invitation is in: the strategy
+  // Which of the two fan-out registers this invitation is in: a combination
   // that matches a candidate set, or one that refuses the terms outright.
-  // Read once here so the element markers, the key summaries, and the
-  // consent fact a surface shows all follow the same verdict.
-  const fanOutMatches = terms.linkageStrategy === "single-pass";
+  // Read from the refusal's OWN predicates rather than restated here, so the
+  // copy cannot stay in the refusing register for a combination the refusal
+  // has stopped refusing, and read once so the element markers, the key
+  // summaries, and the consent fact a surface shows all follow one verdict.
+  const fanOutMatches =
+    terms.algorithm !== "psi-c" &&
+    candidateSetIsImplementedForStrategy(terms.linkageStrategy);
   // Whether the strategy this invitation names matches the deduplicating
   // cardinality its term asks for; a strategy that does not is refused at
   // acceptance rather than run. Read from the refusal's OWN predicate
@@ -1343,6 +1492,16 @@ export function summarizeInvitation(
   const deduplicateApplied =
     APPLIED_SETTINGS.deduplicate &&
     deduplicateIsImplementedForStrategy(terms.linkageStrategy);
+  // The two halves of the refused pair the invitation itself holds: the
+  // inviting party's own `deduplicate`, and the candidate set these terms
+  // declare, which the accepting party's `deduplicate: true` completes into
+  // the `many-to-many` cardinality no strategy pairs with a candidate set.
+  // Both conditions are read through the refusal's OWN predicate
+  // (`assertCandidateSetCardinalityImplemented`, linkageSatisfiability.ts), so
+  // a seat cannot state the consequence for an invitation the accept takes,
+  // nor withhold it for one the accept refuses.
+  const acceptorDeduplicateRefused =
+    terms.deduplicate && termsDeclareCandidateSet(terms);
 
   const summary: InvitationSummary = {
     invitingParty: redactAndDisplayPartyIdentity(terms.identity),
@@ -1354,6 +1513,9 @@ export function summarizeInvitation(
     deduplicateApplied,
     fansOut: terms.linkageKeys.some((key) => key.elements.some(declaresFanOut)),
     fanOutApplied: fanOutMatches,
+    acceptorDeduplicateRefused,
+    acceptorTableWithheld: withholdsAcceptorAssociationTable(terms),
+    inviterTableWithheld: withholdsInviterAssociationTable(terms),
     linkageKeys: terms.linkageKeys.map((key) =>
       summarizeKey(key, fieldByName, fanOutMatches),
     ),

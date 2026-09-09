@@ -184,6 +184,9 @@ describe("InvitationTerms: the count-only tier a psi-c invitation renders", () =
     expect(app.container.textContent).not.toContain(
       CONSENT_FACTS.partnerLearnsOwnMembership.note,
     );
+    expect(app.container.textContent).not.toContain(
+      CONSENT_FACTS.partnerOwnMembershipWithheld.note,
+    );
     // Not the whole branch going missing: the cooperative caveat the membership
     // sentence renders beside is still stated.
     expect(produces).toContain(CONSENT_FACTS.partnerReceivesNoResult.note);

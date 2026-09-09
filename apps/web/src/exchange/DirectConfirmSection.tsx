@@ -22,6 +22,7 @@ import { useOnlineStatus } from "@components/useOnlineStatus";
 
 import {
   IDENTITY_CONTROL_CHAR_PATTERN,
+  IDENTITY_DIRECTION_CHAR_PATTERN,
   MAX_IDENTITY_LENGTH,
 } from "@jobs/intentSchemas";
 import {
@@ -38,8 +39,15 @@ import { FileProfileSummary } from "@console/ServerFilePicker";
 import styles from "@styles/app.module.css";
 
 import {
+  DEDUPLICATE_CONTROL_DESCRIPTION,
+  DEDUPLICATE_CONTROL_LABEL,
+} from "@psi/deduplicateChoice";
+
+import {
   DEFAULT_PREVIEW_IDENTITY,
+  DIRECT_DEDUPLICATE_SIDE_NOTICE,
   DIRECT_LINKAGE_STRATEGY_AGREEMENT_NOTICE,
+  directBothSidedDeduplicateNotice,
   previewInferredTerms,
 } from "./directExchangeModel";
 
@@ -48,14 +56,17 @@ import type { ProfiledJobInput } from "@psi/jobClient/workInputClient";
 
 /**
  * The direct-exchange confirm screen: the committed file's identity and shape, the
- * optional identity field, the linkage-strategy choice, the browser-side preview
- * of the terms the file is EXPECTED to produce, the two fixed symmetry notices,
- * and the trust-model affirmation that gates Run.
+ * optional identity field, the linkage-strategy and deduplicate choices, the
+ * browser-side preview of the terms the file is EXPECTED to produce, the two fixed
+ * symmetry notices, and the trust-model affirmation that gates Run.
  *
- * The strategy is authored here rather than on the server step because it is a
- * term rather than a connection setting: it reshapes the very terms previewed
- * below it, and selecting single-pass includes the disclosure note the invitation
- * flow's own authoring control presents.
+ * The strategy and this party's `deduplicate` are authored here rather than on the
+ * server step because they are terms rather than connection settings: each
+ * reshapes the very terms previewed below them, and selecting single-pass includes
+ * the disclosure note the invitation flow's own authoring control presents. The two
+ * differ in what agreement they need -- the strategy is a mandatory-consistency
+ * term both parties must select alike, while each party's `deduplicate` is its own
+ * -- so each control states which it is.
  *
  * The terms preview is read-only. It is computed from the file's columns exactly as
  * the CLI's zero-setup command infers them ({@link previewInferredTerms}) and shown
@@ -76,6 +87,8 @@ export function DirectConfirmSection({
   onIdentity,
   linkageStrategy,
   onLinkageStrategy,
+  deduplicate,
+  onDeduplicate,
   affirmed,
   onAffirm,
   onRun,
@@ -90,6 +103,10 @@ export function DirectConfirmSection({
    * `--linkage-strategy` and applied over the previewed terms. */
   linkageStrategy: LinkageStrategy;
   onLinkageStrategy: (strategy: LinkageStrategy) => void;
+  /** This party's own side of the matching cardinality, threaded to the run's
+   * `--deduplicate` and applied over the previewed terms. */
+  deduplicate: boolean;
+  onDeduplicate: (value: boolean) => void;
   /** Whether the trust affirmation is checked -- the Run gate. */
   affirmed: boolean;
   onAffirm: (checked: boolean) => void;
@@ -111,8 +128,18 @@ export function DirectConfirmSection({
         profile.columns,
         DEFAULT_PREVIEW_IDENTITY,
         linkageStrategy,
+        deduplicate,
       ),
-    [profile, linkageStrategy],
+    [profile, linkageStrategy, deduplicate],
+  );
+
+  // What the run refuses if the partner declares the term too: the
+  // both-sided deduplicate refusal, read from the same boundary the run
+  // resolves the joint cardinality at. It states a consequence rather than
+  // holding Run: this spine reads no partner declaration, so a one-sided
+  // pair -- which runs under either strategy -- is the operator's to choose.
+  const bothSidedNotice = directBothSidedDeduplicateNotice(
+    preview.linkageTerms,
   );
 
   // A direct run is a live two-party session against the agreed server, dialled
@@ -142,17 +169,19 @@ export function DirectConfirmSection({
   // operator confirms the run from: the names below are the stripped ones, and
   // this spine has no earlier surface that outlives the file step.
   const sanitizedNotice =
-    profile.bidiStrippedColumns.length > 0
-      ? sanitizedColumnsAlert(profile.bidiStrippedColumns)
+    profile.sanitizedColumnPositions.length > 0
+      ? sanitizedColumnsAlert(profile.sanitizedColumnPositions)
       : undefined;
 
   // Client-side guard mirroring the intent schema's identity contract, validated
   // on the value the run actually sends (the trimmed label; a blank field omits
   // identity and the run names no party, so it is not an error). Naming the fault
   // at the field keeps a label the schema refuses -- a leading dash, an over-long
-  // value, or a control character -- from reaching the server as an opaque 400
-  // that failureFor would misattribute to the file or SFTP destination -- the
-  // shared contract's own rules, which this guard cannot loosen.
+  // value, a control character, or a text-direction character -- from reaching
+  // the server as an opaque 400 that failureFor would misattribute to the file
+  // or SFTP destination -- the shared contract's own rules, which this guard
+  // cannot loosen. Each class gets its own words: the two rules refuse different
+  // characters, and an operator fixing one is not told about the other.
   const trimmedIdentity = identity.trim();
   const identityError =
     trimmedIdentity.length === 0
@@ -163,7 +192,9 @@ export function DirectConfirmSection({
           ? `Identity cannot exceed ${MAX_IDENTITY_LENGTH} characters`
           : IDENTITY_CONTROL_CHAR_PATTERN.test(trimmedIdentity)
             ? "Identity cannot contain control characters (a line break or a tab, for instance)"
-            : undefined;
+            : IDENTITY_DIRECTION_CHAR_PATTERN.test(trimmedIdentity)
+              ? "Identity cannot contain text-direction characters (a right-to-left override, for instance)"
+              : undefined;
 
   return (
     <Stack gap="lg">
@@ -229,6 +260,30 @@ export function DirectConfirmSection({
         )}
       </Stack>
 
+      <Stack gap="sm">
+        <Checkbox
+          checked={deduplicate}
+          onChange={(event) => onDeduplicate(event.currentTarget.checked)}
+          label={DEDUPLICATE_CONTROL_LABEL}
+          description={DEDUPLICATE_CONTROL_DESCRIPTION}
+        />
+        <Text size="sm" c="dimmed">
+          {DIRECT_DEDUPLICATE_SIDE_NOTICE}
+        </Text>
+        {bothSidedNotice !== undefined && (
+          <Alert
+            color="yellow"
+            icon={<IconAlertCircle aria-hidden />}
+            title="If your partner sets this too, the exchange stops"
+            // Pinned for the same reason the single-pass note above is: the
+            // combination is announced when the pair of controls makes it.
+            role="alert"
+          >
+            {bothSidedNotice}
+          </Alert>
+        )}
+      </Stack>
+
       {overlongAlert !== undefined && (
         <Alert
           color="red"
@@ -253,6 +308,7 @@ export function DirectConfirmSection({
         {unlinkable === undefined ? (
           <InvitationTerms
             linkageTerms={preview.linkageTerms}
+            partnerDeclaresOwnDeduplicate
             perspective="proposing"
             headingOrder={2}
             framing={{

@@ -10,6 +10,7 @@ import {
   createManagedExchange,
   getManagedExchange,
   openManagedExchangeDatabase,
+  recordManagedExchangeLastRun,
   spendManagedExchangeIfCurrent,
 } from "@psi/managed/managedExchangeStore";
 import {
@@ -22,8 +23,11 @@ import {
   managedExchangeLockName,
   withManagedExchangeLock,
 } from "@psi/managed/managedExchangeLock";
+import {
+  RotationPersistError,
+  succeededRun,
+} from "@psi/managed/managedRunRotate";
 import { ManagedInputError } from "@psi/managed/managedInputGuard";
-import { RotationPersistError } from "@psi/managed/managedRunRotate";
 import { composeManagedExchangeFile } from "@psi/managed/managedExchangeRecord";
 import { deriveManagedFailureTier } from "@psi/managed/managedFailureTiers";
 import { getManagedLocalState } from "@psi/managed/managedLocalState";
@@ -94,6 +98,62 @@ async function putRawLocalState(id: string, value: unknown): Promise<void> {
   } finally {
     db.close();
   }
+}
+
+/** Whether an operator's own Run could take this record's lock right now, on the
+ * attended surface's own fail-fast discipline. */
+async function attendedRunCouldStart(id: string): Promise<boolean> {
+  try {
+    await withManagedExchangeLock(id, () => Promise.resolve(), {
+      ifAvailable: true,
+    });
+    return true;
+  } catch (error) {
+    if (error instanceof ManagedExchangeLockUnavailableError) return false;
+    throw error;
+  }
+}
+
+/** Hold `name` from a same-origin browsing context of its own, and destroy that
+ * context on demand. Standing in for a second tab: the lock's holder is the
+ * frame's own lock manager, so removing the frame is the tab close, and what
+ * happens to the lock is the real Web Locks implementation's answer. */
+async function lockHeldByASecondContext(
+  name: string,
+): Promise<{ closeContext: () => void }> {
+  const frame = document.createElement("iframe");
+  const loaded = new Promise<void>((resolve) => {
+    frame.addEventListener("load", () => resolve(), { once: true });
+  });
+  document.body.append(frame);
+  await loaded;
+  const contextWindow = frame.contentWindow;
+  if (contextWindow === null)
+    throw new Error("the second context did not open");
+  const held = deferred<void>();
+  void contextWindow.navigator.locks.request(name, () => {
+    held.resolve();
+    return new Promise(() => {
+      // Held for as long as the context lives, the way a run parked in its
+      // payload exchange holds it.
+    });
+  });
+  await held.promise;
+  return { closeContext: () => frame.remove() };
+}
+
+/** Wait for `condition` to hold, polling because Web Locks raises no change
+ * event. Rejects rather than hanging the suite when it never does. */
+async function waitFor(
+  condition: () => Promise<boolean>,
+  description: string,
+): Promise<void> {
+  const deadline = Date.now() + 5_000;
+  while (Date.now() < deadline) {
+    if (await condition()) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`timed out waiting for ${description}`);
 }
 
 beforeEach(async () => {
@@ -241,6 +301,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
 
     const result = await runManagedExchange({
       record: created,
+      runStartedAtMs: Date.now(),
       acquireInput: () => Promise.resolve(undefined),
       handshake: () => {
         order.push("handshake");
@@ -285,6 +346,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
     try {
       await runManagedExchange({
         record: created,
+        runStartedAtMs: Date.now(),
         acquireInput: () => Promise.resolve(undefined),
         handshake: () => Promise.resolve({ rotatedSecret, handshake: "c" }),
         dataExchange: () => Promise.resolve("done"),
@@ -306,6 +368,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
     const rotatedSecret = generateSharedSecret();
     await runManagedExchange({
       record: created,
+      runStartedAtMs: Date.now(),
       acquireInput: () => Promise.resolve(undefined),
       handshake: () => Promise.resolve({ rotatedSecret, handshake: "c" }),
       dataExchange: () => Promise.resolve("done"),
@@ -325,6 +388,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
     const rotationAt = Date.parse("2026-07-14T12:00:00.000Z");
     await runManagedExchange({
       record: created,
+      runStartedAtMs: Date.now(),
       acquireInput: () => Promise.resolve(undefined),
       handshake: () => Promise.resolve({ rotatedSecret, handshake: "c" }),
       dataExchange: () => Promise.resolve("done"),
@@ -343,6 +407,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
     const rotatedSecret = generateSharedSecret();
     await runManagedExchange({
       record: created,
+      runStartedAtMs: Date.now(),
       acquireInput: () => Promise.resolve(undefined),
       handshake: () => Promise.resolve({ rotatedSecret, handshake: "c" }),
       dataExchange: () => Promise.resolve("done"),
@@ -388,6 +453,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
     try {
       await runManagedExchange({
         record: created,
+        runStartedAtMs: Date.now(),
         acquireInput: () => Promise.resolve(undefined),
         handshake: () => Promise.resolve({ rotatedSecret, handshake: "c" }),
         dataExchange: () => {
@@ -444,6 +510,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
     try {
       await runManagedExchange({
         record: created,
+        runStartedAtMs: Date.now(),
         acquireInput: () => Promise.resolve(undefined),
         handshake: () => Promise.resolve({ rotatedSecret, handshake: "c" }),
         dataExchange: () => {
@@ -505,6 +572,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
     try {
       await runManagedExchange({
         record: created,
+        runStartedAtMs: Date.now(),
         acquireInput: () => Promise.reject(inputFailure),
         handshake: () => {
           handshakeRan = true;
@@ -539,13 +607,14 @@ describe("runManagedExchange: persist-before-success end to end", () => {
     const firstInExchange = deferred<void>();
     const releaseFirst = deferred<void>();
 
-    // The first run parks inside its data exchange (after it has rotated and
-    // persisted, and released the lock). The second run then rotates from the
-    // freshest stored record. Because the lock covers rotation+persist, the two
-    // rotations cannot interleave: the second's field-scoped write lands on the
-    // first's committed secret, never reverting it.
+    // The first run parks inside its data exchange, still holding the lock. The
+    // second queues behind it and rotates from the freshest stored record once
+    // the first is done: the two rotations cannot interleave, so the second's
+    // field-scoped write lands on the first's committed secret rather than
+    // reverting it.
     const first = runManagedExchange({
       record: created,
+      runStartedAtMs: Date.now(),
       acquireInput: () => Promise.resolve(undefined),
       handshake: () =>
         Promise.resolve({ rotatedSecret: firstRotated, handshake: "1" }),
@@ -565,6 +634,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
 
       second = runManagedExchange({
         record: { id: created.id },
+        runStartedAtMs: Date.now(),
         acquireInput: () => Promise.resolve(undefined),
         handshake: () =>
           Promise.resolve({ rotatedSecret: secondRotated, handshake: "2" }),
@@ -590,6 +660,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
 
     const error: unknown = await runManagedExchange({
       record: created,
+      runStartedAtMs: Date.now(),
       acquireInput: () => Promise.resolve(undefined),
       handshake: () => Promise.resolve({ rotatedSecret, handshake: "c" }),
       dataExchange: () => Promise.reject(failure),
@@ -632,6 +703,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
 
     const error: unknown = await runManagedExchange({
       record: created,
+      runStartedAtMs: Date.now(),
       acquireInput: () => {
         inputRead = true;
         return Promise.resolve(undefined);
@@ -684,6 +756,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
 
     const error: unknown = await runManagedExchange({
       record: created,
+      runStartedAtMs: Date.now(),
       acquireInput: () => {
         inputRead = true;
         return Promise.resolve(undefined);
@@ -730,6 +803,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
     const rotatedSecret = generateSharedSecret();
     await runManagedExchange({
       record: created,
+      runStartedAtMs: Date.now(),
       acquireInput: () => Promise.resolve(undefined),
       handshake: () => Promise.resolve({ rotatedSecret, handshake: "c" }),
       dataExchange: () => Promise.resolve("done"),
@@ -745,6 +819,7 @@ describe("runManagedExchange: persist-before-success end to end", () => {
     await expect(
       runManagedExchange({
         record: created,
+        runStartedAtMs: Date.now(),
         acquireInput: () => Promise.resolve(undefined),
         handshake: () =>
           Promise.resolve({
@@ -762,18 +837,21 @@ describe("runManagedExchange: persist-before-success end to end", () => {
     );
   });
 
-  test("a slow run's stale success tail cannot mask a newer run's outcome", async () => {
+  test("a slow run's stale success tail cannot mask a newer outcome", async () => {
     const created = await createManagedExchange(newExchange());
     const earlierRunAt = Date.parse("2026-07-14T12:00:00.000Z");
     const laterRunAt = Date.parse("2026-07-14T13:00:00.000Z");
-    const firstInExchange = deferred<void>();
-    const releaseFirst = deferred<void>();
+    const runInExchange = deferred<void>();
+    const releaseRun = deferred<void>();
 
-    // The first run rotates, releases the lock, and parks in its data exchange;
-    // its success bookkeeping will land last, stamped with the older clock. The
-    // second run completes fully in between, recording the newer outcome.
-    const first = runManagedExchange({
+    // The run parks in its data exchange, holding the lock; its success
+    // bookkeeping will land last, stamped with the older clock. It stands in for
+    // the write the lock does not bind -- a failing run's bookkeeping tail,
+    // stamped and written after its own lock has released (managedRun.ts) --
+    // arriving behind the newer entry written here.
+    const run = runManagedExchange({
       record: created,
+      runStartedAtMs: Date.now(),
       acquireInput: () => Promise.resolve(undefined),
       handshake: () =>
         Promise.resolve({
@@ -781,35 +859,296 @@ describe("runManagedExchange: persist-before-success end to end", () => {
           handshake: "1",
         }),
       dataExchange: async () => {
-        firstInExchange.resolve();
-        await releaseFirst.promise;
+        runInExchange.resolve();
+        await releaseRun.promise;
         return "1";
       },
       now: () => earlierRunAt,
     });
 
-    await firstInExchange.promise;
+    await runInExchange.promise;
     try {
-      await runManagedExchange({
-        record: { id: created.id },
+      await recordManagedExchangeLastRun(
+        created.id,
+        succeededRun(laterRunAt),
+        laterRunAt,
+      );
+    } finally {
+      releaseRun.resolve();
+      await run;
+    }
+
+    // The run's tail wrote last, but with an older stamp: the monotonic
+    // bookkeeping write no-ops, keeping the newer outcome.
+    expect((await getManagedExchange(created.id))?.lastRun?.at).toBe(
+      new Date(laterRunAt).toISOString(),
+    );
+  });
+});
+
+describe("the lock spans the payload exchange", () => {
+  /** Park a run inside its payload exchange and hand back what a test needs to
+   * probe it: the secret it persisted, and the release that lets it finish. */
+  async function runParkedInItsExchange(id: string): Promise<{
+    rotatedSecret: string;
+    release: () => void;
+    settled: Promise<unknown>;
+  }> {
+    const rotatedSecret = generateSharedSecret();
+    const exchanging = deferred<void>();
+    const release = deferred<void>();
+    const settled = runManagedExchange({
+      record: { id },
+      runStartedAtMs: Date.now(),
+      acquireInput: () => Promise.resolve(undefined),
+      handshake: () => Promise.resolve({ rotatedSecret, handshake: "c" }),
+      dataExchange: async () => {
+        exchanging.resolve();
+        await release.promise;
+        return "exchanged";
+      },
+    });
+    await exchanging.promise;
+    return {
+      rotatedSecret,
+      release: () => release.resolve(),
+      settled: settled.catch((error: unknown) => error),
+    };
+  }
+
+  test("a second attended Run is refused while the payload exchange is in flight", async () => {
+    const created = await createManagedExchange(newExchange());
+    const parked = await runParkedInItsExchange(created.id);
+
+    try {
+      // The operator's own Run, on the attended surface's fail-fast discipline:
+      // refused for the whole exchange, not just the rotation ahead of it.
+      expect(await attendedRunCouldStart(created.id)).toBe(false);
+      await expect(
+        runManagedExchange({
+          record: { id: created.id },
+          runStartedAtMs: Date.now(),
+          acquireInput: () => Promise.resolve(undefined),
+          handshake: () => {
+            throw new Error("a second run must not reach the handshake");
+          },
+          dataExchange: () => {
+            throw new Error("a second run must not exchange");
+          },
+          lock: { ifAvailable: true },
+        }),
+      ).rejects.toBeInstanceOf(ManagedExchangeLockUnavailableError);
+    } finally {
+      parked.release();
+      await parked.settled;
+    }
+  });
+
+  test("a hand-off spend is refused while the payload exchange is in flight", async () => {
+    const created = await createManagedExchange(newExchange());
+    const parked = await runParkedInItsExchange(created.id);
+
+    try {
+      // The spend is handed the secret this run already persisted, so nothing
+      // but the lock can refuse it: a "superseded" answer would mean the
+      // currency check did the work instead.
+      expect(
+        await spendManagedExchangeIfCurrent(
+          created.id,
+          parked.rotatedSecret,
+          "2026-07-14T09:00:00.000Z",
+        ),
+      ).toBe("run-in-flight");
+    } finally {
+      parked.release();
+      await parked.settled;
+    }
+    // Nothing was handed over: the copy is still this device's to run.
+    expect(await getManagedLocalState(created.id)).toBeUndefined();
+  });
+
+  test("the lock is free once the success stamp resolves", async () => {
+    const created = await createManagedExchange(newExchange());
+    const rotatedSecret = generateSharedSecret();
+    let lockHeldAtExchange: boolean | undefined;
+
+    await runManagedExchange({
+      record: created,
+      runStartedAtMs: Date.now(),
+      acquireInput: () => Promise.resolve(undefined),
+      handshake: () => Promise.resolve({ rotatedSecret, handshake: "c" }),
+      dataExchange: async () => {
+        lockHeldAtExchange = !(await attendedRunCouldStart(created.id));
+        return "exchanged";
+      },
+    });
+
+    expect(lockHeldAtExchange).toBe(true);
+    // Held to the end of the run and no further: the stamp is on the record and
+    // the next run can take the lock at once.
+    expect((await getManagedExchange(created.id))?.lastRun?.outcome).toBe(
+      "succeeded",
+    );
+    expect(await attendedRunCouldStart(created.id)).toBe(true);
+  });
+
+  test("the lock is free after the payload exchange fails", async () => {
+    const created = await createManagedExchange(newExchange());
+    const failure = new Error("data channel dropped mid-exchange");
+
+    await expect(
+      runManagedExchange({
+        record: created,
+        runStartedAtMs: Date.now(),
         acquireInput: () => Promise.resolve(undefined),
         handshake: () =>
           Promise.resolve({
             rotatedSecret: generateSharedSecret(),
-            handshake: "2",
+            handshake: "c",
           }),
-        dataExchange: () => Promise.resolve("2"),
-        now: () => laterRunAt,
-      });
-    } finally {
-      releaseFirst.resolve();
-      await first;
-    }
+        dataExchange: () => Promise.reject(failure),
+      }),
+    ).rejects.toBe(failure);
 
-    // The first run's tail wrote after the second's, but with an older stamp:
-    // the monotonic bookkeeping write no-ops, keeping the newer run's outcome.
-    expect((await getManagedExchange(created.id))?.lastRun?.at).toBe(
-      new Date(laterRunAt).toISOString(),
+    // A failed exchange must not strand the lock for the retry that follows it.
+    expect(await attendedRunCouldStart(created.id)).toBe(true);
+  });
+
+  test("a tab closed mid-exchange releases the lock it held", async () => {
+    const created = await createManagedExchange(newExchange());
+    const secondTab = await lockHeldByASecondContext(
+      managedExchangeLockName(created.id),
+    );
+    expect(await attendedRunCouldStart(created.id)).toBe(false);
+
+    secondTab.closeContext();
+
+    await waitFor(
+      () => attendedRunCouldStart(created.id),
+      "the closed tab's lock to be released",
+    );
+    // And the record runs again, which is the whole of what the release buys.
+    const rotatedSecret = generateSharedSecret();
+    await runManagedExchange({
+      record: created,
+      runStartedAtMs: Date.now(),
+      acquireInput: () => Promise.resolve(undefined),
+      handshake: () => Promise.resolve({ rotatedSecret, handshake: "c" }),
+      dataExchange: () => Promise.resolve("exchanged"),
+      lock: { ifAvailable: true },
+    });
+    expect((await getManagedExchange(created.id))?.sharedSecret).toBe(
+      rotatedSecret,
+    );
+  });
+});
+
+describe("a failing run never overwrites a success stamped after it began", () => {
+  /** The input rejection a run's guard raises, whose benign bookkeeping the
+   * critical section writes before it re-raises. */
+  const inputFailure = new ManagedInputError({
+    reason: "acquire",
+    cause: new Error("the entry was not found"),
+  });
+
+  test("a failure stamped over a success that landed mid-run leaves the success", async () => {
+    const created = await createManagedExchange(newExchange());
+    const runStartedAtMs = Date.now();
+    const successAt = runStartedAtMs + 1_000;
+
+    // This run is open, another context completes a whole exchange and stamps
+    // its success, and this run then fails and writes a NEWER failure stamp.
+    // The failure is the newer entry, so monotonicity admits it; the run-start
+    // rule is what keeps the success.
+    await expect(
+      runManagedExchange({
+        record: created,
+        runStartedAtMs,
+        acquireInput: async () => {
+          await recordManagedExchangeLastRun(
+            created.id,
+            succeededRun(successAt),
+            successAt,
+          );
+          throw inputFailure;
+        },
+        handshake: () => {
+          throw new Error("the handshake must not run past an input rejection");
+        },
+        dataExchange: () => {
+          throw new Error("the data exchange must not run");
+        },
+        now: () => successAt + 1_000,
+      }),
+    ).rejects.toBe(inputFailure);
+
+    const stored = await getManagedExchange(created.id);
+    expect(stored?.lastRun).toEqual(succeededRun(successAt));
+  });
+
+  test("a failure whose run began after the success stamp records normally", async () => {
+    const created = await createManagedExchange(newExchange());
+    const successAt = Date.now();
+    await recordManagedExchangeLastRun(
+      created.id,
+      succeededRun(successAt),
+      successAt,
+    );
+
+    // The same failure, from a run that opened after the success landed: this
+    // one has its own window to account for, so its outcome stands.
+    await expect(
+      runManagedExchange({
+        record: created,
+        runStartedAtMs: successAt + 1_000,
+        acquireInput: () => Promise.reject(inputFailure),
+        handshake: () => {
+          throw new Error("the handshake must not run past an input rejection");
+        },
+        dataExchange: () => {
+          throw new Error("the data exchange must not run");
+        },
+        now: () => successAt + 2_000,
+      }),
+    ).rejects.toBe(inputFailure);
+
+    const stored = await getManagedExchange(created.id);
+    expect(stored?.lastRun?.outcome).toBe("failed");
+    expect(stored?.lastRun?.failureKind).toBe("input");
+  });
+
+  test("a success writes over a stored failure whatever the run start", async () => {
+    const created = await createManagedExchange(newExchange());
+    const runStartedAtMs = Date.now();
+    const completedAt = runStartedAtMs + 2_000;
+    await recordManagedExchangeLastRun(
+      created.id,
+      {
+        at: new Date(runStartedAtMs + 1_000).toISOString(),
+        outcome: "failed",
+        failureKind: "custody-unreadable",
+      },
+      runStartedAtMs + 1_000,
+    );
+
+    // The rule holds a FAILURE off a newer success, never a success off
+    // anything: this run completed, and its own stamp is the record's outcome.
+    const result = await runManagedExchange({
+      record: created,
+      runStartedAtMs,
+      acquireInput: () => Promise.resolve(undefined),
+      handshake: () =>
+        Promise.resolve({
+          rotatedSecret: generateSharedSecret(),
+          handshake: "carried",
+        }),
+      dataExchange: () => Promise.resolve("done"),
+      now: () => completedAt,
+    });
+
+    expect(result.lastRun).toEqual(succeededRun(completedAt));
+    expect((await getManagedExchange(created.id))?.lastRun).toEqual(
+      succeededRun(completedAt),
     );
   });
 });

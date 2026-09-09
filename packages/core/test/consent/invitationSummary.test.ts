@@ -1,9 +1,11 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 
 import { getDefaultLinkageTerms } from "../../src/defaults/builtInLinkageTerms.js";
 import {
   summarizeInvitation,
   TRANSFORM_FUNCTION_GLOSSARY,
+  withholdsAcceptorAssociationTable,
+  withholdsInviterAssociationTable,
 } from "../../src/consent/invitationSummary.js";
 import {
   disclosedColumnNames,
@@ -13,10 +15,17 @@ import {
   assertDeduplicateImplemented,
   DEDUPLICATE_IMPLEMENTED_BY_STRATEGY,
 } from "../../src/linkageTermsPolicy.js";
+import { resolveLinkageCardinality } from "../../src/exchange.js";
+import { deriveAcceptedLinkageTerms } from "../../src/linkageTermsNegotiation.js";
+import { assertPayloadSendDisclosed } from "../../src/payloadExchange.js";
+import { withholdsSenderAssociationTable } from "../../src/psi/link.js";
+import { resolveRole } from "../../src/protocolSetup.js";
 
 import type { ConnectionEndpoint } from "../../src/config/invitation.js";
 import type {
   LinkageStrategy,
+  LinkageTerms,
+  Output,
   TransformStep,
 } from "../../src/config/linkageTermsSchema.js";
 
@@ -249,25 +258,32 @@ describe("the consent summary's fan-out register", () => {
     ],
   };
 
-  test("a fan-out element under single-pass is marked as matching on several values", () => {
-    // The element matches on every candidate it realizes, so the header marker
-    // names that breadth. The two flags beside it are what selects the consent
-    // fact each surface renders.
-    const summary = summarizeInvitation({
-      linkageTerms: { ...fanOutTerms, linkageStrategy: "single-pass" },
-    });
-    expect(summary.linkageKeys[0].headerFields).toEqual([
-      "last name (multiple)",
-    ]);
-    expect(summary.fansOut).toBe(true);
-    expect(summary.fanOutApplied).toBe(true);
-  });
+  test.each(["cascade", "single-pass"] as const)(
+    "a fan-out element under %s is marked as matching on several values",
+    (linkageStrategy) => {
+      // Both strategies match on every candidate the element realizes, so the
+      // header marker names that breadth under either. The two flags beside it
+      // are what selects the consent fact each surface renders.
+      const summary = summarizeInvitation({
+        linkageTerms: { ...fanOutTerms, linkageStrategy },
+      });
+      expect(summary.linkageKeys[0].headerFields).toEqual([
+        "last name (multiple)",
+      ]);
+      expect(summary.fansOut).toBe(true);
+      expect(summary.fanOutApplied).toBe(true);
+    },
+  );
 
-  test("the same element under cascade is marked as not supported", () => {
+  test("the same element under the count-only algorithm is marked as not supported", () => {
     // Refused before the exchange runs, so no matching of any breadth happens
     // and naming one would describe a run that does not occur.
     const summary = summarizeInvitation({
-      linkageTerms: { ...fanOutTerms, linkageStrategy: "cascade" },
+      linkageTerms: {
+        ...fanOutTerms,
+        algorithm: "psi-c",
+        linkageStrategy: "cascade",
+      },
     });
     expect(summary.linkageKeys[0].headerFields).toEqual([
       "last name (not supported)",
@@ -331,6 +347,354 @@ describe("the consent summary's fan-out register", () => {
       /each able to match independently/,
     );
     expect(TRANSFORM_FUNCTION_GLOSSARY.split_on).not.toMatch(/refuses/);
+  });
+});
+
+describe("the consent summary's refused-pair register", () => {
+  const metadata = inferMetadata(LINKAGE_ONLY_COLUMNS, []);
+  const baseTerms = getDefaultLinkageTerms("Inviter", metadata);
+  const fanOutKeys = [
+    {
+      name: "last name",
+      elements: [
+        {
+          field: "last_name",
+          transform: [{ function: "split_on", params: { delimiter: " " } }],
+        },
+      ],
+    },
+  ];
+
+  // Whether an acceptance declaring this party's own `deduplicate` is refused,
+  // driven through the boundary the accept action itself runs rather than
+  // through a second reading of the terms.
+  const acceptRefuses = (
+    terms: LinkageTerms,
+    deduplicate: boolean,
+  ): boolean => {
+    try {
+      deriveAcceptedLinkageTerms(terms, "Acceptor", deduplicate);
+      return false;
+    } catch {
+      return true;
+    }
+  };
+
+  test("states the refusal where the invitation holds both halves of the pair", () => {
+    // The seat reads this before the operator sets the one value the
+    // invitation does not hold, so the flag and the accept's own verdict on
+    // that value are driven together.
+    const terms = { ...baseTerms, deduplicate: true, linkageKeys: fanOutKeys };
+    expect(
+      summarizeInvitation({ linkageTerms: terms }).acceptorDeduplicateRefused,
+    ).toBe(true);
+    expect(acceptRefuses(terms, true)).toBe(true);
+    expect(acceptRefuses(terms, false)).toBe(false);
+  });
+
+  test("withholds it where the inviting party declares no deduplicate", () => {
+    // Half the pair is the invitation's own: a candidate set alone leaves this
+    // party's value free, and stating a refusal for it would name one the
+    // accept does not make.
+    const terms = { ...baseTerms, linkageKeys: fanOutKeys };
+    expect(
+      summarizeInvitation({ linkageTerms: terms }).acceptorDeduplicateRefused,
+    ).toBe(false);
+    expect(acceptRefuses(terms, true)).toBe(false);
+  });
+
+  test("withholds it where the terms declare no candidate set", () => {
+    // The other half: a deduplicating invitation whose keys expand nothing
+    // pairs a both-sided cardinality the cascade matches.
+    const terms = { ...baseTerms, deduplicate: true };
+    expect(
+      summarizeInvitation({ linkageTerms: terms }).acceptorDeduplicateRefused,
+    ).toBe(false);
+    expect(acceptRefuses(terms, true)).toBe(false);
+  });
+});
+
+describe("the consent summary's withheld-table register", () => {
+  const metadata = inferMetadata(LINKAGE_ONLY_COLUMNS, []);
+  const baseTerms = getDefaultLinkageTerms("Inviter", metadata);
+
+  /** The output shape that makes the inviting party the sole receiver. */
+  const SOLE_RECEIVER: Output = {
+    expectsOutput: true,
+    shareWithPartner: false,
+  };
+
+  /** The terms of the one invitation shape whose exchange closes the grouping. */
+  const WITHHOLDING_TERMS: LinkageTerms = {
+    ...baseTerms,
+    linkageStrategy: "single-pass",
+    output: SOLE_RECEIVER,
+    payload: { send: [], receive: [] },
+  };
+
+  // Every case below reads the summary field the surfaces select on, and
+  // holds the predicate behind it to the same answer, so a summary that
+  // stopped carrying the resolution fails here rather than at a renderer.
+  const withheld = (overrides: Partial<LinkageTerms>): boolean => {
+    const terms = { ...WITHHOLDING_TERMS, ...overrides };
+    const carried = summarizeInvitation({
+      linkageTerms: terms,
+    }).acceptorTableWithheld;
+    expect(carried).toBe(withholdsAcceptorAssociationTable(terms));
+    return carried;
+  };
+
+  test("holds the verdict for the one combination the exchange closes", () => {
+    expect(withheld({})).toBe(true);
+  });
+
+  test("drops it under cascade, whose rounds carry the grouping either way", () => {
+    // The strategy axis. A cascade has no frame to suppress: each round names
+    // the matched positions as it goes, so what the accepting party's operator
+    // is shown is the client's choice however the rest of the document reads.
+    expect(withheld({ linkageStrategy: "cascade" })).toBe(false);
+  });
+
+  test("drops it where the accepting party is entitled to the result", () => {
+    // The entitlement axis. A party that receives the result is handed the
+    // table, and is on no rule's withheld side.
+    expect(
+      withheld({ output: { expectsOutput: true, shareWithPartner: true } }),
+    ).toBe(false);
+  });
+
+  test("drops it where neither party is entitled to the result", () => {
+    // The other half of the entitlement axis, and the one a reading that
+    // checked only the accepting party's own side would get wrong. With
+    // nobody entitled, role resolution falls to its work-minimizing branch,
+    // which can seat the accepting party as the RECEIVER and hand it the
+    // whole table. The pair is refused at the terms exchange rather than at
+    // acceptance, so the surfaces render for it and must claim nothing.
+    expect(
+      withheld({ output: { expectsOutput: false, shareWithPartner: false } }),
+    ).toBe(false);
+  });
+
+  test("drops it where the invitation asks the accepting party for columns", () => {
+    // The payload axis. A party that transmits a column reads its own matched
+    // rows to build that payload, so its half is returned as before.
+    expect(
+      withheld({
+        payload: { send: [], receive: [{ name: "program_outcome" }] },
+      }),
+    ).toBe(false);
+  });
+
+  test("drops it where the request is left lazy rather than declared empty", () => {
+    // An absent `payload.receive` mirrors to an absent acceptor `send`, which
+    // binds that party's disclosure to nothing, so the run may reach the
+    // linkage with a payload-disclosing helper. Both ways of leaving it absent.
+    expect(withheld({ payload: { send: [] } })).toBe(false);
+    expect(withheld({ payload: undefined })).toBe(false);
+  });
+
+  test("rests on role resolution rather than on an assumption about it", () => {
+    // The seat the verdict reads: the accepting party mirrors to no
+    // entitlement, and role resolution makes the entitled party the receiver
+    // whatever the record counts -- so the accepting party is the sender the
+    // run's rule covers. Both count orders, since the work-minimizing branch
+    // would seat the smaller dataset as the receiver had the one-sided branch
+    // stopped being taken.
+    const accepted = deriveAcceptedLinkageTerms(WITHHOLDING_TERMS, "Acceptor");
+    expect(accepted.output.expectsOutput).toBe(false);
+    for (const [acceptorCount, inviterCount] of [
+      [1, 5000],
+      [5000, 1],
+    ])
+      expect(
+        resolveRole(
+          "responder",
+          accepted.output,
+          WITHHOLDING_TERMS.output,
+          acceptorCount,
+          inviterCount,
+        ),
+      ).toBe("sender");
+    // And the rule itself, asked with the state that run would hold, rather
+    // than the summary's answer restated.
+    expect(
+      withholdsSenderAssociationTable(accepted.output.expectsOutput, false),
+    ).toBe(true);
+  });
+
+  test("is enforced by the guard that stops a disclosing acceptor", () => {
+    // What puts the verdict in the enforced register rather than the likely
+    // one: the declared-empty request mirrors to an empty acceptor `send`,
+    // held to exactly the columns that party's metadata discloses before any
+    // data moves. A file that would transmit one stops there instead of
+    // reaching the rounds with the table exchanged.
+    const accepted = deriveAcceptedLinkageTerms(WITHHOLDING_TERMS, "Acceptor");
+    expect(accepted.payload?.send).toEqual([]);
+    expect(() =>
+      assertPayloadSendDisclosed(
+        accepted.payload,
+        inferMetadata(DISCLOSING_COLUMNS, []),
+        accepted.output,
+      ),
+    ).toThrow(/payload.send/);
+    expect(() =>
+      assertPayloadSendDisclosed(accepted.payload, metadata, accepted.output),
+    ).not.toThrow();
+  });
+
+  test("drops it for a document no acceptance can reach", () => {
+    // The invitation keeps the result and also declares a column to send. The
+    // accepting party mirrors to no entitlement and to a `receive` it may not
+    // hold, so acceptance stops rather than any run following; the verdict
+    // follows that refusal instead of describing the run.
+    const alsoSendsAColumn = {
+      send: [{ name: "program_outcome" }],
+      receive: [],
+    };
+    expect(() =>
+      deriveAcceptedLinkageTerms(
+        { ...WITHHOLDING_TERMS, payload: alsoSendsAColumn },
+        "Acceptor",
+      ),
+    ).toThrow(/cannot be accepted unchanged/);
+    expect(withheld({ payload: alsoSendsAColumn })).toBe(false);
+  });
+
+  test("takes the verdict from the protocol's rule rather than a copy", async () => {
+    // The delegation the enforced basis rests on: the verdict is asked of
+    // withholdsSenderAssociationTable rather than restated here. Standing that
+    // rule on its head over one unchanged document is what a restated copy
+    // cannot follow, so a rule that grows a condition moves this predicate
+    // with it.
+    for (const ruleWithholds of [true, false]) {
+      const asked: [boolean, boolean][] = [];
+      vi.resetModules();
+      vi.doMock("../../src/psi/link.js", async () => ({
+        ...(await vi.importActual<typeof import("../../src/psi/link.js")>(
+          "../../src/psi/link.js",
+        )),
+        withholdsSenderAssociationTable: (
+          senderExpectsOutput: boolean,
+          senderDisclosesPayload: boolean,
+        ) => {
+          asked.push([senderExpectsOutput, senderDisclosesPayload]);
+          return ruleWithholds;
+        },
+      }));
+      const { withholdsAcceptorAssociationTable: overTheMockedRule } =
+        await import("../../src/consent/invitationSummary.js");
+      expect(overTheMockedRule(WITHHOLDING_TERMS)).toBe(ruleWithholds);
+      // Asked with the state that run holds: the accepting party is entitled
+      // to nothing and discloses nothing.
+      expect(asked).toEqual([[false, false]]);
+    }
+    vi.doUnmock("../../src/psi/link.js");
+    vi.resetModules();
+  });
+});
+
+describe("the consent summary's withheld-table register, mirrored", () => {
+  // The other direction of the same line, read at the seat where the ACCEPTING
+  // party declares a grouping of its own: there the inviting party is the one
+  // handed no result, and what its process still reads of the grouping is what
+  // the surfaces select on.
+  const metadata = inferMetadata(LINKAGE_ONLY_COLUMNS, []);
+  const baseTerms = getDefaultLinkageTerms("Inviter", metadata);
+
+  /** The terms whose exchange closes the grouping to the INVITING party. */
+  const WITHHOLDING_TERMS: LinkageTerms = {
+    ...baseTerms,
+    linkageStrategy: "single-pass",
+    output: { expectsOutput: false, shareWithPartner: true },
+    payload: { send: [], receive: [] },
+  };
+
+  const withheld = (overrides: Partial<LinkageTerms>): boolean => {
+    const terms = { ...WITHHOLDING_TERMS, ...overrides };
+    const carried = summarizeInvitation({
+      linkageTerms: terms,
+    }).inviterTableWithheld;
+    expect(carried).toBe(withholdsInviterAssociationTable(terms));
+    return carried;
+  };
+
+  test("holds the verdict for the combination the exchange closes", () => {
+    expect(withheld({})).toBe(true);
+  });
+
+  test("drops it under cascade, whose rounds carry the grouping either way", () => {
+    expect(withheld({ linkageStrategy: "cascade" })).toBe(false);
+  });
+
+  test("drops it where the inviting party is entitled to the result", () => {
+    expect(
+      withheld({ output: { expectsOutput: true, shareWithPartner: true } }),
+    ).toBe(false);
+  });
+
+  test("drops it where neither party is entitled to the result", () => {
+    // Role resolution falls to its work-minimizing branch with nobody
+    // entitled, which can seat the inviting party as the receiver and hand it
+    // the whole table, so the surfaces must claim nothing.
+    expect(
+      withheld({ output: { expectsOutput: false, shareWithPartner: false } }),
+    ).toBe(false);
+  });
+
+  test("drops it where the invitation declares a column of its own to send", () => {
+    expect(
+      withheld({
+        payload: { send: [{ name: "program_outcome" }], receive: [] },
+      }),
+    ).toBe(false);
+  });
+
+  test("drops it where the send is left lazy rather than declared empty", () => {
+    // An absent `send` binds the inviting party's own disclosure to nothing,
+    // so the run may reach the linkage with a payload-disclosing helper.
+    expect(withheld({ payload: { receive: [] } })).toBe(false);
+    expect(withheld({ payload: undefined })).toBe(false);
+  });
+
+  test("rests on role resolution rather than on an assumption about it", () => {
+    // The accepting party is the entitled one here, so role resolution seats
+    // it as the receiver and leaves the inviting party the sender the rule
+    // covers -- whatever the record counts.
+    const accepted = deriveAcceptedLinkageTerms(WITHHOLDING_TERMS, "Acceptor");
+    expect(accepted.output.expectsOutput).toBe(true);
+    for (const [acceptorCount, inviterCount] of [
+      [1, 5000],
+      [5000, 1],
+    ])
+      expect(
+        resolveRole(
+          "responder",
+          accepted.output,
+          WITHHOLDING_TERMS.output,
+          acceptorCount,
+          inviterCount,
+        ),
+      ).toBe("receiver");
+    expect(
+      withholdsSenderAssociationTable(
+        WITHHOLDING_TERMS.output.expectsOutput,
+        false,
+      ),
+    ).toBe(true);
+  });
+
+  test("is the shape the accept seat offers its own control on", () => {
+    // The two halves meet here: this is a reachable acceptance, and its
+    // derived cardinality is the one the accepting party's own grouping makes.
+    const accepted = deriveAcceptedLinkageTerms(
+      WITHHOLDING_TERMS,
+      "Acceptor",
+      true,
+    );
+    expect(accepted.deduplicate).toBe(true);
+    expect(
+      resolveLinkageCardinality(accepted, WITHHOLDING_TERMS).cardinality,
+    ).toBe("many-to-one");
   });
 });
 

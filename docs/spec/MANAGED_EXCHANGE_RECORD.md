@@ -103,7 +103,7 @@ are the standing definition of the managed exchange.
 | `expires` | string (ISO 8601, UTC `Z`) or absent | The instant after which `sharedSecret` must not be used; the recovery when it lapses is re-invite. Absent means no bound is in force. The record inherits the CLI key file's **consumer** semantics for `expires` -- one field, one meaning to every consumer (see [Token age and rotation policy](../SECURITY_DESIGN.md#token-age-and-rotation-policy), a citation about meaning, not sourcing) -- while its **provenance** is single-source: only the max-age stamp writes it, the invitation's setup lifetime having been consumed at provisioning. Two write paths stamp it -- a successful run's rotation write-back and an operator's in-place edit of `tokenMaxAgeDays` -- both under the same never-move-later rule (see [Edit-time re-derivation of `expires`](#edit-time-re-derivation-of-expires)). |
 | `tokenMaxAgeDays` | integer or absent | The operator's max-token-age policy for this exchange, the browser analog of the CLI `authentication.token_max_age_days`, and like it **off by default**: absent means no bound is in force, and a record is created with it absent unless the operator sets one. When set, each successful run stamps `expires` this many days out onto the rotated secret. The reason to opt in is a dormant partnership: rotation caps exposure only for an exchange that actually runs, so an idle stored secret has no automatic exposure bound without it (see [The primary controls](../SECURITY_DESIGN.md#the-primary-controls)). It is a **local field** the operator may edit in place without a re-invite; what the edit does to `expires` is [Edit-time re-derivation of `expires`](#edit-time-re-derivation-of-expires). |
 | `schedule` | object or absent | The partnership-agreed run schedule the unattended path executes: the agreed recurrence and run window -- the schedule is partnership-level agreement, coordinated out-of-band exactly as the terms are -- plus the retry bookkeeping for a missed window (the next planned attempt). Absent for an exchange run attended-only. The field-by-field layout is in [The `schedule` object](#the-schedule-object). |
-| `lastRun` | object or absent | Run bookkeeping the backup state and the tiered desync UX read (see [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md)): `at` (ISO 8601 UTC), `outcome` (`"succeeded"` \| `"failed"` \| `"desynced"` \| `"missed"`), and, for a non-succeeded outcome, an optional `failureKind` (`"auth"` \| `"transport"` \| `"storage"` \| `"custody-unreadable"` \| `"input"` \| `"terms-shortfall"` \| `"consent"` \| `"handed-off"` \| `"cancelled"`). A `"missed"` outcome records a no-show: the wait for the other party's runner spent its whole budget with nobody arriving, so no handshake ran. A scheduled run reaches it when an agreed window passes without a completed handshake; an attended run reaches it when its own wait for the partner expires. It has no `failureKind` -- the outcome is the whole account, and it is held apart from `"transport"` (a connection that was made and broke, whose remedy is retrying the connection) and from `"cancelled"` (the operator stopped the run). It is benign, retried at the next window or whenever the operator runs the exchange again, and never routed through the desync/attack framing (see [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md#a-missed-window-is-neither-desync-nor-attack)). An `"input"` failure records a benign pre-run acquisition problem -- the handle's file missing, moved, or unreadable at run start -- detected before any connection, likewise never routed through that framing; putting the file back clears it, so its surface offers the run again. A `"terms-shortfall"` failure records the other benign pre-run input state, held apart from it because its remedy is not another attempt: the file was read and cannot satisfy every linkage key the standing terms declare, so the run is refused before connecting (by the run-start input guard, or by the run boundary's own `assertLinkageTermsSatisfiable` inside the pre-connection prepare), and the same file refuses identically at the next window. Its remedy is a file covering every agreed key, or terms re-agreed with the partner out of band -- never a retry or a bare re-pick. A `"consent"` failure records the third pre-connection refusal: a send-side disclosure gate refused because the set this run would send is not the one the exchange recorded agreeing to send (see [What the setup consent covers across runs](../MANAGED_EXCHANGE.md#what-the-setup-consent-covers-across-runs)). It is likewise benign and outside that framing. A `"handed-off"` failure records the fourth: the run found this device's copy [spent](#the-backup-marker-the-spent-state-and-the-import-marker-local-siblings-never-in-the-artifact) by an export and refused inside the run+rotate lock, before reading the input file and before connecting, rather than rotating a secret whose owner is now elsewhere. It is the single-owner invariant holding rather than a fault, so it too stays outside the desync/attack framing, and it is the record's own account of a run -- attended or scheduled -- that met a hand-off nobody was present to answer for. A `"custody-unreadable"` failure records the fifth, and it is that same refusal failing to read the entry it decides on: the sibling entry did not validate, or its store did not answer, so the run stopped in the same place rather than rotating on custody it could not establish. It is held apart from `"storage"` because the two leave different states behind -- a `"storage"` failure rotated a secret it could not save, which can leave the two parties holding different ones and is recovered by re-inviting, while this refusal precedes the handshake and rotates nothing, so nothing here is a desync and a fresh secret would replace one nothing moved. `"consent"`, `"terms-shortfall"`, `"handed-off"`, and `"custody-unreadable"` are the failure kinds a surface must **not** present as retryable: the same input determines the same disclosure and falls the same way short of the same keys, a handed-off copy refuses identically at every later run, and a run reads the same unreadable entry every time, so the remedy is the operator's, not another attempt's. A record written before a kind was added to the enum still reads -- an entry with `"input"` for a shortfall loads and tiers as the generic input state; the converse is the reader-rejects-unknown rule's consequence, an artifact with a kind this reader does not know being refused whole rather than read with the kind dropped. A **re-invite clears `lastRun`** in the same rotation transaction that advances the fresh secret: the re-invite is the recovery for the failure the entry recorded, so leaving it would re-derive a consumed tier at the next visit -- and once the import marker is cleared alongside, a stale `"auth"` failure would re-derive as the attack tier rather than the benign import one. A successful run instead advances `lastRun` to `"succeeded"`; only the re-invite recovery drops it. |
+| `lastRun` | object or absent | Run bookkeeping the backup state and the tiered desync UX read (see [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md)): `at` (ISO 8601 UTC), `outcome` (`"succeeded"` \| `"failed"` \| `"desynced"` \| `"missed"`), and, for a non-succeeded outcome, an optional `failureKind` (`"auth"` \| `"transport"` \| `"storage"` \| `"custody-unreadable"` \| `"input"` \| `"terms-shortfall"` \| `"consent"` \| `"handed-off"` \| `"cancelled"`). A `"missed"` outcome records a no-show: the wait for the other party's runner spent its whole budget with nobody arriving, so no handshake ran. A scheduled run reaches it when an agreed window passes without a completed handshake; an attended run reaches it when its own wait for the partner expires. It has no `failureKind` -- the outcome is the whole account, and it is held apart from `"transport"` (a connection that was made and broke, whose remedy is retrying the connection) and from `"cancelled"` (the operator stopped the run). It is benign, retried at the next window or whenever the operator runs the exchange again, and never routed through the desync/attack framing (see [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md#a-missed-window-is-neither-desync-nor-attack)). An `"input"` failure records a benign pre-run acquisition problem -- the handle's file missing, moved, or unreadable at run start -- detected before any connection, likewise never routed through that framing; putting the file back clears it, so its surface offers the run again. A `"terms-shortfall"` failure records the other benign pre-run input state, held apart from it because its remedy is not another attempt: the file was read and cannot satisfy every linkage key the standing terms declare, so the run is refused before connecting (by the run-start input guard, or by the run boundary's own `assertLinkageTermsSatisfiable` inside the pre-connection prepare), and the same file refuses identically at the next window. Its remedy is a file covering every agreed key, or terms re-agreed with the partner out of band -- never a retry or a bare re-pick. A `"consent"` failure records the third pre-connection refusal: a send-side disclosure gate refused because the set this run would send is not the one the exchange recorded agreeing to send (see [What the setup consent covers across runs](../MANAGED_EXCHANGE.md#what-the-setup-consent-covers-across-runs)). It is likewise benign and outside that framing. A `"handed-off"` failure records the fourth: the run found this device's copy [spent](#the-backup-marker-the-spent-state-and-the-import-marker-local-siblings-never-in-the-artifact) by an export and refused inside the run+rotate lock, before reading the input file and before connecting, rather than rotating a secret whose owner is now elsewhere. It is the single-owner invariant holding rather than a fault, so it too stays outside the desync/attack framing, and it is the record's own account of a run -- attended or scheduled -- that met a hand-off nobody was present to answer for. A `"custody-unreadable"` failure records the fifth, and it is that same refusal failing to read the entry it decides on: the sibling entry did not validate, or its store did not answer, so the run stopped in the same place rather than rotating on custody it could not establish. It is held apart from `"storage"` because the two leave different states behind -- a `"storage"` failure rotated a secret it could not save, which can leave the two parties holding different ones and is recovered by re-inviting, while this refusal precedes the handshake and rotates nothing, so nothing here is a desync and a fresh secret would replace one nothing moved. `"consent"`, `"terms-shortfall"`, `"handed-off"`, and `"custody-unreadable"` are the failure kinds a surface must **not** present as retryable: the same input determines the same disclosure and falls the same way short of the same keys, a handed-off copy refuses identically at every later run, and a run reads the same unreadable entry every time, so the remedy is the operator's, not another attempt's. A record written before a kind was added to the enum still reads -- an entry with `"input"` for a shortfall loads and tiers as the generic input state; the converse is the reader-rejects-unknown rule's consequence, an artifact with a kind this reader does not know being refused whole rather than read with the kind dropped. A **re-invite clears `lastRun`** in the same rotation transaction that advances the fresh secret: the re-invite is the recovery for the failure the entry recorded, so leaving it would re-derive a consumed tier at the next visit -- and once the import marker is cleared alongside, a stale `"auth"` failure would re-derive as the attack tier rather than the benign import one. A successful run instead advances `lastRun` to `"succeeded"`; only the re-invite recovery drops it. Which of two runs' entries the store keeps is [Recording a run outcome](#recording-a-run-outcome). |
 
 Everything in this table except `sharedSecret` is non-secret but not
 non-sensitive. Together the persisted fields disclose the partnership's
@@ -237,6 +237,48 @@ rotation would have -- strictly the conservative direction, and recoverable by
 re-invite if it lands an already-lapsed bound (the standing recovery for a lapsed
 `expires`). The implementation of this derivation is
 `apps/web/src/psi/managed/managedTokenAgeEdit.ts`.
+
+#### Recording a run outcome
+
+Every runner -- the attended Run and the scheduled one alike -- records its
+`lastRun` through one field-scoped store write
+(`recordManagedExchangeLastRun` in
+`apps/web/src/psi/managed/managedExchangeStore.ts`), which touches neither the
+secret nor the document. Two rules decide whether the entry it is handed lands,
+and each drops the entry whole rather than writing part of it:
+
+- **Monotonic on `at`.** An entry stamped before the stored one is dropped. The
+  [run+rotate lock](#the-secret-is-a-linear-resource) serializes the runs it
+  binds, but not every entry reaches this write from inside it -- a run that
+  fails stamps and writes its bookkeeping tail
+  (`apps/web/src/psi/managed/managedRun.ts`) after its lock has released -- so
+  an entry stamped behind the stored one can still arrive; this rule makes it a
+  no-op instead.
+- **A failure MUST NOT overwrite a success stamped after its own run began.**
+  Every write states the instant its run began -- stamped before the run's first
+  check, so it precedes every act the run makes -- and an entry whose outcome is
+  not `"succeeded"` is dropped when the stored entry is a `"succeeded"` one
+  stamped at or after that instant. The rule above does not cover this: a
+  failing run's bookkeeping tail is stamped after its lock has released, so
+  another context can run a whole exchange under the lock and record its success
+  in between -- leaving the failure as the newer stamp, which would otherwise
+  land over that success.
+
+The second rule is what makes an inter-attempt yield safe (see [Occupying a due
+window](#occupying-a-due-window)): the free interval it opens is exactly when an
+attended run can complete inside a scheduled window, and every ordering that
+would have erased that run's success reduces to a failing run stamping over it.
+A success is the entry nothing re-derives -- a window that recorded one and then
+folded to a miss counts a window that was met -- so a stamp sharing the run's
+start instant is kept as well.
+
+The rules are the store write's, not a runner's, so they hold for a refusal
+recorded inside the lock (`handed-off`, `custody-unreadable`, an input
+rejection, a failed rotation persist) exactly as for one the runner classifies
+after the fact. They do not reach the entry a [schedule advance](#catch-up-on-wake)
+carries: that one is the catch-up walk's verdict on an already-closed window
+rather than a run in flight, so it states no run start and the monotonic rule is
+what holds a newer success off it.
 
 ### The schedule object
 
@@ -478,12 +520,17 @@ free for the tail (see
 [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md#cross-tab-single-writer-locking-web-locks)).
 An operator's own Run can take the lock in any such free interval and rotate
 the shared secret, and the occupancy's later attempts then run against a
-rotated record and can stamp their own `lastRun` over that run's success. A
-designed inter-attempt yield is deferred rather than designed away, and it
-cannot be added on its own: widening the free intervals widens that hazard, so
-any future yield must arrive with a write-path rule on the shared attended
-path -- a run that fails cannot overwrite a success stamped after that run
-began, `lastRun` being monotonic on `at`.
+rotated record. Their own `lastRun` cannot land over that run's success: the
+write rule in [Recording a run outcome](#recording-a-run-outcome) holds a
+failing run's entry off a success stamped after that run began. An attempt that
+instead meets that Run still in flight -- the lock spans its payload exchange --
+is refused rather than queued, since the scheduled path takes the lock
+fail-fast: the window's disposition is `"unattempted"`, the occupancy ends
+there, and the schedule advances past the window, so the window is consumed
+rather than re-attempted against the rotated record. A designed
+inter-attempt yield -- one that makes the free interval wide enough for an
+attended Run to take rather than leaving it to how an attempt happened to
+fail -- is deferred rather than designed away.
 
 An occupancy belongs to one record. Each wake dispatches every due record that is
 not already occupying its window, so an exchange holding its own window open for
@@ -613,9 +660,36 @@ run, they fork the secret permanently: after the first device rotates, the secon
 device's copy is stale, and no automatic reconciliation exists (there is no grace
 window; see [Desync detection and
 recovery](../MANAGED_EXCHANGE.md#desync-detection-and-recovery)). The guard on a
-single device is a cross-tab single-writer lock over the run+rotate critical
-section (Web Locks); export/import between devices is **migration, not sync** (the
-source copy is invalidated on export). Both are specified in
+single device is a cross-tab single-writer lock (Web Locks) held from a run's
+begin through the success stamp it writes, so **one exchange of a record is in
+flight at a time** on a browser profile: a second tab, a second attended Run, and
+a scheduled attempt are each refused or queued across the whole run, the payload
+exchange included, rather than across its rotation alone. A [hand-off
+spend](#the-backup-marker-the-spent-state-and-the-import-marker-local-siblings-never-in-the-artifact)
+contends for that same lock, so it too is refused while an exchange is in flight.
+The partner influences how long the payload exchange takes, so the run's cancel
+reaches that width: it closes the run's connection, which rejects the wait the
+exchange is parked in, so the run ends and the lock releases without the holding
+tab being destroyed. Three limits of that remain. Between the channel being
+acquired and the transport open resolving, the cancel reaches nothing: the
+connection-open wait takes no signal of its own, so only its own 30-second
+ceiling ends it, partner-influenced only up to that same ceiling, and the run
+holds the record's single-writer lock throughout that handshake phase. The
+cancel lands at the run's next act on the connection, so one arriving inside a
+local PSI round takes effect when that round next reads or writes. And a run
+nobody cancels holds the lock for as long as the partner takes, up to the
+connection's inactivity budget; a destroyed tab still releases it.
+A cancelled run also files no entry in the [accounting of
+disclosures](#the-accounting-of-disclosures), even though payload frames
+already handed to the transport may have reached the partner -- the same holds
+for any mid-exchange transport drop, since the entry is appended only once a
+completed exchange yields its result, so a partial exchange files nothing there
+while the record's own `lastRun` still stamps the run `"failed"`, with
+`failureKind` `"cancelled"` or `"transport"`. And the cancel does not discard
+what the transport already holds buffered: the teardown's close flushes rather
+than drops, so a cancel does not mean nothing further leaves the device.
+Export/import between devices is **migration, not sync** (the source copy is
+invalidated on export). Both are specified in
 [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md#single-device-ownership).
 
 ### Persist-before-success ordering

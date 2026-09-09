@@ -471,6 +471,7 @@ describe("run seam composition: the input guard gates the handshake", () => {
     let handshakeRan = false;
     const error: unknown = await runManagedExchange({
       record: created,
+      runStartedAtMs: Date.now(),
       acquireInput: () =>
         acquireValidatedManagedInput(created.exchangeFile, {
           kind: "handle",
@@ -512,6 +513,7 @@ describe("run seam composition: the input guard gates the handshake", () => {
     let handshakeRan = false;
     const error: unknown = await runManagedExchange({
       record: created,
+      runStartedAtMs: Date.now(),
       acquireInput: () =>
         acquireValidatedManagedInput(created.exchangeFile, {
           kind: "handle",
@@ -557,6 +559,7 @@ describe("run seam composition: the input guard gates the handshake", () => {
     let handshakeColumns: Array<string> | undefined;
     const result = await runManagedExchange({
       record: created,
+      runStartedAtMs: Date.now(),
       acquireInput: () =>
         acquireValidatedManagedInput(created.exchangeFile, {
           kind: "handle",

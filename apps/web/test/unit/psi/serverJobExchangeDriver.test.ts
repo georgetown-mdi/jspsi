@@ -354,6 +354,55 @@ describe("createServerJobExchangeDriver event mapping", () => {
     expect(outputs.kind).not.toBe("withheld");
   });
 
+  test("the console seat states what the agreed deduplicate pair resolved to", async () => {
+    // The CLI states the same three on an info log line, which no relay event
+    // holds and a console seat never sees, so the terminal event is the only
+    // route to this seat's completion panel. Read on all three outcome shapes:
+    // the panel states the pair whatever this party received.
+    const matching = {
+      localDeduplicate: false,
+      partnerDeduplicate: true,
+      cardinality: "one-to-many",
+    };
+    for (const event of [
+      { ...result(true), matching },
+      { ...result(false), matching },
+      { ...countOnlyResult(42), matching },
+    ]) {
+      const { client } = scriptedClient([event]);
+      const events = driverEvents(new AbortController().signal);
+      await createServerJobExchangeDriver(driverConfig(), client).run(events);
+      expect((events.onResult.mock.calls[0][0] as RunOutputs).matching).toEqual(
+        matching,
+      );
+    }
+  });
+
+  test("a matching the relay frame malforms leaves the panel stating none", async () => {
+    // The relay forwards the CLI's fields verbatim, so the shape is checked
+    // rather than assumed: an unknown label, a non-boolean value, or a
+    // non-object leaves the seat with no matching rather than a label this
+    // build cannot define.
+    for (const matching of [
+      { localDeduplicate: false, partnerDeduplicate: true, cardinality: "1:n" },
+      {
+        localDeduplicate: "false",
+        partnerDeduplicate: true,
+        cardinality: "one-to-many",
+      },
+      { partnerDeduplicate: true, cardinality: "one-to-many" },
+      "one-to-many",
+      null,
+    ]) {
+      const { client } = scriptedClient([{ ...result(true), matching }]);
+      const events = driverEvents(new AbortController().signal);
+      await createServerJobExchangeDriver(driverConfig(), client).run(events);
+      expect(
+        (events.onResult.mock.calls[0][0] as RunOutputs).matching,
+      ).toBeUndefined();
+    }
+  });
+
   test("a security error passes its category through VERBATIM", async () => {
     // The single most important fidelity requirement: a CLI-classified security
     // terminal must never be downgraded to the retryable 'exchange'.
@@ -1135,6 +1184,58 @@ describe("createFetchJobApiClient over an injected fetch", () => {
     expect(error).toBeInstanceOf(JobApiRequestError);
     expect(error.status).toBe(409);
     expect(error.activeJobId).toBeUndefined();
+  });
+
+  test("a refused (400) create carries the refusal token off the body", async () => {
+    // The refusal is about the console's mounts, which this browser never learns,
+    // so the token is what lets the seat compose copy the operator can act on.
+    const fetchImpl = (() =>
+      Promise.resolve(
+        new Response(
+          JSON.stringify({ reason: "signing-identity-in-rendezvous" }),
+          { status: 400, headers: { "Content-Type": "application/json" } },
+        ),
+      )) as typeof fetch;
+    const client = createFetchJobApiClient(fetchImpl);
+
+    const error = (await client
+      .createJob(
+        {
+          channel: "filedrop",
+          linkageTerms: validLinkageTerms(),
+          sharedSecret: VALID_SHARED_SECRET,
+          inputCsv: "x\n",
+          eventStream: true,
+        },
+        new AbortController().signal,
+      )
+      .catch((thrown: unknown) => thrown)) as JobApiRequestError;
+    expect(error.status).toBe(400);
+    expect(error.refusalReason).toBe("signing-identity-in-rendezvous");
+  });
+
+  test("an unknown or absent 400 reason leaves refusalReason undefined", async () => {
+    // Every other create rejection is empty-bodied, and a token this bundle does
+    // not know is treated as none: the seat falls back to its generic copy rather
+    // than rendering something it cannot interpret.
+    for (const body of [null, JSON.stringify({ reason: "who-knows" })]) {
+      const fetchImpl = (() =>
+        Promise.resolve(new Response(body, { status: 400 }))) as typeof fetch;
+      const error = (await createFetchJobApiClient(fetchImpl)
+        .createJob(
+          {
+            channel: "filedrop",
+            linkageTerms: validLinkageTerms(),
+            sharedSecret: VALID_SHARED_SECRET,
+            inputCsv: "x\n",
+            eventStream: true,
+          },
+          new AbortController().signal,
+        )
+        .catch((thrown: unknown) => thrown)) as JobApiRequestError;
+      expect(error.status).toBe(400);
+      expect(error.refusalReason).toBeUndefined();
+    }
   });
 
   test("fetchRecordAvailability reads recordAvailable and recordCreatedAt", async () => {

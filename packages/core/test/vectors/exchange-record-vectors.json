@@ -125,7 +125,7 @@
         }
       },
       "record": {
-        "version": "psilink-exchange-record/v6",
+        "version": "psilink-exchange-record/v7",
         "createdAt": "2026-01-02T03:04:05.000Z",
         "outcome": "completed",
         "termsHash": "NndSxh_H2dH9QDOK3GNhZz574iSYpmWXZBAcqzbbJ7o",
@@ -155,7 +155,12 @@
               "name": "status",
               "description": "Enrollment status at the most recent visit."
             }
-          ]
+          ],
+          "matching": {
+            "localDeduplicate": false,
+            "partnerDeduplicate": false,
+            "cardinality": "one-to-one"
+          }
         },
         "recordsExposed": 5,
         "resultSize": 2,
@@ -259,7 +264,7 @@
         }
       },
       "record": {
-        "version": "psilink-exchange-record/v6",
+        "version": "psilink-exchange-record/v7",
         "createdAt": "2026-01-02T03:04:05.000Z",
         "outcome": "completed",
         "termsHash": "1pgvorgQseW486XCURs3KAcOP_YN3bnIhVndGsrHHwc",
@@ -274,7 +279,12 @@
             }
           ],
           "payloadSent": [],
-          "payloadReceived": []
+          "payloadReceived": [],
+          "matching": {
+            "localDeduplicate": false,
+            "partnerDeduplicate": false,
+            "cardinality": "one-to-one"
+          }
         },
         "recordsExposed": 3,
         "resultSize": 1,
@@ -390,7 +400,7 @@
         }
       },
       "record": {
-        "version": "psilink-exchange-record/v6",
+        "version": "psilink-exchange-record/v7",
         "createdAt": "2026-01-02T03:04:05.000Z",
         "outcome": "completed",
         "termsHash": "0mw2vkRK9EL4_K_3ZPpnmToLl2eyDBS3zGfoxqOlOTc",
@@ -410,7 +420,12 @@
               "description": "Administered dose in milligrams."
             }
           ],
-          "payloadReceived": []
+          "payloadReceived": [],
+          "matching": {
+            "localDeduplicate": false,
+            "partnerDeduplicate": false,
+            "cardinality": "one-to-one"
+          }
         },
         "recordsExposed": 4,
         "bindingNonce": "ICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgICA",
@@ -528,7 +543,7 @@
         }
       },
       "record": {
-        "version": "psilink-exchange-record/v6",
+        "version": "psilink-exchange-record/v7",
         "createdAt": "2026-01-02T03:04:05.000Z",
         "outcome": "completed",
         "termsHash": "0mw2vkRK9EL4_K_3ZPpnmToLl2eyDBS3zGfoxqOlOTc",
@@ -548,7 +563,12 @@
               "name": "dose",
               "description": "Administered dose in milligrams."
             }
-          ]
+          ],
+          "matching": {
+            "localDeduplicate": false,
+            "partnerDeduplicate": false,
+            "cardinality": "one-to-one"
+          }
         },
         "recordsExposed": 6,
         "bindingNonce": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA",
@@ -694,7 +714,7 @@
         }
       },
       "record": {
-        "version": "psilink-exchange-record/v6",
+        "version": "psilink-exchange-record/v7",
         "createdAt": "2026-01-02T03:04:05.000Z",
         "outcome": "completed",
         "termsHash": "eZBA72rLn0xaADBj7BGC0mWHe_7s0pwED7tzDaUVjWk",
@@ -722,7 +742,12 @@
             }
           ],
           "payloadSent": [],
-          "payloadReceived": []
+          "payloadReceived": [],
+          "matching": {
+            "localDeduplicate": false,
+            "partnerDeduplicate": false,
+            "cardinality": "one-to-one"
+          }
         },
         "recordsExposed": 8,
         "resultSize": 3,
@@ -867,7 +892,7 @@
         }
       },
       "record": {
-        "version": "psilink-exchange-record/v6",
+        "version": "psilink-exchange-record/v7",
         "createdAt": "2026-01-02T03:04:05.000Z",
         "outcome": "completed",
         "termsHash": "AzJi5GLcAEIuLecddIrltTqEXxzN35jvu9OPcLpZ910",
@@ -895,7 +920,12 @@
             }
           ],
           "payloadSent": [],
-          "payloadReceived": []
+          "payloadReceived": [],
+          "matching": {
+            "localDeduplicate": false,
+            "partnerDeduplicate": false,
+            "cardinality": "one-to-one"
+          }
         },
         "recordsExposed": 8,
         "resultSize": 3,
@@ -1038,7 +1068,7 @@
         }
       },
       "record": {
-        "version": "psilink-exchange-record/v6",
+        "version": "psilink-exchange-record/v7",
         "createdAt": "2026-01-02T03:04:05.000Z",
         "outcome": "completed",
         "termsHash": "NndSxh_H2dH9QDOK3GNhZz574iSYpmWXZBAcqzbbJ7o",
@@ -1068,7 +1098,12 @@
               "name": "status",
               "description": "Enrollment status at the most recent visit."
             }
-          ]
+          ],
+          "matching": {
+            "localDeduplicate": false,
+            "partnerDeduplicate": false,
+            "cardinality": "one-to-one"
+          }
         },
         "recordsExposed": 5,
         "resultSize": 2,
@@ -1192,7 +1227,7 @@
         }
       },
       "record": {
-        "version": "psilink-exchange-record/v6",
+        "version": "psilink-exchange-record/v7",
         "createdAt": "2026-01-02T03:04:05.000Z",
         "outcome": "completed",
         "termsHash": "-mC6tZrCMQSzff2U5-6INjSqA4k8GbYkVTWjmJq92tk",
@@ -1221,7 +1256,12 @@
             "keySet": "contradicted"
           },
           "payloadSent": [],
-          "payloadReceived": []
+          "payloadReceived": [],
+          "matching": {
+            "localDeduplicate": false,
+            "partnerDeduplicate": false,
+            "cardinality": "one-to-one"
+          }
         },
         "recordsExposed": 3,
         "resultSize": 1,
@@ -1385,7 +1425,7 @@
         }
       },
       "record": {
-        "version": "psilink-exchange-record/v6",
+        "version": "psilink-exchange-record/v7",
         "createdAt": "2026-01-02T03:04:05.000Z",
         "outcome": "completed",
         "termsHash": "ldxVOhHDYzxE130SIN5Yx4Xr_aJTye5YjaG7kO2oAJQ",
@@ -1422,7 +1462,12 @@
             "keySet": "consistent"
           },
           "payloadSent": [],
-          "payloadReceived": []
+          "payloadReceived": [],
+          "matching": {
+            "localDeduplicate": false,
+            "partnerDeduplicate": false,
+            "cardinality": "one-to-one"
+          }
         },
         "recordsExposed": 5,
         "bindingNonce": "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
@@ -1583,7 +1628,7 @@
         }
       },
       "record": {
-        "version": "psilink-exchange-record/v6",
+        "version": "psilink-exchange-record/v7",
         "createdAt": "2026-01-02T03:04:05.000Z",
         "outcome": "completed",
         "termsHash": "rpEsquyNSax88z8WM723OMdf7SoVFtV45Pgy3FkeeOc",
@@ -1620,7 +1665,12 @@
             "keySet": "unchecked"
           },
           "payloadSent": [],
-          "payloadReceived": []
+          "payloadReceived": [],
+          "matching": {
+            "localDeduplicate": false,
+            "partnerDeduplicate": false,
+            "cardinality": "one-to-one"
+          }
         },
         "recordsExposed": 5,
         "bindingNonce": "MDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDAwMDA",
@@ -1719,7 +1769,7 @@
         }
       },
       "record": {
-        "version": "psilink-exchange-record/v6",
+        "version": "psilink-exchange-record/v7",
         "createdAt": "2026-01-02T03:04:05.000Z",
         "outcome": "completed",
         "termsHash": "6SJZlUOZSCBkd1l8YQFlACMchYvQPCLpa4QefopNc_c",
@@ -1733,7 +1783,12 @@
             }
           ],
           "payloadSent": [],
-          "payloadReceived": []
+          "payloadReceived": [],
+          "matching": {
+            "localDeduplicate": false,
+            "partnerDeduplicate": false,
+            "cardinality": "one-to-one"
+          }
         },
         "recordsExposed": 3,
         "resultSize": 1,
@@ -1878,7 +1933,7 @@
         }
       },
       "record": {
-        "version": "psilink-exchange-record/v6",
+        "version": "psilink-exchange-record/v7",
         "createdAt": "2026-01-02T03:04:06.000Z",
         "outcome": "receipt-swap-terminated",
         "termsHash": "NndSxh_H2dH9QDOK3GNhZz574iSYpmWXZBAcqzbbJ7o",
@@ -1908,7 +1963,12 @@
               "name": "status",
               "description": "Enrollment status at the most recent visit."
             }
-          ]
+          ],
+          "matching": {
+            "localDeduplicate": false,
+            "partnerDeduplicate": false,
+            "cardinality": "one-to-one"
+          }
         },
         "recordsExposed": 5,
         "resultSize": 2,
@@ -1926,6 +1986,597 @@
           "localPayloadSent": "UVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVFRUVE",
           "partnerPayloadReceived": "UlJSUlJSUlJSUlJSUlJSUlJSUlJSUlJSUlJSUlJSUlI",
           "associationTable": "U1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1NTU1M"
+        }
+      }
+    },
+    {
+      "name": "many-to-one-local-deduplicates",
+      "description": "This party declared deduplicate and its partner did not, so its seat resolves to many-to-one: several of its records link to one of the partner's. Pins the governance block's resolved matching (localDeduplicate true, partnerDeduplicate false, cardinality many-to-one) and the commitment over an association table whose partner half repeats a row index once per link while its local half stays strictly ascending. The committed payloads hold one row per matched record rather than one per pair -- three sent rows for the three distinct local records, two received rows for the two distinct partner records those three pairs link to -- so an implementation committing a payload row per pair does not reproduce these commitments. The recorded result size is the pair count. The mirror seat of the same run is one-to-many-partner-deduplicates, whose termsHash is this one's.",
+      "inputs": {
+        "localTerms": {
+          "version": "1.0.0",
+          "identity": "County Clinic",
+          "date": "2026-02-01",
+          "algorithm": "psi",
+          "linkageStrategy": "cascade",
+          "output": {
+            "expectsOutput": true,
+            "shareWithPartner": true
+          },
+          "deduplicate": true,
+          "linkageFields": [
+            {
+              "name": "last_name",
+              "type": "last_name"
+            },
+            {
+              "name": "date_of_birth",
+              "type": "date_of_birth"
+            }
+          ],
+          "linkageKeys": [
+            {
+              "name": "NAME_DOB",
+              "elements": [
+                {
+                  "field": "last_name"
+                },
+                {
+                  "field": "date_of_birth"
+                }
+              ]
+            }
+          ],
+          "payload": {
+            "send": [
+              {
+                "name": "visit_date",
+                "description": "Date of the clinic visit."
+              }
+            ],
+            "receive": [
+              {
+                "name": "program",
+                "description": "Program the participant is enrolled in."
+              }
+            ]
+          },
+          "legalAgreement": {
+            "reference": "DUA-2026-0117",
+            "purpose": "Follow-up on program participants seen at the clinic",
+            "expirationDate": "2031-03-31"
+          }
+        },
+        "partnerTerms": {
+          "version": "1.0.0",
+          "identity": "State Registry",
+          "date": "2026-02-01",
+          "algorithm": "psi",
+          "linkageStrategy": "cascade",
+          "output": {
+            "expectsOutput": true,
+            "shareWithPartner": true
+          },
+          "deduplicate": false,
+          "linkageFields": [
+            {
+              "name": "last_name",
+              "type": "last_name"
+            },
+            {
+              "name": "date_of_birth",
+              "type": "date_of_birth"
+            }
+          ],
+          "linkageKeys": [
+            {
+              "name": "NAME_DOB",
+              "elements": [
+                {
+                  "field": "last_name"
+                },
+                {
+                  "field": "date_of_birth"
+                }
+              ]
+            }
+          ],
+          "payload": {
+            "send": [
+              {
+                "name": "program",
+                "description": "Program the participant is enrolled in."
+              }
+            ],
+            "receive": [
+              {
+                "name": "visit_date",
+                "description": "Date of the clinic visit."
+              }
+            ]
+          },
+          "legalAgreement": {
+            "reference": "DUA-2026-0117",
+            "purpose": "Follow-up on program participants seen at the clinic",
+            "expirationDate": "2031-03-31"
+          }
+        },
+        "resultSize": 3,
+        "associationTable": [
+          [0, 1, 3],
+          [2, 2, 0]
+        ],
+        "localPayloadSent": {
+          "columns": ["visit_date"],
+          "rows": [["2025-04-02"], ["2025-09-18"], ["2025-11-30"]]
+        },
+        "partnerPayloadReceived": {
+          "columns": ["program"],
+          "rows": [["Continuity of care"], ["Transitional support"]]
+        },
+        "createdAt": "2026-02-03T14:20:00.000Z",
+        "outcome": "completed",
+        "recordsExposed": 9
+      },
+      "randomness": {
+        "bindingNonce": "YGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGA",
+        "salts": {
+          "localPayloadSent": "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE",
+          "partnerPayloadReceived": "YmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmI",
+          "associationTable": "Y2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2M"
+        }
+      },
+      "record": {
+        "version": "psilink-exchange-record/v7",
+        "createdAt": "2026-02-03T14:20:00.000Z",
+        "outcome": "completed",
+        "termsHash": "kG8ABOtXJz73F3wx9cNC37tsVGxwNEXcx5sukYbWWNg",
+        "localIdentity": "County Clinic",
+        "partnerIdentity": "State Registry",
+        "governance": {
+          "algorithm": "psi",
+          "legalAgreement": {
+            "reference": "DUA-2026-0117",
+            "purpose": "Follow-up on program participants seen at the clinic",
+            "expirationDate": "2031-03-31"
+          },
+          "matchingBasis": [
+            {
+              "name": "date_of_birth",
+              "type": "date_of_birth"
+            },
+            {
+              "name": "last_name",
+              "type": "last_name"
+            }
+          ],
+          "payloadSent": [
+            {
+              "name": "visit_date",
+              "description": "Date of the clinic visit."
+            }
+          ],
+          "payloadReceived": [
+            {
+              "name": "program",
+              "description": "Program the participant is enrolled in."
+            }
+          ],
+          "matching": {
+            "localDeduplicate": true,
+            "partnerDeduplicate": false,
+            "cardinality": "many-to-one"
+          }
+        },
+        "recordsExposed": 9,
+        "resultSize": 3,
+        "bindingNonce": "YGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGA",
+        "commitments": {
+          "localPayloadSent": "qx0t9wzAWsaMtBnIjNxzojm3S8HnqPUSzdLS8rxwLXs",
+          "partnerPayloadReceived": "Hp4_dH83vC9cRiq8qF2681aglsudj2fMfiA61KK8tKU",
+          "associationTable": "GMFWS86lsRy7BpfjEUM1zkHxcChq2cWGj9v2_CFuzZo"
+        }
+      },
+      "keys": {
+        "version": "psilink-exchange-keys/v1",
+        "salts": {
+          "localPayloadSent": "YWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWFhYWE",
+          "partnerPayloadReceived": "YmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmJiYmI",
+          "associationTable": "Y2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2NjY2M"
+        }
+      }
+    },
+    {
+      "name": "one-to-many-partner-deduplicates",
+      "description": "The partner seat of the run many-to-one-local-deduplicates records, with the two terms documents swapped: this party declared no deduplicate and its partner declared it, so the same run resolves to one-to-many here. Pins the mirrored label (localDeduplicate false, partnerDeduplicate true, cardinality one-to-many), which is the value an implementation reading the wrong side of the pair gets wrong, and the commitment over the mirrored association table -- the same pairs, ordered by this party's own row index, with the local half non-decreasing and the partner half strictly ascending. The payload directions swap with the seat and cover byte-identical data to the mirror vector's, while the two seats commit under different salts. The agreed-terms hash matches the mirror vector's, since the hash orders the two documents canonically rather than by which party is local.",
+      "inputs": {
+        "localTerms": {
+          "version": "1.0.0",
+          "identity": "State Registry",
+          "date": "2026-02-01",
+          "algorithm": "psi",
+          "linkageStrategy": "cascade",
+          "output": {
+            "expectsOutput": true,
+            "shareWithPartner": true
+          },
+          "deduplicate": false,
+          "linkageFields": [
+            {
+              "name": "last_name",
+              "type": "last_name"
+            },
+            {
+              "name": "date_of_birth",
+              "type": "date_of_birth"
+            }
+          ],
+          "linkageKeys": [
+            {
+              "name": "NAME_DOB",
+              "elements": [
+                {
+                  "field": "last_name"
+                },
+                {
+                  "field": "date_of_birth"
+                }
+              ]
+            }
+          ],
+          "payload": {
+            "send": [
+              {
+                "name": "program",
+                "description": "Program the participant is enrolled in."
+              }
+            ],
+            "receive": [
+              {
+                "name": "visit_date",
+                "description": "Date of the clinic visit."
+              }
+            ]
+          },
+          "legalAgreement": {
+            "reference": "DUA-2026-0117",
+            "purpose": "Follow-up on program participants seen at the clinic",
+            "expirationDate": "2031-03-31"
+          }
+        },
+        "partnerTerms": {
+          "version": "1.0.0",
+          "identity": "County Clinic",
+          "date": "2026-02-01",
+          "algorithm": "psi",
+          "linkageStrategy": "cascade",
+          "output": {
+            "expectsOutput": true,
+            "shareWithPartner": true
+          },
+          "deduplicate": true,
+          "linkageFields": [
+            {
+              "name": "last_name",
+              "type": "last_name"
+            },
+            {
+              "name": "date_of_birth",
+              "type": "date_of_birth"
+            }
+          ],
+          "linkageKeys": [
+            {
+              "name": "NAME_DOB",
+              "elements": [
+                {
+                  "field": "last_name"
+                },
+                {
+                  "field": "date_of_birth"
+                }
+              ]
+            }
+          ],
+          "payload": {
+            "send": [
+              {
+                "name": "visit_date",
+                "description": "Date of the clinic visit."
+              }
+            ],
+            "receive": [
+              {
+                "name": "program",
+                "description": "Program the participant is enrolled in."
+              }
+            ]
+          },
+          "legalAgreement": {
+            "reference": "DUA-2026-0117",
+            "purpose": "Follow-up on program participants seen at the clinic",
+            "expirationDate": "2031-03-31"
+          }
+        },
+        "resultSize": 3,
+        "associationTable": [
+          [0, 2, 2],
+          [3, 0, 1]
+        ],
+        "localPayloadSent": {
+          "columns": ["program"],
+          "rows": [["Continuity of care"], ["Transitional support"]]
+        },
+        "partnerPayloadReceived": {
+          "columns": ["visit_date"],
+          "rows": [["2025-04-02"], ["2025-09-18"], ["2025-11-30"]]
+        },
+        "createdAt": "2026-02-03T14:20:01.000Z",
+        "outcome": "completed",
+        "recordsExposed": 6
+      },
+      "randomness": {
+        "bindingNonce": "cHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHA",
+        "salts": {
+          "localPayloadSent": "cXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXE",
+          "partnerPayloadReceived": "cnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnI",
+          "associationTable": "c3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3M"
+        }
+      },
+      "record": {
+        "version": "psilink-exchange-record/v7",
+        "createdAt": "2026-02-03T14:20:01.000Z",
+        "outcome": "completed",
+        "termsHash": "kG8ABOtXJz73F3wx9cNC37tsVGxwNEXcx5sukYbWWNg",
+        "localIdentity": "State Registry",
+        "partnerIdentity": "County Clinic",
+        "governance": {
+          "algorithm": "psi",
+          "legalAgreement": {
+            "reference": "DUA-2026-0117",
+            "purpose": "Follow-up on program participants seen at the clinic",
+            "expirationDate": "2031-03-31"
+          },
+          "matchingBasis": [
+            {
+              "name": "date_of_birth",
+              "type": "date_of_birth"
+            },
+            {
+              "name": "last_name",
+              "type": "last_name"
+            }
+          ],
+          "payloadSent": [
+            {
+              "name": "program",
+              "description": "Program the participant is enrolled in."
+            }
+          ],
+          "payloadReceived": [
+            {
+              "name": "visit_date",
+              "description": "Date of the clinic visit."
+            }
+          ],
+          "matching": {
+            "localDeduplicate": false,
+            "partnerDeduplicate": true,
+            "cardinality": "one-to-many"
+          }
+        },
+        "recordsExposed": 6,
+        "resultSize": 3,
+        "bindingNonce": "cHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHBwcHA",
+        "commitments": {
+          "localPayloadSent": "3UwRmwMj0MM1netKDLi5VqX90px78kkiveOrD3p8d3Q",
+          "partnerPayloadReceived": "5XJLRIszRAYjJECHqmtblwGwvXmoXPaHZq2i1-6jL88",
+          "associationTable": "lgzdXHe73VbAoRHn5VStAYUf_WCXIGurQSo_3vGfeeE"
+        }
+      },
+      "keys": {
+        "version": "psilink-exchange-keys/v1",
+        "salts": {
+          "localPayloadSent": "cXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXFxcXE",
+          "partnerPayloadReceived": "cnJycnJycnJycnJycnJycnJycnJycnJycnJycnJycnI",
+          "associationTable": "c3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3Nzc3M"
+        }
+      }
+    },
+    {
+      "name": "many-to-many-both-deduplicate",
+      "description": "Both parties declared deduplicate, so both seats resolve to many-to-many and each keeps its within-dataset duplicate values. Pins the resolved matching (both values true, cardinality many-to-many) and the commitment over an association table whose two halves both repeat: a two-by-two cluster of one matched value contributes four pairs and a fifth pair stands alone, so the recorded result size (5) is above either party's matched-record count (3). The committed payloads again hold one row per matched record, three on each side. The linkage strategy is cascade, the one that pairs the both-sided cardinality.",
+      "inputs": {
+        "localTerms": {
+          "version": "1.0.0",
+          "identity": "Shelter Network",
+          "date": "2026-02-02",
+          "algorithm": "psi",
+          "linkageStrategy": "cascade",
+          "output": {
+            "expectsOutput": true,
+            "shareWithPartner": true
+          },
+          "deduplicate": true,
+          "linkageFields": [
+            {
+              "name": "last_name",
+              "type": "last_name"
+            },
+            {
+              "name": "date_of_birth",
+              "type": "date_of_birth"
+            }
+          ],
+          "linkageKeys": [
+            {
+              "name": "NAME_DOB",
+              "elements": [
+                {
+                  "field": "last_name"
+                },
+                {
+                  "field": "date_of_birth"
+                }
+              ]
+            }
+          ],
+          "payload": {
+            "send": [
+              {
+                "name": "shelter_nights",
+                "description": "Nights of shelter stay in the reporting period."
+              }
+            ],
+            "receive": [
+              {
+                "name": "benefit_status",
+                "description": "Benefit enrollment status at the reporting date."
+              }
+            ]
+          },
+          "legalAgreement": {
+            "reference": "MOU-2026-0088",
+            "purpose": "Coordinated outreach for shared clients",
+            "expirationDate": "2029-12-31"
+          }
+        },
+        "partnerTerms": {
+          "version": "1.0.0",
+          "identity": "Benefits Office",
+          "date": "2026-02-02",
+          "algorithm": "psi",
+          "linkageStrategy": "cascade",
+          "output": {
+            "expectsOutput": true,
+            "shareWithPartner": true
+          },
+          "deduplicate": true,
+          "linkageFields": [
+            {
+              "name": "last_name",
+              "type": "last_name"
+            },
+            {
+              "name": "date_of_birth",
+              "type": "date_of_birth"
+            }
+          ],
+          "linkageKeys": [
+            {
+              "name": "NAME_DOB",
+              "elements": [
+                {
+                  "field": "last_name"
+                },
+                {
+                  "field": "date_of_birth"
+                }
+              ]
+            }
+          ],
+          "payload": {
+            "send": [
+              {
+                "name": "benefit_status",
+                "description": "Benefit enrollment status at the reporting date."
+              }
+            ],
+            "receive": [
+              {
+                "name": "shelter_nights",
+                "description": "Nights of shelter stay in the reporting period."
+              }
+            ]
+          },
+          "legalAgreement": {
+            "reference": "MOU-2026-0088",
+            "purpose": "Coordinated outreach for shared clients",
+            "expirationDate": "2029-12-31"
+          }
+        },
+        "resultSize": 5,
+        "associationTable": [
+          [0, 0, 1, 1, 4],
+          [2, 5, 2, 5, 3]
+        ],
+        "localPayloadSent": {
+          "columns": ["shelter_nights"],
+          "rows": [["12"], ["3"], ["27"]]
+        },
+        "partnerPayloadReceived": {
+          "columns": ["benefit_status"],
+          "rows": [["active"], ["pending"], ["closed"]]
+        },
+        "createdAt": "2026-02-04T08:45:00.000Z",
+        "outcome": "completed",
+        "recordsExposed": 7
+      },
+      "randomness": {
+        "bindingNonce": "gICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIA",
+        "salts": {
+          "localPayloadSent": "gYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYE",
+          "partnerPayloadReceived": "goKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoI",
+          "associationTable": "g4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4M"
+        }
+      },
+      "record": {
+        "version": "psilink-exchange-record/v7",
+        "createdAt": "2026-02-04T08:45:00.000Z",
+        "outcome": "completed",
+        "termsHash": "VHFv8sXLr678X1S3EQjwyCNAqrG2MKiPD32KG6fy0Rg",
+        "localIdentity": "Shelter Network",
+        "partnerIdentity": "Benefits Office",
+        "governance": {
+          "algorithm": "psi",
+          "legalAgreement": {
+            "reference": "MOU-2026-0088",
+            "purpose": "Coordinated outreach for shared clients",
+            "expirationDate": "2029-12-31"
+          },
+          "matchingBasis": [
+            {
+              "name": "date_of_birth",
+              "type": "date_of_birth"
+            },
+            {
+              "name": "last_name",
+              "type": "last_name"
+            }
+          ],
+          "payloadSent": [
+            {
+              "name": "shelter_nights",
+              "description": "Nights of shelter stay in the reporting period."
+            }
+          ],
+          "payloadReceived": [
+            {
+              "name": "benefit_status",
+              "description": "Benefit enrollment status at the reporting date."
+            }
+          ],
+          "matching": {
+            "localDeduplicate": true,
+            "partnerDeduplicate": true,
+            "cardinality": "many-to-many"
+          }
+        },
+        "recordsExposed": 7,
+        "resultSize": 5,
+        "bindingNonce": "gICAgICAgICAgICAgICAgICAgICAgICAgICAgICAgIA",
+        "commitments": {
+          "localPayloadSent": "g2Qvi6EaHGelujkXvXWZuuqVa-wmxYecLWds7fmmsy8",
+          "partnerPayloadReceived": "jDOSJgalDV_M9WMao_XpIWHrIjdlS_dLS0soZ6yP7sU",
+          "associationTable": "hIphaStGVsWGO8kwgpILNBRHXKe36wFF9Lgbldl50m4"
+        }
+      },
+      "keys": {
+        "version": "psilink-exchange-keys/v1",
+        "salts": {
+          "localPayloadSent": "gYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYGBgYE",
+          "partnerPayloadReceived": "goKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoKCgoI",
+          "associationTable": "g4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4ODg4M"
         }
       }
     }

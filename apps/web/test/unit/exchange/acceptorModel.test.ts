@@ -4,6 +4,7 @@ import { UNNAMED_PARTY_LABEL } from "@psilink/core";
 
 import {
   ACCEPTOR_NAME_CONTROL_CHAR_PROBLEM,
+  ACCEPTOR_NAME_TEXT_DIRECTION_PROBLEM,
   ACCEPTOR_SEND_FORWARD_REFERENCE,
   acceptUnsupported,
   acceptorConsentName,
@@ -241,6 +242,25 @@ describe("acceptor ledger rows", () => {
     expect(rowValue(rows, "How it runs")).toBe("Browser");
   });
 
+  test("a count-only invitation's receive row promises no matched rows", () => {
+    // A psi-c run produces the overlap size and no result table for anyone, so
+    // the row the acceptor consents under cannot promise matched rows and the
+    // inviter's columns. The token takes the shape count-only terms admit: one
+    // linkage key and no payload either way.
+    const rows = acceptorLedgerRows(
+      makeToken({
+        algorithm: "psi-c",
+        linkageKeys: [baseTerms.linkageKeys[0]],
+        payload: { send: [], receive: [] },
+      }),
+      HOW_IT_RUNS,
+    );
+    expect(rowValue(rows, "You will receive")).toBe(
+      "How many records you have in common - no matched rows and no shared " +
+        "columns",
+    );
+  });
+
   test("from the columns step on, the send row names the disclosed metadata columns, isolated", () => {
     // The acceptor's live metadata discloses a payload column the invitation never
     // requested (the inviter authored no payload.receive). The send row must name it.
@@ -438,6 +458,22 @@ describe("acceptor completion ledger", () => {
     expect(rowValue(rows, "You received")).toBe("0 matched rows");
   });
 
+  test("a matched result with no count says so rather than displaying as zero", () => {
+    // A server-job accept leaves the result on the console, which counts none of
+    // its rows. The row still names the columns that arrived with them, and it
+    // states the count is missing rather than displaying the zero above.
+    const rows = acceptorDoneLedgerRows(
+      makeToken(),
+      { kind: "matched" },
+      DISCLOSING_METADATA,
+      HOW_IT_RUNS,
+    );
+    expect(rowValue(rows, "You received")).toBe(
+      "Matched rows + enrollment_date, program_code - row count not " +
+        "available; download the result to count them",
+    );
+  });
+
   test("the settled share-bar subset keeps the past-tense disclosure row", () => {
     // The expiry row is consumed with the invitation, so the settled condensed
     // subset is what left, what arrived, and what matched -- "You sent" first.
@@ -506,6 +542,24 @@ describe("acceptor name shape", () => {
     expect(acceptorNameProblem(`County${control}Health`)).toBe(
       ACCEPTOR_NAME_CONTROL_CHAR_PROBLEM,
     );
+  });
+
+  test.each([
+    ["a right-to-left override", RLO],
+    ["a left-to-right embedding", "\u202a"],
+    ["a pop directional isolate", "\u2069"],
+  ])("reports %s in the name under its own wording", (_label, character) => {
+    // The second rule core holds this value to. Its own message: an operator
+    // told about control characters would not know what to remove.
+    expect(acceptorNameProblem(`County${character}Health`)).toBe(
+      ACCEPTOR_NAME_TEXT_DIRECTION_PROBLEM,
+    );
+  });
+
+  test("reports nothing for a direction mark, which core admits", () => {
+    // The implicit marks open no scope, so core keeps them and the field must
+    // not stop a name that would be accepted.
+    expect(acceptorNameProblem("County\u200eHealth")).toBeUndefined();
   });
 
   test("reports nothing for a name written in letters outside ASCII", () => {

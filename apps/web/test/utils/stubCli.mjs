@@ -49,7 +49,10 @@
 //                     file named by --identity-file (and the one named by
 //                     --export-certificate, when present) so the driver's
 //                     created-vs-loaded read of the identity path is exercised
-//                     against a file that really appears. It honors
+//                     against a file that really appears. The identity create is
+//                     exclusive, as the real command's is, so a name already
+//                     taken -- a dangling symlink included -- is the CLI's usage
+//                     exit rather than a write through it. It honors
 //                     STUB_EXIT_CODE, STUB_DELAY_MS, and STUB_IGNORE_SIGTERM.
 //   STUB_CWD_FILE     When set, the child's own process.cwd() is written to this
 //                     path by the `fingerprint` branch, so a test can assert the
@@ -71,6 +74,28 @@ const DEFAULT_PROBE_LINE =
 // canonical 43-character unpadded base64url digest (the final character drawn
 // from the aligned set the config schema requires).
 const DEFAULT_FINGERPRINT_LINE = "B".repeat(42) + "A\n";
+
+// The CLI's usage-error exit code, which is what the real command answers when
+// it cannot create the identity at the path it was given.
+const FINGERPRINT_USAGE_EXIT_CODE = 64;
+
+/**
+ * Create the identity file, refusing (false) rather than writing through
+ * anything already at the name. The real command creates via a temp file plus
+ * linkSync, so an existing name is EEXIST -- a dangling symlink included, which
+ * a plain write would follow, creating the key in whatever directory the link
+ * points at.
+ */
+function createIdentityExclusively(filePath) {
+  try {
+    fs.writeFileSync(filePath, JSON.stringify({ stub: "identity" }), {
+      flag: "wx",
+    });
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /** The value of a single `--flag=value` argv token, or undefined when absent. */
 function flagValue(argv, flag) {
@@ -107,22 +132,31 @@ if (process.argv[2] === "probe-host-key") {
   if (process.env.STUB_CWD_FILE !== undefined)
     fs.writeFileSync(process.env.STUB_CWD_FILE, process.cwd());
   const exitCode = Number.parseInt(process.env.STUB_EXIT_CODE ?? "0", 10);
+  let outcome = exitCode;
   if (exitCode === 0) {
     // The real command creates the identity file (and the export) before it
     // prints, so the stub does too: the driver reads the identity path's presence
     // BEFORE spawning, and a second invocation must therefore see the file this
-    // one left.
+    // one left. Create-or-REUSE, as the real command is: an identity already
+    // there is loaded, never rewritten, so a read of one in a read-only mount
+    // writes nothing.
     const identityFile = flagValue(process.argv, "--identity-file");
-    if (identityFile !== undefined)
-      fs.writeFileSync(identityFile, JSON.stringify({ stub: "identity" }));
-    const exportFile = flagValue(process.argv, "--export-certificate");
-    if (exportFile !== undefined)
-      fs.writeFileSync(exportFile, JSON.stringify({ stub: "certificate" }));
-    process.stdout.write(
-      process.env.STUB_FINGERPRINT_STDOUT ?? DEFAULT_FINGERPRINT_LINE,
-    );
+    if (
+      identityFile !== undefined &&
+      !fs.existsSync(identityFile) &&
+      !createIdentityExclusively(identityFile)
+    )
+      outcome = FINGERPRINT_USAGE_EXIT_CODE;
+    if (outcome === 0) {
+      const exportFile = flagValue(process.argv, "--export-certificate");
+      if (exportFile !== undefined)
+        fs.writeFileSync(exportFile, JSON.stringify({ stub: "certificate" }));
+      process.stdout.write(
+        process.env.STUB_FINGERPRINT_STDOUT ?? DEFAULT_FINGERPRINT_LINE,
+      );
+    }
   }
-  exitAfterDelay(exitCode);
+  exitAfterDelay(outcome);
 } else {
   runExchangeStub();
 }

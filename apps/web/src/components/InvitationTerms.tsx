@@ -1,6 +1,8 @@
 import { useId, useState } from "react";
 
 import {
+  Alert,
+  Checkbox,
   Collapse,
   Group,
   List,
@@ -11,13 +13,16 @@ import {
   VisuallyHidden,
 } from "@mantine/core";
 
-import { IconChevronRight } from "@tabler/icons-react";
+import { IconAlertCircle, IconChevronRight } from "@tabler/icons-react";
 import { useReducedMotion } from "@mantine/hooks";
 
 import {
   CONSENT_FACTS,
   COUNT_ONLY_DISCLOSURE_STATEMENT,
+  DEDUPLICATE_ACCEPTOR_SETTABLE_SIDE_NOTE,
   DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
+  DEDUPLICATE_PARTNER_DECLARED_DISCLOSURE_STATEMENT,
+  DEDUPLICATE_PARTNER_DECLARED_SIDE_NOTE,
   DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,
   DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT,
   LINKAGE_RULE_SET_VERDICT_COPY,
@@ -25,15 +30,22 @@ import {
   OUTBOUND_SEND_NO_PAYLOAD_SENTENCE,
   PROPOSED_NOT_APPLIED_NOTES,
   UNRECOGNIZED_TRANSFORM_NOTE,
+  describeDeduplicatePair,
   distinctLinkageRuleSetVerdicts,
   linkageRuleSetVerdictNote,
   ruleSetCitation,
-  sanitizeForDisplay,
   summarizeInvitation,
   unshownDeclaredNamesLine,
 } from "@psilink/core";
 
 import { ColumnChips } from "@components/ColumnChips";
+import { ColumnName } from "@components/ColumnName";
+
+import {
+  DEDUPLICATE_CONTROL_DESCRIPTION,
+  DEDUPLICATE_CONTROL_LABEL,
+} from "@psi/deduplicateChoice";
+import { acceptorMaySetDeduplicate } from "@psi/acceptInvitation";
 
 import type { ReactNode, Ref } from "react";
 
@@ -74,6 +86,31 @@ const ruleSetValueStyle = {
   borderRadius: "var(--mantine-radius-sm)",
   padding: "2px 6px",
   wordBreak: "break-all",
+} as const;
+
+/**
+ * The matching-multiplicity headline, in the roles the reading seat holds.
+ *
+ * A seat holding an invitation names the two parties that document declares. The
+ * seat where each party declares its own side against terms read from its own
+ * file (`partnerDeclaresOwnDeduplicate`) holds no invitation naming either role,
+ * so a reader mapping the roles the other way would read the direction inverted
+ * -- there the sentence names the reader and its partner instead, like the
+ * consent copy beneath it.
+ */
+const DUPLICATE_MATCHES_HEADLINE = {
+  invitationRoles: {
+    deduplicating:
+      "More than one of the inviting party's records may match a single one of the accepting party's records.",
+    oneToOne:
+      "Each of the inviting party's records matches at most one of the accepting party's records.",
+  },
+  partnerDeclared: {
+    deduplicating:
+      "More than one of your records may match a single one of your partner's records.",
+    oneToOne:
+      "Each of your records matches at most one of your partner's records.",
+  },
 } as const;
 
 /** A labelled block: a bold caption above its value(s). When `captionId` is set it
@@ -379,6 +416,8 @@ export function InvitationTerms({
   inviterRetainsFiles,
   connectionEndpoint,
   outboundColumns,
+  acceptorDeduplicate,
+  partnerDeclaresOwnDeduplicate,
   perspective = "review",
   headingOrder = 2,
   headingRef,
@@ -417,6 +456,31 @@ export function InvitationTerms({
    * where `review` shows a forward-reference instead). Neither value reaches the
    * screen when the invitation gives the inviting party no result. */
   outboundColumns?: Array<string>;
+  /** The accepting party's OWN `deduplicate` value and the control that sets
+   * it, on a seat where that party authors its own side. Supplied AND admitted
+   * by the invitation ({@link acceptorMaySetDeduplicate}), the duplicate
+   * matches block states BOTH parties' values and what the pair discloses
+   * (`describeDeduplicatePair`) and offers the checkbox beneath them;
+   * otherwise the block states the inviting party's value alone, which is what
+   * an accept with no such control runs (`deriveAcceptedLinkageTerms` then
+   * derives this party's side as false).
+   *
+   * `refusal` is the pair's own refusal read at the seat
+   * (`acceptorDeduplicateRefusal`), rendered beside the control so the operator
+   * meets it before the run rather than mid-exchange. The caller holds the
+   * Continue gate on the same value. */
+  acceptorDeduplicate?: {
+    value: boolean;
+    onChange: (value: boolean) => void;
+    refusal?: string;
+  };
+  /** Whether the PARTNER declares its own `deduplicate` on its own run rather
+   * than reading it from these terms -- the direct exchange, where each party
+   * infers terms from its own file and no invitation states either side. The
+   * duplicate-matches block then closes on
+   * {@link DEDUPLICATE_PARTNER_DECLARED_SIDE_NOTE}, which asserts nothing about
+   * a side this seat cannot know, in place of the accept seat's notes. */
+  partnerDeclaresOwnDeduplicate?: boolean;
   /** Which context this renders in. Drives the heading and intro copy, the
    * viewer-centric blocks (Result sharing, the payload send/receive framing, and
    * the inviter-only sent-columns chips above "Other details"), and the two
@@ -447,6 +511,14 @@ export function InvitationTerms({
     inviterRetainsFiles,
     connectionEndpoint,
   });
+  // This party's own side WHERE THE INVITATION ADMITS ONE: a sole-receiver
+  // invitation mirrors the accepting party to expectsOutput false, which the
+  // schema takes no deduplicate from, so that accept gets no control and no
+  // sentence stating a value this party sets -- it runs the closed default the
+  // derivation applies (acceptorMaySetDeduplicate).
+  const ownDeduplicate = acceptorMaySetDeduplicate(linkageTerms)
+    ? acceptorDeduplicate
+    : undefined;
   // A count of the columns the inviter requests FROM the acceptor (the acceptor's
   // own data egress). A count, not names: the length is a bounded integer
   // (MAX_PAYLOAD_ENTRIES at decode), so no partner free text enters the
@@ -497,6 +569,15 @@ export function InvitationTerms({
     perspective === "proposing"
       ? "Your partner will receive the result"
       : "Your partner (the inviter) will receive the result";
+  // Whether the exchange withholds the PARTNER's half of the association table,
+  // on the same viewer-relative swap as the receipt fields above: the partner is
+  // the accepting party under "proposing" and the inviting party otherwise, and
+  // core resolves a verdict for each half. It selects which own-membership
+  // sentence the block below states.
+  const partnerTableWithheld =
+    perspective === "proposing"
+      ? summary.acceptorTableWithheld
+      : summary.inviterTableWithheld;
   // The outbound-send slot holds whichever block states what this viewer's own data
   // leaving amounts to: count-only (no payload moves) takes precedence, then a
   // partner receiving no result (nothing is transmitted, gated on
@@ -750,16 +831,16 @@ export function InvitationTerms({
                       cannot disagree, and as a plain length -- none of the operator's
                       header text enters the sentence. */}
                   <OutboundSendCount count={outboundColumns.length} />
-                  {/* These are the operator's OWN CSV headers (from the live
-                      metadata disclosure), not a sanitized summary value, so
-                      sanitize them for display like every other column-name surface
-                      (ColumnChips renders verbatim) -- a header containing
-                      bidi/zero-width/homoglyph characters must not misrepresent to
-                      the operator what leaves their machine. */}
+                  {/* These are the operator's OWN CSV headers, read from the file
+                      they chose rather than from the partner's token, so each
+                      shows through ColumnName, the isolation every sink for a
+                      name of theirs uses: one header reads the same here as on
+                      the step that marks it to send. The names the invitation
+                      declares stay escaped wherever this panel shows them. */}
                   <ColumnChips
-                    columns={outboundColumns.map((name) =>
-                      sanitizeForDisplay(name),
-                    )}
+                    columns={outboundColumns.map((name, index) => (
+                      <ColumnName key={index} name={name} />
+                    ))}
                     labelledBy={outboundSendCaptionId}
                   />
                 </>
@@ -889,14 +970,23 @@ export function InvitationTerms({
                   cooperative caveat above: this states what an HONEST partner learns
                   intrinsically. A non-receiving partner in a `psi` exchange learns
                   which of ITS OWN records are in the viewer's data -- membership --
-                  under both linkage strategies (docs/notes/one-sided-disclosure.md).
-                  Bounded so it cannot overstate: never which of the viewer's records
-                  they matched, nor anything about the rest of the set beyond its
-                  size. Not disclosed under `psi-c`, whose non-receiving party is the
-                  sender and learns no membership. */}
+                  wherever the run returns it that half of the table
+                  (docs/notes/one-sided-disclosure.md). Bounded so it cannot
+                  overstate: never which of the viewer's records they matched, nor
+                  anything about the rest of the set beyond its size. Not disclosed
+                  under `psi-c`, whose non-receiving party is the sender and learns no
+                  membership. WHICH of the two sentences renders follows core's
+                  resolution of the run (partnerTableWithheld), never a reading of the
+                  strategy and the payload declaration made here. */}
               {summary.algorithm !== "psi-c" && (
                 <Text size="xs" c="dimmed">
-                  {CONSENT_FACTS.partnerLearnsOwnMembership.note}
+                  {
+                    CONSENT_FACTS[
+                      partnerTableWithheld
+                        ? "partnerOwnMembershipWithheld"
+                        : "partnerLearnsOwnMembership"
+                    ].note
+                  }
                 </Text>
               )}
             </>
@@ -1340,43 +1430,161 @@ export function InvitationTerms({
             )}
 
             <Term label="Duplicate matches">
-              <Text size="sm">
-                {summary.deduplicate
-                  ? "More than one of the inviting party's records may match a single one of the accepting party's records."
-                  : "Each of the inviting party's records matches at most one of the accepting party's records."}
-              </Text>
-              {/* What a deduplicating match reveals, and whose records are
-                grouped to reveal it -- the inviting party's alone, since
-                acceptance derives the accepting party's own side as false
-                (deriveAcceptedLinkageTerms). Shared wording with the CLI accept
-                prompt; WHICH statement renders follows the output shape: grouping
-                where the inviting party shares the result, none where it is the
-                sole receiver. Rendered for exactly a deduplicating invitation the
-                run applies -- a strategy that cannot deduplicate is refused at
-                acceptance (assertDeduplicateImplemented). */}
-              {summary.deduplicate && summary.deduplicateApplied && (
+              {/* The invitation's own value, on a seat with no control over
+                this party's side: there the accepting party's side is the
+                closed default, so the sentence reads the run. Where the
+                control exists the pair statement below states the run
+                instead, over both declared values, and this reading of the
+                invitation alone would contradict it the moment the operator
+                ticks its own side. */}
+              {ownDeduplicate === undefined && (
+                <Text size="sm">
+                  {
+                    DUPLICATE_MATCHES_HEADLINE[
+                      partnerDeclaresOwnDeduplicate
+                        ? "partnerDeclared"
+                        : "invitationRoles"
+                    ][summary.deduplicate ? "deduplicating" : "oneToOne"]
+                  }
+                </Text>
+              )}
+              {/* The pair, on a seat where this party sets its own side: both
+                declared values and what the combination discloses, over the
+                invitation's value and the one the operator has selected. The
+                sentence is core's, the same fact the run states after the terms
+                exchange (describeResolvedMatching), read here before any key or
+                payload moves. */}
+              {ownDeduplicate !== undefined && (
                 <>
-                  <Text size="xs" c="dimmed">
-                    {summary.inviterSharesResult
-                      ? DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT
-                      : DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT}
+                  <Text size="sm">
+                    {describeDeduplicatePair({
+                      inviterDeduplicate: summary.deduplicate,
+                      acceptorDeduplicate: ownDeduplicate.value,
+                      inviterReceivesResult: summary.inviterReceivesOutput,
+                    })}
                   </Text>
-                  {/* The sole-receiver statement states the withholding this
-                    client makes; what the rounds still disclose to the accepting
-                    party's own process is the fact beside it, read from the shared
-                    table. Only that shape needs it: where the inviting party shares
-                    the result, the accepting party is presented the grouping and
-                    there is no display limit to qualify. */}
-                  {!summary.inviterSharesResult && (
+                  <Checkbox
+                    mt="xs"
+                    checked={ownDeduplicate.value}
+                    onChange={(event) =>
+                      ownDeduplicate.onChange(event.currentTarget.checked)
+                    }
+                    label={DEDUPLICATE_CONTROL_LABEL}
+                    description={DEDUPLICATE_CONTROL_DESCRIPTION}
+                  />
+                  {/* What this party's own value would meet against an
+                    invitation declaring both a candidate set and its own
+                    deduplicate: the accept refuses that pair
+                    (deriveAcceptedLinkageTerms), so the consequence is stated
+                    with the control rather than met at the accept action. Read
+                    from core's verdict on the invitation alone, and rendered
+                    whatever this party's value stands at, so it is on screen
+                    before the value that completes the combination is set. */}
+                  {summary.acceptorDeduplicateRefused && (
                     <Text size="xs" c="dimmed">
-                      {CONSENT_FACTS.duplicateGroupingDisplayLimit.note}
+                      {CONSENT_FACTS.acceptorDeduplicateRefused.note}
                     </Text>
                   )}
+                </>
+              )}
+              {/* The combination this pair resolves to, refused at the seat
+                rather than mid-run. Core's own message: it names the strategy
+                to change and the one-sided pair to fall back to, so it does not
+                read as a setting that cannot be had. Gated on the refusal
+                alone, not on the control: a pair the caller refuses is stated
+                whether or not this invitation admits a control. */}
+              {acceptorDeduplicate?.refusal !== undefined && (
+                <Alert
+                  color="red"
+                  icon={<IconAlertCircle aria-hidden />}
+                  title="These two settings cannot run together"
+                  mt="xs"
+                >
+                  {acceptorDeduplicate.refusal}
+                </Alert>
+              )}
+              {/* What the INVITING party's deduplicate reveals, and whose
+                records are grouped to reveal it. Shared wording with the CLI
+                accept prompt; WHICH statement renders follows the output shape:
+                grouping where the inviting party shares the result, none where
+                it is the sole receiver. Rendered for exactly a deduplicating
+                invitation the run applies -- a strategy that cannot deduplicate
+                is refused at acceptance (assertDeduplicateImplemented). The
+                accepting party's own side is the pair statement's above, which
+                renders whatever either value is. */}
+              {summary.deduplicate && summary.deduplicateApplied && (
+                <>
+                  {/* The seat where the partner declares its own side reads the
+                    shared-result account in the second person, for the reason
+                    the headline above is written that way: no invitation there
+                    tells the reader which party role is theirs. The
+                    sole-receiver account has that one form, so a document of
+                    that shape keeps it. */}
                   <Text size="xs" c="dimmed">
-                    {DEDUPLICATE_ACCEPTOR_SIDE_NOTE}
+                    {!summary.inviterSharesResult
+                      ? DEDUPLICATE_SOLE_RECEIVER_DISCLOSURE_STATEMENT
+                      : partnerDeclaresOwnDeduplicate
+                        ? DEDUPLICATE_PARTNER_DECLARED_DISCLOSURE_STATEMENT
+                        : DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT}
+                  </Text>
+                  {/* The sole-receiver statement states the withholding this
+                    client makes; what the exchange itself does with the grouping
+                    is the fact beside it, read from the shared table. WHICH of the
+                    two renders follows core's resolution of the run
+                    (acceptorTableWithheld), never a reading of the strategy and the
+                    payload request made here. Only that shape needs either: where
+                    the inviting party shares the result, the accepting party is
+                    presented the grouping and there is nothing to qualify. */}
+                  {!summary.inviterSharesResult && (
+                    <Text size="xs" c="dimmed">
+                      {
+                        CONSENT_FACTS[
+                          summary.acceptorTableWithheld
+                            ? "duplicateGroupingWithheld"
+                            : "duplicateGroupingDisplayLimit"
+                        ].note
+                      }
+                    </Text>
+                  )}
+                  {/* The direction note, in the variant this seat owes: where
+                    the accepting party sets its own side in place, the note
+                    closes on that control rather than on a configuration file
+                    the operator may not have, and drops the "never grouped"
+                    clause the pair statement above answers with the two values
+                    actually selected. Where the partner declares its own side
+                    on its own run, the note drops that clause too -- nothing
+                    here decides the other side -- and closes on where it is
+                    declared. */}
+                  <Text size="xs" c="dimmed">
+                    {ownDeduplicate !== undefined
+                      ? DEDUPLICATE_ACCEPTOR_SETTABLE_SIDE_NOTE
+                      : partnerDeclaresOwnDeduplicate
+                        ? DEDUPLICATE_PARTNER_DECLARED_SIDE_NOTE
+                        : DEDUPLICATE_ACCEPTOR_SIDE_NOTE}
                   </Text>
                 </>
               )}
+              {/* The other direction of the same line, for the shape where
+                this party groups its own records and the INVITING party is
+                entitled to no result: the pair statement above states what
+                the result holds, and this states what the exchange still
+                sends the partner's process. WHICH of the two renders follows
+                core's resolution of the run (inviterTableWithheld), never a
+                reading of the strategy and the payload declaration made
+                here. */}
+              {ownDeduplicate?.value === true &&
+                !summary.inviterReceivesOutput &&
+                summary.deduplicateApplied && (
+                  <Text size="xs" c="dimmed">
+                    {
+                      CONSENT_FACTS[
+                        summary.inviterTableWithheld
+                          ? "partnerDuplicateGroupingWithheld"
+                          : "partnerReadsDuplicateGrouping"
+                      ].note
+                    }
+                  </Text>
+                )}
             </Term>
           </Stack>
         </Collapse>

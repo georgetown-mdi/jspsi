@@ -303,13 +303,17 @@ Ratified by the owner:
   states its out-of-container requirement at the point of use.
 - **Core Functionality** (board 9) -- Done is: no linkage term the schema admits
   is parsed, displayed, or agreed without the run applying it -- every
-  declared-but-inert path implemented or refused.
+  declared-but-inert path implemented or refused -- and no local option the
+  config admits changes the result file without the run composing it.
 - **Application Encryption** (board 9) -- Done is:
   escape-once-at-the-display-sink and bound-at-composition hold across every
   operator-facing sink, carried by checks rather than by a fix per fragment.
 - **Partnership identity and consent** (board 9) -- Done is: no exchange
   proceeds past a consent surface whose disclosure list and terms binding are
-  unverified, on the invite, accept, and unattended paths alike.
+  unverified, on the invite, accept, and unattended paths alike, and no run
+  that put a payload on the wire -- completed, cancelled, or cut -- leaves
+  the accounting of disclosures without an entry stating what was disclosed
+  and what delivery remains unconfirmed.
 - **Web Exchange Rework** (board 9) -- Done is: the reworked screens carry a
   full invite-to-result exchange in the browser with the interop suite green,
   and no screen remains on the pre-rework flow.

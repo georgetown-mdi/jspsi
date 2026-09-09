@@ -119,7 +119,9 @@ export const HANDOFF_INBOUND_DIRECTORY_URL_PLACEHOLDER =
  * config's `signing.identity_file`.
  *
  * The identity is a real file on the operator's host, but the console loads
- * it by the CONTAINER's path, which their host does not have. The template
+ * it by the CONTAINER's path, which their host does not have -- whether that
+ * is the mounted data root's default or the secrets-mount file the operator
+ * chose, since the console resolves either to a container path. The template
  * names the file rather than the location, and the panel says which file to
  * point it at.
  */
@@ -235,8 +237,8 @@ function buildExchangeHandoffTemplate(
  * Compose the zero-setup mode's portable command tokens: `psilink` plus the
  * connection portion (sftp's `sftp://` URL and `--server-*` flags with the
  * credential `@path` placeholdered, or filedrop's placeholder `file://`
- * locator), the run's tuning flags, its identity and linkage-strategy
- * selectors when set, and the input/output positionals.
+ * locator), the run's tuning flags, its identity, linkage-strategy, and
+ * deduplicate selectors when set, and the input/output positionals.
  *
  * The sftp arm reuses {@link zeroSetupSftpArgv} against a
  * placeholder-credential entry, so the URL, username, and mandatory
@@ -275,6 +277,7 @@ function buildZeroSetupHandoffTemplate(
     ...(intent.linkageStrategy !== undefined
       ? [`--linkage-strategy=${intent.linkageStrategy}`]
       : []),
+    ...(intent.deduplicate === true ? ["--deduplicate"] : []),
     HANDOFF_INPUT_NAME,
     HANDOFF_OUTPUT_NAME,
   ];

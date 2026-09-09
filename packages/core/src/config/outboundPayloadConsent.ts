@@ -1,7 +1,11 @@
 import { z } from "zod";
 
 import { boundedArray } from "../utils/boundedArray.js";
-import { MAX_NAME_LENGTH, MAX_PAYLOAD_ENTRIES } from "./linkageTermsSchema.js";
+import {
+  MAX_NAME_LENGTH,
+  MAX_PAYLOAD_ENTRIES,
+  nameValue,
+} from "./linkageTermsSchema.js";
 
 /**
  * This party's recorded consent to its OWN outbound payload set -- the
@@ -44,11 +48,12 @@ export type OutboundPayloadConsent =
     };
 
 /**
- * Schema for {@link OutboundPayloadConsent}. `columns` carries the same
- * per-name length and entry-count bounds as every other payload column list, so a
- * hand-edited config cannot make the field unloadable in a way the writers could
- * not have produced; the discriminated union is what keeps a `confirmed` record
- * without columns, or a `pending` record carrying them, unrepresentable.
+ * Schema for {@link OutboundPayloadConsent}. `columns` holds the same per-name
+ * length, name shape, and entry-count bounds as every other payload column
+ * list, so a hand-edited config cannot make the field unloadable in a way the
+ * writers could not have produced; the discriminated union is what keeps a
+ * `confirmed` record without columns, or a `pending` record carrying them,
+ * unrepresentable.
  */
 export const OutboundPayloadConsentSchema: z.ZodType<OutboundPayloadConsent> =
   z.discriminatedUnion("status", [
@@ -56,7 +61,7 @@ export const OutboundPayloadConsentSchema: z.ZodType<OutboundPayloadConsent> =
     z.object({
       status: z.literal("confirmed"),
       columns: boundedArray(
-        z.string().min(1).max(MAX_NAME_LENGTH),
+        nameValue(z.string().min(1).max(MAX_NAME_LENGTH)),
         MAX_PAYLOAD_ENTRIES,
         `outbound payload consent must not exceed ${MAX_PAYLOAD_ENTRIES} columns`,
       ),

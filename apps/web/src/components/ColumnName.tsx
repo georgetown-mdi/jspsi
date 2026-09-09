@@ -1,40 +1,44 @@
 import { DISPLAY_TRUNCATION_MARKER, MAX_NAME_LENGTH } from "@psilink/core";
 
 /**
- * How the acceptor's confirm-columns screen shows one of the operator's column
- * names: verbatim, inside a bidi isolate. Every column-name sink on that screen
+ * How the acceptor's screens show one of the operator's column names: verbatim,
+ * inside a bidi isolate. Every column-name sink on the confirm-columns screen
  * goes through this module -- the grid's row header and its two control labels,
  * the quick-fix mapper's options, the disclosed-columns panel, the alert naming
  * the operator's own columns in the payload-declaration conflict notice (whose
  * declaration-sourced names take the escape instead), the grid's live regions, and the
- * ledger's "You will send" row -- so one name reads the same wherever the screen
- * puts it. That last notice is the one place two provenances meet, and its split
- * costs a collision this accepts: a declared name the operator's file also holds
- * reaches them escaped in the notice and verbatim here in the grid row the notice
- * sends them to, so the two forms are the same string only for a name of printable
- * ASCII holding no backslash. Escaping the half the operator cannot inspect costs
- * reading one name in two forms.
+ * ledger's "You will send" row -- as does the consent screen's chip list of what
+ * this party will send, so one name reads the same wherever either screen puts
+ * it. What escapes instead, on those screens and everywhere else it shows, is a
+ * name the INVITATION declares: partner text, escaped where the invitation
+ * summary is built. The two provenances meet in that conflict notice, and again
+ * on the consent screen, where the declared names sit in the same panel as this
+ * party's own send; the split costs a collision both accept: a declared name the
+ * operator's file also holds reaches them escaped in the notice and verbatim
+ * here in the grid row the notice sends them to, so the two forms are the same
+ * string only for a name of printable ASCII holding no backslash. Escaping the
+ * half the operator cannot inspect costs reading one name in two forms.
  *
  * These names are the operator's OWN CSV header, read from the file they chose,
  * not the partner-controlled text `sanitizeForDisplay` exists for, so they do not
  * take its escape. What they do need is layout containment: a header holding a
  * right-to-left override, or an embedding it never closes, otherwise reorders the
- * sentence, label, or table row it is interpolated into -- and this is the screen
- * where the operator decides what leaves their machine, so the copy around a name
- * has to mean what it says. Isolation buys exactly that and spends almost nothing
- * else: an accented or non-Latin header renders as itself rather than as escapes
- * on the operator's own authoring surface, and two headers sharing a long prefix
- * stay distinct as far as {@link MAX_NAME_LENGTH}, the ceiling past which no name
- * completes an exchange anyway.
+ * sentence, label, or table row it is interpolated into -- and these are the
+ * screens where the operator decides what leaves their machine, so the copy
+ * around a name has to mean what it says. Isolation buys exactly that and spends
+ * almost nothing else: an accented or non-Latin header renders as itself rather
+ * than as escapes on the operator's own authoring surface, and two headers
+ * sharing a long prefix stay distinct as far as {@link MAX_NAME_LENGTH}, the
+ * ceiling past which no name completes an exchange anyway.
  *
  * The boundary, because it does not show in the rendering: a homoglyph (Cyrillic
  * U+0430 for Latin "a"), a zero-width character, or a tab or newline (HTML folds
  * either into the space beside it) makes two headers differing only by that read
  * alike here, and escaping is what would tell them apart. One such pair no treatment
  * tells apart: two headers past {@link MAX_NAME_LENGTH} code points sharing their
- * first {@link MAX_NAME_LENGTH} render as the same cut string in every sink on this
- * screen. The names are the operator's own file's, so the cost of that is the
- * legibility of their own header, and no longer a mis-directed disclosure: a name
+ * first {@link MAX_NAME_LENGTH} render as the same cut string in every sink on
+ * either screen. The names are the operator's own file's, so the cost of that is
+ * the legibility of their own header, and no longer a mis-directed disclosure: a name
  * long enough to be cut here is past the ceiling on the UTF-16 count too, so marking
  * either twin to send closes the launch gate rather than sending the column the
  * operator did not mean. Nothing here decides what is sent; it decides only how the

@@ -4,6 +4,10 @@ import {
   FAN_OUT_FUNCTION_NAMES,
   INVITATION_LIFETIME_SECONDS,
   MAX_INVITATION_LIFETIME_SECONDS,
+  MAX_NAME_LENGTH,
+  NAME_SHAPE_PATTERN,
+  TEXT_CONTROL_CHAR_MESSAGE,
+  TEXT_DIRECTION_MESSAGE,
   UsageError,
   assertDeduplicateImplemented,
   canonicalString,
@@ -11,12 +15,14 @@ import {
   countOnlyTransmitsColumn,
   decideLinkageTermsVerdict,
   disclosedColumnNames,
+  loneSurrogateIndex,
   safeParseLinkageTerms,
   summarizeLinkageShortfall,
   swapPairTransformsDiffer,
 } from "@psilink/core";
 
 import {
+  descriptorFor,
   isStepValid,
   pipelineHasInertCoalesce,
 } from "../standardizationAuthoring";
@@ -124,6 +130,19 @@ const UNENCODABLE_KEY_TRANSFORM_MESSAGE =
   "precisely. Open that key and correct that transform's parameters, or remove " +
   "the step.";
 
+/** Shown when a linkage key's transform declares a step whose function this build
+ * has no descriptor for. The descriptor table is core's own registry, so a name
+ * absent from it is a name core's pipeline compile refuses at the mint
+ * (`assertTransformsCompile`) -- this gate is that same refusal given at the
+ * moment of choice, not a stricter reading, which is why it holds where the
+ * descriptor param gate, stricter than core, does not. Names no function: an
+ * element transform's `function` is partner-authored free text, the same reason
+ * {@link UNSUPPLYABLE_KEY_MESSAGE} names no field. The step list marks the
+ * offending row, which is where the removal happens. */
+const UNRECOGNIZED_KEY_TRANSFORM_MESSAGE =
+  "A linkage key's transform has a step psilink does not recognize, so it " +
+  "cannot run. Open that key and remove the highlighted step.";
+
 /** Shown when a key's two swapped elements have different cleaning steps: a swap
  * has only the receiver read the pair in the other order, while each element's
  * steps stay on its own position, so the column cleans one way on the party that
@@ -138,6 +157,42 @@ const SWAP_TRANSFORM_MISMATCH_MESSAGE =
   "A linkage key matches two of its fields in either order, but gives them " +
   "different cleaning steps. Open that key and give both fields the same steps, " +
   "or turn off matching them in either order.";
+
+/** What the terms schema refuses about a transform's parameter name: the length
+ * ceiling every name is held to, the name-class character rule, and the
+ * well-formedness walk that refuses an unpaired UTF-16 surrogate anywhere in the
+ * document, a `params` record key included. */
+type ParamNameRefusal = "too-long" | "control-character" | "lone-surrogate";
+
+/** The one remedy every refused parameter name takes. Renaming is not offered as
+ * a way out: this editor's own step controls write the parameter names their
+ * functions take, so such a name arrives only on an imported document, whose
+ * parameters the operator does not edit one by one. */
+const REFUSED_PARAM_NAME_REMEDY =
+  "Open that key and remove that step, or turn the key off.";
+
+/** Shown when a linkage key's transform names a parameter the schema refuses,
+ * which it does on the `linkageKeys` path -- collapsed by the generic mapping to
+ * "Enable at least one linkage key." on a draft whose keys are all enabled, so
+ * one of these must be set ahead of that mapping. Each names its own class: the
+ * three faults have different fixes in the document the operator holds. None
+ * names the key or the parameter, the same reason {@link UNSUPPLYABLE_KEY_MESSAGE}
+ * names no field -- and here the name is the offending text itself, so quoting it
+ * would put those characters on the screen. */
+const REFUSED_PARAM_NAME_MESSAGES: Record<ParamNameRefusal, string> = {
+  "too-long":
+    `A linkage key's transform names a parameter longer than ${String(MAX_NAME_LENGTH)} ` +
+    "characters, which these terms cannot carry. " +
+    REFUSED_PARAM_NAME_REMEDY,
+  "control-character":
+    "A linkage key's transform names a parameter with a control or " +
+    "text-direction character in it, which these terms cannot carry. " +
+    REFUSED_PARAM_NAME_REMEDY,
+  "lone-surrogate":
+    "A linkage key's transform names a parameter with an incomplete character " +
+    "in it, which these terms cannot carry. " +
+    REFUSED_PARAM_NAME_REMEDY,
+};
 
 /** Shown when the built terms cannot be canonically encoded and the offending
  * value is not in any enabled key's transform -- the residual the editor's own
@@ -214,6 +269,34 @@ function isCanonicallyEncodable(value: unknown): boolean {
     if (err instanceof CanonicalEncodingError) return false;
     throw err;
   }
+}
+
+/** What the schema refuses about one parameter name, or undefined for a name it
+ * accepts. Asked of the bound, the pattern, and the surrogate reading the schema
+ * itself applies, so the editor and the schema cannot disagree about which names
+ * are refused. A name breaking several rules takes the first, in the order the
+ * schema reaches them: the record key's length ceiling and shape, then the
+ * document-wide well-formedness walk. */
+function paramNameRefusalOf(name: string): ParamNameRefusal | undefined {
+  if (name.length > MAX_NAME_LENGTH) return "too-long";
+  if (!NAME_SHAPE_PATTERN.test(name)) return "control-character";
+  if (loneSurrogateIndex(name) >= 0) return "lone-surrogate";
+  return undefined;
+}
+
+/** What the schema refuses about the first parameter name it refuses in the
+ * built terms' transform steps, or undefined when it refuses none. */
+function firstParamNameRefusal(
+  terms: LinkageTerms,
+): ParamNameRefusal | undefined {
+  for (const key of terms.linkageKeys)
+    for (const element of key.elements)
+      for (const step of element.transform ?? [])
+        for (const name of Object.keys(step.params ?? {})) {
+          const refusal = paramNameRefusalOf(name);
+          if (refusal !== undefined) return refusal;
+        }
+  return undefined;
 }
 
 /**
@@ -307,6 +390,16 @@ export function validateAdvancedInvite(
     errors.keys = UNSUPPLYABLE_KEY_MESSAGE;
   }
 
+  // A transform parameter name the schema refuses -- for its length, a character
+  // a terms name may not hold, or an unpaired UTF-16 surrogate -- is refused on
+  // the same `linkageKeys` path, and needs its own message ahead of the mapping
+  // for the reason the checks above do. Ahead of the encode dry run below too:
+  // the encoder refuses a lone-surrogate name as well, under a message that
+  // names a different fault and a remedy that does not reach this one.
+  const paramNameRefusal = firstParamNameRefusal(terms);
+  if (errors.keys === undefined && paramNameRefusal !== undefined)
+    errors.keys = REFUSED_PARAM_NAME_MESSAGES[paramNameRefusal];
+
   // Canonical-encode dry run: the terms are hashed into the cross-party agreement
   // in this byte form, and a value outside the reproducible domain throws here
   // rather than desyncing two parties. Run up front so this message wins over the
@@ -361,9 +454,11 @@ export function validateAdvancedInvite(
 
   const parsed = safeParseLinkageTerms(terms);
   if (!parsed.success) {
-    // Each control touched by a schema issue gets its control-specific message
-    // (keyed on the control, not the individual issue, so the set of affected
-    // controls is all that matters). Keeps the first message per control: the keys
+    // Each control touched by a schema issue gets its control-specific message:
+    // the one its class of fault earns where the issue names a refused character
+    // class (refusedCharacterMessage), and the control's generic message
+    // otherwise, since the rest of the schema's issues are technical and name a
+    // value no editor may echo. Keeps the first message per control: the keys
     // control sets its accurate message up front so it wins over the generic
     // schema mapping, and stacking several messages on one input is noise. The
     // payload control is the exception -- a schema payload error (e.g. an
@@ -371,13 +466,19 @@ export function validateAdvancedInvite(
     // direction-conflict message that may already occupy it, so both are shown
     // rather than leaving the operator unaware of one that still blocks
     // generation.
-    const schemaFields = new Set(
-      parsed.error.issues.map((issue) => fieldForIssuePath(issue.path)),
-    );
-    for (const field of schemaFields) {
+    const schemaFields = new Map<AdvancedField, Set<string>>();
+    for (const issue of parsed.error.issues) {
+      const field = fieldForIssuePath(issue.path);
+      const seen = schemaFields.get(field);
+      if (seen === undefined) schemaFields.set(field, new Set([issue.message]));
+      else seen.add(issue.message);
+    }
+    for (const [field, issueMessages] of schemaFields) {
       const existing = errors[field];
       if (existing === undefined) {
-        errors[field] = messageForField(field);
+        errors[field] =
+          refusedCharacterMessage(field, issueMessages) ??
+          messageForField(field);
       } else if (field === "payload") {
         // Lead with the schema/column error and trail the direction conflict: the
         // schema error is the obstacle that persists after the operator reverses
@@ -496,6 +597,24 @@ export function validateAdvancedInvite(
   )
     errors.keys = `A linkage key's transform ${FAN_OUT_MESSAGE_BODY}`;
 
+  // The unrecognized-step gate, the key-element counterpart of the descriptor
+  // gate above: a step whose function has no descriptor is one core's compile
+  // refuses at the mint, so the alert the element editor marks that step with
+  // stands beside a Generate that is shut rather than one that mints. Written
+  // under the fan-out message, whose remedy is the same removal on a step this
+  // one does recognize.
+  if (
+    errors.keys === undefined &&
+    terms.linkageKeys.some((key) =>
+      key.elements.some((element) =>
+        (element.transform ?? []).some(
+          (step) => descriptorFor(step.function) === undefined,
+        ),
+      ),
+    )
+  )
+    errors.keys = UNRECOGNIZED_KEY_TRANSFORM_MESSAGE;
+
   // The deduplicating-pair gate, run as core's own refusal rather than a second
   // web-side copy of the pair it names -- the same reading-from-core the fan-out
   // gate above does, so a pair added there is refused here with no second edit.
@@ -565,6 +684,54 @@ function fieldForIssuePath(path: ReadonlyArray<PropertyKey>): AdvancedField {
   // linkageKeys, linkageFields, and anything else the editor can influence
   // surface against the key list (the only structural control it offers).
   return "keys";
+}
+
+/** The words each control uses for the two character classes the schema refuses
+ * in the free-text values a record holds verbatim, in the wording the acceptor's
+ * own name field uses for the same two rules (`acceptorModel.ts`). Only the two
+ * of the three fields this editor authors are listed: the third is a payload
+ * column `description`, which the built terms never hold -- the payload is
+ * derived from the disclosed column names alone (`payloadSendForMetadata`), so
+ * that control cannot receive one of these issues, which the validation test
+ * pins rather than this sentence.
+ *
+ * Their own messages because the generic ones tell an operator who pasted such a
+ * value to enter a value they have already entered. Neither echoes any part of
+ * it: the offending text is the value itself, so quoting it would put those
+ * characters on the screen -- the reason {@link REFUSED_PARAM_NAME_MESSAGES}
+ * names no parameter. */
+const REFUSED_CHARACTER_MESSAGES: Partial<
+  Record<AdvancedField, { control: string; direction: string }>
+> = {
+  identity: {
+    control:
+      "Your name cannot contain control characters (a line break or a tab, for instance).",
+    direction:
+      "Your name cannot contain text-direction characters (a right-to-left override, for instance).",
+  },
+  legalPurpose: {
+    control:
+      "The purpose cannot contain control characters (a line break or a tab, for instance).",
+    direction:
+      "The purpose cannot contain text-direction characters (a right-to-left override, for instance).",
+  },
+};
+
+/** The message for a control whose schema issues include one of the two refused
+ * character classes, or undefined for a control with no such wording or a set of
+ * issues holding neither class. Read on the schema's own message literals, so
+ * the editor and the schema cannot come to disagree about which rule fired. The
+ * control-character class is answered first: it is the one an operator is likelier
+ * to have pasted, and a value holding both is fixed one character at a time. */
+function refusedCharacterMessage(
+  field: AdvancedField,
+  issueMessages: ReadonlySet<string>,
+): string | undefined {
+  const words = REFUSED_CHARACTER_MESSAGES[field];
+  if (words === undefined) return undefined;
+  if (issueMessages.has(TEXT_CONTROL_CHAR_MESSAGE)) return words.control;
+  if (issueMessages.has(TEXT_DIRECTION_MESSAGE)) return words.direction;
+  return undefined;
 }
 
 /** A clear, control-specific message for a schema failure on that control. The

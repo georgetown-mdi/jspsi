@@ -5,10 +5,14 @@ import {
   parseExchangeSpec,
   safeParseExchangeSpec,
 } from "../../src/config/exchangeSpec";
+import { METADATA_NAME_SHAPE_MESSAGE } from "../../src/config/metadata";
 import {
+  MAX_PAYLOAD_ENTRIES,
   MAX_TEXT_LENGTH,
   MAX_TRANSFORM_PARAM_LENGTH,
+  NAME_SHAPE_MESSAGE,
 } from "../../src/config/linkageTermsSchema";
+import { reconcileReceivedPayload } from "../../src/payloadExchange";
 
 // Minimal valid components used as a base.
 const minimalLinkageTerms = {
@@ -200,6 +204,142 @@ test("a transform param over the content bound is rejected through this spec pat
       /transform param must not exceed/.test(i.message),
     ),
   ).toBe(true);
+});
+
+test("a name-class control character is rejected through this spec path", () => {
+  // The name shape lives on LinkageTermsSchema, so the operator's own config
+  // load inherits it: the terms a party keeps on disk are held to the rule a
+  // partner's are, and the refusal names the field rather than the value.
+  const result = safeParseExchangeSpec({
+    ...minimalSpec,
+    linkageTerms: {
+      ...minimalLinkageTerms,
+      payload: { send: [{ name: "risk\u0007score" }] },
+    },
+  });
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  expect(result.error.issues.map((issue) => issue.path.join("."))).toContain(
+    "linkageTerms.payload.send.0.name",
+  );
+  expect(JSON.stringify(result.error.issues)).toContain(NAME_SHAPE_MESSAGE);
+});
+
+test("a control character in a metadata name is rejected through this spec path", () => {
+  // The metadata block is the operator's own, but a disclosed column's name
+  // reaches the partner in the invitation's payload column list, so the block
+  // holds the name shape too. The refusal names the field by path in the
+  // spelling a config file writes.
+  const result = safeParseExchangeSpec({
+    ...minimalSpec,
+    metadata: [
+      {
+        name: "client\u0007id",
+        type: "identifier",
+        role: "identifier",
+        is_payload: true,
+      },
+    ],
+  });
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  expect(result.error.issues.map((issue) => issue.path.join("."))).toContain(
+    "metadata.0.name",
+  );
+  expect(JSON.stringify(result.error.issues)).toContain(
+    METADATA_NAME_SHAPE_MESSAGE,
+  );
+});
+
+test("a name-class character is rejected in every payload column list", () => {
+  // The three local enforcement records list column names rather than terms, so
+  // each holds the same shape a terms payload name does. expected_payload_columns
+  // is written from a partner's invitation and the other two from this party's
+  // own metadata, so this is what keeps the class out of the file whichever side
+  // authored the name. U+202E RLO, written as an escape.
+  const hostile = "risk\u202escore";
+  for (const [key, issuePath] of [
+    ["expected_payload_columns", "expectedPayloadColumns.0"],
+    ["disclosed_payload_columns", "disclosedPayloadColumns.0"],
+  ] as const) {
+    const result = safeParseExchangeSpec({ ...minimalSpec, [key]: [hostile] });
+    expect(result.success).toBe(false);
+    if (result.success) continue;
+    expect(result.error.issues.map((issue) => issue.path.join("."))).toContain(
+      issuePath,
+    );
+    expect(JSON.stringify(result.error.issues)).toContain(NAME_SHAPE_MESSAGE);
+  }
+
+  const consent = safeParseExchangeSpec({
+    ...minimalSpec,
+    outbound_payload_consent: { status: "confirmed", columns: [hostile] },
+  });
+  expect(consent.success).toBe(false);
+  if (consent.success) return;
+  expect(JSON.stringify(consent.error.issues)).toContain(NAME_SHAPE_MESSAGE);
+  // The refusal locates the field and reports none of the name.
+  expect(JSON.stringify(consent.error.issues)).not.toContain("risk");
+});
+
+// --- Payload column-name duplicate normalization -----------------------------
+// The two top-level lists name each column once, the treatment the negotiated
+// payload dictionary already applies. Both are hand-authorable in a recurring
+// config, and both are compared against a set of columns holding each name
+// once, so a repeat left standing refuses the run for the operator's own typo.
+
+test("expectedPayloadColumns: a column named twice parses to one entry", () => {
+  expect(
+    parseExchangeSpec({
+      ...minimalSpec,
+      expected_payload_columns: ["notes", "member_id", "notes"],
+    }).expectedPayloadColumns,
+  ).toEqual(["notes", "member_id"]);
+});
+
+test("disclosedPayloadColumns: a column named twice parses to one entry", () => {
+  expect(
+    parseExchangeSpec({
+      ...minimalSpec,
+      disclosed_payload_columns: ["diagnosis", "diagnosis", "dose"],
+    }).disclosedPayloadColumns,
+  ).toEqual(["diagnosis", "dose"]);
+});
+
+test("a payload column list over the maximum count is refused by its authored count, not normalized under it", () => {
+  // The count gate stands ahead of the collapse on both lists: a list padded
+  // with one name repeated is refused for the count it was authored with rather
+  // than admitted for the single entry it would collapse to.
+  for (const key of [
+    "expected_payload_columns",
+    "disclosed_payload_columns",
+  ] as const) {
+    const padded = Array.from(
+      { length: MAX_PAYLOAD_ENTRIES + 1 },
+      () => "dose",
+    );
+    const result = safeParseExchangeSpec({ ...minimalSpec, [key]: padded });
+    expect(result.success).toBe(false);
+    if (result.success) continue;
+    expect(JSON.stringify(result.error.issues)).toContain("must not exceed");
+  }
+});
+
+test("expectedPayloadColumns: a repeat does not reach payload reconciliation as a mismatch", () => {
+  // The parsed list is what reconcileReceivedPayload compares the partner's
+  // transmitted columns against, element-wise over the sorted names. The second
+  // assertion is the uncollapsed control: a doubled entry reaching that
+  // comparison is a length mismatch, aborting with a protocol error that
+  // attributes the operator's own typo to the partner.
+  const declared = parseExchangeSpec({
+    ...minimalSpec,
+    expected_payload_columns: ["notes", "notes"],
+  }).expectedPayloadColumns;
+  const received = { columns: ["notes"], rowIndices: [0], rows: [["a note"]] };
+  expect(() => reconcileReceivedPayload(received, declared)).not.toThrow();
+  expect(() => reconcileReceivedPayload(received, ["notes", "notes"])).toThrow(
+    /payload disclosure mismatch/,
+  );
 });
 
 // --- parse vs safeParse ------------------------------------------------------

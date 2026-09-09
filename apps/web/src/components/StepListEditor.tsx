@@ -232,9 +232,11 @@ function StepRow({
           </Group>
           {/* A step whose function has no descriptor names a function this
               build does not have: its params can be neither checked nor
-              edited here, and `isStepValid` holds the host's gate shut on it,
-              so removing it is the only way out. Marked as a malformed param
-              is, since the gate that blocks points at what is marked. */}
+              edited here, and both hosts hold their gate shut on it -- the
+              cleaning lists through `isStepValid`, the key-element list
+              through its own descriptor read -- so removing it is the only
+              way out. Marked as a malformed param is, since the gate that
+              blocks points at what is marked. */}
           {descriptor === undefined && (
             <Alert
               role="alert"

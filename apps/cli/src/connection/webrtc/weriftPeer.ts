@@ -647,6 +647,15 @@ async function logSelectedCandidatePair(
   );
 }
 
+/**
+ * A budget as the operator reads and sets it: `--peer-timeout` takes a
+ * `<int><unit>` duration, so an expiry quoting milliseconds names a number the
+ * flag does not accept and a supervisor cannot act on.
+ */
+function budgetSeconds(ms: number): string {
+  return `${ms / 1000}s`;
+}
+
 interface NegotiationOptions {
   peer: RTCPeerConnection;
   role: RendezvousRole;
@@ -787,7 +796,8 @@ class Negotiation {
           new ConnectionError(
             `the exchange partner did not ` +
               `${role === "acceptor" ? "answer" : "offer"} within ` +
-              `${this.options.rendezvousTimeoutMs}ms`,
+              `${budgetSeconds(this.options.rendezvousTimeoutMs)}; ` +
+              "--peer-timeout sets how long to wait for a partner to arrive",
             "transport",
           ),
         ),
@@ -1121,8 +1131,9 @@ class Negotiation {
       () =>
         void this.failWithIceDiagnosis(
           `the data channel did not open within ` +
-            `${this.options.channelOpenTimeoutMs}ms after the exchange ` +
-            "partner's session description arrived",
+            `${budgetSeconds(this.options.channelOpenTimeoutMs)} after the ` +
+            "exchange partner's session description arrived; --peer-timeout " +
+            "sets that bound",
         ),
       this.options.channelOpenTimeoutMs,
     );

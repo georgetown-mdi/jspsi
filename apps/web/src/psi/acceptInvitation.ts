@@ -1,8 +1,12 @@
 import {
+  UsageError,
   assertDeduplicateImplemented,
+  countOnlyShapeViolation,
   decodeInvitation,
   deriveAcceptedLinkageTerms,
   isInvitationExpired,
+  resolveLinkageCardinality,
+  sanitizeErrorForDisplay,
 } from "@psilink/core";
 
 import type { DeploymentProfile } from "@utils/clientConfig";
@@ -151,22 +155,167 @@ function endpointDrivableHere(
  * names must be declared linkage fields); the editor's own output satisfies it
  * (`getDefaultStandardization`).
  *
+ * `deduplicate` is this party's OWN side, taken from the accept seat's control
+ * rather than from the invitation, which declares only the inviting party's
+ * ({@link acceptorDeduplicateRefusal} answers a pair the run would refuse).
+ * Omitted, it defaults to the closed `false` an acceptance derives with no
+ * control at all.
+ *
  * @param linkageTerms  The inviter's linkage terms from the decoded token.
  * @param acceptorName  The accepting party's name, recorded as the prepared
  *                      terms' identity.
  * @param edits         The acceptor's edited metadata and standardization, when it
  *                      prepared its data; omitted to fall back to CSV inference.
+ * @param deduplicate   Whether several of THIS party's records may match one of
+ *                      the partner's, as the accepting operator set it.
  */
 export function acceptorExchangeDataSpec(
   linkageTerms: LinkageTerms,
   acceptorName: string,
   edits?: AcceptorDataEdits,
+  deduplicate: boolean = false,
 ): ExchangeDataSpec {
   return {
-    linkageTerms: deriveAcceptedLinkageTerms(linkageTerms, acceptorName),
+    linkageTerms: deriveAcceptedLinkageTerms(
+      linkageTerms,
+      acceptorName,
+      deduplicate,
+    ),
     ...(edits && {
       metadata: edits.metadata,
       standardization: edits.standardization,
     }),
   };
+}
+
+/**
+ * The identity the accept seat's pre-run deduplicate check stands the operator's
+ * own name in for. The check reads the two parties' `deduplicate` values and
+ * `linkage_strategy` and nothing else, and it runs while the terms are being
+ * reviewed -- before the name field on the consent step. The stand-in is never
+ * displayed and never run: the launched terms hold the committed name
+ * ({@link acceptorExchangeDataSpec}).
+ */
+const DEDUPLICATE_CHECK_IDENTITY = "you";
+
+/**
+ * Whether the ACCEPTING party may declare a `deduplicate` of its own against
+ * this invitation.
+ *
+ * The schema takes `deduplicate: true` only from a party that receives the
+ * result, and the accepting party's `expectsOutput` is the inviting party's
+ * `shareWithPartner` mirrored (`deriveAcceptedLinkageTerms`). So a
+ * sole-receiver invitation leaves this party no value to set: acceptance
+ * applies the closed default, and a document declaring anything else is
+ * refused by that derivation.
+ *
+ * The count-only shape refuses `deduplicate` on the same document for a
+ * reason of its own -- a `psi-c` run reports a size and pairs no records --
+ * so the shape rule is asked as well, over the document this party would
+ * present. Both are core's own rules rather than restatements of them, so a
+ * seat offers the control exactly where the accept would take the value, and
+ * the operator meets no control whose value it would refuse.
+ */
+export function acceptorMaySetDeduplicate(linkageTerms: LinkageTerms): boolean {
+  return (
+    linkageTerms.output.shareWithPartner &&
+    countOnlyShapeViolation({ ...linkageTerms, deduplicate: true }) ===
+      undefined
+  );
+}
+
+/**
+ * A refusal the accept seat reads before the run, and which side of the accept
+ * it belongs to.
+ *
+ * `pair` is the two parties' `deduplicate` values against this invitation's
+ * strategy: the accepting operator resolves it by clearing its own side, so it
+ * renders beside that control and holds the step's Continue.
+ *
+ * `terms` is the invitation mirroring to a document no acceptance can run,
+ * whatever this party sets -- nothing at the seat resolves it, so it blocks the
+ * accept the way an endpoint this build cannot drive does.
+ */
+export interface AcceptorDeduplicateRefusal {
+  scope: "pair" | "terms";
+  message: string;
+}
+
+/**
+ * The refusal the accepting party's own `deduplicate` value meets against this
+ * invitation, or `undefined` when the pair runs -- read at the seat, before the
+ * run and before any key or payload moves.
+ *
+ * It derives the accepting party's terms exactly as a launch does and hands the
+ * pair to `resolveLinkageCardinality`, the same boundary the run resolves the
+ * joint cardinality at, so the seat refuses exactly the pairs the run refuses
+ * and no others. Today that is the agreed `(true, true)` pair under a strategy
+ * pairing no `many-to-many` (`assertBothSidedDeduplicateImplemented`); the
+ * derivation itself answers a `psi-c` invitation, whose count-only shape holds
+ * neither party's `deduplicate` open. A `pair` refusal is the combination's,
+ * not the setting's: its message names the strategy to change and the one-sided
+ * pair to fall back to, and clearing either party's value runs.
+ *
+ * The two scopes are told apart by what clearing this party's side does, not by
+ * the error's type alone: a refusal the closed default meets as well stands
+ * whatever this party sets -- the invitation's own `deduplicate` against its own
+ * strategy, or a mirror the schema refuses -- so it is `terms`, and the seat
+ * blocks the accept rather than pointing at a control that cannot clear it.
+ *
+ * It returns for every invitation this build decoded rather than throwing for
+ * some of them: the accept screen reads it in its render body, where a throw
+ * takes the whole route to its error boundary instead of the refusal the
+ * operator can act on. Either scope's message is escaped for display at this
+ * boundary, the one that holds it. A `pair` message comes from the two
+ * cardinality assertions, which core states as fixed literals over its own
+ * strategy table, so the call is hygiene on that arm: it holds the display
+ * bound if a later refusal interpolates partner text.
+ */
+export function acceptorDeduplicateRefusal(
+  linkageTerms: LinkageTerms,
+  deduplicate: boolean,
+): AcceptorDeduplicateRefusal | undefined {
+  try {
+    resolvePresentedCardinality(linkageTerms, deduplicate);
+    return undefined;
+  } catch (error) {
+    const clearingRuns = deduplicate && acceptorClosedDefaultRuns(linkageTerms);
+    return {
+      scope: error instanceof UsageError && clearingRuns ? "pair" : "terms",
+      message: sanitizeErrorForDisplay(error),
+    };
+  }
+}
+
+/**
+ * Resolve the joint cardinality of the pair this party's `deduplicate` makes
+ * with the invitation, at the boundary the run resolves it at, throwing what
+ * the run would throw.
+ */
+function resolvePresentedCardinality(
+  linkageTerms: LinkageTerms,
+  deduplicate: boolean,
+): void {
+  resolveLinkageCardinality(
+    deriveAcceptedLinkageTerms(
+      linkageTerms,
+      DEDUPLICATE_CHECK_IDENTITY,
+      deduplicate,
+    ),
+    linkageTerms,
+  );
+}
+
+/**
+ * Whether this invitation runs with the accepting party's side closed -- the
+ * value an acceptance derives with no control at all -- which is what makes a
+ * refusal one this party's own control can clear.
+ */
+function acceptorClosedDefaultRuns(linkageTerms: LinkageTerms): boolean {
+  try {
+    resolvePresentedCardinality(linkageTerms, false);
+    return true;
+  } catch {
+    return false;
+  }
 }

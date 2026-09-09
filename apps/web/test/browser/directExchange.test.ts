@@ -9,20 +9,31 @@ import { createElement } from "react";
 // Load Mantine's stylesheet so components render with their real geometry.
 import "@mantine/core/styles.css";
 
-import { LINKAGE_RULE_SET_VERDICT_COPY } from "@psilink/core";
+import {
+  DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
+  DEDUPLICATE_PARTNER_DECLARED_DISCLOSURE_STATEMENT,
+  DEDUPLICATE_PARTNER_DECLARED_SIDE_NOTE,
+  DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,
+  LINKAGE_RULE_SET_VERDICT_COPY,
+} from "@psilink/core";
 
 import {
   SINGLE_PASS_DISCLOSURE_BODY,
   SINGLE_PASS_DISCLOSURE_TITLE,
 } from "@psi/linkageStrategyChoice";
+import { DEDUPLICATE_CONTROL_LABEL } from "@psi/deduplicateChoice";
 
 import {
+  ReattachNotice,
   UNDESCRIBABLE_RECORD_CONFIRM_BODY,
   UNTAKEN_RECORD_CONFIRM_BODY,
 } from "@exchange/RunSurface";
 import { Lobby } from "@exchange/Lobby";
 
-import { DIRECT_LINKAGE_STRATEGY_AGREEMENT_NOTICE } from "@exchange/directExchangeModel";
+import {
+  DIRECT_DEDUPLICATE_SIDE_NOTICE,
+  DIRECT_LINKAGE_STRATEGY_AGREEMENT_NOTICE,
+} from "@exchange/directExchangeModel";
 import { DirectExchangeScreen } from "@exchange/DirectExchangeScreen";
 import { RETAIN_MODE_BILATERAL_NOTICE } from "@console/exchangeFilesModel";
 import { SPLIT_RENDEZVOUS_RETAIN_REQUIREMENT } from "@console/filedropRendezvousChoice";
@@ -61,7 +72,7 @@ const CLIENTS_PROFILE = {
   ...CLIENTS_FILE,
   rowCount: 2,
   columns: ["client_id", "first_name", "last_name", "dob", "program_code"],
-  bidiStrippedColumns: [],
+  sanitizedColumnPositions: [],
   dateInputFormat: "%m/%d/%Y",
   columnSamples: [
     { column: "client_id", values: ["1", "2"] },
@@ -304,6 +315,33 @@ async function reachConfirm() {
     .toBeInTheDocument();
 }
 
+/** The trust affirmation that gates Run, named apart from the deduplicate
+ * control the confirm step offers beside the linkage strategy. */
+function trustAffirmation() {
+  return page.getByRole("checkbox", {
+    name: /I trust the server my partner and I agreed on/,
+  });
+}
+
+/** This party's own side of the matching cardinality, on the same step. */
+function deduplicateControl() {
+  return page.getByRole("checkbox", { name: DEDUPLICATE_CONTROL_LABEL });
+}
+
+/**
+ * A read of the rendered text that waits for the terms preview's collapsed
+ * "Other details" panel to commit. Mantine's Collapse keeps a closed panel
+ * mounted inside a React Activity (mode="hidden") boundary, which commits at a
+ * deferred priority: a synchronous read of the container can land before the
+ * panel's content is in the DOM at all, which is what made the assertions below
+ * fail under CPU contention. React commits that hidden subtree in one pass, so
+ * once one line from it is present the whole panel is, and the assertions after
+ * the first read of a given state can stay synchronous.
+ */
+function expectPanelText() {
+  return expect.poll(() => app.container.textContent);
+}
+
 describe("direct exchange confirm and run", () => {
   test("previews the inferred terms, gates Run on the affirmation, and runs a zero-setup job", async () => {
     const api = stubJobApi({ sftp: CONFIGURED_SFTP });
@@ -359,7 +397,7 @@ describe("direct exchange confirm and run", () => {
       page.getByLabelText("Your identity (optional)"),
       "County Health",
     );
-    await page.getByRole("checkbox").click();
+    await trustAffirmation().click();
     await expect
       .element(page.getByRole("button", { name: "Run the exchange" }))
       .toBeEnabled();
@@ -434,7 +472,9 @@ describe("direct exchange confirm and run", () => {
       .not.toBeInTheDocument();
     await expect
       .element(
-        page.getByText("A formatting character was removed from a column name"),
+        page.getByText(
+          "An invisible control character was removed from a column name",
+        ),
       )
       .toBeInTheDocument();
     // The refused file did not commit: the spine stays on its file step.
@@ -451,21 +491,23 @@ describe("direct exchange confirm and run", () => {
     // into the notice.
     stubJobApi({
       sftp: CONFIGURED_SFTP,
-      profile: { ...CLIENTS_PROFILE, bidiStrippedColumns: [2, 5] },
+      profile: { ...CLIENTS_PROFILE, sanitizedColumnPositions: [2, 5] },
     });
     app.render(createElement(DirectExchangeScreen));
     await reachConfirm();
 
     await expect
       .element(
-        page.getByText("Formatting characters removed from column names"),
+        page.getByText(
+          "Invisible control characters removed from column names",
+        ),
       )
       .toBeInTheDocument();
     await expect
       .element(page.getByText("Columns 2, 5", { exact: false }))
       .toBeInTheDocument();
     // A notice, not a refusal: the run is still reachable behind its affirmation.
-    await page.getByRole("checkbox").click();
+    await trustAffirmation().click();
     await expect
       .element(page.getByRole("button", { name: "Run the exchange" }))
       .toBeEnabled();
@@ -475,7 +517,7 @@ describe("direct exchange confirm and run", () => {
     const api = stubJobApi({ sftp: CONFIGURED_SFTP });
     app.render(createElement(DirectExchangeScreen));
     await reachConfirm();
-    await page.getByRole("checkbox").click();
+    await trustAffirmation().click();
     await page.getByRole("button", { name: "Run the exchange" }).click();
 
     await vi.waitFor(() =>
@@ -503,7 +545,7 @@ describe("direct exchange confirm and run", () => {
     const api = stubJobApi({ sftp: CONFIGURED_SFTP, jobStatus: "failed" });
     app.render(createElement(DirectExchangeScreen));
     await reachConfirm();
-    await page.getByRole("checkbox").click();
+    await trustAffirmation().click();
     await page.getByRole("button", { name: "Run the exchange" }).click();
 
     await vi.waitFor(() =>
@@ -557,7 +599,7 @@ describe("direct exchange confirm and run", () => {
     await expect
       .element(page.getByRole("heading", { level: 1, name: "Confirm and run" }))
       .toBeInTheDocument();
-    await page.getByRole("checkbox").click();
+    await trustAffirmation().click();
     await expect
       .element(page.getByRole("button", { name: "Run the exchange" }))
       .toBeEnabled();
@@ -575,7 +617,7 @@ describe("direct exchange confirm and run", () => {
     app.render(createElement(DirectExchangeScreen));
     await reachConfirm();
     // Affirm first, so the identity guard is the only thing gating Run.
-    await page.getByRole("checkbox").click();
+    await trustAffirmation().click();
     await expect
       .element(page.getByRole("button", { name: "Run the exchange" }))
       .toBeEnabled();
@@ -635,7 +677,7 @@ describe("direct exchange confirm and run", () => {
       "This exchange matches in a single pass",
     );
 
-    await page.getByRole("checkbox").click();
+    await trustAffirmation().click();
     await page.getByRole("button", { name: "Run the exchange" }).click();
     await vi.waitFor(() => {
       expect(
@@ -649,6 +691,86 @@ describe("direct exchange confirm and run", () => {
     );
     const intent = JSON.parse(post?.body ?? "{}") as Record<string, unknown>;
     expect(intent.linkageStrategy).toBe("single-pass");
+  });
+
+  test("this party's deduplicate reshapes the preview and rides the run", async () => {
+    const api = stubJobApi({ sftp: CONFIGURED_SFTP });
+    app.render(createElement(DirectExchangeScreen));
+    await reachConfirm();
+
+    // The closed default, which is what a run with no flag at all applies. The
+    // seat holds no invitation, so the sentence names the operator and its
+    // partner rather than the two declared roles.
+    await expect.element(deduplicateControl()).not.toBeChecked();
+    expect(app.container.textContent).toContain(DIRECT_DEDUPLICATE_SIDE_NOTICE);
+    await expectPanelText().toContain(
+      "Each of your records matches at most one of your partner's records.",
+    );
+
+    await deduplicateControl().click();
+    // The preview is the terms the run presents, so the terms panel states this
+    // party's own selection rather than the one-to-one match it does not run.
+    await expectPanelText().toContain(
+      "More than one of your records may match a single one of your partner's",
+    );
+    // What the grouping discloses and the direction it runs in, both in the
+    // roles this seat's reader holds: the partner declares its own side on its
+    // own run, so nothing here asserts that side is never grouped.
+    expect(app.container.textContent).toContain(
+      DEDUPLICATE_PARTNER_DECLARED_DISCLOSURE_STATEMENT,
+    );
+    expect(app.container.textContent).toContain(
+      DEDUPLICATE_PARTNER_DECLARED_SIDE_NOTE,
+    );
+    expect(app.container.textContent).not.toContain(
+      DEDUPLICATE_SHARED_RESULT_DISCLOSURE_STATEMENT,
+    );
+    expect(app.container.textContent).not.toContain(
+      DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
+    );
+
+    await trustAffirmation().click();
+    await page.getByRole("button", { name: "Run the exchange" }).click();
+    await vi.waitFor(() => {
+      expect(
+        api.captured.some(
+          (request) => request.url === "/api/jobs" && request.method === "POST",
+        ),
+      ).toBe(true);
+    });
+    const post = api.captured.find(
+      (request) => request.url === "/api/jobs" && request.method === "POST",
+    );
+    const intent = JSON.parse(post?.body ?? "{}") as Record<string, unknown>;
+    expect(intent.deduplicate).toBe(true);
+  });
+
+  test("the both-sided single-pass pair is named at the step, and does not hold Run", async () => {
+    // The pair the run refuses if the partner declares the term too. This spine
+    // reads no partner declaration, so the combination is stated rather than
+    // gating a one-sided pair the run matches under either strategy.
+    stubJobApi({ sftp: CONFIGURED_SFTP });
+    app.render(createElement(DirectExchangeScreen));
+    await reachConfirm();
+    await deduplicateControl().click();
+    expect(app.container.textContent).not.toContain(
+      "does not match a many-to-many cardinality",
+    );
+
+    await page.getByRole("radio", { name: "Single-pass" }).click();
+    await expect
+      .element(
+        page.getByText("If your partner sets this too, the exchange stops"),
+      )
+      .toBeInTheDocument();
+    expect(app.container.textContent).toContain(
+      "Set linkage_strategy to cascade",
+    );
+
+    await trustAffirmation().click();
+    await expect
+      .element(page.getByRole("button", { name: "Run the exchange" }))
+      .toBeEnabled();
   });
 });
 
@@ -674,7 +796,7 @@ describe("console direct re-attaches on a busy create", () => {
     });
     app.render(createElement(DirectExchangeScreen));
     await reachConfirm();
-    await page.getByRole("checkbox").click();
+    await trustAffirmation().click();
     await page.getByRole("button", { name: "Run the exchange" }).click();
 
     // The busy create re-attaches to the occupying exchange under recovery-style
@@ -687,13 +809,29 @@ describe("console direct re-attaches on a busy create", () => {
         }),
       )
       .toBeInTheDocument();
+    // The lead reads twice -- the polite region announces it, the visible notice
+    // leads with it -- so the visible one is the last of the two.
+    await expect
+      .element(
+        page
+          .getByText("You are back on an exchange this console already holds.")
+          .last(),
+      )
+      .toBeVisible();
+    await expect
+      .element(page.getByTestId("reattach-announcement"))
+      .toHaveTextContent(
+        "You are back on an exchange this console already holds.",
+      );
+    // Body text unique to the visible notice, absent from the hidden
+    // announcement region, so this fails if the notice itself never mounts.
     await expect
       .element(
         page.getByText(
-          "You are back on an exchange this console already holds.",
+          "This exchange was already running here -- from another tab or an earlier visit -- so you are watching it rather than starting a new one.",
         ),
       )
-      .toBeInTheDocument();
+      .toBeVisible();
     expect(
       page
         .getByText("This console is already running an exchange", {
@@ -748,7 +886,7 @@ describe("console direct re-attaches on a busy create", () => {
     });
     app.render(createElement(DirectExchangeScreen));
     await reachConfirm();
-    await page.getByRole("checkbox").click();
+    await trustAffirmation().click();
     await page.getByRole("button", { name: "Run the exchange" }).click();
 
     // The moment the 409 is known -- before the probe settles -- the surface heads
@@ -761,16 +899,19 @@ describe("console direct re-attaches on a busy create", () => {
         }),
       )
       .toBeInTheDocument();
-    await vi.waitFor(() => {
-      const region = Array.from(
-        document.querySelectorAll('[role="status"]'),
-      ).find((el) =>
-        el.textContent.includes(
-          "Reconnecting to the exchange this console already holds",
-        ),
+    await expect
+      .element(page.getByTestId("reattach-announcement"))
+      .toHaveTextContent(
+        "Reconnecting to the exchange this console already holds",
       );
-      expect(region).toBeDefined();
-    });
+    // The visible notice holds no live role of its own: the region announces,
+    // and the notice's body stays in reading order.
+    expect(
+      page
+        .getByText("This console already holds an exchange", { exact: false })
+        .element()
+        .closest('[role="status"], [role="alert"]'),
+    ).toBeNull();
     // No fresh-run keep-open framing flashes during the interim.
     expect(page.getByText("Keep this tab open.").query()).toBeNull();
 
@@ -800,7 +941,7 @@ describe("console direct re-attaches on a busy create", () => {
     });
     app.render(createElement(DirectExchangeScreen));
     await reachConfirm();
-    await page.getByRole("checkbox").click();
+    await trustAffirmation().click();
     await page.getByRole("button", { name: "Run the exchange" }).click();
 
     await expect
@@ -1099,7 +1240,7 @@ describe("direct-exchange recoveries against the run's exchange record", () => {
   ): Promise<void> {
     app.render(createElement(DirectExchangeScreen));
     await reachConfirm();
-    await page.getByRole("checkbox").click();
+    await trustAffirmation().click();
     await page.getByRole("button", { name: "Run the exchange" }).click();
     await vi.waitFor(() =>
       expect(api.captured.some((r) => r.url === "/api/jobs/job-7/events")).toBe(
@@ -1210,5 +1351,53 @@ describe("console lobby recurring-exchange surface", () => {
     expect(
       page.getByText("Cleared this browser", { exact: false }).query(),
     ).toBeNull();
+  });
+});
+
+describe("the re-attachment announcement", () => {
+  test("the region is mounted empty and the same node takes each notice", async () => {
+    app.render(
+      createElement(ReattachNotice, {
+        reattaching: false,
+        reattachedRun: false,
+        state: "running",
+      }),
+    );
+
+    // Present through the ordinary fresh run, holding nothing: a region that
+    // appears with its notice is a freshly inserted node rather than a change to
+    // one an assistive technology is already observing.
+    const region = page.getByTestId("reattach-announcement");
+    await expect.element(region).toBeInTheDocument();
+    expect(region.element().textContent).toBe("");
+    const mounted = region.element();
+
+    app.render(
+      createElement(ReattachNotice, {
+        reattaching: true,
+        reattachedRun: false,
+        state: "running",
+      }),
+    );
+    await expect
+      .element(region)
+      .toHaveTextContent(
+        "Reconnecting to the exchange this console already holds",
+      );
+    expect(region.element()).toBe(mounted);
+
+    app.render(
+      createElement(ReattachNotice, {
+        reattaching: false,
+        reattachedRun: true,
+        state: "running",
+      }),
+    );
+    await expect
+      .element(region)
+      .toHaveTextContent(
+        "You are back on an exchange this console already holds.",
+      );
+    expect(region.element()).toBe(mounted);
   });
 });

@@ -15,8 +15,11 @@ import {
 } from "@console/connectionTuningModel";
 import {
   DEFAULT_PREVIEW_IDENTITY,
+  DIRECT_DEDUPLICATE_DEFAULT,
   DIRECT_LINKAGE_STRATEGY_DEFAULT,
   DIRECT_STEP_ORDER,
+  directBothSidedDeduplicateNotice,
+  directDeduplicateIntentFields,
   directLinkageStrategyIntentFields,
   directServerBlockedReason,
   previewInferredTerms,
@@ -26,6 +29,8 @@ import {
   ZERO_SETUP_EXCHANGE_FILES,
   exchangeFilesProblems,
 } from "@console/exchangeFilesModel";
+
+import type { LinkageStrategy } from "@psilink/core";
 
 import type { DirectServerGates } from "@exchange/directExchangeModel";
 
@@ -46,6 +51,7 @@ describe("previewInferredTerms", () => {
       LINKABLE_COLUMNS,
       "County Health",
       DIRECT_LINKAGE_STRATEGY_DEFAULT,
+      DIRECT_DEDUPLICATE_DEFAULT,
     );
     const core = getDefaultLinkageTerms(
       "County Health",
@@ -63,6 +69,7 @@ describe("previewInferredTerms", () => {
       LINKABLE_COLUMNS,
       DEFAULT_PREVIEW_IDENTITY,
       DIRECT_LINKAGE_STRATEGY_DEFAULT,
+      DIRECT_DEDUPLICATE_DEFAULT,
     );
     const disclosed = disclosedColumnNames(inferMetadata(LINKABLE_COLUMNS, []));
 
@@ -86,6 +93,7 @@ describe("previewInferredTerms", () => {
       [...LINKABLE_COLUMNS, past],
       "x",
       DIRECT_LINKAGE_STRATEGY_DEFAULT,
+      DIRECT_DEDUPLICATE_DEFAULT,
     );
     expect(preview.overlongDisclosedColumns).toEqual([6]);
     expect(preview.disclosedPayloadColumns).toContain(past);
@@ -97,6 +105,7 @@ describe("previewInferredTerms", () => {
       [...LINKABLE_COLUMNS, atCeiling],
       "x",
       DIRECT_LINKAGE_STRATEGY_DEFAULT,
+      DIRECT_DEDUPLICATE_DEFAULT,
     );
     expect(preview.disclosedPayloadColumns).toContain(atCeiling);
     expect(preview.overlongDisclosedColumns).toEqual([]);
@@ -111,6 +120,7 @@ describe("previewInferredTerms", () => {
       [...LINKABLE_COLUMNS, astral],
       "x",
       DIRECT_LINKAGE_STRATEGY_DEFAULT,
+      DIRECT_DEDUPLICATE_DEFAULT,
     );
     expect(preview.overlongDisclosedColumns).toEqual([6]);
   });
@@ -123,6 +133,7 @@ describe("previewInferredTerms", () => {
       ["notes", "comment"],
       "x",
       DIRECT_LINKAGE_STRATEGY_DEFAULT,
+      DIRECT_DEDUPLICATE_DEFAULT,
     );
     expect(preview.linkageTerms.linkageKeys).toEqual([]);
     expect(preview.refusal?.kind).toBe("no-linkable-key");
@@ -139,6 +150,7 @@ describe("previewInferredTerms", () => {
       ["first_name", "last_name", "date_of_birth"],
       "x",
       DIRECT_LINKAGE_STRATEGY_DEFAULT,
+      DIRECT_DEDUPLICATE_DEFAULT,
     );
     expect(preview.refusal).toBeUndefined();
     expect(
@@ -171,21 +183,35 @@ describe("the direct-exchange linkage strategy", () => {
     // not use -- and would withhold the single-pass disclosure the terms panel
     // raises off this very field.
     expect(
-      previewInferredTerms(LINKABLE_COLUMNS, "x", "single-pass").linkageTerms
-        .linkageStrategy,
+      previewInferredTerms(
+        LINKABLE_COLUMNS,
+        "x",
+        "single-pass",
+        DIRECT_DEDUPLICATE_DEFAULT,
+      ).linkageTerms.linkageStrategy,
     ).toBe("single-pass");
     expect(
-      previewInferredTerms(LINKABLE_COLUMNS, "x", "cascade").linkageTerms
-        .linkageStrategy,
+      previewInferredTerms(
+        LINKABLE_COLUMNS,
+        "x",
+        "cascade",
+        DIRECT_DEDUPLICATE_DEFAULT,
+      ).linkageTerms.linkageStrategy,
     ).toBe("cascade");
   });
 
   test("the strategy does not disturb the inferred keys, fields, or disclosed set", () => {
-    const cascade = previewInferredTerms(LINKABLE_COLUMNS, "x", "cascade");
+    const cascade = previewInferredTerms(
+      LINKABLE_COLUMNS,
+      "x",
+      "cascade",
+      DIRECT_DEDUPLICATE_DEFAULT,
+    );
     const singlePass = previewInferredTerms(
       LINKABLE_COLUMNS,
       "x",
       "single-pass",
+      DIRECT_DEDUPLICATE_DEFAULT,
     );
     expect(singlePass.linkageTerms.linkageKeys).toEqual(
       cascade.linkageTerms.linkageKeys,
@@ -208,6 +234,79 @@ describe("the direct-exchange linkage strategy", () => {
     expect(directLinkageStrategyIntentFields("single-pass")).toEqual({
       linkageStrategy: "single-pass",
     });
+  });
+});
+
+describe("the direct-exchange deduplicate control", () => {
+  test("the preview has this party's selection, not the inferred default", () => {
+    // The CLI's zero-setup command applies --deduplicate over the terms it
+    // inferred, so a preview left on the default would show the operator a
+    // cardinality the run does not use.
+    expect(
+      previewInferredTerms(LINKABLE_COLUMNS, "x", "cascade", true).linkageTerms
+        .deduplicate,
+    ).toBe(true);
+    expect(
+      previewInferredTerms(LINKABLE_COLUMNS, "x", "cascade", false).linkageTerms
+        .deduplicate,
+    ).toBe(false);
+  });
+
+  test("the selection does not disturb the inferred keys, fields, or disclosed set", () => {
+    const plain = previewInferredTerms(LINKABLE_COLUMNS, "x", "cascade", false);
+    const grouped = previewInferredTerms(
+      LINKABLE_COLUMNS,
+      "x",
+      "cascade",
+      true,
+    );
+    expect(grouped.linkageTerms.linkageKeys).toEqual(
+      plain.linkageTerms.linkageKeys,
+    );
+    expect(grouped.linkageTerms.linkageFields).toEqual(
+      plain.linkageTerms.linkageFields,
+    );
+    expect(grouped.disclosedPayloadColumns).toEqual(
+      plain.disclosedPayloadColumns,
+    );
+    expect(grouped.refusal).toBeUndefined();
+  });
+
+  test("only a non-default choice reaches the intent", () => {
+    // The CLI flag is off by default and a zero-setup run loads no configuration
+    // for it to override, so emitting it for the default would lengthen the
+    // graduated command line without changing the run.
+    expect(directDeduplicateIntentFields(DIRECT_DEDUPLICATE_DEFAULT)).toEqual(
+      {},
+    );
+    expect(directDeduplicateIntentFields(true)).toEqual({ deduplicate: true });
+  });
+
+  test("the both-sided single-pass pair is named, with both values and what to change", () => {
+    // The pair the run refuses if the partner declares the term too. The message
+    // is core's own, read from the boundary the run resolves the cardinality at,
+    // so the screen names that combination and no other.
+    const notice = directBothSidedDeduplicateNotice(
+      previewInferredTerms(LINKABLE_COLUMNS, "x", "single-pass", true)
+        .linkageTerms,
+    );
+    expect(notice).toBeDefined();
+    expect(notice).toContain("both parties setting deduplicate to true");
+    expect(notice).toContain("many-to-many");
+    expect(notice).toContain("Set linkage_strategy to cascade");
+  });
+
+  test("nothing is named for a pair the run matches", () => {
+    // Under cascade the both-sided pair runs, and with this party's own side off
+    // no pair the partner can declare is refused -- so neither states anything.
+    const named = (strategy: LinkageStrategy, deduplicate: boolean) =>
+      directBothSidedDeduplicateNotice(
+        previewInferredTerms(LINKABLE_COLUMNS, "x", strategy, deduplicate)
+          .linkageTerms,
+      );
+    expect(named("cascade", true)).toBeUndefined();
+    expect(named("single-pass", false)).toBeUndefined();
+    expect(named("cascade", false)).toBeUndefined();
   });
 });
 

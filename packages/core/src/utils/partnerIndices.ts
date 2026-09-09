@@ -102,8 +102,8 @@ function createRepeatDetector(
 
 /**
  * The grouping a list is required to be injective MODULO, entry for entry: what
- * this party's own outbound entry at that position named -- a key round, and a
- * position within the partner's candidate set for that round.
+ * this party's own outbound entry at that place was accepted against -- a key
+ * round, and one of the partner's records within it.
  *
  * Both arrays run parallel to the list under check and hold state this party
  * computed and sent, never anything read from the frame under check. A caller
@@ -113,8 +113,12 @@ function createRepeatDetector(
 export interface PartnerIndexGrouping {
   /** The key round each entry's outbound counterpart named. */
   readonly rounds: ArrayLike<number>;
-  /** The partner candidate-set position it named within that round. */
-  readonly positions: ArrayLike<number>;
+  /**
+   * The partner record it was accepted against within that round, as that
+   * record's rank there. Where several of the partner's records were accepted
+   * with one of this party's, the lowest of their ranks stands for the group.
+   */
+  readonly groups: ArrayLike<number>;
 }
 
 /**
@@ -125,14 +129,14 @@ export interface PartnerIndexGrouping {
  * The three arrays run parallel to ONE ANOTHER, one element per outbound entry
  * this party sent, and the list under check is the concatenation of those runs in
  * that order. Every one of them holds state this party computed -- the (round,
- * position) it sent, and a count it accumulated from a frame already checked --
- * never anything read from the frame under check.
+ * partner record) it was accepted against, and a count it accumulated from a
+ * frame already checked -- never anything read from the frame under check.
  */
 interface PartnerIndexRunGrouping extends PartnerIndexGrouping {
   /**
    * How many consecutive entries of the list answer each outbound entry. Two
    * outbound entries this party grouped together have the same length, both
-   * being the size of the one partner group behind the position they named.
+   * being the number of the partner's records accepted with them.
    */
   readonly runLengths: ArrayLike<number>;
 }
@@ -171,15 +175,15 @@ export interface PartnerIndexRules {
    * Admit a repeated entry between RUNS this party itself grouped together:
    * the cascade's returned mapped-element list where BOTH parties keep
    * their within-dataset duplicates, so one outbound entry of this party's
-   * comes back as the whole partner group behind the position it named
-   * rather than as one row (docs/spec/PROTOCOL.md, Deriving one table from
-   * the exchanged association maps).
+   * comes back as every one of the partner's records accepted with it rather
+   * than as one row (docs/spec/PROTOCOL.md, Deriving one table from the
+   * exchanged association maps).
    *
    * What {@link repeatsGroupedBy} becomes once the partner has multiplicity
-   * too, buying the same guarantee: two outbound entries that named ONE
-   * (round, position) must come back with identical runs, element for
-   * element and in order, and entries that named DIFFERENT positions must
-   * come back with disjoint runs, so the partner can neither merge two of
+   * too, buying the same guarantee: two outbound entries accepted against ONE
+   * (round, partner record) must come back with identical runs, element for
+   * element and in order, and entries accepted against DIFFERENT partner
+   * records must come back with disjoint runs, so the partner can neither merge two of
    * this party's groups nor split one. Distinctness survives within a run:
    * a row named twice for one of this party's records is a repeated pair no
    * consumer can read.
@@ -216,8 +220,8 @@ export interface PartnerIndexRules {
 // that IS that first appearance -- resolved before any entry is read so a
 // later run is compared against its group's first element for element
 // without ever reading past it. Two runs of one group have the same length
-// by construction, both being the size of the partner group behind the one
-// position they named; a caller breaking that, or handing over runs that do
+// by construction, both being the number of the partner's records accepted
+// with them; a caller breaking that, or handing over runs that do
 // not cover the list it pinned, is stopped here rather than left comparing
 // misaligned entries.
 function resolveRunGroups(
@@ -237,21 +241,22 @@ function resolveRunGroups(
           "for every run",
       );
     const round = runs.rounds[run];
-    let byPosition = firstRunByGroup.get(round);
-    if (byPosition === undefined) {
-      byPosition = new Map<number, [number, number]>();
-      firstRunByGroup.set(round, byPosition);
+    let byGroup = firstRunByGroup.get(round);
+    if (byGroup === undefined) {
+      byGroup = new Map<number, [number, number]>();
+      firstRunByGroup.set(round, byGroup);
     }
-    const position = runs.positions[run];
-    const first = byPosition.get(position);
+    const group = runs.groups[run];
+    const first = byGroup.get(group);
     if (first === undefined) {
       firstStarts[run] = -1;
-      byPosition.set(position, [covered, length]);
+      byGroup.set(group, [covered, length]);
     } else {
       if (first[1] !== length)
         throw new Error(
-          `${what}: a run-grouped index check needs one run length per position ` +
-            `this side matched, given ${first[1]} and ${length} for one position`,
+          `${what}: a run-grouped index check needs one run length per ` +
+            `partner record this side matched, given ${first[1]} and ` +
+            `${length} for one`,
         );
       firstStarts[run] = first[0];
     }
@@ -304,22 +309,22 @@ export function assertPartnerIndices(
   if (
     grouping !== undefined &&
     (grouping.rounds.length !== indices.length ||
-      grouping.positions.length !== indices.length)
+      grouping.groups.length !== indices.length)
   )
     throw new Error(
       `${what}: a grouped index check needs one group per entry, given ` +
-        `${grouping.rounds.length} round(s) and ${grouping.positions.length} ` +
-        `position(s) for ${entryCount(indices.length)}`,
+        `${grouping.rounds.length} round(s) and ${grouping.groups.length} ` +
+        `group(s) for ${entryCount(indices.length)}`,
     );
   if (
     runs !== undefined &&
     (runs.rounds.length !== runs.runLengths.length ||
-      runs.positions.length !== runs.runLengths.length)
+      runs.groups.length !== runs.runLengths.length)
   )
     throw new Error(
       `${what}: a run-grouped index check needs one group per run, given ` +
-        `${runs.rounds.length} round(s) and ${runs.positions.length} ` +
-        `position(s) for ${runs.runLengths.length} run(s)`,
+        `${runs.rounds.length} round(s) and ${runs.groups.length} ` +
+        `group(s) for ${runs.runLengths.length} run(s)`,
     );
   const relaxations =
     (grouping !== undefined ? 1 : 0) +
@@ -351,8 +356,8 @@ export function assertPartnerIndices(
     rules.repeats === true
       ? () => false
       : createRepeatDetector(indices.length, exclusiveBound);
-  // Which index each group has taken so far, by round and then by
-  // position. Only the first entry of a group consults the repeat
+  // Which index each group has taken so far, by round and then by partner
+  // record. Only the first entry of a group consults the repeat
   // detector, so a legitimate repeat within one group is never treated as
   // one across groups.
   const indexByGroup = new Map<number, Map<number, number>>();
@@ -398,34 +403,37 @@ export function assertPartnerIndices(
               indices.lastIndexOf(index, entry - 1) >= runStart
               ? `${what} names one partner row twice for one record this side ` +
                   "matched"
-              : `${what} names one partner row for two positions this side ` +
-                  "matched",
+              : `${what} names one partner row for two of the partner's ` +
+                  "records this side matched",
           );
       } else if (indices[firstStart + (entry - runStart)] !== index)
         throw partnerProtocolError(
           participantId,
-          `${what} names two partner rows for one position this side matched`,
+          `${what} names two partner rows for one of the partner's records ` +
+            "this side matched",
         );
     } else if (grouping) {
       const round = grouping.rounds[entry];
-      let indexByPosition = indexByGroup.get(round);
-      if (indexByPosition === undefined) {
-        indexByPosition = new Map<number, number>();
-        indexByGroup.set(round, indexByPosition);
+      let indexByRecord = indexByGroup.get(round);
+      if (indexByRecord === undefined) {
+        indexByRecord = new Map<number, number>();
+        indexByGroup.set(round, indexByRecord);
       }
-      const position = grouping.positions[entry];
-      const taken = indexByPosition.get(position);
+      const group = grouping.groups[entry];
+      const taken = indexByRecord.get(group);
       if (taken === undefined) {
         if (repeats(index))
           throw partnerProtocolError(
             participantId,
-            `${what} names one partner row for two positions this side matched`,
+            `${what} names one partner row for two of the partner's records ` +
+              "this side matched",
           );
-        indexByPosition.set(position, index);
+        indexByRecord.set(group, index);
       } else if (taken !== index)
         throw partnerProtocolError(
           participantId,
-          `${what} names two partner rows for one position this side matched`,
+          `${what} names two partner rows for one of the partner's records ` +
+            "this side matched",
         );
     } else if (repeats(index))
       throw partnerProtocolError(participantId, `${what} repeats an index`);

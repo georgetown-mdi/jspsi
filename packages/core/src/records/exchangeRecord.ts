@@ -22,9 +22,14 @@ import {
 } from "../config/linkageTermsSchema.js";
 import { checkLinkageRuleSetCitation } from "../defaults/builtInLinkageTerms.js";
 import { boundedArray } from "../utils/boundedArray.js";
+import {
+  LINKAGE_CARDINALITIES,
+  resolvedMatchingFromTerms,
+} from "../linkageTermsPolicy.js";
 
 import type { CanonicalValue } from "../utils/canonical.js";
 import type { LinkageTerms } from "../config/linkageTermsSchema.js";
+import type { ResolvedMatching } from "../linkageTermsPolicy.js";
 import type { Algorithm, AssociationTable } from "../types.js";
 
 // The exchange record: a self-attested, unsigned disclosure-log entry each
@@ -47,7 +52,7 @@ import type { Algorithm, AssociationTable } from "../types.js";
  * fields have moved it, are in docs/spec/EXCHANGE_RECORD.md ("Record
  * fields").
  */
-export const EXCHANGE_RECORD_VERSION = "psilink-exchange-record/v6";
+export const EXCHANGE_RECORD_VERSION = "psilink-exchange-record/v7";
 
 /** The one recognized format version for v1 {@link VerificationKeys}. */
 export const EXCHANGE_KEYS_VERSION = "psilink-exchange-keys/v1";
@@ -310,9 +315,10 @@ interface RecordLinkageRuleSetVerdict {
  * time; the payload column sets are drawn from the committed payloads instead.
  * Both parties' records still hold consistent metadata for the same exchange
  * -- the committed payloads are byte-identical, so one party's
- * {@link payloadSent} equals the other's {@link payloadReceived} -- except a
- * column's free-text {@link RecordPayloadColumn.description}, which is not
- * cross-party validated.
+ * {@link payloadSent} equals the other's {@link payloadReceived} -- with two
+ * exceptions: a column's free-text {@link RecordPayloadColumn.description},
+ * which is not cross-party validated, and {@link matching}, which is written
+ * from each party's own side of the agreed pair.
  */
 interface ExchangeRecordGovernance {
   /** The matching algorithm: `psi` revealed matched identifiers, `psi-c`
@@ -349,6 +355,15 @@ interface ExchangeRecordGovernance {
   /** The payload columns this party committed as received for matched records.
    * Empty when this party received no payload. */
   payloadReceived: RecordPayloadColumn[];
+  /** What the two parties' agreed `deduplicate` values resolved to for this
+   * party: its own declared value, the value the partner presented at the
+   * terms exchange, and the cardinality the pair gives this party. Both values
+   * are recorded beside the label because the label is mirrored -- a party
+   * reading `one-to-many` off its own record could not otherwise tell which
+   * side declared what -- and because a record naming only the resolved
+   * multiplicity states the run's shape without stating the partner's term
+   * that decided it. Booleans and a closed label; no partner free text. */
+  matching: ResolvedMatching;
 }
 
 /**
@@ -522,7 +537,11 @@ export interface VerificationKeys {
 // allocation. Array counts use boundedArray (a count refine BEFORE per-element
 // validation) for the same Zod issue-accumulation reason the linkage-terms
 // bounds document. The bounds reject; they do not reshape a valid record --
-// defense-in-depth ceilings, not semantic limits.
+// defense-in-depth ceilings, not semantic limits. The name shape the
+// linkage-terms schema applies (NAME_SHAPE_PATTERN) is not applied here, for
+// the reason `type` and a citation `version` are open strings below: the record
+// is a frozen log, and its reader accepts what a possibly different-version
+// writer recorded. Display escaping at the render site neutralizes such a value.
 
 // Length cap for the fixed-size base64url crypto values a record and its keys
 // hold (termsHash, bindingNonce, receiptBinder, each commitment, each salt):
@@ -643,6 +662,16 @@ const RecordLinkageRuleSetVerdictSchema: z.ZodType<RecordLinkageRuleSetVerdict> 
     keySet: RecordLinkageRuleSetVerdictValueSchema,
   });
 
+// The label set is closed and meaning-bearing, like `algorithm` beside it: a
+// record naming a cardinality this version does not define states a matching
+// multiplicity this reader cannot interpret, so it is rejected rather than
+// passed through as an open descriptive string.
+const ResolvedMatchingSchema: z.ZodType<ResolvedMatching> = z.object({
+  localDeduplicate: z.boolean(),
+  partnerDeduplicate: z.boolean(),
+  cardinality: z.enum(LINKAGE_CARDINALITIES),
+});
+
 const ExchangeRecordGovernanceSchema: z.ZodType<ExchangeRecordGovernance> = z
   .object({
     // algorithm stays pinned to the closed enum even though the sibling
@@ -679,6 +708,7 @@ const ExchangeRecordGovernanceSchema: z.ZodType<ExchangeRecordGovernance> = z
       MAX_PAYLOAD_ENTRIES,
       `payloadReceived must not exceed ${MAX_PAYLOAD_ENTRIES} entries`,
     ),
+    matching: ResolvedMatchingSchema,
   })
   // The citation and the verdict travel together or not at all. A citation with
   // no verdict beside it is the shape a reader would otherwise have to guess
@@ -844,9 +874,14 @@ export interface BuiltExchangeRecord {
  * column name, for the optional data-dictionary DESCRIPTION on each committed
  * column; an undescribed column has a bare name. Reads names, types,
  * descriptions, and the agreement reference and purpose only -- never a value.
+ *
+ * The resolved matching is the one field taken from BOTH terms documents: the
+ * cardinality is a function of the two `deduplicate` values together
+ * (`resolvedMatchingFromTerms`), so neither document states it alone.
  */
 function governanceFromTerms(
   terms: LinkageTerms,
+  partnerTerms: LinkageTerms,
   localPayloadSent: CommittedPayload,
   partnerPayloadReceived: CommittedPayload,
 ): ExchangeRecordGovernance {
@@ -951,6 +986,7 @@ function governanceFromTerms(
       partnerPayloadReceived.columns,
       terms.payload?.receive,
     ),
+    matching: resolvedMatchingFromTerms(terms, partnerTerms),
   };
 }
 
@@ -1029,6 +1065,7 @@ export async function buildExchangeRecord(
     governance: ExchangeRecordGovernanceSchema.parse(
       governanceFromTerms(
         inputs.localTerms,
+        inputs.partnerTerms,
         inputs.localPayloadSent,
         inputs.partnerPayloadReceived,
       ),

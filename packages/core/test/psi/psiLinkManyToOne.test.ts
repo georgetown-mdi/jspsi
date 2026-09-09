@@ -23,6 +23,7 @@ import type { AssociationTable } from "../../src/types";
 import { singlePassReplyByteCap } from "../../src/connection/frameSize";
 import { UNBOUNDED_PSI_ELEMENTS } from "../utils/psiElementBounds";
 import { fanOutFreeBounds } from "../utils/singlePassBounds";
+import { recordingConnection } from "../utils/recordingConnection";
 
 // Deduplicating matching: a "many" party keeps a value several of its records
 // hold, contributes it once to the round, and attributes a match on it to every
@@ -128,7 +129,7 @@ async function runCascade(
       makeParticipant("starter"),
       connFor("starter", starterConn),
       starterKeys,
-      joinerKeys[0].length,
+      fanOutFreeBounds(starterKeys.length, joinerKeys[0].length),
       -1,
     ),
   );
@@ -138,7 +139,7 @@ async function runCascade(
       makeParticipant("joiner"),
       connFor("joiner", joinerConn),
       joinerKeys,
-      starterKeys[0].length,
+      fanOutFreeBounds(joinerKeys.length, starterKeys[0].length),
       -1,
     ),
   );
@@ -396,6 +397,19 @@ type StarterRoundReport = (
   joinerPositions: Array<number>,
 ) => Array<MappedElement>;
 
+// The round's joiner positions reordered by the starter row each paired with. A
+// round's entries are attributed by their place in the naming party's own
+// ascending row order, so a hand-played starter states them in that order too.
+function inOwnRowOrder(
+  joinerPositions: Array<number>,
+  ownRows: Array<number>,
+): Array<number> {
+  return joinerPositions
+    .map((position, i): [number, number] => [ownRows[i], position])
+    .sort((a, b) => a[0] - b[0])
+    .map(([, position]) => position);
+}
+
 // The joiner's resolver drops a position two or more of the starter's records
 // matched, so a starter naming one at all names a record the joiner did not match.
 // This is the list a non-conforming starter that had resolved the round the same
@@ -433,13 +447,15 @@ async function runNonConformingStarter(
     Array<number>,
     Array<number>,
   ];
-  await conn.send(sortedRows.map((slot) => permutation[slot]));
+  const ownRows = sortedRows.map((slot) => permutation[slot]);
+  await conn.send(ownRows);
   await conn.receive();
 
   // A party contributing its dataset verbatim has one round position per record,
   // so its translation of the joiner's list is the identity and its own entries
-  // hold the joiner's positions as the round reported them.
-  await conn.send(report(joinerPositions));
+  // hold the joiner's positions as the round reported them, in its own ascending
+  // row order -- the order a round's entries are attributed by.
+  await conn.send(report(inOwnRowOrder(joinerPositions, ownRows)));
   const joinerList = (await conn.receive()) as Array<MappedElement>;
   await conn.send(joinerList);
   await conn.receive();
@@ -461,7 +477,7 @@ async function runAgainstNonConformingStarter(
     makeParticipant("joiner"),
     joinerConn,
     joinerKeys,
-    starterValues.length,
+    fanOutFreeBounds(joinerKeys.length, starterValues.length),
     -1,
   ).then(
     (table) => table,
@@ -507,15 +523,15 @@ test("a non-conforming starter naming the dropped group is refused by the joiner
   expect(outcome).toBeInstanceOf(ConnectionError);
   expect((outcome as ConnectionError).kind).toBe("protocol");
   expect((outcome as Error).message).toMatch(
-    /names a record this side did not match on that round/,
+    /names positions other than the ones that round's accepted pairs rest on/,
   );
 });
 
-test("a non-conforming starter reinstating the dropped group is refused on the count", async () => {
-  // The same drop seen by the count check: the joiner holds the partner's list to
-  // the positions IT attributed, so a starter naming every pair the round produced
-  // -- the three its own records matched -- cannot restore the group by volume
-  // either.
+test("a non-conforming starter reinstating the dropped group is refused entry for entry", async () => {
+  // The same drop seen at the entry-for-entry rule: the joiner holds the
+  // partner's list to the pairing IT resolved, so a starter naming every pair
+  // the round produced -- the three its own records matched -- cannot restore
+  // the group by volume either.
   const outcome = await runAgainstNonConformingStarter(
     ["A", "A", "B"],
     [["A", "A", "B"]],
@@ -529,7 +545,7 @@ test("a non-conforming starter reinstating the dropped group is refused on the c
   expect(outcome).toBeInstanceOf(ConnectionError);
   expect((outcome as ConnectionError).kind).toBe("protocol");
   expect((outcome as Error).message).toMatch(
-    /the partner's mapped-element list has 3 entries, expected 1/,
+    /names positions other than the ones that round's accepted pairs rest on/,
   );
 });
 
@@ -607,7 +623,7 @@ for (const manySide of ["starter", "joiner"] as const) {
     await expectProtocolRefusal(
       manySide,
       onMappedElementList(1, (list) => [list[0], list[0]]),
-      /names one record twice/,
+      /names positions other than the ones that round's accepted pairs rest on/,
     );
   });
 
@@ -639,7 +655,7 @@ for (const manySide of ["starter", "joiner"] as const) {
       onMappedElementList(2, (list) =>
         list.map((entry) => ({ ...entry, theirIndex: list[0].theirIndex })),
       ),
-      /names one partner row for two positions this side matched/,
+      /names one partner row for two of the partner's records this side matched/,
     );
   });
 
@@ -654,7 +670,7 @@ for (const manySide of ["starter", "joiner"] as const) {
         { ...list[1], theirIndex: list[2].theirIndex },
         ...list.slice(2),
       ]),
-      /names two partner rows for one position this side matched/,
+      /names two partner rows for one of the partner's records this side matched/,
     );
   });
 
@@ -1051,7 +1067,7 @@ for (const manySide of ["starter", "joiner"] as const) {
       expect(outcome).toBeInstanceOf(ConnectionError);
       expect((outcome as ConnectionError).kind).toBe("protocol");
       expect((outcome as Error).message).toMatch(
-        /names one partner row for two positions this side matched/,
+        /names one partner row for two of the partner's records this side matched/,
       );
     },
   );
@@ -1080,9 +1096,10 @@ async function runNonConformingStarterRound(
     Array<number>,
     Array<number>,
   ];
-  await conn.send(sortedRows.map((slot) => permutation[slot]));
+  const ownRows = sortedRows.map((slot) => permutation[slot]);
+  await conn.send(ownRows);
   await conn.receive();
-  return joinerPositions;
+  return inOwnRowOrder(joinerPositions, ownRows);
 }
 
 interface MultiKeyRun {
@@ -1129,7 +1146,7 @@ async function runManyKeysAgainstNonConformingStarter(
     makeParticipant("joiner"),
     joinerConn,
     joinerKeys,
-    starterColumns[0].length,
+    fanOutFreeBounds(joinerKeys.length, starterColumns[0].length),
     -1,
   ).then(
     (table) => table,
@@ -1169,4 +1186,105 @@ test("rows of a group the resolver dropped stay eligible for a later key", async
     [0, 1, 2],
     [1, 0, 2],
   ]);
+});
+
+// --- The round's frames over a round no producer widened ---------------------
+// A party omits its grouping for a round in which each of its matched positions
+// is the only one its record owns, which every deduplicating round of
+// single-valued keys is, so such a round puts on both frames what the
+// single-valued cascade puts there (docs/spec/PROTOCOL.md, An absent grouping
+// is all ones). The cases below pin that, and pin the local checks a grouping
+// arriving on either frame is held to.
+
+// The starter is the "many" side and both its rows hold one value, so the
+// round's frames are as short as a cascade round gets: one matched position
+// each, one group behind the starter's.
+const GATED_STARTER_KEYS: Keys = [["shared", "shared"]];
+const GATED_JOINER_KEYS: Keys = [["shared"]];
+
+async function recordedGatedRound(): Promise<{
+  starter: Array<unknown>;
+  joiner: Array<unknown>;
+}> {
+  const [starterConn, joinerConn] = createMessagePipe();
+  const starterRecorder = recordingConnection(starterConn);
+  const joinerRecorder = recordingConnection(joinerConn);
+  await Promise.all([
+    linkViaPSI(
+      { cardinality: "many-to-one" },
+      makeParticipant("starter"),
+      starterRecorder.conn,
+      GATED_STARTER_KEYS,
+      fanOutFreeBounds(1, GATED_JOINER_KEYS[0].length),
+      -1,
+    ),
+    linkViaPSI(
+      { cardinality: "one-to-many" },
+      makeParticipant("joiner"),
+      joinerRecorder.conn,
+      GATED_JOINER_KEYS,
+      fanOutFreeBounds(1, GATED_STARTER_KEYS[0].length),
+      -1,
+    ),
+  ]);
+  return { starter: starterRecorder.sent, joiner: joinerRecorder.sent };
+}
+
+test("a deduplicating round sends the sender's original-index list bare", async () => {
+  const sent = await recordedGatedRound();
+  // The starter's third frame is the round's original-index list: the list
+  // alone, with no grouping beside it.
+  expect(sent.starter[2]).toStrictEqual([0]);
+});
+
+test("a deduplicating round sends the receiver's association table at two elements", async () => {
+  const sent = await recordedGatedRound();
+  // The joiner's second frame is the round's association table, which the
+  // grouping would have joined as a third element.
+  expect(sent.joiner[1]).toStrictEqual([[0], [0]]);
+});
+
+test("a deduplicating round refuses run lengths that do not partition the association table", async () => {
+  // The joiner is the "one" side, so the starter reads its grouping as run
+  // lengths: a run of two over the round's one matched position sums past what
+  // the frame names.
+  const run = await runCascade(
+    "starter",
+    GATED_STARTER_KEYS,
+    GATED_JOINER_KEYS,
+    {
+      party: "starter",
+      deviation: (frame) =>
+        Array.isArray(frame) && frame.length === 2 && Array.isArray(frame[0])
+          ? [frame[0], frame[1], [2]]
+          : frame,
+    },
+  );
+  expect(run.starter).toBeInstanceOf(ConnectionError);
+  expect((run.starter as ConnectionError).kind).toBe("protocol");
+  expect((run.starter as Error).message).toMatch(/summing past the matched/);
+});
+
+test("a deduplicating round refuses an owner list leaving a position unowned", async () => {
+  // The starter is the "many" side, so the joiner reads its grouping as an
+  // owner list per matched position: an empty entry owns nothing.
+  const run = await runCascade(
+    "starter",
+    GATED_STARTER_KEYS,
+    GATED_JOINER_KEYS,
+    {
+      party: "joiner",
+      deviation: (frame) =>
+        Array.isArray(frame) &&
+        frame.length > 0 &&
+        frame.every((entry) => typeof entry === "number")
+          ? [frame, [[]]]
+          : frame,
+    },
+  );
+  expect(run.joiner).toBeInstanceOf(ConnectionError);
+  expect((run.joiner as ConnectionError).kind).toBe("protocol");
+  expect((run.joiner as Error).message).toMatch(
+    /leaves a matched position with no owner/,
+  );
 });

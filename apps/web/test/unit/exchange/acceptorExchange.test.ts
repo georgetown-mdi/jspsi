@@ -52,6 +52,7 @@ describe("prepareAcceptorExchange", () => {
 
   test("adopts the invitation's terms under the committed name", () => {
     const prepared = prepareAcceptorExchange({
+      deduplicate: false,
       linkageTerms: inviterTerms,
       acceptorName: "Sam Alvarez",
       edits: baseEdits,
@@ -74,10 +75,13 @@ describe("prepareAcceptorExchange", () => {
   test("leaves this party one-to-one under a deduplicating invitation", () => {
     // The web accept entry point derives the acceptor's own terms
     // (deriveAcceptedLinkageTerms) as it prepares the exchange, ahead of any
-    // connection, and that derivation sets this party's own deduplicate rather
-    // than reading it off the invitation -- so what the inviter declares, or goes
-    // on to present at the terms exchange, cannot make this party the "many" side.
+    // connection, and that derivation takes this party's own deduplicate from
+    // the seat rather than reading it off the invitation -- so what the inviter
+    // declares, or goes on to present at the terms exchange, cannot make this
+    // party the "many" side. An operator that left the seat's control closed
+    // gets the run it got before the control existed.
     const prepared = prepareAcceptorExchange({
+      deduplicate: false,
       linkageTerms: { ...inviterTerms, deduplicate: true },
       acceptorName: "Sam Alvarez",
       edits: baseEdits,
@@ -90,6 +94,7 @@ describe("prepareAcceptorExchange", () => {
 
   test("commits the received-payload columns to the disclosed set exactly", () => {
     const prepared = prepareAcceptorExchange({
+      deduplicate: false,
       linkageTerms: inviterTerms,
       acceptorName: "Sam Alvarez",
       edits: baseEdits,
@@ -113,6 +118,7 @@ describe("prepareAcceptorExchange", () => {
     // holds the partner to what this acceptance consented to.
     for (const declared of [false, true]) {
       const prepared = prepareAcceptorExchange({
+        deduplicate: false,
         linkageTerms: { ...inviterTerms, deduplicate: declared },
         acceptorName: "Sam Alvarez",
         edits: baseEdits,
@@ -127,6 +133,7 @@ describe("prepareAcceptorExchange", () => {
 
   test("the empty disclosed set commits to 'receive nothing' (not lazy)", () => {
     const prepared = prepareAcceptorExchange({
+      deduplicate: false,
       linkageTerms: inviterTerms,
       acceptorName: "Sam Alvarez",
       edits: baseEdits,
@@ -141,6 +148,7 @@ describe("prepareAcceptorExchange", () => {
 
   test("an omitted disclosed set stays lazy (undefined)", () => {
     const prepared = prepareAcceptorExchange({
+      deduplicate: false,
       linkageTerms: inviterTerms,
       acceptorName: "Sam Alvarez",
       edits: baseEdits,
@@ -169,6 +177,7 @@ describe("prepareAcceptorExchange", () => {
         : column,
     );
     const prepared = prepareAcceptorExchange({
+      deduplicate: false,
       linkageTerms: firstNameOnlyTerms,
       acceptorName: "Sam Alvarez",
       edits: editsFor(edited),
@@ -180,4 +189,29 @@ describe("prepareAcceptorExchange", () => {
       prepared.metadata.find((column) => column.name === "last_name")?.role,
     ).toBe("ignored");
   });
+});
+
+describe("the accepting party's own deduplicate in the prepared exchange", () => {
+  const baseEdits = editsFor(seedMetadata);
+
+  test.each([false, true])(
+    "carries the operator's value into the presented terms (invitation declares %s)",
+    (declared) => {
+      const prepared = prepareAcceptorExchange({
+        deduplicate: true,
+        linkageTerms: { ...inviterTerms, deduplicate: declared },
+        acceptorName: "Sam Alvarez",
+        edits: baseEdits,
+        rawRows,
+        columns,
+        disclosedPayloadColumns: ["program_code"],
+      });
+      // Presented, not derived away: the terms this party hands the partner at
+      // the terms exchange hold the value the operator set.
+      expect(prepared.linkageTerms.deduplicate).toBe(true);
+      // And the binding on the PARTNER's value stays the invitation's own
+      // declaration, so this party's choice binds the inviter to nothing.
+      expect(prepared.expectedPartnerDeduplicate).toBe(declared);
+    },
+  );
 });

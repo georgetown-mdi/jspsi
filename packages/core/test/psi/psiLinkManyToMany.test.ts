@@ -4,6 +4,7 @@ import PSI from "@openmined/psi.js";
 
 import { PSIParticipant } from "../../src/psi/participant";
 import { linkViaPSI } from "../../src/psi/link";
+import { fanOutFreeBounds } from "../utils/singlePassBounds";
 import {
   createMessagePipe,
   ConnectionError,
@@ -113,7 +114,7 @@ async function runCascade(
       makeParticipant("starter"),
       connFor("starter", starterConn),
       starterKeys,
-      joinerKeys[0].length,
+      fanOutFreeBounds(starterKeys.length, joinerKeys[0].length),
       -1,
     ),
   );
@@ -123,7 +124,7 @@ async function runCascade(
       makeParticipant("joiner"),
       connFor("joiner", joinerConn),
       joinerKeys,
-      starterKeys[0].length,
+      fanOutFreeBounds(joinerKeys.length, starterKeys[0].length),
       -1,
     ),
   );
@@ -526,7 +527,7 @@ async function runAgainstNonConformingStarter(
     makeParticipant("joiner"),
     joinerConn,
     joinerKeys,
-    starterValues.length,
+    fanOutFreeBounds(joinerKeys.length, starterValues.length),
     -1,
   ).then(
     (table) => table,
@@ -664,7 +665,7 @@ for (const party of ["starter", "joiner"] as const) {
         ...list.slice(0, -1),
         { ...list[list.length - 1], theirIndex: list[0].theirIndex },
       ]),
-      /names one partner row for two positions this side matched/,
+      /names one partner row for two of the partner's records this side matched/,
     );
   });
 
@@ -678,7 +679,7 @@ for (const party of ["starter", "joiner"] as const) {
         { ...list[2], theirIndex: list[1].theirIndex },
         ...list.slice(3),
       ]),
-      /names two partner rows for one position this side matched/,
+      /names two partner rows for one of the partner's records this side matched/,
     );
   });
 

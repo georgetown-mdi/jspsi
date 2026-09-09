@@ -210,8 +210,11 @@ test("terms exchange: an out-of-shape psi-c document is refused on receipt, reje
     // Each party's failure is the count-only rule the document breaks -- the
     // one that refuses it, preserved through the abort so both ends name it
     // -- and not the unusable PSI library, so no round ran on either side.
-    expect(refusal.message).toMatch(/exactly one linkage key/);
-    expect(refusal.message).not.toMatch(/PSI library/);
+    // Read off the rendered chain: the partner's stated reason reaches the
+    // aborting party as a labelled cause link, not as message text.
+    const rendered = sanitizeErrorForDisplay(refusal);
+    expect(rendered).toMatch(/exactly one linkage key/);
+    expect(rendered).not.toMatch(/PSI library/);
   }
 });
 
@@ -315,6 +318,98 @@ test("both-output: both records agree on terms and hold the result size", async 
       resp.record.commitments.partnerPayloadReceived,
     ),
   ).toBe(true);
+});
+
+// --- The resolved matching, on the outcome and in the record -----------------
+
+// The differing pair: one party declares deduplicate and its partner does not,
+// which is the shape an invitation's own declaration binds one side of and
+// nothing binds the other. Both parties must be entitled to output, the
+// declaring party by rule (docs/spec/PROTOCOL.md, A deduplicating party must
+// receive the output).
+function preparedDeclaring(
+  identity: string,
+  rows: typeof serverRows,
+  deduplicate: boolean,
+) {
+  return prepareForExchange(
+    {
+      linkageTerms: {
+        ...firstNameTerms,
+        identity,
+        deduplicate,
+        output: { expectsOutput: true, shareWithPartner: true },
+      },
+    },
+    identity,
+    rows,
+    ["first_name", "note"],
+  );
+}
+
+test("the differing pair resolves one matching, mirrored, whichever seat declares it", async () => {
+  // Run it both ways round so neither the handshake role nor the seat decides
+  // what a party reads: what each party states is its own value, its partner's,
+  // and the label its own side of the pair resolves to.
+  for (const initiatorDeduplicates of [true, false]) {
+    const [connInitiator, connResponder] = createMessagePipe();
+    const [initiator, responder] = await Promise.all([
+      runExchange(
+        connInitiator,
+        "initiator",
+        preparedDeclaring("Initiator Co", clientRows, initiatorDeduplicates),
+        { psiLibrary },
+      ),
+      runExchange(
+        connResponder,
+        "responder",
+        preparedDeclaring("Responder Co", serverRows, !initiatorDeduplicates),
+        { psiLibrary },
+      ),
+    ]);
+
+    const initiatorMatching = {
+      localDeduplicate: initiatorDeduplicates,
+      partnerDeduplicate: !initiatorDeduplicates,
+      cardinality: initiatorDeduplicates ? "many-to-one" : "one-to-many",
+    };
+    const responderMatching = {
+      localDeduplicate: !initiatorDeduplicates,
+      partnerDeduplicate: initiatorDeduplicates,
+      cardinality: initiatorDeduplicates ? "one-to-many" : "many-to-one",
+    };
+    expect(initiator.matching).toEqual(initiatorMatching);
+    expect(responder.matching).toEqual(responderMatching);
+
+    // The record states the same triple its run returned, so an accounting read
+    // after the fact names the partner's value rather than the resolved
+    // multiplicity alone.
+    expect(built(initiator).record.governance.matching).toEqual(
+      initiatorMatching,
+    );
+    expect(built(responder).record.governance.matching).toEqual(
+      responderMatching,
+    );
+  }
+});
+
+test("the pair neither party deduplicates is recorded as stated, not as silence", async () => {
+  // The one-to-one run is the shape every consent surface already describes, and
+  // recording it by omission would leave a reader unable to tell it from a
+  // record whose writer dropped the field.
+  const [initiator, responder] = await runBoth(
+    { expectsOutput: true, shareWithPartner: true },
+    { expectsOutput: true, shareWithPartner: true },
+  );
+  const oneToOne = {
+    localDeduplicate: false,
+    partnerDeduplicate: false,
+    cardinality: "one-to-one",
+  };
+  expect(initiator.matching).toEqual(oneToOne);
+  expect(responder.matching).toEqual(oneToOne);
+  expect(built(initiator).record.governance.matching).toEqual(oneToOne);
+  expect(built(responder).record.governance.matching).toEqual(oneToOne);
 });
 
 test("both-output: a legal-agreement purpose flows end-to-end into both records", async () => {

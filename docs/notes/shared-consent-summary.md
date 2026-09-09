@@ -354,31 +354,50 @@ presents the acceptor none of it.
 
 ### Where the acceptor's non-receipt is held, and where it is not
 
-That second half is display-scoped on purpose, and the surfaces say so. What
+That second half is display-scoped for most runs, and the surfaces say so. What
 holds it is the entitlement gate on the table `runExchange` returns, so a
 sole-receiver acceptance is handed none. The wire is not what holds it in
-general. Under cascade the rounds carry the grouping to the acceptor's own
-process -- its matched position repeated once per group member, against the
-inviter's row indices. Under single-pass the one wire-level withholding can
-reach it, since the sole receiver is the party entitled to output and role
-resolution therefore makes the acceptor the sender that withholding covers, but
-only where the acceptor transmits no payload column of its own; an invitation
-requesting one leaves the table exchanged and the grouping in that party's
-process again.
+general: on most runs that gate is the whole of it, the matching still carries
+the grouping to the acceptor's own process, and what its operator is shown then
+rests on the software that party runs.
 
-Stating the withholding as an absolute would put a trust-contingent fact under an
-`enforced` headline, which is the one error this classification exists to
-prevent. So the two halves are two facts. The STATEMENT says what psilink
-presents, which is the display withholding this client makes. The limit -- that
-the matching still carries the grouping to the acceptor's process wherever the
-withholding above does not reach, so what its operator is shown rests on the
-software that party runs -- is a
-`trust-contingent` entry of its own in the shared table
-(`duplicateGroupingDisplayLimit`), rendered beside the statement by both
-surfaces. A limit that is a claim about software rather than about the run is
-classified as one rather than left as an unmarked clause inside a sentence, which
-is the same reason every other caveat in the table is an entry rather than prose
-in a renderer.
+One combination is the exception, and it is a combination of three things
+rather than a property of the setting: the strategy, which party is entitled
+to output, and whether the invitation asks the acceptor for a payload column.
+The rule and its composition with a deduplicating cardinality are specified,
+not restated here -- [PROTOCOL.md](../spec/PROTOCOL.md), "Withholding the
+sender's table from a blind helper" and "Where the 'one' party receives no
+output".
+
+Stating the withholding as an absolute would put a trust-contingent fact under
+an `enforced` headline, which is the one error this classification exists to
+prevent. Stating it as never held would understate a run that does close it. So
+the account is three facts, not one sentence with a qualifier:
+
+- The STATEMENT says what psilink presents, which is the display withholding
+  this client makes, and holds for every sole-receiver shape.
+- `duplicateGroupingDisplayLimit` is the `trust-contingent` entry beside it
+  wherever the exchange has not closed the grouping. A limit that is a claim
+  about software rather than about the run is classified as one rather than
+  left as an unmarked clause inside a sentence, which is the same reason every
+  other caveat in the table is an entry rather than prose in a renderer.
+- `duplicateGroupingWithheld` is the `enforced` entry that replaces it where
+  the run does close it, and states what the wire withholds and from whom.
+
+Which of the two renders is not a judgment either surface makes. Core resolves
+the combination once (`withholdsAcceptorAssociationTable`,
+`consent/invitationSummary.ts`), asking the run's own predicate for the verdict
+rather than reading the rule a second time, and each surface selects the fact
+from the resolved flag the summary carries -- the same shape the fan-out pair
+takes. A second reading is exactly what would let one surface promise a
+protection the run does not make.
+
+The enforced entry's basis is enforced in this table's own sense: either the
+fact is true of the run, or the exchange stops rather than proceed. The empty
+payload request mirrors to an empty `payload.send` for the accepting party,
+which `assertPayloadSendDisclosed` holds to exactly the columns that party's
+metadata discloses before any data moves, so a file that would transmit one
+stops there rather than reaching the rounds with the table exchanged.
 
 The split is also what keeps the duplicate-matches marker where it belongs. That
 marker states its headline's own fact, match multiplicity, which the run does
@@ -390,15 +409,16 @@ beside it -- the same division the partner's result receipt takes above and the
 retain-mode line takes below.
 
 That forced the pin to grow a shape axis of its own. It names copy a surface must
-render for a variant document, so a term with two truthful sentences could
-otherwise pin only what both shapes share -- which is neither sentence -- or pin
-one and let the other shape render it. The classification names the shapes
-instead, and each holds both the copy its variant owes and the copy it must not
-include, so a surface rendering one sentence under every shape fails on the shape
-whose run does not make that disclosure. Both surfaces are measured against the
-same two pairs. The display limit rides those pairs too: the sole-receiver shape
-owes it beside its statement, and the both-receive shape forbids it, since a
-screen that presents the acceptor the grouping has no withholding to qualify.
+render for a variant document, so a term with several truthful sentences could
+otherwise pin only what every shape shares -- which is none of them -- or pin one
+and let the other shapes render it. The classification names the shapes instead,
+and each holds both the copy its variant owes and the copy it must not include,
+so a surface rendering one sentence under every shape fails on the shape whose
+run does not make that disclosure. Both surfaces are measured against the same
+three pairs: both parties receive, the inviting party alone receives with the
+table exchanged, and the inviting party alone receives with the table withheld.
+The two limits ride those pairs, each required by the shape whose run it
+describes and forbidden by the other two.
 
 Whichever sentence renders, its placement is the same rule the caveats follow,
 applied to the headline it qualifies rather than to the setting's implementation
@@ -407,13 +427,16 @@ inside a disclosure, and the sentence sits with it.
 
 A direction note sits beside whichever statement the shape selects, and the pin
 holds both, because what the setting discloses and whose records are grouped to
-disclose it are separate facts a reader needs together. Acceptance derives the
-accepting party's own `deduplicate` as false rather than adopting the
-invitation's, so the pair an accepted deduplicating invitation resolves to is
-one-sided by construction. A reader met only by the disclosure statement would
-have no way to tell whether their own file is the one being grouped -- and the
-invitation offers no control for the other direction, so the sentence names the
-per-party configuration path that does.
+disclose it are separate facts a reader needs together. The note itself now has
+two variants, selected by whether the seat offers the accepting party a control
+for its own side: a settable variant, read alongside that seat's own pair
+statement naming the two values the operator selected; and a configuration-file
+variant, read alongside the disclosure statement alone, naming the per-party
+configuration path as the way to the other direction. Both keep the shared
+widening sentence, what the inviting party's own declaration costs the
+accepting party regardless of which variant renders. A reader met only by the
+disclosure statement, with neither variant, would have no way to tell whether
+their own file is the one being grouped.
 
 That note states a second fact for the same reason it states the first: what
 the derivation closes is the grouping, not the acceptor's own outbound
@@ -545,14 +568,37 @@ count-report frame ([PROTOCOL.md](../spec/PROTOCOL.md#psi-c)). Stated there, the
 fact would tell an acceptor that a disclosure happens which the algorithm
 forecloses -- directly under a headline saying only the count is revealed.
 
-So the fact is scoped by the ALGORITHM and not by the linkage strategy: it holds
-for a one-sided `psi` exchange under both strategies and for no `psi-c` exchange
-at all. Both surfaces withhold it for any `psi-c` invitation, off the same reading
-of the algorithm that reaches the tier's own five sentences -- one gate, so the
-fact and its replacement cannot both be shown or both be missing. What a
-count-only run does disclose is the tier's to state, and it already does: the
-round disclosures beside the count, and the enforced half that hands neither
-party a pairing.
+So the ALGORITHM is the first gate, and it is a gate rather than a variant: no
+`psi-c` exchange states the fact at all. Both surfaces withhold it for any
+`psi-c` invitation, off the same reading of the algorithm that reaches the
+tier's own five sentences -- one gate, so the fact and its replacement cannot
+both be shown or both be missing. What a count-only run does disclose is the
+tier's to state, and it already does: the round disclosures beside the count,
+and the enforced half that hands neither party a pairing.
+
+Within `psi` the fact then splits, on the same wire question the sole-receiver
+pair above turns on. The disclosure is intrinsic because the run hands the
+helper its half of the association table -- so on the one combination where the
+exchange suppresses that half entirely, the helper's process never receives, and
+so never learns, its own membership
+([PROTOCOL.md](../spec/PROTOCOL.md#linkage-strategies-cascade-and-single-pass)).
+Stated there, the disclosure sentence would name a leak the wire has closed,
+directly under a marker reading `enforced`. So the line holds two sentences, one
+per case, and the pick is the run's own verdict on the partner's half rather than
+a reading of the strategy and the payload declaration made at a surface: the
+accept seat reads `withholdsInviterAssociationTable`, the seat proposing its own
+terms reads `withholdsAcceptorAssociationTable`, and each is the same predicate
+the protocol suppresses the frame on. One label carries both, since what the line
+answers -- what the partner learns about its own records -- is the same question
+either way.
+
+The payload declaration the second condition rests on cannot disagree with the
+disclosed subset the same token holds, whoever authored it: the token schema
+refuses both pairings that would state one disclosure two ways, at decode as
+well as at the mint
+([FILE_SYNC.md](../spec/FILE_SYNC.md#disclosed-columns-subset-on-the-token)).
+So a surface reading the declaration for this line and the subset for the
+receive line beside it cannot be made to state both at once.
 
 ## A fact that outlives the run, and the negative it does not state
 

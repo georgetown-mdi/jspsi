@@ -526,6 +526,11 @@ describe("governance metadata", () => {
         { name: "dose", description: "Administered dose in milligrams." },
       ],
       payloadReceived: [{ name: "status" }],
+      matching: {
+        localDeduplicate: false,
+        partnerDeduplicate: false,
+        cardinality: "one-to-one",
+      },
     });
     // A column the data dictionary does not describe omits the key rather than
     // including an undefined one -- a distinction the structural equality above
@@ -738,6 +743,12 @@ describe("governance metadata", () => {
       "matchingBasis",
       "payloadSent",
       "payloadReceived",
+      "matching",
+    ]);
+    onlyKeys(g.matching, [
+      "localDeduplicate",
+      "partnerDeduplicate",
+      "cardinality",
     ]);
     onlyKeys(g.legalAgreement!, ["reference", "purpose", "expirationDate"]);
     for (const field of g.matchingBasis) {
@@ -974,7 +985,7 @@ describe("serialize / parse", () => {
 
   test("parseExchangeRecord rejects an unrecognized version", async () => {
     const { record } = await buildExchangeRecord(baseInputs, fixedRandomness);
-    const bumped = { ...record, version: "psilink-exchange-record/v7" };
+    const bumped = { ...record, version: "psilink-exchange-record/v8" };
     expect(() => parseExchangeRecord(bumped)).toThrow();
   });
 
@@ -1269,6 +1280,25 @@ function randomnessFromVector(v: RecordVector): ExchangeRecordRandomness {
 describe("exchange-record-vectors.json", () => {
   test("the vector file is non-empty", () => {
     expect(vectors.length).toBeGreaterThan(0);
+  });
+
+  // The record's cardinality is a function of the two parties' agreed
+  // `deduplicate` values, so pinning all four pairs pins all four labels an
+  // independent implementation has to resolve -- including the mirrored pair,
+  // where reading the wrong side gives the other label.
+  test("the vectors cover every agreed deduplicate pair", () => {
+    const pairs = vectors.map(
+      (v) =>
+        `${String(v.inputs.localTerms.deduplicate)},${String(
+          v.inputs.partnerTerms.deduplicate,
+        )}`,
+    );
+    expect([...new Set(pairs)].sort()).toEqual([
+      "false,false",
+      "false,true",
+      "true,false",
+      "true,true",
+    ]);
   });
 
   test.each(vectors)(

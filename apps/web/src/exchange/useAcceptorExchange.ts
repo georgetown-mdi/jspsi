@@ -120,6 +120,7 @@ export function acceptorServerJobConfig({
   edits,
   inputSource,
   transport,
+  deduplicate,
   options,
   runDiagnostics,
   receipts,
@@ -129,6 +130,11 @@ export function acceptorServerJobConfig({
   edits: AcceptorDataEdits;
   inputSource: JobInputSource;
   transport: ServerJobExchangeTransport;
+  /** Whether several of THIS party's records may match one of the partner's, as
+   * the accepting operator set it at the seat. It rides the composed terms the
+   * console hands the CLI, so the run the console conducts presents the value
+   * the operator consented to. */
+  deduplicate: boolean;
   /** The confirm-columns step's file-handling choices, already resolved through
    * core's retain-mode implication. Absent when the operator changed nothing, so
    * the composed config includes no `options` block at all. */
@@ -146,7 +152,11 @@ export function acceptorServerJobConfig({
     ...(options !== undefined ? { options } : {}),
     ...(runDiagnostics !== undefined ? { runDiagnostics } : {}),
     ...(receipts !== undefined ? { receipts } : {}),
-    linkageTerms: deriveAcceptedLinkageTerms(token.linkageTerms, acceptorName),
+    linkageTerms: deriveAcceptedLinkageTerms(
+      token.linkageTerms,
+      acceptorName,
+      deduplicate,
+    ),
     sharedSecret: token.sharedSecret,
     inputSource,
     metadata: edits.metadata,
@@ -168,7 +178,7 @@ export function acceptorServerJobConfig({
     // nothing there; including it makes the CLI refuse an inviter presenting a
     // value this acceptance did not consent to. Read off the token's own terms,
     // never the derived acceptor perspective above, whose `deduplicate` is this
-    // party's own mirrored false.
+    // party's own side and binds the inviter to nothing.
     expectedPartnerDeduplicate: token.linkageTerms.deduplicate,
   };
 }
@@ -200,6 +210,11 @@ export interface AcceptorLaunch {
    * uses the retained `rawRows`/`columns` and never reads it. Mirrors the inviter's
    * `inputSource`. */
   inputSource: AcceptorLaunchSource;
+  /** Whether several of THIS party's records may match one of the partner's, as
+   * the accepting operator set it at the terms-review seat. Fixed into the
+   * launch like every other committed choice, so the run cannot be retuned under
+   * itself, and carried on both the browser and the server-job path. */
+  deduplicate: boolean;
   /** The confirm-columns step's file-handling choices for a server-job accept,
    * already resolved through core's retain-mode implication. Fixed into the launch
    * so the run cannot be retuned under itself; absent when the operator changed
@@ -358,7 +373,7 @@ export function useAcceptorExchange({
 
     const { invitation, acceptorName, rawRows, columns, edits, inputSource } =
       current;
-    const { options, runDiagnostics, receipts } = current;
+    const { options, runDiagnostics, receipts, deduplicate } = current;
     const { token, endpoint } = invitation;
     // The console transport this endpoint runs over, threaded to failureFor so a
     // console mounted-file create rejection (a workFile 400) names the file cause
@@ -398,6 +413,7 @@ export function useAcceptorExchange({
         rawRows,
         columns,
         disclosedPayloadColumns: token.disclosedPayloadColumns,
+        deduplicate,
       });
       onStages(stagesFor(prepared, "acceptor"));
 
@@ -461,6 +477,7 @@ export function useAcceptorExchange({
           edits,
           inputSource: jobInputSource,
           transport: serverJobTransport,
+          deduplicate,
           ...(options !== undefined ? { options } : {}),
           ...(runDiagnostics !== undefined ? { runDiagnostics } : {}),
           ...(receipts !== undefined ? { receipts } : {}),
@@ -501,10 +518,19 @@ export function useAcceptorExchange({
     }
 
     // Raise a failure's alert and freeze the run: the terminal path for every
-    // error except a busy (409) create, which re-attaches instead.
+    // error except a busy (409) create, which re-attaches instead. Whether a
+    // location was picked is the draft's own field, never anything the refusal
+    // reports, and it chooses that refusal's copy.
     const raiseFailure = (category: ExchangeErrorCategory, error: unknown) => {
       setFailure(
-        failureFor(category, error, jobInputSource, channel, "acceptor"),
+        failureFor(
+          category,
+          error,
+          jobInputSource,
+          channel,
+          "acceptor",
+          receipts?.signing?.identityLocation !== undefined,
+        ),
       );
       setRun((prev) => runWithFailure(prev));
     };

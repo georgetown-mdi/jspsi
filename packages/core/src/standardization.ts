@@ -33,6 +33,7 @@ import { readRowColumn } from "./file.js";
 import type { CSVRow } from "./file.js";
 import { isCalendarDateValid } from "./utils/calendarDate.js";
 import {
+  assertFuzzyExpansionAccepts,
   expandFuzzyComparisons,
   expandsOnReceiverOnly,
 } from "./fuzzyComparisons.js";
@@ -51,13 +52,11 @@ import {
 } from "./fanOutFunctions.js";
 
 export {
-  assertDeclaredWidthMatchesStrategy,
   declaredEffectiveKeyCount,
   declaredKeyWidth,
   FAN_OUT_CANDIDATES_PER_ELEMENT,
   FAN_OUT_FUNCTION_NAMES,
   localFanOutFactor,
-  strategyCannotMatchDeclaredWidth,
 } from "./fanOutFunctions.js";
 export { DEFAULT_DATE_OUTPUT_FORMAT } from "./keyElementWidth.js";
 
@@ -756,34 +755,56 @@ const quotedFanOutFunctionNames = FAN_OUT_FUNCTION_NAMES.map(
   (name) => `"${name}"`,
 ).join(", ");
 
-// The recovery the DECLARED-step refusal closes on: the strategy that matches a
+// The recovery the DECLARED-step refusals close on: a strategy that matches a
 // candidate set, or no candidate set at all. Named separately because the
-// refusal's two surfaces share it while differing in error class.
-const FAN_OUT_STRATEGY_RECOVERY =
-  "Agree linkage terms whose linkage_strategy is single-pass, or remove the " +
-  `${quotedFanOutFunctionNames} step from the standardization and from every ` +
-  "linkage-key element transform.";
+// refusal's surfaces share it while differing in error class.
+const CANDIDATE_SET_STRATEGY_RECOVERY =
+  "Agree linkage terms whose linkage_strategy matches a candidate set, or " +
+  `remove the ${quotedFanOutFunctionNames} step, the fuzzy comparison and ` +
+  "the swapped key order from the standardization and from every linkage " +
+  "key.";
 
 /**
- * The message both DECLARED-step refusals hold, raised before the exchange
- * runs. `functionName` is matched against FAN_OUT_FUNCTION_NAMES before it
- * reaches here, so the message is a fixed literal, never partner free text;
- * the strategy the terms actually name is not interpolated, since nothing
- * narrows it to a schema literal at this boundary. The two refusals share the
- * wording and differ only in error class, by whose content the fault is (see
- * assertFanOutImplemented).
+ * The message the DECLARED-step refusal holds for a standardization pipeline,
+ * raised before the exchange runs. `functionName` is matched against
+ * FAN_OUT_FUNCTION_NAMES before it reaches here, so the message is a fixed
+ * literal, never partner free text; the strategy the terms actually name is
+ * not interpolated, since nothing narrows it to a schema literal at this
+ * boundary.
  *
  * @internal composed by `assertFanOutImplemented` in `linkageSatisfiability.ts`.
  */
 export function fanOutDeclaredMessage(functionName: string): string {
   return (
-    "fan-out matching runs under the single-pass linkage strategy only, but " +
-    "these linkage terms name another and these transforms declare a " +
-    `"${functionName}" step: it expands one value into several match ` +
-    "candidates, while every other strategy matches a single value per record. " +
-    "A record whose value actually splits would abort the run the moment it " +
-    "reached a matching round rather than match one key per candidate, so the " +
-    `exchange is refused up front instead. ${FAN_OUT_STRATEGY_RECOVERY}`
+    "these linkage terms name a linkage strategy that matches a single value " +
+    `per record, and these transforms declare a "${functionName}" step: it ` +
+    "expands one value into several match candidates. A record whose value " +
+    "actually splits would abort the run the moment it reached a matching " +
+    "round rather than match one key per candidate, so the exchange is " +
+    `refused up front instead. ${CANDIDATE_SET_STRATEGY_RECOVERY}`
+  );
+}
+
+/**
+ * The sibling message for a candidate set declared by the LINKAGE KEYS
+ * themselves -- an element transform's fan-out step, a
+ * `generate_fuzzy_comparisons` expansion, or a `swap` naming both orders --
+ * under a strategy that matches a single value per record.
+ *
+ * Fixed literals only: this half is adopted verbatim from a partner's
+ * invitation on the accept path, so nothing from the document is
+ * interpolated.
+ *
+ * @internal composed by `assertFanOutImplemented` in `linkageSatisfiability.ts`.
+ */
+export function candidateSetUnderStrategyMessage(): string {
+  return (
+    "these linkage terms name a linkage strategy that matches a single value " +
+    "per record, and one of their linkage keys expands one value into several " +
+    "match candidates. A record realizing several candidates would abort the " +
+    "run the moment it reached a matching round rather than match one key per " +
+    "candidate, so the exchange is refused up front instead. " +
+    CANDIDATE_SET_STRATEGY_RECOVERY
   );
 }
 
@@ -791,32 +812,35 @@ export function fanOutDeclaredMessage(functionName: string): string {
  * Refusal for a candidate set that reached a call site running one value per
  * record -- the point of harm, since the alternative is silent narrowing.
  * Key realization holds every candidate ({@link buildKeyStrings}); the call
- * sites that cannot honor them are `linkViaPSI`, `linkViaCountOnlyPSI` (fan-out
- * matching runs under single-pass alone), and the single-pass table build
+ * sites that cannot honor them are `linkViaCountOnlyPSI` (a count-only round
+ * counts matched values), `linkViaPSI` under a `many-to-many` cardinality or a
+ * strategy off the candidate-set allowlist, and the single-pass table build
  * for a party that declared no fan-out (a fixed-width column holds one
  * value per key, record). A party that DID declare one builds a ragged
  * table instead and refuses in `link.ts`'s own width checks, a different
  * refusal on the same fault: an expansion the declared factors do not
  * account for.
  *
- * Unreachable while {@link assertFanOutImplemented} gates every run path
- * off single-pass. Encoded as a check, not a comment, since it also covers
- * a fan-out function missing from {@link FAN_OUT_FUNCTION_NAMES}, and a
- * standardization-authored path a prepared exchange assembled outside
- * `prepareForExchange` hides from that gate.
+ * Unreachable for a combination {@link assertFanOutImplemented} and
+ * {@link assertCandidateSetCardinalityImplemented} gate at the terms.
+ * Encoded as a check, not a comment, since it also covers a fan-out function
+ * missing from {@link FAN_OUT_FUNCTION_NAMES}, and a standardization-authored
+ * path a prepared exchange assembled outside `prepareForExchange` hides from
+ * those gates.
  */
 export function fanOutReachedMatchingRefusal(): UsageError {
   return new UsageError(
     "a transform expanded a record into several match candidates, but this " +
-      "round matches a single value per record: fan-out matching runs under " +
-      "the single-pass linkage strategy, and there only for a party whose " +
-      "declared linkage terms and standardization account for the expansion. " +
+      "round matches a single value per record: a count-only exchange and a " +
+      "many-to-many match run one value per record, and a single-pass party " +
+      "matches a candidate set only where its declared linkage terms and " +
+      "standardization account for the expansion. " +
       "Continuing would drop the record from its linkage key rather than " +
       "match it on each candidate, so the exchange is refused instead. Remove " +
-      "the step that expands this record's value -- a " +
-      `${quotedFanOutFunctionNames} step under another strategy, a fuzzy ` +
-      "comparison, or a transform that expands one value without being a " +
-      "declared fan-out function.",
+      `the step that expands this record's value -- a ` +
+      `${quotedFanOutFunctionNames} step, a fuzzy comparison, a swapped key ` +
+      "order, or a transform that expands one value without being a declared " +
+      "fan-out function.",
   );
 }
 
@@ -2080,6 +2104,9 @@ function compiledElementSteps(
  */
 const MAX_TRANSFORMED_VALUE_LENGTH = 4096;
 
+const UNRECOGNIZED_TRANSFORM_FUNCTION_LABEL =
+  "a function this build does not recognize";
+
 // Every number in the refusals below is a derived integer and the step's
 // function name is narrowed to a fixed literal before it is interpolated, so
 // neither the value (this party's own PII) nor partner free text reaches the
@@ -2088,7 +2115,22 @@ const MAX_TRANSFORMED_VALUE_LENGTH = 4096;
 function transformFunctionLabel(functionName: string): string {
   return STANDARDIZATION_FUNCTION_NAMES.includes(functionName)
     ? `"${functionName}"`
-    : "a function this build does not recognize";
+    : UNRECOGNIZED_TRANSFORM_FUNCTION_LABEL;
+}
+
+/**
+ * Whether `label` is one {@link transformFunctionLabel} produces: a quoted name
+ * from {@link STANDARDIZATION_FUNCTION_NAMES}, or the fixed stand-in for a name
+ * this build does not have.
+ *
+ * @internal read by `asTransformRefusal` in `linkageSatisfiability.ts`, which
+ * checks a label reaching it against what the tagging site produced.
+ */
+export function isTransformFunctionLabel(label: string): boolean {
+  return (
+    label === UNRECOGNIZED_TRANSFORM_FUNCTION_LABEL ||
+    STANDARDIZATION_FUNCTION_NAMES.some((name) => `"${name}"` === label)
+  );
 }
 
 // The issue path locating an element in the agreed terms. The key index is
@@ -3074,6 +3116,14 @@ function buildKeyStringsUnderPlan(
     // allocation this charge refuses. The transient at a crossing is one
     // value's expansion, bounded by the kind's ceiling and
     // MAX_FUZZY_EXPANSION_INPUT_LENGTH without reference to the row.
+
+    // The refusal for a value the kind cannot expand is read over the whole
+    // pre-expansion list first, because the loop below can settle the row at
+    // the accumulating bound before it reaches a later value -- which would
+    // leave whether the operator hears about an unexpandable value to where in
+    // the element's candidate order it sits. The list is already charged and
+    // bounded by the row cap, so the pass allocates nothing.
+    for (const value of candidates) assertFuzzyExpansionAccepts(value, fuzzy);
     rowCandidateCharacters -= totalCandidateCharacters(candidates);
     const expanded: string[] = [];
     for (const value of candidates) {

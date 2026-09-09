@@ -16,9 +16,9 @@ import { INFER_DATE_SCAN_CAP, inferDateFormat } from "./utils/date.js";
  * this selection runs inside the read -- `loadCSVColumnSample`'s chunk handler
  * and the web server's stream consumer -- which holds no sanitized-position
  * list, so its empty-name refusal would state the wrong cause for a name the
- * bidi strip emptied, ahead of the caller's own warning. The one refusal stays
+ * strip emptied, ahead of the caller's own warning. The one refusal stays
  * with that caller, which passes the positions
- * (`CSVParseMeta.bidiStrippedColumns`) and names the removal. A type is resolved
+ * (`CSVParseMeta.sanitizedColumnPositions`) and names the removal. A type is resolved
  * per name, so dropping one changes no other column's type.
  */
 export function inferDateOfBirthColumn(
@@ -35,10 +35,10 @@ export function inferDateOfBirthColumn(
 interface InferredDateInputFormat {
   /** The CSV header field names. */
   columns: Array<string>;
-  /** The 1-based positions of the names the read removed bidi control characters
-   * from (`CSVParseMeta.bidiStrippedColumns`), so a caller authoring a config
+  /** The 1-based positions of the names the read removed control characters
+   * from (`CSVParseMeta.sanitizedColumnPositions`), so a caller authoring a config
    * from this read tells its operator what changed. */
-  bidiStrippedColumns: Array<number>;
+  sanitizedColumnPositions: Array<number>;
   /** The date-of-birth column the format was inferred from, absent when the
    * header has none. */
   dobColumn?: string;
@@ -67,7 +67,7 @@ export async function inferDateInputFormatFromSource(
   file: LocalFile,
   byteCeiling: number = CSV_LINE_BYTE_CEILING,
 ): Promise<InferredDateInputFormat> {
-  const { columns, bidiStrippedColumns, sampledColumn, sample } =
+  const { columns, sanitizedColumnPositions, sampledColumn, sample } =
     await loadCSVColumnSample(
       file,
       inferDateOfBirthColumn,
@@ -78,7 +78,7 @@ export async function inferDateInputFormatFromSource(
     sampledColumn !== undefined ? inferDateFormat(sample) : undefined;
   return {
     columns,
-    bidiStrippedColumns,
+    sanitizedColumnPositions,
     ...(sampledColumn !== undefined ? { dobColumn: sampledColumn } : {}),
     ...(dateInputFormat !== undefined ? { dateInputFormat } : {}),
   };

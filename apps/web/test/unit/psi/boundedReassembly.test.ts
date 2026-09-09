@@ -1,7 +1,8 @@
 import { describe, expect, test, vi } from "vitest";
 
-import { ConnectionError } from "@psilink/core";
-import { WEBRTC_VALUE_WEIGHTS } from "@psilink/core/testing";
+import { ConnectionError, MAX_WEBRTC_STRING_BYTES } from "@psilink/core";
+
+import { MAX_CSV_FILE_BYTES } from "@components/csvIntake";
 
 import {
   boundChunkReassembly,
@@ -115,15 +116,6 @@ function str32Header(byteLen: number): Uint8Array {
   ]);
 }
 
-/** A BinaryPack array16 of `n` empty objects (each a one-byte `fixmap` of zero
- * pairs) -- the cheapest-on-the-wire, heaviest-in-memory shape, the worst case the
- * byte-aware budget exists to charge exactly. */
-function arrayOfEmptyObjects(n: number): Uint8Array {
-  const out = [0xdc, (n >>> 8) & 0xff, n & 0xff];
-  for (let i = 0; i < n; i++) out.push(0x80); // fixmap(0)
-  return new Uint8Array(out);
-}
-
 /** A BinaryPack fixstr (declared length <= 15) of `s`, header byte + UTF-8 bytes. */
 function fixstr(s: string): Array<number> {
   const bytes = [...new TextEncoder().encode(s)];
@@ -145,8 +137,7 @@ function mappedRecord(theirIndex: number, iteration: number): Array<number> {
 
 /** A BinaryPack array16 of `n` mapped-element records (the mapped-element frame).
  * Bounded to the array16 count so a large `n` fails loud rather than silently
- * truncating the header; the budget derivation uses {@link expectedMappedCost}
- * (pure arithmetic) for the multi-million-record ceiling, never a real buffer. */
+ * truncating the header. */
 function mappedElementFrame(n: number): Uint8Array {
   if (n > 0xffff)
     throw new RangeError(`mappedElementFrame: n=${n} exceeds array16`);
@@ -155,32 +146,9 @@ function mappedElementFrame(n: number): Uint8Array {
   return new Uint8Array(out);
 }
 
-/** Resident weight of a string of `byteLen` wire bytes under the cost model. */
-function stringWeightOf(byteLen: number): number {
-  return (
-    WEBRTC_VALUE_WEIGHTS.stringBase +
-    WEBRTC_VALUE_WEIGHTS.stringPerByte * byteLen
-  );
-}
-
-/** The charged retained cost of an `n`-record mapped-element frame under the cost
- * model: a root array, plus per record its slot in that array, one object, the
- * object's four declared slots, and two key strings. This is the derivation the
- * production budget is sized against. */
-function expectedMappedCost(n: number): number {
-  const perRecord =
-    WEBRTC_VALUE_WEIGHTS.scalar +
-    WEBRTC_VALUE_WEIGHTS.object +
-    4 * WEBRTC_VALUE_WEIGHTS.scalar +
-    stringWeightOf("theirIndex".length) +
-    stringWeightOf("iteration".length);
-  return WEBRTC_VALUE_WEIGHTS.array + n * perRecord;
-}
-
 type InstallOptions = {
   maxFrameBytes?: number;
   maxConcurrentReassemblies?: number;
-  maxStructureBytes?: number;
   maxReassemblyDepth?: number;
   maxChunks?: number;
   minChunkResidentBytes?: number;
@@ -371,29 +339,12 @@ describe("boundChunkReassembly: wire-byte, chunk, and partial bounds", () => {
 });
 
 describe("boundChunkReassembly: deserialized-structure bound at the unpack chokepoint", () => {
-  test("rejects an unchunked frame whose retained cost exceeds the byte budget", () => {
-    const conn = new FakeChunkedConnection();
-    const fail = install(conn, { maxStructureBytes: 100 });
-
-    // A byte-backed array of 200 fixints: 40 + 200*8 = 1640 retained bytes > 100.
-    // Delivered straight through _handleDataMessage, never touching _handleChunk.
-    conn._handleDataMessage({ data: arrayOfFixints(200) });
-
-    expect(fail).toHaveBeenCalledTimes(1);
-    const err = fail.mock.calls[0][0] as ConnectionError;
-    expect(err.kind).toBe("protocol");
-    expect(err.message).toBe(
-      "inbound WebRTC frame exceeds its 100-byte structure limit",
-    );
-    expect(conn.delivered).toEqual([]);
-  });
-
   test("rejects a map keyed by a non-string, naming the map-key rule", () => {
     const conn = new FakeChunkedConnection();
-    const fail = install(conn, { maxStructureBytes: 1_000_000 });
+    const fail = install(conn);
 
-    // fixmap(1) keyed by a fixint: refused at any budget, since the property name
-    // `unpack_map` coerces such a key to is not bounded by what declares it.
+    // fixmap(1) keyed by a fixint: the property name `unpack_map` coerces such a
+    // key to is not bounded by what declares it.
     conn._handleDataMessage({ data: new Uint8Array([0x81, 0x07, 0x08]) });
 
     expect(fail).toHaveBeenCalledTimes(1);
@@ -403,28 +354,9 @@ describe("boundChunkReassembly: deserialized-structure bound at the unpack choke
     expect(conn.delivered).toEqual([]);
   });
 
-  test("rejects a frame within the old value-count budget but over the byte budget", () => {
-    const conn = new FakeChunkedConnection();
-    const fail = install(conn, { maxStructureBytes: 1000 });
-
-    // 20 empty objects is 21 values -- trivially within any value-count budget --
-    // but 40 + 20*64 = 1320 retained bytes, over the 1000-byte budget. This is the
-    // empty-object amplification a flat per-value count let through; the scan
-    // rejects it at the offending header, before unpack allocates the objects.
-    conn._handleDataMessage({ data: arrayOfEmptyObjects(20) });
-
-    expect(fail).toHaveBeenCalledTimes(1);
-    expect((fail.mock.calls[0][0] as ConnectionError).message).toContain(
-      "structure limit",
-    );
-    expect(conn.delivered).toEqual([]);
-  });
-
   test("rejects a deep nested-array spine by the bytes-that-follow check", () => {
     const conn = new FakeChunkedConnection();
-    // Byte budget generous, so the bytes-that-follow check is what decides and the
-    // refusal names it rather than the budget.
-    const fail = install(conn, { maxStructureBytes: 1_000_000_000 });
+    const fail = install(conn);
 
     // Eight nested array32 each declaring 999000: each header declares far more
     // elements than the bytes that follow it, so the first is refused.
@@ -440,14 +372,10 @@ describe("boundChunkReassembly: deserialized-structure bound at the unpack choke
 
   test("rejects a spine nested deeper than the depth cap, naming that cap", () => {
     const conn = new FakeChunkedConnection();
-    const fail = install(conn, {
-      maxStructureBytes: 1_000_000,
-      maxReassemblyDepth: 4,
-    });
+    const fail = install(conn, { maxReassemblyDepth: 4 });
 
-    // Ten fixarray(1) levels over one fixint leaf: every level is byte-backed and
-    // the whole frame costs 10*(40+8) retained bytes, so only the depth cap can
-    // refuse it.
+    // Ten fixarray(1) levels over one fixint leaf: every level is byte-backed, so
+    // only the depth cap can refuse it.
     const spine = new Uint8Array([...new Array<number>(10).fill(0x91), 0x01]);
     conn._handleDataMessage({ data: spine });
 
@@ -458,31 +386,11 @@ describe("boundChunkReassembly: deserialized-structure bound at the unpack choke
     expect(conn.delivered).toEqual([]);
   });
 
-  test("rejects sibling containers whose combined retained cost exceeds the budget", () => {
-    const conn = new FakeChunkedConnection();
-    const fail = install(conn, { maxStructureBytes: 100 });
-
-    // array(2) of two byte-backed array(60)s: each container is within the bytes
-    // that follow, but 40 + 2*40 + 120*8 = 1080 retained bytes > 100, since the
-    // running cost spans the whole structure, not just the current container.
-    const frame = new Uint8Array([
-      0xdc,
-      0x00,
-      0x02,
-      ...arrayOfFixints(60),
-      ...arrayOfFixints(60),
-    ]);
-    conn._handleDataMessage({ data: frame });
-
-    expect(fail).toHaveBeenCalledTimes(1);
-    expect(conn.delivered).toEqual([]);
-  });
-
   test("rejects an array declaring more elements than the bytes that follow", () => {
     const conn = new FakeChunkedConnection();
-    // Byte budget generous; the bytes-that-follow check is what catches the
-    // zero-filled-array vector (a 5-byte header declaring a million elements).
-    const fail = install(conn, { maxStructureBytes: 1_000_000_000 });
+    // The bytes-that-follow check is what catches the zero-filled-array vector (a
+    // 5-byte header declaring a million elements).
+    const fail = install(conn);
 
     conn._handleDataMessage({ data: array32Header(1_000_000) });
 
@@ -494,13 +402,10 @@ describe("boundChunkReassembly: deserialized-structure bound at the unpack choke
     expect(conn.delivered).toEqual([]);
   });
 
-  test("rejects an oversized string the byte budget alone would miss", () => {
+  test("rejects a string declaring more bytes than the per-string cap", () => {
     const conn = new FakeChunkedConnection();
     const fail = install(conn, { maxStringBytes: 100 });
 
-    // One value whose resident weight is small, but a 1000-byte string's build
-    // transient dwarfs that slot -- refused by the per-string cap, not the budget,
-    // which the refusal names.
     conn._handleDataMessage({ data: str32Header(1000) });
 
     expect(fail).toHaveBeenCalledTimes(1);
@@ -514,19 +419,17 @@ describe("boundChunkReassembly: deserialized-structure bound at the unpack choke
 
   test("accepts a small valid structure and delegates to unpack", () => {
     const conn = new FakeChunkedConnection();
-    const fail = install(conn, { maxStructureBytes: 1000 });
+    const fail = install(conn);
 
-    conn._handleDataMessage({ data: arrayOfFixints(50) }); // 40 + 50*8 = 440 <= 1000
+    conn._handleDataMessage({ data: arrayOfFixints(50) });
 
     expect(fail).not.toHaveBeenCalled();
     expect(conn.delivered).toHaveLength(1);
   });
 
-  test("accepts an at-budget legitimate mapped-element frame", () => {
+  test("accepts a legitimate mapped-element frame at the production limits", () => {
     const conn = new FakeChunkedConnection();
-    // Budget set to exactly the frame's charged cost: the largest legitimate frame
-    // shape is admitted, never rejected on its own retained size.
-    const fail = install(conn, { maxStructureBytes: expectedMappedCost(500) });
+    const fail = install(conn);
 
     conn._handleDataMessage({ data: mappedElementFrame(500) });
 
@@ -534,15 +437,12 @@ describe("boundChunkReassembly: deserialized-structure bound at the unpack choke
     expect(conn.delivered).toHaveLength(1);
   });
 
-  test("charges a binary value its view overhead, not its payload bytes", () => {
+  test("accepts a binary value whatever payload it declares", () => {
     const conn = new FakeChunkedConnection();
-    // Budget at exactly the per-value binary weight: a raw value declaring a 10-byte
-    // payload passes, so the payload is skipped rather than charged -- a real binary
-    // set frame is the wire cap's concern, not this structural budget's.
-    const fail = install(conn, {
-      maxStructureBytes: WEBRTC_VALUE_WEIGHTS.binary,
-    });
+    const fail = install(conn);
 
+    // A raw16 declaring a 10-byte payload: the scan skips the payload rather than
+    // reading it, so a real binary set frame is the wire cap's concern.
     const raw = new Uint8Array(13);
     raw[0] = 0xda; // raw16
     raw[1] = 0x00;
@@ -553,32 +453,13 @@ describe("boundChunkReassembly: deserialized-structure bound at the unpack choke
     expect(conn.delivered).toHaveLength(1);
   });
 
-  test("refuses a binary value one byte below its view overhead", () => {
-    // The other side of that boundary: the view a `bin`/`raw` value decodes to is
-    // charged, so a budget below it refuses a frame holding the same 256-byte
-    // charge the budget above admits (that test's raw16 differs in payload, not
-    // in charge).
-    const conn = new FakeChunkedConnection();
-    const fail = install(conn, {
-      maxStructureBytes: WEBRTC_VALUE_WEIGHTS.binary - 1,
-    });
-
-    conn._handleDataMessage({ data: new Uint8Array([0xa0]) }); // fixraw(0)
-
-    expect(fail).toHaveBeenCalledTimes(1);
-    expect(conn.delivered).toEqual([]);
-  });
-
   test("scans the reassembled frame on the chunked-completion path too", () => {
     const conn = new FakeChunkedConnection();
-    const fail = install(conn, {
-      maxStructureBytes: 100,
-      maxFrameBytes: 1_000_000,
-    });
+    const fail = install(conn, { maxFrameBytes: 1_000_000 });
 
-    // A byte-backed over-budget array delivered as two chunks: the scan runs on
-    // the reassembled buffer via the recursive _handleDataMessage call.
-    const frame = arrayOfFixints(200);
+    // An over-declared array delivered as two chunks: the scan runs on the
+    // reassembled buffer via the recursive _handleDataMessage call.
+    const frame = new Uint8Array([...array32Header(1_000_000), 0x01, 0x01]);
     const mid = Math.ceil(frame.length / 2);
     conn._handleChunk({
       __peerData: 1,
@@ -594,10 +475,19 @@ describe("boundChunkReassembly: deserialized-structure bound at the unpack choke
     });
 
     expect(fail).toHaveBeenCalledTimes(1);
-    expect((fail.mock.calls[0][0] as ConnectionError).message).toContain(
-      "structure limit",
+    expect((fail.mock.calls[0][0] as ConnectionError).message).toBe(
+      "inbound WebRTC frame declares a container with more elements than the " +
+        "bytes behind it can encode",
     );
     expect(conn.delivered).toEqual([]);
+  });
+
+  test("caps a single string at the file size the CSV intake accepts", () => {
+    // The per-string cap is set to the intake cap because a payload cell is not
+    // length-bounded upstream: a cell that reached the wire from an admitted file
+    // must not be refused here. Core cannot import the app that owns the intake
+    // cap, so the two are held together here.
+    expect(MAX_WEBRTC_STRING_BYTES).toBe(MAX_CSV_FILE_BYTES);
   });
 });
 

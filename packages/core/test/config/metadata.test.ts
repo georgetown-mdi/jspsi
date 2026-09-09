@@ -2,6 +2,7 @@ import { expect, test } from "vitest";
 
 import {
   inferMetadata,
+  METADATA_NAME_SHAPE_MESSAGE,
   ALIAS_TYPE_META_MAP,
   ownResultColumnNames,
   safeParseMetadata,
@@ -317,6 +318,93 @@ test("safeParseMetadata does not echo an over-long name in the error", () => {
   }
 });
 
+// --- column-name shape --------------------------------------------------------
+// The block's `name` takes the shape the linkage-terms names take: a declared
+// column name is a name rather than a data value, it is matched on, and each
+// disclosed one reaches the partner in the invitation's payload column list and
+// both parties' exchange records. The two refused classes are written as escapes
+// so this source holds no raw invisible byte.
+
+test("safeParseMetadata accepts a column name written in letters", () => {
+  // What the rule leaves alone: letters in three scripts, an astral character,
+  // and the two invisibles outside the class -- the zero-width joiner and the
+  // left-to-right MARK, which opens no scope.
+  const result = safeParseMetadata([
+    {
+      name: "Ministe\u0300re \u200d\u5389\u751f\u52b4\u50cd\u7701\u200e \u{1f600}",
+      type: "other",
+      role: "payload",
+      is_payload: true,
+    },
+  ]);
+  expect(result.success).toBe(true);
+});
+
+test.each([
+  ["a NUL", "\u0000"],
+  ["a BEL", "\u0007"],
+  ["a tab", "\t"],
+  ["a line feed", "\n"],
+  ["a carriage return", "\r"],
+  ["an ESC", "\u001b"],
+  ["a DEL", "\u007f"],
+  ["a C1 control", "\u0085"],
+  ["a left-to-right embedding", "\u202a"],
+  ["a right-to-left embedding", "\u202b"],
+  ["a pop directional formatting", "\u202c"],
+  ["a left-to-right override", "\u202d"],
+  ["a right-to-left override", "\u202e"],
+  ["a left-to-right isolate", "\u2066"],
+  ["a right-to-left isolate", "\u2067"],
+  ["a first-strong isolate", "\u2068"],
+  ["a pop directional isolate", "\u2069"],
+])(
+  "safeParseMetadata rejects a column name holding %s",
+  (_label, character) => {
+    const result = safeParseMetadata([
+      {
+        name: `id${character}`,
+        type: "other",
+        role: "payload",
+        is_payload: true,
+      },
+    ]);
+    expect(result.success).toBe(false);
+  },
+);
+
+test("the shape refusal names the field by path, not the value", () => {
+  const result = safeParseMetadata([
+    {
+      name: "id\u0007unrepeatable-name",
+      type: "other",
+      role: "payload",
+      is_payload: true,
+    },
+  ]);
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  expect(result.error.issues.map((issue) => issue.path.join("."))).toContain(
+    "0.name",
+  );
+  const rendered = JSON.stringify(result.error.issues);
+  expect(rendered).toContain(METADATA_NAME_SHAPE_MESSAGE);
+  expect(rendered).not.toContain("unrepeatable-name");
+});
+
+test("the shape refusal names the remedy and the removal behind it", () => {
+  // A configuration reaches this refusal by declaring a column as the header
+  // was typed, so the rule alone leaves the operator with nothing to do: the
+  // message ties the character to the header read and names both ways out.
+  expect(METADATA_NAME_SHAPE_MESSAGE).toContain(
+    "the CSV read removes these characters from a header",
+  );
+  expect(METADATA_NAME_SHAPE_MESSAGE).toContain("re-run psilink init");
+  expect(METADATA_NAME_SHAPE_MESSAGE).toContain(
+    "delete the character from the name",
+  );
+});
+
 // --- role: ignored ------------------------------------------------------------
 
 test("safeParseMetadata accepts role: ignored", () => {
@@ -398,7 +486,7 @@ test("inferMetadata empty-name error names the positions, not input", () => {
 });
 
 test("the empty-name refusal blames the removal when it emptied the name", () => {
-  // A header made only of text-direction characters is neither a trailing comma
+  // A header made only of control characters is neither a trailing comma
   // nor a blank cell, so a caller holding the parse's sanitation positions gets a
   // cause and a remedy that fit what the operator's file actually had.
   let message = "";
@@ -408,7 +496,7 @@ test("the empty-name refusal blames the removal when it emptied the name", () =>
     message = err instanceof Error ? err.message : String(err);
   }
   expect(message).toContain("input column 2 has an empty name");
-  expect(message).toContain("invisible text-direction characters");
+  expect(message).toContain("invisible control characters");
   expect(message).toContain("ordinary characters");
   expect(message).not.toContain("trailing comma");
 });
@@ -422,7 +510,7 @@ test("the empty-name refusal states both causes for a mixed header", () => {
   }
   expect(message).toContain("input columns 2, 4 have an empty name");
   expect(message).toContain("column 2 held");
-  expect(message).toContain("invisible text-direction characters");
+  expect(message).toContain("invisible control characters");
   expect(message).toContain("trailing comma");
 });
 
@@ -436,7 +524,7 @@ test("a sanitized position that is not empty leaves the generic cause", () => {
     message = err instanceof Error ? err.message : String(err);
   }
   expect(message).toContain("trailing comma");
-  expect(message).not.toContain("text-direction");
+  expect(message).not.toContain("invisible control characters");
 });
 
 test("inferMetadata accepts a fully-named header (no regression)", () => {

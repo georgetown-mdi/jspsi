@@ -7,13 +7,16 @@ import {
 import {
   MAX_TEXT_LENGTH,
   TEXT_CONTROL_CHAR_MESSAGE,
+  TEXT_DIRECTION_MESSAGE,
   safeParseLinkageTerms,
 } from "../src/config/linkageTermsSchema";
 import type { LinkageTerms } from "../src/config/linkageTermsSchema";
 import {
   assertPresentedDeduplicateMatchesInvitation,
   InvitationTermDivergenceError,
+  resolveLinkageCardinality,
 } from "../src/exchange";
+import { COUNT_ONLY_SHAPE_REFUSALS } from "../src/linkageTermsPolicy";
 import { UsageError } from "../src/errors";
 import {
   DISPLAY_TRUNCATION_MARKER,
@@ -865,11 +868,13 @@ test.each([
     output: { expectsOutput: true, shareWithPartner: false },
   },
 ])(
-  "deriveAcceptedLinkageTerms derives the acceptor's deduplicate as false ($direction)",
+  "deriveAcceptedLinkageTerms derives the acceptor's deduplicate as false with no value supplied ($direction)",
   ({ output }) => {
     // The acceptor's own side of the cardinality is never the inviter's to set, so
     // it is derived rather than read off the invitation, for either output shape and
-    // for either value the invitation holds. That is what closes the flip: a
+    // for either value the invitation holds. A caller with no control over that
+    // side supplies none and gets this closed default. That is what closes the
+    // flip: a
     // hostile inviter declaring `true` and then presenting `false` at the terms
     // exchange cannot make this party the "many" side, because this party's value
     // was never the invitation's.
@@ -940,6 +945,41 @@ test("deriveAcceptedLinkageTerms fails closed when the mirror is incoherent (pay
   // thing refused, so the account stays the invitation's.
   expect((thrown as Error).message).toContain("cannot be accepted unchanged");
   expect((thrown as Error).message).not.toContain(TEXT_CONTROL_CHAR_MESSAGE);
+  // The schema's own issue, named rather than described: a caller rendering
+  // this reads which rule the derived document broke, and a second shape below
+  // reaches the same check with a different rule.
+  expect((thrown as Error).message).toContain(
+    "payload.receive: payload.receive must be empty when expectsOutput is false",
+  );
+});
+
+test("deriveAcceptedLinkageTerms names the schema issue for an acceptorDeduplicate the mirror cannot hold", () => {
+  // The second shape reaching the same coherence check: the accepting party
+  // declares deduplicate against a sole-receiver invitation, which mirrors it to
+  // expectsOutput: false -- a combination the schema refuses. A seat that offers
+  // a control for this party's own side reads the same rule before offering it
+  // (acceptorMaySetDeduplicate, apps/web/src/psi/acceptInvitation.ts).
+  const inviterTerms: LinkageTerms = {
+    ...inviterBase,
+    output: { expectsOutput: true, shareWithPartner: false },
+  };
+  let thrown: unknown;
+  try {
+    deriveAcceptedLinkageTerms(inviterTerms, "Accepting Org", true);
+  } catch (e) {
+    thrown = e;
+  }
+  expect((thrown as Error).message).toContain(
+    "output.expectsOutput: expectsOutput must be true when deduplicate is true",
+  );
+  // This invitation declares no payload, so a message naming one would be an
+  // account of a shape that is not here.
+  expect((thrown as Error).message).not.toContain("payload.receive");
+  // The same invitation accepted with the closed default runs, so what is
+  // refused is the value, not the invitation.
+  expect(() =>
+    deriveAcceptedLinkageTerms(inviterTerms, "Accepting Org"),
+  ).not.toThrow();
 });
 
 test("deriveAcceptedLinkageTerms refuses a control character in the ACCEPTOR's own identity", () => {
@@ -963,6 +1003,27 @@ test("deriveAcceptedLinkageTerms refuses a control character in the ACCEPTOR's o
   // for this rule follows.
   expect(message).not.toContain("quarantined-county");
   expect(message).not.toContain("\t");
+});
+
+test("deriveAcceptedLinkageTerms refuses a text-direction character in the ACCEPTOR's own identity", () => {
+  // The second rule the schema holds this field to, applied where the
+  // control-character rule is and for the same reason: substituted unchecked,
+  // the value fails the re-check at the end under the invitation's account.
+  let thrown: unknown;
+  try {
+    deriveAcceptedLinkageTerms(
+      inviterBase,
+      "Agency\u202eA of quarantined-county",
+    );
+  } catch (e) {
+    thrown = e;
+  }
+  expect(thrown).toBeInstanceOf(UsageError);
+  const { message } = thrown as Error;
+  expect(message).toContain(TEXT_DIRECTION_MESSAGE);
+  expect(message).not.toContain("cannot be accepted unchanged");
+  expect(message).not.toContain("quarantined-county");
+  expect(message).not.toContain("\u202e");
 });
 
 test.each([
@@ -1076,3 +1137,142 @@ test("deriveAcceptedLinkageTerms accepts a sole-receiver inviter that REQUESTS p
   expect(validateCompatibility(inviterTerms, derived).errors).toEqual([]);
   expect(validateCompatibility(derived, inviterTerms).errors).toEqual([]);
 });
+
+// --- The accepting party's own deduplicate -----------------------------------
+
+// The value a seat where the accepting party authors its own side passes, which
+// reaches the terms that party presents rather than being derived away. These
+// pin that it survives the derivation, that the pair the two documents make
+// resolves at the run boundary, and that a pair the run refuses is refused at
+// the derivation.
+
+test.each([false, true])(
+  "deriveAcceptedLinkageTerms carries the accepting party's own deduplicate (invitation declares %s)",
+  (declared) => {
+    const inviterTerms: LinkageTerms = {
+      ...inviterBase,
+      deduplicate: declared,
+    };
+    const derived = deriveAcceptedLinkageTerms(
+      inviterTerms,
+      "Accepting Org",
+      true,
+    );
+    expect(derived.deduplicate).toBe(true);
+    // The invitation's own side is untouched by the accepting party's choice, so
+    // nothing changes for the inviting party.
+    expect(inviterTerms.deduplicate).toBe(declared);
+    // Still no cross-party equality rule: the differing pair IS the one-sided
+    // run, and the matching pair is the both-sided one.
+    expect(validateCompatibility(inviterTerms, derived).errors).toEqual([]);
+    expect(validateCompatibility(derived, inviterTerms).errors).toEqual([]);
+  },
+);
+
+test.each([
+  { inviter: false, acceptor: false, cardinality: "one-to-one" },
+  { inviter: true, acceptor: false, cardinality: "one-to-many" },
+  { inviter: false, acceptor: true, cardinality: "many-to-one" },
+  { inviter: true, acceptor: true, cardinality: "many-to-many" },
+] as const)(
+  "the run resolves the pair ($inviter, $acceptor) to $cardinality on the accepting party's side",
+  ({ inviter, acceptor, cardinality }) => {
+    // The joint cardinality comes from the two PRESENTED values through the one
+    // boundary a two-config exchange resolves it at, so an acceptance that sets
+    // its own side reaches the same result as two authored configurations. The
+    // label is read from the resolving party's own side, so each party holds the
+    // mirror of the other's for the single procedure they run.
+    const inviterTerms: LinkageTerms = {
+      ...inviterBase,
+      deduplicate: inviter,
+    };
+    const acceptorTerms = deriveAcceptedLinkageTerms(
+      inviterTerms,
+      "Accepting Org",
+      acceptor,
+    );
+    expect(
+      resolveLinkageCardinality(acceptorTerms, inviterTerms),
+    ).toStrictEqual({
+      localDeduplicate: acceptor,
+      partnerDeduplicate: inviter,
+      cardinality,
+    });
+    const mirrored =
+      cardinality === "many-to-one"
+        ? "one-to-many"
+        : cardinality === "one-to-many"
+          ? "many-to-one"
+          : cardinality;
+    expect(
+      resolveLinkageCardinality(inviterTerms, acceptorTerms),
+    ).toStrictEqual({
+      localDeduplicate: inviter,
+      partnerDeduplicate: acceptor,
+      cardinality: mirrored,
+    });
+  },
+);
+
+test("the both-sided pair under single-pass is refused before matching begins", () => {
+  // The one combination this build refuses: both parties deduplicating under a
+  // strategy that pairs no many-to-many. The refusal is the COMBINATION's -- it
+  // names the strategy to change and the one-sided pair to fall back to -- not a
+  // statement that the accepting party may never set its own side.
+  const inviterTerms: LinkageTerms = {
+    ...inviterBase,
+    linkageStrategy: "single-pass",
+    deduplicate: true,
+  };
+  const acceptorTerms = deriveAcceptedLinkageTerms(
+    inviterTerms,
+    "Accepting Org",
+    true,
+  );
+  const refusal = thrownFrom(() =>
+    resolveLinkageCardinality(acceptorTerms, inviterTerms),
+  );
+  expect(refusal).toBeInstanceOf(UsageError);
+  expect(refusal.message).toContain("cascade");
+  expect(refusal.message).toContain("deduplicate to false on one of the two");
+  // Clearing this party's own side runs, so the refusal is not a bar on the
+  // setting itself.
+  expect(() =>
+    resolveLinkageCardinality(
+      deriveAcceptedLinkageTerms(inviterTerms, "Accepting Org"),
+      inviterTerms,
+    ),
+  ).not.toThrow();
+});
+
+test("count-only terms refuse the accepting party's own deduplicate", () => {
+  // The count-only shape holds NEITHER party's `deduplicate` open, and the
+  // invitation's own value is read before the mirror is built -- where the
+  // accepting party's does not appear. The derived document is held to the same
+  // rule, so the value is refused at acceptance rather than at the run boundary.
+  const countOnly: LinkageTerms = {
+    ...inviterBase,
+    algorithm: "psi-c",
+    linkageStrategy: "cascade",
+    deduplicate: false,
+  };
+  expect(() =>
+    deriveAcceptedLinkageTerms(countOnly, "Accepting Org"),
+  ).not.toThrow();
+  const refusal = thrownFrom(() =>
+    deriveAcceptedLinkageTerms(countOnly, "Accepting Org", true),
+  );
+  expect(refusal).toBeInstanceOf(UsageError);
+  expect(refusal.message).toBe(COUNT_ONLY_SHAPE_REFUSALS.deduplicate);
+});
+
+// The thrown value, or a failure naming that nothing was thrown -- so a test
+// asserting on a refusal cannot pass by the call succeeding.
+function thrownFrom(run: () => unknown): Error {
+  try {
+    run();
+  } catch (error) {
+    return error as Error;
+  }
+  throw new Error("expected a refusal, but the call returned");
+}

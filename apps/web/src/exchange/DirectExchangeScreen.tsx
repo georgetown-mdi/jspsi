@@ -37,9 +37,11 @@ import { ServerFilePicker } from "@console/ServerFilePicker";
 import styles from "@styles/app.module.css";
 
 import {
+  DIRECT_DEDUPLICATE_DEFAULT,
   DIRECT_LINKAGE_STRATEGY_DEFAULT,
   DIRECT_STEP_LABELS,
   DIRECT_STEP_ORDER,
+  directDeduplicateIntentFields,
   directLinkageStrategyIntentFields,
 } from "./directExchangeModel";
 import { WorkShell } from "./WorkShell";
@@ -105,6 +107,10 @@ export function DirectExchangeScreen() {
   const [linkageStrategy, setLinkageStrategy] = useState<LinkageStrategy>(
     DIRECT_LINKAGE_STRATEGY_DEFAULT,
   );
+  // This party's own side of the matching cardinality, authored beside the
+  // strategy. Unlike the strategy the two parties need not agree it: each
+  // declares its own, and neither run reads the other's.
+  const [deduplicate, setDeduplicate] = useState(DIRECT_DEDUPLICATE_DEFAULT);
   const [affirmed, setAffirmed] = useState(false);
   // The operator's file-handling choices for this run, authored beside the agreed
   // server (both parties settle these out of band, exactly as they settle the
@@ -182,6 +188,7 @@ export function DirectExchangeScreen() {
     inputSource,
     ...(identity.trim().length > 0 ? { identity: identity.trim() } : {}),
     ...directLinkageStrategyIntentFields(linkageStrategy),
+    ...directDeduplicateIntentFields(deduplicate),
     options: withConnectionTuning(
       exchangeFilesOptions(exchangeFiles, ZERO_SETUP_EXCHANGE_FILES),
       connectionTuning,
@@ -210,7 +217,7 @@ export function DirectExchangeScreen() {
   // time. A fresh file drops the trust affirmation, so the operator re-affirms for
   // the new context, then advances to the server step.
   function commitFile(profile: ProfiledJobInput) {
-    const stripped = profile.bidiStrippedColumns;
+    const stripped = profile.sanitizedColumnPositions;
     // Before the refusal below, which drops the profile the confirm step reads
     // its own notice from: the removal is stated beside the refusal it caused.
     setSanitizedNotice(
@@ -379,6 +386,8 @@ export function DirectExchangeScreen() {
             onIdentity={setIdentity}
             linkageStrategy={linkageStrategy}
             onLinkageStrategy={setLinkageStrategy}
+            deduplicate={deduplicate}
+            onDeduplicate={setDeduplicate}
             affirmed={affirmed}
             onAffirm={setAffirmed}
             onRun={runExchange}

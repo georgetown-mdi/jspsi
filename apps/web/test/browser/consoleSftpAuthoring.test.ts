@@ -12,6 +12,7 @@ import "@mantine/core/styles.css";
 import { decodeInvitation } from "@psilink/core";
 
 import { InviterScreen } from "@exchange/InviterScreen";
+import { SftpCredentialWarnings } from "@console/SftpCredentialWarnings";
 import styles from "@styles/app.module.css";
 
 import { createAppMount, flushPendingUpdates } from "./renderApp";
@@ -53,7 +54,7 @@ const CLIENTS_PROFILE = {
   ...CLIENTS_FILE,
   rowCount: 2,
   columns: ["client_id", "first_name", "last_name", "dob", "program_code"],
-  bidiStrippedColumns: [],
+  sanitizedColumnPositions: [],
   dateInputFormat: "%m/%d/%Y",
   columnSamples: [
     { column: "client_id", values: ["1", "2"] },
@@ -740,12 +741,25 @@ describe("console SFTP connection authoring", () => {
     );
     await page.getByRole("button", { name: "Save connection" }).click();
     // The connection is authored (it runs), and the non-blocking warning shows.
+    // The title reads twice -- the polite region announces it, the visible Alert
+    // is titled with it -- so the visible one is the last of the two.
     await expect
-      .element(page.getByText("Credential file location"))
-      .toBeInTheDocument();
+      .element(page.getByText("Credential file location").last())
+      .toBeVisible();
     await expect
       .element(page.getByText("inside the job data root", { exact: false }))
       .toBeInTheDocument();
+    // The region announces the headline alone, and the Alert holding the warning
+    // has no live role that would voice the whole body a second time.
+    await expect
+      .element(page.getByTestId("credential-warnings-announcement"))
+      .toHaveTextContent("Credential file location");
+    expect(
+      page
+        .getByText("inside the job data root", { exact: false })
+        .element()
+        .closest('[role="alert"], [role="status"]'),
+    ).toBeNull();
   });
 
   test("a 413 shows the too-large message, not the reachability one", async () => {
@@ -1198,5 +1212,27 @@ describe("console SFTP connection authoring", () => {
     await expect
       .element(page.getByRole("heading", { level: 1 }))
       .toHaveTextContent("Save your exchange file");
+  });
+});
+
+describe("the credential warnings' announcement", () => {
+  test("the region is mounted empty and the same node takes the warning", async () => {
+    app.render(createElement(SftpCredentialWarnings, { warnings: [] }));
+
+    const region = page.getByTestId("credential-warnings-announcement");
+    await expect.element(region).toBeInTheDocument();
+    expect(region.element().textContent).toBe("");
+    const mounted = region.element();
+
+    app.render(
+      createElement(SftpCredentialWarnings, {
+        warnings: ["The password credential file is inside the job data root."],
+      }),
+    );
+
+    await expect.element(region).toHaveTextContent("Credential file location");
+    // The same node took the text: a region that appears with its warning is a
+    // freshly inserted node rather than a change to one already being observed.
+    expect(region.element()).toBe(mounted);
   });
 });

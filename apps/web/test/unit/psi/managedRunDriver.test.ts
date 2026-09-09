@@ -5,6 +5,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import log from "loglevel";
 
 import {
+  ConnectionError,
   describeResolvedRunShape,
   getDefaultLinkageTerms,
   runExchange,
@@ -221,6 +222,34 @@ function makeParkedCloseMc() {
   };
 }
 
+/** A message connection standing in for a partner that stopped sending, in the
+ * authentication or mid-payload: a call parked on it never settles until the
+ * connection is closed, which rejects it with the `closed` error core's own
+ * close raises for a parked receive. `stalled` is what the parked call returns
+ * while that stands. */
+function makeStalledExchangeMc() {
+  let cutExchange: ((error: Error) => void) | undefined;
+  const stalled = new Promise<never>((_resolve, reject) => {
+    cutExchange = reject;
+  });
+  // Marked handled here, so the rejection the close raises is not reported
+  // before the run's own await reaches it.
+  void stalled.catch(() => undefined);
+  const close = vi.fn(() => {
+    cutExchange?.(new ConnectionError("connection closed", "closed"));
+    return Promise.resolve();
+  });
+  return {
+    mc: {
+      close,
+      receive: vi.fn(),
+      send: vi.fn(),
+    } as unknown as MessageConnection,
+    close,
+    stalled,
+  };
+}
+
 function acquireResources(side: RendezvousRole = "acceptor") {
   const peer = { disconnect: vi.fn(), destroy: vi.fn() };
   const conn = { close: vi.fn() };
@@ -384,6 +413,76 @@ describe("runManagedExchangeInBrowser", () => {
       onCloseOutcome: expect.any(Function),
       signal: controller.signal,
     });
+  });
+
+  test("a cancel cuts an exchange the partner has stalled mid-payload", async () => {
+    // The recovery a stalled partner would otherwise leave nowhere but closing
+    // the tab. The exchange is parked on a receive whose duration the partner
+    // picks, and the run holds the record's single-writer lock across it; core's
+    // exchange takes no signal, so closing the connection is what ends it.
+    const { mc, close, stalled } = makeStalledExchangeMc();
+    mockedOpen.mockResolvedValue(mc);
+    const { peer } = acquireResources();
+    mockedRunExchange.mockReturnValueOnce(stalled);
+    const controller = new AbortController();
+
+    const running = runDriver(controller.signal);
+    await tick();
+    // The run is in its exchange with nothing torn down: the cancel below is
+    // what reaches it.
+    expect(mockedRunExchange).toHaveBeenCalledTimes(1);
+    expect(close).not.toHaveBeenCalled();
+    controller.abort();
+
+    await expect(running).rejects.toThrow("connection closed");
+    expect(close).toHaveBeenCalled();
+    expect(peer.disconnect).toHaveBeenCalled();
+  });
+
+  test("a cancel cuts a run the partner has stalled in the authentication", async () => {
+    // The same recovery one phase earlier: the connection is published to the
+    // cancel path as soon as the channel opens, so a partner who answers ICE and
+    // then never completes the handshake is cut the same way a mid-payload stall
+    // is, rather than parking until the inactivity budget expires.
+    const { mc, close, stalled } = makeStalledExchangeMc();
+    mockedOpen.mockResolvedValue(mc);
+    const { peer } = acquireResources();
+    mockedAuthenticate.mockReturnValueOnce(stalled);
+    const controller = new AbortController();
+
+    const running = runDriver(controller.signal);
+    await tick();
+    // The stall stands and nothing is torn down: the cancel below is what
+    // reaches it.
+    expect(mockedAuthenticate).toHaveBeenCalledTimes(1);
+    expect(close).not.toHaveBeenCalled();
+    controller.abort();
+
+    await expect(running).rejects.toThrow("connection closed");
+    expect(close).toHaveBeenCalled();
+    expect(peer.disconnect).toHaveBeenCalled();
+    // Nothing stamped this run a success: the cut landed ahead of the exchange.
+    expect(mockedRunExchange).not.toHaveBeenCalled();
+    expect(mockedAppendDisclosure).not.toHaveBeenCalled();
+  });
+
+  test("a cancel that landed while the channel was opening cuts the exchange too", async () => {
+    // An aborted signal never fires its listener again, so a cancel arriving
+    // before there was a connection to close has to be read once more when one
+    // exists -- otherwise this run exchanges with the partner and holds the
+    // record's lock across it, having already been cancelled.
+    const { mc, close, stalled } = makeStalledExchangeMc();
+    mockedOpen.mockResolvedValue(mc);
+    acquireResources();
+    mockedRunExchange.mockReturnValueOnce(stalled);
+    const controller = new AbortController();
+    controller.abort();
+
+    await expect(runDriver(controller.signal)).rejects.toThrow(
+      "connection closed",
+    );
+
+    expect(close).toHaveBeenCalled();
   });
 
   test("yields its outputs on a run cancelled during the drain", async () => {
@@ -634,8 +733,35 @@ describe("naming what the agreed terms resolved to", () => {
     );
   }
 
+  /** Run the driver capturing both slots the protocol-confirmation callback
+   * reports through: the notice slot, and the status slot the resolved pair
+   * takes. */
+  async function runCapturingBothSlots(signal: AbortSignal) {
+    const onWarning = vi.fn();
+    const onResolvedMatching = vi.fn();
+    await runManagedExchangeInBrowser({
+      record: RECORD,
+      source: SOURCE,
+      signal,
+      urls: URLS,
+      onWarning,
+      onResolvedMatching,
+    });
+    return { onWarning, onResolvedMatching };
+  }
+
+  /** The three fields of a run shape the status slot is handed: the record
+   * counts the shape also holds are the notices' input, not the pair's. */
+  const matchingOf = (shape: ResolvedRunShape) => ({
+    localDeduplicate: shape.localDeduplicate,
+    partnerDeduplicate: shape.partnerDeduplicate,
+    cardinality: shape.cardinality,
+  });
+
   const OVER_BOUND_SHAPE: ResolvedRunShape = {
     cardinality: "many-to-many",
+    localDeduplicate: true,
+    partnerDeduplicate: true,
     localRecordCount: 3163,
     localDeclaredRecordCount: 3163,
     partnerRecordCount: 3164,
@@ -653,54 +779,66 @@ describe("naming what the agreed terms resolved to", () => {
     mockedOpen.mockResolvedValue(mc);
     acquireResources();
     exchangeConfirming(OVER_BOUND_SHAPE);
-    const onWarning = vi.fn();
     const { cardinalityNotice, pairTableAdvisory } =
       describeResolvedRunShape(OVER_BOUND_SHAPE);
 
-    await runDriver(new AbortController().signal, onWarning);
+    const { onWarning, onResolvedMatching } = await runCapturingBothSlots(
+      new AbortController().signal,
+    );
 
     expect(onWarning.mock.calls).toEqual([
       [cardinalityNotice],
       [pairTableAdvisory],
     ]);
+    expect(onResolvedMatching.mock.calls).toEqual([
+      [matchingOf(OVER_BOUND_SHAPE)],
+    ]);
   });
 
-  test("raises nothing for a one-to-one run within the bound", async () => {
-    // The cardinality that adds no multiplicity is the one every consent surface
-    // already describes, so naming it here would be noise on the ordinary run --
-    // and an unattended seat's noise is a log line nobody asked for.
+  test("states the resolved matching alone on a one-to-one run within the bound", async () => {
+    // The cardinality notice and the projection advisory both stay off this
+    // shape, so an ordinary re-run raises no notice at all and the pair the two
+    // parties presented is the whole of what this callback reports.
     const { mc } = makeParkedCloseMc();
     mockedOpen.mockResolvedValue(mc);
     acquireResources();
-    exchangeConfirming({
+    const shape: ResolvedRunShape = {
       cardinality: "one-to-one",
+      localDeduplicate: false,
+      partnerDeduplicate: false,
       localRecordCount: 3163,
       localDeclaredRecordCount: 3163,
       partnerRecordCount: 3164,
       localExpectsOutput: true,
       partnerAssociationTableWithheld: false,
-    });
-    const onWarning = vi.fn();
+    };
+    exchangeConfirming(shape);
 
-    await runDriver(new AbortController().signal, onWarning);
+    const { onWarning, onResolvedMatching } = await runCapturingBothSlots(
+      new AbortController().signal,
+    );
 
     expect(onWarning).not.toHaveBeenCalled();
+    expect(onResolvedMatching.mock.calls).toEqual([[matchingOf(shape)]]);
   });
 
   test("drops the notices on a run the operator already stopped", async () => {
     // The live gate every call site of this wiring takes: a cancelled run's notices
-    // are noise, and the caller's surface may be gone.
+    // are noise, and the caller's surface may be gone. The resolved pair takes the
+    // same gate -- the surface that would state it is gone with the rest.
     const { mc } = makeParkedCloseMc();
     mockedOpen.mockResolvedValue(mc);
     acquireResources();
     exchangeConfirming(OVER_BOUND_SHAPE);
-    const onWarning = vi.fn();
     const controller = new AbortController();
     controller.abort();
 
-    await runDriver(controller.signal, onWarning);
+    const { onWarning, onResolvedMatching } = await runCapturingBothSlots(
+      controller.signal,
+    );
 
     expect(onWarning).not.toHaveBeenCalled();
+    expect(onResolvedMatching).not.toHaveBeenCalled();
   });
 });
 

@@ -7,7 +7,6 @@ import {
   CsvLineByteCeilingError,
   INFER_DATE_SCAN_CAP,
   MAX_NAME_LENGTH,
-  MAX_TRANSFORM_PATTERN_LENGTH,
   StandardizationSchema,
   inferDateFormat,
   inferDateOfBirthColumn,
@@ -22,6 +21,7 @@ import { MAX_INPUT_NAME_LENGTH, isAdmissibleInputName } from "./workInputName";
 import {
   MAX_STANDARDIZATION_STEPS,
   MAX_STANDARDIZATION_TRANSFORMATIONS,
+  stepPatternsWithinCap,
 } from "./intentSchemas";
 import { JOB_DATA_ROOT_ENV } from "./gate";
 
@@ -212,12 +212,12 @@ export interface JobInputProfile {
   modifiedAt: number;
   rowCount: number;
   columns: Array<string>;
-  /** The 1-based positions of the columns whose name lost bidi control
-   * characters at the parse (core's `CSVParseMeta.bidiStrippedColumns`). The
+  /** The 1-based positions of the columns whose name lost control
+   * characters at the parse (core's `CSVParseMeta.sanitizedColumnPositions`). The
    * console's intake seats read the file through this profile rather than
    * parsing it themselves, so the positions ride the wire for the notice they
    * show; `columns` already holds the stripped names. */
-  bidiStrippedColumns: Array<number>;
+  sanitizedColumnPositions: Array<number>;
   dateInputFormat?: string;
   columnSamples: Array<ColumnSample>;
 }
@@ -244,9 +244,9 @@ export async function profileJobInput(
   let dobResolved = false;
   let rowCount = 0;
   let columns: Array<string>;
-  let bidiStrippedColumns: Array<number>;
+  let sanitizedColumnPositions: Array<number>;
   try {
-    ({ columns, bidiStrippedColumns } = await streamCSVRows(
+    ({ columns, sanitizedColumnPositions } = await streamCSVRows(
       stream,
       (rows, cols) => {
         if (!dobResolved && cols.length > 0) {
@@ -301,7 +301,7 @@ export async function profileJobInput(
     modifiedAt: mtimeMsInt(stat.mtimeMs),
     rowCount,
     columns,
-    bidiStrippedColumns,
+    sanitizedColumnPositions,
     ...(dateInputFormat !== undefined ? { dateInputFormat } : {}),
     columnSamples,
   };
@@ -392,54 +392,11 @@ export function useJobInputDir(
 }
 
 /**
- * The standardization functions whose named param is compiled to a
- * linear-time regex at pipeline construction (`compileLinearRegex` in core's
- * standardization.ts), paired with that param's camelCase name -- the only
- * sources whose length drives the super-linear RE2 compile this route
- * bounds. A plain-string param (coalesce's `default`, null_if's
- * `value`/`values`) is never compiled and is unbounded elsewhere, so capping
- * it here would 400 a pipeline that runs fine everywhere else. `parse_date`'s
- * format param also compiles, but the coverage accumulator already bounds it
- * via `isStepValid` before any compile.
- */
-const REGEX_SOURCE_PARAM_BY_FUNCTION: Record<string, string> = {
-  replace_regex: "pattern",
-  extract_regex: "pattern",
-  filter_regex: "pattern",
-  split_on: "delimiter",
-};
-
-/**
- * Whether every standardization step's compiled regex source stays within
- * {@link MAX_TRANSFORM_PATTERN_LENGTH}. The intent-level schema bounds
- * counts, not pattern length, and RE2JS compile cost lands on this process's
- * event loop before any row streams, so this route caps the source length of
- * exactly the params that reach regex compilation
- * ({@link REGEX_SOURCE_PARAM_BY_FUNCTION}) -- a compute-DoS bound on the
- * browser-supplied standardization body, not an access perimeter over the
- * operator's own directory.
- */
-function stepPatternsWithinCap(
-  transformation: Standardization[number],
-): boolean {
-  for (const step of transformation.steps ?? []) {
-    if (!Object.hasOwn(REGEX_SOURCE_PARAM_BY_FUNCTION, step.function)) continue;
-    const value = step.params?.[REGEX_SOURCE_PARAM_BY_FUNCTION[step.function]];
-    if (
-      typeof value === "string" &&
-      value.length > MAX_TRANSFORM_PATTERN_LENGTH
-    )
-      return false;
-  }
-  return true;
-}
-
-/**
  * The coverage route's standardization validation: core's structural schema plus
  * the same count bounds the intent schema applies (reusing its exported caps) plus
- * the route-level per-step pattern-length cap ({@link stepPatternsWithinCap}). The
- * shared intent schema is NOT modified -- only this in-process compute
- * endpoint needs the pattern cap.
+ * the per-step pattern-length cap ({@link stepPatternsWithinCap}). The shared
+ * intent schema is NOT modified -- only this in-process compute endpoint applies
+ * the pattern cap.
  */
 const coverageStandardizationSchema = StandardizationSchema.refine(
   (transformations) =>

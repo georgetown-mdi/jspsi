@@ -110,6 +110,7 @@ export const WEB_FILES = [
   "apps/web/src/psi/invitation.ts",
   "apps/web/src/psi/managed/managedExchangeRecord.ts",
   "apps/web/src/psi/transport/boundedReassembly.ts",
+  "apps/web/src/psi/transport/iterativePacking.ts",
   "apps/web/src/psi/transport/waitForOpen.ts",
   "apps/web/src/psi/transport/waitForPeerClose.ts",
   "apps/web/src/utils/diagnostics.ts",

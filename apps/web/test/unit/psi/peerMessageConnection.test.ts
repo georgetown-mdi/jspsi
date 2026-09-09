@@ -53,6 +53,15 @@ class FakeDataConnection extends EventEmitter {
   _handleChunk = (_chunk: unknown) => {};
   _handleDataMessage = (_message: unknown) => {};
 
+  // The PeerJS send internals openPeerMessageConnection replaces so an outbound
+  // frame packs without recursion (see iterativePacking.ts). Modeled here so the
+  // install assertion passes; the replacement itself is exercised in
+  // iterativePacking.test.ts.
+  chunker = { chunkedMTU: 16_300 };
+  _send = (_data: unknown, _chunked: boolean) => {};
+  _sendChunks = (_packed: ArrayBuffer) => {};
+  _bufferedSend = (_packed: ArrayBuffer) => {};
+
   constructor(open = true) {
     super();
     this.open = open;
@@ -125,6 +134,19 @@ describe("openPeerMessageConnection", () => {
     fake.emit("data", obj);
 
     expect(await mc.receive()).toBe(obj);
+  });
+
+  test("fails to install the outbound encoder on a connection lacking PeerJS send internals", async () => {
+    // The other half of the dependency-assumption check: a connection with the
+    // reassembly internals but no send internals fails loud rather than leaving
+    // PeerJS's recursive packer in place, which fails only once an exchange is
+    // large enough.
+    const { fake, conn } = makeConn();
+    Reflect.deleteProperty(fake, "_sendChunks");
+    await expect(openPeerMessageConnection(conn)).rejects.toThrow(
+      /send internals/,
+    );
+    expect(fake.eventNames()).toHaveLength(0);
   });
 
   test("fails to install the inbound bound on a connection lacking PeerJS internals", async () => {

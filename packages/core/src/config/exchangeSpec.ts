@@ -2,10 +2,12 @@ import { z } from "zod";
 import { camelizeKeys } from "../utils/camelizeKeys.js";
 import { safeParseCamelized } from "./safeParseCamelized.js";
 import {
+  columnsNamedOnce,
   LinkageTermsSchema,
   MAX_NAME_LENGTH,
   MAX_PAYLOAD_ENTRIES,
   MAX_TEXT_LENGTH,
+  nameValue,
 } from "./linkageTermsSchema.js";
 import { AuthenticationSchema, ConnectionConfigSchema } from "./connection.js";
 import { StandardizationSchema } from "./standardizationSchema.js";
@@ -15,6 +17,27 @@ import { SigningConfigSchema } from "./signing.js";
 import { boundedArray } from "../utils/boundedArray.js";
 
 // --- Exchange spec -----------------------------------------------------------
+
+/**
+ * One of this spec's local payload column-name lists, with each name kept once:
+ * the first entry naming a column stands and a later entry repeating it is
+ * dropped ({@link columnsNamedOnce}, the collapse the negotiated payload
+ * dictionary applies to the same input). A name written twice names one column
+ * twice, and enforcement compares the list against a set of columns that holds
+ * each once, so a repeat left standing would refuse a run for the author's own
+ * typo -- on the receive side attributing it to the partner.
+ *
+ * {@link boundedArray} bounds the count at {@link MAX_PAYLOAD_ENTRIES} ahead of
+ * the collapse, so a padded list is refused for its authored count. Each name
+ * holds the shape (`nameValue`) and per-name cap the lists these are written
+ * from already hold.
+ */
+const payloadColumnNameList = (message: string): z.ZodType<string[]> =>
+  boundedArray(
+    nameValue(z.string().min(1).max(MAX_NAME_LENGTH)),
+    MAX_PAYLOAD_ENTRIES,
+    message,
+  ).transform((names) => columnsNamedOnce(names, (name) => name));
 
 /**
  * A complete psilink exchange specification. Consumed by both the web
@@ -78,11 +101,12 @@ export const ExchangeSpecSchema = z
     // observed). An empty array is a strict "receive nothing"; an absent
     // field reconciles lazily. An observe-on-save writer records only a
     // NON-EMPTY observation, since an observed-empty set is an ambiguous
-    // zero-match run. Bounded like a payload list; names are
-    // partner-controlled.
-    expectedPayloadColumns: boundedArray(
-      z.string().min(1).max(MAX_NAME_LENGTH),
-      MAX_PAYLOAD_ENTRIES,
+    // zero-match run. `payloadColumnNameList` holds the count, the name shape,
+    // and the one-entry-per-name collapse. The invitation this list is written
+    // from already holds that shape, so a partner's control or text-direction
+    // character cannot arrive in the operator's configuration by a hand edit
+    // either; names are partner-controlled.
+    expectedPayloadColumns: payloadColumnNameList(
       `expectedPayloadColumns must not exceed ${MAX_PAYLOAD_ENTRIES} entries`,
     ).optional(),
     // Optional local SEND-side commitment: the payload columns (in THIS
@@ -98,10 +122,10 @@ export const ExchangeSpecSchema = z
     // partner mid-exchange, attributing the failure to them. The acceptor
     // does not set this (it carries payload.send instead). An empty array
     // is a strict "disclose nothing"; an absent field reconciles lazily.
-    // Bounded like a payload list; names are this party's own.
-    disclosedPayloadColumns: boundedArray(
-      z.string().min(1).max(MAX_NAME_LENGTH),
-      MAX_PAYLOAD_ENTRIES,
+    // `payloadColumnNameList` holds the count, the name shape, and the
+    // one-entry-per-name collapse; the metadata these names are derived from
+    // already holds that shape, and the names are this party's own.
+    disclosedPayloadColumns: payloadColumnNameList(
       `disclosedPayloadColumns must not exceed ${MAX_PAYLOAD_ENTRIES} entries`,
     ).optional(),
     // Optional local record of this party's consent to its OWN outbound

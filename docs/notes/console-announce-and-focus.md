@@ -46,6 +46,27 @@ The region holds a summary sentence, not the diagnosis. A screen-reader user hea
 
 The containers that take programmatic focus (the presented-result panel, and the secrets picker's stage, which established the pattern) set `tabIndex={-1}` and `style={{ outline: "none" }}`. `tabIndex={-1}` makes an element focusable by script only -- it is not in the tab order and not keyboard operable -- so WCAG 2.4.7 Focus Visible, which is about the keyboard focus indicator on the interactive controls a keyboard user tabs through, does not apply to it. Suppressing the outline is what keeps a scripted move from painting a focus ring around a whole panel that the user never navigated to; every control inside the panel keeps its own indicator.
 
+## The polite regions in the web app
+
+A region mounts ahead of its content and takes its text after mount, through
+`useDeferredAnnouncement` where the content can already be there in the owner's
+own mount commit. These are the sites that had grown up around the other shape
+-- a live role on an element that appeared together with what it said -- and
+what each settled on; a test on each surface holds the choice.
+
+| Site | Choice |
+| --- | --- |
+| `console/SftpCredentialWarnings.tsx` | Mount ahead. The region renders whether or not the connection drew warnings and announces the alert's title alone; the visible Alert takes `role="presentation"`, so the warnings themselves are read in reading order rather than announced twice. |
+| `exchange/RunSurface.tsx`, `RunWarningsAlert` | Mount ahead. The region stands through the whole run and announces the count ("The exchange reported 3 warnings"), which is what makes each further arrival a distinct value; the visible Alert takes `role="presentation"`. |
+| `exchange/RunSurface.tsx`, the re-attachment notices | Mount ahead, in `ReattachNotice`: the region is rendered beside the two notices in every phase of a console run column, and each notice's own live role is gone. It announces the notice's lead line; the body stays in reading order. |
+| `exchange/AcceptorScreen.tsx`, "Reading your invitation..." | Role dropped. The decode runs once on mount, so the sentence is initial page content that no later change reaches, and the settle moves focus to the terms, the block, or the error alert. A live role there asserted an announcement nothing performs. |
+| `components/AppShellStatus.tsx` | Mount ahead. The region lives as long as the shell rather than being rebuilt on each online or update-ready flip, and holds the strip's title; each Alert takes `role="presentation"`. |
+
+`role="alert"` sites are outside this: the convention displaces that default
+where a polite region takes the announcement over (above), and leaves the
+alerts that announce on their own -- the mechanism the acknowledged risk above
+names as the most reliably special-cased.
+
 ## Considered and left alone
 
 - **The peer-bytes excerpt's control-like chrome.** The field the peer's own first bytes render in is a read-only `Textarea`, which looks like something to type into. That is a separate question about how the excerpt presents, not about how the outcome announces, and the properties that attribute those bytes are specified and checked independently.

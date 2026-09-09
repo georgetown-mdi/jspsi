@@ -159,6 +159,30 @@ emits only camelCase keys, so a token it produced is already in this normal form
 the fold is observable only for a hand-authored or third-party token containing
 `snake_case` keys.
 
+A second parse-layer rewrite is byte-significant in the same way. A
+`payload.send` or `payload.receive` list naming a column more than once parses
+to one entry per name at every path that produces a `LinkageTerms`: the first
+entry naming a column stands, with its own `description`, and a later entry
+naming it is dropped. The encoder is handed a list holding each column once and
+preserves its order as given. A third-party implementation reproducing the
+agreed-terms hash MUST apply the same collapse before encoding, and MUST apply
+it to both lists, since a document holding a repeat encodes to different bytes
+with and without it.
+
+Two entries name the same column when their `name` strings are equal **code unit
+for code unit**, the comparison the member ordering above uses. No Unicode
+normalization is applied: a name holding U+00E9 (NFC) and one holding `e`
+followed by the combining acute U+0301 (NFD) are two distinct columns, and both
+entries stand. Names are not case folded either, so `dose` and `Dose` are
+distinct, and whitespace is significant, so `dose ` is not `dose`. A reproducer
+that folds any of these collapses entries psilink keeps, and encodes different
+bytes.
+
+The collapse changes the agreed-terms hash for a terms document that carries a
+repeated payload column name: an exchange record or signed receipt a
+pre-collapse build produced over such a document verifies as a terms-hash
+mismatch against this build.
+
 ### Numbers
 
 A number MUST be finite. RFC 8785 section 3.2.2.3 does not restate a number

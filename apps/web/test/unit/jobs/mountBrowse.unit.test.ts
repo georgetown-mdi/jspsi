@@ -4,7 +4,11 @@ import path from "node:path";
 
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import { listMountEntries, resolveMountFile } from "@jobs/mountBrowse";
+import {
+  listMountEntries,
+  resolveMountFile,
+  resolveMountPath,
+} from "@jobs/mountBrowse";
 
 // The browse contract lists and resolves paths under a server-anchored mount
 // root, admitting dot-prefixed segments (SSH key material) but confining every
@@ -132,6 +136,69 @@ describe("resolveMountFile", () => {
     const mount = mountWithKeys();
     const readFile = vi.spyOn(fs, "readFileSync");
     resolveMountFile(mount, [".ssh", "id_ed25519"]);
+    expect(readFile).not.toHaveBeenCalled();
+  });
+});
+
+describe("resolveMountPath", () => {
+  test("resolves a name with nothing at it to the confined parent plus the name", () => {
+    const mount = mountWithKeys();
+    expect(resolveMountPath(mount, ["certs", "not-yet.json"])).toEqual({
+      absolutePath: path.join(fs.realpathSync(mount), "certs", "not-yet.json"),
+    });
+  });
+
+  test("resolves an existing final segment to its realpath", () => {
+    const mount = mountWithKeys();
+    expect(resolveMountPath(mount, [".ssh", "id_ed25519"])).toEqual({
+      absolutePath: fs.realpathSync(path.join(mount, ".ssh", "id_ed25519")),
+    });
+  });
+
+  test("a symlink AT the final segment pointing out of the mount is refused", () => {
+    // The escape the parent chain's realpath cannot see: every segment above the
+    // last is inside the mount, and the name that escapes is the picked one.
+    const mount = mountWithKeys();
+    const outside = tempDir("outside");
+    const target = path.join(outside, "victim.json");
+    fs.writeFileSync(target, "x\n");
+    fs.symlinkSync(target, path.join(mount, "identity.json"));
+    expect(resolveMountPath(mount, ["identity.json"])).toBeNull();
+  });
+
+  test("a symlink AT the final segment pointing inside the mount resolves to its target", () => {
+    const mount = mountWithKeys();
+    const target = path.join(mount, "certs", "key.json");
+    fs.writeFileSync(target, "x\n");
+    fs.symlinkSync(target, path.join(mount, "identity.json"));
+    expect(resolveMountPath(mount, ["identity.json"])).toEqual({
+      absolutePath: fs.realpathSync(target),
+    });
+  });
+
+  test("a link with nothing at its end resolves to the link's own path", () => {
+    // Nothing is at the end of it, wherever it points, so the path stays the one
+    // inside the mount and the caller's own presence check answers the operator.
+    const mount = mountWithKeys();
+    const outside = tempDir("outside");
+    fs.symlinkSync(
+      path.join(outside, "gone.json"),
+      path.join(mount, "identity.json"),
+    );
+    expect(resolveMountPath(mount, ["identity.json"])).toEqual({
+      absolutePath: path.join(fs.realpathSync(mount), "identity.json"),
+    });
+  });
+
+  test("an empty subpath resolves nothing", () => {
+    expect(resolveMountPath(mountWithKeys(), [])).toBeNull();
+  });
+
+  test("never reads file bytes while resolving", () => {
+    const mount = mountWithKeys();
+    const readFile = vi.spyOn(fs, "readFileSync");
+    resolveMountPath(mount, [".ssh", "id_ed25519"]);
+    resolveMountPath(mount, ["certs", "not-yet.json"]);
     expect(readFile).not.toHaveBeenCalled();
   });
 });

@@ -841,9 +841,11 @@ describe("summarizeInvitation", () => {
   const swapKey = (
     firstEl: Partial<LinkageKeyElement>,
     secondEl: Partial<LinkageKeyElement>,
+    termsOverrides: Partial<LinkageTerms> = {},
   ) =>
     summarizeInvitation(
       makeToken({
+        ...termsOverrides,
         linkageFields: [
           { name: "first_name", type: "first_name" },
           { name: "last_name", type: "last_name" },
@@ -935,10 +937,14 @@ describe("summarizeInvitation", () => {
     // step the operator has to find and remove, and that step sits in the element
     // that declares it. Re-attributing it would put it on a field with no such
     // step, so the pair keeps its own markers -- the refused key has no run whose
-    // per-field effect the swap could describe.
+    // per-field effect the swap could describe. The count-only algorithm is what
+    // puts the key in that register: both linkage strategies match a candidate
+    // set, and psi-c refuses one.
+    const countOnly: Partial<LinkageTerms> = { algorithm: "psi-c" };
     const lastNameFansOut = swapKey(
       { transform: soundAlike },
       { transform: fanOut },
+      countOnly,
     );
     expect(lastNameFansOut.headerFields).toEqual([
       "first name (sound-alike)",
@@ -949,6 +955,7 @@ describe("summarizeInvitation", () => {
     const firstNameFansOut = swapKey(
       { transform: fanOut },
       { transform: soundAlike },
+      countOnly,
     );
     expect(firstNameFansOut.headerFields).toEqual([
       "first name (not supported)",
@@ -956,7 +963,7 @@ describe("summarizeInvitation", () => {
     ]);
 
     // The lone declaring element holds it too, with nothing to trade markers with.
-    expect(swapKey({}, { transform: fanOut }).headerFields).toEqual([
+    expect(swapKey({}, { transform: fanOut }, countOnly).headerFields).toEqual([
       "first name",
       "last name (not supported)",
     ]);
@@ -997,6 +1004,7 @@ describe("summarizeInvitation", () => {
     // declaring element's field, and the sibling element is unmarked.
     const key = summarizeInvitation(
       makeToken({
+        algorithm: "psi-c",
         linkageFields: [
           { name: "first_name", type: "first_name" },
           { name: "last_name", type: "last_name" },
@@ -1442,11 +1450,11 @@ describe("summarizeInvitation", () => {
     expect(headerFor([{ function: "phonetic" }])).toBe(
       "last name (sound-alike)",
     );
-    // Refused outright rather than named for its breadth: core refuses a declared
-    // fan-out before the exchange runs, so no matching of any breadth happens.
+    // Named for its breadth: both linkage strategies match on every candidate a
+    // declared fan-out realizes.
     expect(
       headerFor([{ function: "split_on", params: { delimiter: " " } }]),
-    ).toBe("last name (not supported)");
+    ).toBe("last name (multiple)");
     // The collapse a coalesce names needs a rule ahead of it that can empty the
     // value, which is the only state its substituting branch fires in; as the only
     // step it substitutes nothing, so it earns no marker (the collapse ranking's
@@ -1999,15 +2007,15 @@ describe("summarizeInvitation", () => {
         coalesce,
       ]),
     ).toBe("last name (any date)");
-    // A refused fan-out still outranks every breadth marker: there is no run to
-    // describe a breadth of.
+    // A fan-out outranks every other breadth marker: what the element matches on
+    // is the candidate set, whatever the steps beside it narrow.
     expect(
       headerFor([
         { function: "split_on", params: { delimiter: " " } },
         slice,
         coalesce,
       ]),
-    ).toBe("last name (not supported)");
+    ).toBe("last name (multiple)");
     // Single-step markers, pinned so compound precedence cannot change them.
     expect(headerFor([slice])).toBe("last name (partial)");
     expect(headerFor([{ function: "phonetic" }])).toBe(
@@ -2203,13 +2211,12 @@ describe("summarizeInvitation", () => {
     ).toBe("last name (fallback)");
 
     // split_on never reaches the truncation rule: it is a fan-out, decided above
-    // every breadth marker -- refused under cascade, and named for the candidate
-    // set under the strategy that matches it.
+    // every breadth marker and named for the candidate set it realizes.
     const splitThenSlice = [
       { function: "split_on", params: { delimiter: " " } },
       slice,
     ];
-    expect(headerFor(splitThenSlice)).toBe("last name (not supported)");
+    expect(headerFor(splitThenSlice)).toBe("last name (multiple)");
     expect(
       summarizeInvitation(
         makeToken({
@@ -2315,9 +2322,9 @@ describe("summarizeInvitation", () => {
       phonetic: "sound-alike",
       replace_regex: "pattern replacement",
       pad_left: "padded slice",
-      // A declared fan-out is decided above the truncation rule entirely: under
-      // these cascade terms the exchange is refused rather than named a breadth.
-      split_on: "not supported",
+      // A declared fan-out is decided above the truncation rule entirely: what
+      // the element matches on is its candidate set.
+      split_on: "multiple",
     };
     // Two-directional: the table covers exactly core's function set, so a new
     // core function fails here until it gets a verdict.
@@ -2343,11 +2350,10 @@ describe("summarizeInvitation", () => {
       // Effect named where the matching direction is determinable.
       substring: "partial",
       phonetic: "sound-alike",
-      // Refused rather than named for a breadth: under these cascade terms the
-      // exchange does not run at all with a declared fan-out step. Its other
-      // marker, under the strategy that matches the candidate set, has its own
-      // test below.
-      split_on: "not supported",
+      // Named for the candidate set it realizes, which both linkage strategies
+      // match on. Its other marker, under a combination that refuses one, has
+      // its own test above.
+      split_on: "multiple",
       // Rule named directly where a partner pattern or value list makes the
       // direction indeterminate.
       replace_regex: "pattern replacement",

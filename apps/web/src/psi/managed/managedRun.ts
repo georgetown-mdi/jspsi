@@ -133,8 +133,8 @@ export interface ManagedRerunOptions {
  *    export handed off ({@link ManagedExchangeSpentError}, the `"handed-off"`
  *    state), then acquires and validates the input before the handshake opens
  *    any connection (a {@link ManagedInputError} has the `"input"` or
- *    `"terms-shortfall"` tier), holds the lock across the handshake and the
- *    durable rotation persist, then runs the data exchange and records success.
+ *    `"terms-shortfall"` tier), and holds the lock across the handshake, the
+ *    durable rotation persist, the data exchange, and the success it records.
  *
  * The lock's own unavailability ({@link ManagedExchangeLockUnavailableError}: a
  * run is already in progress in another tab) propagates for the caller to show
@@ -166,6 +166,11 @@ export async function runManagedRerun<TInput, THandshake, TExchange>(
   options: ManagedRerunOptions = {},
 ): Promise<ManagedExchangeRunResult<TExchange>> {
   const now = options.now ?? Date.now;
+  // Stamped before the first check this run makes, and stated by every
+  // bookkeeping write below and inside runManagedExchange, so a success another
+  // context stamps while this run is in flight is not overwritten by this run's
+  // failure (docs/spec/MANAGED_EXCHANGE_RECORD.md, "Recording a run outcome").
+  const runStartedAtMs = now();
 
   // Checked before any connection: a lapsed bound means no run happened, so no
   // lastRun is written.
@@ -190,6 +195,7 @@ export async function runManagedRerun<TInput, THandshake, TExchange>(
           ? { tokenMaxAgeDays: record.tokenMaxAgeDays }
           : {}),
       },
+      runStartedAtMs,
       acquireInput: seams.acquireInput,
       handshake: seams.handshake,
       dataExchange: seams.dataExchange,
@@ -216,7 +222,7 @@ export async function runManagedRerun<TInput, THandshake, TExchange>(
       // Best-effort: a failed write here must never replace the run's own
       // failure.
       try {
-        await recordManagedExchangeLastRun(record.id, lastRun);
+        await recordManagedExchangeLastRun(record.id, lastRun, runStartedAtMs);
       } catch {
         // Swallowed: the original failure still reaches the caller on the rethrow.
       }

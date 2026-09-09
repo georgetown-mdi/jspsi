@@ -2,18 +2,24 @@ import { expect, test, describe } from "vitest";
 
 import {
   runPipeline,
+  applyStep,
   buildStandardizedDataset,
   buildKeyStrings,
   compileSteps,
   hasMemoizedCompiledSteps,
+  renderDateOutput,
+  valueOverCeiling,
+  DEFAULT_DATE_OUTPUT_FORMAT,
   FAN_OUT_FUNCTION_NAMES,
   StandardizedField,
   StandardizedDataset,
   STANDARDIZATION_FUNCTION_NAMES,
+  type CompiledStep,
   type FieldValue,
 } from "../src/standardization";
 import {
   validateStandardizationAgainstTerms,
+  assertCandidateSetCardinalityImplemented,
   assertFanOutImplemented,
   assertStandardizationMatchesTerms,
   assertTransformsCompile,
@@ -31,7 +37,9 @@ import {
   CONSENT_VERDICT_PARAM_NAMES,
   stepCanEmptyRealizedValue,
   pipelineAlwaysDrops,
+  pipelineCollapsesParsedDateToConstant,
   parseDateInputDropsEveryRecord,
+  transformRefusalIn,
   type LinkageTermsStanding,
 } from "../src/linkageSatisfiability";
 import {
@@ -1206,6 +1214,392 @@ describe("pipelineAlwaysDrops rescue equivalence", () => {
   });
 });
 
+describe("parse_date probe walk equivalence", () => {
+  // The shipped predicates read every substring run of one element in a single
+  // forward pass carrying one value per probe date. Checked here: those verdicts
+  // against a transcription that measures each run on its own, re-running the
+  // probes from the `parse_date` for every run end, over every pipeline the
+  // alphabet below spells.
+  type ReferenceReading =
+    | { kind: "collapsed"; value: string }
+    | { kind: "valueDependentDrop" }
+    | { kind: "layoutDeterminedDrop" }
+    | { kind: "undetermined" }
+    | { kind: "cannotMeasure" };
+
+  type ReferenceOutcome =
+    | { kind: "value"; value: string }
+    | { kind: "dropped" }
+    | { kind: "candidates" }
+    | { kind: "unread" };
+
+  const runFromStart = (
+    input: string,
+    compiled: ReadonlyArray<CompiledStep>,
+  ): ReferenceOutcome => {
+    let current: FieldValue = input;
+    for (const step of compiled) {
+      current = applyStep(current, step);
+      if (valueOverCeiling(current) !== undefined) return { kind: "unread" };
+    }
+    if (current === null) return { kind: "dropped" };
+    if (current instanceof Set)
+      return current.size > 0 ? { kind: "candidates" } : { kind: "unread" };
+    return current === ""
+      ? { kind: "unread" }
+      : { kind: "value", value: current };
+  };
+
+  /** The measurement a run end carries: which `parse_date` laid out the value,
+   * the layout it renders, and the steps between it and the run end. Undefined
+   * where the index carries no measurement at all. */
+  const runMeasurement = (
+    steps: ReadonlyArray<TransformStep>,
+    index: number,
+  ):
+    | {
+        parseDateIndex: number;
+        outputFormat: string;
+        measuredSteps: TransformStep[];
+      }
+    | undefined => {
+    if (steps[index]?.function !== "substring") return undefined;
+    if (steps[index + 1]?.function === "substring") return undefined;
+    let runStart = index;
+    while (runStart > 0 && steps[runStart - 1].function === "substring")
+      runStart -= 1;
+    let parseDateIndex = runStart - 1;
+    while (
+      parseDateIndex >= 0 &&
+      steps[parseDateIndex].function !== "parse_date"
+    )
+      parseDateIndex -= 1;
+    if (parseDateIndex < 0) return undefined;
+    const parseDateStep = steps[parseDateIndex];
+    if (parseDateInputDropsEveryRecord(parseDateStep.params)) return undefined;
+    const rawOutputFormat = parseDateStep.params?.outputFormat;
+    return {
+      parseDateIndex,
+      outputFormat:
+        typeof rawOutputFormat === "string"
+          ? rawOutputFormat
+          : DEFAULT_DATE_OUTPUT_FORMAT,
+      measuredSteps: steps.slice(parseDateIndex + 1, index + 1),
+    };
+  };
+
+  const readRun = (
+    steps: ReadonlyArray<TransformStep>,
+    index: number,
+  ): ReferenceReading => {
+    const measurement = runMeasurement(steps, index);
+    if (measurement === undefined) return { kind: "undetermined" };
+    const { outputFormat, measuredSteps } = measurement;
+    try {
+      const compiled = compileSteps([...measuredSteps]);
+      const survivors = new Set<string>();
+      for (const probe of DATE_COLLAPSE_PROBES) {
+        const outcome = runFromStart(
+          renderDateOutput(outputFormat, probe.year, probe.month, probe.day),
+          compiled,
+        );
+        if (outcome.kind === "unread" || outcome.kind === "candidates")
+          return { kind: "cannotMeasure" };
+        if (outcome.kind === "value") survivors.add(outcome.value);
+        if (survivors.size > 1) return { kind: "undetermined" };
+      }
+      const [collapsed] = survivors;
+      if (collapsed !== undefined)
+        return { kind: "collapsed", value: collapsed };
+      return measuredSteps.every((step) =>
+        LAYOUT_DETERMINED_FUNCTION_NAMES.has(step.function),
+      )
+        ? { kind: "layoutDeterminedDrop" }
+        : { kind: "valueDependentDrop" };
+    } catch {
+      return { kind: "cannotMeasure" };
+    }
+  };
+
+  const collapsesPerRun = (
+    steps: ReadonlyArray<TransformStep>,
+    index: number,
+  ): boolean => {
+    const reading = readRun(steps, index);
+    if (
+      reading.kind === "cannotMeasure" ||
+      reading.kind === "valueDependentDrop"
+    )
+      return true;
+    if (reading.kind !== "collapsed") return false;
+    try {
+      const tail = runFromStart(
+        reading.value,
+        compileSteps([...steps.slice(index + 1)]),
+      );
+      return tail.kind !== "dropped";
+    } catch {
+      return true;
+    }
+  };
+
+  const dropsPerRun = (
+    steps: ReadonlyArray<TransformStep>,
+    index: number,
+  ): boolean => readRun(steps, index).kind === "layoutDeterminedDrop";
+
+  // The probe inputs the two formulations can differ over: a live `parse_date`
+  // under two output layouts and a dead one; windows that read a literal region,
+  // a date component, and nothing at all; a layout-determined step; steps that
+  // read the value (one naming a probe's own rendered value, one inflating a
+  // value past the per-value ceiling); a fan-out; a rescuing `coalesce`; and a
+  // function this build cannot compile.
+  const ALPHABET: ReadonlyArray<TransformStep> = [
+    {
+      function: "parse_date",
+      params: { inputFormat: "YYYY-MM-DD", outputFormat: "ACME-YYYYMMDD" },
+    },
+    {
+      function: "parse_date",
+      params: { inputFormat: "MM/DD/YYYY", outputFormat: "YYYY" },
+    },
+    { function: "parse_date", params: { inputFormat: "MM/DD" } },
+    { function: "substring", params: { start: 1, length: 4 } },
+    { function: "substring", params: { start: 6, length: 4 } },
+    { function: "substring", params: { start: 40, length: 4 } },
+    { function: "substring", params: { start: 1 } },
+    { function: "remove_dashes" },
+    { function: "null_if", params: { values: ["ACME"] } },
+    { function: "filter_regex", params: { pattern: "^[0-9]+$" } },
+    { function: "replace_regex", params: { pattern: "A", replacement: "B" } },
+    { function: "pad_left", params: { length: 5000, fill: "0" } },
+    { function: "split_on", params: { separator: "-" } },
+    { function: "coalesce", params: { default: "FALLBACK" } },
+    { function: "not_a_real_function" },
+  ];
+  const MAX_PIPELINE_LENGTH = 4;
+
+  const forEachPipelineOver = (
+    alphabet: ReadonlyArray<TransformStep>,
+    maxLength: number,
+    visit: (pipeline: TransformStep[]) => void,
+  ): void => {
+    const extend = (prefix: TransformStep[]): void => {
+      if (prefix.length === maxLength) return;
+      for (const step of alphabet) {
+        const pipeline = [...prefix, step];
+        visit(pipeline);
+        extend(pipeline);
+      }
+    };
+    extend([]);
+  };
+
+  const enumeratedOver = (alphabetSize: number, maxLength: number): number =>
+    Array.from(
+      { length: maxLength },
+      (_, index) => alphabetSize ** (index + 1),
+    ).reduce((total, count) => total + count, 0);
+
+  /** The element-level verdict composed out of the per-index reference: every
+   * step index offered to it, the first collapse answering. The shipped
+   * whole-element predicate is held equal to this. */
+  const collapsesPerIndex = (steps: ReadonlyArray<TransformStep>): boolean =>
+    steps.some((_step, index) => collapsesPerRun(steps, index));
+
+  /** Whether this build can compile `step`, which is what poisons a span. */
+  const compileThrows = (step: TransformStep): boolean => {
+    try {
+      compileSteps([step]);
+      return false;
+    } catch {
+      return true;
+    }
+  };
+
+  /** What each probe leaves the run ending at `index` holding, in declared
+   * order -- the sequence a reading is read off. Used to count which shapes a
+   * sweep reaches, not to decide a verdict. */
+  const probeOutcomesAt = (
+    steps: ReadonlyArray<TransformStep>,
+    index: number,
+  ): ReferenceOutcome[] | undefined => {
+    const measurement = runMeasurement(steps, index);
+    if (measurement === undefined) return undefined;
+    let compiled: CompiledStep[];
+    try {
+      compiled = compileSteps([...measurement.measuredSteps]);
+    } catch {
+      return undefined;
+    }
+    return DATE_COLLAPSE_PROBES.map((probe) => {
+      try {
+        return runFromStart(
+          renderDateOutput(
+            measurement.outputFormat,
+            probe.year,
+            probe.month,
+            probe.day,
+          ),
+          compiled,
+        );
+      } catch {
+        return { kind: "unread" } as ReferenceOutcome;
+      }
+    });
+  };
+
+  /** A run end settled by two distinct survivors read BEFORE a probe the
+   * measurement cannot read. The single forward pass carries one value per probe
+   * across the whole span, so the declared probe order it reads them back in is
+   * what keeps this a coarsening rather than an unmeasurable window. */
+  const distinctSurvivorsPrecedeUnreadableProbe = (
+    steps: ReadonlyArray<TransformStep>,
+    index: number,
+  ): boolean => {
+    const outcomes = probeOutcomesAt(steps, index);
+    if (outcomes === undefined) return false;
+    const survivors = new Set<string>();
+    for (const [probeIndex, outcome] of outcomes.entries()) {
+      if (outcome.kind === "unread" || outcome.kind === "candidates")
+        return false;
+      if (outcome.kind === "value") survivors.add(outcome.value);
+      if (survivors.size > 1)
+        return outcomes
+          .slice(probeIndex + 1)
+          .some(
+            (later) => later.kind === "unread" || later.kind === "candidates",
+          );
+    }
+    return false;
+  };
+
+  /** A run end whose measured steps hold a compile this build refuses, with a
+   * LATER run end under the same `parse_date`. The forward pass blanks every
+   * probe for the rest of the span rather than for that run alone, so this is
+   * the shape where the poisoning outlives the run the refusal sits in. */
+  const compileThrowPrecedesALaterRunEnd = (
+    steps: ReadonlyArray<TransformStep>,
+    index: number,
+  ): boolean => {
+    const measurement = runMeasurement(steps, index);
+    if (measurement === undefined) return false;
+    if (!measurement.measuredSteps.some(compileThrows)) return false;
+    return steps.some(
+      (_step, later) =>
+        later > index &&
+        runMeasurement(steps, later)?.parseDateIndex ===
+          measurement.parseDateIndex,
+    );
+  };
+
+  const forEachPipeline = (visit: (pipeline: TransformStep[]) => void): void =>
+    forEachPipelineOver(ALPHABET, MAX_PIPELINE_LENGTH, visit);
+
+  test("one walk gives the verdict per-run measurement gives", () => {
+    const divergent: string[] = [];
+    let examined = 0;
+    let collapseVerdicts = 0;
+    let dropVerdicts = 0;
+    let elementCollapseVerdicts = 0;
+    forEachPipeline((pipeline) => {
+      examined += 1;
+      for (const index of pipeline.keys()) {
+        const collapses = substringCollapsesParsedDateToConstant(
+          pipeline,
+          index,
+        );
+        const drops = substringRunDropsEveryParsedDate(pipeline, index);
+        if (collapses) collapseVerdicts += 1;
+        if (drops) dropVerdicts += 1;
+        if (
+          collapses !== collapsesPerRun(pipeline, index) ||
+          drops !== dropsPerRun(pipeline, index)
+        )
+          divergent.push(`${index} of ${JSON.stringify(pipeline)}`);
+      }
+      const elementCollapses = pipelineCollapsesParsedDateToConstant(pipeline);
+      if (elementCollapses) elementCollapseVerdicts += 1;
+      if (elementCollapses !== collapsesPerIndex(pipeline))
+        divergent.push(`element ${JSON.stringify(pipeline)}`);
+    });
+    // Two assertions so a failure includes witnesses as well as its scale: the
+    // whole divergent list is elided in the diff once it runs to thousands.
+    expect(divergent.slice(0, 3)).toEqual([]);
+    expect(divergent).toHaveLength(0);
+    // Not vacuous: the sweep is the full enumeration and reaches both verdicts.
+    expect(examined).toBe(enumeratedOver(ALPHABET.length, MAX_PIPELINE_LENGTH));
+    expect(collapseVerdicts).toBeGreaterThan(0);
+    expect(dropVerdicts).toBeGreaterThan(0);
+    expect(elementCollapseVerdicts).toBeGreaterThan(0);
+  });
+
+  // Two behaviors the single forward pass carries past the run that starts them
+  // need a span longer than one run, and the sweep above reaches neither: it
+  // stops at four steps, and every unreadability source in its alphabet takes
+  // all four probes at once. The alphabet here is small enough to enumerate
+  // deeper and holds what those two shapes need: a `replace_regex` that inflates
+  // ONE probe's rendered value past the per-value ceiling, a second `parse_date`
+  // layout whose windows leave the probes distinct, and a step this build cannot
+  // compile.
+  const DEEP_ALPHABET: ReadonlyArray<TransformStep> = [
+    {
+      function: "parse_date",
+      params: { inputFormat: "YYYY-MM-DD", outputFormat: "ACME-YYYYMMDD" },
+    },
+    {
+      function: "parse_date",
+      params: { inputFormat: "MM/DD/YYYY", outputFormat: "YYYY-MM-DD" },
+    },
+    { function: "substring", params: { start: 1, length: 4 } },
+    {
+      function: "replace_regex",
+      params: { pattern: "24", replacement: "0".repeat(5000) },
+    },
+    { function: "filter_regex", params: { pattern: "^[0-9]+$" } },
+    { function: "split_on", params: { separator: "-" } },
+    { function: "not_a_real_function" },
+  ];
+  const DEEP_PIPELINE_LENGTH = 5;
+
+  test("the walk holds where a span outlives the run that poisoned it", () => {
+    const divergent: string[] = [];
+    let examined = 0;
+    let distinctSurvivorsBeforeUnreadable = 0;
+    let compileThrowBeforeLaterRunEnd = 0;
+    forEachPipelineOver(DEEP_ALPHABET, DEEP_PIPELINE_LENGTH, (pipeline) => {
+      examined += 1;
+      for (const index of pipeline.keys()) {
+        if (distinctSurvivorsPrecedeUnreadableProbe(pipeline, index))
+          distinctSurvivorsBeforeUnreadable += 1;
+        if (compileThrowPrecedesALaterRunEnd(pipeline, index))
+          compileThrowBeforeLaterRunEnd += 1;
+        if (
+          substringCollapsesParsedDateToConstant(pipeline, index) !==
+            collapsesPerRun(pipeline, index) ||
+          substringRunDropsEveryParsedDate(pipeline, index) !==
+            dropsPerRun(pipeline, index)
+        )
+          divergent.push(`${index} of ${JSON.stringify(pipeline)}`);
+      }
+      if (
+        pipelineCollapsesParsedDateToConstant(pipeline) !==
+        collapsesPerIndex(pipeline)
+      )
+        divergent.push(`element ${JSON.stringify(pipeline)}`);
+    });
+    expect(divergent.slice(0, 3)).toEqual([]);
+    expect(divergent).toHaveLength(0);
+    expect(examined).toBe(
+      enumeratedOver(DEEP_ALPHABET.length, DEEP_PIPELINE_LENGTH),
+    );
+    // The counts are asserted rather than reported so the sweep cannot quietly
+    // stop reaching the two shapes it is here for.
+    expect(distinctSurvivorsBeforeUnreadable).toBeGreaterThan(0);
+    expect(compileThrowBeforeLaterRunEnd).toBeGreaterThan(0);
+  });
+});
+
 // --- validateStandardizationAgainstTerms -------------------------------------
 
 describe("validateStandardizationAgainstTerms", () => {
@@ -1361,6 +1755,17 @@ describe("assertFanOutImplemented", () => {
       ],
     },
   ];
+  // Both shipped strategies resolve a candidate set, so the strategy arm is
+  // reached only by one this build does not recognize. Cast because no such
+  // member exists yet -- which is the case these pin.
+  const unlistedStrategyTerms = (
+    keys?: LinkageTerms["linkageKeys"],
+  ): LinkageTerms =>
+    ({
+      ...minimalTerms,
+      linkageStrategy: "two-pass",
+      ...(keys ? { linkageKeys: keys } : {}),
+    }) as unknown as LinkageTerms;
 
   test("refuses a standardization declaring a fan-out step, naming it", () => {
     // A standardization is only ever this party's own -- no invitation holds
@@ -1371,10 +1776,10 @@ describe("assertFanOutImplemented", () => {
       { output: "last_name", input: "LN", steps: [fanOutStep] },
     ];
     expect(() =>
-      assertFanOutImplemented(minimalTerms, standardization),
+      assertFanOutImplemented(unlistedStrategyTerms(), standardization),
     ).toThrow(OperatorConfigError);
     expect(() =>
-      assertFanOutImplemented(minimalTerms, standardization),
+      assertFanOutImplemented(unlistedStrategyTerms(), standardization),
     ).toThrow(/split_on/);
   });
 
@@ -1383,64 +1788,74 @@ describe("assertFanOutImplemented", () => {
     // the accept path, so this half stays a plain UsageError: not provably this
     // operator's own content, and its message stays swallowed by the generic
     // alert.
-    const terms: LinkageTerms = {
-      ...minimalTerms,
-      linkageKeys: elementFanOutKeys,
-    };
+    const terms = unlistedStrategyTerms(elementFanOutKeys);
     expect(() => assertFanOutImplemented(terms)).toThrow(UsageError);
-    expect(() => assertFanOutImplemented(terms)).toThrow(/split_on/);
     expect(() => assertFanOutImplemented(terms)).not.toThrow(
       OperatorConfigError,
     );
   });
 
-  test("admits both authoring surfaces under single-pass, the strategy that matches a candidate set", () => {
-    // The narrowed rule's other half: fan-out matching is specified for
-    // single-pass alone (docs/spec/PROTOCOL.md, Fan-out runs under single-pass
-    // only), so the same two configurations the cascade refuses above run there.
-    const singlePassTerms: LinkageTerms = {
+  test("admits both authoring surfaces under the strategies that resolve a candidate set", () => {
+    // The narrowed rule's other half: both shipped strategies resolve one
+    // (CANDIDATE_SET_IMPLEMENTED_BY_STRATEGY, linkageTermsPolicy.ts), so the
+    // configurations an unlisted strategy refuses above run under either.
+    const standardization = [
+      { output: "last_name", input: "LN", steps: [fanOutStep] },
+    ];
+    for (const linkageStrategy of ["cascade", "single-pass"] as const) {
+      const terms: LinkageTerms = { ...minimalTerms, linkageStrategy };
+      expect(() =>
+        assertFanOutImplemented(terms, standardization),
+      ).not.toThrow();
+      expect(() =>
+        assertFanOutImplemented({ ...terms, linkageKeys: elementFanOutKeys }),
+      ).not.toThrow();
+    }
+  });
+
+  test("refuses a strategy this build does not recognize, rather than admitting it", () => {
+    // An allowlist, not a named denylist: a strategy added to the schema refuses
+    // a candidate set until its own resolution is written.
+    expect(() =>
+      assertFanOutImplemented(unlistedStrategyTerms(elementFanOutKeys)),
+    ).toThrow(UsageError);
+  });
+
+  test("refuses a candidate set under the count-only algorithm, whatever the strategy", () => {
+    // psi-c counts matched VALUES where the resolution pairs each record at most
+    // once, so the count would over-report the linkage it is used to justify.
+    // The refusal reaches both authoring surfaces, under the very strategy that
+    // otherwise resolves a candidate set.
+    const countOnly: LinkageTerms = {
       ...minimalTerms,
-      linkageStrategy: "single-pass",
+      algorithm: "psi-c",
+      linkageStrategy: "cascade",
     };
     const standardization = [
       { output: "last_name", input: "LN", steps: [fanOutStep] },
     ];
-    expect(() =>
-      assertFanOutImplemented(singlePassTerms, standardization),
-    ).not.toThrow();
-    expect(() =>
-      assertFanOutImplemented({
-        ...singlePassTerms,
-        linkageKeys: elementFanOutKeys,
-      }),
-    ).not.toThrow();
-  });
-
-  test("refuses a strategy this build does not recognize, rather than admitting it", () => {
-    // An allowlist, not a cascade-named denylist: a strategy added to the schema
-    // refuses a fan-out until it too realizes one. Cast because no such member
-    // exists yet -- which is the case this pins.
-    const futureStrategyTerms = {
-      ...minimalTerms,
-      linkageStrategy: "two-pass",
-      linkageKeys: elementFanOutKeys,
-    } as unknown as LinkageTerms;
-    expect(() => assertFanOutImplemented(futureStrategyTerms)).toThrow(
-      UsageError,
+    expect(() => assertFanOutImplemented(countOnly, standardization)).toThrow(
+      OperatorConfigError,
     );
+    expect(() =>
+      assertFanOutImplemented({ ...countOnly, linkageKeys: elementFanOutKeys }),
+    ).toThrow(UsageError);
+    expect(() =>
+      assertFanOutImplemented({ ...countOnly, linkageKeys: elementFanOutKeys }),
+    ).toThrow(/count-only/);
   });
 
   test("the refusal names the strategy rule and the two ways out of it", () => {
-    // What an operator does about it: agree single-pass terms, or drop the step.
-    // Neither remedy is derivable from the function name alone, so both are
-    // pinned rather than left to the message's shape.
-    const terms: LinkageTerms = {
-      ...minimalTerms,
-      linkageKeys: elementFanOutKeys,
-    };
-    expect(() => assertFanOutImplemented(terms)).toThrow(/single-pass/);
+    // What an operator does about it: agree terms whose strategy matches a
+    // candidate set, or drop the step. Neither remedy is derivable from the
+    // function name alone, so both are pinned rather than left to the message's
+    // shape.
+    const terms = unlistedStrategyTerms(elementFanOutKeys);
     expect(() => assertFanOutImplemented(terms)).toThrow(
-      /Agree linkage terms whose linkage_strategy is single-pass/,
+      /matches a single value per record/,
+    );
+    expect(() => assertFanOutImplemented(terms)).toThrow(
+      /Agree linkage terms whose linkage_strategy matches a candidate set/,
     );
     expect(() => assertFanOutImplemented(terms)).toThrow(
       /remove the "split_on" step/,
@@ -1455,7 +1870,7 @@ describe("assertFanOutImplemented", () => {
         { output: "last_name", input: "LN", steps: [{ function: name }] },
       ];
       expect(() =>
-        assertFanOutImplemented(minimalTerms, standardization),
+        assertFanOutImplemented(unlistedStrategyTerms(), standardization),
       ).toThrow(UsageError);
     }
   });
@@ -1469,9 +1884,72 @@ describe("assertFanOutImplemented", () => {
       },
     ];
     expect(() =>
-      assertFanOutImplemented(minimalTerms, standardization),
+      assertFanOutImplemented(unlistedStrategyTerms(), standardization),
     ).not.toThrow();
-    expect(() => assertFanOutImplemented(minimalTerms)).not.toThrow();
+    expect(() =>
+      assertFanOutImplemented(unlistedStrategyTerms()),
+    ).not.toThrow();
+  });
+});
+
+describe("assertCandidateSetCardinalityImplemented", () => {
+  const fanOutStep = { function: "split_on", params: { delimiter: "-" } };
+  const withCandidateSet: LinkageTerms = {
+    ...minimalTerms,
+    linkageKeys: [
+      {
+        name: "LN+DOB",
+        elements: [
+          { field: "last_name", transform: [fanOutStep] },
+          { field: "date_of_birth" },
+        ],
+      },
+    ],
+  };
+  const deduplicating = (terms: LinkageTerms): LinkageTerms => ({
+    ...terms,
+    deduplicate: true,
+  });
+
+  test("refuses a candidate set under the many-to-many the pair resolves to", () => {
+    expect(() =>
+      assertCandidateSetCardinalityImplemented(
+        deduplicating(withCandidateSet),
+        deduplicating(withCandidateSet),
+      ),
+    ).toThrow(UsageError);
+    expect(() =>
+      assertCandidateSetCardinalityImplemented(
+        deduplicating(withCandidateSet),
+        deduplicating(withCandidateSet),
+      ),
+    ).toThrow(/many-to-many/);
+  });
+
+  test("admits a candidate set under the one-sided cardinalities", () => {
+    // many-to-one and one-to-many are not refused with it: a candidate set on
+    // either side of those runs under both strategies.
+    expect(() =>
+      assertCandidateSetCardinalityImplemented(
+        deduplicating(withCandidateSet),
+        withCandidateSet,
+      ),
+    ).not.toThrow();
+    expect(() =>
+      assertCandidateSetCardinalityImplemented(
+        withCandidateSet,
+        deduplicating(withCandidateSet),
+      ),
+    ).not.toThrow();
+  });
+
+  test("admits many-to-many where no key declares a candidate set", () => {
+    expect(() =>
+      assertCandidateSetCardinalityImplemented(
+        deduplicating(minimalTerms),
+        deduplicating(minimalTerms),
+      ),
+    ).not.toThrow();
   });
 });
 
@@ -1814,6 +2292,195 @@ describe("assertTransformsCompile", () => {
       assertTransformsCompile(terms);
     });
     expect(second * 10).toBeLessThan(first);
+  });
+});
+
+// --- transformRefusalIn ------------------------------------------------------
+
+describe("transformRefusalIn", () => {
+  // A front end that shows the author what to change has to tell the two
+  // document-shaped refusals apart, and the classes they are raised under answer
+  // a different question (whose content the fault is). The tag is that identity;
+  // these pin what it holds, on both surfaces and both classes.
+  const keysWithTransform = (
+    steps: TransformStep[],
+  ): LinkageTerms["linkageKeys"] => [
+    { name: "LN", elements: [{ field: "last_name", transform: steps }] },
+  ];
+
+  const refusalFrom = (run: () => void): unknown => {
+    try {
+      run();
+    } catch (error) {
+      return error;
+    }
+    throw new Error("expected a refusal");
+  };
+
+  test("names an uncompilable step by the label the message states", () => {
+    for (const surface of ["element", "standardization"] as const) {
+      const step = { function: "pad_left", params: { length: 4, char: "ab" } };
+      const error = refusalFrom(() =>
+        surface === "element"
+          ? assertTransformsCompile({
+              ...minimalTerms,
+              linkageKeys: keysWithTransform([step]),
+            })
+          : assertTransformsCompile(minimalTerms, [
+              { output: "last_name", input: "LN", steps: [step] },
+            ]),
+      );
+      expect(transformRefusalIn(error), surface).toEqual({
+        reason: "uncompilable-step",
+        stepLabel: '"pad_left"',
+      });
+    }
+  });
+
+  test("holds no byte of a document a partner authored", () => {
+    // The label is core's narrowed one, so a front end interpolating it echoes
+    // no function name, param name, or param value the document declares --
+    // measured with a marker planted in all three.
+    const terms: LinkageTerms = {
+      ...minimalTerms,
+      linkageKeys: keysWithTransform([
+        { function: "ZZMARKFN", params: { ZZMARKPARAM: "ZZMARKVALUE" } },
+      ]),
+    };
+    const refusal = transformRefusalIn(
+      refusalFrom(() => assertTransformsCompile(terms)),
+    );
+    expect(refusal).toEqual({
+      reason: "uncompilable-step",
+      stepLabel: "a function this build does not recognize",
+    });
+    expect(JSON.stringify(refusal)).not.toMatch(/ZZMARK/);
+  });
+
+  test("holds the two counts an over-count document is refused on", () => {
+    const steps = (count: number): TransformStep[] =>
+      Array.from({ length: count }, () => ({ function: "to_upper_case" }));
+    expect(
+      transformRefusalIn(
+        refusalFrom(() =>
+          assertTransformsCompile(
+            { ...minimalTerms, linkageKeys: keysWithTransform(steps(5)) },
+            undefined,
+            { maxSteps: 4 },
+          ),
+        ),
+      ),
+    ).toEqual({ reason: "too-many-steps", declaredSteps: 5, maxSteps: 4 });
+    // The other surface and error class hold the same reading: the count spans
+    // both, so the tag does too.
+    expect(
+      transformRefusalIn(
+        refusalFrom(() =>
+          assertTransformsCompile(
+            minimalTerms,
+            [{ output: "last_name", input: "LN", steps: steps(5) }],
+            { maxSteps: 4 },
+          ),
+        ),
+      ),
+    ).toEqual({ reason: "too-many-steps", declaredSteps: 5, maxSteps: 4 });
+  });
+
+  test("leaves the budget refusal and every other failure unmarked", () => {
+    // The budget refusal reports what was not checked rather than a fault in the
+    // document, and the same document can pass on a faster machine, so it holds
+    // no tag and a front end reading one falls back to its generic message.
+    const terms: LinkageTerms = {
+      ...minimalTerms,
+      linkageKeys: keysWithTransform([
+        { function: "pad_left", params: { length: 9, char: "0" } },
+      ]),
+    };
+    expect(
+      transformRefusalIn(
+        refusalFrom(() =>
+          assertTransformsCompile(terms, undefined, { totalBudgetMs: 0 }),
+        ),
+      ),
+    ).toBeUndefined();
+    expect(
+      transformRefusalIn(new UsageError("something else")),
+    ).toBeUndefined();
+    expect(transformRefusalIn(undefined)).toBeUndefined();
+    expect(
+      transformRefusalIn({ psilinkTransformRefusal: { reason: "invented" } }),
+    ).toBeUndefined();
+  });
+
+  test("reads a tag holding anything but a label this build renders as none", () => {
+    // The tag is read off any object in the cause chain, so a chain link a
+    // front end did not mint could hold one. A step label outside what the
+    // tagging site produces is no tag at all, leaving the generic message,
+    // rather than text of that link's choosing rendered in the mapped alert.
+    const taggedChain = (refusal: unknown): Error =>
+      new Error("mint failed", {
+        cause: { psilinkTransformRefusal: refusal },
+      });
+    expect(
+      transformRefusalIn(
+        taggedChain({
+          reason: "uncompilable-step",
+          stepLabel: "ZZSPOOFLABEL",
+        }),
+      ),
+    ).toBeUndefined();
+    for (const stepLabel of [
+      '"pad_left"',
+      "a function this build does not recognize",
+    ])
+      expect(
+        transformRefusalIn(
+          taggedChain({ reason: "uncompilable-step", stepLabel }),
+        ),
+        stepLabel,
+      ).toEqual({
+        reason: "uncompilable-step",
+        stepLabel,
+      });
+    // A count is read only as the shape the walk counts with: a fraction, a
+    // negative, or a non-number is no tag either.
+    for (const declaredSteps of [5.5, -1, Number.NaN, Infinity, "5"])
+      expect(
+        transformRefusalIn(
+          taggedChain({ reason: "too-many-steps", declaredSteps, maxSteps: 4 }),
+        ),
+        String(declaredSteps),
+      ).toBeUndefined();
+    expect(
+      transformRefusalIn(
+        taggedChain({
+          reason: "too-many-steps",
+          declaredSteps: 5,
+          maxSteps: 4.5,
+        }),
+      ),
+    ).toBeUndefined();
+    expect(
+      transformRefusalIn(
+        taggedChain({
+          reason: "too-many-steps",
+          declaredSteps: 5,
+          maxSteps: 4,
+        }),
+      ),
+    ).toEqual({ reason: "too-many-steps", declaredSteps: 5, maxSteps: 4 });
+  });
+
+  test("reads the refusal through whatever wrapped it", () => {
+    const refused = refusalFrom(() =>
+      assertTransformsCompile({
+        ...minimalTerms,
+        linkageKeys: keysWithTransform([{ function: "pad_left", params: {} }]),
+      }),
+    );
+    expect(
+      transformRefusalIn(new Error("minting failed", { cause: refused })),
+    ).toEqual({ reason: "uncompilable-step", stepLabel: '"pad_left"' });
   });
 });
 

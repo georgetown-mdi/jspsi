@@ -52,7 +52,11 @@ import { beginManagedRendezvous } from "./managedRendezvous";
 
 import { acquireValidatedManagedInput } from "./managedInputHandle";
 
-import type { BuiltExchangeRecord, MessageConnection } from "@psilink/core";
+import type {
+  BuiltExchangeRecord,
+  MessageConnection,
+  ResolvedMatching,
+} from "@psilink/core";
 import type { DataConnection } from "peerjs";
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 import type Peer from "peerjs";
@@ -97,7 +101,9 @@ export interface ManagedRunDriverConfig {
    * prompt once for a gone permission), or an operator-re-selected file. Its
    * contents are never taken from the record. */
   source: ManagedInputSource;
-  /** Cancels the rendezvous, the connection, and the exchange on unmount. */
+  /** Cancels the rendezvous, the connection, and the exchange on unmount. It
+   * reaches the exchange by closing the run's open connection, which is what
+   * ends the waits the partner holds (see {@link runManagedExchangeInBrowser}). */
   signal: AbortSignal;
   /** The object-URL boundary the outputs are built through -- `window.URL` in the
    * app, a recording fake in tests. */
@@ -115,13 +121,20 @@ export interface ManagedRunDriverConfig {
    * instead ({@link ./managedRun.ts}, `rerunFailureLastRun`). Absent, both flows
    * keep their default budget. */
   peerWaitTimeoutMs?: number;
-  /** A non-fatal, operator-relevant notice raised mid-run, from three sources: what
-   * the agreed terms resolved to ({@link describeResolvedRunShape}); the clean
+  /** A non-fatal, operator-relevant notice raised mid-run, from three sources: the
+   * deduplicating cardinality and the pair-table projection the agreed terms
+   * resolved to ({@link describeResolvedRunShape}); the clean
    * close ending on an exit with no delivery signal ({@link CLOSE_OUTCOME_WARNINGS});
    * and {@link DISCLOSURE_NOT_FILED_WARNING}. Optional: a caller with no notice
    * surface omits it and all are dropped. Never a terminal -- the run still settles
    * exactly once, and a notice from the teardown's close can arrive after it. */
   onWarning?: (message: string) => void;
+  /** What the two parties' agreed `deduplicate` values resolved to, reported
+   * once the terms are agreed and before the first round. It states the run's
+   * own terms rather than raising a notice, so an attended re-run shows it as
+   * run status. Optional: an unattended run has nobody reading it as it goes
+   * and omits it, and its own record holds the same three afterwards. */
+  onResolvedMatching?: (matching: ResolvedMatching) => void;
 }
 
 /**
@@ -140,7 +153,15 @@ export interface ManagedRunDriverConfig {
 export function runManagedExchangeInBrowser(
   config: ManagedRunDriverConfig,
 ): Promise<ManagedExchangeRunResult<RunOutputs>> {
-  const { record, source, signal, urls, onWarning, peerWaitTimeoutMs } = config;
+  const {
+    record,
+    source,
+    signal,
+    urls,
+    onWarning,
+    onResolvedMatching,
+    peerWaitTimeoutMs,
+  } = config;
   const exchangeRole = HANDSHAKE_ROLE_FOR_SIDE[record.side];
 
   // Two gates on the notices this run's close can raise. This run's own outputs
@@ -165,6 +186,19 @@ export function runManagedExchangeInBrowser(
     if (signal.aborted) return;
     onWarning?.(message);
   };
+
+  // How the operator's cancel reaches the exchange itself: core's
+  // MessageConnection takes no signal, so closing the connection is the only
+  // lever that rejects a receive parked for a duration the partner chooses. The
+  // run's single-writer lock spans the payload exchange, so a partner that
+  // stalls holds the record's lock until this close cuts the wait.
+  let openTransport:
+    { peer: Peer; conn: DataConnection; mc: MessageConnection } | undefined;
+  const cutRunOnCancel = () => {
+    if (openTransport !== undefined)
+      void teardown(openTransport.peer, openTransport.conn, openTransport.mc);
+  };
+  signal.addEventListener("abort", cutRunOnCancel);
 
   return runManagedRerun<ManagedRerunInput, ManagedRerunCarried, RunOutputs>(
     record,
@@ -241,6 +275,11 @@ export function runManagedExchangeInBrowser(
             onCloseOutcome: emitCloseWarning,
             signal,
           });
+          openTransport = { peer, conn, mc };
+          // A cancel that landed while the channel was opening fired the
+          // listener above with nothing yet to close, and an aborted signal
+          // never fires it again, so the state is read once here.
+          if (signal.aborted) cutRunOnCancel();
           // record.expires stays enforced at the handshake (core's pre- and
           // post-handshake guards), covering a bound that lapses between the
           // pre-connection expiry check and here; the orchestration re-maps that
@@ -271,8 +310,8 @@ export function runManagedExchangeInBrowser(
           throw error;
         }
       },
-      // After the durable persist and the lock release: run the PSI exchange, build
-      // the outputs, and tear down regardless of outcome.
+      // After the durable persist: run the PSI exchange, build the outputs, and
+      // tear down regardless of outcome.
       dataExchange: async (carried) => {
         try {
           const result = await runExchange(
@@ -284,14 +323,24 @@ export function runManagedExchangeInBrowser(
               psiEngineFactory: createBrowserPsiEngineFactory(
                 defaultSpawnPsiCryptoWorker,
               ),
-              // What the agreed terms resolved to, raised here as for every other
-              // seat: an unattended re-run is where an unnoticed widening of the
-              // match matters most, since nobody is watching and the terms are a
-              // standing record. Core composes both strings and raises neither --
-              // that is a front end's discretion (docs/spec/PROTOCOL.md, "The
-              // both-sided expansion has no ceiling of its own") -- so they take
-              // this wiring's own notice slot.
+              // What the agreed terms resolved to, reported here as for every
+              // other seat: a re-run is where an unnoticed widening of the match
+              // matters most, since the terms are a standing record. The
+              // resolved pair goes to the status slot, on every run; the
+              // deduplicating cardinality and the pair-table projection are
+              // notices and take this wiring's notice slot, where the shape
+              // raises them. Core composes each and raises none -- a front end's
+              // discretion (docs/spec/PROTOCOL.md, "The both-sided expansion has
+              // no ceiling of its own").
               onProtocolConfirmed: (_partnerTerms, _resolvedRole, runShape) => {
+                const { localDeduplicate, partnerDeduplicate, cardinality } =
+                  runShape;
+                if (!signal.aborted)
+                  onResolvedMatching?.({
+                    localDeduplicate,
+                    partnerDeduplicate,
+                    cardinality,
+                  });
                 const { cardinalityNotice, pairTableAdvisory } =
                   describeResolvedRunShape(runShape);
                 for (const notice of [cardinalityNotice, pairTableAdvisory])
@@ -325,7 +374,9 @@ export function runManagedExchangeInBrowser(
       // operator-torn-down run is recorded as cancelled, not a transport fault.
       aborted: () => signal.aborted,
     },
-  );
+  ).finally(() => {
+    signal.removeEventListener("abort", cutRunOnCancel);
+  });
 }
 
 /** The notice a run raises when its disclosure could not be filed: the exchange

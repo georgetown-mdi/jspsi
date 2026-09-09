@@ -27,6 +27,7 @@ import {
 } from "../../../src/psi/invitation.js";
 import { prepareAcceptedInvitation } from "../../../src/psi/acceptInvitation.js";
 
+import type { LinkageTerms, Metadata } from "@psilink/core";
 import type { InvitationLocation } from "../../../src/psi/invitation.js";
 
 const location: InvitationLocation = {
@@ -598,7 +599,7 @@ describe("generateInvitation", () => {
 
   test("an unnamed column the strip produced reports its sanitized position", async () => {
     // The mint's own re-parse is a refusal seat too: a header made only of
-    // text-direction characters strips to the empty name, and the failure carries
+    // control characters strips to the empty name, and the failure carries
     // the sanitation positions so the alert states that cause rather than a
     // trailing comma.
     const STRIPPED_TO_EMPTY_CSV =
@@ -727,21 +728,31 @@ describe("generateInvitation", () => {
     ).rejects.toThrow(/does not transmit/);
   });
 
-  // The mint-boundary fan-out safety check, over the default (cascade) terms,
-  // which match one value per record and so refuse a fan-out. These hand-built
-  // shapes stand in for a caller that reaches the mint without going through
-  // the editor's Generate gate, so no invitation for an exchange core already
-  // refuses ever reaches a partner. The function comes from core's own list,
-  // so a fan-out function added there is covered here.
+  // The mint-boundary candidate-set safety check, over count-only terms: a
+  // psi-c round counts matched values where the resolution pairs each record at
+  // most once, so a fan-out is refused there whatever the linkage strategy.
+  // These hand-built shapes stand in for a caller that reaches the mint without
+  // going through the editor's Generate gate, so no invitation for an exchange
+  // core already refuses ever reaches a partner. The function comes from core's
+  // own list, so a fan-out function added there is covered here.
   const [fanOutFunction] = FAN_OUT_FUNCTION_NAMES;
   const fanOutStep = { function: fanOutFunction, params: { delimiter: "-" } };
+  // The count-only shape: one linkage key, cascade, no deduplicate, no payload.
+  const countOnlyTerms = (metadata: Metadata): LinkageTerms => {
+    const base = getDefaultLinkageTerms("Org", metadata);
+    return {
+      ...base,
+      algorithm: "psi-c",
+      linkageKeys: base.linkageKeys.slice(0, 1),
+    };
+  };
 
   test("refuses to mint when a linkage-key element transform fans out", async () => {
     const metadata = inferMetadata(
       ["ssn", "first_name", "last_name", "dob"],
       [],
     );
-    const base = getDefaultLinkageTerms("Org", metadata);
+    const base = countOnlyTerms(metadata);
     const fanning = {
       ...base,
       linkageKeys: base.linkageKeys.map((key, i) =>
@@ -764,12 +775,31 @@ describe("generateInvitation", () => {
         linkageTerms: fanning,
         metadata,
       }),
-    ).rejects.toThrow(
-      /fan-out matching runs under the single-pass linkage strategy only/,
-    );
+    ).rejects.toThrow(/count-only/);
   });
 
   test("refuses to mint when the authored standardization fans out", async () => {
+    const metadata = inferMetadata(
+      ["ssn", "first_name", "last_name", "dob"],
+      [],
+    );
+    await expect(
+      generateInvitation({
+        inviterName: "Org",
+        file: csvStream(PARTIAL_CSV),
+        location,
+        linkageTerms: countOnlyTerms(metadata),
+        metadata,
+        standardization: [
+          { output: "last_name", input: "last_name", steps: [fanOutStep] },
+        ],
+      }),
+    ).rejects.toThrow(/count-only/);
+  });
+
+  test("mints a fan-out under the default cascade terms", async () => {
+    // The admitted half: both linkage strategies resolve a candidate set, so a
+    // fan-out under the editor's default terms is minted rather than refused.
     const metadata = inferMetadata(
       ["ssn", "first_name", "last_name", "dob"],
       [],
@@ -785,9 +815,7 @@ describe("generateInvitation", () => {
           { output: "last_name", input: "last_name", steps: [fanOutStep] },
         ],
       }),
-    ).rejects.toThrow(
-      /fan-out matching runs under the single-pass linkage strategy only/,
-    );
+    ).resolves.toBeDefined();
   });
 
   // The mint-boundary compile safety check, the sibling of the fan-out one
