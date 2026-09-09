@@ -83,8 +83,16 @@ exits 0; pinned with `versionlock` or `exclude=`, `dnf update` still exits 0 and
 prints `Complete!` while changing not one package in the image. A 5438 image is
 not incrementally patchable and does not say so. 5021's certified module is a
 *separate* package name, so `openssl-libs` stays free to float: after a full
-`dnf update --releasever=latest` that image scans at zero OS-layer findings and
-still loads module `3.0.8-d694bfa693b76001`.
+`dnf update --releasever=latest` that image scans at zero OS-layer findings.
+What such an update no longer leaves alone is the module itself. AWS now
+publishes 5438's module under the `-certified` package name too, at the higher
+NVR `3.2.2-1.amzn2023`, so an update inside the image moves the provider from
+`3.0.8-d694bfa693b76001` to `3.2.2-799901ad7ab41d45` -- measured on the package
+closure at the pinned snapshot. It lands on a certified module rather than an
+uncertified one, which is the half that still separates this package name from
+`-latest`, but the certificate a running image answers to is no longer a
+property of the package name alone. The build runs no update, and its
+read-back assertion fails on any module its pins do not name.
 
 **Replacing the default image rather than adding a variant.** No certificate
 reaches musl or Alpine, so the default image cannot support this claim -- but
@@ -552,10 +560,9 @@ worth moving to are listed in
 [the procedure in DEPENDENCY_PINS.md](../spec/DEPENDENCY_PINS.md#bumping-the-fips-base-image),
 and one of them arrives weekly rather than filed: `image_smoke.yaml`'s scheduled
 run scans the built variant and reports what it finds as code-scanning alerts.
-That scan reports rather than gates, and no pull request runs one over the
-variant at all, because the pinned rootfs has findings no pin movement can reach
-and a check red on every run is one reviewers learn to ignore. So the gate is at
-release while the signal is weekly.
+That scan gates, on the schedule and on a pull request alike, so a finding
+against a pin nothing has touched reddens the weekly run rather than waiting for
+a release to refuse it.
 
 ## What it costs
 
