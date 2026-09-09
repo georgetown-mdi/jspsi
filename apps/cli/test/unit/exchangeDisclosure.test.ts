@@ -287,10 +287,10 @@ test("a run that withholds the partner's half of the table says so instead", () 
     payload: { receive: [] },
   }).join("\n");
   expect(lines).toContain(
-    "what your partner learns about its own records (enforced):",
+    "what your partner learns about its own records (your partner's word):",
   );
   expect(lines).toContain(
-    "never sent which of its own records are in your data",
+    "By agreement, not enforced: your agreed terms declare no disclosure",
   );
   expect(lines).not.toContain(
     "your partner learns which of its own records are in your data",

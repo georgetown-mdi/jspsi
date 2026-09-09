@@ -292,6 +292,25 @@ export const CONSENT_FACTS = {
       "data. Withholding it is a limit of the exchange rather than a choice " +
       "of the software your partner runs.",
   },
+  partnerOwnMembershipWithheldSelfAuthored: {
+    basis: "trust-contingent",
+    reason:
+      "The same case at the seat reading terms it wrote itself " +
+      "(`withholdsPartnerAssociationTable`), whose own documentation states " +
+      "the shape it cannot see: it holds this party's declared " +
+      "`payload.receive` against the partner's DECLARED `payload.send`, not " +
+      "against what the partner's resolved metadata will actually transmit. " +
+      "`validateCompatibility` passes a partner config with no payload block " +
+      "by comparing against `partner.payload?.send ?? []`; if that partner's " +
+      "metadata still discloses a column, this party's own process sends it, " +
+      "and the run aborts only at the received-payload reconciliation after " +
+      "the exchange rather than before this half moves. What holds is the " +
+      "agreed declaration, not a run property this side can enforce.",
+    note:
+      "By agreement, not enforced: your agreed terms declare no disclosure " +
+      "of your partner's half of the matched-pair table, and the run stops " +
+      "if your partner's input turns out to disclose one.",
+  },
   duplicateMatches: {
     basis: "enforced",
     reason:

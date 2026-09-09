@@ -145,12 +145,19 @@ export function renderExchangeDisclosure(
   // of the matched-pair table. No such line under `psi-c`, whose non-receiving
   // party is the sender -- it computes nothing from the round and is sent no
   // count report -- so the algorithm's disclosures stand there instead.
+  //
+  // The withheld variant here rests on the partner's own declaration rather
+  // than on anything this run enforces: `withholdsPartnerAssociationTable`
+  // reads this party's declared `payload.receive` against the partner's
+  // declared `payload.send`, not the partner's resolved metadata, so it takes
+  // the trust-contingent fact rather than the one the invitation seats read
+  // off their own authored document.
   if (
     !linkageTerms.output.shareWithPartner &&
     linkageTerms.algorithm === "psi"
   ) {
     const membershipFact = withholdsPartnerAssociationTable(linkageTerms)
-      ? "partnerOwnMembershipWithheld"
+      ? "partnerOwnMembershipWithheldSelfAuthored"
       : "partnerLearnsOwnMembership";
     emit(
       `  ${marked(
