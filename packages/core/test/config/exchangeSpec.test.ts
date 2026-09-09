@@ -283,10 +283,11 @@ test("a name-class character is rejected in every payload column list", () => {
 });
 
 // --- Payload column-name duplicate normalization -----------------------------
-// The two top-level lists name each column once, the treatment the negotiated
-// payload dictionary already applies. Both are hand-authorable in a recurring
-// config, and both are compared against a set of columns holding each name
-// once, so a repeat left standing refuses the run for the operator's own typo.
+// The two top-level lists and the outbound consent record's own list name each
+// column once, the treatment the negotiated payload dictionary already applies.
+// All three are hand-authorable in a recurring config, and each is compared
+// against a set of columns holding each name once, so a repeat left standing
+// refuses the run for the operator's own typo.
 
 test("expectedPayloadColumns: a column named twice parses to one entry", () => {
   expect(
@@ -306,19 +307,29 @@ test("disclosedPayloadColumns: a column named twice parses to one entry", () => 
   ).toEqual(["diagnosis", "dose"]);
 });
 
+test("outboundPayloadConsent: a column named twice parses to one entry", () => {
+  expect(
+    parseExchangeSpec({
+      ...minimalSpec,
+      outbound_payload_consent: {
+        status: "confirmed",
+        columns: ["dose", "notes", "dose"],
+      },
+    }).outboundPayloadConsent,
+  ).toEqual({ status: "confirmed", columns: ["dose", "notes"] });
+});
+
 test("a payload column list over the maximum count is refused by its authored count, not normalized under it", () => {
-  // The count gate stands ahead of the collapse on both lists: a list padded
+  // The count gate stands ahead of the collapse on every list: a list padded
   // with one name repeated is refused for the count it was authored with rather
   // than admitted for the single entry it would collapse to.
-  for (const key of [
-    "expected_payload_columns",
-    "disclosed_payload_columns",
-  ] as const) {
-    const padded = Array.from(
-      { length: MAX_PAYLOAD_ENTRIES + 1 },
-      () => "dose",
-    );
-    const result = safeParseExchangeSpec({ ...minimalSpec, [key]: padded });
+  const padded = Array.from({ length: MAX_PAYLOAD_ENTRIES + 1 }, () => "dose");
+  for (const fields of [
+    { expected_payload_columns: padded },
+    { disclosed_payload_columns: padded },
+    { outbound_payload_consent: { status: "confirmed", columns: padded } },
+  ]) {
+    const result = safeParseExchangeSpec({ ...minimalSpec, ...fields });
     expect(result.success).toBe(false);
     if (result.success) continue;
     expect(JSON.stringify(result.error.issues)).toContain("must not exceed");

@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { boundedArray } from "../utils/boundedArray.js";
 import {
+  columnsNamedOnce,
   MAX_NAME_LENGTH,
   MAX_PAYLOAD_ENTRIES,
   nameValue,
@@ -54,6 +55,12 @@ export type OutboundPayloadConsent =
  * writers could not have produced; the discriminated union is what keeps a
  * `confirmed` record without columns, or a `pending` record carrying them,
  * unrepresentable.
+ *
+ * A name written twice names one column twice, so the list keeps each name
+ * once ({@link columnsNamedOnce}), as the spec's sibling payload column-name
+ * lists and the negotiated payload dictionary do. {@link boundedArray} bounds
+ * the count ahead of that collapse, so a padded list is refused for its
+ * authored count.
  */
 export const OutboundPayloadConsentSchema: z.ZodType<OutboundPayloadConsent> =
   z.discriminatedUnion("status", [
@@ -64,6 +71,6 @@ export const OutboundPayloadConsentSchema: z.ZodType<OutboundPayloadConsent> =
         nameValue(z.string().min(1).max(MAX_NAME_LENGTH)),
         MAX_PAYLOAD_ENTRIES,
         `outbound payload consent must not exceed ${MAX_PAYLOAD_ENTRIES} columns`,
-      ),
+      ).transform((names) => columnsNamedOnce(names, (name) => name)),
     }),
   ]);
