@@ -292,6 +292,46 @@ describe("the consent summary's fan-out register", () => {
     expect(summary.fanOutApplied).toBe(false);
   });
 
+  const swapKeys = [
+    {
+      name: "name",
+      elements: [{ field: "first_name" }, { field: "last_name" }],
+      swap: ["first_name", "last_name"] as [string, string],
+    },
+  ];
+
+  test.each(["cascade", "single-pass"] as const)(
+    "a swapped key order under %s is marked as applied",
+    (linkageStrategy) => {
+      // A swap is a candidate set like the expansion it rides the applied
+      // setting with, and both strategies resolve one, so the surfaces state
+      // the either-order match the run performs with nothing qualifying it.
+      const summary = summarizeInvitation({
+        linkageTerms: { ...baseTerms, linkageKeys: swapKeys, linkageStrategy },
+      });
+      expect(summary.linkageKeys[0].hasSwap).toBe(true);
+      expect(summary.linkageKeys[0].swapApplied).toBe(true);
+    },
+  );
+
+  test("the same swap under the count-only algorithm is marked as not applied", () => {
+    // The count-only round refuses a candidate set, so the swap the invitation
+    // declares is a term the exchange will not run. The flag reads the
+    // refusal's own verdict, so the surfaces cannot state an either-order match
+    // for a document the run stops.
+    const summary = summarizeInvitation({
+      linkageTerms: {
+        ...baseTerms,
+        linkageKeys: swapKeys,
+        algorithm: "psi-c",
+        linkageStrategy: "cascade",
+      },
+    });
+    expect(summary.linkageKeys[0].hasSwap).toBe(true);
+    expect(summary.linkageKeys[0].swapApplied).toBe(false);
+    expect(summary.fanOutApplied).toBe(false);
+  });
+
   test("terms declaring no fan-out are in neither register", () => {
     const summary = summarizeInvitation({
       linkageTerms: { ...baseTerms, linkageStrategy: "single-pass" },

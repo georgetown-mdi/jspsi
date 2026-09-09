@@ -379,6 +379,16 @@ export interface InvitationKeySummary {
    * order). */
   hasSwap: boolean;
   /**
+   * Whether today's exchange actually applies the swap above: both the setting
+   * the swapped key order rides ({@link APPLIED_SETTINGS}) and the combination
+   * that resolves a candidate set, which is the same verdict
+   * {@link InvitationSummary.fanOutApplied} reports -- a count-only exchange
+   * refuses a swapped key rather than matching it in the declared order alone.
+   * Meaningful only alongside {@link hasSwap}; the renderer flags the swap note
+   * as proposed-but-not-applied when this is false.
+   */
+  swapApplied: boolean;
+  /**
    * The two swapped elements' field labels, present only when both swap
    * references resolve to elements with *distinct* labels (the common case,
    * e.g. ["Last name", "First name"]). Absent when an identifier names no
@@ -1273,6 +1283,11 @@ function summarizeKey(
     elements,
     headerFields,
     hasSwap,
+    // The swapped key order is a candidate-set producer under the same applied
+    // setting as the fuzzy expansion (`keyDeclaresCandidateSet`,
+    // fanOutFunctions.ts), so it applies on exactly the combinations that
+    // resolve a candidate set -- the verdict `fanOutMatches` already holds.
+    swapApplied: APPLIED_SETTINGS.fuzzyComparisons && fanOutMatches,
     swap,
   };
 }

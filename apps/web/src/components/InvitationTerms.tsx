@@ -371,6 +371,14 @@ function MatchKeyDetails({ summary }: { summary: InvitationKeySummary }) {
           {summary.swap !== undefined
             ? `${summary.swap[0]} and ${summary.swap[1]} may be matched in either order`
             : "Two of these elements may be matched in either order"}
+          {/* The marker renders only for a swap the run would not apply, which
+              on the shipped build is a count-only exchange, where a candidate
+              set is refused. A swapped order changes match breadth, not the
+              disclosure guarantee, so by the caveat-placement rule on
+              {@link InvitationTerms} the marker stays here with the note it
+              qualifies. */}
+          {!summary.swapApplied &&
+            ` ${PROPOSED_NOT_APPLIED_NOTES.swappedKeyOrder}`}
         </Text>
       )}
     </Stack>

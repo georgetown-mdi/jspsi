@@ -31,6 +31,7 @@ import { InvitationTerms } from "@components/InvitationTerms";
 
 import {
   BEL,
+  CONSENT_PROBE_TERMS,
   COUNT_ONLY_PROBE_TERMS,
   ESC,
   HOSTILE_IDENTITY,
@@ -2887,6 +2888,40 @@ describe("InvitationTerms: a qualifying sentence sits at its headline's visibili
     expect(panel.textContent).toContain("adjacent years");
     expect(panel.textContent).not.toContain(
       PROPOSED_NOT_APPLIED_NOTES.fuzzyComparisons,
+    );
+  });
+
+  test("a count-only invitation marks the swap it will refuse, beside the swap note", async () => {
+    // A swapped key order is a candidate set, which a count-only round refuses,
+    // so the either-order note is qualified where it stands rather than left
+    // reading as behavior the run performs. Rendered from core's shared probe --
+    // the same document the CLI accept prompt's pin uses -- so the two surfaces
+    // are measured on one input.
+    renderTerms(COUNT_ONLY_PROBE_TERMS);
+    await expect.element(toggle("Matching strategies")).toBeInTheDocument();
+    await userEvent.click(toggle("Matching strategies"));
+    const panel = await readyPanel(
+      "given name, family name, and date of birth",
+    );
+    expect(panel.textContent).toContain("may be matched in either order");
+    expect(panel.textContent).toContain(
+      PROPOSED_NOT_APPLIED_NOTES.swappedKeyOrder,
+    );
+  });
+
+  test("a swap the run applies shows its note unqualified", async () => {
+    // Non-vacuous the other way, over the same key: under `psi` the receiver
+    // builds the key in both orders, so the note stands with nothing qualifying
+    // it and the caveat above is the algorithm's doing rather than the fixture's.
+    renderTerms(CONSENT_PROBE_TERMS);
+    await expect.element(toggle("Matching strategies")).toBeInTheDocument();
+    await userEvent.click(toggle("Matching strategies"));
+    const panel = await readyPanel(
+      "given name, family name, and date of birth",
+    );
+    expect(panel.textContent).toContain("may be matched in either order");
+    expect(app.container.textContent).not.toContain(
+      PROPOSED_NOT_APPLIED_NOTES.swappedKeyOrder,
     );
   });
 
