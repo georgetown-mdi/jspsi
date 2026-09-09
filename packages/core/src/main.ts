@@ -403,6 +403,7 @@ export type {
 // partner-controlled string in it, is made once rather than per surface.
 export {
   summarizeInvitation,
+  withholdsPartnerAssociationTable,
   TRANSFORM_FUNCTION_GLOSSARY,
 } from "./consent/invitationSummary.js";
 export type {
@@ -430,6 +431,7 @@ export {
   OUTBOUND_SEND_NO_PAYLOAD_SENTENCE,
   PROPOSED_NOT_APPLIED_NOTES,
   RECORDED_LINKAGE_RULE_SET_CAVEAT,
+  SELF_AUTHORED_EXCHANGE_FACTS,
   UNRECOGNIZED_TRANSFORM_NOTE,
   describeDeduplicatePair,
   distinctLinkageRuleSetVerdicts,

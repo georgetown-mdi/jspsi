@@ -82,6 +82,19 @@ export const CONSENT_FACTS = {
       "at acceptance the line says so, and the same confirmation is taken at the " +
       "first run that can resolve it.",
   },
+  outboundSendSelfAuthored: {
+    basis: "enforced",
+    reason:
+      "The same disclosure at the seat that wrote its own configuration, where " +
+      "the half of `outboundSend` resting on a recorded acceptance has nothing " +
+      "to rest on: this party consented to no set and psilink holds none for " +
+      "it. What remains is the derivation, which is the whole basis here -- the " +
+      "displayed set comes from the run's own resolved metadata through the " +
+      "same predicate the payload step transmits on, so no column outside it " +
+      "leaves the machine. A later run whose file discloses a different set " +
+      "displays that set rather than stopping, since there is no confirmed set " +
+      "to differ from.",
+  },
   invitingParty: {
     basis: "trust-contingent",
     reason:
@@ -267,14 +280,37 @@ export const CONSENT_FACTS = {
       "disclosing no column, which is the second condition the rule asks. " +
       "Resolved off the run's own predicate -- " +
       "`withholdsInviterAssociationTable` where the partner is the inviting " +
-      "party and `withholdsAcceptorAssociationTable` where it is the " +
-      "accepting party (consent/invitationSummary.ts) -- so a surface never " +
-      "states this basis for a run that does not withhold.",
+      "party, `withholdsAcceptorAssociationTable` where it is the accepting " +
+      "party, and `withholdsPartnerAssociationTable` where the viewer reads " +
+      "linkage terms it wrote itself (consent/invitationSummary.ts) -- so a " +
+      "surface never states this basis for a run that does not withhold. The " +
+      "third of those reads two documents from one of them, and its own " +
+      "documentation states the shape it cannot see.",
     note:
       "This exchange withholds your partner's half of the matched-pair table, " +
       "so its process is never sent which of its own records are in your " +
       "data. Withholding it is a limit of the exchange rather than a choice " +
       "of the software your partner runs.",
+  },
+  partnerOwnMembershipWithheldSelfAuthored: {
+    basis: "trust-contingent",
+    reason:
+      "The same case at the seat reading terms it wrote itself " +
+      "(`withholdsPartnerAssociationTable`), whose own documentation states " +
+      "the shape it cannot see: it holds this party's declared " +
+      "`payload.receive` against the partner's DECLARED `payload.send`, not " +
+      "against what the partner's resolved metadata will actually transmit. " +
+      "`validateCompatibility` passes a partner config with no payload block " +
+      "by comparing against `partner.payload?.send ?? []`; if that partner's " +
+      "metadata still discloses a column, this party's own process sends it, " +
+      "and the run aborts only at the received-payload reconciliation after " +
+      "the exchange rather than before this half moves. What holds is the " +
+      "agreed declaration, not a run property this side can enforce.",
+    note:
+      "By agreement, not enforced: your agreed terms declare no disclosure " +
+      "of your partner's half of the matched-pair table. If your partner's " +
+      "own input discloses one anyway, its process is sent that half while " +
+      "the exchange runs, and the run stops only afterwards.",
   },
   duplicateMatches: {
     basis: "enforced",
@@ -623,6 +659,29 @@ export const ACCEPTOR_DEDUPLICATE_CONTROL_FACTS = [
   "partnerReadsDuplicateGrouping",
   "partnerDuplicateGroupingWithheld",
   "acceptorDeduplicateRefused",
+] as const satisfies ReadonlyArray<ConsentFactId>;
+
+/**
+ * The facts only the seat reading linkage terms it WROTE ITSELF can reach: a
+ * run whose two configurations the parties authored between them, with no
+ * invitation and so no acceptance record behind either one.
+ *
+ * Each restates a fact an acceptance surface already states, on the basis
+ * this seat can back rather than the one that seat holds -- the outbound set
+ * derived with no recorded consent to differ from, and a withholding resting
+ * on the partner's declared payload direction rather than on a run property
+ * this side enforces. An acceptance surface rendering either sentence would
+ * state a basis its own run does not hold. The per-surface checks that hold a
+ * surface to every fact's note read this set rather than each excluding by
+ * hand, so which surface owes which sentence stays one judgment.
+ *
+ * Every member's id ends in `SelfAuthored`, after the fact it restates; a
+ * core test holds the set to that naming, so a further one cannot be added to
+ * the table and left out of this list.
+ */
+export const SELF_AUTHORED_EXCHANGE_FACTS = [
+  "outboundSendSelfAuthored",
+  "partnerOwnMembershipWithheldSelfAuthored",
 ] as const satisfies ReadonlyArray<ConsentFactId>;
 
 /**

@@ -146,7 +146,7 @@ export async function confirmOutboundPayloadConsent(params: {
 
   const interactive = process.stdin.isTTY === true;
   displayOutboundColumns(
-    consentSurfaceSink({ log, logFile, willPrompt: interactive }),
+    consentSurfaceSink({ log, logFile, toPromptStream: interactive }),
     verdict,
   );
   if (!interactive) throw outboundPayloadConsentRefusal(verdict);

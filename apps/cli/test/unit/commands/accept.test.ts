@@ -31,6 +31,7 @@ import {
   redactPrivateKeyMaterial,
   sanitizeErrorForDisplay,
   sanitizeForDisplay,
+  SELF_AUTHORED_EXCHANGE_FACTS,
   setDiagnosticSink,
   summarizeInvitation,
   UNRECOGNIZED_TRANSFORM_NOTE,
@@ -4079,18 +4080,18 @@ describe("displayInvitation: the declared terms it discloses (columns, citations
     // The whole table, rather than a list restated here: a caveat this renderer
     // authored for itself instead of reading is absent from the rendering and fails,
     // and one the web reworded on its own side fails there for the same reason.
-    // Bar the facts core marks as reachable only from a seat where the
-    // ACCEPTING party declares a grouping of its own: this prompt offers no
-    // such control, so the run they state is one it never conducts. The set is
-    // core's judgment, not this test's, so the web seat that does render them
-    // is held to the same list.
+    // Bar the facts core marks as reachable from another seat only: the ones a
+    // seat where the ACCEPTING party declares a grouping of its own can state,
+    // which this prompt offers no control over, and the ones a party reading
+    // terms it wrote itself states on a basis an acceptance does not hold.
+    // Both sets are core's judgment, not this test's, so the seats that do
+    // render them are held to the same lists.
+    const elsewhere: ReadonlyArray<string> = [
+      ...ACCEPTOR_DEDUPLICATE_CONTROL_FACTS,
+      ...SELF_AUTHORED_EXCHANGE_FACTS,
+    ];
     const classified: Array<ConsentFact> = Object.entries(CONSENT_FACTS)
-      .filter(
-        ([id]) =>
-          !(
-            ACCEPTOR_DEDUPLICATE_CONTROL_FACTS as ReadonlyArray<string>
-          ).includes(id),
-      )
+      .filter(([id]) => !elsewhere.includes(id))
       .map(([, fact]) => fact);
     expect(classified.length).toBeLessThan(Object.keys(CONSENT_FACTS).length);
     const notes = classified
