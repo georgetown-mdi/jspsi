@@ -7,6 +7,7 @@ import {
   summarizeInvitation,
   withholdsAcceptorAssociationTable,
   withholdsInviterAssociationTable,
+  withholdsPartnerAssociationTable,
 } from "../../src/consent/invitationSummary.js";
 
 import type { LinkageTerms } from "../../src/config/linkageTermsSchema.js";
@@ -112,5 +113,49 @@ describe("the own-membership consent pair", () => {
     expect(
       summarizeInvitation({ linkageTerms: suppressed }).acceptorTableWithheld,
     ).toBe(true);
+  });
+
+  test("is picked at the seat reading terms it wrote itself", () => {
+    // A party that authored its own configuration reads the same pair off its
+    // own document, where the helper is simply its partner.
+    const exchanged = acceptorIsTheHelper({ linkageStrategy: "cascade" });
+    expect(withholdsPartnerAssociationTable(exchanged)).toBe(false);
+
+    const suppressed = acceptorIsTheHelper({
+      linkageStrategy: "single-pass",
+      payload: { send: [], receive: [] },
+    });
+    expect(withholdsPartnerAssociationTable(suppressed)).toBe(true);
+
+    // Requesting a column from the partner is what makes the partner a helper
+    // that needs its half back, so the run returns it.
+    expect(
+      withholdsPartnerAssociationTable(
+        acceptorIsTheHelper({ linkageStrategy: "single-pass" }),
+      ),
+    ).toBe(false);
+    // And an absent request binds the partner to nothing, so it reads as
+    // disclosure rather than as an empty declaration.
+    expect(
+      withholdsPartnerAssociationTable(
+        acceptorIsTheHelper({
+          linkageStrategy: "single-pass",
+          payload: { send: [] },
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  test("reads this party's own send out of the verdict at that seat", () => {
+    // A document sharing no result with the partner sends nothing whatever it
+    // declares, so its own send cannot decide whether the PARTNER's half is
+    // withheld -- the acceptance reading refuses that document instead, which
+    // is the case this seat does not share.
+    const declaringASend = acceptorIsTheHelper({
+      linkageStrategy: "single-pass",
+      payload: { send: [{ name: "risk_score" }], receive: [] },
+    });
+    expect(withholdsPartnerAssociationTable(declaringASend)).toBe(true);
+    expect(withholdsAcceptorAssociationTable(declaringASend)).toBe(false);
   });
 });

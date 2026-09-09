@@ -219,6 +219,102 @@ test("a count-only exchange states what it reveals and that it sends no columns"
   );
 });
 
+test("a count-only exchange whose input marks a column lists none, and says the run stops", () => {
+  // The count-only refusal comes moments later, from the same metadata: listing
+  // the column as sent would state a disclosure this run cannot make.
+  const lines = rendered(
+    {
+      ...localTerms,
+      algorithm: "psi-c",
+      output: { expectsOutput: true, shareWithPartner: true },
+    },
+    ["diagnosis"],
+  );
+  expect(lines).toContain("  columns you will send (enforced): (none)");
+  expect(lines.join("\n")).not.toContain("- diagnosis");
+  expect(lines.join("\n")).toContain(
+    "Your input marks one or more columns to send to your partner, which a count-only exchange cannot do, so this run stops before it starts.",
+  );
+  expect(lines.join("\n")).toContain(
+    "A count-only exchange sends no data columns in either direction",
+  );
+});
+
+test("a count-only run keeps that account whichever party the count goes to", () => {
+  // The algorithm holds both directions, so the reason the columns are not sent
+  // is the same one a partner entitled to the result would read.
+  const lines = rendered(
+    {
+      ...localTerms,
+      algorithm: "psi-c",
+      output: { expectsOutput: true, shareWithPartner: false },
+    },
+    ["diagnosis"],
+  ).join("\n");
+  expect(lines).toContain("  columns you will send (enforced): (none)");
+  expect(lines).not.toContain("- diagnosis");
+  expect(lines).toContain(
+    "A count-only exchange sends no data columns in either direction",
+  );
+  expect(lines).toContain("so this run stops before it starts");
+});
+
+// --- What a partner entitled to no result still learns -------------------------
+
+test("a partner receiving no result is told what it still learns about its own records", () => {
+  // A cascade returns the partner its matched positions as the rounds go, so the
+  // match itself tells it which of its records this party holds.
+  const lines = rendered({
+    ...localTerms,
+    output: { expectsOutput: true, shareWithPartner: false },
+  }).join("\n");
+  expect(lines).toContain(
+    "what your partner learns about its own records (enforced):",
+  );
+  expect(lines).toContain(
+    "Even when honored, your partner learns which of its own records are in your data",
+  );
+});
+
+test("a run that withholds the partner's half of the table says so instead", () => {
+  // Single-pass, this party the sole receiver, and no column requested of the
+  // partner: the run suppresses the partner's half, so it is never sent which of
+  // its own records matched.
+  const lines = rendered({
+    ...localTerms,
+    linkageStrategy: "single-pass",
+    output: { expectsOutput: true, shareWithPartner: false },
+    payload: { receive: [] },
+  }).join("\n");
+  expect(lines).toContain(
+    "what your partner learns about its own records (enforced):",
+  );
+  expect(lines).toContain(
+    "never sent which of its own records are in your data",
+  );
+  expect(lines).not.toContain(
+    "your partner learns which of its own records are in your data",
+  );
+});
+
+test("a count-only run states no own-membership fact, since its helper learns none", () => {
+  // The non-receiving party of a count-only run is the sender: it computes
+  // nothing from the round, and what the run does disclose is the algorithm's.
+  const lines = rendered({
+    ...localTerms,
+    algorithm: "psi-c",
+    output: { expectsOutput: true, shareWithPartner: false },
+  }).join("\n");
+  expect(lines).not.toContain("what your partner learns about its own records");
+  expect(lines).toContain(COUNT_ONLY_DISCLOSURE_STATEMENT);
+});
+
+test("a partner entitled to the result gets no own-membership line", () => {
+  expect(rendered(localTerms).join("\n")).not.toContain(
+    "what your partner learns about its own records",
+  );
+});
+
 // --- The matching terms -------------------------------------------------------
 
 test("a grouping this party declares states what it discloses, in its own terms", () => {

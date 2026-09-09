@@ -1376,6 +1376,53 @@ export function withholdsInviterAssociationTable(terms: LinkageTerms): boolean {
 }
 
 /**
+ * Whether the exchange withholds the PARTNER's half of the association table,
+ * read from the linkage terms a party wrote for ITSELF -- an exchange both
+ * parties configured from their own files, with no invitation between them.
+ *
+ * The same rule as the two readings above
+ * ({@link withholdsSenderAssociationTable}), asked at a seat where the
+ * document is this party's own: `output.expectsOutput` is this party's
+ * entitlement, `output.shareWithPartner` the partner's, and `payload.receive`
+ * what this party takes from the partner. Three conditions:
+ *
+ * - The strategy is `single-pass`, the only strategy with a frame to
+ *   suppress.
+ * - This party is entitled to output and the partner is not, so role
+ *   resolution seats this party as the receiver and leaves the partner the
+ *   sender the withholding covers. `validateCompatibility` holds this party's
+ *   `shareWithPartner` equal to the partner's own `expectsOutput`, so the two
+ *   documents cannot disagree about which party that is.
+ * - This party declares an empty `payload.receive`, which binds the partner to
+ *   sending no column: `validateCompatibility` refuses a partner whose
+ *   `payload.send` names one. An absent `receive` binds nothing and so reads
+ *   as disclosure, the direction the run defaults an unadvertised partner flag
+ *   in.
+ *
+ * This party's own `payload.send` does not enter it: the withholding is a
+ * property of the SENDER, and a document that shares no result with the
+ * partner sends nothing whatever it declares.
+ *
+ * A best-effort reading of two documents from one of them: the run's own
+ * decision reads the partner's disclosure flag off the terms exchange, derived
+ * from the partner's metadata, while the empty `payload.receive` is held
+ * against the partner's DECLARED `payload.send` alone. A partner declaring no
+ * payload at all while its metadata transmits a column passes that check, and
+ * such a run does not withhold -- it aborts at the received-payload
+ * reconciliation instead, after the round.
+ */
+export function withholdsPartnerAssociationTable(terms: LinkageTerms): boolean {
+  if (terms.linkageStrategy !== "single-pass") return false;
+  if (!terms.output.expectsOutput) return false;
+  const requestsNoPayload =
+    terms.payload?.receive !== undefined && terms.payload.receive.length === 0;
+  return withholdsSenderAssociationTable(
+    terms.output.shareWithPartner,
+    !requestsNoPayload,
+  );
+}
+
+/**
  * Build a display-ready {@link InvitationSummary} from an invitation's
  * linkage terms, optional expiry, and optional held disclosed-columns
  * subset. The parameter is a structural subset of {@link InvitationToken}

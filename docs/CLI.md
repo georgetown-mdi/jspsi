@@ -461,6 +461,7 @@ An exchange you authored yourself -- your own configuration and your partner's, 
 
 - the columns you send your partner for matched records, resolved from your input file exactly as the exchange transmits them;
 - which of you receives the result;
+- what a partner entitled to no result still learns about its own records, and where the exchange withholds even that;
 - the PSI algorithm and the linkage strategy, each with what it discloses;
 - whether several of your records may match a single one of your partner's, and what that grouping tells your partner;
 - the fields the run matches on, and the linkage keys it combines them into.

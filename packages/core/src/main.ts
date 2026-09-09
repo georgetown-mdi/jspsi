@@ -402,6 +402,7 @@ export type {
 // partner-controlled string in it, is made once rather than per surface.
 export {
   summarizeInvitation,
+  withholdsPartnerAssociationTable,
   TRANSFORM_FUNCTION_GLOSSARY,
 } from "./consent/invitationSummary.js";
 export type {

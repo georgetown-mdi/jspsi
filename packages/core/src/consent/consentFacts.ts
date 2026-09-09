@@ -82,6 +82,19 @@ export const CONSENT_FACTS = {
       "at acceptance the line says so, and the same confirmation is taken at the " +
       "first run that can resolve it.",
   },
+  outboundSendSelfAuthored: {
+    basis: "enforced",
+    reason:
+      "The same disclosure at the seat that wrote its own configuration, where " +
+      "the half of `outboundSend` resting on a recorded acceptance has nothing " +
+      "to rest on: this party consented to no set and psilink holds none for " +
+      "it. What remains is the derivation, which is the whole basis here -- the " +
+      "displayed set comes from the run's own resolved metadata through the " +
+      "same predicate the payload step transmits on, so no column outside it " +
+      "leaves the machine. A later run whose file discloses a different set " +
+      "displays that set rather than stopping, since there is no confirmed set " +
+      "to differ from.",
+  },
   invitingParty: {
     basis: "trust-contingent",
     reason:
@@ -267,9 +280,12 @@ export const CONSENT_FACTS = {
       "disclosing no column, which is the second condition the rule asks. " +
       "Resolved off the run's own predicate -- " +
       "`withholdsInviterAssociationTable` where the partner is the inviting " +
-      "party and `withholdsAcceptorAssociationTable` where it is the " +
-      "accepting party (consent/invitationSummary.ts) -- so a surface never " +
-      "states this basis for a run that does not withhold.",
+      "party, `withholdsAcceptorAssociationTable` where it is the accepting " +
+      "party, and `withholdsPartnerAssociationTable` where the viewer reads " +
+      "linkage terms it wrote itself (consent/invitationSummary.ts) -- so a " +
+      "surface never states this basis for a run that does not withhold. The " +
+      "third of those reads two documents from one of them, and its own " +
+      "documentation states the shape it cannot see.",
     note:
       "This exchange withholds your partner's half of the matched-pair table, " +
       "so its process is never sent which of its own records are in your " +

@@ -12,6 +12,7 @@ import {
   disclosedColumnNames,
   redactAndSanitizeForDisplay,
   summarizeInvitation,
+  withholdsPartnerAssociationTable,
 } from "@psilink/core";
 
 import { marked, type ConsentSurfaceSink } from "./invitationDisplay";
@@ -39,6 +40,17 @@ const DISCLOSURE_HEADING =
 const OUTBOUND_COLUMNS_LABEL = "columns you will send";
 
 /**
+ * What the display states for a count-only exchange whose input still marks a
+ * column to send: `prepareForExchange` refuses that run a few lines later, so
+ * the line states the outcome and the two ways out of it rather than a column
+ * list the run will never transmit.
+ */
+const COUNT_ONLY_MARKED_COLUMNS_REFUSAL =
+  "Your input marks one or more columns to send to your partner, which a " +
+  "count-only exchange cannot do, so this run stops before it starts. Clear " +
+  'the payload marking on those columns, or set the algorithm to "psi".';
+
+/**
  * The columns this party transmits for matched records, from the metadata this
  * run resolved -- the set {@link disclosedColumnNames} gathers and the payload
  * step transmits, so the display cannot overstate or understate what leaves the
@@ -49,8 +61,8 @@ const OUTBOUND_COLUMNS_LABEL = "columns you will send";
  * holds, a count-only exchange sends none in either direction, and a resolved
  * set that is empty discloses only the fact of a match. A count-only run whose
  * metadata WOULD transmit a column is refused a few lines later, in
- * `prepareForExchange`, so this lists that set rather than claiming the
- * algorithm has already emptied it.
+ * `prepareForExchange`, so it states that refusal beside the count-only fact
+ * rather than listing a set no run of these terms transmits.
  *
  * Each name is redacted and escaped here, at the composition site, since these
  * are operator-file strings with no display boundary of their own.
@@ -60,16 +72,20 @@ function displayOutboundColumns(
   linkageTerms: LinkageTerms,
   columns: ReadonlyArray<string>,
 ): void {
-  const label = `  ${marked(OUTBOUND_COLUMNS_LABEL, "outboundSend")}`;
+  const label = `  ${marked(OUTBOUND_COLUMNS_LABEL, "outboundSendSelfAuthored")}`;
+  // The count-only case comes first, ahead of the output direction: it holds
+  // both directions at once, and it is the shape a marked column is refused
+  // over.
+  if (linkageTerms.algorithm === "psi-c") {
+    emit(`${label}: (none)`);
+    emit(`    ${CONSENT_FACTS.countOnlyNoPayload.note}`);
+    if (columns.length > 0) emit(`    ${COUNT_ONLY_MARKED_COLUMNS_REFUSAL}`);
+    return;
+  }
   if (!linkageTerms.output.shareWithPartner) {
     emit(
       `${label}: (none) -- your partner receives no result, so no payload is sent`,
     );
-    return;
-  }
-  if (linkageTerms.algorithm === "psi-c" && columns.length === 0) {
-    emit(`${label}: (none)`);
-    emit(`    ${CONSENT_FACTS.countOnlyNoPayload.note}`);
     return;
   }
   if (columns.length === 0) {
@@ -123,6 +139,27 @@ export function renderExchangeDisclosure(
       (linkageTerms.output.shareWithPartner ? "yes" : "no"),
   );
   emit(`    ${CONSENT_FACTS[partnerFact].note}`);
+  // What a partner entitled to no result still learns, which its receipt line
+  // does not state: under `psi` an identifier-revealing match tells it which of
+  // its own records are in this party's data, unless the run withholds its half
+  // of the matched-pair table. No such line under `psi-c`, whose non-receiving
+  // party is the sender -- it computes nothing from the round and is sent no
+  // count report -- so the algorithm's disclosures stand there instead.
+  if (
+    !linkageTerms.output.shareWithPartner &&
+    linkageTerms.algorithm === "psi"
+  ) {
+    const membershipFact = withholdsPartnerAssociationTable(linkageTerms)
+      ? "partnerOwnMembershipWithheld"
+      : "partnerLearnsOwnMembership";
+    emit(
+      `  ${marked(
+        "what your partner learns about its own records",
+        membershipFact,
+      )}:`,
+    );
+    emit(`    ${CONSENT_FACTS[membershipFact].note}`);
+  }
 
   emit(`  ${marked("PSI algorithm", "algorithm")}: ${linkageTerms.algorithm}`);
   if (linkageTerms.algorithm === "psi-c")
