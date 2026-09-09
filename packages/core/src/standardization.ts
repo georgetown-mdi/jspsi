@@ -74,8 +74,9 @@ const logger = getLogger("cleaning");
  *   as `split_on`. `Set` enforces uniqueness: duplicate values from splitting or
  *   subsequent element-wise steps are automatically deduplicated.
  *   {@link buildKeyStrings} crosses these candidates into the key's candidate
- *   set; matching on that set runs under the single-pass strategy alone, and the
- *   cascade refuses it (see {@link fanOutReachedMatchingRefusal}).
+ *   set; both linkage strategies match on that set, and what refuses it is the
+ *   count-only algorithm or a many-to-many match (see
+ *   {@link fanOutReachedMatchingRefusal}).
  */
 export type FieldValue = string | null | Set<string>;
 
