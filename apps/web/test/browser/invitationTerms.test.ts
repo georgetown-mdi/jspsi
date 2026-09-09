@@ -2496,20 +2496,41 @@ describe("InvitationTerms: matching on several values per record", () => {
     ],
   });
 
-  test("states what a splitting key does where the strategy matches candidates", async () => {
-    renderTerms(fanOutTerms("single-pass"));
-    await expect.element(toggle("Other details")).toBeInTheDocument();
-    const panel = await readyPanel("Other details");
-    expect(app.container.textContent).toContain(
-      CONSENT_FACTS.fanOutCandidates.note,
-    );
-    expect(panel.textContent).not.toContain(
-      CONSENT_FACTS.fanOutCandidates.note,
-    );
-  });
+  test.each(["cascade", "single-pass"] as const)(
+    "states what a splitting key does under %s, which matches each candidate",
+    async (linkageStrategy) => {
+      renderTerms(fanOutTerms(linkageStrategy));
+      await expect.element(toggle("Other details")).toBeInTheDocument();
+      const panel = await readyPanel("Other details");
+      expect(app.container.textContent).toContain(
+        CONSENT_FACTS.fanOutCandidates.note,
+      );
+      expect(panel.textContent).not.toContain(
+        CONSENT_FACTS.fanOutCandidates.note,
+      );
+    },
+  );
 
-  test("states the refusal where the strategy matches one value per record", async () => {
-    renderTerms(fanOutTerms("cascade"));
+  test("states the refusal where the algorithm matches one value per record", async () => {
+    // The count-only algorithm is the register the refusal is left in: its
+    // round counts matched values where the resolution pairs a record once,
+    // so terms declaring a candidate set are refused whichever strategy they
+    // name. Driven off the count-only probe, whose shape a psi-c document is
+    // held to, with a splitting element on its one key.
+    renderTerms({
+      ...COUNT_ONLY_PROBE_TERMS,
+      linkageKeys: [
+        {
+          name: "family name",
+          elements: [
+            {
+              field: "family_name",
+              transform: [{ function: "split_on", params: { delimiter: " " } }],
+            },
+          ],
+        },
+      ],
+    });
     await expect.element(toggle("Other details")).toBeInTheDocument();
     await readyPanel("Other details");
     expect(app.container.textContent).toContain(
