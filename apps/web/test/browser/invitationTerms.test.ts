@@ -18,6 +18,7 @@ import {
   MAX_DECLARED_NAMES_SHOWN,
   MAX_NAME_LENGTH,
   MAX_PAYLOAD_ENTRIES,
+  PROPOSED_NOT_APPLIED_NOTES,
   UNRECOGNIZED_TRANSFORM_NOTE,
   describeDeduplicatePair,
   getDefaultLinkageTerms,
@@ -30,6 +31,7 @@ import { InvitationTerms } from "@components/InvitationTerms";
 
 import {
   BEL,
+  CONSENT_PROBE_TERMS,
   COUNT_ONLY_PROBE_TERMS,
   ESC,
   HOSTILE_IDENTITY,
@@ -2797,12 +2799,11 @@ describe("InvitationTerms: a qualifying sentence sits at its headline's visibili
     );
   });
 
-  test("the fuzzy caveat sits with its annotation inside the key's own detail, behind the matching disclosure", async () => {
-    // A key element with a proposed (not-applied) fuzzy comparison. By the rule
-    // the caveat stays in the key's collapsed detail alongside the annotation it
-    // qualifies -- the two are one sentence, so they cannot separate -- and the whole
-    // key detail is behind the default-collapsed "Matching strategies" disclosure,
-    // not in the always-visible core.
+  test("an applied fuzzy comparison shows its annotation inside the key's own detail with no caveat", async () => {
+    // The run applies the expansion, so the annotation stands unqualified. Where
+    // it is placed is the rule under test: in the key's collapsed detail, behind
+    // the default-collapsed "Matching strategies" disclosure and not in the
+    // always-visible core, which is where a caveat would have to join it.
     renderCaveatTerms({
       linkageFields: [{ name: "dob", type: "date_of_birth" }],
       linkageKeys: [
@@ -2816,26 +2817,78 @@ describe("InvitationTerms: a qualifying sentence sits at its headline's visibili
     });
     await expect.element(toggle("Matching strategies")).toBeInTheDocument();
 
-    // Behind the matching disclosure, not in the core: the caveat is within the
-    // collapsed "Matching strategies" panel (which holds the nested key detail even
-    // while hidden), so it is never shown always-visible like the psi-c caveat.
+    // Behind the matching disclosure, not in the core: the annotation is within
+    // the collapsed "Matching strategies" panel (which holds the nested key detail
+    // even while hidden), so it is never shown always-visible like the psi-c caveat.
     expect((await readyPanel("Matching strategies")).textContent).toContain(
-      "(proposed; not yet applied)",
+      "adjacent years",
     );
 
-    // Open the matching list, then the key: the annotation and its not-yet-applied
-    // caveat are together in that key's own detail.
+    // Open the matching list, then the key: the annotation is in that key's own
+    // detail, and the run applies it, so nothing qualifies it.
     await userEvent.click(toggle("Matching strategies"));
     const panel = await readyPanel("DOB");
     expect(panel.textContent).toContain("adjacent years");
-    expect(panel.textContent).toContain("(proposed; not yet applied)");
+    expect(panel.textContent).not.toContain(
+      PROPOSED_NOT_APPLIED_NOTES.fuzzyComparisons,
+    );
+  });
+
+  test("a count-only invitation marks the swap it will refuse, beside the swap note", async () => {
+    // A swapped key order is a candidate set, which a count-only round refuses,
+    // so the either-order note is qualified where it stands rather than left
+    // reading as behavior the run performs. Rendered from core's shared probe --
+    // the same document the CLI accept prompt's pin uses -- so the two surfaces
+    // are measured on one input.
+    renderTerms(COUNT_ONLY_PROBE_TERMS);
+    await expect.element(toggle("Matching strategies")).toBeInTheDocument();
+    // The always-visible header subline degrades the same way a refused
+    // fan-out element's header marker does, before the matching list is even
+    // opened.
+    expect(app.container.textContent).toContain(
+      "date of birth (fuzzy) (either order not supported)",
+    );
+    expect(app.container.textContent).not.toContain(
+      "(matched in either order)",
+    );
+    await userEvent.click(toggle("Matching strategies"));
+    const panel = await readyPanel(
+      "given name, family name, and date of birth",
+    );
+    expect(panel.textContent).toContain("may be matched in either order");
+    expect(panel.textContent).toContain(
+      PROPOSED_NOT_APPLIED_NOTES.swappedKeyOrder,
+    );
+  });
+
+  test("a swap the run applies shows its note unqualified", async () => {
+    // Non-vacuous the other way, over the same key: under `psi` the receiver
+    // builds the key in both orders, so the note stands with nothing qualifying
+    // it and the caveat above is the algorithm's doing rather than the fixture's.
+    renderTerms(CONSENT_PROBE_TERMS);
+    await expect.element(toggle("Matching strategies")).toBeInTheDocument();
+    // The always-visible header subline states the either-order match
+    // unqualified, since the run applies it.
+    expect(app.container.textContent).toContain(
+      "date of birth (fuzzy) (matched in either order)",
+    );
+    expect(app.container.textContent).not.toContain(
+      "(either order not supported)",
+    );
+    await userEvent.click(toggle("Matching strategies"));
+    const panel = await readyPanel(
+      "given name, family name, and date of birth",
+    );
+    expect(panel.textContent).toContain("may be matched in either order");
+    expect(app.container.textContent).not.toContain(
+      PROPOSED_NOT_APPLIED_NOTES.swappedKeyOrder,
+    );
   });
 
   test("a setting that matches the run has no not-yet-applied caveat", async () => {
-    // psi (identifiers revealed -- the run's actual behavior), deduplicate off, and
-    // no fuzzy: every displayed setting equals what the run does, so none is
-    // flagged. The flag gating itself is asserted in the summarizeInvitation unit
-    // tests.
+    // psi (identifiers revealed -- the run's actual behavior) and deduplicate
+    // off: every displayed setting equals what the run does, so none is flagged.
+    // The flag gating itself is asserted in the summarizeInvitation unit tests.
     renderCaveatTerms({
       algorithm: "psi",
       deduplicate: false,
@@ -2847,7 +2900,7 @@ describe("InvitationTerms: a qualifying sentence sits at its headline's visibili
     // panels' mounted content, so this also covers the detail levels, not just the
     // core.
     expect(app.container.textContent).not.toContain(
-      "(proposed; not yet applied)",
+      PROPOSED_NOT_APPLIED_NOTES.fuzzyComparisons,
     );
   });
 });

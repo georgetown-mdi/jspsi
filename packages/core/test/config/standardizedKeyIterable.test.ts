@@ -157,15 +157,21 @@ describe("StandardizedKeyIterable — swap (isReceiver)", () => {
     expect(sender.at(1)).toBe("IORIOALBERT19750817");
   });
 
-  test("receiver: first_name then last_name (swapped)", () => {
+  test("receiver: both orders, the swapped one and the authored one", () => {
+    // The receiver assembles the key twice, which is what makes the pair match
+    // whichever way round the partner's record holds the two values.
     const receiver = new StandardizedKeyIterable(
       key,
       dataset,
       rawRows.length,
       true,
     );
-    expect(receiver.at(0)).toBe("JAMESHEARD19750716");
-    expect(receiver.at(1)).toBe("ALBERTIORIO19750817");
+    expect(receiver.at(0)).toEqual(
+      new Set(["JAMESHEARD19750716", "HEARDJAMES19750716"]),
+    );
+    expect(receiver.at(1)).toEqual(
+      new Set(["ALBERTIORIO19750817", "IORIOALBERT19750817"]),
+    );
   });
 });
 

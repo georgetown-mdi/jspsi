@@ -26,6 +26,7 @@ import {
   MAX_NAME_LENGTH,
   MAX_PAYLOAD_ENTRIES,
   parseExchangeSpec,
+  PROPOSED_NOT_APPLIED_NOTES,
   reconcileReceivedPayload,
   redactPrivateKeyMaterial,
   sanitizeErrorForDisplay,
@@ -3649,15 +3650,19 @@ describe("displayInvitation: the declared terms it discloses (columns, citations
     expect(out).toContain("          transform: substring");
     expect(out).toContain("            - start: 1");
     expect(out).toContain("            - length: 3");
-    // The fuzzy-comparison expansion, marked as proposed: the run does not yet
-    // apply it, so the prompt must not state a looser match than it performs.
+    // The fuzzy-comparison expansion, unqualified: the run applies it, so the
+    // prompt states the looser match it performs rather than marking it as one
+    // the exchange refuses.
     expect(out).toContain(
-      "          also matches approximate variants (adjacent years) (proposed; not yet applied)",
+      "          also matches approximate variants (adjacent years)\n",
     );
-    // The swap the two elements are matched under.
+    expect(out).not.toContain(PROPOSED_NOT_APPLIED_NOTES.fuzzyComparisons);
+    // The swap the two elements are matched under, unqualified for the same
+    // reason: the run builds the key in both orders.
     expect(out).toContain(
-      "      swap: First name and Last name may be matched in either order",
+      "      swap: First name and Last name may be matched in either order\n",
     );
+    expect(out).not.toContain(PROPOSED_NOT_APPLIED_NOTES.swappedKeyOrder);
     // The per-field data standards, under a heading marking them as the inviter's
     // own undertaking rather than rules the exchange applies, with the
     // partner-authored character class shown raw after a fixed first-party label
@@ -3677,6 +3682,33 @@ describe("displayInvitation: the declared terms it discloses (columns, citations
       "    stated purpose: Evaluation of the county tutoring program",
     );
     expect(out).toContain("    agreement valid through: 2027-12-31");
+  });
+
+  test("displayInvitation: a count-only invitation marks the swap it will refuse", () => {
+    // A swapped key order is a candidate set, which a count-only round refuses,
+    // so the note stating an either-order match is qualified where it stands
+    // rather than left reading as behavior the run performs. The expansion on
+    // the same terms is marked for the same reason, so the two producers a
+    // reader meets in the key detail are marked together.
+    const log = getLogger("accept-display-count-only-swap-test");
+    log.setLevel("silent");
+    const out = renderDisplayInvitation(log, {
+      ...sampleToken(FUTURE()),
+      linkageTerms: COUNT_ONLY_PROBE_TERMS,
+    });
+    expect(out).toContain(
+      "      swap: First name and Last name may be matched in either order " +
+        PROPOSED_NOT_APPLIED_NOTES.swappedKeyOrder,
+    );
+    expect(out).toContain(PROPOSED_NOT_APPLIED_NOTES.fuzzyComparisons);
+    // The always-visible header line degrades the same way a refused fan-out
+    // element's header marker does, rather than asserting the either-order
+    // match a count-only round refuses.
+    expect(out).toContain(
+      "      matches on: first name (partial) - last name (partial) - " +
+        "date of birth (fuzzy) (either order not supported)",
+    );
+    expect(out).not.toContain("(matched in either order)");
   });
 
   test("displayInvitation: a deduplicating term states what it discloses and whose records pay it", () => {

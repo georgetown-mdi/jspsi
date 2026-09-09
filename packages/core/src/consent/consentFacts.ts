@@ -1227,19 +1227,29 @@ export function describeDeduplicatePair({
 
 /**
  * The caveat copy for a term an inviter may declare that today's exchange does
- * not apply, keyed by the {@link APPLIED_SETTINGS} flag that gates it.
+ * not apply, keyed by the term it marks.
  *
- * `fuzzyComparisons` is the one such term. It has no refusal: it is a silent
- * no-op that narrows the match, so its marker says only that the expansion is
- * proposed, where claiming a refusal would describe a run that does not happen.
- * A term whose not-applying IS a refusal takes the opposite copy -- naming the
- * refusal and what to ask the inviter for -- which is what makes this a table
- * rather than a house style.
+ * Both entries are candidate-set producers riding one applied setting
+ * ({@link APPLIED_SETTINGS}.fuzzyComparisons, which the swapped key order sits
+ * behind too). That setting is on, so what a surface renders either marker for
+ * is a combination that resolves no candidate set -- a count-only exchange --
+ * which refuses those terms rather than matching on the exact value alone.
+ * Each copy names that refusal and the term to ask the inviter to drop, which
+ * is the one remedy its reader can act on. A term whose not-applying is a
+ * silent narrowing of the match takes the opposite copy, saying only that the
+ * term is proposed, which is what makes this a table rather than a house style.
  *
  * Shared for the same reason the classification is.
  */
 export const PROPOSED_NOT_APPLIED_NOTES = {
-  fuzzyComparisons: "(proposed; not yet applied)",
+  fuzzyComparisons:
+    "(not applied -- the exchange will refuse to run these terms. Ask your " +
+    "partner for an invitation that drops the approximate matching, or one " +
+    "that names terms matching on each candidate.)",
+  swappedKeyOrder:
+    "(not applied -- the exchange will refuse to run these terms. Ask your " +
+    "partner for an invitation that drops the swapped key order, or one that " +
+    "names terms matching on each candidate.)",
 } as const;
 
 /**

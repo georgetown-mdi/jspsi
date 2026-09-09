@@ -10,24 +10,23 @@
  * let an operator mint an invitation whose headline behavior silently does
  * not happen.
  *
- * `deduplicate` is applied: the cascade, the payload frame, the result
- * file, and the exchange record all hold the resolved multiplicity. What
- * is still refused is narrower than the setting -- the agreed both-sided
- * pair under `single-pass`, which pairs no `many-to-many`
- * (`assertBothSidedDeduplicateImplemented`, reached from
+ * Both settings are applied. `deduplicate`: the cascade, the payload
+ * frame, the result file, and the exchange record all hold the resolved
+ * multiplicity. What is still refused is narrower than the setting -- the
+ * agreed both-sided pair under `single-pass`, which pairs no
+ * `many-to-many` (`assertBothSidedDeduplicateImplemented`, reached from
  * `resolveLinkageCardinality`) -- and is refused as that combination
  * rather than as the setting, so one party's `deduplicate: true` runs
- * under either strategy. `fuzzyComparisons` is not applied: expansion is
- * a silent no-op, not a refusal, and flipping this flag alone does not
- * complete the feature (docs/notes/one-sided-fuzzy-expansion.md).
+ * under either strategy. `fuzzyComparisons`: `buildKeyStrings` expands
+ * each declared element into its candidate set on the party the kind
+ * designates, and both linkage strategies match the whole set
+ * (docs/notes/one-sided-fuzzy-expansion.md).
  *
  * A key's `swap` term rides this same flag even though it is not
  * `generateFuzzyComparisons`: its full variant has the receiver build the
  * key in both orders (docs/notes/one-sided-fuzzy-expansion.md), which is
- * a candidate set both linkage strategies resolve. With
- * the flag false the receiver builds the exchanged order alone, so the
- * operator-facing "matched in either order" copy overstates the current
- * behavior.
+ * a candidate set both linkage strategies resolve, so it lands with the
+ * expansion rather than ahead of it.
  *
  * Typed `boolean`, not the literal values, so a consumer's gate is
  * treated as a genuine runtime branch rather than code a dead-code lint
@@ -45,5 +44,5 @@ export const APPLIED_SETTINGS: {
   readonly fuzzyComparisons: boolean;
 } = {
   deduplicate: true,
-  fuzzyComparisons: false,
+  fuzzyComparisons: true,
 };

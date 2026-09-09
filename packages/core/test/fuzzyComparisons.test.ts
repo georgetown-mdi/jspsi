@@ -1,4 +1,11 @@
-import { expect, test, describe } from "vitest";
+import { expect, test, describe, vi } from "vitest";
+
+// The expansion primitives below read no flag, but the buildKeyStrings block at
+// the end of this file pins the CLOSED branch of the gate the shipped build
+// leaves open, so the flag is mocked off for the whole file.
+vi.mock("../src/consent/appliedSettings", () => ({
+  APPLIED_SETTINGS: { deduplicate: true, fuzzyComparisons: false },
+}));
 
 import {
   adjacentYearCandidates,
@@ -47,7 +54,7 @@ function fuzzyTerms(kind: GenerateFuzzyComparisons): LinkageTerms {
 // The expansion primitives are pure and always exercised. buildKeyStrings gates
 // calling them on APPLIED_SETTINGS.fuzzyComparisons; this file pins the behavior
 // while that flag is false, and fuzzyComparisonsApplied.test.ts pins the
-// expansion the flag turns on.
+// expansion the shipped build runs with it on.
 
 describe("transpositionCandidates", () => {
   test("emits every two-position swap, not the adjacent ones alone", () => {
@@ -452,11 +459,11 @@ describe("buildKeyStrings while fuzzy expansion is not applied", () => {
     );
   }
 
-  // Guards the assumption the rest of this file's expectations rest on. If
-  // the flag is flipped without the PSI round that consumes a candidate set,
-  // this fails rather than letting the gated-off expectations below silently
-  // describe a behavior the build no longer has.
-  test("the applied-settings flag is still off", () => {
+  // Guards the assumption the expectations below rest on: they describe the
+  // gate's closed branch, which the shipped build does not take, so a mock that
+  // stopped taking effect would leave them silently describing the applied
+  // behavior instead.
+  test("the gate under test is closed", () => {
     expect(APPLIED_SETTINGS.fuzzyComparisons).toBe(false);
   });
 
@@ -543,8 +550,9 @@ describe("buildKeyStrings while fuzzy expansion is not applied", () => {
   });
 
   test("a row the expansion would widen past the width bound still builds one key", () => {
-    // With the flag on this row is refused (fuzzyComparisonsApplied.test.ts); the
-    // refusal is reachable only through the expansion, so the gate closes it too.
+    // The shipped build refuses this row (fuzzyComparisonsApplied.test.ts); the
+    // refusal is reachable only through the expansion, so the closed gate
+    // withholds it.
     const dataset = makeDataset({ a: "ABCDEFGH", b: "JKLMNOPQ" });
     const key: LinkageKey = {
       name: "A+B",

@@ -268,7 +268,8 @@ function MatchKeyDisclosure({ summary }: { summary: InvitationKeySummary }) {
           if ever reached, so the joined line contains no unescaped partner text. */}
       <Text id={sublineId} size="xs" c="dimmed">
         Matches on {summary.headerFields.join(" - ")}
-        {summary.hasSwap && " (matched in either order)"}
+        {summary.swapHeaderMarker !== undefined &&
+          ` ${summary.swapHeaderMarker}`}
       </Text>
       <div id={panelId}>
         <Collapse expanded={open}>
@@ -309,11 +310,12 @@ function MatchKeyDetails({ summary }: { summary: InvitationKeySummary }) {
                   {" "}
                   - also matches approximate variants ({element.fuzzyComparison}
                   )
-                  {/* Fuzzy changes match breadth, not the disclosure guarantee, so by
-                      the caveat-placement rule on {@link InvitationTerms} it stays here
-                      with the annotation it qualifies, flagging a proposed expansion
-                      the run does not yet perform. Not-applied narrows the match, the
-                      safe direction, so it needs no core prominence. */}
+                  {/* The marker renders only for an expansion the run would not
+                      apply, which on the shipped build is a count-only exchange,
+                      where a candidate set is refused. Fuzzy changes match
+                      breadth, not the disclosure guarantee, so by the
+                      caveat-placement rule on {@link InvitationTerms} the marker
+                      stays here with the annotation it qualifies. */}
                   {!element.fuzzyComparisonApplied &&
                     ` ${PROPOSED_NOT_APPLIED_NOTES.fuzzyComparisons}`}
                 </Text>
@@ -370,6 +372,14 @@ function MatchKeyDetails({ summary }: { summary: InvitationKeySummary }) {
           {summary.swap !== undefined
             ? `${summary.swap[0]} and ${summary.swap[1]} may be matched in either order`
             : "Two of these elements may be matched in either order"}
+          {/* The marker renders only for a swap the run would not apply, which
+              on the shipped build is a count-only exchange, where a candidate
+              set is refused. A swapped order changes match breadth, not the
+              disclosure guarantee, so by the caveat-placement rule on
+              {@link InvitationTerms} the marker stays here with the note it
+              qualifies. */}
+          {!summary.swapApplied &&
+            ` ${PROPOSED_NOT_APPLIED_NOTES.swappedKeyOrder}`}
         </Text>
       )}
     </Stack>

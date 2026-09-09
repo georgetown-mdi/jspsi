@@ -352,7 +352,7 @@ function displayLinkageKey(
   // separator.
   emit(
     `      matches on: ${key.headerFields.join(" - ")}` +
-      (key.hasSwap ? " (matched in either order)" : ""),
+      (key.swapHeaderMarker !== undefined ? ` ${key.swapHeaderMarker}` : ""),
   );
   emit("      elements:");
   for (const element of key.elements) {
@@ -386,12 +386,19 @@ function displayLinkageKey(
         emit(`            ${coercion.param} runs as ${coercion.runsAs}`);
     }
   }
-  if (key.hasSwap)
-    emit(
+  if (key.hasSwap) {
+    const swapNote =
       key.swap !== undefined
         ? `      swap: ${key.swap[0]} and ${key.swap[1]} may be matched in either order`
-        : "      swap: two of these elements may be matched in either order",
+        : "      swap: two of these elements may be matched in either order";
+    // The caveat renders only for a swap the run would not apply, which on the
+    // shipped build is a count-only exchange, where a candidate set is refused.
+    emit(
+      key.swapApplied
+        ? swapNote
+        : `${swapNote} ${PROPOSED_NOT_APPLIED_NOTES.swappedKeyOrder}`,
     );
+  }
 }
 
 /**

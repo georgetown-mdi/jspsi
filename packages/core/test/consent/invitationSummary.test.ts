@@ -292,6 +292,53 @@ describe("the consent summary's fan-out register", () => {
     expect(summary.fanOutApplied).toBe(false);
   });
 
+  const swapKeys = [
+    {
+      name: "name",
+      elements: [{ field: "first_name" }, { field: "last_name" }],
+      swap: ["first_name", "last_name"] as [string, string],
+    },
+  ];
+
+  test.each(["cascade", "single-pass"] as const)(
+    "a swapped key order under %s is marked as applied",
+    (linkageStrategy) => {
+      // A swap is a candidate set like the expansion it rides the applied
+      // setting with, and both strategies resolve one, so the surfaces state
+      // the either-order match the run performs with nothing qualifying it.
+      const summary = summarizeInvitation({
+        linkageTerms: { ...baseTerms, linkageKeys: swapKeys, linkageStrategy },
+      });
+      expect(summary.linkageKeys[0].hasSwap).toBe(true);
+      expect(summary.linkageKeys[0].swapApplied).toBe(true);
+      expect(summary.linkageKeys[0].swapHeaderMarker).toBe(
+        "(matched in either order)",
+      );
+    },
+  );
+
+  test("the same swap under the count-only algorithm is marked as not applied", () => {
+    // The count-only round refuses a candidate set, so the swap the invitation
+    // declares is a term the exchange will not run. The flag reads the
+    // refusal's own verdict, so the surfaces cannot state an either-order match
+    // for a document the run stops, and the header marker degrades the same
+    // way a refused fan-out element's header marker does.
+    const summary = summarizeInvitation({
+      linkageTerms: {
+        ...baseTerms,
+        linkageKeys: swapKeys,
+        algorithm: "psi-c",
+        linkageStrategy: "cascade",
+      },
+    });
+    expect(summary.linkageKeys[0].hasSwap).toBe(true);
+    expect(summary.linkageKeys[0].swapApplied).toBe(false);
+    expect(summary.linkageKeys[0].swapHeaderMarker).toBe(
+      "(either order not supported)",
+    );
+    expect(summary.fanOutApplied).toBe(false);
+  });
+
   test("terms declaring no fan-out are in neither register", () => {
     const summary = summarizeInvitation({
       linkageTerms: { ...baseTerms, linkageStrategy: "single-pass" },
@@ -405,8 +452,14 @@ describe("the consent summary's refused-pair register", () => {
 
   test("withholds it where the terms declare no candidate set", () => {
     // The other half: a deduplicating invitation whose keys expand nothing
-    // pairs a both-sided cardinality the cascade matches.
-    const terms = { ...baseTerms, deduplicate: true };
+    // pairs a both-sided cardinality the cascade matches. The built-in default
+    // key set does not serve here -- one of its keys declares `swap`, which is
+    // a candidate set of its own once the expansion is applied.
+    const terms = {
+      ...baseTerms,
+      deduplicate: true,
+      linkageKeys: [{ name: "last name", elements: [{ field: "last_name" }] }],
+    };
     expect(
       summarizeInvitation({ linkageTerms: terms }).acceptorDeduplicateRefused,
     ).toBe(false);

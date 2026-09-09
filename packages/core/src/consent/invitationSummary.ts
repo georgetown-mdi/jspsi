@@ -340,10 +340,13 @@ interface InvitationKeyElementSummary {
   /** Plain-language label for the fuzzy-comparison expansion, if any. */
   fuzzyComparison?: string;
   /**
-   * Whether today's exchange actually applies the fuzzy comparison above (see
-   * {@link APPLIED_SETTINGS}). Meaningful only alongside a
-   * `fuzzyComparison`; the renderer flags that annotation as proposed-but-not-
-   * applied when this is false.
+   * Whether today's exchange actually applies the fuzzy comparison above:
+   * both the setting that gates the expansion ({@link APPLIED_SETTINGS}) and
+   * the combination that resolves a candidate set, which is the same verdict
+   * {@link InvitationSummary.fanOutApplied} reports -- a count-only exchange
+   * refuses an expanded element rather than matching it. Meaningful only
+   * alongside a `fuzzyComparison`; the renderer flags that annotation as
+   * proposed-but-not-applied when this is false.
    */
   fuzzyComparisonApplied: boolean;
 }
@@ -376,6 +379,16 @@ export interface InvitationKeySummary {
    * order). */
   hasSwap: boolean;
   /**
+   * Whether today's exchange actually applies the swap above: both the setting
+   * the swapped key order rides ({@link APPLIED_SETTINGS}) and the combination
+   * that resolves a candidate set, which is the same verdict
+   * {@link InvitationSummary.fanOutApplied} reports -- a count-only exchange
+   * refuses a swapped key rather than matching it in the declared order alone.
+   * Meaningful only alongside {@link hasSwap}; the renderer flags the swap note
+   * as proposed-but-not-applied when this is false.
+   */
+  swapApplied: boolean;
+  /**
    * The two swapped elements' field labels, present only when both swap
    * references resolve to elements with *distinct* labels (the common case,
    * e.g. ["Last name", "First name"]). Absent when an identifier names no
@@ -397,7 +410,8 @@ export interface InvitationKeySummary {
    * its sanitized identifier, though the terms schema already refuses an
    * element naming an undeclared field, so no decoded token reaches that
    * fallback. An anchor a partner-controlled key {@link name} cannot
-   * misrepresent; the swap "either order" note is held by {@link hasSwap}.
+   * misrepresent; the swap "either order" note is held by
+   * {@link swapHeaderMarker}.
    *
    * A swap re-attributes markers to the receiver's terms: each swapped
    * element keeps its own rules but reads the OTHER element's field value on
@@ -405,6 +419,17 @@ export interface InvitationKeySummary {
    * its swapped PARTNER's field here, not the field it is declared on.
    */
   headerFields: Array<Displayable>;
+  /**
+   * The always-visible header suffix a swapped key earns, present only when
+   * {@link hasSwap} is true. States the either-order match plainly when
+   * {@link swapApplied}; degrades to naming the refusal, the same way a
+   * refused fan-out element's {@link elementBreadthMarker} degrades to "not
+   * supported", when a count-only round refuses the swap instead. Undefined
+   * for a non-swapped key, so a renderer appends nothing. Fixed copy, safe to
+   * render verbatim; the full remedy stays in the per-key detail's own swap
+   * caveat, which this header suffix stays short beside.
+   */
+  swapHeaderMarker?: Displayable;
 }
 
 /**
@@ -1178,12 +1203,14 @@ function summarizeKey(
           element.generateFuzzyComparisons !== undefined
             ? FUZZY_COMPARISON_LABELS[element.generateFuzzyComparisons]
             : undefined,
-        fuzzyComparisonApplied: APPLIED_SETTINGS.fuzzyComparisons,
+        fuzzyComparisonApplied:
+          APPLIED_SETTINGS.fuzzyComparisons && fanOutMatches,
       };
     },
   );
 
   const hasSwap = key.swap !== undefined;
+  const swapApplied = APPLIED_SETTINGS.fuzzyComparisons && fanOutMatches;
   let swap: [Displayable, Displayable] | undefined;
   // Header-marker re-attribution across a swap: maps each swapped element
   // to the breadth marker its header entry should show INSTEAD of its own
@@ -1263,13 +1290,25 @@ function summarizeKey(
     headerFields.push(entry);
   }
 
+  const swapHeaderMarker = hasSwap
+    ? swapApplied
+      ? displayText`(matched in either order)`
+      : displayText`(either order not supported)`
+    : undefined;
+
   return {
     id: key.name,
     name: redactAndSanitizeForDisplay(key.name),
     elements,
     headerFields,
     hasSwap,
+    // The swapped key order is a candidate-set producer under the same applied
+    // setting as the fuzzy expansion (`keyDeclaresCandidateSet`,
+    // fanOutFunctions.ts), so it applies on exactly the combinations that
+    // resolve a candidate set -- the verdict `fanOutMatches` already holds.
+    swapApplied,
     swap,
+    swapHeaderMarker,
   };
 }
 
@@ -1471,10 +1510,9 @@ export function summarizeInvitation(
   }
 
   // The consent screen reflects the inviter's terms as proposed, not only
-  // what today's exchange executes: the per-element generateFuzzyComparisons
-  // is shown even though the run does not yet apply the expansion. The
-  // *Applied flags below report that gap to the renderer; the displayed
-  // terms are what the acceptor agrees to.
+  // what today's exchange executes: a term the run would not apply is shown
+  // all the same, and the *Applied flags below report the gap to the
+  // renderer. The displayed terms are what the acceptor agrees to.
   // Which of the two fan-out registers this invitation is in: a combination
   // that matches a candidate set, or one that refuses the terms outright.
   // Read from the refusal's OWN predicates rather than restated here, so the

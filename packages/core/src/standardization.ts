@@ -57,6 +57,7 @@ export {
   FAN_OUT_CANDIDATES_PER_ELEMENT,
   FAN_OUT_FUNCTION_NAMES,
   localFanOutFactor,
+  termsDeclareCandidateSet,
 } from "./fanOutFunctions.js";
 export { DEFAULT_DATE_OUTPUT_FORMAT } from "./keyElementWidth.js";
 
@@ -74,8 +75,9 @@ const logger = getLogger("cleaning");
  *   as `split_on`. `Set` enforces uniqueness: duplicate values from splitting or
  *   subsequent element-wise steps are automatically deduplicated.
  *   {@link buildKeyStrings} crosses these candidates into the key's candidate
- *   set; matching on that set runs under the single-pass strategy alone, and the
- *   cascade refuses it (see {@link fanOutReachedMatchingRefusal}).
+ *   set; both linkage strategies match on that set, and what refuses it is the
+ *   count-only algorithm or a many-to-many match (see
+ *   {@link fanOutReachedMatchingRefusal}).
  */
 export type FieldValue = string | null | Set<string>;
 
@@ -3090,10 +3092,10 @@ function buildKeyStringsUnderPlan(
     // silently.
     //
     // Gated on APPLIED_SETTINGS.fuzzyComparisons, the single source of truth both
-    // consent surfaces annotate this term from. Flipping the flag belongs with
-    // the round that consumes a candidate set: a fuzzy row would otherwise reach
-    // a linkage strategy holding several candidates, which is refused, turning
-    // the no-op the consent copy describes into an aborted exchange.
+    // consent surfaces annotate this term from. The gate and the round that
+    // consumes a candidate set are one decision: an expanded row reaching a
+    // strategy that matches only a single value is refused, which would turn the
+    // narrowed match the consent copy describes into an aborted exchange.
     //
     // The expansion is the ROLE-KEYED one the plan resolved, not the element's
     // raw designation: a receiver-only kind builds candidates on the receiver

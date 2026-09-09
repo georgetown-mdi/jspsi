@@ -1,12 +1,8 @@
 import { expect, test, describe, afterEach, vi } from "vitest";
 
-// buildKeyStrings gates the expansion on APPLIED_SETTINGS.fuzzyComparisons, which
-// is false in the shipped build because no PSI round consumes a candidate set
-// yet. This file pins what the expansion does once that flag flips, so the
-// key-building half is verified rather than only reachable in review.
-vi.mock("../src/consent/appliedSettings", () => ({
-  APPLIED_SETTINGS: { deduplicate: false, fuzzyComparisons: true },
-}));
+// The key-building half of the expansion the shipped build applies. It reads the
+// real APPLIED_SETTINGS rather than a mock, so a flag turned back off fails here
+// instead of leaving these expectations describing a run that no longer happens.
 
 // Counts the per-value expansions buildKeyStrings performs, delegating to the
 // real one: the value-at-a-time loop is what bounds the allocation at a
