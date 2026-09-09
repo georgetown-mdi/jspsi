@@ -83,7 +83,12 @@ import {
 } from "node:fs";
 import { dirname, join } from "node:path";
 
-import { eventCwd, NOT_AN_EVENT, readEvent } from "./lib/event.mjs";
+import {
+  eventCwd,
+  NOT_AN_EVENT,
+  readEvent,
+  workflowArgs,
+} from "./lib/event.mjs";
 import { git } from "./lib/shell.mjs";
 import { worktreeRecords } from "./lib/worktrees.mjs";
 
@@ -103,31 +108,6 @@ function block(reason) {
     `Blocked by require-clean-tree-for-review hook: ${reason}${suffix}`,
   );
   process.exit(2);
-}
-
-// The Workflow's named arguments, as an object; null when `args` was delivered
-// in a shape that holds no named field, which is a fail-closed case rather
-// than an empty one -- a target named in an unreadable delivery would go
-// unchecked. Absent arguments are an empty set, not an unreadable one.
-function workflowArgs(toolInput) {
-  const delivered = toolInput?.args;
-  if (delivered === undefined || delivered === null) return {};
-  let resolved = delivered;
-  if (typeof delivered === "string") {
-    try {
-      resolved = JSON.parse(delivered);
-    } catch {
-      return null;
-    }
-  }
-  if (
-    resolved === null ||
-    typeof resolved !== "object" ||
-    Array.isArray(resolved)
-  ) {
-    return null;
-  }
-  return resolved;
 }
 
 // The refs this call reviews: none, one, or several. Null when `targetRef` is
