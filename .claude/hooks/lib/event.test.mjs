@@ -105,6 +105,39 @@ describe("commandOf", () => {
   });
 });
 
+describe("workflowArgs", () => {
+  const readArgs = (tool_input) =>
+    evaluate(
+      "event.workflowArgs(event.readEvent().tool_input)",
+      JSON.stringify({ tool_name: "Workflow", tool_input }),
+    );
+
+  it("returns the named arguments of an object delivery", () => {
+    expect(readArgs({ args: { targetRef: "branch", claims: ["a"] } })).toEqual({
+      targetRef: "branch",
+      claims: ["a"],
+    });
+  });
+
+  it("parses a delivery that arrived as a JSON string", () => {
+    expect(readArgs({ args: '{"targetRef":"branch"}' })).toEqual({
+      targetRef: "branch",
+    });
+  });
+
+  it("treats absent arguments as an empty set", () => {
+    for (const tool_input of [{}, { args: null }]) {
+      expect(readArgs(tool_input)).toEqual({});
+    }
+  });
+
+  it("reports a delivery holding no named field as unreadable", () => {
+    for (const args of ["not json", ["targetRef"], 7, true]) {
+      expect(readArgs({ args })).toBeNull();
+    }
+  });
+});
+
 describe("eventCwd", () => {
   it("returns the directory the call was made from", () => {
     expect(

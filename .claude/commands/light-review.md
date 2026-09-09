@@ -61,6 +61,17 @@ contract of the same kind as a totality claim -- three of six refutations in the
 2026-09-02 review program were of this kind, each costing a role round -- so stop and
 rewrite it.
 
+Quoting is fixed so that rule is checkable. DOUBLE quotes in a claim mean the quoted
+text occurs verbatim in the tree at the target ref -- which covers a message the branch
+adds as well as one it keeps from `origin/staging` -- and
+`require-measured-claim-literals.mjs` refuses the Step 2 Workflow call for a claim whose
+double-quoted text is nowhere in that tree, naming the claim and the missing text.
+Everything else a claim quotes goes in SINGLE quotes or backticks, which the gate does
+not read: a string the round FEEDS the surface (`refuses the input '0000-00-00'`), a
+paraphrase, or a term of art. A message the source assembles from fragments has no
+contiguous occurrence to find, so quote a fragment that does occur, or state the
+property instead.
+
 A plan-stage contract -- claims about a design rather than the code -- must include
 the assumption claim, that the plan solves the right problem, among CLAIMS; commit the
 design document on the branch first, so the diff the round reviews is non-empty.

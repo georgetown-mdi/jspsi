@@ -3,7 +3,9 @@
 // Every hook is handed one JSON object on file descriptor 0 and decides from
 // that alone. Each reads stdin, handles an unreadable event, and tests
 // tool_name the same way; sharing that logic here means a fix to any of the
-// three applies to every hook at once.
+// three applies to every hook at once. Reading a Workflow's `args` is here for
+// the same reason: two gates read the same field out of the same three
+// deliveries, and a delivery one of them mishandles is one the other does too.
 //
 // Nothing here exits or blocks. What an unreadable event means is the hook's own
 // answer -- most allow the call, require-clean-tree-for-review.mjs and
@@ -54,6 +56,35 @@ export function eventForTools(...tools) {
 export function commandOf(event) {
   const command = event?.tool_input?.command;
   return typeof command === "string" ? command : null;
+}
+
+/**
+ * A Workflow call's named arguments as an object, or null when `args` was
+ * delivered in a shape holding no named field -- a string that is not JSON, a
+ * primitive, an array. Absent arguments are an empty set, not an unreadable one,
+ * so they come back as `{}`. What null means is the caller's: the gates that
+ * must confirm something about a named argument refuse it, and the ones that
+ * only refine a call allow it.
+ */
+export function workflowArgs(toolInput) {
+  const delivered = toolInput?.args;
+  if (delivered === undefined || delivered === null) return {};
+  let resolved = delivered;
+  if (typeof delivered === "string") {
+    try {
+      resolved = JSON.parse(delivered);
+    } catch {
+      return null;
+    }
+  }
+  if (
+    resolved === null ||
+    typeof resolved !== "object" ||
+    Array.isArray(resolved)
+  ) {
+    return null;
+  }
+  return resolved;
 }
 
 /**
