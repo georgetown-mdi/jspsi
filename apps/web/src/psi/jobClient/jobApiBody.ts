@@ -9,8 +9,9 @@ import { readBoundedJsonBody } from "@utils/boundedJsonBody";
  * The bound holds what an answer that is not this endpoint's -- a proxy's error
  * page, a truncated stream, a console at a different version -- can cost the
  * operator's tab: a bounded read and the client's own malformed-body state,
- * never an unbounded buffer. `Response.json()` is banned across src/ and
- * server/ so a new client cannot read one unbounded (apps/web/eslint.config.js;
+ * never an unbounded buffer. Every whole-body read -- `Response.json()`,
+ * `.text()` and `.arrayBuffer()` -- is banned across src/ and server/ so a new
+ * client cannot read one unbounded (apps/web/eslint.config.js;
  * scripts/eslint-web-json-parse-ban.test.mjs for its reach). What fixes each cap
  * below: docs/spec/SERVER_JOB_API.md, Size caps.
  */

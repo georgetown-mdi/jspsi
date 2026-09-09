@@ -44,15 +44,19 @@ job API), `transport/` (WebRTC rendezvous, the peer connection and its waits),
 `authoring/` (invitation authoring) and `workers/` (the CSV, coverage and PSI
 workers with their controllers).
 
-The direction runs one way: `src/psi` and `src/components` sit below the three
-product directories and must not import from them, which is what keeps the
-headless scheduled runner -- it enters through `src/psi` -- out of the screens'
-graph. Two rules in `eslint.config.js` enforce it: `no-restricted-imports`
-groups for static specifiers and a `no-restricted-syntax` selector over every
-string-literal specifier, dynamic imports included.
-`scripts/eslint-web-layer-direction.test.mjs` drives both. A module two layers
-need belongs in `src/psi` when it is React-free and in `src/components` when it
-is not. Between the products the graph is not constrained: the recurring
+The direction runs one way: `src/components`, `src/jobs`, `src/psi` and
+`src/utils` sit below the three product directories and must not import from
+them, which is what keeps the headless scheduled runner -- it enters through
+`src/psi` -- out of the screens' graph, and a route handler's server-side graph
+out of it too. Three rules in `eslint.config.js` enforce it:
+`no-restricted-imports` groups for static specifiers, a `no-restricted-syntax`
+selector over every string-literal specifier with dynamic imports included, and
+a third holding a dynamic import below the products to a plain string literal,
+since a template literal or a concatenation names a module the other two cannot
+read. `scripts/eslint-web-layer-direction.test.mjs` drives all three. A module
+two layers need belongs in `src/psi` when it is React-free, in `src/components`
+when it is not, and in `src/utils` when it is
+neither. Between the products the graph is not constrained: the recurring
 manager reuses the exchange's run surface, and the exchange screens render the
 console's cards under the console build's own gate.
 
