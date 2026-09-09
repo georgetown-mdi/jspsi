@@ -42,6 +42,7 @@ import { UNDESCRIBABLE_RECORD_LEAD } from "@exchange/RecordDownload";
 import { CONTROLS_ONLY_HEADER_PROFILE } from "../utils/unnamedColumnProfiles";
 
 import { createAppMount, flushPendingUpdates } from "./renderApp";
+import { expectCommittedText } from "./collapsePanels";
 
 import type { JobHandoff } from "@jobs/handoff";
 
@@ -328,18 +329,10 @@ function deduplicateControl() {
   return page.getByRole("checkbox", { name: DEDUPLICATE_CONTROL_LABEL });
 }
 
-/**
- * A read of the rendered text that waits for the terms preview's collapsed
- * "Other details" panel to commit. Mantine's Collapse keeps a closed panel
- * mounted inside a React Activity (mode="hidden") boundary, which commits at a
- * deferred priority: a synchronous read of the container can land before the
- * panel's content is in the DOM at all, which is what made the assertions below
- * fail under CPU contention. React commits that hidden subtree in one pass, so
- * once one line from it is present the whole panel is, and the assertions after
- * the first read of a given state can stay synchronous.
- */
+/** The mounted screen's text, polled so a line inside the terms preview's
+ * collapsed "Other details" panel is asserted only once that panel commits. */
 function expectPanelText() {
-  return expect.poll(() => app.container.textContent);
+  return expectCommittedText(app.container);
 }
 
 describe("direct exchange confirm and run", () => {
