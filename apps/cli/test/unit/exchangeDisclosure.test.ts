@@ -6,16 +6,24 @@ import logLibrary from "loglevel";
 import { afterEach, beforeEach, expect, test } from "vitest";
 
 import {
+  CONSENT_FACTS,
   COUNT_ONLY_DISCLOSURE_STATEMENT,
   DEDUPLICATE_PARTNER_DECLARED_DISCLOSURE_STATEMENT,
   DEDUPLICATE_PARTNER_DECLARED_SIDE_NOTE,
+  SELF_AUTHORED_EXCHANGE_FACTS,
   setDiagnosticSink,
   UsageError,
 } from "@psilink/core";
-import type { ExchangeDataSpec, LinkageTerms, Metadata } from "@psilink/core";
+import type {
+  ConsentFact,
+  ExchangeDataSpec,
+  LinkageTerms,
+  Metadata,
+} from "@psilink/core";
 
 import { prepareDataset } from "../../src/commands/exchange";
 import { renderExchangeDisclosure } from "../../src/exchangeDisclosure";
+import { configureLogFile } from "../../src/util/logging";
 import {
   captureStdio,
   snapshotDiagnosticSinkAndLevel,
@@ -109,17 +117,22 @@ afterEach(() => {
  * attached, which is what the display must not read. Standard error is captured
  * rather than left to reach the runner's own output: the display writes there,
  * where the confirmation beside it asks.
+ *
+ * `logFile` is the resolved `--log-file` a surface reads to decide whether the
+ * run's record is somewhere else and owed a copy; installing the sink that
+ * writes the file is the caller's.
  */
 async function prepare(
   spec: ExchangeDataSpec,
   interactive: boolean,
+  logFile?: string,
 ): Promise<unknown> {
   const stdio = captureStdio();
   try {
     return await withStdin(interactive ? ttyStream() : streamOf(""), () =>
       prepareDataset(spec, "County Health", input, {
         configPath: configFile,
-        logFile: undefined,
+        logFile,
       }).then(
         () => undefined,
         (e: unknown) => e,
@@ -183,6 +196,27 @@ test("a log level that drops diagnostics still shows the display", async () => {
   expect(promptWrites).toContain(DISCLOSURE_HEADING);
   expect(promptWrites).toContain("columns you will send (enforced):");
   expect(promptWrites).toContain("\n    - diagnosis");
+});
+
+test("a log file keeps the display at a level that drops diagnostics", async () => {
+  // The same quieted run, with the record kept somewhere the operator is not
+  // watching: the copy docs/CLI.md promises is the whole value of --log-file on
+  // an unattended run, so a level that leaves the print intact may not leave the
+  // file empty.
+  logLibrary.getLogger("exchange").setLevel("warn");
+  const logFile = path.join(dir, "run.log");
+  const sink = configureLogFile(logFile);
+  try {
+    expect(await prepare({ linkageTerms: localTerms }, false, logFile)).toBe(
+      undefined,
+    );
+  } finally {
+    sink.close();
+  }
+  const kept = fs.readFileSync(logFile, "utf8");
+  expect(kept).toContain(DISCLOSURE_HEADING);
+  expect(kept).toContain("columns you will send (enforced):");
+  expect(kept).toContain("    - diagnosis");
 });
 
 // --- A configuration written by accepting an invitation ----------------------
@@ -345,6 +379,22 @@ test("a count-only run states no own-membership fact, since its helper learns no
   expect(lines).toContain(COUNT_ONLY_DISCLOSURE_STATEMENT);
 });
 
+test("terms leaving neither party a result say the run stops instead", () => {
+  // `validateCompatibility` refuses that pair outright ("neither party expects
+  // output"), so the run stops at the terms exchange: an own-membership
+  // sentence here would state a disclosure of an exchange that does not happen.
+  const lines = rendered({
+    ...localTerms,
+    output: { expectsOutput: false, shareWithPartner: false },
+  }).join("\n");
+  expect(lines).toContain(
+    "Neither you nor your partner expects a result from these terms, so this " +
+      "run stops at the terms exchange, before any linkage data is sent.",
+  );
+  expect(lines).not.toContain("what your partner learns about its own records");
+  expect(lines).not.toContain(CONSENT_FACTS.partnerLearnsOwnMembership.note);
+});
+
 test("a partner entitled to the result gets no own-membership line", () => {
   expect(rendered(localTerms).join("\n")).not.toContain(
     "what your partner learns about its own records",
@@ -369,6 +419,60 @@ test("single-pass linkage states the disclosure it trades for its round trip", (
   }).join("\n");
   expect(lines).toContain("linkage strategy (enforced): single-pass");
   expect(lines).toContain("single-pass linkage means one of you sends");
+});
+
+// --- The facts this seat alone can state --------------------------------------
+
+/**
+ * Every shape of the display, joined: between them the output directions, the
+ * two algorithms, the two strategies, and a grouping reach every line it can
+ * print. The sweep below reads this rather than one rendering, so a sentence
+ * only a single shape reaches still counts as rendered.
+ */
+function everyRendering(): string {
+  return [
+    rendered(localTerms, ["diagnosis"]),
+    rendered({ ...localTerms, deduplicate: true }),
+    rendered(
+      {
+        ...localTerms,
+        output: { expectsOutput: true, shareWithPartner: false },
+      },
+      ["diagnosis"],
+    ),
+    rendered({
+      ...localTerms,
+      linkageStrategy: "single-pass",
+      output: { expectsOutput: true, shareWithPartner: false },
+      payload: { receive: [] },
+    }),
+    rendered({ ...localTerms, algorithm: "psi-c" }, ["diagnosis"]),
+    rendered({
+      ...localTerms,
+      output: { expectsOutput: false, shareWithPartner: true },
+    }),
+    rendered({
+      ...localTerms,
+      output: { expectsOutput: false, shareWithPartner: false },
+    }),
+  ]
+    .map((lines) => lines.join("\n"))
+    .join("\n");
+}
+
+test("every note core marks as this seat's own is a line this display prints", () => {
+  // The set is core's judgment, read from it rather than restated here, and it
+  // is the same list the acceptance sweep excludes by -- so a fact added to it
+  // and rendered by nobody fails here instead of passing both suites.
+  const facts: ReadonlyArray<ConsentFact> = SELF_AUTHORED_EXCHANGE_FACTS.map(
+    (id) => CONSENT_FACTS[id],
+  );
+  const notes = facts
+    .map((fact) => fact.note)
+    .filter((note) => note !== undefined);
+  expect(notes.length).toBeGreaterThan(0);
+  const rendering = everyRendering();
+  for (const note of notes) expect(rendering).toContain(`\n    ${note}`);
 });
 
 test("no line names an inviting or accepting party", () => {

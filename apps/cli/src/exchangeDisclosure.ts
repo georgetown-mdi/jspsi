@@ -55,6 +55,24 @@ const COUNT_ONLY_MARKED_COLUMNS_REFUSAL =
   'the payload marking on those columns, or set the algorithm to "psi".';
 
 /**
+ * What the display states in place of an own-membership disclosure where this
+ * party's own output block is the pair the terms exchange refuses:
+ * `validateCompatibility` reads the partner's `expectsOutput` off this
+ * document's `shareWithPartner`, so a document expecting no result and sharing
+ * none is a run in which neither party expects output. That run stops at the
+ * terms exchange, so what a partner would learn from it is nothing the
+ * operator has to weigh. The remedy names the two configuration fields, since
+ * either one settles it and each takes a matching value in the partner's own
+ * file.
+ */
+const NO_PARTY_EXPECTS_OUTPUT_REFUSAL =
+  "Neither you nor your partner expects a result from these terms, so this " +
+  "run stops at the terms exchange, before any linkage data is sent. Set " +
+  "expects_output to true if the result is yours to receive, or " +
+  "share_with_partner to true if it is your partner's, and settle the " +
+  "matching value with them.";
+
+/**
  * The columns this party transmits for matched records, from the metadata this
  * run resolved -- the set {@link disclosedColumnNames} gathers and the payload
  * step transmits, so the display cannot overstate or understate what leaves the
@@ -156,7 +174,16 @@ export function renderExchangeDisclosure(
   // declared `payload.send`, not the partner's resolved metadata, so it takes
   // the trust-contingent fact rather than the one the invitation seats read
   // off their own authored document.
-  if (
+  //
+  // Ahead of both sentences: `validateCompatibility` holds the partner's
+  // `expectsOutput` equal to this document's `shareWithPartner`, so a document
+  // with neither is the "neither party expects output" pair it refuses
+  // (linkageTermsNegotiation.ts) -- a run that stops at the terms exchange,
+  // whose membership sentence would describe an exchange that does not happen.
+  const neitherPartyExpectsOutput =
+    !linkageTerms.output.expectsOutput && !linkageTerms.output.shareWithPartner;
+  if (neitherPartyExpectsOutput) emit(`  ${NO_PARTY_EXPECTS_OUTPUT_REFUSAL}`);
+  else if (
     !linkageTerms.output.shareWithPartner &&
     linkageTerms.algorithm === "psi"
   ) {
@@ -231,7 +258,10 @@ export function renderExchangeDisclosure(
  * is attached. Rendered through {@link consentSurfaceSink} on the prompt
  * stream, like the outbound-payload confirmation beside it: this is the only
  * account this party gets of what its run discloses, so a raised
- * `--log-level` must not drop it. A `--log-file` keeps a copy.
+ * `--log-level` must not drop it. The `--log-file` copy takes `warn` for the
+ * same reason -- at `info` a run quieted to `warn` would print the surface and
+ * keep no record of it -- leaving `error` and `silent` the levels that record
+ * none of it, as they record no other line either.
  *
  * A no-op for a configuration written by accepting an invitation, which holds
  * an outbound-payload consent record: that party read these facts when it
@@ -258,7 +288,7 @@ export function displayExchangeDisclosure(params: {
   const { spec, metadata, linkageTerms, logFile, log } = params;
   if (spec.outboundPayloadConsent !== undefined) return;
   renderExchangeDisclosure(
-    consentSurfaceSink({ log, logFile, toPromptStream: true }),
+    consentSurfaceSink({ log, logFile, toPromptStream: true, level: "warn" }),
     linkageTerms,
     metadata,
   );

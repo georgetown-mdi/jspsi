@@ -41,10 +41,13 @@ import type {
 export type ConsentSurfaceSink = (line: string) => void;
 
 /**
- * The level a consent line takes where the log records it. `info` is the surface
- * itself; `warn` is for a line an operator has to read even at a level that has
- * already dropped the surface -- the notice an acceptance raises for an
- * `--identity` its kept configuration overrides.
+ * The level a consent line takes where the log records it. `info` is a surface
+ * the log records at the level it is shown at; `warn` is for a line the run's
+ * record has to hold even at a level that has already dropped the surface --
+ * the notice an acceptance raises for an `--identity` its kept configuration
+ * overrides, and the disclosure a self-authored exchange prints at every level
+ * (`exchangeDisclosure.ts`), whose file copy would otherwise be the one thing
+ * a raised level drops.
  */
 export type ConsentSurfaceLevel = "info" | "warn";
 
@@ -56,9 +59,11 @@ export type ConsentSurfaceLevel = "info" | "warn";
  * When `toPromptStream`, every line goes to {@link writePromptLine}
  * unformatted, regardless of `--log-level` and whether a terminal is
  * attached, plus the log at `level` when `logFile` is set (so the run's
- * record gets a copy without a second print to the terminal). Otherwise
- * lines are ordinary diagnostic output at `level`, filtered by
- * `--log-level` as usual.
+ * record gets a copy without a second print to the terminal). That copy is
+ * an ordinary log line, so a `--log-level` above `level` leaves the file
+ * without one while the printed copy stays whole -- a caller whose surface
+ * prints at every level picks `level` accordingly. Otherwise lines are
+ * ordinary diagnostic output at `level`, filtered by `--log-level` as usual.
  *
  * A caller passes it true for a surface a prompt is answered against, so
  * consent is never asked for terms this run did not show, and for one the
