@@ -328,6 +328,20 @@ function deduplicateControl() {
   return page.getByRole("checkbox", { name: DEDUPLICATE_CONTROL_LABEL });
 }
 
+/**
+ * A read of the rendered text that waits for the terms preview's collapsed
+ * "Other details" panel to commit. Mantine's Collapse keeps a closed panel
+ * mounted inside a React Activity (mode="hidden") boundary, which commits at a
+ * deferred priority: a synchronous read of the container can land before the
+ * panel's content is in the DOM at all, which is what made the assertions below
+ * fail under CPU contention. React commits that hidden subtree in one pass, so
+ * once one line from it is present the whole panel is, and the assertions after
+ * the first read of a given state can stay synchronous.
+ */
+function expectPanelText() {
+  return expect.poll(() => app.container.textContent);
+}
+
 describe("direct exchange confirm and run", () => {
   test("previews the inferred terms, gates Run on the affirmation, and runs a zero-setup job", async () => {
     const api = stubJobApi({ sftp: CONFIGURED_SFTP });
@@ -689,14 +703,14 @@ describe("direct exchange confirm and run", () => {
     // partner rather than the two declared roles.
     await expect.element(deduplicateControl()).not.toBeChecked();
     expect(app.container.textContent).toContain(DIRECT_DEDUPLICATE_SIDE_NOTICE);
-    expect(app.container.textContent).toContain(
+    await expectPanelText().toContain(
       "Each of your records matches at most one of your partner's records.",
     );
 
     await deduplicateControl().click();
     // The preview is the terms the run presents, so the terms panel states this
     // party's own selection rather than the one-to-one match it does not run.
-    expect(app.container.textContent).toContain(
+    await expectPanelText().toContain(
       "More than one of your records may match a single one of your partner's",
     );
     // What the grouping discloses and the direction it runs in, both in the
