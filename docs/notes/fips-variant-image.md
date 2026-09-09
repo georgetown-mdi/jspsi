@@ -104,8 +104,9 @@ operational environment that includes a container or a VM.
 reaches musl or Alpine, so the default image cannot support this claim -- but
 the variant does not come free either. By default **SFTP does not work in it at
 all** (below), so every SFTP configuration in the field would need a new key and
-any Ed25519 host-key pin would need replacing; and the image is 1.84x the size
-with a userland holding GPL-3.0 terms Alpine's does not. That is an
+any Ed25519 host-key pin would need replacing; and the image is roughly 1.1x
+the size on `x86_64` and 1.4x on `aarch64`, with a userland holding GPL-3.0
+terms Alpine's does not. That is an
 operator-burden argument for a second artifact, not an impossibility argument
 against one image, and it is how the field resolves the same question: vendors
 who ship the crypto inside their artifact ship a variant (Chainguard, HashiCorp
