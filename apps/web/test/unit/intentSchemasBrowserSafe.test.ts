@@ -1,16 +1,14 @@
 import { dirname, join, relative, resolve } from "node:path";
 
 import {
-  existsSync,
   mkdirSync,
   mkdtempSync,
   readFileSync,
   rmSync,
-  statSync,
   writeFileSync,
 } from "node:fs";
 
-import { builtinModules, createRequire } from "node:module";
+import { builtinModules } from "node:module";
 
 import { tmpdir } from "node:os";
 
@@ -41,48 +39,35 @@ import { afterAll, describe, expect, test } from "vitest";
  *
  * A path under the app that resolves to no file fails the run by name rather
  * than counting as a bare package, because counting it that way drops its whole
- * subtree from the walk and leaves every claim below it unmade. That holds for a
- * relative specifier and for one through an alias alike: an aliased specifier
- * that resolves to no source file is a bare package only when it resolves as a
- * real package from apps/web, which is the fallback TypeScript itself takes.
+ * subtree from the walk and leaves every claim below it unmade.
  *
- * And the aliases are read from tsconfig.json rather than hand-listed, so the
- * `@*` -> `./src/*` catch-all resolves too: `@/jobs/intentSchemas` and `@theme`
- * name app sources, and a hand list missing either would walk neither subtree
- * while still reporting green.
+ * And every specifier is placed by the TypeScript compiler's own resolver,
+ * `ts.resolveModuleName` under apps/web/tsconfig.json's merged options, so each
+ * alias the project declares resolves the way the project resolves it -- the
+ * `@*` -> `./src/*` catch-all included, under which `@/jobs/intentSchemas` and
+ * `@theme` name app sources -- and a specifier the resolver places in
+ * node_modules is the bare package it leaves alone. A re-implementation of the
+ * `paths` matching would answer for its own rules instead, walking neither
+ * subtree behind an alias it got wrong while still reporting green.
  *
  * A builtin is any specifier Node resolves as one -- `node:`-prefixed or not --
  * since `import "fs"` loads the same module and is as unloadable in a browser.
+ * It is answered ahead of the resolver, which places a builtin on an
+ * `@types/node` declaration or nowhere at all depending on what is installed
+ * beside the tree being walked.
  */
 
 const here = dirname(fileURLToPath(import.meta.url));
 const webRoot = resolve(here, "../..");
 
-/** The two roots a walk needs: `base` is what tsconfig's path targets are
- * relative to (the directory holding tsconfig.json), and `src` is where the walk
- * numbers its files from. */
-type Tree = { readonly base: string; readonly src: string };
-
-const appTree: Tree = { base: webRoot, src: join(webRoot, "src") };
-
-/** One `compilerOptions.paths` entry: the literal text before and after its
- * `*`, and the targets the `*` is substituted into. A pattern with no `*`
- * matches one exact specifier and has an empty `suffix`. */
-type Alias = {
-  readonly prefix: string;
-  readonly suffix: string;
-  readonly wildcard: boolean;
-  readonly targets: ReadonlyArray<string>;
-};
-
 /**
- * The path aliases apps/web/tsconfig.json declares, longest literal prefix
- * first, which is the order TypeScript itself matches them in. Read from the
- * config rather than hand-listed: a hand list stops resolving the day an alias
- * is added or renamed, and every specifier through the missing one counts as a
- * bare package whose subtree goes unwalked, with nothing here reporting.
+ * `configPath`'s resolved compiler options -- `extends`, `baseUrl` and `paths`
+ * merged the way `tsc` merges them -- read through the TypeScript API rather
+ * than a hand re-parse of the JSON, so a specifier resolves under the options
+ * the project actually compiles with. apps/web/tsconfig.json extends
+ * tsconfig.base.json, which a plain read of its own `compilerOptions` misses.
  */
-function readTsconfigAliases(configPath: string): Array<Alias> {
+function resolvedCompilerOptions(configPath: string): ts.CompilerOptions {
   const read = ts.readConfigFile(configPath, (path) =>
     readFileSync(path, "utf8"),
   );
@@ -91,59 +76,49 @@ function readTsconfigAliases(configPath: string): Array<Alias> {
       `${configPath} is unreadable: ${ts.flattenDiagnosticMessageText(read.error.messageText, " ")}`,
     );
   }
-  const paths = (read.config as { compilerOptions?: { paths?: unknown } })
-    .compilerOptions?.paths;
-  const entries = Object.entries(
-    (paths ?? {}) as Record<string, Array<string>>,
-  );
-  if (entries.length === 0) {
+  const options = ts.parseJsonConfigFileContent(
+    read.config,
+    ts.sys,
+    dirname(configPath),
+  ).options;
+  if (Object.keys(options.paths ?? {}).length === 0) {
     throw new Error(
       `${configPath} declares no compilerOptions.paths, so this walk resolves nothing through an alias and every claim it makes covers less than it names`,
     );
   }
-  return entries
-    .map(([pattern, targets]) => {
-      const star = pattern.indexOf("*");
-      return star === -1
-        ? { prefix: pattern, suffix: "", wildcard: false, targets }
-        : {
-            prefix: pattern.slice(0, star),
-            suffix: pattern.slice(star + 1),
-            wildcard: true,
-            targets,
-          };
-    })
-    .sort((a, b) => b.prefix.length - a.prefix.length);
+  return options;
 }
 
-const ALIASES = readTsconfigAliases(join(webRoot, "tsconfig.json"));
+const WEB_COMPILER_OPTIONS = resolvedCompilerOptions(
+  join(webRoot, "tsconfig.json"),
+);
 
-/** What `alias` substitutes for its `*` when it matches `specifier`, or
- * undefined when it does not match. */
-function aliasSubstitution(
-  alias: Alias,
-  specifier: string,
-): string | undefined {
-  if (!alias.wildcard) return specifier === alias.prefix ? "" : undefined;
-  if (!specifier.startsWith(alias.prefix)) return undefined;
-  if (!specifier.endsWith(alias.suffix)) return undefined;
-  if (specifier.length < alias.prefix.length + alias.suffix.length)
-    return undefined;
-  return specifier.slice(
-    alias.prefix.length,
-    specifier.length - alias.suffix.length,
-  );
+/** The alias patterns apps/web/tsconfig.json declares, as the compiler holds
+ * them. */
+const ALIAS_PATTERNS = Object.keys(WEB_COMPILER_OPTIONS.paths ?? {});
+
+/** What a walk resolves under: `src` is where it numbers its files from, and
+ * `options` are the app's own compiler options re-rooted at the tree, so a
+ * `paths` target lands inside it. */
+type Tree = { readonly src: string; readonly options: ts.CompilerOptions };
+
+/** The tree rooted at `base`, the directory a `paths` target is relative to. */
+function treeAt(base: string): Tree {
+  return {
+    src: join(base, "src"),
+    options: { ...WEB_COMPILER_OPTIONS, pathsBasePath: base },
+  };
 }
 
-/** Whether `specifier` resolves as an installed package from `tree`, the
- * fallback TypeScript takes when no path mapping names a file. */
-function resolvesAsPackage(tree: Tree, specifier: string): boolean {
-  try {
-    createRequire(join(tree.base, "package.json")).resolve(specifier);
-    return true;
-  } catch {
-    return false;
-  }
+const appTree = treeAt(webRoot);
+
+const NODE_BUILTINS = new Set(builtinModules);
+
+/** Whether `specifier` names a Node builtin, in either spelling: `node:fs` and
+ * `fs` load the same module, and neither loads in a browser. */
+function isNodeBuiltin(specifier: string): boolean {
+  if (specifier.startsWith("node:")) return true;
+  return NODE_BUILTINS.has(specifier.split("/")[0]);
 }
 
 /** What a specifier names: one of the app's own files, a bare package left
@@ -159,45 +134,19 @@ function resolveSource(
   fromFile: string,
   specifier: string,
 ): Resolution {
-  const targets: Array<string> = [];
-  if (specifier.startsWith(".")) {
-    targets.push(resolve(dirname(join(tree.src, fromFile)), specifier));
-  } else {
-    for (const alias of ALIASES) {
-      const substitution = aliasSubstitution(alias, specifier);
-      if (substitution === undefined) continue;
-      for (const target of alias.targets) {
-        targets.push(resolve(tree.base, target.replace("*", substitution)));
-      }
-    }
-    if (targets.length === 0) return { kind: "bare" };
-  }
-  for (const target of targets) {
-    for (const candidate of [
-      target,
-      `${target}.ts`,
-      `${target}.tsx`,
-      join(target, "index.ts"),
-      join(target, "index.tsx"),
-    ]) {
-      if (existsSync(candidate) && statSync(candidate).isFile()) {
-        return { kind: "source", file: relative(tree.src, candidate) };
-      }
-    }
-  }
-  if (!specifier.startsWith(".") && resolvesAsPackage(tree, specifier)) {
-    return { kind: "bare" };
-  }
-  return { kind: "unresolved" };
-}
-
-const NODE_BUILTINS = new Set(builtinModules);
-
-/** Whether `specifier` names a Node builtin, in either spelling: `node:fs` and
- * `fs` load the same module, and neither loads in a browser. */
-function isNodeBuiltin(specifier: string): boolean {
-  if (specifier.startsWith("node:")) return true;
-  return NODE_BUILTINS.has(specifier.split("/")[0]);
+  if (isNodeBuiltin(specifier)) return { kind: "bare" };
+  const { resolvedModule } = ts.resolveModuleName(
+    specifier,
+    join(tree.src, fromFile),
+    tree.options,
+    ts.sys,
+  );
+  if (resolvedModule === undefined) return { kind: "unresolved" };
+  if (resolvedModule.isExternalLibraryImport === true) return { kind: "bare" };
+  return {
+    kind: "source",
+    file: relative(tree.src, resolvedModule.resolvedFileName),
+  };
 }
 
 /**
@@ -284,7 +233,7 @@ function walkFixture(
 ): ReturnType<typeof importGraph> {
   const base = mkdtempSync(join(tmpdir(), "psilink-browser-safe-"));
   fixtureRoots.push(base);
-  const tree: Tree = { base, src: join(base, "src") };
+  const tree = treeAt(base);
   for (const [path, source] of Object.entries(files)) {
     const full = join(tree.src, path);
     mkdirSync(dirname(full), { recursive: true });
@@ -329,14 +278,11 @@ describe("the job intent's schema module stays loadable in the browser", () => {
 
 describe("the walk resolves every alias apps/web/tsconfig.json declares", () => {
   test("it reads them from the config, catch-all included", () => {
-    const patterns = ALIASES.map((alias) =>
-      alias.wildcard ? `${alias.prefix}*${alias.suffix}` : alias.prefix,
-    );
     expect(
-      patterns,
+      ALIAS_PATTERNS,
       "the tsconfig `@*` -> ./src/* catch-all is not among the aliases read, so a specifier written through it counts as a bare package and its subtree goes unwalked",
     ).toContain("@*");
-    expect(patterns).toEqual(
+    expect(ALIAS_PATTERNS).toEqual(
       expect.arrayContaining(["@components/*", "@utils/*"]),
     );
   });
