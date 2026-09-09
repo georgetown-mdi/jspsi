@@ -1155,6 +1155,14 @@ test("the round refuses a fractional run length", async () => {
   expectProtocolRefusal(err, /not a positive whole number/);
 });
 
+test("the round refuses runs naming more records than the partner counted", async () => {
+  const err = await widenedRound(
+    "starter",
+    onRoundTable((table) => [table[0], table[1], [1, 1, 1]]),
+  );
+  expectProtocolRefusal(err, /more runs than the 2 record\(s\) the partner/);
+});
+
 test("the round refuses an owner list where run lengths are due", async () => {
   const err = await widenedRound(
     "starter",

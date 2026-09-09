@@ -88,13 +88,11 @@ function isEntryPositions(value: unknown): boolean {
 // bounded rejection rather than a stack overflow or an oversized Zod error
 // string; a count `.max()` is not an option since the legitimate count -- the
 // matched intersection -- is in the millions, bounded only by
-// MAX_FRAME_SIZE_BYTES. A nested position list is checked by the same
-// predicate and never recurses, so a deeply nested frame is one rejection too.
-// The predicate accepts a non-null, non-array object with a finite iteration
-// and a theirIndex that is a finite number or an array of them, read via
-// receiveParsed or a direct `.parse()`; either way a malformed frame produces
-// a clean ConnectionError("protocol").
-/** @internal exported for the pathological-count wire-message test. */
+// MAX_FRAME_SIZE_BYTES. The predicate accepts a non-null, non-array object
+// with a finite iteration and a theirIndex that is a finite number or an array
+// of them, and it never recurses into that array, so a frame nesting arrays
+// inside a position list is one rejection too.
+/** @internal exported for the mapped-element wire-message tests. */
 export const mappedElementArray = singleIssueArray<MappedElementEntry>(
   (value) =>
     typeof value === "object" &&
@@ -961,12 +959,14 @@ export async function linkViaPSI(
         positionsByOrdinal(local.ownership),
         localPositionsMatched,
       );
-      const rowsAcceptedWith = new Map<number, Array<number>>();
+      const rowsAcceptedWith = new Map<number, Set<number>>();
       for (let p = 0; p < partnerAccepted.length; ++p) {
-        const rows = rowsAcceptedWith.get(partnerAccepted[p]);
-        const row = local.rowOfOrdinal[localAccepted[p]];
-        if (rows === undefined) rowsAcceptedWith.set(partnerAccepted[p], [row]);
-        else if (!rows.includes(row)) rows.push(row);
+        let rows = rowsAcceptedWith.get(partnerAccepted[p]);
+        if (rows === undefined) {
+          rows = new Set<number>();
+          rowsAcceptedWith.set(partnerAccepted[p], rows);
+        }
+        rows.add(local.rowOfOrdinal[localAccepted[p]]);
       }
       // The partner states a round's entries in its own ascending row order,
       // which is ascending rank order, so the reading party takes the `i`-th
@@ -975,7 +975,7 @@ export async function linkViaPSI(
       const ranks = [...rowsAcceptedWith.keys()].sort((a, b) => a - b);
       partnerEntriesByIter[j] = ranks.map((rank) => partnerEntries.get(rank)!);
       partnerEntryRowsByIter[j] = ranks.map((rank) =>
-        rowsAcceptedWith.get(rank)!.sort((a, b) => a - b),
+        [...rowsAcceptedWith.get(rank)!].sort((a, b) => a - b),
       );
     } else {
       partnerEntriesByIter[j] = undefined;

@@ -8,6 +8,7 @@ import {
   linkViaSinglePassPSI,
   withholdsSenderAssociationTable,
   associationAndIterationArray,
+  mappedElementArray,
   encodeInt32LE,
   decodeInt32LE,
   encodeSinglePassReply,
@@ -820,6 +821,83 @@ test("a mapped-elements element that is an array (not a plain object) is rejecte
   }
   expect(err).toBeInstanceOf(ConnectionError);
   expect((err as ConnectionError).kind).toBe("protocol");
+});
+
+// --- mappedElementArray: the widened entry's bounds ---------------------------
+// The first pass's frame is partner-controlled on the same scale, and a
+// candidate set widens its theirIndex from a number to a list of positions. The
+// same single-issue bound must hold over the wider shape, and the predicate
+// must not recurse into the list -- a frame nesting arrays inside one is a
+// clean rejection, not a stack overflow.
+const pathologicalEntries = () => Array.from({ length: 4_000_000 }, () => 1);
+
+test("receiveParsed: a pathological-count mapped-element frame fails cleanly", async () => {
+  const [connA, connB] = createMessagePipe();
+  const parsed = receiveParsed(connA, mappedElementArray);
+  await connB.send(pathologicalEntries());
+  const err = await parsed.catch((e: unknown) => e);
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("protocol");
+  expect((err as ConnectionError).cause).not.toBeInstanceOf(RangeError);
+});
+
+test("direct parse: a pathological-count mapped-element frame fails cleanly, not with a bare RangeError", () => {
+  let err: unknown;
+  try {
+    parseOrProtocolError(mappedElementArray, pathologicalEntries());
+  } catch (e) {
+    err = e;
+  }
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("protocol");
+  expect((err as ConnectionError).cause).not.toBeInstanceOf(RangeError);
+});
+
+test("a legitimately large mapped-element frame of position lists parses", async () => {
+  const n = 200_000;
+  const [connA, connB] = createMessagePipe();
+  const parsed = receiveParsed(connA, mappedElementArray);
+  await connB.send(
+    Array.from({ length: n }, (_, i) => ({
+      theirIndex: i % 2 === 0 ? i : [i, i + 1],
+      iteration: 0,
+    })),
+  );
+  expect(await parsed).toHaveLength(n);
+});
+
+test("a mapped-element entry whose position list holds an array is rejected", () => {
+  let err: unknown;
+  try {
+    parseOrProtocolError(mappedElementArray, [
+      { theirIndex: [[0]], iteration: 0 },
+    ]);
+  } catch (e) {
+    err = e;
+  }
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("protocol");
+});
+
+test("a frame of nested-array position lists is one clean rejection", () => {
+  // Every entry nests an array where a position is due, at 200k -- past the
+  // ~130k where the array frames of a `z.array` element schema overflow Zod's
+  // call stack spreading one issue per element (utils/singleIssueArray.ts).
+  let err: unknown;
+  try {
+    parseOrProtocolError(
+      mappedElementArray,
+      Array.from({ length: 200_000 }, () => ({
+        theirIndex: [[0]],
+        iteration: 0,
+      })),
+    );
+  } catch (e) {
+    err = e;
+  }
+  expect(err).toBeInstanceOf(ConnectionError);
+  expect((err as ConnectionError).kind).toBe("protocol");
+  expect((err as ConnectionError).cause).not.toBeInstanceOf(RangeError);
 });
 
 // --- single-pass reply codec and the receiver's frame-length tie --------------
