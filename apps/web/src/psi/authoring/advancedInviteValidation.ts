@@ -19,6 +19,7 @@ import {
   safeParseLinkageTerms,
   summarizeLinkageShortfall,
   swapPairTransformsDiffer,
+  termsDeclareCandidateSet,
 } from "@psilink/core";
 
 import {
@@ -243,6 +244,21 @@ const COUNT_ONLY_MESSAGES: Record<CountOnlyShapeViolation, string> = {
     `those columns so they are not sent, or ${REVEAL_IDENTIFIERS_INSTEAD}`,
 };
 
+/** Shown when a count-only draft's linkage keys declare a candidate set -- an
+ * element expanded into approximate variants, a key matched in either order, or
+ * a transform that splits one value into several. Core refuses such a document
+ * before the exchange runs (`assertFanOutImplemented`), so an invitation
+ * minted on it is one both sides abort on; this is that refusal given where the
+ * operator still holds the controls. Names the three declarations rather than
+ * which one this key holds: the key list is where each is edited, and an
+ * imported key's names are partner-influenceable, the same reason
+ * {@link UNSUPPLYABLE_KEY_MESSAGE} names no field. */
+const COUNT_ONLY_CANDIDATE_SET_MESSAGE =
+  "A count-only exchange matches one value per record, but a linkage key here " +
+  "matches on several. Open that key and remove its fuzzy comparison, its " +
+  "either-order swap, or the step that splits a value into parts; or " +
+  REVEAL_IDENTIFIERS_INSTEAD;
+
 /** Shown when the draft asks for a deduplicating match under a linkage strategy
  * that cannot run one. Core refuses that pair on both parties before matching
  * begins ({@link assertDeduplicateImplemented}), so an invitation minted on it is
@@ -328,9 +344,10 @@ function shortfallRemedy(verdict: LinkageTermsVerdict): string {
  * (identity/legal-text presence, date format, referential integrity); this adds
  * only the gates the schema does not express: the invitation-lifetime bounds, a
  * not-yet-passed legal-agreement expiry, at least one column-satisfiable linkage
- * key, a canonical-encode dry run (the byte form both parties hash), and the two
- * pairings the schema admits but the run refuses (a declared fan-out step, and a
- * deduplicating term under a linkage strategy that matches one value per record).
+ * key, a canonical-encode dry run (the byte form both parties hash), and the
+ * three pairings the schema admits but the run refuses (a declared fan-out step,
+ * a deduplicating term under a linkage strategy that matches one value per
+ * record, and a candidate set under the count-only algorithm).
  *
  * Schema errors are mapped back to the offending control by their issue path,
  * since the referential-integrity refines report at the array path, echoing no
@@ -630,6 +647,17 @@ export function validateAdvancedInvite(
     if (!(err instanceof UsageError)) throw err;
     errors.keys = DEDUPLICATE_STRATEGY_MESSAGE;
   }
+
+  // The count-only candidate-set gate: a count-only document whose keys expand a
+  // record into several match candidates is refused before the exchange runs
+  // (`assertFanOutImplemented`), and nothing above catches the two declarations
+  // that expand a key without a fan-out step -- a fuzzy comparison and a swap.
+  // The verdict is core's own predicate over all three declarations
+  // (`termsDeclareCandidateSet`), not a second web-side list of them, so this
+  // gate refuses exactly the documents the run refuses. Written ahead of the
+  // shape gate below, whose rules the terms schema refuses first.
+  if (terms.algorithm === "psi-c" && termsDeclareCandidateSet(terms))
+    errors.keys = COUNT_ONLY_CANDIDATE_SET_MESSAGE;
 
   // The count-only shape gate, at the same altitude as the fan-out one above and
   // read from core's own rules rather than a second web-side list, so this editor

@@ -367,6 +367,7 @@ export {
   buildKeyStrings,
   buildStandardizedDataset,
   runPipeline,
+  termsDeclareCandidateSet,
 } from "./standardization";
 export {
   assertFanOutImplemented,

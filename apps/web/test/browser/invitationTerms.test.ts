@@ -18,6 +18,7 @@ import {
   MAX_DECLARED_NAMES_SHOWN,
   MAX_NAME_LENGTH,
   MAX_PAYLOAD_ENTRIES,
+  PROPOSED_NOT_APPLIED_NOTES,
   UNRECOGNIZED_TRANSFORM_NOTE,
   describeDeduplicatePair,
   getDefaultLinkageTerms,
@@ -2884,7 +2885,9 @@ describe("InvitationTerms: a qualifying sentence sits at its headline's visibili
     await userEvent.click(toggle("Matching strategies"));
     const panel = await readyPanel("DOB");
     expect(panel.textContent).toContain("adjacent years");
-    expect(panel.textContent).not.toContain("(proposed; not yet applied)");
+    expect(panel.textContent).not.toContain(
+      PROPOSED_NOT_APPLIED_NOTES.fuzzyComparisons,
+    );
   });
 
   test("a setting that matches the run has no not-yet-applied caveat", async () => {
@@ -2902,7 +2905,7 @@ describe("InvitationTerms: a qualifying sentence sits at its headline's visibili
     // panels' mounted content, so this also covers the detail levels, not just the
     // core.
     expect(app.container.textContent).not.toContain(
-      "(proposed; not yet applied)",
+      PROPOSED_NOT_APPLIED_NOTES.fuzzyComparisons,
     );
   });
 });

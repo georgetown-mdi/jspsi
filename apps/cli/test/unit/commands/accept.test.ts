@@ -26,6 +26,7 @@ import {
   MAX_NAME_LENGTH,
   MAX_PAYLOAD_ENTRIES,
   parseExchangeSpec,
+  PROPOSED_NOT_APPLIED_NOTES,
   reconcileReceivedPayload,
   redactPrivateKeyMaterial,
   sanitizeErrorForDisplay,
@@ -3651,11 +3652,11 @@ describe("displayInvitation: the declared terms it discloses (columns, citations
     expect(out).toContain("            - length: 3");
     // The fuzzy-comparison expansion, unqualified: the run applies it, so the
     // prompt states the looser match it performs rather than marking it as one
-    // the exchange only proposes.
+    // the exchange refuses.
     expect(out).toContain(
       "          also matches approximate variants (adjacent years)\n",
     );
-    expect(out).not.toContain("proposed; not yet applied");
+    expect(out).not.toContain(PROPOSED_NOT_APPLIED_NOTES.fuzzyComparisons);
     // The swap the two elements are matched under.
     expect(out).toContain(
       "      swap: First name and Last name may be matched in either order",

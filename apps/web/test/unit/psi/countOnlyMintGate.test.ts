@@ -131,3 +131,64 @@ describe("the count-only shape gate at the Generate boundary", () => {
     expect(result.terms?.deduplicate).toBe(true);
   });
 });
+
+describe("the count-only candidate-set gate at the Generate boundary", () => {
+  // The rule the shape rules above do not hold: a count-only round counts
+  // matched values where the matching pairs each record at most once, so a key
+  // expanding a record into several candidates is refused at prepare and again
+  // at the agreed-terms run boundary.
+
+  /** The seeded count-only draft narrowed to the one built-in key declaring a
+   * swap -- an expansion, and the reason the gate is reachable through the keys
+   * the editor seeds rather than an authored one. It satisfies every count-only
+   * shape rule: one key, cascade, no deduplication, no payload. */
+  function swappedKeyDraft() {
+    const { draft, seed } = countOnlyDraft();
+    const swapIndex = draft.keys.findIndex(
+      (entry) => entry.key.swap !== undefined,
+    );
+    expect(swapIndex).toBeGreaterThanOrEqual(0);
+    return {
+      seed,
+      draft: {
+        ...draft,
+        keys: draft.keys.map((entry, index) => ({
+          ...entry,
+          enabled: index === swapIndex,
+        })),
+      },
+    };
+  }
+
+  test("the swap really does reach the built terms", () => {
+    // Without this the case below could pass on a draft whose enabled key
+    // declares no swap, gating nothing and still being green.
+    const { draft } = swappedKeyDraft();
+    const terms = buildAdvancedTerms(draft);
+    expect(terms.algorithm).toBe("psi-c");
+    expect(terms.linkageKeys.every((key) => key.swap !== undefined)).toBe(true);
+  });
+
+  test("blocks Generate on a count-only draft whose key declares a swap", () => {
+    const { draft, seed } = swappedKeyDraft();
+    const result = validateAdvancedInvite(draft, seed, NOW);
+    expect(result.canGenerate).toBe(false);
+    expect(result.terms).toBeUndefined();
+    // What is wrong and what to change, against the key list that holds both
+    // remedies -- not the generic schema-failure message, and not the alert the
+    // mint would otherwise raise after the operator pressed Generate.
+    expect(result.errors.keys).toMatch(/matches one value per record/);
+    expect(result.errors.keys).toMatch(/either-order swap/);
+    expect(result.errors.keys).toMatch(/Reveal the matched identifiers/);
+  });
+
+  test("under psi the identical draft generates, so the refusal was the count-only algorithm's", () => {
+    // The identifier-revealing algorithm resolves a candidate set under both
+    // linkage strategies, so the same swapped key generates there.
+    const { draft, seed } = swappedKeyDraft();
+    const asPsi: AdvancedInviteDraft = { ...draft, algorithm: "psi" };
+    const result = validateAdvancedInvite(asPsi, seed, NOW);
+    expect(result.errors).toEqual({});
+    expect(result.canGenerate).toBe(true);
+  });
+});

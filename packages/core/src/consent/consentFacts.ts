@@ -1231,17 +1231,19 @@ export function describeDeduplicatePair({
  *
  * `fuzzyComparisons` is the one entry. Its flag is on, so what a surface
  * renders this marker for is a combination that resolves no candidate set --
- * a count-only exchange -- or the setting being gated again. It claims no
- * refusal: an unapplied expansion is a silent narrowing of the match rather
- * than a refused run, so the marker says only that the expansion is proposed.
- * A term whose not-applying IS a refusal takes the opposite copy -- naming the
- * refusal and what to ask the inviter for -- which is what makes this a table
- * rather than a house style.
+ * a count-only exchange -- which refuses those terms rather than matching on
+ * the exact value alone. The copy names that refusal and what to ask the
+ * inviter for. A term whose not-applying is a silent narrowing of the match
+ * takes the opposite copy, saying only that the term is proposed, which is
+ * what makes this a table rather than a house style.
  *
  * Shared for the same reason the classification is.
  */
 export const PROPOSED_NOT_APPLIED_NOTES = {
-  fuzzyComparisons: "(proposed; not yet applied)",
+  fuzzyComparisons:
+    "(not applied -- the exchange will refuse to run these terms. Ask your " +
+    "partner for an invitation that drops the approximate matching, or one " +
+    "that names terms matching on each candidate.)",
 } as const;
 
 /**
