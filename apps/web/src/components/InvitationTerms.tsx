@@ -310,11 +310,11 @@ function MatchKeyDetails({ summary }: { summary: InvitationKeySummary }) {
                   - also matches approximate variants ({element.fuzzyComparison}
                   )
                   {/* The marker renders only for an expansion the run would not
-                      apply, which the shipped build never reports. Fuzzy changes
-                      match breadth, not the disclosure guarantee, so by the
+                      apply, which on the shipped build is a count-only exchange,
+                      where a candidate set is refused. Fuzzy changes match
+                      breadth, not the disclosure guarantee, so by the
                       caveat-placement rule on {@link InvitationTerms} the marker
-                      stays here with the annotation it qualifies: an unapplied
-                      expansion narrows the match, the safe direction. */}
+                      stays here with the annotation it qualifies. */}
                   {!element.fuzzyComparisonApplied &&
                     ` ${PROPOSED_NOT_APPLIED_NOTES.fuzzyComparisons}`}
                 </Text>

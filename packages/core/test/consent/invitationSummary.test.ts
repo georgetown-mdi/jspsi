@@ -405,8 +405,14 @@ describe("the consent summary's refused-pair register", () => {
 
   test("withholds it where the terms declare no candidate set", () => {
     // The other half: a deduplicating invitation whose keys expand nothing
-    // pairs a both-sided cardinality the cascade matches.
-    const terms = { ...baseTerms, deduplicate: true };
+    // pairs a both-sided cardinality the cascade matches. The built-in default
+    // key set does not serve here -- one of its keys declares `swap`, which is
+    // a candidate set of its own once the expansion is applied.
+    const terms = {
+      ...baseTerms,
+      deduplicate: true,
+      linkageKeys: [{ name: "last name", elements: [{ field: "last_name" }] }],
+    };
     expect(
       summarizeInvitation({ linkageTerms: terms }).acceptorDeduplicateRefused,
     ).toBe(false);

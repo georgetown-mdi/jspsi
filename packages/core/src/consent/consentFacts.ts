@@ -1229,8 +1229,9 @@ export function describeDeduplicatePair({
  * The caveat copy for a term an inviter may declare that today's exchange does
  * not apply, keyed by the {@link APPLIED_SETTINGS} flag that gates it.
  *
- * `fuzzyComparisons` is the one entry, and its flag is on, so the marker is
- * what a surface renders if the setting is ever gated again. It claims no
+ * `fuzzyComparisons` is the one entry. Its flag is on, so what a surface
+ * renders this marker for is a combination that resolves no candidate set --
+ * a count-only exchange -- or the setting being gated again. It claims no
  * refusal: an unapplied expansion is a silent narrowing of the match rather
  * than a refused run, so the marker says only that the expansion is proposed.
  * A term whose not-applying IS a refusal takes the opposite copy -- naming the

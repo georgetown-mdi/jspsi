@@ -340,10 +340,13 @@ interface InvitationKeyElementSummary {
   /** Plain-language label for the fuzzy-comparison expansion, if any. */
   fuzzyComparison?: string;
   /**
-   * Whether today's exchange actually applies the fuzzy comparison above (see
-   * {@link APPLIED_SETTINGS}). Meaningful only alongside a
-   * `fuzzyComparison`; the renderer flags that annotation as proposed-but-not-
-   * applied when this is false.
+   * Whether today's exchange actually applies the fuzzy comparison above:
+   * both the setting that gates the expansion ({@link APPLIED_SETTINGS}) and
+   * the combination that resolves a candidate set, which is the same verdict
+   * {@link InvitationSummary.fanOutApplied} reports -- a count-only exchange
+   * refuses an expanded element rather than matching it. Meaningful only
+   * alongside a `fuzzyComparison`; the renderer flags that annotation as
+   * proposed-but-not-applied when this is false.
    */
   fuzzyComparisonApplied: boolean;
 }
@@ -1178,7 +1181,8 @@ function summarizeKey(
           element.generateFuzzyComparisons !== undefined
             ? FUZZY_COMPARISON_LABELS[element.generateFuzzyComparisons]
             : undefined,
-        fuzzyComparisonApplied: APPLIED_SETTINGS.fuzzyComparisons,
+        fuzzyComparisonApplied:
+          APPLIED_SETTINGS.fuzzyComparisons && fanOutMatches,
       };
     },
   );
