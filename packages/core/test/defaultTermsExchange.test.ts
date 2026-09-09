@@ -58,11 +58,15 @@ function columnOf(field: LinkageField): string {
 }
 
 /**
- * The character count of the longest leading substring any default key takes
- * of a name, plus one: the generated names hold that many varying letters, so
- * a counterpart built to agree on a key's shorter prefix still differs at the
- * next character. Derived from the keys rather than fixed, so a key taking a
- * longer prefix widens the generated names with it.
+ * The character count of the longest leading substring any default key
+ * element takes of its field's value, plus one -- computed over every default
+ * key element, not name fields alone, so it also picks up a longer non-name
+ * prefix (currently date_of_birth's year-and-month substring). That is a safe
+ * overbound for the varying letters a generated name needs: the generated
+ * names hold at least that many varying letters, so a counterpart built to
+ * agree on a key's shorter prefix still differs at the next character.
+ * Derived from the keys rather than fixed, so a key taking a longer prefix
+ * widens the generated names with it.
  */
 const NAME_CODE_LENGTH =
   1 +
@@ -84,14 +88,18 @@ const LETTER_POOLS: Record<PartyName, string> = {
   b: "NOPQRSTUVWXYZ",
 };
 
-/** The letters one record's generated names begin with: distinct per record at
- * every position, from the party's own pool. */
+/** The letters one record's generated names begin with: the record number
+ * written as base-`pool.length` digits, least significant first, from the
+ * party's own pool. Distinct for every record below `pool.length **
+ * NAME_CODE_LENGTH`, which every record index this file generates falls well
+ * under -- unlike a periodic scheme, which would give two records that many
+ * apart the same code. Verified below rather than merely asserted here. */
 function nameCode(party: PartyName, record: number): string {
   const pool = LETTER_POOLS[party];
   return Array.from(
     { length: NAME_CODE_LENGTH },
     (_unused, position) =>
-      pool[(record * (position + 1) + position) % pool.length],
+      pool[Math.floor(record / pool.length ** position) % pool.length],
   ).join("");
 }
 
@@ -257,6 +265,23 @@ function asRow(values: Record<string, string>): Record<string, string> {
 // no counterpart was built for, against party B's own row at the same index. It
 // keeps a run in which everything matched from passing.
 const UNRELATED_RECORD = defaultKeys.length;
+
+// Every record index this file generates must get its own name code, per
+// party: a collision would let an unrelated pair agree on a name field by
+// construction of the generator rather than by a key relating them, silently
+// hollowing out the non-relation guarantee UNRELATED_RECORD exists for.
+for (const party of ["a", "b"] as const) {
+  const seen = new Map<string, number>();
+  for (let record = 0; record <= UNRELATED_RECORD; record++) {
+    const code = nameCode(party, record);
+    const collidesWith = seen.get(code);
+    if (collidesWith !== undefined)
+      throw new Error(
+        `nameCode gave party ${party}'s records ${collidesWith} and ${record} the same name code "${code}"`,
+      );
+    seen.set(code, record);
+  }
+}
 
 const anchorRows = [
   ...defaultKeys.map((_key, record) => asRow(baseValues("a", record))),
