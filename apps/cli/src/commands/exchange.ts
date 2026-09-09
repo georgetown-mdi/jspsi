@@ -40,6 +40,7 @@ import { resolveRecordOutput } from "../recordFile";
 import { resolveReceiptOutput } from "../receiptFile";
 import { assertIdentityMatchesAgreedTerms } from "../signingIdentityDivergence";
 import { loadSigningIdentity } from "../signingIdentityFile";
+import { displayExchangeDisclosure } from "../exchangeDisclosure";
 import { confirmOutboundPayloadConsent } from "../outboundPayloadConsent";
 import { parseSensitiveYaml } from "../sensitiveFile";
 import { resolveAtSignRefs, resolveExchangeSpecRefs } from "../util/atSignRefs";
@@ -726,6 +727,17 @@ export async function prepareDataset(
       exchangeDataSpec.standardization,
       exchangeDataSpec.metadata,
     );
+
+  // The two disclosure surfaces this point owes the operator, each covering the
+  // party the other does not: the display for a configuration the operator
+  // wrote, which no acceptance showed the terms of, and the confirmation for one
+  // written by accepting an invitation.
+  displayExchangeDisclosure({
+    spec: exchangeDataSpec,
+    metadata: resolved.metadata,
+    linkageTerms: resolved.linkageTerms,
+    log,
+  });
 
   // Show and confirm this party's OWN outbound columns before any credential,
   // terms, or data are sent, when the exchange has a consent record its current

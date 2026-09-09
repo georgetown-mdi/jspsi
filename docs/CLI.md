@@ -455,6 +455,20 @@ Topics this command shares with the rest of the CLI have a section apiece below:
 
 Before any credential, terms, or data are sent, the `INPUT_FILE`'s columns are checked against the configuration's linkage terms, the same satisfiability pre-flight `accept` applies. Unless the CSV can satisfy every key those terms declare, the run stops with a usage error (exit 64) naming the unsatisfied fields and the keys they cost, rather than completing an exchange short of the keys the two parties agreed on. A key whose own cleaning drops every record (a `parse_date` with an incomplete `input_format`) counts as producing nothing here too, and is named the same way; its fix is the terms rather than a different CSV. This guards a recurring run whose CSV has drifted from the terms the configuration committed to -- a file swapped since setup, or one never checked at an offline accept. The remedy for a lasting drift is to settle new terms with your partner out of band and re-establish the exchange under those. The check resolves fields exactly as the exchange does, honoring any explicit metadata or column-standardization in the configuration, so a field an explicit type or remap produces is not flagged.
 
+### What the run shows before it starts
+
+An exchange you authored yourself -- your own configuration and your partner's, settled between you out of band rather than through an invitation -- prints what it will disclose before any credential, terms, or data are sent:
+
+- the columns you send your partner for matched records, resolved from your input file exactly as the exchange transmits them;
+- which of you receives the result;
+- the PSI algorithm and the linkage strategy, each with what it discloses;
+- whether several of your records may match a single one of your partner's, and what that grouping tells your partner;
+- the fields the run matches on, and the linkage keys it combines them into.
+
+It asks nothing and refuses nothing: a run that is valid without it stays valid. The lines print whether or not a terminal is attached, so a scheduled run records them like any other diagnostic output and `--log-file` keeps a copy.
+
+An exchange you accepted an invitation for prints none of this once acceptance has recorded the columns you send: accepting showed you the same facts, and [Confirming what you send](#confirming-what-you-send) below shows the columns again on any run whose set is not the one you confirmed. An acceptance whose partner is entitled to no result records no columns, because none are sent to it; those runs print the display like any other.
+
 ### Confirming what you send
 
 An exchange you accepted an invitation for has one fact no invitation determines: the columns *you* send to your partner for matched records. The invitation determines what you receive; what you send comes from your own input file, where a column psilink does not recognize as a linkage or identifier column is transmitted by default. So acceptance records the set it showed you, and the exchange holds itself to that record:

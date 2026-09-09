@@ -89,8 +89,15 @@ export function consentSurfaceSink(params: {
  * An optional note joins the marker in the same parenthetical, for a label
  * whose value alone leaves a magnitude unstated; it must be first-party
  * text for the same reason.
+ *
+ * Shared with the disclosure a locally authored exchange shows before it runs
+ * (`exchangeDisclosure.ts`), so one label cannot state a basis the other omits.
  */
-function marked(label: string, fact: ConsentFactId, note?: string): string {
+export function marked(
+  label: string,
+  fact: ConsentFactId,
+  note?: string,
+): string {
   const basis = CONSENT_BASIS_MARKERS[CONSENT_FACTS[fact].basis];
   return `${label} (${note === undefined ? basis : `${basis}, ${note}`})`;
 }

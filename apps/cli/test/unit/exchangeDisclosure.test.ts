@@ -1,0 +1,256 @@
+import fs from "node:fs";
+import path from "node:path";
+import { tmpdir } from "node:os";
+
+import logLibrary from "loglevel";
+import { afterEach, beforeEach, expect, test } from "vitest";
+
+import {
+  COUNT_ONLY_DISCLOSURE_STATEMENT,
+  DEDUPLICATE_PARTNER_DECLARED_DISCLOSURE_STATEMENT,
+  DEDUPLICATE_PARTNER_DECLARED_SIDE_NOTE,
+  setDiagnosticSink,
+  UsageError,
+} from "@psilink/core";
+import type { ExchangeDataSpec, LinkageTerms, Metadata } from "@psilink/core";
+
+import { prepareDataset } from "../../src/commands/exchange";
+import { renderExchangeDisclosure } from "../../src/exchangeDisclosure";
+import { snapshotDiagnosticSinkAndLevel } from "../loggingTestSupport";
+import { streamOf, ttyStream, withStdin } from "../stdinStream";
+
+snapshotDiagnosticSinkAndLevel();
+
+const DISCLOSURE_HEADING =
+  "What this exchange sends and matches on. Nothing has been sent yet:";
+const CONFIRMATION_HEADING =
+  "Nothing is sent until you confirm what this exchange will send:";
+
+/** Terms of the shape two parties author from their own files: no invitation
+ * between them, so nothing here was adopted from a partner's proposal. */
+const localTerms: LinkageTerms = {
+  version: "1.0.0",
+  identity: "County Health",
+  date: "2026-01-01",
+  algorithm: "psi",
+  linkageStrategy: "cascade",
+  output: { expectsOutput: true, shareWithPartner: true },
+  deduplicate: false,
+  linkageFields: [
+    { name: "first_name", type: "first_name" },
+    { name: "last_name", type: "last_name" },
+  ],
+  linkageKeys: [
+    {
+      name: "FN_LN",
+      elements: [{ field: "first_name" }, { field: "last_name" }],
+    },
+  ],
+};
+
+function metadataDisclosing(columns: string[]): Metadata {
+  return [
+    {
+      name: "first_name",
+      type: "first_name",
+      role: "linkage",
+      isPayload: false,
+    },
+    { name: "last_name", type: "last_name", role: "linkage", isPayload: false },
+    ...columns.map((name) => ({
+      name,
+      type: "other" as const,
+      role: "payload" as const,
+      isPayload: true,
+    })),
+  ];
+}
+
+/** Every line {@link renderExchangeDisclosure} emits for `terms`. */
+function rendered(terms: LinkageTerms, columns: string[] = []): string[] {
+  const lines: string[] = [];
+  renderExchangeDisclosure(
+    (line) => lines.push(line),
+    terms,
+    metadataDisclosing(columns),
+  );
+  return lines;
+}
+
+let dir: string;
+let configFile: string;
+let input: string;
+let logged: string[];
+
+beforeEach(() => {
+  dir = fs.mkdtempSync(path.join(tmpdir(), "psilink-exchange-disclosure-"));
+  configFile = path.join(dir, "psilink.yaml");
+  input = path.join(dir, "in.csv");
+  fs.writeFileSync(input, "first_name,last_name,diagnosis\nAda,Lovelace,A\n");
+  logged = [];
+  setDiagnosticSink((_method, _prefix, args) => {
+    logged.push(args.map((arg) => String(arg)).join(" "));
+  });
+  logLibrary.getLogger("exchange").setLevel("info");
+});
+
+afterEach(() => {
+  fs.rmSync(dir, { recursive: true, force: true });
+});
+
+/**
+ * Prepare a dataset from `spec` over the CSV above, collecting what the run
+ * logged. `interactive` decides only whether a terminal is attached, which is
+ * what the display must not read.
+ */
+async function prepare(
+  spec: ExchangeDataSpec,
+  interactive: boolean,
+): Promise<unknown> {
+  return withStdin(interactive ? ttyStream() : streamOf(""), () =>
+    prepareDataset(spec, "County Health", input, {
+      configPath: configFile,
+      logFile: undefined,
+    }).then(
+      () => undefined,
+      (e: unknown) => e,
+    ),
+  );
+}
+
+// --- A locally authored configuration ----------------------------------------
+
+test("a two-config run shows what it sends and what it matches on", async () => {
+  // No invitation was accepted here, so nothing has ever shown this operator
+  // the terms their own file commits them to, nor the columns their input file
+  // makes transmittable by default.
+  expect(await prepare({ linkageTerms: localTerms }, true)).toBe(undefined);
+  const output = logged.join("\n");
+  expect(output).toContain(DISCLOSURE_HEADING);
+  expect(output).toContain("columns you will send (enforced):");
+  expect(output).toContain("\n    - diagnosis");
+  expect(output).toContain("you will receive the result (enforced): yes");
+  expect(output).toContain(
+    "your partner will receive the result (enforced): yes",
+  );
+  expect(output).toContain("PSI algorithm (enforced): psi");
+  expect(output).toContain("linkage strategy (enforced): cascade");
+  expect(output).toContain(
+    "duplicate matches (enforced): each of your records matches at most one of your partner's",
+  );
+  expect(output).toContain("matched on (enforced): first name, last name");
+  expect(output).toContain("linkage keys (enforced):");
+  expect(output).toContain("    - FN_LN: first name - last name");
+});
+
+test("a run with no terminal to ask on shows the same lines, and asks nothing", async () => {
+  // The scheduled run is the one the display exists for: it discloses exactly
+  // as much as an attended one, and there is nothing to answer either way.
+  expect(await prepare({ linkageTerms: localTerms }, true)).toBe(undefined);
+  const attended = [...logged];
+  logged = [];
+  expect(await prepare({ linkageTerms: localTerms }, false)).toBe(undefined);
+  expect(logged).toEqual(attended);
+  expect(logged.join("\n")).toContain(DISCLOSURE_HEADING);
+});
+
+// --- A configuration written by accepting an invitation ----------------------
+
+test("an accept-derived configuration is not shown the facts a second time", async () => {
+  // Its consent record is the confirmation surface's, and accepting showed the
+  // terms; the run adds no second account of them.
+  const spec: ExchangeDataSpec = {
+    linkageTerms: localTerms,
+    outboundPayloadConsent: { status: "confirmed", columns: ["diagnosis"] },
+  };
+  expect(await prepare(spec, true)).toBe(undefined);
+  expect(logged.join("\n")).not.toContain(DISCLOSURE_HEADING);
+});
+
+test("a set the confirmation surface asks about is shown once, by that surface", async () => {
+  const spec: ExchangeDataSpec = {
+    linkageTerms: localTerms,
+    outboundPayloadConsent: { status: "pending" },
+  };
+  expect(await prepare(spec, false)).toBeInstanceOf(UsageError);
+  const output = logged.join("\n");
+  expect(output).toContain(CONFIRMATION_HEADING);
+  expect(output).not.toContain(DISCLOSURE_HEADING);
+  expect(output.match(/columns you will send \(enforced\)/g)).toHaveLength(1);
+});
+
+// --- The shapes the columns line takes ---------------------------------------
+
+test("a partner entitled to no result is told no payload is sent", () => {
+  const lines = rendered(
+    {
+      ...localTerms,
+      output: { expectsOutput: true, shareWithPartner: false },
+    },
+    ["diagnosis"],
+  );
+  expect(lines).toContain(
+    "  columns you will send (enforced): (none) -- your partner receives no result, so no payload is sent",
+  );
+  expect(lines.join("\n")).not.toContain("- diagnosis");
+  // Withholding a result rests on the agreed terms being honored, so the line
+  // takes the partner's-word marker rather than the enforced one a receipt gets.
+  expect(lines.join("\n")).toContain(
+    "your partner will receive the result (your partner's word): no",
+  );
+});
+
+test("an input file with nothing transmittable says only matched records", () => {
+  expect(rendered(localTerms)).toContain(
+    "  columns you will send (enforced): (none) -- only matched records",
+  );
+});
+
+test("a count-only exchange states what it reveals and that it sends no columns", () => {
+  const lines = rendered({
+    ...localTerms,
+    algorithm: "psi-c",
+    output: { expectsOutput: true, shareWithPartner: true },
+  }).join("\n");
+  expect(lines).toContain("PSI algorithm (enforced): psi-c");
+  expect(lines).toContain(COUNT_ONLY_DISCLOSURE_STATEMENT);
+  expect(lines).toContain(
+    "A count-only exchange sends no data columns in either direction",
+  );
+});
+
+// --- The matching terms -------------------------------------------------------
+
+test("a grouping this party declares states what it discloses, in its own terms", () => {
+  const lines = rendered({ ...localTerms, deduplicate: true }).join("\n");
+  expect(lines).toContain(
+    "duplicate matches (enforced): several of your records may match a single one of your partner's",
+  );
+  expect(lines).toContain(DEDUPLICATE_PARTNER_DECLARED_DISCLOSURE_STATEMENT);
+  expect(lines).toContain(DEDUPLICATE_PARTNER_DECLARED_SIDE_NOTE);
+});
+
+test("single-pass linkage states the disclosure it trades for its round trip", () => {
+  const lines = rendered({
+    ...localTerms,
+    linkageStrategy: "single-pass",
+  }).join("\n");
+  expect(lines).toContain("linkage strategy (enforced): single-pass");
+  expect(lines).toContain("single-pass linkage means one of you sends");
+});
+
+test("no line names an inviting or accepting party", () => {
+  // The operator here read no invitation and sent none: a line addressing them
+  // as one of those two parties would tell them nothing about which side they
+  // are on.
+  const lines = rendered(
+    {
+      ...localTerms,
+      deduplicate: true,
+      linkageStrategy: "single-pass",
+      output: { expectsOutput: true, shareWithPartner: false },
+    },
+    ["diagnosis"],
+  ).join("\n");
+  expect(lines).not.toMatch(/inviting party|accepting party|invitation/i);
+});
