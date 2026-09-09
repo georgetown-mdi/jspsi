@@ -3701,6 +3701,14 @@ describe("displayInvitation: the declared terms it discloses (columns, citations
         PROPOSED_NOT_APPLIED_NOTES.swappedKeyOrder,
     );
     expect(out).toContain(PROPOSED_NOT_APPLIED_NOTES.fuzzyComparisons);
+    // The always-visible header line degrades the same way a refused fan-out
+    // element's header marker does, rather than asserting the either-order
+    // match a count-only round refuses.
+    expect(out).toContain(
+      "      matches on: first name (partial) - last name (partial) - " +
+        "date of birth (fuzzy) (either order not supported)",
+    );
+    expect(out).not.toContain("(matched in either order)");
   });
 
   test("displayInvitation: a deduplicating term states what it discloses and whose records pay it", () => {

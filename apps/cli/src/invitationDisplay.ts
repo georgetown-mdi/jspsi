@@ -352,7 +352,7 @@ function displayLinkageKey(
   // separator.
   emit(
     `      matches on: ${key.headerFields.join(" - ")}` +
-      (key.hasSwap ? " (matched in either order)" : ""),
+      (key.swapHeaderMarker !== undefined ? ` ${key.swapHeaderMarker}` : ""),
   );
   emit("      elements:");
   for (const element of key.elements) {

@@ -410,7 +410,8 @@ export interface InvitationKeySummary {
    * its sanitized identifier, though the terms schema already refuses an
    * element naming an undeclared field, so no decoded token reaches that
    * fallback. An anchor a partner-controlled key {@link name} cannot
-   * misrepresent; the swap "either order" note is held by {@link hasSwap}.
+   * misrepresent; the swap "either order" note is held by
+   * {@link swapHeaderMarker}.
    *
    * A swap re-attributes markers to the receiver's terms: each swapped
    * element keeps its own rules but reads the OTHER element's field value on
@@ -418,6 +419,17 @@ export interface InvitationKeySummary {
    * its swapped PARTNER's field here, not the field it is declared on.
    */
   headerFields: Array<Displayable>;
+  /**
+   * The always-visible header suffix a swapped key earns, present only when
+   * {@link hasSwap} is true. States the either-order match plainly when
+   * {@link swapApplied}; degrades to naming the refusal, the same way a
+   * refused fan-out element's {@link elementBreadthMarker} degrades to "not
+   * supported", when a count-only round refuses the swap instead. Undefined
+   * for a non-swapped key, so a renderer appends nothing. Fixed copy, safe to
+   * render verbatim; the full remedy stays in the per-key detail's own swap
+   * caveat, which this header suffix stays short beside.
+   */
+  swapHeaderMarker?: Displayable;
 }
 
 /**
@@ -1198,6 +1210,7 @@ function summarizeKey(
   );
 
   const hasSwap = key.swap !== undefined;
+  const swapApplied = APPLIED_SETTINGS.fuzzyComparisons && fanOutMatches;
   let swap: [Displayable, Displayable] | undefined;
   // Header-marker re-attribution across a swap: maps each swapped element
   // to the breadth marker its header entry should show INSTEAD of its own
@@ -1277,6 +1290,12 @@ function summarizeKey(
     headerFields.push(entry);
   }
 
+  const swapHeaderMarker = hasSwap
+    ? swapApplied
+      ? displayText`(matched in either order)`
+      : displayText`(either order not supported)`
+    : undefined;
+
   return {
     id: key.name,
     name: redactAndSanitizeForDisplay(key.name),
@@ -1287,8 +1306,9 @@ function summarizeKey(
     // setting as the fuzzy expansion (`keyDeclaresCandidateSet`,
     // fanOutFunctions.ts), so it applies on exactly the combinations that
     // resolve a candidate set -- the verdict `fanOutMatches` already holds.
-    swapApplied: APPLIED_SETTINGS.fuzzyComparisons && fanOutMatches,
+    swapApplied,
     swap,
+    swapHeaderMarker,
   };
 }
 

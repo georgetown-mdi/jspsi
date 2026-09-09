@@ -311,6 +311,9 @@ describe("the consent summary's fan-out register", () => {
       });
       expect(summary.linkageKeys[0].hasSwap).toBe(true);
       expect(summary.linkageKeys[0].swapApplied).toBe(true);
+      expect(summary.linkageKeys[0].swapHeaderMarker).toBe(
+        "(matched in either order)",
+      );
     },
   );
 
@@ -318,7 +321,8 @@ describe("the consent summary's fan-out register", () => {
     // The count-only round refuses a candidate set, so the swap the invitation
     // declares is a term the exchange will not run. The flag reads the
     // refusal's own verdict, so the surfaces cannot state an either-order match
-    // for a document the run stops.
+    // for a document the run stops, and the header marker degrades the same
+    // way a refused fan-out element's header marker does.
     const summary = summarizeInvitation({
       linkageTerms: {
         ...baseTerms,
@@ -329,6 +333,9 @@ describe("the consent summary's fan-out register", () => {
     });
     expect(summary.linkageKeys[0].hasSwap).toBe(true);
     expect(summary.linkageKeys[0].swapApplied).toBe(false);
+    expect(summary.linkageKeys[0].swapHeaderMarker).toBe(
+      "(either order not supported)",
+    );
     expect(summary.fanOutApplied).toBe(false);
   });
 

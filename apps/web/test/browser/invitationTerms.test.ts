@@ -2899,6 +2899,15 @@ describe("InvitationTerms: a qualifying sentence sits at its headline's visibili
     // are measured on one input.
     renderTerms(COUNT_ONLY_PROBE_TERMS);
     await expect.element(toggle("Matching strategies")).toBeInTheDocument();
+    // The always-visible header subline degrades the same way a refused
+    // fan-out element's header marker does, before the matching list is even
+    // opened.
+    expect(app.container.textContent).toContain(
+      "date of birth (fuzzy) (either order not supported)",
+    );
+    expect(app.container.textContent).not.toContain(
+      "(matched in either order)",
+    );
     await userEvent.click(toggle("Matching strategies"));
     const panel = await readyPanel(
       "given name, family name, and date of birth",
@@ -2915,6 +2924,14 @@ describe("InvitationTerms: a qualifying sentence sits at its headline's visibili
     // it and the caveat above is the algorithm's doing rather than the fixture's.
     renderTerms(CONSENT_PROBE_TERMS);
     await expect.element(toggle("Matching strategies")).toBeInTheDocument();
+    // The always-visible header subline states the either-order match
+    // unqualified, since the run applies it.
+    expect(app.container.textContent).toContain(
+      "date of birth (fuzzy) (matched in either order)",
+    );
+    expect(app.container.textContent).not.toContain(
+      "(either order not supported)",
+    );
     await userEvent.click(toggle("Matching strategies"));
     const panel = await readyPanel(
       "given name, family name, and date of birth",

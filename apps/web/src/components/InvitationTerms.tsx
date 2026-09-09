@@ -268,7 +268,8 @@ function MatchKeyDisclosure({ summary }: { summary: InvitationKeySummary }) {
           if ever reached, so the joined line contains no unescaped partner text. */}
       <Text id={sublineId} size="xs" c="dimmed">
         Matches on {summary.headerFields.join(" - ")}
-        {summary.hasSwap && " (matched in either order)"}
+        {summary.swapHeaderMarker !== undefined &&
+          ` ${summary.swapHeaderMarker}`}
       </Text>
       <div id={panelId}>
         <Collapse expanded={open}>
