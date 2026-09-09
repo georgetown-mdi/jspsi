@@ -2404,13 +2404,14 @@ test.each(["cascade", "single-pass"] as const)(
 );
 
 test("validateInvite: offline config-source refuses a fan-out standardization before minting", async () => {
-  // The mint-boundary counterpart of the run-side fan-out refusal (cascade
-  // terms match one value per record, so a splitting record's candidate set
-  // has no round to enter): a config whose hand-authored standardization
-  // declares `split_on` must be refused BEFORE the token is disclosed, not
-  // left for the config's own `psilink exchange` to reject later (exit 64).
-  // An OperatorConfigError, since a standardization is only this party's own authoring.
-  const terms = defaultTerms();
+  // The mint-boundary counterpart of the run-side candidate-set refusal (a
+  // count-only round counts matched values where the resolution pairs each
+  // record at most once): a config whose hand-authored standardization declares
+  // `split_on` must be refused BEFORE the token is disclosed, not left for the
+  // config's own `psilink exchange` to reject later (exit 64). An
+  // OperatorConfigError, since a standardization is only this party's own
+  // authoring.
+  const terms = countOnlyTerms();
   const { dir, configPath, keyPath } = withConfig(terms, [
     {
       output: "last_name",
@@ -2427,7 +2428,7 @@ test("validateInvite: offline config-source refuses a fan-out standardization be
         log: silentLog,
       });
     await expect(invite()).rejects.toBeInstanceOf(OperatorConfigError);
-    await expect(invite()).rejects.toThrow(/split_on/);
+    await expect(invite()).rejects.toThrow(/count-only/);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
@@ -2439,7 +2440,7 @@ test("validateInvite: offline config-source refuses a fan-out element transform 
   // mint boundary. A plain UsageError, not an OperatorConfigError -- an acceptor
   // adopts element transforms verbatim from the partner's invitation, so the
   // fault is not provably the local operator's own content.
-  const base = defaultTerms();
+  const base = countOnlyTerms();
   const [firstKey, ...restKeys] = base.linkageKeys;
   const terms: LinkageTerms = {
     ...base,
@@ -2471,60 +2472,62 @@ test("validateInvite: offline config-source refuses a fan-out element transform 
       });
     await expect(invite()).rejects.toBeInstanceOf(UsageError);
     await expect(invite()).rejects.not.toBeInstanceOf(OperatorConfigError);
-    await expect(invite()).rejects.toThrow(/split_on/);
+    await expect(invite()).rejects.toThrow(/count-only/);
   } finally {
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
 
-test("validateInvite: offline config-source mints a fan-out under single-pass", async () => {
-  // The admitted half of the same gate, and the path an operator is sent to: the
-  // web editor authors no fan-out, so a config naming single-pass is where one is
-  // written, and the mint must accept it rather than refuse it. Both authoring
-  // surfaces at once -- the config's own standardization and a key's element
-  // transform.
-  const base = defaultTerms();
-  const [firstKey, ...restKeys] = base.linkageKeys;
-  const terms: LinkageTerms = {
-    ...base,
-    linkageStrategy: "single-pass",
-    linkageKeys: [
+for (const linkageStrategy of ["cascade", "single-pass"] as const) {
+  test(`validateInvite: offline config-source mints a fan-out under ${linkageStrategy}`, async () => {
+    // The admitted half of the same gate, and the path an operator is sent to:
+    // the web editor authors no fan-out, so a config is where one is written,
+    // and the mint must accept it rather than refuse it under either linkage
+    // strategy. Both authoring surfaces at once -- the config's own
+    // standardization and a key's element transform.
+    const base = defaultTerms();
+    const [firstKey, ...restKeys] = base.linkageKeys;
+    const terms: LinkageTerms = {
+      ...base,
+      linkageStrategy,
+      linkageKeys: [
+        {
+          ...firstKey,
+          elements: firstKey.elements.map((element, i) =>
+            i === 0
+              ? {
+                  ...element,
+                  transform: [
+                    { function: "split_on", params: { delimiter: " " } },
+                  ],
+                }
+              : element,
+          ),
+        },
+        ...restKeys,
+      ],
+    };
+    const { dir, configPath, keyPath } = withConfig(terms, [
       {
-        ...firstKey,
-        elements: firstKey.elements.map((element, i) =>
-          i === 0
-            ? {
-                ...element,
-                transform: [
-                  { function: "split_on", params: { delimiter: " " } },
-                ],
-              }
-            : element,
-        ),
+        output: "last_name",
+        input: "last_name",
+        steps: [{ function: "split_on", params: { delimiter: " " } }],
       },
-      ...restKeys,
-    ],
-  };
-  const { dir, configPath, keyPath } = withConfig(terms, [
-    {
-      output: "last_name",
-      input: "last_name",
-      steps: [{ function: "split_on", params: { delimiter: " " } }],
-    },
-  ]);
-  try {
-    await expect(
-      validateInvite({
-        resolved: { mode: "offline" },
-        options: testOptions({ configFile: configPath, keyFile: keyPath }),
-        acceptTimeout: 900,
-        log: silentLog,
-      }),
-    ).resolves.toBeDefined();
-  } finally {
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
-});
+    ]);
+    try {
+      await expect(
+        validateInvite({
+          resolved: { mode: "offline" },
+          options: testOptions({ configFile: configPath, keyFile: keyPath }),
+          acceptTimeout: 900,
+          log: silentLog,
+        }),
+      ).resolves.toBeDefined();
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+}
 
 test("validateInvite: offline config-source refuses a standardization step it cannot build", async () => {
   // The mint-boundary compile refusal, the sibling of the fan-out one above: a

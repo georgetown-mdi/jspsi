@@ -325,12 +325,15 @@ describe("prepareForExchange: a deduplicating term is read against the strategy"
 
 // --- A fan-out transform fails closed before connecting -----------------------
 
-describe("prepareForExchange: a fan-out transform is refused off single-pass", () => {
-  // Fan-out matching runs under single-pass alone, so a record whose value
-  // splits realizes a candidate set the cascade cannot consume. Refuse before any
-  // connection rather than abort the run once a splitting row reaches a round.
-  // The base `terms` are cascade, so every case below is the refusing half; the
-  // admitted half is the single-pass describe that follows.
+describe("prepareForExchange: a fan-out transform is refused under psi-c", () => {
+  // A count-only round counts matched VALUES where the resolution pairs each
+  // record at most once, so a record whose value splits would make the count
+  // over-report the linkage it is used to justify. Refuse before any connection
+  // rather than abort the run once a splitting row reaches the round. The base
+  // `terms` are already in the count-only shape apart from the algorithm, so
+  // every case below sets that alone; the admitted half is the psi describe
+  // that follows.
+  const countOnlyTerms: LinkageTerms = { ...terms, algorithm: "psi-c" };
   const splittingStandardization: Standardization = [
     {
       output: "first_name",
@@ -345,7 +348,7 @@ describe("prepareForExchange: a fan-out transform is refused off single-pass", (
   ];
 
   const splittingElementTerms: LinkageTerms = {
-    ...terms,
+    ...countOnlyTerms,
     linkageKeys: [
       {
         name: "FN_LN",
@@ -364,7 +367,7 @@ describe("prepareForExchange: a fan-out transform is refused off single-pass", (
     const prepare = () =>
       prepareForExchange(
         {
-          linkageTerms: terms,
+          linkageTerms: countOnlyTerms,
           metadata,
           standardization: splittingStandardization,
         },
@@ -373,7 +376,7 @@ describe("prepareForExchange: a fan-out transform is refused off single-pass", (
         columns,
       );
     expect(prepare).toThrow(UsageError);
-    expect(prepare).toThrow(/split_on/);
+    expect(prepare).toThrow(/count-only/);
   });
 
   test("a linkage-key element transform declaring split_on is refused", () => {
@@ -387,7 +390,7 @@ describe("prepareForExchange: a fan-out transform is refused off single-pass", (
         columns,
       );
     expect(prepare).toThrow(UsageError);
-    expect(prepare).toThrow(/split_on/);
+    expect(prepare).toThrow(/count-only/);
   });
 
   test("the standardization-declared refusal is an OperatorConfigError", () => {
@@ -400,7 +403,7 @@ describe("prepareForExchange: a fan-out transform is refused off single-pass", (
     try {
       prepareForExchange(
         {
-          linkageTerms: terms,
+          linkageTerms: countOnlyTerms,
           metadata,
           standardization: splittingStandardization,
         },
@@ -455,7 +458,7 @@ describe("prepareForExchange: a fan-out transform is refused off single-pass", (
     // Built legitimately -- terms and standardization both free of fan-out -- then
     // given fan-out TERMS, the way a caller that skipped prepareForExchange could.
     const prepared = prepareForExchange(
-      { linkageTerms: terms, metadata },
+      { linkageTerms: countOnlyTerms, metadata },
       "Tester",
       rawRows,
       columns,
@@ -466,7 +469,7 @@ describe("prepareForExchange: a fan-out transform is refused off single-pass", (
       psiLibrary: unusablePsiLibrary,
     });
     await expect(run).rejects.toThrow(UsageError);
-    await expect(run).rejects.toThrow(/split_on/);
+    await expect(run).rejects.toThrow(/count-only/);
   });
 
   test("runExchange runs past the guard for terms declaring no fan-out", async () => {
@@ -474,7 +477,7 @@ describe("prepareForExchange: a fan-out transform is refused off single-pass", (
     // of fan-out reach the terms exchange, so the failure is the connection's --
     // proof the refusal above fired on the fan-out rather than on the fixtures.
     const prepared = prepareForExchange(
-      { linkageTerms: terms, metadata },
+      { linkageTerms: countOnlyTerms, metadata },
       "Tester",
       rawRows,
       columns,
@@ -486,12 +489,14 @@ describe("prepareForExchange: a fan-out transform is refused off single-pass", (
   });
 });
 
-// --- The same two surfaces run under single-pass ------------------------------
+// --- The same two surfaces run under either linkage strategy ------------------
 
 describe("prepareForExchange: a fan-out transform runs under single-pass", () => {
-  // The admitted half of the strategy rule: single-pass matches a record's whole
-  // candidate set (docs/spec/PROTOCOL.md, Fan-out matching), so both authoring
-  // surfaces prepare and reach the terms exchange rather than being refused.
+  // The admitted half of the rule: both linkage strategies match a record's
+  // whole candidate set (docs/spec/PROTOCOL.md, Fan-out matching), so both
+  // authoring surfaces prepare and reach the terms exchange rather than being
+  // refused. Single-pass is the strategy driven here because it is the one
+  // whose declared width the prepared exchange records.
   const singlePassTerms: LinkageTerms = {
     ...terms,
     linkageStrategy: "single-pass",
@@ -1218,10 +1223,10 @@ const refusalCases: Array<{
     messageRendered: false,
   },
   {
-    what: "a fan-out declared in this party's own standardization",
-    says: /split_on/,
+    what: "a fan-out declared in this party's own standardization under psi-c",
+    says: /count-only/,
     spec: {
-      linkageTerms: terms,
+      linkageTerms: { ...terms, algorithm: "psi-c" },
       metadata,
       standardization: [
         {
@@ -1235,11 +1240,12 @@ const refusalCases: Array<{
     messageRendered: true,
   },
   {
-    what: "a fan-out declared in a linkage key's element transform",
-    says: /split_on/,
+    what: "a fan-out declared in a linkage key's element transform under psi-c",
+    says: /count-only/,
     spec: {
       linkageTerms: {
         ...terms,
+        algorithm: "psi-c",
         linkageKeys: [
           {
             name: "FN_LN",

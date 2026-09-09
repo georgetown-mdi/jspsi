@@ -514,7 +514,10 @@ function acceptedPositionSets(
   }
   const entries = new Map<number, Array<number>>();
   for (const [rank, set] of sets)
-    entries.set(rank, [...set].sort((a, b) => a - b));
+    entries.set(
+      rank,
+      [...set].sort((a, b) => a - b),
+    );
   return entries;
 }
 
@@ -624,7 +627,9 @@ class RoundGrouping implements RoundGroupingExchange {
   // position and a position in fact stands for a group of the partner's rows
   // (docs/spec/PROTOCOL.md, An absent grouping is all ones).
   partnerPartitionIsExact(): boolean {
-    return !this.sides.partnerKeepsDuplicates || this.partnerField !== undefined;
+    return (
+      !this.sides.partnerKeepsDuplicates || this.partnerField !== undefined
+    );
   }
 
   local(): LocalRoundGrouping {
@@ -890,12 +895,12 @@ export async function linkViaPSI(
         throw new InternalConsistencyError(
           "a linkage round matched a position no grouping of the round names",
         );
-      for (
-        let b = partner.starts[theirs];
-        b < partner.starts[theirs + 1];
-        ++b
-      )
-        noteMatch(localPositionsMatched, partner.ordinals[b], localPositions[m]);
+      for (let b = partner.starts[theirs]; b < partner.starts[theirs + 1]; ++b)
+        noteMatch(
+          localPositionsMatched,
+          partner.ordinals[b],
+          localPositions[m],
+        );
       for (
         let a = local.ownership.starts[mine];
         a < local.ownership.starts[mine + 1];
@@ -1146,7 +1151,10 @@ export async function linkViaPSI(
       // partner reading positions for groups cannot tell them apart. A
       // position standing for a GROUP of this party's records names the group
       // rather than one record.
-      if (!sides.localKeepsDuplicates && canonicalPositionOf[i] !== positions[0])
+      if (
+        !sides.localKeepsDuplicates &&
+        canonicalPositionOf[i] !== positions[0]
+      )
         throw partnerProtocolError(
           participant.id,
           "the partner's mapped-element list names a position other than the " +

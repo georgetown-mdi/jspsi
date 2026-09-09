@@ -19,6 +19,7 @@ import {
 } from "../src/standardization";
 import {
   validateStandardizationAgainstTerms,
+  assertCandidateSetCardinalityImplemented,
   assertFanOutImplemented,
   assertStandardizationMatchesTerms,
   assertTransformsCompile,
@@ -1754,6 +1755,17 @@ describe("assertFanOutImplemented", () => {
       ],
     },
   ];
+  // Both shipped strategies resolve a candidate set, so the strategy arm is
+  // reached only by one this build does not recognize. Cast because no such
+  // member exists yet -- which is the case these pin.
+  const unlistedStrategyTerms = (
+    keys?: LinkageTerms["linkageKeys"],
+  ): LinkageTerms =>
+    ({
+      ...minimalTerms,
+      linkageStrategy: "two-pass",
+      ...(keys ? { linkageKeys: keys } : {}),
+    }) as unknown as LinkageTerms;
 
   test("refuses a standardization declaring a fan-out step, naming it", () => {
     // A standardization is only ever this party's own -- no invitation holds
@@ -1764,10 +1776,10 @@ describe("assertFanOutImplemented", () => {
       { output: "last_name", input: "LN", steps: [fanOutStep] },
     ];
     expect(() =>
-      assertFanOutImplemented(minimalTerms, standardization),
+      assertFanOutImplemented(unlistedStrategyTerms(), standardization),
     ).toThrow(OperatorConfigError);
     expect(() =>
-      assertFanOutImplemented(minimalTerms, standardization),
+      assertFanOutImplemented(unlistedStrategyTerms(), standardization),
     ).toThrow(/split_on/);
   });
 
@@ -1776,64 +1788,74 @@ describe("assertFanOutImplemented", () => {
     // the accept path, so this half stays a plain UsageError: not provably this
     // operator's own content, and its message stays swallowed by the generic
     // alert.
-    const terms: LinkageTerms = {
-      ...minimalTerms,
-      linkageKeys: elementFanOutKeys,
-    };
+    const terms = unlistedStrategyTerms(elementFanOutKeys);
     expect(() => assertFanOutImplemented(terms)).toThrow(UsageError);
-    expect(() => assertFanOutImplemented(terms)).toThrow(/split_on/);
     expect(() => assertFanOutImplemented(terms)).not.toThrow(
       OperatorConfigError,
     );
   });
 
-  test("admits both authoring surfaces under single-pass, the strategy that matches a candidate set", () => {
-    // The narrowed rule's other half: fan-out matching is specified for
-    // single-pass alone (docs/spec/PROTOCOL.md, Fan-out runs under single-pass
-    // only), so the same two configurations the cascade refuses above run there.
-    const singlePassTerms: LinkageTerms = {
+  test("admits both authoring surfaces under the strategies that resolve a candidate set", () => {
+    // The narrowed rule's other half: both shipped strategies resolve one
+    // (CANDIDATE_SET_IMPLEMENTED_BY_STRATEGY, linkageTermsPolicy.ts), so the
+    // configurations an unlisted strategy refuses above run under either.
+    const standardization = [
+      { output: "last_name", input: "LN", steps: [fanOutStep] },
+    ];
+    for (const linkageStrategy of ["cascade", "single-pass"] as const) {
+      const terms: LinkageTerms = { ...minimalTerms, linkageStrategy };
+      expect(() =>
+        assertFanOutImplemented(terms, standardization),
+      ).not.toThrow();
+      expect(() =>
+        assertFanOutImplemented({ ...terms, linkageKeys: elementFanOutKeys }),
+      ).not.toThrow();
+    }
+  });
+
+  test("refuses a strategy this build does not recognize, rather than admitting it", () => {
+    // An allowlist, not a named denylist: a strategy added to the schema refuses
+    // a candidate set until its own resolution is written.
+    expect(() =>
+      assertFanOutImplemented(unlistedStrategyTerms(elementFanOutKeys)),
+    ).toThrow(UsageError);
+  });
+
+  test("refuses a candidate set under the count-only algorithm, whatever the strategy", () => {
+    // psi-c counts matched VALUES where the resolution pairs each record at most
+    // once, so the count would over-report the linkage it is used to justify.
+    // The refusal reaches both authoring surfaces, under the very strategy that
+    // otherwise resolves a candidate set.
+    const countOnly: LinkageTerms = {
       ...minimalTerms,
-      linkageStrategy: "single-pass",
+      algorithm: "psi-c",
+      linkageStrategy: "cascade",
     };
     const standardization = [
       { output: "last_name", input: "LN", steps: [fanOutStep] },
     ];
-    expect(() =>
-      assertFanOutImplemented(singlePassTerms, standardization),
-    ).not.toThrow();
-    expect(() =>
-      assertFanOutImplemented({
-        ...singlePassTerms,
-        linkageKeys: elementFanOutKeys,
-      }),
-    ).not.toThrow();
-  });
-
-  test("refuses a strategy this build does not recognize, rather than admitting it", () => {
-    // An allowlist, not a cascade-named denylist: a strategy added to the schema
-    // refuses a fan-out until it too realizes one. Cast because no such member
-    // exists yet -- which is the case this pins.
-    const futureStrategyTerms = {
-      ...minimalTerms,
-      linkageStrategy: "two-pass",
-      linkageKeys: elementFanOutKeys,
-    } as unknown as LinkageTerms;
-    expect(() => assertFanOutImplemented(futureStrategyTerms)).toThrow(
-      UsageError,
+    expect(() => assertFanOutImplemented(countOnly, standardization)).toThrow(
+      OperatorConfigError,
     );
+    expect(() =>
+      assertFanOutImplemented({ ...countOnly, linkageKeys: elementFanOutKeys }),
+    ).toThrow(UsageError);
+    expect(() =>
+      assertFanOutImplemented({ ...countOnly, linkageKeys: elementFanOutKeys }),
+    ).toThrow(/count-only/);
   });
 
   test("the refusal names the strategy rule and the two ways out of it", () => {
-    // What an operator does about it: agree single-pass terms, or drop the step.
-    // Neither remedy is derivable from the function name alone, so both are
-    // pinned rather than left to the message's shape.
-    const terms: LinkageTerms = {
-      ...minimalTerms,
-      linkageKeys: elementFanOutKeys,
-    };
-    expect(() => assertFanOutImplemented(terms)).toThrow(/single-pass/);
+    // What an operator does about it: agree terms whose strategy matches a
+    // candidate set, or drop the step. Neither remedy is derivable from the
+    // function name alone, so both are pinned rather than left to the message's
+    // shape.
+    const terms = unlistedStrategyTerms(elementFanOutKeys);
     expect(() => assertFanOutImplemented(terms)).toThrow(
-      /Agree linkage terms whose linkage_strategy is single-pass/,
+      /matches a single value per record/,
+    );
+    expect(() => assertFanOutImplemented(terms)).toThrow(
+      /Agree linkage terms whose linkage_strategy matches a candidate set/,
     );
     expect(() => assertFanOutImplemented(terms)).toThrow(
       /remove the "split_on" step/,
@@ -1848,7 +1870,7 @@ describe("assertFanOutImplemented", () => {
         { output: "last_name", input: "LN", steps: [{ function: name }] },
       ];
       expect(() =>
-        assertFanOutImplemented(minimalTerms, standardization),
+        assertFanOutImplemented(unlistedStrategyTerms(), standardization),
       ).toThrow(UsageError);
     }
   });
@@ -1862,9 +1884,72 @@ describe("assertFanOutImplemented", () => {
       },
     ];
     expect(() =>
-      assertFanOutImplemented(minimalTerms, standardization),
+      assertFanOutImplemented(unlistedStrategyTerms(), standardization),
     ).not.toThrow();
-    expect(() => assertFanOutImplemented(minimalTerms)).not.toThrow();
+    expect(() =>
+      assertFanOutImplemented(unlistedStrategyTerms()),
+    ).not.toThrow();
+  });
+});
+
+describe("assertCandidateSetCardinalityImplemented", () => {
+  const fanOutStep = { function: "split_on", params: { delimiter: "-" } };
+  const withCandidateSet: LinkageTerms = {
+    ...minimalTerms,
+    linkageKeys: [
+      {
+        name: "LN+DOB",
+        elements: [
+          { field: "last_name", transform: [fanOutStep] },
+          { field: "date_of_birth" },
+        ],
+      },
+    ],
+  };
+  const deduplicating = (terms: LinkageTerms): LinkageTerms => ({
+    ...terms,
+    deduplicate: true,
+  });
+
+  test("refuses a candidate set under the many-to-many the pair resolves to", () => {
+    expect(() =>
+      assertCandidateSetCardinalityImplemented(
+        deduplicating(withCandidateSet),
+        deduplicating(withCandidateSet),
+      ),
+    ).toThrow(UsageError);
+    expect(() =>
+      assertCandidateSetCardinalityImplemented(
+        deduplicating(withCandidateSet),
+        deduplicating(withCandidateSet),
+      ),
+    ).toThrow(/many-to-many/);
+  });
+
+  test("admits a candidate set under the one-sided cardinalities", () => {
+    // many-to-one and one-to-many are not refused with it: a candidate set on
+    // either side of those runs under both strategies.
+    expect(() =>
+      assertCandidateSetCardinalityImplemented(
+        deduplicating(withCandidateSet),
+        withCandidateSet,
+      ),
+    ).not.toThrow();
+    expect(() =>
+      assertCandidateSetCardinalityImplemented(
+        withCandidateSet,
+        deduplicating(withCandidateSet),
+      ),
+    ).not.toThrow();
+  });
+
+  test("admits many-to-many where no key declares a candidate set", () => {
+    expect(() =>
+      assertCandidateSetCardinalityImplemented(
+        deduplicating(minimalTerms),
+        deduplicating(minimalTerms),
+      ),
+    ).not.toThrow();
   });
 });
 

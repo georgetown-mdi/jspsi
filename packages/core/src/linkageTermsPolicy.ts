@@ -44,7 +44,10 @@ export type CountOnlyShapeViolation =
  * The rules and the reasoning behind each: docs/spec/PROTOCOL.md, PSI-C.
  */
 export const COUNT_ONLY_SHAPE_REFUSALS: Readonly<
-  Record<CountOnlyShapeViolation | "transmittedColumns" | "candidateSet", string>
+  Record<
+    CountOnlyShapeViolation | "transmittedColumns" | "candidateSet",
+    string
+  >
 > = {
   linkageKeys:
     'count-only ("psi-c") linkage terms must declare exactly one linkage ' +
@@ -76,7 +79,7 @@ export const COUNT_ONLY_SHAPE_REFUSALS: Readonly<
     "candidates. A count-only round counts matched values where the matching " +
     "pairs each record at most once, so the count would report more links " +
     "than the exchange stands for. Remove the expanding step, the fuzzy " +
-    "comparison, or the swapped key order, or set the algorithm to \"psi\".",
+    'comparison, or the swapped key order, or set the algorithm to "psi".',
   transmittedColumns:
     'a count-only ("psi-c") exchange transmits no data columns, but this ' +
     "input's metadata marks one or more columns to send to the partner. The " +
