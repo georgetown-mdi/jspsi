@@ -758,9 +758,9 @@ what holds the base either way.
 
 - The Trivy scan the release workflow runs over the built variant,
   which gates every publish, so a snapshot with fixable high or critical
-  findings blocks a release rather than shipping. `image_smoke.yaml`'s weekly
-  build asks the same question of the variant between releases and reports
-  the answer without gating on it (below).
+  findings blocks a release rather than shipping. `image_smoke.yaml`'s Trivy
+  scan of the variant asks the same question on every trigger, pull requests
+  included, and gates on it the same way (below).
 - An advisory, or a certificate-lifecycle event, read by hand against the pins
   in [CONTAINER_IMAGES.md](CONTAINER_IMAGES.md#the-fips-variant-images-pins).
 
