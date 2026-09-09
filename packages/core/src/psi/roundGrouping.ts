@@ -80,12 +80,45 @@ export interface RoundOwnership {
   /** The slot each matched position occupies. */
   readonly slotOfPosition: Map<number, number>;
   /**
-   * The lowest matched position each ordinal owns, which is the canonical
-   * position the round's mapped-element entry for that record names
-   * (docs/spec/PROTOCOL.md, The final mapped-element entry names a canonical
-   * position).
+   * The lowest matched position each ordinal owns. It is the one position a
+   * round names a record by where the reading party holds no exact partition
+   * of the naming party's positions into records -- a deduplicating party
+   * that omitted its grouping -- and it coincides with the whole set where
+   * no candidate set widened the round (docs/spec/PROTOCOL.md, The final
+   * mapped-element entry names the positions its record's pairs rest on).
    */
   readonly canonicalPosition: Int32Array;
+}
+
+/**
+ * The positions each ordinal owns, as one flat array with per-ordinal
+ * boundaries: ordinal `o` owns `positions[starts[o] .. starts[o + 1])`,
+ * ascending.
+ *
+ * The transpose of {@link RoundOwnership}, which reads position to owner. A
+ * mapped-element entry names the positions an accepted partner record owns,
+ * so the pass that derives one reads the partition this way round
+ * (docs/spec/PROTOCOL.md, The final mapped-element entry names the positions
+ * its record's pairs rest on).
+ */
+export interface OrdinalPositions {
+  readonly starts: Int32Array;
+  readonly positions: Int32Array;
+}
+
+/** @internal */
+export function positionsByOrdinal(
+  ownership: RoundOwnership,
+): OrdinalPositions {
+  const starts = new Int32Array(ownership.recordCount + 1);
+  for (const ordinal of ownership.ordinals) ++starts[ordinal + 1];
+  for (let o = 0; o < ownership.recordCount; ++o) starts[o + 1] += starts[o];
+  const cursor = Int32Array.from(starts.subarray(0, ownership.recordCount));
+  const positions = new Int32Array(ownership.ordinals.length);
+  for (let t = 0; t < ownership.positions.length; ++t)
+    for (let o = ownership.starts[t]; o < ownership.starts[t + 1]; ++o)
+      positions[cursor[ownership.ordinals[o]]++] = ownership.positions[t];
+  return { starts, positions };
 }
 
 /** This party's own grouping for a round, ready to send and to sweep with. */
@@ -229,6 +262,12 @@ function readRunLengths(
         participantId,
         "the round's grouping holds a run longer than the candidate count " +
           `one record may contribute to the key (${bounds.maxPositionsPerRecord})`,
+      );
+    if (run >= bounds.partnerRecordCount)
+      throw partnerProtocolError(
+        participantId,
+        "the round's grouping holds more runs than the " +
+          `${bounds.partnerRecordCount} record(s) the partner counted`,
       );
     if (filled + length > positions.length)
       throw partnerProtocolError(

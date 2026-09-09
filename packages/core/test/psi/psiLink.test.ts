@@ -355,15 +355,15 @@ test("single-pass reproduces the cascade's survivor-relative uniqueness", async 
   expect(singlePassReceiver).toStrictEqual(cascadeReceiver);
 });
 
-// --- the cascade: a record holding several candidates is refused -------------
+// --- the cascade: which candidate sets reach a round -------------------------
 // Key realization holds every candidate a record realizes (buildKeyStrings).
-// Which strategies resolve one is an allowlist, so a linkage_strategy the
-// resolution is not written for refuses the record where it would consume it
-// rather than narrowing to one candidate or dropping it, either of which
-// matches on less than the terms declare. The cascade's own resolution is
-// built and its entry is false, so this is the fail-closed behavior at the
-// point of harm for a candidate set that reached a round anyway.
-test("a candidate set reaching the cascade is refused, not narrowed", async () => {
+// Two readings decide whether a round consumes one: an allowlist over the
+// strategies whose resolution is written, and the resolved cardinality,
+// `many-to-many` having no single-pass table for the equivalence obligation to
+// name. A combination outside them refuses the record where it would consume
+// it rather than narrowing to one candidate or dropping it, either of which
+// matches on less than the terms declare.
+test("a candidate set reaching a many-to-many round is refused, not narrowed", async () => {
   const withCandidateSet: Array<Array<string | Set<string> | undefined>> = [
     ["A", new Set(["B", "C"])],
   ];
@@ -380,7 +380,7 @@ test("a candidate set reaching the cascade is refused, not narrowed", async () =
   // asserted too -- the CLI classifies a UsageError as a configuration fault.
   const run = () =>
     linkViaPSI(
-      { cardinality: "one-to-one" },
+      { cardinality: "many-to-many" },
       participant,
       conn,
       withCandidateSet,
@@ -388,12 +388,12 @@ test("a candidate set reaching the cascade is refused, not narrowed", async () =
       -1,
     );
   await expect(run()).rejects.toThrow(UsageError);
-  await expect(run()).rejects.toThrow(/fan-out/);
+  await expect(run()).rejects.toThrow(/several match candidates/);
 });
 
 test("the allowlist is what decides, one entry per strategy", () => {
   expect(CANDIDATE_SET_IMPLEMENTED_BY_STRATEGY).toStrictEqual({
-    cascade: false,
+    cascade: true,
     "single-pass": true,
   });
   for (const strategy of Object.keys(
@@ -404,17 +404,15 @@ test("the allowlist is what decides, one entry per strategy", () => {
     );
 });
 
-test("the cascade's boundary refusal lifts with its own entry", async () => {
-  // The refusal above is the table's verdict rather than a strategy named in
-  // the round, so flipping the entry the cascade's realization waits on runs
-  // the candidate set instead of refusing it. The resolution behind that entry
-  // is exercised at length in cascadeCandidateSets.test.ts.
+test("the cascade resolves a candidate set, and its entry is what decides", async () => {
+  // The round reads the table rather than naming a strategy, so closing the
+  // cascade's entry returns the fail-closed refusal a strategy with no written
+  // resolution meets. The resolution behind the open entry is exercised at
+  // length in cascadeCandidateSets.test.ts.
   const withCandidateSet: Array<Array<string | Set<string> | undefined>> = [
     [new Set(["B", "C"])],
   ];
-  const shipped = CANDIDATE_SET_IMPLEMENTED_BY_STRATEGY.cascade;
-  CANDIDATE_SET_IMPLEMENTED_BY_STRATEGY.cascade = true;
-  try {
+  const link = async (): Promise<AssociationTable> => {
     const [starterConn, joinerConn] = createMessagePipe();
     const [starterTable] = await Promise.all([
       linkViaPSI(
@@ -444,7 +442,15 @@ test("the cascade's boundary refusal lifts with its own entry", async () => {
         -1,
       ),
     ]);
-    expect(starterTable).toStrictEqual([[0], [0]]);
+    return starterTable;
+  };
+
+  expect(await link()).toStrictEqual([[0], [0]]);
+
+  const shipped = CANDIDATE_SET_IMPLEMENTED_BY_STRATEGY.cascade;
+  CANDIDATE_SET_IMPLEMENTED_BY_STRATEGY.cascade = false;
+  try {
+    await expect(link()).rejects.toThrow(UsageError);
   } finally {
     CANDIDATE_SET_IMPLEMENTED_BY_STRATEGY.cascade = shipped;
   }

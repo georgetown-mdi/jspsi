@@ -755,34 +755,56 @@ const quotedFanOutFunctionNames = FAN_OUT_FUNCTION_NAMES.map(
   (name) => `"${name}"`,
 ).join(", ");
 
-// The recovery the DECLARED-step refusal closes on: the strategy that matches a
+// The recovery the DECLARED-step refusals close on: a strategy that matches a
 // candidate set, or no candidate set at all. Named separately because the
-// refusal's two surfaces share it while differing in error class.
-const FAN_OUT_STRATEGY_RECOVERY =
-  "Agree linkage terms whose linkage_strategy is single-pass, or remove the " +
-  `${quotedFanOutFunctionNames} step from the standardization and from every ` +
-  "linkage-key element transform.";
+// refusal's surfaces share it while differing in error class.
+const CANDIDATE_SET_STRATEGY_RECOVERY =
+  "Agree linkage terms whose linkage_strategy matches a candidate set, or " +
+  `remove the ${quotedFanOutFunctionNames} step, the fuzzy comparison and ` +
+  "the swapped key order from the standardization and from every linkage " +
+  "key.";
 
 /**
- * The message both DECLARED-step refusals hold, raised before the exchange
- * runs. `functionName` is matched against FAN_OUT_FUNCTION_NAMES before it
- * reaches here, so the message is a fixed literal, never partner free text;
- * the strategy the terms actually name is not interpolated, since nothing
- * narrows it to a schema literal at this boundary. The two refusals share the
- * wording and differ only in error class, by whose content the fault is (see
- * assertFanOutImplemented).
+ * The message the DECLARED-step refusal holds for a standardization pipeline,
+ * raised before the exchange runs. `functionName` is matched against
+ * FAN_OUT_FUNCTION_NAMES before it reaches here, so the message is a fixed
+ * literal, never partner free text; the strategy the terms actually name is
+ * not interpolated, since nothing narrows it to a schema literal at this
+ * boundary.
  *
  * @internal composed by `assertFanOutImplemented` in `linkageSatisfiability.ts`.
  */
 export function fanOutDeclaredMessage(functionName: string): string {
   return (
-    "fan-out matching runs under the single-pass linkage strategy only, but " +
-    "these linkage terms name another and these transforms declare a " +
-    `"${functionName}" step: it expands one value into several match ` +
-    "candidates, while every other strategy matches a single value per record. " +
-    "A record whose value actually splits would abort the run the moment it " +
-    "reached a matching round rather than match one key per candidate, so the " +
-    `exchange is refused up front instead. ${FAN_OUT_STRATEGY_RECOVERY}`
+    "these linkage terms name a linkage strategy that matches a single value " +
+    `per record, and these transforms declare a "${functionName}" step: it ` +
+    "expands one value into several match candidates. A record whose value " +
+    "actually splits would abort the run the moment it reached a matching " +
+    "round rather than match one key per candidate, so the exchange is " +
+    `refused up front instead. ${CANDIDATE_SET_STRATEGY_RECOVERY}`
+  );
+}
+
+/**
+ * The sibling message for a candidate set declared by the LINKAGE KEYS
+ * themselves -- an element transform's fan-out step, a
+ * `generate_fuzzy_comparisons` expansion, or a `swap` naming both orders --
+ * under a strategy that matches a single value per record.
+ *
+ * Fixed literals only: this half is adopted verbatim from a partner's
+ * invitation on the accept path, so nothing from the document is
+ * interpolated.
+ *
+ * @internal composed by `assertFanOutImplemented` in `linkageSatisfiability.ts`.
+ */
+export function candidateSetUnderStrategyMessage(): string {
+  return (
+    "these linkage terms name a linkage strategy that matches a single value " +
+    "per record, and one of their linkage keys expands one value into several " +
+    "match candidates. A record realizing several candidates would abort the " +
+    "run the moment it reached a matching round rather than match one key per " +
+    "candidate, so the exchange is refused up front instead. " +
+    CANDIDATE_SET_STRATEGY_RECOVERY
   );
 }
 
@@ -790,32 +812,35 @@ export function fanOutDeclaredMessage(functionName: string): string {
  * Refusal for a candidate set that reached a call site running one value per
  * record -- the point of harm, since the alternative is silent narrowing.
  * Key realization holds every candidate ({@link buildKeyStrings}); the call
- * sites that cannot honor them are `linkViaPSI`, `linkViaCountOnlyPSI` (fan-out
- * matching runs under single-pass alone), and the single-pass table build
+ * sites that cannot honor them are `linkViaCountOnlyPSI` (a count-only round
+ * counts matched values), `linkViaPSI` under a `many-to-many` cardinality or a
+ * strategy off the candidate-set allowlist, and the single-pass table build
  * for a party that declared no fan-out (a fixed-width column holds one
  * value per key, record). A party that DID declare one builds a ragged
  * table instead and refuses in `link.ts`'s own width checks, a different
  * refusal on the same fault: an expansion the declared factors do not
  * account for.
  *
- * Unreachable while {@link assertFanOutImplemented} gates every run path
- * off single-pass. Encoded as a check, not a comment, since it also covers
- * a fan-out function missing from {@link FAN_OUT_FUNCTION_NAMES}, and a
- * standardization-authored path a prepared exchange assembled outside
- * `prepareForExchange` hides from that gate.
+ * Unreachable for a combination {@link assertFanOutImplemented} and
+ * {@link assertCandidateSetCardinalityImplemented} gate at the terms.
+ * Encoded as a check, not a comment, since it also covers a fan-out function
+ * missing from {@link FAN_OUT_FUNCTION_NAMES}, and a standardization-authored
+ * path a prepared exchange assembled outside `prepareForExchange` hides from
+ * those gates.
  */
 export function fanOutReachedMatchingRefusal(): UsageError {
   return new UsageError(
     "a transform expanded a record into several match candidates, but this " +
-      "round matches a single value per record: fan-out matching runs under " +
-      "the single-pass linkage strategy, and there only for a party whose " +
-      "declared linkage terms and standardization account for the expansion. " +
+      "round matches a single value per record: a count-only exchange and a " +
+      "many-to-many match run one value per record, and a single-pass party " +
+      "matches a candidate set only where its declared linkage terms and " +
+      "standardization account for the expansion. " +
       "Continuing would drop the record from its linkage key rather than " +
       "match it on each candidate, so the exchange is refused instead. Remove " +
-      "the step that expands this record's value -- a " +
-      `${quotedFanOutFunctionNames} step under another strategy, a fuzzy ` +
-      "comparison, or a transform that expands one value without being a " +
-      "declared fan-out function.",
+      `the step that expands this record's value -- a ` +
+      `${quotedFanOutFunctionNames} step, a fuzzy comparison, a swapped key ` +
+      "order, or a transform that expands one value without being a declared " +
+      "fan-out function.",
   );
 }
 

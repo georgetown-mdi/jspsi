@@ -8,6 +8,8 @@ import {
   assertBothSidedDeduplicateImplemented,
   assertCountOnlyTermsShape,
   assertDeduplicateImplemented,
+  candidateSetIsImplementedForStrategy,
+  COUNT_ONLY_SHAPE_REFUSALS,
   resolvedMatchingFromTerms,
 } from "./linkageTermsPolicy.js";
 import { getDefaultLinkageTerms } from "./defaults/builtInLinkageTerms.js";
@@ -20,6 +22,7 @@ import {
   StandardizedKeyIterable,
 } from "./standardization.js";
 import {
+  assertCandidateSetCardinalityImplemented,
   assertFanOutImplemented,
   assertLinkageTermsSatisfiable,
   assertStandardizationMatchesTerms,
@@ -320,29 +323,34 @@ export function matchedPairCount(associationTable: AssociationTable): number {
 
 /**
  * Refuse agreed terms that declare a per-record candidate width
- * ({@link partyFansOut}) on a strategy matching a single value per record,
- * before anything goes on the wire: fan-out matching runs under
- * single-pass only (docs/spec/PROTOCOL.md, Fan-out runs under single-pass
- * only). Covers the width a fuzzy comparison declares, which
- * `assertFanOutImplemented` does not reach by step name. A
- * {@link UsageError}: the width is a function of terms the accept path
- * adopts wholesale.
+ * ({@link partyFansOut}) under a combination with no resolution for one,
+ * before anything goes on the wire: a `linkage_strategy` off the
+ * candidate-set allowlist, or the count-only algorithm
+ * (docs/spec/PROTOCOL.md, The combinations that stay unsupported).
+ *
+ * The numeric reading of what `assertFanOutImplemented` refuses structurally,
+ * kept beside it so a width the derivation produces and the producer list does
+ * not cannot slip past both. A {@link UsageError}: the width is a function of
+ * terms the accept path adopts wholesale.
  */
 function assertDeclaredWidthMatchesStrategy(
   terms: LinkageTerms,
   effectiveKeyCount: number,
 ): void {
-  if (terms.linkageStrategy === "single-pass") return;
+  const countOnly = terms.algorithm === "psi-c";
+  if (!countOnly && candidateSetIsImplementedForStrategy(terms.linkageStrategy))
+    return;
   const keyCount = terms.linkageKeys.length;
   if (!partyFansOut(keyCount, { effectiveKeyCount })) return;
+  if (countOnly) throw new UsageError(COUNT_ONLY_SHAPE_REFUSALS.candidateSet);
   throw new UsageError(
     "these linkage terms declare " +
       `${effectiveKeyCount} candidate value slot(s) per record against their ` +
       `${keyCount} linkage key(s), so a record may realize several candidates ` +
       "for a key, while they name a strategy that matches a single value per " +
-      "record. Matching a candidate set runs under the single-pass linkage " +
-      "strategy only. Remove the expanding step or fuzzy comparison from the " +
-      "key's elements, or agree terms whose linkage_strategy is single-pass.",
+      "record. Remove the expanding step, the fuzzy comparison or the swapped " +
+      "key order from the key's elements, or agree terms whose " +
+      "linkage_strategy matches a candidate set.",
   );
 }
 
@@ -619,8 +627,9 @@ export function assertPresentedDeduplicateMatchesInvitation(
  * for one procedure (docs/spec/PROTOCOL.md, Deduplicating cardinalities):
  * `(true, false)` gives the declaring party `many-to-one`; `(true, true)`
  * gives `many-to-many`, which {@link assertBothSidedDeduplicateImplemented}
- * requires a matching strategy for. A refusal is symmetric and aborts
- * both parties at this point.
+ * requires a matching strategy for and
+ * {@link assertCandidateSetCardinalityImplemented} refuses a candidate set
+ * under. A refusal is symmetric and aborts both parties at this point.
  *
  * The refusals are this function's own; the derivation beneath them is
  * {@link resolvedMatchingFromTerms}, which the self-attested record reads
@@ -633,6 +642,7 @@ export function resolveLinkageCardinality(
   assertDeduplicateImplemented(localTerms);
   assertDeduplicateImplemented(partnerTerms);
   assertBothSidedDeduplicateImplemented(localTerms, partnerTerms);
+  assertCandidateSetCardinalityImplemented(localTerms, partnerTerms);
   return resolvedMatchingFromTerms(localTerms, partnerTerms);
 }
 

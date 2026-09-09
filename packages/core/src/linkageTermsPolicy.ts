@@ -44,7 +44,7 @@ export type CountOnlyShapeViolation =
  * The rules and the reasoning behind each: docs/spec/PROTOCOL.md, PSI-C.
  */
 export const COUNT_ONLY_SHAPE_REFUSALS: Readonly<
-  Record<CountOnlyShapeViolation | "transmittedColumns", string>
+  Record<CountOnlyShapeViolation | "transmittedColumns" | "candidateSet", string>
 > = {
   linkageKeys:
     'count-only ("psi-c") linkage terms must declare exactly one linkage ' +
@@ -70,6 +70,13 @@ export const COUNT_ONLY_SHAPE_REFUSALS: Readonly<
     "intersection and nothing else, so it sends no data column whichever " +
     "party the terms entitle to the count. Remove the payload send and " +
     'receive columns, or set the algorithm to "psi".',
+  candidateSet:
+    'a count-only ("psi-c") exchange matches one value per record, but these ' +
+    "linkage terms declare a step that expands one value into several match " +
+    "candidates. A count-only round counts matched values where the matching " +
+    "pairs each record at most once, so the count would report more links " +
+    "than the exchange stands for. Remove the expanding step, the fuzzy " +
+    "comparison, or the swapped key order, or set the algorithm to \"psi\".",
   transmittedColumns:
     'a count-only ("psi-c") exchange transmits no data columns, but this ' +
     "input's metadata marks one or more columns to send to the partner. The " +
@@ -226,21 +233,19 @@ export function assertDeduplicateImplemented(terms: LinkageTerms): void {
  *
  * `single-pass` does: its receiver holds the sender's whole per-key candidate
  * structure and replays the cascade locally, so it is the only resolver in the
- * exchange (`linkViaSinglePassPSI`). The cascade's own realization -- the
- * per-round grouping on both of the round's position-naming frames, the shared
- * sweep, and the differential vectors -- is built but not lit: the entry stays
- * `false` until the refusals that stand at authoring, prepare, and the run
- * boundary come down with it, so nothing an operator can configure reaches the
- * new path meanwhile. Landing those refusals means a many-to-many candidate
- * set fails closed at all three points, whatever the strategy
- * (docs/spec/PROTOCOL.md, The combinations that stay unsupported), and means
- * roundGrouping.ts's run-length form (`readRunLengths`) gains the
- * partner-declared record-count check the owner-list form already has, since
- * that count feeds `numPartnerAcceptedRecords`. The entry gates the frames
- * with the resolution: while it is `false` a cascade round neither sends a
- * grouping nor admits one, so every exchange an operator can run -- a
- * deduplicating one included -- puts the single-valued cascade's frames on
- * the wire and accepts what it accepts.
+ * exchange (`linkViaSinglePassPSI`). The cascade does too: each round states
+ * both parties' groupings on its two position-naming frames, both parties run
+ * the one shared sweep over them, and the final pass states every position an
+ * accepted record's pairs rest on (docs/spec/PROTOCOL.md, Per-round candidacy
+ * under cascade). The entry gates the frames with the resolution: a strategy
+ * answering `false` neither sends a grouping nor admits one, so its rounds
+ * put the single-valued cascade's frames on the wire and accept what it
+ * accepts.
+ *
+ * The strategy is one of two conditions a candidate set runs under; the other
+ * is the resolved cardinality, `many-to-many` refusing one whatever the
+ * strategy ({@link assertCandidateSetCardinalityImplemented},
+ * linkageSatisfiability.ts).
  *
  * A total table over {@link LinkageStrategy} rather than a comparison against
  * one named strategy, so a `linkage_strategy` added later refuses a candidate
@@ -255,7 +260,7 @@ export const CANDIDATE_SET_IMPLEMENTED_BY_STRATEGY: Record<
   LinkageStrategy,
   boolean
 > = {
-  cascade: false,
+  cascade: true,
   "single-pass": true,
 };
 

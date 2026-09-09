@@ -6,22 +6,21 @@ import {
 import {
   candidatePositionCount,
   describeLocalRoundGrouping,
-  ownsSeveralPositions,
   positionRowRange,
+  positionsByOrdinal,
   readPartnerRoundGrouping,
   type LocalRoundGrouping,
+  type OrdinalPositions,
   type RoundCandidates,
   type RoundGroupingField,
   type RoundOwnership,
 } from "./roundGrouping";
 import {
   resolveRoundCandidatePairs,
-  type ResolvedRound,
   type RoundAcceptance,
 } from "./roundResolution";
 import type { AssociationTable } from "../types";
 import {
-  ConnectionError,
   receiveParsed,
   parseOrProtocolError,
   type MessageConnection,
@@ -66,16 +65,52 @@ interface IndexIterationPair {
   iteration: number;
 }
 
+// The first mapped-element pass's entry: the round a record was accepted in,
+// and the positions of the partner's candidate set that record's accepted
+// pairs rest on. A bare number is the one-position case, which is what a round
+// no candidate set widened states (docs/spec/PROTOCOL.md, The final
+// mapped-element entry names the positions its record's pairs rest on).
+interface MappedElementEntry {
+  theirIndex: number | Array<number>;
+  iteration: number;
+}
+
+function isEntryPositions(value: unknown): boolean {
+  return (
+    Number.isFinite(value) ||
+    (Array.isArray(value) && value.every(Number.isFinite))
+  );
+}
+
 // Parsed as the whole received message (the root array). The single-issue
 // validator caps issue accumulation at one regardless of element count
 // (utils/singleIssueArray.ts), so a pathological frame fails as a clean
 // bounded rejection rather than a stack overflow or an oversized Zod error
 // string; a count `.max()` is not an option since the legitimate count -- the
 // matched intersection -- is in the millions, bounded only by
-// MAX_FRAME_SIZE_BYTES. The predicate accepts a non-null, non-array object
-// with a finite theirIndex and iteration, read via receiveParsed or a direct
-// `.parse()`; either way a malformed frame produces a clean
-// ConnectionError("protocol").
+// MAX_FRAME_SIZE_BYTES. A nested position list is checked by the same
+// predicate and never recurses, so a deeply nested frame is one rejection too.
+// The predicate accepts a non-null, non-array object with a finite iteration
+// and a theirIndex that is a finite number or an array of them, read via
+// receiveParsed or a direct `.parse()`; either way a malformed frame produces
+// a clean ConnectionError("protocol").
+/** @internal exported for the pathological-count wire-message test. */
+export const mappedElementArray = singleIssueArray<MappedElementEntry>(
+  (value) =>
+    typeof value === "object" &&
+    value !== null &&
+    !Array.isArray(value) &&
+    isEntryPositions((value as Record<string, unknown>).theirIndex) &&
+    Number.isFinite((value as Record<string, unknown>).iteration),
+  "must be an array of {theirIndex, iteration} entries whose theirIndex is a " +
+    "finite number or an array of them",
+);
+
+// The second pass's entry, one per accepted pair: the round, and one row of
+// the answering party. The positions of the first pass are resolved to rows
+// there, so this half of the exchange never holds a list
+// (docs/spec/PROTOCOL.md, Deriving one table from the exchanged association
+// maps).
 /** @internal exported for the pathological-count wire-message test. */
 export const associationAndIterationArray =
   singleIssueArray<IndexIterationPair>(
@@ -88,7 +123,8 @@ export const associationAndIterationArray =
     "must be an array of {theirIndex, iteration} finite-number pairs",
   );
 
-type IndexIterationMap = Array<IndexIterationPair | undefined>;
+type IndexIterationMap = Array<MappedElementEntry | undefined>;
+type MappedElementList = Array<MappedElementEntry>;
 type IterationMap = Array<IndexIterationPair>;
 
 interface IndexableIterable<T> extends Iterable<T> {
@@ -214,54 +250,58 @@ export function groupDuplicatesAndRemoveUndefineds(
   return [data, { rows, groupStarts }];
 }
 
-// The (round, partner position) each entry of this party's own outbound
-// mapped-element list names, copied out of the list BEFORE it is sent. The
-// returned list is checked against this grouping, and it has to be the grouping
-// this party sent: a transport that hands the partner the array itself rather than
-// a serialization of it leaves the partner's own in-place translation
-// (`e.theirIndex = i`, below) writing over these entries.
-function sentGrouping(sent: IterationMap): PartnerIndexGrouping {
+// The (round, partner record) each entry of this party's own outbound
+// mapped-element list was accepted against, held in this party's own arrays
+// rather than read back off the list: a transport that hands the partner the
+// array itself rather than a serialization of it leaves the partner's own
+// in-place translation (`e.theirIndex = row`, below) writing over the entries.
+// The partner record is its rank within the round, which the sweep resolved
+// from the two groupings; where several of the partner's records were accepted
+// with one of this party's, the lowest of their ranks stands for the group.
+function sentGrouping(
+  sent: IterationMap | MappedElementList,
+  matchedRows: ReadonlyArray<number>,
+  acceptedPartnerRank: Int32Array,
+): PartnerIndexGrouping {
   return {
     rounds: Float64Array.from(sent, (e) => e.iteration),
-    positions: Float64Array.from(sent, (e) => e.theirIndex),
+    groups: Float64Array.from(matchedRows, (row) => acceptedPartnerRank[row]),
   };
 }
 
 // One label per matched record of this party, equal exactly for the records
-// that named one (round, position) -- the block of a single matched value.
-// Read off the grouping copied out before the send, not off the list itself,
-// so the derivation rests on this party's own record of what it sent rather
-// than on objects a transport may hand both sides by reference. The in-place
-// translation that overwrites a received list (`e.theirIndex = i`, below) is
-// the branch a side keeping no duplicates takes; a label is derived only
-// where both sides keep theirs.
+// accepted against one (round, partner record) -- the block of a single
+// matched value. Read off the grouping this party holds, not off the list
+// itself, so the derivation rests on this party's own record of what it sent
+// rather than on objects a transport may hand both sides by reference.
 function blockLabels(groups: PartnerIndexGrouping): Int32Array {
   const labels = new Int32Array(groups.rounds.length);
-  const positionsByRound = new Map<number, Map<number, number>>();
+  const groupsByRound = new Map<number, Map<number, number>>();
   let next = 0;
   for (let i = 0; i < labels.length; ++i) {
-    let byPosition = positionsByRound.get(groups.rounds[i]);
-    if (byPosition === undefined) {
-      byPosition = new Map();
-      positionsByRound.set(groups.rounds[i], byPosition);
+    let byGroup = groupsByRound.get(groups.rounds[i]);
+    if (byGroup === undefined) {
+      byGroup = new Map();
+      groupsByRound.set(groups.rounds[i], byGroup);
     }
-    let label = byPosition.get(groups.positions[i]);
+    let label = byGroup.get(groups.groups[i]);
     if (label === undefined) {
       label = next++;
-      byPosition.set(groups.positions[i], label);
+      byGroup.set(groups.groups[i], label);
     }
     labels[i] = label;
   }
   return labels;
 }
 
-// The rule this party's own returned mapped-element list is held to. There is one
-// rule -- injectivity modulo the grouping this party sent -- read at whichever
-// granularity the partner returns: entry for entry where the partner takes one row
-// per position it was named, and run for run where it keeps its own duplicates and
-// returns the whole group behind that position. A party that sent no grouping keeps
-// flat distinctness. `matchedRows` runs parallel to the sent list, so the tally it
-// reads gives one run length per outbound entry.
+// The rule this party's own returned mapped-element list is held to. There is
+// one rule -- injectivity modulo the pairing this party resolved -- read at
+// whichever granularity the partner returns: entry for entry where the partner
+// takes one row per entry, and run for run where it keeps its own duplicates
+// and returns every one of its records accepted with that entry's. A party
+// whose own side keeps no duplicates holds flat distinctness instead.
+// `matchedRows` runs parallel to the sent list, so the tally it reads gives one
+// run length per outbound entry.
 function returnedListRules(
   sentGroups: PartnerIndexGrouping | undefined,
   returnedEntriesPerRecord: Int32Array | undefined,
@@ -273,7 +313,7 @@ function returnedListRules(
   return {
     repeatsGroupedByRuns: {
       rounds: sentGroups.rounds,
-      positions: sentGroups.positions,
+      groups: sentGroups.groups,
       runLengths: Int32Array.from(
         matchedRows,
         (row) => returnedEntriesPerRecord[row],
@@ -433,120 +473,98 @@ function roundAcceptance(
   };
 }
 
-// The mapped-element entry each of one side's accepted records would state:
-// the canonical position of the partner record it was accepted against, one
-// entry per record (docs/spec/PROTOCOL.md, The final mapped-element entry
-// names a canonical position). A record accepted against partner records at
-// two DIFFERENT canonical positions has no such entry, and the map is
-// withheld rather than picking one of them.
-function entriesAcceptedRecordsWouldState(
+// The positions of the OTHER party's candidate set that each of this side's
+// accepted records' pairs rest on: for one accepted record, every position a
+// partner record accepted with it owns that this record itself matched, in
+// ascending position order (docs/spec/PROTOCOL.md, The final mapped-element
+// entry names the positions its record's pairs rest on). Both parties derive
+// the mirror image of this from the round's two groupings, so a naming party
+// and the party reading its entries compute the same sets.
+//
+// `matchedPositions` is the round's value-level incidence read from this
+// side's records: the positions of the other party's set each of them matched.
+// It is what keeps a partner record's other positions out of an entry.
+function acceptedPositionSets(
   acceptedRanks: ReadonlyArray<number>,
   partnerRanks: ReadonlyArray<number>,
-  partnerCanonicalPosition: Int32Array,
-): Map<number, number> | undefined {
-  const named = new Map<number, number>();
+  partnerPositions: OrdinalPositions,
+  matchedPositions: ReadonlyMap<number, Set<number>>,
+): Map<number, Array<number>> {
+  const sets = new Map<number, Set<number>>();
   for (let p = 0; p < acceptedRanks.length; ++p) {
-    const position = partnerCanonicalPosition[partnerRanks[p]];
-    const already = named.get(acceptedRanks[p]);
-    if (already === undefined) named.set(acceptedRanks[p], position);
-    else if (already !== position) return undefined;
-  }
-  return named;
-}
-
-// Whether the pass reading those entries recovers the round's accepted records
-// one at a time. It takes each entry for the WHOLE group behind the position it
-// names, so the named groups have to be disjoint and hold accepted records
-// only, together covering every one of them; and a naming side that keeps no
-// duplicates may not name one position twice, holding one record per position
-// to name it with (docs/spec/PROTOCOL.md, Deriving one table from the exchanged
-// association maps).
-function entriesStateEachRecordOnce(
-  entries: Map<number, number>,
-  namingSideKeepsDuplicates: boolean,
-  readerOwnership: RoundOwnership,
-  readerAccepted: ReadonlySet<number>,
-): boolean {
-  const namedPositions = new Set<number>();
-  const covered = new Set<number>();
-  for (const position of entries.values()) {
-    if (namedPositions.has(position)) {
-      if (!namingSideKeepsDuplicates) return false;
-      continue;
+    const matched = matchedPositions.get(acceptedRanks[p]);
+    if (matched === undefined)
+      throw new InternalConsistencyError(
+        "a linkage round accepted a pair resting on no matched value",
+      );
+    let set = sets.get(acceptedRanks[p]);
+    if (set === undefined) {
+      set = new Set<number>();
+      sets.set(acceptedRanks[p], set);
     }
-    namedPositions.add(position);
-    const slot = readerOwnership.slotOfPosition.get(position);
-    if (slot === undefined) return false;
+    const partner = partnerRanks[p];
     for (
-      let o = readerOwnership.starts[slot];
-      o < readerOwnership.starts[slot + 1];
-      ++o
+      let k = partnerPositions.starts[partner];
+      k < partnerPositions.starts[partner + 1];
+      ++k
     ) {
-      const ordinal = readerOwnership.ordinals[o];
-      if (!readerAccepted.has(ordinal) || covered.has(ordinal)) return false;
-      covered.add(ordinal);
+      const position = partnerPositions.positions[k];
+      if (matched.has(position)) set.add(position);
     }
   }
-  return covered.size === readerAccepted.size;
+  const entries = new Map<number, Array<number>>();
+  for (const [rank, set] of sets)
+    entries.set(rank, [...set].sort((a, b) => a - b));
+  return entries;
 }
 
-// A round whose accepted pairs the two mapped-element lists have no way to
-// state: one record accepted against two of the partner's candidate groups,
-// two records sharing a group accepted against different partner records, or
-// any sibling shape leaving an entry per record naming one canonical position
-// short of the round's pairs. Both parties resolve the same accepted pairs from
-// the same two groupings, so both refuse the same round rather than one
-// stranding the other, and a conforming partner reaches every one of these
-// shapes from the two parties' own data, so none is a partnerProtocolError.
-function assertRoundStatesEachRecordOnce(
+// The positions one entry of a partner's mapped-element list names, checked
+// against this party's own round before any of them indexes anything: whole
+// numbers inside that round's candidate set, distinct and ascending. A bare
+// number is the one-position case (docs/spec/PROTOCOL.md, The reading pass's
+// preconditions, at the widened entry).
+function entryPositions(
   participantId: string,
-  resolved: ResolvedRound,
-  sides: MultiplicitySides,
-  localIsSender: boolean,
-  localOwnership: RoundOwnership,
-  partnerOwnership: RoundOwnership,
-): void {
-  const [senderOwnership, receiverOwnership] = localIsSender
-    ? [localOwnership, partnerOwnership]
-    : [partnerOwnership, localOwnership];
-  const [senderKeeps, receiverKeeps] = localIsSender
-    ? [sides.localKeepsDuplicates, sides.partnerKeepsDuplicates]
-    : [sides.partnerKeepsDuplicates, sides.localKeepsDuplicates];
-  const senderEntries = entriesAcceptedRecordsWouldState(
-    resolved.acceptedSenderRanks,
-    resolved.acceptedReceiverRanks,
-    receiverOwnership.canonicalPosition,
-  );
-  const receiverEntries = entriesAcceptedRecordsWouldState(
-    resolved.acceptedReceiverRanks,
-    resolved.acceptedSenderRanks,
-    senderOwnership.canonicalPosition,
-  );
-  if (
-    senderEntries !== undefined &&
-    receiverEntries !== undefined &&
-    entriesStateEachRecordOnce(
-      senderEntries,
-      senderKeeps,
-      receiverOwnership,
-      new Set(resolved.acceptedReceiverRanks),
-    ) &&
-    entriesStateEachRecordOnce(
-      receiverEntries,
-      receiverKeeps,
-      senderOwnership,
-      new Set(resolved.acceptedSenderRanks),
+  theirIndex: number | ReadonlyArray<number>,
+  positionCount: number,
+): ReadonlyArray<number> {
+  const positions = Array.isArray(theirIndex) ? theirIndex : [theirIndex];
+  if (positions.length === 0)
+    throw partnerProtocolError(
+      participantId,
+      "the partner's mapped-element list holds an entry naming no position",
+    );
+  let previous = -1;
+  for (const position of positions) {
+    if (
+      !Number.isInteger(position) ||
+      position < 0 ||
+      position >= positionCount
     )
-  )
-    return;
-  throw new ConnectionError(
-    `${participantId}: a linkage key matched records a cascade exchange ` +
-      "cannot report one at a time: it names one of the partner's candidate " +
-      "groups per matched record. Run these linkage terms under the " +
-      "single-pass linkage strategy, or remove the step that expands one " +
-      "value into several match candidates.",
-    "protocol",
-  );
+      throw partnerProtocolError(
+        participantId,
+        "the partner's mapped-element list names a position outside that " +
+          "round's candidate set",
+      );
+    if (position <= previous)
+      throw partnerProtocolError(
+        participantId,
+        "the partner's mapped-element list holds an entry whose positions " +
+          "are not in strictly ascending order",
+      );
+    previous = position;
+  }
+  return positions;
+}
+
+function positionsEqual(
+  named: ReadonlyArray<number>,
+  expected: ReadonlyArray<number>,
+): boolean {
+  if (named.length !== expected.length) return false;
+  for (let i = 0; i < named.length; ++i)
+    if (named[i] !== expected[i]) return false;
+  return true;
 }
 
 function stillInCandidacy(outOfCandidacy: Uint8Array): Array<number> {
@@ -566,6 +584,7 @@ function stillInCandidacy(outOfCandidacy: Uint8Array): Array<number> {
 class RoundGrouping implements RoundGroupingExchange {
   private localGrouping: LocalRoundGrouping | undefined;
   private partnerOwnership: RoundOwnership | undefined;
+  private partnerField: RoundGroupingField | undefined;
 
   constructor(
     private readonly participantId: string,
@@ -590,12 +609,22 @@ class RoundGrouping implements RoundGroupingExchange {
     field: RoundGroupingField | undefined,
     matchedPositions: ReadonlyArray<number>,
   ): void {
+    this.partnerField = field;
     this.partnerOwnership = readPartnerRoundGrouping(field, matchedPositions, {
       participantId: this.participantId,
       maxPositionsPerRecord: this.maxPositionsPerRecord,
       partnerRecordCount: this.partnerRecordCount,
       ownerLists: this.sides.partnerKeepsDuplicates,
     });
+  }
+
+  // Whether this party holds the partner's exact partition of the round's
+  // matched positions into records. It does unless the partner deduplicates
+  // and omitted its grouping, where the absent field states one owner per
+  // position and a position in fact stands for a group of the partner's rows
+  // (docs/spec/PROTOCOL.md, An absent grouping is all ones).
+  partnerPartitionIsExact(): boolean {
+    return !this.sides.partnerKeepsDuplicates || this.partnerField !== undefined;
   }
 
   local(): LocalRoundGrouping {
@@ -690,13 +719,17 @@ export async function linkViaPSI(
   const localIsSender = sendFirst;
   const acceptance = roundAcceptance(sides, localIsSender);
   // A candidate set reaches a round only under a strategy whose resolution for
-  // one is built; the gate is the allowlist, so a linkage_strategy added later
-  // refuses one until its own resolution is written
-  // (docs/spec/PROTOCOL.md, The combinations that stay unsupported). The same
-  // entry gates the grouping's place on the round's two position-naming
-  // frames, so a closed entry leaves both frames as the single-valued cascade
-  // sends and reads them.
-  const resolvesCandidateSets = candidateSetIsImplementedForStrategy("cascade");
+  // one is built, and under a resolved cardinality that has one: `many-to-many`
+  // is refused whatever the strategy, having no single-pass table for the
+  // equivalence obligation to name (docs/spec/PROTOCOL.md, The combinations
+  // that stay unsupported). The strategy gate is an allowlist, so a
+  // linkage_strategy added later refuses one until its own resolution is
+  // written. The same reading gates the grouping's place on the round's two
+  // position-naming frames, so a closed one leaves both frames as the
+  // single-valued cascade sends and reads them.
+  const resolvesCandidateSets =
+    candidateSetIsImplementedForStrategy("cascade") &&
+    protocol.cardinality !== "many-to-many";
   const readCandidates: (value: KeyCandidates) => KeyCandidates =
     resolvesCandidateSets ? (value) => value : requireSingleCandidate;
 
@@ -709,16 +742,26 @@ export async function linkViaPSI(
   let outOfCandidacy = new Uint8Array(0);
   const candidatesByIter: Array<RoundCandidates> = [];
   // The lowest of the round's matched positions each of this party's accepted
-  // records owns, which is the position the partner's mapped-element entry for
-  // that record names (docs/spec/PROTOCOL.md, The final mapped-element entry
-  // names a canonical position).
+  // records owns, which is the one position a partner holding no exact
+  // partition of them names that record by.
   let canonicalPositionOf = new Int32Array(0);
-  // The count of the PARTNER's records this round accepted -- one per accepted
-  // pair on that side -- which is what its mapped-element list is held to. It
-  // reads accepted records rather than matched positions because a candidate
-  // set puts several positions behind one record (docs/spec/PROTOCOL.md, The
-  // round's symmetry check reads accepted records).
-  let numPartnerAcceptedRecords = 0;
+  // The partner record each of this party's accepted records was accepted
+  // against, as its rank within the round -- the lowest where several were.
+  // It is the group the returned mapped-element list is held injective modulo
+  // (docs/spec/PROTOCOL.md, The reading pass's preconditions, at the widened
+  // entry).
+  let acceptedPartnerRank = new Int32Array(0);
+  // What each round's entries of the partner's mapped-element list must be, in
+  // the order it states them: the positions the `i`-th of the partner's
+  // accepted records' pairs rest on, and the rows of this party's records
+  // accepted with it. Held per round where this party holds the partner's exact
+  // partition, and `undefined` where it does not -- a deduplicating partner
+  // that omitted its grouping, whose entries name one position standing for a
+  // group (docs/spec/PROTOCOL.md, Deriving one table from the exchanged
+  // association maps).
+  const partnerEntriesByIter: Array<Array<ReadonlyArray<number>> | undefined> =
+    [];
+  const partnerEntryRowsByIter: Array<Array<Array<number>> | undefined> = [];
 
   for (let j = 0; j < data.length; ++j) {
     setStage(`stage ${j + 1} / ${data.length}`);
@@ -731,6 +774,7 @@ export async function linkViaPSI(
       );
       outOfCandidacy = new Uint8Array(indexIterationMap.length);
       canonicalPositionOf = new Int32Array(indexIterationMap.length).fill(-1);
+      acceptedPartnerRank = new Int32Array(indexIterationMap.length).fill(-1);
       log.debug(`${participant.id}: ${indexIterationMap.length} total records`);
     } else {
       unidentifiedIndices = stillInCandidacy(outOfCandidacy);
@@ -819,6 +863,24 @@ export async function linkViaPSI(
     const partner = round.partner();
     const senderRanks: Array<number> = [];
     const receiverRanks: Array<number> = [];
+    // The round's value-level incidence, read from each side's records: the
+    // positions of the OTHER party's set each record of this side matched, and
+    // the mirror. The entry derivation intersects them with what an accepted
+    // partner record owns.
+    const partnerPositionsMatched = new Map<number, Set<number>>();
+    const localPositionsMatched = new Map<number, Set<number>>();
+    const noteMatch = (
+      matched: Map<number, Set<number>>,
+      rank: number,
+      position: number,
+    ): void => {
+      let positions = matched.get(rank);
+      if (positions === undefined) {
+        positions = new Set<number>();
+        matched.set(rank, positions);
+      }
+      positions.add(position);
+    };
     for (let m = 0; m < localPositions.length; ++m) {
       // Both groupings partition the very index lists the round's frames
       // named, so every matched position of either party has a slot.
@@ -829,10 +891,21 @@ export async function linkViaPSI(
           "a linkage round matched a position no grouping of the round names",
         );
       for (
+        let b = partner.starts[theirs];
+        b < partner.starts[theirs + 1];
+        ++b
+      )
+        noteMatch(localPositionsMatched, partner.ordinals[b], localPositions[m]);
+      for (
         let a = local.ownership.starts[mine];
         a < local.ownership.starts[mine + 1];
         ++a
-      )
+      ) {
+        noteMatch(
+          partnerPositionsMatched,
+          local.ownership.ordinals[a],
+          partnerPositions[m],
+        );
         for (
           let b = partner.starts[theirs];
           b < partner.starts[theirs + 1];
@@ -845,52 +918,88 @@ export async function linkViaPSI(
             localIsSender ? partner.ordinals[b] : local.ownership.ordinals[a],
           );
         }
+      }
     }
     const resolved = resolveRoundCandidatePairs(
       senderRanks,
       receiverRanks,
       acceptance,
     );
-    // The round's accepted pairs stop being statable one record at a time only
-    // where a record owns two of the round's matched positions, so a round no
-    // candidate set widened skips the pass rather than walking every accepted
-    // pair and every named group.
-    if (ownsSeveralPositions(local.ownership) || ownsSeveralPositions(partner))
-      assertRoundStatesEachRecordOnce(
-        participant.id,
-        resolved,
-        sides,
-        localIsSender,
-        local.ownership,
-        partner,
-      );
     const localAccepted = localIsSender
       ? resolved.acceptedSenderRanks
       : resolved.acceptedReceiverRanks;
     const partnerAccepted = localIsSender
       ? resolved.acceptedReceiverRanks
       : resolved.acceptedSenderRanks;
-    const partnerAcceptedRecords = new Set<number>();
+
+    // This party states the positions its accepted records' pairs rest on
+    // exactly where the partner holds its exact partition to read them
+    // against; where the partner does not -- this party deduplicating and
+    // omitting its grouping -- an entry names the one canonical position, which
+    // the partner reads for the whole group behind it. Both parties derive the
+    // same reading for each direction, one from its own side of the resolved
+    // cardinality and its own grouping, the other from what arrived.
+    const statesPositionSets =
+      !sides.localKeepsDuplicates || local.field !== undefined;
+    const entryPositionSets = statesPositionSets
+      ? acceptedPositionSets(
+          localAccepted,
+          partnerAccepted,
+          positionsByOrdinal(partner),
+          partnerPositionsMatched,
+        )
+      : undefined;
+    if (round.partnerPartitionIsExact()) {
+      const partnerEntries = acceptedPositionSets(
+        partnerAccepted,
+        localAccepted,
+        positionsByOrdinal(local.ownership),
+        localPositionsMatched,
+      );
+      const rowsAcceptedWith = new Map<number, Array<number>>();
+      for (let p = 0; p < partnerAccepted.length; ++p) {
+        const rows = rowsAcceptedWith.get(partnerAccepted[p]);
+        const row = local.rowOfOrdinal[localAccepted[p]];
+        if (rows === undefined) rowsAcceptedWith.set(partnerAccepted[p], [row]);
+        else if (!rows.includes(row)) rows.push(row);
+      }
+      // The partner states a round's entries in its own ascending row order,
+      // which is ascending rank order, so the reading party takes the `i`-th
+      // entry for the `i`-th of these (docs/spec/PROTOCOL.md, An entry is
+      // attributed by its place in the round).
+      const ranks = [...rowsAcceptedWith.keys()].sort((a, b) => a - b);
+      partnerEntriesByIter[j] = ranks.map((rank) => partnerEntries.get(rank)!);
+      partnerEntryRowsByIter[j] = ranks.map((rank) =>
+        rowsAcceptedWith.get(rank)!.sort((a, b) => a - b),
+      );
+    } else {
+      partnerEntriesByIter[j] = undefined;
+      partnerEntryRowsByIter[j] = undefined;
+    }
+
+    const lowestPartnerRank = new Map<number, number>();
     for (let p = 0; p < localAccepted.length; ++p) {
-      partnerAcceptedRecords.add(partnerAccepted[p]);
-      const row = local.rowOfOrdinal[localAccepted[p]];
-      // The entry names the partner's canonical position, which both parties
-      // derive identically from the round's grouping.
-      const theirIndex = partner.canonicalPosition[partnerAccepted[p]];
-      const already = indexIterationMap[row];
-      if (already !== undefined) {
-        if (already.theirIndex !== theirIndex)
+      const held = lowestPartnerRank.get(localAccepted[p]);
+      if (held === undefined || partnerAccepted[p] < held)
+        lowestPartnerRank.set(localAccepted[p], partnerAccepted[p]);
+    }
+    for (const [rank, partnerRank] of lowestPartnerRank) {
+      const row = local.rowOfOrdinal[rank];
+      let theirIndex: number | Array<number>;
+      if (entryPositionSets === undefined)
+        theirIndex = partner.canonicalPosition[partnerRank];
+      else {
+        const positions = entryPositionSets.get(rank);
+        if (positions === undefined || positions.length === 0)
           throw new InternalConsistencyError(
-            "a cascade round accepted one record against two partner " +
-              "positions, which the mapped-element passes cannot state",
+            "a linkage round accepted a record whose pairs rest on no position",
           );
-        continue;
+        theirIndex = positions.length === 1 ? positions[0] : positions;
       }
       indexIterationMap[row] = { theirIndex, iteration: j };
-      canonicalPositionOf[row] =
-        local.ownership.canonicalPosition[localAccepted[p]];
+      canonicalPositionOf[row] = local.ownership.canonicalPosition[rank];
+      acceptedPartnerRank[row] = partnerRank;
     }
-    numPartnerAcceptedRecords += partnerAcceptedRecords.size;
 
     // Every record standing in ANY of the round's candidate pairs leaves
     // candidacy, accepted or discarded.
@@ -910,7 +1019,7 @@ export async function linkViaPSI(
         }
         return acc;
       },
-      [[], []] as [IterationMap, Array<number>],
+      [[], []] as [MappedElementList, Array<number>],
     );
 
   const numMappedElements = identifiedIndexIterationMap.length;
@@ -923,7 +1032,11 @@ export async function linkViaPSI(
   // side: the pairing its own list named is what that list has to come back
   // holding, entry for entry or run for run as the partner's own side rules.
   const sentGroups = sides.localKeepsDuplicates
-    ? sentGrouping(identifiedIndexIterationMap)
+    ? sentGrouping(
+        identifiedIndexIterationMap,
+        originalIndices,
+        acceptedPartnerRank,
+      )
     : undefined;
 
   log.debug(
@@ -936,56 +1049,49 @@ export async function linkViaPSI(
     log,
     sendFirst,
     identifiedIndexIterationMap,
+    mappedElementArray,
   );
 
-  // Translate the partner's list of our records through the per-round
-  // candidate sets, checking each entry against what THIS side matched
-  // before it reads a candidate set: a round pairs our position p only if
-  // the partner's corresponding record also names p in that round, so every
-  // entry is checkable against local state. Once a side deduplicates, the
-  // pairing is no longer one entry per record on both sides -- a "many"
-  // side's list names each of our matched positions once per record in its
-  // group -- so a coverage rule and a bound on the partner's authenticated
-  // row count replace count equality (docs/spec/PROTOCOL.md, Deriving one
-  // table from the exchanged association maps).
-  if (sides.partnerKeepsDuplicates) {
-    if (theirIdentifiedIndexIterationMap.length > partnerRecordCount)
-      throw partnerProtocolError(
-        participant.id,
-        "the partner's mapped-element list has " +
-          `${theirIdentifiedIndexIterationMap.length} entries, more than the ` +
-          `${partnerRecordCount} record(s) the partner counted`,
-      );
-  } else {
-    assertPartnerIndexCount(
+  // Translate the partner's list of our records into our own rows, checking
+  // each entry against what THIS side resolved before it indexes anything.
+  // The partner states one entry per record it accepted, so a list longer than
+  // its declared record count is refused before any of it is read.
+  if (theirIdentifiedIndexIterationMap.length > partnerRecordCount)
+    throw partnerProtocolError(
       participant.id,
-      "the partner's mapped-element list",
-      theirIdentifiedIndexIterationMap.length,
-      numPartnerAcceptedRecords,
+      "the partner's mapped-element list has " +
+        `${theirIdentifiedIndexIterationMap.length} entries, more than the ` +
+        `${partnerRecordCount} record(s) the partner counted`,
     );
-  }
-  // Where a position of ours stands for a group, translating an entry EXPANDS it
-  // into one entry per record in that group, in ascending record order, with the
-  // groups left in the order of the list being translated -- the ordering the
-  // originating party reconstructs its own table from. Where it stands for one
-  // record the entry is translated in place.
-  const expands = sides.localKeepsDuplicates;
+  // Where this party holds the partner's exact partition, a round's entries
+  // must be exactly the ones the pairing states, entry for entry in the order
+  // sent, and each expands to the rows of our records accepted with that
+  // partner record. Where it does not -- a deduplicating partner that omitted
+  // its grouping -- an entry names one position and expands to the whole group
+  // of ours behind it, the reading the single-valued deduplicating cascade uses
+  // (docs/spec/PROTOCOL.md, Deriving one table from the exchanged association
+  // maps). Either way the rows come out in ascending row order, and the groups
+  // in the order of the list being translated, which is the ordering the
+  // originating party reconstructs its own table from. The translation builds
+  // its own list rather than writing the rows over the entries it read: a
+  // transport that hands the partner the array itself rather than a
+  // serialization of it would otherwise leave this party writing over the
+  // partner's own outbound entries.
   const expanded: IterationMap = [];
   // How many entries of our own returned list belong to each of our matched
-  // records: the count of the partner's entries naming the position that record
-  // matched, which is the size of the partner group behind it. Only a "many"
-  // partner returns more than one, and only then is the tally read. Where a
-  // position of ours stands for a group, every record of that group takes the
-  // count, since the partner expanded each of their entries alike.
+  // records: the count of the partner's entries that expanded to it, which is
+  // the number of the partner's records accepted with it. Only a "many"
+  // partner returns more than one, and only then is the tally read.
   const returnedEntriesPerRecord = sides.partnerKeepsDuplicates
     ? new Int32Array(indexIterationMap.length)
     : undefined;
   // The total, which is the length our own returned list is held to below: a
-  // quantity we accumulate from the list already checked above and our own group
-  // sizes, never one read off the frame under check.
+  // quantity we accumulate from the list already checked above and our own
+  // pairing, never one read off the frame under check.
   let returnedEntries = 0;
   const named = new Uint8Array(indexIterationMap.length);
   let namedRecords = 0;
+  const entriesReadPerIter = new Int32Array(candidatesByIter.length);
   for (const e of theirIdentifiedIndexIterationMap) {
     if (
       !Number.isInteger(e.iteration) ||
@@ -998,63 +1104,89 @@ export async function linkViaPSI(
           "did not run",
       );
     const candidates = candidatesByIter[e.iteration];
-    if (
-      !Number.isInteger(e.theirIndex) ||
-      e.theirIndex < 0 ||
-      e.theirIndex >= candidatePositionCount(candidates)
-    )
-      throw partnerProtocolError(
-        participant.id,
-        "the partner's mapped-element list names a position outside that " +
-          "round's candidate set",
-      );
-    const [from, to] = positionRowRange(candidates, e.theirIndex);
-    const i = candidates.rows[from];
-    if (indexIterationMap[i]?.iteration !== e.iteration)
-      throw partnerProtocolError(
-        participant.id,
-        "the partner's mapped-element list names a record this side did not " +
-          "match on that round",
-      );
-    // Where a candidate set widened this party, one record owns several of the
-    // round's matched positions and only the lowest names it. Without that the
-    // injectivity the pass rests on does not hold, so a position the record
-    // merely owns is refused (docs/spec/PROTOCOL.md, The final mapped-element
-    // entry names a canonical position). A position standing for a GROUP of
-    // this party's records names the group rather than one record, and the
-    // group is what the coverage rule below reads.
-    if (!sides.localKeepsDuplicates && canonicalPositionOf[i] !== e.theirIndex)
-      throw partnerProtocolError(
-        participant.id,
-        "the partner's mapped-element list names a position other than the " +
-          "canonical one of the record it matched",
-      );
-    if (named[i] === 1) {
-      if (!sides.partnerKeepsDuplicates)
+    const positions = entryPositions(
+      participant.id,
+      e.theirIndex,
+      candidatePositionCount(candidates),
+    );
+    const expectedEntries = partnerEntriesByIter[e.iteration];
+    let rows: ReadonlyArray<number>;
+    if (expectedEntries !== undefined) {
+      const place = entriesReadPerIter[e.iteration]++;
+      if (place >= expectedEntries.length)
+        throw partnerProtocolError(
+          participant.id,
+          "the partner's mapped-element list states more entries for a key " +
+            "round than the records it accepted there",
+        );
+      if (!positionsEqual(positions, expectedEntries[place]))
+        throw partnerProtocolError(
+          participant.id,
+          "the partner's mapped-element list names positions other than the " +
+            "ones that round's accepted pairs rest on",
+        );
+      rows = partnerEntryRowsByIter[e.iteration]![place];
+    } else {
+      if (positions.length !== 1)
+        throw partnerProtocolError(
+          participant.id,
+          "the partner's mapped-element list names several positions for a " +
+            "round whose grouping it omitted",
+        );
+      const [from, to] = positionRowRange(candidates, positions[0]);
+      const i = candidates.rows[from];
+      if (indexIterationMap[i]?.iteration !== e.iteration)
+        throw partnerProtocolError(
+          participant.id,
+          "the partner's mapped-element list names a record this side did " +
+            "not match on that round",
+        );
+      // Where a candidate set widened this party, one record owns several of
+      // the round's matched positions and only the lowest names it, since a
+      // partner reading positions for groups cannot tell them apart. A
+      // position standing for a GROUP of this party's records names the group
+      // rather than one record.
+      if (!sides.localKeepsDuplicates && canonicalPositionOf[i] !== positions[0])
+        throw partnerProtocolError(
+          participant.id,
+          "the partner's mapped-element list names a position other than the " +
+            "canonical one of the record it matched",
+        );
+      if (named[i] === 1 && !sides.partnerKeepsDuplicates)
         throw partnerProtocolError(
           participant.id,
           "the partner's mapped-element list names one record twice",
         );
-    } else {
-      for (let r = from; r < to; ++r) {
-        named[candidates.rows[r]] = 1;
+      rows = candidates.rows.slice(from, to);
+    }
+    for (const row of rows)
+      if (named[row] === 0) {
+        named[row] = 1;
         ++namedRecords;
       }
-    }
     if (returnedEntriesPerRecord) {
-      for (let r = from; r < to; ++r)
-        ++returnedEntriesPerRecord[candidates.rows[r]];
-      returnedEntries += to - from;
+      for (const row of rows) ++returnedEntriesPerRecord[row];
+      returnedEntries += rows.length;
     }
-    if (expands) {
-      for (let r = from; r < to; ++r)
-        expanded.push({
-          theirIndex: candidates.rows[r],
-          iteration: e.iteration,
-        });
-    } else {
-      e.theirIndex = i;
-    }
+    if (!sides.localKeepsDuplicates && rows.length !== 1)
+      throw new InternalConsistencyError(
+        "a mapped-element entry expanded to several rows on a side that " +
+          "keeps none of its within-dataset duplicates",
+      );
+    for (const row of rows)
+      expanded.push({ theirIndex: row, iteration: e.iteration });
+  }
+  for (let j = 0; j < candidatesByIter.length; ++j) {
+    const expectedEntries = partnerEntriesByIter[j];
+    if (
+      expectedEntries !== undefined &&
+      entriesReadPerIter[j] !== expectedEntries.length
+    )
+      throw partnerProtocolError(
+        participant.id,
+        "the partner's mapped-element list states fewer entries for a key " +
+          "round than the records it accepted there",
+      );
   }
   // Coverage: the list must name every record this side matched. With the
   // per-entry rules above that also pins its length -- to this side's matched
@@ -1076,33 +1208,33 @@ export async function linkViaPSI(
     conn,
     log,
     sendFirst,
-    expands ? expanded : theirIdentifiedIndexIterationMap,
+    expanded,
+    associationAndIterationArray,
   );
 
-  // Our own list, come back with each entry's index translated into the
-  // partner's row space. Its length is ours to know -- one entry per record
-  // we matched, or, where the partner expanded it, the tally we accumulated
-  // over its own list above -- and every row index it holds lands in the
-  // returned table, so it is bounded by the row count the partner declared
-  // on the terms exchange. A repeated row is admitted only where THIS party
-  // is the "many" side; the count check above then caps the list's length,
-  // which distinctness otherwise does.
+  // Our own list, come back with each entry's positions resolved into the
+  // partner's row space, one row per accepted pair. Its length is ours to know
+  // -- one entry per record we matched, or, where the partner expanded it, the
+  // tally we accumulated over its own list above -- and every row index it
+  // holds lands in the returned table, so it is bounded by the row count the
+  // partner declared on the terms exchange. A repeated row is admitted only
+  // where THIS party is the "many" side; the count check above then caps the
+  // list's length, which distinctness otherwise does.
   //
-  // What survives the relaxation is injectivity MODULO the grouping this
-  // party sent: two entries naming the same (round, position) must come back
-  // holding the same partner row, and two naming different positions must
-  // come back holding different rows -- distinct positions in a round are
-  // distinct partner values held by distinct partner rows, and a partner row
-  // matched in round j has left candidacy for every later round. Without it
-  // the "one" partner, not this party's own data, would decide which of our
-  // records group together (docs/spec/PROTOCOL.md, Deriving one table from
-  // the exchanged association maps).
+  // What survives the relaxation is injectivity MODULO the pairing this party
+  // resolved: two entries whose records were accepted against one partner
+  // record must come back holding the same row, and two whose partner records
+  // differ must come back holding different rows -- a partner record accepted
+  // in round j has left candidacy for every later round. Without it the "one"
+  // partner, not this party's own data, would decide which of our records
+  // group together (docs/spec/PROTOCOL.md, Deriving one table from the
+  // exchanged association maps).
   //
-  // Where the partner keeps its duplicates too, each of our entries comes
-  // back as the whole partner GROUP behind the position it named rather than
-  // one row, so the same rule reads over runs: grouped entries must come
-  // back with identical runs, differently grouped ones with disjoint runs.
-  // The run lengths are the per-record tally we already hold.
+  // Where the partner keeps its duplicates too, each of our entries comes back
+  // as a run of the partner's records accepted with ours rather than one row,
+  // so the same rule reads over runs: grouped entries must come back with
+  // identical runs, differently grouped ones with disjoint runs. The run
+  // lengths are the per-record tally we already hold.
   assertPartnerIndexCount(
     participant.id,
     "the returned mapped-element list",
@@ -2612,7 +2744,7 @@ export function decodeSinglePassReply(bytes: Uint8Array): {
   return { setup, response, numRecords, distinctValueIndices };
 }
 
-async function exchangeMappedElements(
+async function exchangeMappedElements<T>(
   id: string,
   conn: MessageConnection,
   log: {
@@ -2620,13 +2752,16 @@ async function exchangeMappedElements(
     debug: (...msg: Array<unknown>) => void;
   },
   sendFirst: boolean,
-  values: IterationMap,
-): Promise<IterationMap> {
+  values: ReadonlyArray<unknown>,
+  // The schema the INBOUND frame is read under: the first pass admits an entry
+  // naming a set of positions, the second one row per accepted pair.
+  schema: { parse(value: unknown): T },
+): Promise<T> {
   if (sendFirst) {
     log.debug(`${id}: sending own mapped elements`);
     await conn.send(values);
     log.debug(`${id}: waiting for response`);
-    const result = await receiveParsed(conn, associationAndIterationArray);
+    const result = await receiveParsed(conn, schema);
     log.debug(`${id}: received other mapped elements`);
     return result;
   } else {
@@ -2637,6 +2772,6 @@ async function exchangeMappedElements(
     log.debug(`${id}: received other mapped elements`);
     log.debug(`${id}: sending own mapped elements`);
     await conn.send(values);
-    return parseOrProtocolError(associationAndIterationArray, rawData);
+    return parseOrProtocolError(schema, rawData);
   }
 }
