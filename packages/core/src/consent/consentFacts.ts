@@ -387,6 +387,33 @@ export const CONSENT_FACTS = {
       "matched records. Withholding them is a limit of the exchange rather " +
       "than a choice of the software your partner runs.",
   },
+  acceptorDeduplicateRefused: {
+    basis: "enforced",
+    reason:
+      "What this party's own `deduplicate` would do against an invitation " +
+      "that declares both a candidate set and the inviting party's own " +
+      "`deduplicate`: the pair resolves to a many-to-many match, which no " +
+      "linkage strategy pairs with a candidate set, so the accept boundary " +
+      "refuses it (`assertCandidateSetCardinalityImplemented`, reached from " +
+      "`deriveAcceptedLinkageTerms`) and the agreed-terms run boundary " +
+      "refuses it again (`resolveLinkageCardinality`). Both of the " +
+      "conditions this party does not set are the invitation's own, so the " +
+      "consequence is stated before the value that completes the " +
+      "combination is set rather than met at the accept. Resolved by " +
+      "`acceptorDeduplicateRefused` (consent/invitationSummary.ts) off the " +
+      "refusal's own predicates, so a surface never states it for an " +
+      "invitation the accept would take. The exchange does not run at all, " +
+      "which is a fact of the run rather than of the partner's conduct.",
+    note:
+      "Your partner declares that several of its records may match one of " +
+      "yours, and these terms expand one value into several match candidates " +
+      "for a linkage key. With duplicate matching set for your own records " +
+      "as well, each party's records could group the other's while matching " +
+      "through several candidates at once, which no linkage strategy pairs " +
+      "-- so the exchange will refuse to run. Leave your own setting off to " +
+      "run these terms, or ask your partner for an invitation that drops " +
+      "either the expansion or its own duplicate matching.",
+  },
   matchedFields: {
     basis: "enforced",
     reason:
@@ -585,15 +612,17 @@ export type ConsentFactId = keyof typeof CONSENT_FACTS;
  * A surface offering no such control accepts with that party's side derived
  * false ({@link deriveAcceptedLinkageTerms}), so the run these state -- the
  * accepting party grouping its own records while the inviting party is
- * entitled to no result -- is one it never conducts, and rendering either
- * sentence there would state a disclosure that acceptance does not make. The
- * per-surface checks that hold a surface to every fact's note read this set
- * rather than each excluding by hand, so which surface owes which sentence
- * stays one judgment.
+ * entitled to no result, and the refusal that party's own `deduplicate`
+ * completes -- is one it never conducts, and rendering any of these sentences
+ * there would state a disclosure or a refusal that acceptance does not make.
+ * The per-surface checks that hold a surface to every fact's note read this
+ * set rather than each excluding by hand, so which surface owes which
+ * sentence stays one judgment.
  */
 export const ACCEPTOR_DEDUPLICATE_CONTROL_FACTS = [
   "partnerReadsDuplicateGrouping",
   "partnerDuplicateGroupingWithheld",
+  "acceptorDeduplicateRefused",
 ] as const satisfies ReadonlyArray<ConsentFactId>;
 
 /**

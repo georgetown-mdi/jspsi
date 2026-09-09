@@ -1471,6 +1471,19 @@ export function InvitationTerms({
                     label={DEDUPLICATE_CONTROL_LABEL}
                     description={DEDUPLICATE_CONTROL_DESCRIPTION}
                   />
+                  {/* What this party's own value would meet against an
+                    invitation declaring both a candidate set and its own
+                    deduplicate: the accept refuses that pair
+                    (deriveAcceptedLinkageTerms), so the consequence is stated
+                    with the control rather than met at the accept action. Read
+                    from core's verdict on the invitation alone, and rendered
+                    whatever this party's value stands at, so it is on screen
+                    before the value that completes the combination is set. */}
+                  {summary.acceptorDeduplicateRefused && (
+                    <Text size="xs" c="dimmed">
+                      {CONSENT_FACTS.acceptorDeduplicateRefused.note}
+                    </Text>
+                  )}
                 </>
               )}
               {/* The combination this pair resolves to, refused at the seat

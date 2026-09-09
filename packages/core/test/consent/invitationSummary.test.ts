@@ -350,6 +350,70 @@ describe("the consent summary's fan-out register", () => {
   });
 });
 
+describe("the consent summary's refused-pair register", () => {
+  const metadata = inferMetadata(LINKAGE_ONLY_COLUMNS, []);
+  const baseTerms = getDefaultLinkageTerms("Inviter", metadata);
+  const fanOutKeys = [
+    {
+      name: "last name",
+      elements: [
+        {
+          field: "last_name",
+          transform: [{ function: "split_on", params: { delimiter: " " } }],
+        },
+      ],
+    },
+  ];
+
+  // Whether an acceptance declaring this party's own `deduplicate` is refused,
+  // driven through the boundary the accept action itself runs rather than
+  // through a second reading of the terms.
+  const acceptRefuses = (
+    terms: LinkageTerms,
+    deduplicate: boolean,
+  ): boolean => {
+    try {
+      deriveAcceptedLinkageTerms(terms, "Acceptor", deduplicate);
+      return false;
+    } catch {
+      return true;
+    }
+  };
+
+  test("states the refusal where the invitation holds both halves of the pair", () => {
+    // The seat reads this before the operator sets the one value the
+    // invitation does not hold, so the flag and the accept's own verdict on
+    // that value are driven together.
+    const terms = { ...baseTerms, deduplicate: true, linkageKeys: fanOutKeys };
+    expect(
+      summarizeInvitation({ linkageTerms: terms }).acceptorDeduplicateRefused,
+    ).toBe(true);
+    expect(acceptRefuses(terms, true)).toBe(true);
+    expect(acceptRefuses(terms, false)).toBe(false);
+  });
+
+  test("withholds it where the inviting party declares no deduplicate", () => {
+    // Half the pair is the invitation's own: a candidate set alone leaves this
+    // party's value free, and stating a refusal for it would name one the
+    // accept does not make.
+    const terms = { ...baseTerms, linkageKeys: fanOutKeys };
+    expect(
+      summarizeInvitation({ linkageTerms: terms }).acceptorDeduplicateRefused,
+    ).toBe(false);
+    expect(acceptRefuses(terms, true)).toBe(false);
+  });
+
+  test("withholds it where the terms declare no candidate set", () => {
+    // The other half: a deduplicating invitation whose keys expand nothing
+    // pairs a both-sided cardinality the cascade matches.
+    const terms = { ...baseTerms, deduplicate: true };
+    expect(
+      summarizeInvitation({ linkageTerms: terms }).acceptorDeduplicateRefused,
+    ).toBe(false);
+    expect(acceptRefuses(terms, true)).toBe(false);
+  });
+});
+
 describe("the consent summary's withheld-table register", () => {
   const metadata = inferMetadata(LINKAGE_ONLY_COLUMNS, []);
   const baseTerms = getDefaultLinkageTerms("Inviter", metadata);

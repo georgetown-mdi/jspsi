@@ -12,6 +12,7 @@ import { createElement } from "react";
 import "@mantine/core/styles.css";
 
 import {
+  CONSENT_FACTS,
   describeDeduplicatePair,
   describeResolvedMatching,
   encodeInvitation,
@@ -2607,6 +2608,63 @@ describe("AcceptorScreen: this party's own deduplicate", () => {
     // not the setting.
     await userEvent.click(ownSide());
     await expect.element(proceed).toBeEnabled();
+  });
+
+  // An invitation holding both halves of a pair no strategy runs: its linkage
+  // key splits a value into several match candidates, and the inviting party
+  // declares a deduplicate of its own. This party's own value is the only
+  // thing left to complete it.
+  const refusedPairTerms: LinkageTerms = {
+    ...acceptorTerms,
+    deduplicate: true,
+    linkageKeys: [
+      {
+        name: "first",
+        elements: [
+          {
+            field: "firstName",
+            transform: [{ function: "split_on", params: { delimiter: " " } }],
+          },
+        ],
+      },
+      acceptorTerms.linkageKeys[1],
+    ],
+  };
+
+  test("states what this party's own side would refuse before it is set", async () => {
+    await reachReview(refusedPairTerms);
+    // On screen while the control still stands at the closed default, so the
+    // operator meets the consequence rather than the accept action's refusal.
+    await expect
+      .element(page.getByText(CONSENT_FACTS.acceptorDeduplicateRefused.note))
+      .toBeInTheDocument();
+    const proceed = page.getByRole("button", {
+      name: "Continue: consent & your file",
+    });
+    await expect.element(proceed).toBeEnabled();
+    // And the refusal itself is unmoved: setting the value the sentence names
+    // still stops the accept.
+    await userEvent.click(ownSide());
+    await expect
+      .element(page.getByText("These two settings cannot run together"))
+      .toBeInTheDocument();
+    await expect.element(proceed).toBeDisabled();
+  });
+
+  test("says nothing of that refusal where the invitation declares no side of its own", async () => {
+    // The other half of the pair is the invitation's: a splitting key alone
+    // leaves this party's value free, and the accept takes either value.
+    await reachReview({ ...refusedPairTerms, deduplicate: false });
+    await expect.element(ownSide()).toBeInTheDocument();
+    expect(app.container.textContent).not.toContain(
+      CONSENT_FACTS.acceptorDeduplicateRefused.note,
+    );
+    await userEvent.click(ownSide());
+    await expect
+      .element(
+        page.getByRole("button", { name: "Continue: consent & your file" }),
+      )
+      .toBeEnabled();
   });
 
   test("the both-sided pair under the cascade continues", async () => {

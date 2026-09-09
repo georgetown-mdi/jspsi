@@ -15,6 +15,7 @@ import { displayText } from "../utils/sanitizeForDisplay.js";
 import { redactAndSanitizeForDisplay } from "../utils/sanitizeErrorForDisplay.js";
 import { redactAndDisplayPartyIdentity } from "../records/partyIdentityDisplay.js";
 
+import { termsDeclareCandidateSet } from "../fanOutFunctions.js";
 import { endpointRequiresRetainedFiles } from "../config/invitation.js";
 import type { InvitationToken } from "../config/invitation.js";
 import { checkLinkageRuleSetCitation } from "../defaults/builtInLinkageTerms.js";
@@ -543,6 +544,22 @@ export interface InvitationSummary {
    * fan-out consent facts a surface renders.
    */
   fanOutApplied: boolean;
+  /**
+   * Whether a `deduplicate: true` the ACCEPTING party declares for itself
+   * against this invitation is refused: these terms declare a candidate set
+   * and the inviting party declares a `deduplicate` of its own, so the pair
+   * that party's own value completes resolves to the `many-to-many`
+   * cardinality no strategy pairs with a candidate set.
+   *
+   * Both conditions are the invitation's own, which is what makes the
+   * consequence statable at a seat before that value is set; the pair itself
+   * is refused at the accept boundary (`assertCandidateSetCardinalityImplemented`,
+   * reached from `deriveAcceptedLinkageTerms`) and again at the agreed-terms
+   * run boundary (`resolveLinkageCardinality`). Read by the seat that offers
+   * the accepting party a control over its own side; a surface offering none
+   * accepts with that side derived false, which this combination needs true.
+   */
+  acceptorDeduplicateRefused: boolean;
   /**
    * Whether the exchange suppresses the accepting party's half of the
    * matched-pair table: that party's process receives neither which of its
@@ -1476,6 +1493,16 @@ export function summarizeInvitation(
   const deduplicateApplied =
     APPLIED_SETTINGS.deduplicate &&
     deduplicateIsImplementedForStrategy(terms.linkageStrategy);
+  // The two halves of the refused pair the invitation itself holds: the
+  // inviting party's own `deduplicate`, and the candidate set these terms
+  // declare, which the accepting party's `deduplicate: true` completes into
+  // the `many-to-many` cardinality no strategy pairs with a candidate set.
+  // Both conditions are read through the refusal's OWN predicate
+  // (`assertCandidateSetCardinalityImplemented`, linkageSatisfiability.ts), so
+  // a seat cannot state the consequence for an invitation the accept takes,
+  // nor withhold it for one the accept refuses.
+  const acceptorDeduplicateRefused =
+    terms.deduplicate && termsDeclareCandidateSet(terms);
 
   const summary: InvitationSummary = {
     invitingParty: redactAndDisplayPartyIdentity(terms.identity),
@@ -1487,6 +1514,7 @@ export function summarizeInvitation(
     deduplicateApplied,
     fansOut: terms.linkageKeys.some((key) => key.elements.some(declaresFanOut)),
     fanOutApplied: fanOutMatches,
+    acceptorDeduplicateRefused,
     acceptorTableWithheld: withholdsAcceptorAssociationTable(terms),
     inviterTableWithheld: withholdsInviterAssociationTable(terms),
     linkageKeys: terms.linkageKeys.map((key) =>
