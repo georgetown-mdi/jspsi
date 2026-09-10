@@ -1442,13 +1442,11 @@ export function withholdsInviterAssociationTable(terms: LinkageTerms): boolean {
  * property of the SENDER, and a document that shares no result with the
  * partner sends nothing whatever it declares.
  *
- * A best-effort reading of two documents from one of them: the run's own
- * decision reads the partner's disclosure flag off the terms exchange, derived
- * from the partner's metadata, while the empty `payload.receive` is held
- * against the partner's DECLARED `payload.send` alone. A partner declaring no
- * payload at all while its metadata transmits a column passes that check, and
- * such a run does not withhold -- it aborts at the received-payload
- * reconciliation instead, after the round.
+ * A reading of two documents from one of them: the empty `payload.receive` is
+ * held against the partner's DECLARED `payload.send` alone, never against what
+ * that partner's metadata will transmit. A partner declaring no payload at all
+ * while its metadata transmits a column passes that check, and its disclosure
+ * is refused at the received-payload reconciliation after the round.
  */
 export function withholdsPartnerAssociationTable(terms: LinkageTerms): boolean {
   if (terms.linkageStrategy !== "single-pass") return false;

@@ -9,7 +9,11 @@ import {
 } from "../src/connection/messageConnection";
 
 import type { BuiltExchangeRecord } from "../src/records/exchangeRecord";
-import type { LinkageStrategy, Output } from "../src/config/linkageTermsSchema";
+import type {
+  LinkageStrategy,
+  Output,
+  Payload,
+} from "../src/config/linkageTermsSchema";
 import type { ExchangeResult } from "../src/exchange";
 
 // Integration coverage of the linkageStrategy dispatch in runExchange: a
@@ -232,6 +236,9 @@ test("single-pass one-sided output: only the receiver gets the table and payload
 async function runOneSidedSinglePass(opts: {
   helperDiscloses: boolean;
   helperIsInitiator: boolean;
+  helperPayload?: Payload;
+  receiverPayload?: Payload;
+  advertiseHelperDisclosure?: boolean;
 }): Promise<{
   receiver: ExchangeResult;
   helper: ExchangeResult;
@@ -266,6 +273,7 @@ async function runOneSidedSinglePass(opts: {
     output: Output,
     rows: Array<Record<string, string>>,
     columnNames: Array<string>,
+    payload?: Payload,
   ) =>
     prepareForExchange(
       {
@@ -274,6 +282,7 @@ async function runOneSidedSinglePass(opts: {
           linkageStrategy: "single-pass",
           identity,
           output,
+          ...(payload !== undefined ? { payload } : {}),
         },
       },
       identity,
@@ -283,8 +292,19 @@ async function runOneSidedSinglePass(opts: {
 
   const [connReceiver, connHelper] = createMessagePipe();
   const helperInbound: Array<unknown> = [];
+  // A modified helper build advertises `disclosesPayload` on its terms frame
+  // whatever its own data holds. Rewriting the frame on the way out models that
+  // party while leaving this honest helper's own withhold decision (taken from
+  // its metadata) alone, so the receiver's cross-check is what the test reads.
+  const isTermsFrame = (m: unknown): m is Record<string, unknown> =>
+    typeof m === "object" && m !== null && "linkageTerms" in m;
   const capturingHelper: MessageConnection = {
-    send: (m: unknown) => connHelper.send(m),
+    send: (m: unknown) =>
+      connHelper.send(
+        opts.advertiseHelperDisclosure === true && isTermsFrame(m)
+          ? { ...m, disclosesPayload: true }
+          : m,
+      ),
     receive: async (timeoutMs?: number) => {
       const frame = await connHelper.receive(timeoutMs);
       helperInbound.push(frame);
@@ -305,13 +325,20 @@ async function runOneSidedSinglePass(opts: {
         helperOut,
         helperRows,
         opts.helperDiscloses ? ["first_name", "note"] : ["first_name"],
+        opts.helperPayload,
       ),
       { psiLibrary },
     ),
     runExchange(
       connReceiver,
       opts.helperIsInitiator ? "responder" : "initiator",
-      prepare("Receiver Co", receiverOut, receiverRows, ["first_name"]),
+      prepare(
+        "Receiver Co",
+        receiverOut,
+        receiverRows,
+        ["first_name"],
+        opts.receiverPayload,
+      ),
       { psiLibrary },
     ),
   ]);
@@ -380,5 +407,42 @@ test("single-pass one-sided, payload-disclosing helper still receives its table 
   expect(receiver.partnerPayload.columns).toEqual(["note"]);
   // ...which is only possible because the helper received its association-table half:
   // the table frame (the only Array-shaped frame) DID reach the helper's process.
+  expect(helperInbound.some((f) => Array.isArray(f))).toBe(true);
+});
+
+test("withheld-shaped agreed terms outrank an advertised disclosure", async () => {
+  // The receiver's suppression binds to the agreed terms, not to what the sender
+  // asserts about itself: a helper whose terms declare `payload.send: []`, mirrored
+  // by the receiver's `payload.receive: []`, is bound to disclosing no column, so a
+  // build advertising `disclosesPayload` true against those terms is still sent no
+  // association-table half.
+  const { receiver, helper, helperInbound } = await runOneSidedSinglePass({
+    helperDiscloses: false,
+    helperIsInitiator: false,
+    helperPayload: { send: [] },
+    receiverPayload: { receive: [] },
+    advertiseHelperDisclosure: true,
+  });
+
+  expect(receiver.resolvedRole).toBe("receiver");
+  expect(helper.resolvedRole).toBe("sender");
+  expect(receiver.associationTable?.[0]).toHaveLength(2);
+  expect(helperInbound.some((f) => Array.isArray(f))).toBe(false);
+});
+
+test("disclosing agreed terms still deliver the helper its half", async () => {
+  // The other side of the same cross-check: agreed terms declaring the helper's
+  // `payload.send`, mirrored by the receiver's `payload.receive`, bind it to
+  // disclosing that column, so it needs its matched rows and the half arrives.
+  const note = [{ name: "note" }];
+  const { receiver, helper, helperInbound } = await runOneSidedSinglePass({
+    helperDiscloses: true,
+    helperIsInitiator: false,
+    helperPayload: { send: note },
+    receiverPayload: { receive: note },
+  });
+
+  expect(helper.resolvedRole).toBe("sender");
+  expect(receiver.partnerPayload.columns).toEqual(["note"]);
   expect(helperInbound.some((f) => Array.isArray(f))).toBe(true);
 });

@@ -84,7 +84,10 @@ import { OperatorConfigError, UsageError, causeChainSome } from "./errors.js";
 import type { Metadata, OwnColumnSelection } from "./config/metadata.js";
 import { TEXT_CONTROL_CHAR_PATTERN } from "./config/linkageTermsSchema.js";
 import { BIDI_CONTROL_PATTERN } from "./utils/nameControls.js";
-import type { LinkageTerms } from "./config/linkageTermsSchema.js";
+import type {
+  LinkageTerms,
+  PayloadColumn,
+} from "./config/linkageTermsSchema.js";
 import type { StandardizedDataset } from "./standardization.js";
 import type {
   HandshakeRole,
@@ -1586,19 +1589,36 @@ export async function runExchange(
   // resolved SENDER is a non-receiving helper (expectsOutput false) disclosing no
   // payload, it needs nothing back, so the receiver suppresses its
   // association-table half entirely and the sender skips awaiting it -- keeping a
-  // blind helper blind to its own membership. The sender's properties
-  // come from whichever side we are: our own when we are the sender, the partner's
-  // (read off the terms exchange) when we are the receiver. A missing partner flag
-  // (undefined -- a non-conforming peer that did not advertise it) defaults to
-  // "discloses payload", so it never blinds a helper that needs its table. Only
-  // consulted on the single-pass path (see withholdsSenderAssociationTable and
-  // link.ts).
+  // blind helper blind to its own membership. Only consulted on the single-pass
+  // path (see withholdsSenderAssociationTable and link.ts).
   const senderExpectsOutput = isReceiver
     ? partnerTerms.output.expectsOutput
     : linkageTerms.output.expectsOutput;
-  const senderDisclosesPayload = isReceiver
+
+  // What the sender's own process asserts about its disclosure: our metadata
+  // where we are the sender, the flag read off the terms exchange where we are
+  // the receiver. An absent flag (a peer that advertised none) reads as
+  // "discloses payload", so it never blinds a helper that needs its table.
+  const senderAssertsDisclosure = isReceiver
     ? (partnerDisclosesPayload ?? true)
     : localDisclosesPayload;
+
+  // A payload direction the agreed terms declare present and empty binds that
+  // party to disclosing no column, so it overrides the assertion above, which is
+  // the sender's own and rides no agreed-terms hash. Either document carries the
+  // declaration -- the sender's `payload.send`, or the receiver's
+  // `payload.receive`, which validateCompatibility holds the sender's send to --
+  // and both parties read the same pair, so suppression and skip stay in step.
+  const declaresNoPayloadColumn = (
+    direction: ReadonlyArray<PayloadColumn> | undefined,
+  ): boolean => direction !== undefined && direction.length === 0;
+  const senderTerms = isReceiver ? partnerTerms : linkageTerms;
+  const receiverTerms = isReceiver ? linkageTerms : partnerTerms;
+  const senderDisclosesPayload =
+    senderAssertsDisclosure &&
+    !declaresNoPayloadColumn(senderTerms.payload?.send) &&
+    !declaresNoPayloadColumn(receiverTerms.payload?.receive);
+
   const withholdSenderTable = withholdsSenderAssociationTable(
     senderExpectsOutput,
     senderDisclosesPayload,
