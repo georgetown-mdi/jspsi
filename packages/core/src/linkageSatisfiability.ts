@@ -153,9 +153,7 @@ export function assertStandardizationMatchesTerms(
  * written (docs/spec/PROTOCOL.md, The combinations that stay unsupported). And
  * `psi-c`, whose count-only round counts matched VALUES where the resolution
  * pairs each record at most once, so the count would over-report the linkage it
- * is used to justify. The third unsupported combination reads both parties'
- * documents and has its own boundary
- * ({@link assertCandidateSetCardinalityImplemented}).
+ * is used to justify.
  *
  * It is the candidate-set sibling of `assertAlgorithmImplemented` and
  * `assertDeduplicateImplemented` in `exchange.ts`, and it runs at the three
@@ -219,53 +217,6 @@ export function assertFanOutImplemented(
         ? COUNT_ONLY_SHAPE_REFUSALS.candidateSet
         : candidateSetUnderStrategyMessage(),
     );
-}
-
-/**
- * Refuse a candidate set under the `many-to-many` cardinality the two parties'
- * agreed `deduplicate` values resolve to, before any matching begins.
- *
- * The closure over candidate sets under `many-to-many` is specified and not
- * yet built (docs/spec/PROTOCOL.md, The `many-to-many` entity closure and The
- * combinations that stay unsupported), so the combination is refused until
- * the cascade's resolution lands. `many-to-one` and `one-to-many` are not
- * refused with it: a candidate set on either side of those runs under both
- * strategies.
- *
- * The combination takes BOTH parties' documents, so unlike
- * {@link assertFanOutImplemented} it cannot be decided from one. It is applied
- * at each point the pair is knowable: the accept boundary, where the accepting
- * party holds the inviter's document and sets its own `deduplicate`
- * (`deriveAcceptedLinkageTerms`), and the agreed-terms run boundary
- * (`resolveLinkageCardinality`), which reads both documents and so refuses
- * symmetrically, both parties aborting at the same point. Below them the
- * strategy's own fail-closed half refuses a candidate set reaching a
- * `many-to-many` round ({@link fanOutReachedMatchingRefusal}).
- *
- * A plain {@link UsageError}, not an {@link OperatorConfigError}: this reads
- * the PARTNER's document as well as this party's, so the fault is not
- * unconditionally this operator's own. The message holds only fixed literals.
- */
-export function assertCandidateSetCardinalityImplemented(
-  localTerms: LinkageTerms,
-  partnerTerms: LinkageTerms,
-): void {
-  if (!(localTerms.deduplicate && partnerTerms.deduplicate)) return;
-  if (
-    !termsDeclareCandidateSet(localTerms) &&
-    !termsDeclareCandidateSet(partnerTerms)
-  )
-    return;
-  throw new UsageError(
-    "these linkage terms expand one value into several match candidates while " +
-      "both parties set deduplicate to true, which resolves to a many-to-many " +
-      "match. A record of either party could then be matched through several " +
-      "of its candidates at once, and no linkage strategy pairs that " +
-      "combination, so the exchange is refused before matching begins rather " +
-      "than matched to less than the terms declare. Set deduplicate to false " +
-      "on one of the two parties, or remove the expanding step, the fuzzy " +
-      "comparison and the swapped key order from every linkage key.",
-  );
 }
 
 /**

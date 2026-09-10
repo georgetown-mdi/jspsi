@@ -82,9 +82,35 @@ describe("describeDeduplicatePair", () => {
     expect(describePair(true, true)).toContain("one row per matched pair");
   });
 
+  test("states the grouping a record matching on several values makes", () => {
+    // The both-sided pair groups records no linkage key links, through a record
+    // that matched on several values of one key (docs/spec/PROTOCOL.md, The
+    // many-to-many entity closure). It is a disclosure of the pairing, so the
+    // sentence an acceptor consents on states it.
+    expect(describePair(true, true)).toContain(
+      "records sharing no matched value are disclosed to both parties as one " +
+        "group",
+    );
+  });
+
   test("states that neither file is grouped where neither party declares it", () => {
     expect(describePair(false, false)).toContain(
       "neither party's file is grouped",
+    );
+  });
+});
+
+describe("the fan-out note's account of pairing", () => {
+  // The note renders wherever the terms declare a candidate set the exchange
+  // matches, under either party's `deduplicate`, so it states the pairing
+  // count against the pair rather than for one combination.
+  test("scopes the at-most-once pairing to the pair that pairs once", () => {
+    const note = CONSENT_FACTS.fanOutCandidates.note!;
+    expect(note).toContain("with neither set it is paired at most once");
+    expect(note).toContain(
+      "with both set -- which cascade linkage matches and single-pass " +
+        "refuses -- it is paired with every one of the other party's records " +
+        "any of its candidates reached",
     );
   });
 });

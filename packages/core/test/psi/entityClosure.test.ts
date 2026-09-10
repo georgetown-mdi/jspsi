@@ -1,17 +1,18 @@
 import { describe, expect, test } from "vitest";
 
 import {
-  assertBlockDiagonalClosure,
+  assertRoundDiagonalClosure,
   entityClusters,
 } from "../../src/psi/entityClosure";
+import type { ClosureBlock } from "../../src/psi/entityClosure";
 import { InternalConsistencyError } from "../../src/errors";
 import type { AssociationTable } from "../../src/types";
 
 // The closure step a party runs locally over the table the cascade left
-// it, and the check that holds its result to the shape the both-sided
-// cardinality actually produces (docs/spec/PROTOCOL.md, The many-to-many
-// entity closure). The runs that drive it through linkViaPSI are in
-// psiLinkManyToMany.test.ts; here the tables are hand-built so the check
+// it, and the check that holds its result to the round-diagonal shape the
+// both-sided cardinality actually produces (docs/spec/PROTOCOL.md, The
+// many-to-many entity closure). The runs that drive it through linkViaPSI are
+// in psiLinkManyToMany.test.ts; here the tables are hand-built so the check
 // can be shown to REFUSE shapes no real run produces.
 
 describe("entityClusters", () => {
@@ -48,11 +49,10 @@ describe("entityClusters", () => {
   });
 
   test("a chain through a shared record is one cluster", () => {
-    // The shape the block claim says a cascade run cannot produce: our
-    // rows 0 and 1 reach each other through the partner's row 0.
-    // entityClusters computes the closure of whatever table it is given,
-    // so it groups them; assertBlockDiagonalClosure's refusal below is
-    // what catches this shape, since the closure will not.
+    // A chain: our rows 0 and 1 reach each other through the partner's row 0.
+    // entityClusters computes the closure of whatever table it is given, so it
+    // groups them whether one record's candidate set chained the two blocks or
+    // nothing did; the check below is what tells those apart.
     expect(
       entityClusters([
         [0, 1],
@@ -93,21 +93,26 @@ describe("entityClusters", () => {
   });
 });
 
-describe("assertBlockDiagonalClosure", () => {
-  // Two blocks: a 2x2 on one matched value and a 1x1 on another.
+describe("assertRoundDiagonalClosure", () => {
+  // Two blocks of one round: a 2x2 on one matched value and a 1x1 on another.
   const blockTable: AssociationTable = [
     [0, 0, 1, 1, 2],
     [0, 1, 0, 1, 2],
   ];
-  const blockLabels = [0, 0, 0, 0, 1];
+  const oneRound = [0, 0, 0, 0, 0];
+  const blocks: Array<ClosureBlock> = [
+    { localRows: [0, 1], partnerRows: [0, 1] },
+    { localRows: [2], partnerRows: [2] },
+  ];
 
   const refusal = (
     table: AssociationTable,
-    labels: Array<number>,
+    roundOfPair: Array<number>,
+    given: Array<ClosureBlock>,
   ): InternalConsistencyError => {
     let thrown: unknown;
     try {
-      assertBlockDiagonalClosure("client", table, labels);
+      assertRoundDiagonalClosure("client", table, roundOfPair, given);
     } catch (err) {
       thrown = err;
     }
@@ -120,64 +125,173 @@ describe("assertBlockDiagonalClosure", () => {
 
   test("a table of complete blocks passes", () => {
     expect(() =>
-      assertBlockDiagonalClosure("client", blockTable, blockLabels),
+      assertRoundDiagonalClosure("client", blockTable, oneRound, blocks),
     ).not.toThrow();
   });
 
-  test("a cluster spanning two blocks is refused", () => {
-    // Our rows 0 and 1 matched different values -- two labels -- and both came
-    // back against the partner's row 0, so the closure would group them through a
-    // partner record no linkage key links them through. The cluster is a complete
-    // 2x1 product, so completeness alone would pass it: the labels are what
-    // catches it.
+  test("a cluster chaining two blocks of one round passes", () => {
+    // The smallest chained cluster (docs/spec/PROTOCOL.md, The smallest chained
+    // cluster): our row 0 contributed both matched values, so the blocks {0,1}
+    // x {0} and {0} x {1} join into one cluster of three pairs where the 2x2
+    // product would hold four. Block-diagonal excluded it; round-diagonal
+    // admits it.
+    expect(() =>
+      assertRoundDiagonalClosure(
+        "client",
+        [
+          [0, 0, 1],
+          [0, 1, 0],
+        ],
+        [0, 0, 0],
+        [
+          { localRows: [0, 1], partnerRows: [0] },
+          { localRows: [0], partnerRows: [1] },
+        ],
+      ),
+    ).not.toThrow();
+  });
+
+  test("a cluster spanning two rounds is refused", () => {
+    // The same three pairs, with the chaining pair matched on a later key: a
+    // record standing in any of a key's candidate pairs leaves candidacy for
+    // every later key, so no cluster can reach a second round.
     const thrown = refusal(
       [
-        [0, 1],
-        [0, 0],
+        [0, 0, 1],
+        [0, 1, 0],
       ],
-      [0, 1],
+      [0, 1, 0],
+      [
+        { localRows: [0, 1], partnerRows: [0] },
+        { localRows: [0], partnerRows: [1] },
+      ],
     );
     expect(thrown.message).toMatch(
-      /grouped through a partner record no linkage key links them through/,
+      /joins pairs matched on two different linkage keys/,
     );
   });
 
-  test("a cluster that is not the whole product is refused", () => {
-    // One label throughout, so the pairs claim one matched value, but the
-    // pair (1, 1) the block would hold is missing.
+  test("a block the table holds only part of is refused", () => {
+    // One block of two records a side, so the value's pairs are the whole 2x2
+    // product, and the table is missing (1, 1).
     const thrown = refusal(
       [
         [0, 0, 1],
         [0, 1, 0],
       ],
       [0, 0, 0],
+      [{ localRows: [0, 1], partnerRows: [0, 1] }],
     );
     expect(thrown.message).toMatch(
-      /holds 3 pair\(s\) over 2 record\(s\) of this party and 2 of the partner's/,
+      /the table holds no pair between this party's record 1 and the partner's 1/,
     );
   });
 
   test("one block split across two clusters is refused", () => {
-    // Both pairs hold one label, so they claim one matched value, yet they
-    // share no record -- the value's block would have to hold every pair
-    // between the two sides.
+    // Both pairs claim one matched value, yet they share no record -- the
+    // value's block would have to hold every pair between the two sides.
     const thrown = refusal(
       [
         [0, 1],
         [0, 1],
       ],
       [0, 0],
+      [{ localRows: [0, 1], partnerRows: [0, 1] }],
     );
     expect(thrown.message).toMatch(
       /split across the clusters holding this party's records 0 and 1/,
     );
   });
 
-  test("a label per record rather than per pair is refused as a miscount", () => {
-    // Labels are per PAIR, not per record: a caller passing one per
-    // record is stopped rather than read against the wrong pairs.
+  test("a block whose partner half falls in another cluster is refused", () => {
+    const thrown = refusal(
+      [
+        [0, 1],
+        [0, 1],
+      ],
+      [0, 0],
+      [{ localRows: [0], partnerRows: [0, 1] }],
+    );
+    expect(thrown.message).toMatch(
+      /the cluster holding this party's record 0 and the one holding the partner's record 1/,
+    );
+  });
+
+  test("a pair no block names is refused", () => {
+    // Two complete 1x1 blocks, declared apart, plus the pair (0, 1) no matched
+    // value produced: it merges them into one three-pair cluster on an edge
+    // nothing backs. Each block on its own is whole and lands in one cluster,
+    // so only the converse -- that the blocks name every pair the table holds
+    // -- catches it.
+    const thrown = refusal(
+      [
+        [0, 0, 1],
+        [0, 1, 1],
+      ],
+      [0, 0, 0],
+      [
+        { localRows: [0], partnerRows: [0] },
+        { localRows: [1], partnerRows: [1] },
+      ],
+    );
+    expect(thrown.message).toMatch(
+      /the table pairs this party's record 0 with the partner's 1, and no matched value's block holds that pair/,
+    );
+  });
+
+  test("a stray pair inside an otherwise valid multi-block cluster is refused", () => {
+    // The smallest chained cluster with one pair added: our row 1 and the
+    // partner's row 1 are already in the cluster through row 0's two
+    // candidates, so the stray pair (1, 1) moves no record between clusters
+    // and splits no block. It is a pair the round never matched all the same.
+    const thrown = refusal(
+      [
+        [0, 0, 1, 1],
+        [0, 1, 0, 1],
+      ],
+      [0, 0, 0, 0],
+      [
+        { localRows: [0, 1], partnerRows: [0] },
+        { localRows: [0], partnerRows: [1] },
+      ],
+    );
+    expect(thrown.message).toMatch(
+      /the table pairs this party's record 1 with the partner's 1, and no matched value's block holds that pair/,
+    );
+  });
+
+  test("a pair two overlapping blocks of one round both name passes", () => {
+    // Our row 0 and the partner's row 0 contributed both of the round's matched
+    // values, so the pair (0, 0) sits in both blocks. The blocks are compared
+    // as sets of pairs, not summed counts, so naming it twice is not a
+    // shortfall anywhere.
     expect(() =>
-      assertBlockDiagonalClosure("client", blockTable, [0, 0, 1]),
-    ).toThrow(/3 block label\(s\) for 5 matched pair\(s\)/);
+      assertRoundDiagonalClosure(
+        "client",
+        [
+          [0, 0, 1],
+          [0, 1, 0],
+        ],
+        [0, 0, 0],
+        [
+          { localRows: [0, 1], partnerRows: [0] },
+          { localRows: [0], partnerRows: [0, 1] },
+        ],
+      ),
+    ).not.toThrow();
+  });
+
+  test("a round label per record rather than per pair is refused as a miscount", () => {
+    expect(() =>
+      assertRoundDiagonalClosure("client", blockTable, [0, 0, 0], blocks),
+    ).toThrow(/3 round label\(s\) for 5 matched pair\(s\)/);
+  });
+
+  test("a block with no record on one side is refused as a caller fault", () => {
+    expect(() =>
+      assertRoundDiagonalClosure("client", blockTable, oneRound, [
+        { localRows: [], partnerRows: [0] },
+      ]),
+    ).toThrow(/a block with no record on one side/);
   });
 });

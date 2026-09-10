@@ -19,7 +19,6 @@ import {
 } from "../src/standardization";
 import {
   validateStandardizationAgainstTerms,
-  assertCandidateSetCardinalityImplemented,
   assertFanOutImplemented,
   assertStandardizationMatchesTerms,
   assertTransformsCompile,
@@ -1888,67 +1887,6 @@ describe("assertFanOutImplemented", () => {
     ).not.toThrow();
     expect(() =>
       assertFanOutImplemented(unlistedStrategyTerms()),
-    ).not.toThrow();
-  });
-});
-
-describe("assertCandidateSetCardinalityImplemented", () => {
-  const fanOutStep = { function: "split_on", params: { delimiter: "-" } };
-  const withCandidateSet: LinkageTerms = {
-    ...minimalTerms,
-    linkageKeys: [
-      {
-        name: "LN+DOB",
-        elements: [
-          { field: "last_name", transform: [fanOutStep] },
-          { field: "date_of_birth" },
-        ],
-      },
-    ],
-  };
-  const deduplicating = (terms: LinkageTerms): LinkageTerms => ({
-    ...terms,
-    deduplicate: true,
-  });
-
-  test("refuses a candidate set under the many-to-many the pair resolves to", () => {
-    expect(() =>
-      assertCandidateSetCardinalityImplemented(
-        deduplicating(withCandidateSet),
-        deduplicating(withCandidateSet),
-      ),
-    ).toThrow(UsageError);
-    expect(() =>
-      assertCandidateSetCardinalityImplemented(
-        deduplicating(withCandidateSet),
-        deduplicating(withCandidateSet),
-      ),
-    ).toThrow(/many-to-many/);
-  });
-
-  test("admits a candidate set under the one-sided cardinalities", () => {
-    // many-to-one and one-to-many are not refused with it: a candidate set on
-    // either side of those runs under both strategies.
-    expect(() =>
-      assertCandidateSetCardinalityImplemented(
-        deduplicating(withCandidateSet),
-        withCandidateSet,
-      ),
-    ).not.toThrow();
-    expect(() =>
-      assertCandidateSetCardinalityImplemented(
-        withCandidateSet,
-        deduplicating(withCandidateSet),
-      ),
-    ).not.toThrow();
-  });
-
-  test("admits many-to-many where no key declares a candidate set", () => {
-    expect(() =>
-      assertCandidateSetCardinalityImplemented(
-        deduplicating(minimalTerms),
-        deduplicating(minimalTerms),
-      ),
     ).not.toThrow();
   });
 });

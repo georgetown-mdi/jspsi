@@ -3574,6 +3574,28 @@ describe("displayInvitation: the declared terms it discloses (columns, citations
     );
   });
 
+  test("displayInvitation: states what a splitting key pairs where the invitation declares duplicate matching", () => {
+    // A splitting key beside an inviting party's own `deduplicate`: the pair an
+    // accepting party's own value completes runs on the cascade, and there a
+    // record matched on a candidate is paired with every partner record its
+    // candidates reached rather than once. The prompt states that before the
+    // acceptor sets its own side in its configuration file.
+    const log = getLogger("accept-display-fan-out-deduplicate-test");
+    log.setLevel("silent");
+    const token = splittingKeyToken(FUTURE(), "cascade");
+    const rendered = renderDisplayInvitation(log, {
+      ...token,
+      linkageTerms: { ...token.linkageTerms, deduplicate: true },
+    });
+    expect(rendered).toContain("several values per record (enforced):");
+    expect(rendered).toContain(
+      "with both set -- which cascade linkage matches and single-pass " +
+        "refuses -- it is paired with every one of the other party's records " +
+        "any of its candidates reached",
+    );
+    expect(rendered).not.toContain("paired at most once and is then left out");
+  });
+
   test("displayInvitation: represents every consent-relevant linkage term, bar the recorded gaps", () => {
     // Which terms an acceptor's consent turns on is judged once, in core's shared
     // classification, so this prompt and the web consent summary cannot drift on

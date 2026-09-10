@@ -267,11 +267,6 @@ export function assertDeduplicateImplemented(terms: LinkageTerms): void {
  * put the single-valued cascade's frames on the wire and accept what it
  * accepts.
  *
- * The strategy is one of two conditions a candidate set runs under; the other
- * is the resolved cardinality, `many-to-many` refusing one whatever the
- * strategy ({@link assertCandidateSetCardinalityImplemented},
- * linkageSatisfiability.ts).
- *
  * A total table over {@link LinkageStrategy} rather than a comparison against
  * one named strategy, so a `linkage_strategy` added later refuses a candidate
  * set until its own resolution is written rather than inheriting either of the
@@ -343,6 +338,34 @@ export function manyToManyIsImplementedForStrategy(
 }
 
 /**
+ * Whether the `deduplicate` pair these two documents make is one the
+ * strategy does not pair: both parties declaring the term, under a strategy
+ * answering `false` in {@link MANY_TO_MANY_IMPLEMENTED_BY_STRATEGY}.
+ *
+ * The one predicate behind {@link assertBothSidedDeduplicateImplemented},
+ * which throws on exactly this, and the consent summary's
+ * `acceptorDeduplicateRefused` (`consent/invitationSummary.ts`), which states
+ * the consequence at a seat before the accepting party sets its own side. The
+ * two cannot come to different verdicts about a pair, so no seat states the
+ * refusal for an invitation the accept takes, nor withholds it for one the
+ * accept refuses.
+ *
+ * Reads both terms documents whole rather than the four values, for the same
+ * reason {@link assertDeduplicateImplemented} does: a caller cannot pass one
+ * party's `deduplicate` against the other's strategy.
+ */
+export function bothSidedDeduplicateRefused(
+  localTerms: LinkageTerms,
+  partnerTerms: LinkageTerms,
+): boolean {
+  if (!(localTerms.deduplicate && partnerTerms.deduplicate)) return false;
+  return !(
+    manyToManyIsImplementedForStrategy(localTerms.linkageStrategy) &&
+    manyToManyIsImplementedForStrategy(partnerTerms.linkageStrategy)
+  );
+}
+
+/**
  * Refuse the agreed `(true, true)` pair on a linkage strategy that does not
  * pair the both-sided cardinality it resolves to, before any matching
  * begins.
@@ -369,12 +392,7 @@ export function assertBothSidedDeduplicateImplemented(
   localTerms: LinkageTerms,
   partnerTerms: LinkageTerms,
 ): void {
-  if (!(localTerms.deduplicate && partnerTerms.deduplicate)) return;
-  if (
-    manyToManyIsImplementedForStrategy(localTerms.linkageStrategy) &&
-    manyToManyIsImplementedForStrategy(partnerTerms.linkageStrategy)
-  )
-    return;
+  if (!bothSidedDeduplicateRefused(localTerms, partnerTerms)) return;
   const pairing = (
     Object.keys(MANY_TO_MANY_IMPLEMENTED_BY_STRATEGY) as Array<LinkageStrategy>
   )

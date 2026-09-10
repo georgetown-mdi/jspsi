@@ -44,7 +44,10 @@ import {
   MAX_RECORD_COUNT,
   psiElementBounds,
 } from "../src/connection/frameSize";
-import { assertPartnerIndices } from "../src/utils/partnerIndices";
+import {
+  assertPartnerIndices,
+  resolveRunGroupedReturn,
+} from "../src/utils/partnerIndices";
 import { fanOutFreeBounds } from "./utils/singlePassBounds";
 import {
   createMessagePipe,
@@ -835,12 +838,15 @@ test("a grouping that does not run parallel to the list is a caller fault", () =
   expect((err as Error).message).toMatch(/one group per entry/);
 });
 
-// --- the same rule where the grouping answers in runs -------------------------
-// Where the partner keeps its own duplicates too, one entry this party sent comes
-// back as the whole partner group behind the position it named, so the list is a
-// concatenation of runs rather than one entry per outbound entry. The rule is the
-// same one read at that granularity: runs of one group identical, runs of
-// different groups disjoint, and distinctness surviving inside a run.
+// --- the same rule where the return answers in runs ---------------------------
+// Where the partner keeps its own duplicates too, one entry this party sent
+// comes back as a RUN holding every one of the partner's records accepted with
+// it, so the list is a concatenation of runs rather than one entry per outbound
+// entry. What each run is held to is the partner GROUPS this party resolved its
+// entry was accepted with, which a candidate set leaves overlapping between two
+// entries rather than equal or disjoint -- so the rule reads which of this
+// party's own records the return claims each row for, and holds that partition
+// to the one its pairing states.
 
 const expectCallerFault = (run: () => void, detail: RegExp): void => {
   const err = refusalFrom(run);
@@ -849,132 +855,178 @@ const expectCallerFault = (run: () => void, detail: RegExp): void => {
   expect((err as Error).message).toMatch(detail);
 };
 
-test("runs of one group must be identical and runs of two must be disjoint", () => {
-  // Outbound entries 0 and 1 named one position and came back with two rows each;
-  // entry 2 named another and came back with one.
-  const rules = {
-    repeatsGroupedByRuns: {
-      rounds: [0, 0, 0],
-      groups: [0, 0, 1],
-      runLengths: [2, 2, 1],
-    },
+test("a run holds the rows of the groups its own entry was accepted with", () => {
+  // Entries 0 and 1 were accepted with rank 0, a group of two of the partner's
+  // records, and entry 1 with rank 1 as well. Rows 1 and 2 are claimed for both
+  // entries and row 4 for entry 1 alone, which is the partition the two ranks
+  // state.
+  const runs = {
+    rounds: [0, 0],
+    runLengths: [2, 3],
+    ownerStarts: [0, 1, 3],
+    owners: [0, 0, 1],
+  };
+  expect(
+    resolveRunGroupedReturn("me", "the list", [1, 2, 2, 1, 4], 5, runs),
+  ).toStrictEqual(
+    new Map([
+      [
+        0,
+        new Map([
+          [0, [1, 2]],
+          [1, [4]],
+        ]),
+      ],
+    ]),
+  );
+});
+
+test("a run naming a row the round did not pair with its entry is refused", () => {
+  // The merge a rule keyed to one rank per entry would admit: the entry accepted
+  // with rank 1 alone comes back holding rank 0's row as well, which would join
+  // two of this party's records into one cluster its own resolution kept apart.
+  const runs = {
+    rounds: [0, 0],
+    runLengths: [1, 1],
+    ownerStarts: [0, 1, 2],
+    owners: [0, 1],
+  };
+  expectProtocolRefusal(
+    refusalFrom(() =>
+      resolveRunGroupedReturn("me", "the list", [1, 1], 5, runs),
+    ),
+    /the list names one partner row for a set of this side's records the round did not accept together/,
+  );
+});
+
+test("overlapping owner sets keep the rows they share", () => {
+  // What a candidate set produces and a rank-keyed rule cannot state: entry 0
+  // was accepted with ranks 0 and 1, entry 1 with rank 1 alone. Their runs
+  // neither coincide nor are disjoint, and rank 1's row stands in both.
+  const runs = {
+    rounds: [0, 0],
+    runLengths: [2, 1],
+    ownerStarts: [0, 2, 3],
+    owners: [0, 1, 1],
   };
   expect(() =>
-    assertPartnerIndices("me", "the list", [2, 1, 2, 1, 0], ROWS, rules),
+    resolveRunGroupedReturn("me", "the list", [0, 3, 3], 5, runs),
   ).not.toThrow();
+  // Which of its rows the partner puts behind which of its groups is its own
+  // word throughout, so exchanging the two rows is admitted: what the rule
+  // holds is which of THIS party's records share a row, and that is unmoved.
+  expect(() =>
+    resolveRunGroupedReturn("me", "the list", [3, 0, 0], 5, runs),
+  ).not.toThrow();
+});
+
+test("a group the return leaves without a row is refused", () => {
+  // This party resolved entry 0 was accepted with two of the partner's groups
+  // and entry 1 with one of them, and the return hands entry 0 the row it hands
+  // entry 1 -- so the group entry 0 alone was accepted with has no row, and the
+  // pairs resting on it are dropped by the partner rather than by this party's
+  // own resolution.
   expectProtocolRefusal(
     refusalFrom(() =>
-      assertPartnerIndices("me", "the list", [2, 1, 2, 1, 2], ROWS, rules),
+      resolveRunGroupedReturn("me", "the list", [2, 2], 5, {
+        rounds: [0, 0],
+        runLengths: [1, 1],
+        ownerStarts: [0, 2, 3],
+        owners: [0, 1, 1],
+      }),
     ),
-    /the list names one partner row for two of the partner's records this side matched/,
-  );
-  expectProtocolRefusal(
-    refusalFrom(() =>
-      assertPartnerIndices("me", "the list", [2, 1, 2, 0, 1], ROWS, rules),
-    ),
-    /the list names two partner rows for one of the partner's records this side matched/,
+    /the list leaves a group of the partner's records this side matched without a row/,
   );
 });
 
 test("a run naming one partner row twice is refused within the run", () => {
-  // The run is the partner's own group, whose rows are distinct: a row named twice
-  // for one of this party's records is a repeated pair, reported as such rather
-  // than as a merge of two groups.
+  // The rows of a run are the partner's own records, which are distinct: a row
+  // named twice for one of this party's records is a repeated pair.
   expectProtocolRefusal(
     refusalFrom(() =>
-      assertPartnerIndices("me", "the list", [2, 2], ROWS, {
-        repeatsGroupedByRuns: {
-          rounds: [0],
-          groups: [0],
-          runLengths: [2],
-        },
+      resolveRunGroupedReturn("me", "the list", [3, 3, 5], 6, {
+        rounds: [0, 0],
+        runLengths: [2, 1],
+        ownerStarts: [0, 2, 3],
+        owners: [0, 1, 1],
       }),
     ),
     /the list names one partner row twice for one record this side matched/,
   );
 });
 
-test("one position of each round is a group of its own under the run rule", () => {
-  // A position number means nothing across rounds here either, so runs answering
-  // the same position in two rounds must be disjoint.
-  const rules = {
-    repeatsGroupedByRuns: {
+test("each round resolves its own ranks", () => {
+  // A rank means nothing across rounds: each round's runs are read against the
+  // groups that round accepted, so one round's rank 0 and another's are
+  // resolved separately and may stand for different rows.
+  expect(
+    resolveRunGroupedReturn("me", "the list", [1, 2], 5, {
       rounds: [0, 1],
-      groups: [0, 0],
       runLengths: [1, 1],
-    },
-  };
-  expectProtocolRefusal(
-    refusalFrom(() =>
-      assertPartnerIndices("me", "the list", [1, 1], ROWS, rules),
-    ),
-    /names one partner row for two of the partner's records this side matched/,
+      ownerStarts: [0, 1, 2],
+      owners: [0, 0],
+    }),
+  ).toStrictEqual(
+    new Map([
+      [0, new Map([[0, [1]]])],
+      [1, new Map([[0, [2]]])],
+    ]),
   );
-  expect(() =>
-    assertPartnerIndices("me", "the list", [1, 2], ROWS, rules),
-  ).not.toThrow();
 });
 
-test("run lengths that do not cover the list are a caller fault", () => {
+test("an out-of-range or fractional entry is refused before the pairing", () => {
+  const runs = {
+    rounds: [0],
+    runLengths: [1],
+    ownerStarts: [0, 1],
+    owners: [0],
+  };
+  expectProtocolRefusal(
+    refusalFrom(() => resolveRunGroupedReturn("me", "the list", [5], 5, runs)),
+    /the list has an index outside \[0, 5\)/,
+  );
+  expectProtocolRefusal(
+    refusalFrom(() =>
+      resolveRunGroupedReturn("me", "the list", [0.5], 5, runs),
+    ),
+    /the list has an entry that is not a whole number/,
+  );
+});
+
+test("runs that do not cover the list are a caller fault", () => {
   // The run lengths are the count this party pinned the list's length to before
-  // getting here, so runs that do not add up to it are a local misuse rather than
-  // the partner's violation -- and the comparison of a later run against its
-  // group's first never reads past the run it was given.
+  // getting here, so runs that do not add up to it are a local misuse rather
+  // than the partner's violation.
   expectCallerFault(
     () =>
-      assertPartnerIndices("me", "the list", [0, 1, 2], ROWS, {
-        repeatsGroupedByRuns: {
-          rounds: [0, 0],
-          groups: [0, 1],
-          runLengths: [1, 1],
-        },
+      resolveRunGroupedReturn("me", "the list", [0, 1, 2], ROWS, {
+        rounds: [0, 0],
+        runLengths: [1, 1],
+        ownerStarts: [0, 1, 2],
+        owners: [0, 1],
       }),
     /runs to cover the list, given runs totalling 2 for 3 entries/,
   );
   expectCallerFault(
     () =>
-      assertPartnerIndices("me", "the list", [0, 1], ROWS, {
-        repeatsGroupedByRuns: {
-          rounds: [0, 0],
-          groups: [0],
-          runLengths: [1, 1],
-        },
+      resolveRunGroupedReturn("me", "the list", [0, 1], ROWS, {
+        rounds: [0, 0],
+        runLengths: [1, 2],
+        ownerStarts: [0, 1, 2],
+        owners: [0, 1],
       }),
-    /one group per run/,
+    /runs running past 2 entries/,
   );
   expectCallerFault(
     () =>
-      assertPartnerIndices("me", "the list", [0, 1, 2], ROWS, {
-        repeatsGroupedByRuns: {
-          rounds: [0, 0],
-          groups: [0, 0],
-          runLengths: [1, 2],
-        },
+      resolveRunGroupedReturn("me", "the list", [0, 1], ROWS, {
+        rounds: [0, 0],
+        runLengths: [1, 1],
+        ownerStarts: [0, 1],
+        owners: [0],
       }),
-    /one run length per partner record this side matched, given 1 and 2/,
+    /one length and one owner list per run, given 2 and 1 for 2 run\(s\)/,
   );
-});
-
-test("the run rule cannot be combined with either other relaxation", () => {
-  // Each rule holds a repeat to a different thing, so no list can be under two of
-  // them at once -- the check that keeps a caller from relaxing distinctness twice
-  // and getting neither rule's guarantee.
-  for (const other of [
-    { repeats: true },
-    { repeatsGroupedBy: { rounds: [0], groups: [0] } },
-  ])
-    expectCallerFault(
-      () =>
-        assertPartnerIndices("me", "the list", [0], ROWS, {
-          repeatsGroupedByRuns: {
-            rounds: [0],
-            groups: [0],
-            runLengths: [1],
-          },
-          ...other,
-        }),
-      /at most one of them applies to a list/,
-    );
 });
 
 // --- The untouched run --------------------------------------------------------

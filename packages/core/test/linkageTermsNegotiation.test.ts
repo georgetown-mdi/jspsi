@@ -1224,13 +1224,24 @@ test("the both-sided pair under single-pass is refused before matching begins", 
     linkageStrategy: "single-pass",
     deduplicate: true,
   };
+  // The accept boundary is the first point the pair is knowable, so it refuses
+  // there as well as at the agreed-terms run boundary, which is what keeps the
+  // combination off the consent surfaces.
+  const atAccept = thrownFrom(() =>
+    deriveAcceptedLinkageTerms(inviterTerms, "Accepting Org", true),
+  );
+  expect(atAccept).toBeInstanceOf(UsageError);
+  expect(atAccept.message).toContain("cascade");
+  expect(atAccept.message).toContain("deduplicate to false on one of the two");
   const acceptorTerms = deriveAcceptedLinkageTerms(
     inviterTerms,
     "Accepting Org",
-    true,
   );
   const refusal = thrownFrom(() =>
-    resolveLinkageCardinality(acceptorTerms, inviterTerms),
+    resolveLinkageCardinality(
+      { ...acceptorTerms, deduplicate: true },
+      inviterTerms,
+    ),
   );
   expect(refusal).toBeInstanceOf(UsageError);
   expect(refusal.message).toContain("cascade");
@@ -1238,10 +1249,7 @@ test("the both-sided pair under single-pass is refused before matching begins", 
   // Clearing this party's own side runs, so the refusal is not a bar on the
   // setting itself.
   expect(() =>
-    resolveLinkageCardinality(
-      deriveAcceptedLinkageTerms(inviterTerms, "Accepting Org"),
-      inviterTerms,
-    ),
+    resolveLinkageCardinality(acceptorTerms, inviterTerms),
   ).not.toThrow();
 });
 

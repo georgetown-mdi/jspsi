@@ -138,110 +138,160 @@ export function entityClusters(table: AssociationTable): Array<EntityCluster> {
 }
 
 /**
- * Requires a matched table's entity clusters to be exactly its per-(round, value)
- * blocks: the shape the closure takes in the scope `many-to-many` runs in, where
- * the cascade is the only strategy that pairs it and no fan-out reaches the
- * cascade (docs/spec/PROTOCOL.md, The `many-to-many` entity closure).
+ * One block of a both-sided round: the records of each party that contributed
+ * one matched value, in their own party's row space. Every pair between them is
+ * accepted, `many-to-many` acceptance being total, so a block is the whole
+ * `m x n` product (docs/spec/PROTOCOL.md, The `many-to-many` entity closure).
  *
- * The claim is that the table is a disjoint union of complete `m x n` blocks,
- * one per matched value of one round, so a cluster's members all share one
- * linkage-key value under one key. It is what makes the closure safe to run
- * without a disclosure of its own: no two of a party's records are grouped
- * through a partner record that no rule links them through. Three conditions
- * hold it, and this refuses each -- a cluster spanning two blocks, a cluster
- * that is not the whole `m x n` product, and one block split across two
- * clusters.
+ * A record contributing several of a round's matched values stands in several
+ * of that round's blocks, which is what joins them into one cluster.
+ */
+export interface ClosureBlock {
+  readonly localRows: ReadonlyArray<number>;
+  readonly partnerRows: ReadonlyArray<number>;
+}
+
+/**
+ * Requires a matched table's entity clusters to be round-diagonal: a cluster may
+ * span several blocks of one round and never two rounds
+ * (docs/spec/PROTOCOL.md, The `many-to-many` entity closure).
  *
- * The labels are read per PAIR rather than per record, so a producer that
- * labels one record's pairs apart -- one record in two of a round's blocks, as
- * a cascade fan-out would, though refused today where a record's value is read
- * -- is still held to the same block shape, rather than having its two blocks
- * flattened into one label per record this could not see past. The sole
- * producer today (`blockLabels`, link.ts) derives one label per matched record
- * and replicates it across that record's pairs, over a map holding at most one
- * (round, position) per record, so it excludes that shape structurally; the
- * per-pair signature is what keeps this a safety check against a changed
- * derivation, not a restatement of the current one.
+ * Four conditions hold the shape, and this refuses each -- a cluster whose
+ * pairs were matched in two different rounds, a block split across two clusters,
+ * a block the table does not hold every pair of, and a pair of the table no
+ * block names. The last two are the two containments between the table's pairs
+ * and the blocks' union, so a cluster holds the pairs its blocks name and no
+ * others. What they secure is that every grouping the closure hands the operator
+ * rests on the round's own matched values: a cluster's records are joined by the
+ * values its blocks were built from, and by nothing the partner's returned list
+ * decided on its own.
  *
- * The returned-list checks (`assertPartnerIndices`, utils/partnerIndices.ts)
- * already imply this on the built path: they hold the runs answering one
- * position identical and the runs answering different positions disjoint,
- * which are these same conditions read on the frame rather than on the table.
- * That is why a violation here is an internal inconsistency rather than a
- * partner fault, and why the claim is pinned on the artifact every consumer
- * reads rather than left to rest on that argument alone.
+ * The blocks are the round's own, read per matched VALUE rather than per record,
+ * so a record standing in two of a round's blocks -- which is what a candidate
+ * set produces -- is held to both rather than having them flattened into one
+ * grouping this could not see past.
+ *
+ * The returned-list check (`resolveRunGroupedReturn`, utils/partnerIndices.ts)
+ * already implies this on the built path: it holds the partner's runs to the
+ * pairing this party resolved, row for row, so the table it builds is that
+ * pairing's own image. That is why a violation here is an internal
+ * inconsistency rather than a partner fault, and why the claim is pinned on the
+ * artifact every consumer reads rather than left to rest on that argument alone.
  *
  * @param id - The participant id the message is attributed to.
  * @param table - The matched table, read as pairs.
- * @param blockOfPair - One opaque block label per pair of `table`, equal exactly
- *   for two pairs of one (round, value) block.
+ * @param roundOfPair - The key round each pair of `table` was matched in.
+ * @param blocks - Every block the rounds produced, in the two parties' row
+ *   spaces.
  */
-export function assertBlockDiagonalClosure(
+export function assertRoundDiagonalClosure(
   id: string,
   table: AssociationTable,
-  blockOfPair: ReadonlyArray<number>,
+  roundOfPair: ReadonlyArray<number>,
+  blocks: ReadonlyArray<ClosureBlock>,
 ): void {
-  if (blockOfPair.length !== table[0].length)
+  if (roundOfPair.length !== table[0].length)
     throw new Error(
-      `${id}: the closure check was given ${blockOfPair.length} block ` +
+      `${id}: the closure check was given ${roundOfPair.length} round ` +
         `label(s) for ${table[0].length} matched pair(s)`,
     );
 
   const clusters = entityClusters(table);
   const clusterOfLocalRow = new Map<number, number>();
+  const clusterOfPartnerRow = new Map<number, number>();
   clusters.forEach((cluster, index) => {
     for (const row of cluster.localRows) clusterOfLocalRow.set(row, index);
+    for (const row of cluster.partnerRows) clusterOfPartnerRow.set(row, index);
   });
 
-  const pairsInCluster = new Array<number>(clusters.length).fill(0);
-  const blockOfCluster = new Array<number | undefined>(clusters.length).fill(
+  const roundOfCluster = new Array<number | undefined>(clusters.length).fill(
     undefined,
   );
-  for (let i = 0; i < blockOfPair.length; ++i) {
+  for (let i = 0; i < roundOfPair.length; ++i) {
     const cluster = clusterOfLocalRow.get(table[0][i])!;
-    ++pairsInCluster[cluster];
-    const block = blockOfCluster[cluster];
-    if (block === undefined) blockOfCluster[cluster] = blockOfPair[i];
-    else if (block !== blockOfPair[i])
-      throw notBlockDiagonal(
+    const round = roundOfCluster[cluster];
+    if (round === undefined) roundOfCluster[cluster] = roundOfPair[i];
+    else if (round !== roundOfPair[i])
+      throw notRoundDiagonal(
         id,
         `the cluster holding this party's record ${clusters[cluster].localRows[0]} ` +
-          "joins pairs matched on two different key values, so two of a " +
-          "party's records would be grouped through a partner record no " +
-          "linkage key links them through",
+          "joins pairs matched on two different linkage keys, where a record " +
+          "standing in any of a key's candidate pairs leaves candidacy for " +
+          "every later key",
       );
   }
 
-  const clusterOfBlock = new Map<number, number>();
-  for (let index = 0; index < clusters.length; ++index) {
-    const { localRows, partnerRows } = clusters[index];
-    if (pairsInCluster[index] !== localRows.length * partnerRows.length)
-      throw notBlockDiagonal(
-        id,
-        `the cluster holding this party's record ${localRows[0]} holds ` +
-          `${pairsInCluster[index]} pair(s) over ${localRows.length} record(s) ` +
-          `of this party and ${partnerRows.length} of the partner's, where a ` +
-          "block of one matched value holds every pair between them",
-      );
-    const block = blockOfCluster[index]!;
-    const first = clusterOfBlock.get(block);
-    if (first !== undefined)
-      throw notBlockDiagonal(
-        id,
-        "one matched value's pairs are split across the clusters holding " +
-          `this party's records ${clusters[first].localRows[0]} and ` +
-          `${localRows[0]}`,
-      );
-    clusterOfBlock.set(block, index);
+  const partnerRowsOf = new Map<number, Set<number>>();
+  for (let i = 0; i < table[0].length; ++i) {
+    let rows = partnerRowsOf.get(table[0][i]);
+    if (rows === undefined) {
+      rows = new Set<number>();
+      partnerRowsOf.set(table[0][i], rows);
+    }
+    rows.add(table[1][i]);
   }
+
+  const pairsCoveredByBlocks = new Set<string>();
+  for (const block of blocks) {
+    if (block.localRows.length === 0 || block.partnerRows.length === 0)
+      throw new Error(
+        `${id}: the closure check was given a block with no record on one ` +
+          "side, where a block is the records that contributed one matched value",
+      );
+    const cluster = clusterOfLocalRow.get(block.localRows[0]);
+    for (const row of block.localRows)
+      if (clusterOfLocalRow.get(row) !== cluster)
+        throw notRoundDiagonal(
+          id,
+          "one matched value's pairs are split across the clusters holding " +
+            `this party's records ${block.localRows[0]} and ${row}`,
+        );
+    for (const row of block.partnerRows)
+      if (clusterOfPartnerRow.get(row) !== cluster)
+        throw notRoundDiagonal(
+          id,
+          "one matched value's pairs are split across the cluster holding " +
+            `this party's record ${block.localRows[0]} and the one holding ` +
+            `the partner's record ${row}`,
+        );
+    for (const local of block.localRows) {
+      const held = partnerRowsOf.get(local);
+      for (const partner of block.partnerRows) {
+        if (held?.has(partner) !== true)
+          throw notRoundDiagonal(
+            id,
+            `the block of one matched value covers ${block.localRows.length} ` +
+              `record(s) of this party and ${block.partnerRows.length} of the ` +
+              `partner's, and the table holds no pair between this party's ` +
+              `record ${local} and the partner's ${partner}, where a block ` +
+              "holds every pair between the records that contributed its value",
+          );
+        pairsCoveredByBlocks.add(pairKey(local, partner));
+      }
+    }
+  }
+
+  for (let i = 0; i < table[0].length; ++i)
+    if (!pairsCoveredByBlocks.has(pairKey(table[0][i], table[1][i])))
+      throw notRoundDiagonal(
+        id,
+        `the table pairs this party's record ${table[0][i]} with the ` +
+          `partner's ${table[1][i]}, and no matched value's block holds that ` +
+          "pair, so the cluster it joins rests on an edge the round did not " +
+          "produce",
+      );
 }
 
-function notBlockDiagonal(
+function pairKey(local: number, partner: number): string {
+  return `${local},${partner}`;
+}
+
+function notRoundDiagonal(
   id: string,
   detail: string,
 ): InternalConsistencyError {
   return new InternalConsistencyError(
-    `${id}: the matched table's entity clusters are not the blocks a ` +
+    `${id}: the matched table's entity clusters are not the shape a ` +
       `both-sided deduplicating cascade produces: ${detail}. The exchange ` +
       "cannot proceed; report it with this message.",
   );

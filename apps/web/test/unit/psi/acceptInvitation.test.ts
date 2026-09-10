@@ -445,20 +445,20 @@ describe("the accepting party's own deduplicate at the seat", () => {
 
   test("the seat's refusal agrees with the run boundary over the same pair", () => {
     // The seat reads `resolveLinkageCardinality`, the boundary the run resolves
-    // the joint cardinality at, so it refuses exactly the pairs the run refuses.
+    // the joint cardinality at, through the derivation the accept itself runs
+    // -- which holds the same refusal -- so it refuses exactly the pairs the
+    // run refuses. Both are inside the try for that reason.
     const singlePass: LinkageTerms = {
       ...invitationTerms,
       linkageStrategy: "single-pass",
       deduplicate: true,
     };
-    const acceptorTerms = deriveAcceptedLinkageTerms(
-      singlePass,
-      "Accepting Org",
-      true,
-    );
     let boundary: string | undefined;
     try {
-      resolveLinkageCardinality(acceptorTerms, singlePass);
+      resolveLinkageCardinality(
+        deriveAcceptedLinkageTerms(singlePass, "Accepting Org", true),
+        singlePass,
+      );
     } catch (error) {
       boundary = (error as Error).message;
     }
