@@ -1192,8 +1192,11 @@ exchange's own page, below its run history.
   does not call back the payload already handed to the transport, and neither
   does a connection dropping, so the disclosure is accounted for either way. Such
   an entry is marked where the page lists entries and states that delivery to
-  your partner is not confirmed and the run produced no result, so an accounting
-  drawn from the list does not take it for a completed disclosure.
+  your partner is not confirmed and that the run wrote you no result file, so an
+  accounting drawn from the list does not take it for a completed disclosure. Its
+  columns each way are what the run had sent and what had arrived when it
+  stopped, which the entry names as such; a result size beside them is the
+  intersection the exchange had computed, not a result you were handed.
 - **A run that stopped before sending is not in it.** Nothing was disclosed, so
   there is no record to file; the run history above says what happened instead.
 - **It is exportable.** One action writes the whole accounting as a CSV, one row

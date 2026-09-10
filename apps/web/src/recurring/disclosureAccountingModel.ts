@@ -106,6 +106,11 @@ export const DISCLOSED_AT_LABEL = "Disclosed at";
  * them and the exported CSV columns follow. Stated once so the export's header row
  * exists for an accounting with no entries to read it off; a unit test pins it
  * against the facts a real record produces, so the two cannot drift.
+ *
+ * The export's header is one row over every entry, so it names the columns in
+ * these terms whatever each entry's own run did. A stopped run's entry restates
+ * one label for itself on screen ({@link ARRIVED_COLUMNS_LABEL}); the column it
+ * sits in, and the order of the columns, are the same for every entry.
  */
 export const DISCLOSURE_FACT_LABELS: ReadonlyArray<string> = [
   "Partner",
@@ -167,17 +172,34 @@ const OUTCOME_DISCLOSURE: Record<ExchangeRecordOutcome, Displayable> = {
  * What a terminated run's entry attests, and what it does not. A record commits to
  * this party's own act of disclosure -- the payload frame handed to the transport
  * -- never to the partner's receipt of it, and a run cut there kept only what had
- * arrived by the cut and produced no result (see docs/spec/EXCHANGE_RECORD.md,
- * "When a record is owed").
+ * arrived by the cut (see docs/spec/EXCHANGE_RECORD.md, "When a record is owed").
+ *
+ * What it says about the result is the result FILE, not the result size beside it:
+ * the size is the intersection the exchange had computed, which a terminated
+ * record holds under the same entitlement gate a completed one does, while a
+ * terminated run writes no result file (see docs/spec/EXCHANGE_RECORD.md). A note
+ * denying a result outright would contradict the size in the same entry.
  *
  * It sits on the outcome fact, the one fact of a terminated entry that always has a
  * value: a note attached to the received-columns fact would be dropped in exactly
  * the case it speaks for, since a run cut before the partner's reply shows that
  * fact's named empty state instead. Being a note, it also travels into the exported
- * CSV, where a compliance reader meets the entry without the screen around it.
+ * CSV, where a compliance reader meets the entry without the screen around it --
+ * and where the received-columns column is named for every entry at once, so this
+ * is the only place the export states what those names are.
  */
 const TERMINATED_DISCLOSURE_NOTE =
-  "Your payload had been handed to the transport, so this entry records a disclosure; whether it reached your partner is not confirmed. The columns you received are what had arrived when the run stopped, and no result was produced.";
+  "Your payload had been handed to the transport, so this entry records a disclosure; whether it reached your partner is not confirmed. The columns recorded as received are what had arrived when the run stopped, and the run wrote you no result file.";
+
+/**
+ * How a terminated entry names its received-columns fact on screen: what the
+ * record holds there is what had arrived by the cut, which the run never went on
+ * to accept -- a run stopped by the received-payload refusal commits the very
+ * column names it refused (see docs/spec/EXCHANGE_RECORD.md, "When a record is
+ * owed"). The export's header is one row over every entry, so it keeps the
+ * standing label and {@link TERMINATED_DISCLOSURE_NOTE} states this there.
+ */
+const ARRIVED_COLUMNS_LABEL = "Columns that arrived before the run stopped";
 
 /** Whether the record's run stopped after disclosing rather than finishing. */
 function terminatedRun(record: Pick<ExchangeRecord, "outcome">): boolean {
@@ -285,6 +307,11 @@ function ruleSetFact(
  * basis the match keyed on and the rule set the terms cited it to, the records
  * this party exposed, the result size where it was recorded, and where the result
  * was filed. Each is a field of the run's exchange record.
+ *
+ * The same facts in the same order for every record. A terminated run's entry
+ * differs in two of them only: the outcome fact takes
+ * {@link TERMINATED_DISCLOSURE_NOTE}, and the received-columns fact takes
+ * {@link ARRIVED_COLUMNS_LABEL} for the label it shows.
  */
 export function disclosureFacts(
   record: ExchangeRecord,
@@ -319,7 +346,7 @@ export function disclosureFacts(
       NO_COLUMNS,
     ),
     listFact(
-      "Columns you received",
+      terminatedRun(record) ? ARRIVED_COLUMNS_LABEL : "Columns you received",
       governance.payloadReceived.map((column) => categoryLabel(column)),
       NO_COLUMNS,
     ),
