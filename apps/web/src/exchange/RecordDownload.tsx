@@ -139,7 +139,7 @@ function recordPanelCopy(offer: RenderedRecordOffer): {
  * offering.
  *
  * The run this exists for is the one that DISCLOSED AND THEN STOPPED. A record is
- * owed from the moment the payload exchange returns, so such a run writes one to
+ * owed from the moment this party's payload crosses, so such a run writes one to
  * the same destination a completed run's takes (docs/spec/EXCHANGE_RECORD.md, When
  * a record is owed) -- and it reaches the seat as a failure, where the completion
  * downloads render nothing at all. Without this panel the console would hold the

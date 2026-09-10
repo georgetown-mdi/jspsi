@@ -1516,7 +1516,7 @@ export class JobManager {
  * parses into a `createdAt` and an `outcome`.
  *
  * Gated on the record's own existence rather than the run having succeeded:
- * a record is owed from the moment the payload exchange returns
+ * a record is owed from the moment this party's payload crosses
  * (docs/spec/EXCHANGE_RECORD.md, When a record is owed), so a run that
  * disclosed and then terminated writes one too. Settling is read separately
  * because the CLI writes the pair near the end of a run, so a mid-run ask

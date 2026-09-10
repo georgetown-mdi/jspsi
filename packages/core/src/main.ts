@@ -492,6 +492,7 @@ export {
   assertSigningModeImplemented,
   countIsPartnerReported,
   describeExchangeStages,
+  exchangeDisclosedWithoutPartnerPayload,
   exchangeRecordFromFailure,
   exchangeRecordOwedButUnbuilt,
   matchedPairCount,

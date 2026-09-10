@@ -918,7 +918,7 @@ describe("status route reports record availability", () => {
   });
 
   test("a run that failed before disclosing offers no record", async () => {
-    // A failure before the payload exchange returns owes no record and writes
+    // A failure before this party's payload crosses owes no record and writes
     // none, so nothing is on disk to offer -- the absence is the file's, not a
     // status test standing in for it.
     const id = await createFinishedJob("failed", { STUB_EXIT_CODE: "1" });

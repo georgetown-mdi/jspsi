@@ -378,13 +378,12 @@ interface ExchangeRecordGovernance {
  *   terminated without this party holding a receipt for it. The signed-receipt
  *   swap is the step it most often terminates in, but the value covers the
  *   whole post-disclosure region -- a partner reply that never arrives, and a
- *   received payload refused against what this party consented to receive,
- *   both terminate the run before the swap and record the same value. The
+ *   received payload refused against what this party consented to receive, both
+ *   terminate the run before the swap and record the same value. The
  *   received-payload commitment beside it is empty where no reply arrived, so
  *   the record commits to what this party received. The record still attests
- *   the disclosure it made. It
- *   does not state WHY the run terminated (docs/spec/EXCHANGE_RECORD.md, When
- *   a record is owed).
+ *   the disclosure it made; it does not state WHY the run terminated
+ *   (docs/spec/EXCHANGE_RECORD.md, When a record is owed).
  *
  * Stated on every record rather than left to an absent-marks-terminated
  * reading, so a compliance reader never infers a completed run from silence --
