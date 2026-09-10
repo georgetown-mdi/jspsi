@@ -395,7 +395,7 @@ export const AuthenticationSchema: z.ZodType<Authentication> = z.strictObject({
  * established.
  */
 interface TurnServer {
-  /** TURN server URI (`turn:` or `turns:`). */
+  /** TURN server URI: `turn:` or `turns:` followed by a host. */
   url: string;
   username: string;
   /** TURN credential; @-file recommended. */
@@ -407,8 +407,22 @@ interface TurnServer {
   credentialType?: "password" | "hmac-sha1";
 }
 
+// A TURN or STUN URI names its host directly after the scheme. An entry with
+// no host -- `turn:` left by an empty environment substitution, say -- reaches
+// the ICE layer as a server it cannot resolve and is dropped there: a
+// relay-only policy then gathers host candidates, and a stun list replaces the
+// built-in default with nothing. Both are refused here instead.
+const TURN_URL_PATTERN = /^turns?:[^\s:?][^\s?]*(?:\?\S*)?$/;
+const STUN_URI_PATTERN = /^stuns?:[^\s:?][^\s?]*(?:\?\S*)?$/;
+
 const TurnServerSchema: z.ZodType<TurnServer> = z.object({
-  url: z.string().regex(/^turns?:/, "TURN URL must begin with turn: or turns:"),
+  url: z
+    .string()
+    .regex(
+      TURN_URL_PATTERN,
+      "a turn entry's url must name a host after turn: or turns:, for " +
+        "example turns:relay.example.org:443?transport=tcp",
+    ),
   username: z.string().min(1),
   credential: z.string().min(1),
   credentialType: z.enum(["password", "hmac-sha1"]).optional(),
@@ -778,7 +792,7 @@ export interface WebRTCConnectionConfig {
   role?: "inviter" | "acceptor";
   /**
    * STUN servers for ICE candidate gathering; each entry is a `stun:` or
-   * `stuns:` URI.
+   * `stuns:` URI followed by a host.
    */
   stun?: string[];
   /** TURN servers for relaying when no direct path can be found. */
@@ -878,7 +892,13 @@ const WebRTCConnectionConfigSchema = z.object({
   role: z.enum(["inviter", "acceptor"]).optional(),
   stun: z
     .array(
-      z.string().regex(/^stuns?:/, "STUN URI must begin with stun: or stuns:"),
+      z
+        .string()
+        .regex(
+          STUN_URI_PATTERN,
+          "a stun entry must name a host after stun: or stuns:, for " +
+            "example stun:stun.example.org:3478",
+        ),
     )
     .optional(),
   turn: z.array(TurnServerSchema).optional(),

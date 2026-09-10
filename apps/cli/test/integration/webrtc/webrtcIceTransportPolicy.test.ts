@@ -27,6 +27,18 @@ const UNREACHABLE_TURN = {
 const UNREACHABLE_STUN = { urls: "stun:127.0.0.1:3478" };
 
 /**
+ * A TURN entry naming no host, the shape an empty environment substitution
+ * leaves behind. The connection schema refuses it
+ * (`packages/core/src/config/connection.ts`); the arm below is what that
+ * refusal keeps out, so it is built here rather than parsed.
+ */
+const HOSTLESS_TURN = {
+  urls: "turn:",
+  username: "psilink",
+  credential: "placeholder-not-a-secret",
+};
+
+/**
  * How long a gathering arm may take. An unreachable ICE server is abandoned on
  * werift's own timer, which is what each arm waits out, so this sits well above
  * the six or seven seconds that takes.
@@ -120,5 +132,30 @@ test(
     expect(unset.some((candidate) => candidate.includes("typ host"))).toBe(
       true,
     );
+  },
+);
+
+test(
+  "a relay-only policy with no relay server gathers a host candidate",
+  { timeout: GATHERING_TIMEOUT_MS },
+  async () => {
+    // What makes the schema's two refusals required rather than tidy: werift
+    // applies the policy only where a TURN server it can parse reaches it, so
+    // a relay-only connection with no `turn` entry, or one whose url names no
+    // host, offers the partner the very host address the setting exists to
+    // keep off the wire. Neither shape parses, so both are built here.
+    const [noServers, hostlessTurn] = await Promise.all([
+      gatheredCandidates({ iceTransportPolicy: "relay" }),
+      gatheredCandidates({
+        iceServers: [HOSTLESS_TURN],
+        iceTransportPolicy: "relay",
+      }),
+    ]);
+    expect(noServers.some((candidate) => candidate.includes("typ host"))).toBe(
+      true,
+    );
+    expect(
+      hostlessTurn.some((candidate) => candidate.includes("typ host")),
+    ).toBe(true);
   },
 );

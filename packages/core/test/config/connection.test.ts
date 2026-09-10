@@ -1013,29 +1013,87 @@ test("file-sync-only options do not survive a webrtc parse", () => {
 // --- STUN URI format ---------------------------------------------------------
 
 test.each([
+  ["stun:stun.example.org", true],
   ["stun:stun.example.org:3478", true],
   ["stuns:stun.example.org:5349", true],
   ["https://stun.example.org", false],
   ["turn:stun.example.org", false],
   ["", false],
+  // A scheme with no host names no server, so it can never answer a binding
+  // request; a configured list replaces the built-in default rather than
+  // adding to it, so such an entry would leave the run with no STUN at all.
+  ["stun:", false],
+  ["stuns:", false],
+  ["stun: ", false],
+  ["stun:?transport=udp", false],
 ])('STUN URI "%s" is %s', (uri, valid) => {
   const result = safeParseConnectionConfig({ ...webrtcBase, stun: [uri] });
   expect(result.success).toBe(valid);
 });
 
+test("a host-less STUN entry is refused with the form it needs", () => {
+  const result = safeParseConnectionConfig({ ...webrtcBase, stun: ["stun:"] });
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  const messages = result.error.issues.map((i) => i.message);
+  expect(messages.some((m) => m.includes("stun entry must name a host"))).toBe(
+    true,
+  );
+  expect(messages.some((m) => m.includes("stun:stun.example.org"))).toBe(true);
+});
+
 // --- TURN URL format ---------------------------------------------------------
 
 test.each([
+  ["turn:turn.example.org", true],
   ["turn:turn.example.org:3478", true],
   ["turns:turn.example.org:443", true],
+  ["turns:turn.example.org:443?transport=tcp", true],
   ["https://turn.example.org", false],
   ["stun:turn.example.org", false],
+  // A scheme with no host is dropped by the ICE layer, which under
+  // `ice_transport_policy: relay` leaves the run gathering host candidates --
+  // the property the policy exists to keep. Driven at the library in
+  // apps/cli/test/integration/webrtc/webrtcIceTransportPolicy.test.ts.
+  ["turn:", false],
+  ["turns:", false],
+  ["turn: ", false],
+  ["turn:?transport=tcp", false],
 ])('TURN URL "%s" is %s', (url, valid) => {
   const result = safeParseConnectionConfig({
     ...webrtcBase,
     turn: [{ url, username: "u", credential: "c" }],
   });
   expect(result.success).toBe(valid);
+});
+
+test("a host-less TURN url is refused with the form it needs", () => {
+  const result = safeParseConnectionConfig({
+    ...webrtcBase,
+    turn: [{ url: "turn:", username: "u", credential: "c" }],
+  });
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  const messages = result.error.issues.map((i) => i.message);
+  expect(
+    messages.some((m) => m.includes("turn entry's url must name a host")),
+  ).toBe(true);
+  expect(messages.some((m) => m.includes("turns:relay.example.org:443"))).toBe(
+    true,
+  );
+});
+
+test("a host-less TURN url is refused under every policy", () => {
+  // The entry is unusable whatever the policy, so the refusal does not wait
+  // for `relay` to make it matter.
+  for (const iceTransportPolicy of ["all", undefined] as const) {
+    const result = safeParseConnectionConfig({
+      ...webrtcBase,
+      turn: [{ url: "turns:", username: "u", credential: "c" }],
+      ...(iceTransportPolicy === undefined ? {} : { iceTransportPolicy }),
+    });
+    expect(result.success).toBe(false);
+  }
 });
 
 // --- camelizeKeys integration ------------------------------------------------
