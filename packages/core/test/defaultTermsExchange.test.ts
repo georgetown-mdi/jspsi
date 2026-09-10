@@ -4,6 +4,8 @@ import PSI from "@openmined/psi.js";
 
 import { getDefaultLinkageTerms } from "../src/defaults/builtInLinkageTerms";
 import { referencedLinkageFieldNames } from "../src/config/linkageTermsSchema";
+import { termsDeclareCandidateSet } from "../src/fanOutFunctions";
+import { entityClusters } from "../src/psi/entityClosure";
 import { prepareForExchange, runExchange } from "../src/exchange";
 import { createMessagePipe } from "../src/connection/messageConnection";
 
@@ -356,6 +358,34 @@ test("the built-in default terms link the records their keys relate", async () =
   expect(matchedPairs(anchor)).toEqual(expected);
   expect(matchedPairs(counterpart)).toEqual(expected);
   expect(anchor.audit?.record.resultSize).toBe(defaultKeys.length);
+});
+
+test("the built-in default terms run with both parties deduplicating", async () => {
+  // The shipped key set declares a candidate set of its own -- its swap key
+  // names both orders -- so the pair both parties deduplicating resolves to is
+  // the one the cascade matches over a round's blocks and closes into entity
+  // clusters. It relates the same records the single-sided run does, each
+  // cluster one record a side.
+  expect(termsDeclareCandidateSet(defaultTerms)).toBe(true);
+
+  const { anchor, counterpart } = await runDefaultTermsExchange(
+    (identity) => ({ ...getDefaultLinkageTerms(identity), deduplicate: true }),
+    anchorRows,
+    counterpartRows,
+  );
+
+  const expected = defaultKeys.map((_key, record): [number, number] => [
+    record,
+    record,
+  ]);
+  expect(matchedPairs(anchor)).toEqual(expected);
+  expect(matchedPairs(counterpart)).toEqual(expected);
+  expect(entityClusters(anchor.associationTable!)).toEqual(
+    expected.map(([local, partner]) => ({
+      localRows: [local],
+      partnerRows: [partner],
+    })),
+  );
 });
 
 // The same pairs one key at a time. Under the whole cascade a pair built for a

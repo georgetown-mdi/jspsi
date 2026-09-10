@@ -16,10 +16,10 @@ import {
 } from "./config/compatibilityMessage.js";
 import type { CompatibilityMessageFragment } from "./config/compatibilityMessage.js";
 import {
+  assertBothSidedDeduplicateImplemented,
   assertCountOnlyTermsShape,
   assertDeduplicateImplemented,
 } from "./linkageTermsPolicy.js";
-import { assertBothSidedDeduplicateImplemented } from "./linkageTermsPolicy.js";
 import {
   LinkageTermsSchema,
   MAX_TEXT_LENGTH,

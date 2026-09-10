@@ -33,7 +33,7 @@ import { UNBOUNDED_PSI_ELEMENTS } from "../utils/psiElementBounds";
 
 const psiLibrary = await PSI();
 
-type Keys = Array<Array<string | undefined>>;
+type Keys = Array<Array<string | Set<string> | undefined>>;
 
 function makeParticipant(role: "starter" | "joiner"): PSIParticipant {
   return new PSIParticipant(
@@ -719,6 +719,86 @@ for (const party of ["starter", "joiner"] as const) {
     await expectProtocolRefusal(
       onMappedElementList(1, (list) => [...list, list[list.length - 1]]),
       /the returned mapped-element list has 5 entries, expected 6/,
+    );
+  });
+}
+
+// --- the index checks over a round a candidate set widened ---------------------
+// The same rules where one record contributes several of a round's values, which
+// is what leaves two of this party's entries accepted with overlapping sets of
+// the partner's records rather than with one group each (docs/spec/PROTOCOL.md,
+// What this resolution owes). The starter's row 0 reaches both of the
+// joiner's records through its two candidates and its row 1 reaches one of them,
+// so the four records stand in one chained cluster over two blocks.
+const chainedStarterKeys: Keys = [[new Set(["E1", "E2"]), "E2", "E3", "S"]];
+const chainedJoinerKeys: Keys = [["E1", "E2", "E3", "J"]];
+
+for (const party of ["starter", "joiner"] as const) {
+  const under = ` (deviating party: ${party})`;
+
+  const expectChainedRefusal = async (
+    deviation: Deviation,
+    detail: RegExp,
+  ): Promise<void> => {
+    const run = await runCascade(chainedStarterKeys, chainedJoinerKeys, {
+      party,
+      deviation,
+    });
+    const outcome = run[party];
+    expect(outcome).toBeInstanceOf(ConnectionError);
+    expect((outcome as ConnectionError).kind).toBe("protocol");
+    expect((outcome as Error).message).toMatch(detail);
+  };
+
+  test(`a widened round's chained cluster resolves on both parties${under}`, async () => {
+    // The undeviated run, so each refusal below is read against a round that
+    // otherwise completes.
+    const run = await runCascade(chainedStarterKeys, chainedJoinerKeys);
+    const [starter, joiner] = expectTables(run);
+    expect(pairsOf(starter, false)).toStrictEqual([
+      [0, 0],
+      [0, 1],
+      [1, 1],
+      [2, 2],
+    ]);
+    expectAgreement(starter, joiner);
+    expect(entityClusters(starter)).toStrictEqual([
+      { localRows: [0, 1], partnerRows: [0, 1] },
+      { localRows: [2], partnerRows: [2] },
+    ]);
+  });
+
+  test(`a returned run naming a row the round did not pair with its entry is refused${under}`, async () => {
+    // The amplification the run rule exists to stop: pointing one entry's run at
+    // a partner row another entry's record was paired with -- and its own was
+    // not -- would merge two of this party's records into one cluster its own
+    // resolution kept apart. Every entry stays in range and the count is
+    // untouched.
+    await expectChainedRefusal(
+      onMappedElementList(2, (list) => [
+        ...list.slice(0, -1),
+        { ...list[list.length - 1], theirIndex: list[0].theirIndex },
+      ]),
+      /names one partner row for a set of this side's records the round did not accept together/,
+    );
+  });
+
+  test(`a partner entry naming a position this party did not match is refused${under}`, async () => {
+    // The widened entry names a SET of positions here, and every one of them is
+    // held to the same rule a single-position entry is: a position this party
+    // matched in that round.
+    await expectChainedRefusal(
+      onMappedElementList(1, (list) => [
+        ...list.slice(0, -1),
+        { ...list[list.length - 1], theirIndex: [2, 3] },
+      ]),
+      party === "starter"
+        ? // The joiner omits its own grouping here, so the starter reads its
+          // entries as position sets against its own round output.
+          /names a record this side did not match on that round/
+        : // The starter states its grouping, so the joiner holds its entries to
+          // the pairing both parties computed, position for position.
+          /names positions other than the ones that round's accepted pairs rest on/,
     );
   });
 }

@@ -990,14 +990,17 @@ export async function linkViaPSI(
       : resolved.acceptedSenderRanks;
 
     // This party states the positions its accepted records' pairs rest on
-    // exactly where the partner holds its exact partition to read them
-    // against; where the partner does not -- this party deduplicating and
-    // omitting its grouping -- an entry names the one canonical position, which
-    // the partner reads for the whole group behind it. Both parties derive the
-    // same reading for each direction, one from its own side of the resolved
-    // cardinality and its own grouping, the other from what arrived.
+    // wherever the partner can read them: where it holds this party's exact
+    // partition, and under a both-sided multiplicity, where a named position
+    // stands for the whole group of the partner's records behind it and the
+    // entry expands to those groups together. It is only where the partner
+    // reads positions for groups AND its own side keeps its distinctness that
+    // an entry names the one canonical position, since a record of this party
+    // is then accepted against one record of the partner's. Both parties derive
+    // the same reading for each direction, one from its own side of the
+    // resolved cardinality and its own grouping, the other from what arrived.
     const statesPositionSets =
-      !sides.localKeepsDuplicates || local.field !== undefined;
+      !sides.localKeepsDuplicates || local.field !== undefined || bothSided;
     const entryPositionSets = statesPositionSets
       ? acceptedPositionSets(
           localAccepted,
@@ -1204,40 +1207,56 @@ export async function linkViaPSI(
         );
       rows = partnerEntryRowsByIter[e.iteration]![place];
     } else {
-      if (positions.length !== 1)
+      // Each position the entry names stands for the whole GROUP of this
+      // party's records behind it, and the entry expands to those groups taken
+      // together. Only a both-sided round reaches more than one position here:
+      // elsewhere the naming party's record was accepted against one record of
+      // this side, whose positions its canonical one stands for. The count is
+      // held to the candidate width the agreed terms declare for the key,
+      // which is the most values one of the partner's records can hold.
+      const positionCeiling = bothSided
+        ? keyWidthBound(bounds, e.iteration)
+        : 1;
+      if (positions.length > positionCeiling)
         throw partnerProtocolError(
           participant.id,
-          "the partner's mapped-element list names several positions for a " +
-            "round whose grouping it omitted",
+          "the partner's mapped-element list names more positions for one " +
+            `record than the ${positionCeiling} that round admits`,
         );
-      const [from, to] = positionRowRange(candidates, positions[0]);
-      const i = candidates.rows[from];
-      if (indexIterationMap[i]?.iteration !== e.iteration)
-        throw partnerProtocolError(
-          participant.id,
-          "the partner's mapped-element list names a record this side did " +
-            "not match on that round",
-        );
-      // Where a candidate set widened this party, one record owns several of
-      // the round's matched positions and only the lowest names it, since a
-      // partner reading positions for groups cannot tell them apart. A
-      // position standing for a GROUP of this party's records names the group
-      // rather than one record.
-      if (
-        !sides.localKeepsDuplicates &&
-        canonicalPositionOf[i] !== positions[0]
-      )
-        throw partnerProtocolError(
-          participant.id,
-          "the partner's mapped-element list names a position other than the " +
-            "canonical one of the record it matched",
-        );
-      if (named[i] === 1 && !sides.partnerKeepsDuplicates)
-        throw partnerProtocolError(
-          participant.id,
-          "the partner's mapped-element list names one record twice",
-        );
-      rows = candidates.rows.slice(from, to);
+      const groupRows: Array<number> = [];
+      const inGroups = new Set<number>();
+      for (const position of positions) {
+        const [from, to] = positionRowRange(candidates, position);
+        const i = candidates.rows[from];
+        if (indexIterationMap[i]?.iteration !== e.iteration)
+          throw partnerProtocolError(
+            participant.id,
+            "the partner's mapped-element list names a record this side did " +
+              "not match on that round",
+          );
+        // Where a candidate set widened this party and its partner keeps no
+        // duplicates, one record owns several of the round's matched positions
+        // and only the lowest names it, since a partner reading positions for
+        // groups cannot tell them apart. A position standing for a GROUP of
+        // this party's records names the group rather than one record.
+        if (!sides.localKeepsDuplicates && canonicalPositionOf[i] !== position)
+          throw partnerProtocolError(
+            participant.id,
+            "the partner's mapped-element list names a position other than " +
+              "the canonical one of the record it matched",
+          );
+        if (named[i] === 1 && !sides.partnerKeepsDuplicates)
+          throw partnerProtocolError(
+            participant.id,
+            "the partner's mapped-element list names one record twice",
+          );
+        for (let r = from; r < to; ++r)
+          if (!inGroups.has(candidates.rows[r])) {
+            inGroups.add(candidates.rows[r]);
+            groupRows.push(candidates.rows[r]);
+          }
+      }
+      rows = groupRows.sort((a, b) => a - b);
     }
     for (const row of rows)
       if (named[row] === 0) {

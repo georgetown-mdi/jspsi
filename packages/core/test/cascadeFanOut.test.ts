@@ -22,6 +22,7 @@ import {
   StandardizedKeyIterable,
 } from "../src/standardization";
 import { getLogger } from "../src/utils/logger";
+import { entityClusters } from "../src/psi/entityClosure";
 import type {
   GenerateFuzzyComparisons,
   LinkageKey,
@@ -497,4 +498,116 @@ test("a record whose candidates cross the accumulation charge contributes nothin
   } finally {
     warn.mockRestore();
   }
+});
+
+// --- both parties deduplicating, end to end ----------------------------------
+// The same three producers under the cardinality the agreed `(true, true)` pair
+// resolves to, which pairs every candidate a round produces and closes the
+// table into entity clusters (docs/spec/PROTOCOL.md, The `many-to-many` entity
+// closure). Each case here is the section above's fixture with both parties'
+// `deduplicate` set, so what it adds is that an authored candidate set reaches
+// that cardinality's round rather than a refusal.
+
+const bothSided = (terms: LinkageTerms): LinkageTerms => ({
+  ...terms,
+  deduplicate: true,
+});
+
+// Each party's own half of the one pair set, read as (initiator row, responder
+// row) pairs so the two are compared as one table.
+function agreedPairs(
+  initiator: ExchangeResult,
+  responder: ExchangeResult,
+): Array<[number, number]> {
+  const mine = initiator.associationTable!;
+  const theirs = responder.associationTable!;
+  const asPairs = (
+    table: [Array<number>, Array<number>],
+    swap: boolean,
+  ): Array<[number, number]> =>
+    table[0]
+      .map((local, i): [number, number] =>
+        swap ? [table[1][i], local] : [local, table[1][i]],
+      )
+      .sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  const pairs = asPairs(mine, false);
+  expect(asPairs(theirs, true)).toEqual(pairs);
+  return pairs;
+}
+
+test("a split_on configuration matches with both parties deduplicating", async () => {
+  // The initiator's two rows both split off "JONES", so the responder's row 0
+  // stands in a block with each of them, and the initiator's row 0 also matches
+  // through its other candidate. One cluster spans two of the round's blocks,
+  // which is the shape the closure admits and the block-diagonal one did not.
+  const [initiator, responder] = await runBothParties(
+    bothSided(cascadeTerms(SPLIT_ON_KEYS)),
+    [
+      { last_name: "Smith-Jones", first_name: "Alice" },
+      { last_name: "Jones", first_name: "Bella" },
+    ],
+    [
+      { last_name: "Jones", first_name: "Zoe" },
+      { last_name: "Smith", first_name: "Yara" },
+    ],
+  );
+
+  expect(agreedPairs(initiator, responder)).toEqual([
+    [0, 0],
+    [0, 1],
+    [1, 0],
+  ]);
+  expect(entityClusters(initiator.associationTable!)).toEqual([
+    { localRows: [0, 1], partnerRows: [0, 1] },
+  ]);
+});
+
+describe("each fuzzy comparison kind matches with both parties deduplicating", () => {
+  test.each(FUZZY_CASES)(
+    "$kind relates the pair its expansion reaches",
+    async ({ kind, initiator, responder }) => {
+      const dateKind = kind === "adjacent_years" || kind === "day_month_swaps";
+      const column = dateKind ? "date_of_birth" : "last_name";
+      // Two rows a side holding one value each, so the expansion's pair is a
+      // 2x2 block rather than the single pair the one-to-one run takes.
+      const [initiatorResult, responderResult] = await runBothParties(
+        bothSided(fuzzyTerms(kind)),
+        [{ [column]: initiator }, { [column]: initiator }],
+        [{ [column]: responder }, { [column]: responder }],
+        [column],
+      );
+      expect(agreedPairs(initiatorResult, responderResult)).toEqual([
+        [0, 0],
+        [0, 1],
+        [1, 0],
+        [1, 1],
+      ]);
+      expect(entityClusters(initiatorResult.associationTable!)).toEqual([
+        { localRows: [0, 1], partnerRows: [0, 1] },
+      ]);
+    },
+  );
+});
+
+test("a swap key declaring both orders matches with both parties deduplicating", async () => {
+  // The candidate set the shipped default key set carries, under the both-sided
+  // pair: one party's record matches the partner whose fields are reversed and
+  // the partner whose fields agree, so the two partner records fall in one
+  // cluster with it.
+  const [initiator, responder] = await runBothParties(
+    bothSided(SWAP_TERMS),
+    [{ first_name: "John", last_name: "Smith" }],
+    [
+      { first_name: "Smith", last_name: "John" },
+      { first_name: "John", last_name: "Smith" },
+    ],
+  );
+
+  expect(agreedPairs(initiator, responder)).toEqual([
+    [0, 0],
+    [0, 1],
+  ]);
+  expect(entityClusters(initiator.associationTable!)).toEqual([
+    { localRows: [0], partnerRows: [0, 1] },
+  ]);
 });
