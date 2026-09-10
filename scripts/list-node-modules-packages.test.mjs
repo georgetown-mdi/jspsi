@@ -1,4 +1,5 @@
 import {
+  chmodSync,
   mkdirSync,
   mkdtempSync,
   rmSync,
@@ -80,6 +81,17 @@ describe("listNodeModulesPackages", () => {
     ]);
   });
 
+  it("skips a dotted entry inside a scope directory", () => {
+    const nodeModules = tree({
+      "@psilink/.cache": null,
+      "@psilink/core": { name: "@psilink/core", version: "0.1.0" },
+    });
+
+    expect(listNodeModulesPackages(nodeModules)).toEqual([
+      "@psilink/core@0.1.0",
+    ]);
+  });
+
   it("reads a workspace link from its target without descending into it", () => {
     const nodeModules = tree({
       "../packages/core": { name: "@psilink/core", version: "0.1.0" },
@@ -99,4 +111,47 @@ describe("listNodeModulesPackages", () => {
   it("is empty for a tree that does not exist", () => {
     expect(listNodeModulesPackages(join(tmpdir(), "no-such-tree"))).toEqual([]);
   });
+
+  // The two cases below stage a directory that denies the account reading it,
+  // which root ignores and a platform with no uid to read cannot stage at all.
+  const modesDenyTheReader =
+    process.getuid !== undefined && process.getuid() !== 0;
+
+  it.skipIf(!modesDenyTheReader)(
+    "refuses a scope directory it cannot list",
+    () => {
+      const nodeModules = tree({
+        "@noble/curves": { name: "@noble/curves", version: "2.4.0" },
+        yaml: { name: "yaml", version: "2.8.1" },
+      });
+      const scope = join(nodeModules, "@noble");
+      chmodSync(scope, 0o000);
+
+      try {
+        expect(() => listNodeModulesPackages(nodeModules)).toThrow(scope);
+        expect(() => listNodeModulesPackages(nodeModules)).toThrow("EACCES");
+      } finally {
+        chmodSync(scope, 0o755);
+      }
+    },
+  );
+
+  it.skipIf(!modesDenyTheReader)(
+    "refuses a nested node_modules it cannot list",
+    () => {
+      const nodeModules = tree({
+        ssh2: { name: "ssh2", version: "1.17.0" },
+        "ssh2/node_modules/asn1": { name: "asn1", version: "0.2.6" },
+      });
+      const nested = join(nodeModules, "ssh2", "node_modules");
+      chmodSync(nested, 0o000);
+
+      try {
+        expect(() => listNodeModulesPackages(nodeModules)).toThrow(nested);
+        expect(() => listNodeModulesPackages(nodeModules)).toThrow("EACCES");
+      } finally {
+        chmodSync(nested, 0o755);
+      }
+    },
+  );
 });

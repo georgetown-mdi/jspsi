@@ -14,6 +14,12 @@
 // reported by its path rather than skipped, that being the shape something other
 // than npm arrives in.
 //
+// The walk fails closed. A directory it cannot list refuses, naming the path and
+// the error code, rather than reporting an empty level and dropping every
+// package under it from the comparison. An absent directory is not a failure:
+// most packages have no nested node_modules, and an absent tree at the top is
+// refused by the empty result instead.
+//
 // A symlinked entry -- the workspace links npm writes for the workspaces its
 // install names -- is reported from the manifest it resolves to and not
 // descended into: its target is a workspace directory outside the tree, whose
@@ -44,6 +50,7 @@ function walkLevel(directory, root, found) {
     const path = join(directory, entry.name);
     if (entry.name.startsWith("@") && entry.isDirectory()) {
       for (const scoped of readEntries(path)) {
+        if (scoped.name.startsWith(".")) continue;
         recordPackage(join(path, scoped.name), root, found, scoped);
       }
       continue;
@@ -69,8 +76,11 @@ function recordPackage(path, root, found, entry) {
 function readEntries(directory) {
   try {
     return readdirSync(directory, { withFileTypes: true });
-  } catch {
-    return [];
+  } catch (error) {
+    if (error.code === "ENOENT") return [];
+    throw new Error(
+      `${directory} cannot be listed (${error.code ?? error.message}); run this as an account that can read every directory in the tree`,
+    );
   }
 }
 
@@ -82,7 +92,13 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     );
     process.exit(2);
   }
-  const packages = listNodeModulesPackages(directory);
+  let packages;
+  try {
+    packages = listNodeModulesPackages(directory);
+  } catch (error) {
+    console.error(error.message);
+    process.exit(1);
+  }
   if (packages.length === 0) {
     console.error(`${directory} holds no package`);
     process.exit(1);

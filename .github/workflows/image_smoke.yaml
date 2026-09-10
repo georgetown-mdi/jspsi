@@ -680,6 +680,12 @@ jobs:
       # that reason; dockerfile-freeze.test.mjs is what holds the Dockerfile to
       # it, and a change to one is a change to both.
       #
+      # The image leg runs as uid 0. Which packages the tree holds is a
+      # property of the image's filesystem rather than of what the runtime
+      # account can see, so no directory mode decides what is measured; the
+      # lister refuses a directory it cannot list either way, and running as
+      # root leaves it nothing to refuse.
+      #
       # One direction: a package in the image and not in the resolution fails.
       # The two trees are resolved from the same lockfile but seeded from
       # different manifest sets -- the builder copies four workspace manifests,
@@ -693,13 +699,13 @@ jobs:
           npm ci --omit=dev --omit=optional -w packages/core -w apps/cli
           node scripts/list-node-modules-packages.mjs node_modules \
             | LC_ALL=C sort >"$RUNNER_TEMP/resolved.txt"
-          docker run --rm \
+          docker run --rm --user 0 \
             -v "$PWD/scripts/list-node-modules-packages.mjs":/list.mjs:ro \
             --entrypoint node ${{ matrix.tag }} /list.mjs /app/node_modules \
             | LC_ALL=C sort >"$RUNNER_TEMP/shipped.txt"
 
           echo "the ${{ matrix.variant }} image carries $(wc -l <"$RUNNER_TEMP/shipped.txt") packages under /app/node_modules; the production resolution holds $(wc -l <"$RUNNER_TEMP/resolved.txt")"
-          outside=$(comm -23 "$RUNNER_TEMP/shipped.txt" "$RUNNER_TEMP/resolved.txt")
+          outside=$(LC_ALL=C comm -23 "$RUNNER_TEMP/shipped.txt" "$RUNNER_TEMP/resolved.txt")
           if [ -n "$outside" ]; then
             count=$(printf '%s\n' "$outside" | wc -l)
             echo "$count packages under /app/node_modules are outside the production resolution; the first of them:" >&2

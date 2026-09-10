@@ -578,6 +578,14 @@ shape something other than npm arrives in, and an empty tree fails outright
 rather than passing for want of anything to compare. A symlinked entry is read
 from the manifest it resolves to and not descended into.
 
+The walk fails closed. A directory it cannot list fails the step, naming that
+path and the error code, rather than reporting an empty level and dropping the
+packages under it from the comparison; an absent directory is not that, most
+packages having no nested `node_modules` of their own. The walk of the image
+runs as uid 0. Which packages the tree holds is a property of the image's
+filesystem rather than of what the runtime account can see, so no directory
+mode under `/app/node_modules` decides what is measured or refuses the step.
+
 The comparison runs one way: a package in the image and not in the resolution
 fails, and one in the resolution and not in the image does not. The two trees
 resolve from the same lockfile but are seeded from different manifest sets --
