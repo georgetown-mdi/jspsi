@@ -69,23 +69,25 @@ HKDF.
 
 **Certificate 5021, the module `3.0.8-d694bfa693b76001`, which the pinned
 snapshot still serves under the same `-certified` package name.** Three things
-it states are stronger than 5438's: six tested operational environments against
-four, with AWS Snowball among them as a tested platform rather than a
-vendor-affirmed one; a section 2.10 that states the HKDF SP 800-56C attribution
-in prose rather than leaving the row name to carry it; and a Caveat that stops
-at the SSP sentence, where 5438's adds section 11.1's
-install-and-FIPS-mode-verification requirement as a certificate-level condition
-the image cannot satisfy for itself, since it often cannot even read the host's
-FIPS mode. It is Active until 2030-05-25, so nothing forced the move.
+it states are stronger than 5438's: six tested operational environments in its
+Table 3 against 5438's four, the extra platform being AWS Snowball, which 5438
+only vendor-affirms in its Table 4 -- both certificates test the same two EC2
+platforms, each with the processor's acceleration on and off; a section 2.10
+that states the HKDF SP 800-56C attribution in prose rather than leaving the row
+name to carry it; and a Caveat that stops at the SSP sentence, where 5438's adds
+section 11.1's install-and-FIPS-mode-verification requirement as a
+certificate-level condition the image cannot satisfy for itself, since it often
+cannot even read the host's FIPS mode. It is Active until 2030-05-25, so nothing
+forced the move.
 
-The move was taken anyway (owner, 2026-09-10), for architecture coverage and
-runway. Both architectures `Dockerfile.fips` builds for are tested platforms on
-5438, each at both acceleration settings, where 5021 tested Graviton3 only with
-the processor's acceleration on and Xeon only with it off; and 5438's sunset is
-2031-07-26. Every algorithm the scoped claim names is on 5438's approved table
-with no category moved, so what the move costs is in the environment and caveat
-text rather than in an algorithm gap, and it is stated where an assessor reads
-it ([COMPLIANCE.md](../COMPLIANCE.md#fips-140)). The packaging objection that
+The move was taken anyway (owner, 2026-09-10), for runway: 5438's sunset is
+2031-07-26. It costs no coverage of the platforms the image runs on, both
+architectures `Dockerfile.fips` builds for being tested on 5438's Table 3 at
+both acceleration settings, as they are on 5021's. Every algorithm the scoped
+claim names is on 5438's approved table with no category moved, so what the move
+costs is in the environment and caveat text rather than in an algorithm gap, and
+it is stated where an assessor reads it
+([COMPLIANCE.md](../COMPLIANCE.md#fips-140)). The packaging objection that
 once stood against this certificate does not survive the `-certified` package:
 re-measured against it the vulnerability delta is zero on every scan setting and
 both architectures, and the module is incrementally patchable exactly as 5021's

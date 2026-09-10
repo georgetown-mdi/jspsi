@@ -1,7 +1,7 @@
 ---
 title: "psilink Compliance"
 review_owner: "psilink maintainers"
-last_reviewed: "2026-09-06"
+last_reviewed: "2026-09-10"
 ---
 
 # psilink compliance

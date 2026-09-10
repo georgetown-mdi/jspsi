@@ -237,8 +237,8 @@ name, and the service the call lands on is not established here.
   any OpenSSL Project certificate; under certificate 4985 Ed25519 is
   Non-Approved and Not Allowed, and certificate 5438 names it in no table at
   all, while the module read inside the image held no such primitive. Two of the
-  forty active certificates do approve EdDSA, and neither yields a verifiable certified
-  module for a freely redistributable image -- see
+  forty active certificates do approve EdDSA, and neither yields a verifiable
+  certified module for a freely redistributable image -- see
   [fips-provider-surface.md](fips-provider-surface.md). This is why the algorithm
   moved rather than the disclosure.
 - That the receipt, the certificate format, or the signed-receipt protocol is
