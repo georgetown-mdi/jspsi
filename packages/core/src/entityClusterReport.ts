@@ -1,3 +1,5 @@
+import { formatCount } from "./utils/formatCount.js";
+
 import type {
   EntityClusterShape,
   EntityClusterSummary,
@@ -13,14 +15,6 @@ import type {
  * first, so what the cut drops is the small end.
  */
 export const ENTITY_CLUSTER_SHAPES_NAMED = 6;
-
-// The explicit locale the pair-table advisory formats under
-// (pairTableProjection.ts): grouped digits as the same ASCII bytes on every
-// host and in every browser, which the CLI's console sentinel requires of every
-// line it reads.
-function formatCount(count: number): string {
-  return new Intl.NumberFormat("en-US").format(count);
-}
 
 function plural(count: number, noun: string): string {
   return `${formatCount(count)} ${noun}${count === 1 ? "" : "s"}`;

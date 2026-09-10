@@ -2123,8 +2123,13 @@ export async function runProtocol(
     // operator must not re-run it, so the catch classifies it as "output".
     terminalPhase = "output";
 
-    const { associationTable, intersectionCount, matching, resolvedRole } =
-      outcome;
+    const {
+      associationTable,
+      intersectionCount,
+      entityClusters,
+      matching,
+      resolvedRole,
+    } = outcome;
     await writeExchangeOutputs({
       outcome,
       prepared,
@@ -2150,7 +2155,9 @@ export async function runProtocol(
     // reading only fd 3, and it states the same trust posture (partner-
     // vs. self-reported) the human line does. What the agreed deduplicate
     // pair resolved to rides it for the same reason: the line stating it
-    // is an info line, unread on fd 3 alone or at a quieter log level.
+    // is an info line, unread on fd 3 alone or at a quieter log level. The
+    // entity-cluster summary the output stage logged above rides it on that
+    // same footing.
     // The metrics summary precedes it so the terminal event stays last.
     emitMetrics();
     emit((e) =>
@@ -2166,6 +2173,7 @@ export async function runProtocol(
                 resolvedRole,
               }),
             },
+        entityClusters,
       ),
     );
     return { onAuthenticatedError: run.onAuthenticatedError };

@@ -222,8 +222,9 @@ interface ReceivedExchangeOutputs extends ExchangeOutputsBase {
   /** How the entity closure grouped this result's pairs
    * ({@link ExchangeResult.entityClusters}): present on a `many-to-many` run,
    * absent under every other cardinality, whose clusters follow from the
-   * table's own shape. Absent on the server-job path too, which holds the
-   * result on the console and reads no table here. */
+   * table's own shape. A server job holds the result on the console and reads
+   * no table here, so its summary is the one the CLI put on the `result` event
+   * (docs/spec/CLI_EVENTS.md). */
   entityClusters?: EntityClusterSummary;
 }
 

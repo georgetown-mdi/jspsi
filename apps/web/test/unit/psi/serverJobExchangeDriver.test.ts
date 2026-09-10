@@ -378,6 +378,60 @@ describe("createServerJobExchangeDriver event mapping", () => {
     }
   });
 
+  test("the console seat carries the cluster summary through to its outputs", async () => {
+    // The CLI states the same figures on an info log line no relay event holds,
+    // so the terminal event is the only route to this seat: without the
+    // forward, the console's completion panel can never state the grouping the
+    // browser path already states.
+    const entityClusters = {
+      clusterCount: 2,
+      localRows: 3,
+      partnerRows: 3,
+      shapes: [
+        { localRows: 2, partnerRows: 2, distinctValues: 2, clusters: 1 },
+        { localRows: 1, partnerRows: 1, distinctValues: 1, clusters: 1 },
+      ],
+    };
+    const { client } = scriptedClient([{ ...result(true), entityClusters }]);
+    const events = driverEvents(new AbortController().signal);
+
+    await createServerJobExchangeDriver(driverConfig(), client).run(events);
+
+    const outputs = events.onResult.mock.calls[0][0] as RunOutputs;
+    expect(outputs.kind === "matched" && outputs.entityClusters).toEqual(
+      entityClusters,
+    );
+  });
+
+  test("a cluster summary the relay frame malforms leaves the panel stating none", async () => {
+    // The relay forwards the CLI's fields verbatim, so every figure is checked
+    // rather than assumed: a negative or fractional count, a missing shape
+    // figure, or a non-array distribution leaves the seat stating no grouping
+    // rather than a distribution missing part of itself.
+    for (const entityClusters of [
+      { clusterCount: -1, localRows: 1, partnerRows: 1, shapes: [] },
+      { clusterCount: 1, localRows: 1.5, partnerRows: 1, shapes: [] },
+      { clusterCount: 1, localRows: 1, partnerRows: 1 },
+      {
+        clusterCount: 1,
+        localRows: 1,
+        partnerRows: 1,
+        shapes: [{ localRows: 1, partnerRows: 1, clusters: 1 }],
+      },
+      { clusterCount: 1, localRows: 1, partnerRows: 1, shapes: "2 x 2" },
+      "two clusters",
+      null,
+    ]) {
+      const { client } = scriptedClient([{ ...result(true), entityClusters }]);
+      const events = driverEvents(new AbortController().signal);
+      await createServerJobExchangeDriver(driverConfig(), client).run(events);
+      const outputs = events.onResult.mock.calls[0][0] as RunOutputs;
+      expect(
+        outputs.kind === "matched" ? outputs.entityClusters : undefined,
+      ).toBeUndefined();
+    }
+  });
+
   test("a matching the relay frame malforms leaves the panel stating none", async () => {
     // The relay forwards the CLI's fields verbatim, so the shape is checked
     // rather than assumed: an unknown label, a non-boolean value, or a
