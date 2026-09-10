@@ -786,14 +786,17 @@ jobs:
       # run whichever image it is in. The variant's leg can only hold that while
       # its pinned base and release snapshot name a rootfs whose closure scans
       # clean, which is one of the things the coordinated base move above is for
-      # -- a leg red for weeks on findings no release can clear would teach
-      # reviewers to ignore it, and scoping it out again is the answer to that
-      # rather than an entry in .github/trivyignore.yaml.
+      # -- a leg red for weeks on findings no published rootfs can clear would
+      # teach reviewers to ignore it. The answer to that is a dated,
+      # package-scoped entry in .github/trivyignore.yaml whose statement names the
+      # missing base and whose expiry forces the re-read (the file's header),
+      # never an id-only entry, which would also suppress the finding on the other
+      # image.
       #
-      # What refuses to publish a finding is release.yaml, which gates BOTH
-      # images ahead of its registry login. Accepting one in
-      # .github/trivyignore.yaml instead would make this leg green everywhere and
-      # take that refusal with it: both images' release gate reads that same file.
+      # What refuses to publish a finding is release.yaml, which gates BOTH images
+      # ahead of its registry login and reads that same file, so an accepted entry
+      # also passes the publish refusal for the packages it names; that is why
+      # every entry is scoped to its packages and dated.
       # `!cancelled()` rather than no condition at all: the scan is the only
       # step whose subject is the image's package surface rather than its
       # behaviour, so a functional smoke that failed above is a reason to want
