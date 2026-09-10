@@ -2,9 +2,11 @@ import { UNNAMED_PARTY_LABEL, getDefaultLinkageTerms } from "@psilink/core";
 import { describe, expect, test } from "vitest";
 
 import {
+  DELIVERY_NOT_RECORDED,
   SIDE_LABELS,
   completedRunRecorded,
   connectionRows,
+  lastRunMayHaveSentPayload,
   linkageTermsRows,
   runHistoryEntries,
   scheduleView,
@@ -313,6 +315,74 @@ describe("completedRunRecorded reads the record's own bookkeeping", () => {
         ...(failureKind !== undefined ? { failureKind } : {}),
       };
       expect(completedRunRecorded(record("acceptor", { lastRun }))).toBe(false);
+    },
+  );
+});
+
+// The second thing the accounting view reads, for the runs completedRunRecorded
+// answers false on: whether the retained run leaves a send open. It is the run
+// history's own condition, so the two surfaces cannot state different limits for
+// the same run.
+describe("lastRunMayHaveSentPayload matches the run history's own line", () => {
+  const lastRunOf = (
+    outcome: ManagedExchangeLastRun["outcome"],
+    failureKind?: ManagedExchangeLastRun["failureKind"],
+  ): ManagedExchangeLastRun => ({
+    at: "2026-07-01T09:00:00.000Z",
+    outcome,
+    ...(failureKind !== undefined ? { failureKind } : {}),
+  });
+
+  test("a never-run exchange leaves no send open", () => {
+    expect(lastRunMayHaveSentPayload(record("inviter"))).toBe(false);
+  });
+
+  test("a succeeded run certainly sent", () => {
+    const lastRun = lastRunOf("succeeded");
+    expect(lastRunMayHaveSentPayload(record("inviter", { lastRun }))).toBe(
+      true,
+    );
+  });
+
+  test.each([
+    { outcome: "failed" as const, failureKind: "transport" as const },
+    { outcome: "failed" as const, failureKind: "cancelled" as const },
+    { outcome: "failed" as const, failureKind: undefined },
+  ])(
+    "a $outcome run ($failureKind) that could postdate the send leaves it open",
+    ({ outcome, failureKind }) => {
+      const lastRun = lastRunOf(outcome, failureKind);
+      // The same run the history states the uncertain line for, so the accounting's
+      // empty state cannot deny what the line above it leaves open.
+      expect(
+        runHistoryEntries(record("acceptor", { lastRun }))[0].disclosure,
+      ).toContain(DELIVERY_NOT_RECORDED);
+      expect(lastRunMayHaveSentPayload(record("acceptor", { lastRun }))).toBe(
+        true,
+      );
+    },
+  );
+
+  test.each([
+    { outcome: "missed" as const, failureKind: undefined },
+    { outcome: "desynced" as const, failureKind: undefined },
+    { outcome: "failed" as const, failureKind: "auth" as const },
+    { outcome: "failed" as const, failureKind: "input" as const },
+    { outcome: "failed" as const, failureKind: "consent" as const },
+    { outcome: "failed" as const, failureKind: "storage" as const },
+    { outcome: "failed" as const, failureKind: "handed-off" as const },
+    { outcome: "failed" as const, failureKind: "terms-shortfall" as const },
+    { outcome: "failed" as const, failureKind: "custody-unreadable" as const },
+  ])(
+    "a $outcome run ($failureKind) that predates the send rules it out",
+    ({ outcome, failureKind }) => {
+      const lastRun = lastRunOf(outcome, failureKind);
+      expect(
+        runHistoryEntries(record("acceptor", { lastRun }))[0].disclosure,
+      ).toContain("Nothing was disclosed");
+      expect(lastRunMayHaveSentPayload(record("acceptor", { lastRun }))).toBe(
+        false,
+      );
     },
   );
 });

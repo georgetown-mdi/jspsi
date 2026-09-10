@@ -159,7 +159,7 @@ describe("a re-read of the accounting shows that it is under way", () => {
 
     await expect
       .element(
-        page.getByText("No run of this exchange has completed", {
+        page.getByText("no run of this exchange has filed a disclosure here", {
           exact: false,
         }),
       )
@@ -195,7 +195,7 @@ describe("a re-read of the accounting shows that it is under way", () => {
 
     await expect
       .element(
-        page.getByText("No run of this exchange has completed", {
+        page.getByText("no run of this exchange has filed a disclosure here", {
           exact: false,
         }),
       )

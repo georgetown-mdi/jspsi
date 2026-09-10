@@ -240,12 +240,20 @@ const SUCCEEDED_DISCLOSURE =
 const NOTHING_DISCLOSED =
   "Nothing was disclosed -- the run stopped before any data was exchanged.";
 
+/**
+ * What neither the run bookkeeping nor the accounting can say about a run that
+ * could have sent: this browser records this party's own act of disclosure, never
+ * the partner's receipt of it. Shared by the run history and the accounting's
+ * empty state so both state that limit in the same words for the same run.
+ */
+export const DELIVERY_NOT_RECORDED =
+  "Whether any data reached your partner is not recorded here";
+
 /** The disclosure line for a run that failed after the handshake, where this
  * bookkeeping cannot prove whether data reached the partner. It asserts neither
- * way and points at the authoritative account -- the accounting of disclosures,
- * which holds an entry for this run exactly when its payload was sent. */
-const OUTCOME_UNCERTAIN =
-  "The run did not complete. Whether any data reached your partner is not recorded here; check the accounting of disclosures below, which holds an entry for this run if its payload was sent.";
+ * way and points at the accounting of disclosures, where a run files its record
+ * once it has sent. */
+const OUTCOME_UNCERTAIN = `The run did not complete. ${DELIVERY_NOT_RECORDED}; check the accounting of disclosures below, where a run that sent its payload files its record.`;
 
 /**
  * Whether a failed run's bookkeeping proves it stopped before the data exchange
@@ -276,20 +284,25 @@ function disclosurePrecedesExchange(
 }
 
 /**
- * The disclosure line for a non-succeeded run, from the outcome and
- * `failureKind`: no handshake (`"missed"`, `"desynced"`) or a failure at or
- * before the persist ({@link disclosurePrecedesExchange}) means nothing was
- * disclosed; otherwise the line asserts neither way and points at the record
- * file offered at run completion.
+ * Whether a run the bookkeeping did not stamp `"succeeded"` leaves open that this
+ * party's payload was sent. A no-show and a rotation-desync both mean no handshake
+ * completed, so no data was exchanged; a `"failed"` outcome defers to the
+ * `failureKind`'s position in the run lifecycle
+ * ({@link disclosurePrecedesExchange}).
+ */
+function sendNotRuledOut(lastRun: ManagedExchangeLastRun): boolean {
+  if (lastRun.outcome === "missed" || lastRun.outcome === "desynced")
+    return false;
+  return !disclosurePrecedesExchange(lastRun.failureKind);
+}
+
+/**
+ * The disclosure line for a non-succeeded run: a run whose send is ruled out
+ * ({@link sendNotRuledOut}) disclosed nothing; otherwise the line asserts neither
+ * way and points at the accounting of disclosures.
  */
 function nonSucceededDisclosure(lastRun: ManagedExchangeLastRun): string {
-  // A no-show and a rotation-desync both mean no handshake completed, so no data was
-  // exchanged; a `"failed"` outcome defers to the failureKind's lifecycle position.
-  if (lastRun.outcome === "missed" || lastRun.outcome === "desynced")
-    return NOTHING_DISCLOSED;
-  return disclosurePrecedesExchange(lastRun.failureKind)
-    ? NOTHING_DISCLOSED
-    : OUTCOME_UNCERTAIN;
+  return sendNotRuledOut(lastRun) ? OUTCOME_UNCERTAIN : NOTHING_DISCLOSED;
 }
 
 /**
@@ -338,4 +351,27 @@ export function completedRunRecorded(
   record: Pick<ManagedExchangeRecord, "lastRun">,
 ): boolean {
   return record.lastRun?.outcome === "succeeded";
+}
+
+/**
+ * Whether the record's retained run leaves open that this party's payload was
+ * sent -- the condition behind the run history's own uncertain disclosure line
+ * ({@link sendNotRuledOut}), read by the accounting view so an empty accounting
+ * states that same limit instead of denying the send.
+ *
+ * A succeeded run answers `true`: it certainly sent. The accounting view reads
+ * {@link completedRunRecorded} first, so a completed run takes its own reading
+ * there and never this one.
+ *
+ * ONE-WAY, as {@link completedRunRecorded} is: the record keeps only the most
+ * recent run (see docs/spec/MANAGED_EXCHANGE_RECORD.md, the `lastRun` row), so
+ * `false` speaks for the retained run alone.
+ */
+export function lastRunMayHaveSentPayload(
+  record: Pick<ManagedExchangeRecord, "lastRun">,
+): boolean {
+  const { lastRun } = record;
+  if (lastRun === undefined) return false;
+  if (lastRun.outcome === "succeeded") return true;
+  return sendNotRuledOut(lastRun);
 }

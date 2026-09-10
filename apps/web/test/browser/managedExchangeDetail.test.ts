@@ -975,7 +975,7 @@ describe("managed exchange detail accounting of disclosures", () => {
     ).toBeNull();
   });
 
-  test("an exchange with no completed run scopes the empty state to this browser's copy, and offers no export", async () => {
+  test("a never-run exchange states what is recorded here, and offers no export", async () => {
     // A device that imported the exchange from a backup file holds no accounting
     // -- the artifact does not contain one -- so an unqualified "it has disclosed
     // nothing" would be treated there as the partnership's whole disclosure history.
@@ -996,7 +996,7 @@ describe("managed exchange detail accounting of disclosures", () => {
     await expect
       .element(
         page.getByText(
-          "No run of this exchange has sent your payload in this browser, so this browser's copy of the accounting is empty.",
+          "This browser's copy of the accounting is empty: no run of this exchange has filed a disclosure here.",
           { exact: false },
         ),
       )
@@ -1023,6 +1023,77 @@ describe("managed exchange detail accounting of disclosures", () => {
         .query(),
     ).toBeNull();
   });
+
+  test.each([
+    { failureKind: "cancelled" as const, how: "an operator cancelled it" },
+    { failureKind: "transport" as const, how: "the connection dropped" },
+  ])(
+    "an empty accounting beside a run that stopped when $how does not deny the send",
+    async ({ failureKind }) => {
+      // A run that stopped after sending files its entry best-effort, and a filing
+      // that fails there is reported to the diagnostic log alone (see
+      // docs/spec/MANAGED_EXCHANGE_RECORD.md, "When an entry is written"), so an
+      // empty accounting is not evidence the payload never left this browser.
+      app.render(
+        createElement(ManagedExchangeDetail, {
+          record: record("inviter", {
+            lastRun: {
+              at: "2026-07-01T09:00:00.000Z",
+              outcome: "failed",
+              failureKind,
+            },
+          }),
+          accountingRead: { kind: "none" },
+          onResetAccounting: () => Promise.resolve(),
+          onRetryAccountingRead: () => undefined,
+          onSaveLocalFields: () => Promise.resolve(),
+          onReinviteToChangeTerms: () => undefined,
+          canReinvite: true,
+          reinviting: false,
+          reinviteFailed: false,
+        }),
+      );
+
+      await expect
+        .element(
+          page.getByText(
+            "no run of this exchange has filed a disclosure here",
+            {
+              exact: false,
+            },
+          ),
+        )
+        .toBeInTheDocument();
+      await expect
+        .element(
+          page.getByText("not a record that nothing was sent", {
+            exact: false,
+          }),
+        )
+        .toBeInTheDocument();
+      // The limit is stated in the run history's own words for the same run, so
+      // the two sections of this page cannot say different things about it.
+      expect(
+        page
+          .getByText(
+            "Whether any data reached your partner is not recorded here",
+            {
+              exact: false,
+            },
+          )
+          .elements(),
+      ).toHaveLength(2);
+      // The plain empty state, which reads as an absence of disclosures, is the
+      // one this run must not get.
+      expect(
+        page
+          .getByText("That is not necessarily the exchange's whole history", {
+            exact: false,
+          })
+          .query(),
+      ).toBeNull();
+    },
+  );
 
   test("an accounting emptied beside a completed run states the emptiness, not an absence of runs", async () => {
     // What a recovery reset leaves: the entries destroyed, the record's own run
@@ -1051,7 +1122,9 @@ describe("managed exchange detail accounting of disclosures", () => {
       .toBeInTheDocument();
     expect(
       page
-        .getByText("No run of this exchange has completed", { exact: false })
+        .getByText("no run of this exchange has filed a disclosure here", {
+          exact: false,
+        })
         .query(),
     ).toBeNull();
     // What is true instead: the copy is empty, and the two ways an operator
@@ -2077,7 +2150,9 @@ describe("an accounting read still in flight", () => {
     ).toBeNull();
     expect(
       page
-        .getByText("No run of this exchange has completed", { exact: false })
+        .getByText("no run of this exchange has filed a disclosure here", {
+          exact: false,
+        })
         .query(),
     ).toBeNull();
     // Nor is it either failed state: nothing here says the records are stranded or
