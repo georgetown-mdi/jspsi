@@ -20,5 +20,5 @@ export const DEDUPLICATE_CONTROL_LABEL =
 
 /** What leaving it off means, as the control's own description. */
 export const DEDUPLICATE_CONTROL_DESCRIPTION =
-  "Your own side of this setting. Leave it off and each of your records " +
-  "matches at most one of your partner's.";
+  "Your own side of this setting. Leave it off and no more than one of your " +
+  "records matches a single one of your partner's.";
