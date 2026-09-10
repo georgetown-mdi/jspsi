@@ -96,14 +96,14 @@ export const RECORD_UNANSWERED_LEAD =
 
 /**
  * What the seat says under that lead. It states the condition under which a record
- * exists rather than asserting one does -- a run that stopped before it exchanged
+ * exists rather than asserting one does -- a run that stopped before it sent its
  * data owes none and has none -- and names the one thing to avoid meanwhile, since
  * the recovery controls above remove the run and any record with it.
  */
 export const RECORD_UNANSWERED_NOTICE =
   "This page asked several times whether this run wrote an exchange record and " +
   "got no answer back, so it has stopped asking. If this run got as far as " +
-  "exchanging data, the record of that disclosure is with the run's files on " +
+  "sending your data, the record of that disclosure is with the run's files on " +
   "this console -- reload this page to ask again, and keep the run until you " +
   "have the file, because every way on from here removes it.";
 

@@ -921,10 +921,10 @@ export function toCommittedPayload(
  * caller cannot recover from a rejection: this party's payload crosses before
  * the initiator's receive, and the throw that follows carries no state saying
  * so. It runs once the send has RESOLVED -- the transport has taken the frame
- * (docs/COMMUNICATION.md) -- and never for a send that rejected, whose payload
- * the transport did not take. A caller that owes a record of what it disclosed
- * opens that obligation there (docs/spec/EXCHANGE_RECORD.md, When a record is
- * owed).
+ * (docs/COMMUNICATION.md) -- and never for a send that rejected, whatever the
+ * transport did with the frame before rejecting. A caller that owes a record
+ * of what it disclosed opens that obligation there (docs/spec/EXCHANGE_RECORD.md,
+ * When a record is owed).
  */
 export async function exchangePayloads(
   conn: MessageConnection,

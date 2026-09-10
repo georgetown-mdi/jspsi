@@ -1129,8 +1129,8 @@ const oneDirectionalDisclosuresByTerminatedRun = new WeakSet<object>();
  * recovered from the error {@link runExchange} threw; `undefined` when the failure
  * holds none.
  *
- * A run past its own payload send has put this party's payload in the partner's
- * hands, so the disclosure the record attests occurred whatever the steps after
+ * A run past its own payload send has handed this party's payload to the
+ * transport, so the disclosure the record attests occurred whatever the steps after
  * it then do. The record is owed from that point (docs/spec/PROTOCOL.md,
  * Self-attested record), so the caller persists this pair exactly as it persists
  * {@link ExchangeResult.audit}: the run still failed, and the record's own
@@ -1835,8 +1835,8 @@ export async function runExchange(
   //   disclosure metadata transmits.
   //
   // The refusal is caught by the region's guard below rather than thrown straight
-  // through: this party's own payload is in the partner's hands whatever the
-  // partner sent back, so the record of that outbound disclosure is owed. The
+  // through: this party's own payload has left it through the transport whatever
+  // the partner sent back, so the record of that outbound disclosure is owed. The
   // throw also leaves the rest of the guarded region unrun, so no further frame
   // goes to a partner that broke the disclosure contract.
   const expectedReceive = countOnly

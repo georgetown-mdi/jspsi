@@ -32,7 +32,7 @@ The structural cost the point does carry is the one this note weighed before it 
 
 ## The residual window it leaves
 
-A send the transport rejects discloses nothing the record would commit to, so the region does not open on it and no record is owed -- what the operator gets there is the run's own error and its entry on the machine-readable event stream, as for every failure before the send. The linkage-key material an earlier cut discloses is likewise outside what this artifact attests.
+A send the transport rejects does not open the region, so no record is owed on it -- what the operator gets there is the run's own error and its entry on the machine-readable event stream, as for every failure before the send. That leaves one gap the spec states as a limit: a publish the file-sync transport reports as indeterminate may have reached the partner, and the run still writes no record. Whether such a publish should open the region is an open question this note does not settle. The linkage-key material an earlier cut discloses is likewise outside what this artifact attests.
 
 The window at the far edge is the transport's, and it stays open: a send resolves on the local hand-off, so a frame the transport took may never reach the partner if the channel then closes on an error ([COMMUNICATION.md](../COMMUNICATION.md#message-delivery-and-teardown)). The record is written for the hand-off on both legs rather than for a delivery no party can observe, which is the conservative direction for an accounting -- over-reporting a disclosure whose frame never arrived, never omitting one that did. The specification states that limit where it fixes the point ([EXCHANGE_RECORD.md](../spec/EXCHANGE_RECORD.md#when-a-record-is-owed)).
 

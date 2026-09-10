@@ -2242,8 +2242,8 @@ export async function runProtocol(
       );
 
     // The disclosure a terminated run already made outlives the failure that
-    // stopped it: a run past its own payload send has put this party's payload
-    // in the partner's hands, so core hands the self-attested record of that
+    // stopped it: a run past its own payload send has handed this party's payload
+    // to the transport, so core hands the self-attested record of that
     // disclosure back on the error rather than discarding it
     // (docs/spec/PROTOCOL.md, Self-attested record). It is written here on the
     // same terms a completed run's is -- same destination, same owner-only pair

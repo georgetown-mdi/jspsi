@@ -267,7 +267,7 @@ describe("untakenRecordConfirm", () => {
 
   test("confirms over an ask that never answered, under its own copy", () => {
     // An exhausted ask established nothing, and a run that got as far as
-    // exchanging data owes a record whether or not the console said so -- so
+    // sending its data owes a record whether or not the console said so -- so
     // the silence still buys a confirm, just not the one that asserts a record.
     expect(untakenRecordConfirm({ kind: "unanswered" })).toEqual({
       title: UNKNOWN_RECORD_CONFIRM_TITLE,
