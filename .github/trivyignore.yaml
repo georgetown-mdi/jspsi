@@ -31,7 +31,7 @@
 # different OS package sets -- Alpine in the default image, Amazon Linux in the
 # FIPS variant -- so an unscoped entry also suppresses the id on a package whose
 # fix is published and reachable. A `purls` list holds the entry to the packages
-# it names; `paths` does the same for a language package by its location.
+# it names.
 #
 #   vulnerabilities:
 #     - id: CVE-0000-00000
