@@ -469,30 +469,62 @@ describe("the consent summary's refused-pair register", () => {
   });
 
   test("withholds it where the inviting party declares no deduplicate", () => {
-    // Half the pair is the invitation's own: a candidate set alone leaves this
+    // Half the pair is the invitation's own: the strategy alone leaves this
     // party's value free, and stating a refusal for it would name one the
     // accept does not make.
-    const terms = { ...baseTerms, linkageKeys: fanOutKeys };
+    const terms = {
+      ...baseTerms,
+      linkageStrategy: "single-pass" as const,
+      linkageKeys: fanOutKeys,
+    };
     expect(
       summarizeInvitation({ linkageTerms: terms }).acceptorDeduplicateRefused,
     ).toBe(false);
     expect(acceptRefuses(terms, true)).toBe(false);
   });
 
-  test("withholds it where the terms declare no candidate set", () => {
-    // The other half: a deduplicating invitation whose keys expand nothing
-    // pairs a both-sided cardinality the cascade matches. The built-in default
-    // key set does not serve here -- one of its keys declares `swap`, which is
-    // a candidate set of its own once the expansion is applied.
+  test("withholds it where the cascade pairs the candidate set both parties widen", () => {
+    // The other half: the cascade resolves many-to-many over the two parties'
+    // candidate sets, so a deduplicating invitation whose key splits a value
+    // is one the accept takes (docs/spec/PROTOCOL.md, The `many-to-many`
+    // entity closure).
     const terms = {
       ...baseTerms,
       deduplicate: true,
-      linkageKeys: [{ name: "last name", elements: [{ field: "last_name" }] }],
+      linkageKeys: fanOutKeys,
     };
     expect(
       summarizeInvitation({ linkageTerms: terms }).acceptorDeduplicateRefused,
     ).toBe(false);
     expect(acceptRefuses(terms, true)).toBe(false);
+  });
+
+  test("equals the accept boundary's verdict over every combination", () => {
+    // The fact and the boundary read one predicate, so the register cannot
+    // drift from what an acceptance declaring this party's own side meets.
+    const keyShapes: Array<[string, LinkageTerms["linkageKeys"]]> = [
+      [
+        "one value per record",
+        [{ name: "last name", elements: [{ field: "last_name" }] }],
+      ],
+      ["a candidate set", fanOutKeys],
+    ];
+    for (const linkageStrategy of ["cascade", "single-pass"] as const)
+      for (const [keyShape, linkageKeys] of keyShapes)
+        for (const deduplicate of [false, true]) {
+          const terms = {
+            ...baseTerms,
+            linkageStrategy,
+            linkageKeys,
+            deduplicate,
+          };
+          const combination = { linkageStrategy, keyShape, deduplicate };
+          expect({
+            ...combination,
+            refused: summarizeInvitation({ linkageTerms: terms })
+              .acceptorDeduplicateRefused,
+          }).toEqual({ ...combination, refused: acceptRefuses(terms, true) });
+        }
   });
 });
 

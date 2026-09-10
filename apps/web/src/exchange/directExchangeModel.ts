@@ -140,10 +140,6 @@ export function directDeduplicateIntentFields(deduplicate: boolean): {
  * pair BOTH sides declaring the term resolves to, read from
  * `assertBothSidedDeduplicateImplemented`, which the screen's own title
  * names -- the notice is that refusal alone, not a totalizing one.
- * `resolveLinkageCardinality`'s other pair-wide check,
- * `assertCandidateSetCardinalityImplemented`, cannot fire on this spine: its
- * terms come from `previewInferredTerms` over the file's columns and declare
- * no candidate set.
  * Today the pair refused is the agreed `(true, true)` one under
  * `single-pass`; core's own message names the strategy to move to and the
  * one-sided pair to fall back to.

@@ -2610,25 +2610,14 @@ describe("AcceptorScreen: this party's own deduplicate", () => {
     await expect.element(proceed).toBeEnabled();
   });
 
-  // An invitation holding both halves of a pair no strategy runs: its linkage
-  // key splits a value into several match candidates, and the inviting party
-  // declares a deduplicate of its own. This party's own value is the only
+  // An invitation holding both halves of a pair its strategy does not run: it
+  // names single-pass, which pairs no both-sided cardinality, and the inviting
+  // party declares a deduplicate of its own. This party's own value is the only
   // thing left to complete it.
   const refusedPairTerms: LinkageTerms = {
     ...acceptorTerms,
+    linkageStrategy: "single-pass",
     deduplicate: true,
-    linkageKeys: [
-      {
-        name: "first",
-        elements: [
-          {
-            field: "firstName",
-            transform: [{ function: "split_on", params: { delimiter: " " } }],
-          },
-        ],
-      },
-      acceptorTerms.linkageKeys[1],
-    ],
   };
 
   test("states what this party's own side would refuse before it is set", async () => {
@@ -2652,7 +2641,7 @@ describe("AcceptorScreen: this party's own deduplicate", () => {
   });
 
   test("says nothing of that refusal where the invitation declares no side of its own", async () => {
-    // The other half of the pair is the invitation's: a splitting key alone
+    // The other half of the pair is the invitation's: the strategy alone
     // leaves this party's value free, and the accept takes either value.
     await reachReview({ ...refusedPairTerms, deduplicate: false });
     await expect.element(ownSide()).toBeInTheDocument();
