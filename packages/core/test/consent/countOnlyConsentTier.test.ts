@@ -1,6 +1,5 @@
 import { describe, expect, test } from "vitest";
 
-import { APPLIED_SETTINGS } from "../../src/consent/appliedSettings.js";
 import {
   CONSENT_FACTS,
   COUNT_ONLY_DISCLOSURE_STATEMENT,
@@ -74,7 +73,6 @@ describe("the count-only consent tier", () => {
     // A caveat keyed to the algorithm would be the drift this pins -- it would state
     // a refusal the exchange no longer performs, over sentences that are true.
     expect(PROPOSED_NOT_APPLIED_NOTES).not.toHaveProperty("psiC");
-    expect(Object.keys(APPLIED_SETTINGS)).not.toContain("psiC");
     expect(
       summarizeInvitation({ linkageTerms: COUNT_ONLY_PROBE_TERMS }).algorithm,
     ).toBe("psi-c");

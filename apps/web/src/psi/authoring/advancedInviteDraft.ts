@@ -1044,8 +1044,7 @@ function standardizationForImportedTerms(
  * standardization is reconstructed from the imported field declarations
  * against the inviter's columns ({@link standardizationForImportedTerms});
  * a field no column can satisfy stays undeclared rather than silently
- * mis-bound. The caller refuses a gated-active import first (see
- * {@link gatedActiveSettingMessage}).
+ * mis-bound.
  *
  * `includeOwnColumns` is passed in like `lifetimeSeconds`: both are per-party
  * and local, held by no terms document, so an import keeps the operator's own
@@ -1081,9 +1080,8 @@ export function draftFromTerms(
     algorithm: terms.algorithm,
     deduplicate: terms.deduplicate,
     // Reflect the imported strategy so the control shows it and an export
-    // round-trips it. Adopted as-is rather than refused: the strategy is a
-    // term the run honors whichever value it holds, so
-    // gatedActiveSettingMessage has no branch for it.
+    // round-trips it. Adopted as-is: the run honors the strategy whichever
+    // value it holds.
     linkageStrategy: terms.linkageStrategy,
     legalAgreement:
       terms.legalAgreement !== undefined

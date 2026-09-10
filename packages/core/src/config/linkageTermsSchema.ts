@@ -945,9 +945,9 @@ const LinkageKeyElementSchema: z.ZodType<LinkageKeyElement> = z.object({
  * When `swap` is present it names two elements (by element `name` or `field`
  * name) that the receiver swaps when building this key; the sender uses the
  * un-swapped order. This catches data entry errors where names are reversed.
- * Under `APPLIED_SETTINGS.fuzzyComparisons` the receiver builds BOTH orders, so
- * the key matches its two elements in either arrangement while the sender still
- * builds one (docs/notes/one-sided-fuzzy-expansion.md).
+ * The receiver builds BOTH orders, so the key matches its two elements in
+ * either arrangement while the sender still builds one
+ * (docs/notes/one-sided-fuzzy-expansion.md).
  */
 export interface LinkageKey {
   name: string;

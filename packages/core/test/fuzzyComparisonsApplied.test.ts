@@ -1,8 +1,6 @@
 import { expect, test, describe, afterEach, vi } from "vitest";
 
-// The key-building half of the expansion the shipped build applies. It reads the
-// real APPLIED_SETTINGS rather than a mock, so a flag turned back off fails here
-// instead of leaving these expectations describing a run that no longer happens.
+// The key-building half of the expansion the shipped build applies.
 
 // Counts the per-value expansions buildKeyStrings performs, delegating to the
 // real one: the value-at-a-time loop is what bounds the allocation at a

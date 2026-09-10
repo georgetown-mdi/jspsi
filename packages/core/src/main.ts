@@ -449,10 +449,6 @@ export {
   MAX_DECLARED_NAMES_SHOWN,
   unshownDeclaredNamesLine,
 } from "./consent/declaredNameBound.js";
-// Which proposed settings today's exchange actually applies. Read by the summary
-// above (to flag a proposed-but-not-applied term) and by the web app's linkage-
-// terms editor and import path.
-export { APPLIED_SETTINGS } from "./consent/appliedSettings.js";
 export {
   loadCSVFile,
   streamCSVRows,

@@ -13,7 +13,6 @@ import {
 import { IconArrowDown, IconArrowUp } from "@tabler/icons-react";
 
 import {
-  APPLIED_SETTINGS,
   AlgorithmSchema,
   LinkageStrategySchema,
   sanitizeForDisplay,
@@ -296,7 +295,6 @@ export function KeysTab({
           draft={editor.draft}
           declaredFields={declaredFields}
           keyVerdict={keyVerdict}
-          fuzzyApplied={APPLIED_SETTINGS.fuzzyComparisons}
           onChange={onAuthoredDraft}
           announce={announce}
         />
@@ -352,13 +350,11 @@ export function KeysTab({
         }
         mt="md"
       />
-      {/* Gated on the same applied flag as the terms clamp and the import refusal,
-      so a control an operator can turn on is one the run honors. The accepting
-      party's own side of the cardinality is not this control's to set: acceptance
-      derives it as false, so what this authors is one-sided by construction. */}
+      {/* The accepting party's own side of the cardinality is not this control's
+      to set: acceptance derives it as false, so what this authors is one-sided
+      by construction. */}
       <Checkbox
         label="Allow several of your records to match one partner record"
-        disabled={!APPLIED_SETTINGS.deduplicate}
         checked={editor.draft.deduplicate}
         onChange={(event) => onDeduplicate(event.currentTarget.checked)}
         mt="md"

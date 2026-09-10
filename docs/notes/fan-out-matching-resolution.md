@@ -107,7 +107,6 @@ The index table could hold the count prefix only on the keys that actually fan o
 
 ## What stays open
 
-- **The other candidate producer.** `generate_fuzzy_comparisons` produces per-record candidate sets by the same mechanism and reuses this candidacy and resolution machinery; what stays open is the applied setting its expansion is gated on. Its width factor and its exceedance fate are specified with the cap in [the width bound](../spec/PROTOCOL.md#the-width-bound-a-per-key-candidate-cap-the-terms-declare).
 - **Deduplicating cardinalities.** The rules here specify the one-to-one case. A many-to-X resolution defines itself through the same cardinality boundary, and the sweep's "at most one pair per record" step is the part it replaces.
 
-Cascade fan-out was the door this design left open rather than closed; it inherited the resolution rule rather than choosing one, and it has since landed ([cascade-fan-out.md](cascade-fan-out.md)).
+Cascade fan-out was the door this design left open rather than closed; it inherited the resolution rule rather than choosing one, and it has since landed ([cascade-fan-out.md](cascade-fan-out.md)). The other candidate producer has landed as well: `generate_fuzzy_comparisons` builds per-record candidate sets by this mechanism and reuses this candidacy and resolution machinery, its width factor and its exceedance fate specified alongside the cap in [the width bound](../spec/PROTOCOL.md#the-width-bound-a-per-key-candidate-cap-the-terms-declare).

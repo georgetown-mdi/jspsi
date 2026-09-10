@@ -764,8 +764,8 @@ export function displayInvitation(params: {
   // declaring its own side in its own configuration, outside what accepting
   // this invitation on the command line produces.
   //
-  // Gated on the applied flag too: an invitation whose strategy matches no
-  // deduplicating cardinality is refused at acceptance
+  // Gated on `deduplicateApplied` too: an invitation whose strategy matches
+  // no deduplicating cardinality is refused at acceptance
   // (`assertDeduplicateImplemented`), so a grouping statement here would
   // describe a run that does not happen.
   if (summary.deduplicate && summary.deduplicateApplied) {

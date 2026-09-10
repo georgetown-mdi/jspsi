@@ -27,14 +27,11 @@ import type {
  * (a field reference chosen from the declared list, a per-element transform
  * pipeline, and a two-of-N swap) and imports/exports the whole terms document.
  *
- * Per-element fuzzy comparisons are GATED: clamped to no-fuzzy while
- * `APPLIED_SETTINGS` is false, editor control disabled to match, and an import
- * that turns one on is refused. `deduplicate` reads the same flag through the
- * same clamp. A fan-out transform step is gated against core's own list instead
- * of a flag: the step editor offers no fan-out family, and an imported document
- * holding one -- in a cleaning step or a key-element transform -- is refused at
- * the mint; this editor authors none at any strategy, wider than core's own
- * single-pass allowance.
+ * A fan-out transform step is gated against core's own list: the step editor
+ * offers no fan-out family, and an imported document holding one -- in a
+ * cleaning step or a key-element transform -- is refused at the mint; this
+ * editor authors none at any strategy, wider than core's own single-pass
+ * allowance.
  *
  * No payload block is authored into the terms. The output direction is settable
  * end-to-end (the acceptor mirrors the inviter's output; the exchange withholds
@@ -145,24 +142,20 @@ export interface AdvancedInviteDraft {
    * unrepresentable -- it has no `OutputDirection`. */
   outputDirection: OutputDirection;
   /** The matching algorithm. `psi` reveals matched identifiers; `psi-c` reveals
-   * only the count. Ungated -- the exchange honors both -- so
-   * {@link buildAdvancedTerms} writes it straight through with no clamp; a
-   * count-only draft outside the shape the specification admits is refused by the
-   * count-only rules at validation instead. */
+   * only the count. A count-only draft outside the shape the specification
+   * admits is refused by the count-only rules at validation. */
   algorithm: Algorithm;
   /** Whether more than one of the holder's records may match the same partner
    * record -- deduplication of the holder's OWN inputs, which lets multiple of its
    * inputs map to the same matched output (see EXCHANGE_REFERENCE
-   * `linkage_terms.deduplicate`). {@link buildAdvancedTerms} clamps it to `false`
-   * only while `APPLIED_SETTINGS`.deduplicate is false, and passes it otherwise. */
+   * `linkage_terms.deduplicate`). */
   deduplicate: boolean;
   /** How the agreed linkage keys are exchanged (see {@link LinkageStrategy}).
    * `cascade` (the default) matches keys one round at a time; `single-pass`
    * batches them into one exchange at the cost of disclosing the sender's full
-   * per-key value structure to the receiver. NOT gated -- honored end-to-end, so
-   * {@link buildAdvancedTerms} writes it straight through; the consent tradeoff
-   * shows at the control. Seeded from the default terms (`cascade`) and
-   * reflected from an imported document. */
+   * per-key value structure to the receiver. The consent tradeoff shows at the
+   * control. Seeded from the default terms (`cascade`) and reflected from an
+   * imported document. */
   linkageStrategy: LinkageStrategy;
   legalAgreement?: DraftLegalAgreement;
   /** The inviter's per-party column metadata (semantic type + disclosure role),

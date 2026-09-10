@@ -1,11 +1,4 @@
-import { expect, test, describe, vi } from "vitest";
-
-// The expansion primitives below read no flag, but the buildKeyStrings block at
-// the end of this file pins the CLOSED branch of the gate the shipped build
-// leaves open, so the flag is mocked off for the whole file.
-vi.mock("../src/consent/appliedSettings", () => ({
-  APPLIED_SETTINGS: { deduplicate: true, fuzzyComparisons: false },
-}));
+import { expect, test, describe } from "vitest";
 
 import {
   adjacentYearCandidates,
@@ -16,20 +9,9 @@ import {
   transpositionCandidates,
   MAX_FUZZY_EXPANSION_INPUT_LENGTH,
 } from "../src/fuzzyComparisons";
-import {
-  buildKeyStrings,
-  StandardizedDataset,
-  StandardizedField,
-} from "../src/standardization";
-import { declaredEffectiveKeyCount } from "../src/fanOutFunctions";
-import { APPLIED_SETTINGS } from "../src/consent/appliedSettings";
 import { UsageError } from "../src/errors";
 import { isCalendarDateValid } from "../src/utils/calendarDate";
-import type {
-  GenerateFuzzyComparisons,
-  LinkageKey,
-  LinkageTerms,
-} from "../src/config/linkageTermsSchema";
+import type { GenerateFuzzyComparisons } from "../src/config/linkageTermsSchema";
 
 const FUZZY_KINDS: readonly GenerateFuzzyComparisons[] = [
   "transpositions",
@@ -38,23 +20,8 @@ const FUZZY_KINDS: readonly GenerateFuzzyComparisons[] = [
   "day_month_swaps",
 ];
 
-// The one-key terms a width assertion reads: the key declares the expansion and
-// nothing else, so its effective key count is the plain 1 or the fuzzy factor.
-function fuzzyTerms(kind: GenerateFuzzyComparisons): LinkageTerms {
-  return {
-    linkageKeys: [
-      {
-        name: "one",
-        elements: [{ field: "last_name", generateFuzzyComparisons: kind }],
-      },
-    ],
-  } as LinkageTerms;
-}
-
-// The expansion primitives are pure and always exercised. buildKeyStrings gates
-// calling them on APPLIED_SETTINGS.fuzzyComparisons; this file pins the behavior
-// while that flag is false, and fuzzyComparisonsApplied.test.ts pins the
-// expansion the shipped build runs with it on.
+// The expansion primitives are pure; the key building that calls them is pinned
+// in fuzzyComparisonsApplied.test.ts.
 
 describe("transpositionCandidates", () => {
   test("emits every two-position swap, not the adjacent ones alone", () => {
@@ -433,136 +400,4 @@ describe("what each side's expansion buys, as an intersection", () => {
       );
     },
   );
-});
-
-describe("the declared width of a fuzzy key", () => {
-  // Read under the shipped flag (false) here; the widths the flag buys are pinned
-  // in fuzzyExpansionWidth.test.ts, which mocks it on.
-  test("a fuzzy element raises no width while the expansion is inert", () => {
-    for (const kind of FUZZY_KINDS)
-      expect(declaredEffectiveKeyCount(fuzzyTerms(kind))).toBe(1);
-  });
-});
-
-describe("buildKeyStrings while fuzzy expansion is not applied", () => {
-  function makeDataset(fields: Record<string, string>): StandardizedDataset {
-    const keyOverEveryField = {
-      name: "every field",
-      elements: Object.keys(fields).map((field) => ({ field })),
-    };
-    return new StandardizedDataset(
-      Object.entries(fields).map(
-        ([name, value]) =>
-          new StandardizedField(name, name, [], [{ [name]: value }]),
-      ),
-      [keyOverEveryField],
-    );
-  }
-
-  // Guards the assumption the expectations below rest on: they describe the
-  // gate's closed branch, which the shipped build does not take, so a mock that
-  // stopped taking effect would leave them silently describing the applied
-  // behavior instead.
-  test("the gate under test is closed", () => {
-    expect(APPLIED_SETTINGS.fuzzyComparisons).toBe(false);
-  });
-
-  test("a fuzzy element builds the same single key as one without", () => {
-    const dataset = makeDataset({
-      last_name: "SMITH",
-      date_of_birth: "19900115",
-    });
-    const plain: LinkageKey = {
-      name: "LN+DOB",
-      elements: [{ field: "last_name" }, { field: "date_of_birth" }],
-    };
-    const fuzzy: LinkageKey = {
-      name: "LN+DOB",
-      elements: [
-        { field: "last_name", generateFuzzyComparisons: "transpositions" },
-        { field: "date_of_birth", generateFuzzyComparisons: "adjacent_years" },
-      ],
-    };
-    expect(buildKeyStrings(plain, dataset, 0)).toEqual(
-      new Set(["SMITH19900115"]),
-    );
-    expect(buildKeyStrings(fuzzy, dataset, 0)).toEqual(
-      buildKeyStrings(plain, dataset, 0),
-    );
-  });
-
-  test("a value the expansion would refuse still builds its exact key", () => {
-    // adjacent_years refuses a non-canonical date, and the length cap refuses a
-    // long value; neither refusal is reachable while the gate is closed.
-    const dataset = makeDataset({
-      date_of_birth: "01/15/1990",
-      long: "A".repeat(MAX_FUZZY_EXPANSION_INPUT_LENGTH + 1),
-    });
-    const key: LinkageKey = {
-      name: "DOB",
-      elements: [
-        { field: "date_of_birth", generateFuzzyComparisons: "adjacent_years" },
-        { field: "long", generateFuzzyComparisons: "edit_distances" },
-      ],
-    };
-    expect(() => buildKeyStrings(key, dataset, 0)).not.toThrow(UsageError);
-    expect(buildKeyStrings(key, dataset, 0)?.size).toBe(1);
-  });
-
-  test("the two roles build the same key for every kind", () => {
-    // The expansion is what the role keys, so with it inert a fuzzy element is
-    // role-blind: the receiver and the sender realize one identical value, and no
-    // width, refusal, or advisory separates them.
-    const dataset = makeDataset({ last_name: "SMITH" });
-    for (const kind of FUZZY_KINDS) {
-      const key: LinkageKey = {
-        name: "LN",
-        elements: [{ field: "last_name", generateFuzzyComparisons: kind }],
-      };
-      expect(buildKeyStrings(key, dataset, 0, false)).toEqual(
-        new Set(["SMITH"]),
-      );
-      expect(buildKeyStrings(key, dataset, 0, true)).toEqual(
-        new Set(["SMITH"]),
-      );
-    }
-  });
-
-  test("a swapped key builds the exchanged order alone, not both orders", () => {
-    // The swap's full variant is gated with the expansion beside it: a second key
-    // string per row is a candidate set, which the cascade and the count-only
-    // round refuse, so it lands with the round that consumes one.
-    const dataset = makeDataset({ first_name: "JOHN", last_name: "SMITH" });
-    const key: LinkageKey = {
-      name: "FN+LN",
-      elements: [{ field: "first_name" }, { field: "last_name" }],
-      swap: ["first_name", "last_name"],
-    };
-    expect(buildKeyStrings(key, dataset, 0, true)).toEqual(
-      new Set(["SMITHJOHN"]),
-    );
-    expect(buildKeyStrings(key, dataset, 0, false)).toEqual(
-      new Set(["JOHNSMITH"]),
-    );
-    expect(
-      declaredEffectiveKeyCount({ linkageKeys: [key] } as LinkageTerms),
-    ).toBe(1);
-  });
-
-  test("a row the expansion would widen past the width bound still builds one key", () => {
-    // The shipped build refuses this row (fuzzyComparisonsApplied.test.ts); the
-    // refusal is reachable only through the expansion, so the closed gate
-    // withholds it.
-    const dataset = makeDataset({ a: "ABCDEFGH", b: "JKLMNOPQ" });
-    const key: LinkageKey = {
-      name: "A+B",
-      elements: [
-        { field: "a", generateFuzzyComparisons: "edit_distances" },
-        { field: "b", generateFuzzyComparisons: "edit_distances" },
-      ],
-    };
-    expect(buildKeyStrings(key, dataset, 0, true)).toEqual(
-      new Set(["ABCDEFGHJKLMNOPQ"]),
-    );
-  });
 });

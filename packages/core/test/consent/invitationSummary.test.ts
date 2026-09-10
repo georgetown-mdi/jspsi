@@ -325,9 +325,9 @@ describe("the consent summary's fan-out register", () => {
   test.each(["cascade", "single-pass"] as const)(
     "a swapped key order under %s is marked as applied",
     (linkageStrategy) => {
-      // A swap is a candidate set like the expansion it rides the applied
-      // setting with, and both strategies resolve one, so the surfaces state
-      // the either-order match the run performs with nothing qualifying it.
+      // A swap is a candidate set like the fuzzy expansion, and both
+      // strategies resolve one, so the surfaces state the either-order match
+      // the run performs with nothing qualifying it.
       const summary = summarizeInvitation({
         linkageTerms: { ...baseTerms, linkageKeys: swapKeys, linkageStrategy },
       });

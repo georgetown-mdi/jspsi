@@ -1,5 +1,4 @@
 import {
-  APPLIED_SETTINGS,
   DEFAULT_LINKAGE_RULE_SET,
   authoredLinkageFields,
   decideLinkageTermsVerdict,
@@ -39,12 +38,6 @@ import type { AdvancedInviteDraft, DraftKey } from "./advancedInviteTypes";
  * The rule-set citation an imported document keeps or loses is decided here too,
  * by {@link citationDropCause}; {@link importedCitationDropCause} exposes the loss
  * and its reason so the editor can say so before the document is emitted.
- *
- * The gated-setting clamp lives here: {@link buildAdvancedTerms} forces
- * deduplication and per-element fuzzy expansion to the applied behavior while
- * their {@link APPLIED_SETTINGS} flag is false, the structural half of the gate
- * that holds regardless of how the draft reached its state. The disabled editor
- * controls and the import refusal are the other layers.
  */
 
 /** NFC-normalize and trim a free-text value. NFC is the cross-party canonical
@@ -123,24 +116,6 @@ function reconcileImportedFields(
     }
   }
   return result;
-}
-
-/** Drop every element's `generateFuzzyComparisons`, returning the key unchanged
- * when none has one. The fuzzy half of the {@link buildAdvancedTerms} gating
- * clamp -- the built terms never propose a fuzzy expansion the run does not apply,
- * regardless of how an element acquired one. */
-function stripFuzzy(key: LinkageKey): LinkageKey {
-  if (key.elements.every((el) => el.generateFuzzyComparisons === undefined))
-    return key;
-  return {
-    ...key,
-    elements: key.elements.map((el) => {
-      if (el.generateFuzzyComparisons === undefined) return el;
-      const next = { ...el };
-      delete next.generateFuzzyComparisons;
-      return next;
-    }),
-  };
 }
 
 /**
@@ -274,9 +249,8 @@ export function importedCitationDropCause(
 /**
  * Build the {@link LinkageTerms} a draft represents. `version` and `date`
  * come from the seed unchanged (the editor exposes no control for them);
- * `algorithm` and `deduplicate` come from the draft but are clamped to the
- * applied behavior while gated (see below); `linkageStrategy`, `identity`, the
- * `output` direction, and the optional legal agreement come from the draft (free
+ * `algorithm`, `deduplicate`, `linkageStrategy`, `identity`, the `output`
+ * direction, and the optional legal agreement come from the draft (free
  * text NFC-normalized and trimmed); linkage keys are the enabled ones in draft
  * order, and linkage fields are filtered to those the enabled keys reference
  * (mirroring `getDefaultLinkageTerms`).
@@ -297,17 +271,9 @@ export function buildAdvancedTerms(draft: AdvancedInviteDraft): LinkageTerms {
   // overrides identity, the output direction, the enabled keys, and the legal
   // agreement.
   const baseTerms = getDefaultLinkageTerms(draft.identity, draft.metadata);
-  // Clamp deduplication and per-element fuzzy expansion to the applied behavior
-  // while gated, so the built terms can never contain a setting the run does not yet
-  // honor regardless of how the draft reached this state (a UI gap, an import) --
-  // the structural half of the gate that holds even if the disabled controls or
-  // import refusal are bypassed.
-  const deduplicate = APPLIED_SETTINGS.deduplicate ? draft.deduplicate : false;
   const enabledKeys = draft.keys
     .filter((entry) => entry.enabled)
-    .map((entry) =>
-      APPLIED_SETTINGS.fuzzyComparisons ? entry.key : stripFuzzy(entry.key),
-    );
+    .map((entry) => entry.key);
   const referenced = referencedLinkageFieldNames(enabledKeys);
   // Derive the linkage fields from the authored standardization, not the
   // one-field-per-type default: a transformation per type declares its own field
@@ -335,11 +301,8 @@ export function buildAdvancedTerms(draft: AdvancedInviteDraft): LinkageTerms {
   const terms: LinkageTerms = {
     ...baseTerms,
     identity: normalizeText(draft.identity),
-    // Unclamped, unlike its gated neighbors: the exchange honors both members, and
-    // a count-only document outside the shape the specification admits is refused
-    // by the count-only rules rather than narrowed here.
     algorithm: draft.algorithm,
-    deduplicate,
+    deduplicate: draft.deduplicate,
     linkageStrategy: draft.linkageStrategy,
     output: outputForDirection(draft.outputDirection),
     linkageFields,

@@ -1,7 +1,6 @@
 import { describe, expect, test } from "vitest";
 
 import {
-  APPLIED_SETTINGS,
   CanonicalEncodingError,
   DEDUPLICATE_IMPLEMENTED_BY_STRATEGY,
   FAN_OUT_FUNCTION_NAMES,
@@ -21,7 +20,6 @@ import {
   seedAdvancedInvite,
 } from "../../../src/psi/authoring/advancedInviteDraft.js";
 import {
-  gatedActiveSettingMessage,
   inertCoalesceNotice,
   validateAdvancedInvite,
 } from "../../../src/psi/authoring/advancedInviteValidation.js";
@@ -317,19 +315,7 @@ describe("the strategy gate on a deduplicating term", () => {
     );
     expect(result.errors).toEqual({});
     expect(result.canGenerate).toBe(true);
-    // The setting reaches the built terms rather than being clamped away: the
-    // exchange applies it, which is the one question this control is gated on.
-    expect(APPLIED_SETTINGS.deduplicate).toBe(true);
     expect(result.terms?.deduplicate).toBe(true);
-  });
-
-  test("an import that turns the setting on is not refused", () => {
-    // The import door is closed against a setting the RUN does not apply, and
-    // this one it does, so the document loads rather than being turned away.
-    const { draft } = seedAdvancedInvite("Org", ALL_COLUMNS);
-    const terms = buildAdvancedTerms({ ...draft, deduplicate: true });
-    expect(terms.deduplicate).toBe(true);
-    expect(gatedActiveSettingMessage(terms)).toBeUndefined();
   });
 
   test("a draft that deduplicates without receiving results names that obstacle on the output control", () => {

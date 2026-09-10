@@ -91,10 +91,7 @@ const FUZZY_LABELS: Record<FuzzyComparison, string> = {
   day_month_swaps: "Day and month exchanged",
 };
 
-/** The control's options, in the order the labels above declare. The control is
- * rendered only when the run applies fuzzy comparisons (see
- * APPLIED_SETTINGS.fuzzyComparisons); while it does not, the control is hidden
- * rather than shown disabled with a "not available" note. */
+/** The control's options, in the order the labels above declare. */
 const FUZZY_OPTIONS: Array<{ value: FuzzyComparison; label: string }> = (
   Object.keys(FUZZY_LABELS) as Array<FuzzyComparison>
 ).map((value) => ({ value, label: FUZZY_LABELS[value] }));
@@ -107,12 +104,12 @@ function elementIdentifier(element: LinkageKeyElement): string {
 }
 
 /**
- * The expert key-authoring surface: an ordered list of linkage keys, each fully
- * editable element-by-element. A key has a name, an ordered list of elements
- * (each a field reference chosen from the declared list, an optional alias, a
- * transform pipeline, and a gated fuzzy expansion), and an optional two-of-N swap
- * over its own element identifiers. Keys and elements add, remove, and reorder
- * with keyboard-operable controls.
+ * The expert key-authoring surface: an ordered list of linkage keys, each
+ * fully editable element-by-element. A key has a name, an ordered list of
+ * elements (each a field reference chosen from the declared list, an optional
+ * alias, a transform pipeline, and an optional fuzzy expansion), and an
+ * optional two-of-N swap over its own element identifiers. Keys and elements
+ * add, remove, and reorder with keyboard-operable controls.
  *
  * Presentational over the draft: it computes the next draft with the pure helpers
  * in {@link advancedInvite} and emits it through {@link onChange}; the host owns
@@ -125,7 +122,6 @@ export function ExpertKeyEditor({
   draft,
   declaredFields,
   keyVerdict,
-  fuzzyApplied,
   onChange,
   announce,
 }: {
@@ -135,9 +131,6 @@ export function ExpertKeyEditor({
   /** The per-key badge verdict at this index ({@link KeyVerdict}): satisfiable,
    * unsatisfiable (a missing field), or dead (a self-defeating transform). */
   keyVerdict: (keyIndex: number) => KeyVerdict;
-  /** Whether the run applies fuzzy comparisons; when false the per-element fuzzy
-   * control is hidden rather than shown disabled. */
-  fuzzyApplied: boolean;
   onChange: (next: AdvancedInviteDraft) => void;
   /** Emit a message to the host's polite live region. */
   announce: (message: string) => void;
@@ -557,40 +550,32 @@ export function ExpertKeyEditor({
                                   />
                                 </div>
 
-                                {/* The fuzzy-comparison control is shown only when the
-                              exchange actually applies fuzzy expansions. While it
-                              does not, the whole control is hidden rather than shown
-                              disabled with a "not available" note, so the element
-                              editor is not cluttered with a dead capability. */}
-                                {fuzzyApplied && (
-                                  <Select
-                                    label="Fuzzy comparison"
-                                    data={FUZZY_OPTIONS}
-                                    value={
-                                      element.generateFuzzyComparisons ?? null
-                                    }
-                                    clearable
-                                    description="Expand this value into near-matches before hashing"
-                                    onChange={(value) =>
-                                      editElement(
-                                        keyIndex,
-                                        elementIndex,
-                                        (el) => {
-                                          const next = { ...el };
-                                          // Mantine infers the value type from the typed
-                                          // FUZZY_OPTIONS data, so it is a FuzzyComparison
-                                          // (or null) without an assertion.
-                                          if (value === null)
-                                            delete next.generateFuzzyComparisons;
-                                          else
-                                            next.generateFuzzyComparisons =
-                                              value;
-                                          return next;
-                                        },
-                                      )
-                                    }
-                                  />
-                                )}
+                                <Select
+                                  label="Fuzzy comparison"
+                                  data={FUZZY_OPTIONS}
+                                  value={
+                                    element.generateFuzzyComparisons ?? null
+                                  }
+                                  clearable
+                                  description="Expand this value into near-matches before hashing"
+                                  onChange={(value) =>
+                                    editElement(
+                                      keyIndex,
+                                      elementIndex,
+                                      (el) => {
+                                        const next = { ...el };
+                                        // Mantine infers the value type from the typed
+                                        // FUZZY_OPTIONS data, so it is a FuzzyComparison
+                                        // (or null) without an assertion.
+                                        if (value === null)
+                                          delete next.generateFuzzyComparisons;
+                                        else
+                                          next.generateFuzzyComparisons = value;
+                                        return next;
+                                      },
+                                    )
+                                  }
+                                />
                               </Stack>
                             </Paper>
                           );

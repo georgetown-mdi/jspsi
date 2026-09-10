@@ -8,8 +8,7 @@
  * - {@link ./advancedInviteDraft} -- draft-editing operations: seeding, metadata
  *   reconciliation, expert key/element authoring, and import-to-draft.
  * - {@link ./advancedInviteTerms} -- the linkage-terms mapping: a draft to the
- *   {@link LinkageTerms} it represents, and the inviter's own exchange spec. The
- *   gated-setting clamp (dedup / fuzzy) lives here.
+ *   {@link LinkageTerms} it represents, and the inviter's own exchange spec.
  * - {@link ./advancedInviteValidation} -- the Generate gate, the import-refusal
  *   messages, and the two notices that refuse nothing: an imported rule-set
  *   citation the rebuild drops, and a declared default value the run will not
@@ -66,7 +65,6 @@ export {
 } from "./advancedInviteTerms";
 
 export {
-  gatedActiveSettingMessage,
   importedCitationDropNotice,
   importedConstraintDivergenceMessage,
   inertCoalesceNotice,
