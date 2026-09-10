@@ -245,11 +245,6 @@ export function assertDeduplicateImplemented(terms: LinkageTerms): void {
  * put the single-valued cascade's frames on the wire and accept what it
  * accepts.
  *
- * The strategy is one of two conditions a candidate set runs under; the other
- * is the resolved cardinality, `many-to-many` refusing one whatever the
- * strategy ({@link assertCandidateSetCardinalityImplemented},
- * linkageSatisfiability.ts).
- *
  * A total table over {@link LinkageStrategy} rather than a comparison against
  * one named strategy, so a `linkage_strategy` added later refuses a candidate
  * set until its own resolution is written rather than inheriting either of the

@@ -358,39 +358,10 @@ test("single-pass reproduces the cascade's survivor-relative uniqueness", async 
 
 // --- the cascade: which candidate sets reach a round -------------------------
 // Key realization holds every candidate a record realizes (buildKeyStrings).
-// Two readings decide whether a round consumes one: an allowlist over the
-// strategies whose resolution is written, and the resolved cardinality,
-// `many-to-many` having no single-pass table for the equivalence obligation to
-// name. A combination outside them refuses the record where it would consume
-// it rather than narrowing to one candidate or dropping it, either of which
-// matches on less than the terms declare.
-test("a candidate set reaching a many-to-many round is refused, not narrowed", async () => {
-  const withCandidateSet: Array<Array<string | Set<string> | undefined>> = [
-    ["A", new Set(["B", "C"])],
-  ];
-  const [conn] = createMessagePipe();
-  const participant = new PSIParticipant(
-    "server",
-    psiLibrary,
-    { role: "starter", verbose: -1 },
-    UNBOUNDED_PSI_ELEMENTS,
-  );
-
-  // Refused before any frame moves: the pipe's other end is never read, so a
-  // refusal that leaked past this point would hang rather than pass. The class is
-  // asserted too -- the CLI classifies a UsageError as a configuration fault.
-  const run = () =>
-    linkViaPSI(
-      { cardinality: "many-to-many" },
-      participant,
-      conn,
-      withCandidateSet,
-      fanOutFreeBounds(withCandidateSet.length, 1),
-      -1,
-    );
-  await expect(run()).rejects.toThrow(UsageError);
-  await expect(run()).rejects.toThrow(/several match candidates/);
-});
+// One reading decides whether a round consumes one: an allowlist over the
+// strategies whose resolution is written. A strategy outside it refuses the
+// record where it would consume it rather than narrowing to one candidate or
+// dropping it, either of which matches on less than the terms declare.
 
 test("the allowlist is what decides, one entry per strategy", () => {
   expect(CANDIDATE_SET_IMPLEMENTED_BY_STRATEGY).toStrictEqual({

@@ -22,7 +22,6 @@ import {
   StandardizedKeyIterable,
 } from "./standardization.js";
 import {
-  assertCandidateSetCardinalityImplemented,
   assertFanOutImplemented,
   assertLinkageTermsSatisfiable,
   assertStandardizationMatchesTerms,
@@ -627,9 +626,8 @@ export function assertPresentedDeduplicateMatchesInvitation(
  * for one procedure (docs/spec/PROTOCOL.md, Deduplicating cardinalities):
  * `(true, false)` gives the declaring party `many-to-one`; `(true, true)`
  * gives `many-to-many`, which {@link assertBothSidedDeduplicateImplemented}
- * requires a matching strategy for and
- * {@link assertCandidateSetCardinalityImplemented} refuses a candidate set
- * under. A refusal is symmetric and aborts both parties at this point.
+ * requires a matching strategy for. A refusal is symmetric and aborts both
+ * parties at this point.
  *
  * The refusals are this function's own; the derivation beneath them is
  * {@link resolvedMatchingFromTerms}, which the self-attested record reads
@@ -642,7 +640,6 @@ export function resolveLinkageCardinality(
   assertDeduplicateImplemented(localTerms);
   assertDeduplicateImplemented(partnerTerms);
   assertBothSidedDeduplicateImplemented(localTerms, partnerTerms);
-  assertCandidateSetCardinalityImplemented(localTerms, partnerTerms);
   return resolvedMatchingFromTerms(localTerms, partnerTerms);
 }
 

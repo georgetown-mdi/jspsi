@@ -659,27 +659,30 @@ for (const party of ["starter", "joiner"] as const) {
     // Which of this party's records share a partner row is ITS grouping, not the
     // returning party's to decide. Pointing the "E2" record's run at a row the
     // "E1" group already took merges two groups this side sent, which flat
-    // distinctness cannot catch on a side where a repeat is admitted.
+    // distinctness cannot catch on a side where a repeat is admitted: what
+    // catches it is that no group this round accepted holds those records
+    // together.
     await expectProtocolRefusal(
       onMappedElementList(2, (list) => [
         ...list.slice(0, -1),
         { ...list[list.length - 1], theirIndex: list[0].theirIndex },
       ]),
-      /names one partner row for two of the partner's records this side matched/,
+      /names one partner row for a set of this side's records the round did not accept together/,
     );
   });
 
   test(`a returned list splitting one of this party's groups is refused${under}`, async () => {
     // The mirror deviation: the two records that named ONE position come back with
-    // different runs, so the partner splits a group this side's own data formed.
-    // Every entry stays in range and the count is untouched.
+    // runs sharing no row, so the partner splits a group this side's own data
+    // formed. Every entry stays in range and the count is untouched.
     await expectProtocolRefusal(
       onMappedElementList(2, (list) => [
         ...list.slice(0, 2),
-        { ...list[2], theirIndex: list[1].theirIndex },
-        ...list.slice(3),
+        { ...list[2], theirIndex: 2 },
+        { ...list[3], theirIndex: 3 },
+        ...list.slice(4),
       ]),
-      /names two partner rows for one of the partner's records this side matched/,
+      /names one partner row for a set of this side's records the round did not accept together/,
     );
   });
 

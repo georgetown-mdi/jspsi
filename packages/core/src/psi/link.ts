@@ -35,7 +35,7 @@ import {
   type SinglePassCeilingBreach,
   type SinglePassPartySize,
 } from "../connection/frameSize";
-import { assertBlockDiagonalClosure } from "./entityClosure";
+import { assertRoundDiagonalClosure, type ClosureBlock } from "./entityClosure";
 import { FAN_OUT_CANDIDATES_PER_ELEMENT } from "../fanOutFunctions";
 import {
   fanOutReachedMatchingRefusal,
@@ -47,7 +47,9 @@ import {
   assertPartnerIndices,
   assertPartnerIndexTable,
   partnerProtocolError,
+  resolveRunGroupedReturn,
   type PartnerIndexGrouping,
+  type PartnerIndexOwnerRuns,
   type PartnerIndexRules,
 } from "../utils/partnerIndices";
 import {
@@ -137,8 +139,8 @@ interface IndexableIterable<T> extends Iterable<T> {
 // unconditionally -- psi-c counts matched VALUES where the resolution accepts
 // at most one pair per record, so a candidate set would over-report the
 // linkage the count is used to justify -- while the cascade applies it behind
-// the strategy allowlist (docs/spec/PROTOCOL.md, The combinations that stay
-// unsupported).
+// the strategy allowlist (docs/spec/PROTOCOL.md, Where a candidate set is
+// refused).
 function requireSingleCandidate(value: KeyCandidates): string | undefined {
   if (value === undefined || typeof value === "string") return value;
   throw fanOutReachedMatchingRefusal();
@@ -267,57 +269,81 @@ function sentGrouping(
   };
 }
 
-// One label per matched record of this party, equal exactly for the records
-// accepted against one (round, partner record) -- the block of a single
-// matched value. Read off the grouping this party holds, not off the list
-// itself, so the derivation rests on this party's own record of what it sent
-// rather than on objects a transport may hand both sides by reference.
-function blockLabels(groups: PartnerIndexGrouping): Int32Array {
-  const labels = new Int32Array(groups.rounds.length);
-  const groupsByRound = new Map<number, Map<number, number>>();
-  let next = 0;
-  for (let i = 0; i < labels.length; ++i) {
-    let byGroup = groupsByRound.get(groups.rounds[i]);
-    if (byGroup === undefined) {
-      byGroup = new Map();
-      groupsByRound.set(groups.rounds[i], byGroup);
-    }
-    let label = byGroup.get(groups.groups[i]);
-    if (label === undefined) {
-      label = next++;
-      byGroup.set(groups.groups[i], label);
-    }
-    labels[i] = label;
+// What this party's own returned list has to come back holding where the
+// partner keeps its duplicates too: for each outbound entry, in the order sent,
+// the round it named and every partner record its own record was accepted with.
+// Read off this party's own resolution rather than off the list, so a transport
+// that hands the partner the sent objects themselves cannot move it.
+function sentOwnerRuns(
+  sent: MappedElementList,
+  matchedRows: ReadonlyArray<number>,
+  acceptedPartnerRanks: ReadonlyArray<ReadonlyArray<number>>,
+  returnedEntriesPerRecord: Int32Array,
+): PartnerIndexOwnerRuns {
+  const ownerStarts = new Int32Array(matchedRows.length + 1);
+  const owners: Array<number> = [];
+  for (let i = 0; i < matchedRows.length; ++i) {
+    for (const rank of acceptedPartnerRanks[matchedRows[i]]) owners.push(rank);
+    ownerStarts[i + 1] = owners.length;
   }
-  return labels;
+  return {
+    rounds: Float64Array.from(sent, (e) => e.iteration),
+    runLengths: Int32Array.from(
+      matchedRows,
+      (row) => returnedEntriesPerRecord[row],
+    ),
+    ownerStarts,
+    owners: Int32Array.from(owners),
+  };
 }
 
-// The rule this party's own returned mapped-element list is held to. There is
-// one rule -- injectivity modulo the pairing this party resolved -- read at
-// whichever granularity the partner returns: entry for entry where the partner
-// takes one row per entry, and run for run where it keeps its own duplicates
-// and returns every one of its records accepted with that entry's. A party
-// whose own side keeps no duplicates holds flat distinctness instead.
-// `matchedRows` runs parallel to the sent list, so the tally it reads gives one
-// run length per outbound entry.
+// One block of a round: for one matched value, the local rows that contributed
+// it and the partner ranks that did, whose whole product a both-sided round
+// accepts (docs/spec/PROTOCOL.md, The `many-to-many` entity closure).
+interface RoundBlock {
+  readonly localRows: Array<number>;
+  readonly partnerRanks: Array<number>;
+}
+
+// Those blocks in the two parties' ROW spaces, which is where the closure check
+// reads them: this party's own rows as the round held them, and the partner's
+// ranks resolved into its rows by the returned list's own check.
+function closureBlocks(
+  blocksByIter: ReadonlyArray<ReadonlyArray<RoundBlock>>,
+  rowsOfRankByIter: ReadonlyMap<number, ReadonlyMap<number, Array<number>>>,
+): Array<ClosureBlock> {
+  const blocks: Array<ClosureBlock> = [];
+  for (let j = 0; j < blocksByIter.length; ++j) {
+    const rowsOfRank = rowsOfRankByIter.get(j);
+    for (const block of blocksByIter[j]) {
+      const partnerRows = new Set<number>();
+      for (const rank of block.partnerRanks) {
+        const rows = rowsOfRank?.get(rank);
+        if (rows === undefined)
+          throw new InternalConsistencyError(
+            "a linkage round matched a value whose partner records the " +
+              "returned mapped-element list left without a row",
+          );
+        for (const row of rows) partnerRows.add(row);
+      }
+      blocks.push({
+        localRows: block.localRows,
+        partnerRows: [...partnerRows],
+      });
+    }
+  }
+  return blocks;
+}
+
+// The rule this party's own returned mapped-element list is held to where the
+// partner takes one row per entry: injectivity modulo the pairing this party
+// resolved. A party whose own side keeps no duplicates holds flat distinctness
+// instead. Where the partner keeps its duplicates too the list comes back as
+// runs and is read by `resolveRunGroupedReturn` instead.
 function returnedListRules(
   sentGroups: PartnerIndexGrouping | undefined,
-  returnedEntriesPerRecord: Int32Array | undefined,
-  matchedRows: ReadonlyArray<number>,
 ): PartnerIndexRules {
-  if (sentGroups === undefined) return {};
-  if (returnedEntriesPerRecord === undefined)
-    return { repeatsGroupedBy: sentGroups };
-  return {
-    repeatsGroupedByRuns: {
-      rounds: sentGroups.rounds,
-      groups: sentGroups.groups,
-      runLengths: Int32Array.from(
-        matchedRows,
-        (row) => returnedEntriesPerRecord[row],
-      ),
-    },
-  };
+  return sentGroups === undefined ? {} : { repeatsGroupedBy: sentGroups };
 }
 
 /**
@@ -665,9 +691,9 @@ class RoundGrouping implements RoundGroupingExchange {
  * the two mirror one procedure (docs/spec/PROTOCOL.md, Deduplicating
  * cardinalities). Under `"many-to-many"` both sides apply the "many" rule,
  * so a matched value stands for a group on each side and the pair set is the
- * two groups' product; the returned table is held to the block shape the
- * entity closure step rests on ({@link ./entityClosure.entityClusters},
- * {@link ./entityClosure.assertBlockDiagonalClosure}). exchange.ts resolves
+ * two groups' product; the returned table is held to the round-diagonal shape
+ * the entity closure step rests on ({@link ./entityClosure.entityClusters},
+ * {@link ./entityClosure.assertRoundDiagonalClosure}). exchange.ts resolves
  * the cardinality from the two agreed `deduplicate` settings.
  *
  * @param protocol - Only `cardinality` is used, this party's own resolved
@@ -722,17 +748,17 @@ export async function linkViaPSI(
   const localIsSender = sendFirst;
   const acceptance = roundAcceptance(sides, localIsSender);
   // A candidate set reaches a round only under a strategy whose resolution for
-  // one is built, and under a resolved cardinality that has one: `many-to-many`
-  // is refused whatever the strategy, its closure over candidate sets being
-  // specified and not yet built (docs/spec/PROTOCOL.md, The `many-to-many`
-  // entity closure). The strategy gate is an allowlist, so a
-  // linkage_strategy added later refuses one until its own resolution is
-  // written. The same reading gates the grouping's place on the round's two
-  // position-naming frames, so a closed one leaves both frames as the
-  // single-valued cascade sends and reads them.
-  const resolvesCandidateSets =
-    candidateSetIsImplementedForStrategy("cascade") &&
-    protocol.cardinality !== "many-to-many";
+  // one is built. The gate is an ALLOWLIST, so a linkage_strategy added later
+  // refuses one until its own resolution is written (docs/spec/PROTOCOL.md,
+  // Where a candidate set is refused). The same reading gates the grouping's
+  // place on the round's two position-naming frames, so a closed one leaves
+  // both frames as the single-valued cascade sends and reads them.
+  const resolvesCandidateSets = candidateSetIsImplementedForStrategy("cascade");
+  // Both sides keeping their within-dataset duplicates is what stands a matched
+  // value for a GROUP on each side, so the round's pairs fall into blocks and
+  // the table is held to the closure over them (docs/spec/PROTOCOL.md, The
+  // `many-to-many` entity closure).
+  const bothSided = sides.localKeepsDuplicates && sides.partnerKeepsDuplicates;
   const readCandidates: (value: KeyCandidates) => KeyCandidates =
     resolvesCandidateSets ? (value) => value : requireSingleCandidate;
 
@@ -754,6 +780,14 @@ export async function linkViaPSI(
   // (docs/spec/PROTOCOL.md, The reading pass's preconditions, at the widened
   // entry).
   let acceptedPartnerRank = new Int32Array(0);
+  // Every partner record each of this party's accepted records was accepted
+  // with, as their ranks within the round. Where a candidate set widened a
+  // both-sided round that is a SET rather than the one rank above, and it is
+  // the set the returned list's runs are held to (docs/spec/PROTOCOL.md, What
+  // lifting the refusal owes). Sparse: only a matched record has an entry.
+  const acceptedPartnerRanks: Array<Array<number>> = [];
+  // Each round's blocks, held only where the cardinality forms them.
+  const blocksByIter: Array<Array<RoundBlock>> = [];
   // What each round's entries of the partner's mapped-element list must be, in
   // the order it states them: the positions the `i`-th of the partner's
   // accepted records' pairs rest on, and the rows of this party's records
@@ -872,6 +906,8 @@ export async function linkViaPSI(
     // partner record owns.
     const partnerPositionsMatched = new Map<number, Set<number>>();
     const localPositionsMatched = new Map<number, Set<number>>();
+    const blocks: Array<RoundBlock> = [];
+    blocksByIter.push(blocks);
     const noteMatch = (
       matched: Map<number, Set<number>>,
       rank: number,
@@ -893,6 +929,24 @@ export async function linkViaPSI(
         throw new InternalConsistencyError(
           "a linkage round matched a position no grouping of the round names",
         );
+      if (bothSided) {
+        const localRows: Array<number> = [];
+        for (
+          let a = local.ownership.starts[mine];
+          a < local.ownership.starts[mine + 1];
+          ++a
+        )
+          localRows.push(local.rowOfOrdinal[local.ownership.ordinals[a]]);
+        blocks.push({
+          localRows,
+          partnerRanks: [
+            ...partner.ordinals.subarray(
+              partner.starts[theirs],
+              partner.starts[theirs + 1],
+            ),
+          ],
+        });
+      }
       for (let b = partner.starts[theirs]; b < partner.starts[theirs + 1]; ++b)
         noteMatch(
           localPositionsMatched,
@@ -983,10 +1037,21 @@ export async function linkViaPSI(
     }
 
     const lowestPartnerRank = new Map<number, number>();
+    const ranksAcceptedWith = bothSided
+      ? new Map<number, Set<number>>()
+      : undefined;
     for (let p = 0; p < localAccepted.length; ++p) {
       const held = lowestPartnerRank.get(localAccepted[p]);
       if (held === undefined || partnerAccepted[p] < held)
         lowestPartnerRank.set(localAccepted[p], partnerAccepted[p]);
+      if (ranksAcceptedWith) {
+        let ranks = ranksAcceptedWith.get(localAccepted[p]);
+        if (ranks === undefined) {
+          ranks = new Set<number>();
+          ranksAcceptedWith.set(localAccepted[p], ranks);
+        }
+        ranks.add(partnerAccepted[p]);
+      }
     }
     for (const [rank, partnerRank] of lowestPartnerRank) {
       const row = local.rowOfOrdinal[rank];
@@ -1004,6 +1069,10 @@ export async function linkViaPSI(
       indexIterationMap[row] = { theirIndex, iteration: j };
       canonicalPositionOf[row] = local.ownership.canonicalPosition[rank];
       acceptedPartnerRank[row] = partnerRank;
+      if (ranksAcceptedWith)
+        acceptedPartnerRanks[row] = [...ranksAcceptedWith.get(rank)!].sort(
+          (a, b) => a - b,
+        );
     }
 
     // Every record standing in ANY of the round's candidate pairs leaves
@@ -1034,15 +1103,18 @@ export async function linkViaPSI(
   );
 
   // Held for the returned list's check below, where this party is the "many"
-  // side: the pairing its own list named is what that list has to come back
-  // holding, entry for entry or run for run as the partner's own side rules.
-  const sentGroups = sides.localKeepsDuplicates
-    ? sentGrouping(
-        identifiedIndexIterationMap,
-        originalIndices,
-        acceptedPartnerRank,
-      )
-    : undefined;
+  // side and its partner the "one": the pairing its own list named is what that
+  // list has to come back holding, entry for entry. Where the partner keeps its
+  // duplicates too the list comes back as runs and is held to the whole set of
+  // partner records each entry was accepted with instead.
+  const sentGroups =
+    sides.localKeepsDuplicates && !sides.partnerKeepsDuplicates
+      ? sentGrouping(
+          identifiedIndexIterationMap,
+          originalIndices,
+          acceptedPartnerRank,
+        )
+      : undefined;
 
   log.debug(
     `${participant.id}: sending match map indexed by round, receiving ` +
@@ -1239,23 +1311,44 @@ export async function linkViaPSI(
   // exchanged association maps).
   //
   // Where the partner keeps its duplicates too, each of our entries comes back
-  // as a run of the partner's records accepted with ours rather than one row,
-  // so the same rule reads over runs: grouped entries must come back with
-  // identical runs, differently grouped ones with disjoint runs. The run
-  // lengths are the per-record tally we already hold.
+  // as a run of the partner's records accepted with ours rather than one row.
+  // A candidate set then leaves those sets overlapping without coinciding, so
+  // the rule is read over the sets themselves rather than over one rank of each
+  // (`resolveRunGroupedReturn`, utils/partnerIndices.ts).
   assertPartnerIndexCount(
     participant.id,
     "the returned mapped-element list",
     identifiedIndexMap.length,
     sides.partnerKeepsDuplicates ? returnedEntries : numMappedElements,
   );
-  assertPartnerIndices(
-    participant.id,
-    "the returned mapped-element list",
-    identifiedIndexMap.map((x) => x.theirIndex),
-    partnerRecordCount,
-    returnedListRules(sentGroups, returnedEntriesPerRecord, originalIndices),
-  );
+  const returnedRows = identifiedIndexMap.map((x) => x.theirIndex);
+  // Under a both-sided multiplicity the run answering each of our entries is
+  // held to the whole set of the partner's records that entry was accepted
+  // with, which resolves each of those ranks to one of the partner's rows; the
+  // table and its blocks are then read through that resolution. Every other
+  // shape returns one row per entry and takes the rule above.
+  const rowsOfRankByIter = bothSided
+    ? resolveRunGroupedReturn(
+        participant.id,
+        "the returned mapped-element list",
+        returnedRows,
+        partnerRecordCount,
+        sentOwnerRuns(
+          identifiedIndexIterationMap,
+          originalIndices,
+          acceptedPartnerRanks,
+          returnedEntriesPerRecord!,
+        ),
+      )
+    : undefined;
+  if (rowsOfRankByIter === undefined)
+    assertPartnerIndices(
+      participant.id,
+      "the returned mapped-element list",
+      returnedRows,
+      partnerRecordCount,
+      returnedListRules(sentGroups),
+    );
 
   if (!sides.partnerKeepsDuplicates)
     return identifiedIndexMap.reduce(
@@ -1272,13 +1365,12 @@ export async function linkViaPSI(
   // Walking our records in that order with the per-record tally reconstructs
   // the pairing, which is why the expansion order is normative.
   //
-  // Under a BOTH-sided multiplicity the pairs are labelled with the block
-  // each belongs to as they are built, so the entity closure step can hold
-  // the table to those blocks below. Only that cardinality has labels: where
-  // one side keeps its distinctness a cluster is one record of that side
-  // with the group facing it, which the table's own shape already gives.
-  const labels = sentGroups && blockLabels(sentGroups);
-  const blockOfPair: Array<number> | undefined = labels && [];
+  // Under a BOTH-sided multiplicity each pair is labelled with the round it was
+  // matched in as it is built, so the entity closure step can hold the table to
+  // the round's own blocks below. Only that cardinality forms them: where one
+  // side keeps its distinctness a cluster is one record of that side with the
+  // group facing it, which the table's own shape already gives.
+  const roundOfPair: Array<number> | undefined = bothSided ? [] : undefined;
   const table: [Array<number>, Array<number>] = [[], []];
   let cursor = 0;
   for (let i = 0; i < originalIndices.length; ++i) {
@@ -1286,11 +1378,16 @@ export async function linkViaPSI(
     for (let t = returnedEntriesPerRecord![row]; t > 0; --t) {
       table[0].push(row);
       table[1].push(identifiedIndexMap[cursor++].theirIndex);
-      blockOfPair?.push(labels![i]);
+      roundOfPair?.push(identifiedIndexIterationMap[i].iteration);
     }
   }
-  if (blockOfPair)
-    assertBlockDiagonalClosure(participant.id, table, blockOfPair);
+  if (roundOfPair && rowsOfRankByIter)
+    assertRoundDiagonalClosure(
+      participant.id,
+      table,
+      roundOfPair,
+      closureBlocks(blocksByIter, rowsOfRankByIter),
+    );
   return table;
 }
 

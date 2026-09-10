@@ -452,8 +452,15 @@ describe("the consent summary's refused-pair register", () => {
   test("states the refusal where the invitation holds both halves of the pair", () => {
     // The seat reads this before the operator sets the one value the
     // invitation does not hold, so the flag and the accept's own verdict on
-    // that value are driven together.
-    const terms = { ...baseTerms, deduplicate: true, linkageKeys: fanOutKeys };
+    // that value are driven together. The strategy is what stands in the way:
+    // single-pass pairs no both-sided cardinality at all, so the accept refuses
+    // the value there.
+    const terms = {
+      ...baseTerms,
+      deduplicate: true,
+      linkageStrategy: "single-pass" as const,
+      linkageKeys: fanOutKeys,
+    };
     expect(
       summarizeInvitation({ linkageTerms: terms }).acceptorDeduplicateRefused,
     ).toBe(true);
