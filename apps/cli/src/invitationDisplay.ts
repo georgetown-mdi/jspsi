@@ -851,7 +851,9 @@ export function displayInvitation(params: {
   // `disclosedPayloadColumns`) when the invitation has one, falling back
   // to the authored `payload.send` otherwise. A lazy send -- no held
   // subset and nothing authored -- is omitted, since it reconciles at
-  // exchange time; that omission is what leaves a bare "(none)"
+  // exchange time; so is an invitation that hands this party no result,
+  // which transmits no column for the "you will receive the result" line
+  // above to disagree with. That omission is what leaves a bare "(none)"
   // unambiguous, since only a declared direction reaches the line at all.
   // What the declaration commits its party to is docs/CLI.md's to state.
   //

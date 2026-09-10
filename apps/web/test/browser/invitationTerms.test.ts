@@ -1380,6 +1380,32 @@ describe("InvitationTerms: always-visible ingress count in the 'What you receive
     expect(group("What you receive").query()).toBeNull();
   });
 
+  test("an invitation giving this party no result raises no ingress count beside its 'No'", async () => {
+    // The mint-reachable pair: the result is not shared, the terms declare an
+    // empty send, and the token still carries the subset a mint stamps whatever
+    // the output direction. Nothing crosses to a party entitled to no result, so
+    // the screen states the non-receipt under Result sharing and counts no
+    // arriving column against it -- the same reading the CLI accept prompt makes
+    // of the same pair (apps/cli/test/unit/commands/accept.test.ts).
+    render(
+      {
+        ...terms,
+        output: { expectsOutput: true, shareWithPartner: false },
+        payload: { send: [] },
+      },
+      { disclosedPayloadColumns: ["diagnosis"] },
+    );
+    await expect.element(toggle("Other details")).toBeInTheDocument();
+    expect(app.container.textContent).toContain(
+      "You will receive the matched result: No",
+    );
+    expect(group("What you receive").query()).toBeNull();
+    // The stamped column is named nowhere either: a column that does not cross
+    // is no part of what this party receives, at the count or in the detail.
+    const panel = await readyPanel("Other details");
+    expect(panel.textContent).not.toContain("diagnosis");
+  });
+
   test("the inviter's own proposing preview shows no ingress count (its send is chips in 'What you disclose')", async () => {
     // Receiving-partner framing is acceptor-only. The inviter's preview shows its
     // send as chips in "What you disclose" already, so the presence is not hidden in

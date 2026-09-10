@@ -25,14 +25,18 @@ const EVIL_IDENTITY = `Acme${ESC}[31m${RLO}org`;
 const EVIL_KEY_NAME = `key${BEL}one`;
 
 // A self-contained set of linkage terms with every optional block populated, so
-// a single render exercises the full terms display.
+// a single render exercises the full terms display. Both parties receive the
+// result: a `payload.send` names columns the accepting party is to receive, and
+// an invitation sharing no result with that party transmits none of them --
+// summarizeInvitation states no arriving set there, leaving the send-side
+// assertions below nothing to read.
 const baseTerms: LinkageTerms = {
   version: "1.0.0",
   identity: "County Health Department",
   date: "2026-01-15",
   algorithm: "psi",
   linkageStrategy: "cascade",
-  output: { expectsOutput: true, shareWithPartner: false },
+  output: { expectsOutput: true, shareWithPartner: true },
   deduplicate: false,
   linkageFields: [
     { name: "ssn", type: "ssn" },
@@ -131,7 +135,7 @@ describe("summarizeInvitation", () => {
     expect(summary.invitingParty).toBe("County Health Department");
     expect(summary.algorithm).toBe("psi");
     expect(summary.inviterReceivesOutput).toBe(true);
-    expect(summary.inviterSharesResult).toBe(false);
+    expect(summary.inviterSharesResult).toBe(true);
     expect(summary.linkageKeys.map((key) => key.name)).toEqual([
       "SSN + LN + DOB",
     ]);

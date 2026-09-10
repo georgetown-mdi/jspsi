@@ -78,7 +78,10 @@ export const hostileTerms: LinkageTerms = {
   date: `2026-01-15${BEL}`,
   algorithm: "psi",
   linkageStrategy: "cascade",
-  output: { expectsOutput: true, shareWithPartner: false },
+  // Both parties receive: a summary states no arriving column set for an
+  // invitation that shares no result, which would leave the payload send names
+  // and the token's disclosed subset out of the walk with nothing to escape.
+  output: { expectsOutput: true, shareWithPartner: true },
   deduplicate: false,
   linkageFields: [
     { name: `last${BEL}name`, type: "last_name" },
