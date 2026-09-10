@@ -829,12 +829,20 @@ That workflow's Trivy scan gates on the variant leg on every trigger, the
 pull-request path included, so a bump taken in order to clear a scan finding is
 confirmed by the pull request's own run rather than by a dispatch beside it.
 That posture holds only while the pinned base and snapshot name a rootfs whose
-closure scans clean: a base carrying fixable findings no pin movement can reach
-takes the leg back off the pull-request path in the same diff that pins it,
-because a check red on every product PR for weeks teaches reviewers to ignore
-it. Accepting such a finding in `.github/trivyignore.yaml` is not the
-alternative -- the release workflow's gate reads that same file, so an entry
-there stops it refusing to publish too. Either way the findings arrive as
+closure scans clean, and a check red on every product PR for weeks teaches
+reviewers to ignore it. A base carrying a fixable finding no published rootfs
+can reach -- the fix served by a newer package snapshot than any rootfs the
+registry has been rebuilt onto, which the build's release assertion refuses to
+mix -- is answered by an entry in `.github/trivyignore.yaml` scoped by `purls`
+to the packages assessed, stating why the finding is accepted (the vulnerable
+path must be one no psilink role reaches), naming the base bump that clears
+it, and carrying an `expired_at` that forces the re-read. The release
+workflow's gate reads that same file, so the entry is a publish decision as
+much as a merge one; that is why it is scoped and dated and never an id-only
+entry, which would also suppress the finding on the other image. Taking the
+leg back off the pull-request path is not the alternative: it hides the scan
+from the runs that would show the finding cleared. The entry comes out in the
+same diff as the bump. Either way the findings arrive as
 code-scanning alerts under `container-image-fips`, and scanning the built
 variant by hand (OS and language packages, `vuln` scanner, high and above,
 fixable only, against `.github/trivyignore.yaml`) answers the same question
