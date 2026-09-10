@@ -1,8 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
 
-import log from "loglevel";
-
-import { describeResolvedRunShape } from "@psilink/core";
+import { describeResolvedRunShape, getLogger } from "@psilink/core";
 
 import {
   DISCLOSURE_NOT_FILED_WARNING,
@@ -19,6 +17,8 @@ import { listReadableManagedExchanges } from "../../../src/psi/managed/managedEx
 import type { ManagedExchangeRecord } from "../../../src/psi/managed/managedExchangeRecord.js";
 import type { ManagedRunDriverConfig } from "../../../src/psi/managed/managedRunDriver.js";
 import type { ManagedScheduleTickSeams } from "../../../src/psi/managed/managedScheduleRunner.js";
+
+const log = getLogger("managedScheduleRuntime");
 
 /**
  * The browser half of the unattended runner: what it hands the run driver, what

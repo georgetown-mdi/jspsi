@@ -3,11 +3,11 @@ import { Fragment, useEffect, useMemo, useRef, useState } from "react";
 import { Alert, Button, Checkbox, Text, TextInput } from "@mantine/core";
 import { Dropzone } from "@mantine/dropzone";
 import { IconAlertCircle } from "@tabler/icons-react";
-import log from "loglevel";
 
 import {
   deriveAcceptedLinkageTerms,
   describeDecodeError,
+  getLogger,
   sanitizeErrorForDisplay,
 } from "@psilink/core";
 
@@ -166,6 +166,8 @@ import type { RunDiagnosticsDraft } from "@psi/runDiagnosticsModel";
 import type { SftpConnectionInfo } from "@psi/jobClient/serverJobExchangeDriver";
 import type { SftpConnectionProjection } from "@jobs/jobManager";
 import type { SftpEndpointLocator } from "@console/sftpConnectionForm";
+
+const log = getLogger("AcceptorScreen");
 
 /** Stable empty inputs for {@link useNonEmptyRates} before a file is acquired, so the
  * hook's controller is not rebuilt every render on a fresh `[]` identity. */

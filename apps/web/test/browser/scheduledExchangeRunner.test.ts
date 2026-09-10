@@ -2,7 +2,7 @@
 
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import log from "loglevel";
+import { getLogger } from "@psilink/core";
 
 import { Fragment, createElement } from "react";
 
@@ -16,6 +16,8 @@ import { isInstalledRuntime } from "@utils/installedRuntime";
 import { createAppMount, flushPendingUpdates } from "./renderApp";
 
 import type { ManagedScheduleRuntimeOptions } from "@psi/managed/managedScheduleRuntime";
+
+const log = getLogger("ScheduledExchangeRunner");
 
 // This suite mounts in a real Chromium tab, the runtime the runner must not
 // fire in. The runner it starts is injected -- this file tests the gate and

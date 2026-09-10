@@ -3,7 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { Alert, Anchor, Button, Text, TextInput } from "@mantine/core";
 import { Dropzone } from "@mantine/dropzone";
 import { IconAlertCircle } from "@tabler/icons-react";
-import log from "loglevel";
+import { getLogger } from "@psilink/core";
 
 import { MAX_CSV_FILE_BYTES } from "@components/csvIntake";
 
@@ -23,6 +23,8 @@ import type {
 import type { AcquiredCsv } from "@psi/inviterEditor";
 import type { AlertContent } from "@components/csvIntake";
 import type { FileRejection } from "@mantine/dropzone";
+
+const log = getLogger("YourFileSection");
 
 /**
  * Step 1 of the inviter spine: the inviter's name and file. Presentational --

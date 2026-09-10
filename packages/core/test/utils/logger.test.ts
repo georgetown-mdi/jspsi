@@ -77,6 +77,22 @@ test("raises a pre-existing logger's detail to debug and trace", () => {
   expect(emitted.join("\n")).toContain(`[TRACE] [${name}] visible at trace`);
 });
 
+test("takes a level NAME, the shape a server environment holds", () => {
+  // The web server's LOG_LEVEL is an environment value, so its bootstrap has a
+  // name rather than a number, and reaching for loglevel's own levels table to
+  // convert it would put a CommonJS named import in a tree Node loads as ESM.
+  const name = uniqueName("named-level");
+  const log = getLogger(name);
+
+  setLogLevel("SILENT");
+  log.error("must not appear");
+  expect(emitted).toEqual([]);
+
+  setLogLevel("INFO");
+  log.info("visible at info");
+  expect(emitted.join("\n")).toContain(`[INFO] [${name}] visible at info`);
+});
+
 test("still applies to a logger created after it", () => {
   setLogLevel(logLibrary.levels.SILENT);
   const log = getLogger(uniqueName("later"));

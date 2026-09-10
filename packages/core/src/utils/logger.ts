@@ -67,6 +67,12 @@ export const getDiagnosticSink = (): DiagnosticSink | undefined =>
  * it here, so a `silent` run stays silent and a `debug` run stays detailed
  * no matter when a logger was constructed.
  *
+ * `level` takes either form loglevel accepts, a number or a level name in
+ * either case (`"INFO"`), so a bootstrap holding the name an operator wrote
+ * -- the web server's `LOG_LEVEL` environment value -- hands it over without
+ * a table of its own; loglevel normalizes it and throws a `TypeError` on a
+ * value that names no level.
+ *
  * The registry sweep is what reaches backward: `setDefaultLevel` alone
  * governs only the root logger and loggers built after it, so a
  * module-scope logger materialized at import time -- before any flag is
@@ -95,7 +101,7 @@ export const getDiagnosticSink = (): DiagnosticSink | undefined =>
  * method beforehand -- a test spy, a destructured `log.warn` -- is stale
  * afterwards; call the method off the logger instead.
  */
-export const setLogLevel = (level: logLibrary.LogLevelNumbers): void => {
+export const setLogLevel = (level: logLibrary.LogLevelDesc): void => {
   logLibrary.setDefaultLevel(level);
   const registry = logLibrary.getLoggers() as Record<
     string | symbol,

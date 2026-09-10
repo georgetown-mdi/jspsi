@@ -1,6 +1,9 @@
 import tseslint from "typescript-eslint";
 import webConfig from "./apps/web/eslint.config.js";
-import { crossWorkspaceImportBans } from "./eslint.boundaries.mjs";
+import {
+  crossWorkspaceImportBans,
+  noBareRootLoglevelEmit,
+} from "./eslint.boundaries.mjs";
 
 function scopeToDir(dir, configs) {
   return configs.map((config) => {
@@ -20,28 +23,6 @@ function scopeToDir(dir, configs) {
     };
   });
 }
-
-// Ban emitting through loglevel's bare root logger (the `logLibrary` default
-// import) in source that runs inside the CLI integration workers. The suite's
-// two leak-detection backstops -- the console sentinel and withCapturedLogs
-// capture -- only observe NAMED loggers: a named logger binds the
-// sentinel-wrapped console (and the capture interceptor) at getLogger time,
-// whereas the eager capture install rebinds the root logger against the raw,
-// pre-sentinel console (capturedLogs.setup.ts runs before the sentinel wraps
-// console). So a bare `logLibrary.<level>(...)` would silently escape BOTH
-// backstops. This rule is the executable form of that invariant -- the prose
-// "nothing emits through the bare root logger" the eager-install ordering rests
-// on -- so a future bare-root emit fails the lint check instead of quietly
-// reopening the blind spot. Emit through getLogger / getLoggerForVerbosity; the
-// root `logLibrary` is for setLevel / levels / getLogger only. (In core/src and
-// cli/src the loglevel default is uniformly imported as `logLibrary` and is
-// never a named-logger variable, so keying on that identifier is exact.)
-const noBareRootLoglevelEmit = {
-  selector:
-    "CallExpression[callee.object.name='logLibrary'][callee.property.name=/^(trace|debug|info|warn|error)$/]",
-  message:
-    "Do not emit through the bare root logger (logLibrary.<level>()): the CLI integration console sentinel and withCapturedLogs capture only see named loggers, so a bare-root emit escapes both leak-detection backstops. Use getLogger / getLoggerForVerbosity; logLibrary is for setLevel / levels / getLogger only.",
-};
 
 // The operator-facing display sinks this repo emits diagnostics through: the
 // `console` methods, and a loglevel logger reached through the receivers used in

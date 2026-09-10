@@ -2,7 +2,10 @@
 import pluginRouter from "@tanstack/eslint-plugin-router";
 import { tanstackConfig } from "@tanstack/eslint-config";
 import filledPrimaryContrastScope from "./eslint-rules/filled-primary-contrast-scope.mjs";
-import { crossWorkspaceImportBans } from "../../eslint.boundaries.mjs";
+import {
+  crossWorkspaceImportBans,
+  noBareRootLoglevelEmit,
+} from "../../eslint.boundaries.mjs";
 
 // The sensitive-file YAML-parse ban (shared by the broad block and the rawRows
 // allowlist block, since flat config replaces -- does not merge -- a rule's options,
@@ -21,6 +24,40 @@ const rawYamlParserImportBan = {
   importNames: ["parse", "parseDocument", "parseAllDocuments"],
   message:
     "Do not import yaml's raw parsers in the web app; route parsing through @psilink/core's parseSensitiveYaml / parseSensitiveJson (the shared sensitive-file chokepoint). yaml's `stringify` is allowed.",
+};
+
+// The root-logger import ban, over `src/`. loglevel's default export IS the root
+// logger, so holding emission to core's named loggers means the browser bundle
+// never binds it: every diagnostic line goes through `@psilink/core`'s getLogger,
+// which adds the `[timestamp] [LEVEL] [context]` prefix and strips private-key
+// material out of string arguments. The named exports stay available -- the
+// client entry takes `setDefaultLevel`, and two config modules take the
+// `LogLevel` type -- so this bans the binding that can emit and nothing else. The
+// emit selector from eslint.boundaries.mjs bans the call shape as well, which is
+// what covers a root logger reached without an import of its own. `server/` takes
+// the whole-module ban below instead, and `vite.config.ts` sits outside every
+// glob and keeps loglevel's own root logger for its build-time warnings; it never
+// ships to the browser.
+const rootLoglevelImportBan = {
+  name: "loglevel",
+  importNames: ["default"],
+  message:
+    "Do not import loglevel's default export in the web app: it is the root logger, whose emits skip the context prefix and the private-key redaction @psilink/core's getLogger installs. Emit through getLogger; import the named `setDefaultLevel` / `levels` for level configuration.",
+};
+
+// The server tree's ban on loglevel altogether, name and all. Node runs the built
+// Nitro entry with loglevel left external, and its ESM loader synthesizes no
+// named export off that CommonJS module, so a named import here is a SyntaxError
+// at boot, before the server listens. Banning the whole module rather than its
+// value exports alone is what a `paths` entry can express: no-restricted-imports
+// cannot tell a type-only import from a value one. The level goes to core's
+// setLogLevel, which sweeps every logger the entry's imports already built. The
+// client entry keeps its named import -- Vite bundles the browser build and
+// resolves the interop itself.
+const serverLoglevelModuleBan = {
+  name: "loglevel",
+  message:
+    "Do not import loglevel in the web app's server tree: it is a CommonJS module the built Nitro entry keeps external, so a named import of it throws `Named export not found` at boot, and its default export is the root logger, whose emits skip the context prefix and the private-key redaction @psilink/core's getLogger installs. Set the level with @psilink/core's setLogLevel and emit through getLogger.",
 };
 
 // Hold the draft-side rule-set membership compares at the one chokepoint that
@@ -226,7 +263,14 @@ const sharedSyntaxBans = [
   sensitiveYamlParseBan,
   fetchedBodyReadBan,
   seatWarningSinkBan,
+  noBareRootLoglevelEmit,
 ];
+
+// The no-restricted-imports `paths` entries every block covering src/ takes,
+// spread for the same reason sharedSyntaxBans is: a block that restates the rule
+// cannot drop one of them by omission. server/ takes the yaml entry beside the
+// stricter loglevel entry, in the block of its own below.
+const sharedImportPathBans = [rawYamlParserImportBan, rootLoglevelImportBan];
 
 // The two bans a file below the products takes on top of the shared set.
 const layerDirectionBans = [
@@ -290,9 +334,27 @@ export default [
       "no-restricted-imports": [
         "error",
         {
-          paths: [rawYamlParserImportBan],
+          paths: sharedImportPathBans,
           // Re-carried from the boundary block above, which this block would
           // otherwise replace for src/ (flat config replaces a rule's options).
+          patterns: crossWorkspaceImportBans.web,
+        },
+      ],
+    },
+  },
+  {
+    // The server tree's stricter loglevel entry (see serverLoglevelModuleBan),
+    // which replaces the shared set for these files. It re-carries the
+    // sensitive-parse ban and the workspace-boundary groups the block above sets
+    // for them, since flat config replaces a rule's whole options; the syntax
+    // bans that block sets, the bare-root emit selector included, it leaves
+    // alone.
+    files: ["server/**/*.ts"],
+    rules: {
+      "no-restricted-imports": [
+        "error",
+        {
+          paths: [rawYamlParserImportBan, serverLoglevelModuleBan],
           patterns: crossWorkspaceImportBans.web,
         },
       ],
@@ -362,7 +424,7 @@ export default [
       "no-restricted-imports": [
         "error",
         {
-          paths: [rawYamlParserImportBan, linkageComparisonChokepointBan],
+          paths: [...sharedImportPathBans, linkageComparisonChokepointBan],
           patterns: crossWorkspaceImportBans.web,
         },
       ],
@@ -417,7 +479,7 @@ export default [
       "no-restricted-imports": [
         "error",
         {
-          paths: [rawYamlParserImportBan, linkageComparisonChokepointBan],
+          paths: [...sharedImportPathBans, linkageComparisonChokepointBan],
           patterns: [...crossWorkspaceImportBans.web, ...productDirectoryBans],
         },
       ],
@@ -454,7 +516,7 @@ export default [
       "no-restricted-imports": [
         "error",
         {
-          paths: [rawYamlParserImportBan],
+          paths: sharedImportPathBans,
           patterns: [...crossWorkspaceImportBans.web, ...productDirectoryBans],
         },
       ],

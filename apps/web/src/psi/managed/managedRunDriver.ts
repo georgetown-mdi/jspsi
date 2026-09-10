@@ -23,13 +23,12 @@
  * and derives the rendezvous id, fresh this run.
  */
 
-import log from "loglevel";
-
 // @ts-ignore this is really there
 import PSI from "@openmined/psi.js/psi_wasm_web";
 
 import {
   describeResolvedRunShape,
+  getLogger,
   loadPsiBackend,
   runExchange,
 } from "@psilink/core";
@@ -68,6 +67,8 @@ import type { ManagedExchangeRunResult } from "./managedExchangeRun";
 import type { ManagedInputSource } from "./managedInputHandle";
 import type { ManagedRerunOptions } from "./managedRun";
 import type { PeerCloseOutcome } from "../transport/waitForPeerClose";
+
+const log = getLogger("managedRunDriver");
 
 /** What the input phase yields to the handshake: the prepared exchange bound to
  * this run's freshly-read rows, before any connection. */

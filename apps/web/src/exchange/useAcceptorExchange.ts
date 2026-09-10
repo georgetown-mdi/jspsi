@@ -1,11 +1,13 @@
-import log from "loglevel";
-
 import { useEffect, useMemo, useRef, useState } from "react";
 
 // @ts-ignore this is really there
 import PSI from "@openmined/psi.js/psi_wasm_web";
 
-import { deriveAcceptedLinkageTerms, loadPsiBackend } from "@psilink/core";
+import {
+  deriveAcceptedLinkageTerms,
+  getLogger,
+  loadPsiBackend,
+} from "@psilink/core";
 
 import {
   createFetchJobApiClient,
@@ -63,6 +65,8 @@ import type { RunDiagnosticsIntentFields } from "@psi/runDiagnosticsModel";
 import type { RunFailure } from "./useInviterExchange";
 import type { RunOutputs } from "@psi/runOutputs";
 import type { Transport } from "@psi/transportChooser";
+
+const log = getLogger("useAcceptorExchange");
 
 /** The connection-endpoint channels the acceptor can drive, narrowed from the
  * token by {@link prepareAcceptedInvitation}: WebRTC always, file-drop or SFTP on
