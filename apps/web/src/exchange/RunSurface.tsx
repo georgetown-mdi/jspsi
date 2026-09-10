@@ -516,7 +516,7 @@ export const UNTAKEN_RECORD_CONFIRM_TITLE = "Leave the exchange record behind?";
  * removal it is, and pointed at the download standing on the same screen.
  */
 export const UNTAKEN_RECORD_CONFIRM_BODY =
-  "This run exchanged data before it stopped, and this console holds its " +
+  "This run disclosed your data before it stopped, and this console holds its " +
   "record of that disclosure. Going on removes the run and the record with it, " +
   "and neither party can recreate it. Download it from the exchange-record " +
   "panel on this page first if you need the accounting entry.";

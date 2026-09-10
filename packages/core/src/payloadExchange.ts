@@ -916,14 +916,25 @@ export function toCommittedPayload(
  * Every failure mode (transport error, malformed message, send rejection)
  * surfaces as a rejection of the awaited call, so no listener registration,
  * error buffering, or per-path cleanup is needed.
+ *
+ * `onLocalPayloadSent` is the step's partial progress, and the one part of it a
+ * caller cannot recover from a rejection: this party's payload crosses before
+ * the initiator's receive, and the throw that follows carries no state saying
+ * so. It runs once the send has RESOLVED -- the transport has taken the frame
+ * (docs/COMMUNICATION.md) -- and never for a send that rejected, whatever the
+ * transport did with the frame before rejecting. A caller that owes a record
+ * of what it disclosed opens that obligation there (docs/spec/EXCHANGE_RECORD.md,
+ * When a record is owed).
  */
 export async function exchangePayloads(
   conn: MessageConnection,
   handshakeRole: HandshakeRole,
   localPayload: PayloadWireMessage,
+  onLocalPayloadSent?: () => void,
 ): Promise<PartnerPayload> {
   if (handshakeRole === "initiator") {
     await conn.send(localPayload);
+    onLocalPayloadSent?.();
     return toPartnerPayload(await receiveParsed(conn, payloadWireSchema));
   }
   const partnerPayload = toPartnerPayload(
@@ -941,6 +952,7 @@ export async function exchangePayloads(
   // messageConnection.ts and docs/COMMUNICATION.md. Do not "fix" this by
   // assuming send has delivered.
   await conn.send(localPayload);
+  onLocalPayloadSent?.();
   return partnerPayload;
 }
 

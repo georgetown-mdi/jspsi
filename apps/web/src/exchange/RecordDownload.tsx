@@ -11,8 +11,8 @@ import type { JobExchangeRecordOfferState } from "./useJobExchangeRecordOffer";
  * run for one that did nothing.
  */
 export const TERMINATED_RECORD_LEAD =
-  "This run had already exchanged data when it stopped, and wrote the record of " +
-  "that disclosure.";
+  "This run had already disclosed your data when it stopped, and wrote the " +
+  "record of that disclosure.";
 
 /**
  * What the seat says under that lead. Two things the operator can act on: the
@@ -96,14 +96,14 @@ export const RECORD_UNANSWERED_LEAD =
 
 /**
  * What the seat says under that lead. It states the condition under which a record
- * exists rather than asserting one does -- a run that stopped before it exchanged
+ * exists rather than asserting one does -- a run that stopped before it sent its
  * data owes none and has none -- and names the one thing to avoid meanwhile, since
  * the recovery controls above remove the run and any record with it.
  */
 export const RECORD_UNANSWERED_NOTICE =
   "This page asked several times whether this run wrote an exchange record and " +
   "got no answer back, so it has stopped asking. If this run got as far as " +
-  "exchanging data, the record of that disclosure is with the run's files on " +
+  "sending your data, the record of that disclosure is with the run's files on " +
   "this console -- reload this page to ask again, and keep the run until you " +
   "have the file, because every way on from here removes it.";
 
@@ -139,7 +139,7 @@ function recordPanelCopy(offer: RenderedRecordOffer): {
  * offering.
  *
  * The run this exists for is the one that DISCLOSED AND THEN STOPPED. A record is
- * owed from the moment the payload exchange returns, so such a run writes one to
+ * owed from the moment this party's payload crosses, so such a run writes one to
  * the same destination a completed run's takes (docs/spec/EXCHANGE_RECORD.md, When
  * a record is owed) -- and it reaches the seat as a failure, where the completion
  * downloads render nothing at all. Without this panel the console would hold the

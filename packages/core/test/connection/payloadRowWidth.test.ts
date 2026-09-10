@@ -2,7 +2,12 @@ import { expect, test } from "vitest";
 
 import PSI from "@openmined/psi.js";
 
-import { prepareForExchange, runExchange } from "../../src/exchange";
+import {
+  exchangeDisclosedWithoutPartnerPayload,
+  exchangeRecordFromFailure,
+  prepareForExchange,
+  runExchange,
+} from "../../src/exchange";
 import {
   ConnectionError,
   createMessagePipe,
@@ -15,8 +20,8 @@ import type { Output } from "../../src/config/linkageTermsSchema";
 // A payload row must supply exactly one value per named column, or the
 // record's readable governance list and its committed values fall out of
 // sync. These tests drive a full `psi` run so the refusal is shown landing
-// before the output or record stage, on the lazy receive path, where
-// reconciliation itself does not refuse. Parse-level cases are in
+// before the output stage, on the lazy receive path, where reconciliation
+// itself does not refuse. Parse-level cases are in
 // payloadExchange.test.ts.
 
 const psiLibrary = await PSI();
@@ -126,7 +131,7 @@ test("a run receiving an honest payload frame records the columns whose values i
   ).toEqual(["diagnosis"]);
 });
 
-test("a run receiving a columnless frame that holds rows is refused before its output or record stage", async () => {
+test("a run receiving a columnless frame that holds rows is refused before its output stage", async () => {
   const [connReceiver, connSenderRaw] = createMessagePipe();
   // One value per matched record, against no column at all. Accepting it would
   // commit those values while the record's readable received-column list read
@@ -157,9 +162,9 @@ test("a run receiving a columnless frame that holds rows is refused before its o
     ),
   ]);
 
-  // The receiving party's whole run rejects, so it produces no result table, no
-  // partner payload, and no record -- the refusal is the exchange's outcome
-  // rather than something a later stage has to compensate for.
+  // The receiving party's whole run rejects, so it produces no result table and
+  // no partner payload -- the refusal is the exchange's outcome rather than
+  // something a later stage has to compensate for.
   expect(receiverOutcome.status).toBe("rejected");
   const refusal =
     receiverOutcome.status === "rejected" ? receiverOutcome.reason : undefined;
@@ -168,4 +173,14 @@ test("a run receiving a columnless frame that holds rows is refused before its o
   expect(String((refusal as ConnectionError).cause)).toMatch(
     /each payload row must have one value per declared column/,
   );
+
+  // What it does keep is the record of its own disclosure: this party is the
+  // initiator, so its payload crossed before the forged reply was parsed, and
+  // refusing the reply does not unmake that (docs/spec/EXCHANGE_RECORD.md, When
+  // a record is owed). The received-payload commitment is empty, because nothing
+  // was received.
+  const kept = exchangeRecordFromFailure(refusal);
+  expect(kept?.record.outcome).toBe("receipt-swap-terminated");
+  expect(kept?.record.governance.payloadReceived).toEqual([]);
+  expect(exchangeDisclosedWithoutPartnerPayload(refusal)).toBe(true);
 });

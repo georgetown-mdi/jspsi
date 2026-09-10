@@ -1119,22 +1119,26 @@ const recordsByTerminatedRun = new WeakMap<object, BuiltExchangeRecord>();
 // built" stop sharing one undefined.
 const unbuiltRecordsByTerminatedRun = new WeakSet<object>();
 
+// The terminated runs whose payload crossed and whose partner's never arrived,
+// so the record beside them commits to no received payload. Kept as a mark on
+// the error for the same reason the two above are.
+const oneDirectionalDisclosuresByTerminatedRun = new WeakSet<object>();
+
 /**
  * The self-attested record of the disclosure a terminated run had ALREADY made,
  * recovered from the error {@link runExchange} threw; `undefined` when the failure
  * holds none.
  *
- * A run past its payload exchange has already sent and received its payloads, so
- * the disclosure the record attests occurred whatever the steps after it then do.
- * The record is owed from that point (docs/spec/PROTOCOL.md, Self-attested
- * record), so the caller persists this pair exactly as it persists
+ * A run past its own payload send has handed this party's payload to the
+ * transport, so the disclosure the record attests occurred whatever the steps after
+ * it then do. The record is owed from that point (docs/spec/PROTOCOL.md,
+ * Self-attested record), so the caller persists this pair exactly as it persists
  * {@link ExchangeResult.audit}: the run still failed, and the record's own
  * `outcome` field states that rather than passing for a completed run's.
  *
- * A failure raised BEFORE the payload exchange returns holds nothing, this
- * party's own payload having possibly crossed inside it -- the initiator sends
- * before it receives, and a cut in that window leaves no record (the durability
- * point's stated residual: docs/spec/EXCHANGE_RECORD.md, When a record is owed).
+ * A failure raised before this party's send resolved holds nothing: the
+ * region had not opened, so no record is owed (docs/spec/EXCHANGE_RECORD.md,
+ * When a record is owed).
  *
  * The lookup walks the `cause` chain, so a caller that re-raises the failure with
  * the original as its `cause` still recovers the record.
@@ -1155,7 +1159,7 @@ export function exchangeRecordFromFailure(
  * could not be built, so {@link exchangeRecordFromFailure} returns nothing for a
  * disclosure that nonetheless occurred.
  *
- * True only past the payload exchange: the record was owed (docs/spec/PROTOCOL.md,
+ * True only past this party's payload send: the record was owed (docs/spec/PROTOCOL.md,
  * Self-attested record) and {@link buildExchangeRecord} threw, which the build
  * warns about on the operator log with its cause. This is the same loss the
  * completed path reports as a missing artifact, made queryable on the failing path
@@ -1173,15 +1177,39 @@ export function exchangeRecordOwedButUnbuilt(error: unknown): boolean {
 }
 
 /**
- * `error`, marked for the two accessors above: holding `audit` where the record
- * built, and recording the loss where it did not, so a caller can tell that
- * absence from a failure that owed no record. A thrown non-object can hold
- * neither mark, which is warned here: what goes missing is the operator's
- * disclosure-log entry for a disclosure that happened.
+ * Whether the terminated run behind `error` disclosed this party's payload and
+ * received none of the partner's -- the run cut, or the reply refused at the
+ * wire schema, between this party's own send and the partner's frame.
+ *
+ * The record such a run leaves commits to an empty received payload, which is
+ * what this party received but reads no differently from a partner that
+ * transmitted none (docs/spec/EXCHANGE_RECORD.md, When a record is owed). A
+ * caller accounting for the disclosure reads the distinction here: this party's
+ * data crossed and nothing came back. False for a run that received the
+ * partner's payload before terminating, and false for one that owed no record.
+ *
+ * The lookup walks the `cause` chain, as its siblings above do.
+ */
+export function exchangeDisclosedWithoutPartnerPayload(
+  error: unknown,
+): boolean {
+  return causeChainSome(error, (link) =>
+    oneDirectionalDisclosuresByTerminatedRun.has(link),
+  );
+}
+
+/**
+ * `error`, marked for the accessors above: holding `audit` where the record
+ * built, recording the loss where it did not so a caller can tell that absence
+ * from a failure that owed no record, and recording whether the partner's
+ * payload arrived at all. A thrown non-object can hold no mark, which is warned
+ * here: what goes missing is the operator's disclosure-log entry for a
+ * disclosure that happened.
  */
 function carryingExchangeRecord(
   error: unknown,
   audit: BuiltExchangeRecord | undefined,
+  partnerPayloadReceived: boolean,
 ): unknown {
   if (typeof error !== "object" || error === null) {
     // Warned only where a record exists and is now unreachable; a record that
@@ -1194,6 +1222,8 @@ function carryingExchangeRecord(
       );
     return error;
   }
+  if (!partnerPayloadReceived)
+    oneDirectionalDisclosuresByTerminatedRun.add(error);
   if (audit === undefined) {
     unbuiltRecordsByTerminatedRun.add(error);
     return error;
@@ -1787,24 +1817,6 @@ export async function runExchange(
     partnerTerms.output.expectsOutput && associationTable !== undefined
       ? preparePayload(prepared.rawRows, prepared.metadata, associationTable)
       : { hasData: false };
-  const partnerPayload = await exchangePayloads(
-    conn,
-    handshakeRole,
-    localPayload,
-  );
-
-  // The record-owed region opens here. exchangePayloads has returned, so the
-  // disclosure the record attests has provably occurred. Only the two guarded
-  // steps below -- the received-payload reconciliation and the signed-receipt
-  // swap after it -- fail into this party's owed record rather than discarding
-  // it (docs/spec/PROTOCOL.md, Self-attested record); what runs between those
-  // two windows is uncaught, over locally built values, so a throw there would
-  // escape with no record and no mark set. A statement added to this region
-  // must join one of the two guarded windows, or the region must gain a single
-  // enclosing guard, or it opens that hole rather than closing it. A holder
-  // rather than a bare `unknown`, so a thrown `undefined` is still treated as
-  // a failure and cannot pass for a run that got through.
-  let postDisclosureFailure: { error: unknown } | undefined;
 
   // Received-payload enforcement, fail-closed before the result is returned (so a
   // mismatched payload is never shown or written as a result):
@@ -1822,21 +1834,16 @@ export async function runExchange(
   //   one (expectedPayloadColumns undefined) takes whatever the sender's own
   //   disclosure metadata transmits.
   //
-  // The refusal is caught rather than thrown straight through: this party's own
-  // payload is already in the partner's hands whatever the partner sent back, so
-  // the record of that outbound disclosure is owed. Catching it also skips the
-  // signed-receipt swap below, so no further frame goes to a partner that broke
-  // the disclosure contract.
+  // The refusal is caught by the region's guard below rather than thrown straight
+  // through: this party's own payload has left it through the transport whatever
+  // the partner sent back, so the record of that outbound disclosure is owed. The
+  // throw also leaves the rest of the guarded region unrun, so no further frame
+  // goes to a partner that broke the disclosure contract.
   const expectedReceive = countOnly
     ? []
     : linkageTerms.output.expectsOutput
       ? prepared.expectedPayloadColumns
       : [];
-  try {
-    reconcileReceivedPayload(partnerPayload, expectedReceive);
-  } catch (error) {
-    postDisclosureFailure = { error };
-  }
 
   // resultSize (the intersection size) is bound only when both parties are
   // entitled to output; heldResult gates both the record's committed table and what
@@ -1861,31 +1868,55 @@ export async function runExchange(
       ? undefined
       : matchedPairCount(associationTable);
 
-  // Signed-receipt step: at the conclusion of a disclosing exchange, both parties
-  // sign the SAME canonical receipt content (the agreed-terms hash and the two
-  // directional payload MACs, plus a session-derived binder) and swap signatures
-  // over the live channel, producing one dual-signed record. Gated on a signing
-  // identity AND a session key both being present, so the unsigned-record path --
-  // the web app (no keys) and a CLI exchange without a signing identity -- runs
-  // this function unchanged. Placed after exchangePayloads so the receipt commits
-  // to the full result, including payloads.
-  //
-  // A failure here is NOT swallowed: a fingerprint-pin or signature failure is a
-  // security event that terminates the exchange (exchangeSignedReceipt throws a
-  // security ConnectionError). It is caught only so the record built below can
-  // state what became of the run and be handed back on the throw -- the disclosure
-  // this party already made is what that record attests, and it is owed whether or
-  // not the swap that follows completes (docs/spec/PROTOCOL.md, Self-attested
-  // record). The whole step sits inside the catch, the binder derivation included,
-  // so no post-disclosure failure route leaves the caller without a record.
-  //
-  // Skipped entirely once the reconciliation above has already terminated the
-  // run: the swap is a step of an exchange that is over, and its frames would go
-  // to the partner whose payload was refused.
+  // The record-owed region, held by one enclosing guard. It opens at THIS
+  // PARTY'S PAYLOAD SEND, the point exchangePayloads reports through the
+  // callback below: from there the disclosure the record attests has occurred
+  // whatever the rest of the run does (docs/spec/PROTOCOL.md, Self-attested
+  // record). Every step inside the guard fails into this party's owed record by
+  // construction, and every value the record commits to is fixed above it or,
+  // for the partner's payload, by what arrived before the cut.
+  let localPayloadSent = false;
+  // What this party received: a run cut after its own send received no payload
+  // at all, and the record commits to what was received
+  // (docs/spec/EXCHANGE_RECORD.md, When a record is owed).
+  let partnerPayload: PartnerPayload = {
+    columns: [],
+    rowIndices: [],
+    rows: [],
+  };
+  let partnerPayloadReceived = false;
   let signedReceipt: DualSignedRecord | undefined;
   let receiptBinder: string | undefined;
-  if (willSignReceipt && postDisclosureFailure === undefined) {
-    try {
+  // A holder rather than a bare `unknown`, so a thrown `undefined` is still
+  // treated as a failure and cannot pass for a run that got through.
+  let postDisclosureFailure: { error: unknown } | undefined;
+  try {
+    partnerPayload = await exchangePayloads(
+      conn,
+      handshakeRole,
+      localPayload,
+      () => {
+        localPayloadSent = true;
+      },
+    );
+    partnerPayloadReceived = true;
+    reconcileReceivedPayload(partnerPayload, expectedReceive);
+    // Signed-receipt step: at the conclusion of a disclosing exchange, both
+    // parties sign the SAME canonical receipt content (the agreed-terms hash and
+    // the two directional payload MACs, plus a session-derived binder) and swap
+    // signatures over the live channel, producing one dual-signed record. Gated
+    // on a signing identity AND a session key both being present, so the
+    // unsigned-record path -- the web app (no keys) and a CLI exchange without a
+    // signing identity -- runs this function unchanged. Placed after the payload
+    // exchange so the receipt commits to the full result, payloads included.
+    //
+    // A failure here is NOT swallowed: a fingerprint-pin or signature failure is
+    // a security event that terminates the exchange (exchangeSignedReceipt
+    // throws a security ConnectionError). The region's guard catches it only so
+    // the record built below can state what became of the run and be handed back
+    // on the throw -- the disclosure this party already made is what that record
+    // attests, and it is owed whether or not the swap completes.
+    if (willSignReceipt) {
       // Both parties fold in the INITIATOR's role, so both derive the same binder
       // with no extra messages; see deriveReceiptBinder. Derived before the record
       // is built, so both artifacts hold the one value.
@@ -1929,9 +1960,13 @@ export async function runExchange(
         partnerIdentity: namedParties.partner,
         content,
       });
-    } catch (error) {
-      postDisclosureFailure = { error };
     }
+  } catch (error) {
+    // Before this party's send resolved the region has not opened, so the
+    // failure owes no record and leaves with none; what a rejected send may
+    // nonetheless have published is the limit the spec states.
+    if (!localPayloadSent) throw error;
+    postDisclosureFailure = { error };
   }
 
   // Build the record once the run's outcome is decided, so it can state it. It
@@ -1979,7 +2014,11 @@ export async function runExchange(
   // The failure terminates the run, carrying the record of the disclosure that
   // already occurred so the caller can still persist it.
   if (postDisclosureFailure !== undefined)
-    throw carryingExchangeRecord(postDisclosureFailure.error, audit);
+    throw carryingExchangeRecord(
+      postDisclosureFailure.error,
+      audit,
+      partnerPayloadReceived,
+    );
 
   return {
     // Withheld (undefined) from a party whose agreed terms give it no output, so

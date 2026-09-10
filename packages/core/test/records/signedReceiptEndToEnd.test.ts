@@ -5,6 +5,7 @@ import PSI from "@openmined/psi.js";
 import {
   assertLocalCertificateAuthorizesAgreedIdentity,
   assertReceiptBindingsOrAbort,
+  exchangeDisclosedWithoutPartnerPayload,
   exchangeRecordFromFailure,
   exchangeRecordOwedButUnbuilt,
   prepareForExchange,
@@ -918,12 +919,75 @@ function preparedWithPayload(identity: string, rows: typeof payloadServer) {
   );
 }
 
+/** Fail this party's connection at the `nth` frame it sends or receives after
+ * its own payload frame has gone out, placing a cut at a chosen position inside
+ * the record-owed region. */
+function cutAfterPayloadSend(
+  conn: MessageConnection,
+  nth: number,
+): MessageConnection {
+  let payloadSent = false;
+  let framesSinceSend = 0;
+  const cutHere = () => {
+    if (!payloadSent) return;
+    framesSinceSend += 1;
+    if (framesSinceSend === nth)
+      throw new ConnectionError("the connection dropped", "transport");
+  };
+  const isPayload = (data: unknown) =>
+    typeof data === "object" && data !== null && "hasData" in data;
+  return {
+    send: async (data) => {
+      cutHere();
+      await conn.send(data);
+      if (isPayload(data)) payloadSent = true;
+    },
+    receive: (timeoutMs?: number) => {
+      cutHere();
+      return conn.receive(timeoutMs);
+    },
+    close: () => conn.close(),
+  };
+}
+
+/** Reject this party's own payload send at the transport, leaving every earlier
+ * message of the exchange to go out normally. */
+function rejectPayloadSend(conn: MessageConnection): MessageConnection {
+  return {
+    send: async (data) => {
+      if (typeof data === "object" && data !== null && "hasData" in data)
+        throw new ConnectionError("the connection dropped", "transport");
+      await conn.send(data);
+    },
+    receive: (timeoutMs?: number) => conn.receive(timeoutMs),
+    close: () => conn.close(),
+  };
+}
+
+/** Swap this party's outbound payload frame for `forged`, leaving every other
+ * message of the exchange untouched. */
+function withForgedPayload(
+  conn: MessageConnection,
+  forged: unknown,
+): MessageConnection {
+  return {
+    send: (data) =>
+      conn.send(
+        typeof data === "object" && data !== null && "hasData" in data
+          ? forged
+          : data,
+      ),
+    receive: (timeoutMs?: number) => conn.receive(timeoutMs),
+    close: () => conn.close(),
+  };
+}
+
 describe("a run terminated after its disclosure keeps the record of it", () => {
-  // The durability point: the record is owed from the moment the payload exchange
-  // completes, because the disclosure it attests has provably happened by then.
-  // Everything after that -- the received-payload check and the whole
-  // signed-receipt swap -- can fail without taking the record with it
-  // (docs/spec/PROTOCOL.md, Self-attested record).
+  // The durability point: the record is owed from the moment this party's own
+  // payload crosses, because the disclosure it attests has happened from there
+  // on. Everything after that send -- the rest of the payload exchange, the
+  // received-payload check and the whole signed-receipt swap -- can fail without
+  // taking the record with it (docs/spec/PROTOCOL.md, Self-attested record).
 
   test("a fingerprint-pin mismatch leaves both sides holding a terminated record", async () => {
     // The responder pins the WRONG fingerprint, so it refuses the initiator's
@@ -1091,7 +1155,7 @@ describe("a run terminated after its disclosure keeps the record of it", () => {
     // The route past the payload exchange that is not the swap. The initiator
     // has locked in a column set the responder does not transmit, so
     // reconcileReceivedPayload refuses AFTER both payloads have crossed: this
-    // party's own data is in the partner's hands whatever came back, so the
+    // party's own data has been handed to the transport whatever came back, so the
     // disclosure is owed a record exactly as a terminated swap's is. Both sides
     // run unsigned, so the receipt step plays no part in producing it.
     const initiatorPrepared = preparedWithPayload(
@@ -1141,6 +1205,228 @@ describe("a run terminated after its disclosure keeps the record of it", () => {
     await connInitiator.close();
     await connResponder.close();
   });
+
+  test("a cut between this party's send and the partner's reply keeps the record", async () => {
+    // The window the durability point opens at the send: the initiator's payload
+    // has been handed to the transport and the partner's never arrives. The record
+    // commits to what crossed, and to an empty received payload beside it.
+    const [connInitiatorRaw, connResponder] = createMessagePipe();
+    const [initiatorSettled, responderSettled] = await Promise.allSettled([
+      runExchange(
+        cutAfterPayloadSend(connInitiatorRaw, 1),
+        "initiator",
+        preparedWithPayload("Initiator Co", payloadClient),
+        { psiLibrary },
+      ),
+      runExchange(
+        connResponder,
+        "responder",
+        preparedWithPayload("Responder Co", payloadServer),
+        { psiLibrary },
+      ),
+    ]);
+
+    expect(initiatorSettled.status).toBe("rejected");
+    const failure = (initiatorSettled as PromiseRejectedResult).reason;
+    expect(failure).toBeInstanceOf(ConnectionError);
+    const kept = exchangeRecordFromFailure(failure);
+    expect(kept?.record.outcome).toBe("receipt-swap-terminated");
+    expect(kept?.record.recordsExposed).toBe(payloadClient.length);
+    // What this party disclosed is attested in full; what it received is
+    // committed as nothing, which is what it received.
+    expect(kept?.record.governance.payloadSent).toEqual([{ name: "note" }]);
+    expect(kept?.record.governance.payloadReceived).toEqual([]);
+    expect(kept?.record.commitments.partnerPayloadReceived).toBeDefined();
+    expect(kept?.record.commitments.associationTable).toBeDefined();
+    expect(kept?.record.receiptBinder).toBeUndefined();
+    expect(exchangeRecordOwedButUnbuilt(failure)).toBe(false);
+    // The one-directional disclosure the record itself does not distinguish, for
+    // the caller accounting for what left this machine.
+    expect(exchangeDisclosedWithoutPartnerPayload(failure)).toBe(true);
+
+    // The partner, which received a payload before its own send, completed.
+    expect(responderSettled.status).toBe("fulfilled");
+    await connInitiatorRaw.close();
+    await connResponder.close();
+  });
+
+  test("a malformed reply after the send is owed a record all the same", async () => {
+    // The wire-schema refusal inside the payload exchange: the responder answers
+    // with a frame the schema refuses, and the initiator -- which sent first --
+    // terminates on the parse holding the record of what it had disclosed.
+    const [connInitiator, connResponderRaw] = createMessagePipe();
+    const connResponder = withForgedPayload(connResponderRaw, {
+      hasData: true,
+      columns: ["note"],
+      rowIndices: [0, 0],
+      rows: [["s-c"], ["s-e"]],
+    });
+    const [initiatorSettled, responderSettled] = await Promise.allSettled([
+      runExchange(
+        connInitiator,
+        "initiator",
+        preparedWithPayload("Initiator Co", payloadClient),
+        { psiLibrary },
+      ),
+      runExchange(
+        connResponder,
+        "responder",
+        preparedWithPayload("Responder Co", payloadServer),
+        { psiLibrary },
+      ),
+    ]);
+
+    expect(initiatorSettled.status).toBe("rejected");
+    const failure = (initiatorSettled as PromiseRejectedResult).reason;
+    expect((failure as ConnectionError).kind).toBe("protocol");
+    const kept = exchangeRecordFromFailure(failure);
+    expect(kept?.record.outcome).toBe("receipt-swap-terminated");
+    expect(kept?.record.governance.payloadSent).toEqual([{ name: "note" }]);
+    expect(kept?.record.governance.payloadReceived).toEqual([]);
+    expect(exchangeDisclosedWithoutPartnerPayload(failure)).toBe(true);
+
+    // The forgery is at the responder's transport, so its own run sent a payload
+    // and finished: the terminated half is one party's.
+    expect(responderSettled.status).toBe("fulfilled");
+    await connInitiator.close();
+    await connResponderRaw.close();
+  });
+
+  test("a malformed payload arriving before this party's send owes no record", async () => {
+    // The other side of the asymmetry. The responder receives first, so a frame
+    // the schema refuses ends its run with nothing of its own across the wire
+    // and nothing to attest.
+    const [connInitiatorRaw, connResponder] = createMessagePipe();
+    const connInitiator = withForgedPayload(connInitiatorRaw, {
+      hasData: true,
+      columns: ["note"],
+      rowIndices: [0, 0],
+      rows: [["c-c"], ["c-e"]],
+    });
+    const initiator = runExchange(
+      connInitiator,
+      "initiator",
+      preparedWithPayload("Initiator Co", payloadClient),
+      { psiLibrary },
+    ).catch((reason: unknown) => reason);
+    const responderFailure = await runExchange(
+      connResponder,
+      "responder",
+      preparedWithPayload("Responder Co", payloadServer),
+      { psiLibrary },
+    ).then(
+      () => {
+        throw new Error("expected the responder to refuse the forged frame");
+      },
+      (reason: unknown) => reason,
+    );
+
+    expect((responderFailure as ConnectionError).kind).toBe("protocol");
+    expect(exchangeRecordFromFailure(responderFailure)).toBeUndefined();
+    expect(exchangeRecordOwedButUnbuilt(responderFailure)).toBe(false);
+    expect(exchangeDisclosedWithoutPartnerPayload(responderFailure)).toBe(
+      false,
+    );
+
+    await connInitiatorRaw.close();
+    await connResponder.close();
+    // The initiator's own frame did cross, forged or not, so its half is owed a
+    // record where the responder's is not.
+    expect(exchangeRecordFromFailure(await initiator)?.record.outcome).toBe(
+      "receipt-swap-terminated",
+    );
+  });
+
+  test("a payload send the transport rejects owes no record either", async () => {
+    // The region's lower edge on the leg that sends first, where the guard on
+    // the send itself is the only thing holding it: the initiator's frame never
+    // reaches the transport, so the run rethrows the transport's own error with
+    // no record and no mark on it.
+    const [connInitiatorRaw, connResponder] = createMessagePipe();
+    const responder = runExchange(
+      connResponder,
+      "responder",
+      preparedWithPayload("Responder Co", payloadServer),
+      { psiLibrary },
+    ).catch((reason: unknown) => reason);
+    const failure = await runExchange(
+      rejectPayloadSend(connInitiatorRaw),
+      "initiator",
+      preparedWithPayload("Initiator Co", payloadClient),
+      { psiLibrary },
+    ).then(
+      () => {
+        throw new Error(
+          "expected the rejected send to end the initiator's run",
+        );
+      },
+      (reason: unknown) => reason,
+    );
+
+    expect(failure).toBeInstanceOf(ConnectionError);
+    expect((failure as ConnectionError).kind).toBe("transport");
+    expect(exchangeRecordFromFailure(failure)).toBeUndefined();
+    expect(exchangeRecordOwedButUnbuilt(failure)).toBe(false);
+    expect(exchangeDisclosedWithoutPartnerPayload(failure)).toBe(false);
+
+    // The partner, parked on a payload frame that never comes, ends on the close.
+    await connInitiatorRaw.close();
+    await connResponder.close();
+    await responder;
+  });
+
+  test.each([1, 2, 3])(
+    "a cut at frame %i of the region fails into this party's owed record",
+    async (nth) => {
+      // The region is closed by construction rather than by each step joining a
+      // guard of its own: the positions here are the partner's payload, this
+      // party's receipt frame and the partner's, and a cut at any of them ends
+      // the run holding the same record.
+      const [connInitiatorRaw, connResponder] = createMessagePipe();
+      const responder = runExchange(
+        connResponder,
+        "responder",
+        preparedWithPayload("Responder Co", payloadServer),
+        {
+          psiLibrary,
+          signingIdentity: identityB,
+          partnerFingerprint: fingerprintA,
+          sessionKey,
+        },
+      ).catch((reason: unknown) => reason);
+      const failure = await runExchange(
+        cutAfterPayloadSend(connInitiatorRaw, nth),
+        "initiator",
+        preparedWithPayload("Initiator Co", payloadClient),
+        {
+          psiLibrary,
+          signingIdentity: identityA,
+          partnerFingerprint: fingerprintB,
+          sessionKey,
+        },
+      ).then(
+        () => {
+          throw new Error("expected the cut to terminate the initiator's run");
+        },
+        (reason: unknown) => reason,
+      );
+
+      const kept = exchangeRecordFromFailure(failure);
+      expect(kept?.record.outcome).toBe("receipt-swap-terminated");
+      expect(kept?.record.recordsExposed).toBe(payloadClient.length);
+      expect(kept?.record.governance.payloadSent).toEqual([{ name: "note" }]);
+      // Only the first position cuts before the partner's payload arrives; the
+      // later ones commit what did arrive.
+      expect(exchangeDisclosedWithoutPartnerPayload(failure)).toBe(nth === 1);
+      expect(kept?.record.governance.payloadReceived).toEqual(
+        nth === 1 ? [] : [{ name: "note" }],
+      );
+
+      await connInitiatorRaw.close();
+      await connResponder.close();
+      await responder;
+    },
+  );
 
   test("a record that was owed and could not be built is reported on the failure", async () => {
     // The build is non-fatal and warns on the operator log alone, so a caller
@@ -1403,11 +1689,12 @@ describe("a partner payload holding a lone surrogate is refused at the wire sche
     expect(String((raised as ConnectionError).cause)).toMatch(
       /unpaired UTF-16 surrogate/,
     );
-    // A frame refused at the parse leaves no record on either handshake role,
-    // as every other malformed payload frame does
-    // (test/connection/payloadRowWidth.test.ts); what the refusal removes is a
-    // run that reaches the receipt build and loses the record it owes there.
-    expect(exchangeRecordFromFailure(raised)).toBeUndefined();
+    // The refused frame never becomes a committed payload: this party keeps the
+    // record its own crossed payload owes it, committing to nothing received.
+    const kept = exchangeRecordFromFailure(raised);
+    expect(kept?.record.outcome).toBe("receipt-swap-terminated");
+    expect(kept?.record.governance.payloadReceived).toEqual([]);
+    expect(exchangeDisclosedWithoutPartnerPayload(raised)).toBe(true);
     expect(exchangeRecordOwedButUnbuilt(raised)).toBe(false);
 
     await rawHonest.close();

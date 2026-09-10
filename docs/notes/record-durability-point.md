@@ -12,21 +12,29 @@ The mechanism was never in dispute. The question this note records is the semant
 
 ## The durability point
 
-Three points were available.
+Four points were available.
 
 **When the run returns.** The behavior as it stood. It is defensible only if the record is read as "a receipt for a completed exchange", and it is not: the record is an accounting-of-disclosures artifact, and an accounting is over disclosures, not over runs that went well. It also makes the artifact's existence turn on a step that has nothing to do with the disclosure -- a partner's certificate, a pin the operator typed, a connection that held for one more frame.
 
-**When the payload exchange completes.** The point at which the disclosure the record attests has provably happened: keys exchanged and matched, payload columns sent and received, and nothing afterwards able to undo any of it. The protocol already says as much about the swap -- "aborting does not undo the data exchange" -- and the record is precisely the artifact that says the data was exchanged. It is a boundary rather than a step, which is what makes it robust: the two guarded steps that follow it -- the reconciliation and the swap -- each fail into the same owed record, so a step joins the rule by joining one of those windows (or the region gains a single enclosing guard), not merely by sitting anywhere past the boundary.
+**When the payload exchange completes.** The point at which both payloads have moved: keys exchanged and matched, payload columns sent and received, and nothing afterwards able to undo any of it. It leaves the asymmetric window the next point closes, since the initiator sends before it receives.
+
+**When this party's own payload crosses.** Taken. It is the first point at which the fact the record attests -- that this party handed its payload to the transport for the partner -- is true, so it is the point under which the artifact's existence tracks that fact most closely. It is a boundary rather than a step, and the region it opens is held by a single enclosing guard around everything that follows the send, so a step joins the rule by being in the region rather than by joining a window of its own.
 
 **Earlier, at some point inside the matching.** Rejected. A partial disclosure has no accurate record: the record commits to the payloads in both directions and to the pairing, and a run cut off mid-cascade has no fixed value for any of them. Recording that would need a different artifact attesting a different thing, not an earlier build of this one.
 
-The second was taken. It is the only one of the three under which the artifact's existence tracks the fact it attests.
+## What the send point costs, and what it does not
+
+The rejection above sets the bar the send point had to clear: every value the record commits to must be fixed by the time the region opens. At the send they are. The pairing and this party's own payload are built before the frame goes out, and the third -- the partner's payload -- has a fixed value on a run cut there, namely nothing received, which the record commits to as an empty payload. That commitment is true of what this party received and does not distinguish a cut before the reply from a partner that transmitted no payload; the specification states that limit ([EXCHANGE_RECORD.md](../spec/EXCHANGE_RECORD.md#when-a-record-is-owed)), and the distinction stays available to a core caller, which reads it off the terminated run's error through `exchangeDisclosedWithoutPartnerPayload`. No CLI event and no browser view reports the mark, so the partial-disclosure notice an operator would see is not composed from it here.
+
+Distinguishing it in the document instead was weighed and not taken. It needs a second `outcome` value, an omittable received-payload commitment, or both, and every one of those is a format-version move and an at-rest invalidation -- the same price the note weighs for a second value under "One outcome value for the whole region" -- bought for a reader who, on this record, already knows the run terminated and already cannot tell which step ended it.
+
+The structural cost the point does carry is the one this note weighed before it was taken: the payload-exchange step has to report its partial progress, since a caller that only sees the partner's payload or a throw cannot tell whether its own payload crossed. The step reports it as it happens, so the record-owed region opens on the send itself rather than on anything inferred afterwards.
 
 ## The residual window it leaves
 
-The point taken is the payload exchange's return, and the step is not symmetric: the initiator sends its payload before it receives the partner's. A cut inside that window therefore leaves the initiator's payload across the wire and no record of it -- along with the linkage-key material an even earlier cut discloses. The limit is stated where the rule is specified ([EXCHANGE_RECORD.md](../spec/EXCHANGE_RECORD.md#when-a-record-is-owed)), and what the operator gets in its place is the run's own error and its entry on the machine-readable event stream.
+A send the transport rejects does not open the region, so no record is owed on it -- what the operator gets there is the run's own error and its entry on the machine-readable event stream, as for every failure before the send. That leaves one gap the spec states as a limit: a publish the file-sync transport reports as indeterminate may have reached the partner, and the run still writes no record. Whether such a publish should open the region is an open question this note does not settle. The linkage-key material an earlier cut discloses is likewise outside what this artifact attests.
 
-Opening the region at this party's own payload send would close the window, and it is left as a decision for the maintainer rather than taken here. Its cost is structural rather than a matter of wording: the payload-exchange step would have to expose its partial progress to the caller, which today it does not -- it returns the partner's payload or throws -- so the record would be built from a run state no step currently reports.
+The window at the far edge is the transport's, and it stays open: a send resolves on the local hand-off, so a frame the transport took may never reach the partner if the channel then closes on an error ([COMMUNICATION.md](../COMMUNICATION.md#message-delivery-and-teardown)). The record is written for the hand-off on both legs rather than for a delivery no party can observe, which is the conservative direction for an accounting -- over-reporting a disclosure whose frame never arrived, never omitting one that did. The specification states that limit where it fixes the point ([EXCHANGE_RECORD.md](../spec/EXCHANGE_RECORD.md#when-a-record-is-owed)).
 
 ## What a terminated run's record must not be
 
@@ -42,7 +50,7 @@ Stating it on every record, rather than marking only the terminated case, follow
 
 ## One outcome value for the whole region
 
-The durability point being a boundary leaves a second question: whether each way the tail can end gets its own outcome value. It does not. `receipt-swap-terminated` is written for every termination past the payload exchange -- the received-payload refusal as much as a pin refusal or a transport drop in the swap -- and the value is named for the step those failures most often come from rather than for the only one it covers.
+The durability point being a boundary leaves a second question: whether each way the tail can end gets its own outcome value. It does not. `receipt-swap-terminated` is written for every termination past this party's payload send -- a reply that never arrives or arrives malformed, and the received-payload refusal, as much as a pin refusal or a transport drop in the swap -- and the value is named for the step those failures most often come from rather than for the only one it covers.
 
 Two alternatives were weighed. **A second value naming the reconciliation** distinguishes the causes at the price of widening the accepted value set, which the record's format version moves with: a reader rejects an unrecognized `outcome` rather than migrating it, so every added value is a format decision and an at-rest invalidation, not a labelling one. **A cause field beside the outcome** avoids the value set but puts free-form failure attribution into an artifact whose whole discipline is that it states only what its writer can attest about its own disclosure.
 

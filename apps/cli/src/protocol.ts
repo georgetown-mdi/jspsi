@@ -2242,13 +2242,14 @@ export async function runProtocol(
       );
 
     // The disclosure a terminated run already made outlives the failure that
-    // stopped it: a run past its payload exchange has sent and received its
-    // payloads, so core hands the self-attested record of that disclosure back
-    // on the error rather than discarding it (docs/spec/PROTOCOL.md,
-    // Self-attested record). It is written here on the same terms a completed
-    // run's is -- same destination, same owner-only pair -- because it is the
-    // same kind of artifact; what marks it as a terminated run's is the record's
-    // own outcome field, which travels with the file wherever it is copied.
+    // stopped it: a run past its own payload send has handed this party's payload
+    // to the transport, so core hands the self-attested record of that
+    // disclosure back on the error rather than discarding it
+    // (docs/spec/PROTOCOL.md, Self-attested record). It is written here on the
+    // same terms a completed run's is -- same destination, same owner-only pair
+    // -- because it is the same kind of artifact; what marks it as a terminated
+    // run's is the record's own outcome field, which travels with the file
+    // wherever it is copied.
     // Skipped under --no-record, like every other record write.
     const disclosedRecord = exchangeRecordFromFailure(err);
     if (recordOutput !== undefined) {
