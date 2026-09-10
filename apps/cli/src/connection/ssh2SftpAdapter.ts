@@ -506,12 +506,14 @@ export class SSH2SFTPClientAdapter implements FileTransportClient {
     // before logging. end/close are benign out-of-band lifecycle signals, so
     // they go to trace.
     //
-    // An error reaches the operator only while a session is still held: that
-    // reading says the exchange just lost one, and the library has not cleared
-    // `sftp` by the time it hands such an error over (measured; see
-    // docs/spec/DEPENDENCY_PINS.md, "Upgrading the SFTP Stack"). With no
-    // session held -- a failed dial, a closed connection -- the outcome already
-    // went to that call's caller, so the line joins end/close at trace.
+    // An error is logged at ERROR only while a session is still held, the
+    // state in which the exchange can lose one; the library has not cleared
+    // `sftp` by the time it hands such an error over (measured for a reset
+    // that takes a live session; see docs/spec/DEPENDENCY_PINS.md, "Upgrading
+    // the SFTP Stack"). A teardown the peer answers with a reset also arrives
+    // held and logs here. With no session held -- a failed dial, a closed
+    // connection -- the outcome already went to that call's caller, so the
+    // line joins end/close at trace.
     this.client = new Ssh2SftpClient("sftp", {
       error: (err: unknown) => {
         const line =
