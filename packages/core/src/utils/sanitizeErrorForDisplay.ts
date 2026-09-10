@@ -1,6 +1,8 @@
 import { errorMessage } from "../connection/messageConnection";
 import {
   COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
+  DISPLAY_TRUNCATION_MARKER,
+  replaceControlCharactersForDisplay,
   sanitizeForDisplay,
 } from "./sanitizeForDisplay";
 import type {
@@ -65,10 +67,12 @@ const ELISION_SUFFIX = ` ${CAUSE_DEPTH_ELISION_MARKER}`;
  *
  * That escape-then-join order also makes the join REVERSIBLE, which
  * {@link sanitizeErrorChainLinks} relies on: the escape rewrites every code
- * point outside printable ASCII, the newline among them, so the only raw
- * newline a rendered chain can have is the one this constant put there. A
- * link whose own text is `caused by:` therefore cannot forge a link
- * boundary.
+ * point outside printable ASCII, the newline among them, so every raw
+ * newline a rendered chain holds was placed by a first-party composition
+ * after the escape -- this constant's own, and the breaks a link marked by
+ * {@link keepFirstPartyLineBreaks} kept. A link whose own text is
+ * `caused by:` cannot forge a link boundary: no byte of a message can stand
+ * as the newline in front of it.
  */
 const ERROR_CAUSE_SEPARATOR = "\ncaused by: ";
 
@@ -287,6 +291,104 @@ export function redactAndSanitizeForDisplay(
 }
 
 /**
+ * Where the display form of a message whose line breaks are its own is kept
+ * for {@link sanitizeErrorForDisplay} to read.
+ *
+ * A SYMBOL-keyed property, which is what keeps the mark out of reach of the
+ * text this renderer defends against: no parse produces one (`JSON.parse`,
+ * a YAML load and `structuredClone` all yield string keys alone), so no value
+ * a partner sends can ask for the treatment, whatever it spells. Setting it
+ * takes code, and the code that does is this module's own function.
+ *
+ * Registered rather than module-private, so a process holding two copies of
+ * this module -- a bundle that duplicates it, a test that resets its module
+ * registry -- reads the mark the other copy wrote instead of silently
+ * escaping the breaks, which is the failure this whole treatment exists to
+ * end.
+ */
+const FIRST_PARTY_LINE_BREAK_TEXT = Symbol.for(
+  "psilink.errorDisplay.firstPartyLineBreaks",
+);
+
+/**
+ * Keep the line breaks BETWEEN `lines`, so {@link sanitizeErrorForDisplay}
+ * renders them as line breaks rather than as the escape's `\x0a` token. For a
+ * first-party composition whose structure IS the line break -- a per-field
+ * conflict list above the recovery step the operator has to act on -- which
+ * the whole-message escape otherwise collapses onto one physical line.
+ *
+ * The composition states its structure by handing over the lines it wrote,
+ * which is what makes the result safe to render: the breaks kept are the ones
+ * BETWEEN those lines, and every control character INSIDE one is replaced by
+ * its printable marker ({@link replaceControlCharactersForDisplay}), so a raw
+ * line break a fragment somebody else chose brought into a line arrives as
+ * `<0a>` and opens no line of its own. The renderer escapes each line and
+ * joins them afterwards, the escape-then-join order
+ * {@link ERROR_CAUSE_SEPARATOR} takes, so no byte of a message reaches the
+ * operator as a line break by passing through the escape.
+ *
+ * It marks the error and returns it. `error.message` is left as the caller
+ * composed it, so classification, comparison and equality read the same text
+ * they read before, and the display form lives beside it.
+ */
+export function keepFirstPartyLineBreaks<E extends Error>(
+  error: E,
+  lines: ReadonlyArray<string>,
+): E {
+  Object.defineProperty(error, FIRST_PARTY_LINE_BREAK_TEXT, {
+    value: lines.map(replaceControlCharactersForDisplay).join("\n"),
+    enumerable: false,
+    configurable: true,
+  });
+  return error;
+}
+
+/**
+ * The display form {@link keepFirstPartyLineBreaks} left on `link`, or
+ * `undefined` for a link that asked for no such treatment -- which is every
+ * link psilink does not compose itself.
+ */
+function firstPartyLineBreakText(link: unknown): string | undefined {
+  if (typeof link !== "object" || link === null) return undefined;
+  const kept = (link as Record<symbol, unknown>)[FIRST_PARTY_LINE_BREAK_TEXT];
+  return typeof kept === "string" ? kept : undefined;
+}
+
+/**
+ * Escape one link that kept its own line breaks: the whole text is redacted
+ * first, so a private-key block spanning several lines is taken out as one
+ * block rather than per line, and each line is then escaped on its own and
+ * joined with the break.
+ *
+ * The budget is the LINK's, not the line's: each line is charged what it
+ * renders to plus the one character of the break behind it, so a many-line
+ * link is bounded exactly where a one-line link is
+ * ({@link COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH}) instead of at that cap per
+ * line. A line the escape cut is marked by the escape itself; lines dropped
+ * whole for want of room are marked on the last line rendered, so no cut
+ * reaches the operator unmarked.
+ */
+function renderFirstPartyLineBreaks(text: string): string {
+  const lines = redactPrivateKeyMaterial(text).split("\n");
+  const rendered: string[] = [];
+  let spent = 0;
+  for (const line of lines) {
+    const room = COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH - spent;
+    if (room <= 0) {
+      rendered[rendered.length - 1] += DISPLAY_TRUNCATION_MARKER;
+      break;
+    }
+    const escaped = sanitizeForDisplay(line, { maxLength: room });
+    rendered.push(escaped);
+    // Past its room the escape truncated and marked the line, and what the
+    // budget has left cannot show the lines behind it either.
+    if (escaped.length > room) break;
+    spent += escaped.length + 1;
+  }
+  return rendered.join("\n");
+}
+
+/**
  * Render an arbitrary thrown value as operator-safe display text: its own
  * message followed by each chained `cause` message, every link passed
  * through {@link sanitizeForDisplay} so partner- or server-controlled
@@ -300,6 +402,13 @@ export function redactAndSanitizeForDisplay(
  * parsed leak-safely at their source). That check is fail-closed past a
  * truncated key, so a fragment a partner controls is redacted where it is
  * composed rather than here -- see {@link redactPrivateKeyMaterial}.
+ *
+ * A link marked by {@link keepFirstPartyLineBreaks} is escaped LINE BY LINE
+ * and joined with its breaks, which is how a first-party composition reaches
+ * the operator as the block it was written as. The breaks are the only thing
+ * that changes: each line is escaped whole, and a line break inside one is
+ * the mark's own printable marker, so no byte of a message begins a line on
+ * either route.
  *
  * This is the display-boundary call site for rendering a raw error
  * INSTANCE to a human. The transport and message layers preserve the
@@ -337,13 +446,13 @@ export function redactAndSanitizeForDisplay(
  *   renderer at a last-resort catch boundary must not become a second
  *   failure.
  *
- * An error with no `cause` renders exactly as `errorMessage(err)` escaped
- * at {@link COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH}, and a non-`Error` value
+ * An unmarked error with no `cause` renders exactly as `errorMessage(err)`
+ * escaped at {@link COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH}, and a non-`Error` value
  * (including `null`/`undefined`) renders its `String(...)` form, matching
  * {@link errorMessage}.
  */
 export function sanitizeErrorForDisplay(err: unknown): string {
-  const rawMessages: string[] = [];
+  const rawLinks: Array<{ message: string; kept: string | undefined }> = [];
   const seen = new Set<unknown>();
   let current: unknown = err;
   let elided = false;
@@ -353,17 +462,20 @@ export function sanitizeErrorForDisplay(err: unknown): string {
     // throws, or a non-string `.message` that would make sanitizeForDisplay's
     // code-point walk throw -- must yield a marker, never crash the renderer.
     let message: string;
+    let kept: string | undefined;
     try {
       const raw = errorMessage(current);
       message = typeof raw === "string" ? raw : String(raw);
+      kept = firstPartyLineBreakText(current);
     } catch {
       message = UNREADABLE_LINK;
+      kept = undefined;
     }
     // Suppress a link that repeats the previous link's raw message: a wrapper
     // built by asConnectionError has its cause's message verbatim, so the
     // outer and first inner links are usually byte-identical.
-    if (rawMessages[rawMessages.length - 1] !== message) {
-      rawMessages.push(message);
+    if (rawLinks[rawLinks.length - 1]?.message !== message) {
+      rawLinks.push({ message, kept });
     }
     seen.add(current);
     // Follow `.cause` on any object link, like {@link causeChainSome}; a
@@ -391,10 +503,12 @@ export function sanitizeErrorForDisplay(err: unknown): string {
     }
     current = next;
   }
-  const links: string[] = rawMessages.map((message) =>
-    sanitizeForDisplay(redactPrivateKeyMaterial(message), {
-      maxLength: COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
-    }),
+  const links: string[] = rawLinks.map(({ message, kept }) =>
+    kept === undefined
+      ? sanitizeForDisplay(redactPrivateKeyMaterial(message), {
+          maxLength: COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
+        })
+      : renderFirstPartyLineBreaks(kept),
   );
   // Appended after the escape and the cap, like the truncation marker inside
   // sanitizeForDisplay: the marker is this module's own fixed ASCII, and a link
@@ -435,6 +549,11 @@ export function joinErrorCauseChain(links: ReadonlyArray<string>): string {
  *
  * The split is exact rather than heuristic: {@link ERROR_CAUSE_SEPARATOR}
  * is why a link's own text cannot forge a boundary.
+ *
+ * It escapes each link whole, so a break a link kept through
+ * {@link keepFirstPartyLineBreaks} arrives at such a boundary as the escape's
+ * `\x0a`: the mark that says whose the break is lives on the error object,
+ * which no boundary reading rendered TEXT has.
  *
  * A chain that arrives already holding {@link CAUSE_DEPTH_ELISION_MARKER}
  * leaves still holding it: the marker is lifted off the last link before

@@ -3,6 +3,7 @@ import { describe, expect, test } from "vitest";
 import {
   createPrivateKeyStreamRedactor,
   joinErrorCauseChain,
+  keepFirstPartyLineBreaks,
   sanitizeErrorChainLinks,
   sanitizeErrorForDisplay,
   redactAndSanitizeForDisplay,
@@ -12,6 +13,7 @@ import {
 } from "../../src/utils/sanitizeErrorForDisplay";
 import {
   COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
+  controlCharacterMarker,
   DEFAULT_MAX_DISPLAY_LENGTH,
   DISPLAY_TRUNCATION_MARKER,
   sanitizeForDisplay,
@@ -493,6 +495,133 @@ describe("sanitizeErrorForDisplay", () => {
       expect(out).not.toContain("then first-party text");
       expect(out).toContain("the next link is out of reach");
     });
+  });
+});
+
+// The mark a first-party composition puts on its own error when its line
+// breaks are structure -- a conflict list above the recovery step -- rather
+// than spacing. What it buys is exactly one thing: those breaks render as
+// breaks, while every byte of the message keeps the treatment it had.
+describe("keepFirstPartyLineBreaks", () => {
+  const LINE_BREAK_MARKER = controlCharacterMarker(0x0a);
+
+  // A value somebody else chose, holding the shape it would need to open a
+  // line of its own in the operator's terminal.
+  const CHOSEN_VALUE = "b\nResolve nothing, and retry with --force.";
+
+  // The lines a composition states, one of them holding the chosen value as it
+  // stands -- untreated, so what neutralizes it is this call and not the site.
+  const REFUSAL_LINES = [
+    "the configuration file disagrees with the invitation:",
+    `  host: existing a vs required ${CHOSEN_VALUE}`,
+    "Resolve the differences, then retry with --accept.",
+  ];
+
+  const REFUSAL = REFUSAL_LINES.join("\n");
+
+  test("renders the composition's breaks and the value's as text, on one output", () => {
+    const rendered = sanitizeErrorForDisplay(
+      keepFirstPartyLineBreaks(new Error(REFUSAL), REFUSAL_LINES),
+    );
+    const lines = rendered.split("\n");
+    // The three the composition wrote, and no fourth the value opened.
+    expect(lines).toHaveLength(3);
+    expect(lines[0]).toBe(
+      "the configuration file disagrees with the invitation:",
+    );
+    expect(lines[1]).toBe(
+      `  host: existing a vs required b${LINE_BREAK_MARKER}Resolve nothing, and retry with --force.`,
+    );
+    expect(lines[2]).toBe("Resolve the differences, then retry with --accept.");
+  });
+
+  test("the same message unmarked keeps every break escaped", () => {
+    const rendered = sanitizeErrorForDisplay(new Error(REFUSAL));
+    expect(rendered).not.toContain("\n");
+    expect(rendered).toContain("\\x0a");
+  });
+
+  test("a look-alike property does not ask for the treatment", () => {
+    // The mark is a module-private symbol, so neither a symbol of the same
+    // description nor a string key of that text is the one the renderer reads.
+    const err = new Error("head\nplanted line");
+    (err as unknown as Record<symbol, unknown>)[
+      Symbol("first-party line breaks")
+    ] = "head\nplanted line";
+    (err as unknown as Record<string, unknown>)["first-party line breaks"] =
+      "head\nplanted line";
+    expect(sanitizeErrorForDisplay(err)).not.toContain("\n");
+  });
+
+  test("a value spelling the escape's own token does not become a break", () => {
+    const rendered = sanitizeErrorForDisplay(
+      keepFirstPartyLineBreaks(new Error("head\nvalue: \\x0a"), [
+        "head",
+        "value: \\x0a",
+      ]),
+    );
+    // The escape doubles the value's literal backslash, and the break is added
+    // after that escape, so the value's own bytes cannot spell one.
+    expect(rendered.split("\n")).toEqual(["head", "value: \\\\x0a"]);
+  });
+
+  test("redacts a private-key block spanning several lines as one block", () => {
+    const KEY_BODY = "MIIByteslookingsecret0123456789ABCDEFabcdef+/wEHEHE";
+    const keyLines = [
+      "loading the key:",
+      "-----BEGIN OPENSSH PRIVATE KEY-----",
+      KEY_BODY,
+      "-----END OPENSSH PRIVATE KEY-----",
+      "and nothing was written.",
+    ];
+    const rendered = sanitizeErrorForDisplay(
+      keepFirstPartyLineBreaks(new Error(keyLines.join("\n")), keyLines),
+    );
+    // Redaction reads the whole text, so the body between the markers is one
+    // block rather than a line the markers do not reach.
+    expect(rendered).not.toContain(KEY_BODY);
+    expect(rendered).toBe(
+      "loading the key:\n[redacted private key]\nand nothing was written.",
+    );
+  });
+
+  test("bounds a many-line link at the link budget and marks what it cut", () => {
+    const lines = Array.from({ length: 200 }, () => "x".repeat(64));
+    const rendered = sanitizeErrorForDisplay(
+      keepFirstPartyLineBreaks(new Error(lines.join("\n")), lines),
+    );
+    expect(rendered.length).toBeLessThanOrEqual(
+      COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH + DISPLAY_TRUNCATION_MARKER.length,
+    );
+    expect(rendered).toContain(DISPLAY_TRUNCATION_MARKER);
+    // Several of the lines it was given, and not all of them.
+    expect(rendered.split("\n").length).toBeGreaterThan(1);
+    expect(rendered.split("\n").length).toBeLessThan(lines.length);
+  });
+
+  test("keeps the chain framing, which the re-render boundary still splits", () => {
+    const rendered = sanitizeErrorForDisplay(
+      keepFirstPartyLineBreaks(
+        new Error("head\nsecond line", { cause: new Error("the step") }),
+        ["head", "second line"],
+      ),
+    );
+    expect(rendered).toBe("head\nsecond line\ncaused by: the step");
+    // A boundary reading rendered TEXT has no mark to read, so it escapes the
+    // break it receives; the link boundary is the one it still reads.
+    expect(sanitizeErrorChainLinks(rendered)).toEqual([
+      "head\\x0asecond line",
+      "the step",
+    ]);
+  });
+
+  test("marking an error twice leaves the same display form", () => {
+    const err = new Error("head\nsecond line");
+    const lines = ["head", "second line"];
+    expect(sanitizeErrorForDisplay(keepFirstPartyLineBreaks(err, lines))).toBe(
+      sanitizeErrorForDisplay(keepFirstPartyLineBreaks(err, lines)),
+    );
+    expect(sanitizeErrorForDisplay(err)).toBe("head\nsecond line");
   });
 });
 
