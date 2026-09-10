@@ -1112,7 +1112,9 @@ partner's receipt of it, so an accounting drawn from the list must not take an
 unconfirmed send for a delivered one. Whether the partner's payload came back is a
 fact of the live run rather than of the frozen record (see
 [EXCHANGE_RECORD.md](EXCHANGE_RECORD.md#when-a-record-is-owed)), so no entry
-states it.
+states it as a field; but a terminated entry's received-columns fact lists what
+had arrived, which for a non-empty list shows the partner's payload came back,
+and an empty list is ambiguous -- nothing arrived, or the run stopped first.
 
 **What it holds at rest, and retention.** The entries are the records' own
 cleartext content: names, categories, references, and aggregate counts, never a

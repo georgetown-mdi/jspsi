@@ -1196,7 +1196,11 @@ exchange's own page, below its run history.
   accounting drawn from the list does not take it for a completed disclosure. Its
   columns each way are what the run had sent and what had arrived when it
   stopped, which the entry names as such; a result size beside them is the
-  intersection the exchange had computed, not a result you were handed.
+  intersection the exchange had computed, not a result you were handed. A run
+  whose exchange completed and whose record was filed before a local
+  output-build step failed instead keeps an entry with outcome completed,
+  unmarked, while the run history says the run did not complete and no result
+  file was written.
 - **A run that stopped before sending is not in it.** Nothing was disclosed, so
   there is no record to file; the run history above says what happened instead.
 - **It is exportable.** One action writes the whole accounting as a CSV, one row
