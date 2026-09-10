@@ -2,7 +2,11 @@ import { expect, test } from "vitest";
 
 import PSI from "@openmined/psi.js";
 
-import { prepareForExchange, runExchange } from "../src/exchange";
+import {
+  PayloadDisclosureDivergenceError,
+  prepareForExchange,
+  runExchange,
+} from "../src/exchange";
 import {
   createMessagePipe,
   type MessageConnection,
@@ -224,6 +228,14 @@ test("single-pass one-sided output: only the receiver gets the table and payload
   expect(responder.partnerPayload.columns).toEqual([]);
 });
 
+interface OneSidedSinglePassOptions {
+  helperDiscloses: boolean;
+  helperIsInitiator: boolean;
+  helperPayload?: Payload;
+  receiverPayload?: Payload;
+  advertiseHelperDisclosure?: boolean;
+}
+
 // Run a one-sided single-pass exchange (receiver expects output, helper
 // does not) end to end, capturing every frame the HELPER's process
 // receives so a test can assert -- at the wire -- whether the
@@ -233,15 +245,15 @@ test("single-pass one-sided output: only the receiver gets the table and payload
 // BOTH payload-exchange orderings are exercised (resolveRole always makes
 // the output party the PSI receiver, so this only reorders the payload
 // phase, where an untested permutation could hide a frame-desync hang).
-async function runOneSidedSinglePass(opts: {
-  helperDiscloses: boolean;
-  helperIsInitiator: boolean;
-  helperPayload?: Payload;
-  receiverPayload?: Payload;
-  advertiseHelperDisclosure?: boolean;
-}): Promise<{
-  receiver: ExchangeResult;
-  helper: ExchangeResult;
+//
+// Both outcomes are settled rather than joined, so a test of a refusal reads
+// each party's own verdict -- a refusal binding both parties has to be
+// observed on both -- and neither rejection is left unhandled.
+async function settleOneSidedSinglePass(
+  opts: OneSidedSinglePassOptions,
+): Promise<{
+  receiver: PromiseSettledResult<ExchangeResult>;
+  helper: PromiseSettledResult<ExchangeResult>;
   helperInbound: Array<unknown>;
 }> {
   const receiverOut: Output = { expectsOutput: true, shareWithPartner: false };
@@ -316,7 +328,7 @@ async function runOneSidedSinglePass(opts: {
 
   // The pipe is symmetric, so the two parties can sit on either end; the handshake
   // role (which orders the payload phase) is set independently per opts.
-  const [helper, receiver] = await Promise.all([
+  const [helper, receiver] = await Promise.allSettled([
     runExchange(
       capturingHelper,
       opts.helperIsInitiator ? "initiator" : "responder",
@@ -343,6 +355,20 @@ async function runOneSidedSinglePass(opts: {
     ),
   ]);
   return { receiver, helper, helperInbound };
+}
+
+// The settled harness above for the exchanges that complete: each party's
+// result, with a rejection rethrown so the test reports the failure itself.
+async function runOneSidedSinglePass(opts: OneSidedSinglePassOptions): Promise<{
+  receiver: ExchangeResult;
+  helper: ExchangeResult;
+  helperInbound: Array<unknown>;
+}> {
+  const { receiver, helper, helperInbound } =
+    await settleOneSidedSinglePass(opts);
+  if (helper.status === "rejected") throw helper.reason;
+  if (receiver.status === "rejected") throw receiver.reason;
+  return { receiver: receiver.value, helper: helper.value, helperInbound };
 }
 
 test("single-pass one-sided, no-payload helper is blinded: table withheld, no hang", async () => {
@@ -445,4 +471,48 @@ test("disclosing agreed terms still deliver the helper its half", async () => {
   expect(helper.resolvedRole).toBe("sender");
   expect(receiver.partnerPayload.columns).toEqual(["note"]);
   expect(helperInbound.some((f) => Array.isArray(f))).toBe(true);
+});
+
+test("a withheld-shaped payload.send outranks the flag on a lazy receiver", async () => {
+  // The suppressed half of the same cross-check, on the pair the compatibility
+  // check leaves lazy: the helper's terms declare `payload.send: []` while the
+  // receiver declares no `payload.receive` at all, so the helper is bound to
+  // disclosing no column by its own document, and a build advertising
+  // `disclosesPayload` true against it is still sent no association-table half.
+  const { receiver, helper, helperInbound } = await runOneSidedSinglePass({
+    helperDiscloses: false,
+    helperIsInitiator: false,
+    helperPayload: { send: [] },
+    advertiseHelperDisclosure: true,
+  });
+
+  expect(receiver.resolvedRole).toBe("receiver");
+  expect(helper.resolvedRole).toBe("sender");
+  expect(receiver.associationTable?.[0]).toHaveLength(2);
+  expect(helperInbound.some((f) => Array.isArray(f))).toBe(false);
+});
+
+test("an asserted disclosure the agreed terms contradict refuses both parties", async () => {
+  // The honest misconfiguration the binding must not silence: the helper's
+  // metadata transmits `note` while its terms declare no `payload.send` (the
+  // guided and default paths author none), and the receiver declares an empty
+  // `payload.receive`. The compatibility check passes that pair -- it holds the
+  // receive against the DECLARED send -- so the contradiction is between the
+  // agreed terms and what the helper's process discloses. Both parties refuse it,
+  // and no association-table frame reaches the helper.
+  const { receiver, helper, helperInbound } = await settleOneSidedSinglePass({
+    helperDiscloses: true,
+    helperIsInitiator: false,
+    receiverPayload: { receive: [] },
+  });
+
+  expect(helper.status).toBe("rejected");
+  expect(receiver.status).toBe("rejected");
+  for (const outcome of [helper, receiver]) {
+    const reason = (outcome as PromiseRejectedResult).reason as Error;
+    expect(reason).toBeInstanceOf(PayloadDisclosureDivergenceError);
+    expect(reason.message).toContain("empty payload.receive");
+    expect(reason.message).toContain("asserts it discloses one");
+  }
+  expect(helperInbound.some((f) => Array.isArray(f))).toBe(false);
 });

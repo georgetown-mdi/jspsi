@@ -1,8 +1,9 @@
 // The runtime rules a set of agreed linkage terms is held to, as opposed to the
 // shape a terms document must parse into (config/linkageTermsSchema.ts): which
 // linkage strategies implement `deduplicate` and many-to-many matching, what a
-// count-only (`psi-c`) document may not carry, and which swap-paired key
-// elements a single transform would read differently on the two parties.
+// count-only (`psi-c`) document may not carry, when a payload direction
+// declares no column, and which swap-paired key elements a single transform
+// would read differently on the two parties.
 //
 // Each rule is stated once here and read from both directions: the terms schema
 // refuses a document that breaks it at parse time, and the exchange re-asserts
@@ -15,6 +16,7 @@ import type {
   LinkageKeyElement,
   LinkageStrategy,
   LinkageTerms,
+  PayloadColumn,
 } from "./config/linkageTermsSchema.js";
 import type { LinkageCardinality } from "./psi/link.js";
 
@@ -145,6 +147,25 @@ export function assertCountOnlyTermsShape(terms: LinkageTerms): void {
   const violation = countOnlyShapeViolation(terms);
   if (violation === undefined) return;
   throw new UsageError(COUNT_ONLY_SHAPE_REFUSALS[violation]);
+}
+
+/**
+ * Whether one direction of a `payload` dictionary -- a document's `send` or
+ * its `receive` -- is declared PRESENT and EMPTY, the explicit "no column
+ * moves this way". An ABSENT direction declares nothing and binds neither
+ * party: `validateCompatibility` reads it lazily, and every gate below
+ * takes it as disclosure.
+ *
+ * The one reading behind each gate that binds a party to disclosing no
+ * column: the three invitation withhold readings
+ * (`consent/invitationSummary.ts`) and the run's own sender-disclosure
+ * resolution (`resolveSenderDisclosesPayload`, exchange.ts), so a consent
+ * screen and the run it describes cannot read a declaration differently.
+ */
+export function declaresNoPayloadColumn(
+  direction: ReadonlyArray<PayloadColumn> | undefined,
+): boolean {
+  return direction !== undefined && direction.length === 0;
 }
 
 /**

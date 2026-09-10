@@ -1508,10 +1508,15 @@ function relieveTransientMemory(): void {
  * entitled to output always receives it.
  *
  * Both parties compute this from the SAME authenticated session state -- the
- * resolved sender's output entitlement, and its disclosure as the agreed
- * terms and the advertised `disclosesPayload` flag together resolve it
- * (`runExchange`, exchange.ts) -- so the receiver's decision to suppress the
- * frame and the sender's decision to skip awaiting it are always the same.
+ * resolved sender's output entitlement, and the disclosure the agreed terms
+ * and the advertised `disclosesPayload` flag together resolve
+ * (`resolveSenderDisclosesPayload`, exchange.ts): a sender whose
+ * `payload.send` the terms declare present and empty discloses none whatever
+ * it advertises; a receiver's `payload.receive` declared present and empty
+ * against an advertised disclosure contradicts the terms and is refused
+ * there rather than resolved either way; otherwise the advertisement
+ * decides. So the receiver's decision to suppress the frame and the sender's
+ * decision to skip awaiting it are always the same.
  * The frame is suppressed ENTIRELY, never sent empty: an
  * empty-versus-populated association table would leak the match count by
  * the frame's presence and size, so only omitting it closes the channel. See

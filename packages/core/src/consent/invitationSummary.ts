@@ -22,6 +22,7 @@ import { checkLinkageRuleSetCitation } from "../defaults/builtInLinkageTerms.js"
 import type { LinkageRuleSetCitationVerdict } from "../defaults/builtInLinkageTerms.js";
 import {
   candidateSetIsImplementedForStrategy,
+  declaresNoPayloadColumn,
   deduplicateIsImplementedForStrategy,
 } from "../linkageTermsPolicy.js";
 import { withholdsSenderAssociationTable } from "../psi/link.js";
@@ -1361,8 +1362,7 @@ export function withholdsAcceptorAssociationTable(
   if (!terms.output.expectsOutput) return false;
   if (!terms.output.shareWithPartner && (terms.payload?.send?.length ?? 0) > 0)
     return false;
-  const requestsNoPayload =
-    terms.payload?.receive !== undefined && terms.payload.receive.length === 0;
+  const requestsNoPayload = declaresNoPayloadColumn(terms.payload?.receive);
   return withholdsSenderAssociationTable(
     terms.output.shareWithPartner,
     !requestsNoPayload,
@@ -1406,8 +1406,7 @@ export function withholdsInviterAssociationTable(terms: LinkageTerms): boolean {
   if (terms.linkageStrategy !== "single-pass") return false;
   if (terms.output.expectsOutput) return false;
   if (!terms.output.shareWithPartner) return false;
-  const disclosesNoPayload =
-    terms.payload?.send !== undefined && terms.payload.send.length === 0;
+  const disclosesNoPayload = declaresNoPayloadColumn(terms.payload?.send);
   return withholdsSenderAssociationTable(
     terms.output.expectsOutput,
     !disclosesNoPayload,
@@ -1451,8 +1450,7 @@ export function withholdsInviterAssociationTable(terms: LinkageTerms): boolean {
 export function withholdsPartnerAssociationTable(terms: LinkageTerms): boolean {
   if (terms.linkageStrategy !== "single-pass") return false;
   if (!terms.output.expectsOutput) return false;
-  const requestsNoPayload =
-    terms.payload?.receive !== undefined && terms.payload.receive.length === 0;
+  const requestsNoPayload = declaresNoPayloadColumn(terms.payload?.receive);
   return withholdsSenderAssociationTable(
     terms.output.shareWithPartner,
     !requestsNoPayload,

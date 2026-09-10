@@ -10,6 +10,7 @@ import {
   assertDeduplicateImplemented,
   candidateSetIsImplementedForStrategy,
   COUNT_ONLY_SHAPE_REFUSALS,
+  declaresNoPayloadColumn,
   resolvedMatchingFromTerms,
 } from "./linkageTermsPolicy.js";
 import { getDefaultLinkageTerms } from "./defaults/builtInLinkageTerms.js";
@@ -84,10 +85,7 @@ import { OperatorConfigError, UsageError, causeChainSome } from "./errors.js";
 import type { Metadata, OwnColumnSelection } from "./config/metadata.js";
 import { TEXT_CONTROL_CHAR_PATTERN } from "./config/linkageTermsSchema.js";
 import { BIDI_CONTROL_PATTERN } from "./utils/nameControls.js";
-import type {
-  LinkageTerms,
-  PayloadColumn,
-} from "./config/linkageTermsSchema.js";
+import type { LinkageTerms } from "./config/linkageTermsSchema.js";
 import type { StandardizedDataset } from "./standardization.js";
 import type {
   HandshakeRole,
@@ -252,6 +250,74 @@ export function resolveCountOnlyRun(
   assertCountOnlyTermsShape(localTerms);
   assertCountOnlyTermsShape(partnerTerms);
   return localTerms.algorithm === "psi-c";
+}
+
+/**
+ * The refusal raised when the party in the SENDER seat asserts a payload
+ * disclosure the agreed terms declare no column for
+ * ({@link resolveSenderDisclosesPayload}).
+ *
+ * A {@link ConnectionError} of kind `protocol`, not {@link UsageError}: the
+ * assertion is held against a pair of documents both parties agreed, so the
+ * contradiction is a process disclosing against the terms it agreed under --
+ * the classification {@link reconcileReceivedPayload} gives the same pair
+ * when the column arrives (CLI exit 69, not 64). The message holds fixed
+ * literals only, never a value read off either document.
+ */
+export class PayloadDisclosureDivergenceError extends ConnectionError {
+  constructor(message: string) {
+    super(message, "protocol");
+    this.name = "PayloadDisclosureDivergenceError";
+  }
+}
+
+/**
+ * Resolve whether the party in the SENDER seat discloses payload to the
+ * receiver -- the input the single-pass association-table withhold gate
+ * reads ({@link withholdsSenderAssociationTable}) -- from the two agreed
+ * terms documents and that party's own assertion (`senderAsserts`: the
+ * `disclosesPayload` flag off the terms exchange, or this party's own
+ * metadata where it is the sender).
+ *
+ * The assertion rides the envelope rather than the agreed-terms hash, so it
+ * can only ADD disclosure to what the terms declare. Three cases:
+ *
+ * - The sender's `payload.send` declared present and empty binds it to
+ *   disclosing no column whatever it asserts, so the half is withheld and
+ *   the exchange continues. `assertPayloadSendDisclosed` holds that
+ *   declaration to exactly what metadata transmits before any data moves,
+ *   so a conforming sender in this shape discloses none.
+ * - The receiver's `payload.receive` declared present and empty, with no
+ *   such declaration on the sender's own document to hold it to, while the
+ *   sender asserts disclosure: the two contradict, and the exchange is
+ *   refused rather than narrowed to a run whose payload never moves.
+ * - Neither direction declared present and empty: the assertion decides.
+ *
+ * Symmetric: both parties read the same two documents and the same
+ * assertion, so the receiver's suppression and the sender's skip agree, and
+ * a refusal aborts both at this same point -- before the linkage round, the
+ * association table, and the payload -- rather than desyncing the lockstep.
+ */
+export function resolveSenderDisclosesPayload(
+  senderAsserts: boolean,
+  senderTerms: LinkageTerms,
+  receiverTerms: LinkageTerms,
+): boolean {
+  if (declaresNoPayloadColumn(senderTerms.payload?.send)) return false;
+  if (senderAsserts && declaresNoPayloadColumn(receiverTerms.payload?.receive))
+    throw new PayloadDisclosureDivergenceError(
+      "the agreed linkage terms declare that one party sends no payload " +
+        "column, but that party's process asserts it discloses one: the " +
+        "receiving party's terms declare an empty payload.receive, which " +
+        "holds the sending party to sending none. The exchange is refused " +
+        "before any association table or payload moves. To disclose those " +
+        "columns, declare them in the sending party's payload.send and the " +
+        "receiving party's payload.receive, or omit payload.receive to take " +
+        "whatever the partner sends. To disclose none, set the sending " +
+        "party's input metadata to transmit no column (is_payload: false, " +
+        "or role ignored).",
+    );
+  return senderAsserts;
 }
 
 /**
@@ -1589,8 +1655,10 @@ export async function runExchange(
   // resolved SENDER is a non-receiving helper (expectsOutput false) disclosing no
   // payload, it needs nothing back, so the receiver suppresses its
   // association-table half entirely and the sender skips awaiting it -- keeping a
-  // blind helper blind to its own membership. Only consulted on the single-pass
-  // path (see withholdsSenderAssociationTable and link.ts).
+  // blind helper blind to its own membership. The verdict below is consulted on
+  // the single-pass path alone (see withholdsSenderAssociationTable and link.ts);
+  // the disclosure it reads is resolved for every strategy, since the refusal it
+  // raises is about what the agreed terms admit rather than about a frame.
   const senderExpectsOutput = isReceiver
     ? partnerTerms.output.expectsOutput
     : linkageTerms.output.expectsOutput;
@@ -1603,21 +1671,17 @@ export async function runExchange(
     ? (partnerDisclosesPayload ?? true)
     : localDisclosesPayload;
 
-  // A payload direction the agreed terms declare present and empty binds that
-  // party to disclosing no column, so it overrides the assertion above, which is
-  // the sender's own and rides no agreed-terms hash. Either document carries the
-  // declaration -- the sender's `payload.send`, or the receiver's
-  // `payload.receive`, which validateCompatibility holds the sender's send to --
-  // and both parties read the same pair, so suppression and skip stay in step.
-  const declaresNoPayloadColumn = (
-    direction: ReadonlyArray<PayloadColumn> | undefined,
-  ): boolean => direction !== undefined && direction.length === 0;
-  const senderTerms = isReceiver ? partnerTerms : linkageTerms;
-  const receiverTerms = isReceiver ? linkageTerms : partnerTerms;
-  const senderDisclosesPayload =
-    senderAssertsDisclosure &&
-    !declaresNoPayloadColumn(senderTerms.payload?.send) &&
-    !declaresNoPayloadColumn(receiverTerms.payload?.receive);
+  // The assertion only ADDS disclosure to what the agreed terms declare: a
+  // withheld-shaped `payload.send` binds the sender to disclosing no column, and
+  // a `payload.receive` the receiver declares empty against a sender asserting
+  // disclosure is a contradiction this refuses. Both parties read the same pair,
+  // so suppression, skip and refusal stay in step. See
+  // resolveSenderDisclosesPayload.
+  const senderDisclosesPayload = resolveSenderDisclosesPayload(
+    senderAssertsDisclosure,
+    isReceiver ? partnerTerms : linkageTerms,
+    isReceiver ? linkageTerms : partnerTerms,
+  );
 
   const withholdSenderTable = withholdsSenderAssociationTable(
     senderExpectsOutput,
