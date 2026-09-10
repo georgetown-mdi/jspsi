@@ -568,11 +568,13 @@ export const CONSENT_FACTS = {
       "acceptor consents on. Resolved by `candidateSetChainsGrouping` " +
       "(consent/invitationSummary.ts) over every producer of a candidate set " +
       "rather than over the `split_on` half alone, and off the accept " +
-      "boundary's own both-sided predicate, so no surface withholds the " +
-      "sentence for a key that expands its value by another route and none " +
-      "states it for a pair the accept refuses. The sentence states the pair " +
-      "conditionally, since the party reading it holds one side and not the " +
-      "other wherever it is rendered.",
+      "boundary's own verdict on the other party's value rather than the " +
+      "strategy rule alone, so no surface withholds the sentence for a key " +
+      "that expands its value by another route and none states it where that " +
+      "value is one the accept refuses -- a sole-receiver document, which " +
+      "leaves that party none to set, as much as a refused pair. The " +
+      "sentence states the pair conditionally, since the party reading it " +
+      "holds one side and not the other wherever it is rendered.",
     note:
       "A linkage key here matches one record on several values at once. " +
       "Where both parties set duplicate matching for their own records, every " +

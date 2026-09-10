@@ -535,6 +535,15 @@ describe("the consent summary's chained-grouping register", () => {
   const plainKeys = [
     { name: "last name", elements: [{ field: "last_name" }] },
   ] satisfies LinkageTerms["linkageKeys"];
+  /** Both parties receive the result, the shape the defaults declare. */
+  const SHARED_RESULT: Output = { expectsOutput: true, shareWithPartner: true };
+  /** The inviting party keeps the result, leaving the other party none. */
+  const SOLE_RECEIVER: Output = {
+    expectsOutput: true,
+    shareWithPartner: false,
+  };
+  /** Neither party is entitled to a result. */
+  const NO_RECEIVER: Output = { expectsOutput: false, shareWithPartner: false };
   // One key per producer of a candidate set, since the fan-out flag beside
   // this register reads only the first of the three.
   const candidateSetKeys: Array<[string, LinkageTerms["linkageKeys"]]> = [
@@ -657,53 +666,80 @@ describe("the consent summary's chained-grouping register", () => {
       ).toBe(false);
   });
 
+  test("withholds it where the invitation leaves the other party no side to set", () => {
+    // The finding's shape: the inviting party keeps the result, so the
+    // accepting party mirrors to no entitlement and the schema takes no
+    // `deduplicate` from it. The pair the sentence rests on is one that party
+    // can never complete, so stating the grouping would state a disclosure
+    // this exchange cannot make.
+    const terms = {
+      ...baseTerms,
+      deduplicate: true,
+      output: SOLE_RECEIVER,
+    };
+    expect(termsDeclareCandidateSet(terms)).toBe(true);
+    expect(summarizeInvitation({ linkageTerms: terms })).toMatchObject({
+      acceptorDeduplicateRefused: false,
+      candidateSetChainsGrouping: false,
+    });
+  });
+
   test("holds exactly where the run pairs a candidate set both parties widen", () => {
     // Driven over the whole combination table against core's own predicates,
-    // so the register cannot drift from the run: a candidate set the exchange
-    // matches, a `deduplicate` these terms declare, and a pair the accept
-    // boundary takes from the other party.
+    // so the register cannot drift from the run: the accept boundary takes the
+    // both-sided pair -- these terms' own `deduplicate` beside the value the
+    // other party sets -- and the terms declare a candidate set. The output
+    // axis is what separates a pair the other party can complete from one it
+    // cannot, so it is driven beside the strategy and the algorithm.
     const keyShapes: Array<[string, LinkageTerms["linkageKeys"]]> = [
       ["one value per record", plainKeys],
       ...candidateSetKeys,
     ];
+    const outputShapes: Array<[string, Output]> = [
+      ["both parties receive the result", SHARED_RESULT],
+      ["the inviting party is the sole receiver", SOLE_RECEIVER],
+      ["neither party receives a result", NO_RECEIVER],
+    ];
     for (const algorithm of ["psi", "psi-c"] as const)
       for (const linkageStrategy of ["cascade", "single-pass"] as const)
         for (const [keyShape, linkageKeys] of keyShapes)
-          for (const deduplicate of [false, true]) {
-            const terms = {
-              ...baseTerms,
-              algorithm,
-              linkageStrategy,
-              linkageKeys,
-              deduplicate,
-            };
-            const summary = summarizeInvitation({ linkageTerms: terms });
-            const accepts = ((): boolean => {
-              try {
-                deriveAcceptedLinkageTerms(terms, "Acceptor", true);
-                return true;
-              } catch {
-                return false;
-              }
-            })();
-            const combination = {
-              algorithm,
-              linkageStrategy,
-              keyShape,
-              deduplicate,
-            };
-            expect({
-              ...combination,
-              chains: summary.candidateSetChainsGrouping,
-            }).toEqual({
-              ...combination,
-              chains:
-                termsDeclareCandidateSet(terms) &&
-                summary.fanOutApplied &&
+          for (const [outputShape, output] of outputShapes)
+            for (const deduplicate of [false, true]) {
+              const terms = {
+                ...baseTerms,
+                algorithm,
+                linkageStrategy,
+                linkageKeys,
+                output,
+                deduplicate,
+              };
+              const summary = summarizeInvitation({ linkageTerms: terms });
+              const acceptTakesBothSidedPair =
                 deduplicate &&
-                accepts,
-            });
-          }
+                ((): boolean => {
+                  try {
+                    deriveAcceptedLinkageTerms(terms, "Acceptor", true);
+                    return true;
+                  } catch {
+                    return false;
+                  }
+                })();
+              const combination = {
+                algorithm,
+                linkageStrategy,
+                keyShape,
+                outputShape,
+                deduplicate,
+              };
+              expect({
+                ...combination,
+                chains: summary.candidateSetChainsGrouping,
+              }).toEqual({
+                ...combination,
+                chains:
+                  acceptTakesBothSidedPair && termsDeclareCandidateSet(terms),
+              });
+            }
   });
 });
 

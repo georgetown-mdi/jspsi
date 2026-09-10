@@ -2727,6 +2727,31 @@ describe("AcceptorScreen: this party's own deduplicate", () => {
     );
   });
 
+  test("says nothing of that grouping where this party receives no result", async () => {
+    // The swapped key and the declared duplicate matching of the case above,
+    // with the invitation keeping the result: this party mirrors to no
+    // entitlement, so the accept takes no duplicate matching from it and the
+    // seat offers none. The pair the sentence rests on is one nothing here can
+    // complete, so stating the grouping would state a disclosure this exchange
+    // cannot make.
+    await reachReview({
+      ...acceptorTerms,
+      deduplicate: true,
+      output: { expectsOutput: true, shareWithPartner: false },
+      linkageKeys: [
+        {
+          name: "name",
+          elements: [{ field: "firstName" }, { field: "lastName" }],
+          swap: ["firstName", "lastName"],
+        },
+      ],
+    });
+    expect(ownSide().query()).toBeNull();
+    expect(app.container.textContent).not.toContain(
+      CONSENT_FACTS.candidateSetChainsGrouping.note,
+    );
+  });
+
   test("says nothing of that grouping where the keys expand no value", async () => {
     // The grouping follows the candidate set: a deduplicating invitation over
     // plain keys pairs records that share a matched value and nothing else, so

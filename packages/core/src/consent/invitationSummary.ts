@@ -24,6 +24,7 @@ import {
   declaresNoPayloadColumn,
   deduplicateIsImplementedForStrategy,
 } from "../linkageTermsPolicy.js";
+import { deriveAcceptedLinkageTerms } from "../linkageTermsNegotiation.js";
 import { termsDeclareCandidateSet } from "../fanOutFunctions.js";
 import { withholdsSenderAssociationTable } from "../psi/link.js";
 import type {
@@ -597,11 +598,17 @@ export interface InvitationSummary {
    * Whether a linkage key expands one value into several match candidates
    * under a `deduplicate` pair whose grouping chains: the terms declare a
    * candidate set the exchange matches on, they declare a `deduplicate` of
-   * their own, and the pair the other party's own `deduplicate` completes is
-   * one the strategy matches. Every record a candidate reached is then
+   * their own, and the accept boundary takes the pair the other party's own
+   * `deduplicate` would complete. Every record a candidate reached is then
    * grouped with the record that reached it, so one group can hold two
    * records no linkage key links (docs/spec/PROTOCOL.md, The `many-to-many`
    * entity closure).
+   *
+   * The pair is put to `deriveAcceptedLinkageTerms` rather than to the
+   * strategy rule alone, so the fact is false wherever that party cannot set
+   * the value the sentence rests on -- a sole-receiver document, whose
+   * mirrored output leaves it the closed default, as much as a strategy
+   * pairing no both-sided cardinality.
    *
    * Read over every producer of a candidate set, unlike {@link fansOut},
    * which is the `split_on` half alone: a `swap` key and a
@@ -1487,6 +1494,37 @@ export function withholdsPartnerAssociationTable(terms: LinkageTerms): boolean {
 }
 
 /**
+ * The name the accept probe below stands the other party's own in for. The
+ * derivation checks that party's `identity` against the schema's rules, and a
+ * summary is built before any name is entered; the probe's result is thrown
+ * away, so this value is never displayed and never run.
+ */
+const ACCEPT_PROBE_IDENTITY = "you";
+
+/**
+ * Whether the accept boundary takes these terms with the OTHER party's own
+ * `deduplicate` set -- the party the invitation does not declare for: the
+ * accepting party at a seat holding an invitation, this party's partner at a
+ * seat reading terms its own party wrote.
+ *
+ * Runs `deriveAcceptedLinkageTerms` itself rather than restating the rules it
+ * applies, so a fact stating a consequence of that value is withheld wherever
+ * the accept refuses it for ANY reason: a sole-receiver document, which leaves
+ * that party no value to set (the schema takes `deduplicate: true` only from a
+ * party that receives the result); the count-only shape, which holds neither
+ * party's value open; a strategy pairing no both-sided cardinality; and a
+ * document that mirrors to no acceptable acceptance at all.
+ */
+function acceptTakesPartnerDeduplicate(terms: LinkageTerms): boolean {
+  try {
+    deriveAcceptedLinkageTerms(terms, ACCEPT_PROBE_IDENTITY, true);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Build a display-ready {@link InvitationSummary} from an invitation's
  * linkage terms, optional expiry, and optional held disclosed-columns
  * subset. The parameter is a structural subset of {@link InvitationToken}
@@ -1614,14 +1652,17 @@ export function summarizeInvitation(
   );
   // The grouping a candidate set makes once both parties deduplicate, read
   // over the whole producer list (`termsDeclareCandidateSet`, fanOutFunctions.ts)
-  // rather than over the `split_on` half `fansOut` holds, and put to the same
-  // two predicates the registers beside it read: the combination that matches
-  // a candidate set, and the accept boundary's verdict on the pair. So a seat
-  // states it for exactly the terms whose run can chain a group.
+  // rather than over the `split_on` half `fansOut` holds, and put to the
+  // combination that matches a candidate set and to the accept boundary's own
+  // verdict on the pair. The verdict is the whole boundary rather than the
+  // both-sided predicate alone, so a seat withholds the sentence wherever the
+  // other party's `deduplicate` is one the accept refuses -- a sole-receiver
+  // document leaves that party none to set, and stating the grouping there
+  // would state a disclosure this exchange cannot make.
   const candidateSetChainsGrouping =
     fanOutMatches &&
     terms.deduplicate &&
-    !acceptorDeduplicateRefused &&
+    acceptTakesPartnerDeduplicate(terms) &&
     termsDeclareCandidateSet(terms);
 
   const summary: InvitationSummary = {
