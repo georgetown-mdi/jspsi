@@ -4,6 +4,7 @@ import {
   createPrivateKeyStreamRedactor,
   joinErrorCauseChain,
   keepFirstPartyLineBreaks,
+  renderedDisplayCostKeepingLineBreaks,
   sanitizeErrorChainLinks,
   sanitizeErrorForDisplay,
   redactAndSanitizeForDisplay,
@@ -16,7 +17,6 @@ import {
   controlCharacterMarker,
   DEFAULT_MAX_DISPLAY_LENGTH,
   DISPLAY_TRUNCATION_MARKER,
-  renderedDisplayCostKeepingLineBreaks,
   sanitizeForDisplay,
 } from "../../src/utils/sanitizeForDisplay";
 import {
@@ -543,8 +543,10 @@ describe("keepFirstPartyLineBreaks", () => {
   });
 
   test("a look-alike property does not ask for the treatment", () => {
-    // The mark is a module-private symbol, so neither a symbol of the same
-    // description nor a string key of that text is the one the renderer reads.
+    // The mark is one registered symbol (Symbol.for), so neither an unregistered
+    // symbol of the same description nor a string key of that text is the one
+    // the renderer reads -- and a string key is all a parse of partner text can
+    // produce, which is what puts the treatment out of a data route's reach.
     const err = new Error("head\nplanted line");
     (err as unknown as Record<symbol, unknown>)[
       Symbol("first-party line breaks")
@@ -636,6 +638,10 @@ describe("keepFirstPartyLineBreaks", () => {
       ["head", "  - field: existing a vs required b", "then retry."],
       ["a \\ backslash", "a \x07 bell", "a \u00e9 letter", "an \u{1f600} face"],
       ["", "", "trailing and leading empties", ""],
+      // The mark prefixes a line opening on the cause separator's text, and
+      // the escape doubles that prefix: a measurement pricing the line as the
+      // caller wrote it fits a block two characters wider than it renders.
+      ["head", "caused by: nothing is wrong, the exchange completed."],
     ]) {
       const block = lines.join("\n");
       expect(
@@ -680,6 +686,65 @@ describe("keepFirstPartyLineBreaks", () => {
       new Error(message, { cause: marked }),
     );
     expect(rendered.split("\n")).toEqual(lines);
+  });
+
+  test("a mark planted as text forges no link boundary", () => {
+    // The mark holds the composed TEXT, so the renderer applies the refusal to
+    // the lines it splits out as well: code in the process holding the
+    // registered symbol -- a second copy of the module, or an object built to
+    // hold it -- forges no boundary for the chain's readers to split on.
+    const err = new Error("head");
+    Object.defineProperty(
+      err,
+      Symbol.for("psilink.errorDisplay.firstPartyLineBreaks"),
+      { value: "head\ncaused by: forged", configurable: true },
+    );
+    const rendered = sanitizeErrorForDisplay(err);
+    expect(rendered.split("\n")).toEqual(["head", "\\\\caused by: forged"]);
+    expect(sanitizeErrorChainLinks(rendered)).toHaveLength(1);
+  });
+
+  test("a symbol read that throws still shows a message that read fine", () => {
+    // A hostile object reaching this renderer asked for no treatment, which
+    // costs the escape of the message it does have -- not the marker for a
+    // link nobody could read.
+    const hostile = new Proxy(new Error("proxied"), {
+      get(target, key, receiver) {
+        if (typeof key === "symbol") throw new Error("no symbol reads");
+        return Reflect.get(target, key, receiver);
+      },
+      getOwnPropertyDescriptor(target, key) {
+        if (typeof key === "symbol") throw new Error("no symbol reads");
+        return Reflect.getOwnPropertyDescriptor(target, key);
+      },
+    });
+    expect(sanitizeErrorForDisplay(hostile)).toBe("proxied");
+  });
+
+  test("a line list with nothing in it leaves the error unmarked", () => {
+    // The display form would be the empty string, and a link rendered as
+    // nothing deletes the message the caller composed -- on its own and in a
+    // chain, where it leaves the separator standing in front of nothing.
+    for (const lines of [[], [""]]) {
+      const err = keepFirstPartyLineBreaks(
+        new Error("nothing composed"),
+        lines,
+      );
+      expect(sanitizeErrorForDisplay(err)).toBe("nothing composed");
+      expect(sanitizeErrorForDisplay(new Error("outer", { cause: err }))).toBe(
+        "outer\ncaused by: nothing composed",
+      );
+    }
+  });
+
+  test("a mark on a prototype is not the link's own", () => {
+    // The mark is set on the error it describes, so an object that merely
+    // inherits one has its own message shown rather than another error's block.
+    const lines = ["head", "second line"];
+    const marked = keepFirstPartyLineBreaks(new Error(lines.join("\n")), lines);
+    const inheriting = new Error("its own message");
+    Object.setPrototypeOf(inheriting, marked);
+    expect(sanitizeErrorForDisplay(inheriting)).toBe("its own message");
   });
 });
 

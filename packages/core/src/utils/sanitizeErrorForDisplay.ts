@@ -2,6 +2,7 @@ import { errorMessage } from "../connection/messageConnection";
 import {
   COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
   DISPLAY_TRUNCATION_MARKER,
+  renderedDisplayCost,
   replaceControlCharactersForDisplay,
   sanitizeForDisplay,
 } from "./sanitizeForDisplay";
@@ -346,11 +347,16 @@ export function keepFirstPartyLineBreaks<E extends Error>(
   error: E,
   lines: ReadonlyArray<string>,
 ): E {
+  const display = lines
+    .map(replaceControlCharactersForDisplay)
+    .map(refuseCauseSeparatorOpening)
+    .join("\n");
+  // Lines holding no text at all would put the empty string in front of the
+  // message the caller composed, rendering the link -- and its place in a
+  // chain -- as nothing. The unmarked route shows that message instead.
+  if (display === "") return error;
   Object.defineProperty(error, FIRST_PARTY_LINE_BREAK_TEXT, {
-    value: lines
-      .map(replaceControlCharactersForDisplay)
-      .map(refuseCauseSeparatorOpening)
-      .join("\n"),
+    value: display,
     enumerable: false,
     configurable: true,
   });
@@ -377,12 +383,51 @@ function refuseCauseSeparatorOpening(line: string): string {
 }
 
 /**
+ * What a BLOCK costs once this renderer shows it with the line breaks between
+ * its lines kept rather than escaped ({@link keepFirstPartyLineBreaks}): the
+ * sum of each line's {@link renderedDisplayCost} plus one character per break,
+ * which is what {@link renderFirstPartyLineBreaks} emits.
+ *
+ * A composition whose structure IS the line break fits its block with this
+ * rather than with {@link renderedDisplayCost}, which prices a break at the
+ * four characters of `\x0a`: charging four for what renders as one leaves
+ * three characters per line of the budget unspendable, and what goes unspent
+ * is the conflict detail the block was fitted to show.
+ *
+ * A raw block measures what its marked form renders to, so a site may measure
+ * before it marks. Two treatments stand between the two forms, and neither
+ * moves the total: the mark rewrites each line's control characters to a
+ * printable marker, and every control character is at or below U+009F, where
+ * the escape and the marker are both four characters wide; and a line opening
+ * on the cause separator's text is prefixed, which is why this runs the same
+ * {@link refuseCauseSeparatorOpening} rather than pricing the line as the
+ * caller wrote it.
+ */
+export function renderedDisplayCostKeepingLineBreaks(block: string): number {
+  const lines = block.split("\n");
+  return (
+    lines.reduce(
+      (total, line) =>
+        total + renderedDisplayCost(refuseCauseSeparatorOpening(line)),
+      0,
+    ) +
+    lines.length -
+    1
+  );
+}
+
+/**
  * The display form {@link keepFirstPartyLineBreaks} left on `link`, or
  * `undefined` for a link that asked for no such treatment -- which is every
  * link psilink does not compose itself.
  */
 function firstPartyLineBreakText(link: unknown): string | undefined {
   if (typeof link !== "object" || link === null) return undefined;
+  // An OWN property, which is where the mark puts it: a link whose prototype
+  // holds one is not a link this module marked, and a class or a plain object
+  // placed in a chain's path must not lend the treatment to everything built
+  // from it.
+  if (!Object.hasOwn(link, FIRST_PARTY_LINE_BREAK_TEXT)) return undefined;
   const kept = (link as Record<symbol, unknown>)[FIRST_PARTY_LINE_BREAK_TEXT];
   return typeof kept === "string" ? kept : undefined;
 }
@@ -400,6 +445,14 @@ function firstPartyLineBreakText(link: unknown): string | undefined {
  * line. A line the escape cut is marked by the escape itself; lines dropped
  * whole for want of room are marked on the last line rendered, so no cut
  * reaches the operator unmarked.
+ *
+ * Every line goes through {@link refuseCauseSeparatorOpening} here as well as
+ * at the mark, since what this reads is a stored string: the mark is the only
+ * thing standing between a line and the operator's reading of a link
+ * boundary, and code in the process that plants one -- a second copy of this
+ * module writing the registered symbol, an object built to hold it -- states
+ * the text rather than the lines. Applied twice it changes nothing: a line the
+ * mark already prefixed no longer opens on the separator's text.
  */
 function renderFirstPartyLineBreaks(text: string): string {
   const lines = redactPrivateKeyMaterial(text).split("\n");
@@ -411,7 +464,9 @@ function renderFirstPartyLineBreaks(text: string): string {
       rendered[rendered.length - 1] += DISPLAY_TRUNCATION_MARKER;
       break;
     }
-    const escaped = sanitizeForDisplay(line, { maxLength: room });
+    const escaped = sanitizeForDisplay(refuseCauseSeparatorOpening(line), {
+      maxLength: room,
+    });
     rendered.push(escaped);
     // Past its room the escape truncated and marked the line, and what the
     // budget has left cannot show the lines behind it either.
@@ -499,9 +554,16 @@ export function sanitizeErrorForDisplay(err: unknown): string {
     try {
       const raw = errorMessage(current);
       message = typeof raw === "string" ? raw : String(raw);
-      kept = firstPartyLineBreakText(current);
     } catch {
       message = UNREADABLE_LINK;
+    }
+    // The mark's read is its own attempt: a link whose symbol read throws -- a
+    // Proxy, or a getter -- has asked for no treatment, which costs the escaped
+    // render of a message that read fine, not the marker for a link nobody
+    // could read.
+    try {
+      kept = firstPartyLineBreakText(current);
+    } catch {
       kept = undefined;
     }
     // Suppress a link that repeats the previous link's raw message: a wrapper
