@@ -168,12 +168,11 @@ export function renderExchangeDisclosure(
   // party is the sender -- it computes nothing from the round and is sent no
   // count report -- so the algorithm's disclosures stand there instead.
   //
-  // The withheld variant here rests on the partner's own declaration rather
-  // than on anything this run enforces: `withholdsPartnerAssociationTable`
-  // reads this party's declared `payload.receive` against the partner's
-  // declared `payload.send`, not the partner's resolved metadata, so it takes
-  // the trust-contingent fact rather than the one the invitation seats read
-  // off their own authored document.
+  // The withheld variant here reads the two documents the parties wrote for
+  // themselves -- `withholdsPartnerAssociationTable` holds this party's
+  // declared `payload.receive` against the partner's declared `payload.send`
+  // -- so it takes the fact worded for a seat that accepted no invitation
+  // rather than the one the invitation seats read off their own token.
   //
   // Ahead of both sentences: `validateCompatibility` holds the partner's
   // `expectsOutput` equal to this document's `shareWithPartner`, so a document

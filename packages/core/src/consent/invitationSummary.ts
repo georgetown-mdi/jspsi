@@ -21,6 +21,7 @@ import { checkLinkageRuleSetCitation } from "../defaults/builtInLinkageTerms.js"
 import type { LinkageRuleSetCitationVerdict } from "../defaults/builtInLinkageTerms.js";
 import {
   candidateSetIsImplementedForStrategy,
+  declaresNoPayloadColumn,
   deduplicateIsImplementedForStrategy,
 } from "../linkageTermsPolicy.js";
 import { withholdsSenderAssociationTable } from "../psi/link.js";
@@ -1365,8 +1366,7 @@ export function withholdsAcceptorAssociationTable(
   if (!terms.output.expectsOutput) return false;
   if (!terms.output.shareWithPartner && (terms.payload?.send?.length ?? 0) > 0)
     return false;
-  const requestsNoPayload =
-    terms.payload?.receive !== undefined && terms.payload.receive.length === 0;
+  const requestsNoPayload = declaresNoPayloadColumn(terms.payload?.receive);
   return withholdsSenderAssociationTable(
     terms.output.shareWithPartner,
     !requestsNoPayload,
@@ -1410,8 +1410,7 @@ export function withholdsInviterAssociationTable(terms: LinkageTerms): boolean {
   if (terms.linkageStrategy !== "single-pass") return false;
   if (terms.output.expectsOutput) return false;
   if (!terms.output.shareWithPartner) return false;
-  const disclosesNoPayload =
-    terms.payload?.send !== undefined && terms.payload.send.length === 0;
+  const disclosesNoPayload = declaresNoPayloadColumn(terms.payload?.send);
   return withholdsSenderAssociationTable(
     terms.output.expectsOutput,
     !disclosesNoPayload,
@@ -1446,19 +1445,18 @@ export function withholdsInviterAssociationTable(terms: LinkageTerms): boolean {
  * property of the SENDER, and a document that shares no result with the
  * partner sends nothing whatever it declares.
  *
- * A best-effort reading of two documents from one of them: the run's own
- * decision reads the partner's disclosure flag off the terms exchange, derived
- * from the partner's metadata, while the empty `payload.receive` is held
- * against the partner's DECLARED `payload.send` alone. A partner declaring no
- * payload at all while its metadata transmits a column passes that check, and
- * such a run does not withhold -- it aborts at the received-payload
- * reconciliation instead, after the round.
+ * A reading of two documents from one of them: the empty `payload.receive` is
+ * held against the partner's DECLARED `payload.send` alone, never against what
+ * that partner's metadata will transmit. A partner declaring no payload at all
+ * while its metadata transmits a column passes that check, so this reading
+ * predicts a withheld table for a pair the run itself refuses outright, once
+ * both parties' terms are agreed and before any linkage round
+ * (`resolveDirectionDisclosesPayload`, exchange.ts).
  */
 export function withholdsPartnerAssociationTable(terms: LinkageTerms): boolean {
   if (terms.linkageStrategy !== "single-pass") return false;
   if (!terms.output.expectsOutput) return false;
-  const requestsNoPayload =
-    terms.payload?.receive !== undefined && terms.payload.receive.length === 0;
+  const requestsNoPayload = declaresNoPayloadColumn(terms.payload?.receive);
   return withholdsSenderAssociationTable(
     terms.output.shareWithPartner,
     !requestsNoPayload,

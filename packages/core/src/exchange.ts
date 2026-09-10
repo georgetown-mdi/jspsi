@@ -10,6 +10,7 @@ import {
   assertDeduplicateImplemented,
   candidateSetIsImplementedForStrategy,
   COUNT_ONLY_SHAPE_REFUSALS,
+  declaresNoPayloadColumn,
   resolvedMatchingFromTerms,
 } from "./linkageTermsPolicy.js";
 import { getDefaultLinkageTerms } from "./defaults/builtInLinkageTerms.js";
@@ -249,6 +250,130 @@ export function resolveCountOnlyRun(
   assertCountOnlyTermsShape(localTerms);
   assertCountOnlyTermsShape(partnerTerms);
   return localTerms.algorithm === "psi-c";
+}
+
+/**
+ * The refusal raised when a party asserts a payload disclosure the agreed
+ * terms declare no column for ({@link resolveDirectionDisclosesPayload}).
+ *
+ * A {@link ConnectionError} of kind `protocol`, not {@link UsageError}: the
+ * assertion is held against a pair of documents both parties agreed, so the
+ * contradiction is a process disclosing against the terms it agreed under --
+ * the classification {@link reconcileReceivedPayload} gives the same pair
+ * when the column arrives (CLI exit 69, not 64). The constructor takes no
+ * argument and holds the message itself, so no call site can compose a value
+ * read off either agreed document into what the operator is shown.
+ */
+export class PayloadDisclosureDivergenceError extends ConnectionError {
+  constructor() {
+    super(
+      "the agreed linkage terms declare that one party sends no payload " +
+        "column, but that party's process asserts it discloses one: the " +
+        "receiving party's terms declare an empty payload.receive, which " +
+        "holds the sending party to sending none. The exchange is refused " +
+        "before any association table or payload moves. To disclose those " +
+        "columns, declare them in the sending party's payload.send and the " +
+        "receiving party's payload.receive, or omit payload.receive to take " +
+        "whatever the partner sends. To disclose none, set the sending " +
+        "party's input metadata to transmit no column (is_payload: false, " +
+        "or role ignored).",
+      "protocol",
+    );
+    this.name = "PayloadDisclosureDivergenceError";
+  }
+}
+
+/**
+ * Resolve whether ONE direction of the exchange discloses payload -- the
+ * party whose document is `disclosingPartyTerms` to the party whose document
+ * is `receivingPartyTerms` -- from the two agreed terms documents and the
+ * disclosing party's own assertion (`disclosingPartyAsserts`: that party's
+ * `disclosesPayload` flag off the terms exchange, or this party's own
+ * metadata for its own direction).
+ *
+ * A direction whose RECEIVING party is entitled to no output discloses
+ * nothing, whatever either document declares and whatever the disclosing
+ * party asserts: the payload send gate transmits only to a partner entitled
+ * to the result, so no column can move this way and there is nothing for a
+ * declaration to contradict. Both parties read that entitlement off the same
+ * agreed document, so both resolve the direction identically -- and false is
+ * the value the withhold gate reads for a direction that moves no payload.
+ *
+ * Otherwise the assertion rides the envelope rather than the agreed-terms
+ * hash, so it can only ADD disclosure to what the terms declare. Three cases:
+ *
+ * - The disclosing party's `payload.send` declared present and empty binds
+ *   it to disclosing no column whatever it asserts, so this direction moves
+ *   nothing and the exchange continues. `assertPayloadSendDisclosed` holds
+ *   that declaration to exactly what metadata transmits before any data
+ *   moves, so a conforming party in this shape discloses none.
+ * - The receiving party's `payload.receive` declared present and empty, with
+ *   no such declaration on the disclosing party's own document to hold it
+ *   to, while that party asserts disclosure: the two contradict, and the
+ *   exchange is refused rather than narrowed to a run whose payload never
+ *   moves.
+ * - Neither direction declared present and empty: the assertion decides.
+ */
+export function resolveDirectionDisclosesPayload(
+  disclosingPartyAsserts: boolean,
+  disclosingPartyTerms: LinkageTerms,
+  receivingPartyTerms: LinkageTerms,
+): boolean {
+  if (!receivingPartyTerms.output.expectsOutput) return false;
+  if (declaresNoPayloadColumn(disclosingPartyTerms.payload?.send)) return false;
+  if (
+    disclosingPartyAsserts &&
+    declaresNoPayloadColumn(receivingPartyTerms.payload?.receive)
+  )
+    throw new PayloadDisclosureDivergenceError();
+  return disclosingPartyAsserts;
+}
+
+/** Which payload disclosure each direction of one exchange resolves to. */
+export interface PayloadDisclosureDirections {
+  /** Whether this party discloses payload to the partner. */
+  localToPartner: boolean;
+  /** Whether the partner discloses payload to this party. */
+  partnerToLocal: boolean;
+}
+
+/**
+ * Resolve BOTH directions of one exchange
+ * ({@link resolveDirectionDisclosesPayload} applied twice), so a
+ * `payload.receive` declared present and empty is held against the other
+ * party's asserted disclosure whichever PSI seat role resolution goes on to
+ * give either of them. Only which direction the single-pass
+ * association-table withhold gate reads follows the seat
+ * ({@link withholdsSenderAssociationTable}); the refusal does not.
+ *
+ * Both parties read the same pair of agreed documents but not the same pair
+ * of assertions: each takes its own direction from its own metadata and the
+ * other direction from the partner's advertised flag. A conforming party
+ * advertises exactly what its metadata discloses, so against such a partner
+ * the two resolutions match and a suppression, a skip and a refusal all
+ * agree -- at this same point, before the linkage round, the association
+ * table, and the payload. Where a partner's advertisement diverges from its
+ * own metadata the two differ and one party can refuse alone, so the
+ * refusal's call site sends the partner an abort before the throw.
+ */
+export function resolveBothDirectionsDisclosePayload(
+  localAsserts: boolean,
+  localTerms: LinkageTerms,
+  partnerAsserts: boolean,
+  partnerTerms: LinkageTerms,
+): PayloadDisclosureDirections {
+  return {
+    localToPartner: resolveDirectionDisclosesPayload(
+      localAsserts,
+      localTerms,
+      partnerTerms,
+    ),
+    partnerToLocal: resolveDirectionDisclosesPayload(
+      partnerAsserts,
+      partnerTerms,
+      localTerms,
+    ),
+  };
 }
 
 /**
@@ -1559,6 +1684,40 @@ export async function runExchange(
   // starting a round one side would refuse. See resolveCountOnlyRun.
   const countOnly = resolveCountOnlyRun(linkageTerms, partnerTerms);
 
+  // Resolve what each party discloses to the other, at the same point and for
+  // the same reason as the cardinality above: the resolution is symmetric and
+  // covers both directions, so a `payload.receive` either party declares present
+  // and empty against the other's asserted disclosure refuses BOTH parties here
+  // -- before the bootstrap frame, the PSI rounds, the association table and the
+  // payload -- whichever seat role resolution goes on to give them. A direction
+  // whose receiving party is entitled to no output resolves to no disclosure
+  // instead: the send gate below transmits nothing that way, so a declaration
+  // there contradicts nothing. An absent partner flag (a peer that advertised
+  // none) is taken as "discloses payload", so it never blinds a helper that
+  // needs its table. See resolveBothDirectionsDisclosePayload.
+  let payloadDisclosure: PayloadDisclosureDirections;
+  try {
+    payloadDisclosure = resolveBothDirectionsDisclosePayload(
+      localDisclosesPayload,
+      linkageTerms,
+      partnerDisclosesPayload ?? true,
+      partnerTerms,
+    );
+  } catch (err) {
+    // Best-effort abort before the throw, as the deduplicate refusal above
+    // sends one. The two parties read different assertions for the same
+    // direction -- the disclosing party its own metadata, the other party the
+    // advertised flag -- so a partner whose advertisement diverges from its
+    // metadata fires this on one side alone, and without the frame the other
+    // waits out its full peer-inactivity budget. The reason is a fixed literal,
+    // disclosing nothing new.
+    await sendAbort(conn, [
+      "a party asserts a payload disclosure the agreed linkage terms " +
+        "declare no column for",
+    ]);
+    throw err;
+  }
+
   // Surface a present-but-malformed partner advertisement as a diagnostic. The
   // value was already dropped by the fail-soft parse (partnerHostKey is
   // undefined), so reconciliation below is a no-op for it; this signal lets the
@@ -1616,19 +1775,20 @@ export async function runExchange(
   // resolved SENDER is a non-receiving helper (expectsOutput false) disclosing no
   // payload, it needs nothing back, so the receiver suppresses its
   // association-table half entirely and the sender skips awaiting it -- keeping a
-  // blind helper blind to its own membership. The sender's properties
-  // come from whichever side we are: our own when we are the sender, the partner's
-  // (read off the terms exchange) when we are the receiver. A missing partner flag
-  // (undefined -- a non-conforming peer that did not advertise it) defaults to
-  // "discloses payload", so it never blinds a helper that needs its table. Only
-  // consulted on the single-pass path (see withholdsSenderAssociationTable and
-  // link.ts).
+  // blind helper blind to its own membership. The verdict below is consulted on
+  // the single-pass path alone (see withholdsSenderAssociationTable and link.ts);
+  // the disclosure it reads is resolved for every strategy, since the refusal it
+  // raises is about what the agreed terms admit rather than about a frame.
   const senderExpectsOutput = isReceiver
     ? partnerTerms.output.expectsOutput
     : linkageTerms.output.expectsOutput;
+
+  // What the resolved SENDER discloses to the resolved receiver: the direction
+  // of the pair resolved above that runs from the sender's seat.
   const senderDisclosesPayload = isReceiver
-    ? (partnerDisclosesPayload ?? true)
-    : localDisclosesPayload;
+    ? payloadDisclosure.partnerToLocal
+    : payloadDisclosure.localToPartner;
+
   const withholdSenderTable = withholdsSenderAssociationTable(
     senderExpectsOutput,
     senderDisclosesPayload,

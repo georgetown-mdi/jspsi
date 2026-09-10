@@ -1507,11 +1507,31 @@ function relieveTransientMemory(): void {
  * intrinsic, threat-model-accepted membership disclosure), and a party
  * entitled to output always receives it.
  *
- * Both parties compute this from the SAME authenticated session state -- the
- * resolved sender's output entitlement and its advertised `disclosesPayload`
- * flag, declared on the terms exchange -- so the receiver's decision to
- * suppress the frame and the sender's decision to skip awaiting it are
- * always the same. The frame is suppressed ENTIRELY, never sent empty: an
+ * Both parties compute this from the same authenticated session state -- the
+ * resolved sender's output entitlement, and the disclosure the agreed terms
+ * and the advertised `disclosesPayload` flag together resolve
+ * (`resolveDirectionDisclosesPayload`, exchange.ts): a direction whose
+ * receiving party is entitled to no output discloses none, since the send
+ * gate transmits nothing that way; a sender whose `payload.send` the terms
+ * declare present and empty discloses none whatever it advertises; a
+ * receiver's `payload.receive` declared present and empty against an asserted
+ * disclosure contradicts the terms and is refused there, on either seat,
+ * rather than resolved either way; otherwise the assertion decides.
+ *
+ * The two parties do not read the same assertion, though: the sender takes
+ * its own metadata and the receiver the advertised flag. So the receiver's
+ * decision to suppress the frame and the sender's decision to skip awaiting
+ * it are the same against a CONFORMING peer -- one advertising exactly what
+ * its metadata discloses -- and the refusal above covers the divergent
+ * advertisement wherever a `payload.receive` is declared present and empty
+ * to hold it against. One case is left outside both: a sender advertising
+ * false while its metadata discloses a column, against a receiver declaring
+ * no `payload.receive` at all, leaves the receiver suppressing the frame
+ * and the sender awaiting it until the peer-inactivity budget runs out. It
+ * takes a modified partner, and this is a stated limit rather than a
+ * closed case.
+ *
+ * The frame is suppressed ENTIRELY, never sent empty: an
  * empty-versus-populated association table would leak the match count by
  * the frame's presence and size, so only omitting it closes the channel. See
  * docs/notes/one-sided-disclosure.md and docs/spec/PROTOCOL.md.

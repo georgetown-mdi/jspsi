@@ -352,15 +352,15 @@ test("a run that withholds the partner's half of the table says so instead", () 
     payload: { receive: [] },
   }).join("\n");
   expect(lines).toContain(
-    "what your partner learns about its own records (your partner's word):",
+    "what your partner learns about its own records (enforced):",
   );
   expect(lines).toContain(
-    "By agreement, not enforced: your agreed terms declare no disclosure",
+    "its process is never sent which of its own records are in your data",
   );
-  // And the sentence says when a partner whose input discloses one anyway is
-  // caught, which is after its process has been sent the half.
+  // And the sentence says where a partner whose input discloses one anyway
+  // lands, which is a refusal on both parties before any of the match runs.
   expect(lines).toContain(
-    "its process is sent that half while the exchange runs, and the run stops only afterwards",
+    "the exchange is refused for both parties before the match starts",
   );
   expect(lines).not.toContain(
     "your partner learns which of its own records are in your data",

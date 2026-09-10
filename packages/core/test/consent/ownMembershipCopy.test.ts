@@ -118,20 +118,23 @@ describe("the own-membership consent pair", () => {
     ).toBe(true);
   });
 
-  test("says at the self-authored seat when a partner disclosing anyway is caught", () => {
+  test("says at the self-authored seat where a partner disclosing anyway lands", () => {
     // That seat's verdict reads the partner's DECLARED payload direction, and a
     // partner config with no payload block passes compatibility while its
-    // metadata still discloses a column: the reconciliation that catches it
-    // runs after the exchange, so the sentence cannot promise a stop before
-    // this party's half moves.
+    // metadata still discloses a column. The run refuses that pair on both
+    // parties before the linkage round, so the sentence promises the stop
+    // rather than a later catch, and the fact sits in the enforced register
+    // beside its sibling.
     const fact = CONSENT_FACTS.partnerOwnMembershipWithheldSelfAuthored;
-    expect(fact.basis).toBe("trust-contingent");
-    expect(fact.note).toContain("By agreement, not enforced");
+    expect(fact.basis).toBe("enforced");
+    expect(fact.note).not.toContain("By agreement, not enforced");
     expect(fact.note).toContain(
-      "its process is sent that half while the exchange runs, and the run " +
-        "stops only afterwards",
+      "the exchange is refused for both parties before the match starts",
     );
-    // The enforced sibling's claim is what this one must not make.
+    // And not the reading where that half moves before the run stops.
+    expect(fact.note).not.toContain("while the exchange runs");
+    expect(fact.reason).not.toContain("after the exchange");
+    // A restatement for its own seat, not a copy of the sibling's sentence.
     expect(fact.note).not.toContain(
       CONSENT_FACTS.partnerOwnMembershipWithheld.note,
     );
