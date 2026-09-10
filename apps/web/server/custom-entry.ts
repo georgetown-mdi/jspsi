@@ -14,9 +14,7 @@ import "#nitro-internal-pollyfills";
 import { useNitroApp, useRuntimeConfig } from "nitropack/runtime";
 import { toNodeListener } from "h3";
 
-import { setDefaultLevel } from "loglevel";
-
-import { getLogger } from "@psilink/core";
+import { getLogger, setLogLevel } from "@psilink/core";
 
 import {
   bootSftpCredentialScratchDir,
@@ -37,7 +35,7 @@ const config = await configManager.load();
 const cert = process.env.NITRO_SSL_CERT;
 const key = process.env.NITRO_SSL_KEY;
 
-setDefaultLevel(config.LOG_LEVEL);
+setLogLevel(config.LOG_LEVEL);
 
 const log = getLogger("server-entry");
 

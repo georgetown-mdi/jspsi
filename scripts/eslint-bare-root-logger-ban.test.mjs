@@ -16,7 +16,9 @@ import {
 // config files (noBareRootLoglevelEmit in eslint.boundaries.mjs, applied to
 // packages/core/src, apps/cli/src and apps/web's src/ and server/), and the
 // import ban apps/web adds beside it, which refuses loglevel's default export --
-// the root logger itself -- so no alias of it can emit under any name.
+// the root logger itself -- so no alias of it can emit under any name. Under
+// apps/web/server it refuses the module outright, named exports included, since
+// Node's ESM loader cannot import those off a CommonJS module.
 //
 // Both fail silently: a `files` pattern that stops matching, or a rule's options
 // replaced by a later block (flat config replaces rather than merges), keeps
@@ -82,17 +84,23 @@ const WEB_TEST = resolve(
 const CORE_SRC = resolve(repoRoot, "packages/core/src/exchange.ts");
 const CLI_SRC = resolve(repoRoot, "apps/cli/src/commands/exchange.ts");
 
-const WEB_BANNED = [
+/** The src/ paths, which keep loglevel's named exports: the client entry sets the
+ * browser's level through `setDefaultLevel`. */
+const WEB_SRC_BANNED = [
   WEB_PRODUCT,
   WEB_BELOW_PRODUCTS,
   WEB_CHOKEPOINT,
   WEB_RAW_ROWS,
-  WEB_SERVER,
 ];
 
-/** Whether a no-restricted-imports `paths` entry is the root-logger ban. */
+const WEB_BANNED = [...WEB_SRC_BANNED, WEB_SERVER];
+
+/** Whether a no-restricted-imports `paths` entry refuses the root logger: by name
+ * under src/, and as the whole module under server/, where an entry with no
+ * `importNames` refuses every import of it. */
 const isRootLoglevelBan = (entry) =>
-  entry.name === "loglevel" && (entry.importNames ?? []).includes("default");
+  entry.name === "loglevel" &&
+  (entry.importNames === undefined || entry.importNames.includes("default"));
 
 // Loading the flat config and the typescript-eslint parser for the first time is
 // the expensive part of a lintText call, independent of which file or how much
@@ -170,8 +178,8 @@ describe("the bare-root-logger bans", { timeout: 60_000 }, () => {
     });
   }
 
-  it("leaves the level-configuration imports the entry points take", async () => {
-    for (const filePath of WEB_BANNED) {
+  it("leaves the level-configuration imports the client entry takes", async () => {
+    for (const filePath of WEB_SRC_BANNED) {
       expect(
         await importHits(
           filePath,
@@ -181,6 +189,54 @@ describe("the bare-root-logger bans", { timeout: 60_000 }, () => {
       ).toHaveLength(0);
     }
   });
+
+  // The server tree takes the whole module instead: Node's ESM loader synthesizes
+  // no named export off a CommonJS module, so a named import there is a
+  // SyntaxError at boot, before the built server listens. The type import goes
+  // with them, since a no-restricted-imports `paths` entry cannot tell a
+  // type-only import from a value one.
+  for (const [shape, source] of [
+    [
+      "the level setter",
+      'import { setDefaultLevel } from "loglevel";\nsetDefaultLevel("INFO");\n',
+    ],
+    [
+      "the levels table",
+      'import { levels } from "loglevel";\nexport const level = levels.INFO;\n',
+    ],
+    [
+      "a type-only import",
+      'import type { LogLevel } from "loglevel";\nexport type Level = keyof LogLevel;\n',
+    ],
+  ]) {
+    it(`refuses ${shape} in the server tree`, async () => {
+      expect(
+        await importHits(WEB_SERVER, source),
+        `${WEB_SERVER}: ${shape} passed`,
+      ).not.toHaveLength(0);
+    });
+  }
+
+  // The server block sets no-restricted-imports for its own loglevel entry, so it
+  // re-carries the two groups the src/-and-server/ block above would otherwise
+  // give those files -- and could drop either by omission.
+  for (const [shape, source] of [
+    [
+      "a raw YAML parser",
+      'import { parse } from "yaml";\nexport const doc = parse("a: 1");\n',
+    ],
+    [
+      "a reach into the other app",
+      'import { protocol } from "psilink";\nexport const p = protocol;\n',
+    ],
+  ]) {
+    it(`refuses ${shape} in the server tree`, async () => {
+      expect(
+        await importHits(WEB_SERVER, source),
+        `${WEB_SERVER}: ${shape} passed`,
+      ).not.toHaveLength(0);
+    });
+  }
 
   it("refuses a bare-root emit in every tree the shared selector covers", async () => {
     const source =
