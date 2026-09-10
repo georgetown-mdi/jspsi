@@ -293,24 +293,33 @@ export const CONSENT_FACTS = {
       "of the software your partner runs.",
   },
   partnerOwnMembershipWithheldSelfAuthored: {
-    basis: "trust-contingent",
+    basis: "enforced",
     reason:
       "The same case at the seat reading terms it wrote itself " +
-      "(`withholdsPartnerAssociationTable`), whose own documentation states " +
-      "the shape it cannot see: it holds this party's declared " +
-      "`payload.receive` against the partner's DECLARED `payload.send`, not " +
-      "against what the partner's resolved metadata will actually transmit. " +
-      "`validateCompatibility` passes a partner config with no payload block " +
-      "by comparing against `partner.payload?.send ?? []`; if that partner's " +
-      "metadata still discloses a column, this party's own process sends it, " +
-      "and the run aborts only at the received-payload reconciliation after " +
-      "the exchange rather than before this half moves. What holds is the " +
-      "agreed declaration, not a run property this side can enforce.",
+      "(`withholdsPartnerAssociationTable`), which holds this party's " +
+      "declared `payload.receive` against the partner's DECLARED " +
+      "`payload.send` rather than against what the partner's resolved " +
+      "metadata will transmit -- `validateCompatibility` passes a partner " +
+      "config with no payload block by comparing against " +
+      "`partner.payload?.send ?? []`. The run does not leave that " +
+      "difference to the agreement: both parties resolve each " +
+      "direction's disclosure from the two agreed documents and both " +
+      "parties' asserted disclosure immediately after the terms exchange, so " +
+      "a partner whose metadata discloses a column against this party's " +
+      "declared-empty `payload.receive` refuses BOTH parties before the " +
+      "linkage round, the association table and the payload " +
+      "(`resolveBothDirectionsDisclosePayload`, exchange.ts). Either the " +
+      "partner's half is withheld or the exchange stops before it could " +
+      "move, which is what `enforced` means here. It stays a fact of its own " +
+      "rather than folding into `partnerOwnMembershipWithheld` because an " +
+      "acceptance surface must not address a seat that accepted no " +
+      "invitation.",
     note:
-      "By agreement, not enforced: your agreed terms declare no disclosure " +
-      "of your partner's half of the matched-pair table. If your partner's " +
-      "own input discloses one anyway, its process is sent that half while " +
-      "the exchange runs, and the run stops only afterwards.",
+      "This exchange withholds your partner's half of the matched-pair " +
+      "table, so its process is never sent which of its own records are in " +
+      "your data. A partner whose own input discloses a column your agreed " +
+      "terms declare none for is not sent that half either: the exchange is " +
+      "refused for both parties before the match starts.",
   },
   duplicateMatches: {
     basis: "enforced",
@@ -666,14 +675,15 @@ export const ACCEPTOR_DEDUPLICATE_CONTROL_FACTS = [
  * run whose two configurations the parties authored between them, with no
  * invitation and so no acceptance record behind either one.
  *
- * Each restates a fact an acceptance surface already states, on the basis
+ * Each restates a fact an acceptance surface already states, on the reading
  * this seat can back rather than the one that seat holds -- the outbound set
- * derived with no recorded consent to differ from, and a withholding resting
- * on the partner's declared payload direction rather than on a run property
- * this side enforces. An acceptance surface rendering either sentence would
- * state a basis its own run does not hold. The per-surface checks that hold a
- * surface to every fact's note read this set rather than each excluding by
- * hand, so which surface owes which sentence stays one judgment.
+ * derived with no recorded consent to differ from, and a withholding read off
+ * the two documents the parties wrote for themselves rather than off an
+ * invitation one of them authored. An acceptance surface rendering either
+ * sentence would address a party that accepted no invitation. The per-surface
+ * checks that hold a surface to every fact's note read this set rather than
+ * each excluding by hand, so which surface owes which sentence stays one
+ * judgment.
  *
  * Every member's id ends in `SelfAuthored`, after the fact it restates; a
  * core test holds the set to that naming, so a further one cannot be added to
