@@ -156,12 +156,15 @@ export interface ClosureBlock {
  * span several blocks of one round and never two rounds
  * (docs/spec/PROTOCOL.md, The `many-to-many` entity closure).
  *
- * Three conditions hold the shape, and this refuses each -- a cluster whose
+ * Four conditions hold the shape, and this refuses each -- a cluster whose
  * pairs were matched in two different rounds, a block split across two clusters,
- * and a block the table does not hold every pair of. What they secure is that
- * every grouping the closure hands the operator rests on the round's own matched
- * values: a cluster's records are joined by the values its blocks were built
- * from, and by nothing the partner's returned list decided on its own.
+ * a block the table does not hold every pair of, and a pair of the table no
+ * block names. The last two are the two containments between the table's pairs
+ * and the blocks' union, so a cluster holds the pairs its blocks name and no
+ * others. What they secure is that every grouping the closure hands the operator
+ * rests on the round's own matched values: a cluster's records are joined by the
+ * values its blocks were built from, and by nothing the partner's returned list
+ * decided on its own.
  *
  * The blocks are the round's own, read per matched VALUE rather than per record,
  * so a record standing in two of a round's blocks -- which is what a candidate
@@ -228,6 +231,7 @@ export function assertRoundDiagonalClosure(
     rows.add(table[1][i]);
   }
 
+  const pairsCoveredByBlocks = new Set<string>();
   for (const block of blocks) {
     if (block.localRows.length === 0 || block.partnerRows.length === 0)
       throw new Error(
@@ -252,7 +256,7 @@ export function assertRoundDiagonalClosure(
         );
     for (const local of block.localRows) {
       const held = partnerRowsOf.get(local);
-      for (const partner of block.partnerRows)
+      for (const partner of block.partnerRows) {
         if (held?.has(partner) !== true)
           throw notRoundDiagonal(
             id,
@@ -262,8 +266,24 @@ export function assertRoundDiagonalClosure(
               `record ${local} and the partner's ${partner}, where a block ` +
               "holds every pair between the records that contributed its value",
           );
+        pairsCoveredByBlocks.add(pairKey(local, partner));
+      }
     }
   }
+
+  for (let i = 0; i < table[0].length; ++i)
+    if (!pairsCoveredByBlocks.has(pairKey(table[0][i], table[1][i])))
+      throw notRoundDiagonal(
+        id,
+        `the table pairs this party's record ${table[0][i]} with the ` +
+          `partner's ${table[1][i]}, and no matched value's block holds that ` +
+          "pair, so the cluster it joins rests on an edge the round did not " +
+          "produce",
+      );
+}
+
+function pairKey(local: number, partner: number): string {
+  return `${local},${partner}`;
 }
 
 function notRoundDiagonal(

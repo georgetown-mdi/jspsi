@@ -217,6 +217,70 @@ describe("assertRoundDiagonalClosure", () => {
     );
   });
 
+  test("a pair no block names is refused", () => {
+    // Two complete 1x1 blocks, declared apart, plus the pair (0, 1) no matched
+    // value produced: it merges them into one three-pair cluster on an edge
+    // nothing backs. Each block on its own is whole and lands in one cluster,
+    // so only the converse -- that the blocks name every pair the table holds
+    // -- catches it.
+    const thrown = refusal(
+      [
+        [0, 0, 1],
+        [0, 1, 1],
+      ],
+      [0, 0, 0],
+      [
+        { localRows: [0], partnerRows: [0] },
+        { localRows: [1], partnerRows: [1] },
+      ],
+    );
+    expect(thrown.message).toMatch(
+      /the table pairs this party's record 0 with the partner's 1, and no matched value's block holds that pair/,
+    );
+  });
+
+  test("a stray pair inside an otherwise valid multi-block cluster is refused", () => {
+    // The smallest chained cluster with one pair added: our row 1 and the
+    // partner's row 1 are already in the cluster through row 0's two
+    // candidates, so the stray pair (1, 1) moves no record between clusters
+    // and splits no block. It is a pair the round never matched all the same.
+    const thrown = refusal(
+      [
+        [0, 0, 1, 1],
+        [0, 1, 0, 1],
+      ],
+      [0, 0, 0, 0],
+      [
+        { localRows: [0, 1], partnerRows: [0] },
+        { localRows: [0], partnerRows: [1] },
+      ],
+    );
+    expect(thrown.message).toMatch(
+      /the table pairs this party's record 1 with the partner's 1, and no matched value's block holds that pair/,
+    );
+  });
+
+  test("a pair two overlapping blocks of one round both name passes", () => {
+    // Our row 0 and the partner's row 0 contributed both of the round's matched
+    // values, so the pair (0, 0) sits in both blocks. The blocks are compared
+    // as sets of pairs, not summed counts, so naming it twice is not a
+    // shortfall anywhere.
+    expect(() =>
+      assertRoundDiagonalClosure(
+        "client",
+        [
+          [0, 0, 1],
+          [0, 1, 0],
+        ],
+        [0, 0, 0],
+        [
+          { localRows: [0, 1], partnerRows: [0] },
+          { localRows: [0], partnerRows: [0, 1] },
+        ],
+      ),
+    ).not.toThrow();
+  });
+
   test("a round label per record rather than per pair is refused as a miscount", () => {
     expect(() =>
       assertRoundDiagonalClosure("client", blockTable, [0, 0, 0], blocks),
