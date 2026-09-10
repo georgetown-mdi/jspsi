@@ -211,30 +211,33 @@ describe("runPipeline — string functions", () => {
     ).toBe("CDEFG");
   });
 
-  test("substring drops a non-integer length without string-concatenating", () => {
-    // The wire params are z.unknown(), so a partner can declare `length` as a
-    // non-number. An unguarded `startIdx + length` would then concatenate strings
-    // -- {start: 3, length: "5"} on "ABCDEFGHIJ" once sliced to "CDEFGHIJ" (from
-    // index 2 to "2" + "5" = "25") rather than the intended "CDEFG". The guard
-    // drops any non-integer bound to null instead.
+  test("substring refuses a non-integer length instead of string-concatenating", () => {
+    // A caller that builds steps without a decode can hand `length` a
+    // non-number. An unguarded `startIdx + length` would then concatenate
+    // strings -- {start: 3, length: "5"} on "ABCDEFGHIJ" once sliced to
+    // "CDEFGHIJ" (from index 2 to "2" + "5" = "25") rather than the intended
+    // "CDEFG". The bound is read through the declared-type accessor, which
+    // refuses any non-integer at compile, before a value is sliced.
     for (const length of ["5", 5.5, true, ["5"]]) {
       expect(
-        runPipeline("ABCDEFGHIJ", [
-          { function: "substring", params: { start: 3, length } },
-        ]),
+        () =>
+          runPipeline("ABCDEFGHIJ", [
+            { function: "substring", params: { start: 3, length } },
+          ]),
         JSON.stringify({ length }),
-      ).toBeNull();
+      ).toThrow("substring length must be a whole number");
     }
   });
 
-  test("substring drops a non-integer start without string-concatenating", () => {
+  test("substring refuses a non-integer start instead of string-concatenating", () => {
     for (const start of ["3", 3.5, true, ["3"]]) {
       expect(
-        runPipeline("ABCDEFGHIJ", [
-          { function: "substring", params: { start, length: 5 } },
-        ]),
+        () =>
+          runPipeline("ABCDEFGHIJ", [
+            { function: "substring", params: { start, length: 5 } },
+          ]),
         JSON.stringify({ start }),
-      ).toBeNull();
+      ).toThrow("substring start must be a whole number");
     }
   });
 
@@ -312,16 +315,21 @@ describe("runPipeline — string functions", () => {
     ).toThrow('pad_left: "length" must be a positive integer');
   });
 
-  test("pad_left throws when length is a non-integer", () => {
+  // A wrong TYPE is the declared-type accessor's refusal, naming the type the
+  // step wrote; the positive-integer check above keeps its own wording for a
+  // value that is a whole number and still unusable.
+  test("pad_left refuses a fractional length as a wrong type", () => {
     expect(() =>
       runPipeline("123", [{ function: "pad_left", params: { length: 1.5 } }]),
-    ).toThrow('pad_left: "length" must be a positive integer');
+    ).toThrow(
+      "pad_left length must be a whole number, not a fractional number",
+    );
   });
 
-  test("pad_left throws when length is not a number", () => {
+  test("pad_left refuses a length that is not a number", () => {
     expect(() =>
       runPipeline("123", [{ function: "pad_left", params: { length: "9" } }]),
-    ).toThrow('pad_left: "length" must be a positive integer');
+    ).toThrow("pad_left length must be a whole number, not text");
   });
 });
 
@@ -4260,6 +4268,46 @@ describe("declared transform param types", () => {
           { function: fn, params: { ...otherParams, [param]: wrongType } },
         ]),
       ).toThrow(new RegExp(`${fn} ${param} must be`));
+    },
+  );
+
+  // The pattern params have no default to fall back to: unread through the
+  // accessor, an unquoted `007` renders into the compile source as the pattern
+  // `7` rather than being refused. Each is read through the same accessor as
+  // every other declared text param, one function at a time.
+  const patternParams: Array<{
+    fn: string;
+    param: string;
+    otherParams: Record<string, unknown>;
+  }> = [
+    { fn: "replace_regex", param: "pattern", otherParams: { replacement: "" } },
+    { fn: "extract_regex", param: "pattern", otherParams: {} },
+    { fn: "filter_regex", param: "pattern", otherParams: {} },
+    { fn: "split_on", param: "delimiter", otherParams: {} },
+  ];
+
+  test.each(patternParams)(
+    "$fn refuses a non-text $param rather than compiling a coerced one",
+    ({ fn, param, otherParams }) => {
+      for (const wrongType of [7, 1.5, true, null, [], {}])
+        expect(
+          () =>
+            runPipeline("a7b", [
+              { function: fn, params: { ...otherParams, [param]: wrongType } },
+            ]),
+          JSON.stringify(wrongType),
+        ).toThrow(new RegExp(`${fn} ${param} must be text`));
+    },
+  );
+
+  test.each(patternParams)(
+    "$fn compiles a $param declared as text",
+    ({ fn, param, otherParams }) => {
+      expect(() =>
+        runPipeline("a7b", [
+          { function: fn, params: { ...otherParams, [param]: "7" } },
+        ]),
+      ).not.toThrow();
     },
   );
 

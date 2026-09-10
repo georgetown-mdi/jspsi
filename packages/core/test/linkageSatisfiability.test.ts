@@ -392,30 +392,40 @@ describe("substringCollapsesParsedDateToConstant", () => {
   });
 
   test("a window that reads nothing is a drop, not a collapse", () => {
-    // substringFactory compiles a non-integer bound, a `start` of 0, a zero
-    // length, and a window that starts past the end into a step that returns null
-    // for every value: the element matches NOTHING, the opposite of collapsing
-    // onto a constant.
+    // substringFactory compiles a `start` of 0, a zero length, and a window that
+    // starts past the end into a step that returns null for every value: the
+    // element matches NOTHING, the opposite of collapsing onto a constant.
     const literalRegion = parseDate("ACME-YYYYMMDD");
     for (const [start, length] of [
       [0, 3],
       [1, 0],
       [14, 3],
       [1, -13],
-      [1.5, 3],
-      [1, 2.5],
-    ] as Array<[unknown, unknown]>) {
+    ] as Array<[number, number]>) {
       const steps = [literalRegion, slice(start, length)];
       for (const date of DATES) expect(runPipeline(date, steps)).toBeNull();
       expect(verdictAt(steps, 1), `${JSON.stringify([start, length])}`).toBe(
         false,
       );
     }
-    for (const bound of [null, "1", [], {}, true])
+  });
+
+  test("a wrong-typed bound is refused at compile and reads as unmeasurable", () => {
+    // The type is refused where a document is decoded, so only a caller building
+    // steps without one reaches this: the factory refuses the bound at compile,
+    // and a run this build cannot measure resolves UP to the collapse word
+    // rather than the milder one, as any unmeasurable run does.
+    const literalRegion = parseDate("ACME-YYYYMMDD");
+    for (const bound of [null, "1", [], {}, true, 1.5]) {
+      expect(
+        () => runPipeline(DATES[0], [literalRegion, slice(bound, 3)]),
+        JSON.stringify(bound),
+      ).toThrow("substring start must be a whole number");
       expect(
         verdictAt([literalRegion, slice(bound, 3)], 1),
         JSON.stringify(bound),
-      ).toBe(false);
+      ).toBe(true);
+    }
   });
 
   test("the verdict is a property of the position, not of either step alone", () => {
@@ -3052,6 +3062,15 @@ describe("assessLinkageSatisfiability dead keys", () => {
     ["null length", { start: 3, length: null }],
   ];
 
+  // The three wrong-typed bounds above, which a builder run never reaches: the
+  // factory refuses the type at compile, so the differential below holds them to
+  // that refusal rather than to a null key string.
+  const WRONG_TYPED_BOUNDS: ReadonlySet<string> = new Set([
+    "fractional start",
+    "string start",
+    "null length",
+  ]);
+
   test("a substring whose bounds open no window is a dead key", () => {
     for (const [label, params] of DEGENERATE_WINDOWS) {
       const terms = dobTerms([
@@ -3094,6 +3113,12 @@ describe("assessLinkageSatisfiability dead keys", () => {
         [new StandardizedField("dob", "dob", [], rows)],
         [key],
       );
+      if (WRONG_TYPED_BOUNDS.has(label)) {
+        expect(() => buildKeyStrings(key, dataset, 0), label).toThrow(
+          /substring (start|length) must be a whole number/,
+        );
+        continue;
+      }
       for (let index = 0; index < rows.length; index++)
         expect([label, index, buildKeyStrings(key, dataset, index)]).toEqual([
           label,

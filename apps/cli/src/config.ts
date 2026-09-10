@@ -35,9 +35,9 @@ import {
   safeParseFileSyncOptions,
   safeParseLinkageTerms,
   safeParseMetadata,
+  safeParseStandardization,
   snakeizeKey,
   snakeizeKeys,
-  StandardizationSchema,
   trimPartialControlCharacterMarker,
   UsageError,
   withRetainModeImplications,
@@ -1735,18 +1735,20 @@ export function readConfigLinkageSource(
         describeSchemaIssues(result.error.issues, "camelized"),
     );
 
-  // The explicit standardization is optional. Its `output`/`input`/`steps` keys
-  // are single words (snake == camel) and `params` is free-form, so the schema
-  // parses the on-disk form without camelizing. An invalid block is reported
-  // as a usage error, like invalid linkage_terms above.
+  // The explicit standardization is optional. safeParseStandardization camelizes
+  // the on-disk snake_case keys (a step's `input_format`) before validating,
+  // like linkage_terms above and like the `parseExchangeSpec` the run path reads
+  // the same block through, so a step's params meet the declared-type check and
+  // the function library under the one spelling both look up. An invalid block
+  // is reported as a usage error, like invalid linkage_terms above.
   const rawStd = obj["standardization"];
   let standardization: Standardization | undefined;
   if (rawStd !== undefined) {
-    const stdResult = StandardizationSchema.safeParse(rawStd);
+    const stdResult = safeParseStandardization(rawStd);
     if (!stdResult.success)
       throw new UsageError(
         `config file ${configPath} has invalid standardization: ` +
-          describeSchemaIssues(stdResult.error.issues, "as-written"),
+          describeSchemaIssues(stdResult.error.issues, "camelized"),
       );
     standardization = stdResult.data;
   }

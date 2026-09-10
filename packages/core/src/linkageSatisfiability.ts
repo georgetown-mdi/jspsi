@@ -687,12 +687,15 @@ export function coalesceSubstitutesConstant(
  * cleared mid-edit (`substring` with no `start`), which the terms schema admits
  * as well-formed while {@link substringFactory} nulls every row.
  *
- * The conditions, each a case where {@link substringWindow} returns no window
- * whatever `valueLength` it is handed:
+ * The conditions, each a case where the step reads no window whatever
+ * `valueLength` it is handed:
  *
- * - `start` is not an integer, or is `0`. Both are the guard `substringWindow`
- *   opens with, which never consults the value.
- * - `length` is not an integer. Same guard.
+ * - `start` is `0`, which is the guard {@link substringWindow} opens with and
+ *   never consults the value for.
+ * - `start` or `length` is not an integer. A step declaring one is refused at
+ *   decode and again at compile (`config/transformParamTypes.ts`), so it reads
+ *   nothing by never running; the verdict answers for terms built through
+ *   neither.
  * - `length` is `0`: the end argument lands exactly on the start bound, and a
  *   window closing where it opens slices `""`.
  * - `length` is negative AND the composed end argument cannot outrun the start

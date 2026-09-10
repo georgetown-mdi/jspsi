@@ -161,6 +161,21 @@ function booleanParam(
   return declared;
 }
 
+/** The whole number a step declares for `param`; see {@link textParam}. */
+function integerParam(
+  functionName: string,
+  params: Params,
+  param: string,
+): number | undefined {
+  const declared = declaredParam(params, param);
+  if (declared === undefined) return undefined;
+  if (typeof declared !== "number" || !Number.isInteger(declared))
+    throw new UsageError(
+      transformParamTypeMessage(functionName, param, "integer", declared),
+    );
+  return declared;
+}
+
 /** The list of text a step declares for `param`; see {@link textParam}. */
 function textListParam(
   functionName: string,
@@ -528,13 +543,13 @@ function parseDateFactory(params: Params): StandardizingFn {
 // it at runtime, and the terms-level breadth verdicts here read it against a
 // rendered layout without any data, so the two cannot drift.
 //
-// Guard both bounds by type, not just presence: an unguarded non-number
-// `length` turns `startIndex + length` into string concatenation, silently
-// producing the wrong window rather than the intended one. A non-integer bound
-// is refused before a run (`config/transformParamTypes.ts`); what remains for
-// this guard is the `start === 0` no-op and an absent bound, which read nothing
-// -- the ignore path a degenerate bound takes, refused one layer up by the
-// dead-pipeline grading.
+// The bounds arrive typed: a non-integer is refused where the document is
+// decoded (`config/transformParamTypes.ts`) and again by the accessor the
+// factory reads them through, which is what keeps an unguarded non-number
+// `length` from turning `startIndex + length` into string concatenation. What
+// remains here is the `start === 0` no-op and an absent bound, which read
+// nothing -- the ignore path a degenerate bound takes, refused one layer up by
+// the dead-pipeline grading.
 //
 // The two ends of the `String.prototype.slice` call this describes clamp by
 // different rules: a NEGATIVE `length` drives the end argument below zero, where
@@ -543,18 +558,11 @@ function parseDateFactory(params: Params): StandardizingFn {
 // `valueLength + length`. Both bounds are determinate only because the caller
 // supplies the length of the value being sliced.
 function substringWindow(
-  params: Params | undefined,
+  start: number | undefined,
+  length: number | undefined,
   valueLength: number,
 ): { start: number; end: number } | undefined {
-  const start = params?.start;
-  const length = params?.length;
-  if (
-    typeof start !== "number" ||
-    !Number.isInteger(start) ||
-    typeof length !== "number" ||
-    !Number.isInteger(length) ||
-    start === 0
-  )
+  if (start === undefined || length === undefined || start === 0)
     return undefined;
   // SQL SUBSTR convention: a positive start is 1-indexed; a negative one counts
   // back from the end and clamps at the front of the value.
@@ -570,13 +578,15 @@ function substringWindow(
 }
 
 function substringFactory(params: Params): StandardizingFn {
-  // substringWindow holds the whole convention -- bounds coercion, SQL SUBSTR
-  // indexing, and the clamps -- and needs the length of the value being sliced
-  // to fix either bound, so the window is resolved per value rather than
-  // hoisted out of the returned fn. A window that reads nothing is the drop
-  // this step takes for a degenerate bound.
+  const start = integerParam("substring", params, "start");
+  const length = integerParam("substring", params, "length");
+  // substringWindow holds the whole convention -- SQL SUBSTR indexing and the
+  // clamps -- and needs the length of the value being sliced to fix either
+  // bound, so the window is resolved per value rather than hoisted out of the
+  // returned fn. A window that reads nothing is the drop this step takes for a
+  // degenerate bound.
   return (s) => {
-    const window = substringWindow(params, s.length);
+    const window = substringWindow(start, length, s.length);
     if (window === undefined) return null;
     return s.slice(window.start, window.end);
   };
@@ -635,8 +645,8 @@ function phoneticFactory(params: Params): StandardizingFn {
 }
 
 function padLeftFactory(params: Params): StandardizingFn {
-  const length = params.length as number | undefined;
-  if (typeof length !== "number" || !Number.isInteger(length) || length <= 0)
+  const length = integerParam("pad_left", params, "length");
+  if (length === undefined || length <= 0)
     throw new Error(`pad_left: "length" must be a positive integer`);
   // Normalize before validating the length, not after: NFC can change the
   // code-unit count (a combining mark like U+0344 -> U+0308 U+0301 expands to
@@ -668,7 +678,9 @@ function nullIfFactory(params: Params): StandardizingFn {
 }
 
 function replaceRegexFactory(params: Params): StandardizingFn {
-  const pattern = coerceToPatternString(params.pattern);
+  const pattern = coerceToPatternString(
+    textParam("replace_regex", params, "pattern"),
+  );
   // NFC-normalize the replacement literal so it cannot inject a non-NFC byte
   // sequence into the key (the pattern itself is matched as authored; author
   // it in NFC to match NFC runtime values).
@@ -684,7 +696,9 @@ function replaceRegexFactory(params: Params): StandardizingFn {
 }
 
 function extractRegexFactory(params: Params): StandardizingFn {
-  const pattern = coerceToPatternString(params.pattern);
+  const pattern = coerceToPatternString(
+    textParam("extract_regex", params, "pattern"),
+  );
   const re = compileLinearRegex(pattern);
   // Match AND slice on the NFC-normalized value (see the STANDARDIZING_FUNCTIONS
   // contract): an authored-NFC pattern must match a value left non-NFC by an
@@ -696,7 +710,9 @@ function extractRegexFactory(params: Params): StandardizingFn {
 }
 
 function filterRegexFactory(params: Params): StandardizingFn {
-  const pattern = coerceToPatternString(params.pattern);
+  const pattern = coerceToPatternString(
+    textParam("filter_regex", params, "pattern"),
+  );
   const re = compileLinearRegex(pattern);
   // NFC-normalize before testing (see the STANDARDIZING_FUNCTIONS contract) so
   // an authored-NFC pattern matches a value left non-NFC by an upstream
@@ -706,7 +722,9 @@ function filterRegexFactory(params: Params): StandardizingFn {
 }
 
 function splitOnFactory(params: Params): StandardizingFn {
-  const delimiter = coerceToPatternString(params.delimiter);
+  const delimiter = coerceToPatternString(
+    textParam("split_on", params, "delimiter"),
+  );
   const includeOriginal =
     booleanParam("split_on", params, "includeOriginal") ?? false;
   const re = compileLinearRegex(delimiter);

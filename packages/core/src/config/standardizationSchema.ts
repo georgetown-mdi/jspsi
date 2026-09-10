@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { MAX_NAME_LENGTH } from "./linkageTermsSchema.js";
+import { safeParseCamelized } from "./safeParseCamelized.js";
 import { transformParamTypeRefusals } from "./transformParamTypes.js";
 
 // --- Standardizing step ------------------------------------------------------
@@ -94,3 +95,22 @@ export const StandardizationSchema: z.ZodType<Standardization> = z
     },
     { message: "each linkage field may appear as output at most once" },
   );
+
+/**
+ * Parse and validate a raw on-disk `standardization` block, converting its
+ * snake_case keys to camelCase first, as every other document read does.
+ *
+ * The block a document writes reaches the schema and the function library
+ * through this, so a step's `input_format` is the `inputFormat` both the
+ * declared-type check ({@link transformParamTypeRefusals}) and the factory that
+ * reads it look up -- the same normalization `ExchangeSpecSchema` applies to
+ * this block on the run path (`parseExchangeSpec`), so a config's steps behave
+ * the same whichever entry point reads them.
+ *
+ * Returns a Zod safe-parse result. Honors the "safe" contract for the
+ * `camelizeKeys` bounds too: a depth- or node-count-tripping input yields a
+ * `{ success: false }` result rather than throwing.
+ */
+export function safeParseStandardization(raw: unknown) {
+  return safeParseCamelized(StandardizationSchema, raw);
+}

@@ -60,7 +60,8 @@ const EXPECTED_TYPE_LABELS: Record<TransformParamType, string> = {
  *
  * A number is named against what was expected, since "not a number" would read
  * as a contradiction where the param takes one and the document wrote a
- * fraction.
+ * fraction. A number YAML writes as `.nan` or `.inf` is neither whole nor
+ * fractional, so it is named for the thing that disqualifies it.
  */
 function declaredTypeLabel(
   value: unknown,
@@ -72,6 +73,7 @@ function declaredTypeLabel(
     case "string":
       return "text";
     case "number":
+      if (!Number.isFinite(value)) return "a non-finite number";
       return expected === "integer" ? "a fractional number" : "a number";
     case "boolean":
       return "a boolean";

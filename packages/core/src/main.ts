@@ -190,7 +190,10 @@ export {
 export type { CompatibilityMessageFragment } from "./config/compatibilityMessage";
 export { describeDecodeError } from "./utils/describeDecodeError";
 
-export { StandardizationSchema } from "./config/standardizationSchema";
+export {
+  safeParseStandardization,
+  StandardizationSchema,
+} from "./config/standardizationSchema";
 export type {
   Standardization,
   StandardizationStep,

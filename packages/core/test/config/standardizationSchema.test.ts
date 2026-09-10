@@ -1,7 +1,11 @@
 import { expect, test, describe } from "vitest";
+import YAML from "yaml";
 
 import { MAX_NAME_LENGTH } from "../../src/config/linkageTermsSchema";
-import { StandardizationSchema } from "../../src/config/standardizationSchema";
+import {
+  safeParseStandardization,
+  StandardizationSchema,
+} from "../../src/config/standardizationSchema";
 
 // --- StandardizationSchema ---------------------------------------------------
 
@@ -102,4 +106,79 @@ describe("StandardizationSchema declared param types", () => {
       StandardizationSchema.safeParse(stepSpec({ pattern: "-" })).success,
     ).toBe(true);
   });
+});
+
+// --- safeParseStandardization ------------------------------------------------
+// The on-disk read. A document writes its keys in snake_case, so the block is
+// camelized before the schema and the function library see it: the one spelling
+// the declared-type check and the factory that reads the param both look up.
+
+describe("safeParseStandardization", () => {
+  const document = (params: string) =>
+    YAML.parse(
+      [
+        "- output: dob",
+        "  input: DOB",
+        "  steps:",
+        "    - function: parse_date",
+        "      params:",
+        params,
+      ].join("\n"),
+    );
+
+  test("camelizes a step's params", () => {
+    const result = safeParseStandardization(
+      document(
+        "        input_format: DD/MM/YYYY\n        output_format: YYYYMMDD",
+      ),
+    );
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data[0].steps?.[0].params).toEqual({
+      inputFormat: "DD/MM/YYYY",
+      outputFormat: "YYYYMMDD",
+    });
+  });
+
+  test("refuses a param the document mistyped, locating it in the step", () => {
+    const result = safeParseStandardization(
+      document("        input_format: 7"),
+    );
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(
+      result.error.issues.map((issue) => [issue.path.join("."), issue.message]),
+    ).toContainEqual([
+      "0.steps.0.params.inputFormat",
+      "parse_date inputFormat must be text, not a number; quote the value, or " +
+        "omit the key to leave the param unset",
+    ]);
+  });
+
+  // YAML writes NaN and the infinities as `.nan` and `.inf`. Neither is a whole
+  // number and neither is a fraction, so the refusal names what disqualifies
+  // them rather than calling them fractional.
+  test.each([[".nan"], [".inf"], ["-.inf"]])(
+    "names %s for what it is",
+    (written) => {
+      const result = safeParseStandardization(
+        YAML.parse(
+          [
+            "- output: dob",
+            "  input: DOB",
+            "  steps:",
+            "    - function: substring",
+            "      params:",
+            `        start: ${written}`,
+            "        length: 3",
+          ].join("\n"),
+        ),
+      );
+      expect(result.success).toBe(false);
+      if (result.success) return;
+      expect(result.error.issues.map((issue) => issue.message)).toContain(
+        "substring start must be a whole number, not a non-finite number",
+      );
+    },
+  );
 });
