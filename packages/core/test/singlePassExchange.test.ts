@@ -5,6 +5,8 @@ import PSI from "@openmined/psi.js";
 import {
   PayloadDisclosureDivergenceError,
   prepareForExchange,
+  resolveBothDirectionsDisclosePayload,
+  resolveDirectionDisclosesPayload,
   runExchange,
 } from "../src/exchange";
 import {
@@ -15,10 +17,14 @@ import {
 import type { BuiltExchangeRecord } from "../src/records/exchangeRecord";
 import type {
   LinkageStrategy,
+  LinkageTerms,
   Output,
   Payload,
 } from "../src/config/linkageTermsSchema";
-import type { ExchangeResult } from "../src/exchange";
+import type {
+  ExchangeResult,
+  PayloadDisclosureDirections,
+} from "../src/exchange";
 
 // Integration coverage of the linkageStrategy dispatch in runExchange: a
 // single-pass exchange must flow through the full path -- role resolution, the
@@ -248,6 +254,13 @@ interface OneSidedSinglePassOptions {
   helperPayload?: Payload;
   receiverPayload?: Payload;
   advertiseHelperDisclosure?: boolean;
+  // The receiver's own metadata transmitting a column, which the send gate
+  // never lets reach a helper entitled to no output. Set where the shape
+  // under test turns on the direction that moves nothing.
+  receiverDiscloses?: boolean;
+  // The strategy both parties agree, for the shapes that must behave the same
+  // whether or not there is an association-table frame to withhold.
+  strategy?: LinkageStrategy;
 }
 
 // Run a one-sided single-pass exchange (receiver expects output, helper
@@ -274,13 +287,19 @@ async function settleOneSidedSinglePass(
   const receiverOut: Output = { expectsOutput: true, shareWithPartner: false };
   const helperOut: Output = { expectsOutput: false, shareWithPartner: true };
 
-  // Carol and Elizabeth overlap. Receiver rows are first-name-only; the helper's
-  // gain a `note` payload column only when it discloses.
-  const receiverRows = [
-    { first_name: "Carol" },
-    { first_name: "Elizabeth" },
-    { first_name: "Henry" },
-  ];
+  // Carol and Elizabeth overlap. Each party's rows gain a `note` payload column
+  // only where that party discloses.
+  const receiverRows: Array<Record<string, string>> = opts.receiverDiscloses
+    ? [
+        { first_name: "Carol", note: "r-c" },
+        { first_name: "Elizabeth", note: "r-e" },
+        { first_name: "Henry", note: "r-h" },
+      ]
+    : [
+        { first_name: "Carol" },
+        { first_name: "Elizabeth" },
+        { first_name: "Henry" },
+      ];
   const helperRows: Array<Record<string, string>> = opts.helperDiscloses
     ? [
         { first_name: "Alice", note: "h-a" },
@@ -306,7 +325,7 @@ async function settleOneSidedSinglePass(
       {
         linkageTerms: {
           ...baseTerms,
-          linkageStrategy: "single-pass",
+          linkageStrategy: opts.strategy ?? "single-pass",
           identity,
           output,
           ...(payload !== undefined ? { payload } : {}),
@@ -374,7 +393,7 @@ async function settleOneSidedSinglePass(
         "Receiver Co",
         receiverOut,
         receiverRows,
-        ["first_name"],
+        opts.receiverDiscloses ? ["first_name", "note"] : ["first_name"],
         opts.receiverPayload,
       ),
       { psiLibrary },
@@ -541,6 +560,65 @@ test("an asserted disclosure the agreed terms contradict refuses both parties", 
     expect(reason.message).toContain("asserts it discloses one");
   }
   expect(helperInbound.some((f) => Array.isArray(f))).toBe(false);
+});
+
+test("a helper owed no result may declare an empty payload.receive", async () => {
+  // The direction that can move nothing must not refuse. The helper is
+  // entitled to no output, so the send gate transmits it no column whatever
+  // the receiver's own metadata holds -- and here that metadata does transmit
+  // `note`, while the helper declares the empty `payload.receive` the schema
+  // requires of a party expecting none. There is nothing for that declaration
+  // to contradict, so the run completes and the helper's own `note` reaches
+  // the receiver, on either strategy.
+  for (const strategy of ["single-pass", "cascade"] as const) {
+    const { receiver, helper, helperInbound } = await runOneSidedSinglePass({
+      strategy,
+      helperDiscloses: true,
+      receiverDiscloses: true,
+      helperIsInitiator: false,
+      helperPayload: { receive: [] },
+    });
+
+    expect(helper.resolvedRole).toBe("sender");
+    expect(receiver.partnerPayload.columns).toEqual(["note"]);
+    // And nothing came back the other way: the helper is owed no result, so
+    // the receiver's own disclosed column is never transmitted to it.
+    expect(helper.partnerPayload.columns).toEqual([]);
+    // Under single-pass the helper still receives its association-table half,
+    // which is what building the payload above takes.
+    if (strategy === "single-pass")
+      expect(helperInbound.some((f) => Array.isArray(f))).toBe(true);
+  }
+});
+
+test("the mirrored declaration on the party owed the result still refuses", async () => {
+  // The same two parties with the empty declaration on the other document.
+  // The RECEIVER is entitled to output, so the helper's disclosure has
+  // somewhere to move and `payload.receive: []` on the party that would
+  // receive it contradicts the helper's metadata. Both parties refuse, and
+  // neither an association table nor a payload frame reaches either of them.
+  const { receiver, helper, helperInbound, receiverInbound } =
+    await settleOneSidedSinglePass({
+      helperDiscloses: true,
+      receiverDiscloses: true,
+      helperIsInitiator: false,
+      receiverPayload: { receive: [] },
+    });
+
+  for (const outcome of [helper, receiver]) {
+    expect(outcome.status).toBe("rejected");
+    expect((outcome as PromiseRejectedResult).reason).toBeInstanceOf(
+      PayloadDisclosureDivergenceError,
+    );
+  }
+  for (const inbound of [helperInbound, receiverInbound]) {
+    expect(inbound.some((f) => Array.isArray(f))).toBe(false);
+    expect(
+      inbound.some(
+        (f) => typeof f === "object" && f !== null && "hasData" in f,
+      ),
+    ).toBe(false);
+  }
 });
 
 test("a one-sided divergence refusal aborts the party still waiting", async () => {
@@ -761,5 +839,158 @@ test("the divergence refusal fires under cascade too, before the first round", a
       responderRows: serverRows,
       initiatorPayload: { receive: [] },
     }),
+  );
+});
+
+// Every `payload` shape the per-direction resolution reads differently:
+// absent, an empty dictionary, and each direction declared present-and-empty
+// or present-with-a-column, alone and paired.
+const PAYLOAD_SHAPES: ReadonlyArray<Payload | undefined> = [
+  undefined,
+  {},
+  { send: [] },
+  { receive: [] },
+  { send: [], receive: [] },
+  { send: [{ name: "note" }] },
+  { receive: [{ name: "note" }] },
+];
+
+// The output entitlements two agreed documents can hold: each party's
+// `expectsOutput` equals the other's `shareWithPartner`, which is what
+// validateCompatibility holds them to, and the pair where neither expects
+// output is the one it refuses outright.
+const COMPATIBLE_OUTPUT_PAIRS: ReadonlyArray<readonly [Output, Output]> = [
+  [
+    { expectsOutput: true, shareWithPartner: true },
+    { expectsOutput: true, shareWithPartner: true },
+  ],
+  [
+    { expectsOutput: true, shareWithPartner: false },
+    { expectsOutput: false, shareWithPartner: true },
+  ],
+  [
+    { expectsOutput: false, shareWithPartner: true },
+    { expectsOutput: true, shareWithPartner: false },
+  ],
+];
+
+const matrixTerms = (
+  output: Output,
+  payload: Payload | undefined,
+): LinkageTerms => ({
+  ...baseTerms,
+  linkageStrategy: "single-pass",
+  identity: "Matrix Co",
+  output,
+  ...(payload !== undefined ? { payload } : {}),
+});
+
+// One direction's verdict with a refusal as a value, so a sweep can compare
+// the two parties' readings of the same direction rather than one throw.
+type DirectionOutcome = boolean | "refused";
+
+const settleDirection = (
+  asserts: boolean,
+  disclosingTerms: LinkageTerms,
+  receivingTerms: LinkageTerms,
+): DirectionOutcome => {
+  try {
+    return resolveDirectionDisclosesPayload(
+      asserts,
+      disclosingTerms,
+      receivingTerms,
+    );
+  } catch {
+    return "refused";
+  }
+};
+
+const settleBothDirections = (
+  localAsserts: boolean,
+  localTerms: LinkageTerms,
+  partnerAsserts: boolean,
+  partnerTerms: LinkageTerms,
+): PayloadDisclosureDirections | "refused" => {
+  try {
+    return resolveBothDirectionsDisclosePayload(
+      localAsserts,
+      localTerms,
+      partnerAsserts,
+      partnerTerms,
+    );
+  } catch {
+    return "refused";
+  }
+};
+
+test("both parties resolve every direction of every conforming pair alike", () => {
+  // A conforming party advertises exactly what its own metadata discloses, so
+  // the two parties hold the same four inputs up to swapping local and
+  // partner. Each party's own outbound direction must then equal the other's
+  // reading of that same direction -- a refusal included -- or a receiver's
+  // suppression and a sender's skip could disagree over a frame one of them
+  // sends and the other never awaits. Swept over every declaration shape,
+  // assertion and entitlement rather than sampled: nothing in the shape of
+  // the resolution keeps a later refactor symmetric.
+  let pairs = 0;
+  for (const [localOutput, partnerOutput] of COMPATIBLE_OUTPUT_PAIRS)
+    for (const localPayload of PAYLOAD_SHAPES)
+      for (const partnerPayload of PAYLOAD_SHAPES)
+        for (const localAsserts of [false, true])
+          for (const partnerAsserts of [false, true]) {
+            ++pairs;
+            const localTerms = matrixTerms(localOutput, localPayload);
+            const partnerTerms = matrixTerms(partnerOutput, partnerPayload);
+            const localToPartner = settleDirection(
+              localAsserts,
+              localTerms,
+              partnerTerms,
+            );
+            const partnerToLocal = settleDirection(
+              partnerAsserts,
+              partnerTerms,
+              localTerms,
+            );
+            const pair = JSON.stringify({
+              localOutput,
+              localPayload,
+              localAsserts,
+              partnerOutput,
+              partnerPayload,
+              partnerAsserts,
+            });
+
+            // A direction whose receiving party is owed no result moves no
+            // payload, so it resolves to no disclosure and never refuses.
+            if (!partnerOutput.expectsOutput)
+              expect(localToPartner, pair).toBe(false);
+            if (!localOutput.expectsOutput)
+              expect(partnerToLocal, pair).toBe(false);
+
+            const local = settleBothDirections(
+              localAsserts,
+              localTerms,
+              partnerAsserts,
+              partnerTerms,
+            );
+            const partner = settleBothDirections(
+              partnerAsserts,
+              partnerTerms,
+              localAsserts,
+              localTerms,
+            );
+            if (localToPartner === "refused" || partnerToLocal === "refused") {
+              expect(local, pair).toBe("refused");
+              expect(partner, pair).toBe("refused");
+              continue;
+            }
+            expect(local, pair).toEqual({ localToPartner, partnerToLocal });
+            expect(partner, pair).toEqual({
+              localToPartner: partnerToLocal,
+              partnerToLocal: localToPartner,
+            });
+          }
+  expect(pairs).toBe(
+    COMPATIBLE_OUTPUT_PAIRS.length * PAYLOAD_SHAPES.length ** 2 * 4,
   );
 });

@@ -291,8 +291,16 @@ export class PayloadDisclosureDivergenceError extends ConnectionError {
  * `disclosesPayload` flag off the terms exchange, or this party's own
  * metadata for its own direction).
  *
- * The assertion rides the envelope rather than the agreed-terms hash, so it
- * can only ADD disclosure to what the terms declare. Three cases:
+ * A direction whose RECEIVING party is entitled to no output discloses
+ * nothing, whatever either document declares and whatever the disclosing
+ * party asserts: the payload send gate transmits only to a partner entitled
+ * to the result, so no column can move this way and there is nothing for a
+ * declaration to contradict. Both parties read that entitlement off the same
+ * agreed document, so both resolve the direction identically -- and false is
+ * the value the withhold gate reads for a direction that moves no payload.
+ *
+ * Otherwise the assertion rides the envelope rather than the agreed-terms
+ * hash, so it can only ADD disclosure to what the terms declare. Three cases:
  *
  * - The disclosing party's `payload.send` declared present and empty binds
  *   it to disclosing no column whatever it asserts, so this direction moves
@@ -311,6 +319,7 @@ export function resolveDirectionDisclosesPayload(
   disclosingPartyTerms: LinkageTerms,
   receivingPartyTerms: LinkageTerms,
 ): boolean {
+  if (!receivingPartyTerms.output.expectsOutput) return false;
   if (declaresNoPayloadColumn(disclosingPartyTerms.payload?.send)) return false;
   if (
     disclosingPartyAsserts &&
@@ -1650,10 +1659,12 @@ export async function runExchange(
   // covers both directions, so a `payload.receive` either party declares present
   // and empty against the other's asserted disclosure refuses BOTH parties here
   // -- before the bootstrap frame, the PSI rounds, the association table and the
-  // payload -- whichever seat role resolution goes on to give them. An absent
-  // partner flag (a peer that advertised none) is taken as "discloses payload",
-  // so it never blinds a helper that needs its table. See
-  // resolveBothDirectionsDisclosePayload.
+  // payload -- whichever seat role resolution goes on to give them. A direction
+  // whose receiving party is entitled to no output resolves to no disclosure
+  // instead: the send gate below transmits nothing that way, so a declaration
+  // there contradicts nothing. An absent partner flag (a peer that advertised
+  // none) is taken as "discloses payload", so it never blinds a helper that
+  // needs its table. See resolveBothDirectionsDisclosePayload.
   let payloadDisclosure: PayloadDisclosureDirections;
   try {
     payloadDisclosure = resolveBothDirectionsDisclosePayload(

@@ -1510,12 +1510,13 @@ function relieveTransientMemory(): void {
  * Both parties compute this from the same authenticated session state -- the
  * resolved sender's output entitlement, and the disclosure the agreed terms
  * and the advertised `disclosesPayload` flag together resolve
- * (`resolveDirectionDisclosesPayload`, exchange.ts): a sender whose
- * `payload.send` the terms declare present and empty discloses none whatever
- * it advertises; a receiver's `payload.receive` declared present and empty
- * against an asserted disclosure contradicts the terms and is refused there,
- * on either seat, rather than resolved either way; otherwise the assertion
- * decides.
+ * (`resolveDirectionDisclosesPayload`, exchange.ts): a direction whose
+ * receiving party is entitled to no output discloses none, since the send
+ * gate transmits nothing that way; a sender whose `payload.send` the terms
+ * declare present and empty discloses none whatever it advertises; a
+ * receiver's `payload.receive` declared present and empty against an asserted
+ * disclosure contradicts the terms and is refused there, on either seat,
+ * rather than resolved either way; otherwise the assertion decides.
  *
  * The two parties do not read the same assertion, though: the sender takes
  * its own metadata and the receiver the advertised flag. So the receiver's
