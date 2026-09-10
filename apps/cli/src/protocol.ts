@@ -10,6 +10,7 @@ import {
   exchangeRecordOwedButUnbuilt,
   countIsPartnerReported,
   buildOutputTable,
+  describeEntityClusters,
   describeResolvedMatching,
   describeResolvedRunShape,
   authenticateConnection,
@@ -1521,6 +1522,7 @@ async function writeExchangeOutputs(params: {
   const {
     associationTable,
     intersectionCount,
+    entityClusters,
     resolvedRole,
     partnerPayload,
     audit,
@@ -1601,6 +1603,15 @@ async function writeExchangeOutputs(params: {
       throw err;
     }
   }
+
+  // How the entity closure grouped the pairs this party just wrote, stated
+  // after the result it describes. Core hands one on a many-to-many run this
+  // party holds the table of and none otherwise, so the cardinality is not
+  // re-read here. The sentence is core's own composition over integers it
+  // formats itself -- the same one the browser seat renders, so no two sinks
+  // drift -- and holds no partner-authored text.
+  if (entityClusters !== undefined)
+    log.info(describeEntityClusters(entityClusters));
 
   // Every audit artifact this run was asked for and could not produce,
   // as the messages the machine-interface stream states below.

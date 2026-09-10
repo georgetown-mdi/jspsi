@@ -17,6 +17,7 @@ import type Peer from "peerjs";
 import type { PeerCloseOutcome } from "./transport/waitForPeerClose";
 
 import type {
+  EntityClusterSummary,
   ExchangeResult,
   MessageConnection,
   PreparedExchange,
@@ -218,6 +219,12 @@ interface ReceivedExchangeOutputs extends ExchangeOutputsBase {
   kind: "matched";
   /** The matched results (CSV), as an object URL the UI exposes as a download. */
   resultsUrl: string;
+  /** How the entity closure grouped this result's pairs
+   * ({@link ExchangeResult.entityClusters}): present on a `many-to-many` run,
+   * absent under every other cardinality, whose clusters follow from the
+   * table's own shape. Absent on the server-job path too, which holds the
+   * result on the console and reads no table here. */
+  entityClusters?: EntityClusterSummary;
 }
 
 /** A non-receiving helper's outputs: no results file, only the optional record

@@ -13,6 +13,7 @@ import { Link } from "@tanstack/react-router";
 
 import {
   DEFAULT_PEER_TIMEOUT_MS,
+  describeEntityClusters,
   describeResolvedMatching,
 } from "@psilink/core";
 
@@ -264,6 +265,30 @@ export function completionOutcome(
   }
 }
 
+/**
+ * How the entity closure grouped this run's result, as the sentence the panel
+ * states, or `undefined` where the run reported no grouping to state.
+ *
+ * A summary reaches the outputs on a `many-to-many` run this party holds the
+ * table of and on no other, so the reading is off the outputs rather than off a
+ * cardinality label: every other cardinality groups by the table's own shape,
+ * and the console's server-job path reads no table here.
+ *
+ * The sentence is core's own composition ({@link describeEntityClusters}), the
+ * same one the CLI seat states, over integers core formats itself.
+ *
+ * Exported for the copy-pin test.
+ *
+ * @internal
+ */
+export function completionClusterReport(
+  outputs: RunOutputs | undefined,
+): string | undefined {
+  const summary =
+    outputs?.kind === "matched" ? outputs.entityClusters : undefined;
+  return summary === undefined ? undefined : describeEntityClusters(summary);
+}
+
 /** The completion panel: the big "Exchange complete" line naming whatever this run
  * produced ({@link completionOutcome}), what the two parties' agreed
  * `deduplicate` values resolved to, and the finished-at timestamp. It takes the
@@ -275,7 +300,9 @@ export function completionOutcome(
  * same one a browser-conducted run already showed on its running screen, so no
  * two sinks drift on what a run resolved to. It is omitted where the outputs
  * hold no resolved matching, rather than standing in a default for a pair this
- * seat did not read. */
+ * seat did not read.
+ *
+ * The entity-cluster line beneath it is {@link completionClusterReport}. */
 export function DonePanel({
   outputs,
   finishedAt,
@@ -284,6 +311,7 @@ export function DonePanel({
   finishedAt: Date | undefined;
 }) {
   const outcome = completionOutcome(outputs);
+  const clusters = completionClusterReport(outputs);
   return (
     <div className={styles.donePanel}>
       <p className={styles.bigCount}>
@@ -306,6 +334,9 @@ export function DonePanel({
         <p className={`${styles.small} ${styles.sub}`}>
           {describeResolvedMatching(outputs.matching)}
         </p>
+      )}
+      {clusters !== undefined && (
+        <p className={`${styles.small} ${styles.sub}`}>{clusters}</p>
       )}
       {finishedAt !== undefined && (
         <p className={`${styles.small} ${styles.sub} ${styles.mono}`}>

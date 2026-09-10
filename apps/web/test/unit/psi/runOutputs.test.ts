@@ -179,6 +179,31 @@ describe("buildRunOutputs", () => {
     }
   });
 
+  test("a matched result carries the run's own entity-cluster summary", () => {
+    // The completion panel states how the closure grouped the pairs, so the
+    // summary rides the matched outputs rather than being recomputed there. A
+    // run that reported none leaves the field absent, which is every
+    // cardinality but the both-sided one.
+    const entityClusters = {
+      clusterCount: 1,
+      localRows: 2,
+      partnerRows: 2,
+      shapes: [
+        { localRows: 2, partnerRows: 2, distinctValues: 2, clusters: 1 },
+      ],
+    };
+    expect(
+      buildRunOutputs(
+        { ...receivedResult(true), entityClusters },
+        prepared,
+        recordingUrls().urls,
+      ),
+    ).toMatchObject({ kind: "matched", entityClusters });
+    expect(
+      buildRunOutputs(receivedResult(true), prepared, recordingUrls().urls),
+    ).toMatchObject({ kind: "matched", entityClusters: undefined });
+  });
+
   test("a throw after the results url was created revokes it before propagating", () => {
     const { urls, created, revoked } = recordingUrls({ failOnCall: 2 });
 

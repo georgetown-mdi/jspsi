@@ -89,6 +89,7 @@ vi.mock("@psilink/core", async (importActual) => {
       return {
         associationTable: [[], []],
         intersectionCount: undefined,
+        entityClusters: undefined,
         partnerTerms: stubLinkageTerms,
         matching: {
           localDeduplicate: false,

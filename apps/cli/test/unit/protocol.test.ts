@@ -255,6 +255,7 @@ import {
   isPeerWaitTimeout,
   sanitizeErrorForDisplay,
   sanitizeForDisplay,
+  describeEntityClusters,
   describeResolvedMatching,
   describeResolvedRunShape,
   getDefaultLinkageTerms,
@@ -928,6 +929,78 @@ test("leaves the pre-round boundary silent on a one-to-one run", async () => {
   ]);
 
   expect(mockState.warnings).toStrictEqual([]);
+}, 20_000);
+
+// --- the post-run entity-cluster diagnostic ------------------------------------
+
+const CLUSTER_SUMMARY = {
+  clusterCount: 2,
+  localRows: 3,
+  partnerRows: 3,
+  shapes: [
+    { localRows: 2, partnerRows: 2, distinctValues: 2, clusters: 1 },
+    { localRows: 1, partnerRows: 1, distinctValues: 1, clusters: 1 },
+  ],
+};
+
+const MANY_TO_MANY_SHAPE: ResolvedRunShape = {
+  cardinality: "many-to-many",
+  localDeduplicate: true,
+  partnerDeduplicate: true,
+  localRecordCount: 3,
+  localDeclaredRecordCount: 3,
+  partnerRecordCount: 3,
+  localExpectsOutput: true,
+  partnerAssociationTableWithheld: false,
+};
+
+async function runBothParties(): Promise<void> {
+  await Promise.all(
+    ["test-a", "test-b"].map((loggerName) =>
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        output: undefined,
+        verbosity: -1,
+        loggerName,
+      }),
+    ),
+  );
+}
+
+test("states how the closure grouped the result a many-to-many run wrote", async () => {
+  // The figures are the run's own; what this pins is that the seat states them
+  // where the operator reads its result, in core's composition rather than one
+  // the CLI writes itself.
+  vi.mocked(runExchange).mockImplementation(
+    runExchangeConfirming(MANY_TO_MANY_SHAPE, {
+      associationTable: [[], []],
+      partnerPayload: {},
+      matching: STUB_MATCHING,
+      entityClusters: CLUSTER_SUMMARY,
+    }) as never,
+  );
+  await runBothParties();
+
+  expect(mockState.infos).toContain(describeEntityClusters(CLUSTER_SUMMARY));
+}, 20_000);
+
+test("says nothing about clusters on a run that reported none", async () => {
+  // Every cardinality but the both-sided one leaves core reporting no summary,
+  // and the seat reads that rather than the cardinality label.
+  vi.mocked(runExchange).mockImplementation(
+    runExchangeConfirming(MANY_TO_MANY_SHAPE) as never,
+  );
+  await runBothParties();
+
+  expect(
+    mockState.infos.filter((line) => line.includes("Entity clusters")),
+  ).toStrictEqual([]);
 }, 20_000);
 
 test("states the partner's deduplicate value and the resolved cardinality on every run", async () => {
