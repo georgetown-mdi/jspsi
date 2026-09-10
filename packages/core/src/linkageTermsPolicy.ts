@@ -158,9 +158,10 @@ export function assertCountOnlyTermsShape(terms: LinkageTerms): void {
  *
  * The one reading behind each gate that binds a party to disclosing no
  * column: the three invitation withhold readings
- * (`consent/invitationSummary.ts`) and the run's own sender-disclosure
- * resolution (`resolveSenderDisclosesPayload`, exchange.ts), so a consent
- * screen and the run it describes cannot read a declaration differently.
+ * (`consent/invitationSummary.ts`) and the run's own per-direction
+ * disclosure resolution (`resolveDirectionDisclosesPayload`, exchange.ts),
+ * so a consent screen and the run it describes cannot read a declaration
+ * differently.
  */
 export function declaresNoPayloadColumn(
   direction: ReadonlyArray<PayloadColumn> | undefined,

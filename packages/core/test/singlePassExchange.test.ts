@@ -228,6 +228,20 @@ test("single-pass one-sided output: only the receiver gets the table and payload
   expect(responder.partnerPayload.columns).toEqual([]);
 });
 
+// A terms-exchange frame, the only frame kind that holds `linkageTerms`.
+const isTermsFrame = (m: unknown): m is Record<string, unknown> =>
+  typeof m === "object" && m !== null && "linkageTerms" in m;
+
+// The abort the payload-disclosure refusal sends before it throws, whole: the
+// reason is a fixed literal, so a test reads the frame by equality.
+const PAYLOAD_DISCLOSURE_ABORT_FRAME = {
+  decision: "abort",
+  abortReasons: [
+    "a party asserts a payload disclosure the agreed linkage terms " +
+      "declare no column for",
+  ],
+};
+
 interface OneSidedSinglePassOptions {
   helperDiscloses: boolean;
   helperIsInitiator: boolean;
@@ -312,8 +326,6 @@ async function settleOneSidedSinglePass(
   // its metadata) alone, so the receiver's cross-check is what the test reads.
   // Either value can be stamped: true over metadata that discloses nothing, and
   // false over metadata that discloses a column.
-  const isTermsFrame = (m: unknown): m is Record<string, unknown> =>
-    typeof m === "object" && m !== null && "linkageTerms" in m;
   const capturingHelper: MessageConnection = {
     send: (m: unknown) =>
       connHelper.send(
@@ -555,13 +567,7 @@ test("a one-sided divergence refusal aborts the party still waiting", async () =
   // arms no inactivity deadline, so without the abort frame this receiver never
   // returns and the test fails by timing out.
   expect(receiver.status).toBe("rejected");
-  expect(receiverInbound).toContainEqual({
-    decision: "abort",
-    abortReasons: [
-      "a party asserts a payload disclosure the agreed linkage terms " +
-        "declare no column for",
-    ],
-  });
+  expect(receiverInbound).toContainEqual(PAYLOAD_DISCLOSURE_ABORT_FRAME);
   // Neither the association table (the only Array-shaped frame) nor a payload
   // frame moved in either direction before the refusal.
   for (const inbound of [helperInbound, receiverInbound]) {
@@ -579,4 +585,181 @@ test("the divergence refusal takes no message argument", () => {
   // can interpolate a value read off either agreed document into the message
   // the operator is shown.
   expect(PayloadDisclosureDivergenceError.length).toBe(0);
+});
+
+interface TwoSidedOptions {
+  strategy: LinkageStrategy;
+  initiatorRows: typeof serverRows;
+  responderRows: typeof serverRows;
+  initiatorPayload?: Payload;
+}
+
+// Each party's outcome, every frame it put on the wire, and whatever was left
+// unread in its inbound queue when both runs settled.
+interface SettledTwoSided {
+  initiator: PromiseSettledResult<ExchangeResult>;
+  responder: PromiseSettledResult<ExchangeResult>;
+  initiatorSent: Array<unknown>;
+  responderSent: Array<unknown>;
+  initiatorUnread: Array<unknown>;
+  responderUnread: Array<unknown>;
+}
+
+// Everything left in a party's inbound queue once both runs have settled:
+// what the peer put on the wire and this party never read. A frame the pipe
+// already delivered resolves synchronously, so the bound below only decides
+// how long the drain waits before concluding the queue is empty -- no
+// assertion turns on its size.
+const DRAINED_QUEUE_TIMEOUT_MS = 100;
+
+async function drainInbound(conn: MessageConnection): Promise<Array<unknown>> {
+  const frames: Array<unknown> = [];
+  for (;;) {
+    try {
+      frames.push(await conn.receive(DRAINED_QUEUE_TIMEOUT_MS));
+    } catch {
+      return frames;
+    }
+  }
+}
+
+// Run a TWO-SIDED exchange (both parties expect output and share it, both
+// datasets transmitting `note`) end to end, capturing every frame each party
+// puts on the wire and draining what neither read. Row counts are set per
+// party because role resolution follows the declared counts here -- the
+// smaller dataset takes the PSI receiver seat -- which is how a test flips
+// which seat a party's own declaration is held on.
+async function settleTwoSided(opts: TwoSidedOptions): Promise<SettledTwoSided> {
+  const [connInitiator, connResponder] = createMessagePipe();
+  const initiatorSent: Array<unknown> = [];
+  const responderSent: Array<unknown> = [];
+  const capturing = (
+    conn: MessageConnection,
+    sent: Array<unknown>,
+  ): MessageConnection => ({
+    send: (m: unknown) => {
+      sent.push(m);
+      return conn.send(m);
+    },
+    receive: (timeoutMs?: number) => conn.receive(timeoutMs),
+    close: () => conn.close(),
+    setInboundFrameCap: conn.setInboundFrameCap?.bind(conn),
+  });
+  const prepare = (
+    identity: string,
+    rows: typeof serverRows,
+    payload?: Payload,
+  ) =>
+    prepareForExchange(
+      {
+        linkageTerms: {
+          ...baseTerms,
+          linkageStrategy: opts.strategy,
+          identity,
+          output: both,
+          ...(payload !== undefined ? { payload } : {}),
+        },
+      },
+      identity,
+      rows,
+      ["first_name", "note"],
+    );
+
+  const [initiator, responder] = await Promise.allSettled([
+    runExchange(
+      capturing(connInitiator, initiatorSent),
+      "initiator",
+      prepare("Initiator Co", opts.initiatorRows, opts.initiatorPayload),
+      { psiLibrary },
+    ),
+    runExchange(
+      capturing(connResponder, responderSent),
+      "responder",
+      prepare("Responder Co", opts.responderRows),
+      { psiLibrary },
+    ),
+  ]);
+  return {
+    initiator,
+    responder,
+    initiatorSent,
+    responderSent,
+    initiatorUnread: await drainInbound(connInitiator),
+    responderUnread: await drainInbound(connResponder),
+  };
+}
+
+// Whether a frame belongs to the terms exchange -- the terms themselves, or a
+// bare decision frame. Every other frame kind the run sends (the PSI rounds,
+// the association table, the payload) fails this, so asserting it over
+// everything a party sent is the wire-level reading of "refused before any
+// linkage round, association table or payload moved".
+const isTermsOrDecisionFrame = (m: unknown): boolean =>
+  typeof m === "object" && m !== null && (isTermsFrame(m) || "decision" in m);
+
+function expectRefusedOnBothSides(settled: SettledTwoSided): void {
+  for (const outcome of [settled.initiator, settled.responder]) {
+    expect(outcome.status).toBe("rejected");
+    expect((outcome as PromiseRejectedResult).reason).toBeInstanceOf(
+      PayloadDisclosureDivergenceError,
+    );
+  }
+  // Each party's abort reached the other: it is sitting unread in the peer's
+  // inbound queue, since the peer refused on its own rather than waiting.
+  for (const unread of [settled.initiatorUnread, settled.responderUnread])
+    expect(unread).toContainEqual(PAYLOAD_DISCLOSURE_ABORT_FRAME);
+  for (const sent of [settled.initiatorSent, settled.responderSent])
+    expect(sent.every(isTermsOrDecisionFrame)).toBe(true);
+}
+
+test("the divergence refusal binds either seat the record counts give", async () => {
+  // The seat a party is given follows the declared record counts, which no
+  // operator chooses. Two-sided single-pass, both parties' metadata
+  // transmitting `note` and neither declaring a `payload.send`: the initiator
+  // declares an empty `payload.receive`, so the responder's disclosure
+  // contradicts it. The same pair runs on both seatings -- the declaring party
+  // on the smaller dataset (PSI receiver) and on the larger one (PSI sender) --
+  // and each is paired with the control that declares no `payload.receive`,
+  // which completes and hands that party the very column the declaration
+  // refuses. Both seatings must refuse identically.
+  for (const [initiatorRows, responderRows, seat] of [
+    [clientRows, serverRows, "receiver"],
+    [serverRows, clientRows, "sender"],
+  ] as const) {
+    const control = await settleTwoSided({
+      strategy: "single-pass",
+      initiatorRows,
+      responderRows,
+    });
+    expect(control.initiator.status).toBe("fulfilled");
+    const completed = (
+      control.initiator as PromiseFulfilledResult<ExchangeResult>
+    ).value;
+    expect(completed.resolvedRole).toBe(seat);
+    expect(completed.partnerPayload.columns).toEqual(["note"]);
+
+    expectRefusedOnBothSides(
+      await settleTwoSided({
+        strategy: "single-pass",
+        initiatorRows,
+        responderRows,
+        initiatorPayload: { receive: [] },
+      }),
+    );
+  }
+});
+
+test("the divergence refusal fires under cascade too, before the first round", async () => {
+  // The refusal reads what the agreed terms admit, not what a frame holds,
+  // so it binds a strategy with no association-table frame to withhold. The
+  // same pair as above under `cascade`: both parties refuse, and neither sends
+  // a PSI round frame.
+  expectRefusedOnBothSides(
+    await settleTwoSided({
+      strategy: "cascade",
+      initiatorRows: clientRows,
+      responderRows: serverRows,
+      initiatorPayload: { receive: [] },
+    }),
+  );
 });

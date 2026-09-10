@@ -1444,8 +1444,10 @@ export function withholdsInviterAssociationTable(terms: LinkageTerms): boolean {
  * A reading of two documents from one of them: the empty `payload.receive` is
  * held against the partner's DECLARED `payload.send` alone, never against what
  * that partner's metadata will transmit. A partner declaring no payload at all
- * while its metadata transmits a column passes that check, and its disclosure
- * is refused at the received-payload reconciliation after the round.
+ * while its metadata transmits a column passes that check, so this reading
+ * predicts a withheld table for a pair the run itself refuses outright, once
+ * both parties' terms are agreed and before any linkage round
+ * (`resolveDirectionDisclosesPayload`, exchange.ts).
  */
 export function withholdsPartnerAssociationTable(terms: LinkageTerms): boolean {
   if (terms.linkageStrategy !== "single-pass") return false;
