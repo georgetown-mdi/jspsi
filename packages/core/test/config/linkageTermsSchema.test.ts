@@ -3647,6 +3647,24 @@ describe("declared transform param types", () => {
     ).toBe(true);
   });
 
+  test("a partner token's refusal states the type alone, naming no remedy", () => {
+    // The remedy a text param's refusal can name -- quote the value, or leave
+    // the key out -- addresses whoever wrote the document. The acceptor reading
+    // this one did not write it: the terms are the partner's, and
+    // describeDecodeError renders the message to them as it stands. The
+    // operator's own standardization block takes the remedy
+    // (standardizationSchema.test.ts).
+    const result = safeParseLinkageTerms(
+      transformStepTerms("coalesce", { default: 42 }),
+    );
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.message)).toContain(
+      "coalesce default must be text, not a number",
+    );
+    expect(describeDecodeError(result.error)).not.toContain("quote the value");
+  });
+
   test("refuses a null coalesce default", () => {
     const result = safeParseLinkageTerms(
       transformStepTerms("coalesce", { default: null }),

@@ -85,22 +85,44 @@ function declaredTypeLabel(
 }
 
 /**
+ * How a refusal is read, which decides whether it names a remedy.
+ *
+ * A remedy for a text param -- quote the value, or leave the key out -- tells
+ * the party who WROTE the document what to change. That is the operator
+ * reading a refusal of their own configuration. It is not the acceptor reading
+ * a refusal of a partner's invitation: they have no document to edit, so the
+ * instruction would send them after something they cannot do. Their refusal
+ * states the type and stops.
+ */
+export interface TransformParamRefusalOptions {
+  /** Whether the party who reads this refusal can edit the refused document. */
+  readerCanEditTheDocument: boolean;
+}
+
+const REFUSAL_TO_A_READER: TransformParamRefusalOptions = {
+  readerCanEditTheDocument: false,
+};
+
+/**
  * The refusal message for a param declared as the wrong type. The one wording
  * for both decode paths and the factories, so an operator meets the same
  * sentence wherever the document is read.
  *
- * The text case names the remedy for the way the mistake is made: an unquoted
- * number or bare `null` in a YAML document, where the operator meant a literal
- * or meant to leave the param out.
+ * The text case names the remedy for the way the mistake is made -- an
+ * unquoted number or bare `null` in a YAML document, where the operator meant
+ * a literal or meant to leave the param out -- for the reader who can act on
+ * it (see {@link TransformParamRefusalOptions}). A caller that says nothing
+ * gets the type statement alone.
  */
 export function transformParamTypeMessage(
   functionName: string,
   param: string,
   expected: TransformParamType,
   declared: unknown,
+  options: TransformParamRefusalOptions = REFUSAL_TO_A_READER,
 ): string {
   const head = `${functionName} ${param} must be ${EXPECTED_TYPE_LABELS[expected]}, not ${declaredTypeLabel(declared, expected)}`;
-  return expected === "text"
+  return expected === "text" && options.readerCanEditTheDocument
     ? `${head}; quote the value, or omit the key to leave the param unset`
     : head;
 }
@@ -169,10 +191,13 @@ function matchesDeclaredType(
  * partner-authored free text, and a bare index answers `constructor` or
  * `toString` with an inherited `Object.prototype` member.
  */
-export function transformParamTypeRefusals(step: {
-  function: string;
-  params?: Record<string, unknown>;
-}): TransformParamTypeRefusal[] {
+export function transformParamTypeRefusals(
+  step: {
+    function: string;
+    params?: Record<string, unknown>;
+  },
+  options: TransformParamRefusalOptions = REFUSAL_TO_A_READER,
+): TransformParamTypeRefusal[] {
   if (!Object.hasOwn(TRANSFORM_PARAM_TYPES, step.function)) return [];
   const expectedTypes = TRANSFORM_PARAM_TYPES[step.function];
   const params = step.params;
@@ -190,6 +215,7 @@ export function transformParamTypeRefusals(step: {
           param,
           expected,
           declared,
+          options,
         ),
       });
       continue;

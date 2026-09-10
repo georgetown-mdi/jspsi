@@ -29,7 +29,14 @@ const StandardizationStepSchema: z.ZodType<StandardizationStep> = z
   // the type it got, rather than running with something the operator did not
   // write. A param left out is how a step takes the function's default.
   .superRefine((step, ctx) => {
-    for (const refusal of transformParamTypeRefusals(step))
+    // The document this refuses is the operator's own, and the operator is who
+    // reads the refusal, so a text param's refusal names the remedy: quote the
+    // value, or leave the key out. The terms schema's identical check says the
+    // type alone, because an acceptor reading a refusal of a partner's
+    // invitation has no document to edit.
+    for (const refusal of transformParamTypeRefusals(step, {
+      readerCanEditTheDocument: true,
+    }))
       ctx.addIssue({
         code: "custom",
         message: refusal.message,
