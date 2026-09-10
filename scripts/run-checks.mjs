@@ -76,7 +76,12 @@ export const CHECKS = [
   {
     script: "check:enforcement-claims",
     description:
-      "Every CLAUDE.md enforcement claim names a hook that exists, is registered, and matches the tool the rule is about, and every hook has a test.",
+      "Every enforcement claim in CLAUDE.md and the orchestration ruleset names a hook that exists, is registered, and matches the tool the rule is about, and every hook has a test.",
+  },
+  {
+    script: "check:rule-ledgers",
+    description:
+      "CLAUDE.md and the orchestration ruleset share no enforcement claim and no heading, CLAUDE.md points at the ruleset once, and every front door loads it.",
   },
   {
     script: "check:egress-claims",

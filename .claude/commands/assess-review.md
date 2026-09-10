@@ -13,6 +13,11 @@ You stay where you are. You do not `cd` into the branch's worktree, and you do n
 check anything out -- reads go through `git -C <tree>` and `git show <ref>:<path>`,
 and anything that must RUN goes to a spawn.
 
+## First
+
+If `.claude/orchestration/ruleset.md` is not already in your context, read it
+before proceeding -- it holds the session rules this command's steps assume.
+
 ## Input
 
     /assess-review [<branch>]

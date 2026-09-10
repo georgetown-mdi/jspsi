@@ -3,6 +3,7 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { describe, expect, it } from "vitest";
 import {
+  RULE_LEDGERS,
   enforcementClaims,
   enforcementViolations,
   hookInventory,
@@ -13,7 +14,9 @@ const here = dirname(fileURLToPath(import.meta.url));
 const root = resolve(here, "..");
 
 const readRepo = () => ({
-  claims: enforcementClaims(readFileSync(resolve(root, "CLAUDE.md"), "utf8")),
+  claims: RULE_LEDGERS.flatMap((ledger) =>
+    enforcementClaims(readFileSync(resolve(root, ledger), "utf8"), ledger),
+  ),
   registrations: registeredHooks(
     JSON.parse(readFileSync(resolve(root, ".claude/settings.json"), "utf8")),
   ),
@@ -21,7 +24,7 @@ const readRepo = () => ({
 });
 
 describe("enforcement claim check", () => {
-  it("passes on the real CLAUDE.md, settings.json, and hooks dir", () => {
+  it("passes on the real ledgers, settings.json, and hooks dir", () => {
     expect(enforcementViolations(readRepo())).toEqual([]);
   });
 
@@ -32,6 +35,34 @@ describe("enforcement claim check", () => {
     expect(hooks).toContain("require-fable-approval.mjs");
     expect(hooks.length).toBeGreaterThanOrEqual(4);
     expect(claims.every((c) => c.lineNumber > 0)).toBe(true);
+  });
+
+  it("holds claims in both ledgers, each labelled with its own file", () => {
+    const { claims } = readRepo();
+    for (const ledger of RULE_LEDGERS) {
+      expect(
+        claims.filter((c) => c.file === ledger).length,
+        ledger,
+      ).toBeGreaterThan(0);
+    }
+  });
+
+  it("names the ledger a failing claim sits in", () => {
+    const violations = enforcementViolations({
+      claims: [
+        {
+          hook: "gone.mjs",
+          file: ".claude/orchestration/ruleset.md",
+          line: "Enforced by `gone.mjs` on Agent spawns.",
+          lineNumber: 12,
+        },
+      ],
+      registrations: [],
+      inventory: hookInventory(["a-hook.mjs", "a-hook.test.mjs"]),
+    });
+    expect(violations[0].problem).toContain(
+      ".claude/orchestration/ruleset.md:12",
+    );
   });
 
   it("reads every real registration back to an existing hook script", () => {
