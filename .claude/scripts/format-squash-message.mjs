@@ -12,8 +12,10 @@
 // restating CONTRIBUTING.md's Commit Messages rules at each producer -- the
 // remind-squash-message.mjs reminder, squash-message.mjs's prompt -- checks
 // nothing, and a 120-column body line reaches the maintainer intact. This is
-// where those rules are executable, and the limits below are the only copy of
-// the numbers outside CONTRIBUTING.md's own statement of the rule.
+// where those rules are executable. The wrap column below is the only copy of
+// that number outside CONTRIBUTING.md's own statement of the rule; the subject
+// budget is re-exported from ../../scripts/lib/squashSubjectBudget.mjs, the one
+// definition the PR checklist check and the PR-title hook measure it from too.
 //
 // THE SPLIT BETWEEN NORMALIZING AND REFUSING is whether the fix keeps the words.
 // Rewrapping a paragraph, dropping a markdown marker, turning a list item into a
@@ -42,11 +44,11 @@
 // riding with the item above it.
 //
 // THE SUBJECT BUDGET COUNTS THE SUFFIX. GitHub appends " (#NNNN)" to the subject
-// at squash time, and CONTRIBUTING.md's 50-character limit is on what lands, so
-// the budget checked here is 50 minus that suffix's width at the pull request's
-// own number, measured against the subject as normalized. A draft written before
-// the number is known passes `unassigned`, which assumes the four digits every
-// pull request in this repository has.
+// at squash time, and CONTRIBUTING.md's subject limit is on what lands, so the
+// budget checked here is that limit minus the suffix's width at the pull
+// request's own number, measured against the subject as normalized. A draft
+// written before the number is known passes `unassigned`, which assumes the four
+// digits every pull request in this repository has.
 //
 // AN INDENTED BLOCK IS LEFT VERBATIM. Rewrapping indented text would destroy the
 // shape someone indented it for, so a block holding an indented line is not
@@ -62,17 +64,23 @@
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
-/** CONTRIBUTING.md's subject limit, counting the suffix GitHub appends. */
-export const SUBJECT_LIMIT = 50;
+import {
+  SUBJECT_LIMIT,
+  UNASSIGNED_PR,
+  squashSuffix,
+  subjectBudget,
+} from "../../scripts/lib/squashSubjectBudget.mjs";
+
+export {
+  ASSUMED_PR_DIGITS,
+  SUBJECT_LIMIT,
+  UNASSIGNED_PR,
+  squashSuffix,
+  subjectBudget,
+} from "../../scripts/lib/squashSubjectBudget.mjs";
 
 /** CONTRIBUTING.md's body wrap: the widest a body line may be. */
 export const BODY_WRAP_COLUMNS = 70;
-
-/** The pull-request number argument for a draft written before one exists. */
-export const UNASSIGNED_PR = "unassigned";
-
-/** Digits assumed for the suffix when the pull-request number is unknown. */
-export const ASSUMED_PR_DIGITS = 4;
 
 /** A fenced-code delimiter, whose line is dropped whole. */
 const CODE_FENCE = /^\s*(?:```|~~~)/;
@@ -109,20 +117,6 @@ const MARKDOWN_MARKERS = [
   { pattern: /`[^`]+`/, name: "an inline code span" },
   { pattern: /\[[^\]]*\]\([^)\s]*\)/, name: "a markdown link" },
 ];
-
-/** The suffix GitHub appends to the subject when it squash-merges. */
-export function squashSuffix(prNumber) {
-  const digits =
-    prNumber === null || prNumber === UNASSIGNED_PR
-      ? "N".repeat(ASSUMED_PR_DIGITS)
-      : String(prNumber);
-  return ` (#${digits})`;
-}
-
-/** The characters the subject itself may use, once the suffix is counted. */
-export function subjectBudget(prNumber) {
-  return SUBJECT_LIMIT - squashSuffix(prNumber).length;
-}
 
 /**
  * The draft as a subject, the line under it, and the body: line endings

@@ -11,9 +11,13 @@ push:
 - `squash-message.mjs`, which drafts the squash message a pull request lands as,
   and `format-squash-message.mjs`, which rewraps a draft's body, drops the
   markdown and list markers a commit message does not take, and reports what it
-  cannot fix without rewriting the message. It holds the subject budget and the
-  wrap column, which the reminder hook and the
-  `block-nonconforming-squash-message.mjs` guard both read rather than restate
+  cannot fix without rewriting the message. It holds the wrap column, and
+  re-exports the subject budget from
+  [`squashSubjectBudget.mjs`](../../scripts/lib/squashSubjectBudget.mjs) next
+  door, the one definition the PR checklist check and the PR-title hook measure
+  that budget from. The reminder hook and the
+  `block-nonconforming-squash-message.mjs` guard take both from here rather than
+  restate them
 - `verify-nonexecutable-delta.mjs`, which decides whether a review attestation
   survives a moved head, and `verify-rebase-invariance.mjs`, which decides the
   same question for a head moved by a rebase. `lib/gitFixture.mjs` holds the

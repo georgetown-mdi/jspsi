@@ -16,11 +16,13 @@
 //   6. The Security review line must name the sha it reviewed, and that sha must
 //      be the PR head: a commit pushed after a review turns the PR red until the
 //      new head is reviewed and the line updated.
-//   7. The PR title must fit in 50 characters once GitHub's own `(#<number>)`
-//      squash-merge suffix is appended. This rule runs on the runner only,
-//      where PR_NUMBER is required and the budget is derived from it;
-//      titleBudget()'s 42-character fallback serves a direct call with no
-//      number, not reachable through this CLI.
+//   7. The PR title must fit the commit-subject limit once GitHub's own
+//      `(#<number>)` squash-merge suffix is appended. Both come from
+//      lib/squashSubjectBudget.mjs, which the hook refusing an over-budget
+//      `gh pr create --title` reads too, so the two cannot disagree. This rule
+//      runs on the runner only, where PR_NUMBER is required and the budget is
+//      derived from it; titleBudget()'s fallback for an unnumbered pull request
+//      serves a direct call with no number, not reachable through this CLI.
 //
 // The limits are deliberate. This is a mechanical SAFETY CHECK for the tells that a
 // checklist was left unresolved or resolved dishonestly by shape; whether a
@@ -44,6 +46,8 @@
 
 import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
+
+import { squashSuffix, subjectBudget } from "./lib/squashSubjectBudget.mjs";
 
 /** The template's Security review line, whose sha the attestation rule reads. */
 const REVIEW_PREFIX = "Security review";
@@ -278,24 +282,23 @@ export function bodyViolations(text, headSha) {
  * number to render one from). Derived from `prNumber`'s own digit count
  * rather than a hard-coded width, so a five-digit PR number moves the
  * boundary instead of silently passing a stale one; unset or blank falls
- * back to the 42-character figure CONTRIBUTING.md's guidance quotes, sized
- * for today's four-digit numbers.
+ * back to the figure CONTRIBUTING.md's guidance quotes, sized for today's
+ * four-digit numbers.
  */
 export function titleBudget(prNumber) {
   const digits =
     typeof prNumber === "string" || typeof prNumber === "number"
       ? String(prNumber).trim()
       : "";
-  if (digits === "") return { budget: 42, suffix: null };
-  const suffix = ` (#${digits})`;
-  return { budget: 50 - suffix.length, suffix };
+  if (digits === "") return { budget: subjectBudget(null), suffix: null };
+  return { budget: subjectBudget(digits), suffix: squashSuffix(digits) };
 }
 
 /**
  * Title-length violations for the squash-merge subject a PR title becomes
  * (empty array = clean): an empty or whitespace-only title, and a title that
- * would not fit the 50-character commit-subject budget once GitHub's merge
- * suffix is appended.
+ * would not fit the commit-subject budget once GitHub's merge suffix is
+ * appended.
  */
 export function titleViolations(title, prNumber) {
   if (typeof title !== "string" || title.trim() === "") {
@@ -308,7 +311,7 @@ export function titleViolations(title, prNumber) {
   const suffixNote =
     suffix !== null
       ? `GitHub's "${suffix}" merge suffix`
-      : `GitHub's " (#<number>)" merge suffix (no PR number available locally, so the 42-character fallback budget applies)`;
+      : `GitHub's " (#<number>)" merge suffix (no PR number available locally, so the fallback budget for a four-digit number applies)`;
   return [
     `PR title is ${title.length} characters, over the ${budget}-character budget once ${suffixNote} is appended -- shorten the title, it becomes the squash-merge commit subject`,
   ];
