@@ -21,6 +21,9 @@ import { deriveAcceptedLinkageTerms } from "../../src/linkageTermsNegotiation.js
 import { assertPayloadSendDisclosed } from "../../src/payloadExchange.js";
 import { withholdsSenderAssociationTable } from "../../src/psi/link.js";
 import { resolveRole } from "../../src/protocolSetup.js";
+import { parseLinkageTerms } from "../../src/config/linkageTermsSchema.js";
+import { declaredTransformParamType } from "../../src/config/transformParamTypes.js";
+import { runPipeline } from "../../src/standardization.js";
 
 import type { ConnectionEndpoint } from "../../src/config/invitation.js";
 import type {
@@ -1245,5 +1248,199 @@ describe("the consent summary's per-step params", () => {
         name,
       ).toEqual(["a: 1"]);
     }
+  });
+});
+
+// --- The displayed param against the executed one ----------------------------
+
+describe("a transform param the consent summary displays", () => {
+  // The acceptor consents to what this screen states, so a param displayed as
+  // one value and run as another would take that consent for a match the
+  // exchange does not make. Each case measures the two against each other: a
+  // step REBUILT from the lines the summary displays must transform every probe
+  // row exactly as the step the document decoded to does.
+  //
+  // Two transformations survive between the display and the run, pinned in
+  // their own cases below rather than measured away: the compile NFC-normalizes
+  // the literal a step injects or compares against, and a regex step with no
+  // pattern compiles the literal `undefined`. A third difference is a rendering
+  // of the value rather than a change to it -- the display doubles a backslash
+  // (docs/spec/CHANNEL_SECURITY.md, Display sanitization escape format) -- and
+  // is reversed here before the comparison.
+  const PROBE_ROWS = [
+    "",
+    "7",
+    "0",
+    "123",
+    "ab123cd",
+    "abcdefghij",
+    "25/12/2021",
+    "12/25/2021",
+    "N/A",
+    "NULL",
+    "UNKNOWN",
+    "a-b",
+    "a|b",
+    "Robert",
+  ];
+
+  const ELEMENTS: TransformStep[][] = [
+    [{ function: "pad_left", params: { length: 5, char: "0" } }],
+    [{ function: "substring", params: { start: 3, length: 4 } }],
+    [
+      {
+        function: "parse_date",
+        params: { inputFormat: "DD/MM/YYYY", outputFormat: "YYYY.MM.DD" },
+      },
+    ],
+    [{ function: "phonetic", params: { algorithm: "soundex" } }],
+    [
+      { function: "null_if", params: { value: "N/A" } },
+      { function: "coalesce", params: { default: "UNKNOWN" } },
+    ],
+    [{ function: "null_if", params: { values: ["NULL", "UNKNOWN"] } }],
+    [
+      {
+        function: "replace_regex",
+        params: { pattern: "[0-9]+", replacement: "#" },
+      },
+    ],
+    [{ function: "extract_regex", params: { pattern: "(\\d+)" } }],
+    [{ function: "filter_regex", params: { pattern: "[0-9]" } }],
+    [
+      {
+        function: "split_on",
+        params: { delimiter: "\\|", includeOriginal: true },
+      },
+    ],
+  ];
+
+  const documentWith = (elements: TransformStep[][]) => ({
+    version: "1.0.0",
+    identity: "Inviter",
+    date: "2025-01-01",
+    algorithm: "psi",
+    output: { expectsOutput: true, shareWithPartner: false },
+    deduplicate: false,
+    linkageFields: [{ name: "ssn", type: "ssn" }],
+    linkageKeys: [
+      {
+        name: "K",
+        elements: elements.map((transform, index) => ({
+          field: "ssn",
+          name: `e${index}`,
+          transform,
+        })),
+      },
+    ],
+  });
+
+  // The value a displayed line states, read back as the type the function reads
+  // the param as -- the type the document was decoded against, so the reading
+  // is the function's own contract rather than a guess at the line's shape.
+  const valueFromDisplay = (
+    functionName: string,
+    param: string,
+    shown: string,
+  ): unknown => {
+    switch (declaredTransformParamType(functionName, param)) {
+      case "integer":
+        return Number(shown);
+      case "boolean":
+        return shown === "true";
+      case "text-list":
+        return JSON.parse(shown) as unknown;
+      default:
+        return shown.replaceAll("\\\\", "\\");
+    }
+  };
+
+  const stepFromDisplay = (
+    functionName: string,
+    lines: readonly string[],
+  ): TransformStep => {
+    const params: Record<string, unknown> = {};
+    for (const line of lines) {
+      const separator = line.indexOf(": ");
+      const param = line.slice(0, separator);
+      params[param] = valueFromDisplay(
+        functionName,
+        param,
+        line.slice(separator + 2),
+      );
+    }
+    return { function: functionName, params };
+  };
+
+  // A fan-out step returns a set, whose iteration order is not what is being
+  // compared.
+  const resultOf = (steps: TransformStep[], row: string) => {
+    const result = runPipeline(row, steps);
+    return result instanceof Set ? [...result].sort() : result;
+  };
+
+  const decoded = parseLinkageTerms(documentWith(ELEMENTS));
+  const summary = summarizeInvitation({ linkageTerms: decoded });
+
+  test.each(
+    ELEMENTS.map((steps, index) => ({
+      functions: steps.map((step) => step.function).join(" then "),
+      index,
+    })),
+  )("$functions runs what it displays", ({ index }) => {
+    const declaredSteps =
+      decoded.linkageKeys[0].elements[index].transform ?? [];
+    const displayedSteps = summary.linkageKeys[0].elements[index].transforms;
+    const rebuilt = declaredSteps.map((step, stepIndex) =>
+      stepFromDisplay(step.function, displayedSteps[stepIndex].params),
+    );
+    for (const row of PROBE_ROWS)
+      expect(resultOf(rebuilt, row), `${row}`).toEqual(
+        resultOf(declaredSteps, row),
+      );
+  });
+
+  test("the compile normalizes a declared literal to NFC", () => {
+    // The first of the two surviving transformations. replace_regex, null_if,
+    // pad_left and coalesce normalize the literal they inject or compare
+    // against, so a document authoring one in another normal form runs its NFC
+    // equivalent while the display shows the form the document wrote.
+    const authored = "André";
+    const steps: TransformStep[] = [
+      { function: "null_if", params: { value: "X" } },
+      { function: "coalesce", params: { default: authored } },
+    ];
+    const terms = parseLinkageTerms(documentWith([steps]));
+    const executed = runPipeline(
+      "X",
+      terms.linkageKeys[0].elements[0].transform as TransformStep[],
+    );
+    expect(executed).toBe(authored.normalize("NFC"));
+    expect(executed).not.toBe(authored);
+    expect(
+      summarizeInvitation({ linkageTerms: terms }).linkageKeys[0].elements[0]
+        .transforms[1].params[0],
+    ).not.toContain(executed);
+  });
+
+  test("a regex step with no pattern runs the literal 'undefined'", () => {
+    // The second. An absent pattern is rendered as a string on its way to the
+    // engine, so the step matches the six characters of the word while the
+    // display states no pattern at all -- the one param whose absence changes
+    // what runs rather than taking a documented default.
+    const steps: TransformStep[] = [
+      { function: "replace_regex", params: { replacement: "Z" } },
+    ];
+    const terms = parseLinkageTerms(documentWith([steps]));
+    const displayed = summarizeInvitation({
+      linkageTerms: terms,
+    }).linkageKeys[0].elements[0].transforms[0].params;
+    expect(displayed).toEqual(["replacement: Z"]);
+    expect(
+      runPipeline(
+        "a-undefined-b",
+        terms.linkageKeys[0].elements[0].transform as TransformStep[],
+      ),
+    ).toBe("a-Z-b");
   });
 });

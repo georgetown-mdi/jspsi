@@ -182,6 +182,76 @@ describe("safeParseStandardization", () => {
     ]);
   });
 
+  // Nothing of the declared value reaches the refusal here either: the message
+  // names its TYPE and the issue path locates it. The operator's own block, so
+  // a text param's refusal names the remedy the terms schema's does not.
+  const stepSpec = (params: Record<string, unknown>, fn: string) => [
+    { output: "last_name", input: "LN", steps: [{ function: fn, params }] },
+  ];
+  const MARKER = "unrepeatable-param-marker";
+  const longMarkerText = MARKER.padEnd(720, "x");
+  const QUOTE_REMEDY =
+    "; quote the value, or omit the key to leave the param unset";
+
+  test.each([
+    {
+      name: "a long string in an integer param",
+      fn: "substring",
+      params: { start: longMarkerText, length: 3 },
+      param: "start",
+      message: "substring start must be a whole number, not text",
+    },
+    {
+      name: "a long string in a text param, refused for its neighbour",
+      fn: "replace_regex",
+      params: { pattern: longMarkerText, replacement: 42 },
+      param: "replacement",
+      message:
+        "replace_regex replacement must be text, not a number" + QUOTE_REMEDY,
+    },
+    {
+      name: "an object carrying a marker",
+      fn: "coalesce",
+      params: { default: { note: MARKER } },
+      param: "default",
+      message: "coalesce default must be text, not an object" + QUOTE_REMEDY,
+    },
+    {
+      name: "an array carrying a marker",
+      fn: "coalesce",
+      params: { default: [MARKER] },
+      param: "default",
+      message: "coalesce default must be text, not a list" + QUOTE_REMEDY,
+    },
+    {
+      name: "a NaN in an integer param",
+      fn: "substring",
+      params: { start: Number.NaN, length: 3 },
+      param: "start",
+      message:
+        "substring start must be a whole number, not a non-finite number",
+    },
+    {
+      name: "an infinity in an integer param",
+      fn: "substring",
+      params: { start: Number.NEGATIVE_INFINITY, length: 3 },
+      param: "start",
+      message:
+        "substring start must be a whole number, not a non-finite number",
+    },
+  ])("$name is refused by type, echoing no part of it", (testCase) => {
+    const result = safeParseStandardization(
+      stepSpec(testCase.params, testCase.fn),
+    );
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(
+      result.error.issues.map((issue) => [issue.path.join("."), issue.message]),
+    ).toContainEqual([`0.steps.0.params.${testCase.param}`, testCase.message]);
+    for (const issue of result.error.issues)
+      expect(issue.message).not.toContain(MARKER);
+  });
+
   // YAML writes NaN and the infinities as `.nan` and `.inf`. Neither is a whole
   // number and neither is a fraction, so the refusal names what disqualifies
   // them rather than calling them fractional.

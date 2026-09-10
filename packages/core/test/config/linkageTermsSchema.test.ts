@@ -3635,6 +3635,98 @@ describe("declared transform param types", () => {
     ]);
   });
 
+  // Nothing of the declared value reaches the refusal: the message names its
+  // TYPE and the issue path locates it, so a value crafted to be read as a
+  // sentence -- a long string, a marker inside an object or a list -- is not
+  // repeated to whoever reads the refusal. Measured over the rendered relay,
+  // which is what an acceptor sees, and not over the message alone.
+  const MARKER = "unrepeatable-param-marker";
+  const longMarkerText = MARKER.padEnd(720, "x");
+  const paramPath = (param: string) => [
+    "linkageKeys",
+    0,
+    "elements",
+    0,
+    "transform",
+    0,
+    "params",
+    param,
+  ];
+
+  test.each([
+    {
+      name: "a long string in an integer param",
+      fn: "substring",
+      params: { start: longMarkerText, length: 3 },
+      param: "start",
+      message: "substring start must be a whole number, not text",
+    },
+    {
+      name: "a long string in a text param, refused for its neighbour",
+      fn: "replace_regex",
+      params: { pattern: longMarkerText, replacement: 42 },
+      param: "replacement",
+      message: "replace_regex replacement must be text, not a number",
+    },
+    {
+      name: "an object carrying a marker",
+      fn: "coalesce",
+      params: { default: { note: MARKER } },
+      param: "default",
+      message: "coalesce default must be text, not an object",
+    },
+    {
+      name: "an array carrying a marker",
+      fn: "coalesce",
+      params: { default: [MARKER] },
+      param: "default",
+      message: "coalesce default must be text, not a list",
+    },
+    {
+      name: "a NaN in an integer param",
+      fn: "substring",
+      params: { start: Number.NaN, length: 3 },
+      param: "start",
+      message:
+        "substring start must be a whole number, not a non-finite number",
+    },
+    {
+      name: "an infinity in an integer param",
+      fn: "substring",
+      params: { start: Number.POSITIVE_INFINITY, length: 3 },
+      param: "start",
+      message:
+        "substring start must be a whole number, not a non-finite number",
+    },
+  ])("$name is refused by type, echoing no part of it", (testCase) => {
+    const result = safeParseLinkageTerms(
+      transformStepTerms(testCase.fn, testCase.params),
+    );
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(
+      result.error.issues.map((issue) => [issue.path, issue.message]),
+    ).toContainEqual([paramPath(testCase.param), testCase.message]);
+    expect(describeDecodeError(result.error)).not.toContain(MARKER);
+  });
+
+  test("a long text param carrying a marker parses, so no refusal quotes it", () => {
+    // The other half of the measurement above: where the value is the type the
+    // function reads, it is accepted as declared rather than echoed into an
+    // issue at all.
+    const result = safeParseLinkageTerms(
+      transformStepTerms("replace_regex", {
+        pattern: longMarkerText,
+        replacement: "",
+      }),
+    );
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(
+      result.data.linkageKeys[0].elements[0].transform?.[0].params?.pattern,
+    ).toBe(longMarkerText);
+  });
+
   test("refuses a numeric pad_left char", () => {
     const result = safeParseLinkageTerms(
       transformStepTerms("pad_left", { length: 9, char: 5 }),
