@@ -29,8 +29,8 @@ import { ManagedRunSurface } from "@recurring/ManagedRunSurface";
 import { composeManagedExchangeFile } from "@psi/managed/managedExchangeRecord";
 import { dispatchManagedCronExport } from "@psi/managed/managedExchangeExport";
 
+import { createAppMount, flushPendingUpdates } from "./renderApp";
 import { captureDownloads } from "./captureDownloads";
-import { createAppMount } from "./renderApp";
 
 import type { DownloadCapture } from "./captureDownloads";
 import type { NewManagedExchange } from "@psi/managed/managedExchangeRecord";
@@ -106,6 +106,10 @@ beforeEach(async () => {
 });
 
 afterEach(async () => {
+  // The run surface polls its record's run lock on an interval, so a store read
+  // can be in flight at teardown; unmounting into one corrupts React's scheduler
+  // for the rest of the file (see flushPendingUpdates).
+  await flushPendingUpdates();
   app.unmount();
   await clearManagedExchanges();
 });
@@ -344,8 +348,10 @@ describe("the durable spent surface names the hand-off that spent it", () => {
 
   /** Mount the run surface again from nothing, as a later visit does: the surface
    * re-reads the record and its sibling state rather than keeping what the
-   * confirmation put in React state. */
-  function remount(id: string): void {
+   * confirmation put in React state. The unmount waits out the work the spend
+   * left scheduled, which a synchronous one would tear down mid-render. */
+  async function remount(id: string): Promise<void> {
+    await flushPendingUpdates();
     app.unmount();
     app.render(createElement(ManagedRunSurface, { id }));
   }
@@ -366,7 +372,7 @@ describe("the durable spent surface names the hand-off that spent it", () => {
         .element(page.getByText("Handed off to the command line"))
         .toBeInTheDocument();
 
-      remount(created.id);
+      await remount(created.id);
 
       await expect
         .element(
@@ -410,7 +416,7 @@ describe("the durable spent surface names the hand-off that spent it", () => {
         (await getManagedLocalState(created.id))?.spent?.handoff,
       ).toBeUndefined();
 
-      remount(created.id);
+      await remount(created.id);
 
       await expect
         .element(

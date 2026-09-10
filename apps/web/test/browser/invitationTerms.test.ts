@@ -2868,9 +2868,12 @@ describe("InvitationTerms: a qualifying sentence sits at its headline's visibili
     // are measured on one input.
     renderTerms(COUNT_ONLY_PROBE_TERMS);
     await expect.element(toggle("Matching strategies")).toBeInTheDocument();
-    // The always-visible header subline degrades the same way a refused
-    // fan-out element's header marker does, before the matching list is even
-    // opened.
+    // "date of birth (fuzzy) (either order not supported)" is the per-key
+    // header MatchKeyDisclosure renders for this key: always-visible relative
+    // to its own inner disclosure, but nested inside the outer "Matching
+    // strategies" Collapse, so it commits at that panel's deferred priority.
+    // Wait for the panel rather than racing its commit (see collapsePanels.ts).
+    await readyPanel("Matching strategies");
     expect(app.container.textContent).toContain(
       "date of birth (fuzzy) (either order not supported)",
     );
@@ -2893,8 +2896,12 @@ describe("InvitationTerms: a qualifying sentence sits at its headline's visibili
     // it and the caveat above is the algorithm's doing rather than the fixture's.
     renderTerms(CONSENT_PROBE_TERMS);
     await expect.element(toggle("Matching strategies")).toBeInTheDocument();
-    // The always-visible header subline states the either-order match
-    // unqualified, since the run applies it.
+    // "date of birth (fuzzy) (matched in either order)" is the per-key
+    // header MatchKeyDisclosure renders for this key: always-visible relative
+    // to its own inner disclosure, but nested inside the outer "Matching
+    // strategies" Collapse, so it commits at that panel's deferred priority.
+    // Wait for the panel rather than racing its commit (see collapsePanels.ts).
+    await readyPanel("Matching strategies");
     expect(app.container.textContent).toContain(
       "date of birth (fuzzy) (matched in either order)",
     );
