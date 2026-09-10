@@ -336,10 +336,14 @@ test("decodeInvitation reads a disclosed column named twice as one entry, and th
   // token naming a column twice there must therefore collapse at decode, or the
   // acceptor consents to a two-item list and expects a set the partner's own
   // transmission cannot match.
+  // Terms that share the result with the accepting party: the summary reads the
+  // subset only where a column is transmitted at all, so the base terms' own
+  // one-sided direction would answer a different question than this one.
   const token = {
     ...baseToken,
     linkageTerms: {
       ...baseTerms,
+      output: { expectsOutput: true, shareWithPartner: true },
       payload: { send: [{ name: "dose", description: "Dose administered" }] },
     },
     disclosedPayloadColumns: ["dose", "dose"],

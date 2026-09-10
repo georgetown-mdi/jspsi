@@ -2886,6 +2886,29 @@ describe("displayInvitation: the declared terms it discloses (columns, citations
     ).not.toContain("columns you will receive");
   });
 
+  test("displayInvitation: an invitation giving this party no result counts no received columns", () => {
+    // The mint-reachable pair: the result is not shared, the terms declare an
+    // empty send, and the token still carries the subset a mint stamps whatever
+    // the output direction. No column crosses to a party entitled to no result,
+    // so the prompt states the non-receipt once and puts no count of arriving
+    // columns two lines under it.
+    const log = getLogger("accept-display-no-result-test");
+    log.setLevel("silent");
+    const base = sampleToken(FUTURE());
+    const joined = renderDisplayInvitation(log, {
+      ...base,
+      linkageTerms: {
+        ...base.linkageTerms,
+        output: { expectsOutput: true, shareWithPartner: false },
+        payload: { send: [] },
+      },
+      disclosedPayloadColumns: ["diagnosis"],
+    });
+    expect(joined).toContain("you will receive the result (enforced): no");
+    expect(joined).not.toContain("columns you will receive");
+    expect(joined).not.toContain("diagnosis");
+  });
+
   test("displayInvitation: the rule-set citation displays as the partner's word, and is absent when none is cited", () => {
     // The citation is the inviting party's own claim about its rules, so the block
     // holds the trust-contingent marker rather than displaying as a provenance

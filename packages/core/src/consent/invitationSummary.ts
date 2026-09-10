@@ -227,6 +227,11 @@ interface InvitationPayloadSummary {
    * when false, the send side is lazy and stays unshown. The narrower
    * {@link sendFromCarriedSubset} says whether an acceptance can hold the
    * inviter to this declaration.
+   *
+   * False as well where `output.shareWithPartner` is clear, however the
+   * invitation declares or stamps its send: no column is transmitted to a
+   * party entitled to no result, so there is no arriving set to state and
+   * the receipt fact (`viewerReceivesNoResult`) is what says so.
    */
   sendDeclared: boolean;
   /**
@@ -243,6 +248,10 @@ interface InvitationPayloadSummary {
    * reconcile against, so an online run accepts whatever the inviter
    * transmits. A surface classifying the received-columns fact reads this
    * flag, not {@link sendDeclared}.
+   *
+   * Clear wherever {@link sendDeclared} is, including the no-result shape
+   * above: a subset stamped on an invitation that transmits nothing is not
+   * the source of any displayed set.
    */
   sendFromCarriedSubset: boolean;
   /** Columns the inviter requests from the acceptor for matched records (what
@@ -1664,16 +1673,28 @@ export function summarizeInvitation(
   // FROM the acceptor) has no transmission predicate to derive from and
   // stays the authored list.
   //
+  // Both sources are read only where the inviting party shares the result:
+  // `runExchange` builds a party's payload just when the PARTNER is entitled
+  // to one, so an invitation handing the accepting party no result transmits
+  // no column whatever its metadata discloses. A mint still stamps its
+  // disclosed subset there, beside a `payload.send` the token schema lets
+  // stand empty for exactly that reason (config/invitation.ts), and reading
+  // it would put a count of arriving columns on a screen that also states no
+  // result arrives.
+  //
   // sendDeclared, sendFromCarriedSubset, and receiveDeclared are documented
   // on InvitationPayloadSummary; the section below renders whenever the
   // send OR the receive is declared.
-  const sendFromCarriedSubset = source.disclosedPayloadColumns !== undefined;
-  const sendDeclared =
-    sendFromCarriedSubset || (terms.payload?.send ?? []).length > 0;
+  const carriedSubset = terms.output.shareWithPartner
+    ? source.disclosedPayloadColumns
+    : undefined;
+  const authoredSend = terms.output.shareWithPartner
+    ? (terms.payload?.send ?? []).map((column) => column.name)
+    : [];
+  const sendFromCarriedSubset = carriedSubset !== undefined;
+  const sendDeclared = sendFromCarriedSubset || authoredSend.length > 0;
   const receiveDeclared = terms.payload?.receive !== undefined;
-  const send =
-    source.disclosedPayloadColumns ??
-    (terms.payload?.send ?? []).map((column) => column.name);
+  const send = carriedSubset ?? authoredSend;
   const receive = (terms.payload?.receive ?? []).map((column) => column.name);
   if (sendDeclared || receiveDeclared) {
     summary.payload = {

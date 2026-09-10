@@ -124,6 +124,28 @@ describe("the consent summary's payload block", () => {
     });
   });
 
+  test("shows no send set at all when this party is entitled to no result", () => {
+    // A mint stamps its disclosed subset whatever the output direction, and the
+    // token schema admits that subset beside an empty `payload.send` where the
+    // result is not shared. `runExchange` builds a party's payload only where
+    // the partner is entitled to one, so no column crosses here: the summary
+    // states no arriving set rather than one a surface would count beside its
+    // own "you receive no result" line.
+    const metadata = inferMetadata(DISCLOSING_COLUMNS, []);
+    expect(disclosedColumnNames(metadata).length).toBeGreaterThan(0);
+    const terms = getDefaultLinkageTerms("Inviter", metadata);
+    const summary = summarizeInvitation({
+      linkageTerms: {
+        ...terms,
+        output: { expectsOutput: true, shareWithPartner: false },
+        payload: { send: [] },
+      },
+      disclosedPayloadColumns: disclosedColumnNames(metadata),
+    });
+    expect(summary.inviterSharesResult).toBe(false);
+    expect(summary.payload).toBeUndefined();
+  });
+
   test("shows an authored empty payload.receive as a declared request", () => {
     // The receive-side mirror of the declared-empty send case above: an
     // authored `payload.receive: []` is the strict "the acceptor sends
