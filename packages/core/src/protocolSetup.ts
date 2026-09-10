@@ -133,12 +133,14 @@ export const PROTOCOL_VERSION_MISMATCH_MESSAGE =
 // the terms exchange").
 //
 // Two optionality choices this schema fixes. `disclosesPayload` is optional
-// even though the production caller always passes a definite boolean, and the
-// withhold gate defaults an absent value to "discloses payload" (do not
-// withhold), so a non-conforming peer that omits it can never drive the blind
-// path against a helper that needs its table. `recordCount` is required here
-// because this frame is never an abort, so a missing count is a clean decode
-// failure rather than an unenforced assumption.
+// even though the production caller always passes a definite boolean, and
+// the payload-disclosure resolution reads an absent value as an assertion
+// of disclosure: a non-conforming peer that omits it can never drive the
+// blind path against a helper that needs its table, and against a party
+// whose agreed terms declare an empty `payload.receive` it is refused
+// before any round, as an asserted disclosure would be. `recordCount` is
+// required here because this frame is never an abort, so a missing count
+// is a clean decode failure rather than an unenforced assumption.
 const termsMessage = z.object({
   linkageTerms: z.unknown(),
   recordCount: recordCountField,
