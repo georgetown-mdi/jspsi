@@ -2666,6 +2666,37 @@ describe("AcceptorScreen: this party's own deduplicate", () => {
       .toBeEnabled();
   });
 
+  test("states what the both-sided pair does with a key that splits its value", async () => {
+    // The combination the cascade runs and this seat can reach: an invitation
+    // declaring duplicate matching over a key that splits one value into
+    // several candidates. Both halves of what it pairs are on screen before the
+    // accept -- the candidate pairing under both settings, and the grouping of
+    // records no key links -- so the operator sets its own side against them.
+    await reachReview({
+      ...acceptorTerms,
+      deduplicate: true,
+      linkageKeys: [
+        {
+          name: "first",
+          elements: [
+            {
+              field: "firstName",
+              transform: [{ function: "split_on", params: { delimiter: " " } }],
+            },
+          ],
+        },
+        acceptorTerms.linkageKeys[1],
+      ],
+    });
+    expect(app.container.textContent).toContain(
+      CONSENT_FACTS.fanOutCandidates.note,
+    );
+    await userEvent.click(ownSide());
+    await expect
+      .element(page.getByText(pairSentence(true, true)))
+      .toBeInTheDocument();
+  });
+
   test("offers no control where this party receives no result", async () => {
     // A sole-receiver invitation mirrors this party to expectsOutput false, and
     // the schema takes no deduplicate from a party that receives no result --

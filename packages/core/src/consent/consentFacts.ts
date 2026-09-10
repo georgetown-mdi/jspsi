@@ -496,23 +496,29 @@ export const CONSENT_FACTS = {
       "grouping for every key, matched or not, where a cascade round states " +
       "each party's grouping of that round's matched values alone. All three " +
       "are properties of the round rather than of anyone's conduct. The " +
-      "normative " +
-      "rows are docs/spec/PROTOCOL.md's (Fan-out matching, and the disclosure " +
-      "delta fan-out pays), so a row reclassified there and not here is a " +
-      "divergence between a specification and the sentence an acceptor consents " +
-      "on.",
+      "normative rows are docs/spec/PROTOCOL.md's (Fan-out matching, the " +
+      "disclosure delta fan-out pays, and the `many-to-many` entity closure, " +
+      "which the pairing count under both parties' duplicate matching is read " +
+      "from), so a row reclassified there and not here is a divergence " +
+      "between a specification and the sentence an acceptor consents on.",
     note:
       "A linkage key here splits a value into several candidates and matches " +
       "each on its own, so a record matches when any single candidate does. " +
       "That match can rest on one candidate out of a name rather than on the " +
       "whole value, which is weaker evidence. A record matched this way is " +
-      "paired at most once and is then left out of the later, less precise " +
-      "keys, whether or not that pairing stands. Under single-pass linkage the " +
-      "party that receives the other's key structure also learns how many " +
-      "candidates each of the other's records produced for each key and which " +
-      "of its values came from the same record; under cascade linkage each " +
-      "party learns instead how the other's matched values group into records, " +
-      "round by round, for the records still in the running.",
+      "left out of the later, less precise keys, whether or not that pairing " +
+      "stands, and how many of the other party's records it pairs with " +
+      "follows the two duplicate-matching settings: with neither set it is " +
+      "paired at most once, and with both set -- which cascade linkage " +
+      "matches and single-pass refuses -- it is paired with every one of the " +
+      "other party's records any of its candidates reached, and the records " +
+      "joined that way are disclosed to both parties as one group. Under " +
+      "single-pass linkage the party that receives the other's key structure " +
+      "also learns how many candidates each of the other's records produced " +
+      "for each key and which of its values came from the same record; under " +
+      "cascade linkage each party learns instead how the other's matched " +
+      "values group into records, round by round, for the records still in " +
+      "the running.",
   },
   fanOutRefused: {
     basis: "enforced",
@@ -1254,7 +1260,10 @@ export function describeDeduplicatePair({
       "Both parties declare deduplicate true. One matched linkage-key value " +
       "pairs every one of the accepting party's records holding it with every " +
       "one of the inviting party's, so the result discloses both parties' " +
-      "groupings and holds one row per matched pair."
+      "groupings and holds one row per matched pair. Where a key matches one " +
+      "record on several values, the records those values reach are all " +
+      "grouped with it, so records sharing no matched value are disclosed to " +
+      "both parties as one group."
     );
   if (inviterDeduplicate)
     return (
