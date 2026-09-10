@@ -52,6 +52,9 @@ on:
       - "support/windows-network-filedrop/**"
       - "scripts/derive-image-dependencies.mjs"
       - "scripts/assert-image-capabilities.mjs"
+      # Both sides of the production-scope measurement below are read by this
+      # one lister, so an edit to it moves what that step measures.
+      - "scripts/list-node-modules-packages.mjs"
       # Both legs run a real exchange over these two synthetic inputs, so a
       # change to their schema breaks it here rather than in a release build.
       - "test_data/**"
@@ -662,6 +665,48 @@ jobs:
               exit 1
             fi
           done
+
+      # Which packages the built image's /app/node_modules actually carries,
+      # against the production resolution the builder installs. The freeze test
+      # holds the install command's shape, and no reading of an instruction
+      # reaches the tree that command resolves: the lockfile's flags decide what
+      # a scoped --omit=dev --omit=optional install keeps, and the wipe before it
+      # decides what an earlier install leaves behind.
+      #
+      # The expected side is resolved here, from the committed lockfile, by
+      # running that same command on the runner -- not read off the Dockerfile
+      # and not kept as a package list, either of which would move with the
+      # regression it is meant to catch. The command is written out here for
+      # that reason; dockerfile-freeze.test.mjs is what holds the Dockerfile to
+      # it, and a change to one is a change to both.
+      #
+      # One direction: a package in the image and not in the resolution fails.
+      # The two trees are resolved from the same lockfile but seeded from
+      # different manifest sets -- the builder copies four workspace manifests,
+      # a checkout has all five -- so the runner's tree carries workspace links
+      # the image has no manifest for, and only the image's own extras are a
+      # scope violation. The lister refuses an empty tree, and a runtime
+      # dependency that failed to arrive fails the exchange smokes above.
+      - name: Measure the image's production node_modules scope
+        run: |
+          set -euo pipefail
+          npm ci --omit=dev --omit=optional -w packages/core -w apps/cli
+          node scripts/list-node-modules-packages.mjs node_modules \
+            | LC_ALL=C sort >"$RUNNER_TEMP/resolved.txt"
+          docker run --rm \
+            -v "$PWD/scripts/list-node-modules-packages.mjs":/list.mjs:ro \
+            --entrypoint node ${{ matrix.tag }} /list.mjs /app/node_modules \
+            | LC_ALL=C sort >"$RUNNER_TEMP/shipped.txt"
+
+          echo "the ${{ matrix.variant }} image carries $(wc -l <"$RUNNER_TEMP/shipped.txt") packages under /app/node_modules; the production resolution holds $(wc -l <"$RUNNER_TEMP/resolved.txt")"
+          outside=$(comm -23 "$RUNNER_TEMP/shipped.txt" "$RUNNER_TEMP/resolved.txt")
+          if [ -n "$outside" ]; then
+            count=$(printf '%s\n' "$outside" | wc -l)
+            echo "$count packages under /app/node_modules are outside the production resolution; the first of them:" >&2
+            printf '%s\n' "$outside" | head -n 40 >&2
+            exit 1
+          fi
+          echo "/app/node_modules: every package is in the production resolution"
 
       # Every setuid and setgid file in the built image, compared against the
       # inventory docs/spec/CONTAINER_IMAGES.md records for it. No reading of a

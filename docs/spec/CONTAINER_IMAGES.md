@@ -9,7 +9,7 @@ Two container images are built from this repository: the shipped CLI image
 freeze their npm tree to the committed lockfile, pin their base image by digest,
 and install one reviewed set of OS packages each. This document records what
 each pins, what holds the pin, what those installs bring into the image, and the
-three properties of a built image that are measured by running it rather than by
+four properties of a built image that are measured by running it rather than by
 reading its instructions. Why the npm dependencies themselves are exact-pinned,
 and the per-stack upgrade checklists, are in
 [DEPENDENCY_PINS.md](DEPENDENCY_PINS.md).
@@ -104,11 +104,13 @@ and runs without it -- driven on the omitted tree, ssh2 1.17.0 completes a
 handshake, authentication and remote exec over loopback with `cpu-features`
 unresolvable.
 
-No check measures the built image's `/app/node_modules` against that scope. The
-freeze test reads the instruction, and the runtime measurements below cover the
-writable set, symlink containment and the setuid inventory rather than the
-package set, so a package the resolved tree holds and this scope does not
-account for reaches the image unremarked.
+The built image's `/app/node_modules` is measured against that scope by
+[the production node_modules scope](#the-production-node_modules-scope) below,
+which is the resolved-tree half the freeze test cannot reach: every package the
+image carries must be one the same install resolves from the committed lockfile
+on the runner. What it does not reach is a package the resolution holds and the
+image lacks, and the `apps/web` `.output` bundle the runtime stage copies
+alongside, which is vite's own output rather than an npm install.
 
 The `node:26-alpine` base image is digest-pinned in both stages to its
 multi-arch index digest, so the Node runtime and Alpine userland beneath the
@@ -484,15 +486,15 @@ one is reached: every `crypto.subtle` AES-GCM call supplies an external IV
 
 ## The runtime posture measured on each built image
 
-Three properties are settled by running the image `image_smoke.yaml` just
+Four properties are settled by running the image `image_smoke.yaml` just
 built, not by reading the Dockerfile that produced it: which trees the
-container can write, which files have a setuid or setgid bit, and where every
-symlink under `/app` resolves. All three are outcomes rather than
-instructions -- each is decided by base-image state and by the file modes and
-targets an OS package arrives with as much as by anything this repository
-writes -- so a static reading of the build cannot reach any of them, however
-tightly `scripts/dockerfile-freeze.test.mjs` holds the instructions
-themselves.
+container can write, which files have a setuid or setgid bit, where every
+symlink under `/app` resolves, and which packages `/app/node_modules` carries.
+All four are outcomes rather than instructions -- each is decided by base-image
+state, by the file modes and targets an OS package arrives with, or by what a
+lockfile resolves, as much as by anything this repository writes -- so a static
+reading of the build cannot reach any of them, however tightly
+`scripts/dockerfile-freeze.test.mjs` holds the instructions themselves.
 
 ### The writable set
 
@@ -549,6 +551,49 @@ its raw target and, where one resolved, the path it resolved to -- are printed
 so the failure is diagnosable from the job log alone.
 
 Run on both images, as the writable-set measurement above is.
+
+### The production node_modules scope
+
+Every package the built image carries under `/app/node_modules` is one the
+production install resolves. The measured side is a walk of that directory in
+the image; the expected side is the tree
+`npm ci --omit=dev --omit=optional -w packages/core -w apps/cli` resolves from
+the committed lockfile on the runner, in the checkout the job already has.
+`scripts/list-node-modules-packages.mjs` reads both, emitting one
+`name@version` per package, and the step fails on any the image holds and the
+resolution does not, printing them.
+
+The expected side is resolved rather than listed. A committed list of packages
+would be a second freeze, drifting against the one
+`scripts/dockerfile-freeze.test.mjs` already holds, and reading the flags off
+the Dockerfile would move the expectation with any regression in the
+instruction it is meant to catch. The command is therefore written out in the
+step, and the freeze test is what holds the Dockerfile to the same one.
+
+The lister walks directories rather than reading npm's own
+`.package-lock.json`, which records what npm installed and not what the tree
+holds: a later build step that adds to the tree is invisible to that file. A
+directory carrying no readable manifest is reported by its path, that being the
+shape something other than npm arrives in, and an empty tree fails outright
+rather than passing for want of anything to compare. A symlinked entry is read
+from the manifest it resolves to and not descended into.
+
+The comparison runs one way: a package in the image and not in the resolution
+fails, and one in the resolution and not in the image does not. The two trees
+resolve from the same lockfile but are seeded from different manifest sets --
+the builder copies four workspace manifests, a checkout has all five -- so the
+runner's tree carries a workspace link the image has no manifest for. What the
+opposite direction would catch is covered by the exchange smokes, which do not
+complete without the runtime dependencies, and by the symlink containment
+measurement, which refuses a workspace link that dangles.
+
+Two things stay outside it. The `apps/web` `.output` tree the runtime stage
+copies bundles its own dependencies, which are vite's output rather than an npm
+install and are not walked. And where a package sits in the tree is not
+compared, only which packages are there; the layout is the lockfile's, and the
+copied layout is the freeze test's.
+
+Run on both images, as the measurements above are.
 
 ### The setuid and setgid inventory
 
