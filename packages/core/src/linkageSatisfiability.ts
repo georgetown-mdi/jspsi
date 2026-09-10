@@ -225,12 +225,12 @@ export function assertFanOutImplemented(
  * Refuse a candidate set under the `many-to-many` cardinality the two parties'
  * agreed `deduplicate` values resolve to, before any matching begins.
  *
- * `single-pass` refuses `many-to-many` outright, so a cascade realization of
- * the pair would have no single-pass table to be identical to and the
- * equivalence obligation that pins the resolution would have no referent
- * (docs/spec/PROTOCOL.md, The combinations that stay unsupported).
- * `many-to-one` and `one-to-many` are not refused with it: a candidate set on
- * either side of those runs under both strategies.
+ * The closure over candidate sets under `many-to-many` is specified and not
+ * yet built (docs/spec/PROTOCOL.md, The `many-to-many` entity closure and The
+ * combinations that stay unsupported), so the combination is refused until
+ * the cascade's resolution lands. `many-to-one` and `one-to-many` are not
+ * refused with it: a candidate set on either side of those runs under both
+ * strategies.
  *
  * The combination takes BOTH parties' documents, so unlike
  * {@link assertFanOutImplemented} it cannot be decided from one. It is applied
