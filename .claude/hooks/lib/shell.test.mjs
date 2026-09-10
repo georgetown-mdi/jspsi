@@ -10,6 +10,7 @@ import {
   splitSegments,
   splitStages,
   tokenize,
+  tokenizeRaw,
 } from "./shell.mjs";
 
 const temporary = [];
@@ -118,6 +119,22 @@ describe("tokenize", () => {
 
   it("reads an empty segment as no words", () => {
     expect(tokenize("   ")).toEqual([]);
+  });
+});
+
+describe("tokenizeRaw", () => {
+  it("splits the same words and leaves every quote on them", () => {
+    expect(tokenizeRaw(`gh pr create --title "Don't stop"`)).toEqual([
+      "gh",
+      "pr",
+      "create",
+      "--title",
+      `"Don't stop"`,
+    ]);
+  });
+
+  it("reads an empty segment as no words", () => {
+    expect(tokenizeRaw("   ")).toEqual([]);
   });
 });
 
