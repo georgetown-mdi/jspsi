@@ -568,15 +568,14 @@ export function unsatisfiedLinkageFields(
  * `YYYY` or `YY`), matching the factory, which populates `year` from whichever it
  * tokenizes; month needs `MM`, day needs `DD`.
  *
- * This mirrors {@link parseDateFactory}'s coercion exactly so the verdict cannot
- * drift from the runtime. A nullish input format falls back to the factory's
- * complete `"MM/DD/YYYY"`, which drops nothing. A non-nullish NON-string (wire
- * params are `z.unknown()`, so a partner can supply one) never yields a value at
- * runtime -- the factory coerces any non-string to an empty format that tokenizes
- * to an all-dropping pattern -- so it is dead, and is reported so WITHOUT calling
- * {@link parseDateFormat} on the non-string (which would throw on an array). For a
- * string input format the present component set is recovered from core's OWN
- * tokenizer ({@link parseDateFormat}), not a re-implemented scan -- the
+ * This mirrors {@link parseDateFactory} exactly so the verdict cannot drift from
+ * the runtime. An absent input format falls back to the factory's complete
+ * `"MM/DD/YYYY"`, which drops nothing. A non-string format yields no value
+ * either way -- the decode refuses it (`config/transformParamTypes.ts`) and the
+ * factory refuses it at compile -- and is reported dead WITHOUT calling
+ * {@link parseDateFormat} on it, which would throw on an array. For a string
+ * input format the present component set is recovered from core's OWN tokenizer
+ * ({@link parseDateFormat}), not a re-implemented scan -- the
  * encode-the-runtime-invariant-as-a-check rule, here over a "this never produces a
  * value" claim.
  */
@@ -645,10 +644,10 @@ export function stepCanEmptyRealizedValue(step: TransformStep): boolean {
  * fallback there. Two conditions, both necessary:
  *
  * - Its declared `default` is a string, the only shape {@link compileStep} turns
- *   into a substitution value. Wire params are `z.unknown()` with no per-function
- *   shape, so a partner can declare `default` as any JSON value (or omit it);
- *   every non-string behaves as an absent default, which {@link applyStep}'s
- *   coalesce branch runs as a pass-through.
+ *   into a substitution value. A step may omit the default, which leaves
+ *   {@link applyStep}'s coalesce branch a pass-through; any other declared type
+ *   is refused before a run, at decode and again at compile
+ *   (`config/transformParamTypes.ts`).
  * - Some step BEFORE it can empty the value ({@link stepCanEmptyRealizedValue}).
  *   The branch that substitutes fires on a null value or an empty candidate set,
  *   and a pipeline starts from a non-null string -- {@link applyElementTransform}
@@ -1323,8 +1322,8 @@ export function substringRunDropsEveryParsedDate(
  * the verdict to move with it, so a name listed here names a real verdict. What
  * that cannot see is the other direction -- a NEW param that could move the marker
  * toward the milder word arriving with no entry here -- which is a review call, as
- * the coercion table beside {@link describeTransformCoercions} has the same
- * shape of gap.
+ * the declared-type table in `config/transformParamTypes.ts` has the same shape
+ * of gap.
  */
 export const CONSENT_VERDICT_PARAM_NAMES: Readonly<
   Record<string, ReadonlyArray<string>>

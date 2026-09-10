@@ -527,28 +527,15 @@ describe("a coalesce that substitutes nothing where it sits", () => {
     expect(pipelineHasInertCoalesce([nullIf, withDefault])).toBe(false);
   });
 
-  test("a default that is absent or not text substitutes nothing either", () => {
-    // The editor's own `default` control is a text input, so these arrive on an
-    // imported document, whose transform params are `z.unknown()`. Core runs
-    // every non-string default as a pass-through, so the surface must not claim
-    // a substitution. Reported against the default rather than the position,
-    // because an emptying rule already precedes it.
+  test("a coalesce declaring no default substitutes nothing either", () => {
+    // The editor's own `default` control is a text input, so a coalesce with no
+    // default arrives on an imported document; core runs it as a pass-through,
+    // so the surface must not claim a substitution. Reported against the default
+    // rather than the position, because an emptying rule already precedes it.
     const preceding = [{ function: "null_if", params: { values: ["X"] } }];
     expect(inertCoalesceCause({ function: "coalesce" }, preceding)).toBe(
       "no-text-default",
     );
-    expect(
-      inertCoalesceCause(
-        { function: "coalesce", params: { default: 0 } },
-        preceding,
-      ),
-    ).toBe("no-text-default");
-    expect(
-      inertCoalesceCause(
-        { function: "coalesce", params: { default: null } },
-        preceding,
-      ),
-    ).toBe("no-text-default");
   });
 
   test("the position half is core's own classification, not a second list here", () => {

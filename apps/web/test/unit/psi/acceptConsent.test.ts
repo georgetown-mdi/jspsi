@@ -682,41 +682,28 @@ describe("summarizeInvitation", () => {
       }),
     ).linkageKeys[0].elements[0].transforms[0];
 
-  test("annotates a coerced parameter with the value the function actually runs", () => {
-    // The headline case: replace_regex replacement: null executes as the empty
-    // string. The param line stays verbatim and the executed value is shown
-    // as a separate coercion note (not folded into the partner-controlled line).
+  test("shows every declared parameter as written, with nothing added", () => {
+    // What the acceptor reads is what the exchange runs: an invitation whose
+    // param the function cannot read as written never decodes (core's declared
+    // param types), so the screen states the declared value and no note beside
+    // it about what would run instead.
     const transform = transformWith("replace_regex", {
-      pattern: "x",
-      replacement: null,
-    });
-    expect(transform.params).toEqual(["pattern: x", "replacement: null"]);
-    expect(transform.coercions).toEqual([
-      { param: "replacement", runsAs: "the empty string" },
-    ]);
-  });
-
-  test("shows an un-coerced parameter verbatim, even when declared null", () => {
-    // A declared, non-null value is applied as written -- no coercion note.
-    const real = transformWith("replace_regex", {
       pattern: "x",
       replacement: "Y",
     });
-    expect(real.params).toEqual(["pattern: x", "replacement: Y"]);
-    expect(real.coercions).toBeUndefined();
-    // The coercion is per-parameter: replace_regex coerces `replacement` but not
-    // `pattern`, so a null pattern keeps its literal "null" and gains no note
-    // where a blanket "(empty)" rendering would be wrong.
-    const nullPattern = transformWith("replace_regex", { pattern: null });
-    expect(nullPattern.params).toEqual(["pattern: null"]);
-    expect(nullPattern.coercions).toBeUndefined();
+    expect(transform.params).toEqual(["pattern: x", "replacement: Y"]);
+    expect(Object.keys(transform).sort()).toEqual([
+      "description",
+      "function",
+      "params",
+    ]);
   });
 
-  test("a forged 'runs as' in a partner param value does not become a coercion note", () => {
-    // A malicious inviter placing the annotation's literal text inside a param
-    // VALUE stays a verbatim `key: value` line and yields no coercion note: the
-    // genuine note is a separate element built only from core's table, so it
-    // cannot be impersonated by partner-controlled param content.
+  test("shows text that imitates an annotation as one more param line", () => {
+    // A malicious inviter placing annotation-shaped text inside a param VALUE
+    // gets a verbatim `key: value` line like any other: the step's own elements
+    // are its function, its description, and its param lines, so there is no
+    // separate note for that text to be taken for.
     const transform = transformWith("replace_regex", {
       pattern: "x",
       replacement: "Y runs as the empty string",
@@ -725,46 +712,15 @@ describe("summarizeInvitation", () => {
       "pattern: x",
       "replacement: Y runs as the empty string",
     ]);
-    expect(transform.coercions).toBeUndefined();
   });
 
-  test("shows a note for each coerced parameter of a step", () => {
-    // parse_date defaults both formats; declaring both null yields two notes, in
-    // the function's parameter order.
-    const transform = transformWith("parse_date", {
-      inputFormat: null,
-      outputFormat: null,
-    });
-    expect(transform.coercions).toEqual([
-      { param: "inputFormat", runsAs: "MM/DD/YYYY" },
-      { param: "outputFormat", runsAs: "YYYYMMDD" },
-    ]);
-  });
-
-  test("names the executed value for non-empty-string fallbacks", () => {
-    // Beyond the empty-string case: a boolean fallback (split_on includeOriginal)
-    // and a string fallback (pad_left char) render their real executed value, so
-    // the web "runs as" text matches core's actual fallback for every function.
-    expect(
-      transformWith("split_on", { delimiter: ",", includeOriginal: null })
-        .coercions,
-    ).toEqual([{ param: "includeOriginal", runsAs: "false" }]);
-    expect(
-      transformWith("pad_left", { length: 5, char: null }).coercions,
-    ).toEqual([{ param: "char", runsAs: "0" }]);
-  });
-
-  test("does not annotate a coerced param hidden by the display cap", () => {
-    // A coerced param past MAX_DISPLAYED_PARAMS collapses into the overflow
-    // marker; its note is withheld too, so a note never references a param the
-    // acceptor cannot see.
+  test("collapses params past the display cap into the overflow marker", () => {
     const params: Record<string, unknown> = { pattern: "x" };
     for (let i = 0; i < 15; i += 1) params["f" + i] = i;
-    params.replacement = null; // the 17th entry, beyond the cap
+    params.replacement = "Y"; // the 17th entry, beyond the cap
     const transform = transformWith("replace_regex", params);
     expect(transform.params).toContain("... 1 more");
-    expect(transform.params).not.toContain("replacement: null");
-    expect(transform.coercions).toBeUndefined();
+    expect(transform.params).not.toContain("replacement: Y");
   });
 
   test("sanitizes payload column names on both the send and receive sides", () => {
@@ -1835,9 +1791,10 @@ describe("summarizeInvitation", () => {
         },
       ]),
     ).toBe("last name");
-    // A non-string input format (params are partner-controlled `unknown`) also
-    // drops every record at runtime; core's check reports it dead without parsing
-    // it, so the web shows no marker rather than narrowing it to the default.
+    // A non-text input format yields no value either -- core refuses it at
+    // decode and again at compile -- and core's check reports it dead without
+    // parsing it, so the web shows no marker rather than narrowing it to the
+    // default.
     expect(
       headerFor([
         {

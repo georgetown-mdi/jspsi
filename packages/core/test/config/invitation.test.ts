@@ -489,6 +489,37 @@ test("decodeInvitation refuses a transform param over the content bound", async 
   );
 });
 
+test("decodeInvitation refuses a transform param declared as the wrong type", async () => {
+  // A param the step function reads as text is refused at the token decode, so
+  // an acceptor is never shown -- and never accepts -- terms whose step would
+  // run as something other than what the screen states.
+  const token = {
+    ...baseToken,
+    linkageTerms: {
+      ...baseTerms,
+      linkageKeys: [
+        {
+          name: "SSN",
+          elements: [
+            {
+              field: "ssn",
+              transform: [
+                {
+                  function: "replace_regex",
+                  params: { pattern: "\\d", replacement: 42 },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  };
+  await expect(decodeInvitation(await encodeRaw(token))).rejects.toThrow(
+    /replace_regex replacement must be text, not a number/,
+  );
+});
+
 test("decodeInvitation refuses a bidi override in a name", async () => {
   // The name shape sits on LinkageTermsSchema, so the invitation-token decode --
   // a partner's document, checksum-verified but not authenticated -- refuses a

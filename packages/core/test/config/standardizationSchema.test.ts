@@ -50,3 +50,56 @@ describe("StandardizationSchema", () => {
     },
   );
 });
+
+// --- Declared step param types -----------------------------------------------
+// A cleaning step is the operator's own, and an unquoted number or a bare
+// `null` is the way a YAML document mistypes one. The schema reads each param
+// as the type its function reads, so the mistake is reported where the config
+// is decoded rather than changing what the run matches on.
+
+describe("StandardizationSchema declared param types", () => {
+  const stepSpec = (params: Record<string, unknown>, fn = "replace_regex") => [
+    { output: "last_name", input: "LN", steps: [{ function: fn, params }] },
+  ];
+
+  test.each([
+    [
+      "a numeric replace_regex replacement",
+      stepSpec({ pattern: "-", replacement: 42 }),
+      /replace_regex replacement must be text, not a number/,
+    ],
+    [
+      "a numeric pad_left char",
+      stepSpec({ length: 9, char: 5 }, "pad_left"),
+      /pad_left char must be text, not a number/,
+    ],
+    [
+      "a null coalesce default",
+      stepSpec({ default: null }, "coalesce"),
+      /coalesce default must be text, not null/,
+    ],
+  ])("refuses %s", (_name, raw, message) => {
+    const result = StandardizationSchema.safeParse(raw);
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.some((i) => message.test(i.message))).toBe(true);
+  });
+
+  test("a param written as text parses unchanged", () => {
+    const result = StandardizationSchema.safeParse(
+      stepSpec({ pattern: "-", replacement: "42" }),
+    );
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(result.data[0].steps?.[0].params).toEqual({
+      pattern: "-",
+      replacement: "42",
+    });
+  });
+
+  test("an omitted param parses, since that is how a step takes the default", () => {
+    expect(
+      StandardizationSchema.safeParse(stepSpec({ pattern: "-" })).success,
+    ).toBe(true);
+  });
+});

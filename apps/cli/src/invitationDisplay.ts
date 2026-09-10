@@ -396,12 +396,6 @@ function displayLinkageKey(
         emit(`            ${transform.description}`);
       else emit(`            ${UNRECOGNIZED_TRANSFORM_NOTE}`);
       logList(emit, "            ", transform.params);
-      // The coercion note is core-derived on both halves (the function's own
-      // parameter name and the value core's coercion contract runs it as), and sits
-      // on its own line rather than folded into a parameter line, so partner text
-      // placed inside a parameter value cannot impersonate it.
-      for (const coercion of transform.coercions ?? [])
-        emit(`            ${coercion.param} runs as ${coercion.runsAs}`);
     }
   }
   if (key.hasSwap) {

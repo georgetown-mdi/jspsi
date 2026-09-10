@@ -1,6 +1,7 @@
 import { z } from "zod";
 
 import { MAX_NAME_LENGTH } from "./linkageTermsSchema.js";
+import { transformParamTypeRefusals } from "./transformParamTypes.js";
 
 // --- Standardizing step ------------------------------------------------------
 
@@ -14,10 +15,26 @@ export interface StandardizationStep {
   params?: Record<string, unknown>;
 }
 
-const StandardizationStepSchema: z.ZodType<StandardizationStep> = z.object({
-  function: z.string().min(1),
-  params: z.record(z.string(), z.unknown()).optional(),
-});
+const StandardizationStepSchema: z.ZodType<StandardizationStep> = z
+  .object({
+    function: z.string().min(1),
+    params: z.record(z.string(), z.unknown()).optional(),
+  })
+  // A param the step function reads takes the type that function reads it as,
+  // the same table the linkage-terms wire schema checks against
+  // (transformParamTypes.ts). A cleaning step is the operator's own, so the
+  // reading here is the one that catches the unquoted number or bare `null` a
+  // YAML document is easy to write: it refuses at decode, naming the param and
+  // the type it got, rather than running with something the operator did not
+  // write. A param left out is how a step takes the function's default.
+  .superRefine((step, ctx) => {
+    for (const refusal of transformParamTypeRefusals(step))
+      ctx.addIssue({
+        code: "custom",
+        message: refusal.message,
+        path: refusal.path,
+      });
+  });
 
 // --- Standardizing transformation --------------------------------------------
 

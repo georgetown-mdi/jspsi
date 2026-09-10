@@ -12,6 +12,7 @@ import {
   linkageTermsHaveNonConformantTransformRegex,
   regexStepPatternParam,
 } from "./transformRegexDialect.js";
+import { transformParamTypeRefusals } from "./transformParamTypes.js";
 import { exceedsOwnKeyCount } from "../utils/objectKeyCount.js";
 import { loneSurrogateIndex } from "../utils/wellFormedString.js";
 import { BIDI_CONTROL_PATTERN } from "../utils/nameControls.js";
@@ -718,10 +719,10 @@ export interface TransformStep {
 // One value of a transform step's `params` record: any JSON value, with a
 // content bound on a string. The bound sits on the VALUE STAGE rather than a
 // per-step refine so it holds for every function and param name at once,
-// including one this build does not implement. A non-string value passes
-// through untouched (`z.unknown()`); the params whose non-string magnitude
-// drives per-row work have their own stricter refines on TransformStepSchema
-// below. See MAX_TRANSFORM_PARAM_LENGTH.
+// including a param no function reads and a function this build does not
+// implement. Which types a param a function DOES read may take, and the
+// magnitude bounds on those values, are the per-step refines on
+// TransformStepSchema below. See MAX_TRANSFORM_PARAM_LENGTH.
 const TransformParamValueSchema = z
   .unknown()
   .refine(
@@ -782,10 +783,10 @@ const TransformStepSchema: z.ZodType<TransformStep> = TransformStepBaseSchema
   // `pad_left` runs per row in the key-building pipeline
   // (applyElementTransform, driven by buildKeyStrings), so an unbounded
   // `length` makes every row allocate a `padStart` of that size. Only a
-  // positive-integer `length` ever reaches it (padLeftFactory throws on any
-  // other value before allocating); a malformed `length` is left to that
-  // runtime check. Full reasoning: docs/spec/CHANNEL_SECURITY.md,
-  // "Unbounded transform-parameter rejection".
+  // positive-integer `length` ever reaches it: the type refusal below takes
+  // every non-integer, and padLeftFactory throws on a non-positive one before
+  // allocating. Full reasoning: docs/spec/CHANNEL_SECURITY.md, "Unbounded
+  // transform-parameter rejection".
   .refine(
     (step) => {
       if (step.function !== "pad_left") return true;
@@ -803,9 +804,8 @@ const TransformStepSchema: z.ZodType<TransformStep> = TransformStepBaseSchema
   )
   // `parse_date` builds a regex from `inputFormat` and assembles its result
   // from `outputFormat`, both recompiled per row -- an unbounded value
-  // drives an ever-larger regex or per-row output. Only a string value
-  // drives either; a non-string is left to the factory's own
-  // empty/absent-format fallback. The catastrophic-backtracking risk in the
+  // drives an ever-larger regex or per-row output. Both formats are text or
+  // absent, by the type refusal below. The catastrophic-backtracking risk in the
   // expanded regex is closed by the linear-time engine (standardization.ts),
   // not by this cap. Full reasoning: docs/spec/CHANNEL_SECURITY.md,
   // "Unbounded transform-parameter rejection".
@@ -850,10 +850,10 @@ const TransformStepSchema: z.ZodType<TransformStep> = TransformStepBaseSchema
   // `delimiter` under the linear-time engine, which bounds backtracking by
   // construction; this length cap is the orthogonal source-length
   // compile-cost bound (applyElementTransform compiles each step once per
-  // distinct transform array, memoized). It measures the COERCED source the
-  // factory actually compiles (coerceToPatternString), not the raw value, so
-  // an array param cannot slip an oversized source past it. Dialect
-  // conformance is enforced separately on LinkageTermsSchema. Full
+  // distinct transform array, memoized). It measures the source the factory
+  // actually compiles, rendered through the same coerceToPatternString the
+  // factory renders through, so the bound and the compile read one value.
+  // Dialect conformance is enforced separately on LinkageTermsSchema. Full
   // reasoning: docs/spec/CHANNEL_SECURITY.md, "Transform-regex linear-time
   // dialect".
   .refine(
@@ -871,28 +871,26 @@ const TransformStepSchema: z.ZodType<TransformStep> = TransformStepBaseSchema
       path: ["params"],
     },
   )
-  // `substring` slices by numeric `start` / `length`. A non-integer bound
-  // never slices as intended (substringFactory drops it to an all-null fn,
-  // silently excluding every row), so a present non-integer bound is
-  // rejected at parse. An ABSENT bound drops every row the same way and is
-  // admitted here by design: it is refused one layer up, by the
-  // dead-pipeline grading (`pipelineAlwaysDrops` via
-  // `substringWindowDropsEveryValue`), which locates the offender by key
-  // rather than costing the whole document its parse.
-  .refine(
-    (step) => {
-      if (step.function !== "substring") return true;
-      const { start, length } = step.params ?? {};
-      return (
-        (start === undefined || Number.isInteger(start)) &&
-        (length === undefined || Number.isInteger(length))
-      );
-    },
-    {
-      message: "substring start and length must be integers",
-      path: ["params"],
-    },
-  );
+  // Every param a step function READS takes the type that function reads it
+  // as (transformParamTypes.ts): the text a literal or a pattern is written
+  // as, the whole number a slice or a width is written as, the true/false a
+  // switch is written as. A wrong type is refused here, so the operator who
+  // wrote an unquoted number and the partner who crafted one both meet the
+  // refusal at decode, naming the param and the type it got, rather than a
+  // run that quietly applies something else. An ABSENT param is how a step
+  // leaves one unset, so it is admitted; a `substring` bound left out drops
+  // every row and is refused one layer up, by the dead-pipeline grading
+  // (`pipelineAlwaysDrops` via `substringWindowDropsEveryValue`), which
+  // locates the offender by key rather than costing the whole document its
+  // parse.
+  .superRefine((step, ctx) => {
+    for (const refusal of transformParamTypeRefusals(step))
+      ctx.addIssue({
+        code: "custom",
+        message: refusal.message,
+        path: refusal.path,
+      });
+  });
 
 /**
  * A single element of a linkage key. References a linkage field by name and

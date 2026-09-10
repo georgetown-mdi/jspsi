@@ -273,8 +273,10 @@ export function functionDisplay(functionName: string): {
  *
  * - `"no-emptying-rule"` -- no step before it can leave a realized value empty,
  *   so its substituting branch is never reached.
- * - `"no-text-default"` -- an emptying rule does precede it, but the `default` it
- *   declares is absent or is not text, which core runs as a pass-through.
+ * - `"no-text-default"` -- an emptying rule does precede it, but the step
+ *   declares no `default` at all, which core runs as a pass-through. A default
+ *   declared as anything other than text does not reach here: core refuses it
+ *   where the document is decoded.
  */
 type InertCoalesceCause = "no-emptying-rule" | "no-text-default";
 

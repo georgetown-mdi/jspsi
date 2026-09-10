@@ -148,14 +148,15 @@ export function compileLinearRegex(pattern: string): CompiledLinearRegex {
 }
 
 /**
- * Coerce a partner-supplied transform param to the pattern string the engine
- * compiles. The wire schema leaves transform `params` as `z.unknown()`, so a
- * partner can supply a non-string; `RE2JS.compile` throws a bare `TypeError`
- * on `null`/`undefined`/an array rather than coercing, so the dialect gate
- * and the factories must render the value the same way -- with `String(...)`
- * -- or the gate's verdict would not match what the factory runs. A
- * non-string still runs on the linear-time engine, so it has no ReDoS risk;
- * this only fixes which literal it compiles to.
+ * Coerce a transform param to the pattern string the engine compiles. A
+ * declared pattern is text or absent by the time a decoded document reaches a
+ * factory (`config/transformParamTypes.ts`), and an absent one is what this
+ * still renders: `RE2JS.compile` throws a bare `TypeError` on
+ * `null`/`undefined`/an array rather than coercing, so the dialect gate and the
+ * factories must render the value the same way -- with `String(...)` -- or the
+ * gate's verdict would not match what the factory runs. A coerced value still
+ * runs on the linear-time engine, so it has no ReDoS risk; this only fixes
+ * which literal it compiles to.
  */
 export function coerceToPatternString(raw: unknown): string {
   return typeof raw === "string" ? raw : String(raw);

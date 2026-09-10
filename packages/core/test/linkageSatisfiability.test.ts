@@ -454,36 +454,43 @@ describe("substringCollapsesParsedDateToConstant", () => {
     // there is no rendered layout to slice -- a narrowing the dead-key advisory
     // reports, not a collapse. Held to the runtime as well as to the predicate.
     const firstFour = slice(1, 4);
-    for (const inputFormat of ["MM/DD", 7] as unknown[]) {
-      const steps = [parseDate("ACME-YYYYMMDD", inputFormat), firstFour];
-      for (const date of DATES) expect(runPipeline(date, steps)).toBeNull();
-      expect(verdictAt(steps, 1), JSON.stringify(inputFormat)).toBe(false);
-    }
+    const incomplete = [parseDate("ACME-YYYYMMDD", "MM/DD"), firstFour];
+    for (const date of DATES) expect(runPipeline(date, incomplete)).toBeNull();
+    expect(verdictAt(incomplete, 1)).toBe(false);
+    // A non-text input format never runs at all -- it is refused at decode and
+    // again at compile -- so it collapses nothing either.
+    const nonText = [parseDate("ACME-YYYYMMDD", 7), firstFour];
+    expect(() => runPipeline(DATES[0], nonText)).toThrow(
+      /parse_date inputFormat must be text/,
+    );
+    expect(verdictAt(nonText, 1)).toBe(false);
     // An ABSENT input format is not a dead one: the factory falls back to the
     // complete default layout, so the window still lands in the literal region.
-    const absentInput = parseDate("ACME-YYYYMMDD", null);
+    const absentInput = parseDate("ACME-YYYYMMDD", undefined);
     expect(verdictAt([absentInput, firstFour], 1)).toBe(true);
     expect(runPipeline(DATES[0], [absentInput, firstFour])).toBe("ACME");
   });
 
-  test("an unusable output format falls back to the layout the factory renders", () => {
-    // A non-string outputFormat is not text the window reads: the factory falls
-    // back to the plain default layout, which has no literal region, so no window
-    // collapses. Pinned against the runtime rather than the coercion's source.
-    for (const outputFormat of [undefined, null, 7, [], {}] as unknown[])
-      for (const [start, length] of [
-        [1, 4],
-        [5, 2],
-        [1, 8],
-        [-2, 2],
-      ] as Array<[number, number]>) {
-        const steps = [parseDate(outputFormat), slice(start, length)];
-        expect(
-          collapsedValue(steps),
-          JSON.stringify(outputFormat),
-        ).toBeUndefined();
-        expect(verdictAt(steps, 1), JSON.stringify(outputFormat)).toBe(false);
-      }
+  test("an absent output format falls back to the layout the factory renders", () => {
+    // An omitted outputFormat is the plain default layout, which has no literal
+    // region, so no window collapses. Pinned against the runtime rather than
+    // against the default's source. A non-text outputFormat never renders a
+    // layout at all: it is refused before any row.
+    for (const [start, length] of [
+      [1, 4],
+      [5, 2],
+      [1, 8],
+      [-2, 2],
+    ] as Array<[number, number]>) {
+      const steps = [parseDate(undefined), slice(start, length)];
+      expect(collapsedValue(steps)).toBeUndefined();
+      expect(verdictAt(steps, 1)).toBe(false);
+    }
+    for (const outputFormat of [null, 7, [], {}] as unknown[])
+      expect(
+        () => runPipeline(DATES[0], [parseDate(outputFormat), slice(1, 4)]),
+        JSON.stringify(outputFormat),
+      ).toThrow(/parse_date outputFormat must be text/);
   });
 
   test("a run of substrings is read as the one window it ends on (differential)", () => {
@@ -2836,10 +2843,9 @@ describe("assessLinkageSatisfiability dead keys", () => {
   });
 
   test("a non-string parse_date input format is a dead key, without crashing the check", () => {
-    // Wire params are z.unknown(), so a partner can supply a non-string input
-    // format. None yields a value at runtime (every non-string tokenizes to an
-    // all-dropping pattern), so each is dead -- and assessLinkageSatisfiability
-    // must report it without ever tokenizing the non-string itself.
+    // A non-string input format is refused at decode and again at compile, so it
+    // yields no value under any data; assessLinkageSatisfiability reports it dead
+    // without ever tokenizing the non-string itself.
     for (const inputFormat of [5, true, ["MM"], { x: 1 }]) {
       const { deadKeys } = assessLinkageSatisfiability(
         columns,
@@ -2849,7 +2855,7 @@ describe("assessLinkageSatisfiability dead keys", () => {
     }
   });
 
-  test("the builder also drops every record for a non-string input format (differential)", () => {
+  test("the builder refuses a non-string input format rather than building a key (differential)", () => {
     for (const inputFormat of [5, ["MM"], { x: 1 }, true]) {
       const terms = dobTerms([
         { function: "parse_date", params: { inputFormat } },
@@ -2861,9 +2867,9 @@ describe("assessLinkageSatisfiability dead keys", () => {
         terms,
       );
       expect(
-        buildKeyStrings(terms.linkageKeys[0], dataset, 0),
+        () => buildKeyStrings(terms.linkageKeys[0], dataset, 0),
         JSON.stringify(inputFormat),
-      ).toBeNull();
+      ).toThrow(/parse_date inputFormat must be text/);
     }
   });
 
