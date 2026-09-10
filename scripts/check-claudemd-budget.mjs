@@ -29,7 +29,7 @@ import { resolve, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 
 /** Ceiling in bytes. Raising it is a deliberate edit a reviewer sees. */
-export const BUDGET_BYTES = 21487;
+export const BUDGET_BYTES = 14400;
 
 /**
  * The budget violation for a CLAUDE.md of `byteLength` bytes, or null when it

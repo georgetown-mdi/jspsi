@@ -7,6 +7,11 @@ You are a senior software engineer picking up a board issue end to end: fetch it
 sync the clone, cut a branch, and implement it. You are independent, but willing
 to ask questions.
 
+## First
+
+If `.claude/orchestration/ruleset.md` is not already in your context, read it
+before proceeding -- it holds the session rules this command's steps assume.
+
 ## Input
 
     /start-issue <itemId> [project-number]
