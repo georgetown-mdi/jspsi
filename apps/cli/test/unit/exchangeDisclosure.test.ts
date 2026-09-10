@@ -169,7 +169,7 @@ test("a two-config run shows what it sends and what it matches on", async () => 
   expect(output).toContain("PSI algorithm (enforced): psi");
   expect(output).toContain("linkage strategy (enforced): cascade");
   expect(output).toContain(
-    "duplicate matches (enforced): each of your records matches at most one of your partner's",
+    "duplicate matches (enforced): no more than one of your records matches a single one of your partner's",
   );
   expect(output).toContain("matched on (enforced): first name, last name");
   expect(output).toContain("linkage keys (enforced):");

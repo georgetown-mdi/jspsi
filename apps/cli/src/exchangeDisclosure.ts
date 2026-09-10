@@ -213,7 +213,7 @@ export function renderExchangeDisclosure(
     `  ${marked("duplicate matches", "duplicateMatches")}: ` +
       (linkageTerms.deduplicate
         ? "several of your records may match a single one of your partner's"
-        : "each of your records matches at most one of your partner's"),
+        : "no more than one of your records matches a single one of your partner's"),
   );
   // What the grouping this party declared discloses, and which party pays it,
   // in the wording written for a seat where each party declares its own value

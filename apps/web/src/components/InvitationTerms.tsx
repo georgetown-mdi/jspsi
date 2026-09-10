@@ -97,6 +97,13 @@ const ruleSetValueStyle = {
  * so a reader mapping the roles the other way would read the direction inverted
  * -- there the sentence names the reader and its partner instead, like the
  * consent copy beneath it.
+ *
+ * That seat's sentences bound one direction only, the reader's own records
+ * against a single one of its partner's. The partner declares its own
+ * `deduplicate` on its own run, so a sentence bounding how many of that party's
+ * records may match one of the reader's would state a cardinality nothing here
+ * decides and the partner's own declaration can falsify. Where the other
+ * direction is set is stated beside the control (DIRECT_DEDUPLICATE_SIDE_NOTICE).
  */
 const DUPLICATE_MATCHES_HEADLINE = {
   invitationRoles: {
@@ -109,7 +116,7 @@ const DUPLICATE_MATCHES_HEADLINE = {
     deduplicating:
       "More than one of your records may match a single one of your partner's records.",
     oneToOne:
-      "Each of your records matches at most one of your partner's records.",
+      "No more than one of your records matches a single one of your partner's records.",
   },
 } as const;
 

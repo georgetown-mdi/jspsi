@@ -335,6 +335,14 @@ function expectPanelText() {
   return expectCommittedText(app.container);
 }
 
+/** The terms preview's own text, apart from the confirm step's controls around
+ * it: the deduplicate control describes the same cardinality in its own words, so
+ * a pin on what the preview does not state is read from the preview alone. */
+function inferredTermsText(): string {
+  return page.getByRole("region", { name: "Inferred terms" }).element()
+    .textContent;
+}
+
 describe("direct exchange confirm and run", () => {
   test("previews the inferred terms, gates Run on the affirmation, and runs a zero-setup job", async () => {
     const api = stubJobApi({ sftp: CONFIGURED_SFTP });
@@ -697,7 +705,13 @@ describe("direct exchange confirm and run", () => {
     await expect.element(deduplicateControl()).not.toBeChecked();
     expect(app.container.textContent).toContain(DIRECT_DEDUPLICATE_SIDE_NOTICE);
     await expectPanelText().toContain(
-      "Each of your records matches at most one of your partner's records.",
+      "No more than one of your records matches a single one of your partner's records.",
+    );
+    // One direction only: how many of the PARTNER's records may match a single
+    // one of this party's follows that party's own declaration, made on its own
+    // run, so the preview bounds this party's side and asserts nothing about it.
+    expect(inferredTermsText()).not.toContain(
+      "matches at most one of your partner's",
     );
 
     await deduplicateControl().click();
