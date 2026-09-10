@@ -4,21 +4,22 @@
 //
 // Why this exists: psilink squash-merges, so a pull request's title becomes the
 // commit subject with GitHub's " (#NNNN)" appended, and CONTRIBUTING.md's
-// 50-character subject limit counts that suffix. Every other reading of that
-// budget comes after the fact -- the PR Checklist workflow fails the open pull
-// request, and ../scripts/format-squash-message.mjs refuses a draft written past
-// it -- so a session reusing a board item's own title pays a red run and a
-// retitle for it. This is the same rule at the moment the title is written.
+// subject limit counts that suffix. Every other reading of that budget comes
+// after the fact -- the PR Checklist workflow fails the open pull request, and
+// ../scripts/format-squash-message.mjs refuses a draft written past it -- so a
+// session reusing a board item's own title pays a red run and a retitle for it.
+// This is the same rule at the moment the title is written.
 //
 // THE BUDGET IS NOT A NUMBER HERE. `subjectBudget` in
-// ../scripts/format-squash-message.mjs is the one source, so the suffix width,
-// the limit it is subtracted from, and the digits assumed for an unknown pull
-// request all move together with the normalizer and the drafts it writes.
+// ../../scripts/lib/squashSubjectBudget.mjs is the one source, so the suffix
+// width, the limit it is subtracted from, and the digits assumed for an unknown
+// pull request all move together with the checklist check that fails the open
+// pull request and the normalizer that writes its squash draft.
 //
 // THE PULL-REQUEST NUMBER, where the call carries one. `gh pr edit` names the
 // pull request first, so a number or a pull-request URL written there gives the
 // exact suffix; a branch name, an absent argument, and every `gh pr create` call
-// leave it unknown, where the normalizer's assumed four-digit suffix applies.
+// leave it unknown, where the assumed four-digit suffix applies.
 //
 // STATED LIMITS.
 //   - A title this hook cannot see stays the PR Checklist workflow's to catch: one
@@ -46,7 +47,7 @@ import {
   SUBJECT_LIMIT,
   squashSuffix,
   subjectBudget,
-} from "../scripts/format-squash-message.mjs";
+} from "../../scripts/lib/squashSubjectBudget.mjs";
 import { commandOf, eventForTools } from "./lib/event.mjs";
 import { splitSegments, tokenize, tokenizeRaw } from "./lib/shell.mjs";
 

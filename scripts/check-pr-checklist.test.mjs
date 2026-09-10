@@ -14,6 +14,7 @@ import {
   titleBudget,
   titleViolations,
 } from "./check-pr-checklist.mjs";
+import { subjectBudget } from "./lib/squashSubjectBudget.mjs";
 
 const HEAD = "0123456789abcdef0123456789abcdef01234567";
 
@@ -292,11 +293,14 @@ describe("PR title length", () => {
     expect(titleViolations(title, "12745")).not.toEqual([]);
   });
 
-  it("falls back to the 42-character budget with no PR number", () => {
-    expect(titleBudget(undefined).budget).toBe(42);
-    expect(titleBudget(null).budget).toBe(42);
-    expect(titleViolations("x".repeat(42), undefined)).toEqual([]);
-    expect(titleViolations("x".repeat(43), undefined)).not.toEqual([]);
+  it("falls back to the unnumbered budget with no PR number", () => {
+    const fallback = subjectBudget(null);
+    expect(titleBudget(undefined).budget).toBe(fallback);
+    expect(titleBudget(null).budget).toBe(fallback);
+    expect(titleViolations("x".repeat(fallback), undefined)).toEqual([]);
+    expect(titleViolations("x".repeat(fallback + 1), undefined)).not.toEqual(
+      [],
+    );
   });
 
   it("flags an empty or whitespace-only title with its own message", () => {
