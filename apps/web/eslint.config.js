@@ -27,14 +27,17 @@ const rawYamlParserImportBan = {
 };
 
 // The root-logger import ban. loglevel's default export IS the root logger, so
-// holding emission to core's named loggers means the web app never binds it:
-// every diagnostic line goes through `@psilink/core`'s getLogger, which adds the
+// holding emission to core's named loggers means the shipped app never binds
+// it: under `src/` and `server/` every diagnostic line goes through
+// `@psilink/core`'s getLogger, which adds the
 // `[timestamp] [LEVEL] [context]` prefix and strips private-key material out of
 // string arguments. The named exports stay available -- level configuration
 // (setDefaultLevel, levels) and the LogLevel type are what the entry points
 // import -- so this bans the binding that can emit and nothing else. The emit
 // selector from eslint.boundaries.mjs bans the call shape as well, which is what
 // covers a root logger reached without an import of its own.
+// `vite.config.ts` sits outside both globs and keeps loglevel's own root logger
+// for its build-time warnings; it never ships to the browser.
 const rootLoglevelImportBan = {
   name: "loglevel",
   importNames: ["default"],
