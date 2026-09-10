@@ -152,9 +152,10 @@ const REFUSAL_TO_A_READER: TransformParamRefusalOptions = {
 };
 
 /**
- * The refusal message for a param declared as the wrong type. The one wording
- * for both decode paths and the factories, so an operator meets the same
- * sentence wherever the document is read.
+ * The refusal message for a param declared as the wrong type. Its type
+ * statement is one wording for both decode paths and the factories, so the
+ * same sentence names the fault wherever the document is read; only the remedy
+ * below turns on who reads it.
  *
  * The text case names the remedy for the way the mistake is made -- an
  * unquoted number or bare `null` in a YAML document, where the operator meant
@@ -233,6 +234,10 @@ function matchesDeclaredType(
  * stack -- a throw out of a `safeParse` that contracts to return failure
  * instead (docs/spec/CHANNEL_SECURITY.md, "Application-layer parsed-input
  * bounds").
+ *
+ * `options` reaches the message builder unchanged, so a caller states there
+ * whether the party reading these refusals wrote the document
+ * ({@link TransformParamRefusalOptions}).
  *
  * Own-property lookups throughout (`Object.hasOwn`, not a bare index): the
  * function name and the param names of a linkage-key element transform are
