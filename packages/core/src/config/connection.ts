@@ -784,6 +784,17 @@ export interface WebRTCConnectionConfig {
   /** TURN servers for relaying when no direct path can be found. */
   turn?: TurnServer[];
   /**
+   * Which candidate types ICE may use. `all` permits host, server-reflexive
+   * and relay candidates; `relay` gathers relay candidates only, so every
+   * path the exchange can take runs through a configured TURN server and no
+   * host or server-reflexive address is offered to the partner. Omitting it
+   * leaves the transport's own default, which is `all`.
+   *
+   * `relay` needs a source of relay candidates, so it requires `turn` or
+   * `iceProvision`.
+   */
+  iceTransportPolicy?: "all" | "relay";
+  /**
    * ICE credential API returning combined STUN + TURN servers.
    * Mutually exclusive with `stun` and `turn`.
    */
@@ -871,6 +882,7 @@ const WebRTCConnectionConfigSchema = z.object({
     )
     .optional(),
   turn: z.array(TurnServerSchema).optional(),
+  iceTransportPolicy: z.enum(["all", "relay"]).optional(),
   iceProvision: IceProvisionSchema.optional(),
   options: SharedOptionsSchema.optional(),
   providerOptions: z.record(z.string(), z.unknown()).optional(),
@@ -954,6 +966,24 @@ export const ConnectionConfigSchema: z.ZodType<ConnectionConfig> = z
         (conn.stun !== undefined || conn.turn !== undefined)
       ),
     { message: "iceProvision is mutually exclusive with stun and turn" },
+  )
+  // A relay-only policy gathers nothing but relay candidates, so a connection
+  // that names no relay server can never form a candidate pair. Refusing it
+  // here answers at config time what would otherwise be a rendezvous that runs
+  // its whole budget and then reports that no relay candidate was gathered.
+  .refine(
+    (conn) =>
+      !(
+        conn.channel === "webrtc" &&
+        conn.iceTransportPolicy === "relay" &&
+        (conn.turn === undefined || conn.turn.length === 0) &&
+        conn.iceProvision === undefined
+      ),
+    {
+      message:
+        "ice_transport_policy `relay` gathers relay candidates only, so it " +
+        "requires at least one turn entry (or ice_provision)",
+    },
   )
   // File-sync directory mode (filedrop and sftp). A directory is given either
   // as a single shared path or as a split inbound/outbound pair, never both and

@@ -898,6 +898,89 @@ test("iceProvision with turn is rejected", () => {
   expect(messages.some((m) => m.includes("iceProvision"))).toBe(true);
 });
 
+// --- WebRTC: iceTransportPolicy ----------------------------------------------
+
+test("iceTransportPolicy: relay with a turn entry is valid", () => {
+  const result = safeParseConnectionConfig({
+    ...webrtcBase,
+    turn: [
+      { url: "turns:turn.example.org:443", username: "u", credential: "c" },
+    ],
+    iceTransportPolicy: "relay",
+  });
+  expect(result.success).toBe(true);
+});
+
+test("iceTransportPolicy: relay with iceProvision is valid", () => {
+  // The provisioning endpoint's whole answer is a server list, relays included,
+  // so it satisfies the relay-only policy's need for a source of candidates.
+  const result = safeParseConnectionConfig({
+    ...webrtcBase,
+    iceProvision: { host: "nts.twilio.com" },
+    iceTransportPolicy: "relay",
+  });
+  expect(result.success).toBe(true);
+});
+
+test.each([
+  ["no relay source at all", {}],
+  ["an empty turn list", { turn: [] }],
+  ["stun only", { stun: ["stun:stun.example.org"] }],
+])("iceTransportPolicy: relay with %s is rejected", (_label, extra) => {
+  const result = safeParseConnectionConfig({
+    ...webrtcBase,
+    ...extra,
+    iceTransportPolicy: "relay",
+  });
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  const messages = result.error.issues.map((i) => i.message);
+  expect(messages.some((m) => m.includes("ice_transport_policy"))).toBe(true);
+  expect(messages.some((m) => m.includes("turn"))).toBe(true);
+});
+
+test("iceTransportPolicy: all needs no relay source", () => {
+  const result = safeParseConnectionConfig({
+    ...webrtcBase,
+    iceTransportPolicy: "all",
+  });
+  expect(result.success).toBe(true);
+});
+
+test("an omitted iceTransportPolicy stays omitted", () => {
+  // Absent is the third state: the transport reads it as "leave the library's
+  // own default", so the parse must not fill in an equivalent value.
+  const result = safeParseConnectionConfig({ ...webrtcBase });
+  expect(result.success).toBe(true);
+  if (!result.success) return;
+  expect(result.data).not.toHaveProperty("iceTransportPolicy");
+});
+
+test("an unknown iceTransportPolicy value is rejected", () => {
+  const result = safeParseConnectionConfig({
+    ...webrtcBase,
+    iceTransportPolicy: "relay-only",
+  });
+  expect(result.success).toBe(false);
+});
+
+test("ice_transport_policy is accepted in snake_case", () => {
+  const result = safeParseConnectionConfig({
+    ...webrtcBase,
+    turn: [
+      { url: "turns:turn.example.org:443", username: "u", credential: "c" },
+    ],
+    ice_transport_policy: "relay",
+  });
+  expect(result.success).toBe(true);
+  if (!result.success) return;
+  expect(
+    result.data.channel === "webrtc"
+      ? result.data.iceTransportPolicy
+      : undefined,
+  ).toBe("relay");
+});
+
 // --- WebRTC: the file-sync-only options are outside its union member ---------
 
 test("file-sync-only options do not survive a webrtc parse", () => {

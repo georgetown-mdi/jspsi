@@ -361,6 +361,15 @@ actually used. An empty or absent list means "use the default"; it does not mean
 nothing is configured, what it discloses, and the unreachable-entry idiom for
 gathering host candidates only -- are in [CLI.md](../CLI.md#webrtc-exchanges).
 
+`connection.ice_transport_policy` selects the candidate types this side may
+gather: `all`, which is what an absent value leaves in force, or `relay`. Under
+`relay` no host or server-reflexive candidate is gathered, so this side's
+whole offer is relay candidates and every pair it can form runs through a
+configured TURN server. The value is per party and never a term of the exchange:
+it is not representable in an invitation endpoint, and it constrains nothing the
+partner gathers. A `relay` policy with no `turn` entry and no `ice_provision` is
+rejected by the connection schema, since it could gather nothing to pair.
+
 A rendezvous that ends with no data channel reports the candidate types this
 side gathered, the types the partner sent, and how many candidate pairs were
 tried, each on a labelled cause link of its own, so a relay that was never

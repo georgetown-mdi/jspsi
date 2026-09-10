@@ -534,6 +534,23 @@ connection:
 
 **A relayed exchange has been verified against the project's standing relay:** a CLI party with UDP blocked outright completed an authenticated exchange whose data-channel traffic the relay transported, over TURN-over-TLS on 443. werift verifies the TURN server's certificate, so a relay presenting a certificate the CLI host does not trust yields no relay candidate and no relayed path. Verify relayed connectivity in your own environment before depending on it. `ice_provision` (an ICE-credential API) is not supported by the CLI and is refused rather than ignored, so a connection that configures it does not silently fall back to the default.
 
+**To keep a run off any direct path, set `ice_transport_policy: relay`.** A relay entry alone does not force one: ICE tries every candidate it gathered and settles on whichever pair works first, which on a network where a direct path exists is a direct one. The relay-only policy gathers relay candidates and nothing else, so this party offers the partner no host or server-reflexive address and every path the exchange can take runs through the relay:
+
+```yaml
+connection:
+  channel: webrtc
+  server:
+    host: peers.example.org
+  role: acceptor
+  ice_transport_policy: relay
+  turn:
+    - url: turns:relay.example.org:443?transport=tcp
+      username: psilink
+      credential: "@/run/secrets/turn"
+```
+
+Two things follow from it. A run so configured has no direct path to fall back to, so a relay this host cannot reach ends the run rather than degrading to a direct connection -- reported as [no relay candidate gathered](#when-a-webrtc-exchange-does-not-connect), which on this setting is the whole story. And setting it with no `turn` entry is a usage error (exit 64) before anything is dialed, since a relay-only run with no relay could gather nothing to pair. It is this party's own setting: it constrains only what this host gathers, and the partner is free to offer whatever its own network allows.
+
 **A run that allocates against a relay does not return when its work is done.** The allocation a relay hands out is held open by a refresh timer the exchange's teardown cannot cancel, so the command lingers for five sixths of the lifetime the relay granted -- roughly eight minutes where a relay grants the usual ten. The result file, the exchange record and the receipt are all written before the wait, and nothing is transferred during it; what it holds is the process, and in a container the container, which is what a scheduled recurring exchange has to allow for. The mechanism and its measurement are in [WEBRTC_TRANSPORT.md](spec/WEBRTC_TRANSPORT.md#budgets).
 
 #### When a WebRTC exchange does not connect

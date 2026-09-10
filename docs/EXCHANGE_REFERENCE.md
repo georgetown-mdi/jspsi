@@ -751,6 +751,28 @@ connection:
       credential: "@/run/secrets/turn.key"
 ```
 
+### `connection.ice_transport_policy`
+
+*Type:* enum (`all` | `relay`)  
+*Required:* no  
+*Default:* the transport's own, which is `all`  
+*Applies to:* `webrtc`
+
+Which candidate types ICE may use. `all` permits host, server-reflexive and relay candidates. `relay` gathers relay candidates only, so this party offers the partner no host or server-reflexive address and every path the exchange can take runs through a configured TURN server.
+
+`relay` requires a source of relay candidates: a connection that sets it with no `turn` entry and no `ice_provision` is a usage error (exit 64) before anything is dialed, since it could gather nothing to pair.
+
+> **Honored by the CLI only**, like `stun` and `turn` (see [`connection.stun`](#connectionstun)). It is each party's own setting rather than a term of the exchange: it constrains only the candidates this party gathers, an invitation cannot carry it, and the partner is unaffected. What it is for, and what a run configured with it reports, are in [CLI.md](CLI.md#turn).
+
+```yaml
+connection:
+  ice_transport_policy: relay
+  turn:
+    - url: "turns:turn.example.org:443"
+      username: alice
+      credential: "@/run/secrets/turn.key"
+```
+
 ### `connection.ice_provision`
 
 *Type:* object  

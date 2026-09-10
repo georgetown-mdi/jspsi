@@ -76,7 +76,9 @@ test("a configured list is passed through verbatim, with no warning", () => {
     { urls: ["stun:stun.example:3478"] },
     { urls: "turn:relay.example:3478", username: "u", credential: "c" },
   ];
-  expect(buildPeerConfiguration(iceServers, (m) => warnings.push(m))).toEqual({
+  expect(
+    buildPeerConfiguration(iceServers, undefined, (m) => warnings.push(m)),
+  ).toEqual({
     iceServers,
   });
   expect(warnings).toEqual([]);
@@ -87,7 +89,7 @@ test.each([
   ["an empty list", []],
 ])("%s warns and leaves the built-in default selected", (_label, servers) => {
   const warnings: Array<string> = [];
-  const configuration = buildPeerConfiguration(servers, (m) =>
+  const configuration = buildPeerConfiguration(servers, undefined, (m) =>
     warnings.push(m),
   );
   // An empty list is NOT passed through: to werift an empty `iceServers` and an
