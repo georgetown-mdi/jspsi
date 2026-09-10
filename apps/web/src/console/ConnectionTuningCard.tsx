@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 import {
   Alert,
   Checkbox,
@@ -102,18 +104,15 @@ function DurationRow({
 export function ConnectionTuningCard({
   draft,
   capabilities,
-  open,
-  onToggleOpen,
   onChange,
 }: {
   draft: ConnectionTuningDraft;
   /** Which controls this flow supports; a shared-directory flow omits the SFTP
    * session mode rather than accepting a value its client cannot honour. */
   capabilities: ConnectionTuningCapabilities;
-  open: boolean;
-  onToggleOpen: (open: boolean) => void;
   onChange: (draft: ConnectionTuningDraft) => void;
 }) {
+  const [open, setOpen] = useState(false);
   const problems = connectionTuningProblems(draft);
   const advisories = connectionTuningAdvisories(draft, capabilities);
   const set = <TField extends keyof ConnectionTuningDraft>(
@@ -126,7 +125,7 @@ export function ConnectionTuningCard({
       label="Connection tuning"
       summary={connectionTuningSummary(draft, capabilities)}
       open={open}
-      onToggle={onToggleOpen}
+      onToggle={setOpen}
       headingOrder={2}
     >
       <Stack gap="md" mt="sm">

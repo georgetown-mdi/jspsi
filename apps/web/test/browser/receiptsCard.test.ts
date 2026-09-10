@@ -177,7 +177,6 @@ const SINGLE_MOUNT_RENDEZVOUS: JobRendezvousConfig = {
  */
 function ReceiptsHarness({ identity }: { identity: string }): ReactElement {
   const [draft, setDraft] = useState<ReceiptsDraft>(RECEIPTS_DEFAULT);
-  const [open, setOpen] = useState(true);
   useEffect(() => {
     latestDraft = draft;
   }, [draft]);
@@ -185,8 +184,6 @@ function ReceiptsHarness({ identity }: { identity: string }): ReactElement {
     draft,
     identity,
     rendezvous: SINGLE_MOUNT_RENDEZVOUS,
-    open,
-    onToggleOpen: setOpen,
     onChange: setDraft,
   });
 }
@@ -230,6 +227,12 @@ async function pickIdentityLocation(name: string): Promise<void> {
 
 async function renderCard(identity: string = IDENTITY): Promise<void> {
   app.render(createElement(ReceiptsHarness, { identity }));
+  // The card starts collapsed, as it does on both screens, so the test opens it
+  // the way an operator does. The toggle's accessible name holds the collapsed
+  // summary, so match on the label rather than the whole name.
+  await page
+    .getByRole("button", { name: /Receipts and record keeping/ })
+    .click();
   await expect.element(modeSelect()).toBeInTheDocument();
 }
 

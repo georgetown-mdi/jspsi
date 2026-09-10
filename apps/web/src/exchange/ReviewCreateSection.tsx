@@ -96,21 +96,13 @@ export function ReviewCreateSection({
   sftpSaveFilePreferred,
   rendezvous,
   exchangeFiles,
-  exchangeFilesOpen,
   onExchangeFiles,
-  onExchangeFilesOpen,
   connectionTuning,
-  connectionTuningOpen,
   onConnectionTuning,
-  onConnectionTuningOpen,
   runDiagnostics,
-  runDiagnosticsOpen,
   onRunDiagnostics,
-  onRunDiagnosticsOpen,
   receipts,
-  receiptsOpen,
   onReceipts,
-  onReceiptsOpen,
   onLifetime,
   onDirection,
   onTransport,
@@ -142,35 +134,19 @@ export function ReviewCreateSection({
   /** The operator's file-handling choices for a run the console conducts. Only
    * the console's file-sync transports have them, so the card renders there. */
   exchangeFiles: ExchangeFilesDraft;
-  /** Whether the file-handling disclosure is expanded (held by the host so a
-   * re-render of this step does not collapse it). */
-  exchangeFilesOpen: boolean;
   onExchangeFiles: (draft: ExchangeFilesDraft) => void;
-  onExchangeFilesOpen: (open: boolean) => void;
   /** The operator's connection-tuning choices for the same run, offered on the
    * same transports as the file-handling card. */
   connectionTuning: ConnectionTuningDraft;
-  /** Whether the connection-tuning disclosure is expanded (held by the host for
-   * the same reason as the file-handling one). */
-  connectionTuningOpen: boolean;
   onConnectionTuning: (draft: ConnectionTuningDraft) => void;
-  onConnectionTuningOpen: (open: boolean) => void;
   /** The operator's per-run diagnostic and recovery choices for the same run,
    * offered on the same transports the two cards above are. */
   runDiagnostics: RunDiagnosticsDraft;
-  /** Whether the diagnostics disclosure is expanded (held by the host for the
-   * same reason as the two above). */
-  runDiagnosticsOpen: boolean;
   onRunDiagnostics: (draft: RunDiagnosticsDraft) => void;
-  onRunDiagnosticsOpen: (open: boolean) => void;
   /** The operator's receipt-signing and retention choices for the same run,
    * offered on the same transports the three cards above are. */
   receipts: ReceiptsDraft;
-  /** Whether the receipts disclosure is expanded (held by the host for the same
-   * reason as the three above). */
-  receiptsOpen: boolean;
   onReceipts: (draft: ReceiptsDraft) => void;
-  onReceiptsOpen: (open: boolean) => void;
   onLifetime: (seconds: number) => void;
   onDirection: (direction: OutputDirection) => void;
   onTransport: (transport: Transport) => void;
@@ -409,29 +385,21 @@ export function ReviewCreateSection({
           <ExchangeFilesCard
             draft={exchangeFiles}
             capabilities={CONFIG_EXCHANGE_FILES}
-            open={exchangeFilesOpen}
-            onToggleOpen={onExchangeFilesOpen}
             onChange={onExchangeFiles}
           />
           <ConnectionTuningCard
             draft={connectionTuning}
             capabilities={tuningCapabilities}
-            open={connectionTuningOpen}
-            onToggleOpen={onConnectionTuningOpen}
             onChange={onConnectionTuning}
           />
           <RunDiagnosticsCard
             draft={runDiagnostics}
-            open={runDiagnosticsOpen}
-            onToggleOpen={onRunDiagnosticsOpen}
             onChange={onRunDiagnostics}
           />
           <ReceiptsCard
             draft={receipts}
             identity={editor.draft.identity}
             rendezvous={rendezvous}
-            open={receiptsOpen}
-            onToggleOpen={onReceiptsOpen}
             onChange={onReceipts}
           />
         </>

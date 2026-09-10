@@ -377,28 +377,23 @@ export function InviterScreen() {
   const [rendezvous, setRendezvous] = useState<JobRendezvousConfig>();
   // The operator's file-handling choices for a console server-job run (retain mode
   // and the toggles that travel with it). Held here, beside the transport, because
-  // the review step authors them and the run hook consumes them; the disclosure's
-  // own open state rides along so a reset does not spring it open.
+  // the review step authors them and the run hook consumes them.
   const [exchangeFiles, setExchangeFiles] = useState<ExchangeFilesDraft>(
     EXCHANGE_FILES_DEFAULT,
   );
-  const [exchangeFilesOpen, setExchangeFilesOpen] = useState(false);
   // The operator's connection-tuning choices for the same run (polling, timeouts,
   // the retry budget, and the SFTP session mode), held beside the file-handling
   // draft for the same reasons.
   const [connectionTuning, setConnectionTuning] =
     useState<ConnectionTuningDraft>(CONNECTION_TUNING_DEFAULT);
-  const [connectionTuningOpen, setConnectionTuningOpen] = useState(false);
   // The operator's per-run diagnostic and recovery choices for the same run, held
   // beside the two drafts above for the same reasons.
   const [runDiagnostics, setRunDiagnostics] = useState<RunDiagnosticsDraft>(
     RUN_DIAGNOSTICS_DEFAULT,
   );
-  const [runDiagnosticsOpen, setRunDiagnosticsOpen] = useState(false);
   // The operator's receipt-signing and retention choices for the same run, held
   // beside the three drafts above for the same reasons.
   const [receipts, setReceipts] = useState<ReceiptsDraft>(RECEIPTS_DEFAULT);
-  const [receiptsOpen, setReceiptsOpen] = useState(false);
   const [demoActive, setDemoActive] = useState(false);
   // The offer's progress and, for a failed deposit, what it was about when a
   // column name explains it. Held as one value so no reset can leave a refusal
@@ -1447,21 +1442,13 @@ export function InviterScreen() {
                 sftpSaveFilePreferred={sftpSaveFilePreferred}
                 rendezvous={rendezvous}
                 exchangeFiles={exchangeFiles}
-                exchangeFilesOpen={exchangeFilesOpen}
                 onExchangeFiles={setExchangeFiles}
-                onExchangeFilesOpen={setExchangeFilesOpen}
                 connectionTuning={connectionTuning}
-                connectionTuningOpen={connectionTuningOpen}
                 onConnectionTuning={setConnectionTuning}
-                onConnectionTuningOpen={setConnectionTuningOpen}
                 runDiagnostics={runDiagnostics}
-                runDiagnosticsOpen={runDiagnosticsOpen}
                 onRunDiagnostics={setRunDiagnostics}
-                onRunDiagnosticsOpen={setRunDiagnosticsOpen}
                 receipts={receipts}
-                receiptsOpen={receiptsOpen}
                 onReceipts={setReceipts}
-                onReceiptsOpen={setReceiptsOpen}
                 onLifetime={(seconds) =>
                   applyEditor(editorWithLifetime(editor, seconds))
                 }

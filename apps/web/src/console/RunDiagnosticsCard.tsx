@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 import { Alert, Checkbox, Stack, Text } from "@mantine/core";
 import { IconAlertTriangle, IconInfoCircle } from "@tabler/icons-react";
 
@@ -44,15 +46,12 @@ function draftSummary(draft: RunDiagnosticsDraft): string {
  */
 export function RunDiagnosticsCard({
   draft,
-  open,
-  onToggleOpen,
   onChange,
 }: {
   draft: RunDiagnosticsDraft;
-  open: boolean;
-  onToggleOpen: (open: boolean) => void;
   onChange: (draft: RunDiagnosticsDraft) => void;
 }) {
+  const [open, setOpen] = useState(false);
   const problems = runDiagnosticsProblems(draft);
   const set = <TField extends keyof RunDiagnosticsDraft>(
     key: TField,
@@ -64,7 +63,7 @@ export function RunDiagnosticsCard({
       label="Diagnostics and recovery"
       summary={draftSummary(draft)}
       open={open}
-      onToggle={onToggleOpen}
+      onToggle={setOpen}
       headingOrder={2}
     >
       <Stack gap="md" mt="sm">

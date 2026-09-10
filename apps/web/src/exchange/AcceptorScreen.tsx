@@ -259,24 +259,20 @@ export function AcceptorScreen() {
   const [consented, setConsented] = useState(false);
   // The operator's file-handling choices for an accept the console conducts.
   // Authored on the confirm-columns step, beside the connection, and consumed by
-  // the launch; the disclosure's open state rides alongside.
+  // the launch.
   const [exchangeFiles, setExchangeFiles] = useState<ExchangeFilesDraft>(
     EXCHANGE_FILES_DEFAULT,
   );
-  const [exchangeFilesOpen, setExchangeFilesOpen] = useState(false);
   // The operator's connection-tuning choices for the same accept, authored and
   // consumed alongside the file-handling draft.
   const [connectionTuning, setConnectionTuning] =
     useState<ConnectionTuningDraft>(CONNECTION_TUNING_DEFAULT);
   const [receipts, setReceipts] = useState<ReceiptsDraft>(RECEIPTS_DEFAULT);
-  const [receiptsOpen, setReceiptsOpen] = useState(false);
-  const [connectionTuningOpen, setConnectionTuningOpen] = useState(false);
   // The operator's per-run diagnostic and recovery choices for the same run, held
   // beside the two drafts above for the same reasons.
   const [runDiagnostics, setRunDiagnostics] = useState<RunDiagnosticsDraft>(
     RUN_DIAGNOSTICS_DEFAULT,
   );
-  const [runDiagnosticsOpen, setRunDiagnosticsOpen] = useState(false);
   // This party's own side of the matching cardinality, authored on the terms
   // review step beside what the invitation declares for the inviting party's.
   // It starts closed -- the value an acceptance derives with no control at all.
@@ -1652,29 +1648,21 @@ export function AcceptorScreen() {
                     <ExchangeFilesCard
                       draft={exchangeFiles}
                       capabilities={CONFIG_EXCHANGE_FILES}
-                      open={exchangeFilesOpen}
-                      onToggleOpen={setExchangeFilesOpen}
                       onChange={setExchangeFiles}
                     />
                     <ConnectionTuningCard
                       draft={connectionTuning}
                       capabilities={tuningCapabilities}
-                      open={connectionTuningOpen}
-                      onToggleOpen={setConnectionTuningOpen}
                       onChange={setConnectionTuning}
                     />
                     <RunDiagnosticsCard
                       draft={runDiagnostics}
-                      open={runDiagnosticsOpen}
-                      onToggleOpen={setRunDiagnosticsOpen}
                       onChange={setRunDiagnostics}
                     />
                     <ReceiptsCard
                       draft={receipts}
                       identity={committedName}
                       rendezvous={rendezvous}
-                      open={receiptsOpen}
-                      onToggleOpen={setReceiptsOpen}
                       onChange={setReceipts}
                     />
                   </>

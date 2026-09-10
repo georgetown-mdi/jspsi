@@ -114,22 +114,19 @@ export function DirectExchangeScreen() {
   const [affirmed, setAffirmed] = useState(false);
   // The operator's file-handling choices for this run, authored beside the agreed
   // server (both parties settle these out of band, exactly as they settle the
-  // server). The disclosure's open state rides alongside.
+  // server).
   const [exchangeFiles, setExchangeFiles] = useState<ExchangeFilesDraft>(
     EXCHANGE_FILES_DEFAULT,
   );
-  const [exchangeFilesOpen, setExchangeFilesOpen] = useState(false);
   // The operator's connection-tuning choices for this run, authored beside the
   // file-handling ones and settled out of band the same way.
   const [connectionTuning, setConnectionTuning] =
     useState<ConnectionTuningDraft>(CONNECTION_TUNING_DEFAULT);
-  const [connectionTuningOpen, setConnectionTuningOpen] = useState(false);
   // The operator's per-run diagnostic and recovery choices, authored on the same
   // step: the sweep acts on the very directory settled there.
   const [runDiagnostics, setRunDiagnostics] = useState<RunDiagnosticsDraft>(
     RUN_DIAGNOSTICS_DEFAULT,
   );
-  const [runDiagnosticsOpen, setRunDiagnosticsOpen] = useState(false);
 
   // Fetch the console's authored SFTP connection once on a console build; one
   // fetch per console serves the session. The helper resolves to a null connection
@@ -362,17 +359,11 @@ export function DirectExchangeScreen() {
             sftpConnection={sftpConnection}
             rendezvous={rendezvous}
             exchangeFiles={exchangeFiles}
-            exchangeFilesOpen={exchangeFilesOpen}
             onExchangeFiles={setExchangeFiles}
-            onExchangeFilesOpen={setExchangeFilesOpen}
             connectionTuning={connectionTuning}
-            connectionTuningOpen={connectionTuningOpen}
             onConnectionTuning={setConnectionTuning}
-            onConnectionTuningOpen={setConnectionTuningOpen}
             runDiagnostics={runDiagnostics}
-            runDiagnosticsOpen={runDiagnosticsOpen}
             onRunDiagnostics={setRunDiagnostics}
-            onRunDiagnosticsOpen={setRunDiagnosticsOpen}
             onAuthorConnection={authorSftpConnection}
             onClearConnection={clearSftpConnection}
             onContinue={() => goTo("confirm")}

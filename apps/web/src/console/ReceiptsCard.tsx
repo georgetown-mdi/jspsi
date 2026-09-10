@@ -156,8 +156,6 @@ export function ReceiptsCard({
   draft,
   identity,
   rendezvous,
-  open,
-  onToggleOpen,
   onChange,
 }: {
   draft: ReceiptsDraft;
@@ -170,11 +168,10 @@ export function ReceiptsCard({
    * console build). It decides whether the identity-location advisory applies to
    * this deployment: see {@link receiptsAdvisories}. */
   rendezvous: JobRendezvousConfig | undefined;
-  open: boolean;
-  onToggleOpen: (open: boolean) => void;
   onChange: (draft: ReceiptsDraft) => void;
 }) {
   const requestProblemId = useId();
+  const [open, setOpen] = useState(false);
   const [resolving, setResolving] = useState(false);
   const [failure, setFailure] = useState<string>();
   const [locationPickerOpen, setLocationPickerOpen] = useState(false);
@@ -261,7 +258,7 @@ export function ReceiptsCard({
       label="Receipts and record keeping"
       summary={receiptsSummary(draft)}
       open={open}
-      onToggle={onToggleOpen}
+      onToggle={setOpen}
       headingOrder={2}
     >
       <Stack gap="md" mt="sm">
