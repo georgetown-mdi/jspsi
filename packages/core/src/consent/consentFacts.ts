@@ -506,10 +506,12 @@ export const CONSENT_FACTS = {
       "each party's grouping of that round's matched values alone. All three " +
       "are properties of the round rather than of anyone's conduct. The " +
       "normative rows are docs/spec/PROTOCOL.md's (Fan-out matching, the " +
-      "disclosure delta fan-out pays, and the `many-to-many` entity closure, " +
-      "which the pairing count under both parties' duplicate matching is read " +
-      "from), so a row reclassified there and not here is a divergence " +
-      "between a specification and the sentence an acceptor consents on.",
+      "disclosure delta fan-out pays, the per-side rules, which the pairing " +
+      "counts under a one-sided duplicate matching are read from, and the " +
+      "`many-to-many` entity closure, which the count under both parties' " +
+      "duplicate matching is read from), so a row reclassified there and not " +
+      "here is a divergence between a specification and the sentence an " +
+      "acceptor consents on.",
     note:
       "A linkage key here splits a value into several candidates and matches " +
       "each on its own, so a record matches when any single candidate does. " +
@@ -518,7 +520,9 @@ export const CONSENT_FACTS = {
       "left out of the later, less precise keys, whether or not that pairing " +
       "stands, and how many of the other party's records it pairs with " +
       "follows the two duplicate-matching settings: with neither set it is " +
-      "paired at most once, and with both set -- which cascade linkage " +
+      "paired at most once; with one party's set, a record of the party that " +
+      "set it is paired at most once while a record of the other party may " +
+      "be paired with several; and with both set -- which cascade linkage " +
       "matches and single-pass refuses -- it is paired with every one of the " +
       "other party's records any of its candidates reached, and the records " +
       "joined that way are disclosed to both parties as one group. Under " +
@@ -547,6 +551,36 @@ export const CONSENT_FACTS = {
       "not match on -- so the exchange will refuse to run. Ask your partner for " +
       "an invitation that either drops the split or names terms that match on " +
       "each candidate.",
+  },
+  candidateSetChainsGrouping: {
+    basis: "enforced",
+    reason:
+      "What the run's own pairing does with a record holding several " +
+      "candidate values for one key once BOTH parties group their duplicates: " +
+      "acceptance is total there, so every record any of those values matched " +
+      "is paired with it, and one group can hold two records no linkage key " +
+      "links to each other. The pairs that grouping rests on stand in the " +
+      "association table both parties hold, so it is a property of the round " +
+      "rather than of anyone's conduct, and the closure reading them is each " +
+      "party's own local pass. The normative row is docs/spec/PROTOCOL.md's " +
+      "(the `many-to-many` entity closure), so a row reclassified there and " +
+      "not here is a divergence between a specification and the sentence an " +
+      "acceptor consents on. Resolved by `candidateSetChainsGrouping` " +
+      "(consent/invitationSummary.ts) over every producer of a candidate set " +
+      "rather than over the `split_on` half alone, and off the accept " +
+      "boundary's own verdict on the other party's value rather than the " +
+      "strategy rule alone, so no surface withholds the sentence for a key " +
+      "that expands its value by another route and none states it where that " +
+      "value is one the accept refuses -- a sole-receiver document, which " +
+      "leaves that party none to set, as much as a refused pair. The " +
+      "sentence states the pair conditionally, since the party reading it " +
+      "holds one side and not the other wherever it is rendered.",
+    note:
+      "A linkage key here matches one record on several values at once. " +
+      "Where both parties set duplicate matching for their own records, every " +
+      "record that matched any one of those values is grouped with that " +
+      "record and with each other, so records sharing no matched value are " +
+      "disclosed to both parties as one group.",
   },
   inboundPayloadColumnsCarried: {
     basis: "enforced",

@@ -1099,6 +1099,21 @@ export function InvitationTerms({
           </Term>
         )}
 
+        {/* What those several values group once BOTH parties set duplicate
+            matching. Read over every producer of a candidate set, so a swapped
+            key order and a fuzzy comparison state it where the block above --
+            the split half alone -- is silent, and the shipped default keys
+            declare a swap. Rendered whatever this party's own side stands at,
+            on both seats this component serves, the sentence stating the pair
+            conditionally: the operator meets it before setting that value. */}
+        {summary.candidateSetChainsGrouping && (
+          <Term label="Records grouped with no value in common">
+            <Text size="sm">
+              {CONSENT_FACTS.candidateSetChainsGrouping.note}
+            </Text>
+          </Term>
+        )}
+
         {/* The rules' citation renders above the matching list it cites: a reader
             meets the name before the enumeration it stands for. Both names and
             versions are partner-controlled, sanitized by summarizeInvitation and

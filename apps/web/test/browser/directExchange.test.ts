@@ -10,6 +10,7 @@ import { createElement } from "react";
 import "@mantine/core/styles.css";
 
 import {
+  CONSENT_FACTS,
   DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
   DEDUPLICATE_PARTNER_DECLARED_DISCLOSURE_STATEMENT,
   DEDUPLICATE_PARTNER_DECLARED_SIDE_NOTE,
@@ -704,6 +705,11 @@ describe("direct exchange confirm and run", () => {
     // partner rather than the two declared roles.
     await expect.element(deduplicateControl()).not.toBeChecked();
     expect(app.container.textContent).toContain(DIRECT_DEDUPLICATE_SIDE_NOTICE);
+    // The grouping a candidate set makes needs both sides, and this party has
+    // declared neither yet, so the sentence is not on screen.
+    expect(app.container.textContent).not.toContain(
+      CONSENT_FACTS.candidateSetChainsGrouping.note,
+    );
     await expectPanelText().toContain(
       "No more than one of your records matches a single one of your partner's records.",
     );
@@ -734,6 +740,14 @@ describe("direct exchange confirm and run", () => {
     );
     expect(app.container.textContent).not.toContain(
       DEDUPLICATE_ACCEPTOR_SIDE_NOTE,
+    );
+    // What the inferred keys group once the partner sets its own side too: the
+    // built-in rule set declares a key matched in either order, which is a
+    // candidate set, so this spine reaches the grouping with no key authoring
+    // at all. Stated in the same words as the two CLI surfaces and the accept
+    // screen, and only for the side this party has now declared.
+    expect(app.container.textContent).toContain(
+      CONSENT_FACTS.candidateSetChainsGrouping.note,
     );
 
     await trustAffirmation().click();

@@ -3596,6 +3596,66 @@ describe("displayInvitation: the declared terms it discloses (columns, citations
     expect(rendered).not.toContain("paired at most once and is then left out");
   });
 
+  test("displayInvitation: states the grouping a candidate set makes, whichever declares it", () => {
+    // The grouping the pair this party's own `deduplicate` completes makes of
+    // records no linkage key links. It follows the candidate set rather than
+    // the splitting element alone: the shipped default keys declare a swapped
+    // order and no split, so a prompt reading the fan-out register alone would
+    // say nothing on the terms an operator reaches with no key authoring.
+    const log = getLogger("accept-display-chained-grouping-test");
+    log.setLevel("silent");
+    const deduplicating = (token: InvitationToken): string =>
+      renderDisplayInvitation(log, {
+        ...token,
+        linkageTerms: { ...token.linkageTerms, deduplicate: true },
+      });
+
+    const defaults = deduplicating(sampleToken(FUTURE()));
+    expect(defaults).not.toContain("several values per record");
+    expect(defaults).toContain(
+      "records grouped with no value in common (enforced):",
+    );
+    expect(defaults).toContain(CONSENT_FACTS.candidateSetChainsGrouping.note);
+
+    expect(deduplicating(splittingKeyToken(FUTURE(), "cascade"))).toContain(
+      CONSENT_FACTS.candidateSetChainsGrouping.note,
+    );
+
+    // Silent where the pair the sentence states is refused rather than run,
+    // and where these terms declare no side of it at all.
+    expect(
+      deduplicating(splittingKeyToken(FUTURE(), "single-pass")),
+    ).not.toContain("records grouped with no value in common");
+    expect(renderDisplayInvitation(log, sampleToken(FUTURE()))).not.toContain(
+      "records grouped with no value in common",
+    );
+  });
+
+  test("displayInvitation: withholds the chained grouping where this party receives no result", () => {
+    // The invitation keeps the result, so the accepting party mirrors to no
+    // entitlement and the accept takes no `deduplicate` from it -- on the
+    // shipped default keys, which declare a candidate set, and with the
+    // inviting party's own side declared. The grouping this states rests on a
+    // pair the reader can never complete, so the prompt states the terms'
+    // own side and stops there.
+    const log = getLogger("accept-display-chained-grouping-sole-receiver-test");
+    log.setLevel("silent");
+    const token = sampleToken(FUTURE());
+    const rendered = renderDisplayInvitation(log, {
+      ...token,
+      linkageTerms: {
+        ...token.linkageTerms,
+        deduplicate: true,
+        output: { expectsOutput: true, shareWithPartner: false },
+      },
+    });
+    expect(rendered).toContain("duplicate matches");
+    expect(rendered).not.toContain("records grouped with no value in common");
+    expect(rendered).not.toContain(
+      CONSENT_FACTS.candidateSetChainsGrouping.note,
+    );
+  });
+
   test("displayInvitation: represents every consent-relevant linkage term, bar the recorded gaps", () => {
     // Which terms an acceptor's consent turns on is judged once, in core's shared
     // classification, so this prompt and the web consent summary cannot drift on
@@ -4110,6 +4170,15 @@ describe("displayInvitation: the declared terms it discloses (columns, citations
         payload: { send: [], receive: [] },
       },
     });
+    // The chained grouping is the tenth, and the sole-receiver shape is what
+    // puts it out of reach of the seventh and eighth: the sentence rests on a
+    // pair the accept takes from the ACCEPTING party, which an invitation
+    // keeping the result leaves that party no side of. The probe's own key
+    // declares the candidate set the grouping needs.
+    const deduplicatingSharedResult = renderDisplayInvitation(log, {
+      ...sampleToken(FUTURE()),
+      linkageTerms: { ...CONSENT_PROBE_TERMS, deduplicate: true },
+    });
     const rendered = [
       acceptorWithheld,
       inviterWithheld,
@@ -4120,6 +4189,7 @@ describe("displayInvitation: the declared terms it discloses (columns, citations
       deduplicatingSoleReceiver,
       deduplicatingTableWithheld,
       inviterLearnsNoMembership,
+      deduplicatingSharedResult,
     ].join("\n");
 
     // The whole table, rather than a list restated here: a caveat this renderer
