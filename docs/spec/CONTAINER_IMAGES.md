@@ -204,8 +204,8 @@ it pins beyond that, and the second OS-package inventory that comes with it.
 | Pin | Value | How it is held |
 | --- | --- | --- |
 | Release snapshot | `--releasever=2023.12.20260817` on every `dnf` transaction | Shape-checked as a dated snapshot in `scripts/dockerfile-freeze.test.mjs`; compared against the base rootfs's own `system-release` version, asserted in the build |
-| Provider package and version | `openssl-fips-provider-certified` at `3.0.8-1.amzn2023.0.1` | `rpm -qf` on the installed `fips.so`, asserted in the build |
-| Module version string | `3.0.8-d694bfa693b76001` | `openssl list -providers` read back, asserted in the build |
+| Provider package and version | `openssl-fips-provider-certified` at `3.2.2-1.amzn2023` | `rpm -qf` on the installed `fips.so`, asserted in the build |
+| Module version string | `3.2.2-799901ad7ab41d45` | `openssl list -providers` read back, asserted in the build |
 | Base image | `amazonlinux:2023@sha256:181f98c48832fe926f8ca3b6ffeafcce128e96e77b93d08fbe9a9bc9403ce284`, the multi-arch index digest | Named in the `FROM` instead of the tag; the literal held in `scripts/dockerfile-freeze.test.mjs` |
 | Node runtime tarball, `x64` | `982aa24dd8be4c889c6a8ab337ddff3b0896645b20f4239356e80552c16277ee` | `sha256sum -c` against the literal committed in the fetching `RUN`; the literal held in `scripts/dockerfile-freeze.test.mjs` |
 | Node runtime tarball, `arm64` | `afc7a004018485092ac8985b817b0d5684472bd9472e0b57d2ab88737e50090d` | as above |
@@ -270,25 +270,26 @@ The `-certified` name this image uses is a different package, which is what
 leaves `openssl-libs` free to float beside the pin, and the snapshot above
 serves it at two NVRs holding two certified modules:
 
-    3.0.8-1.amzn2023.0.1 -> 3.0.8-d694bfa693b76001   <- what this image pins, certificate 5021
-    3.2.2-1.amzn2023     -> 3.2.2-799901ad7ab41d45   <- the module certificate 5438 names
+    3.0.8-1.amzn2023.0.1 -> 3.0.8-d694bfa693b76001   <- the module certificate 5021 names
+    3.2.2-1.amzn2023     -> 3.2.2-799901ad7ab41d45   <- what this image pins, certificate 5438
 
-The second is the higher version, so a `dnf update` inside the image would take
-it. Nothing in the build runs one -- the `swap` names an NVR and the assertions
-read the installed module back -- and both halves of that read are what catch a
-module the pins do not name, certified or not.
+Both NVRs hold a certified module under a certificate of its own, so within
+this package name the pin decides which certificate the image stands on rather
+than whether the module is certified at all. Nothing in the build decides it by
+version order -- the `swap` names an NVR and the assertions read the installed
+module back -- and both halves of that read are what catch a module the pins do
+not name, certified or not.
 
 The security policy is the other reason that pin does the work, because it
-names no package this image installs and does not agree with itself about the
-one it does name. Its installation and administrator-guidance sections (11.1 and
-11.2, p. 65) name `openssl-3.0.8-1.amzn2023.0.17`; its end-of-life section
-(11.6, p. 65) names `openssl-3.0.8-1.amzn2023.0.9`. Both are NVRs of the
-distribution's `openssl` package rather than of either `-certified` package, and
-the inconsistency between them is recorded rather than resolved -- neither is
-the value this image pins, and nothing here turns on which of the two the policy
-meant. The module version string is the identifier the policy is consistent
-about, giving it in section 1.1 (p. 6), again in section 11.2 (p. 65) as the
-value the Crypto Officer reads back, and in all six rows of Tables 2 and 3.
+names no package this image installs. Its installation, administrator-guidance
+and end-of-life sections (11.1, 11.2 and 11.4, p. 65) all name
+`openssl-3.2.2-1.amzn2023.0.1`, an NVR of the distribution's `openssl` package
+rather than of either `-certified` package -- and one this image does not carry
+under that name either, its `openssl` being `3.5.7-2.amzn2023.0.1`. What the
+policy is consistent about is the module version string, given in section 11.2
+(p. 65) as the value the Crypto Officer reads back and in all six rows of
+Tables 2 and 3 (p. 8), which is the value the build's second assertion
+compares against.
 
 **The base image digest and the snapshot pin name one release, not two.** The
 snapshot pin covers the package layer and not the base rootfs, and the two are
@@ -338,71 +339,88 @@ base against Alpine's 45, including `systemd`, `dbus`, `pam`,
 `cryptsetup-libs`, `device-mapper` and `util-linux` -- a heavier closure, and
 one that includes an init system.
 
-## What certificate 5021 attests
+## What certificate 5438 attests
 
-The provider pins above name CMVP certificate 5021, "Amazon Linux 2023 OpenSSL
+The provider pins above name CMVP certificate 5438, "Amazon Linux 2023 OpenSSL
 FIPS Provider". Its two sources are the certificate page, which holds
-`FIPS 140-3`, `Overall Level 1`, `Status: Active`, a `5/25/2030` sunset date,
-and an initial validation on `5/26/2025` by atsec information security
+`FIPS 140-3`, `Overall Level 1`, `Status: Active`, a `7/26/2031` sunset date,
+and an initial validation on `7/27/2026` by atsec information security
 corporation; and the module's own non-proprietary security policy, document
-version 1.2 of 2025-05-14, which is the authority for every table below. The
+version 1.6 of 2026-07-20, which is the authority for every table below. The
 page renders no module-version, tested-configuration or approved-algorithm
 section, so the rows here are single-sourced on the policy. Why the image pairs
 with this certificate, what a claim about the image may say, and the conditions
-the policy attaches to three of the algorithm rows are in
+the policy attaches to two of the algorithm rows are in
 [fips-variant-image.md](../notes/fips-variant-image.md).
 
 ### The Caveat
 
-The certificate states one Caveat, quoted here verbatim:
+The certificate states one Caveat. Its installation clause, quoted verbatim:
 
-> When operated in approved mode. No assurance of minimum security of SSPs
-> (e.g., keys, bit strings) that are externally loaded, or of SSPs established
-> with externally loaded SSPs.
+> When installed, initialized and configured as specified in Section 11.1 of
+> the Security Policy.
+
+The rest of the field is the sentence certificate 5021 also carries -- "When
+operated in approved mode. No assurance of minimum security of SSPs (e.g.,
+keys, bit strings) that are externally loaded, or of SSPs established with
+externally loaded SSPs." -- transcribed clause by clause rather than as one
+string, so the order the two parts appear in on the page is not stated here.
 
 Provenance differs from every other row in this section. The Caveat is a field
 of the certificate detail page itself, an HTML page with no page numbers,
-rather than of the 71-page security policy that sources the tables below; there
+rather than of the 68-page security policy that sources the tables below; there
 is accordingly no page citation for it and none is fabricated.
 
 `SSP` is the FIPS 140-3 term for a sensitive security parameter: a key, a seed,
-or any other value whose disclosure or modification compromises the module. The
+or any other value whose disclosure or modification compromises the module. That
 sentence reaches this project's composition directly -- the key schedule mixes a
 pre-shared secret the module did not generate -- and
 [COMPLIANCE.md](../COMPLIANCE.md#fips-140) is where what follows from that is
 stated.
 
-### The tested operational environments
+The installation clause points at a procedure this image does not follow to the
+letter and at a host state it cannot supply for itself. Section 11.1 (p. 65)
+names the same `openssl` RPM the pin section above records, and requires the
+Amazon Linux 2023 system to be in the FIPS validated configuration, verified by
+`fips-mode-setup --check` reporting "FIPS mode is enabled" -- which is the
+host's business rather than the image's, per host tier in
+[fips-variant-image.md](../notes/fips-variant-image.md).
 
-Section 2.2, Table 3 (pp. 8-9), complete -- three hardware platforms, each
-tested with the processor's cryptographic acceleration on and off:
+### The tested and vendor-affirmed operational environments
+
+Section 2.2, Table 3 (p. 8), complete -- two hardware platforms, each tested
+with the processor's cryptographic acceleration on and off:
 
 | Operating system | Hardware platform | Processors | PAA/PAI | Hypervisor or host OS |
 | --- | --- | --- | --- | --- |
-| Amazon Linux 2023 | EC2 `c7g.metal` | AWS Graviton3 | Yes | N/A |
-| Amazon Linux 2023 | EC2 `c6i.metal` | Intel Xeon Platinum 8375C | Yes | N/A |
-| Amazon Linux 2023 | AWS Snowball | AMD EPYC 7702 | Yes | N/A |
-| Amazon Linux 2023 | EC2 `c7g.metal` | AWS Graviton3 | No | N/A |
-| Amazon Linux 2023 | EC2 `c6i.metal` | Intel Xeon Platinum 8375C | No | N/A |
-| Amazon Linux 2023 | AWS Snowball | AMD EPYC 7702 | No | N/A |
+| Amazon Linux 2023 | EC2 `c7g.metal` | AWS Graviton3 (ARMv8-A) | Yes | N/A |
+| Amazon Linux 2023 | EC2 `c6i.metal` | Intel Xeon Platinum 8375C (Sunny Cove) | Yes | N/A |
+| Amazon Linux 2023 | EC2 `c7g.metal` | AWS Graviton3 (ARMv8-A) | No | N/A |
+| Amazon Linux 2023 | EC2 `c6i.metal` | Intel Xeon Platinum 8375C (Sunny Cove) | No | N/A |
 
-Every row states module version `3.0.8-d694bfa693b76001`, the string the pin
+Every row states module version `3.2.2-799901ad7ab41d45`, the string the pin
 table above holds. Table 2 (Tested Module Identification, p. 8) names the same
-three platforms with `fips.so` as the file and `HMAC-SHA-256` as its integrity
-test.
+two platforms with `fips.so` as the file and `HMAC-SHA-256` as its integrity
+test. Both architectures `Dockerfile.fips` builds for are among them at both
+acceleration settings: the Graviton3 rows are ARMv8-A and the Xeon rows x86-64.
 
-**Six tested environments, and no vendor-affirmed ones.** Section 2.2 is titled
-"Tested and Vendor Affirmed Module Version and Identification" and holds only
-the two tested tables; Table 3's caption is followed directly by section 2.3,
-Excluded Components. The second half of that heading is phrased from the table's
-contents, because an absence is all there is to phrase it from:
-this policy states no sentence denying vendor affirmation. Other certificates
-do -- 4985's policy says "No operational environments are vendor affirmed" -- so
-quoting that sentence against 5021 would be a misquotation.
+**Three vendor-affirmed environments, and the sentence that bounds them.**
+Table 4 (p. 9) states Amazon Linux 2023 on AWS Snowball with AMD EPYC 9R14, on
+AWS Snowball with AMD EPYC 7702, and on AWS Snowcone with Intel Denverton Atom
+C3558. What the policy prints directly beneath that table, verbatim:
 
-**None of the six is a container, and none is a virtual machine.** Every row is
-bare metal with `Hypervisor or Host OS: N/A`. The variant image is therefore not
-running in a tested operational environment on any host, which is what
+> CMVP makes no statement as to the correct operation of the module or the
+> security strengths of the generated keys when so ported if the specific
+> operational environment is not listed on the validation certificate.
+
+A vendor-affirmed row is the vendor's affirmation rather than a tested result,
+so a claim resting on one says less than a claim resting on Table 3.
+
+**None of the seven names a container, and none names a virtual machine.** Every
+tested row is bare metal with `Hypervisor or Host OS: N/A`, and Table 4 states
+an operating system and a hardware platform per row with no hypervisor column at
+all. The variant image is therefore not running in a tested operational
+environment on any host, which is what
 [fips-variant-image.md](../notes/fips-variant-image.md) reasons from rather than
 around.
 
@@ -410,17 +428,17 @@ around.
 
 The variant's entrypoint probe makes five call shapes, and those five are what a
 "dispatches into the validated module" claim may name
-([fips-variant-image.md](../notes/fips-variant-image.md)). Each is on Table 5
+([fips-variant-image.md](../notes/fips-variant-image.md)). Each is on Table 6
 (Approved Algorithms, pp. 9-13), under the row name and CAVP certificate ids the
 policy records:
 
-| Call shape | Table 5 row | CAVP certificates | Properties | Reference |
+| Call shape | Table 6 row | CAVP certificates | Properties | Reference |
 | --- | --- | --- | --- | --- |
-| AES-256-GCM, 12-byte IV | `AES-GCM` | A4614, A4615, A4616, A4617, A4620, A4621, A4622, A4623, A4624, A4625, A4626, A4627, A4628 | `Direction - Decrypt, Encrypt`; `IV Generation - External, Internal`; `IV Generation Mode - 8.2.1, 8.2.2`; `Key Length - 128, 192, 256` | SP 800-38D |
-| HKDF-SHA-256 | `KDA HKDF Sp800-56Cr1` | A4603 | `Derived Key Length - 2048`; `Shared Secret Length: 224-2048 Increment 8`; `HMAC Algorithm` including `SHA2-256` | SP 800-56C Rev. 2 |
-| HMAC-SHA-256 | `HMAC-SHA2-256` | A4608, A4612, A4618, A4629, A4630, A4631, A4632 | `Key Length: 112-524288 Increment 8` | FIPS 198-1 |
-| SHA-256 | `SHA2-256` | A4608, A4612, A4618, A4629, A4630, A4631, A4632 | `Message Length: 0-65536 Increment 8`; `Large Message Sizes - 1, 2, 4, 8` | FIPS 180-4 |
-| P-256 ECDH | `KAS-ECC-SSC Sp800-56Ar3` | A4612, A4618, A4629, A4630, A4631, A4632 | `Domain Parameter Generation Methods - P-224, P-256, P-384, P-521`; `Scheme - ephemeralUnified`; `KAS Role - initiator, responder` | SP 800-56A Rev. 3 |
+| AES-256-GCM, 12-byte IV | `AES-GCM` | A7447, A7448, A7449, A7450, A7499, A7500, A7501, A7502, A7503, A7504, A7505, A7506, A7507 | `Direction - Decrypt, Encrypt`; `IV Generation - External, Internal`; `Key Length - 128, 192, 256`; `IV Generation Mode - 8.2.2` | SP 800-38D |
+| HKDF-SHA-256 | `KDA HKDF Sp800-56Cr1` | A7440 | `Derived Key Length - 2048`; `Shared Secret Length: 224-2048 Increment 8`; `HMAC Algorithm` including `SHA2-256` | SP 800-56C Rev. 2 |
+| HMAC-SHA-256 | `HMAC-SHA2-256` | A7444, A7445, A7451, A7495, A7496, A7497, A7498 | `Key Length: 112-524288 Increment 8` | FIPS 198-1 |
+| SHA-256 | `SHA2-256` | A7444, A7445, A7451, A7495, A7496, A7497, A7498 | `Message Length: 0-65536 Increment 8`; `Large Message Sizes - 1, 2, 4, 8` | FIPS 180-4 |
+| P-256 ECDH | `KAS-ECC-SSC Sp800-56Ar3` | A7445, A7451, A7495, A7496, A7497, A7498 | `Domain Parameter Generation Methods - P-224, P-256, P-384, P-521`; `Scheme - ephemeralUnified`; `KAS Role - initiator, responder` | SP 800-56A Rev. 3 |
 
 Three of those properties bound a value `packages/core/src` chooses, and all
 three are satisfied: the HKDF row's shared-secret window is 224-2048 bits
@@ -428,23 +446,38 @@ against a 256-bit shared secret, its tested derived-key length 2048 bits against
 a 256-bit output, and the HMAC row's key-length floor 112 bits against a 256-bit
 key.
 
-**The HKDF row's name and its reference column disagree, and the policy resolves
-it in prose.** The row is named `KDA HKDF Sp800-56Cr1` while its reference
-column reads `SP 800-56C Rev. 2`; section 2.10 (p. 24) states the attribution
-directly -- the module's `KDA OneStep`, `KDA TwoStep` and HKDF are "compliant
-with SP 800-56Cr1 (HKDF) and SP 800-56Cr2 (KDA OneStep, KDA TwoStep)". A
-citation that names this module's HKDF therefore names Cr1 and CAVP certificate
-`A4603`, not the Cr2 row and cert `A3548` that certificate 4985 holds.
+**The HKDF row's name and its reference column disagree, and the policy settles
+it by repetition rather than in prose.** The row is named `KDA HKDF Sp800-56Cr1`
+while its reference column reads `SP 800-56C Rev. 2`, and section 2.10 (p. 22)
+adds nothing, saying only that key establishment methods are specified in the
+Security Function Implementations table. That table (Table 9, p. 18) carries the
+Cr1 row name again, against CAVP certificate `A7440`. A citation that names this
+module's HKDF therefore names Cr1 and `A7440`, not the Cr2 row and cert `A3548`
+that certificate 4985 holds.
 
-**Table 5 membership is not the whole answer for three of the five.** The
-policy attaches a condition to AES-GCM, to the SP 800-56Ar3 assurances behind
-the ECDH row, and to the use context of HKDF, each stated outside Table 5. They
-are recorded in
+**Table 6 membership is not the whole answer for two of the five.** The policy
+attaches a condition to AES-GCM (section 2.7.1, p. 19) and to the SP 800-56Ar3
+assurances behind the ECDH row (section 2.7.4, pp. 20-21), each stated outside
+Table 6. Both are recorded in
 [fips-variant-image.md](../notes/fips-variant-image.md), which is where what may
-be claimed of the image is reasoned about.
+be claimed of the image is reasoned about. HKDF carries no use-context
+restriction on this policy: section 2.10 states none, and what bounds the row
+instead is Table 8, which lists HKDF among the key-derivation algorithms
+non-approved below a 112-bit key -- a threshold a 256-bit key-derivation key is
+far above.
+
+**The AES-GCM condition decides psilink's AEAD, and the row's IV generation mode
+does not.** The row above lists `IV Generation Mode - 8.2.2` alone, while
+psilink's IV is a deterministic construction conformant to SP 800-38D section
+8.2.1 ([CHANNEL_SECURITY.md](CHANNEL_SECURITY.md#iv-construction-and-sp-800-38d-conformance)).
+Neither reading reaches the calls, because every `crypto.subtle` AES-GCM call
+supplies the IV from outside the module, which Table 8 (Non-Approved, Not
+Allowed Algorithms, pp. 13-14) names as `AES GCM (external IV)` and Table 15
+(Non-Approved Services, p. 33) as the encryption service built on it. Where the
+IV comes from is what decides it.
 
 **X25519 and Ed25519 appear in no table of this policy.** Neither string occurs
-anywhere in its 71 pages, and the policy's non-approved-but-allowed categories
+anywhere in its 68 pages, and the policy's non-approved-but-allowed categories
 are empty by explicit statement ("N/A for this module", stated twice -- with and
 without security claimed), so there is no status either algorithm could hold
 under this certificate. That is a different statement from the one certificate
@@ -456,30 +489,30 @@ Receipt signing calls `crypto.subtle` ECDSA over P-256 with SHA-256, and the
 entrypoint probe makes no ECDSA call, so the rows below are a table placement
 and never a measured dispatch
 ([fips-variant-image.md](../notes/fips-variant-image.md)). They sit on the same
-Table 5 (p. 10):
+Table 6 (p. 10):
 
-| Table 5 row | CAVP certificates | Properties | Reference |
+| Table 6 row | CAVP certificates | Properties | Reference |
 | --- | --- | --- | --- |
-| `ECDSA KeyGen (FIPS186-5)` | A4612, A4618, A4629, A4630, A4631, A4632 | `Curve - P-224, P-256, P-384, P-521`; `Secret Generation Mode - testing candidates` | FIPS 186-5 |
-| `ECDSA KeyVer (FIPS186-5)` | A4612, A4618, A4629, A4630, A4631, A4632 | `Curve - P-224, P-256, P-384, P-521` | FIPS 186-5 |
-| `ECDSA SigGen (FIPS186-5)` | A4612, A4618, A4629, A4630, A4631, A4632 | `Curve - P-224, P-256, P-384, P-521`; `Hash Algorithm - SHA2-224, SHA2-256, SHA2-384, SHA2-512, SHA2-512/224, SHA2-512/256`; `Component - No` | FIPS 186-5 |
-| `ECDSA SigVer (FIPS186-5)` | A4612, A4618, A4629, A4630, A4631, A4632 | `Curve - P-224, P-256, P-384, P-521`; `Hash Algorithm - SHA2-224, SHA2-256, SHA2-384, SHA2-512, SHA2-512/224, SHA2-512/256` | FIPS 186-5 |
+| `ECDSA KeyGen (FIPS186-5)` | A7445, A7451, A7495, A7496, A7497, A7498 | `Curve - P-224, P-256, P-384, P-521`; `Secret Generation Mode - testing candidates` | FIPS 186-5 |
+| `ECDSA KeyVer (FIPS186-5)` | A7445, A7451, A7495, A7496, A7497, A7498 | `Curve - P-224, P-256, P-384, P-521` | FIPS 186-5 |
+| `ECDSA SigGen (FIPS186-5)` | A7445, A7451, A7495, A7496, A7497, A7498 | `Curve - P-224, P-256, P-384, P-521`; `Hash Algorithm - SHA2-224, SHA2-256, SHA2-384, SHA2-512, SHA2-512/224, SHA2-512/256`; `Component - No` | FIPS 186-5 |
+| `ECDSA SigVer (FIPS186-5)` | A7445, A7451, A7495, A7496, A7497, A7498 | `Curve - P-224, P-256, P-384, P-521`; `Hash Algorithm - SHA2-224, SHA2-256, SHA2-384, SHA2-512, SHA2-512/224, SHA2-512/256` | FIPS 186-5 |
 
-A second pair of `SigGen` and `SigVer` rows, at CAVP certificates A4613 and
-A4619, lists the SHA-3 hash algorithms in place of the SHA-2 ones over the
+A second pair of `SigGen` and `SigVer` rows, at CAVP certificates A7446 and
+A7452, lists the SHA-3 hash algorithms in place of the SHA-2 ones over the
 same four curves.
 
-Table 13 (Approved Services, p. 30) lists the services above those rows:
+Table 14 (Approved Services, pp. 26-33) lists the services above those rows:
 signature generation and signature verification with ECDSA, each with the
-approved indicator `OSSL_RH_FIPSINDICATOR_APPROVED`, beside key pair generation
-with ECDSA and public key verification with ECDSA.
+approved indicator `OSSL_RH_FIPSINDICATOR_APPROVED` (p. 28), beside key pair
+generation with ECDSA and public key verification with ECDSA.
 
-**The pre-hashed-message variant is a non-approved service.** Table 7 lists
+**The pre-hashed-message variant is a non-approved service.** Table 8 lists
 `RSA and ECDSA (pre-hashed message)` for signature generation and verification,
-and Table 14 (Non-Approved Services, p. 35) lists the two matching service
+and Table 15 (Non-Approved Services, pp. 33-34) lists the two matching service
 rows. The module therefore separates two signature services over one approved
 algorithm, and which of them a caller reaches is decided by the indicator the
-module sets rather than by Table 5 membership. The AES-GCM condition above
+module sets rather than by Table 6 membership. The AES-GCM condition above
 separates two services the same way, and there the call surface determines which
 one is reached: every `crypto.subtle` AES-GCM call supplies an external IV
 ([fips-variant-image.md](../notes/fips-variant-image.md)).
@@ -801,13 +834,16 @@ derived from the other's.
 
 ### The FIPS reference build's inventory
 
-The shipped `Dockerfile.fips` build at the pins above, re-measured 2026-09-09
-(`scratch/fips-5438-remeasure/`), installs **165 OS packages** and weighs
-652,525,047 bytes (653 MB) on `x86_64` and 801,698,635 bytes (802 MB) on
-`aarch64`. Of those 165, **37 hold a GPL-3.0 or LGPL-3.0 term** -- the
-reference build's 39 (enumerated below) minus `binutils` and its
-`elfutils-debuginfod-client` dependency, both of which hold a v3 term and
-neither of which the shipped build installs.
+The shipped `Dockerfile.fips` build at the pins above, re-measured 2026-09-10
+(`scratch/handoffs/fips-provider-pin-3.2.2-report.md`), installs
+**165 OS packages** and weighs 653,417,246 bytes (653 MB) on `x86_64` and
+801,950,571 bytes (802 MB) on `aarch64`. Of those 165, **37 hold a GPL-3.0 or
+LGPL-3.0 term** -- the reference build's 39 (enumerated below) minus `binutils`
+and its `elfutils-debuginfod-client` dependency, both of which hold a v3 term
+and neither of which the shipped build installs. That licence breadth is
+carried forward rather than re-derived at this pin: the closure's package names
+are the same apart from the provider swap, and both provider packages are
+Apache-2.0.
 
 The table below is the older one-off reference build `Dockerfile.fips` was
 derived from, measured on `aarch64` against the Alpine image built the same day.

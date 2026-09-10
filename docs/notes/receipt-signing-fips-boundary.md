@@ -22,11 +22,11 @@ measurements and certificate readings underneath the reasoning are in
 With FIPS 140-3 as the target standard, Ed25519 sits outside the boundary on
 both certificates in play here. Certificate 4985 places it in Table 8,
 Non-Approved and Not Allowed, and includes ECDSA on its approved-algorithm list.
-Certificate 5021, the module the FIPS variant image embeds, names Ed25519 in no
+Certificate 5438, the module the FIPS variant image embeds, names Ed25519 in no
 table at all and states its non-approved-but-allowed category empty, so there is
-no status the algorithm could hold there -- and the certified module does not
-include the primitive to begin with
-([CONTAINER_IMAGES.md](../spec/CONTAINER_IMAGES.md#what-certificate-5021-attests),
+no status the algorithm could hold there -- and the certified module read inside
+the image held no such primitive to begin with
+([CONTAINER_IMAGES.md](../spec/CONTAINER_IMAGES.md#what-certificate-5438-attests),
 [fips-variant-image.md](fips-variant-image.md)). ECDSA is on that certificate's
 approved-algorithm table as well, over P-256 and with SHA2-256 among its hashes,
 so both certificates in play approve the algorithm this note migrates to.
@@ -126,9 +126,9 @@ container work is trying to establish for the AEAD. Leaving the operation outsid
 the module entirely is strictly better than routing it in, and that holds under
 the disclosure option as much as under the migration.
 
-Under certificate 5021 the option is not there to take at all. The certified
-Amazon Linux module has no Ed25519 -- `openssl list` reports it absent while
-the provider is active, measured in the variant image
+Under certificate 5438 the option is not there to take at all. The certified
+Amazon Linux module read in the image has no Ed25519 -- `openssl list` reported
+it absent while the provider was active
 ([fips-variant-image.md](fips-variant-image.md)) -- so presence is a property of
 the OpenSSL Project builds measured here rather than of the module the image
 ships.
@@ -198,7 +198,7 @@ party could break in a copy without invalidating anything the artifact attests.
 
 **May say**, where a validated module is actually present in the environment:
 the signature and verification operations of receipt signing are performed by
-the module, using ECDSA over P-256 with SHA2-256. Certificate 5021, the module
+the module, using ECDSA over P-256 with SHA2-256. Certificate 5438, the module
 the FIPS variant image embeds, includes the algorithm at those parameters on its
 approved-algorithm table -- `KeyGen`, `KeyVer`, `SigGen` and `SigVer`, all
 FIPS 186-5 -- and includes signature generation and signature verification with
@@ -211,7 +211,7 @@ it names for the tested parameter set at the time the claim is made, rather than
 inferring either from the algorithm name.
 
 **Table membership is not the whole answer, and the gap is a service rather than
-an algorithm.** Certificate 5021 also includes `RSA and ECDSA (pre-hashed
+an algorithm.** Certificate 5438 also includes `RSA and ECDSA (pre-hashed
 message)` signature generation and verification among its non-approved
 algorithms and services, so a module driven that way is performing a
 non-approved service with an approved algorithm. Which of the two services a
@@ -235,9 +235,9 @@ name, and the service the call lands on is not established here.
   name ([fips-variant-image.md](fips-variant-image.md)).
 - That an EdDSA build of receipt signing would be FIPS-approved. It is not on
   any OpenSSL Project certificate; under certificate 4985 Ed25519 is
-  Non-Approved and Not Allowed, and certificate 5021 names it in no table at all
-  while the module it certifies does not include the primitive. Two of the forty
-  active certificates do approve EdDSA, and neither yields a verifiable certified
+  Non-Approved and Not Allowed, and certificate 5438 names it in no table at
+  all, while the module read inside the image held no such primitive. Two of the
+  forty active certificates do approve EdDSA, and neither yields a verifiable certified
   module for a freely redistributable image -- see
   [fips-provider-surface.md](fips-provider-surface.md). This is why the algorithm
   moved rather than the disclosure.
@@ -251,12 +251,14 @@ name, and the service the call lands on is not established here.
   it at all, whatever the algorithm.
 - That the shipped image is validated, or that it runs in a validated module's
   operational environment. No certificate covers the default image's base, and
-  the variant image runs in none of the six environments certificate 5021 names:
-  every one is bare metal, none is a container or a virtual machine, and the
-  policy states no vendor affirmation reaching past them
-  ([CONTAINER_IMAGES.md](../spec/CONTAINER_IMAGES.md#what-certificate-5021-attests)).
+  the variant image runs in none of the seven environments certificate 5438
+  names: the four tested are bare metal, the three vendor-affirmed are Snowball
+  and Snowcone appliances, none is a container or a virtual machine, and the
+  policy states beneath the vendor-affirmed table that CMVP makes no statement
+  about a module ported outside the tested list
+  ([CONTAINER_IMAGES.md](../spec/CONTAINER_IMAGES.md#what-certificate-5438-attests)).
   The flat denial 4985's policy states belongs to that document and is not
-  5021's to quote. What the variant image may say instead is in
+  5438's to quote. What the variant image may say instead is in
   [fips-variant-image.md](fips-variant-image.md), and is independent of
   everything decided here.
 - That the receipt is non-repudiable in a stronger sense because the algorithm

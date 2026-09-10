@@ -39,10 +39,9 @@ HKDF.
 - **Amazon Linux 2023 in both stages.** `@openmined/psi.js` ships separate musl
   and glibc prebuilds, so building on one libc and running on the other is not
   safe; the builder and the runtime therefore share the same base.
-- **CMVP certificate 5021**: module `3.0.8-d694bfa693b76001`, packages
-  `openssl-fips-provider-certified` and `-certified-so` at
-  `3.0.8-1.amzn2023.0.1`, installed with `dnf swap` against a pinned release
-  snapshot.
+- **CMVP certificate 5438**: module `3.2.2-799901ad7ab41d45`, packages
+  `openssl-fips-provider-certified` and `-certified-so` at `3.2.2-1.amzn2023`,
+  installed with `dnf swap` against a pinned release snapshot.
 - **The operator provides a FIPS-mode host.** The image does not enable FIPS
   mode, cannot, and does not refuse to run when the host lacks it. On every run
   it probes whether its own crypto is being served by the validated module and
@@ -68,37 +67,33 @@ HKDF.
 
 ## What was rejected, and why
 
-**Certificate 5438, whose certified module AWS now also serves under the
-`-certified` package name.** It has 14 months more nominal runway (sunset
-2031-07-26 against 5021's 2030-05-25). It was first rejected on two measured
-grounds -- a 145-finding, 56-CVE vulnerability delta against the 5021 image, and
-a pin that could not be patched without silently replacing the certified module.
-Both were artifacts of the `openssl-fips-provider-latest` packaging that froze
-the whole openssl stack, and neither reproduces once the bumped snapshot is in
-place: it first serves 5438's module under the `-certified` package name, and
-re-measured against that package the vulnerability delta is zero on every scan
-setting and both architectures, and 5438 is incrementally patchable exactly as
-5021 is -- `openssl-libs` floats, `dnf update` moves real packages, and the
-certified module stays put (measured 2026-09-09, `scratch/fips-5438-remeasure/`).
-What holds instead is the inversion: `-certified` now serves two NVRs, so a
-full `dnf update` inside the 5021 image moves its provider from
-`3.0.8-d694bfa693b76001` up to 5438's `3.2.2-799901ad7ab41d45` -- the build runs
-no update, and its read-back assertion fails on any module its pins do not name.
+**Certificate 5021, the module `3.0.8-d694bfa693b76001`, which the pinned
+snapshot still serves under the same `-certified` package name.** Three things
+it states are stronger than 5438's: six tested operational environments against
+four, with AWS Snowball among them as a tested platform rather than a
+vendor-affirmed one; a section 2.10 that states the HKDF SP 800-56C attribution
+in prose rather than leaving the row name to carry it; and a Caveat that stops
+at the SSP sentence, where 5438's adds section 11.1's
+install-and-FIPS-mode-verification requirement as a certificate-level condition
+the image cannot satisfy for itself, since it often cannot even read the host's
+FIPS mode. It is Active until 2030-05-25, so nothing forced the move.
 
-The decision to stay on 5021 (owner, 2026-09-09) rests on the security policy
-instead. 5438's Caveat raises section 11.1's install-and-FIPS-mode-verification
-requirement to a certificate-level condition the variant image cannot satisfy --
-it often cannot even read the host's FIPS mode -- so the environment gap these
-notes argue around becomes a condition the certificate states and the image
-fails; its tested operational environment count drops from 6 to 4; and its
-section 2.10 no longer states the HKDF SP 800-56C attribution prose that
-[CONTAINER_IMAGES.md](../spec/CONTAINER_IMAGES.md) resolves its Cr1-vs-Cr2
-citation from. Against that stands only the runway, on a certificate active until
-2030; the same-version module/libcrypto pairing does not exist under a floating
-`openssl-libs`, and every algorithm the scoped claim names is on 5438's approved
-table with no category moved -- a close call decided on the caveat, not an
-algorithm gap. Revisit only if AWS retires 5021 early or publishes a tested
-operational environment that includes a container or a VM.
+The move was taken anyway (owner, 2026-09-10), for architecture coverage and
+runway. Both architectures `Dockerfile.fips` builds for are tested platforms on
+5438, each at both acceleration settings, where 5021 tested Graviton3 only with
+the processor's acceleration on and Xeon only with it off; and 5438's sunset is
+2031-07-26. Every algorithm the scoped claim names is on 5438's approved table
+with no category moved, so what the move costs is in the environment and caveat
+text rather than in an algorithm gap, and it is stated where an assessor reads
+it ([COMPLIANCE.md](../COMPLIANCE.md#fips-140)). The packaging objection that
+once stood against this certificate does not survive the `-certified` package:
+re-measured against it the vulnerability delta is zero on every scan setting and
+both architectures, and the module is incrementally patchable exactly as 5021's
+was -- `openssl-libs` floats, `dnf update` moves real packages, and the
+certified module stays put (measured 2026-09-09,
+`scratch/fips-5438-remeasure/`). The pinned NVR is the higher of the two the
+snapshot serves under that package name; the build runs no update in any case,
+and its read-back assertion fails on any module its pins do not name.
 
 **Replacing the default image rather than adding a variant.** No certificate
 reaches musl or Alpine, so the default image cannot support this claim -- but
@@ -183,20 +178,20 @@ construction with both authority and precedent is Red Hat's: name what the
 artifact does, condition it on the deployment, and attach the sanctioned short
 form if a short form is wanted.
 
-**Certificate 5021 is a FIPS 140-3 validation**, which is the project's target
+**Certificate 5438 is a FIPS 140-3 validation**, which is the project's target
 standard ([fips-provider-surface.md](fips-provider-surface.md)), so wording that
 names the revision may name 140-3. Read off the certificate's own security
 policy: "Amazon Linux 2023 OpenSSL FIPS Provider -- FIPS 140-3 Non-Proprietary
-Security Policy", document version 1.2 of 2025-05-14, prepared by atsec for
-Amazon Web Services, validating module version `3.0.8-d694bfa693b76001` -- the
+Security Policy", document version 1.6 of 2026-07-20, prepared by atsec for
+Amazon Web Services, validating module version `3.2.2-799901ad7ab41d45` -- the
 version this image pins -- at overall Security Level 1 against
 FIPS 140-3. The document names 140-3 throughout and 140-2 nowhere. The
-certificate is Active with a 2030-05-25 sunset.
+certificate is Active with a 2031-07-26 sunset.
 
-That reading rests on two sources. The CMVP certificate page for 5021 agrees
+That reading rests on two sources. The CMVP certificate page for 5438 agrees
 with the policy on every field it renders: `Standard: FIPS 140-3`,
-`Overall Level 1`, `Status: Active`, `Sunset Date: 5/25/2030`, vendor Amazon Web
-Services, Inc., and an initial validation on 5/26/2025 by atsec. The status and
+`Overall Level 1`, `Status: Active`, `Sunset Date: 7/26/2031`, vendor Amazon Web
+Services, Inc., and an initial validation on 7/27/2026 by atsec. The status and
 the sunset date are the two the page alone holds -- the policy PDF states
 neither -- so the sentence above naming them is the certificate page's, not the
 policy's.
@@ -205,7 +200,7 @@ The limit is narrower than the reading. The page renders no module-version
 field, no tested-configuration section and no approved-algorithm section, so
 the module version string, the operational environments and the algorithm
 tables are corroborated by nothing beyond the policy. Those are in
-[CONTAINER_IMAGES.md](../spec/CONTAINER_IMAGES.md#what-certificate-5021-attests),
+[CONTAINER_IMAGES.md](../spec/CONTAINER_IMAGES.md#what-certificate-5438-attests),
 single-sourced and marked as such.
 
 ## The three tiers a claim has to distinguish
@@ -401,21 +396,21 @@ provider that agreed a key while exporting or admitting a different encoding of
 the same point would break the handshake as completely as one that refused the
 curve.
 
-### Three conditions the certificate attaches to those five
+### Two conditions the certificate attaches to those five
 
-All five call shapes are on certificate 5021's approved-algorithm table, at the
+All five call shapes are on certificate 5438's approved-algorithm table, at the
 parameters psilink uses; the rows and the CAVP certificate ids are in
-[CONTAINER_IMAGES.md](../spec/CONTAINER_IMAGES.md#what-certificate-5021-attests).
-Table membership is not the whole answer for three of them, because the policy
+[CONTAINER_IMAGES.md](../spec/CONTAINER_IMAGES.md#what-certificate-5438-attests).
+Table membership is not the whole answer for two of them, because the policy
 states a condition on each somewhere other than that table. No measurement
-determines any of the three: each is read off the policy's own text against
-what the code does, and each has a recorded posture below. They are recorded
-because a claim written from Table 5 alone would not include them.
+determines either: each is read off the policy's own text against what the code
+does, and each has a recorded posture below. They are recorded because a claim
+written from Table 6 alone would not include them.
 
 **AES-GCM with an externally supplied IV is a non-approved service, and the
-application AEAD requests that service.** Table 7 (Non-Approved, Not Allowed
+application AEAD requests that service.** Table 8 (Non-Approved, Not Allowed
 Algorithms) lists `AES GCM (external IV)` for authenticated encryption, and
-section 2.7.1 (p. 22) says how the module tells the two services apart: it
+section 2.7.1 (p. 19) says how the module tells the two services apart: it
 "provides a non-approved AES GCM encryption service which accepts arbitrary
 external IVs from the operator", requested "by invoking the
 `EVP_EncryptInit_ex2` API function with a non-NULL iv value", and "the API will
@@ -441,7 +436,7 @@ approved-service indicator is read anywhere in this repository, and no claim
 here rests on one.
 
 **The SP 800-56Ar3 assurances are conditioned on a TLS application.** Section
-2.7.4 (p. 23) opens: "To comply with the assurances found in Section 5.6.2 of SP
+2.7.4 (p. 20) opens: "To comply with the assurances found in Section 5.6.2 of SP
 800-56Ar3, the operator must use the module together with an application that
 implements the TLS protocol." psilink is not one -- its P-256 ECDH runs inside a
 Noise NNpsk0 handshake over psilink's own transport. The section's two remaining
@@ -462,28 +457,26 @@ the security function and stops there. Certificate 4985 states no equivalent, so
 the condition belongs to the certificate this image pairs with rather than to
 the algorithm.
 
-**HKDF is scoped to a key-agreement context.** Section 2.10 (p. 24), of the
-module's `KDA OneStep`, `KDA TwoStep` and HKDF: "These implementations shall
-only be used to generate secret keys in the context of an SP 800-56Ar3 key
-agreement scheme." psilink's collapsed `deriveBits` sits downstream of a P-256
-ECDH -- the shared-secret computation of SP 800-56Ar3 section 5.7.1.2, which
-that publication's section 6.1.2.2 Ephemeral Unified Model scheme is built on
-and which the certificate's row labels `ephemeralUnified` -- so the head of the
-chain qualifies as far as the computation goes. The scheme itself does not
-follow: section 6.1.2.2 also prescribes the key-derivation step this handshake
-replaces with the Noise schedule. Whether every derivation in the Noise
-schedule -- which also mixes the pre-shared secret -- sits "in the context of"
-that scheme is the composition question
-[key-establishment-fips-boundary.md](key-establishment-fips-boundary.md) already
-records as unattested, arriving here as a stated restriction rather than an
-inference.
+**HKDF carries no use-context condition on this certificate, and the silence
+settles less than it sounds like.** Section 2.10 (p. 22) says only that key
+establishment methods are specified in the Security Function Implementations
+table, and states no restriction on the module's `KDA OneStep`, `KDA TwoStep` or
+HKDF; what bounds that row instead is Table 8, which lists HKDF among the
+key-derivation algorithms non-approved below a 112-bit key, a threshold this
+key schedule's 256-bit key-derivation key is far above. So a third condition a
+claim would otherwise have to meet is not stated here. What the silence does not
+do is attest the composition: whether every derivation in the Noise schedule --
+which also mixes the pre-shared secret -- belongs to the SP 800-56Ar3 scheme its
+head is built on is the question
+[key-establishment-fips-boundary.md](key-establishment-fips-boundary.md) records
+as unattested, and a policy stating nothing about the context answers that no
+more than one restricting it would.
 
-The posture follows the restriction rather than the algorithm row.
+The posture follows the composition rather than the algorithm row.
 `KDA HKDF Sp800-56Cr1` is named for the extract-then-expand the module performs
-on a shared secret it computed itself; no derivation in the schedule is claimed
-to satisfy the section 2.10 restriction, and the schedule above the shared
-secret is disclosed as an application composition of approved operations rather
-than as an approved derivation. That is the bound the may-say sentence in
+on a shared secret it computed itself, and the schedule above that shared secret
+is disclosed as an application composition of approved operations rather than as
+an approved derivation. That is the bound the may-say sentence in
 [key-establishment-fips-boundary.md](key-establishment-fips-boundary.md) is
 already written to.
 
@@ -573,9 +566,10 @@ a release to refuse it.
 
 ## What it costs
 
-Measured on the shipped build at the pins above, re-measured 2026-09-09
-(`scratch/fips-5438-remeasure/`): **63 to 165 OS packages**, and an image of
-653 MB on `x86_64` and 802 MB on `aarch64` against the Alpine image's 576 MB. Of
+Measured on the shipped build at the pins above, re-measured 2026-09-10
+(`scratch/handoffs/fips-provider-pin-3.2.2-report.md`): **63 to 165 OS
+packages**, and an image of 653 MB on `x86_64` and 802 MB on `aarch64` against
+the Alpine image's 576 MB. Of
 those 165, **37 have a GPL-3.0 or LGPL-3.0 term** -- the samba client stack that
 the default image already pays for, plus a GPLv3 base userland Alpine's busybox
 and musl do not have (`bash`, `coreutils-single`, `diffutils`, `findutils`,
@@ -650,14 +644,14 @@ reading -- Docker Hub is not reachable from the development container and no
   algorithm tables.** The certificate page corroborates the standard revision,
   the security level, the status and the sunset date, and renders none of those
   three sections (above), so they rest on the security policy alone.
-- **Whether `openssl-libs` 3.5.x loading the certified 3.0.8 module is inside
+- **Whether `openssl-libs` 3.5.x loading the certified 3.2.2 module is inside
   the validation.** It is measured to load, self-test and serve, and AWS's own
-  packaging permits the pairing -- the certified package declares
-  `Conflicts: openssl-libs < 1:3.2.2-1`, a floor rather than an equality -- but
-  the module's security policy names an `openssl-3.0.8` RPM as its distribution
-  vehicle rather than a required host libcrypto, at two NVRs that disagree with
-  each other
-  ([CONTAINER_IMAGES.md](../spec/CONTAINER_IMAGES.md#what-certificate-5021-attests)),
+  packaging permits the pairing -- the `dnf swap` resolves and completes on both
+  architectures with `openssl-libs` at `3.5.7-2.amzn2023.0.1` installed beside
+  it -- but the module's security policy names an
+  `openssl-3.2.2-1.amzn2023.0.1` RPM as its distribution vehicle rather than a
+  required host libcrypto, a package this image installs under no such name
+  ([CONTAINER_IMAGES.md](../spec/CONTAINER_IMAGES.md#what-certificate-5438-attests)),
   and has no porting clause and no user-affirmation clause. That is a policy
   question, not a measurable one, and there is no policy text that narrows it in
   either direction.
