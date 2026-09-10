@@ -1,3 +1,5 @@
+import dns from "node:dns";
+
 import { RTCPeerConnection } from "werift";
 import { expect, test } from "vitest";
 
@@ -12,10 +14,12 @@ import type { RTCIceCandidate } from "werift";
  *
  * The library half is driven rather than read: the whole point of the setting
  * is that werift honors it, so the arms below construct real peer connections
- * and compare what each gathers. Neither reaches the network -- the servers
- * they name are loopback addresses with nothing listening, so the relay arm
- * gathers nothing and the default arm gathers the host candidate it always
- * would.
+ * and compare what each gathers. No arm reaches the network. Every server named
+ * here is a loopback address with nothing listening, so the relay arm gathers
+ * nothing and the default arm gathers the host candidate it always would; the
+ * arm that names no server werift can parse falls back to werift's built-in
+ * Google STUN default, so it runs with the resolver intercepted, as the sibling
+ * transport suite does for the same case (transport.test.ts).
  */
 
 /** Nothing listens here; naming it keeps every arm on loopback. */
@@ -44,6 +48,40 @@ const HOSTLESS_TURN = {
  * the six or seven seconds that takes.
  */
 const GATHERING_TIMEOUT_MS = 30_000;
+
+/**
+ * Run `gather` with DNS resolution short-circuited, so a peer left with no
+ * server it can parse cannot reach werift's built-in Google STUN default: the
+ * lookup that fallback needs fails at once and no packet leaves the machine.
+ * werift resolves through `dns.promises.lookup`; the callback form is hooked
+ * too so a future switch does not silently reach the network.
+ */
+async function withResolverIntercepted<T>(
+  gather: () => Promise<T>,
+): Promise<T> {
+  const intercepted = new Error("resolver intercepted by the ICE policy suite");
+  const realPromiseLookup = dns.promises.lookup;
+  const realCallbackLookup = dns.lookup;
+  (dns.promises as { lookup: unknown }).lookup = async (): Promise<never> => {
+    throw intercepted;
+  };
+  (dns as { lookup: unknown }).lookup = (
+    _hostname: string,
+    options: unknown,
+    callback: unknown,
+  ): void => {
+    const cb = (typeof options === "function" ? options : callback) as (
+      err: Error,
+    ) => void;
+    cb(intercepted);
+  };
+  try {
+    return await gather();
+  } finally {
+    (dns.promises as { lookup: unknown }).lookup = realPromiseLookup;
+    (dns as { lookup: unknown }).lookup = realCallbackLookup;
+  }
+}
 
 /** Candidates one peer connection gathered by the time gathering completed. */
 async function gatheredCandidates(
@@ -143,14 +181,18 @@ test(
     // applies the policy only where a TURN server it can parse reaches it, so
     // a relay-only connection with no `turn` entry, or one whose url names no
     // host, offers the partner the very host address the setting exists to
-    // keep off the wire. Neither shape parses, so both are built here.
-    const [noServers, hostlessTurn] = await Promise.all([
-      gatheredCandidates({ iceTransportPolicy: "relay" }),
-      gatheredCandidates({
-        iceServers: [HOSTLESS_TURN],
-        iceTransportPolicy: "relay",
-      }),
-    ]);
+    // keep off the wire. Neither shape parses, so both are built here. Both
+    // also leave werift with nothing but its built-in default to fall back to,
+    // which is what the intercepted resolver keeps off the network.
+    const [noServers, hostlessTurn] = await withResolverIntercepted(() =>
+      Promise.all([
+        gatheredCandidates({ iceTransportPolicy: "relay" }),
+        gatheredCandidates({
+          iceServers: [HOSTLESS_TURN],
+          iceTransportPolicy: "relay",
+        }),
+      ]),
+    );
     expect(noServers.some((candidate) => candidate.includes("typ host"))).toBe(
       true,
     );

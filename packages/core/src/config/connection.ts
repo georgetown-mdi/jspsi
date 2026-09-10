@@ -411,13 +411,17 @@ interface TurnServer {
 // no host -- `turn:` left by an empty environment substitution, say -- reaches
 // the ICE layer as a server it cannot resolve and is dropped there: a
 // relay-only policy then gathers host candidates, and a stun list replaces the
-// built-in default with nothing. Both are refused here instead.
+// built-in default with nothing. Both are refused here instead. Each pattern is
+// applied to the trimmed value, and the trimmed value is what the connection
+// holds, so the padding a quoted entry can carry decides nothing: a padded
+// `turn:relay.example.org:3478` names its host, and a padded `turn:` none.
 const TURN_URL_PATTERN = /^turns?:[^\s:?][^\s?]*(?:\?\S*)?$/;
 const STUN_URI_PATTERN = /^stuns?:[^\s:?][^\s?]*(?:\?\S*)?$/;
 
 const TurnServerSchema: z.ZodType<TurnServer> = z.object({
   url: z
     .string()
+    .trim()
     .regex(
       TURN_URL_PATTERN,
       "a turn entry's url must name a host after turn: or turns:, for " +
@@ -894,6 +898,7 @@ const WebRTCConnectionConfigSchema = z.object({
     .array(
       z
         .string()
+        .trim()
         .regex(
           STUN_URI_PATTERN,
           "a stun entry must name a host after stun: or stuns:, for " +
@@ -991,6 +996,9 @@ export const ConnectionConfigSchema: z.ZodType<ConnectionConfig> = z
   // that names no relay server can never form a candidate pair. Refusing it
   // here answers at config time what would otherwise be a rendezvous that runs
   // its whole budget and then reports that no relay candidate was gathered.
+  // An `iceProvision` endpoint also answers with relay servers, so it satisfies
+  // the policy here; the message names only `turn`, the one source an
+  // application dials today (the CLI refuses `iceProvision` outright).
   .refine(
     (conn) =>
       !(
@@ -1002,7 +1010,7 @@ export const ConnectionConfigSchema: z.ZodType<ConnectionConfig> = z
     {
       message:
         "ice_transport_policy `relay` gathers relay candidates only, so it " +
-        "requires at least one turn entry (or ice_provision)",
+        "requires at least one turn entry",
     },
   )
   // File-sync directory mode (filedrop and sftp). A directory is given either
