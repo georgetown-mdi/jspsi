@@ -1136,9 +1136,9 @@ const oneDirectionalDisclosuresByTerminatedRun = new WeakSet<object>();
  * {@link ExchangeResult.audit}: the run still failed, and the record's own
  * `outcome` field states that rather than passing for a completed run's.
  *
- * A failure raised BEFORE this party's payload crossed holds nothing: nothing
- * was disclosed, so no record is owed (docs/spec/EXCHANGE_RECORD.md, When a
- * record is owed).
+ * A failure raised before this party's send resolved holds nothing: the
+ * region had not opened, so no record is owed (docs/spec/EXCHANGE_RECORD.md,
+ * When a record is owed).
  *
  * The lookup walks the `cause` chain, so a caller that re-raises the failure with
  * the original as its `cause` still recovers the record.
@@ -1873,7 +1873,8 @@ export async function runExchange(
   // callback below: from there the disclosure the record attests has occurred
   // whatever the rest of the run does (docs/spec/PROTOCOL.md, Self-attested
   // record). Every step inside the guard fails into this party's owed record by
-  // construction, and every value the record commits to is fixed above it.
+  // construction, and every value the record commits to is fixed above it or,
+  // for the partner's payload, by what arrived before the cut.
   let localPayloadSent = false;
   // What this party received: a run cut after its own send received no payload
   // at all, and the record commits to what was received
@@ -1961,8 +1962,9 @@ export async function runExchange(
       });
     }
   } catch (error) {
-    // Before this party's payload crossed nothing was disclosed, so the failure
-    // owes no record and leaves with none.
+    // Before this party's send resolved the region has not opened, so the
+    // failure owes no record and leaves with none; what a rejected send may
+    // nonetheless have published is the limit the spec states.
     if (!localPayloadSent) throw error;
     postDisclosureFailure = { error };
   }

@@ -1155,7 +1155,7 @@ describe("a run terminated after its disclosure keeps the record of it", () => {
     // The route past the payload exchange that is not the swap. The initiator
     // has locked in a column set the responder does not transmit, so
     // reconcileReceivedPayload refuses AFTER both payloads have crossed: this
-    // party's own data is in the partner's hands whatever came back, so the
+    // party's own data has been handed to the transport whatever came back, so the
     // disclosure is owed a record exactly as a terminated swap's is. Both sides
     // run unsigned, so the receipt step plays no part in producing it.
     const initiatorPrepared = preparedWithPayload(
@@ -1208,7 +1208,7 @@ describe("a run terminated after its disclosure keeps the record of it", () => {
 
   test("a cut between this party's send and the partner's reply keeps the record", async () => {
     // The window the durability point opens at the send: the initiator's payload
-    // is in the partner's hands and the partner's never arrives. The record
+    // has been handed to the transport and the partner's never arrives. The record
     // commits to what crossed, and to an empty received payload beside it.
     const [connInitiatorRaw, connResponder] = createMessagePipe();
     const [initiatorSettled, responderSettled] = await Promise.allSettled([
