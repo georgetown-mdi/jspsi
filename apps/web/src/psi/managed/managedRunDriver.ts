@@ -123,11 +123,13 @@ export interface ManagedRunDriverConfig {
    * instead ({@link ./managedRun.ts}, `rerunFailureLastRun`). Absent, both flows
    * keep their default budget. */
   peerWaitTimeoutMs?: number;
-  /** A non-fatal, operator-relevant notice raised mid-run, from three sources: the
+  /** A non-fatal, operator-relevant notice raised mid-run, from four sources: the
    * deduplicating cardinality and the pair-table projection the agreed terms
    * resolved to ({@link describeResolvedRunShape}); the clean
    * close ending on an exit with no delivery signal ({@link CLOSE_OUTCOME_WARNINGS});
-   * and {@link DISCLOSURE_NOT_FILED_WARNING}. Optional: a caller with no notice
+   * and a disclosure that could not be filed, on the run that completed
+   * ({@link DISCLOSURE_NOT_FILED_WARNING}) or the run that stopped after sending
+   * ({@link STOPPED_DISCLOSURE_NOT_FILED_WARNING}). Optional: a caller with no notice
    * surface omits it and all are dropped. Never a terminal -- the run still settles
    * exactly once, and a notice from the teardown's close can arrive after it. */
   onWarning?: (message: string) => void;
@@ -363,7 +365,7 @@ export function runManagedExchangeInBrowser(
           builtOutputs = true;
           return outputs;
         } catch (error) {
-          await fileTerminatedDisclosure(record.id, error);
+          await fileTerminatedDisclosure(record.id, error, onWarning);
           throw error;
         } finally {
           // Started, not awaited: the clean close inside it waits for the peer
@@ -392,6 +394,13 @@ export function runManagedExchangeInBrowser(
  * -- is available only while the completion surface is open. */
 export const DISCLOSURE_NOT_FILED_WARNING =
   "This run's disclosure record could not be saved to this exchange's accounting of disclosures. Your results are complete. Download the record file below if you need to keep an account of this disclosure.";
+
+/** The notice a run that stopped after sending raises when its disclosure could
+ * not be filed. It offers no download: the run has no results surface, so nothing
+ * remains for the operator to take, and what is left to do is record the
+ * disclosure outside this browser. */
+export const STOPPED_DISCLOSURE_NOT_FILED_WARNING =
+  "This run sent your payload and then stopped, and its record could not be saved to this exchange's accounting of disclosures. Note this run's time and partner if you keep an account of disclosures.";
 
 /**
  * Append this run's self-attested exchange record to the exchange's accounting
@@ -434,16 +443,34 @@ async function appendDisclosure(
  * and a local step past it threw, whose record the completed path has already
  * filed.
  *
- * Best-effort, as the completed path's append is, and silent on the operator's
- * screen: the run is failing, so a failed append can neither undo the disclosure
- * nor make the outcome worse, and the failure the run reports is what the operator
- * is shown. The loss goes to the diagnostic log.
+ * Best-effort, as the completed path's append is: the run is failing, so a failed
+ * append can neither undo the disclosure nor make the outcome worse, and the run
+ * still reports its own failure. A failed append does raise
+ * {@link STOPPED_DISCLOSURE_NOT_FILED_WARNING} beside that failure, since the
+ * accounting is what an unattended run leaves behind and nobody would otherwise
+ * learn it is missing a disclosure that happened. The loss also goes to the
+ * diagnostic log.
+ *
+ * Recovering the record is guarded too, so a throwing accessor -- an error whose
+ * own `cause` chain raises while core walks it -- cannot replace the run's
+ * failure. That throw takes the log alone and no notice: what it leaves unknown
+ * is whether a record was owed at all, which the notice would assert.
  */
 async function fileTerminatedDisclosure(
   id: string,
   error: unknown,
+  onWarning: ((message: string) => void) | undefined,
 ): Promise<void> {
-  const audit = exchangeRecordFromFailure(error);
+  let audit: BuiltExchangeRecord | undefined;
+  try {
+    audit = exchangeRecordFromFailure(error);
+  } catch (failure) {
+    log.error(
+      "managed re-run: reading a stopped run's disclosure record from its failure failed:",
+      failure,
+    );
+    return;
+  }
   if (audit === undefined) return;
   try {
     await appendDisclosureRecordToStore(id, audit.record);
@@ -452,6 +479,7 @@ async function fileTerminatedDisclosure(
       "managed re-run: filing a stopped run's disclosure record failed:",
       failure,
     );
+    onWarning?.(STOPPED_DISCLOSURE_NOT_FILED_WARNING);
   }
 }
 

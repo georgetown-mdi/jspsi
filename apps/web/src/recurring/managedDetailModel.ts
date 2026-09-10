@@ -309,7 +309,7 @@ function nonSucceededDisclosure(lastRun: ManagedExchangeLastRun): string {
  * The run-history entries for the detail view, derived from the record's
  * `lastRun` bookkeeping: an empty list when no run has been recorded, otherwise
  * a single entry for the most recent run (see {@link nonSucceededDisclosure} for
- * the disclosure line). Every completed run's own disclosure is in the
+ * the disclosure line). Every run that disclosed has its own record in the
  * accounting of disclosures, not here.
  */
 export function runHistoryEntries(

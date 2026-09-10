@@ -815,6 +815,11 @@ export function ManagedRunSurface({ id }: { id: string }) {
                       {failure.message}
                     </span>
                   </Alert>
+                  {/* Below the failure, not in place of it: a run that stopped
+                      after sending raises its own notice when it could not file
+                      the disclosure, and that notice speaks for a run with no
+                      completion surface to show it on. */}
+                  <RunWarningsAlert warnings={runWarnings} />
                   <FailureRecovery
                     failure={failure}
                     record={record}

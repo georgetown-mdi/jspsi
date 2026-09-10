@@ -1093,10 +1093,12 @@ the read applies, and what is written is the parsed result: what is at rest is
 structurally what the reader admits, so no field beyond the format can sit in the
 store unseen, and a record the reader would reject is never written. A failed
 append does not fail the run -- the disclosure has already happened and the
-exchange's results stand -- and is reported as a notice instead. On a run that
-stopped, the failed append is reported to the diagnostic log alone: that run
-already reports its own failure, which a second notice about the accounting
-would compete with rather than add to.
+exchange's results stand -- and is reported as a notice instead. A failed append
+on a run that STOPPED raises a notice of its own, beside the run's failure rather
+than in place of it: the run still reports the failure it had, and the notice
+states that the accounting is missing a disclosure that happened. It offers no
+record download, unlike the completed run's, because a stopped run has no results
+surface to offer one from. Both go to the diagnostic log as well.
 
 **What a stopped run's entry states.** The entry is the record, so what it states
 is the record's fields and nothing beside them: the columns this party consented

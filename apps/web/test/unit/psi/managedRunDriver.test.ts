@@ -17,6 +17,7 @@ import {
 
 import {
   DISCLOSURE_NOT_FILED_WARNING,
+  STOPPED_DISCLOSURE_NOT_FILED_WARNING,
   runManagedExchangeInBrowser,
 } from "../../../src/psi/managed/managedRunDriver.js";
 import {
@@ -1033,6 +1034,69 @@ describe("filing a stopped run's disclosure", () => {
     ]);
   });
 
+  test("files one entry when the partner's payload arrived and the run refused it", async () => {
+    // The third input into the record-owed region, past the two the cancel and the
+    // drop reach: the partner's payload arrived and this party's consent check
+    // refused it (core's reconcileReceivedPayload, a protocol ConnectionError).
+    // The record commits to what arrived before the refusal, so the entry lands
+    // exactly once and holds those column names.
+    const { mc } = makeParkedCloseMc();
+    mockedOpen.mockResolvedValue(mc);
+    acquireResources();
+    mockedRunExchange.mockRejectedValueOnce(
+      new ConnectionError(
+        "payload disclosure mismatch: the partner transmitted columns [ward] " +
+          "but this party expected to receive only [clinic].",
+        "protocol",
+      ),
+    );
+    const audit = {
+      record: await disclosureRecord({
+        outcome: "receipt-swap-terminated",
+        partnerPayloadColumn: "ward",
+      }),
+      keys: {
+        version: "psilink-exchange-keys/v1",
+        salts: {
+          localPayloadSent: "local-payload-salt",
+          partnerPayloadReceived: "partner-payload-salt",
+        },
+      },
+    } satisfies BuiltExchangeRecord;
+    mockedRecordFromFailure.mockReturnValueOnce(audit);
+    let fileEntry: (() => void) | undefined;
+    mockedAppendDisclosure.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        fileEntry = resolve;
+      }),
+    );
+    let settled = false;
+
+    const running = runDriver(new AbortController().signal).then(
+      () => undefined,
+      (error: unknown) => {
+        settled = true;
+        return error;
+      },
+    );
+    await tick();
+    // The failure waits on the entry: a caller reacting to it must not race the
+    // filing of a disclosure the refused payload does not undo.
+    expect(settled).toBe(false);
+
+    fileEntry?.();
+
+    await expect(running).resolves.toMatchObject({
+      message: expect.stringContaining("payload disclosure mismatch"),
+    });
+    expect(mockedAppendDisclosure.mock.calls).toEqual([
+      [RECORD.id, audit.record],
+    ]);
+    expect(
+      audit.record.governance.payloadReceived.map((column) => column.name),
+    ).toEqual(["ward"]);
+  });
+
   test("files nothing when the run stopped before its payload was sent", async () => {
     // Core opens the record-owed region at the send and hands nothing back for a
     // failure before it. Inventing an entry there would attest a disclosure that
@@ -1082,10 +1146,11 @@ describe("filing a stopped run's disclosure", () => {
     expect(settled).toBe(true);
   });
 
-  test("a failed filing leaves the run's own failure standing", async () => {
-    // The run is already failing and the operator is shown that failure; a store
-    // fault here must not replace it, and raises no second notice to compete with
-    // it. The loss goes to the diagnostic log.
+  test("a failed filing raises its own notice and leaves the run's failure standing", async () => {
+    // The disclosure happened and this browser now holds no record of it, on the
+    // path an unattended run reaches with nobody watching the store, so the loss
+    // is raised rather than left in the log. It does not become the run's
+    // outcome: the run still fails with the failure it had.
     const { mc } = makeParkedCloseMc();
     mockedOpen.mockResolvedValue(mc);
     acquireResources();
@@ -1100,7 +1165,44 @@ describe("filing a stopped run's disclosure", () => {
     ).rejects.toThrow("data channel closed");
 
     expect(logged).toHaveBeenCalled();
+    expect(onWarning.mock.calls).toEqual([
+      [STOPPED_DISCLOSURE_NOT_FILED_WARNING],
+    ]);
+    // The stopped run's notice, not the completed run's: that one points at a
+    // record download this run has no surface to offer.
+    expect(STOPPED_DISCLOSURE_NOT_FILED_WARNING).not.toBe(
+      DISCLOSURE_NOT_FILED_WARNING,
+    );
+    logged.mockRestore();
+  });
+
+  test("a record accessor that throws is logged, and neither replaces the run's failure nor claims a lost entry", async () => {
+    // The accessor walks the failure's `cause` chain, so an error whose chain
+    // raises on the way makes it throw. What that leaves unknown is whether a
+    // record was owed at all, which is why it takes the log and no notice.
+    const { mc } = makeParkedCloseMc();
+    mockedOpen.mockResolvedValue(mc);
+    acquireResources();
+    const failure = new Error("data channel closed");
+    Object.defineProperty(failure, "cause", {
+      get() {
+        throw new Error("the cause chain refused to be read");
+      },
+    });
+    mockedRunExchange.mockRejectedValueOnce(failure);
+    const { exchangeRecordFromFailure: realRecordFromFailure } =
+      await vi.importActual<typeof PsilinkCore>("@psilink/core");
+    mockedRecordFromFailure.mockImplementationOnce(realRecordFromFailure);
+    const logged = vi.spyOn(log, "error").mockImplementation(() => {});
+    const onWarning = vi.fn();
+
+    await expect(
+      runDriver(new AbortController().signal, onWarning),
+    ).rejects.toThrow("data channel closed");
+
+    expect(logged).toHaveBeenCalled();
     expect(onWarning).not.toHaveBeenCalled();
+    expect(mockedAppendDisclosure).not.toHaveBeenCalled();
     logged.mockRestore();
   });
 });

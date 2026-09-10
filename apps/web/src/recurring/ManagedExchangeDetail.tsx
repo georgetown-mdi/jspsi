@@ -637,10 +637,11 @@ function RunSchedule({ record }: { record: ManagedExchangeRecord }) {
  * The run history: what the most recent run DID, whether or not it completed.
  * The record's own bookkeeping keeps only that one run (see
  * docs/spec/MANAGED_EXCHANGE_RECORD.md, the `lastRun` row), so this section is
- * scoped to it. Every run that sent this party's payload has its disclosure in
- * the accounting below, whether or not it finished; a run that stopped before
- * disclosing never enters it. A saved-but-never-run exchange renders the plain
- * empty state.
+ * scoped to it. Every run that sent this party's payload files its disclosure in
+ * the accounting below, whether or not it finished, and raises a notice when the
+ * filing fails ({@link ../psi/managed/managedRunDriver.ts}); a run that stopped
+ * before disclosing never enters it. A saved-but-never-run exchange renders the
+ * plain empty state.
  */
 function RunHistory({ record }: { record: ManagedExchangeRecord }) {
   const entries = runHistoryEntries(record);
@@ -655,8 +656,8 @@ function RunHistory({ record }: { record: ManagedExchangeRecord }) {
         <>
           <p className={`${styles.small} ${styles.sub}`}>
             Only the most recent run&apos;s outcome is kept. Every run that sent
-            your payload has its disclosure in the accounting below, whether or
-            not it finished.
+            your payload files its disclosure in the accounting below, whether
+            or not it finished, and warns you if it cannot.
           </p>
           {entries.map((entry) => (
             <div key={entry.at} className={styles.dlRow}>
@@ -695,7 +696,9 @@ function factRow(fact: DisclosureFact): ConfigRow {
  * A run that stopped after sending files an entry too, and the record's own
  * outcome is what marks it: the collapsed row states it beside the instant, so
  * an accounting drawn from the list does not take an unconfirmed send for a
- * delivered one.
+ * delivered one. Either kind of run raises a notice when its filing fails, which
+ * is what keeps the intro's own promise from overstating what is here
+ * ({@link ../psi/managed/managedRunDriver.ts}).
  *
  * A failed read renders as its own state, never as an empty accounting -- an
  * empty accounting is a claim ("nothing was disclosed") this view must not
@@ -762,13 +765,13 @@ function DisclosureAccountingView({
       <h2 className={styles.eyebrow}>Accounting of disclosures</h2>
       <p className={styles.small}>
         Every run that sent your payload files its own record here, whether or
-        not it finished: who you disclosed to, under which agreement and for
-        what purpose, the categories of data that moved each way, how many
-        records you exposed, and -- when both sides received the result -- its
-        size. A run that stopped after sending is marked, and states that
-        delivery to your partner is not confirmed. Each entry is that run&apos;s
-        self-attested record, built from what both sides already hold and
-        deliberately unsigned: an honest local account, not a signed or
+        not it finished, and warns you if it cannot: who you disclosed to, under
+        which agreement and for what purpose, the categories of data that moved
+        each way, how many records you exposed, and -- when both sides received
+        the result -- its size. A run that stopped after sending is marked, and
+        states that delivery to your partner is not confirmed. Each entry is
+        that run&apos;s self-attested record, built from what both sides already
+        hold and deliberately unsigned: an honest local account, not a signed or
         non-repudiable receipt.
       </p>
       {read === undefined ? (
@@ -849,10 +852,11 @@ function DisclosureAccountingView({
  * recovery reset destroys the entries while leaving the exchange -- run history
  * included -- standing; the export/import artifact migrates the runnable
  * exchange without its accounting; and a run that stopped after sending files
- * its entry best-effort and reports a failed filing to the diagnostic log alone
- * (see docs/spec/MANAGED_EXCHANGE_RECORD.md, "When an entry is written"). So
- * each of the three readings states what is recorded here, and none of them
- * reports an absence of disclosures:
+ * its entry best-effort, so a failed filing leaves an entry missing whether or
+ * not anybody was there for the notice it raises (see
+ * docs/spec/MANAGED_EXCHANGE_RECORD.md, "When an entry is written"). So each of
+ * the three readings states what is recorded here, and none of them reports an
+ * absence of disclosures:
  *
  * - A record remembering a COMPLETED run: the emptiness is stated as fact
  *   beside the run that refutes an absence of runs, naming the two paths to it.
