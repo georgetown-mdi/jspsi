@@ -51,17 +51,11 @@ export function DirectServerSection({
   sftpConnection,
   rendezvous,
   exchangeFiles,
-  exchangeFilesOpen,
   onExchangeFiles,
-  onExchangeFilesOpen,
   connectionTuning,
-  connectionTuningOpen,
   onConnectionTuning,
-  onConnectionTuningOpen,
   runDiagnostics,
-  runDiagnosticsOpen,
   onRunDiagnostics,
-  onRunDiagnosticsOpen,
   onAuthorConnection,
   onClearConnection,
   onContinue,
@@ -76,22 +70,16 @@ export function DirectServerSection({
   /** The operator's file-handling choices, authored here because both parties
    * settle them out of band alongside the server itself. */
   exchangeFiles: ExchangeFilesDraft;
-  exchangeFilesOpen: boolean;
   onExchangeFiles: (draft: ExchangeFilesDraft) => void;
-  onExchangeFilesOpen: (open: boolean) => void;
   /** The operator's connection-tuning choices, authored here for the same reason
    * the file-handling ones are. */
   connectionTuning: ConnectionTuningDraft;
-  connectionTuningOpen: boolean;
   onConnectionTuning: (draft: ConnectionTuningDraft) => void;
-  onConnectionTuningOpen: (open: boolean) => void;
   /** The operator's per-run diagnostic and recovery choices. Authored here, with
    * the other pre-run cards, because the sweep is a decision about the very
    * directory this step determines. */
   runDiagnostics: RunDiagnosticsDraft;
-  runDiagnosticsOpen: boolean;
   onRunDiagnostics: (draft: RunDiagnosticsDraft) => void;
-  onRunDiagnosticsOpen: (open: boolean) => void;
   onAuthorConnection: (connection: SftpConnectionProjection) => void;
   onClearConnection: () => void;
   onContinue: () => void;
@@ -230,25 +218,16 @@ export function DirectServerSection({
       <ExchangeFilesCard
         draft={exchangeFiles}
         capabilities={ZERO_SETUP_EXCHANGE_FILES}
-        open={exchangeFilesOpen}
-        onToggleOpen={onExchangeFilesOpen}
         onChange={onExchangeFiles}
       />
 
       <ConnectionTuningCard
         draft={connectionTuning}
         capabilities={tuningCapabilities}
-        open={connectionTuningOpen}
-        onToggleOpen={onConnectionTuningOpen}
         onChange={onConnectionTuning}
       />
 
-      <RunDiagnosticsCard
-        draft={runDiagnostics}
-        open={runDiagnosticsOpen}
-        onToggleOpen={onRunDiagnosticsOpen}
-        onChange={onRunDiagnostics}
-      />
+      <RunDiagnosticsCard draft={runDiagnostics} onChange={onRunDiagnostics} />
 
       {splitDirectoryProblem !== undefined && (
         <Alert

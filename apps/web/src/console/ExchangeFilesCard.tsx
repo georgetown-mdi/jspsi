@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 import {
   Alert,
   Checkbox,
@@ -65,8 +67,6 @@ function draftSummary(draft: ExchangeFilesDraft): string {
 export function ExchangeFilesCard({
   draft,
   capabilities,
-  open,
-  onToggleOpen,
   onChange,
 }: {
   draft: ExchangeFilesDraft;
@@ -74,10 +74,9 @@ export function ExchangeFilesCard({
    * document omits the unexpected-files control rather than accepting a value it
    * would drop. */
   capabilities: ExchangeFilesCapabilities;
-  open: boolean;
-  onToggleOpen: (open: boolean) => void;
   onChange: (draft: ExchangeFilesDraft) => void;
 }) {
+  const [open, setOpen] = useState(false);
   const problems = exchangeFilesProblems(draft, capabilities);
   const set = <TField extends keyof ExchangeFilesDraft>(
     key: TField,
@@ -89,7 +88,7 @@ export function ExchangeFilesCard({
       label="How files are handled"
       summary={draftSummary(draft)}
       open={open}
-      onToggle={onToggleOpen}
+      onToggle={setOpen}
       headingOrder={2}
     >
       <Stack gap="md" mt="sm">
