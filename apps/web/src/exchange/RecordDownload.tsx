@@ -11,8 +11,8 @@ import type { JobExchangeRecordOfferState } from "./useJobExchangeRecordOffer";
  * run for one that did nothing.
  */
 export const TERMINATED_RECORD_LEAD =
-  "This run had already exchanged data when it stopped, and wrote the record of " +
-  "that disclosure.";
+  "This run had already disclosed your data when it stopped, and wrote the " +
+  "record of that disclosure.";
 
 /**
  * What the seat says under that lead. Two things the operator can act on: the

@@ -950,6 +950,20 @@ function cutAfterPayloadSend(
   };
 }
 
+/** Reject this party's own payload send at the transport, leaving every earlier
+ * message of the exchange to go out normally. */
+function rejectPayloadSend(conn: MessageConnection): MessageConnection {
+  return {
+    send: async (data) => {
+      if (typeof data === "object" && data !== null && "hasData" in data)
+        throw new ConnectionError("the connection dropped", "transport");
+      await conn.send(data);
+    },
+    receive: (timeoutMs?: number) => conn.receive(timeoutMs),
+    close: () => conn.close(),
+  };
+}
+
 /** Swap this party's outbound payload frame for `forged`, leaving every other
  * message of the exchange untouched. */
 function withForgedPayload(
@@ -1321,6 +1335,44 @@ describe("a run terminated after its disclosure keeps the record of it", () => {
     expect(exchangeRecordFromFailure(await initiator)?.record.outcome).toBe(
       "receipt-swap-terminated",
     );
+  });
+
+  test("a payload send the transport rejects owes no record either", async () => {
+    // The region's lower edge on the leg that sends first, where the guard on
+    // the send itself is the only thing holding it: the initiator's frame never
+    // reaches the transport, so the run rethrows the transport's own error with
+    // no record and no mark on it.
+    const [connInitiatorRaw, connResponder] = createMessagePipe();
+    const responder = runExchange(
+      connResponder,
+      "responder",
+      preparedWithPayload("Responder Co", payloadServer),
+      { psiLibrary },
+    ).catch((reason: unknown) => reason);
+    const failure = await runExchange(
+      rejectPayloadSend(connInitiatorRaw),
+      "initiator",
+      preparedWithPayload("Initiator Co", payloadClient),
+      { psiLibrary },
+    ).then(
+      () => {
+        throw new Error(
+          "expected the rejected send to end the initiator's run",
+        );
+      },
+      (reason: unknown) => reason,
+    );
+
+    expect(failure).toBeInstanceOf(ConnectionError);
+    expect((failure as ConnectionError).kind).toBe("transport");
+    expect(exchangeRecordFromFailure(failure)).toBeUndefined();
+    expect(exchangeRecordOwedButUnbuilt(failure)).toBe(false);
+    expect(exchangeDisclosedWithoutPartnerPayload(failure)).toBe(false);
+
+    // The partner, parked on a payload frame that never comes, ends on the close.
+    await connInitiatorRaw.close();
+    await connResponder.close();
+    await responder;
   });
 
   test.each([1, 2, 3])(

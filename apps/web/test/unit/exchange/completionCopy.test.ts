@@ -113,9 +113,10 @@ describe("the missing-receipt copy", () => {
 describe("the exchange-record copy", () => {
   test("the terminated lead leads with the disclosure, not the failure", () => {
     // The alert above already says the run stopped. What the operator would not
-    // otherwise know -- and what the record is FOR -- is that data had already
-    // crossed, so the lead must not be treated as one more restatement of the failure.
-    expect(TERMINATED_RECORD_LEAD).toContain("already exchanged data");
+    // otherwise know -- and what the record is FOR -- is that this party's own data
+    // had already gone out, whether or not anything came back, so the lead must not
+    // be treated as one more restatement of the failure.
+    expect(TERMINATED_RECORD_LEAD).toContain("already disclosed your data");
     expect(TERMINATED_RECORD_LEAD).toContain("record of that disclosure");
   });
 
@@ -180,7 +181,7 @@ describe("the exchange-record copy", () => {
     // earns its interruption only by naming what that press destroys and where the
     // file still is.
     expect(UNTAKEN_RECORD_CONFIRM_TITLE).toContain("exchange record");
-    expect(UNTAKEN_RECORD_CONFIRM_BODY).toContain("exchanged data before it");
+    expect(UNTAKEN_RECORD_CONFIRM_BODY).toContain("disclosed your data before");
     expect(UNTAKEN_RECORD_CONFIRM_BODY).toContain("removes the run");
     expect(UNTAKEN_RECORD_CONFIRM_BODY).toContain(
       "neither party can recreate it",
