@@ -4,10 +4,11 @@ title: "What CLAUDE.md Costs Each Spawn"
 
 # CLAUDE.md's per-spawn cost, and the orchestrator-only share of it
 
-_Status: measurement only. Nothing here moves content, edits
-[CLAUDE.md](../../CLAUDE.md), or adds a check; whether to split the file is a
-separate decision taken against these numbers, and the rules classified below
-are cited by section, not restated. See [docs/notes/README.md](README.md)._
+_Status: measurement, and the split taken against it on 2026-09-10 on the
+owner's ruling. The measurement sections stand as measured; what the ruling
+moved out of [CLAUDE.md](../../CLAUDE.md) and what it left there is the closing
+Decision section. The rules classified below are cited by section, not restated.
+See [docs/notes/README.md](README.md)._
 
 ## Method
 
@@ -117,3 +118,44 @@ deprived of the text. The sizes rest on a hand classification of 45 bullets,
 roughly ten arguable, and on three sessions whose spawn counts range from 8 to
 61; a session's mix of spawn types moves the per-session figure more than the
 partition boundary does.
+
+## Decision
+
+The split was taken on the owner's ruling, against these numbers.
+
+**What moved**, into [`.claude/orchestration/ruleset.md`](../../.claude/orchestration/ruleset.md):
+the by-role partition, plus the gap bullets whose reader is the session -- worktree
+orchestration, the whole review flow, the session-model choice, and the decision
+and briefing rules. Two bullets split at a sentence: the primary-checkout rule
+keeps its write fence in CLAUDE.md and sends only the fix-dispatch sentence, and
+the model rule keeps "every Agent spawn passes an explicit model" and sends the
+rest.
+
+**What stayed**, under one rule: a bullet a spawned role consumes stays in
+CLAUDE.md. That keeps the four the by-role partition already named, and all of
+"Writing, tooling and commits", "Boards and PM" and "Documentation routing".
+
+**Load mechanism.** CLAUDE.md names the ledger once, in the pointer bullet under
+"Orchestrating a session", and the five front doors the ledger's own preamble
+lists -- the `start-issue`, `light-review`, `assess-review` and `panel`
+commands, and the `shortlist-backlog` skill -- each open with a line reading it.
+That is the shape `.claude/pm/ruleset.md` and its two front doors already use.
+
+**The check.** `npm run check:rule-ledgers`
+([`scripts/check-rule-ledgers.mjs`](../../scripts/check-rule-ledgers.mjs)) holds
+each hook claim and each heading to one ledger and holds the load mechanism
+wired; `npm run check:enforcement-claims` validates the claims in both
+files. Neither can see a rule that returns to CLAUDE.md under new words with no
+enforcement claim and no heading of its own -- the byte budget is the guard that
+covers bulk regrowth.
+
+**Sizes.** CLAUDE.md was 21,031 bytes before the split and is 14,364 after, its
+budget ceiling 14,400; the ledger is 7,907, the difference being its preamble
+and headings.
+6,667 bytes left every spawn's prefix, 31.7 percent of the pre-split file --
+between this note's two partitions.
+
+**The one assumption no check holds.** That the harness injects CLAUDE.md into a
+spawn and does not inject the ledger. It is measured in the table above and
+nowhere enforced: a harness that began injecting `.claude/` file bodies would
+return the whole cost with nothing turning red.
