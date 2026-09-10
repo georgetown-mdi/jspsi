@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { EventEmitter } from "node:events";
 import net from "node:net";
 
 import logLibrary from "loglevel";
@@ -142,7 +143,7 @@ function createResettableRelay(target: { host: string; port: number }): {
 // delivered event rather than over a sleep: the library hands the error to the
 // adapter's callback before that close (measured).
 function transportClosed(adapter: SSH2SFTPClientAdapter): Promise<void> {
-  const client = (adapter as unknown as { client: { client: net.Socket } })
+  const client = (adapter as unknown as { client: { client: EventEmitter } })
     .client.client;
   return new Promise<void>((resolve) => {
     client.once("close", () => setImmediate(resolve));
