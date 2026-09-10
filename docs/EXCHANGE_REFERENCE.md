@@ -136,7 +136,7 @@ How the agreed linkage keys are matched between the two parties' records. Both s
 
 `single-pass` trades additional disclosure for the constant round-trip count: to reconstruct the cascade in one pass the receiver learns the sender's full per-key duplicate structure, so it sees matches on less precise keys the step-by-step cascade would have discarded. The emitted result is identical either way. Both parties must agree on the value or the exchange aborts. Choose `single-pass` when the round-trip saving outweighs that disclosure to the receiver. The wire shape and the exact disclosure are in [PROTOCOL.md](spec/PROTOCOL.md#linkage-strategies-cascade-and-single-pass); the ceiling and its derivation in [PROTOCOL.md](spec/PROTOCOL.md#the-single-pass-dataset-ceiling-receiver-memory-and-masking-compute).
 
-Both strategies match on the several values a `split_on` produces, and on the several a `generate_fuzzy_comparisons` or a key declaring `swap` produces, reaching the same table on the same rows (see [Fan-out (multi-value fields)](#fan-out-multi-value-fields)). What refuses those terms is the count-only algorithm and a both-sided `deduplicate`, not the strategy.
+Both strategies match on the several values a `split_on` produces, and on the several a `generate_fuzzy_comparisons` or a key declaring `swap` produces, reaching the same table on the same rows (see [Fan-out (multi-value fields)](#fan-out-multi-value-fields)). What refuses those terms is the count-only algorithm, whatever the strategy, and a both-sided `deduplicate` under `single-pass`; under `cascade` a both-sided `deduplicate` matches them, grouping the records a key's several values reach (see [Deduplicating matches](#linkage_termsdeduplicate)).
 
 ### `linkage_terms.output`
 
@@ -1373,7 +1373,7 @@ A step the function cannot be built from at all is refused where the terms are m
 
 #### Fan-out
 
-> **Either linkage strategy:** matching on the values `split_on` produces runs under [`cascade`](#linkage_termslinkage_strategy) and under `single-pass`. A count-only exchange and a both-sided `deduplicate` refuse one before the exchange runs. See [Fan-out (multi-value fields)](#fan-out-multi-value-fields).
+> **Either linkage strategy:** matching on the values `split_on` produces runs under [`cascade`](#linkage_termslinkage_strategy) and under `single-pass`. A count-only exchange refuses one before the exchange runs, and so does a both-sided `deduplicate` under `single-pass`; under `cascade` the both-sided pair runs and groups the records the values reach. See [Fan-out (multi-value fields)](#fan-out-multi-value-fields).
 
 | Function | Description | Parameters |
 |----------|-------------|------------|
