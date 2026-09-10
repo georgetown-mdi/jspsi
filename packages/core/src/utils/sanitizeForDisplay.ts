@@ -356,6 +356,33 @@ export function renderedDisplayCost(fragment: string): number {
 }
 
 /**
+ * What a BLOCK costs once the display boundary renders it with the line
+ * breaks between its lines kept rather than escaped
+ * ({@link ./sanitizeErrorForDisplay.keepFirstPartyLineBreaks}): the sum of
+ * each line's {@link renderedDisplayCost} plus one character per break,
+ * which is what that renderer emits.
+ *
+ * A composition whose structure IS the line break fits its block with this
+ * rather than with {@link renderedDisplayCost}, which prices a break at the
+ * four characters of `\x0a`: charging four for what renders as one leaves
+ * three characters per line of the budget unspendable, and what goes
+ * unspent is the conflict detail the block was fitted to show.
+ *
+ * A raw block measures what its marked form renders to, so a site may
+ * measure before it marks: the mark rewrites each line's control characters
+ * to a printable marker, and every control character is at or below U+009F,
+ * where the escape and the marker are both four characters wide.
+ */
+export function renderedDisplayCostKeepingLineBreaks(block: string): number {
+  const lines = block.split("\n");
+  return (
+    lines.reduce((total, line) => total + renderedDisplayCost(line), 0) +
+    lines.length -
+    1
+  );
+}
+
+/**
  * Longest prefix of `value` whose {@link renderedDisplayCost} fits
  * `budget`, with {@link DISPLAY_TRUNCATION_MARKER} appended -- and paid for
  * out of that same budget -- when anything was dropped. This is how a

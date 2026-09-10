@@ -3609,6 +3609,40 @@ test("reconcileConflictError: the operator meets the block on its own lines", ()
   expect(lines[2].startsWith("  - connection.server.host: ")).toBe(true);
 });
 
+test("reconcileConflictError: the fit spends a break at what a break renders as", () => {
+  // The block's breaks reach the operator as breaks, so the budget has to be
+  // fitted in the same unit: charging a break the four characters of the
+  // escape's `\x0a` leaves three per line of the cap unspendable, and what
+  // goes unspent is a field's values. Eight fields whose values are all too
+  // wide to show whole is where that difference is a field: fitted in the
+  // boundary's own unit this shape keeps six of the eight, fitted in the
+  // escape's it keeps five.
+  const all: ReconcileDiff[] = [
+    "version",
+    "algorithm",
+    "linkage_strategy",
+    "linkage_fields",
+    "linkage_keys",
+    "linkage_rule_set",
+    "legal_agreement",
+    "payload",
+  ].map((field, index) => ({
+    field,
+    existing: reconcileDiffValue(`/saved/${"s".repeat(60)}${index}`),
+    incoming: reconcileDiffValue(`/required/${"r".repeat(60)}${index}`),
+  }));
+
+  const rendered = renderedAcceptReconcileError(all);
+  expect(rendered.length).toBeLessThanOrEqual(
+    COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
+  );
+  const lines = rendered.split("\n").filter((l) => l.startsWith("  - "));
+  expect(lines).toHaveLength(all.length);
+  expect(
+    lines.filter((l) => l.includes(": existing ")).length,
+  ).toBeGreaterThanOrEqual(6);
+});
+
 test("formatReconcileDiffs: neutralizes partner-controlled values against terminal injection", () => {
   // The incoming side can be a partner-controlled string (a linkage key name, or
   // an inviter's split inbound_path/outbound_path from the connection endpoint),

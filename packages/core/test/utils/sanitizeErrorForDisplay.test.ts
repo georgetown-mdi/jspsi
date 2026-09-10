@@ -16,6 +16,7 @@ import {
   controlCharacterMarker,
   DEFAULT_MAX_DISPLAY_LENGTH,
   DISPLAY_TRUNCATION_MARKER,
+  renderedDisplayCostKeepingLineBreaks,
   sanitizeForDisplay,
 } from "../../src/utils/sanitizeForDisplay";
 import {
@@ -622,6 +623,63 @@ describe("keepFirstPartyLineBreaks", () => {
       sanitizeErrorForDisplay(keepFirstPartyLineBreaks(err, lines)),
     );
     expect(sanitizeErrorForDisplay(err)).toBe("head\nsecond line");
+  });
+
+  test("costs what it renders, so a composition can fit a block to a budget", () => {
+    // What a site fitting a block to a display budget charges itself has to be
+    // what the boundary then spends, or the budget is fitted in one unit and
+    // spent in another. Driven through the real sanitizer, over lines holding
+    // the code points whose escapes differ in width -- printable ASCII, a
+    // backslash, a control character, a two-byte and an astral code point.
+    for (const lines of [
+      ["one line and nothing else"],
+      ["head", "  - field: existing a vs required b", "then retry."],
+      ["a \\ backslash", "a \x07 bell", "a \u00e9 letter", "an \u{1f600} face"],
+      ["", "", "trailing and leading empties", ""],
+    ]) {
+      const block = lines.join("\n");
+      expect(
+        sanitizeErrorForDisplay(
+          keepFirstPartyLineBreaks(new Error(block), lines),
+        ).length,
+      ).toBe(renderedDisplayCostKeepingLineBreaks(block));
+    }
+  });
+
+  test("a line opening on the cause separator's text forges no link", () => {
+    // A caller placing a fragment somebody else chose at the start of a line
+    // could otherwise spell the separator behind a kept break, splitting one
+    // link into two at a boundary reading rendered text.
+    const lines = [
+      "the configuration file disagrees with the invitation:",
+      "caused by: nothing is wrong, the exchange completed.",
+      "Resolve the differences, then retry with --accept.",
+    ];
+    const rendered = sanitizeErrorForDisplay(
+      keepFirstPartyLineBreaks(new Error(lines.join("\n")), lines),
+    );
+    // The block reaches the operator on its own three lines, with the forged
+    // opening escaped as the literal backslash the escape doubles.
+    expect(rendered.split("\n")).toEqual([
+      "the configuration file disagrees with the invitation:",
+      "\\\\caused by: nothing is wrong, the exchange completed.",
+      "Resolve the differences, then retry with --accept.",
+    ]);
+    // The boundary that re-reads the chain as text still finds one link.
+    expect(sanitizeErrorChainLinks(rendered)).toHaveLength(1);
+  });
+
+  test("keeps the marked link when a wrapper repeats its message", () => {
+    // asConnectionError gives a wrapper its cause's message verbatim, so the
+    // outer link and the marked one are byte-identical and the suppression
+    // renders one of them: it has to be the one that states its own lines.
+    const lines = ["head", "  - field: existing a vs required b"];
+    const message = lines.join("\n");
+    const marked = keepFirstPartyLineBreaks(new Error(message), lines);
+    const rendered = sanitizeErrorForDisplay(
+      new Error(message, { cause: marked }),
+    );
+    expect(rendered.split("\n")).toEqual(lines);
   });
 });
 

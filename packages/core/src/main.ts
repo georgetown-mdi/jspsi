@@ -155,6 +155,7 @@ export {
   sanitizeForDisplay,
   displayText,
   renderedDisplayCost,
+  renderedDisplayCostKeepingLineBreaks,
   clipToRenderedCost,
   replaceControlCharactersForDisplay,
   trimPartialControlCharacterMarker,

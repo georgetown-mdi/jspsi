@@ -72,7 +72,8 @@ const ELISION_SUFFIX = ` ${CAUSE_DEPTH_ELISION_MARKER}`;
  * after the escape -- this constant's own, and the breaks a link marked by
  * {@link keepFirstPartyLineBreaks} kept. A link whose own text is
  * `caused by:` cannot forge a link boundary: no byte of a message can stand
- * as the newline in front of it.
+ * as the newline in front of it, and a break the mark kept never stands in
+ * front of one either ({@link refuseCauseSeparatorOpening}).
  */
 const ERROR_CAUSE_SEPARATOR = "\ncaused by: ";
 
@@ -327,6 +328,16 @@ const FIRST_PARTY_LINE_BREAK_TEXT = Symbol.for(
  * {@link ERROR_CAUSE_SEPARATOR} takes, so no byte of a message reaches the
  * operator as a line break by passing through the escape.
  *
+ * A line opening on {@link ERROR_CAUSE_SEPARATOR}'s `caused by: ` text would
+ * stand behind a kept break as a link boundary, so every line is passed
+ * through {@link refuseCauseSeparatorOpening} first: `lines` is a plain
+ * string array, and a caller placing a fragment somebody else chose at the
+ * start of one would otherwise let that chooser forge a link for
+ * {@link sanitizeErrorChainLinks} to split on. Enforced here rather than
+ * asked of the caller, and applied to every line rather than to the ones
+ * that can reach a break, so no later edit to the composition can hand the
+ * obligation back.
+ *
  * It marks the error and returns it. `error.message` is left as the caller
  * composed it, so classification, comparison and equality read the same text
  * they read before, and the display form lives beside it.
@@ -336,11 +347,33 @@ export function keepFirstPartyLineBreaks<E extends Error>(
   lines: ReadonlyArray<string>,
 ): E {
   Object.defineProperty(error, FIRST_PARTY_LINE_BREAK_TEXT, {
-    value: lines.map(replaceControlCharactersForDisplay).join("\n"),
+    value: lines
+      .map(replaceControlCharactersForDisplay)
+      .map(refuseCauseSeparatorOpening)
+      .join("\n"),
     enumerable: false,
     configurable: true,
   });
   return error;
+}
+
+/**
+ * The text {@link ERROR_CAUSE_SEPARATOR} puts behind its newline, read off
+ * that constant so the opening this refuses is the one the join writes.
+ */
+const CAUSE_SEPARATOR_LINE_OPENING = ERROR_CAUSE_SEPARATOR.slice("\n".length);
+
+/**
+ * `line` altered where it opens on {@link CAUSE_SEPARATOR_LINE_OPENING}, so a
+ * kept break in front of it does not spell a link boundary.
+ *
+ * A leading backslash is what does it: {@link sanitizeForDisplay} doubles a
+ * literal backslash, so the line reaches the operator as `\\caused by: ` --
+ * visibly not the renderer's own separator, and unambiguous under the escape's
+ * rule, which is the alphabet the rest of the line is already read in.
+ */
+function refuseCauseSeparatorOpening(line: string): string {
+  return line.startsWith(CAUSE_SEPARATOR_LINE_OPENING) ? `\\${line}` : line;
 }
 
 /**
@@ -473,10 +506,12 @@ export function sanitizeErrorForDisplay(err: unknown): string {
     }
     // Suppress a link that repeats the previous link's raw message: a wrapper
     // built by asConnectionError has its cause's message verbatim, so the
-    // outer and first inner links are usually byte-identical.
-    if (rawLinks[rawLinks.length - 1]?.message !== message) {
-      rawLinks.push({ message, kept });
-    }
+    // outer and first inner links are usually byte-identical. The kept link is
+    // the marked one of the two, so an unmarked wrapper over a marked cause of
+    // the same text still reaches the operator as the block it was written as.
+    const previous = rawLinks[rawLinks.length - 1];
+    if (previous?.message !== message) rawLinks.push({ message, kept });
+    else if (previous.kept === undefined) previous.kept = kept;
     seen.add(current);
     // Follow `.cause` on any object link, like {@link causeChainSome}; a
     // non-object link has no chain to follow. typeof null is "object", so the
