@@ -29,7 +29,11 @@ import {
   updateManagedExchangeLocalFields,
 } from "@psi/managed/managedExchangeStore";
 import { ManagedExchangeDetail } from "@recurring/ManagedExchangeDetail";
-import { disclosureEntries } from "@recurring/disclosureAccountingModel";
+
+import {
+  PARTIAL_DISCLOSURE_LABEL,
+  disclosureEntries,
+} from "@recurring/disclosureAccountingModel";
 
 import {
   disclosureRecord,
@@ -992,7 +996,7 @@ describe("managed exchange detail accounting of disclosures", () => {
     await expect
       .element(
         page.getByText(
-          "No run of this exchange has completed in this browser, so this browser's copy of the accounting is empty.",
+          "No run of this exchange has sent your payload in this browser, so this browser's copy of the accounting is empty.",
           { exact: false },
         ),
       )
@@ -1082,6 +1086,56 @@ describe("managed exchange detail accounting of disclosures", () => {
     expect(
       page.getByRole("button", { name: "Start a fresh accounting" }).query(),
     ).toBeNull();
+  });
+
+  test("a run that stopped after sending is marked partial without opening the entry", async () => {
+    // The list shows one collapsed line per entry, so an accounting read off the
+    // list must not take an unconfirmed send for a delivered one. The mark rides
+    // the toggle's own name, which is also what a screen reader announces.
+    const accounting = appendDisclosureRecord(
+      undefined,
+      await disclosureRecord({ outcome: "receipt-swap-terminated" }),
+    );
+    const [entry] = disclosureEntries(accounting);
+    app.render(
+      createElement(ManagedExchangeDetail, {
+        record: record("inviter"),
+        accountingRead: { kind: "accounting", accounting },
+        onResetAccounting: () => Promise.resolve(),
+        onRetryAccountingRead: () => undefined,
+        onSaveLocalFields: () => Promise.resolve(),
+        onReinviteToChangeTerms: () => undefined,
+        canReinvite: true,
+        reinviting: false,
+        reinviteFailed: false,
+      }),
+    );
+
+    expect(entry.partial).toBe(true);
+    const toggle = page.getByRole("button", {
+      name: `${entry.when} - ${PARTIAL_DISCLOSURE_LABEL}`,
+      exact: false,
+    });
+    await expect.element(toggle).toBeInTheDocument();
+    await expect
+      .element(page.getByText("1 of them stopped before the run finished"))
+      .toBeInTheDocument();
+
+    await toggle.click();
+
+    // Opened, the entry states what it cannot attest beside the outcome it holds.
+    await expect
+      .element(
+        page.getByText("Disclosed, then stopped before the run finished"),
+      )
+      .toBeVisible();
+    await expect
+      .element(
+        page.getByText("whether it reached your partner is not confirmed", {
+          exact: false,
+        }),
+      )
+      .toBeVisible();
   });
 
   test("a filed disclosure opens to the facts of that run, with the partner escaped", async () => {

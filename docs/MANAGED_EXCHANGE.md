@@ -1169,7 +1169,8 @@ disclosures](#the-accounting-of-disclosures).
 ## The accounting of disclosures
 
 Each managed exchange keeps its own accounting of what it has disclosed: one
-entry per completed run, each entry that run's self-attested exchange record.
+entry per run that sent this party's payload, each entry that run's
+self-attested exchange record.
 It is the per-exchange source an operator draws a HIPAA accounting of
 disclosures or a FERPA disclosure record from (see
 [COMPLIANCE.md](COMPLIANCE.md#hipaa-considerations)), and it is on the
@@ -1187,8 +1188,14 @@ exchange's own page, below its run history.
   the run, before it reports its results. This is what an unattended run needs:
   the record file is otherwise offered only as a download when the run finishes,
   which requires somebody there to take it.
-- **A run that did not complete is not in it.** Nothing was disclosed, so there
-  is no record to file; the run history above says what happened instead.
+- **A run that stopped after sending is in it, and is marked.** Cancelling a run
+  does not call back the payload already handed to the transport, and neither
+  does a connection dropping, so the disclosure is accounted for either way. Such
+  an entry is marked where the page lists entries and states that delivery to
+  your partner is not confirmed and the run produced no result, so an accounting
+  drawn from the list does not take it for a completed disclosure.
+- **A run that stopped before sending is not in it.** Nothing was disclosed, so
+  there is no record to file; the run history above says what happened instead.
 - **It is exportable.** One action writes the whole accounting as a CSV, one row
   per run, for handing to a compliance reader.
 - **It stays in this browser, and is deleted with the exchange.** Nothing prunes

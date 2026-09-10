@@ -1,7 +1,7 @@
 ---
 title: "psilink Security Design"
 review_owner: "psilink maintainers"
-last_reviewed: "2026-09-05"
+last_reviewed: "2026-09-10"
 ---
 
 # psilink security
@@ -349,7 +349,7 @@ A persisted input-file handle broadens the reach. Where the record holds a `File
 
 Two constraints keep the record shape bounded: the operator label is length-capped and should not hold sensitive counterparty detail beyond naming the partnership, and the run and schedule bookkeeping is structured enums, timestamps, and durations rather than free text. The persisted exchange-file document does hold other operator-authored free text (a column description, a standardization step's parameters, a retention note, and the agreed terms' description and purpose strings), authored locally with no partner-controlled value in them. The content guidance is the label's: keep row values and sensitive counterparty detail out of authored descriptions and cleaning parameters. The field names and bounds are in [MANAGED_EXCHANGE_RECORD.md](spec/MANAGED_EXCHANGE_RECORD.md).
 
-The exchange's [accounting of disclosures](MANAGED_EXCHANGE.md#the-accounting-of-disclosures) adds to this, and is the one part of it that grows. Each completed run files that run's self-attested exchange record beside the managed record, so a reader of the store also learns how many times the partnership has run, when, and -- per run -- the partner's identity, the governing agreement and the purpose of the disclosure under it, the categories disclosed each way, this party's exposed-record count, and the result size where the record format recorded one. These are the record's own cleartext fields (see [EXCHANGE_RECORD.md](spec/EXCHANGE_RECORD.md#privacy-properties)): aggregate counts, names, and references, never a row value or a matched identifier. Two differences from the row above matter:
+The exchange's [accounting of disclosures](MANAGED_EXCHANGE.md#the-accounting-of-disclosures) adds to this, and is the one part of it that grows. Each run that discloses files that run's self-attested exchange record beside the managed record, whether or not it finished, so a reader of the store also learns how many times the partnership has run, when, and -- per run -- the partner's identity, the governing agreement and the purpose of the disclosure under it, the categories disclosed each way, this party's exposed-record count, and the result size where the record format recorded one. These are the record's own cleartext fields (see [EXCHANGE_RECORD.md](spec/EXCHANGE_RECORD.md#privacy-properties)): aggregate counts, names, and references, never a row value or a matched identifier. Two differences from the row above matter:
 
 - The entries hold partner-authored free text, which the managed record's own fields exclude by design, so the length caps and content guidance above do not govern them -- the containment there is that every such value is escaped at its display sink and never rendered raw.
 - The accounting is unbounded by design: nothing prunes it, because a silently dropped entry would falsify the account it exists to give.

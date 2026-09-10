@@ -240,11 +240,12 @@ const SUCCEEDED_DISCLOSURE =
 const NOTHING_DISCLOSED =
   "Nothing was disclosed -- the run stopped before any data was exchanged.";
 
-/** The disclosure line for a run that failed after the handshake, where the record
- * cannot prove whether data reached the partner. It asserts neither way and points
- * at the authoritative account -- the record file offered at run completion. */
+/** The disclosure line for a run that failed after the handshake, where this
+ * bookkeeping cannot prove whether data reached the partner. It asserts neither
+ * way and points at the authoritative account -- the accounting of disclosures,
+ * which holds an entry for this run exactly when its payload was sent. */
 const OUTCOME_UNCERTAIN =
-  "The run did not complete. Whether any data reached your partner is not recorded here; the record file offered when a run completes is the authoritative account.";
+  "The run did not complete. Whether any data reached your partner is not recorded here; check the accounting of disclosures below, which holds an entry for this run if its payload was sent.";
 
 /**
  * Whether a failed run's bookkeeping proves it stopped before the data exchange
@@ -318,18 +319,20 @@ export function runHistoryEntries(
 }
 
 /**
- * Whether the record's own bookkeeping records a run that COMPLETED -- the only
- * kind that files an entry in the accounting of disclosures (see
- * {@link runHistoryEntries}).
+ * Whether the record's own bookkeeping records a run that COMPLETED -- a run
+ * that certainly filed an entry in the accounting of disclosures.
  *
  * The accounting view reads this to keep its empty state accurate: an empty
  * accounting is not evidence nothing was disclosed, since a reset clears stored
  * entries without touching the record, and export/import moves the exchange
  * without its accounting.
  *
- * ONE-WAY: the record keeps only the most recent run (see
+ * ONE-WAY in two directions. The record keeps only the most recent run (see
  * docs/spec/MANAGED_EXCHANGE_RECORD.md, the `lastRun` row), so `false` means only
- * that the retained run is not a completed one.
+ * that the retained run is not a completed one. And a run that stopped after
+ * sending its payload files an entry as well, which the bookkeeping stamps
+ * `"failed"` and cannot tell from a run that stopped before sending -- so `false`
+ * is not a claim that no entry was filed either.
  */
 export function completedRunRecorded(
   record: Pick<ManagedExchangeRecord, "lastRun">,

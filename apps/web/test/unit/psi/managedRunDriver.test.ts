@@ -5,6 +5,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import {
   ConnectionError,
   describeResolvedRunShape,
+  exchangeRecordFromFailure,
   getDefaultLinkageTerms,
   getLogger,
   runExchange,
@@ -40,6 +41,7 @@ import type Peer from "peerjs";
 
 import type * as PsilinkCore from "@psilink/core";
 import type {
+  BuiltExchangeRecord,
   HandshakeRole,
   MessageConnection,
   PsiBackendSelection,
@@ -147,12 +149,18 @@ vi.mock("@psilink/core", async (importOriginal) => {
         minimalExchangeResult({ partnerTerms: stubPartnerTerms }),
       ),
     ),
+    // Core marks a record-bearing failure through a module-private WeakMap, so a
+    // suite that never runs the real exchange cannot produce one; the accessor is
+    // mocked here and each test states which side of the payload send its failure
+    // fell on, as the CLI's own protocol suite does.
+    exchangeRecordFromFailure: vi.fn(() => undefined),
   };
 });
 
 const mockedAuthenticate = vi.mocked(authenticateExchange);
 const mockedAppendDisclosure = vi.mocked(appendDisclosureRecordToStore);
 const mockedRendezvous = vi.mocked(beginManagedRendezvous);
+const mockedRecordFromFailure = vi.mocked(exchangeRecordFromFailure);
 const mockedRunExchange = vi.mocked(runExchange);
 const mockedOpen = vi.mocked(openPeerMessageConnection);
 const mockedWaitForIncoming = vi.mocked(waitForIncomingConnection);
@@ -940,6 +948,136 @@ describe("filing the run's disclosure", () => {
     expect(result.exchange).toBe(OUTPUTS);
     expect(onWarning.mock.calls).toEqual([[DISCLOSURE_NOT_FILED_WARNING]]);
     expect(logged).toHaveBeenCalled();
+    logged.mockRestore();
+  });
+});
+
+describe("filing a stopped run's disclosure", () => {
+  /** The record core hands back on a failure raised past this party's payload
+   * send: a real record, built with the outcome such a run writes, so the entry
+   * under test is the artifact rather than a stand-in for one. */
+  async function terminatedAudit(): Promise<BuiltExchangeRecord> {
+    return {
+      record: await disclosureRecord({ outcome: "receipt-swap-terminated" }),
+      keys: {
+        version: "psilink-exchange-keys/v1",
+        salts: {
+          localPayloadSent: "local-payload-salt",
+          partnerPayloadReceived: "partner-payload-salt",
+        },
+      },
+    };
+  }
+
+  test("files the disclosure when a cancel cuts the payload exchange", async () => {
+    // Cancelling does not call back the payload frames the transport already
+    // holds, so the disclosure is accounted for even though the run failed.
+    const { mc, stalled } = makeStalledExchangeMc();
+    mockedOpen.mockResolvedValue(mc);
+    acquireResources();
+    mockedRunExchange.mockReturnValueOnce(stalled);
+    const audit = await terminatedAudit();
+    mockedRecordFromFailure.mockReturnValueOnce(audit);
+    const controller = new AbortController();
+
+    const running = runDriver(controller.signal);
+    await tick();
+    controller.abort();
+
+    await expect(running).rejects.toThrow("connection closed");
+    expect(mockedAppendDisclosure.mock.calls).toEqual([
+      [RECORD.id, audit.record],
+    ]);
+    expect(audit.record.outcome).toBe("receipt-swap-terminated");
+  });
+
+  test("files the disclosure when a transport drop cuts the payload exchange", async () => {
+    // The same window, reached without an operator: the scope is the record-owed
+    // region, not how the run ended.
+    const { mc } = makeParkedCloseMc();
+    mockedOpen.mockResolvedValue(mc);
+    acquireResources();
+    mockedRunExchange.mockRejectedValueOnce(new Error("data channel closed"));
+    const audit = await terminatedAudit();
+    mockedRecordFromFailure.mockReturnValueOnce(audit);
+
+    await expect(runDriver(new AbortController().signal)).rejects.toThrow(
+      "data channel closed",
+    );
+
+    expect(mockedAppendDisclosure.mock.calls).toEqual([
+      [RECORD.id, audit.record],
+    ]);
+  });
+
+  test("files nothing when the run stopped before its payload was sent", async () => {
+    // Core opens the record-owed region at the send and hands nothing back for a
+    // failure before it. Inventing an entry there would attest a disclosure that
+    // did not happen.
+    const { mc, stalled } = makeStalledExchangeMc();
+    mockedOpen.mockResolvedValue(mc);
+    acquireResources();
+    mockedRunExchange.mockReturnValueOnce(stalled);
+    const controller = new AbortController();
+
+    const running = runDriver(controller.signal);
+    await tick();
+    controller.abort();
+
+    await expect(running).rejects.toThrow("connection closed");
+    expect(mockedRecordFromFailure).toHaveBeenCalled();
+    expect(mockedAppendDisclosure).not.toHaveBeenCalled();
+  });
+
+  test("files the disclosure before the failure propagates", async () => {
+    // A caller that reacts to the failure -- the surface reloading the record, the
+    // scheduler settling the window -- must not race the entry.
+    const { mc } = makeParkedCloseMc();
+    mockedOpen.mockResolvedValue(mc);
+    acquireResources();
+    mockedRunExchange.mockRejectedValueOnce(new Error("data channel closed"));
+    mockedRecordFromFailure.mockReturnValueOnce(await terminatedAudit());
+    let fileEntry: (() => void) | undefined;
+    mockedAppendDisclosure.mockReturnValueOnce(
+      new Promise<void>((resolve) => {
+        fileEntry = resolve;
+      }),
+    );
+    let settled = false;
+
+    const running = runDriver(new AbortController().signal).then(
+      () => undefined,
+      () => {
+        settled = true;
+      },
+    );
+    await tick();
+    expect(settled).toBe(false);
+
+    fileEntry?.();
+    await running;
+    expect(settled).toBe(true);
+  });
+
+  test("a failed filing leaves the run's own failure standing", async () => {
+    // The run is already failing and the operator is shown that failure; a store
+    // fault here must not replace it, and raises no second notice to compete with
+    // it. The loss goes to the diagnostic log.
+    const { mc } = makeParkedCloseMc();
+    mockedOpen.mockResolvedValue(mc);
+    acquireResources();
+    mockedRunExchange.mockRejectedValueOnce(new Error("data channel closed"));
+    mockedRecordFromFailure.mockReturnValueOnce(await terminatedAudit());
+    mockedAppendDisclosure.mockRejectedValueOnce(new Error("quota exceeded"));
+    const logged = vi.spyOn(log, "error").mockImplementation(() => {});
+    const onWarning = vi.fn();
+
+    await expect(
+      runDriver(new AbortController().signal, onWarning),
+    ).rejects.toThrow("data channel closed");
+
+    expect(logged).toHaveBeenCalled();
+    expect(onWarning).not.toHaveBeenCalled();
     logged.mockRestore();
   });
 });

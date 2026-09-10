@@ -257,7 +257,8 @@ describe("runHistoryEntries renders around the most recent run", () => {
   // A failure that can postdate the handshake -- a data-exchange drop (transport), a
   // teardown that can land mid-exchange (cancelled), or an unrecorded kind -- cannot
   // prove nothing was disclosed, so the line asserts neither way and points at the
-  // record file as the authoritative account.
+  // accounting of disclosures, which holds this run's entry exactly when its
+  // payload was sent.
   test.each([
     { failureKind: "transport" as const },
     { failureKind: "cancelled" as const },
@@ -273,7 +274,7 @@ describe("runHistoryEntries renders around the most recent run", () => {
       const entries = runHistoryEntries(record("acceptor", { lastRun }));
       expect(entries[0].disclosure).not.toContain("Nothing was disclosed");
       expect(entries[0].disclosure).toContain("did not complete");
-      expect(entries[0].disclosure).toContain("authoritative account");
+      expect(entries[0].disclosure).toContain("accounting of disclosures");
     },
   );
 });

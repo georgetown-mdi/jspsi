@@ -31,6 +31,7 @@ import styles from "@styles/app.module.css";
 import {
   DISCLOSURE_EXPORT_MIME,
   DISCLOSURE_STORED_EXPORT_MIME,
+  PARTIAL_DISCLOSURE_LABEL,
   disclosureAccountingCsv,
   disclosureAccountingFileName,
   disclosureEntries,
@@ -633,9 +634,10 @@ function RunSchedule({ record }: { record: ManagedExchangeRecord }) {
  * The run history: what the most recent run DID, whether or not it completed.
  * The record's own bookkeeping keeps only that one run (see
  * docs/spec/MANAGED_EXCHANGE_RECORD.md, the `lastRun` row), so this section is
- * scoped to it. Every completed run's disclosures are in the accounting below;
- * a run that failed before disclosing never enters it. A saved-but-never-run
- * exchange renders the plain empty state.
+ * scoped to it. Every run that sent this party's payload has its disclosure in
+ * the accounting below, whether or not it finished; a run that stopped before
+ * disclosing never enters it. A saved-but-never-run exchange renders the plain
+ * empty state.
  */
 function RunHistory({ record }: { record: ManagedExchangeRecord }) {
   const entries = runHistoryEntries(record);
@@ -649,8 +651,9 @@ function RunHistory({ record }: { record: ManagedExchangeRecord }) {
       ) : (
         <>
           <p className={`${styles.small} ${styles.sub}`}>
-            Only the most recent run&apos;s outcome is kept. Every completed
-            run&apos;s disclosure is in the accounting below.
+            Only the most recent run&apos;s outcome is kept. Every run that sent
+            your payload has its disclosure in the accounting below, whether or
+            not it finished.
           </p>
           {entries.map((entry) => (
             <div key={entry.at} className={styles.dlRow}>
@@ -680,11 +683,16 @@ function factRow(fact: DisclosureFact): ConfigRow {
 }
 
 /**
- * The accounting of disclosures: one entry per completed run, each read off
- * that run's own self-attested exchange record (see
+ * The accounting of disclosures: one entry per run that sent this party's
+ * payload, each read off that run's own self-attested exchange record (see
  * docs/spec/EXCHANGE_RECORD.md), plus the CSV a compliance reader is handed.
  * Entries are the records themselves, not a summary beside them, so this view
  * holds no facts of its own that could drift from the underlying record.
+ *
+ * A run that stopped after sending files an entry too, and the record's own
+ * outcome is what marks it: the collapsed row states it beside the instant, so
+ * an accounting drawn from the list does not take an unconfirmed send for a
+ * delivered one.
  *
  * A failed read renders as its own state, never as an empty accounting -- an
  * empty accounting is a claim ("nothing was disclosed") this view must not
@@ -732,6 +740,7 @@ function DisclosureAccountingView({
   // recovery hands back as a file has no path into anything rendered here.
   const accounting = read?.kind === "accounting" ? read.accounting : undefined;
   const entries = accounting === undefined ? [] : disclosureEntries(accounting);
+  const partialCount = entries.filter((entry) => entry.partial).length;
   const exportCsv = () => {
     if (accounting === undefined) return;
     triggerBlobDownload(
@@ -744,10 +753,12 @@ function DisclosureAccountingView({
     <div className={styles.callout}>
       <h2 className={styles.eyebrow}>Accounting of disclosures</h2>
       <p className={styles.small}>
-        Every completed run files its own record here: who you disclosed to,
-        under which agreement and for what purpose, the categories of data that
-        moved each way, how many records you exposed, and -- when both sides
-        received the result -- its size. Each entry is that run&apos;s
+        Every run that sent your payload files its own record here, whether or
+        not it finished: who you disclosed to, under which agreement and for
+        what purpose, the categories of data that moved each way, how many
+        records you exposed, and -- when both sides received the result -- its
+        size. A run that stopped after sending is marked, and states that
+        delivery to your partner is not confirmed. Each entry is that run&apos;s
         self-attested record, built from what both sides already hold and
         deliberately unsigned: an honest local account, not a signed or
         non-repudiable receipt.
@@ -773,11 +784,19 @@ function DisclosureAccountingView({
             {entries.length === 1
               ? "1 disclosure recorded in this browser."
               : `${entries.length} disclosures recorded in this browser.`}
+            {partialCount > 0 &&
+              (partialCount === 1
+                ? " 1 of them stopped before the run finished."
+                : ` ${partialCount} of them stopped before the run finished.`)}
           </p>
           {entries.map((entry) => (
             <DisclosureSection
               key={entry.bindingNonce}
-              label={entry.when}
+              label={
+                entry.partial
+                  ? `${entry.when} - ${PARTIAL_DISCLOSURE_LABEL}`
+                  : entry.when
+              }
               summary={entry.partner}
               open={openedNonce === entry.bindingNonce}
               onToggle={(open) =>
@@ -840,17 +859,18 @@ function EmptyAccountingNotice({
         everything this exchange has disclosed. Records filed here are destroyed
         by &quot;Start a fresh accounting&quot;, and an exchange restored from
         an export or backup file arrives without the accounting kept on the
-        device it came from. Each run this browser completes files its record
-        here.
+        device it came from. Each run that sends your payload files its record
+        here, whether or not it finishes.
       </p>
     );
   return (
     <p className={styles.small}>
-      No run of this exchange has completed in this browser, so this
+      No run of this exchange has sent your payload in this browser, so this
       browser&apos;s copy of the accounting is empty. That is not necessarily
       the exchange&apos;s whole history: an exchange imported from a backup file
       arrives without the accounting kept on the device it came from. Each run
-      this browser completes will file its record here.
+      that sends your payload will file its record here, whether or not it
+      finishes.
     </p>
   );
 }

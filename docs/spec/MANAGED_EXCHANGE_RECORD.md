@@ -679,15 +679,17 @@ cancel lands at the run's next act on the connection, so one arriving inside a
 local PSI round takes effect when that round next reads or writes. And a run
 nobody cancels holds the lock for as long as the partner takes, up to the
 connection's inactivity budget; a destroyed tab still releases it.
-A cancelled run also files no entry in the [accounting of
-disclosures](#the-accounting-of-disclosures), even though payload frames
-already handed to the transport may have reached the partner -- the same holds
-for any mid-exchange transport drop, since the entry is appended only once a
-completed exchange yields its result, so a partial exchange files nothing there
-while the record's own `lastRun` still stamps the run `"failed"`, with
-`failureKind` `"cancelled"` or `"transport"`. And the cancel does not discard
-what the transport already holds buffered: the teardown's close flushes rather
-than drops, so a cancel does not mean nothing further leaves the device.
+A cancelled run cut after this party's payload send files its entry in the
+[accounting of disclosures](#the-accounting-of-disclosures) like any other run
+that disclosed, and so does a run a mid-exchange transport drop cuts in the same
+window: the scope is the record-owed region, not how the run ended (see
+**When an entry is written** under [the accounting of
+disclosures](#the-accounting-of-disclosures)). One cut before that point files
+nothing, and owes nothing -- no payload frame had reached the transport. Either way the record's own `lastRun` stamps the run `"failed"`, with
+`failureKind` `"cancelled"` or `"transport"`, which does not itself say which
+side of the send the run stopped on; the accounting does. And the cancel does not
+discard what the transport already holds buffered: the teardown's close flushes
+rather than drops, so a cancel does not mean nothing further leaves the device.
 Export/import between devices is **migration, not sync** (the source copy is
 invalidated on export). Both are specified in
 [MANAGED_EXCHANGE.md](../MANAGED_EXCHANGE.md#single-device-ownership).
@@ -1071,8 +1073,14 @@ that parsed: a partially-loaded accounting would still render, as a shorter and
 quietly false account of what was disclosed, so the failure is reported as a
 failure.
 
-**When an entry is written.** Each run appends its record inside a single
-strict-durability transaction, before the run reports its outputs. This is where
+**When an entry is written.** A run appends its record once that record is owed
+-- from the moment this party's payload crosses (see
+[EXCHANGE_RECORD.md](EXCHANGE_RECORD.md#when-a-record-is-owed)) -- inside a single
+strict-durability transaction. A run that finishes appends before it reports its
+outputs. A run that stops after that point appends before its failure propagates,
+so an operator cancelling a run, and a transport drop cutting one, both leave the
+disclosure accounted for; the scope is that region, not how the run ended. A run
+that stops before it discloses appends nothing, and owes nothing. This is where
 an **unattended** run's disclosure record lands: the per-run record is otherwise
 offered only as a download at run completion, which requires an operator present,
 so a scheduled run would otherwise leave no record of a disclosure it made. The
@@ -1085,7 +1093,24 @@ the read applies, and what is written is the parsed result: what is at rest is
 structurally what the reader admits, so no field beyond the format can sit in the
 store unseen, and a record the reader would reject is never written. A failed
 append does not fail the run -- the disclosure has already happened and the
-exchange's results stand -- and is reported as a notice instead.
+exchange's results stand -- and is reported as a notice instead. On a run that
+stopped, the failed append is reported to the diagnostic log alone: that run
+already reports its own failure, which a second notice about the accounting
+would compete with rather than add to.
+
+**What a stopped run's entry states.** The entry is the record, so what it states
+is the record's fields and nothing beside them: the columns this party consented
+to disclose and sent, the run's own instant, the records it exposed, and its
+[`outcome`](EXCHANGE_RECORD.md#when-a-record-is-owed) -- which is what marks it as
+a run that disclosed and then stopped rather than one that finished. A surface
+reading the accounting **MUST** mark such an entry where it lists entries, not
+only where it expands one, and **MUST NOT** present it as a completed disclosure:
+what a record attests is this party's own act of disclosure and never the
+partner's receipt of it, so an accounting drawn from the list must not take an
+unconfirmed send for a delivered one. Whether the partner's payload came back is a
+fact of the live run rather than of the frozen record (see
+[EXCHANGE_RECORD.md](EXCHANGE_RECORD.md#when-a-record-is-owed)), so no entry
+states it.
 
 **What it holds at rest, and retention.** The entries are the records' own
 cleartext content: names, categories, references, and aggregate counts, never a

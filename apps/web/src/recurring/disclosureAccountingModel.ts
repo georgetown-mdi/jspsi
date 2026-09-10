@@ -79,9 +79,20 @@ interface DisclosureEntryView {
   when: string;
   /** The partner this run disclosed to, at the display boundary. */
   partner: Displayable;
+  /** Whether the run stopped after its payload was sent instead of finishing,
+   * read from the record's own `outcome` (see docs/spec/EXCHANGE_RECORD.md,
+   * "When a record is owed"). A collapsed entry states it beside the instant, so
+   * an operator reading the list tells an unconfirmed send from a delivered one
+   * without opening every entry. */
+  partial: boolean;
   /** The run's facts, in the fixed order the export's columns follow. */
   facts: ReadonlyArray<DisclosureFact>;
 }
+
+/** How a {@link DisclosureEntryView.partial} entry is marked where the list shows
+ * one line per run. First-party text, so it composes with the instant without
+ * crossing the display boundary. */
+export const PARTIAL_DISCLOSURE_LABEL = "Stopped before the run finished";
 
 /** The MIME type of the exported accounting. */
 export const DISCLOSURE_EXPORT_MIME = "text/csv";
@@ -141,11 +152,37 @@ const RULE_SET_ABSENT =
  * exchange has disclosed, so both values describe a disclosure that happened; what
  * separates them is whether the run finished. The terminated wording leads with the
  * disclosure for that reason -- an entry a reader might otherwise take for a run
- * that did nothing. */
+ * that did nothing.
+ *
+ * It names no step of the run, unlike the stored value: `receipt-swap-terminated`
+ * is written for every termination after this party's payload crossed, so wording
+ * that named the receipt swap would tell a reader the run reached a step it may
+ * never have started (see docs/spec/EXCHANGE_RECORD.md, "When a record is owed"). */
 const OUTCOME_DISCLOSURE: Record<ExchangeRecordOutcome, Displayable> = {
   completed: displayText`Completed`,
-  "receipt-swap-terminated": displayText`Disclosed, then stopped before a signed receipt was exchanged`,
+  "receipt-swap-terminated": displayText`Disclosed, then stopped before the run finished`,
 };
+
+/**
+ * What a terminated run's entry attests, and what it does not. A record commits to
+ * this party's own act of disclosure -- the payload frame handed to the transport
+ * -- never to the partner's receipt of it, and a run cut there kept only what had
+ * arrived by the cut and produced no result (see docs/spec/EXCHANGE_RECORD.md,
+ * "When a record is owed").
+ *
+ * It sits on the outcome fact, the one fact of a terminated entry that always has a
+ * value: a note attached to the received-columns fact would be dropped in exactly
+ * the case it speaks for, since a run cut before the partner's reply shows that
+ * fact's named empty state instead. Being a note, it also travels into the exported
+ * CSV, where a compliance reader meets the entry without the screen around it.
+ */
+const TERMINATED_DISCLOSURE_NOTE =
+  "Your payload had been handed to the transport, so this entry records a disclosure; whether it reached your partner is not confirmed. The columns you received are what had arrived when the run stopped, and no result was produced.";
+
+/** Whether the record's run stopped after disclosing rather than finishing. */
+function terminatedRun(record: Pick<ExchangeRecord, "outcome">): boolean {
+  return record.outcome === "receipt-swap-terminated";
+}
 
 /** What each `algorithm` disclosed, in plain language: the record's own reading of
  * the field (`psi` revealed matched identifiers, `psi-c` only a count). */
@@ -270,7 +307,12 @@ export function disclosureFacts(
       NOT_RECORDED,
     ),
     fact("What was disclosed", ALGORITHM_DISCLOSURE[governance.algorithm]),
-    fact("How the exchange ended", OUTCOME_DISCLOSURE[record.outcome]),
+    {
+      label: "How the exchange ended",
+      values: [OUTCOME_DISCLOSURE[record.outcome]],
+      muted: NOT_RECORDED,
+      ...(terminatedRun(record) ? { note: TERMINATED_DISCLOSURE_NOTE } : {}),
+    },
     listFact(
       "Columns you sent",
       governance.payloadSent.map((column) => categoryLabel(column)),
@@ -324,6 +366,7 @@ export function disclosureEntries(
       bindingNonce: record.bindingNonce,
       when: dateTimeLabel(new Date(record.createdAt)),
       partner: displayPartyIdentity(record.partnerIdentity),
+      partial: terminatedRun(record),
       facts: disclosureFacts(record),
     }))
     .reverse();
