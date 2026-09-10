@@ -34,6 +34,7 @@ import { ExchangeSpecSchema } from "../../src/config/exchangeSpec";
 import { MAX_ENCODED_INVITATION_LENGTH } from "../../src/config/invitation";
 import { pipelineAlwaysDrops } from "../../src/linkageSatisfiability";
 import { describeDecodeError } from "../../src/utils/describeDecodeError";
+import { transformParamTypeRows } from "../../src/config/transformParamTypes";
 import {
   MAX_NODE_COUNT,
   NestingDepthExceededError,
@@ -3680,142 +3681,126 @@ describe("declared transform param types", () => {
 
   // Every param the table types, driven through a real document: the declared
   // type parses and each other type is refused, so no row of the table is
-  // enforced only in principle.
-  const typedParams: Array<{
-    fn: string;
-    param: string;
-    declared: unknown;
-    otherParams: Record<string, unknown>;
-    refusedTypes: unknown[];
-  }> = [
+  // enforced only in principle. The row list is read from the table itself
+  // rather than copied here, and the parity test below fails on a row with no
+  // case and a case with no row, so neither side drifts in silence.
+  const typedParamCases: Record<
+    string,
     {
-      fn: "substring",
-      param: "start",
+      declared: unknown;
+      otherParams: Record<string, unknown>;
+      refusedTypes: unknown[];
+    }
+  > = {
+    "substring.start": {
       declared: 1,
       otherParams: { length: 3 },
       refusedTypes: ["1", 1.5, true, null, [], {}],
     },
-    {
-      fn: "substring",
-      param: "length",
+    "substring.length": {
       declared: 3,
       otherParams: { start: 1 },
       refusedTypes: ["3", 3.5, true, null, [], {}],
     },
-    {
-      fn: "parse_date",
-      param: "inputFormat",
+    "parse_date.inputFormat": {
       declared: "MM/DD/YYYY",
       otherParams: {},
       refusedTypes: [42, true, null, [], {}],
     },
-    {
-      fn: "parse_date",
-      param: "outputFormat",
+    "parse_date.outputFormat": {
       declared: "YYYYMMDD",
       otherParams: {},
       refusedTypes: [42, true, null, [], {}],
     },
-    {
-      fn: "pad_left",
-      param: "length",
+    "pad_left.length": {
       declared: 9,
       otherParams: {},
       refusedTypes: ["9", 9.5, true, null, [], {}],
     },
-    {
-      fn: "pad_left",
-      param: "char",
+    "pad_left.char": {
       declared: "0",
       otherParams: { length: 9 },
       refusedTypes: [0, true, null, [], {}],
     },
-    {
-      fn: "phonetic",
-      param: "algorithm",
+    "phonetic.algorithm": {
       declared: "soundex",
       otherParams: {},
       refusedTypes: [42, true, null, [], {}],
     },
-    {
-      fn: "null_if",
-      param: "value",
+    "null_if.value": {
       declared: "N/A",
       otherParams: {},
       refusedTypes: [42, true, null, [], {}],
     },
-    {
-      fn: "null_if",
-      param: "values",
+    "null_if.values": {
       declared: ["N/A"],
       otherParams: {},
       refusedTypes: [42, "N/A", true, null, {}, [42]],
     },
-    {
-      fn: "replace_regex",
-      param: "pattern",
+    "replace_regex.pattern": {
       declared: "-",
       otherParams: {},
       refusedTypes: [42, true, null, {}],
     },
-    {
-      fn: "replace_regex",
-      param: "replacement",
+    "replace_regex.replacement": {
       declared: "",
       otherParams: { pattern: "-" },
       refusedTypes: [42, true, null, [], {}],
     },
-    {
-      fn: "extract_regex",
-      param: "pattern",
+    "extract_regex.pattern": {
       declared: "(.)",
       otherParams: {},
       refusedTypes: [42, true, null, {}],
     },
-    {
-      fn: "filter_regex",
-      param: "pattern",
+    "filter_regex.pattern": {
       declared: ".",
       otherParams: {},
       refusedTypes: [42, true, null, {}],
     },
-    {
-      fn: "split_on",
-      param: "delimiter",
+    "split_on.delimiter": {
       declared: "-",
       otherParams: {},
       refusedTypes: [42, true, null, {}],
     },
-    {
-      fn: "split_on",
-      param: "includeOriginal",
+    "split_on.includeOriginal": {
       declared: true,
       otherParams: { delimiter: "-" },
       refusedTypes: [42, "true", null, [], {}],
     },
-    {
-      fn: "coalesce",
-      param: "default",
+    "coalesce.default": {
       declared: "UNKNOWN",
       otherParams: {},
       refusedTypes: [42, true, null, [], {}],
     },
-  ];
+  };
 
-  test.each(typedParams)(
-    "$fn $param parses as declared and refuses every other type",
-    ({ fn, param, declared, otherParams, refusedTypes }) => {
+  test("every row of the declared-type table has a case, and every case a row", () => {
+    expect(
+      transformParamTypeRows()
+        .map((row) => `${row.function}.${row.param}`)
+        .sort(),
+    ).toEqual(Object.keys(typedParamCases).sort());
+  });
+
+  test.each(transformParamTypeRows())(
+    "$function $param parses as declared and refuses every other type",
+    (row) => {
+      const fixture = typedParamCases[`${row.function}.${row.param}`];
+      expect(fixture).toBeDefined();
+      if (fixture === undefined) return;
+      const { declared, otherParams, refusedTypes } = fixture;
+      const fn = row.function;
       expect(
         safeParseLinkageTerms(
-          transformStepTerms(fn, { ...otherParams, [param]: declared }),
+          transformStepTerms(fn, { ...otherParams, [row.param]: declared }),
         ).success,
       ).toBe(true);
       for (const refused of refusedTypes)
         expect(
           safeParseLinkageTerms(
-            transformStepTerms(fn, { ...otherParams, [param]: refused }),
+            transformStepTerms(fn, { ...otherParams, [row.param]: refused }),
           ).success,
-          `${fn} ${param}: ${JSON.stringify(refused)}`,
+          `${fn} ${row.param}: ${JSON.stringify(refused)}`,
         ).toBe(false);
     },
   );

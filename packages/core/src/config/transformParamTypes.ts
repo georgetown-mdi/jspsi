@@ -22,13 +22,15 @@ export type TransformParamType = "text" | "integer" | "boolean" | "text-list";
  * transform and `StandardizationStepSchema` in `standardizationSchema.ts` for a
  * cleaning step -- so a wrong-typed param is refused where the document is
  * decoded, on the invitation path and the operator's own config path alike. The
- * factories in `standardization.ts` read their params through the same table
- * and refuse a wrong type at compile, which is what holds a caller that builds
- * steps without a decode.
+ * factories in `standardization.ts` refuse a wrong type at compile as well,
+ * which is what holds a caller that builds steps without a decode. Each reads
+ * its params through a typed accessor that checks its own reading against this
+ * table when the step is compiled, so an accessor and a row cannot part company
+ * without the compile saying so.
  *
- * A function's entry lists the params the factory reads today; it is kept
- * beside `STANDARDIZING_FUNCTIONS` in behavior by the decode-refusal tests,
- * which drive every row of this table through a real document.
+ * A function's entry lists the params the factory reads today. The
+ * decode-refusal tests drive every row through a real document, reading the row
+ * list from {@link transformParamTypeRows} rather than from a copy of it.
  */
 const TRANSFORM_PARAM_TYPES: Record<
   string,
@@ -45,6 +47,52 @@ const TRANSFORM_PARAM_TYPES: Record<
   split_on: { delimiter: "text", includeOriginal: "boolean" },
   coalesce: { default: "text" },
 };
+
+/**
+ * The type `functionName` reads `param` as, or undefined where the function
+ * reads no such param -- which includes every function this build does not
+ * implement.
+ *
+ * Own-property lookups (`Object.hasOwn`, not a bare index): a function name and
+ * a param name of a linkage-key element transform are partner-authored free
+ * text, and a bare index answers `constructor` or `toString` with an inherited
+ * `Object.prototype` member.
+ */
+export function declaredTransformParamType(
+  functionName: string,
+  param: string,
+): TransformParamType | undefined {
+  if (!Object.hasOwn(TRANSFORM_PARAM_TYPES, functionName)) return undefined;
+  const expectedTypes = TRANSFORM_PARAM_TYPES[functionName];
+  return Object.hasOwn(expectedTypes, param) ? expectedTypes[param] : undefined;
+}
+
+/** One row of the declared-type table. */
+export interface TransformParamTypeRow {
+  /** The standardizing function that reads the param. */
+  function: string;
+  /** The camelCase param name, as it arrives after `camelizeKeys`. */
+  param: string;
+  /** The type the function reads it as. */
+  type: TransformParamType;
+}
+
+/**
+ * Every row of the declared-type table, so a caller drives the whole of it
+ * rather than a hand-written copy of it that drifts without saying so.
+ *
+ * @internal read by the decode-refusal tests, which drive each row through a
+ * real document.
+ */
+export function transformParamTypeRows(): TransformParamTypeRow[] {
+  return Object.entries(TRANSFORM_PARAM_TYPES).flatMap(([name, params]) =>
+    Object.entries(params).map(([param, type]) => ({
+      function: name,
+      param,
+      type,
+    })),
+  );
+}
 
 const EXPECTED_TYPE_LABELS: Record<TransformParamType, string> = {
   text: "text",

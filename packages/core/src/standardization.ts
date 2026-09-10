@@ -1,6 +1,10 @@
 import { z } from "zod";
 import { getLogger } from "./utils/logger.js";
-import { UnknownStandardizationFunctionError, UsageError } from "./errors.js";
+import {
+  InternalConsistencyError,
+  UnknownStandardizationFunctionError,
+  UsageError,
+} from "./errors.js";
 import { redactAndSanitizeForDisplay } from "./utils/sanitizeErrorForDisplay.js";
 import {
   compileLinearRegex,
@@ -8,9 +12,11 @@ import {
   patternConformsToDialect,
 } from "./utils/linearRegex.js";
 import {
+  declaredTransformParamType,
   transformParamEntryTypeMessage,
   transformParamTypeMessage,
 } from "./config/transformParamTypes.js";
+import type { TransformParamType } from "./config/transformParamTypes.js";
 import type {
   Standardization,
   StandardizationStep,
@@ -123,6 +129,28 @@ function declaredParam(params: Params, param: string): unknown {
 }
 
 /**
+ * Refuse an accessor that reads a param as a type the declared-type table does
+ * not declare for it. That table is what both decode paths check a document
+ * against, so an accessor reading the same param as another type would admit at
+ * compile what a decode refuses, or refuse what it admits, with the
+ * disagreement stated nowhere. Every factory reads each param it reads through
+ * an accessor when it is constructed, so a row that drifts from an accessor
+ * fails at the first compile of that step.
+ */
+function assertTableDeclaresType(
+  functionName: string,
+  param: string,
+  expected: TransformParamType,
+): void {
+  const declared = declaredTransformParamType(functionName, param);
+  if (declared === expected) return;
+  throw new InternalConsistencyError(
+    `${functionName} ${param} is read as ${expected}, but the declared-type ` +
+      `table ${declared === undefined ? "holds no row for it" : `declares it ${declared}`}`,
+  );
+}
+
+/**
  * The text a step declares for `param`, or undefined where it declares none.
  *
  * A wrong type is refused rather than replaced with the function's default: the
@@ -130,13 +158,15 @@ function declaredParam(params: Params, param: string): unknown {
  * surface and in the document, so a step that would run as something else stops
  * the pipeline at compile, before the first row. Every decode path types these
  * params already (`config/transformParamTypes.ts`), so this is what holds a
- * caller that builds steps without one.
+ * caller that builds steps without one -- against the same table, which each
+ * accessor checks its own reading against ({@link assertTableDeclaresType}).
  */
 function textParam(
   functionName: string,
   params: Params,
   param: string,
 ): string | undefined {
+  assertTableDeclaresType(functionName, param, "text");
   const declared = declaredParam(params, param);
   if (declared === undefined) return undefined;
   if (typeof declared !== "string")
@@ -152,6 +182,7 @@ function booleanParam(
   params: Params,
   param: string,
 ): boolean | undefined {
+  assertTableDeclaresType(functionName, param, "boolean");
   const declared = declaredParam(params, param);
   if (declared === undefined) return undefined;
   if (typeof declared !== "boolean")
@@ -167,6 +198,7 @@ function integerParam(
   params: Params,
   param: string,
 ): number | undefined {
+  assertTableDeclaresType(functionName, param, "integer");
   const declared = declaredParam(params, param);
   if (declared === undefined) return undefined;
   if (typeof declared !== "number" || !Number.isInteger(declared))
@@ -182,6 +214,7 @@ function textListParam(
   params: Params,
   param: string,
 ): string[] | undefined {
+  assertTableDeclaresType(functionName, param, "text-list");
   const declared = declaredParam(params, param);
   if (declared === undefined) return undefined;
   if (!Array.isArray(declared))
@@ -1107,13 +1140,13 @@ export const STANDARDIZATION_FUNCTION_DESCRIPTORS: Record<
     label: "Substring",
     blurb: "Keep a fixed slice of the value by start position and length.",
     tier: "standard",
-    // The factory drops a non-integer or 0 bound to an always-null fn, but leaves
-    // a negative length (which slices to empty) alone -- so the schema is
-    // stricter here, by design, rejecting hazard shapes (a fractional position,
-    // a non-positive length, a 0 start) at parse time with a message rather than
-    // silently dropping every row. 0 is rejected because the factory treats it as
-    // an always-null no-op; positions are 1-indexed, with a negative start
-    // counting from the end.
+    // The factory throws on a non-integer bound and drops every row for a 0
+    // start, but takes a negative length, which reads a window ending that many
+    // characters short of the end of the value. This schema is stricter than
+    // both, by design: it refuses the hazard shapes -- a fractional position, a
+    // non-positive length, a 0 start -- at parse time with a message, rather
+    // than leaving the operator a step that drops every row. Positions are
+    // 1-indexed, with a negative start counting from the end.
     params: z.object({
       start: z
         .number()
