@@ -1196,6 +1196,57 @@ test("exchangePayloads: malformed data from partner rejects the responder", asyn
   await expect(responderPromise).rejects.toThrow();
 });
 
+/** A connection that records the order of its operations and answers every
+ * receive with an empty payload frame. */
+function tracing(order: string[]): MessageConnection {
+  return {
+    send: () => {
+      order.push("send");
+      return Promise.resolve();
+    },
+    receive: () => {
+      order.push("receive");
+      return Promise.resolve({ hasData: false });
+    },
+    close: () => Promise.resolve(),
+  };
+}
+
+test("exchangePayloads: the initiator's send is reported before it awaits the reply", async () => {
+  // The step's partial progress, which is what a caller owing a record of its
+  // own disclosure opens that obligation on: reported once the transport has
+  // taken the frame, so a failure reading the reply is already inside that
+  // caller's region.
+  const order: string[] = [];
+  await exchangePayloads(tracing(order), "initiator", { hasData: false }, () =>
+    order.push("reported"),
+  );
+  expect(order).toEqual(["send", "reported", "receive"]);
+});
+
+test("exchangePayloads: the responder reports its send, the exchange's terminal frame", async () => {
+  const order: string[] = [];
+  await exchangePayloads(tracing(order), "responder", { hasData: false }, () =>
+    order.push("reported"),
+  );
+  expect(order).toEqual(["receive", "send", "reported"]);
+});
+
+test("exchangePayloads: a send the transport refuses is not reported", async () => {
+  const refusing: MessageConnection = {
+    send: () => Promise.reject(new Error("the transport refused the frame")),
+    receive: () => Promise.resolve({ hasData: false }),
+    close: () => Promise.resolve(),
+  };
+  const reported: string[] = [];
+  await expect(
+    exchangePayloads(refusing, "initiator", { hasData: false }, () =>
+      reported.push("reported"),
+    ),
+  ).rejects.toThrow(/the transport refused the frame/);
+  expect(reported).toEqual([]);
+});
+
 test("exchangePayloads: a frame failing length parity is refused on parity alone, not the repeat scan", async () => {
   // Parity is checked before distinctness, so a mismatched frame is refused
   // without walking its indices -- the refusal names only the parity fault.

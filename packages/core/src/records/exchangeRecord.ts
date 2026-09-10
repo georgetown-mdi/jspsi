@@ -367,8 +367,8 @@ interface ExchangeRecordGovernance {
 }
 
 /**
- * How far the run a record attests got. A record is owed from the moment the
- * payload exchange completes, so a run either got through the steps after that
+ * How far the run a record attests got. A record is owed from the moment this
+ * party's payload crosses, so a run either got through the steps after that
  * point or it did not -- the whole set these two values divide.
  *
  * - `completed`: the run finished. A run that signed exchanged its receipt; a
@@ -377,9 +377,12 @@ interface ExchangeRecordGovernance {
  * - `receipt-swap-terminated`: the disclosure occurred and the run then
  *   terminated without this party holding a receipt for it. The signed-receipt
  *   swap is the step it most often terminates in, but the value covers the
- *   whole post-disclosure region -- e.g. a received payload refused against
- *   what this party consented to receive terminates the run before the swap
- *   and records the same value. The record still attests the disclosure. It
+ *   whole post-disclosure region -- a partner reply that never arrives, and a
+ *   received payload refused against what this party consented to receive,
+ *   both terminate the run before the swap and record the same value. The
+ *   received-payload commitment beside it is empty where no reply arrived, so
+ *   the record commits to what this party received. The record still attests
+ *   the disclosure it made. It
  *   does not state WHY the run terminated (docs/spec/EXCHANGE_RECORD.md, When
  *   a record is owed).
  *
