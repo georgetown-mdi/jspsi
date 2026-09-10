@@ -46,9 +46,12 @@ over.
 
 ## Question 1: does TURN over TLS on 443 carry a restrictive network
 
-Relay is forced by network shape in every row. No configuration can force it:
-the WebRTC connection schema exposes no relay-only setting, and nothing in the
-CLI sets one.
+Relay is forced by network shape in every row, because at the time these runs
+were made no configuration could force it. The relay-only setting the runs
+called for is
+[`connection.ice_transport_policy`](../EXCHANGE_REFERENCE.md#connectionice_transport_policy),
+which reaches the same path without arranging a network that blocks the direct
+one.
 
 Two classes, as scoped: **class A**, UDP blocked outright; **class B**, TCP/443
 only, through an inspecting proxy.
@@ -371,11 +374,13 @@ Candidate members, by title:
   standing relay now carries a byte-witnessed relayed exchange for a UDP-blocked
   CLI party
   ([What the standing deployment carried](#what-the-standing-deployment-carried)),
-  and the "configured but unproven" limit that shipped in
+  the "configured but unproven" limit that shipped in
   [CLI.md](../CLI.md#webrtc-exchanges) and
   [EXCHANGE_REFERENCE.md](../EXCHANGE_REFERENCE.md#connectionturn) is corrected
-  to match. What remains is the field: a real-NAT path and a browser party
-  against the standing instance.
+  to match, and the relay-only setting this record found missing is
+  [`connection.ice_transport_policy`](../EXCHANGE_REFERENCE.md#connectionice_transport_policy).
+  What remains is the field: a real-NAT path and a browser party against the
+  standing instance.
 - **New, and the one this record most motivates: give the web client a TURN
   entry.** Until the browser can offer a relay candidate of its own, no
   restrictive-network claim about a CLI-to-web exchange is complete, and the

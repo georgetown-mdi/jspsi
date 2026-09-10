@@ -135,9 +135,13 @@ outright, which is precisely a CLI-to-web scenario -- landed in 0.24.0, together
 with a full `stun` / `stuns` / `turn` / `turns` URL parser, a `node:tls`
 transport, and ICE-TCP host candidates; `forceTurnTCP` is deprecated in favor of
 the URL transport parameter in the same release. `turns:relay.example:443?transport=tcp`
-parses to a TLS relay, so the port-443 case is expressible. What the spike did
-*not* do is drive a real relay: this is the published API surface, the parsing
-logic, and upstream's own claims, not a run against a TURN server. See
+parses to a TLS relay, so the port-443 case is expressible. The spike itself
+drove no relay -- what it read was the published API surface, the parsing logic,
+and upstream's own claims. A relay has since been driven, on a real internet
+path and against the project's standing deployment, and what those runs
+established is in
+[webrtc-relay-deployment.md](webrtc-relay-deployment.md) and
+[standing-relay-delivery.md](standing-relay-delivery.md). See
 [Constraints the transport inherits](#constraints-the-transport-inherits).
 
 **What would still change the pick.** If the hand-rolled JavaScript DTLS surface
@@ -268,10 +272,20 @@ WebRTC frame envelope admits would spend minutes on the wire from the CLI side.
 If throughput is ever elevated from a cost to a requirement, node-datachannel is
 the comparison point to measure against before the pick is revisited.
 
-**TURN is not verified against a real relay.** The relay transports are present
-in the published API and the URL parser resolves the port-443 TLS case, but no
-relay was driven. If TURN over TLS is required for a deployment, drive it
-first; upstream ships a TURN loopback example as a starting point.
+**TURN over TLS carries an exchange, and what remains unmeasured is narrower
+than the transport.** A CLI party whose network blocks UDP outright completed
+an authenticated exchange over TURNS on 443, on an isolated substitute network,
+over a real internet path against a public certificate, and against the
+project's standing relay -- including through a TLS-terminating proxy once that
+proxy's authority was trusted on the CLI host. The runs, their witnesses, and
+the limits each states are in
+[webrtc-relay-deployment.md](webrtc-relay-deployment.md) and
+[standing-relay-delivery.md](standing-relay-delivery.md); the two that bear on
+this transport are that no run has crossed real NAT and that the remote party's
+selected candidate has never been read. A deployment still verifies relayed
+connectivity in its own environment, which
+[`ice_transport_policy: relay`](../CLI.md#turn) is the way to do without
+arranging a network that blocks the direct path.
 
 ## Supply chain and the vendoring fallback
 
@@ -316,8 +330,9 @@ certificate handling drags in, not by media.
 
 ## What stays open
 
-- TURN over TCP and TLS driven against a real relay, before any deployment
-  relies on relayed connectivity.
+- A relayed exchange across real NAT, and a reading of the remote party's
+  selected candidate; TURN over TLS itself is measured
+  ([webrtc-relay-deployment.md](webrtc-relay-deployment.md)).
 - A throughput comparison against node-datachannel, if and only if throughput is
   promoted from an accepted cost to a requirement.
 
