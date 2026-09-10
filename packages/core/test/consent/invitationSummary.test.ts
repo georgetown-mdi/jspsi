@@ -16,6 +16,7 @@ import {
   DEDUPLICATE_IMPLEMENTED_BY_STRATEGY,
 } from "../../src/linkageTermsPolicy.js";
 import { resolveLinkageCardinality } from "../../src/exchange.js";
+import { termsDeclareCandidateSet } from "../../src/fanOutFunctions.js";
 import { deriveAcceptedLinkageTerms } from "../../src/linkageTermsNegotiation.js";
 import { assertPayloadSendDisclosed } from "../../src/payloadExchange.js";
 import { withholdsSenderAssociationTable } from "../../src/psi/link.js";
@@ -525,6 +526,184 @@ describe("the consent summary's refused-pair register", () => {
               .acceptorDeduplicateRefused,
           }).toEqual({ ...combination, refused: acceptRefuses(terms, true) });
         }
+  });
+});
+
+describe("the consent summary's chained-grouping register", () => {
+  const metadata = inferMetadata(LINKAGE_ONLY_COLUMNS, []);
+  const baseTerms = getDefaultLinkageTerms("Inviter", metadata);
+  const plainKeys = [
+    { name: "last name", elements: [{ field: "last_name" }] },
+  ] satisfies LinkageTerms["linkageKeys"];
+  // One key per producer of a candidate set, since the fan-out flag beside
+  // this register reads only the first of the three.
+  const candidateSetKeys: Array<[string, LinkageTerms["linkageKeys"]]> = [
+    [
+      "a split value",
+      [
+        {
+          name: "last name",
+          elements: [
+            {
+              field: "last_name",
+              transform: [{ function: "split_on", params: { delimiter: " " } }],
+            },
+          ],
+        },
+      ],
+    ],
+    [
+      "an approximate comparison",
+      [
+        {
+          name: "last name",
+          elements: [
+            {
+              field: "last_name",
+              generateFuzzyComparisons: "edit_distances" as const,
+            },
+          ],
+        },
+      ],
+    ],
+    [
+      "a swapped key order",
+      [
+        {
+          name: "name",
+          elements: [{ field: "first_name" }, { field: "last_name" }],
+          swap: ["first_name", "last_name"] as [string, string],
+        },
+      ],
+    ],
+  ];
+
+  test.each(candidateSetKeys)(
+    "states the grouping for %s under a deduplicating cascade",
+    (_shape, linkageKeys) => {
+      // Every producer reaches the same pairing, so the sentence follows the
+      // candidate set rather than the one producer a header marker names.
+      const summary = summarizeInvitation({
+        linkageTerms: { ...baseTerms, deduplicate: true, linkageKeys },
+      });
+      expect(summary.candidateSetChainsGrouping).toBe(true);
+    },
+  );
+
+  test("states it for the shipped default keys, which declare no split", () => {
+    // The combination an operator reaches with no key authoring at all: the
+    // built-in rule set's swapped key is a candidate set, so a both-sided
+    // deduplicate over the defaults chains groups while the fan-out register
+    // stays silent.
+    const summary = summarizeInvitation({
+      linkageTerms: { ...baseTerms, deduplicate: true },
+    });
+    expect(termsDeclareCandidateSet(baseTerms)).toBe(true);
+    expect(summary.fansOut).toBe(false);
+    expect(summary.candidateSetChainsGrouping).toBe(true);
+  });
+
+  test("withholds it where no key expands a value", () => {
+    expect(
+      summarizeInvitation({
+        linkageTerms: {
+          ...baseTerms,
+          deduplicate: true,
+          linkageKeys: plainKeys,
+        },
+      }).candidateSetChainsGrouping,
+    ).toBe(false);
+  });
+
+  test("withholds it where these terms declare no deduplicate", () => {
+    // Half the pair is these terms' own, and a candidate set alone groups
+    // nothing: what the fan-out register states there is the pairing count.
+    for (const [, linkageKeys] of candidateSetKeys)
+      expect(
+        summarizeInvitation({ linkageTerms: { ...baseTerms, linkageKeys } })
+          .candidateSetChainsGrouping,
+      ).toBe(false);
+  });
+
+  test("withholds it where the pair the other side completes is refused", () => {
+    // Single-pass pairs no both-sided cardinality, so the grouping this states
+    // is one the exchange refuses rather than runs.
+    for (const [, linkageKeys] of candidateSetKeys)
+      expect(
+        summarizeInvitation({
+          linkageTerms: {
+            ...baseTerms,
+            deduplicate: true,
+            linkageStrategy: "single-pass",
+            linkageKeys,
+          },
+        }).candidateSetChainsGrouping,
+      ).toBe(false);
+  });
+
+  test("withholds it where the count-only algorithm refuses the candidate set", () => {
+    // The terms are refused before the exchange runs, so no grouping of any
+    // shape happens and stating one would describe a run that does not occur.
+    for (const [, linkageKeys] of candidateSetKeys)
+      expect(
+        summarizeInvitation({
+          linkageTerms: {
+            ...baseTerms,
+            deduplicate: true,
+            algorithm: "psi-c",
+            linkageKeys,
+          },
+        }).candidateSetChainsGrouping,
+      ).toBe(false);
+  });
+
+  test("holds exactly where the run pairs a candidate set both parties widen", () => {
+    // Driven over the whole combination table against core's own predicates,
+    // so the register cannot drift from the run: a candidate set the exchange
+    // matches, a `deduplicate` these terms declare, and a pair the accept
+    // boundary takes from the other party.
+    const keyShapes: Array<[string, LinkageTerms["linkageKeys"]]> = [
+      ["one value per record", plainKeys],
+      ...candidateSetKeys,
+    ];
+    for (const algorithm of ["psi", "psi-c"] as const)
+      for (const linkageStrategy of ["cascade", "single-pass"] as const)
+        for (const [keyShape, linkageKeys] of keyShapes)
+          for (const deduplicate of [false, true]) {
+            const terms = {
+              ...baseTerms,
+              algorithm,
+              linkageStrategy,
+              linkageKeys,
+              deduplicate,
+            };
+            const summary = summarizeInvitation({ linkageTerms: terms });
+            const accepts = ((): boolean => {
+              try {
+                deriveAcceptedLinkageTerms(terms, "Acceptor", true);
+                return true;
+              } catch {
+                return false;
+              }
+            })();
+            const combination = {
+              algorithm,
+              linkageStrategy,
+              keyShape,
+              deduplicate,
+            };
+            expect({
+              ...combination,
+              chains: summary.candidateSetChainsGrouping,
+            }).toEqual({
+              ...combination,
+              chains:
+                termsDeclareCandidateSet(terms) &&
+                summary.fanOutApplied &&
+                deduplicate &&
+                accepts,
+            });
+          }
   });
 });
 

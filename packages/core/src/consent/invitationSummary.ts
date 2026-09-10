@@ -24,6 +24,7 @@ import {
   declaresNoPayloadColumn,
   deduplicateIsImplementedForStrategy,
 } from "../linkageTermsPolicy.js";
+import { termsDeclareCandidateSet } from "../fanOutFunctions.js";
 import { withholdsSenderAssociationTable } from "../psi/link.js";
 import type {
   LinkageField,
@@ -592,6 +593,27 @@ export interface InvitationSummary {
    * that side derived false, which this combination needs true.
    */
   acceptorDeduplicateRefused: boolean;
+  /**
+   * Whether a linkage key expands one value into several match candidates
+   * under a `deduplicate` pair whose grouping chains: the terms declare a
+   * candidate set the exchange matches on, they declare a `deduplicate` of
+   * their own, and the pair the other party's own `deduplicate` completes is
+   * one the strategy matches. Every record a candidate reached is then
+   * grouped with the record that reached it, so one group can hold two
+   * records no linkage key links (docs/spec/PROTOCOL.md, The `many-to-many`
+   * entity closure).
+   *
+   * Read over every producer of a candidate set, unlike {@link fansOut},
+   * which is the `split_on` half alone: a `swap` key and a
+   * `generate_fuzzy_comparisons` element expand a value the same way, and the
+   * shipped default keys declare a `swap`.
+   *
+   * The other party's own `deduplicate` is not in these terms at either seat
+   * that reads this -- an invitation declares the inviting party's side and a
+   * configuration declares its author's -- so the sentence it selects states
+   * the pair conditionally rather than asserting it.
+   */
+  candidateSetChainsGrouping: boolean;
   /**
    * Whether the exchange suppresses the accepting party's half of the
    * matched-pair table: that party's process receives neither which of its
@@ -1590,6 +1612,17 @@ export function summarizeInvitation(
     { ...terms, deduplicate: true },
     terms,
   );
+  // The grouping a candidate set makes once both parties deduplicate, read
+  // over the whole producer list (`termsDeclareCandidateSet`, fanOutFunctions.ts)
+  // rather than over the `split_on` half `fansOut` holds, and put to the same
+  // two predicates the registers beside it read: the combination that matches
+  // a candidate set, and the accept boundary's verdict on the pair. So a seat
+  // states it for exactly the terms whose run can chain a group.
+  const candidateSetChainsGrouping =
+    fanOutMatches &&
+    terms.deduplicate &&
+    !acceptorDeduplicateRefused &&
+    termsDeclareCandidateSet(terms);
 
   const summary: InvitationSummary = {
     invitingParty: redactAndDisplayPartyIdentity(terms.identity),
@@ -1602,6 +1635,7 @@ export function summarizeInvitation(
     fansOut: terms.linkageKeys.some((key) => key.elements.some(declaresFanOut)),
     fanOutApplied: fanOutMatches,
     acceptorDeduplicateRefused,
+    candidateSetChainsGrouping,
     acceptorTableWithheld: withholdsAcceptorAssociationTable(terms),
     inviterTableWithheld: withholdsInviterAssociationTable(terms),
     linkageKeys: terms.linkageKeys.map((key) =>

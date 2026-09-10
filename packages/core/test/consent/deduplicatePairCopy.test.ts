@@ -113,6 +113,73 @@ describe("the fan-out note's account of pairing", () => {
         "any of its candidates reached",
     );
   });
+
+  test("answers the one-sided pairs the note's question also reaches", () => {
+    // The note poses the count for the two duplicate-matching settings, and
+    // the surfaces render it under all four pairs. Under a one-sided setting
+    // the "one" side's record is the one that pairs with several: the relaxed
+    // acceptance clause stops the declaring party's records from repeating
+    // and nothing stops the other party's (docs/spec/PROTOCOL.md, The per-side
+    // rules, and the two cases a deduplicating cardinality adds).
+    const note = CONSENT_FACTS.fanOutCandidates.note!;
+    expect(note).toContain(
+      "with one party's set, a record of the party that set it is paired at " +
+        "most once while a record of the other party may be paired with " +
+        "several",
+    );
+    // Not the both-set count: that pairing is total, and stating it for a
+    // one-sided run would promise pairs the sweep discards.
+    expect(note).not.toContain(
+      "with one party's set it is paired with every one",
+    );
+  });
+});
+
+describe("the chained-grouping fact", () => {
+  const fact = CONSENT_FACTS.candidateSetChainsGrouping;
+
+  test("states the grouping as a fact the run holds", () => {
+    // The pairs a chained group rests on stand in the association table both
+    // parties hold, so the grouping is the run's rather than the partner's
+    // word (docs/spec/PROTOCOL.md, The `many-to-many` entity closure).
+    expect(fact.basis).toBe("enforced");
+  });
+
+  test("states what a group can hold that no linkage key links", () => {
+    expect(fact.note).toContain(
+      "records sharing no matched value are disclosed to both parties as one " +
+        "group",
+    );
+    // The condition it holds under, so a reader of a one-sided run does not
+    // take the grouping for one their own terms make.
+    expect(fact.note).toContain(
+      "Where both parties set duplicate matching for their own records",
+    );
+  });
+
+  test("names no invitation role, so every seat states it in one wording", () => {
+    // The sentence renders at seats holding an invitation and at seats reading
+    // terms their own party wrote: a role name would read inverted at one of
+    // them, and two wordings would be two disclosures free to drift apart.
+    expect(fact.note).not.toContain("inviting party");
+    expect(fact.note).not.toContain("accepting party");
+  });
+
+  test("states the grouping the both-sided pair sentence states", () => {
+    // One disclosure, so the pair sentence a seat with the control renders and
+    // this fact cannot come to differ about what a chained group holds.
+    const chainClause =
+      "records sharing no matched value are disclosed to both parties as one " +
+      "group";
+    expect(
+      describeDeduplicatePair({
+        inviterDeduplicate: true,
+        acceptorDeduplicate: true,
+        inviterReceivesResult: true,
+      }),
+    ).toContain(chainClause);
+    expect(fact.note).toContain(chainClause);
+  });
 });
 
 describe("the pair where the inviting party receives no result", () => {
