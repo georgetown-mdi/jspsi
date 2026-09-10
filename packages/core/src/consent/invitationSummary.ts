@@ -527,10 +527,9 @@ export interface InvitationSummary {
    * Whether an exchange on these terms applies the deduplicate setting above.
    * True: the cascade matches the resolved cardinality and every surface
    * downstream of the association table shows the multiplicity. False: the
-   * strategy this invitation names matches no
-   * deduplicating cardinality, which acceptance refuses outright
-   * (`assertDeduplicateImplemented`), so this flag never claims a
-   * disclosure for a run that cannot happen.
+   * strategy this invitation names matches no deduplicating cardinality, which
+   * acceptance refuses outright (`assertDeduplicateImplemented`), so this flag
+   * never claims a disclosure for a run that cannot happen.
    *
    * Read alongside {@link deduplicate}, like `fansOut` and `fanOutApplied`:
    * answers what the strategy would do with a deduplicating term, whether or
@@ -1298,10 +1297,10 @@ function summarizeKey(
     elements,
     headerFields,
     hasSwap,
-    // The swapped key order is a candidate-set producer under the same applied
-    // setting as the fuzzy expansion (`keyDeclaresCandidateSet`,
-    // fanOutFunctions.ts), so it applies on exactly the combinations that
-    // resolve a candidate set -- the verdict `fanOutMatches` already holds.
+    // The swapped key order is a candidate-set producer like the fuzzy
+    // expansion (`keyDeclaresCandidateSet`, fanOutFunctions.ts), so it applies
+    // on exactly the combinations that resolve a candidate set -- the verdict
+    // `fanOutMatches` already holds.
     swapApplied,
     swap,
     swapHeaderMarker,

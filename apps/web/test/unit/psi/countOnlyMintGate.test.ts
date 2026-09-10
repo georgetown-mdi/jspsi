@@ -8,8 +8,8 @@ import { validateAdvancedInvite } from "@psi/authoring/advancedInviteValidation"
 import type { AdvancedInviteDraft } from "@psi/authoring/advancedInviteTypes";
 
 // The count-only shape gate at the web AUTHORING boundary. Each of the five rules
-// is reached through `buildAdvancedTerms`, which clamps only the settings whose
-// applied-flag is false; the rules themselves read the algorithm and the document.
+// is reached through `buildAdvancedTerms`; the rules themselves read the
+// algorithm and the document.
 // The accept and import gates are the same rules at the other two boundaries, in
 // countOnlyAcceptGates.test.ts.
 

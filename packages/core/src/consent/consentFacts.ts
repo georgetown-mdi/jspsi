@@ -1292,9 +1292,10 @@ export function describeDeduplicatePair({
  * marker for is a combination that resolves no candidate set -- a count-only
  * exchange -- which refuses those terms rather than matching on the exact
  * value alone. Each copy names that refusal and the term to ask the inviter to
- * drop, which is the one remedy its reader can act on. A term whose not-applying is a
- * silent narrowing of the match takes the opposite copy, saying only that the
- * term is proposed, which is what makes this a table rather than a house style.
+ * drop, which is the one remedy its reader can act on. A term whose
+ * not-applying is a silent narrowing of the match takes the opposite copy,
+ * saying only that the term is proposed, which is what makes this a table
+ * rather than a house style.
  *
  * Shared for the same reason the classification is.
  */
