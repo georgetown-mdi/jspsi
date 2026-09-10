@@ -41,6 +41,16 @@ export function splitSegments(command) {
 }
 
 /**
+ * A segment's words with their quotes still on them, for a caller reading a word
+ * whose own text may hold a quote character -- an apostrophe inside a double-
+ * quoted value, which `tokenize` strips along with the pair around it. Not
+ * POSIX-complete.
+ */
+export function tokenizeRaw(segment) {
+  return segment.match(TOKEN) ?? [];
+}
+
+/**
  * A segment's words, quoted spans kept whole and then stripped of every quote
  * character, so a quoted path or ref compares equal to a bare one. Stripping ALL
  * quotes rather than an outermost pair is what makes `HEAD:'staging'` normalize
@@ -48,9 +58,7 @@ export function splitSegments(command) {
  * Not POSIX-complete.
  */
 export function tokenize(segment) {
-  return (segment.match(TOKEN) ?? []).map((token) =>
-    token.replace(/['"]/g, ""),
-  );
+  return tokenizeRaw(segment).map((token) => token.replace(/['"]/g, ""));
 }
 
 /**
