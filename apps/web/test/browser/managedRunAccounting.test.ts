@@ -10,21 +10,24 @@ import { createElement } from "react";
 import "@mantine/core/styles.css";
 
 import {
-  clearManagedExchanges,
-  createManagedExchange,
-} from "@psi/managed/managedExchangeStore";
-import {
+  appendDisclosureRecordToStore,
   readDisclosureAccounting,
   resetDisclosureAccounting,
 } from "@psi/disclosureAccountingStore";
+import {
+  clearManagedExchanges,
+  createManagedExchange,
+} from "@psi/managed/managedExchangeStore";
 import { DISCLOSURE_ACCOUNTING_VERSION } from "@psi/disclosureAccounting";
 import { ManagedRunSurface } from "@recurring/ManagedRunSurface";
+import { PARTIAL_DISCLOSURE_LABEL } from "@recurring/disclosureAccountingModel";
 import { composeManagedExchangeFile } from "@psi/managed/managedExchangeRecord";
 
 import { disclosureRecord } from "../utils/disclosureFixtures";
 
 import { createAppMount, flushPendingUpdates } from "./renderApp";
 
+import type * as DisclosureAccountingStore from "@psi/disclosureAccountingStore";
 import type { DisclosureAccountingRead } from "@psi/disclosureAccountingStore";
 import type { NewManagedExchange } from "@psi/managed/managedExchangeRecord";
 
@@ -196,6 +199,53 @@ describe("a re-read of the accounting shows that it is under way", () => {
     await expect
       .element(
         page.getByText("no run of this exchange has filed a disclosure here", {
+          exact: false,
+        }),
+      )
+      .toBeInTheDocument();
+  });
+});
+
+/**
+ * The stopped-run entry against the real store rather than a staged read: the
+ * driver suite mocks both the record accessor and the append, so nothing there
+ * shows a terminated record surviving IndexedDB. Here a record core built is
+ * appended through the real store -- which holds it to the exchange-record format
+ * on the way in -- read back through the store's own validating parse, and
+ * rendered.
+ */
+describe("a stopped run's entry through the real store", () => {
+  test("files, re-reads, and renders with the mark that tells it from a completed run", async () => {
+    const created = await createManagedExchange(newExchange());
+    const filed = await disclosureRecord({
+      outcome: "receipt-swap-terminated",
+    });
+    await appendDisclosureRecordToStore(created.id, filed);
+    const { readDisclosureAccounting: readTheStore } = await vi.importActual<
+      typeof DisclosureAccountingStore
+    >("@psi/disclosureAccountingStore");
+
+    const read = await readTheStore(created.id);
+
+    if (read.kind !== "accounting")
+      throw new Error(`the store read classified as ${read.kind}`);
+    // The outcome is what the mark is derived from, so the round trip has to keep
+    // it: a parse that dropped the field would render the entry as a completed
+    // disclosure.
+    expect(read.accounting.entries.map((entry) => entry.outcome)).toEqual([
+      "receipt-swap-terminated",
+    ]);
+    reads.mockResolvedValue(read);
+
+    app.render(createElement(ManagedRunSurface, { id: created.id }));
+
+    await expect
+      .element(page.getByText("1 of them stopped before the run finished"))
+      .toBeInTheDocument();
+    await expect
+      .element(
+        page.getByRole("button", {
+          name: PARTIAL_DISCLOSURE_LABEL,
           exact: false,
         }),
       )
