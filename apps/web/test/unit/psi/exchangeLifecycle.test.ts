@@ -116,7 +116,6 @@ const STUB_PREPARED = {
 const STUB_EXCHANGE_RESULT = {
   associationTable: undefined,
   intersectionCount: undefined,
-  entityClusters: undefined,
   partnerTerms: STUB_LINKAGE_TERMS,
   matching: {
     localDeduplicate: false,

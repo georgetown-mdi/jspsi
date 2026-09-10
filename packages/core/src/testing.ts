@@ -169,7 +169,6 @@ export function minimalExchangeResult(
   return {
     associationTable: undefined,
     intersectionCount: undefined,
-    entityClusters: undefined,
     partnerTerms: getDefaultLinkageTerms("Minimal exchange-result fixture"),
     matching: {
       localDeduplicate: false,

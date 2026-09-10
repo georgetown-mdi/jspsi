@@ -1169,8 +1169,8 @@ export interface ExchangeResult {
    * values each formed on (docs/spec/PROTOCOL.md, Choosing linkage keys under
    * closure).
    *
-   * Present exactly on a `many-to-many` run this party holds the table of. It
-   * is `undefined` under every other cardinality, whose clusters follow from
+   * Present exactly on a `many-to-many` run this party holds the table of. The
+   * key is absent under every other cardinality, whose clusters follow from
    * the table's own shape, and under the same withholding gate the table takes
    * -- a party that receives no table receives no summary of it either.
    *
@@ -1181,7 +1181,7 @@ export interface ExchangeResult {
    * `describeEntityClusters` (entityClusterReport.ts) is the sentence both
    * front ends render from it.
    */
-  entityClusters: EntityClusterSummary | undefined;
+  entityClusters?: EntityClusterSummary;
   /** Linkage terms received from the partner during the handshake. */
   partnerTerms: LinkageTerms;
   /**
@@ -2216,7 +2216,9 @@ export async function runExchange(
     intersectionCount: heldResult ? intersectionCount : undefined,
     // Derived from the table above, so it goes out under that same entitlement
     // gate: a party handed no table is told nothing about how its pairs grouped.
-    entityClusters: heldResult ? entityClusters : undefined,
+    // The key is left off where there is no summary, so a result the caller
+    // spreads or compares holds it only for the runs that composed one.
+    ...(heldResult && entityClusters !== undefined ? { entityClusters } : {}),
     partnerTerms,
     matching,
     resolvedRole,

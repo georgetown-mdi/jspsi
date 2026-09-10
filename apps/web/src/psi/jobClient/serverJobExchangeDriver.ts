@@ -868,6 +868,35 @@ function entityClusterShapeOf(value: unknown): EntityClusterShape | undefined {
     : undefined;
 }
 
+/** Whether a shape distribution accounts for exactly the summary's own totals:
+ * the clusters of every shape sum to the cluster count, and the records each
+ * shape holds, once per cluster of that shape, sum to each party's total. Core
+ * composes the two halves from one pass over the same clusters
+ * (docs/spec/PROTOCOL.md, Choosing linkage keys under closure), so a frame
+ * whose halves disagree is malformed rather than a distribution to render. Each
+ * running total is compared as it grows, keeping it inside the safe integers
+ * the totals themselves are held to. */
+function clusterFiguresAgree(
+  clusterCount: number,
+  localRows: number,
+  partnerRows: number,
+  shapes: ReadonlyArray<EntityClusterShape>,
+): boolean {
+  let clusters = 0;
+  let local = 0;
+  let partner = 0;
+  for (const shape of shapes) {
+    clusters += shape.clusters;
+    local += shape.localRows * shape.clusters;
+    partner += shape.partnerRows * shape.clusters;
+    if (clusters > clusterCount || local > localRows || partner > partnerRows)
+      return false;
+  }
+  return (
+    clusters === clusterCount && local === localRows && partner === partnerRows
+  );
+}
+
 /** How the entity closure grouped this party's result, read off a `result`
  * relay event, or undefined when the run reported no grouping -- every
  * cardinality but `many-to-many` -- or when the frame holds a shape this build
@@ -888,7 +917,8 @@ function entityClusterSummaryOf(
   const read = shapes.map(entityClusterShapeOf);
   const counts = [clusterCount, localRows, partnerRows].map(relayCount);
   return counts.every((count) => count !== undefined) &&
-    read.every((shape) => shape !== undefined)
+    read.every((shape) => shape !== undefined) &&
+    clusterFiguresAgree(counts[0], counts[1], counts[2], read)
     ? {
         clusterCount: counts[0],
         localRows: counts[1],

@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 
 import {
+  ENTITY_CLUSTER_GUIDE_SHARE,
   ENTITY_CLUSTER_SHAPES_NAMED,
   describeEntityClusters,
 } from "../src/entityClusterReport";
@@ -61,7 +62,44 @@ describe("describeEntityClusters", () => {
     );
   });
 
-  test("a cluster past one record on a side gets the reading guide", () => {
+  test("a summary with no shapes states the counts it holds", () => {
+    // A seat can be handed a summary whose distribution it could not read --
+    // the console relay drops a malformed one -- and the sentence states what
+    // it was told rather than reading a shape that is not there.
+    expect(describeEntityClusters(summaryOf(3, 1, 1, []))).toBe(
+      "Entity clusters in your result: 3 clusters over 1 record of yours and " +
+        "1 of your partner's. Their sizes are not available.",
+    );
+  });
+
+  test("a largest cluster within the guide share gets no reading guide", () => {
+    // Two records against two, and the boundary case of exactly a tenth of the
+    // 200 matched records: under many-to-many a small largest cluster is the
+    // ordinary outcome, and the guide would then be advice on every run.
+    for (const largest of [shape(2, 2, 1), shape(20, 20, 2)]) {
+      const rest = 200 - largest.localRows;
+      const sentence = describeEntityClusters(
+        summaryOf(1 + rest, 200, 200, [largest, shape(1, 1, 1, rest)]),
+      );
+      expect(sentence).toContain(
+        `${largest.localRows} x ${largest.partnerRows} on`,
+      );
+      expect(sentence).not.toContain("Narrow the key");
+    }
+  });
+
+  test("a largest cluster past the guide share gets the reading guide", () => {
+    // 21 of 200 is past ENTITY_CLUSTER_GUIDE_SHARE, the share a cluster spans
+    // before it is the signature of a key that named a group.
+    expect(ENTITY_CLUSTER_GUIDE_SHARE * 200).toBe(20);
+    expect(
+      describeEntityClusters(
+        summaryOf(180, 200, 200, [shape(21, 21, 3), shape(1, 1, 1, 179)]),
+      ),
+    ).toContain("Narrow the key or the candidate values to break it up.");
+  });
+
+  test("a cluster holding most of the result gets the reading guide", () => {
     expect(
       describeEntityClusters(
         summaryOf(3, 43, 39, [
