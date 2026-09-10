@@ -172,11 +172,15 @@ export interface ClosureBlock {
  * grouping this could not see past.
  *
  * The returned-list check (`resolveRunGroupedReturn`, utils/partnerIndices.ts)
- * already implies this on the built path: it holds the partner's runs to the
- * pairing this party resolved, row for row, so the table it builds is that
- * pairing's own image. That is why a violation here is an internal
- * inconsistency rather than a partner fault, and why the claim is pinned on the
- * artifact every consumer reads rather than left to rest on that argument alone.
+ * runs ahead of this one and holds the partner's runs to the pairing this party
+ * resolved, within a round and across them: each round's rows fall into the
+ * sets of this party's records the round accepted together, and no row is named
+ * in two rounds. What it does not read is this party's own round state agreeing
+ * with the table built from its result -- the round label on each pair and the
+ * round's blocks come from that state rather than from the list. That is why a
+ * violation here is an internal inconsistency rather than a partner fault, and
+ * why the claim is pinned on the artifact every consumer reads rather than left
+ * to rest on that argument alone.
  *
  * @param id - The participant id the message is attributed to.
  * @param table - The matched table, read as pairs.

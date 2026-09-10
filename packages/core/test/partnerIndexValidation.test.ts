@@ -974,6 +974,25 @@ test("each round resolves its own ranks", () => {
   );
 });
 
+test("a row named in two key rounds is refused", () => {
+  // A record accepted in one round leaves candidacy for every later one, so no
+  // partner row stands in two rounds' runs. Each round's partition is read on
+  // its own and admits this one -- round 0's rank 0 and round 1's rank 0 each
+  // hold the row for the single entry of their own round -- so the rule reads
+  // over the whole list.
+  expectProtocolRefusal(
+    refusalFrom(() =>
+      resolveRunGroupedReturn("me", "the list", [1, 1], 5, {
+        rounds: [0, 1],
+        runLengths: [1, 1],
+        ownerStarts: [0, 1, 2],
+        owners: [0, 0],
+      }),
+    ),
+    /the list names one partner row in two key rounds/,
+  );
+});
+
 test("an out-of-range or fractional entry is refused before the pairing", () => {
   const runs = {
     rounds: [0],

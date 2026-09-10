@@ -802,3 +802,45 @@ for (const party of ["starter", "joiner"] as const) {
     );
   });
 }
+
+// --- a row named in two key rounds ---------------------------------------------
+// Removal on a potential match takes a record matched in one round out of every
+// later round's candidate set (docs/spec/PROTOCOL.md, Removal on a potential
+// match), so no partner row stands in two rounds' runs. Each round's pairing is
+// read on its own above, which leaves this one a rule over the whole list.
+const twoRoundKeys: Keys = [
+  ["A", undefined],
+  [undefined, "B"],
+];
+
+test("two key rounds pair off a row each, and the run completes", async () => {
+  const run = await runCascade(twoRoundKeys, twoRoundKeys);
+  const [starter, joiner] = expectTables(run);
+  expect(pairsOf(starter, false)).toStrictEqual([
+    [0, 0],
+    [1, 1],
+  ]);
+  expectAgreement(starter, joiner);
+});
+
+for (const party of ["starter", "joiner"] as const) {
+  test(`a returned list naming one partner row in two key rounds is refused (deviating party: ${party})`, async () => {
+    // Round 1's entry comes back holding the row round 0's entry took. Every
+    // entry stays in range, the count is untouched, and each round on its own
+    // still hands its single accepted group a row -- what refuses it is the
+    // row standing in two rounds.
+    const run = await runCascade(twoRoundKeys, twoRoundKeys, {
+      party,
+      deviation: onMappedElementList(2, (list) => [
+        list[0],
+        { ...list[1], theirIndex: list[0].theirIndex },
+      ]),
+    });
+    const outcome = run[party];
+    expect(outcome).toBeInstanceOf(ConnectionError);
+    expect((outcome as ConnectionError).kind).toBe("protocol");
+    expect((outcome as Error).message).toMatch(
+      /names one partner row in two key rounds/,
+    );
+  });
+}

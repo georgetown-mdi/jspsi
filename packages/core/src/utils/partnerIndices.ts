@@ -342,6 +342,11 @@ function claimantKey(entries: ReadonlyArray<number>): string {
  * this party's records onto one of its own nor split one across two, however its
  * entries' rank sets overlap.
  *
+ * Each row belongs to one round as well: a record accepted in a round leaves
+ * candidacy for every later one (docs/spec/PROTOCOL.md, Removal on a potential
+ * match), so a row two rounds' runs name between them is refused. That is a
+ * whole-list rule, the partition above reading each round on its own.
+ *
  * That overlap is what a candidate set produces and what a rule keyed to one
  * rank per entry cannot state: two entries' rank sets then meet without
  * coinciding, so neither "identical runs" nor "disjoint runs" is the rule, and a
@@ -360,8 +365,9 @@ function claimantKey(entries: ReadonlyArray<number>): string {
  * @param runs - What this party sent and what it resolved each entry against.
  * @returns The partner rows each accepted rank stands for, by round, ascending.
  * @throws A `"protocol"` {@link ConnectionError} on a non-integer or
- *   out-of-range entry, on a run naming one row twice, or on a round whose rows
- *   fall into other sets of this party's records than the ones it accepted.
+ *   out-of-range entry, on a run naming one row twice, on a row named in two
+ *   key rounds, or on a round whose rows fall into other sets of this party's
+ *   records than the ones it accepted.
  */
 export function resolveRunGroupedReturn(
   participantId: string,
@@ -399,6 +405,12 @@ export function resolveRunGroupedReturn(
   // return states, a set per partner row it names.
   const ranksByRound = new Map<number, Map<number, Array<number>>>();
   const claimantsByRound = new Map<number, Map<number, Array<number>>>();
+  // The round each row was first named in, read over the whole list rather than
+  // one run: the per-round partition below cannot see a row the return puts in
+  // two rounds, and a record accepted in one round leaves candidacy for every
+  // later one (docs/spec/PROTOCOL.md, Removal on a potential match), so such a
+  // row is the partner joining clusters this party's resolution kept apart.
+  const roundOfRow = new Map<number, number>();
   const claimed = (
     of: Map<number, Map<number, Array<number>>>,
     round: number,
@@ -437,6 +449,13 @@ export function resolveRunGroupedReturn(
             "matched",
         );
       seen.add(index);
+      const namedIn = roundOfRow.get(index);
+      if (namedIn === undefined) roundOfRow.set(index, round);
+      else if (namedIn !== round)
+        throw partnerProtocolError(
+          participantId,
+          `${what} names one partner row in two key rounds`,
+        );
       claimed(claimantsByRound, round, index).push(run);
     }
   }
