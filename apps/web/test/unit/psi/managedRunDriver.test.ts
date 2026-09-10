@@ -30,6 +30,7 @@ import {
 import { appendDisclosureRecordToStore } from "../../../src/psi/disclosureAccountingStore.js";
 import { authenticateExchange } from "../../../src/psi/authenticateExchange.js";
 import { beginManagedRendezvous } from "../../../src/psi/managed/managedRendezvous.js";
+import { buildRunOutputs } from "../../../src/psi/runOutputs.js";
 import { disclosureRecord } from "../../utils/disclosureFixtures.js";
 import { openPeerMessageConnection } from "../../../src/psi/transport/peerMessageConnection.js";
 
@@ -159,6 +160,7 @@ vi.mock("@psilink/core", async (importOriginal) => {
 
 const mockedAuthenticate = vi.mocked(authenticateExchange);
 const mockedAppendDisclosure = vi.mocked(appendDisclosureRecordToStore);
+const mockedBuildRunOutputs = vi.mocked(buildRunOutputs);
 const mockedRendezvous = vi.mocked(beginManagedRendezvous);
 const mockedRecordFromFailure = vi.mocked(exchangeRecordFromFailure);
 const mockedRunExchange = vi.mocked(runExchange);
@@ -916,6 +918,27 @@ describe("filing the run's disclosure", () => {
 
     fileEntry?.();
     await expect(running).resolves.toMatchObject({ exchange: OUTPUTS });
+  });
+
+  test("files the completed run's record when building its outputs throws", async () => {
+    // The exchange completed, so the disclosure happened and the entry is owed;
+    // a local step failing after it does not decide whether the entry exists.
+    // That failure is not one core raised, so the stopped-run path recovers no
+    // record from it and files no second entry.
+    const { mc } = makeParkedCloseMc();
+    mockedOpen.mockResolvedValue(mc);
+    acquireResources();
+    const record = await exchangeYieldsRecord();
+    mockedBuildRunOutputs.mockImplementationOnce(() => {
+      throw new Error("results blob failed");
+    });
+
+    await expect(runDriver(new AbortController().signal)).rejects.toThrow(
+      "results blob failed",
+    );
+
+    expect(mockedAppendDisclosure.mock.calls).toEqual([[RECORD.id, record]]);
+    expect(record.outcome).toBe("completed");
   });
 
   test("files nothing when the exchange produced no record", async () => {

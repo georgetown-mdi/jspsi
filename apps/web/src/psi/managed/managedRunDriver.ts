@@ -314,8 +314,8 @@ export function runManagedExchangeInBrowser(
           throw error;
         }
       },
-      // After the durable persist: run the PSI exchange, build the outputs, file
-      // the disclosure on either exit, and tear down regardless of outcome.
+      // After the durable persist: run the PSI exchange, file the disclosure on
+      // either exit, build the outputs, and tear down regardless of outcome.
       dataExchange: async (carried) => {
         try {
           const result = await runExchange(
@@ -352,15 +352,15 @@ export function runManagedExchangeInBrowser(
               },
             },
           );
+          // The disclosure has happened, so its record is appended BEFORE the
+          // outputs are built and reported: nobody takes an unattended run's
+          // completion download, an attended run's tab can close on it, and a
+          // local step throwing past this point must not cost a completed run
+          // its entry. Awaited, unlike the teardown below: a local write of
+          // bounded duration, not a wait the partner's peer picks.
+          await appendDisclosure(record.id, result.audit, onWarning);
           const outputs = buildRunOutputs(result, carried.prepared, urls);
           builtOutputs = true;
-          // The disclosure has happened, so its record is appended to this
-          // exchange's accounting BEFORE the run reports its outputs: an
-          // unattended run has nobody to take the completion download, and an
-          // attended one can have its tab closed on the completion screen.
-          // Awaited, unlike the teardown below, because it is a local write of
-          // bounded duration rather than a wait the partner's peer controls.
-          await appendDisclosure(record.id, result.audit, onWarning);
           return outputs;
         } catch (error) {
           await fileTerminatedDisclosure(record.id, error);
@@ -427,10 +427,12 @@ async function appendDisclosure(
  * transport already holds (docs/spec/EXCHANGE_RECORD.md, When a record is owed).
  * The entry states which it is through the record's own `outcome`.
  *
- * A failure that carries no record files nothing: either the run stopped before
- * the region opened, in which case nothing was disclosed, or core could not build
- * the record for a disclosure that did occur, which it warns about on the operator
- * log at the point of the loss.
+ * A failure that carries no record files nothing, which covers all three ways one
+ * arrives: the run stopped before the region opened, so nothing was disclosed;
+ * core could not build the record for a disclosure that did occur, which it warns
+ * about on the operator log at the point of the loss; or the exchange completed
+ * and a local step past it threw, whose record the completed path has already
+ * filed.
  *
  * Best-effort, as the completed path's append is, and silent on the operator's
  * screen: the run is failing, so a failed append can neither undo the disclosure
