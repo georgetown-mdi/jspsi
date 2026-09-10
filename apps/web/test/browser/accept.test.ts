@@ -2691,10 +2691,50 @@ describe("AcceptorScreen: this party's own deduplicate", () => {
     expect(app.container.textContent).toContain(
       CONSENT_FACTS.fanOutCandidates.note,
     );
+    expect(app.container.textContent).toContain(
+      CONSENT_FACTS.candidateSetChainsGrouping.note,
+    );
     await userEvent.click(ownSide());
     await expect
       .element(page.getByText(pairSentence(true, true)))
       .toBeInTheDocument();
+  });
+
+  test("states the same grouping for a key matched in either order", async () => {
+    // The shipped default keys declare a swapped order and no split, so a
+    // screen reading the fan-out register alone -- the split half of the
+    // candidate set -- would state nothing about the grouping on the terms an
+    // operator reaches with no key authoring at all. On screen while this
+    // party's own control still stands at the closed default, the sentence
+    // stating the pair conditionally, so the operator sets that value against
+    // it rather than after it.
+    await reachReview({
+      ...acceptorTerms,
+      deduplicate: true,
+      linkageKeys: [
+        {
+          name: "name",
+          elements: [{ field: "firstName" }, { field: "lastName" }],
+          swap: ["firstName", "lastName"],
+        },
+      ],
+    });
+    expect(app.container.textContent).not.toContain(
+      CONSENT_FACTS.fanOutCandidates.note,
+    );
+    expect(app.container.textContent).toContain(
+      CONSENT_FACTS.candidateSetChainsGrouping.note,
+    );
+  });
+
+  test("says nothing of that grouping where the keys expand no value", async () => {
+    // The grouping follows the candidate set: a deduplicating invitation over
+    // plain keys pairs records that share a matched value and nothing else, so
+    // the sentence would state a grouping this run does not make.
+    await reachReview({ ...acceptorTerms, deduplicate: true });
+    expect(app.container.textContent).not.toContain(
+      CONSENT_FACTS.candidateSetChainsGrouping.note,
+    );
   });
 
   test("offers no control where this party receives no result", async () => {

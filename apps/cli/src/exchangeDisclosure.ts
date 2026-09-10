@@ -230,6 +230,21 @@ export function renderExchangeDisclosure(
     emit(`  ${marked("several values per record", "fanOutCandidates")}:`);
     emit(`    ${CONSENT_FACTS.fanOutCandidates.note}`);
   }
+  // What those several values group once the partner declares a duplicate
+  // matching of its own beside this party's. Read from core's verdict over
+  // every producer of a candidate set, so a key declaring `swap` and a fuzzy
+  // comparison state it where the line above is silent, and stated
+  // conditionally: this run holds its own side of the pair and reads the
+  // partner's only when the exchange runs.
+  if (summary.candidateSetChainsGrouping) {
+    emit(
+      `  ${marked(
+        "records grouped with no value in common",
+        "candidateSetChainsGrouping",
+      )}:`,
+    );
+    emit(`    ${CONSENT_FACTS.candidateSetChainsGrouping.note}`);
+  }
 
   if (summary.matchedFields.length > 0)
     emit(

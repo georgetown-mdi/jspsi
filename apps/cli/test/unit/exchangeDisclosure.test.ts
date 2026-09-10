@@ -412,6 +412,82 @@ test("a grouping this party declares states what it discloses, in its own terms"
   expect(lines).toContain(DEDUPLICATE_PARTNER_DECLARED_SIDE_NOTE);
 });
 
+/** {@link localTerms} with a key that splits one value into several match
+ * candidates, the shape that raises the fan-out fact on this display. */
+const splittingKeyTerms: LinkageTerms = {
+  ...localTerms,
+  linkageKeys: [
+    {
+      name: "LN",
+      elements: [
+        {
+          field: "last_name",
+          transform: [{ function: "split_on", params: { delimiter: " " } }],
+        },
+      ],
+    },
+  ],
+};
+
+/** {@link localTerms} with a key matched in either order -- a candidate set
+ * that declares no split, which is the shape the shipped default keys take. */
+const swappedKeyTerms: LinkageTerms = {
+  ...localTerms,
+  linkageKeys: [
+    {
+      name: "FN_LN",
+      elements: [{ field: "first_name" }, { field: "last_name" }],
+      swap: ["first_name", "last_name"],
+    },
+  ],
+};
+
+test("a key splitting one value states what the run matches on", () => {
+  // The other surface reading this fact is the acceptance display, and both
+  // read core's shared classification, so an operator meets the widening in
+  // the same words whether it accepted an invitation or wrote its own terms.
+  const lines = rendered(splittingKeyTerms).join("\n");
+  expect(lines).toContain("several values per record (enforced):");
+  expect(lines).toContain(CONSENT_FACTS.fanOutCandidates.note);
+
+  // Silent where the run refuses the split rather than matching on it, and
+  // where the terms declare none: the line is not a fixture of the display.
+  expect(
+    rendered({ ...splittingKeyTerms, algorithm: "psi-c" }).join("\n"),
+  ).not.toContain("several values per record");
+  expect(rendered(localTerms).join("\n")).not.toContain(
+    "several values per record",
+  );
+});
+
+test("a candidate set beside this party's own grouping states what it groups", () => {
+  // The grouping the pair the partner's own setting completes makes of records
+  // no linkage key links. It follows the candidate set rather than the split
+  // alone, so a key matched in either order states it where the fan-out line
+  // above says nothing.
+  for (const terms of [splittingKeyTerms, swappedKeyTerms]) {
+    const lines = rendered({ ...terms, deduplicate: true }).join("\n");
+    expect(lines).toContain(
+      "records grouped with no value in common (enforced):",
+    );
+    expect(lines).toContain(CONSENT_FACTS.candidateSetChainsGrouping.note);
+  }
+  expect(rendered(swappedKeyTerms).join("\n")).not.toContain(
+    "several values per record",
+  );
+
+  // Silent where the pair is refused rather than run, and where these terms
+  // declare no side of it.
+  for (const terms of [
+    { ...swappedKeyTerms, deduplicate: true, linkageStrategy: "single-pass" },
+    swappedKeyTerms,
+    { ...localTerms, deduplicate: true },
+  ] as const)
+    expect(rendered(terms).join("\n")).not.toContain(
+      "records grouped with no value in common",
+    );
+});
+
 test("single-pass linkage states the disclosure it trades for its round trip", () => {
   const lines = rendered({
     ...localTerms,

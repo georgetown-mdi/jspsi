@@ -810,6 +810,22 @@ export function displayInvitation(params: {
     emit(`    ${CONSENT_FACTS[fact].note}`);
   }
 
+  // What those several values group once this party declares a duplicate
+  // matching of its own. Read over every producer of a candidate set, so a
+  // swapped key order and a fuzzy comparison state it where the line above --
+  // the split half alone -- is silent. Stated although this command accepts
+  // with this party's side false: the value that completes the pair is set in
+  // the configuration file the direction note above points the operator at.
+  if (summary.candidateSetChainsGrouping) {
+    emit(
+      `  ${marked(
+        "records grouped with no value in common",
+        "candidateSetChainsGrouping",
+      )}:`,
+    );
+    emit(`    ${CONSENT_FACTS.candidateSetChainsGrouping.note}`);
+  }
+
   // The fields the keys actually match on, one short line ahead of the two
   // long matching blocks, so the single fact consent most depends on stays
   // clear without scrolling back through the keys and their combinations.
