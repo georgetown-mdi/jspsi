@@ -22,6 +22,7 @@ import {
   DEFAULT_LINKAGE_RULE_SET,
   DISPLAY_TRUNCATION_MARKER,
   isDrawnFromLinkageRuleSet,
+  keepFirstPartyLineBreaks,
   MAX_NESTING_DEPTH,
   NestingDepthExceededError,
   quoteTermsValue,
@@ -1263,6 +1264,12 @@ export function formatReconcileDiffs(
  * redact/replace/fit treatment as a chooser's value even though it is the
  * operator's own, so no later caller can assume a fragment is exempt from
  * that treatment because of its provenance.
+ *
+ * Its line breaks are structure, not spacing, so the refusal is raised
+ * through {@link reconcileConflictError} rather than from this text
+ * directly.
+ *
+ * @internal exported for testing; `reconcileConflictError` is the caller.
  */
 export function reconcileConflictMessage(params: {
   configPath: string;
@@ -1291,6 +1298,33 @@ export function reconcileConflictMessage(params: {
       ),
     )
   );
+}
+
+/**
+ * The refusal `psilink accept` raises for a configuration that disagrees with
+ * the invitation, as the error the command throws: the message of
+ * {@link reconcileConflictMessage}, marked so the display boundary shows the
+ * conflict list and the recovery step on the lines the block is built from
+ * ({@link keepFirstPartyLineBreaks}).
+ *
+ * Composing the message and marking it happen together here, so the one
+ * composition writing those breaks has no route to an operator that eats
+ * them.
+ *
+ * The lines are read back off the composed message, which is where that
+ * composition's structure is: every value on them is control-replaced and
+ * delimited where it was interpolated, so the breaks between them are the
+ * composition's own -- a property the tests over this file's rendered refusal
+ * hold rather than this sentence.
+ */
+export function reconcileConflictError(params: {
+  configPath: string;
+  against: string;
+  retryWith: string;
+  diffs: ReconcileDiff[];
+}): UsageError {
+  const message = reconcileConflictMessage(params);
+  return keepFirstPartyLineBreaks(new UsageError(message), message.split("\n"));
 }
 
 // --- Config writer -----------------------------------------------------------

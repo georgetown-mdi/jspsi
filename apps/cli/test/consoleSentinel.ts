@@ -96,6 +96,13 @@ const UNESCAPED_DISPLAY_BYTE = /[^\x20-\x7e]/;
 //
 // Stated limit: this strip is literal, so a line whose unescaped payload
 // itself contains `\ncaused by: ` survives it and passes the byte test.
+//
+// The other line break the display boundary emits is the one a composition
+// states as its own (`keepFirstPartyLineBreaks`), and this gate does NOT admit
+// it: a first-party block routed to a `console.*` sink fails here. Admitting a
+// bare LF is what it would cost, and that is the byte a value would spoof a
+// log line with. Those blocks reach the operator on the stderr, `--log-file`
+// and fd-3 sinks, which this sentinel does not gate.
 const RENDERER_FRAMING = /\ncaused by: /g;
 
 // Join console arguments into one matchable line. A non-string is inspected

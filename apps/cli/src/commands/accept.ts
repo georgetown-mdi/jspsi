@@ -30,7 +30,7 @@ import {
   persistExpectedPartnerDeduplicate,
   persistExpectedPayloadColumns,
   persistOutboundPayloadConsent,
-  reconcileConflictMessage,
+  reconcileConflictError,
   warnOnLinkageRuleSetCitationDrift,
   type ReconcileDiff,
 } from "../config";
@@ -890,9 +890,12 @@ function reconcileAcceptConfig(params: {
 
   const all: ReconcileDiff[] = [...conflicts, ...conn.conflicts];
   if (all.length > 0)
-    throw new UsageError(
-      reconcileConflictMessage({ configPath, against, retryWith, diffs: all }),
-    );
+    throw reconcileConflictError({
+      configPath,
+      against,
+      retryWith,
+      diffs: all,
+    });
 
   // A connection field that is "how you reach the same drop" (protocol, port,
   // credentials) may differ without aborting: it applies to this exchange only,
