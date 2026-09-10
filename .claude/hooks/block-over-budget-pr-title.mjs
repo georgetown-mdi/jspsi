@@ -48,7 +48,7 @@ import {
   subjectBudget,
 } from "../scripts/format-squash-message.mjs";
 import { commandOf, eventForTools } from "./lib/event.mjs";
-import { splitSegments, tokenizeRaw } from "./lib/shell.mjs";
+import { splitSegments, tokenize, tokenizeRaw } from "./lib/shell.mjs";
 
 /** The `gh pr` subcommands that take a title. `new` is an alias of `create`. */
 const TITLED_SUBCOMMANDS = new Set(["create", "new", "edit"]);
@@ -76,25 +76,40 @@ function unquote(word) {
   return text;
 }
 
+/**
+ * A segment's words, each read two ways: `text` has every quote character
+ * stripped, so a structural word matches whether or not it was written quoted,
+ * and `written` keeps them, so a title is still counted at the length it was
+ * written. `tokenize` is defined over `tokenizeRaw`, so the two split alike;
+ * were that ever to stop holding, read no words rather than pair the wrong two.
+ */
+function wordsOf(segment) {
+  const written = tokenizeRaw(segment);
+  const stripped = tokenize(segment);
+  if (stripped.length !== written.length) return [];
+  return stripped.map((text, index) => ({ text, written: written[index] }));
+}
+
 /** The title a single word carries, or null when it carries none of its own. */
-function attachedTitle(word) {
-  if (word.startsWith(`${LONG_FLAG}=`)) {
-    return unquote(word.slice(LONG_FLAG.length + 1));
+function attachedTitle({ text, written }) {
+  const value = unquote(written);
+  if (text.startsWith(`${LONG_FLAG}=`)) {
+    return value.slice(LONG_FLAG.length + 1);
   }
-  if (!word.startsWith(SHORT_FLAG) || word.length === SHORT_FLAG.length) {
+  if (!text.startsWith(SHORT_FLAG) || text.length === SHORT_FLAG.length) {
     return null;
   }
-  const value = word.slice(SHORT_FLAG.length);
-  return unquote(value.startsWith("=") ? value.slice(1) : value);
+  const attached = value.slice(SHORT_FLAG.length);
+  return attached.startsWith("=") ? attached.slice(1) : attached;
 }
 
 /** Every title the words set, in the order they were written. */
 function titlesIn(words) {
   const titles = [];
   for (const [index, word] of words.entries()) {
-    if (word === LONG_FLAG || word === SHORT_FLAG) {
+    if (word.text === LONG_FLAG || word.text === SHORT_FLAG) {
       const value = words[index + 1];
-      if (value !== undefined) titles.push(unquote(value));
+      if (value !== undefined) titles.push(unquote(value.written));
       continue;
     }
     const attached = attachedTitle(word);
@@ -106,9 +121,8 @@ function titlesIn(words) {
 /** The pull request a word names, or null when it names none as a number. */
 function prNumberOf(word) {
   if (word === undefined) return null;
-  const value = unquote(word);
   const match =
-    /^#?(\d+)$/.exec(value) ?? /\/pull\/(\d+)(?:\/[^/]*)?$/.exec(value);
+    /^#?(\d+)$/.exec(word.text) ?? /\/pull\/(\d+)(?:\/[^/]*)?$/.exec(word.text);
   return match === null ? null : Number(match[1]);
 }
 
@@ -120,9 +134,9 @@ function prNumberOf(word) {
 function invocationIn(words) {
   for (let index = 0; index + 2 < words.length; index++) {
     const namesInvocation =
-      words[index] === "gh" &&
-      words[index + 1] === "pr" &&
-      TITLED_SUBCOMMANDS.has(words[index + 2]);
+      words[index].text === "gh" &&
+      words[index + 1].text === "pr" &&
+      TITLED_SUBCOMMANDS.has(words[index + 2].text);
     if (namesInvocation) {
       return { from: index + 3, prNumber: prNumberOf(words[index + 3]) };
     }
@@ -155,7 +169,7 @@ function main() {
   if (command === null) process.exit(0);
 
   for (const segment of splitSegments(command)) {
-    const words = tokenizeRaw(segment);
+    const words = wordsOf(segment);
     const invocation = invocationIn(words);
     if (invocation === null) continue;
     const budget = subjectBudget(invocation.prNumber);

@@ -95,11 +95,24 @@ describe("block-over-budget-pr-title hook", () => {
     ]);
   });
 
+  it("reads a structural word written quoted", () => {
+    expectBlocked([
+      `"gh" pr create --title "${title(80)}"`,
+      `gh pr "create" --title "${title(80)}"`,
+      `gh pr create "--title" "${title(80)}"`,
+      `gh pr create "--title=${title(80)}"`,
+    ]);
+  });
+
   it("counts a quote character the title itself holds", () => {
     const written = `Don't ${title(UNNUMBERED_BUDGET - 5)}`;
     expect(written.length).toBe(UNNUMBERED_BUDGET + 1);
     expect(written.replaceAll("'", "").length).toBe(UNNUMBERED_BUDGET);
-    expectBlocked([`gh pr create --title "${written}"`]);
+    expectBlocked([
+      `gh pr create --title "${written}"`,
+      `gh pr create --title="${written}"`,
+      `"gh" "pr" "create" "--title" "${written}"`,
+    ]);
   });
 
   it("takes the exact suffix from the pull request an edit names", () => {

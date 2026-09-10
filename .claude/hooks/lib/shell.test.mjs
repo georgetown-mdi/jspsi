@@ -136,6 +136,23 @@ describe("tokenizeRaw", () => {
   it("reads an empty segment as no words", () => {
     expect(tokenizeRaw("   ")).toEqual([]);
   });
+
+  // A caller reading a word two ways -- matching on the stripped word and
+  // measuring the raw one -- pairs them by position, which holds only while the
+  // two tokenizers split a segment into the same number of words.
+  it("splits a segment into as many words as tokenize does", () => {
+    for (const segment of [
+      `gh pr create --title "Don't stop"`,
+      `"gh" pr "create" "--title" 'a b'`,
+      `gh pr edit 928 -t"x y" --body ""`,
+      "rm -rf  node_modules",
+      "   ",
+    ]) {
+      expect(tokenizeRaw(segment), segment).toHaveLength(
+        tokenize(segment).length,
+      );
+    }
+  });
 });
 
 describe("git", () => {
