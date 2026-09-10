@@ -195,6 +195,8 @@ The partner may still be the one with `expects_output: false`. Where it is, the 
 
 A cluster is the set of records joined by the values they shared under one linkage key, so a cluster is only as good as the key that formed it: a key that is not near-unique where it is present groups records that are not one individual, and the result hands that grouping to both parties as a single entity. The rules for authoring [`linkage_keys`](#linkage_termslinkage_keys) under a both-sided match, and the closure they follow from, are in [`docs/spec/PROTOCOL.md`](spec/PROTOCOL.md#the-many-to-many-entity-closure).
 
+To tell a good grouping from a bad one after the fact, a both-sided run reports what it grouped your result into: how many clusters, over how many records of yours and your partner's, and for each cluster size the number of distinct matched values that formed it. `psilink exchange` states it on the report that follows the run, and the browser states it on the completion panel. A run whose clusters are almost all one of your records against one of your partner's matched close to one-to-one; a cluster far larger than the rest formed on a single value is a key that named a group rather than a person, and one formed on several values was chained together by a record that matched on more than one value of a key. Both figures come from your own result -- nothing is asked of your partner for them, and nothing refuses on them.
+
 ### `expected_partner_deduplicate`
 
 *Type:* boolean
