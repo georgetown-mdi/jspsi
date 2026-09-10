@@ -723,9 +723,9 @@ export async function linkViaPSI(
   const acceptance = roundAcceptance(sides, localIsSender);
   // A candidate set reaches a round only under a strategy whose resolution for
   // one is built, and under a resolved cardinality that has one: `many-to-many`
-  // is refused whatever the strategy, having no single-pass table for the
-  // equivalence obligation to name (docs/spec/PROTOCOL.md, The combinations
-  // that stay unsupported). The strategy gate is an allowlist, so a
+  // is refused whatever the strategy, its closure over candidate sets being
+  // specified and not yet built (docs/spec/PROTOCOL.md, The `many-to-many`
+  // entity closure). The strategy gate is an allowlist, so a
   // linkage_strategy added later refuses one until its own resolution is
   // written. The same reading gates the grouping's place on the round's two
   // position-naming frames, so a closed one leaves both frames as the
