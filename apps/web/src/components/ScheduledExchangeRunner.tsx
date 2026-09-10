@@ -1,11 +1,13 @@
 import { useEffect } from "react";
 
-import log from "loglevel";
+import { getLogger } from "@psilink/core";
 
 import { isConsoleBuild as consoleBuild } from "@utils/clientConfig";
 import { isInstalledRuntime as installedRuntime } from "@utils/installedRuntime";
 
 import type { ManagedScheduleRuntimeOptions } from "@psi/managed/managedScheduleRuntime";
+
+const log = getLogger("ScheduledExchangeRunner");
 
 /** The call sites the mount reads its environment through, so a test can drive
  * the gate and the runtime it guards without an installed app. */

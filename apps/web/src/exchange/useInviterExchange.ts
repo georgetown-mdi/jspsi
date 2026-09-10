@@ -1,5 +1,3 @@
-import log from "loglevel";
-
 import { useEffect, useMemo, useRef, useState } from "react";
 
 // @ts-ignore this is really there
@@ -7,6 +5,7 @@ import PSI from "@openmined/psi.js/psi_wasm_web";
 
 import {
   LinkageTermsUnsatisfiableError,
+  getLogger,
   joinErrorCauseChain,
   loadPsiBackend,
   prepareForExchange,
@@ -71,6 +70,8 @@ import type { ReceiptsIntentFields } from "@psi/receiptsModel";
 import type { RunDiagnosticsIntentFields } from "@psi/runDiagnosticsModel";
 import type { RunOutputs } from "@psi/runOutputs";
 import type { Transport } from "@psi/transportChooser";
+
+const log = getLogger("useInviterExchange");
 
 /** A failed run, ready to render: the lifecycle's category (which decides the
  * recovery the alert offers) and the operator-facing alert content, composed

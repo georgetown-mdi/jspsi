@@ -8,10 +8,10 @@ import {
   IconFileText,
 } from "@tabler/icons-react";
 import { Dropzone } from "@mantine/dropzone";
-import log from "loglevel";
 
 import {
   deriveOurIdColumn,
+  getLogger,
   reconstructCommittedData,
   reproductionMismatchCauses,
   sanitizeErrorForDisplay,
@@ -53,6 +53,8 @@ import type {
 } from "./verifyReceiptModel";
 import type { FileRejection } from "@mantine/dropzone";
 import type { ReactNode } from "react";
+
+const log = getLogger("VerifyReceiptScreen");
 
 /**
  * The console's "Verify a receipt" surface: a read-only, browser-only check of the

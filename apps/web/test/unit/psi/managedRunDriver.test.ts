@@ -2,12 +2,11 @@ import { readFileSync } from "node:fs";
 
 import { afterEach, describe, expect, test, vi } from "vitest";
 
-import log from "loglevel";
-
 import {
   ConnectionError,
   describeResolvedRunShape,
   getDefaultLinkageTerms,
+  getLogger,
   runExchange,
 } from "@psilink/core";
 import {
@@ -51,6 +50,8 @@ import type {
 import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 import type { PeerCloseOutcome } from "../../../src/psi/transport/waitForPeerClose.js";
 import type { RunOutputs } from "@psi/runOutputs";
+
+const log = getLogger("managedRunDriver");
 
 /**
  * The browser wiring of a managed re-run, every platform boundary mocked

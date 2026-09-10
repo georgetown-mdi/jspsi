@@ -2,7 +2,10 @@
 import pluginRouter from "@tanstack/eslint-plugin-router";
 import { tanstackConfig } from "@tanstack/eslint-config";
 import filledPrimaryContrastScope from "./eslint-rules/filled-primary-contrast-scope.mjs";
-import { crossWorkspaceImportBans } from "../../eslint.boundaries.mjs";
+import {
+  crossWorkspaceImportBans,
+  noBareRootLoglevelEmit,
+} from "../../eslint.boundaries.mjs";
 
 // The sensitive-file YAML-parse ban (shared by the broad block and the rawRows
 // allowlist block, since flat config replaces -- does not merge -- a rule's options,
@@ -21,6 +24,22 @@ const rawYamlParserImportBan = {
   importNames: ["parse", "parseDocument", "parseAllDocuments"],
   message:
     "Do not import yaml's raw parsers in the web app; route parsing through @psilink/core's parseSensitiveYaml / parseSensitiveJson (the shared sensitive-file chokepoint). yaml's `stringify` is allowed.",
+};
+
+// The root-logger import ban. loglevel's default export IS the root logger, so
+// holding emission to core's named loggers means the web app never binds it:
+// every diagnostic line goes through `@psilink/core`'s getLogger, which adds the
+// `[timestamp] [LEVEL] [context]` prefix and strips private-key material out of
+// string arguments. The named exports stay available -- level configuration
+// (setDefaultLevel, levels) and the LogLevel type are what the entry points
+// import -- so this bans the binding that can emit and nothing else. The emit
+// selector from eslint.boundaries.mjs bans the call shape as well, which is what
+// covers a root logger reached without an import of its own.
+const rootLoglevelImportBan = {
+  name: "loglevel",
+  importNames: ["default"],
+  message:
+    "Do not import loglevel's default export in the web app: it is the root logger, whose emits skip the context prefix and the private-key redaction @psilink/core's getLogger installs. Emit through getLogger; import the named `setDefaultLevel` / `levels` for level configuration.",
 };
 
 // Hold the draft-side rule-set membership compares at the one chokepoint that
@@ -226,7 +245,13 @@ const sharedSyntaxBans = [
   sensitiveYamlParseBan,
   fetchedBodyReadBan,
   seatWarningSinkBan,
+  noBareRootLoglevelEmit,
 ];
+
+// The no-restricted-imports `paths` entries every block covering src/ (and the
+// one covering server/) takes, spread for the same reason sharedSyntaxBans is:
+// a block that restates the rule cannot drop one of them by omission.
+const sharedImportPathBans = [rawYamlParserImportBan, rootLoglevelImportBan];
 
 // The two bans a file below the products takes on top of the shared set.
 const layerDirectionBans = [
@@ -290,7 +315,7 @@ export default [
       "no-restricted-imports": [
         "error",
         {
-          paths: [rawYamlParserImportBan],
+          paths: sharedImportPathBans,
           // Re-carried from the boundary block above, which this block would
           // otherwise replace for src/ (flat config replaces a rule's options).
           patterns: crossWorkspaceImportBans.web,
@@ -362,7 +387,7 @@ export default [
       "no-restricted-imports": [
         "error",
         {
-          paths: [rawYamlParserImportBan, linkageComparisonChokepointBan],
+          paths: [...sharedImportPathBans, linkageComparisonChokepointBan],
           patterns: crossWorkspaceImportBans.web,
         },
       ],
@@ -417,7 +442,7 @@ export default [
       "no-restricted-imports": [
         "error",
         {
-          paths: [rawYamlParserImportBan, linkageComparisonChokepointBan],
+          paths: [...sharedImportPathBans, linkageComparisonChokepointBan],
           patterns: [...crossWorkspaceImportBans.web, ...productDirectoryBans],
         },
       ],
@@ -454,7 +479,7 @@ export default [
       "no-restricted-imports": [
         "error",
         {
-          paths: [rawYamlParserImportBan],
+          paths: sharedImportPathBans,
           patterns: [...crossWorkspaceImportBans.web, ...productDirectoryBans],
         },
       ],

@@ -26,7 +26,7 @@
  * this slice does not have.
  */
 
-import log from "loglevel";
+import { getLogger } from "@psilink/core";
 
 import { appendSanitizedRunWarning } from "../runWarnings";
 
@@ -48,6 +48,8 @@ import type {
   ManagedScheduleTickEntry,
   ManagedScheduleTickSeams,
 } from "./managedScheduleRunner";
+
+const log = getLogger("managedScheduleRuntime");
 
 /**
  * How often the runtime looks for a due window. It is the resolution of "the

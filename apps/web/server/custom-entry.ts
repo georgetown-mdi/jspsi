@@ -14,7 +14,7 @@ import "#nitro-internal-pollyfills";
 import { useNitroApp, useRuntimeConfig } from "nitropack/runtime";
 import { toNodeListener } from "h3";
 
-import logLibrary from "loglevel";
+import { setDefaultLevel } from "loglevel";
 
 import { getLogger } from "@psilink/core";
 
@@ -37,7 +37,7 @@ const config = await configManager.load();
 const cert = process.env.NITRO_SSL_CERT;
 const key = process.env.NITRO_SSL_KEY;
 
-logLibrary.setDefaultLevel(config.LOG_LEVEL);
+setDefaultLevel(config.LOG_LEVEL);
 
 const log = getLogger("server-entry");
 

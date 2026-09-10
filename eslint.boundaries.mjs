@@ -1,12 +1,15 @@
-// The monorepo's dependency direction as a lint rule rather than a convention:
-// apps consume packages, packages never consume apps, and the two apps never
-// reach into each other (CLAUDE.md). Kept in its own module because the ban has
-// to be folded into several eslint blocks -- flat config replaces, rather than
-// merges, a rule's options across blocks, so every block that sets
-// no-restricted-imports for a guarded tree must re-carry these groups -- and
-// those blocks are split across two config files: ESLint resolves the nearest
+// The lint rules both eslint config files apply. ESLint resolves the nearest
 // config file for a subtree, so apps/web/eslint.config.js is what governs
-// apps/web and the repo-root eslint.config.mjs governs the rest.
+// apps/web and the repo-root eslint.config.mjs governs the rest; a rule that
+// has to hold in both places is written once here and imported by each. Flat
+// config also replaces, rather than merges, a rule's options across blocks, so
+// every block that sets one of these rules for a guarded tree must re-carry the
+// whole option value -- another reason each lives in a named export rather than
+// inline in one block.
+//
+// The cross-workspace import ban is the monorepo's dependency direction as a
+// lint rule rather than a convention: apps consume packages, packages never
+// consume apps, and the two apps never reach into each other (CLAUDE.md).
 //
 // npm workspaces symlinks each workspace into the root node_modules, so the app
 // package names `psilink` (apps/cli) and `jspsi` (apps/web) resolve as bare
@@ -78,4 +81,32 @@ export const crossWorkspaceImportBans = {
       message: WEB_MESSAGE,
     },
   ],
+};
+
+// Ban emitting through loglevel's bare root logger (the `logLibrary` default
+// import). Two things hold only for a NAMED logger built through core's
+// getLogger / getLoggerForVerbosity. Its prefixed method is where private-key
+// material is stripped out of string arguments and the `[timestamp] [LEVEL]
+// [context]` prefix is added (packages/core/src/utils/logger.ts). And in source
+// that runs inside the CLI integration workers, the suite's two leak-detection
+// safety checks -- the console sentinel and the withCapturedLogs capture --
+// observe named loggers only: a named logger binds the sentinel-wrapped console
+// (and the capture interceptor) at getLogger time, whereas the eager capture
+// install rebinds the root logger against the raw, pre-sentinel console
+// (capturedLogs.setup.ts runs before the sentinel wraps console). A bare
+// `logLibrary.<level>(...)` escapes both, so this rule is the executable form of
+// the prose the eager-install ordering rests on -- "nothing emits through the
+// bare root logger".
+//
+// Keying on the `logLibrary` identifier is exact in core/src and cli/src, where
+// the loglevel default is uniformly imported under that name and is never a
+// named-logger variable. apps/web binds its named loggers to `log`, and closes
+// the alias route -- the loglevel default imported under any other name -- with
+// the import ban in apps/web/eslint.config.js.
+/** A `no-restricted-syntax` entry banning `logLibrary.<level>(...)`. */
+export const noBareRootLoglevelEmit = {
+  selector:
+    "CallExpression[callee.object.name='logLibrary'][callee.property.name=/^(trace|debug|info|warn|error)$/]",
+  message:
+    "Do not emit through the bare root logger (logLibrary.<level>()): a root emit skips the context prefix and the private-key redaction core's prefixed logger applies, and the CLI integration console sentinel and withCapturedLogs capture see named loggers only, so it escapes both leak-detection checks. Use getLogger / getLoggerForVerbosity; logLibrary is for setLevel / levels / getLogger only.",
 };
