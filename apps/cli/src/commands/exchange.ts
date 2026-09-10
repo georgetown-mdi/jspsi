@@ -3,7 +3,7 @@ import fs from "node:fs";
 
 import {
   parseExchangeSpec,
-  describeDecodeError,
+  rawDecodeErrorDescription,
   getLogger,
   OperatorConfigError,
   prepareForExchange,
@@ -369,7 +369,7 @@ export function loadConfig(options: ExchangeOptions): {
     // configuration (exit 64), not a transport failure.
     throw new UsageError(
       `config file ${options.configFile} is not a valid exchange spec: ` +
-        describeDecodeError(err),
+        rawDecodeErrorDescription(err),
     );
   }
 

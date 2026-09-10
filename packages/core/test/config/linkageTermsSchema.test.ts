@@ -285,9 +285,9 @@ test("safeParseLinkageTerms returns success: false on invalid input", () => {
 });
 
 test("a parse error does not echo a partner-supplied received value", () => {
-  // describeDecodeError escapes each Zod issue-path segment via
-  // sanitizeForDisplay and relays the schema-fixed message text. Two
-  // mechanisms keep partner bytes out of the message; this test pins both.
+  // describeDecodeError escapes the whole description once, for a consumer
+  // whose own render is the display sink. Two mechanisms keep partner bytes off
+  // that surface; this test pins both.
   //
   // 1. Most codes (type mismatch, enum, semver/date format, too_small) report
   //    only the expected type/options, never the received value, so even the
@@ -307,10 +307,10 @@ test("a parse error does not echo a partner-supplied received value", () => {
   // 2. The `invalid_key` code on the bounded `transform.params` record key
   //    (z.string().max(MAX_NAME_LENGTH)) DOES place the offending key VERBATIM
   //    in the issue PATH, which the raw `error.message` JSON-dumps -- so here
-  //    the source escaping (describeDecodeError) does the protecting, not the
-  //    schema. The dangerous bytes lead the key (with padding past the bound
-  //    after them) so escaping, not the display-length cap, is what neutralizes
-  //    them. Assert on the rendered message the exchange actually relays.
+  //    the display boundary does the protecting, not the schema. The dangerous
+  //    bytes lead the key (with padding past the bound after them) so escaping,
+  //    not the display-length cap, is what neutralizes them. Assert on the
+  //    escaped description a direct-display consumer renders.
   const evilKey = "\x1b[31m\u202e" + "x".repeat(MAX_NAME_LENGTH);
   const invalidKey = safeParseLinkageTerms({
     ...base,
@@ -2247,7 +2247,7 @@ test("the params key refusal is the fixed message at the key's own path", () => 
     NAME_SHAPE_MESSAGE,
   ]);
   // The message text names no submitted value; only the path holds the key,
-  // and describeDecodeError escapes each segment of it.
+  // which the display boundary escapes once.
   expect(issue.message).not.toContain("unrepeatable-key");
   const relayed = describeDecodeError(result.error);
   expect(relayed).toContain("\\x07");

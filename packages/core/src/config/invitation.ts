@@ -10,7 +10,6 @@ import {
 import type { LinkageTerms } from "./linkageTermsSchema.js";
 import { camelizeKeys } from "../utils/camelizeKeys.js";
 import { SHARED_SECRET_REGEX } from "./connection.js";
-import { sanitizeForDisplay } from "../utils/sanitizeForDisplay.js";
 import { pathsResolveToSameDir } from "../utils/pathCompare.js";
 import { parseBoundedJson } from "../utils/boundedJson.js";
 import { fromBase64Url } from "../utils/crypto.js";
@@ -106,10 +105,10 @@ export type ConnectionEndpoint =
 const endpointKeyError: z.core.$ZodErrorMap = (issue) => {
   if (issue.code === "unrecognized_keys") {
     // The rejected key names are partner-controlled (the inviter crafts the
-    // token). This message reaches the accepting operator (the CLI terminal or
-    // the web accept screen) through the shared describeDecodeError, which
-    // relays it as is, so each name is escaped -- a key like "\x1b[31m..." must
-    // not inject terminal control/ANSI sequences or deceptive Unicode.
+    // token), and are composed raw: a key like "\x1b[31m..." is escaped once at
+    // the sink that shows it -- sanitizeErrorForDisplay on the CLI's composed
+    // error, describeDecodeError on the web accept screen, which renders the
+    // description itself (CONTRIBUTING.md, Operator-facing escaping).
     return (
       "a connection endpoint may carry only a credential-free locator (channel " +
       "plus host/port/path, or an inbound_path/outbound_path pair for a split " +
@@ -117,7 +116,7 @@ const endpointKeyError: z.core.$ZodErrorMap = (issue) => {
       "credential or server-identity material (such as a password, private " +
       "key, or host-key fingerprint) can ride along. Remove unexpected " +
       "field(s): " +
-      issue.keys.map((k) => sanitizeForDisplay(k)).join(", ")
+      issue.keys.join(", ")
     );
   }
   // Returning undefined delegates to Zod's default error map (the documented

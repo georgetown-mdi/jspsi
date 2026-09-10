@@ -4,12 +4,12 @@ import type { Argv, Arguments } from "yargs";
 
 import {
   assertCountOnlyTransmitsNoColumn,
-  describeDecodeError,
   deriveAcceptedLinkageTerms,
   deriveOutboundPayloadConsent,
   disclosedColumnNames,
   getLogger,
   parseExchangeSpec,
+  rawDecodeErrorDescription,
   redactAndSanitizeForDisplay,
   UsageError,
 } from "@psilink/core";
@@ -810,7 +810,7 @@ function readExistingAcceptConfig(
     throw new UsageError(
       `a configuration file already exists at ${configPath} but could not be ` +
         `parsed to compare against ${against}: ` +
-        describeDecodeError(err) +
+        rawDecodeErrorDescription(err) +
         `. Fix or remove it, or pass --config-file to write elsewhere, then ` +
         `retry with ${retryWith}.`,
     );

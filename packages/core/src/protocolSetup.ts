@@ -8,7 +8,7 @@ import { validateCompatibility } from "./linkageTermsNegotiation";
 import { SHARED_SECRET_REGEX } from "./config/connection";
 import { MAX_RECORD_COUNT } from "./connection/frameSize";
 import { randomBytes, toBase64Url } from "./utils/crypto";
-import { describeDecodeError } from "./utils/describeDecodeError";
+import { rawDecodeErrorDescription } from "./utils/describeDecodeError";
 import { redactPrivateKeyMaterial } from "./utils/sanitizeErrorForDisplay";
 import {
   errorWithPartnerCauseLinks,
@@ -510,31 +510,21 @@ export async function exchangeTerms(
       partnerTerms = parseLinkageTerms(msg.linkageTerms);
     } catch (parseErr) {
       await sendAbort(conn, ["partner linkage terms failed to parse"]);
-      // These terms are partner-controlled, so the parse error is rendered
-      // through describeDecodeError, which escapes each Zod issue-path
-      // segment via sanitizeForDisplay and relays the schema-fixed message
-      // text (see utils/describeDecodeError). The path escaping is
-      // critical, not cosmetic: Zod's `invalid_key` code on the bounded
-      // `z.record` key in `transform.params`
-      // (z.string().max(MAX_NAME_LENGTH)) places the offending raw key
-      // verbatim into the issue path, which a raw `ZodError.message`
-      // JSON-dumps -- so a partner key holding bidi-override / zero-width /
-      // homoglyph bytes would otherwise reach the operator unescaped.
-      // Escaping at the source makes the invariant hold here rather than
-      // leaning on the display-sink safety check. The path holds partner
-      // bytes, so the render is redacted here as well: the responder joins
-      // this description with the other compatibility errors, and a marker
-      // in an unredacted one takes those behind it with it.
+      // These terms are partner-controlled, so the description holds partner
+      // bytes: Zod's `invalid_key` code on the bounded `z.record` key in
+      // `transform.params` (z.string().max(MAX_NAME_LENGTH)) places the
+      // offending raw key verbatim into the issue path. It composes raw and is
+      // escaped once by sanitizeErrorForDisplay where this error is rendered
+      // (CONTRIBUTING.md, Operator-facing escaping), so bidi-override,
+      // zero-width and homoglyph bytes reach the operator as escapes.
       //
-      // The message text needs no escaping: unknown keys are stripped by
-      // the non-strict `z.object` schemas rather than echoed via
-      // `unrecognized_keys` (pinned by the "strips an unknown partner key"
-      // test), and the other reachable codes (type mismatch, enum,
-      // semver/date format, too_small) report the expected type/options,
-      // not the received value -- only the path holds partner bytes.
+      // Redacted here rather than at that sink because the responder joins this
+      // description with the other compatibility errors, and the sink's
+      // fail-closed dangling rule past an unredacted planted marker would take
+      // the errors behind it with it.
       throw new Error(
         "partner linkage terms failed to parse: " +
-          redactPrivateKeyMaterial(describeDecodeError(parseErr)),
+          redactPrivateKeyMaterial(rawDecodeErrorDescription(parseErr)),
       );
     }
 
@@ -591,12 +581,13 @@ export async function exchangeTerms(
       partnerHostKeyMalformed = parsed.hostKey.malformed;
       partnerTerms = parseLinkageTerms(parsed.linkageTerms);
     } catch (parseErr) {
-      // describeDecodeError escapes the partner-controlled Zod issue path at the
-      // source (the `invalid_key`/bounded-`z.record`-key path included) and
-      // relays the schema-fixed message text, and is redacted for the reason
-      // that note gives -- see the parse-error note in the initiator branch
-      // above.
-      parseError = redactPrivateKeyMaterial(describeDecodeError(parseErr));
+      // The description holds the partner-controlled Zod issue path (the
+      // `invalid_key`/bounded-`z.record`-key path included), composed raw for
+      // the sink to escape and redacted here -- see the parse-error note in the
+      // initiator branch above.
+      parseError = redactPrivateKeyMaterial(
+        rawDecodeErrorDescription(parseErr),
+      );
     }
 
     // Fail-closed protocol-version check first: a version skew is the root

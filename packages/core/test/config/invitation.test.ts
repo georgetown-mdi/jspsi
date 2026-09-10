@@ -29,9 +29,15 @@ import {
 } from "../../src/config/linkageTermsSchema";
 import { summarizeInvitation } from "../../src/consent/invitationSummary";
 import { NestingDepthExceededError } from "../../src/utils/camelizeKeys";
-import { describeDecodeError } from "../../src/utils/describeDecodeError";
+import {
+  describeDecodeError,
+  rawDecodeErrorDescription,
+} from "../../src/utils/describeDecodeError";
 import { sanitizeErrorForDisplay } from "../../src/utils/sanitizeErrorForDisplay";
-import { DISPLAY_TRUNCATION_MARKER } from "../../src/utils/sanitizeForDisplay";
+import {
+  DISPLAY_TRUNCATION_MARKER,
+  sanitizeForDisplay,
+} from "../../src/utils/sanitizeForDisplay";
 
 // A SHARED_SECRET_REGEX-valid placeholder (43 base64url chars = 32 zero bytes).
 // InvitationTokenSchema enforces that shape, so test tokens hold a real one
@@ -1374,22 +1380,68 @@ test.each(nonLocatorCases)(
   },
 );
 
-test("escapes a hostile unrecognized endpoint key name in the rejection message", async () => {
-  // The unrecognized-key rejection echoes the key NAME, which the inviter
-  // controls; the shared describeDecodeError exposes that message (the issue's
-  // message string) to the accepting operator (CLI terminal or web accept
-  // screen), relaying it as is. A name holding control/ANSI bytes must be
-  // escaped at this source, not relayed raw.
-  const hostileKey = "\x1b[31mFAKE";
-  const encoded = await encodeRaw({
+// A rejected endpoint key an inviter can craft, holding both classes the escape
+// count is measured on: a literal backslash, which one escape doubles and two
+// escapes quadruple, and a bidi override, whose escape opens with a backslash
+// of its own. Written as explicit escapes -- never pasted glyphs -- so no
+// editor or formatter can mangle an invisible literal.
+const HOSTILE_ENDPOINT_KEY = "col\u202e\\x";
+
+// What ONE escape of those bytes renders to. Both accept routes must deliver
+// exactly this: the CLI through the error renderer, the web through
+// describeDecodeError. A route that escapes twice renders more backslashes than
+// the key holds and fails the comparison.
+const HOSTILE_ENDPOINT_KEY_ESCAPED_ONCE =
+  sanitizeForDisplay(HOSTILE_ENDPOINT_KEY);
+
+const rejectedEndpointKeyToken = (): Promise<string> =>
+  encodeRaw({
     ...baseToken,
-    connectionEndpoint: { ...CHANNEL_SHAPES.sftp.minimal, [hostileKey]: "x" },
+    connectionEndpoint: {
+      ...CHANNEL_SHAPES.sftp.minimal,
+      [HOSTILE_ENDPOINT_KEY]: "x",
+    },
   });
-  const err = await decodeInvitation(encoded).catch((e: unknown) => e);
+
+test("composes a rejected endpoint key raw, for its sink to escape once", async () => {
+  // The unrecognized-key rejection echoes the key NAME, which the inviter
+  // controls. It composes raw so that the boundary showing it escapes it once;
+  // escaping it here as well is what put four backslashes on an operator's
+  // terminal for the one the key holds.
+  const err = await decodeInvitation(await rejectedEndpointKeyToken()).catch(
+    (e: unknown) => e,
+  );
   expect(err).toBeInstanceOf(ZodError);
-  const messages = (err as ZodError).issues.map((i) => i.message).join("\n");
-  expect(messages).not.toContain("\x1b");
-  expect(messages).toContain("\\x1b");
+  expect(rawDecodeErrorDescription(err)).toContain(HOSTILE_ENDPOINT_KEY);
+});
+
+test("the CLI route renders a rejected endpoint key escaped exactly once", async () => {
+  // Asserted at the rendered boundary through the real renderer, over the
+  // composition the CLI's decode wrapper makes -- core cannot import the CLI, so
+  // apps/cli/test/unit/decodeErrorEscaping.test.ts drives the real wrapper.
+  const err = await decodeInvitation(await rejectedEndpointKeyToken()).catch(
+    (e: unknown) => e,
+  );
+  const rendered = sanitizeErrorForDisplay(
+    new Error(`invalid invitation string: ${rawDecodeErrorDescription(err)}`),
+  );
+  expect(rendered).toContain(
+    `Remove unexpected field(s): ${HOSTILE_ENDPOINT_KEY_ESCAPED_ONCE}`,
+  );
+  expect(rendered).not.toContain(HOSTILE_ENDPOINT_KEY);
+});
+
+test("the web route escapes a rejected endpoint key exactly once", async () => {
+  // describeDecodeError IS the sink on that route: its result goes into a React
+  // text node, which neutralizes HTML markup but not a bidi override.
+  const err = await decodeInvitation(await rejectedEndpointKeyToken()).catch(
+    (e: unknown) => e,
+  );
+  const rendered = describeDecodeError(err);
+  expect(rendered).toContain(
+    `Remove unexpected field(s): ${HOSTILE_ENDPOINT_KEY_ESCAPED_ONCE}`,
+  );
+  expect(rendered).not.toContain(HOSTILE_ENDPOINT_KEY);
 });
 
 test("the locator rejection's guidance survives the display boundary whole", async () => {
