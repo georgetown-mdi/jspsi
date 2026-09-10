@@ -153,6 +153,17 @@ function matchesDeclaredType(
  * `null` is a wrong type like any other, since the function has no null to
  * read.
  *
+ * At most ONE refusal per param, so the count of issues a step raises is
+ * bounded by the params its function reads rather than by the width of a value
+ * it declares. A list-valued param names the FIRST entry that is not text and
+ * stops; the rest are read once that one is corrected. The bound is what keeps
+ * a safe parse safe: Zod accumulates one issue per `addIssue` and spreads the
+ * array up through each nested frame, so an issue per entry of a long list
+ * costs heap in proportion to the list and, deep enough in, overflows the call
+ * stack -- a throw out of a `safeParse` that contracts to return failure
+ * instead (docs/spec/CHANNEL_SECURITY.md, "Application-layer parsed-input
+ * bounds").
+ *
  * Own-property lookups throughout (`Object.hasOwn`, not a bare index): the
  * function name and the param names of a linkage-key element transform are
  * partner-authored free text, and a bare index answers `constructor` or
@@ -184,12 +195,16 @@ export function transformParamTypeRefusals(step: {
       continue;
     }
     if (expected !== "text-list") continue;
-    (declared as unknown[]).forEach((entry, index) => {
-      if (typeof entry === "string") return;
-      refusals.push({
-        path: ["params", param, index],
-        message: transformParamEntryTypeMessage(step.function, param, entry),
-      });
+    const entries = declared as unknown[];
+    const offending = entries.findIndex((entry) => typeof entry !== "string");
+    if (offending === -1) continue;
+    refusals.push({
+      path: ["params", param, offending],
+      message: transformParamEntryTypeMessage(
+        step.function,
+        param,
+        entries[offending],
+      ),
     });
   }
   return refusals;

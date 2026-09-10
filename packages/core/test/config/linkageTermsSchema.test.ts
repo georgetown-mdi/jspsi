@@ -23,6 +23,7 @@ import {
   MAX_DATE_FORMAT_LENGTH,
   MAX_TRANSFORM_PATTERN_LENGTH,
   MAX_TRANSFORM_PARAM_LENGTH,
+  MAX_TRANSFORM_PARAM_ENTRIES,
   MAX_EXCLUDE_ENTRIES,
   MAX_TRANSFORM_STEPS,
   MAX_KEY_ELEMENTS,
@@ -30,6 +31,7 @@ import {
 } from "../../src/config/linkageTermsSchema";
 import type { LinkageKey } from "../../src/config/linkageTermsSchema";
 import { ExchangeSpecSchema } from "../../src/config/exchangeSpec";
+import { MAX_ENCODED_INVITATION_LENGTH } from "../../src/config/invitation";
 import { pipelineAlwaysDrops } from "../../src/linkageSatisfiability";
 import { describeDecodeError } from "../../src/utils/describeDecodeError";
 import {
@@ -1349,6 +1351,114 @@ test("the content bound covers every string param, not only the measured amplifi
       ),
     ).toBe(true);
   }
+});
+
+test("a list-valued param at the entry-count bound parses; one over it is refused", () => {
+  const atBound = Array.from(
+    { length: MAX_TRANSFORM_PARAM_ENTRIES },
+    (_, i) => `value-${i}`,
+  );
+  expect(
+    safeParseLinkageTerms(transformStepTerms("null_if", { values: atBound }))
+      .success,
+  ).toBe(true);
+  const result = safeParseLinkageTerms(
+    transformStepTerms("null_if", { values: [...atBound, "one-more"] }),
+  );
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  expect(
+    result.error.issues.some((i) =>
+      /transform param must not hold more than/.test(i.message),
+    ),
+  ).toBe(true);
+});
+
+test("the entry-count bound covers every list param, not only the one a function reads", () => {
+  // Uniform like the content bound above, and for the same reason: the count
+  // sits on the params record's value stage, so a param no per-function refine
+  // covers and a function this build does not implement are bounded too.
+  const overBound = Array.from(
+    { length: MAX_TRANSFORM_PARAM_ENTRIES + 1 },
+    () => "value",
+  );
+  const cases: Array<[string, Record<string, unknown>]> = [
+    ["null_if", { values: overBound }],
+    ["replace_regex", { pattern: "\\d", replacement: "", unread: overBound }],
+    ["not_a_standardization_function", { anything: overBound }],
+  ];
+  for (const [fn, params] of cases) {
+    const result = safeParseLinkageTerms(transformStepTerms(fn, params));
+    expect(result.success, fn).toBe(false);
+    if (result.success) continue;
+    expect(
+      result.error.issues.some((i) =>
+        /transform param must not hold more than/.test(i.message),
+      ),
+      fn,
+    ).toBe(true);
+  }
+});
+
+// The widest all-wrong list a token at the decode cap can hold. base64url
+// encodes 3 bytes as 4 characters, so the JSON body's budget is three quarters
+// of MAX_ENCODED_INVITATION_LENGTH; measured off the document rather than
+// assumed, so the case follows the cap if it moves.
+function wrongEntriesFittingAToken(): number {
+  let count = 0;
+  for (;;) {
+    const next = count + 1000;
+    const document = transformStepTerms("null_if", {
+      values: Array.from({ length: next }, () => 0),
+    });
+    if (
+      Math.ceil((JSON.stringify(document).length * 4) / 3) >
+      MAX_ENCODED_INVITATION_LENGTH
+    )
+      return count;
+    count = next;
+  }
+}
+
+test("a token-sized list of wrong entries is refused with a bounded issue count", () => {
+  // A safe parse contracts to RETURN failure. Zod accumulates one issue per
+  // addIssue and spreads that array up through each nested frame, so an issue
+  // per wrong entry costs heap in proportion to the list and overflows the call
+  // stack past roughly 130,000 issues -- a throw out of safeParse rather than a
+  // failure. The count of issues is bounded by the params the step declares
+  // instead: one for the entry count, one naming the first entry that is not
+  // text.
+  const count = wrongEntriesFittingAToken();
+  expect(count).toBeGreaterThan(MAX_TRANSFORM_PARAM_ENTRIES);
+  const document = transformStepTerms("null_if", {
+    values: Array.from({ length: count }, () => 0),
+  });
+  let result: ReturnType<typeof safeParseLinkageTerms> | undefined;
+  expect(() => {
+    result = safeParseLinkageTerms(document);
+  }).not.toThrow();
+  expect(result?.success).toBe(false);
+  if (!result || result.success) return;
+  expect(result.error.issues.map((i) => i.path.join("."))).toEqual([
+    "linkageKeys.0.elements.0.transform.0.params.values",
+    "linkageKeys.0.elements.0.transform.0.params.values.0",
+  ]);
+});
+
+test("a list far past the issue-spread threshold is refused rather than thrown", () => {
+  // Terms are re-parsed off the post-handshake wire as well, under a frame cap
+  // orders of magnitude above the token cap, so the property is pinned at a
+  // width no token could carry.
+  const document = transformStepTerms("null_if", {
+    values: Array.from({ length: 200_000 }, () => 0),
+  });
+  let result: ReturnType<typeof safeParseLinkageTerms> | undefined;
+  expect(() => {
+    result = safeParseLinkageTerms(document);
+  }).not.toThrow();
+  expect(result?.success).toBe(false);
+  if (!result || result.success) return;
+  expect(result.error.issues).toHaveLength(2);
 });
 
 test("parseLinkageTerms throws on an over-bound param (the initiator/joiner path)", () => {

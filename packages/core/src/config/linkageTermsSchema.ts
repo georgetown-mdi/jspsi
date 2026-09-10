@@ -299,6 +299,20 @@ export const MAX_TRANSFORM_PATTERN_LENGTH = 1000;
 export const MAX_TRANSFORM_PARAM_LENGTH = 1000;
 
 /**
+ * Upper bound on the COUNT of entries in a LIST-valued partner-controlled
+ * transform param: applies to every array a `transform.params` record holds,
+ * whatever function or param name it sits under, as
+ * {@link MAX_TRANSFORM_PARAM_LENGTH} applies to every string. By design the
+ * same threshold as {@link MAX_EXCLUDE_ENTRIES}: the one list a function reads
+ * today is `null_if`'s `values`, a denylist of the values that drop a row,
+ * which is what a constraint `exclude` holds. Bounds the per-row work the list
+ * drives (`null_if` builds a set of it and tests every row against it) and the
+ * count of entries a declared-type check has to read. Full reasoning:
+ * docs/spec/CHANNEL_SECURITY.md, "Application-layer parsed-input bounds".
+ */
+export const MAX_TRANSFORM_PARAM_ENTRIES = 4096;
+
+/**
  * Generous upper bound on the COUNT of values in a constraint `exclude`
  * denylist. A denylist legitimately holds hundreds of values (a list of
  * invalid SSN patterns, blocked test values, an email blocklist), so this is
@@ -717,22 +731,32 @@ export interface TransformStep {
 }
 
 // One value of a transform step's `params` record: any JSON value, with a
-// content bound on a string. The bound sits on the VALUE STAGE rather than a
-// per-step refine so it holds for every function and param name at once,
-// including a param no function reads and a function this build does not
-// implement. Which types a param a function DOES read may take, and the
-// magnitude bounds on those values, are the per-step refines on
-// TransformStepSchema below. See MAX_TRANSFORM_PARAM_LENGTH.
+// content bound on a string and a count bound on a list. Both sit on the VALUE
+// STAGE rather than a per-step refine so they hold for every function and param
+// name at once, including a param no function reads and a function this build
+// does not implement. Which types a param a function DOES read may take, and
+// the magnitude bounds on those values, are the per-step refines on
+// TransformStepSchema below. See MAX_TRANSFORM_PARAM_LENGTH and
+// MAX_TRANSFORM_PARAM_ENTRIES.
+//
+// Each message is a fixed literal, naming no partner value: the offending step
+// and param are located by the issue path (linkageKeys[i].elements[j]
+// .transform[k].params.<name>), which describeDecodeError escapes segment by
+// segment.
 const TransformParamValueSchema = z
   .unknown()
   .refine(
     (value) =>
       typeof value !== "string" || value.length <= MAX_TRANSFORM_PARAM_LENGTH,
     {
-      // A fixed literal, naming no partner value: the offending step and param
-      // are located by the issue path (linkageKeys[i].elements[j].transform[k]
-      // .params.<name>), which describeDecodeError escapes segment by segment.
       message: `a linkage key element transform param must not exceed ${MAX_TRANSFORM_PARAM_LENGTH} characters`,
+    },
+  )
+  .refine(
+    (value) =>
+      !Array.isArray(value) || value.length <= MAX_TRANSFORM_PARAM_ENTRIES,
+    {
+      message: `a linkage key element transform param must not hold more than ${MAX_TRANSFORM_PARAM_ENTRIES} entries`,
     },
   );
 

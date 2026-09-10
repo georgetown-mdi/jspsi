@@ -106,6 +106,33 @@ describe("StandardizationSchema declared param types", () => {
       StandardizationSchema.safeParse(stepSpec({ pattern: "-" })).success,
     ).toBe(true);
   });
+
+  test("a list param whose every entry is wrong yields one issue, naming the first", () => {
+    // A safe parse contracts to RETURN failure. Zod accumulates one issue per
+    // addIssue and spreads that array up through each nested frame, so an issue
+    // per wrong entry overflows the call stack past roughly 130,000 issues and
+    // throws out of safeParse instead. This block is the operator's own and
+    // takes no count bound, so the per-param bound is what holds the contract
+    // at any width the file can hold.
+    const raw = stepSpec(
+      { values: Array.from({ length: 200_000 }, () => 0) },
+      "null_if",
+    );
+    let result: ReturnType<typeof safeParseStandardization> | undefined;
+    expect(() => {
+      result = safeParseStandardization(raw);
+    }).not.toThrow();
+    expect(result?.success).toBe(false);
+    if (!result || result.success) return;
+    expect(
+      result.error.issues.map((issue) => [issue.path.join("."), issue.message]),
+    ).toEqual([
+      [
+        "0.steps.0.params.values.0",
+        "null_if values must hold only text, not a number",
+      ],
+    ]);
+  });
 });
 
 // --- safeParseStandardization ------------------------------------------------
