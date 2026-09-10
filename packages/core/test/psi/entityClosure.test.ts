@@ -4,7 +4,10 @@ import {
   assertRoundDiagonalClosure,
   entityClusters,
 } from "../../src/psi/entityClosure";
-import type { ClosureBlock } from "../../src/psi/entityClosure";
+import type {
+  ClosureBlock,
+  EntityClusterSummary,
+} from "../../src/psi/entityClosure";
 import { InternalConsistencyError } from "../../src/errors";
 import type { AssociationTable } from "../../src/types";
 
@@ -293,5 +296,129 @@ describe("assertRoundDiagonalClosure", () => {
         { localRows: [], partnerRows: [0] },
       ]),
     ).toThrow(/a block with no record on one side/);
+  });
+
+  test("a block naming a record the table pairs with none is refused", () => {
+    const thrown = refusal(blockTable, oneRound, [
+      ...blocks,
+      { localRows: [9], partnerRows: [2] },
+    ]);
+    expect(thrown.message).toMatch(
+      /names this party's record 9, which the table pairs with none of the partner's/,
+    );
+  });
+});
+
+describe("the entity-cluster summary the closure check returns", () => {
+  const summaryOf = (
+    table: AssociationTable,
+    roundOfPair: Array<number>,
+    given: Array<ClosureBlock>,
+  ): EntityClusterSummary =>
+    assertRoundDiagonalClosure("client", table, roundOfPair, given);
+
+  test("a table with no pairs summarizes to nothing", () => {
+    expect(summaryOf([[], []], [], [])).toStrictEqual({
+      clusterCount: 0,
+      localRows: 0,
+      partnerRows: 0,
+      shapes: [],
+    });
+  });
+
+  test("a table of single blocks counts one value per cluster", () => {
+    expect(
+      summaryOf(
+        [
+          [0, 0, 1, 1, 2],
+          [0, 1, 0, 1, 2],
+        ],
+        [0, 0, 0, 0, 0],
+        [
+          { localRows: [0, 1], partnerRows: [0, 1] },
+          { localRows: [2], partnerRows: [2] },
+        ],
+      ),
+    ).toStrictEqual({
+      clusterCount: 2,
+      localRows: 3,
+      partnerRows: 3,
+      shapes: [
+        { localRows: 2, partnerRows: 2, distinctValues: 1, clusters: 1 },
+        { localRows: 1, partnerRows: 1, distinctValues: 1, clusters: 1 },
+      ],
+    });
+  });
+
+  test("a chained cluster counts the values its blocks were built from", () => {
+    // The smallest chained cluster: three pairs where the 2 x 2 product would
+    // hold four, joined by our row 0 contributing both of the round's values.
+    // Its size alone would not tell it from a shared value's block; the value
+    // count does.
+    expect(
+      summaryOf(
+        [
+          [0, 0, 1],
+          [0, 1, 0],
+        ],
+        [0, 0, 0],
+        [
+          { localRows: [0, 1], partnerRows: [0] },
+          { localRows: [0], partnerRows: [1] },
+        ],
+      ),
+    ).toStrictEqual({
+      clusterCount: 1,
+      localRows: 2,
+      partnerRows: 2,
+      shapes: [
+        { localRows: 2, partnerRows: 2, distinctValues: 2, clusters: 1 },
+      ],
+    });
+  });
+
+  test("clusters merge into one shape only where all three figures agree", () => {
+    // Two 1 x 1 clusters on one value each, and a third of the same size formed
+    // on two values -- the pair of blocks {2} x {2} twice over, which is two
+    // records each holding both of the round's values. Merging on size alone
+    // would report a value count no cluster has.
+    const summary = summaryOf(
+      [
+        [0, 1, 2],
+        [0, 1, 2],
+      ],
+      [0, 0, 0],
+      [
+        { localRows: [0], partnerRows: [0] },
+        { localRows: [1], partnerRows: [1] },
+        { localRows: [2], partnerRows: [2] },
+        { localRows: [2], partnerRows: [2] },
+      ],
+    );
+    expect(summary.shapes).toStrictEqual([
+      { localRows: 1, partnerRows: 1, distinctValues: 2, clusters: 1 },
+      { localRows: 1, partnerRows: 1, distinctValues: 1, clusters: 2 },
+    ]);
+  });
+
+  test("shapes are ordered by the records a cluster holds, largest first", () => {
+    const summary = summaryOf(
+      [
+        [0, 1, 1, 2, 2, 2],
+        [0, 1, 2, 3, 4, 5],
+      ],
+      [0, 0, 0, 0, 0, 0],
+      [
+        { localRows: [0], partnerRows: [0] },
+        { localRows: [1], partnerRows: [1, 2] },
+        { localRows: [2], partnerRows: [3, 4, 5] },
+      ],
+    );
+    expect(summary.shapes.map((shape) => shape.partnerRows)).toStrictEqual([
+      3, 2, 1,
+    ]);
+    expect(summary.clusterCount).toBe(3);
+    expect(summary.localRows).toBe(3);
+    expect(summary.partnerRows).toBe(6);
   });
 });

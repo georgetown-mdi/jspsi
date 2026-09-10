@@ -35,7 +35,11 @@ import {
   type SinglePassCeilingBreach,
   type SinglePassPartySize,
 } from "../connection/frameSize";
-import { assertRoundDiagonalClosure, type ClosureBlock } from "./entityClosure";
+import {
+  assertRoundDiagonalClosure,
+  type ClosureBlock,
+  type EntityClusterSummary,
+} from "./entityClosure";
 import { FAN_OUT_CANDIDATES_PER_ELEMENT } from "../fanOutFunctions";
 import {
   fanOutReachedMatchingRefusal,
@@ -711,6 +715,11 @@ class RoundGrouping implements RoundGroupingExchange {
  * @param verbosity - Log verbosity level (default 0).
  * @param setStage - Optional callback invoked with a progress label at each
  *   key round.
+ * @param reportEntityClusters - Optional callback handed the operator
+ *   diagnostic over the run's entity clusters, once the closure check has
+ *   passed. Invoked under `"many-to-many"` alone, the one cardinality that
+ *   forms blocks; every other cardinality leaves it uncalled, having no
+ *   grouping beyond the table's own shape.
  * @returns An {@link AssociationTable}: `[0]` holds the local matched row
  *   indices ascending, `[1]` the corresponding partner row indices in the
  *   same pairing order. The local half is STRICTLY ascending except where
@@ -730,6 +739,7 @@ export async function linkViaPSI(
   bounds: SessionBounds,
   verbosity: number = 0,
   setStage?: (id: string) => void,
+  reportEntityClusters?: (summary: EntityClusterSummary) => void,
 ) {
   if (participant.config.role === "either")
     throw new Error("participants role is unresolved");
@@ -1400,13 +1410,15 @@ export async function linkViaPSI(
       roundOfPair?.push(identifiedIndexIterationMap[i].iteration);
     }
   }
-  if (roundOfPair && rowsOfRankByIter)
-    assertRoundDiagonalClosure(
+  if (roundOfPair && rowsOfRankByIter) {
+    const clusters = assertRoundDiagonalClosure(
       participant.id,
       table,
       roundOfPair,
       closureBlocks(blocksByIter, rowsOfRankByIter),
     );
+    reportEntityClusters?.(clusters);
+  }
   return table;
 }
 

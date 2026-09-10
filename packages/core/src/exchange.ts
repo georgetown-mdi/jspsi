@@ -50,6 +50,7 @@ import {
   withholdsSenderAssociationTable,
 } from "./psi/link.js";
 import type { LinkageCardinality } from "./psi/link.js";
+import type { EntityClusterSummary } from "./psi/entityClosure.js";
 import type { ResolvedRunShape } from "./pairTableProjection.js";
 import type { ResolvedMatching } from "./linkageTermsPolicy.js";
 import { InProcessPsiEngine } from "./psi/psiEngine.js";
@@ -1161,6 +1162,26 @@ export interface ExchangeResult {
    * computed itself (docs/spec/PROTOCOL.md, PSI-C).
    */
   intersectionCount: number | undefined;
+  /**
+   * The entity-cluster diagnostic over the table above: how many clusters the
+   * closure grouped this party's result into, over how many records of each
+   * party, and the distribution of their shapes with the distinct matched
+   * values each formed on (docs/spec/PROTOCOL.md, Choosing linkage keys under
+   * closure).
+   *
+   * Present exactly on a `many-to-many` run this party holds the table of. It
+   * is `undefined` under every other cardinality, whose clusters follow from
+   * the table's own shape, and under the same withholding gate the table takes
+   * -- a party that receives no table receives no summary of it either.
+   *
+   * Every field is a count over this party's own table and its own rounds'
+   * blocks. Nothing here names a record, a row index, or a linkage-key value,
+   * and nothing in it rests on a quantity the partner declared, so it discloses
+   * nothing beyond the pairs the result file already holds.
+   * `describeEntityClusters` (entityClusterReport.ts) is the sentence both
+   * front ends render from it.
+   */
+  entityClusters: EntityClusterSummary | undefined;
   /** Linkage terms received from the partner during the handshake. */
   partnerTerms: LinkageTerms;
   /**
@@ -1877,6 +1898,7 @@ export async function runExchange(
   let participant: PSIParticipant | undefined;
   let associationTable: AssociationTable | undefined;
   let intersectionCount: number | undefined;
+  let entityClusters: EntityClusterSummary | undefined;
   try {
     participant = new PSIParticipant(
       psiId,
@@ -1926,6 +1948,9 @@ export async function runExchange(
               singlePassBounds,
               verbosity,
               onStage,
+              (summary) => {
+                entityClusters = summary;
+              },
             );
   } finally {
     // Dispose the crypto engine once the PSI phase is done (or has thrown); the
@@ -2189,6 +2214,9 @@ export async function runExchange(
     // gate is the entitlement predicate applied once more at the boundary rather than
     // the only thing standing between a helper and a count.
     intersectionCount: heldResult ? intersectionCount : undefined,
+    // Derived from the table above, so it goes out under that same entitlement
+    // gate: a party handed no table is told nothing about how its pairs grouped.
+    entityClusters: heldResult ? entityClusters : undefined,
     partnerTerms,
     matching,
     resolvedRole,

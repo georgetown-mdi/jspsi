@@ -152,6 +152,49 @@ export interface ClosureBlock {
 }
 
 /**
+ * One shape a run's entity clusters take: how many records of each party a
+ * cluster of that shape holds, how many distinct matched values formed it, and
+ * how many of the run's clusters share all three figures.
+ *
+ * A block is one matched value, so `distinctValues` is the blocks a cluster's
+ * records stand in: one for a single block, more for a chain
+ * (docs/spec/PROTOCOL.md, Choosing linkage keys under closure).
+ */
+export interface EntityClusterShape {
+  readonly localRows: number;
+  readonly partnerRows: number;
+  readonly distinctValues: number;
+  readonly clusters: number;
+}
+
+/**
+ * The cluster diagnostic a party reads off its own `many-to-many` result: how
+ * many entity clusters the run produced, how many records of each party they
+ * hold between them, and the distribution of their shapes, largest first
+ * (docs/spec/PROTOCOL.md, Choosing linkage keys under closure).
+ *
+ * Every figure is a count over this party's own table and the round's own
+ * blocks, so the summary names no record, no row index, and no linkage-key
+ * value, and holds nothing the partner sent beyond the pairs the result file
+ * already states.
+ */
+export interface EntityClusterSummary {
+  /** How many clusters the table's pairs fall into. */
+  readonly clusterCount: number;
+  /** How many of this party's records stand in a cluster. */
+  readonly localRows: number;
+  /** How many of the partner's records stand in a cluster. */
+  readonly partnerRows: number;
+  /**
+   * Every shape the clusters take, largest first by the records a cluster
+   * holds, then by this party's half, then the partner's, then the values.
+   * Clusters are merged into one entry only where all three of their figures
+   * agree, so a shape's per-cluster value count is exact.
+   */
+  readonly shapes: ReadonlyArray<EntityClusterShape>;
+}
+
+/**
  * Requires a matched table's entity clusters to be round-diagonal: a cluster may
  * span several blocks of one round and never two rounds
  * (docs/spec/PROTOCOL.md, The `many-to-many` entity closure).
@@ -187,13 +230,16 @@ export interface ClosureBlock {
  * @param roundOfPair - The key round each pair of `table` was matched in.
  * @param blocks - Every block the rounds produced, in the two parties' row
  *   spaces.
+ * @returns The {@link EntityClusterSummary} over the clusters just checked.
+ *   Each block is attributed to the one cluster the conditions above hold it
+ *   to, which is what makes a cluster's distinct-value count its block count.
  */
 export function assertRoundDiagonalClosure(
   id: string,
   table: AssociationTable,
   roundOfPair: ReadonlyArray<number>,
   blocks: ReadonlyArray<ClosureBlock>,
-): void {
+): EntityClusterSummary {
   if (roundOfPair.length !== table[0].length)
     throw new Error(
       `${id}: the closure check was given ${roundOfPair.length} round ` +
@@ -235,6 +281,7 @@ export function assertRoundDiagonalClosure(
     rows.add(table[1][i]);
   }
 
+  const valuesOfCluster = new Array<number>(clusters.length).fill(0);
   const pairsCoveredByBlocks = new Set<string>();
   for (const block of blocks) {
     if (block.localRows.length === 0 || block.partnerRows.length === 0)
@@ -243,6 +290,14 @@ export function assertRoundDiagonalClosure(
           "side, where a block is the records that contributed one matched value",
       );
     const cluster = clusterOfLocalRow.get(block.localRows[0]);
+    if (cluster === undefined)
+      throw notRoundDiagonal(
+        id,
+        `one matched value's block names this party's record ` +
+          `${block.localRows[0]}, which the table pairs with none of the ` +
+          "partner's",
+      );
+    ++valuesOfCluster[cluster];
     for (const row of block.localRows)
       if (clusterOfLocalRow.get(row) !== cluster)
         throw notRoundDiagonal(
@@ -284,6 +339,43 @@ export function assertRoundDiagonalClosure(
           "pair, so the cluster it joins rests on an edge the round did not " +
           "produce",
       );
+
+  return summarizeClusters(clusters, valuesOfCluster);
+}
+
+// The shape distribution over the checked clusters, keyed on all three of a
+// cluster's figures so merging two clusters into one entry never averages a
+// value count.
+function summarizeClusters(
+  clusters: ReadonlyArray<EntityCluster>,
+  valuesOfCluster: ReadonlyArray<number>,
+): EntityClusterSummary {
+  const byShape = new Map<string, EntityClusterShape>();
+  let localRows = 0;
+  let partnerRows = 0;
+  clusters.forEach((cluster, index) => {
+    localRows += cluster.localRows.length;
+    partnerRows += cluster.partnerRows.length;
+    const shape = {
+      localRows: cluster.localRows.length,
+      partnerRows: cluster.partnerRows.length,
+      distinctValues: valuesOfCluster[index],
+    };
+    const key = `${shape.localRows},${shape.partnerRows},${shape.distinctValues}`;
+    const held = byShape.get(key);
+    byShape.set(key, {
+      ...shape,
+      clusters: (held?.clusters ?? 0) + 1,
+    });
+  });
+  const shapes = [...byShape.values()].sort(
+    (a, b) =>
+      b.localRows + b.partnerRows - (a.localRows + a.partnerRows) ||
+      b.localRows - a.localRows ||
+      b.partnerRows - a.partnerRows ||
+      b.distinctValues - a.distinctValues,
+  );
+  return { clusterCount: clusters.length, localRows, partnerRows, shapes };
 }
 
 function pairKey(local: number, partner: number): string {
