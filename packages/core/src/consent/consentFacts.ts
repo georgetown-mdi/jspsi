@@ -1288,13 +1288,11 @@ export function describeDeduplicatePair({
  * The caveat copy for a term an inviter may declare that today's exchange does
  * not apply, keyed by the term it marks.
  *
- * Both entries are candidate-set producers riding one applied setting
- * ({@link APPLIED_SETTINGS}.fuzzyComparisons, which the swapped key order sits
- * behind too). That setting is on, so what a surface renders either marker for
- * is a combination that resolves no candidate set -- a count-only exchange --
- * which refuses those terms rather than matching on the exact value alone.
- * Each copy names that refusal and the term to ask the inviter to drop, which
- * is the one remedy its reader can act on. A term whose not-applying is a
+ * Both entries are candidate-set producers, so what a surface renders either
+ * marker for is a combination that resolves no candidate set -- a count-only
+ * exchange -- which refuses those terms rather than matching on the exact
+ * value alone. Each copy names that refusal and the term to ask the inviter to
+ * drop, which is the one remedy its reader can act on. A term whose not-applying is a
  * silent narrowing of the match takes the opposite copy, saying only that the
  * term is proposed, which is what makes this a table rather than a house style.
  *

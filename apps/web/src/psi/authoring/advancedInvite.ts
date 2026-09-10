@@ -66,7 +66,6 @@ export {
 } from "./advancedInviteTerms";
 
 export {
-  gatedActiveSettingMessage,
   importedCitationDropNotice,
   importedConstraintDivergenceMessage,
   inertCoalesceNotice,

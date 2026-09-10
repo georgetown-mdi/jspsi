@@ -12,10 +12,7 @@ import {
 import { IconAlertCircle, IconDownload, IconUpload } from "@tabler/icons-react";
 
 import { exportLinkageTerms, importLinkageTerms } from "@psi/linkageTermsIO";
-import {
-  gatedActiveSettingMessage,
-  importedConstraintDivergenceMessage,
-} from "@psi/authoring/advancedInvite";
+import { importedConstraintDivergenceMessage } from "@psi/authoring/advancedInvite";
 
 import { triggerBlobDownload } from "./blobDownload";
 
@@ -29,10 +26,9 @@ const IMPORT_SUCCESS = "Imported. Review the loaded terms before generating.";
  * controls. Export writes the snake_case on-disk form (the "exported from the
  * GUI" reference). Import routes through {@link importLinkageTerms} -- which
  * validates through `safeParseLinkageTerms`, the single validation source --
- * then refuses any terms that turn on a setting the run does not yet apply
- * ({@link gatedActiveSettingMessage}) or that contain per-field constraints the
- * editor cannot represent and would silently normalize
- * ({@link importedConstraintDivergenceMessage}), so neither can reach the
+ * then refuses any terms that contain per-field constraints the editor cannot
+ * represent and would silently normalize
+ * ({@link importedConstraintDivergenceMessage}), so they cannot reach the
  * draft past the GUI's own controls. A rejected import shows a readable,
  * value-free error and leaves the draft untouched.
  */
@@ -55,7 +51,7 @@ export function TermsImportExport({
   /** The pre-inferred date-of-birth input format, threaded so the reconstruction
    * never re-derives it from the rows (the console has none). */
   dateInputFormat?: string;
-  /** Called with validated, non-gated terms to load into the editor. */
+  /** Called with validated terms to load into the editor. */
   onImport: (terms: LinkageTerms) => void;
 }) {
   const [text, setText] = useState("");
@@ -67,11 +63,6 @@ export function TermsImportExport({
     const result = importLinkageTerms(text);
     if (!result.success) {
       setError(result.error);
-      return;
-    }
-    const gated = gatedActiveSettingMessage(result.terms);
-    if (gated !== undefined) {
-      setError(gated);
       return;
     }
     // Refuse a document whose per-field constraints the rebuild would silently

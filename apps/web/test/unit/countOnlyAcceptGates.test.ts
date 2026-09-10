@@ -14,9 +14,7 @@ import type { CSVRow, LinkageTerms } from "@psilink/core";
 // The count-only shape refusals as the ACCEPTING web operator meets them: an
 // out-of-shape document refused on import (core's schema, shared with the
 // invitation decode), and marked columns refused at the launch gate -- a rule
-// no linkage-terms document holds. Both use the real APPLIED_SETTINGS, since
-// the rules read the algorithm, not whether a count-only run path exists yet;
-// the authoring half is behind a forced flag in countOnlyMintGate.test.ts.
+// no linkage-terms document holds. Both rules read the algorithm alone.
 
 /** An invitation in exactly the count-only shape the specification admits: one
  * linkage key, cascade, no deduplication, no payload in either direction. */

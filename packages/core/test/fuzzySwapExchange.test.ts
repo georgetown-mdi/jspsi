@@ -2,9 +2,8 @@ import { expect, test } from "vitest";
 
 // A driven exchange is the only place the width both parties declare for a
 // swapped or expanded key and the candidates one of them assembles are composed
-// rather than checked apart. It reads the real APPLIED_SETTINGS, so the four
-// expansion kinds and the swap variant are pinned end to end on the shipped
-// build.
+// rather than checked apart, so the four expansion kinds and the swap variant
+// are pinned end to end on the shipped build.
 
 import PSI from "@openmined/psi.js";
 

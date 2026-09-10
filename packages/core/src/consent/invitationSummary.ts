@@ -1,4 +1,3 @@
-import { APPLIED_SETTINGS } from "./appliedSettings.js";
 import {
   dateFormatComponents,
   DEFAULT_DATE_OUTPUT_FORMAT,
@@ -340,9 +339,8 @@ interface InvitationKeyElementSummary {
   /** Plain-language label for the fuzzy-comparison expansion, if any. */
   fuzzyComparison?: string;
   /**
-   * Whether today's exchange actually applies the fuzzy comparison above:
-   * both the setting that gates the expansion ({@link APPLIED_SETTINGS}) and
-   * the combination that resolves a candidate set, which is the same verdict
+   * Whether today's exchange actually applies the fuzzy comparison above: the
+   * combination that resolves a candidate set, which is the same verdict
    * {@link InvitationSummary.fanOutApplied} reports -- a count-only exchange
    * refuses an expanded element rather than matching it. Meaningful only
    * alongside a `fuzzyComparison`; the renderer flags that annotation as
@@ -379,8 +377,7 @@ export interface InvitationKeySummary {
    * order). */
   hasSwap: boolean;
   /**
-   * Whether today's exchange actually applies the swap above: both the setting
-   * the swapped key order rides ({@link APPLIED_SETTINGS}) and the combination
+   * Whether today's exchange actually applies the swap above: the combination
    * that resolves a candidate set, which is the same verdict
    * {@link InvitationSummary.fanOutApplied} reports -- a count-only exchange
    * refuses a swapped key rather than matching it in the declared order alone.
@@ -527,10 +524,10 @@ export interface InvitationSummary {
    */
   deduplicate: boolean;
   /**
-   * Whether an exchange on these terms applies the deduplicate setting above
-   * (see {@link APPLIED_SETTINGS}). True: the cascade matches the resolved
-   * cardinality and every surface downstream of the association table shows
-   * the multiplicity. False: the strategy this invitation names matches no
+   * Whether an exchange on these terms applies the deduplicate setting above.
+   * True: the cascade matches the resolved cardinality and every surface
+   * downstream of the association table shows the multiplicity. False: the
+   * strategy this invitation names matches no
    * deduplicating cardinality, which acceptance refuses outright
    * (`assertDeduplicateImplemented`), so this flag never claims a
    * disclosure for a run that cannot happen.
@@ -1203,14 +1200,13 @@ function summarizeKey(
           element.generateFuzzyComparisons !== undefined
             ? FUZZY_COMPARISON_LABELS[element.generateFuzzyComparisons]
             : undefined,
-        fuzzyComparisonApplied:
-          APPLIED_SETTINGS.fuzzyComparisons && fanOutMatches,
+        fuzzyComparisonApplied: fanOutMatches,
       };
     },
   );
 
   const hasSwap = key.swap !== undefined;
-  const swapApplied = APPLIED_SETTINGS.fuzzyComparisons && fanOutMatches;
+  const swapApplied = fanOutMatches;
   let swap: [Displayable, Displayable] | undefined;
   // Header-marker re-attribution across a swap: maps each swapped element
   // to the breadth marker its header entry should show INSTEAD of its own
@@ -1575,9 +1571,9 @@ export function summarizeInvitation(
   // rather than restated here, so the copy cannot stay withheld for a
   // strategy the refusal has stopped refusing, and read once so both
   // surfaces withhold it on the same verdict.
-  const deduplicateApplied =
-    APPLIED_SETTINGS.deduplicate &&
-    deduplicateIsImplementedForStrategy(terms.linkageStrategy);
+  const deduplicateApplied = deduplicateIsImplementedForStrategy(
+    terms.linkageStrategy,
+  );
   // The two halves of the refused pair the invitation itself holds: the
   // inviting party's own `deduplicate`, and the candidate set these terms
   // declare, which the accepting party's `deduplicate: true` completes into

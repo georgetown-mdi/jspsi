@@ -37,7 +37,6 @@ import {
   expandFuzzyComparisons,
   expandsOnReceiverOnly,
 } from "./fuzzyComparisons.js";
-import { APPLIED_SETTINGS } from "./consent/appliedSettings.js";
 import {
   DEFAULT_DATE_OUTPUT_FORMAT,
   SOUNDEX_CODE_LENGTH,
@@ -2778,10 +2777,7 @@ interface KeyReadPlan {
    * beside the swapped order {@link KeyReadPlan.elements} holds -- the swap's
    * full variant, which is what makes a swapped key match the two elements in
    * EITHER order rather than in the exchanged one alone. True on the receiver of
-   * a key whose `swap` resolves, and only while
-   * `APPLIED_SETTINGS.fuzzyComparisons` is on: a second key string per row is a
-   * candidate set, which the cascade and the count-only round refuse, so it
-   * lands with the round that consumes one exactly as the fuzzy expansion does.
+   * a key whose `swap` resolves.
    */
   readonly assemblesSwapVariant: boolean;
   readonly fate: AccumulationFate;
@@ -2862,8 +2858,7 @@ function planKeyRead(
     isReceiver && key.swap
       ? swapElements(key.elements, key.swap)
       : { elements: key.elements, pair: undefined };
-  const assemblesSwapVariant =
-    pair !== undefined && APPLIED_SETTINGS.fuzzyComparisons;
+  const assemblesSwapVariant = pair !== undefined;
   if (assemblesSwapVariant) assertSwapPairPositionsAgree(key, keyIndex);
   return {
     elements,
@@ -2900,10 +2895,9 @@ function planKeyRead(
  * fuzzy expansions run. The receiver builds keys with the named elements swapped
  * and applies every declared expansion; the sender does neither the swap nor an
  * expansion {@link expandsOnReceiverOnly} classifies (see
- * {@link planFuzzyExpansions}). Under
- * `APPLIED_SETTINGS.fuzzyComparisons` the receiver assembles the key in BOTH
- * orders rather than the swapped one alone, which is what makes a swapped key
- * match the two elements in either order; one party assembling both is what the
+ * {@link planFuzzyExpansions}). The receiver assembles the key in BOTH orders
+ * rather than the swapped one alone, which is what makes a swapped key match
+ * the two elements in either order; one party assembling both is what the
  * whole set of one-transposition variants is for, and the second party
  * assembling them too would only double the work
  * (docs/notes/one-sided-fuzzy-expansion.md).
@@ -2921,10 +2915,8 @@ function planKeyRead(
  * candidate flows through the same final NFC pass, and the assembled count is
  * bounded by {@link declaredKeyWidth} -- the width the agreed terms declare for
  * the key, which compounds its elements' factors -- under the
- * {@link MAX_KEY_STRINGS_PER_ROW} assembly cap, a row above either
- * being refused rather than narrowed. It is gated on
- * `APPLIED_SETTINGS.fuzzyComparisons`: while that is false a fuzzy element builds
- * the same single key string as an element without one.
+ * {@link MAX_KEY_STRINGS_PER_ROW} assembly cap, a row above either being
+ * refused rather than narrowed.
  *
  * One call is a round of its own, so a drop it takes and a wide-row advisory it
  * raises are always reported in full: a caller building a whole round row by row
@@ -3091,17 +3083,11 @@ function buildKeyStringsUnderPlan(
     // string or filter one to null -- shrinking the declared candidate set
     // silently.
     //
-    // Gated on APPLIED_SETTINGS.fuzzyComparisons, the single source of truth both
-    // consent surfaces annotate this term from. The gate and the round that
-    // consumes a candidate set are one decision: an expanded row reaching a
-    // strategy that matches only a single value is refused, which would turn the
-    // narrowed match the consent copy describes into an aborted exchange.
-    //
     // The expansion is the ROLE-KEYED one the plan resolved, not the element's
     // raw designation: a receiver-only kind builds candidates on the receiver
     // and the exact value alone on the sender (see planFuzzyExpansions).
     const fuzzy = fuzzyExpansions[elementIndex];
-    if (fuzzy === undefined || !APPLIED_SETTINGS.fuzzyComparisons) {
+    if (fuzzy === undefined) {
       elementValues.push(candidates);
       continue;
     }

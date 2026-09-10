@@ -1,5 +1,4 @@
 import {
-  APPLIED_SETTINGS,
   CanonicalEncodingError,
   FAN_OUT_FUNCTION_NAMES,
   INVITATION_LIFETIME_SECONDS,
@@ -60,10 +59,10 @@ import type {
  * The Generate gate, the import-refusal messages, and the two notices that refuse
  * nothing. {@link validateAdvancedInvite} runs a draft's built terms through the
  * core schema and adds only the gates the schema does not express.
- * {@link gatedActiveSettingMessage} and {@link importedConstraintDivergenceMessage}
- * refuse an import holding a gated setting or a constraint the editor cannot
- * represent. {@link importedCitationDropNotice} and {@link inertCoalesceNotice}
- * state a consequence rather than block it. No React, no I/O.
+ * {@link importedConstraintDivergenceMessage} refuses an import holding a
+ * constraint the editor cannot represent. {@link importedCitationDropNotice}
+ * and {@link inertCoalesceNotice} state a consequence rather than block it.
+ * No React, no I/O.
  */
 
 /** Today's date as YYYY-MM-DD, for the legal-agreement expiry check. Matches the
@@ -803,37 +802,10 @@ function messageForField(field: AdvancedField): string {
   }
 }
 
-/** A message naming any setting an imported terms set turns on that the run does
- * not yet honor (gated by {@link APPLIED_SETTINGS}), or `undefined` when none. The
- * editor refuses such an import rather than load a draft whose headline behavior
- * silently does not happen. Applied at the one door (import) that could otherwise
- * bring a gated setting in from outside; the GUI controls that enforce the same
- * gate are disabled, not removed, so they cannot clear a setting an import turned
- * on. */
-export function gatedActiveSettingMessage(
-  terms: LinkageTerms,
-): string | undefined {
-  const blocked: Array<string> = [];
-  if (terms.deduplicate && !APPLIED_SETTINGS.deduplicate)
-    blocked.push("duplicate matches");
-  if (
-    !APPLIED_SETTINGS.fuzzyComparisons &&
-    terms.linkageKeys.some((key) =>
-      key.elements.some((el) => el.generateFuzzyComparisons !== undefined),
-    )
-  )
-    blocked.push("fuzzy comparisons");
-  if (blocked.length === 0) return undefined;
-  return (
-    `These terms turn on ${blocked.join(", ")}, which this version of the ` +
-    "exchange does not yet apply. Remove those settings and import again."
-  );
-}
-
 /**
  * A message refusing an import whose linkage fields hold constraints the editor
- * cannot represent, or `undefined` when none does -- the constraints counterpart of
- * {@link gatedActiveSettingMessage}, applied at the same door. The draft holds no
+ * cannot represent, or `undefined` when none does, applied at the import door.
+ * The draft holds no
  * per-field constraint state, and `authoredLinkageFields` re-stamps each rebuilt
  * field with its semantic type's DEFAULT-template constraints, so an imported
  * field's own `constraints` (a non-default `exclude` denylist, `validOnly`,

@@ -41,7 +41,6 @@ function render() {
       draft,
       declaredFields,
       keyVerdict: (): KeyVerdict => "satisfiable",
-      fuzzyApplied: false,
       onChange: () => undefined,
       announce: () => undefined,
     }),

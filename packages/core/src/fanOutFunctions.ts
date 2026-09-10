@@ -15,7 +15,6 @@
  * where consumers read them from.
  */
 
-import { APPLIED_SETTINGS } from "./consent/appliedSettings.js";
 import { MAX_LINKAGE_ENTRIES } from "./config/linkageTermsSchema.js";
 import type { LinkageKey, LinkageTerms } from "./config/linkageTermsSchema.js";
 import { UsageError } from "./errors.js";
@@ -215,28 +214,17 @@ function keySite(keyIndex: number | undefined): string {
  * factors. The sender assembles the authored order alone and declares the
  * same number.
  *
- * Both the fuzzy factor and the swap factor are gated on
- * `APPLIED_SETTINGS.fuzzyComparisons`: declaring width for candidates no
- * row realizes would spend this party's share of the single-pass ceiling
- * on slots that stay empty.
- *
  * @throws {UsageError} if the key's declared width exceeds
  * {@link MAX_KEY_CANDIDATE_WIDTH} -- a width no row could assemble in
  * full, so every row of that key would be dropped or refused at the
  * assembly cap.
  */
 export function declaredKeyWidth(key: LinkageKey, keyIndex?: number): number {
-  let width =
-    APPLIED_SETTINGS.fuzzyComparisons && key.swap !== undefined
-      ? SWAP_VARIANT_WIDTH_FACTOR
-      : 1;
+  let width = key.swap !== undefined ? SWAP_VARIANT_WIDTH_FACTOR : 1;
   for (const element of key.elements) {
     if (declaredFanOutFunction(element.transform) !== undefined)
       width *= FAN_OUT_CANDIDATES_PER_ELEMENT;
-    if (
-      APPLIED_SETTINGS.fuzzyComparisons &&
-      element.generateFuzzyComparisons !== undefined
-    )
+    if (element.generateFuzzyComparisons !== undefined)
       width *= fuzzyCandidateCeiling(
         element.generateFuzzyComparisons,
         elementValueWidthBound(element.transform),
@@ -260,20 +248,19 @@ export function declaredKeyWidth(key: LinkageKey, keyIndex?: number): number {
  * expansion, or a `swap` naming both orders.
  *
  * The structural reading of {@link declaredKeyWidth} above 1, taken over the
- * same three producers and gated on the same applied setting, so the two
- * cannot come to different verdicts about whether a key expands. Separate from
- * the width because the refusals that read it run where a width may not be
- * derivable at all: `declaredKeyWidth` refuses terms above
+ * same three producers, so the two cannot come to different verdicts about
+ * whether a key expands. Separate from the width because the refusals that
+ * read it run where a width may not be derivable at all: `declaredKeyWidth`
+ * refuses terms above
  * {@link MAX_KEY_CANDIDATE_WIDTH}, and a gate answering "does this expand"
  * must answer for those terms too.
  */
 export function keyDeclaresCandidateSet(key: LinkageKey): boolean {
-  if (APPLIED_SETTINGS.fuzzyComparisons && key.swap !== undefined) return true;
+  if (key.swap !== undefined) return true;
   return key.elements.some(
     (element) =>
       declaredFanOutFunction(element.transform) !== undefined ||
-      (APPLIED_SETTINGS.fuzzyComparisons &&
-        element.generateFuzzyComparisons !== undefined),
+      element.generateFuzzyComparisons !== undefined,
   );
 }
 

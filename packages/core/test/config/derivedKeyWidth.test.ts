@@ -1,9 +1,7 @@
 import { expect, test, describe } from "vitest";
 
 // The width a fuzzy element declares, its ceiling, and the boundary that
-// enforces it. This file reads the real APPLIED_SETTINGS rather than a mock,
-// so a flag turned back off fails here instead of leaving these expectations
-// describing a run that no longer happens.
+// enforces it.
 
 import PSI from "@openmined/psi.js";
 

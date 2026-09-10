@@ -294,31 +294,33 @@ acceptance does after it states the conflict.
 
 ## Proposed is not applied
 
-One setting an inviter may declare is not honored by today's exchange: the
-per-element fuzzy-comparison expansion. `APPLIED_SETTINGS` is the single source of
-truth for which, and the summary includes the resulting flags alongside each term
-rather than leaving each renderer to consult it. A surface therefore cannot state
-a matching behavior the run does not perform, and cannot forget the caveat for one
-setting while stating it for another.
+A term an inviter may declare is not always honored by the combination the
+invitation names: a count-only round refuses the candidate set a per-element
+fuzzy expansion or a swapped key order produces. The summary derives the
+resulting flags from the refusals' own predicates and holds them alongside each
+term, rather than leaving each renderer to derive them. A surface therefore
+cannot state a matching behavior the run does not perform, and cannot forget the
+caveat for one term while stating it for another.
 
-It does not change what is disclosed -- it changes match breadth -- so its caveat
-sits one expand down with the headline it qualifies. A setting that stated a
+Neither term changes what is disclosed -- both change match breadth -- so the
+caveat sits one expand down with the headline it qualifies. A term that stated a
 DISCLOSURE guarantee would take the other placement: with the headline itself,
 where a reader cannot take the guarantee as in force without also meeting what
 qualifies it.
 
-What a caveat SAYS follows what not applying the setting actually does. The fuzzy
-expansion is a silent no-op that narrows the match, so its marker says only that
-the expansion is proposed. A setting whose not-applying is a REFUSAL takes the
-opposite copy -- naming the refusal and what to ask the inviter for -- and the two
-must not be swapped: a caveat saying the run proceeds and reveals more than the
-headline promised describes a run that does not happen, which is what one surface
-once said about a count-only invitation while the other said the opposite.
+What a caveat SAYS follows what not applying the term actually does. A term the
+combination REFUSES takes copy naming the refusal and what to ask the inviter
+for. A term whose not-applying is a silent no-op narrowing the match takes the
+opposite copy, saying only that the term is proposed, which is what makes the
+caveats a table rather than a house style. The two must not be swapped: a caveat
+saying the run proceeds and reveals more than the headline promised describes a
+run that does not happen, which is what one surface once said about a count-only
+invitation while the other said the opposite.
 
 The caveat copy is held once, beside the classification, and rendered twice --
 for the same reason the classification is. Two surfaces authoring their own
-account of the same unimplemented setting is how they came to say opposite things
-about a proposed count-only exchange in the first place.
+account of the same refused term is how they came to say opposite things about a
+proposed count-only exchange in the first place.
 
 ## The deduplicate disclosure statement
 

@@ -5,8 +5,6 @@ import { describe, expect, test } from "vitest";
 import {
   decodeInvitation,
   deriveAcceptedLinkageTerms,
-  getDefaultLinkageTerms,
-  inferMetadata,
   prepareForExchange,
   safeParseLinkageTerms,
   validateStandardizationAgainstTerms,
@@ -16,8 +14,8 @@ import {
   addElement,
   addKey,
   buildAdvancedTerms,
+  draftFromTerms,
   draftWithKeyEnabled,
-  gatedActiveSettingMessage,
   inviterExchangeDataSpec,
   removeElement,
   removeKey,
@@ -28,7 +26,7 @@ import {
 } from "../../../src/psi/authoring/advancedInvite.js";
 import { generateInvitation } from "../../../src/psi/invitation.js";
 
-import type { CSVRow, LinkageKeyElement, LinkageTerms } from "@psilink/core";
+import type { CSVRow, LinkageKeyElement } from "@psilink/core";
 
 import type { AdvancedInviteDraft } from "../../../src/psi/authoring/advancedInvite.js";
 import type { InvitationLocation } from "../../../src/psi/invitation.js";
@@ -45,30 +43,9 @@ function csvStream(content: string = ALL_COLUMNS_CSV): Readable {
   return Readable.from(content);
 }
 
-/** Set `generateFuzzyComparisons` on element 0 of key 0 of a terms object. */
-function withFuzzyOnFirstElement(terms: LinkageTerms): LinkageTerms {
-  return {
-    ...terms,
-    linkageKeys: terms.linkageKeys.map((key, ki) =>
-      ki === 0
-        ? {
-            ...key,
-            elements: key.elements.map((el, ei) =>
-              ei === 0
-                ? { ...el, generateFuzzyComparisons: "transpositions" }
-                : el,
-            ),
-          }
-        : key,
-    ),
-  };
-}
-
 describe("every authored setting reaches the built terms", () => {
-  // The clamp and the import door fire on a setting whose APPLIED_SETTINGS flag
-  // is false, and no flag is. These pin that nothing an editor control can
-  // author is silently dropped or refused on the way through; gatedSettings.test.ts
-  // drives the clamp itself against a flag mocked off.
+  // Nothing an editor control can author is silently dropped or refused on the
+  // way through.
   test("buildAdvancedTerms writes fuzzy, the algorithm and deduplicate through", () => {
     const { draft } = seedAdvancedInvite("Org", ALL_COLUMNS);
     const authored: AdvancedInviteDraft = {
@@ -99,23 +76,35 @@ describe("every authored setting reaches the built terms", () => {
     );
   });
 
-  test("gatedActiveSettingMessage refuses no setting the run applies", () => {
-    const base = getDefaultLinkageTerms("Org", inferMetadata(ALL_COLUMNS, []));
-    expect(gatedActiveSettingMessage(base)).toBeUndefined();
-    // The algorithm is not held back at all: an imported count-only document is
-    // judged by the count-only shape rules, which validateAdvancedInvite applies.
-    expect(
-      gatedActiveSettingMessage({ ...base, algorithm: "psi-c" }),
-    ).toBeUndefined();
-    // The two settings the door does read, each applied, so each passes: this
-    // door is closed against a setting the run would silently drop, not against
-    // every setting an editor control gates.
-    expect(
-      gatedActiveSettingMessage({ ...base, deduplicate: true }),
-    ).toBeUndefined();
-    expect(
-      gatedActiveSettingMessage(withFuzzyOnFirstElement(base)),
-    ).toBeUndefined();
+  test("an imported document keeps the fuzzy expansion and the deduplicate term", () => {
+    const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    const document = buildAdvancedTerms({
+      ...draft,
+      deduplicate: true,
+      keys: draft.keys.map((entry, i) =>
+        i === 0
+          ? {
+              ...entry,
+              key: {
+                ...entry.key,
+                elements: entry.key.elements.map((el, j): LinkageKeyElement =>
+                  j === 0
+                    ? { ...el, generateFuzzyComparisons: "transpositions" }
+                    : el,
+                ),
+              },
+            }
+          : entry,
+      ),
+    });
+    // The import door turns away a document holding a constraint the editor
+    // cannot represent, not one declaring either of these terms, so a rebuild of
+    // the loaded draft re-emits both.
+    const rebuilt = buildAdvancedTerms(draftFromTerms(document, seed));
+    expect(rebuilt.deduplicate).toBe(true);
+    expect(rebuilt.linkageKeys[0].elements[0].generateFuzzyComparisons).toBe(
+      "transpositions",
+    );
   });
 });
 

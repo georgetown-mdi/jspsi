@@ -27,7 +27,6 @@ import {
   draftFromTerms,
   draftWithFieldAdded,
   draftWithKeyEnabled,
-  gatedActiveSettingMessage,
   importedCitationDropCause,
   importedCitationDropNotice,
   importedConstraintDivergenceMessage,
@@ -988,23 +987,16 @@ describe("the linkage-strategy control", () => {
       ...draft,
       linkageStrategy: "single-pass",
     });
-    // Written straight through -- not clamped like deduplicate/fuzzyComparisons --
-    // and the built terms still parse through the core schema.
     expect(built.linkageStrategy).toBe("single-pass");
     expect(safeParseLinkageTerms(built).success).toBe(true);
   });
 
-  test("(c) single-pass round-trips through export -> import and is not refused as gated", () => {
+  test("(c) single-pass round-trips through export -> import", () => {
     const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
     const exported = buildAdvancedTerms({
       ...draft,
       linkageStrategy: "single-pass",
     });
-    // Unlike a gated deduplicate/fuzzyComparisons setting, an imported single-pass
-    // document is adopted rather than refused: single-pass is honored end-to-end,
-    // so it has no gatedActiveSettingMessage. This is the lie-proof encoding of
-    // "not gated".
-    expect(gatedActiveSettingMessage(exported)).toBeUndefined();
     const imported = draftFromTerms(exported, seed);
     expect(imported.linkageStrategy).toBe("single-pass");
     // Re-building the imported draft preserves the strategy, so an export round-trips
