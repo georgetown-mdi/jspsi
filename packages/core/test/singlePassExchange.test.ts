@@ -255,6 +255,7 @@ async function settleOneSidedSinglePass(
   receiver: PromiseSettledResult<ExchangeResult>;
   helper: PromiseSettledResult<ExchangeResult>;
   helperInbound: Array<unknown>;
+  receiverInbound: Array<unknown>;
 }> {
   const receiverOut: Output = { expectsOutput: true, shareWithPartner: false };
   const helperOut: Output = { expectsOutput: false, shareWithPartner: true };
@@ -304,17 +305,20 @@ async function settleOneSidedSinglePass(
 
   const [connReceiver, connHelper] = createMessagePipe();
   const helperInbound: Array<unknown> = [];
+  const receiverInbound: Array<unknown> = [];
   // A modified helper build advertises `disclosesPayload` on its terms frame
   // whatever its own data holds. Rewriting the frame on the way out models that
   // party while leaving this honest helper's own withhold decision (taken from
   // its metadata) alone, so the receiver's cross-check is what the test reads.
+  // Either value can be stamped: true over metadata that discloses nothing, and
+  // false over metadata that discloses a column.
   const isTermsFrame = (m: unknown): m is Record<string, unknown> =>
     typeof m === "object" && m !== null && "linkageTerms" in m;
   const capturingHelper: MessageConnection = {
     send: (m: unknown) =>
       connHelper.send(
-        opts.advertiseHelperDisclosure === true && isTermsFrame(m)
-          ? { ...m, disclosesPayload: true }
+        opts.advertiseHelperDisclosure !== undefined && isTermsFrame(m)
+          ? { ...m, disclosesPayload: opts.advertiseHelperDisclosure }
           : m,
       ),
     receive: async (timeoutMs?: number) => {
@@ -324,6 +328,16 @@ async function settleOneSidedSinglePass(
     },
     close: () => connHelper.close(),
     setInboundFrameCap: connHelper.setInboundFrameCap?.bind(connHelper),
+  };
+  const capturingReceiver: MessageConnection = {
+    send: (m: unknown) => connReceiver.send(m),
+    receive: async (timeoutMs?: number) => {
+      const frame = await connReceiver.receive(timeoutMs);
+      receiverInbound.push(frame);
+      return frame;
+    },
+    close: () => connReceiver.close(),
+    setInboundFrameCap: connReceiver.setInboundFrameCap?.bind(connReceiver),
   };
 
   // The pipe is symmetric, so the two parties can sit on either end; the handshake
@@ -342,7 +356,7 @@ async function settleOneSidedSinglePass(
       { psiLibrary },
     ),
     runExchange(
-      connReceiver,
+      capturingReceiver,
       opts.helperIsInitiator ? "responder" : "initiator",
       prepare(
         "Receiver Co",
@@ -354,7 +368,7 @@ async function settleOneSidedSinglePass(
       { psiLibrary },
     ),
   ]);
-  return { receiver, helper, helperInbound };
+  return { receiver, helper, helperInbound, receiverInbound };
 }
 
 // The settled harness above for the exchanges that complete: each party's
@@ -515,4 +529,54 @@ test("an asserted disclosure the agreed terms contradict refuses both parties", 
     expect(reason.message).toContain("asserts it discloses one");
   }
   expect(helperInbound.some((f) => Array.isArray(f))).toBe(false);
+});
+
+test("a one-sided divergence refusal aborts the party still waiting", async () => {
+  // A modified helper whose advertisement diverges from its own metadata: the
+  // metadata transmits `note` while the terms frame stamps `disclosesPayload`
+  // false, against a receiver declaring an empty `payload.receive`. The two
+  // roles read different assertions -- the helper its metadata, the receiver
+  // the flag -- so only the helper refuses, and the receiver would otherwise
+  // sit on the pipe awaiting a linkage frame the helper never sends. The abort
+  // the refusal sends first is what ends that wait.
+  const { receiver, helper, helperInbound, receiverInbound } =
+    await settleOneSidedSinglePass({
+      helperDiscloses: true,
+      helperIsInitiator: false,
+      receiverPayload: { receive: [] },
+      advertiseHelperDisclosure: false,
+    });
+
+  expect(helper.status).toBe("rejected");
+  expect((helper as PromiseRejectedResult).reason).toBeInstanceOf(
+    PayloadDisclosureDivergenceError,
+  );
+  // Settled at all, rather than parked until the suite's own timeout: the pipe
+  // arms no inactivity deadline, so without the abort frame this receiver never
+  // returns and the test fails by timing out.
+  expect(receiver.status).toBe("rejected");
+  expect(receiverInbound).toContainEqual({
+    decision: "abort",
+    abortReasons: [
+      "a party asserts a payload disclosure the agreed linkage terms " +
+        "declare no column for",
+    ],
+  });
+  // Neither the association table (the only Array-shaped frame) nor a payload
+  // frame moved in either direction before the refusal.
+  for (const inbound of [helperInbound, receiverInbound]) {
+    expect(inbound.some((f) => Array.isArray(f))).toBe(false);
+    expect(
+      inbound.some(
+        (f) => typeof f === "object" && f !== null && "hasData" in f,
+      ),
+    ).toBe(false);
+  }
+});
+
+test("the divergence refusal takes no message argument", () => {
+  // Structural rather than asserted: with no parameter to pass, no call site
+  // can interpolate a value read off either agreed document into the message
+  // the operator is shown.
+  expect(PayloadDisclosureDivergenceError.length).toBe(0);
 });

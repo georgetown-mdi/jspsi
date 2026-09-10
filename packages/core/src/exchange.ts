@@ -261,12 +261,25 @@ export function resolveCountOnlyRun(
  * assertion is held against a pair of documents both parties agreed, so the
  * contradiction is a process disclosing against the terms it agreed under --
  * the classification {@link reconcileReceivedPayload} gives the same pair
- * when the column arrives (CLI exit 69, not 64). The message holds fixed
- * literals only, never a value read off either document.
+ * when the column arrives (CLI exit 69, not 64). The constructor takes no
+ * argument and holds the message itself, so no call site can compose a value
+ * read off either agreed document into what the operator is shown.
  */
 export class PayloadDisclosureDivergenceError extends ConnectionError {
-  constructor(message: string) {
-    super(message, "protocol");
+  constructor() {
+    super(
+      "the agreed linkage terms declare that one party sends no payload " +
+        "column, but that party's process asserts it discloses one: the " +
+        "receiving party's terms declare an empty payload.receive, which " +
+        "holds the sending party to sending none. The exchange is refused " +
+        "before any association table or payload moves. To disclose those " +
+        "columns, declare them in the sending party's payload.send and the " +
+        "receiving party's payload.receive, or omit payload.receive to take " +
+        "whatever the partner sends. To disclose none, set the sending " +
+        "party's input metadata to transmit no column (is_payload: false, " +
+        "or role ignored).",
+      "protocol",
+    );
     this.name = "PayloadDisclosureDivergenceError";
   }
 }
@@ -293,10 +306,15 @@ export class PayloadDisclosureDivergenceError extends ConnectionError {
  *   refused rather than narrowed to a run whose payload never moves.
  * - Neither direction declared present and empty: the assertion decides.
  *
- * Symmetric: both parties read the same two documents and the same
- * assertion, so the receiver's suppression and the sender's skip agree, and
- * a refusal aborts both at this same point -- before the linkage round, the
- * association table, and the payload -- rather than desyncing the lockstep.
+ * The two roles read the same pair of agreed documents but not the same
+ * assertion: the sender passes its own metadata-derived disclosure, the
+ * receiver the `disclosesPayload` flag off the terms exchange. A conforming
+ * sender advertises what its metadata discloses, so the two values match and
+ * the receiver's suppression, the sender's skip and a refusal all agree --
+ * at this same point, before the linkage round, the association table, and
+ * the payload. Where a partner's advertisement diverges from its own
+ * metadata the two values differ and one party can refuse alone, so the
+ * refusal's call site sends the partner an abort before the throw.
  */
 export function resolveSenderDisclosesPayload(
   senderAsserts: boolean,
@@ -305,18 +323,7 @@ export function resolveSenderDisclosesPayload(
 ): boolean {
   if (declaresNoPayloadColumn(senderTerms.payload?.send)) return false;
   if (senderAsserts && declaresNoPayloadColumn(receiverTerms.payload?.receive))
-    throw new PayloadDisclosureDivergenceError(
-      "the agreed linkage terms declare that one party sends no payload " +
-        "column, but that party's process asserts it discloses one: the " +
-        "receiving party's terms declare an empty payload.receive, which " +
-        "holds the sending party to sending none. The exchange is refused " +
-        "before any association table or payload moves. To disclose those " +
-        "columns, declare them in the sending party's payload.send and the " +
-        "receiving party's payload.receive, or omit payload.receive to take " +
-        "whatever the partner sends. To disclose none, set the sending " +
-        "party's input metadata to transmit no column (is_payload: false, " +
-        "or role ignored).",
-    );
+    throw new PayloadDisclosureDivergenceError();
   return senderAsserts;
 }
 
@@ -1674,14 +1681,29 @@ export async function runExchange(
   // The assertion only ADDS disclosure to what the agreed terms declare: a
   // withheld-shaped `payload.send` binds the sender to disclosing no column, and
   // a `payload.receive` the receiver declares empty against a sender asserting
-  // disclosure is a contradiction this refuses. Both parties read the same pair,
-  // so suppression, skip and refusal stay in step. See
-  // resolveSenderDisclosesPayload.
-  const senderDisclosesPayload = resolveSenderDisclosesPayload(
-    senderAssertsDisclosure,
-    isReceiver ? partnerTerms : linkageTerms,
-    isReceiver ? linkageTerms : partnerTerms,
-  );
+  // disclosure is a contradiction this refuses. Both parties read the same pair
+  // of documents, so a conforming pair's suppression, skip and refusal stay in
+  // step. See resolveSenderDisclosesPayload.
+  let senderDisclosesPayload: boolean;
+  try {
+    senderDisclosesPayload = resolveSenderDisclosesPayload(
+      senderAssertsDisclosure,
+      isReceiver ? partnerTerms : linkageTerms,
+      isReceiver ? linkageTerms : partnerTerms,
+    );
+  } catch (err) {
+    // Best-effort abort before the throw, as the deduplicate refusal above
+    // sends one. The two roles read different assertions -- the sender its own
+    // metadata, the receiver the advertised flag -- so a partner whose
+    // advertisement diverges from its metadata fires this on one side alone,
+    // and without the frame the other waits out its full peer-inactivity
+    // budget. The reason is a fixed literal, disclosing nothing new.
+    await sendAbort(conn, [
+      "a party asserts a payload disclosure the agreed linkage terms " +
+        "declare no column for",
+    ]);
+    throw err;
+  }
 
   const withholdSenderTable = withholdsSenderAssociationTable(
     senderExpectsOutput,
