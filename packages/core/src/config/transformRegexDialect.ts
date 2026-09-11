@@ -50,12 +50,12 @@ export function regexStepPatternParam(
 }
 
 /**
- * Total wall-clock budget, in milliseconds, for checking dialect
- * conformance across all transform patterns in one linkage-terms
- * validation. Each collection caps at 256 entries, but their product (keys
- * x elements x steps) is large enough that a hostile counterparty could
- * make compilation itself a denial of service. Once exhausted, remaining
- * patterns are rejected closed (see
+ * Total time budget, in milliseconds, measured on the monotonic clock,
+ * for checking dialect conformance across all transform patterns in
+ * one linkage-terms validation. Each collection caps at 256 entries,
+ * but their product (keys x elements x steps) is large enough that
+ * a hostile counterparty could make compilation itself a denial of
+ * service. Once exhausted, remaining patterns are rejected closed (see
  * {@link linkageTermsHaveNonConformantTransformRegex}). A legitimate terms
  * set finishes in well under a millisecond.
  */
@@ -65,14 +65,14 @@ const REGEX_DIALECT_TOTAL_BUDGET_MS = 2000;
  * can drive the budget-exhaustion path deterministically, and so the schema can
  * pass the source-length bound the gate rejects at. */
 interface RegexDialectBudget {
-  /** Total wall-clock budget across all patterns; see
-   * {@link REGEX_DIALECT_TOTAL_BUDGET_MS}. */
+  /** Total time budget across all patterns, measured on the monotonic
+   * clock; see {@link REGEX_DIALECT_TOTAL_BUDGET_MS}. */
   totalBudgetMs?: number;
   /**
    * Upper bound on the length of any one declared pattern; a longer source is
    * rejected on length alone, without compiling, since an in-dialect source
    * can compile in time super-linear in its length (a ~150 KB pattern takes
-   * seconds) and the wall-clock budget above cannot interrupt mid-compile.
+   * seconds) and the time budget above cannot interrupt mid-compile.
    * The schema passes its own MAX_TRANSFORM_PATTERN_LENGTH here so both
    * reject at the same threshold; omitted (unit tests only), every source is
    * compiled.
@@ -125,7 +125,7 @@ export function linkageTermsHaveNonConformantTransformRegex(
         if (performance.now() - startedAt >= totalBudgetMs) return true;
         // Reject an oversized source on length alone, before compiling: an
         // in-dialect source compiles in time super-linear in its length, and
-        // the wall-clock budget above cannot interrupt one in-flight compile.
+        // the time budget above cannot interrupt one in-flight compile.
         // The per-step length refine reports the same rejection with a
         // precise over-length message (MAX_TRANSFORM_PATTERN_LENGTH).
         if (source.length > maxPatternLength) return true;
