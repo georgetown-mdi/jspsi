@@ -35,6 +35,58 @@ export interface RelayEvent {
 }
 
 /**
+ * The closed vocabulary of `source` values on the `warning` events the console
+ * relay composes itself, as opposed to the CLI values it passes through from fd
+ * 3 (`WARNING_SOURCES` in apps/cli/src/eventStream.ts, published in
+ * docs/spec/CLI_EVENTS.md). Every value here is disjoint from that set, so a
+ * supervisor reading one job stream tells a relay degradation from a CLI notice
+ * by the field alone.
+ *
+ * docs/spec/SERVER_JOB_API.md (Warning sources on the job stream) is the
+ * registry every value is described in, and where a new synthesized notice
+ * claims one; scripts/check-warning-sources.mjs fails when the two disagree and
+ * when a value here collides with a CLI one.
+ */
+export const RELAY_WARNING_SOURCES = [
+  "relayStreamUnavailable",
+  "relayStreamOversizedLine",
+  "relayStreamReadError",
+  "relayUnparsableEvent",
+  "relayUnknownEvent",
+  "relayProcessError",
+  "relayRendezvousPreflight",
+] as const;
+
+/** One {@link RELAY_WARNING_SOURCES} value; see that list. */
+export type RelayWarningSource = (typeof RELAY_WARNING_SOURCES)[number];
+
+/**
+ * A `warning` event the relay composed itself, for the job's event buffer.
+ * `source` is a required parameter rather than a defaulted one, so a new
+ * synthesized notice cannot reach the stream without claiming a value of its
+ * own. `degraded` marks the fd-3 relay degradations, whose text says the relay
+ * lost part of the CLI's stream rather than what the exchange did.
+ *
+ * The message is not re-sanitized here: a manager-composed event bypasses the
+ * trust-boundary pass {@link validateAndSanitizeEvent} runs over the CLI's own
+ * lines, so each call site composes the text the console sink escapes once as it
+ * renders it.
+ */
+export function buildSynthesizedWarningEvent(
+  source: RelayWarningSource,
+  message: string,
+  options: { degraded?: boolean } = {},
+): RelayEvent {
+  return {
+    v: 1,
+    type: "warning",
+    source,
+    message,
+    ...(options.degraded === true ? { degraded: true } : {}),
+  };
+}
+
+/**
  * The exit code the CLI reports when the exchange itself completed and a local
  * write did not -- an audit artifact, a configuration or consent record, or the
  * result file (docs/spec/CLI_EVENTS.md, Persistence loss). Mirrored here rather
@@ -93,9 +145,10 @@ export interface CliDriverHandlers {
   onEvent: (event: RelayEvent) => void;
   /**
    * A degradation notice (a malformed/unknown fd-3 line, or an oversized stream)
-   * reported as a synthesized warning rather than crashing the relay.
+   * reported as a synthesized warning rather than crashing the relay. `source`
+   * names which degradation it is, one of {@link RELAY_WARNING_SOURCES}.
    */
-  onDegraded: (message: string) => void;
+  onDegraded: (source: RelayWarningSource, message: string) => void;
   /** The run's reconciled terminal state, delivered exactly once. */
   onTerminal: (state: JobTerminalState, diagnostics: CliRunDiagnostics) => void;
 }
@@ -380,8 +433,11 @@ export function sanitizedChildEnv(): NodeJS.ProcessEnv {
  * the handler. A malformed or unknown line does not crash the relay: it is
  * reported as a degradation notice and dropped. The buffer is capped so an
  * unterminated flood cannot grow without bound.
+ *
+ * @internal exported for unit tests, which drive the stream-level degradations
+ * (an absent fd 3, a read error on it) a spawned child cannot stage.
  */
-function attachFd3Reader(
+export function attachFd3Reader(
   child: ChildProcess,
   handlers: CliDriverHandlers,
 ): void {
@@ -392,7 +448,10 @@ function attachFd3Reader(
     typeof fd3Raw === "number" ||
     typeof (fd3Raw as Readable).setEncoding !== "function"
   ) {
-    handlers.onDegraded("CLI event stream (fd 3) was not available");
+    handlers.onDegraded(
+      "relayStreamUnavailable",
+      "CLI event stream (fd 3) was not available",
+    );
     return;
   }
   const fd3 = fd3Raw as Readable;
@@ -401,7 +460,10 @@ function attachFd3Reader(
   fd3.on("data", (chunk: string) => {
     buffer += chunk;
     if (buffer.length > FD3_LINE_CAP) {
-      handlers.onDegraded("CLI event stream line exceeded the size cap");
+      handlers.onDegraded(
+        "relayStreamOversizedLine",
+        "CLI event stream line exceeded the size cap",
+      );
       buffer = "";
       return;
     }
@@ -419,7 +481,10 @@ function attachFd3Reader(
     buffer = "";
   });
   fd3.on("error", () => {
-    handlers.onDegraded("CLI event stream (fd 3) reported a read error");
+    handlers.onDegraded(
+      "relayStreamReadError",
+      "CLI event stream (fd 3) reported a read error",
+    );
   });
 }
 
@@ -435,12 +500,18 @@ function handleFd3Line(line: string, handlers: CliDriverHandlers): void {
   try {
     parsed = parseBoundedJson(trimmed);
   } catch {
-    handlers.onDegraded("CLI emitted a non-JSON event line");
+    handlers.onDegraded(
+      "relayUnparsableEvent",
+      "CLI emitted a non-JSON event line",
+    );
     return;
   }
   const event = validateAndSanitizeEvent(parsed);
   if (event === null) {
-    handlers.onDegraded("CLI emitted an event outside the known schema");
+    handlers.onDegraded(
+      "relayUnknownEvent",
+      "CLI emitted an event outside the known schema",
+    );
     return;
   }
   handlers.onEvent(event);
@@ -623,6 +694,7 @@ function attachTerminalReconciliation(
     // lookahead of the child's last delivery: diagnostic fidelity only, on a
     // path that rarely has stderr at all.
     handlers.onDegraded(
+      "relayProcessError",
       `CLI process error: ${sanitizeForDisplay(error.message)}`,
     );
     deliver(1, null);
