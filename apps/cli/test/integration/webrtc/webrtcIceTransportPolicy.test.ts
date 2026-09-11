@@ -1,7 +1,9 @@
 import dns from "node:dns";
 
 import { RTCPeerConnection } from "werift";
-import { expect, test } from "vitest";
+import { beforeAll, expect, test } from "vitest";
+
+import { safeParseConnectionConfig } from "@psilink/core";
 
 import { buildPeerConfiguration } from "../../../src/connection/webrtc/weriftPeer";
 
@@ -20,6 +22,11 @@ import type { RTCIceCandidate } from "werift";
  * arm that names no server werift can parse falls back to werift's built-in
  * Google STUN default, so it runs with the resolver intercepted, as the sibling
  * transport suite does for the same case (transport.test.ts).
+ *
+ * The table at the bottom drives the same question over the `transport`
+ * parameter of a TURN url: which values leave the entry standing, and so which
+ * ones the connection schema may accept without the relay-only policy quietly
+ * ceasing to hold.
  */
 
 /** Nothing listens here; naming it keeps every arm on loopback. */
@@ -48,6 +55,13 @@ const HOSTLESS_TURN = {
  * the six or seven seconds that takes.
  */
 const GATHERING_TIMEOUT_MS = 30_000;
+
+/**
+ * How long the whole TRANSPORT_FORMS table may take. Its forms gather at
+ * once rather than one after another, so this is a run of the same werift
+ * timer as a single arm, with room for the slowest machine that runs it.
+ */
+const TRANSPORT_TABLE_TIMEOUT_MS = 90_000;
 
 /**
  * Run `gather` with DNS resolution short-circuited, so a peer left with no
@@ -199,5 +213,106 @@ test(
     expect(
       hostlessTurn.some((candidate) => candidate.includes("typ host")),
     ).toBe(true);
+  },
+);
+
+// --- which TURN transport parameters werift keeps ----------------------------
+
+/**
+ * A TURN url's `transport` parameter, and whether werift keeps the entry it
+ * sits on. werift reads the parameter itself and refuses the whole entry over a
+ * value it does not support, continuing without it; under a relay-only policy
+ * that leaves the connection with no relay, so it gathers the host candidate
+ * the policy exists to keep off the wire. The rows are what the connection
+ * schema's grammar is drawn from (`packages/core/src/config/connection.ts`),
+ * measured here rather than read out of the library.
+ */
+const TRANSPORT_FORMS: Array<{ url: string; kept: boolean }> = [
+  { url: "turn:127.0.0.1:3478", kept: true },
+  { url: "turn:127.0.0.1:3478?transport=tcp", kept: true },
+  { url: "turn:127.0.0.1:3478?transport=udp", kept: true },
+  { url: "turn:127.0.0.1:3478?transport=tcp&foo=bar", kept: true },
+  { url: "turn:127.0.0.1:3478?foo=bar", kept: true },
+  { url: "turn:127.0.0.1:3478?Transport=tcp", kept: true },
+  { url: "turn:127.0.0.1:3478?transport=tcp&transport=udp", kept: true },
+  { url: "turns:127.0.0.1:5349", kept: true },
+  { url: "turns:127.0.0.1:5349?transport=tcp", kept: true },
+  { url: "turns:127.0.0.1:5349?transport=tcp&transport=udp", kept: true },
+  { url: "turn:127.0.0.1:3478?transport=UDP", kept: false },
+  { url: "turn:127.0.0.1:3478?transport=TCP", kept: false },
+  { url: "turn:127.0.0.1:3478?transport=quic", kept: false },
+  { url: "turn:127.0.0.1:3478?transport=", kept: false },
+  { url: "turn:127.0.0.1:3478?transport=tcp;x", kept: false },
+  { url: "turn:127.0.0.1:3478?transport=quic&transport=tcp", kept: false },
+  { url: "turns:127.0.0.1:5349?transport=udp", kept: false },
+  { url: "turns:127.0.0.1:5349?transport=quic", kept: false },
+  { url: "turns:127.0.0.1:5349?transport=TCP", kept: false },
+];
+
+/** What each form of TRANSPORT_FORMS gathered, keyed by its url. */
+const gatheredPerForm = new Map<string, Array<string>>();
+
+/**
+ * Every form of TRANSPORT_FORMS gathers in one window, before the arms below
+ * read the results: gathering is what takes the time, the forms are
+ * independent, and one window keeps the resolver intercepted until the last
+ * peer has closed. A form werift refuses leaves the connection with no server
+ * it can parse, which is the case that reaches for the built-in Google STUN
+ * default.
+ */
+beforeAll(async () => {
+  const gathered = await withResolverIntercepted(() =>
+    Promise.all(
+      TRANSPORT_FORMS.map(({ url }) =>
+        gatheredCandidates({
+          iceServers: [{ ...UNREACHABLE_TURN, urls: url }],
+          iceTransportPolicy: "relay",
+        }),
+      ),
+    ),
+  );
+  TRANSPORT_FORMS.forEach(({ url }, index) => {
+    gatheredPerForm.set(url, gathered[index] ?? []);
+  });
+}, TRANSPORT_TABLE_TIMEOUT_MS);
+
+test.each(TRANSPORT_FORMS)(
+  'under relay, werift keeps the entry "$url": $kept',
+  ({ url, kept }) => {
+    const candidates = gatheredPerForm.get(url);
+    expect(candidates, `nothing was gathered for ${url}`).toBeDefined();
+    expect(
+      (candidates ?? []).some((candidate) => candidate.includes("typ host")),
+    ).toBe(!kept);
+  },
+);
+
+/**
+ * The forms the schema refuses although werift keeps them. The schema holds
+ * every occurrence of `transport` to the rule instead of resting on werift
+ * reading the first, so a url setting it twice is refused where the two values
+ * disagree. Listing them here keeps the correspondence below exact in both
+ * directions: any other divergence fails an arm.
+ */
+const REFUSED_THOUGH_KEPT = new Set([
+  "turns:127.0.0.1:5349?transport=tcp&transport=udp",
+]);
+
+test.each(TRANSPORT_FORMS)(
+  'the connection schema accepts "$url" only where werift keeps it',
+  ({ url, kept }) => {
+    const parsed = safeParseConnectionConfig({
+      channel: "webrtc",
+      server: { host: "peers.example.org" },
+      ice_transport_policy: "relay",
+      turn: [
+        {
+          url,
+          username: UNREACHABLE_TURN.username,
+          credential: UNREACHABLE_TURN.credential,
+        },
+      ],
+    });
+    expect(parsed.success).toBe(kept && !REFUSED_THOUGH_KEPT.has(url));
   },
 );

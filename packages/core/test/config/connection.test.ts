@@ -1078,6 +1078,94 @@ test.each([
   expect(result.success).toBe(valid);
 });
 
+// The `transport` parameter. werift keeps a turn entry whose transport is
+// lowercase `tcp` or `udp`, refuses `udp` on a `turns:` url, and refuses every
+// other value -- continuing without the entry, which under
+// `ice_transport_policy: relay` leaves the run gathering host candidates. Each
+// row below is driven at the library in
+// apps/cli/test/integration/webrtc/webrtcIceTransportPolicy.test.ts, except the
+// two the comments mark.
+test.each([
+  ["turn:turn.example.org:3478?transport=udp", true],
+  ["turn:turn.example.org:3478?transport=tcp", true],
+  ["turns:turn.example.org:5349?transport=tcp", true],
+  ["turn:turn.example.org:3478?foo=bar", true],
+  ["turn:turn.example.org:3478?transport=tcp&foo=bar", true],
+  // The parameter name is read case-sensitively, so this url sets no transport
+  // at all and werift keeps the entry on its default.
+  ["turn:turn.example.org:3478?Transport=tcp", true],
+  ["turn:turn.example.org:3478?transport=tcp&transport=udp", true],
+  ["turns:turn.example.org:5349?transport=udp", false],
+  ["turn:turn.example.org:3478?transport=UDP", false],
+  ["turn:turn.example.org:3478?transport=TCP", false],
+  ["turn:turn.example.org:3478?transport=quic", false],
+  ["turn:turn.example.org:3478?transport=", false],
+  ["turn:turn.example.org:3478?transport=tcp;x", false],
+  ["turn:turn.example.org:3478?transport=quic&transport=tcp", false],
+  // A url repeating the parameter is refused unless every value qualifies:
+  // werift keeps this entry, reading the first occurrence, and the schema
+  // refuses it rather than resting on which occurrence is read.
+  ["turns:turn.example.org:5349?transport=tcp&transport=udp", false],
+  // Not driven: a valueless parameter is refused here, so what werift would do
+  // with one decides nothing.
+  ["turn:turn.example.org:3478?transport", false],
+])('TURN transport "%s" is %s', (url, valid) => {
+  const result = safeParseConnectionConfig({
+    ...webrtcBase,
+    turn: [{ url, username: "u", credential: "c" }],
+  });
+  expect(result.success).toBe(valid);
+});
+
+test("a padded TURN transport parameter is read after the trim", () => {
+  // The refusal applies to the trimmed value, as the host requirement does, so
+  // padding neither hides an unsupported value nor breaks a supported one.
+  const refused = safeParseConnectionConfig({
+    ...webrtcBase,
+    turn: [
+      {
+        url: " turns:turn.example.org:5349?transport=udp ",
+        username: "u",
+        credential: "c",
+      },
+    ],
+  });
+  expect(refused.success).toBe(false);
+  const accepted = safeParseConnectionConfig({
+    ...webrtcBase,
+    turn: [
+      {
+        url: " turns:turn.example.org:5349?transport=tcp ",
+        username: "u",
+        credential: "c",
+      },
+    ],
+  });
+  expect(accepted.success).toBe(true);
+});
+
+test("an unsupported TURN transport is refused with the forms it accepts", () => {
+  const result = safeParseConnectionConfig({
+    ...webrtcBase,
+    turn: [
+      {
+        url: "turns:turn.example.org:5349?transport=udp",
+        username: "u",
+        credential: "c",
+      },
+    ],
+  });
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  const messages = result.error.issues.map((i) => i.message);
+  expect(
+    messages.some((m) => m.includes("may leave transport unset or set it to")),
+  ).toBe(true);
+  expect(messages.some((m) => m.includes("turns:relay.example.org:443"))).toBe(
+    true,
+  );
+});
+
 test("a host-less TURN url is refused with the form it needs", () => {
   const result = safeParseConnectionConfig({
     ...webrtcBase,

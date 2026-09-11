@@ -395,7 +395,10 @@ export const AuthenticationSchema: z.ZodType<Authentication> = z.strictObject({
  * established.
  */
 interface TurnServer {
-  /** TURN server URI: `turn:` or `turns:` followed by a host. */
+  /**
+   * TURN server URI: `turn:` or `turns:` followed by a host, with `transport`
+   * either unset or `tcp`, and `udp` permitted on a `turn:` url.
+   */
   url: string;
   username: string;
   /** TURN credential; @-file recommended. */
@@ -418,6 +421,27 @@ interface TurnServer {
 const TURN_URL_PATTERN = /^turns?:[^\s:?][^\s?]*(?:\?\S*)?$/;
 const STUN_URI_PATTERN = /^stuns?:[^\s:?][^\s?]*(?:\?\S*)?$/;
 
+// werift refuses a turn url whose `transport` parameter holds anything but
+// lowercase `tcp` or `udp`, and refuses `udp` on a `turns:` url, continuing
+// silently without that entry: under `ice_transport_policy: relay` the run then
+// gathers host candidates. Every occurrence is held to the rule, so a url
+// repeating the parameter is refused unless each value qualifies, rather than
+// resting on werift reading the first. Measured in
+// apps/cli/test/integration/webrtc/webrtcIceTransportPolicy.test.ts.
+function turnUrlTransportIsSupported(url: string): boolean {
+  const queryStart = url.indexOf("?");
+  if (queryStart === -1) return true;
+  const overTls = url.startsWith("turns:");
+  for (const parameter of url.slice(queryStart + 1).split("&")) {
+    const separator = parameter.indexOf("=");
+    const name = separator === -1 ? parameter : parameter.slice(0, separator);
+    if (name !== "transport") continue;
+    const value = separator === -1 ? "" : parameter.slice(separator + 1);
+    if (value !== "tcp" && !(value === "udp" && !overTls)) return false;
+  }
+  return true;
+}
+
 const TurnServerSchema: z.ZodType<TurnServer> = z.object({
   url: z
     .string()
@@ -426,7 +450,13 @@ const TurnServerSchema: z.ZodType<TurnServer> = z.object({
       TURN_URL_PATTERN,
       "a turn entry's url must name a host after turn: or turns:, for " +
         "example turns:relay.example.org:443?transport=tcp",
-    ),
+    )
+    .refine(turnUrlTransportIsSupported, {
+      message:
+        "a turn entry's url may leave transport unset or set it to lowercase " +
+        "tcp, and a turn: url may also set it to udp, for example " +
+        "turns:relay.example.org:443?transport=tcp",
+    }),
   username: z.string().min(1),
   credential: z.string().min(1),
   credentialType: z.enum(["password", "hmac-sha1"]).optional(),

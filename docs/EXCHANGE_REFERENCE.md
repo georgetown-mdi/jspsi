@@ -738,7 +738,7 @@ The CLI passes these entries to its peer connection (the browser client does not
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `url` | string | yes | TURN server URI: `turn:` or `turns:` followed by a host (a host-less `turn:` is refused) |
+| `url` | string | yes | TURN server URI: `turn:` or `turns:` followed by a host, with `transport` unset or lowercase `tcp` (`udp` too on a `turn:` url). A host-less `turn:`, or any other `transport` value, is refused |
 | `username` | string | yes | TURN username |
 | `credential` | string | yes | TURN credential; `@`-file recommended |
 | `credential_type` | enum | no | `password` (default) \| `hmac-sha1` |
@@ -761,6 +761,8 @@ connection:
 Which candidate types ICE may use. `all` permits host, server-reflexive and relay candidates. `relay` gathers relay candidates only, so this party offers the partner no host or server-reflexive address and every path the exchange can take runs through a configured TURN server.
 
 `relay` requires a source of relay candidates: a connection that sets it with no `turn` entry is a usage error (exit 64) before anything is dialed, since it could gather nothing to pair.
+
+It holds for a `turn` entry the ICE layer keeps. An entry whose `url` sets a `transport` the layer cannot use is dropped there, which would leave a relay-only run gathering host candidates, so the accepted `transport` values ([`connection.turn`](#connectionturn)) are the ones it keeps and any other is refused at parse.
 
 > **Honored by the CLI only**, like `stun` and `turn` (see [`connection.stun`](#connectionstun)). It is each party's own setting rather than a term of the exchange: it constrains only the candidates this party gathers, an invitation cannot carry it, and the partner is unaffected. What it is for, and what a run configured with it reports, are in [CLI.md](CLI.md#turn).
 
