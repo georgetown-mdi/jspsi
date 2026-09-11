@@ -52,6 +52,12 @@ on:
       - "support/windows-network-filedrop/**"
       - "scripts/derive-image-dependencies.mjs"
       - "scripts/assert-image-capabilities.mjs"
+      # The OS-layer attribution lists and the generator that writes them: the
+      # drift leg below regenerates each list from the image it just built, so
+      # an edit to either side is an edit to what that leg compares.
+      - "scripts/generate-os-package-attribution.mjs"
+      - "NOTICE-os-packages-default.tsv"
+      - "NOTICE-os-packages-fips.tsv"
       # Both sides of the production-scope measurement below are read by this
       # one lister, so an edit to it moves what that step measures.
       - "scripts/list-node-modules-packages.mjs"
@@ -789,6 +795,32 @@ jobs:
             exit 1
           fi
           echo "the ${{ matrix.variant }} image's setuid/setgid files are the recorded inventory"
+
+      # The OS-layer attribution list beside NOTICE, regenerated from the image
+      # this job built and held against the committed one. NOTICE covers this
+      # repository's npm tree and `npm sbom` reaches no OS package, so those two
+      # lists are the only artifact attributing what an image's OS layer ships,
+      # and a base or package move adds a package no instruction here names.
+      # dockerfile-freeze.test.mjs freezes the install instructions; this holds
+      # the package set they resolve to, with each package's version and the
+      # license string its own package manager declares.
+      #
+      # Two limits, both properties of this job rather than of the list. It
+      # builds amd64 only, so the arm64 half of each list rests on the
+      # comparison made when the list was generated and not on this check --
+      # release.yaml is where both architectures are built. And the default
+      # image's `apk add --no-cache samba-client` resolves against whatever the
+      # Alpine mirror holds, so that list can go stale with nothing in this
+      # repository changing: a failure naming only a version move is that, and
+      # the remedy is to regenerate the list rather than to look for the commit
+      # that moved it.
+      #
+      # After the functional smokes for the reason the step above gives: an
+      # attribution list that has drifted is worth less than the assertions
+      # about what the image does, which have to keep running while it is
+      # regenerated.
+      - name: Compare the image's OS packages against its attribution list
+        run: node scripts/generate-os-package-attribution.mjs ${{ matrix.variant }} --image ${{ matrix.tag }} --check
 
       # Every package the image ships: the base image's system packages, and the
       # language packages inside it, which are the production npm tree the
