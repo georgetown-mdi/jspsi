@@ -2488,6 +2488,7 @@ test("runOnlineBootstrap reports a lost observed-payload write on fd 3 and in th
     expect(value.configWriteError).toBeUndefined();
     expect(process.exitCode).toBe(73);
     expect(lines.map((l) => l.type)).toEqual(["warning"]);
+    expect(lines.map((l) => l.source)).toEqual(["persistenceLoss"]);
     expect(String(lines[0].message)).toContain(
       "recording the observed received-payload columns",
     );
@@ -3041,6 +3042,12 @@ test("runOnlineBootstrap reports both lost reuse-path refreshes on fd 3 and in t
     expect(process.exitCode).toBe(73);
     const messages = lines.map((l) => String(l.message));
     expect(lines.map((l) => l.type)).toEqual(["warning", "warning"]);
+    // Both refreshes lose the same kind of write, so both take its source and
+    // the exit code it pairs with.
+    expect(lines.map((l) => l.source)).toEqual([
+      "persistenceLoss",
+      "persistenceLoss",
+    ]);
     expect(
       messages.filter((m) => m.includes("consented to receive")),
     ).toHaveLength(1);

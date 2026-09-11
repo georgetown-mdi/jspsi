@@ -284,6 +284,7 @@ import {
   BOTH_SWEPT_GUIDANCE,
   SIGNING_WITHOUT_RECORD_WARNING,
   TERMINATED_RECORD_UNBUILT_WARNING,
+  UNNAMED_PARTNER_ACCOUNTING_NOTE,
   entryHelloResidueGuidance,
   type RunProtocolResult,
   type SigningPersist,
@@ -790,6 +791,7 @@ test("the local own-columns selection reaches the result formatter", async () =>
 function runExchangeConfirming(
   runShape: ResolvedRunShape,
   settled?: Record<string, unknown>,
+  partnerTerms: { identity?: string } = { identity: "Party B" },
 ) {
   return async (
     _conn: unknown,
@@ -803,11 +805,7 @@ function runExchangeConfirming(
       ) => void;
     },
   ): Promise<unknown> => {
-    options.onProtocolConfirmed?.(
-      { identity: "Party B" },
-      "receiver",
-      runShape,
-    );
+    options.onProtocolConfirmed?.(partnerTerms, "receiver", runShape);
     const byDefault = await defaultRunExchange();
     return settled ?? byDefault;
   };
@@ -884,6 +882,10 @@ test("names a deduplicating cardinality and warns on an over-bound projection", 
   ]);
   expect(lines[1].message).toBe(cardinalityNotice);
   expect(lines[2].message).toBe(pairTableAdvisory);
+  // Two notices raised at the same boundary, under two sources: a supervisor
+  // alerting on the projection alone reads the second without the first.
+  expect(lines[1].source).toBe("resolvedCardinality");
+  expect(lines[2].source).toBe("pairTableAdvisory");
 }, 20_000);
 
 test("leaves the pre-round boundary silent on a one-to-one run", async () => {
@@ -929,6 +931,68 @@ test("leaves the pre-round boundary silent on a one-to-one run", async () => {
   ]);
 
   expect(mockState.warnings).toStrictEqual([]);
+}, 20_000);
+
+test("an unnamed partner on a record-filing run takes its own warning class", async () => {
+  // Two warnings of one run, raised for unrelated reasons: the partner named
+  // nobody, and the record could not be built. A supervisor that alerts on the
+  // second reads them apart by source alone.
+  vi.mocked(runExchange).mockImplementation(
+    runExchangeConfirming(
+      {
+        cardinality: "one-to-one",
+        localDeduplicate: false,
+        partnerDeduplicate: false,
+        localRecordCount: 3,
+        localDeclaredRecordCount: 3,
+        partnerRecordCount: 3,
+        localExpectsOutput: true,
+        partnerAssociationTableWithheld: false,
+      },
+      undefined,
+      {},
+    ) as never,
+  );
+  mockFd3Open();
+  try {
+    await Promise.all([
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        output: undefined,
+        verbosity: -1,
+        loggerName: "test-a",
+        recordOutput: { recordFile: path.join(tmpDir, "rec-a.json") },
+        fileSyncRuntime: { eventStream: true },
+      }),
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        output: undefined,
+        verbosity: -1,
+        loggerName: "test-b",
+      }),
+    ]);
+  } finally {
+    vi.mocked(fs.fstatSync).mockRestore();
+  }
+
+  const warnings = takeFd3Lines().filter((l) => l.type === "warning");
+  expect(warnings.map((l) => l.source)).toEqual([
+    "unnamedPartnerRecord",
+    "persistenceLoss",
+  ]);
+  expect(warnings[0].message).toBe(UNNAMED_PARTNER_ACCOUNTING_NOTE);
 }, 20_000);
 
 // --- the post-run entity-cluster diagnostic ------------------------------------
@@ -1353,6 +1417,7 @@ test("a record the run was asked for and could not write warns on fd 3 and exits
     "metrics",
     "result",
   ]);
+  expect(lines[1].source).toBe("persistenceLoss");
   expect(String(lines[1].message)).toContain(
     "the audit record could not be written to",
   );
@@ -1420,6 +1485,7 @@ test(
       "metrics",
       "result",
     ]);
+    expect(lines[1].source).toBe("persistenceLoss");
     expect(lines[1].message).toBe(NO_RECORD_BUILT_WARNING);
     expect(lines[3].resultWritten).toBe(true);
     // What the warning asserts: neither the record nor its keys reached disk.
@@ -2816,6 +2882,60 @@ test(
 // states the fact, and only when it is true.
 
 test(
+  "a terminated run whose record could not be written reports the loss on the stream",
+  { timeout: BOTH_ARMED_HANG_BACKSTOP_MS + 5_000 },
+  async () => {
+    // The other half of the terminated-run notice: the record built and the
+    // write failed. It takes the same source as its sibling, and not the
+    // persistence-loss source, whose exit code would tell a supervisor the
+    // opposite of what this run needs.
+    const keyFileA = path.join(tmpDir, "a.key");
+    const keyFileB = path.join(tmpDir, "b.key");
+    saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
+    saveKeyFile(keyFileB, { sharedSecret: TOKEN_A });
+    // A path whose parent is a regular file, so the write fails on its own
+    // rather than through a mocked writer.
+    const blocker = path.join(tmpDir, "blocker");
+    fs.writeFileSync(blocker, "x");
+    const recordA = path.join(blocker, "record-a.json");
+
+    vi.mocked(runExchange).mockImplementation((async () => {
+      await awaitBothArmed();
+      throw new ReceiptVerificationError("simulated receipt pin mismatch");
+    }) as never);
+    vi.mocked(exchangeRecordFromFailure).mockReturnValue(terminatedAudit);
+    mockFd3Open();
+    try {
+      const [resultA, resultB] = await Promise.allSettled([
+        runSigningParty(
+          keyFileA,
+          "test-a",
+          path.join(tmpDir, "receipt-a.json"),
+          { recordFile: recordA },
+          { eventStream: true },
+        ),
+        runSigningParty(
+          keyFileB,
+          "test-b",
+          path.join(tmpDir, "receipt-b.json"),
+        ),
+      ]);
+      expect(resultA.status).toBe("rejected");
+      expect(resultB.status).toBe("rejected");
+    } finally {
+      vi.mocked(fs.fstatSync).mockRestore();
+    }
+
+    const warnings = takeFd3Lines().filter((l) => l.type === "warning");
+    expect(warnings.map((l) => l.source)).toEqual(["terminatedRunRecord"]);
+    expect(String(warnings[0].message)).toContain(
+      "the audit record could not be written to",
+    );
+    expect(process.exitCode).not.toBe(73);
+  },
+);
+
+test(
   "a terminated run whose record could not be built reports the loss on the stream",
   { timeout: BOTH_ARMED_HANG_BACKSTOP_MS + 5_000 },
   async () => {
@@ -2859,8 +2979,13 @@ test(
     // Only party A ran under --event-stream, so every captured line is its own.
     const lines = takeFd3Lines();
     expect(
-      lines.filter((l) => l.type === "warning").map((l) => String(l.message)),
-    ).toContain(TERMINATED_RECORD_UNBUILT_WARNING);
+      lines
+        .filter((l) => l.type === "warning")
+        .map((l) => [l.source, String(l.message)]),
+    ).toContainEqual([
+      "terminatedRunRecord",
+      TERMINATED_RECORD_UNBUILT_WARNING,
+    ]);
     // The run still fails on its own terms: the terminal event is the error, not
     // the persistence-loss report a completed run's lost artifact takes.
     expect(lines[lines.length - 1].type).toBe("error");
@@ -2968,6 +3093,7 @@ test("signing with records off warns on both the log and the event stream", asyn
   // terms, or data would have been sent.
   const lines = takeFd3Lines();
   expect(lines.map((l) => l.type)).toEqual(["warning", "metrics", "error"]);
+  expect(lines[0].source).toBe("signingWithoutRecord");
   expect(lines[0].message).toBe(SIGNING_WITHOUT_RECORD_WARNING);
 });
 
@@ -4518,6 +4644,7 @@ test("a failed post-authentication hook warns on fd 3 and exits 73 with a result
   const lines = takeFd3Lines();
   const warnings = lines.filter((l) => l.type === "warning");
   expect(warnings).toHaveLength(1);
+  expect(warnings[0].source).toBe("persistenceLoss");
   expect(String(warnings[0].message)).toContain(
     "the post-authentication persistence step",
   );
@@ -5163,6 +5290,7 @@ test("a throw from the pre-terminal hook does not fail the completed exchange", 
   ]);
   // The cause stays on the human log; the stream warning has first-party
   // prose only, so no pre-rendered error text reaches it double-escaped.
+  expect(lines[1].source).toBe("persistenceLoss");
   expect(String(lines[1].message)).not.toContain("let one escape");
   expect(mockState.errors.some((line) => line.includes("let one escape"))).toBe(
     true,
@@ -5482,6 +5610,9 @@ test("a host-key divergence under --event-stream emits a warning event and still
   expect(lines[0].type).toBe("stages");
   expect(lines[1].type).toBe("warning");
   expect(lines[1].v).toBe(1);
+  // The security signal of this stream, under a source of its own: a supervisor
+  // alerting on it alone never has to read the prose of a routine notice.
+  expect(lines[1].source).toBe("hostKeyDivergence");
   expect(lines[1].message).toBe(divergence);
   expect(lines[2].type).toBe("metrics");
   expect(lines[3].type).toBe("result");
@@ -5547,6 +5678,7 @@ test("a terms-exchange warning under --event-stream reaches the fd-3 warning eve
   const warning = lines.find((line) => line.type === "warning");
   expect(warning).toBeDefined();
   expect(warning!.v).toBe(1);
+  expect(warning!.source).toBe("termsExchange");
   // Numbers and first-party prose only, and short of the per-value display cap,
   // so both sinks hold the notice whole: neither escape rewrites or cuts it.
   expect(warning!.message).toBe(widthNotice);
@@ -5622,6 +5754,7 @@ test("a terms-exchange warning past the per-value cap reaches stderr as whole as
 
   const warning = takeFd3Lines().find((line) => line.type === "warning");
   expect(warning).toBeDefined();
+  expect(warning!.source).toBe("termsExchange");
   expect(warning!.message).toBe(composedWarning);
 
   // The same text on the human log, prefix aside: equality rather than
@@ -5691,6 +5824,7 @@ test("a failed onAuthenticated hook under --event-stream emits a warning event b
     "metrics",
     "result",
   ]);
+  expect(lines[0].source).toBe("persistenceLoss");
   expect(String(lines[0].message)).toContain("did not complete");
   // The cause stays on the human log, which the warning event does not repeat
   // (its own escape pass would double-escape rendered error text).

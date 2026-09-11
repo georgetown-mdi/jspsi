@@ -52,17 +52,44 @@ export const EVENT_RESULT_CLUSTER_SHAPES_MAX = 256;
  * these strings -- none is partner-derived -- so a consumer can switch on the
  * discriminant safely. `stages` is the one-shot stage-list event; `stage` marks
  * each stage transition; `stageEnd` reports a completed stage's wall-clock
- * duration; `warning` holds a non-fatal warning (a terms-exchange warning, the
- * cross-party host-key divergence notice, the resolved-cardinality and
- * pair-table notices of the post-terms, pre-round boundary, the
- * signing-without-a-record notice, a missing audit artifact, or any
- * post-exchange persistence failure);
+ * duration; `warning` holds a non-fatal warning, whose own {@link WarningSource}
+ * field names which notice raised it;
  * `metrics` is the one-shot operational-counter summary emitted just before the
  * terminal event; `result` and `error` are the two terminal events (exactly one
  * fires per run).
  */
 export type EventType =
   "stages" | "stage" | "stageEnd" | "warning" | "metrics" | "result" | "error";
+
+/**
+ * The closed vocabulary of `warning` `source` values, naming which of this
+ * party's notices raised the warning. Like `type`, every value is this party's
+ * own string and none is partner-derived, so a consumer switching on it can
+ * tell the cross-party host-key divergence security signal from a routine
+ * per-run notice without parsing `message` -- which an unattended supervisor
+ * otherwise has to, to decide whether to alert.
+ *
+ * `persistenceLoss` is the one value tied to an exit code: it is stamped by
+ * {@link reportPersistenceLoss}, the single call site that also sets
+ * {@link PERSISTENCE_LOSS_EXIT_CODE}, so the source and the code cannot part.
+ *
+ * docs/spec/CLI_EVENTS.md (Warning sources) is the registry every value is
+ * described in, and where a new warning source claims one;
+ * scripts/check-warning-sources.mjs fails when the two disagree.
+ */
+export const WARNING_SOURCES = [
+  "termsExchange",
+  "hostKeyDivergence",
+  "unnamedPartnerRecord",
+  "resolvedCardinality",
+  "pairTableAdvisory",
+  "signingWithoutRecord",
+  "terminatedRunRecord",
+  "persistenceLoss",
+] as const;
+
+/** One {@link WARNING_SOURCES} value; see that list. */
+export type WarningSource = (typeof WARNING_SOURCES)[number];
 
 /**
  * The four terminal-error categories, lifted verbatim from the web's
@@ -134,11 +161,12 @@ export interface StageEndEvent extends EventBase {
 }
 
 /**
- * A non-fatal warning; see the `warning` case of {@link EventType} for the
- * warning sources `message` holds.
+ * A non-fatal warning. `source` names which notice raised it, so a supervisor
+ * classifies the warning without parsing `message`.
  */
 export interface WarningEvent extends EventBase {
   type: "warning";
+  source: WarningSource;
   message: string;
 }
 
@@ -321,11 +349,21 @@ export function buildStageEndEvent(
   };
 }
 
-/** Build a warning event from a non-fatal warning message. */
-export function buildWarningEvent(message: string): WarningEvent {
+/**
+ * Build a warning event from the notice that raised it and its message.
+ * `source` is required rather than defaulted so a new warning site cannot
+ * compile until it chooses a {@link WARNING_SOURCES} value.
+ */
+export function buildWarningEvent(
+  source: WarningSource,
+  message: string,
+): WarningEvent {
   return {
     v: EVENT_STREAM_VERSION,
     type: "warning",
+    // This party's own closed vocabulary, like `type` and the error `category`,
+    // so it takes no escape.
+    source,
     // Terms-exchange warnings can embed partner-authored column names, so
     // redact and sanitize before the text reaches the stream, at the shared
     // warning-composition budget (WARNING_MESSAGE_MAX_DISPLAY_LENGTH) rather
@@ -514,7 +552,7 @@ export interface EventStreamEmitter {
   stages(stages: ExchangeStageDefinition[]): void;
   stage(id: string, label: string): void;
   stageEnd(id: string, durationMs: number): void;
-  warning(message: string): void;
+  warning(source: WarningSource, message: string): void;
   metrics(
     recordsProcessed: number,
     transportRetries: number,
@@ -544,7 +582,8 @@ function createEventStreamEmitter(): EventStreamEmitter {
     stage: (id, label) => writer.emit(buildStageEvent(id, label)),
     stageEnd: (id, durationMs) =>
       writer.emit(buildStageEndEvent(id, durationMs)),
-    warning: (message) => writer.emit(buildWarningEvent(message)),
+    warning: (source, message) =>
+      writer.emit(buildWarningEvent(source, message)),
     metrics: (recordsProcessed, transportRetries, reconnects) =>
       writer.emit(
         buildMetricsEvent(recordsProcessed, transportRetries, reconnects),
@@ -591,9 +630,11 @@ export const PERSISTENCE_LOSS_EXIT_CODE = 73;
 
 /**
  * Report a persistence failure the completed exchange survives, on both machine
- * channels at once: the fd-3 `warning` event (when the stream is open) and
+ * channels at once: the fd-3 `warning` event (when the stream is open), under
+ * the `persistenceLoss` source this function stamps for every caller, and
  * {@link PERSISTENCE_LOSS_EXIT_CODE}. Every non-fatal loss goes through here, so
- * a new one cannot land on one channel and miss the other. The one loss that is
+ * a new one cannot land on one channel and miss the other, and no other warning
+ * source reaches the stream beside that exit code. The one loss that is
  * not survivable -- a result file that could not be written -- reports as the
  * terminal `error` event instead, at the same exit code: `runProtocol` stamps
  * it at that write, so a partner-shaped fault elsewhere in the same output
@@ -612,6 +653,6 @@ export function reportPersistenceLoss(
   notice: string,
   eventStream: EventStreamEmitter | undefined,
 ): void {
-  eventStream?.warning(notice);
+  eventStream?.warning("persistenceLoss", notice);
   process.exitCode = PERSISTENCE_LOSS_EXIT_CODE;
 }

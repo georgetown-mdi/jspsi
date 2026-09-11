@@ -586,7 +586,7 @@ async function runExchangeStage(params: {
             maxLength: WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
           }),
         );
-        emit((e) => e.warning(msg));
+        emit((e) => e.warning("termsExchange", msg));
       },
       // A host-key divergence is a security signal, not a terms warning,
       // so it gets its own un-prefixed warn line; the message is
@@ -599,7 +599,7 @@ async function runExchangeStage(params: {
       // operator disambiguates a rekey from an interception out-of-band.
       onHostKeyDivergence: (msg: string) => {
         log.warn(msg);
-        emit((e) => e.warning(msg));
+        emit((e) => e.warning("hostKeyDivergence", msg));
       },
       // A present-but-malformed partner host-key advertisement is
       // dropped by the fail-soft parse, so reconciliation is silently
@@ -636,7 +636,9 @@ async function runExchangeStage(params: {
         ] as const;
         if (recordOutput !== undefined && partnerTerms.identity === undefined) {
           log.warn(...line, UNNAMED_PARTNER_ACCOUNTING_NOTE);
-          emit((e) => e.warning(UNNAMED_PARTNER_ACCOUNTING_NOTE));
+          emit((e) =>
+            e.warning("unnamedPartnerRecord", UNNAMED_PARTNER_ACCOUNTING_NOTE),
+          );
         } else log.info(...line);
         log.info("role:", resolvedRole);
         // Each party's deduplicate value comes from its own document, so the
@@ -659,10 +661,13 @@ async function runExchangeStage(params: {
         // neither includes partner-authored text in the sinks.
         const { cardinalityNotice, pairTableAdvisory } =
           describeResolvedRunShape(runShape);
-        for (const notice of [cardinalityNotice, pairTableAdvisory]) {
+        for (const [source, notice] of [
+          ["resolvedCardinality", cardinalityNotice],
+          ["pairTableAdvisory", pairTableAdvisory],
+        ] as const) {
           if (notice === undefined) continue;
           log.warn(notice);
-          emit((e) => e.warning(notice));
+          emit((e) => e.warning(source, notice));
         }
       },
     },
@@ -1408,7 +1413,9 @@ function prepareTransport(
   // its one escape from the emitter.
   if (signing !== null && recordOutput === undefined) {
     log.warn(SIGNING_WITHOUT_RECORD_WARNING);
-    emit((e) => e.warning(SIGNING_WITHOUT_RECORD_WARNING));
+    emit((e) =>
+      e.warning("signingWithoutRecord", SIGNING_WITHOUT_RECORD_WARNING),
+    );
   }
   if (auth) {
     // Fail fast on the locally-knowable secret preconditions -- a malformed
@@ -2299,9 +2306,12 @@ export async function runProtocol(
           disclosedRecord.keys,
           loggerName,
         );
-        if (failure !== undefined) emit((e) => e.warning(failure));
+        if (failure !== undefined)
+          emit((e) => e.warning("terminatedRunRecord", failure));
       } else if (exchangeRecordOwedButUnbuilt(err)) {
-        emit((e) => e.warning(TERMINATED_RECORD_UNBUILT_WARNING));
+        emit((e) =>
+          e.warning("terminatedRunRecord", TERMINATED_RECORD_UNBUILT_WARNING),
+        );
       }
     }
 
