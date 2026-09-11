@@ -24,8 +24,9 @@ export const ENTITY_CLUSTER_SHAPES_NAMED = 6;
  * signature of a key that named a group rather than a person, while a result
  * whose clusters are mostly `1 x 1` matched close to one-to-one and has nothing
  * to break up (docs/spec/PROTOCOL.md, Choosing linkage keys under closure).
- * Under `many-to-many` a largest cluster of two records against one is an
- * ordinary outcome, so the guide is held to a share that is not.
+ * The guide is suppressed for a 2 x 1 largest cluster only once either party
+ * has more than twenty matched records, so a small test run may see it on an
+ * ordinary result.
  */
 export const ENTITY_CLUSTER_GUIDE_SHARE = 0.1;
 
@@ -68,9 +69,11 @@ function describeShape(shape: EntityClusterShape): string {
  * itself. No linkage-key value, record, or row index reaches it, so a display
  * sink escapes it exactly as it escapes any other message it is handed.
  *
- * Total over every summary: one whose shape list is empty states the counts it
- * has and nothing about the sizes, so a seat handed a distribution it could not
- * read still states what it was told.
+ * Total for the summaries a seat holds, not every value the type admits: core
+ * composes one whose shapes always account for its counts, and the console
+ * relay drops an inconsistent frame rather than pass one through, so the
+ * empty-shape branch below composes over a value no producer today sends. A
+ * non-empty inconsistent list, if one ever reached here, is rendered as given.
  */
 export function describeEntityClusters(summary: EntityClusterSummary): string {
   if (summary.clusterCount === 0)
