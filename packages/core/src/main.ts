@@ -155,6 +155,7 @@ export {
   sanitizeForDisplay,
   displayText,
   renderedDisplayCost,
+  boundRawFragmentForFit,
   clipToRenderedCost,
   replaceControlCharactersForDisplay,
   trimPartialControlCharacterMarker,
@@ -190,7 +191,10 @@ export {
   ruleSetCitation,
 } from "./config/compatibilityMessage";
 export type { CompatibilityMessageFragment } from "./config/compatibilityMessage";
-export { describeDecodeError } from "./utils/describeDecodeError";
+export {
+  describeDecodeError,
+  rawDecodeErrorDescription,
+} from "./utils/describeDecodeError";
 
 export { StandardizationSchema } from "./config/standardizationSchema";
 export type {

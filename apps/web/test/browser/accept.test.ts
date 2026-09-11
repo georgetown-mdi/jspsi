@@ -446,6 +446,36 @@ describe("acceptor screen: decode gate", () => {
     expect(text).not.toContain('"code"');
   });
 
+  test("a rejected endpoint key renders escaped once in the decode alert", async () => {
+    // This alert is a React text node, which neutralizes HTML markup but not a
+    // bidi override, so the description reaching it is escaped where it is
+    // composed -- and escaped ONCE: the key holds a literal backslash, which a
+    // second pass would quadruple on the surface naming the field to remove.
+    const hostileKey = "col\u202e\\x";
+    window.location.hash = await encodeRaw({
+      version: "1",
+      linkageTerms: acceptorTerms,
+      sharedSecret: generateSharedSecret(),
+      connectionEndpoint: {
+        channel: "webrtc",
+        host: "127.0.0.1",
+        port: 3000,
+        path: "/api/",
+        [hostileKey]: "x",
+      },
+    });
+    app.render(createElement(AcceptorScreen));
+
+    await expect
+      .element(page.getByText("Cannot accept this invitation"))
+      .toBeInTheDocument();
+    const text = document.body.textContent;
+    expect(text).toContain(
+      `Remove unexpected field(s): ${sanitizeForDisplay(hostileKey)}`,
+    );
+    expect(text).not.toContain("\u202e");
+  });
+
   // The name class the CSV header read removes is refused where a partner's
   // token is decoded, and this seat is where a browser acceptor meets that
   // refusal. Each case plants an ASCII marker beside the character, so a name

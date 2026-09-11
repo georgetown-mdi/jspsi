@@ -1,7 +1,7 @@
 import {
-  describeDecodeError,
   decodeInvitation,
   isInvitationExpired,
+  rawDecodeErrorDescription,
   stripInvitationWhitespace,
   UsageError,
 } from "@psilink/core";
@@ -40,7 +40,7 @@ export async function decodeAndValidateInvitation(
     token = await decodeInvitation(stripInvitationWhitespace(encoded));
   } catch (err) {
     throw new UsageError(
-      "invalid invitation string: " + describeDecodeError(err),
+      "invalid invitation string: " + rawDecodeErrorDescription(err),
     );
   }
 

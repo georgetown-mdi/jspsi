@@ -97,8 +97,9 @@ export const TEXT_CONTROL_CHAR_PATTERN = /[\u0000-\u001f\u007f-\u009f]/;
  * Shared refusal message for every free-text control-character rejection, so
  * the document reports the same thing about the same class of value wherever
  * it fires. A fixed literal naming no submitted value: the offending field is
- * located by the issue `path`, which `describeDecodeError` escapes segment by
- * segment, as the unsanitized parse-error path (protocolSetup) requires.
+ * located by the issue `path`, which holds the submitted bytes and is escaped
+ * once at the sink that shows the description (protocolSetup composes it into
+ * an error for `sanitizeErrorForDisplay` to render).
  */
 export const TEXT_CONTROL_CHAR_MESSAGE =
   "a linkage terms free-text value must not contain control characters";
@@ -216,8 +217,8 @@ export const NAME_SHAPE_MESSAGE =
  * Shared refusal message for a terms string -- a member value, an array
  * element, or an object KEY -- that is not well-formed UTF-16. A fixed literal
  * naming no submitted value: the offending string is located by the issue
- * `path`, which `describeDecodeError` escapes segment by segment, as the
- * unsanitized parse-error path (protocolSetup) requires.
+ * `path`, which holds the submitted bytes and is escaped once at the sink that
+ * shows the description.
  */
 export const LONE_SURROGATE_MESSAGE =
   "a linkage terms text value must not contain an unpaired UTF-16 surrogate";
@@ -730,7 +731,7 @@ const TransformParamValueSchema = z
     {
       // A fixed literal, naming no partner value: the offending step and param
       // are located by the issue path (linkageKeys[i].elements[j].transform[k]
-      // .params.<name>), which describeDecodeError escapes segment by segment.
+      // .params.<name>), which the display boundary escapes once.
       message: `a linkage key element transform param must not exceed ${MAX_TRANSFORM_PARAM_LENGTH} characters`,
     },
   );
