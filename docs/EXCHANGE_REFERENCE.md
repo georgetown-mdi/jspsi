@@ -717,7 +717,7 @@ connection:
 *Required:* no  
 *Applies to:* `webrtc`
 
-STUN servers for ICE candidate gathering. Each entry is a string in `stun:` or `stuns:` URI format. Mutually exclusive with `ice_provision`; if `ice_provision` is present, `stun` is invalid.
+STUN servers for ICE candidate gathering. Each entry is a string in `stun:` or `stuns:` URI format and must name a host: a scheme with no host (`stun:`) names no server, and since a configured list replaces the built-in default it would leave the run with no STUN at all, so it is refused. Mutually exclusive with `ice_provision`; if `ice_provision` is present, `stun` is invalid.
 
 > **Honored by the CLI only.** The CLI builds its peer connection from `stun` and `turn`, and a configured list replaces the built-in default rather than adding to it, so the list you author is the list used. The browser client still builds its peer connection with a fixed set of STUN servers and no TURN entry, so on a web-conducted exchange these fields change no candidate the browser gathers. See [CLI.md](CLI.md#stun-and-what-it-discloses) for the default that applies when neither is set, what it discloses, and the idiom for gathering host candidates only.
 
@@ -740,13 +740,37 @@ The CLI passes these entries to its peer connection (the browser client does not
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `url` | string | yes | TURN server URI (`turn:` or `turns:`) |
+| `url` | string | yes | TURN server URI: `turn:` or `turns:` followed by a host, with `transport` unset or lowercase `tcp` (`udp` too on a `turn:` url). A host-less `turn:`, or any other `transport` value, is refused |
 | `username` | string | yes | TURN username |
 | `credential` | string | yes | TURN credential; `@`-file recommended |
 | `credential_type` | enum | no | `password` (default) \| `hmac-sha1` |
 
 ```yaml
 connection:
+  turn:
+    - url: "turns:turn.example.org:443"
+      username: alice
+      credential: "@/run/secrets/turn.key"
+```
+
+### `connection.ice_transport_policy`
+
+*Type:* enum (`all` | `relay`)  
+*Required:* no  
+*Default:* the transport's own, which is `all`  
+*Applies to:* `webrtc`
+
+Which candidate types ICE may use. `all` permits host, server-reflexive and relay candidates. `relay` gathers relay candidates only, so this party offers the partner no host or server-reflexive address and every path the exchange can take runs through a configured TURN server.
+
+`relay` requires a source of relay candidates: a connection that sets it with no `turn` entry is a usage error (exit 64) before anything is dialed, since it could gather nothing to pair.
+
+It holds for a `turn` entry the ICE layer keeps. An entry whose `url` sets a `transport` the layer cannot use is dropped there, which would leave a relay-only run gathering host candidates, so the accepted `transport` values ([`connection.turn`](#connectionturn)) are the ones it keeps and any other is refused at parse.
+
+> **Honored by the CLI only**, like `stun` and `turn` (see [`connection.stun`](#connectionstun)). It is each party's own setting rather than a term of the exchange: it constrains only the candidates this party gathers, an invitation cannot carry it, and the partner is unaffected. What it is for, and what a run configured with it reports, are in [CLI.md](CLI.md#turn).
+
+```yaml
+connection:
+  ice_transport_policy: relay
   turn:
     - url: "turns:turn.example.org:443"
       username: alice

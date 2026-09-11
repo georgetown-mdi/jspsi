@@ -313,6 +313,9 @@ export function webRtcDialFrom(
       role,
       sharedSecret,
       iceServers: iceServersFromConnection(connection),
+      ...(connection.iceTransportPolicy !== undefined && {
+        iceTransportPolicy: connection.iceTransportPolicy,
+      }),
       ...(peerTimeoutMs !== undefined && {
         inactivityTimeoutMs: peerTimeoutMs,
         rendezvousTimeoutMs: peerTimeoutMs,
