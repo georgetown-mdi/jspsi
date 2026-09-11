@@ -1100,6 +1100,17 @@ states that the accounting is missing a disclosure that happened. It offers no
 record download, unlike the completed run's, because a stopped run has no results
 surface to offer one from. Both go to the diagnostic log as well.
 
+**When no record could be built.** An owed record can still fail to build: the
+build is a secondary artifact, so its failure leaves the run's result untouched
+and reports that no record could be produced (see
+[EXCHANGE_RECORD.md](EXCHANGE_RECORD.md#when-a-record-is-owed)). That leaves a
+disclosure that happened with nothing to append. A run that stopped in that state
+raises a notice of its own, on the terms the failed append takes: beside the run's
+failure rather than in place of it, with no record download to offer, and in the
+diagnostic log as well. The notice states the consequence -- this run has no entry
+in the accounting -- because the cause is written where the build failed, on the
+operator log an unattended run discards.
+
 **What a stopped run's entry states.** The entry is the record, so what it states
 is the record's fields and nothing beside them: the columns this party consented
 to disclose and sent, the run's own instant, the records it exposed, and its

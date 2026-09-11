@@ -6,6 +6,7 @@ import {
   ConnectionError,
   describeResolvedRunShape,
   exchangeRecordFromFailure,
+  exchangeRecordOwedButUnbuilt,
   getDefaultLinkageTerms,
   getLogger,
   runExchange,
@@ -18,6 +19,7 @@ import {
 import {
   DISCLOSURE_NOT_FILED_WARNING,
   STOPPED_DISCLOSURE_NOT_FILED_WARNING,
+  STOPPED_DISCLOSURE_RECORD_UNBUILT_WARNING,
   runManagedExchangeInBrowser,
 } from "../../../src/psi/managed/managedRunDriver.js";
 import {
@@ -154,8 +156,11 @@ vi.mock("@psilink/core", async (importOriginal) => {
     // Core marks a record-bearing failure through a module-private WeakMap, so a
     // suite that never runs the real exchange cannot produce one; the accessor is
     // mocked here and each test states which side of the payload send its failure
-    // fell on, as the CLI's own protocol suite does.
+    // fell on, as the CLI's own protocol suite does. Its sibling, which answers
+    // whether a record was owed for a failure carrying none, is marked the same
+    // way and mocked for the same reason.
     exchangeRecordFromFailure: vi.fn(() => undefined),
+    exchangeRecordOwedButUnbuilt: vi.fn(() => false),
   };
 });
 
@@ -164,6 +169,7 @@ const mockedAppendDisclosure = vi.mocked(appendDisclosureRecordToStore);
 const mockedBuildRunOutputs = vi.mocked(buildRunOutputs);
 const mockedRendezvous = vi.mocked(beginManagedRendezvous);
 const mockedRecordFromFailure = vi.mocked(exchangeRecordFromFailure);
+const mockedRecordOwedButUnbuilt = vi.mocked(exchangeRecordOwedButUnbuilt);
 const mockedRunExchange = vi.mocked(runExchange);
 const mockedOpen = vi.mocked(openPeerMessageConnection);
 const mockedWaitForIncoming = vi.mocked(waitForIncomingConnection);
@@ -1097,23 +1103,54 @@ describe("filing a stopped run's disclosure", () => {
     ).toEqual(["ward"]);
   });
 
-  test("files nothing when the run stopped before its payload was sent", async () => {
+  test("files nothing and raises nothing when the run stopped before its payload was sent", async () => {
     // Core opens the record-owed region at the send and hands nothing back for a
     // failure before it. Inventing an entry there would attest a disclosure that
-    // did not happen.
+    // did not happen, and so would a notice about a missing one.
     const { mc, stalled } = makeStalledExchangeMc();
     mockedOpen.mockResolvedValue(mc);
     acquireResources();
     mockedRunExchange.mockReturnValueOnce(stalled);
     const controller = new AbortController();
+    const onWarning = vi.fn();
 
-    const running = runDriver(controller.signal);
+    const running = runDriver(controller.signal, onWarning);
     await tick();
     controller.abort();
 
     await expect(running).rejects.toThrow("connection closed");
     expect(mockedRecordFromFailure).toHaveBeenCalled();
+    expect(mockedRecordOwedButUnbuilt).toHaveBeenCalled();
     expect(mockedAppendDisclosure).not.toHaveBeenCalled();
+    expect(onWarning).not.toHaveBeenCalled();
+  });
+
+  test("raises its own notice when the owed record could not be built", async () => {
+    // The disclosure happened and core could not produce the record for it, so
+    // there is nothing to file and the accounting stays short an entry. Core
+    // states the cause on the operator log, which an unattended run discards, so
+    // the consequence is raised where the run's other notices go.
+    const { mc } = makeParkedCloseMc();
+    mockedOpen.mockResolvedValue(mc);
+    acquireResources();
+    mockedRunExchange.mockRejectedValueOnce(new Error("data channel closed"));
+    mockedRecordOwedButUnbuilt.mockReturnValueOnce(true);
+    const onWarning = vi.fn();
+
+    await expect(
+      runDriver(new AbortController().signal, onWarning),
+    ).rejects.toThrow("data channel closed");
+
+    expect(mockedAppendDisclosure).not.toHaveBeenCalled();
+    expect(onWarning.mock.calls).toEqual([
+      [STOPPED_DISCLOSURE_RECORD_UNBUILT_WARNING],
+    ]);
+    // Not the failed-filing notice: nothing reached the accounting to be saved,
+    // so a notice saying the record could not be saved would name a write that
+    // was never attempted.
+    expect(STOPPED_DISCLOSURE_RECORD_UNBUILT_WARNING).not.toBe(
+      STOPPED_DISCLOSURE_NOT_FILED_WARNING,
+    );
   });
 
   test("files the disclosure before the failure propagates", async () => {
