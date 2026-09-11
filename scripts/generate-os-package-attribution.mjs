@@ -14,7 +14,10 @@
 // `--image` runs the query itself against a tag, which is what
 // image_smoke.yaml does against the image that job just built. `--check`
 // compares the result against the committed list and names every package that
-// differs.
+// differs. It fails on a package added or removed and on a license string that
+// moved; a version that moved it reports without failing, because the runtime
+// stage's package install resolves its versions against a live index that moves
+// under a digest-pinned base.
 //
 // The queries below were run against both built images at both architectures.
 // They query the image by tag because neither Dockerfile names its final stage:
@@ -322,26 +325,36 @@ export function compareRows(committed, measured) {
   return { added, removed, changed };
 }
 
-/** One line per difference, naming the package and what moved. */
-export function describeDifferences({ added, removed, changed }) {
-  return [
+/**
+ * One line per difference, naming the package and what moved, split into the
+ * lines that fail `--check` and the lines it only reports.
+ *
+ * A package added or removed and a license string that moved are changes to
+ * what the image ships. A version that moved is not: the runtime stage installs
+ * against whatever index the builder reaches, and a distribution moves patch
+ * versions within days, so two builds of one digest-pinned Dockerfile hold the
+ * same package set at different versions.
+ */
+export function classifyDifferences({ added, removed, changed }) {
+  const failing = [
     ...added.map((row) => `added: ${row.name} ${row.version} (${row.license})`),
     ...removed.map(
       (row) => `removed: ${row.name} ${row.version} (${row.license})`,
     ),
-    ...changed.flatMap((entry) => {
-      const lines = [];
-      if (entry.committed.version !== entry.measured.version)
-        lines.push(
-          `changed: ${entry.name} version ${entry.committed.version} -> ${entry.measured.version}`,
-        );
-      if (entry.committed.license !== entry.measured.license)
-        lines.push(
+    ...changed
+      .filter((entry) => entry.committed.license !== entry.measured.license)
+      .map(
+        (entry) =>
           `changed: ${entry.name} license ${entry.committed.license} -> ${entry.measured.license}`,
-        );
-      return lines;
-    }),
+      ),
   ];
+  const informational = changed
+    .filter((entry) => entry.committed.version !== entry.measured.version)
+    .map(
+      (entry) =>
+        `changed: ${entry.name} version ${entry.committed.version} -> ${entry.measured.version}`,
+    );
+  return { failing, informational };
 }
 
 /** The `docker` arguments that run one image's query against a tag. */
@@ -388,11 +401,11 @@ function usage() {
   console.error(
     "usage: node scripts/generate-os-package-attribution.mjs <default|fips> --image <tag>\n" +
       "       node scripts/generate-os-package-attribution.mjs <default|fips> --query-output <path|->\n\n" +
-      "Writes the image's list beside NOTICE. With --check it writes nothing and\n" +
-      "fails when the generated list differs from the committed one, naming every\n" +
-      "package that moved. --image needs a Docker daemon and an image built from\n" +
-      "this checkout; --query-output takes the raw stdout of that image's own\n" +
-      "package-manager query.",
+      "Writes the image's list beside NOTICE. With --check it writes nothing,\n" +
+      "names every package that moved, and fails when the package set or a\n" +
+      "license moved; a version that moved it only reports. --image needs\n" +
+      "a Docker daemon and an image built from this checkout; --query-output\n" +
+      "takes the raw stdout of that image's own package-manager query.",
   );
 }
 
@@ -458,27 +471,40 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
           `${image.listFile}: ${readListRows(committed).length} packages, and the image holds each at the version and license the list states`,
         );
       } else {
-        const differences = describeDifferences(
+        const { failing, informational } = classifyDifferences(
           compareRows(readListRows(committed), readListRows(generated)),
         );
         const statedPin = readListBasePin(committed);
         const generatedPin = readListBasePin(generated);
         if (statedPin !== generatedPin)
-          differences.push(
+          failing.push(
             `base pin: ${statedPin} -> ${generatedPin}, so ${image.dockerfile} names a base the list was not generated from`,
           );
-        console.error(
-          `${image.listFile} does not state what ${source} reports:`,
-        );
-        for (const difference of differences) console.error(`  ${difference}`);
-        if (differences.length === 0)
-          console.error(
-            "  the rows agree, so the header differs; regenerate the list",
+        if (failing.length === 0 && informational.length === 0)
+          failing.push(
+            "the rows agree, so the header differs; regenerate the list",
           );
-        console.error(
-          `\nRegenerate it with: node scripts/generate-os-package-attribution.mjs ${options.variant} ${source}`,
-        );
-        process.exit(1);
+        const regenerate = `Regenerate it with: node scripts/generate-os-package-attribution.mjs ${options.variant} ${source}`;
+        if (failing.length === 0) {
+          console.log(
+            `${image.listFile} states a stale version for ${informational.length} ${informational.length === 1 ? "package" : "packages"}; its package set and every license string are what ${source} reports, so this check passes:`,
+          );
+          for (const line of informational) console.log(`  ${line}`);
+          console.log(`\n${regenerate}`);
+        } else {
+          console.error(
+            `${image.listFile} does not state what ${source} reports:`,
+          );
+          for (const line of failing) console.error(`  ${line}`);
+          if (informational.length > 0) {
+            console.error(
+              "\nThese versions also moved, which this check reports rather than fails on:",
+            );
+            for (const line of informational) console.error(`  ${line}`);
+          }
+          console.error(`\n${regenerate}`);
+          process.exit(1);
+        }
       }
     }
   } catch (error) {

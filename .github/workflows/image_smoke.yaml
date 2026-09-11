@@ -810,10 +810,10 @@ jobs:
       # comparison made when the list was generated and not on this check --
       # release.yaml is where both architectures are built. And the default
       # image's `apk add --no-cache samba-client` resolves against whatever the
-      # Alpine mirror holds, so that list can go stale with nothing in this
-      # repository changing: a failure naming only a version move is that, and
-      # the remedy is to regenerate the list rather than to look for the commit
-      # that moved it.
+      # Alpine mirror holds, so a version in that list goes stale with nothing
+      # in this repository changing: the step reports a version that moved and
+      # passes, failing only on a package added or removed or a license that
+      # moved.
       #
       # After the functional smokes for the reason the step above gives: an
       # attribution list that has drifted is worth less than the assertions

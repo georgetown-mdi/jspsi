@@ -826,6 +826,13 @@ image, so a re-measurement builds with `--no-cache` or it measures the cache.
   can go stale with nothing in this repository changing, and the remedy is to
   regenerate it. The FIPS variant has no such exposure: its dnf transactions pin
   `--releasever=2023.12.20260817`.
+- The drift check fails on a package added or removed and on a license string
+  that moved; a version that moved it reports without failing. That install
+  resolves its dependency versions against the live index, which moves patch
+  versions within days, so two builds of the same digest-pinned Dockerfile hold
+  one package set at different versions. Each version a committed list states is
+  therefore as of that list's generation, refreshed when the list is
+  regenerated.
 
 ### What the 45 packages add beyond `smbclient`
 

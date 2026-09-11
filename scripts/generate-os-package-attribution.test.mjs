@@ -1,11 +1,12 @@
+import { spawnSync } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import { describe, expect, it } from "vitest";
 
 import {
   basePin,
+  classifyDifferences,
   compareRows,
-  describeDifferences,
   dockerQueryArgv,
   generateList,
   IMAGES,
@@ -211,30 +212,137 @@ describe("drift against the committed list", () => {
       license: "LGPL-3.0-or-later OR GPL-2.0-or-later",
     },
   ];
-  const measured = [
-    { name: "busybox", version: "1.37.0-r32", license: "GPL-2.0-only" },
-    { name: "gmp", version: "6.3.0-r4", license: "LGPL-3.0-or-later" },
-    { name: "samba-client", version: "4.23.8-r0", license: "GPL-3.0-or-later" },
-  ];
+  const classify = (measured) =>
+    classifyDifferences(compareRows(committed, measured));
 
-  it("names what was added, removed, and changed", () => {
-    const differences = compareRows(committed, measured);
-    expect(differences.added.map((row) => row.name)).toEqual(["samba-client"]);
-    expect(differences.removed.map((row) => row.name)).toEqual(["gdbm"]);
-    expect(differences.changed.map((entry) => entry.name)).toEqual([
-      "busybox",
-      "gmp",
-    ]);
-    expect(describeDifferences(differences)).toEqual([
-      "added: samba-client 4.23.8-r0 (GPL-3.0-or-later)",
-      "removed: gdbm 1.26-r0 (GPL-3.0-or-later)",
-      "changed: busybox version 1.37.0-r31 -> 1.37.0-r32",
-      "changed: gmp license LGPL-3.0-or-later OR GPL-2.0-or-later -> LGPL-3.0-or-later",
-    ]);
+  it("fails naming a package the image added", () => {
+    const measured = [
+      ...committed,
+      {
+        name: "samba-client",
+        version: "4.23.8-r0",
+        license: "GPL-3.0-or-later",
+      },
+    ];
+    expect(classify(measured)).toEqual({
+      failing: ["added: samba-client 4.23.8-r0 (GPL-3.0-or-later)"],
+      informational: [],
+    });
+  });
+
+  it("fails naming a package the image no longer holds", () => {
+    expect(classify(committed.filter((row) => row.name !== "gdbm"))).toEqual({
+      failing: ["removed: gdbm 1.26-r0 (GPL-3.0-or-later)"],
+      informational: [],
+    });
+  });
+
+  it("fails naming a package whose license moved", () => {
+    const measured = committed.map((row) =>
+      row.name === "gmp" ? { ...row, license: "LGPL-3.0-or-later" } : row,
+    );
+    expect(classify(measured)).toEqual({
+      failing: [
+        "changed: gmp license LGPL-3.0-or-later OR GPL-2.0-or-later -> LGPL-3.0-or-later",
+      ],
+      informational: [],
+    });
+  });
+
+  it("only reports a package whose version moved", () => {
+    const measured = committed.map((row) =>
+      row.name === "busybox" ? { ...row, version: "1.37.0-r32" } : row,
+    );
+    expect(classify(measured)).toEqual({
+      failing: [],
+      informational: ["changed: busybox version 1.37.0-r31 -> 1.37.0-r32"],
+    });
+  });
+
+  it("names both classes when a version moved beside a failing difference", () => {
+    const measured = [
+      { name: "busybox", version: "1.37.0-r32", license: "GPL-2.0-only" },
+      { name: "gmp", version: "6.3.0-r5", license: "LGPL-3.0-or-later" },
+    ];
+    expect(classify(measured)).toEqual({
+      failing: [
+        "removed: gdbm 1.26-r0 (GPL-3.0-or-later)",
+        "changed: gmp license LGPL-3.0-or-later OR GPL-2.0-or-later -> LGPL-3.0-or-later",
+      ],
+      informational: [
+        "changed: busybox version 1.37.0-r31 -> 1.37.0-r32",
+        "changed: gmp version 6.3.0-r4 -> 6.3.0-r5",
+      ],
+    });
   });
 
   it("reports nothing when the image holds what the list states", () => {
-    expect(describeDifferences(compareRows(committed, committed))).toEqual([]);
+    expect(classify(committed)).toEqual({ failing: [], informational: [] });
+  });
+});
+
+describe("--check against the committed default list", () => {
+  // The listing is rendered back from the committed list rather than captured,
+  // so these cases move with the list instead of pinning the versions it holds.
+  const listRows = readListRows(
+    readFileSync(resolve(root, IMAGES.default.listFile), "utf8"),
+  );
+  const apkListing = (rows) =>
+    rows
+      .map(
+        (row) =>
+          `${row.name}-${row.version} x86_64 {${row.name}} (${row.license}) [installed]`,
+      )
+      .join("\n");
+  const check = (rows) =>
+    spawnSync(
+      process.execPath,
+      [
+        resolve(root, "scripts/generate-os-package-attribution.mjs"),
+        "default",
+        "--query-output",
+        "-",
+        "--check",
+      ],
+      { input: apkListing(rows), encoding: "utf8" },
+    );
+
+  it("passes when the image holds what the list states", () => {
+    const result = check(listRows);
+    expect(result.status).toBe(0);
+    expect(result.stdout).toContain(
+      "the image holds each at the version and license the list states",
+    );
+  });
+
+  it("passes reporting the package whose version moved", () => {
+    const [first, ...rest] = listRows;
+    const result = check([{ ...first, version: "9.9.9-r9" }, ...rest]);
+    expect(result.status).toBe(0);
+    expect(result.stderr).toBe("");
+    expect(result.stdout).toContain(
+      `${IMAGES.default.listFile} states a stale version for 1 package`,
+    );
+    expect(result.stdout).toContain(
+      `changed: ${first.name} version ${first.version} -> 9.9.9-r9`,
+    );
+    expect(result.stdout).toContain(
+      "node scripts/generate-os-package-attribution.mjs default",
+    );
+  });
+
+  it("fails on a license that moved and on a package that went missing", () => {
+    const [first, ...rest] = listRows;
+    const licensed = check([{ ...first, license: "WTFPL" }, ...rest]);
+    expect(licensed.status).toBe(1);
+    expect(licensed.stderr).toContain(
+      `changed: ${first.name} license ${first.license} -> WTFPL`,
+    );
+    const dropped = check(rest);
+    expect(dropped.status).toBe(1);
+    expect(dropped.stderr).toContain(
+      `removed: ${first.name} ${first.version} (${first.license})`,
+    );
   });
 });
 
