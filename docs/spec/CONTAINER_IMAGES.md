@@ -747,6 +747,93 @@ closure their helper scripts were written against.
 > evidence behind the rows above. Nothing here binds a build: a rebuild that
 > moves a figure moves the figure, not the spec.
 
+### The OS-layer attribution lists
+
+One generated list per image sits beside `NOTICE`:
+[`NOTICE-os-packages-default.tsv`](../../NOTICE-os-packages-default.tsv) and
+[`NOTICE-os-packages-fips.tsv`](../../NOTICE-os-packages-fips.tsv). Each holds
+one tab-separated row per installed package -- package, version, declared
+license -- under a commented header stating the image, the base pin in force at
+generation, the query the rows came from, and the architectures compared.
+`NOTICE` covers this repository's npm tree by construction and `npm sbom`
+reaches no OS package, so these two files are where an image's OS layer is
+attributed.
+
+**How they are derived.** `scripts/generate-os-package-attribution.mjs` reads
+each image's own package-manager metadata, queried against the built image by
+tag.
+
+- Default image: `apk list --installed`, apk-tools 3.0.6-r0 on Alpine 3.24.1.
+  `/lib/apk/db/installed` agrees with that listing on every package's name,
+  version and license on both architectures; the listing is what the generator
+  parses.
+- FIPS variant: `rpm -qa --qf "%{NAME}\t...\t%{LICENSE}\n"`, RPM 4.16.1.3 with
+  dbpath `/var/lib/rpm`, on Amazon Linux 2023.12.20260817. The variant's
+  fips-only OpenSSL configuration does not reach rpm, which reads its database
+  in C; what it breaks is dnf's own Python, which hashes with blake2s.
+- Neither Dockerfile names its final stage, so a `--target` query cannot reach
+  the runtime layer and both images are queried by tag. On the default image
+  that is the difference between measuring the image and measuring the builder:
+  the runtime stage is where `apk add --no-cache samba-client` runs.
+- The rpm version column is `epoch:version-release`, the epoch written even
+  where it is the `0` the format string substitutes for a package that sets
+  none. The architecture column is read and dropped: it is the one field the two
+  architectures of an image disagree on.
+
+**What was measured.** Both images built without a layer cache at both
+architectures, 2026-09-11. A first attempt with a warm cache reported an
+architecture difference that was a stale layer rather than a property of the
+image, so a re-measurement builds with `--no-cache` or it measures the cache.
+
+- Default image: 63 packages, 6 of which declare a disjunction and 18 of which
+  hold a GPL-3.0 or LGPL-3.0 term.
+- FIPS variant: 165 rows, 15 of which declare a disjunction and 37 of which hold
+  a GPL-3.0 or LGPL-3.0 term. One row is the `gpg-pubkey` pseudo-package the
+  Amazon Linux signing key is stored as rather than an installed package; it is
+  listed as the rpm database reports it, so 165 is the row count and 164 the
+  count of real packages.
+- The two architectures of each image produce byte-identical lists: every
+  package agrees on name, version and license, and the only per-architecture
+  difference in either capture is the architecture column the lists drop.
+
+**The limits.**
+
+- The license field is the string the package manager declares, not an audit of
+  the package's contents. Nothing here verifies that a package's files match
+  what its own metadata states.
+- A disjunctive expression (`LGPL-3.0-or-later OR GPL-2.0-or-later`) is recorded
+  as declared. Choosing an arm is a licensing call, and no part of this
+  derivation makes one.
+- The two distributions mix notations, and no string is rewritten. The FIPS
+  variant's field holds legacy Fedora shorthand (`GPLv2+`, `ASL 2.0`,
+  `Public Domain`) beside modern SPDX expressions, bare project names used as a
+  license (`curl`, `Python`, `OpenLDAP`, `pubkey`), a `LicenseRef-`, and one
+  744-character expression shared by `libgcc`, `libstdc++`, `libgomp` and
+  `libatomic`; operator case differs between packages declaring the same
+  disjunction. A reader gets what the distribution states rather than a
+  normalization this project invented.
+- A package recording no license fails the generator, naming the package, rather
+  than reaching a list with an empty cell. No package on either image records
+  one. rpm renders an absent header tag as the literal `(none)`, which the
+  generator treats as the same absence.
+- The drift check on `.github/workflows/image_smoke.yaml` compares `linux/amd64`
+  only, that job building no other architecture. The arm64 half of each list
+  rests on the comparison made when the list was generated. Moving the
+  comparison to `.github/workflows/release.yaml`, where both architectures are
+  already built, is the upgrade path; it is not planned work.
+- The default image's package set floats. `apk add --no-cache samba-client`
+  resolves against whatever the Alpine mirror holds at build time, so its list
+  can go stale with nothing in this repository changing, and the remedy is to
+  regenerate it. The FIPS variant has no such exposure: its dnf transactions pin
+  `--releasever=2023.12.20260817`.
+- The drift check fails on a package added or removed and on a license string
+  that moved; a version that moved it reports without failing. That install
+  resolves its dependency versions against the live index, which moves patch
+  versions within days, so two builds of the same digest-pinned Dockerfile hold
+  one package set at different versions. Each version a committed list states is
+  therefore as of that list's generation, refreshed when the list is
+  regenerated.
+
 ### What the 45 packages add beyond `smbclient`
 
 Invocation is not the only cost: these libraries sit in the image that runs
@@ -859,7 +946,7 @@ measurement, not the shipped build's size plus `binutils`.
 | --- | --- | --- |
 | Image size | 575,506,781 bytes (576 MB) | 1,055,721,059 bytes (1056 MB) |
 | OS packages | 63 | 167 |
-| Packages with a GPL-3.0 or LGPL-3.0 term | the 6 samba ones | 39 |
+| Packages with a GPL-3.0 or LGPL-3.0 term | 18 | 39 |
 
 Where the 480 MB goes: the two base rootfs are almost the same weight
 (`amazonlinux:2023` 183 MB, `node:26-alpine` 178 MB), but Amazon Linux bundles
@@ -870,8 +957,13 @@ too -- glibc/libgcc/libstdc++ 67 MB, `python3` (in the base image, for `dnf`)
 1.2 MB.
 
 **The licence consequence is wider than the default image's, and is open.** The
-GPL-3.0/LGPL-3.0 term the table above records against the Alpine image's samba
-packages reappears here on `samba-client`, `samba-client-libs`, `samba-common`,
+Alpine image's 18, read out of
+[`NOTICE-os-packages-default.tsv`](../../NOTICE-os-packages-default.tsv), are
+eight samba-family packages, the four record stores `talloc`, `tdb-libs`,
+`tevent` and `ldb`, `gdbm` and `readline` on an unconditional v3 term, and
+`gmp`, `libidn2`, `libunistring` and `nettle` offering a v3 arm beside a
+GPLv2-or-later one. The term reappears here on `samba-client`,
+`samba-client-libs`, `samba-common`,
 `samba-common-libs`, `libsmbclient` and `libwbclient`. It is joined by a GPLv3
 base userland Alpine's busybox and musl do not have: `bash`, `coreutils-single`,
 `diffutils`, `findutils`, `gawk`, `grep`, `gzip`, `sed`, `tar`, `readline`,
