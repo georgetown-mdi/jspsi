@@ -123,8 +123,12 @@ export function marked(
  * The verdict sits on the LABEL, like {@link marked}: the set name and
  * version that follow are partner-controlled, so a marker placed after
  * them could be manufactured by a crafted name.
+ *
+ * Shared with the disclosure a locally authored exchange shows before it
+ * runs (`exchangeDisclosure.ts`), so one seat cannot mark a half by a
+ * vocabulary the other does not use.
  */
-function verdictMarked(
+export function verdictMarked(
   label: string,
   verdict: LinkageRuleSetCitationVerdict,
 ): string {
