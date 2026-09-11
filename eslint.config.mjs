@@ -93,6 +93,70 @@ const noRawErrorAtDisplaySink = SINK_VALUE_POSITIONS.map((position) => ({
     "Do not render a raw error at an operator-facing sink: pass it through sanitizeErrorForDisplay(err) (an error instance, cause chain included) or sanitizeForDisplay(text) (a single string fragment). A partner- or server-controlled error message reaches the terminal and any --log-file verbatim otherwise, carrying ANSI, CR/LF, bidi and confusable bytes. A value that is provably not error text: eslint-disable-next-line with a one-line justification.",
 }));
 
+// The other half of the single-altitude escaping rule the sink ban above holds:
+// the composition side. A Displayable is a string that has already crossed the
+// display boundary, and an Error is not a display sink -- sanitizeErrorForDisplay
+// escapes the whole rendered chain once where it is shown -- so a Displayable
+// composed into an Error message or cause is escaped a second time there, and
+// every literal backslash the fragment holds reaches the operator doubled again.
+//
+// The exported helpers that return one, all of them, from the modules that own
+// the brand (packages/core/src/utils/sanitizeForDisplay.ts,
+// utils/sanitizeErrorForDisplay.ts, utils/describeDecodeError.ts and
+// records/partyIdentityDisplay.ts). Matched as the call and tagged-template
+// shapes that produce the value, not as an identifier: the brand lives in the
+// type system, and this config runs no TypeScript program, so the producing call
+// is the one shape the text alone can name.
+const DISPLAYABLE_PRODUCERS =
+  "sanitizeForDisplay|redactAndSanitizeForDisplay|describeDecodeError|displayPartyIdentity|redactAndDisplayPartyIdentity";
+const DISPLAYABLE_VALUE = [
+  `CallExpression[callee.name=/^(${DISPLAYABLE_PRODUCERS})$/]`,
+  `CallExpression[callee.property.name=/^(${DISPLAYABLE_PRODUCERS})$/]`,
+  "TaggedTemplateExpression[tag.name='displayText']",
+  "TaggedTemplateExpression[tag.property.name='displayText']",
+].join(", ");
+
+// What composes an error's text: the constructor of any Error class (the
+// built-ins and every subclass in packages/core/src/errors.ts, each named
+// `...Error`), and the two composers that fold labelled fragments into a cause
+// chain -- chainDetailCauses (packages/core/src/errors.ts), which builds one
+// Error per fragment, and fittedCauseLink (apps/cli/src/connection/causeLink.ts),
+// whose result is one such fragment.
+const ERROR_TEXT_COMPOSITION = [
+  "NewExpression[callee.name=/Error$/]",
+  "NewExpression[callee.property.name=/Error$/]",
+  "CallExpression[callee.name=/^(chainDetailCauses|fittedCauseLink)$/]",
+  "CallExpression[callee.property.name=/^(chainDetailCauses|fittedCauseLink)$/]",
+].join(", ");
+
+// Positions a value can occupy on its way into that composition, each a DIRECT
+// child of its enclosing node for the same reason the sink positions above are:
+// the raw form the composition should take sits in the position instead, and the
+// escaped shape this looks for is not there at all.
+const ERROR_TEXT_POSITIONS = [
+  "> .arguments",
+  "TemplateLiteral > .expressions",
+  "BinaryExpression[operator='+'] > .left",
+  "BinaryExpression[operator='+'] > .right",
+  "ConditionalExpression > .consequent",
+  "ConditionalExpression > .alternate",
+  "ArrowFunctionExpression > .body",
+  "ArrayExpression > .elements",
+  "Property[key.name='cause'] > .value",
+];
+
+// As with the sink ban, this matches the escaped value where it sits in the
+// composition and does not follow it through an intermediate local
+// (`const text = sanitizeForDisplay(v); throw new Error(text)`) or a container
+// the composition unpacks -- that needs the taint analysis no checker runs. It
+// bans the shape a contributor writes by habit; the brand itself is what makes a
+// declared display FIELD unfillable from the raw form.
+const noDisplayableAsErrorArgument = ERROR_TEXT_POSITIONS.map((position) => ({
+  selector: `:matches(${ERROR_TEXT_COMPOSITION}) ${position}:matches(${DISPLAYABLE_VALUE})`,
+  message:
+    "Do not compose an already-escaped Displayable into an Error: an Error is not a display sink, so sanitizeErrorForDisplay escapes the whole rendered chain once where it is shown and this fragment reaches the operator escaped twice, every literal backslash doubled again. Compose the raw string instead (rawDecodeErrorDescription beside describeDecodeError; the unescaped value elsewhere). An error text no display boundary ever renders: eslint-disable-next-line with a one-line justification.",
+}));
+
 // werift is loaded at the point of use (the deferred import in
 // apps/cli/src/connection/webrtc/weriftPeer.ts), never statically: the CLI
 // bundles to one CommonJS file whose external requires all run at startup, so
@@ -184,6 +248,18 @@ export default tseslint.config(
     },
   },
   {
+    // The Displayable-as-error-text ban over every tree this config governs,
+    // tests included: a test that composes an error out of an escaped fragment
+    // asserts on a rendering no operator ever sees, so it pins the wrong string
+    // and reports the route healthy. The three narrower blocks below re-carry it
+    // beside their own entries, since flat config replaces a rule's options
+    // rather than merging them.
+    files: ["packages/**/*.{ts,tsx}", "apps/cli/**/*.{ts,tsx,mts}"],
+    rules: {
+      "no-restricted-syntax": ["error", ...noDisplayableAsErrorArgument],
+    },
+  },
+  {
     // Force all parsing of operator config and credential files (psilink.yaml,
     // .psilink.key, the signing identity) through the single hardened chokepoint.
     // The chokepoint now lives in packages/core/src/sensitiveFile.ts (promoted
@@ -213,6 +289,7 @@ export default tseslint.config(
         ...weriftStaticLoadBan,
         noBareRootLoglevelEmit,
         ...noRawErrorAtDisplaySink,
+        ...noDisplayableAsErrorArgument,
       ],
       // Close the named-import bypass (`import { parse } from "yaml"`); the
       // chokepoint imports the YAML default, so this never hits legitimate code.
@@ -287,6 +364,7 @@ export default tseslint.config(
         },
         noBareRootLoglevelEmit,
         ...noRawErrorAtDisplaySink,
+        ...noDisplayableAsErrorArgument,
       ],
       // Close the named-import bypass (`import { parse } from "yaml"`); the
       // chokepoint imports the YAML default, so this never hits legitimate code.
@@ -358,6 +436,7 @@ export default tseslint.config(
             "Parse operator/credential files through @psilink/core (parseSensitiveYaml / editSensitiveYamlDocument); raw YAML.parse leaks source into errors and the warning channel. Non-sensitive parse: eslint-disable-next-line with a one-line justification.",
         },
         ...noRawErrorAtDisplaySink,
+        ...noDisplayableAsErrorArgument,
       ],
       // Close the named-import bypass (`import { parse } from "yaml"`); the
       // chokepoint imports the YAML default, so this never hits legitimate code.
