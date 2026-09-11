@@ -418,10 +418,12 @@ const SELF_AUTHORED_TRANSFORM_GAP =
 
 /** @internal */
 const SELF_AUTHORED_RULE_SET_GAP =
-  "The display states the keys and fields the run matches on rather than the " +
-  "rule set they are cited to: the citation is this reader's own, and the " +
-  "verdict an acceptance surface renders on it answers a question about a " +
-  "partner's proposal. " +
+  "The display names the cited set only where this build DISPROVES the " +
+  "citation, which is the one reading its seat can act on: the citation is " +
+  "this reader's own to correct, and a name the build confirms or does not " +
+  "ship leaves them nothing to do. A probe varying a half moves between two " +
+  "names this build does not ship, so both sides render alike and the term " +
+  "stays unrepresented. " +
   SELF_AUTHORED_DETAIL_BOUND;
 
 /** @internal */

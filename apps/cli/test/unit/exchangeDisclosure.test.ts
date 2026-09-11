@@ -10,6 +10,9 @@ import {
   COUNT_ONLY_DISCLOSURE_STATEMENT,
   DEDUPLICATE_PARTNER_DECLARED_DISCLOSURE_STATEMENT,
   DEDUPLICATE_PARTNER_DECLARED_SIDE_NOTE,
+  DEFAULT_LINKAGE_RULE_SET,
+  LINKAGE_RULE_SET_VERDICT_COPY,
+  linkageRuleSetVerdictNote,
   SELF_AUTHORED_EXCHANGE_FACTS,
   setDiagnosticSink,
   UsageError,
@@ -497,6 +500,116 @@ test("single-pass linkage states the disclosure it trades for its round trip", (
   }).join("\n");
   expect(lines).toContain("linkage strategy (enforced): single-pass");
   expect(lines).toContain("single-pass linkage means one of you sends");
+});
+
+// --- The rule set the terms cite ----------------------------------------------
+
+/** The citation every case below names: the one rule set this build ships, and
+ * so the only one it can reach a verdict on either way. */
+const shippedCitation = DEFAULT_LINKAGE_RULE_SET.reference;
+
+/** Terms citing the shipped set over the rules that set declares -- the state a
+ * path that seeds the rules and writes the citation together leaves behind. */
+const citedAndDrawn: LinkageTerms = {
+  ...localTerms,
+  linkageFields: [...DEFAULT_LINKAGE_RULE_SET.linkageFields],
+  linkageKeys: [...DEFAULT_LINKAGE_RULE_SET.linkageKeys],
+  linkageRuleSet: shippedCitation,
+};
+
+/** The caveat written for a reader who may have WRITTEN the citation, which is
+ * every reader of this display. Read through core's own selection rather than
+ * pinned as a literal, so a surface reading the recipient's sentence -- which
+ * names the other party as the author of these terms -- fails here. */
+const citingPartyCaveat = linkageRuleSetVerdictNote(
+  "contradicted",
+  "citing-party",
+);
+
+test("a citation this build disproves is stated before the run", () => {
+  // Both halves diverge: the terms declare neither the fields nor the keys the
+  // cited set does, which is what a hand edit to either list leaves behind.
+  const lines = rendered({
+    ...localTerms,
+    linkageRuleSet: shippedCitation,
+  }).join("\n");
+
+  expect(lines).toContain(
+    "the rule set your terms cite does not match what they declare:",
+  );
+  // What the citation claims, named beside what this build found for it. The
+  // declared keys are the block directly above, which the caveat closes on.
+  expect(lines).toContain(
+    `keys (${LINKAGE_RULE_SET_VERDICT_COPY.contradicted.marker}): ` +
+      `"${shippedCitation.keySet.name}" ${shippedCitation.keySet.version}`,
+  );
+  expect(lines).toContain(
+    `fields (${LINKAGE_RULE_SET_VERDICT_COPY.contradicted.marker}): ` +
+      `"${shippedCitation.fieldSet.name}" ${shippedCitation.fieldSet.version}`,
+  );
+  expect(lines).toContain(citingPartyCaveat);
+  // The remedy is this reader's own. The sentence written for a party being
+  // shown someone else's citation would attribute these terms to a partner.
+  expect(lines).not.toContain(LINKAGE_RULE_SET_VERDICT_COPY.contradicted.note);
+});
+
+test("a half this build disproves is stated beside the half it confirms", () => {
+  // The two halves are judged separately, so a citation is not all or nothing:
+  // these terms declare the set's own fields under a key it does not declare.
+  const lines = rendered({
+    ...citedAndDrawn,
+    linkageKeys: localTerms.linkageKeys,
+  }).join("\n");
+
+  expect(lines).toContain(
+    `keys (${LINKAGE_RULE_SET_VERDICT_COPY.contradicted.marker}): ` +
+      `"${shippedCitation.keySet.name}"`,
+  );
+  expect(lines).toContain(
+    `fields (${LINKAGE_RULE_SET_VERDICT_COPY.consistent.marker}): ` +
+      `"${shippedCitation.fieldSet.name}"`,
+  );
+  expect(lines).toContain(citingPartyCaveat);
+});
+
+test("a citation the rules support, and no citation, state nothing", () => {
+  // Neither reading is a finding this seat can act on: rules that support their
+  // citation leave nothing to correct, and terms claiming no provenance make no
+  // claim to disprove. A display stating either would put two lines of
+  // provenance in front of an operator on every run.
+  for (const terms of [citedAndDrawn, localTerms]) {
+    const lines = rendered(terms).join("\n");
+    expect(lines).not.toContain("the rule set your terms cite");
+    expect(lines).not.toContain(citingPartyCaveat);
+    for (const verdict of ["consistent", "contradicted", "unchecked"] as const)
+      expect(lines).not.toContain(
+        LINKAGE_RULE_SET_VERDICT_COPY[verdict].marker,
+      );
+  }
+  // Held non-vacuous: the same terms with the rules edited out from under the
+  // citation do state it, so the silence above is the verdict and not the
+  // display having no such line at all.
+  expect(
+    rendered({ ...citedAndDrawn, linkageKeys: localTerms.linkageKeys }).join(
+      "\n",
+    ),
+  ).toContain(citingPartyCaveat);
+});
+
+test("a set name this build does not ship is left unjudged", () => {
+  // Nothing here resolves a foreign name to content, so there is no comparison
+  // to report and no remedy to offer -- the citation stands as the operator's
+  // own statement about its own rules.
+  const lines = rendered({
+    ...localTerms,
+    linkageRuleSet: {
+      fieldSet: { name: "county-pii", version: "3.1.0" },
+      keySet: { name: "county-keys", version: "3.1.0" },
+    },
+  }).join("\n");
+  expect(lines).not.toContain("the rule set your terms cite");
+  expect(lines).not.toContain("county-keys");
+  expect(lines).toContain(DISCLOSURE_HEADING);
 });
 
 // --- The facts this seat alone can state --------------------------------------
