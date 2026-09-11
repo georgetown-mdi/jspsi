@@ -3801,11 +3801,20 @@ describe("displayInvitation: the declared terms it discloses (columns, citations
     // rather than left reading as behavior the run performs. The expansion on
     // the same terms is marked for the same reason, so the two producers a
     // reader meets in the key detail are marked together.
+    //
+    // The count-only probe holds a key declaring neither, since a psi-c
+    // document declaring one is refused where it is decoded, so the shape this
+    // marking is for is composed here from the shared base's key -- the same
+    // composition the web screen's pin uses, so the two surfaces are measured
+    // on one input.
     const log = getLogger("accept-display-count-only-swap-test");
     log.setLevel("silent");
     const out = renderDisplayInvitation(log, {
       ...sampleToken(FUTURE()),
-      linkageTerms: COUNT_ONLY_PROBE_TERMS,
+      linkageTerms: {
+        ...COUNT_ONLY_PROBE_TERMS,
+        linkageKeys: CONSENT_PROBE_TERMS.linkageKeys,
+      },
     });
     expect(out).toContain(
       "      swap: First name and Last name may be matched in either order " +

@@ -325,12 +325,34 @@ export const CONSENT_PROBE_TERMS: LinkageTerms = {
 };
 
 /**
+ * {@link CONSENT_PROBE_TERMS} stripped to what a count-only exchange
+ * accepts, `psi` still: no payload in either direction, and a key
+ * declaring no candidate set -- neither the swapped order nor the fuzzy
+ * expansion the base's key declares, both of which a psi-c document is
+ * refused for (docs/spec/PROTOCOL.md, PSI-C). Its single cascade key and
+ * its `deduplicate: false` come from the base and need no stripping.
+ *
+ * It is the `algorithm` entry's `prepare` below, so the count-only pair
+ * is built on it: varied against the base as it stands, the psi-c side
+ * would be a document the parse refuses and what the surfaces were
+ * measured on would not be the count-only tier.
+ */
+function countOnlyAdmissibleBase(terms: LinkageTerms): LinkageTerms {
+  return edited(terms, (draft) => {
+    draft.payload = { send: [], receive: [] };
+    for (const key of draft.linkageKeys) {
+      delete key.swap;
+      for (const element of key.elements)
+        delete element.generateFuzzyComparisons;
+    }
+  });
+}
+
+/**
  * @internal
  *
- * {@link CONSENT_PROBE_TERMS} in the shape a count-only exchange accepts:
- * the `psi-c` algorithm over the probe's single cascade key, with no
- * payload in either direction and no deduplication, which is what
- * docs/spec/PROTOCOL.md's PSI-C section admits.
+ * {@link countOnlyAdmissibleBase} under the `psi-c` algorithm: the whole
+ * shape a count-only exchange accepts.
  *
  * It is the `algorithm` entry's variant document below, exported so each
  * surface's render test pins the count-only tier against the same terms
@@ -339,9 +361,8 @@ export const CONSENT_PROBE_TERMS: LinkageTerms = {
  * rendered.
  */
 export const COUNT_ONLY_PROBE_TERMS: LinkageTerms = {
-  ...CONSENT_PROBE_TERMS,
+  ...countOnlyAdmissibleBase(CONSENT_PROBE_TERMS),
   algorithm: "psi-c",
-  payload: { send: [], receive: [] },
 };
 
 /**
@@ -466,15 +487,11 @@ export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
       "only their count (`psi-c`) -- and with the count, each party's record " +
       "count and the number of its records carrying the matched key, which the " +
       "count-only tier states and a surface omitting the tier does not.",
-    // A count-only exchange accepts no payload in either direction, so the pair
-    // is built on a base declaring none: varied against the probe's own payload
-    // the psi-c side would be a document psi-c refuses, and what the surfaces
-    // were measured on would not be the count-only tier. Both sides have the
-    // same empty pair, so they still differ at the algorithm alone.
-    prepare: (terms) =>
-      edited(terms, (draft) => {
-        draft.payload = { send: [], receive: [] };
-      }),
+    // A count-only exchange accepts neither a payload nor a candidate set, so
+    // the pair is built on a base declaring neither -- countOnlyAdmissibleBase
+    // above states what it strips and why. Both sides are that same stripped
+    // document, so they still differ at the algorithm alone.
+    prepare: countOnlyAdmissibleBase,
     vary: (terms) =>
       edited(terms, (draft) => {
         draft.algorithm = "psi-c";
@@ -787,10 +804,15 @@ export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
         "widening declaration in place of another leaves it unmoved. " +
         SELF_AUTHORED_DETAIL_BOUND,
     },
+    // `edit_distances` rather than the all-pairs expansion: this element's
+    // transforms bound no width, and an all-pairs expansion over an unbounded
+    // value declares more candidates than one key may hold, so that variant is
+    // a document the parse refuses. Every kind has a label of its own, so the
+    // difference a surface has to show is the same one.
     vary: (terms) =>
       edited(terms, (draft) => {
         draft.linkageKeys[0].elements[2].generateFuzzyComparisons =
-          "transpositions";
+          "edit_distances";
       }),
   },
   "linkageKeys[].elements[].transform[].function": {

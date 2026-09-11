@@ -1,4 +1,5 @@
 import { describe, expect, test } from "vitest";
+import { ZodError } from "zod";
 
 import {
   deriveAcceptedLinkageTerms,
@@ -43,6 +44,21 @@ const sftpEndpoint: ConnectionEndpoint = {
   port: 22,
 };
 
+// The wire-level encoding without encodeInvitation's schema validation, so a
+// token the schema refuses can still be handed to the accept gate. The
+// checksum detects a transcription error rather than authenticating the token,
+// so a partner composes a valid one over any payload.
+async function encodeRawToken(token: unknown): Promise<string> {
+  const toBase64Url = (bytes: Uint8Array): string =>
+    btoa(String.fromCharCode(...bytes))
+      .replace(/\+/g, "-")
+      .replace(/\//g, "_")
+      .replace(/=/g, "");
+  const bytes = new TextEncoder().encode(JSON.stringify(token));
+  const digest = await globalThis.crypto.subtle.digest("SHA-256", bytes);
+  return toBase64Url(bytes) + toBase64Url(new Uint8Array(digest).slice(0, 4));
+}
+
 async function encode(
   overrides: Partial<InvitationToken> = {},
 ): Promise<string> {
@@ -69,6 +85,61 @@ describe("prepareAcceptedInvitation", () => {
     // A WebRTC endpoint is admitted on any profile, and only it has `host`.
     expect(endpoint.channel).toBe("webrtc");
     if (endpoint.channel === "webrtc") expect(endpoint.host).toBe("127.0.0.1");
+  });
+
+  test("rejects terms no exchange can run, before the consent screen", async () => {
+    // A partner-crafted token whose count-only terms declare a candidate set:
+    // no count-only round resolves one, so the exchange it invites cannot run.
+    // `prepareAcceptedInvitation` decodes before every other gate it holds, so
+    // the refusal reaches the operator with no terms rendered and no
+    // rendezvous opened, and the console's server-job route inherits it.
+    const encoded = await encodeRawToken({
+      version: "1",
+      linkageTerms: {
+        version: "1.0.0",
+        identity: "Partner Authored Identity",
+        date: "2025-01-01",
+        algorithm: "psi-c",
+        linkageStrategy: "cascade",
+        output: { expectsOutput: true, shareWithPartner: false },
+        deduplicate: false,
+        linkageFields: [{ name: "partner_given", type: "first_name" }],
+        linkageKeys: [
+          {
+            name: "Partner Key Name",
+            elements: [
+              {
+                field: "partner_given",
+                transform: [
+                  { function: "split_on", params: { delimiter: "," } },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+      connectionEndpoint: webrtcEndpoint,
+      sharedSecret: generateSharedSecret(),
+    });
+
+    const raised: unknown = await prepareAcceptedInvitation(encoded, {
+      profile: "hosted",
+    }).then(
+      () => undefined,
+      (err: unknown) => err,
+    );
+
+    expect(raised).toBeInstanceOf(ZodError);
+    const messages = (raised as ZodError).issues.map((issue) => issue.message);
+    expect(messages.join("\n")).toContain(
+      "expands one value into several match candidates",
+    );
+    for (const authored of [
+      "Partner Authored Identity",
+      "partner_given",
+      "Partner Key Name",
+    ])
+      expect(messages.join("\n")).not.toContain(authored);
   });
 
   test("rejects an expired invitation (before any connect)", async () => {

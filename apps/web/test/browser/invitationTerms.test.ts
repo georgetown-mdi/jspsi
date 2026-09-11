@@ -2863,10 +2863,15 @@ describe("InvitationTerms: a qualifying sentence sits at its headline's visibili
   test("a count-only invitation marks the swap it will refuse, beside the swap note", async () => {
     // A swapped key order is a candidate set, which a count-only round refuses,
     // so the either-order note is qualified where it stands rather than left
-    // reading as behavior the run performs. Rendered from core's shared probe --
-    // the same document the CLI accept prompt's pin uses -- so the two surfaces
-    // are measured on one input.
-    renderTerms(COUNT_ONLY_PROBE_TERMS);
+    // reading as behavior the run performs. The count-only probe holds a key
+    // declaring neither, since a psi-c document declaring one is refused where
+    // it is decoded, so the shape this marking is for is composed here from the
+    // shared base's key -- the same composition the CLI accept prompt's pin
+    // uses, so the two surfaces are measured on one input.
+    renderTerms({
+      ...COUNT_ONLY_PROBE_TERMS,
+      linkageKeys: CONSENT_PROBE_TERMS.linkageKeys,
+    });
     await expect.element(toggle("Matching strategies")).toBeInTheDocument();
     // "date of birth (fuzzy) (either order not supported)" is the per-key
     // header MatchKeyDisclosure renders for this key: always-visible relative

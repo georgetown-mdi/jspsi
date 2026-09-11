@@ -15,7 +15,7 @@
  * where consumers read them from.
  */
 
-import { MAX_LINKAGE_ENTRIES } from "./config/linkageTermsSchema.js";
+import { MAX_LINKAGE_ENTRIES } from "./config/linkageTermsBounds.js";
 import type { LinkageKey, LinkageTerms } from "./config/linkageTermsSchema.js";
 import { UsageError } from "./errors.js";
 import { fuzzyCandidateCeiling } from "./fuzzyComparisons.js";
@@ -145,6 +145,70 @@ export const MAX_EFFECTIVE_KEY_COUNT =
   MAX_LINKAGE_ENTRIES * FAN_OUT_CANDIDATES_PER_ELEMENT;
 
 /**
+ * The fan-out function names as the refusals below quote them.
+ *
+ * @internal shared with `fanOutReachedMatchingRefusal` in
+ * `standardization.ts`, which closes on the same recovery.
+ */
+export const QUOTED_FAN_OUT_FUNCTION_NAMES = FAN_OUT_FUNCTION_NAMES.map(
+  (name) => `"${name}"`,
+).join(", ");
+
+// The recovery the DECLARED-step refusals close on: a strategy that matches a
+// candidate set, or no candidate set at all. Named separately because the
+// refusal's surfaces share it while differing in error class.
+const CANDIDATE_SET_STRATEGY_RECOVERY =
+  "Agree linkage terms whose linkage_strategy matches a candidate set, or " +
+  `remove the ${QUOTED_FAN_OUT_FUNCTION_NAMES} step, the fuzzy comparison and ` +
+  "the swapped key order from the standardization and from every linkage " +
+  "key.";
+
+/**
+ * The message the DECLARED-step refusal holds for a standardization pipeline,
+ * raised before the exchange runs. `functionName` is matched against
+ * {@link FAN_OUT_FUNCTION_NAMES} before it reaches here, so the message is a
+ * fixed literal, never partner free text; the strategy the terms actually name
+ * is not interpolated, since nothing narrows it to a schema literal at this
+ * boundary.
+ *
+ * @internal composed by `assertFanOutImplemented` in `linkageSatisfiability.ts`.
+ */
+export function fanOutDeclaredMessage(functionName: string): string {
+  return (
+    "these linkage terms name a linkage strategy that matches a single value " +
+    `per record, and these transforms declare a "${functionName}" step: it ` +
+    "expands one value into several match candidates. A record whose value " +
+    "actually splits would abort the run the moment it reached a matching " +
+    "round rather than match one key per candidate, so the exchange is " +
+    `refused up front instead. ${CANDIDATE_SET_STRATEGY_RECOVERY}`
+  );
+}
+
+/**
+ * The sibling message for a candidate set declared by the LINKAGE KEYS
+ * themselves -- an element transform's fan-out step, a
+ * `generate_fuzzy_comparisons` expansion, or a `swap` naming both orders --
+ * under a strategy that matches a single value per record.
+ *
+ * Fixed literals only: this half is adopted verbatim from a partner's
+ * invitation on the accept path, so nothing from the document is
+ * interpolated.
+ *
+ * @internal composed by `termsCandidateSetRefusal` in
+ * `linkageTermsPolicy.ts`.
+ */
+export function candidateSetUnderStrategyMessage(): string {
+  return (
+    "these linkage terms name a linkage strategy that matches a single value " +
+    "per record, and one of their linkage keys expands one value into several " +
+    "match candidates. A record realizing several candidates would abort the " +
+    "run the moment it reached a matching round rather than match one key per " +
+    "candidate, so the exchange is refused up front instead. " +
+    CANDIDATE_SET_STRATEGY_RECOVERY
+  );
+}
+
+/**
  * The factor a key declaring `swap` multiplies into its declared width: the
  * receiver assembles the key in the authored order and in the swapped one, so a
  * record contributes at most twice the product of its elements' factors.
@@ -220,6 +284,18 @@ function keySite(keyIndex: number | undefined): string {
  * assembly cap.
  */
 export function declaredKeyWidth(key: LinkageKey, keyIndex?: number): number {
+  const verdict = keyWidthOrRefusal(key, keyIndex);
+  if ("refusal" in verdict) throw new UsageError(verdict.refusal);
+  return verdict.width;
+}
+
+// The width one key declares, or the refusal that width earns: the single
+// derivation behind both boundaries that read it, so the parse issue and the
+// raised error state the same thing.
+function keyWidthOrRefusal(
+  key: LinkageKey,
+  keyIndex?: number,
+): { readonly width: number } | { readonly refusal: string } {
   let width = key.swap !== undefined ? SWAP_VARIANT_WIDTH_FACTOR : 1;
   for (const element of key.elements) {
     if (declaredFanOutFunction(element.transform) !== undefined)
@@ -230,16 +306,17 @@ export function declaredKeyWidth(key: LinkageKey, keyIndex?: number): number {
         elementValueWidthBound(element.transform),
       );
     if (width > MAX_KEY_CANDIDATE_WIDTH)
-      throw new UsageError(
-        `${keySite(keyIndex)} declares a width of more than the ` +
+      return {
+        refusal:
+          `${keySite(keyIndex)} declares a width of more than the ` +
           `${MAX_KEY_CANDIDATE_WIDTH} candidate values one record may ` +
           "contribute to one key: every element's candidates multiply across " +
           "the key, so expanding steps on several of its elements compound. " +
           "The exchange is refused instead. Declare the expansion on fewer of " +
           "the key's elements, or split the key into keys of fewer elements.",
-      );
+      };
   }
-  return width;
+  return { width };
 }
 
 /**
@@ -292,18 +369,63 @@ export function termsDeclareCandidateSet(terms: LinkageTerms): boolean {
  * @throws {UsageError} if the sum exceeds {@link MAX_EFFECTIVE_KEY_COUNT}.
  */
 export function declaredEffectiveKeyCount(terms: LinkageTerms): number {
+  const verdict = effectiveKeyCountOrRefusal(terms);
+  if ("refusal" in verdict) throw new UsageError(verdict.refusal.message);
+  return verdict.effectiveKeyCount;
+}
+
+/**
+ * A width bound's refusal: the message, and the issue path locating the key it
+ * fires on. The path names a position, not the partner-authored key name, for
+ * the reason {@link keySite} states.
+ */
+export interface DeclaredWidthRefusal {
+  readonly message: string;
+  readonly path: ReadonlyArray<string | number>;
+}
+
+// The effective key count, or the first width refusal the terms earn: a key
+// above MAX_KEY_CANDIDATE_WIDTH, else a sum above MAX_EFFECTIVE_KEY_COUNT.
+function effectiveKeyCountOrRefusal(
+  terms: LinkageTerms,
+):
+  | { readonly effectiveKeyCount: number }
+  | { readonly refusal: DeclaredWidthRefusal } {
   let effectiveKeyCount = 0;
-  for (const [keyIndex, key] of terms.linkageKeys.entries())
-    effectiveKeyCount += declaredKeyWidth(key, keyIndex);
+  for (const [keyIndex, key] of terms.linkageKeys.entries()) {
+    const verdict = keyWidthOrRefusal(key, keyIndex);
+    if ("refusal" in verdict)
+      return {
+        refusal: { message: verdict.refusal, path: ["linkageKeys", keyIndex] },
+      };
+    effectiveKeyCount += verdict.width;
+  }
   if (effectiveKeyCount > MAX_EFFECTIVE_KEY_COUNT)
-    throw new UsageError(
-      `these linkage terms declare ${effectiveKeyCount} candidate value slots ` +
-        `per record, above the ${MAX_EFFECTIVE_KEY_COUNT} an exchange derives ` +
-        "its frame and element bounds from. The exchange is refused instead. " +
-        "Declare fewer linkage keys, or declare the expanding steps on fewer " +
-        "of their elements.",
-    );
-  return effectiveKeyCount;
+    return {
+      refusal: {
+        message:
+          `these linkage terms declare ${effectiveKeyCount} candidate value slots ` +
+          `per record, above the ${MAX_EFFECTIVE_KEY_COUNT} an exchange derives ` +
+          "its frame and element bounds from. The exchange is refused instead. " +
+          "Declare fewer linkage keys, or declare the expanding steps on fewer " +
+          "of their elements.",
+        path: ["linkageKeys"],
+      },
+    };
+  return { effectiveKeyCount };
+}
+
+/**
+ * The width refusal a terms document earns, or `undefined` where both bounds
+ * admit it: the non-throwing reading of {@link declaredKeyWidth} and
+ * {@link declaredEffectiveKeyCount} over a whole document, for the schema
+ * refine that refuses the document at the parse.
+ */
+export function declaredWidthRefusal(
+  terms: LinkageTerms,
+): DeclaredWidthRefusal | undefined {
+  const verdict = effectiveKeyCountOrRefusal(terms);
+  return "refusal" in verdict ? verdict.refusal : undefined;
 }
 
 /**

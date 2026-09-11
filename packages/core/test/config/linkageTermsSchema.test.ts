@@ -51,6 +51,22 @@ const base = {
   linkageKeys: [{ name: "SSN", elements: [{ field: "ssn" }] }],
 };
 
+// A `transpositions` element declares one candidate per PAIR of its value's
+// positions, so an element whose transforms bound no width declares more
+// candidates than one key may hold and the document is refused where it is
+// decoded. Every fixture below that must parse bounds its value the way
+// EXCHANGE_REFERENCE.md tells an author to.
+const boundToTranspositionWidth = [
+  { function: "substring", params: { start: 1, length: 9 } },
+];
+
+// The tighter bound a swap pair takes: the two positions' factors multiply and
+// the swapped order doubles the product, so each position is bounded to a width
+// whose candidates one key still holds.
+const boundToSwappedTranspositionWidth = [
+  { function: "substring", params: { start: 1, length: 7 } },
+];
+
 // --- Happy path --------------------------------------------------------------
 
 // Every structure the schema admits at once. `psi`, because several linkage
@@ -94,7 +110,11 @@ test("parses a complete valid set of terms", () => {
       {
         name: "SSN, transpositions",
         elements: [
-          { field: "ssn", generateFuzzyComparisons: "transpositions" },
+          {
+            field: "ssn",
+            transform: boundToTranspositionWidth,
+            generateFuzzyComparisons: "transpositions",
+          },
         ],
       },
     ],
@@ -512,11 +532,22 @@ function swappedPair(
       { name: "lastName", type: "last_name" },
     ],
     linkageKeys: [
+      // One transform across both positions, which is both what the pair rule
+      // below admits and what bounds a `transpositions` position to a width one
+      // key holds.
       {
         name: "Swapped",
         elements: [
-          { field: "firstName", generate_fuzzy_comparisons: first },
-          { field: "lastName", generate_fuzzy_comparisons: second },
+          {
+            field: "firstName",
+            transform: boundToSwappedTranspositionWidth,
+            generate_fuzzy_comparisons: first,
+          },
+          {
+            field: "lastName",
+            transform: boundToSwappedTranspositionWidth,
+            generate_fuzzy_comparisons: second,
+          },
         ],
         swap: ["firstName", "lastName"],
       },
@@ -572,7 +603,11 @@ test("a fuzzy comparison outside a swap pair is unaffected", () => {
         elements: [
           { field: "firstName" },
           { field: "lastName" },
-          { field: "ssn", generate_fuzzy_comparisons: "transpositions" },
+          {
+            field: "ssn",
+            transform: boundToTranspositionWidth,
+            generate_fuzzy_comparisons: "transpositions",
+          },
         ],
         swap: ["firstName", "lastName"],
       },
@@ -1698,7 +1733,13 @@ test.each([
     linkageKeys: [
       {
         name: "K",
-        elements: [{ field: "ssn", generateFuzzyComparisons: method }],
+        elements: [
+          {
+            field: "ssn",
+            transform: boundToTranspositionWidth,
+            generateFuzzyComparisons: method,
+          },
+        ],
       },
     ],
   });

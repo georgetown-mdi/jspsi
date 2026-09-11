@@ -1,4 +1,6 @@
 import { z } from "zod";
+import { MAX_LINKAGE_ENTRIES } from "./linkageTermsBounds.js";
+import { declaredWidthRefusal } from "../fanOutFunctions.js";
 import { AlgorithmSchema } from "../types.js";
 import type { Algorithm } from "../types.js";
 import { camelizeKeys, MAX_NESTING_DEPTH } from "../utils/camelizeKeys.js";
@@ -19,6 +21,7 @@ import {
   countOnlyShapeViolation,
   swapPairFuzzyComparisonsDiffer,
   swapPairTransformsDiffer,
+  termsCandidateSetRefusal,
 } from "../linkageTermsPolicy.js";
 
 // --- Untrusted-input bounds --------------------------------------------------
@@ -230,13 +233,11 @@ export const LONE_SURROGATE_MESSAGE =
  */
 export const NESTING_DEPTH_MESSAGE = `a linkage terms value must not nest deeper than ${MAX_NESTING_DEPTH} levels`;
 
-/**
- * Upper bound on the COUNT of entries in the `linkageFields` and
- * `linkageKeys` arrays, applied before per-element validation. The `.min(1)`
- * floor and the most-to-least-precise ordering of `linkageKeys` are
- * unaffected.
- */
-export const MAX_LINKAGE_ENTRIES = 256;
+// The entry-count bound is declared in linkageTermsBounds.js and re-exported
+// here, the module every consumer reads it from: the fan-out derivation this
+// schema's refines call reads it too, and a declaration here would put the two
+// modules in an evaluation cycle.
+export { MAX_LINKAGE_ENTRIES };
 
 /**
  * Upper bound on the COUNT of entries in a transform step's `params` record,
@@ -1576,6 +1577,30 @@ const linkageTermsSchema = (
     .refine((a) => countOnlyShapeViolation(a) !== "payload", {
       message: COUNT_ONLY_SHAPE_REFUSALS.payload,
       path: ["payload"],
+    })
+    // A per-(record, key) candidate set under a combination that resolves
+    // none, and the two declared-width bounds. Both read terms alone, so the
+    // parse is the first boundary that can refuse them; the asserts in
+    // `linkageSatisfiability.ts` and `exchange.ts` stay the boundary for a
+    // document built without a parse. The verdicts come from the one shared
+    // reading each rule has, so no boundary states a different refusal.
+    .superRefine((terms, ctx) => {
+      const refusal = termsCandidateSetRefusal(terms);
+      if (refusal !== undefined)
+        ctx.addIssue({
+          code: "custom",
+          message: refusal,
+          path: ["linkageKeys"],
+        });
+    })
+    .superRefine((terms, ctx) => {
+      const refusal = declaredWidthRefusal(terms);
+      if (refusal !== undefined)
+        ctx.addIssue({
+          code: "custom",
+          message: refusal.message,
+          path: [...refusal.path],
+        });
     })
     // Refuse an ill-formed UTF-16 string anywhere in the document. The terms
     // are canonically encoded WHOLE -- by validateCompatibility and by
