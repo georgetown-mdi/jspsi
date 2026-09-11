@@ -2,7 +2,7 @@
 
 The rules for CONDUCTING a psilink session -- one that spawns agents, runs review rounds, dispatches fixes, and reports decisions to the owner. `CONTRIBUTING.md` and `CLAUDE.md` hold what binds every agent; this file holds only what binds the session doing the conducting.
 
-An orchestrating session reads this file before its first `Agent` or `Workflow` call, and again after a context reset. Five front doors load it as their first step: `.claude/commands/start-issue.md`, `.claude/commands/light-review.md`, `.claude/commands/assess-review.md`, `.claude/commands/panel.md`, and `.claude/skills/shortlist-backlog/SKILL.md`.
+An orchestrating session reads this file before its first `Agent` or `Workflow` call, and again after a context reset. Enforced by `require-orchestration-ruleset-read.mjs`, which refuses that first `Agent` or `Workflow` call until `record-orchestration-ruleset-read.mjs` has recorded a read of this file in the session; the marker and how long a read stands for are in their headers. Five front doors load it as their first step: `.claude/commands/start-issue.md`, `.claude/commands/light-review.md`, `.claude/commands/assess-review.md`, `.claude/commands/panel.md`, and `.claude/skills/shortlist-backlog/SKILL.md`.
 
 A spawned agent does not read it. `CLAUDE.md` alone holds the rules that bind it, and a spawn that reads this file pays for rules addressed to its caller.
 

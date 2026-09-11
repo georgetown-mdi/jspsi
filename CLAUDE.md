@@ -101,4 +101,4 @@ Beyond the conventions in `CONTRIBUTING.md`:
 
 ### Orchestrating a session
 
-- The rules for conducting a session that spawns agents, runs review rounds, dispatches fixes and reports decisions to the owner live in `.claude/orchestration/ruleset.md`. A session reads that file before its first `Agent` or `Workflow` call, and again after a context reset. A spawned agent does not read it: its rules are the ones above.
+- The rules for conducting a session -- spawns, rounds, fix dispatch, owner decisions -- live in `.claude/orchestration/ruleset.md`. A session reads it before its first `Agent` or `Workflow` call and again after a context reset; `require-orchestration-ruleset-read.mjs` refuses that call until it has. A spawned agent does not read it; its rules are above.
