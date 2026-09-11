@@ -377,14 +377,20 @@ export const RAW_FIT_CODE_UNITS_PER_BUDGET_CHARACTER = 2;
  * {@link clipToRenderedCost} materializes the whole escaped form to measure
  * it, so measuring such a fragment costs time and memory linear in what the
  * partner sent; cutting first makes both linear in the budget, and
- * {@link RAW_FIT_CODE_UNITS_PER_BUDGET_CHARACTER} is what keeps the fitted
- * text identical to the uncut fragment's.
+ * {@link RAW_FIT_CODE_UNITS_PER_BUDGET_CHARACTER} keeps the fitted text
+ * identical to the uncut fragment's when the cut still renders past
+ * `budget` after redaction -- true of a private key alone, text ahead of
+ * one, and plain text of any length.
  *
  * Cut BEFORE redaction, which is itself before the clip: a cut landing inside
  * a private-key block leaves a `BEGIN` marker whose `END` is gone, which
  * redaction's fail-closed dangling rule takes along with everything after it,
  * and a cut landing inside the marker itself keeps no key body at all -- the
- * body follows the marker.
+ * body follows the marker. A complete key block followed by more text falls
+ * outside that: redaction can shrink the cut fragment below `budget`, and
+ * the fit then shows less of the trailing text than the uncut fragment
+ * would, with no truncation marker to say so. No key material survives
+ * either way.
  */
 export function boundRawFragmentForFit(value: string, budget: number): string {
   return value.slice(0, RAW_FIT_CODE_UNITS_PER_BUDGET_CHARACTER * budget);

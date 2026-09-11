@@ -471,9 +471,12 @@ describe("boundRawFragmentForFit", () => {
 
   test("a cut through a private-key block still redacts", () => {
     // The cut runs before the redaction, so it can leave a BEGIN marker whose
-    // END is gone; the fail-closed dangling rule takes it and everything after
-    // it. A cut landing inside the marker keeps no key body at all, the body
-    // following the marker.
+    // END is gone; the fail-closed dangling rule takes it and everything
+    // after it. A cut landing inside the marker itself leaves no complete
+    // marker for either rule to match, so redaction never fires there; a
+    // severed marker starts near twice the budget in code units, already
+    // past the one budget of rendered text the clip keeps, so the clip alone
+    // keeps the partial marker and the key body out of `shown`.
     // Read at three lead widths, so the cut falls once past the marker, once
     // inside the body, and once inside the marker itself.
     for (const lead of [0, 200, 500]) {
