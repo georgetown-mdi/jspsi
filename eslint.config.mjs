@@ -99,19 +99,29 @@ const noRawErrorAtDisplaySink = SINK_VALUE_POSITIONS.map((position) => ({
 // escapes the whole rendered chain once where it is shown -- so a Displayable
 // composed into an Error message or cause is escaped a second time there, and
 // every literal backslash the fragment holds reaches the operator doubled again.
-//
-// The exported helpers that return one, all of them, from the modules that own
-// the brand (packages/core/src/utils/sanitizeForDisplay.ts,
-// utils/sanitizeErrorForDisplay.ts, utils/describeDecodeError.ts and
-// records/partyIdentityDisplay.ts). Matched as the call and tagged-template
-// shapes that produce the value, not as an identifier: the brand lives in the
-// type system, and this config runs no TypeScript program, so the producing call
-// is the one shape the text alone can name.
-const DISPLAYABLE_PRODUCERS =
-  "sanitizeForDisplay|redactAndSanitizeForDisplay|describeDecodeError|displayPartyIdentity|redactAndDisplayPartyIdentity";
+
+/**
+ * Every exported function declaring a `Displayable` return type in the package
+ * and CLI sources, pinned by
+ * scripts/eslint-displayable-error-argument-ban.test.mjs, which fails naming one
+ * this list is missing. Matched as the call and tagged-template
+ * shapes that produce the value, not as an identifier: the brand lives in the
+ * type system and this config runs no TypeScript program, so the producing call
+ * is the one shape the text alone can name.
+ */
+export const DISPLAYABLE_PRODUCERS = [
+  "sanitizeForDisplay",
+  "redactAndSanitizeForDisplay",
+  "displayText",
+  "describeDecodeError",
+  "displayPartyIdentity",
+  "redactAndDisplayPartyIdentity",
+  "renderDialedBroker",
+];
+const DISPLAYABLE_PRODUCER_PATTERN = DISPLAYABLE_PRODUCERS.join("|");
 const DISPLAYABLE_VALUE = [
-  `CallExpression[callee.name=/^(${DISPLAYABLE_PRODUCERS})$/]`,
-  `CallExpression[callee.property.name=/^(${DISPLAYABLE_PRODUCERS})$/]`,
+  `CallExpression[callee.name=/^(${DISPLAYABLE_PRODUCER_PATTERN})$/]`,
+  `CallExpression[callee.property.name=/^(${DISPLAYABLE_PRODUCER_PATTERN})$/]`,
   "TaggedTemplateExpression[tag.name='displayText']",
   "TaggedTemplateExpression[tag.property.name='displayText']",
 ].join(", ");
@@ -129,28 +139,22 @@ const ERROR_TEXT_COMPOSITION = [
   "CallExpression[callee.property.name=/^(chainDetailCauses|fittedCauseLink)$/]",
 ].join(", ");
 
-// Positions a value can occupy on its way into that composition, each a DIRECT
-// child of its enclosing node for the same reason the sink positions above are:
-// the raw form the composition should take sits in the position instead, and the
-// escaped shape this looks for is not there at all.
+// The sink positions -- their direct-child shape holds here for the reason given
+// above -- plus the two an error composition adds: the array a cause-chain
+// composer takes its fragments in, and the `cause` property of an error's
+// options object.
 const ERROR_TEXT_POSITIONS = [
-  "> .arguments",
-  "TemplateLiteral > .expressions",
-  "BinaryExpression[operator='+'] > .left",
-  "BinaryExpression[operator='+'] > .right",
-  "ConditionalExpression > .consequent",
-  "ConditionalExpression > .alternate",
-  "ArrowFunctionExpression > .body",
+  ...SINK_VALUE_POSITIONS,
   "ArrayExpression > .elements",
   "Property[key.name='cause'] > .value",
 ];
 
 // As with the sink ban, this matches the escaped value where it sits in the
-// composition and does not follow it through an intermediate local
-// (`const text = sanitizeForDisplay(v); throw new Error(text)`) or a container
-// the composition unpacks -- that needs the taint analysis no checker runs. It
-// bans the shape a contributor writes by habit; the brand itself is what makes a
-// declared display FIELD unfillable from the raw form.
+// composition and does not follow it through an intermediate -- a local
+// (`const text = sanitizeForDisplay(v); throw new Error(text)`), a property, a
+// function returning `string`, a container the composition unpacks -- which
+// needs the taint analysis no checker runs. It bans the shape written by habit;
+// the brand is what makes a declared display FIELD unfillable from the raw form.
 const noDisplayableAsErrorArgument = ERROR_TEXT_POSITIONS.map((position) => ({
   selector: `:matches(${ERROR_TEXT_COMPOSITION}) ${position}:matches(${DISPLAYABLE_VALUE})`,
   message:

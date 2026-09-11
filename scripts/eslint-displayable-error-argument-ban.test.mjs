@@ -1,8 +1,12 @@
-import { existsSync } from "node:fs";
+import { existsSync, readdirSync } from "node:fs";
 import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ESLint } from "eslint";
+import ts from "typescript";
 import { beforeAll, describe, expect, it } from "vitest";
+
+import { DISPLAYABLE_PRODUCERS } from "../eslint.config.mjs";
+import { filesUnder, parseFile } from "./lib/typeScriptSources.mjs";
 
 // Coverage of the Displayable-as-error-text ban in the repo-root
 // eslint.config.mjs: an already-escaped value may not be composed into an Error.
@@ -17,6 +21,11 @@ import { beforeAll, describe, expect, it } from "vitest";
 // Each case is linted through the real repo config against a path inside a
 // guarded tree, so the scope, the selectors, and the rule wiring are all
 // exercised as CI runs them rather than restated here.
+//
+// The other half is the producer list the selectors name. A Displayable is a
+// brand the type system holds, so the rule can only name the calls that return
+// one; a producer the list is missing is a call the ban reads as ordinary text.
+// The scan at the end of this file reads the governed sources for that list.
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..");
@@ -225,4 +234,146 @@ describe("the Displayable-as-error-text ban", () => {
       ).not.toHaveLength(0);
     });
   }
+});
+
+// The sources the producer list accounts for: every package's and the CLI's. A
+// producer is exported from one of them -- a `Displayable` is core's brand, and
+// the CLI composes with it -- and the extensions are the ones the ban's own
+// globs cover.
+const GOVERNED_SOURCE_TREES = [
+  ...readdirSync(resolve(repoRoot, "packages"), { withFileTypes: true })
+    .filter((entry) => entry.isDirectory())
+    .map((entry) => `packages/${entry.name}/src`),
+  "apps/cli/src",
+];
+const GOVERNED_SOURCE_EXTENSION = /\.(?:mts|ts|tsx)$/;
+
+/**
+ * What a return type annotation declares: `yes` for a `Displayable`, a
+ * `Promise<Displayable>`, or a union holding one; `unreadable` for an annotation
+ * naming `Displayable` in a shape this does not decide; `no` otherwise. An
+ * unreadable one fails the scan rather than passing as a non-producer.
+ */
+function declaresDisplayable(typeNode) {
+  if (typeNode === undefined) return "no";
+  if (ts.isTypeReferenceNode(typeNode)) {
+    const name = typeNode.typeName.getText();
+    if (name === "Displayable")
+      return typeNode.typeArguments ? "unreadable" : "yes";
+    if (name === "Promise" && typeNode.typeArguments?.length === 1)
+      return declaresDisplayable(typeNode.typeArguments[0]);
+  }
+  if (ts.isUnionTypeNode(typeNode)) {
+    const members = typeNode.types.map(declaresDisplayable);
+    if (members.includes("unreadable")) return "unreadable";
+    return members.includes("yes") ? "yes" : "no";
+  }
+  return /\bDisplayable\b/.test(typeNode.getText()) ? "unreadable" : "no";
+}
+
+/**
+ * The `[name, verdict]` pair of every function a top-level statement declares --
+ * a function declaration, an arrow or function expression bound to a name, and
+ * the default export of either, whose name is undefined.
+ */
+function declaredFunctions(statement) {
+  if (ts.isFunctionDeclaration(statement))
+    return [[statement.name?.text, declaresDisplayable(statement.type)]];
+  if (ts.isExportAssignment(statement)) {
+    const exported = statement.expression;
+    const isFunction =
+      ts.isArrowFunction(exported) || ts.isFunctionExpression(exported);
+    return [
+      [undefined, declaresDisplayable(isFunction ? exported.type : undefined)],
+    ];
+  }
+  if (!ts.isVariableStatement(statement)) return [];
+  return statement.declarationList.declarations.map((declaration) => {
+    const bound = declaration.initializer;
+    const returnType =
+      bound && (ts.isArrowFunction(bound) || ts.isFunctionExpression(bound))
+        ? bound.type
+        : declaration.type && ts.isFunctionTypeNode(declaration.type)
+          ? declaration.type.type
+          : undefined;
+    return [
+      ts.isIdentifier(declaration.name) ? declaration.name.text : undefined,
+      declaresDisplayable(returnType),
+    ];
+  });
+}
+
+/** Whether a top-level statement carries the `export` keyword. */
+function isExported(statement) {
+  return (statement.modifiers ?? []).some(
+    (modifier) => modifier.kind === ts.SyntaxKind.ExportKeyword,
+  );
+}
+
+/**
+ * The names `file` exports as functions declaring a Displayable return type,
+ * whether the export is on the declaration or in an `export { ... }` clause. A
+ * declaration the scan cannot read, or cannot name, throws.
+ */
+function exportedDisplayableProducers(file) {
+  const exportedNames = new Set();
+  const declared = [];
+  for (const statement of parseFile(file).statements) {
+    if (
+      ts.isExportDeclaration(statement) &&
+      statement.exportClause &&
+      ts.isNamedExports(statement.exportClause)
+    )
+      for (const element of statement.exportClause.elements)
+        exportedNames.add((element.propertyName ?? element.name).text);
+    for (const [name, verdict] of declaredFunctions(statement)) {
+      if (verdict === "no") continue;
+      if (name === undefined)
+        throw new Error(
+          `${file}: a function declaring a Displayable return type is exported without a name, which the ban has no way to list`,
+        );
+      if (verdict === "unreadable")
+        throw new Error(
+          `${file}: the return type of ${name} names Displayable in a shape this scan does not read`,
+        );
+      declared.push([name, isExported(statement)]);
+    }
+  }
+  return declared
+    .filter(([name, exportedHere]) => exportedHere || exportedNames.has(name))
+    .map(([name]) => name);
+}
+
+describe("the producers the ban names", () => {
+  /** Each exported producer the governed sources declare, to the file it is in. */
+  const found = new Map();
+
+  beforeAll(() => {
+    for (const tree of GOVERNED_SOURCE_TREES)
+      for (const file of filesUnder(tree).filter((path) =>
+        GOVERNED_SOURCE_EXTENSION.test(path),
+      ))
+        for (const name of exportedDisplayableProducers(file))
+          found.set(name, file);
+  });
+
+  it("holds every exported Displayable producer in the governed sources", () => {
+    expect(
+      found.size,
+      "the scan read no producer at all, so it holds nothing",
+    ).toBeGreaterThan(0);
+    expect(
+      [...found]
+        .filter(([name]) => !DISPLAYABLE_PRODUCERS.includes(name))
+        .map(([name, file]) => `${name} (${file})`),
+      "add each to DISPLAYABLE_PRODUCERS in eslint.config.mjs: the ban reads a call it does not name as ordinary text",
+    ).toEqual([]);
+  });
+
+  it("names no producer the governed sources no longer export", () => {
+    expect(
+      DISPLAYABLE_PRODUCERS.filter((name) => !found.has(name)),
+      "drop each from DISPLAYABLE_PRODUCERS in eslint.config.mjs: a name nothing exports matches nothing",
+    ).toEqual([]);
+  });
 });
