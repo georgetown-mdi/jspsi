@@ -4,15 +4,13 @@ import type { Algorithm } from "../types.js";
 import { camelizeKeys, MAX_NESTING_DEPTH } from "../utils/camelizeKeys.js";
 import { safeParseCamelized } from "./safeParseCamelized.js";
 import { boundedArray } from "../utils/boundedArray.js";
-import {
-  coerceToPatternString,
-  patternConformsToDialect,
-} from "../utils/linearRegex.js";
+import { patternConformsToDialect } from "../utils/linearRegex.js";
 import {
   linkageTermsHaveNonConformantTransformRegex,
   regexStepPatternParam,
 } from "./transformRegexDialect.js";
 import { transformParamTypeRefusals } from "./transformParamTypes.js";
+import type { TransformParamRefusalOptions } from "./transformParamTypes.js";
 import { exceedsOwnKeyCount } from "../utils/objectKeyCount.js";
 import { loneSurrogateIndex } from "../utils/wellFormedString.js";
 import { BIDI_CONTROL_PATTERN } from "../utils/nameControls.js";
@@ -803,7 +801,7 @@ const TransformStepBaseSchema = z.object({
 // the editor descriptor an attacker-authored token never passes through --
 // and each message names no partner value. Full reasoning:
 // docs/spec/CHANNEL_SECURITY.md, "Unbounded transform-parameter rejection".
-const TransformStepSchema: z.ZodType<TransformStep> = TransformStepBaseSchema
+const TransformStepBoundsSchema = TransformStepBaseSchema
   // `pad_left` runs per row in the key-building pipeline
   // (applyElementTransform, driven by buildKeyStrings), so an unbounded
   // `length` makes every row allocate a `padStart` of that size. Only a
@@ -874,41 +872,49 @@ const TransformStepSchema: z.ZodType<TransformStep> = TransformStepBaseSchema
   // `delimiter` under the linear-time engine, which bounds backtracking by
   // construction; this length cap is the orthogonal source-length
   // compile-cost bound (applyElementTransform compiles each step once per
-  // distinct transform array, memoized). It measures the source the factory
-  // actually compiles, rendered through the same coerceToPatternString the
-  // factory renders through, so the bound and the compile read one value.
-  // Dialect conformance is enforced separately on LinkageTermsSchema. Full
-  // reasoning: docs/spec/CHANNEL_SECURITY.md, "Transform-regex linear-time
-  // dialect".
+  // distinct transform array, memoized). Only a string is measured: a
+  // pattern of any other type is refused by the declared-type check below,
+  // and the factory reads the param through the same text accessor, so a
+  // string is the only value either a compile source or this bound is taken
+  // from. Coercing another type here would run a partner-declared
+  // `toString`, which throws out of a safe parse for an object declaring it
+  // as a non-callable value. Dialect conformance is enforced separately on
+  // LinkageTermsSchema. Full reasoning: docs/spec/CHANNEL_SECURITY.md,
+  // "Transform-regex linear-time dialect".
   .refine(
     (step) => {
       const paramKey = regexStepPatternParam(step.function);
       if (paramKey === undefined) return true;
       const value = step.params?.[paramKey];
-      if (value === undefined) return true;
-      return (
-        coerceToPatternString(value).length <= MAX_TRANSFORM_PATTERN_LENGTH
-      );
+      if (typeof value !== "string") return true;
+      return value.length <= MAX_TRANSFORM_PATTERN_LENGTH;
     },
     {
       message: `transform regex pattern must not exceed ${MAX_TRANSFORM_PATTERN_LENGTH} characters`,
       path: ["params"],
     },
-  )
-  // Every param a step function READS takes the type that function reads it
-  // as (transformParamTypes.ts): the text a literal or a pattern is written
-  // as, the whole number a slice or a width is written as, the true/false a
-  // switch is written as. A wrong type is refused here, so the operator who
-  // wrote an unquoted number and the partner who crafted one both meet the
-  // refusal at decode, naming the param and the type it got, rather than a
-  // run that quietly applies something else. An ABSENT param is how a step
-  // leaves one unset, so it is admitted; a `substring` bound left out drops
-  // every row and is refused one layer up, by the dead-pipeline grading
-  // (`pipelineAlwaysDrops` via `substringWindowDropsEveryValue`), which
-  // locates the offender by key rather than costing the whole document its
-  // parse.
-  .superRefine((step, ctx) => {
-    for (const refusal of transformParamTypeRefusals(step))
+  );
+
+// Every param a step function READS takes the type that function reads it as
+// (transformParamTypes.ts): the text a literal or a pattern is written as, the
+// whole number a slice or a width is written as, the true/false a switch is
+// written as. A wrong type is refused here, so the operator who wrote an
+// unquoted number and the partner who crafted one both meet the refusal at
+// decode, naming the param and the type it got, rather than a run that quietly
+// applies something else. An ABSENT param is how a step leaves one unset, so it
+// is admitted; a `substring` bound left out drops every row and is refused one
+// layer up, by the dead-pipeline grading (`pipelineAlwaysDrops` via
+// `substringWindowDropsEveryValue`), which locates the offender by key rather
+// than costing the whole document its parse.
+//
+// `options` decides whether a text param's refusal names the remedy, so the
+// schema is built per audience rather than per parse; see
+// TransformParamRefusalOptions and LinkageTermsSchema below.
+const transformStepSchema = (
+  options: TransformParamRefusalOptions,
+): z.ZodType<TransformStep> =>
+  TransformStepBoundsSchema.superRefine((step, ctx) => {
+    for (const refusal of transformParamTypeRefusals(step, options))
       ctx.addIssue({
         code: "custom",
         message: refusal.message,
@@ -945,18 +951,21 @@ export interface LinkageKeyElement {
   transform?: TransformStep[];
 }
 
-const LinkageKeyElementSchema: z.ZodType<LinkageKeyElement> = z.object({
-  field: nameValue(z.string().min(1).max(MAX_NAME_LENGTH)),
-  name: nameValue(z.string().max(MAX_NAME_LENGTH)).optional(),
-  generateFuzzyComparisons: GenerateFuzzyComparisonsSchema.optional(),
-  // The step COUNT is bounded at MAX_TRANSFORM_STEPS before per-element
-  // validation; see boundedArray and the untrusted-input bounds note.
-  transform: boundedArray(
-    TransformStepSchema,
-    MAX_TRANSFORM_STEPS,
-    `transform must not exceed ${MAX_TRANSFORM_STEPS} steps`,
-  ).optional(),
-});
+const linkageKeyElementSchema = (
+  options: TransformParamRefusalOptions,
+): z.ZodType<LinkageKeyElement> =>
+  z.object({
+    field: nameValue(z.string().min(1).max(MAX_NAME_LENGTH)),
+    name: nameValue(z.string().max(MAX_NAME_LENGTH)).optional(),
+    generateFuzzyComparisons: GenerateFuzzyComparisonsSchema.optional(),
+    // The step COUNT is bounded at MAX_TRANSFORM_STEPS before per-element
+    // validation; see boundedArray and the untrusted-input bounds note.
+    transform: boundedArray(
+      transformStepSchema(options),
+      MAX_TRANSFORM_STEPS,
+      `transform must not exceed ${MAX_TRANSFORM_STEPS} steps`,
+    ).optional(),
+  });
 
 // --- Linkage keys ------------------------------------------------------------
 
@@ -982,24 +991,27 @@ export interface LinkageKey {
   swap?: [string, string];
 }
 
-const LinkageKeySchema: z.ZodType<LinkageKey> = z.object({
-  name: nameValue(z.string().min(1).max(MAX_NAME_LENGTH)),
-  // The element COUNT is bounded at MAX_KEY_ELEMENTS before per-element
-  // validation, with the existing .min(1) floor preserved; see boundedArray and
-  // the untrusted-input bounds note.
-  elements: boundedArray(
-    LinkageKeyElementSchema,
-    MAX_KEY_ELEMENTS,
-    `elements must not exceed ${MAX_KEY_ELEMENTS} entries`,
-    1,
-  ),
-  swap: z
-    .tuple([
-      nameValue(z.string().max(MAX_NAME_LENGTH)),
-      nameValue(z.string().max(MAX_NAME_LENGTH)),
-    ])
-    .optional(),
-});
+const linkageKeySchema = (
+  options: TransformParamRefusalOptions,
+): z.ZodType<LinkageKey> =>
+  z.object({
+    name: nameValue(z.string().min(1).max(MAX_NAME_LENGTH)),
+    // The element COUNT is bounded at MAX_KEY_ELEMENTS before per-element
+    // validation, with the existing .min(1) floor preserved; see boundedArray
+    // and the untrusted-input bounds note.
+    elements: boundedArray(
+      linkageKeyElementSchema(options),
+      MAX_KEY_ELEMENTS,
+      `elements must not exceed ${MAX_KEY_ELEMENTS} entries`,
+      1,
+    ),
+    swap: z
+      .tuple([
+        nameValue(z.string().max(MAX_NAME_LENGTH)),
+        nameValue(z.string().max(MAX_NAME_LENGTH)),
+      ])
+      .optional(),
+  });
 
 /**
  * The set of linkage-field names referenced by at least one element of
@@ -1349,57 +1361,61 @@ export interface LinkageTerms {
   legalAgreement?: LegalAgreement;
 }
 
-// LinkageTermsBaseSchema is not annotated as ZodType<LinkageTerms>
-// because the concrete ZodObject type is needed to chain .refine().
-const LinkageTermsBaseSchema = z.object({
-  version: z
-    .string()
-    .max(MAX_NAME_LENGTH)
-    .regex(/^\d+\.\d+\.\d+$/, "version must be a valid semver string"),
-  // Optional, and bounded where it is present: a party that names itself is held
-  // to a non-empty, length-capped label with no control or text-direction
-  // character in it, and a party that supplies none omits the field rather than
-  // sending an empty string or a placeholder.
-  identity: recordedFreeTextValue(
-    z.string().min(1).max(MAX_TEXT_LENGTH),
-  ).optional(),
-  date: z.iso.date(),
-  algorithm: AlgorithmSchema,
-  linkageStrategy: LinkageStrategySchema.default("cascade"),
-  output: OutputSchema,
-  deduplicate: z.boolean(),
-  // Element COUNT bounded at MAX_LINKAGE_ENTRIES before per-element
-  // validation, with the existing .min(1) floor preserved. A plain .max() is
-  // insufficient here: these flat top-level arrays sit directly below the
-  // root, so a pathological count does not overflow the call stack, but
-  // still throws building the error string from one issue per invalid
-  // entry. See boundedArray and docs/spec/CHANNEL_SECURITY.md,
-  // "Application-layer parsed-input bounds".
-  linkageFields: boundedArray(
-    LinkageFieldSchema,
-    MAX_LINKAGE_ENTRIES,
-    `linkageFields must not exceed ${MAX_LINKAGE_ENTRIES} entries`,
-    1,
-  ),
-  linkageKeys: boundedArray(
-    LinkageKeySchema,
-    MAX_LINKAGE_ENTRIES,
-    `linkageKeys must not exceed ${MAX_LINKAGE_ENTRIES} entries`,
-    1,
-  ),
-  linkageRuleSet: LinkageRuleSetReferenceSchema.optional(),
-  payload: PayloadSchema.optional(),
-  legalAgreement: LegalAgreementSchema.optional(),
-});
+// The base is not annotated as ZodType<LinkageTerms> because the concrete
+// ZodObject type is needed to chain .refine().
+const linkageTermsBaseSchema = (options: TransformParamRefusalOptions) =>
+  z.object({
+    version: z
+      .string()
+      .max(MAX_NAME_LENGTH)
+      .regex(/^\d+\.\d+\.\d+$/, "version must be a valid semver string"),
+    // Optional, and bounded where it is present: a party that names itself is held
+    // to a non-empty, length-capped label with no control or text-direction
+    // character in it, and a party that supplies none omits the field rather than
+    // sending an empty string or a placeholder.
+    identity: recordedFreeTextValue(
+      z.string().min(1).max(MAX_TEXT_LENGTH),
+    ).optional(),
+    date: z.iso.date(),
+    algorithm: AlgorithmSchema,
+    linkageStrategy: LinkageStrategySchema.default("cascade"),
+    output: OutputSchema,
+    deduplicate: z.boolean(),
+    // Element COUNT bounded at MAX_LINKAGE_ENTRIES before per-element
+    // validation, with the existing .min(1) floor preserved. A plain .max() is
+    // insufficient here: these flat top-level arrays sit directly below the
+    // root, so a pathological count does not overflow the call stack, but
+    // still throws building the error string from one issue per invalid
+    // entry. See boundedArray and docs/spec/CHANNEL_SECURITY.md,
+    // "Application-layer parsed-input bounds".
+    linkageFields: boundedArray(
+      LinkageFieldSchema,
+      MAX_LINKAGE_ENTRIES,
+      `linkageFields must not exceed ${MAX_LINKAGE_ENTRIES} entries`,
+      1,
+    ),
+    linkageKeys: boundedArray(
+      linkageKeySchema(options),
+      MAX_LINKAGE_ENTRIES,
+      `linkageKeys must not exceed ${MAX_LINKAGE_ENTRIES} entries`,
+      1,
+    ),
+    linkageRuleSet: LinkageRuleSetReferenceSchema.optional(),
+    payload: PayloadSchema.optional(),
+    legalAgreement: LegalAgreementSchema.optional(),
+  });
 
-export const LinkageTermsSchema: z.ZodType<LinkageTerms> =
-  LinkageTermsBaseSchema.refine(
-    (a) => !a.deduplicate || a.output.expectsOutput,
-    {
+// The whole document, built for one audience: `options` reaches the declared
+// type refusal on every transform step, which is the only refusal here whose
+// wording turns on whether the party reading it wrote the document.
+const linkageTermsSchema = (
+  options: TransformParamRefusalOptions,
+): z.ZodType<LinkageTerms> =>
+  linkageTermsBaseSchema(options)
+    .refine((a) => !a.deduplicate || a.output.expectsOutput, {
       message: "expectsOutput must be true when deduplicate is true",
       path: ["output", "expectsOutput"],
-    },
-  )
+    })
     // A party that receives no output cannot receive payload columns: payload is
     // attached to matched records, which a non-receiving party never gets. Reject
     // expectsOutput:false alongside a non-empty payload.receive as an incoherent
@@ -1581,6 +1597,26 @@ export const LinkageTermsSchema: z.ZodType<LinkageTerms> =
         });
     });
 
+/**
+ * The linkage terms of a document, whose declared-type refusal states the type
+ * and stops. That wording fits a reader with no document to edit -- an
+ * acceptor reading a refusal of a partner's invitation token or of a partner's
+ * terms off the wire -- and is what every path takes by default. A call site
+ * whose reader WROTE the document reads it through
+ * {@link safeParseLinkageTermsTheReaderWrote} instead.
+ */
+export const LinkageTermsSchema: z.ZodType<LinkageTerms> = linkageTermsSchema({
+  readerCanEditTheDocument: false,
+});
+
+// The same document read by the party who wrote it, whose declared-type
+// refusal for a text param names the remedy (quote the value, or omit the
+// key). Built once here rather than per parse: the whole chain above is
+// constructed at module load, and a second audience costs one more
+// construction, not one per document read.
+const LinkageTermsSchemaForItsAuthor: z.ZodType<LinkageTerms> =
+  linkageTermsSchema({ readerCanEditTheDocument: true });
+
 // --- Parse -------------------------------------------------------------------
 
 /**
@@ -1615,6 +1651,23 @@ export function parseLinkageTerms(raw: unknown): LinkageTerms {
  */
 export function safeParseLinkageTerms(raw: unknown) {
   return safeParseCamelized(LinkageTermsSchema, raw, PARAMS_WIDTH_BOUND);
+}
+
+/**
+ * {@link safeParseLinkageTerms} for a document the reading party WROTE -- the
+ * `linkage_terms` block of an operator's own configuration file. Identical in
+ * what it admits; the difference is that a param declared as the wrong text
+ * type is refused with the remedy that fits a document the reader can edit
+ * (quote the value, or omit the key), as the standardization block's refusal
+ * already is. A partner's terms are read through
+ * {@link safeParseLinkageTerms}, whose refusal states the type alone.
+ */
+export function safeParseLinkageTermsTheReaderWrote(raw: unknown) {
+  return safeParseCamelized(
+    LinkageTermsSchemaForItsAuthor,
+    raw,
+    PARAMS_WIDTH_BOUND,
+  );
 }
 
 // The invitation decode path needs the same camelize-before-validate pre-pass

@@ -268,6 +268,7 @@ export {
   TEXT_DIRECTION_MESSAGE,
   referencedLinkageFieldNames,
   safeParseLinkageTerms,
+  safeParseLinkageTermsTheReaderWrote,
 } from "./config/linkageTermsSchema";
 export {
   deriveAcceptedLinkageTerms,

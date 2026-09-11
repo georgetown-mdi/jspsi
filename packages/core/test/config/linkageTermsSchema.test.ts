@@ -1173,26 +1173,50 @@ test("a short non-text transform regex pattern is refused at validation", () => 
   ).toBe(true);
 });
 
-test("an oversized NON-string pattern (array) is caught by the length cap", () => {
-  // The cap measures the COERCED source, not just string-typed values: an array
-  // renders via String(...) to its comma-joined elements, so a long array would
-  // otherwise slip an oversized compile source past the bound. The declared type
-  // refuses such a pattern too; the cap is pinned here in its own right, since it
-  // is what any path reaching a compile source measures.
-  const overlong = Array.from(
-    { length: MAX_TRANSFORM_PATTERN_LENGTH },
-    () => "a",
-  ); // String(...) === "a,a,a,..." -- ~2x over the cap
-  const result = safeParseLinkageTerms(
-    regexStepTerms("replace_regex", { pattern: overlong, replacement: "" }),
+// A pattern of a type other than text never reaches the length cap or the
+// dialect gate: both read the declared string, and the declared-type refusal
+// answers every other type. Rendering one to a string instead would run the
+// object's own `toString`, which a document can declare as a value that is not
+// callable -- a TypeError out of a parse contracted to return failure, so a
+// returned result is itself what these cases pin.
+describe("a transform pattern declared as something other than text", () => {
+  const cases: Array<[string, string, string, unknown]> = [
+    ["replace_regex", "pattern", "an object", { toString: "x" }],
+    ["split_on", "delimiter", "an object", { toString: "x" }],
+    // Long enough that String(...) would render it well over the cap.
+    [
+      "replace_regex",
+      "pattern",
+      "a list",
+      Array.from({ length: MAX_TRANSFORM_PATTERN_LENGTH }, () => "a"),
+    ],
+    [
+      "split_on",
+      "delimiter",
+      "a list",
+      Array.from({ length: MAX_TRANSFORM_PATTERN_LENGTH }, () => "a"),
+    ],
+  ];
+
+  test.each(cases)(
+    "%s %s declared as %s is refused by type, with no length issue",
+    (fn, param, label, value) => {
+      let result: ReturnType<typeof safeParseLinkageTerms> | undefined;
+      expect(() => {
+        result = safeParseLinkageTerms(regexStepTerms(fn, { [param]: value }));
+      }).not.toThrow();
+      expect(result?.success).toBe(false);
+      if (!result || result.success) return;
+      expect(result.error.issues.map((i) => i.message)).toContain(
+        `${fn} ${param} must be text, not ${label}`,
+      );
+      expect(
+        result.error.issues.some((i) =>
+          /transform regex pattern must not exceed/.test(i.message),
+        ),
+      ).toBe(false);
+    },
   );
-  expect(result.success).toBe(false);
-  if (result.success) return;
-  expect(
-    result.error.issues.some((i) =>
-      /transform regex pattern must not exceed/.test(i.message),
-    ),
-  ).toBe(true);
 });
 
 test("a transform regex outside the dialect is rejected by the gate", () => {

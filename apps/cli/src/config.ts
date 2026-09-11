@@ -33,7 +33,7 @@ import {
   ruleSetCitation,
   safeParseConnectionConfig,
   safeParseFileSyncOptions,
-  safeParseLinkageTerms,
+  safeParseLinkageTermsTheReaderWrote,
   safeParseMetadata,
   safeParseStandardization,
   snakeizeKey,
@@ -1728,7 +1728,11 @@ export function readConfigLinkageSource(
   const rawTerms = obj["linkage_terms"] ?? obj["linkageTerms"];
   if (rawTerms === undefined) return { status: "no-linkage-terms" };
 
-  const result = safeParseLinkageTerms(rawTerms);
+  // Read through the entry point whose refusals address the party who WROTE
+  // the document: this block is the operator's own, and the file is open to
+  // them, so a mistyped text param names the remedy rather than the type
+  // alone (@psilink/core, transformParamTypes.ts).
+  const result = safeParseLinkageTermsTheReaderWrote(rawTerms);
   if (!result.success)
     throw new UsageError(
       `config file ${configPath} has invalid linkage_terms: ` +

@@ -133,6 +133,32 @@ describe("StandardizationSchema declared param types", () => {
       ],
     ]);
   });
+
+  // A pattern this schema admits is read by the same factories the wire schema
+  // feeds, and neither reads one by rendering it to a string: an object can
+  // declare `toString` as a value that is not callable, so rendering it throws
+  // out of a parse contracted to return failure. The declared type answers
+  // every non-text pattern instead, here and on the wire schema
+  // (linkageTermsSchema.test.ts).
+  test.each([
+    ["replace_regex", "pattern", "an object", { toString: "x" }],
+    ["split_on", "delimiter", "an object", { toString: "x" }],
+    ["replace_regex", "pattern", "a list", ["a", "b"]],
+    ["split_on", "delimiter", "a list", ["a", "b"]],
+  ] as Array<[string, string, string, unknown]>)(
+    "refuses %s %s declared as %s by type, without rendering it",
+    (fn, param, label, value) => {
+      let result: ReturnType<typeof safeParseStandardization> | undefined;
+      expect(() => {
+        result = safeParseStandardization(stepSpec({ [param]: value }, fn));
+      }).not.toThrow();
+      expect(result?.success).toBe(false);
+      if (!result || result.success) return;
+      expect(result.error.issues.map((i) => i.message)).toEqual([
+        `${fn} ${param} must be text, not ${label}; quote the value, or omit the key to leave the param unset`,
+      ]);
+    },
+  );
 });
 
 // --- safeParseStandardization ------------------------------------------------

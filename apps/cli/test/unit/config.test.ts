@@ -3797,6 +3797,24 @@ test("readConfigLinkageSource refuses a snake_case param the config mistyped", (
   );
 });
 
+// The remedy follows the AUDIENCE, not the schema: this block is the operator's
+// own file, open to them, so the same declared-type refusal the partner-token
+// decode states bare names the remedy here. The bare wording is pinned on the
+// decode side (packages/core/test/config/linkageTermsSchema.test.ts).
+test("readConfigLinkageSource names the remedy for a mistyped linkage_terms param", () => {
+  const configPath = path.join(dir, "psilink.yaml");
+  const terms = structuredClone(getDefaultLinkageTerms("Agency A"));
+  terms.linkageKeys[0].elements[0].transform = [
+    { function: "pad_left", params: { length: 9, char: 0 } },
+  ];
+  fs.writeFileSync(configPath, YAML.stringify({ linkage_terms: terms }));
+  expect(() => readConfigLinkageSource(configPath)).toThrow(UsageError);
+  expect(() => readConfigLinkageSource(configPath)).toThrow(
+    "pad_left char must be text, not a number; quote the value, or omit " +
+      "the key to leave the param unset",
+  );
+});
+
 // The one connection fact the reader lifts out, for the invitation's retain
 // declaration. A `true` at the fixed path is read; nothing else about the block
 // is parsed, which is what keeps a still-placeholder connection from blocking an

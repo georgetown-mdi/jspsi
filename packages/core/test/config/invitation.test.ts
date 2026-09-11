@@ -264,6 +264,41 @@ test("decodeInvitation rejects linkage terms holding an out-of-dialect transform
   );
 });
 
+test("decodeInvitation refuses a transform pattern declared as an object", async () => {
+  // `{"toString": "x"}` is JSON, so a crafted token can carry it where a
+  // pattern belongs. Nothing on the decode path renders a declared pattern to
+  // a string -- doing so would call an own `toString` the partner set to a
+  // value that is not callable, and a TypeError is not the structured refusal
+  // this path contracts to raise. The declared type answers it instead.
+  const malicious = {
+    ...baseToken,
+    linkageTerms: {
+      ...baseTerms,
+      linkageKeys: [
+        {
+          name: "SSN",
+          elements: [
+            {
+              field: "ssn",
+              transform: [
+                {
+                  function: "replace_regex",
+                  params: { pattern: { toString: "x" }, replacement: "" },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    },
+  };
+  const encoded = await encodeRaw(malicious);
+  await expect(decodeInvitation(encoded)).rejects.toThrow(ZodError);
+  await expect(decodeInvitation(encoded)).rejects.toThrow(
+    /replace_regex pattern must be text, not an object/,
+  );
+});
+
 // --- transform.params key-casing normalization at decode ---------------------
 // The invitation decode path is the chokepoint that folds partner-controlled
 // transform.params keys to camelCase (InvitationLinkageTermsSchema), so a

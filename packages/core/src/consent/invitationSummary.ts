@@ -292,7 +292,13 @@ interface InvitationTransformSummary {
    * rests on. Empty when the step declares no parameters. Every parameter is
    * shown as declared: a step whose parameter the function cannot read as
    * written is refused when the invitation is decoded, so what is displayed
-   * here is what runs.
+   * here means what runs. Two differences of RENDERING remain, both the
+   * display boundary's: the whole `key: value` entry is cut at
+   * {@link DEFAULT_MAX_DISPLAY_LENGTH} and marked, while a param value is
+   * admitted up to `MAX_TRANSFORM_PARAM_LENGTH`, and a non-ASCII code point
+   * displays as its escape. The two differences of MEANING -- NFC at compile,
+   * and an absent pattern compiling as the word `undefined` -- are in
+   * docs/spec/CHANNEL_SECURITY.md, "Transform-parameter declared types".
    */
   params: Array<Displayable>;
   /**
