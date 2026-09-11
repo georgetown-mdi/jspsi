@@ -29,6 +29,7 @@ import PSI from "@openmined/psi.js/psi_wasm_web";
 import {
   describeResolvedRunShape,
   exchangeRecordFromFailure,
+  exchangeRecordOwedButUnbuilt,
   getLogger,
   loadPsiBackend,
   runExchange,
@@ -123,13 +124,15 @@ export interface ManagedRunDriverConfig {
    * instead ({@link ./managedRun.ts}, `rerunFailureLastRun`). Absent, both flows
    * keep their default budget. */
   peerWaitTimeoutMs?: number;
-  /** A non-fatal, operator-relevant notice raised mid-run, from four sources: the
+  /** A non-fatal, operator-relevant notice raised mid-run, from five sources: the
    * deduplicating cardinality and the pair-table projection the agreed terms
    * resolved to ({@link describeResolvedRunShape}); the clean
    * close ending on an exit with no delivery signal ({@link CLOSE_OUTCOME_WARNINGS});
-   * and a disclosure that could not be filed, on the run that completed
+   * a disclosure that could not be filed, on the run that completed
    * ({@link DISCLOSURE_NOT_FILED_WARNING}) or the run that stopped after sending
-   * ({@link STOPPED_DISCLOSURE_NOT_FILED_WARNING}). Optional: a caller with no notice
+   * ({@link STOPPED_DISCLOSURE_NOT_FILED_WARNING}); and a stopped run's disclosure
+   * whose record could not be built at all
+   * ({@link STOPPED_DISCLOSURE_RECORD_UNBUILT_WARNING}). Optional: a caller with no notice
    * surface omits it and all are dropped. Never a terminal -- the run still settles
    * exactly once, and a notice from the teardown's close can arrive after it. */
   onWarning?: (message: string) => void;
@@ -402,6 +405,14 @@ export const DISCLOSURE_NOT_FILED_WARNING =
 export const STOPPED_DISCLOSURE_NOT_FILED_WARNING =
   "This run sent your payload and then stopped, and its record could not be saved to this exchange's accounting of disclosures. Note this run's time and partner if you keep an account of disclosures.";
 
+/** The notice a run that stopped after sending raises when the record of that
+ * disclosure could not be built, so nothing reached the accounting to be saved.
+ * It names no download and no destination: the build produced nothing to offer
+ * and nothing was written, and what is left to do is record the disclosure
+ * outside this browser. */
+export const STOPPED_DISCLOSURE_RECORD_UNBUILT_WARNING =
+  "This run sent your payload and then stopped, and no record of it could be built, so this exchange's accounting of disclosures has no entry for it. Note this run's time and partner if you keep an account of disclosures.";
+
 /**
  * Append this run's self-attested exchange record to the exchange's accounting
  * of disclosures. Best-effort by design: the exchange has already happened, so a
@@ -438,10 +449,13 @@ async function appendDisclosure(
  *
  * A failure that carries no record files nothing, which covers all three ways one
  * arrives: the run stopped before the region opened, so nothing was disclosed;
- * core could not build the record for a disclosure that did occur, which it warns
- * about on the operator log at the point of the loss; or the exchange completed
- * and a local step past it threw, whose record the completed path has already
- * filed.
+ * core could not build the record for a disclosure that did occur; or the exchange
+ * completed and a local step past it threw, whose record the completed path has
+ * already filed. Core tells the middle case from the other two, and that case
+ * raises {@link STOPPED_DISCLOSURE_RECORD_UNBUILT_WARNING}: the accounting is
+ * short an entry for a disclosure that happened, and core's own warning at the
+ * failed build goes to the operator log, which an unattended run discards. The
+ * other two raise nothing, since neither leaves the accounting missing anything.
  *
  * Best-effort, as the completed path's append is: the run is failing, so a failed
  * append can neither undo the disclosure nor make the outcome worse, and the run
@@ -451,10 +465,11 @@ async function appendDisclosure(
  * learn it is missing a disclosure that happened. The loss also goes to the
  * diagnostic log.
  *
- * Recovering the record is guarded too, so a throwing accessor -- an error whose
- * own `cause` chain raises while core walks it -- cannot replace the run's
- * failure. That throw takes the log alone and no notice: what it leaves unknown
- * is whether a record was owed at all, which the notice would assert.
+ * Both questions are asked of the failure's `cause` chain and both are guarded, so
+ * a throwing accessor -- an error whose own chain raises while core walks it --
+ * cannot replace the run's failure. That throw takes the log alone and no notice:
+ * what it leaves unknown is whether a record was owed at all, which either notice
+ * would assert.
  */
 async function fileTerminatedDisclosure(
   id: string,
@@ -462,8 +477,11 @@ async function fileTerminatedDisclosure(
   onWarning: ((message: string) => void) | undefined,
 ): Promise<void> {
   let audit: BuiltExchangeRecord | undefined;
+  let owedButUnbuilt = false;
   try {
     audit = exchangeRecordFromFailure(error);
+    if (audit === undefined)
+      owedButUnbuilt = exchangeRecordOwedButUnbuilt(error);
   } catch (failure) {
     log.error(
       "managed re-run: reading a stopped run's disclosure record from its failure failed:",
@@ -471,7 +489,10 @@ async function fileTerminatedDisclosure(
     );
     return;
   }
-  if (audit === undefined) return;
+  if (audit === undefined) {
+    if (owedButUnbuilt) onWarning?.(STOPPED_DISCLOSURE_RECORD_UNBUILT_WARNING);
+    return;
+  }
   try {
     await appendDisclosureRecordToStore(id, audit.record);
   } catch (failure) {
