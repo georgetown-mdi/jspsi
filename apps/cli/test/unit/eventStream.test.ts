@@ -18,6 +18,7 @@ import {
   EVENT_STREAM_FD,
   EVENT_STREAM_VERSION,
   PERSISTENCE_LOSS_EXIT_CODE,
+  WARNING_SOURCES,
   assertEventStreamFdOpen,
   buildErrorEvent,
   buildMetricsEvent,
@@ -46,6 +47,7 @@ afterEach(() => {
 // changing the wire contract.
 
 const CATEGORIES = new Set(["exchange", "output", "security", "config"]);
+const WARNING_SOURCE_VALUES = new Set<string>(WARNING_SOURCES);
 const CARDINALITIES = new Set([
   "one-to-one",
   "one-to-many",
@@ -92,7 +94,11 @@ function validateEvent(event: unknown): event is StreamEvent {
         event.durationMs >= 0
       );
     case "warning":
-      return typeof event.message === "string";
+      return (
+        typeof event.message === "string" &&
+        typeof event.source === "string" &&
+        WARNING_SOURCE_VALUES.has(event.source)
+      );
     case "metrics":
       return (
         ["recordsProcessed", "transportRetries", "reconnects"] as const
@@ -146,7 +152,7 @@ test("every event type validates against the schema and has a version", () => {
     ]),
     buildStageEvent("stage 1 / 2", "Linking key 1 / 2"),
     buildStageEndEvent("stage 1 / 2", 1234),
-    buildWarningEvent("a terms warning"),
+    buildWarningEvent("termsExchange", "a terms warning"),
     buildMetricsEvent(1000, 2, 1),
     buildResultEvent(true, ONE_TO_ONE),
     buildResultEvent(false, ONE_TO_ONE),
@@ -508,7 +514,7 @@ test("sanitizes a hostile stage-transition label and id", () => {
 });
 
 test("sanitizes a hostile warning message", () => {
-  const event = buildWarningEvent(RLO_INJECTION);
+  const event = buildWarningEvent("termsExchange", RLO_INJECTION);
   expect(event.message).not.toContain("\u202e");
   expect(event.message).toContain("\\u202e");
 });
@@ -521,6 +527,7 @@ test("redacts private-key material held in a warning message", () => {
   // where they compose -- this pins the safety check, not their composition.
   const body = "b3BlbnNzaC1rZXktdjEAAAAABG5vbmUAAAAEbm9uZQAAAAAAAAAB";
   const event = buildWarningEvent(
+    "termsExchange",
     `key file rejected: -----BEGIN OPENSSH PRIVATE KEY-----\n${body}\n` +
       `-----END OPENSSH PRIVATE KEY-----`,
   );
@@ -537,7 +544,9 @@ test("sanitizes hostile error text through the display boundary", () => {
 test("no raw ESC or newline survives serialization of a hostile event", () => {
   // A serialized line must not contain a raw control byte or an embedded newline
   // (which would spoof a second NDJSON line). The escaped forms may appear.
-  const line = JSON.stringify(buildWarningEvent("a\x1b[31m\nb"));
+  const line = JSON.stringify(
+    buildWarningEvent("termsExchange", "a\x1b[31m\nb"),
+  );
   expect(line).not.toContain("\x1b");
   // The sanitizer escaped the newline to a visible \x0a before serialization, so
   // no raw 0x0a survives to spoof a second NDJSON line.
@@ -559,7 +568,7 @@ test("every event serializes to a printable-ASCII line", () => {
     buildStagesEvent([{ id: hostile, label: hostile }]),
     buildStageEvent(hostile, hostile),
     buildStageEndEvent(hostile, 1234),
-    buildWarningEvent(hostile),
+    buildWarningEvent("termsExchange", hostile),
     buildMetricsEvent(1000, 2, 1),
     buildResultEvent(false, ONE_TO_ONE, {
       intersectionCount: 7,
@@ -639,9 +648,19 @@ test("reportPersistenceLoss warns on the stream and sets the persistence-loss ex
   expect(lines).toHaveLength(1);
   const event = JSON.parse(lines[0]) as StreamEvent;
   expect(event.type).toBe("warning");
+  // The source travels with the exit code: this function is the only writer of
+  // either, so a supervisor reads the loss off the event without the code and
+  // off the code without the stream.
+  expect((event as { source: string }).source).toBe("persistenceLoss");
   expect((event as { message: string }).message).toBe(
     "the record was not written",
   );
+});
+
+test("each warning source is a distinct value", () => {
+  // A new source that reused an existing value would leave a supervisor unable
+  // to tell the two notices apart, which is what the field exists for.
+  expect(new Set(WARNING_SOURCES).size).toBe(WARNING_SOURCES.length);
 });
 
 test("reportPersistenceLoss still moves the exit code with no stream open", () => {
@@ -690,7 +709,7 @@ test("emits one NDJSON object per line to fd 3, each a valid event", () => {
   emitter.stages([{ id: "confirming protocol", label: "Confirming protocol" }]);
   emitter.stage("stage 1 / 1", "Linking key 1 / 1");
   emitter.stageEnd("stage 1 / 1", 42);
-  emitter.warning("a warning");
+  emitter.warning("termsExchange", "a warning");
   emitter.metrics(500, 1, 2);
   emitter.result(true, ONE_TO_ONE);
 
@@ -725,10 +744,12 @@ test("drains a short write so a long line is never truncated", () => {
   }) as unknown as typeof fs.writeSync);
 
   const message = "x".repeat(200);
-  openEventStreamWithFdWired().warning(message);
+  openEventStreamWithFdWired().warning("termsExchange", message);
   const written = Buffer.concat(chunks).toString("utf8");
   expect(written.endsWith("\n")).toBe(true);
-  expect(JSON.parse(written.trimEnd())).toEqual(buildWarningEvent(message));
+  expect(JSON.parse(written.trimEnd())).toEqual(
+    buildWarningEvent("termsExchange", message),
+  );
 });
 
 test("a broken pipe stops the writer without throwing into the exchange", () => {

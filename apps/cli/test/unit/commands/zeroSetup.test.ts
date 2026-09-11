@@ -1364,6 +1364,7 @@ test("handler --save: a save that cannot reach disk warns on fd 3 and exits 73, 
     // both reach the process through exitWithError.
     expect(f.exitSpy).not.toHaveBeenCalled();
     expect(lines.map((l) => l.type)).toEqual(["warning"]);
+    expect(lines.map((l) => l.source)).toEqual(["persistenceLoss"]);
     // Both artifacts this branch was asked to write are named, and the operator
     // is steered to invite rather than to a re-run.
     expect(String(lines[0].message)).toContain(f.unwritableConfigFile);

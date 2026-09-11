@@ -159,6 +159,11 @@ export const CHECKS = [
       "packages/core/src/main.ts publishes a named list, with no wildcard re-export putting a module's whole surface on the main entry.",
   },
   {
+    script: "check:warning-sources",
+    description:
+      "The fd-3 warning `source` values the CLI emits are the set docs/spec/CLI_EVENTS.md publishes to a supervisor's author.",
+  },
+  {
     script: "check:vectors",
     description:
       "Every known-answer vector under packages/core/test/vectors/ still reproduces from its generator.",

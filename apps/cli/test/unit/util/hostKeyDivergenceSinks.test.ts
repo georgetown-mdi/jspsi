@@ -100,11 +100,12 @@ function warnToEventStream(message: string): string {
     return length;
   }) as unknown as typeof fs.writeSync);
 
-  openEventStreamWithFdWired().warning(message);
+  openEventStreamWithFdWired().warning("hostKeyDivergence", message);
 
   const line = Buffer.concat(chunks).toString("utf8").trimEnd();
   const event = JSON.parse(line) as WarningEvent;
   expect(event.type).toBe("warning");
+  expect(event.source).toBe("hostKeyDivergence");
   return event.message;
 }
 
