@@ -21,6 +21,8 @@ import type {
   Metadata,
 } from "@psilink/core";
 
+import { consentRepresentationProbes } from "@psilink/core/testing";
+
 import { prepareDataset } from "../../src/commands/exchange";
 import { renderExchangeDisclosure } from "../../src/exchangeDisclosure";
 import { configureLogFile } from "../../src/util/logging";
@@ -565,4 +567,44 @@ test("no line names an inviting or accepting party", () => {
     ["diagnosis"],
   ).join("\n");
   expect(lines).not.toMatch(/inviting party|accepting party|invitation/i);
+});
+
+// --- The terms this display is bound to state ---------------------------------
+
+test("the display represents every consent-relevant linkage term, bar the recorded gaps", () => {
+  // Which terms a reader's decision turns on is judged once, in core's shared
+  // classification, so this display and the two acceptance surfaces cannot
+  // drift on the answer. A term is represented here when two sets of terms
+  // differing at that term alone print differently; one this display omits
+  // prints identically and has to be recorded as a gap in that same
+  // classification, which is what keeps a term added to core from landing
+  // here silently.
+  //
+  // One metadata document, reused across every rendering, so only the terms
+  // move: it is what the run resolved from the operator's own input file
+  // rather than a linkage term, and moving it would answer a question about
+  // that file instead.
+  const render = (terms: LinkageTerms): string =>
+    rendered(terms, ["diagnosis"]).join("\n");
+
+  // The shapes that name the accepting party's own `deduplicate` are not
+  // measured here: this seat accepted no invitation, so the pair such a shape
+  // states is one it never runs. Held non-vacuous both ways.
+  const allProbes = consentRepresentationProbes();
+  const probes = allProbes.filter(
+    (probe) => probe.acceptorDeduplicate === undefined,
+  );
+  expect(probes.length).toBeGreaterThan(0);
+  expect(allProbes.length).toBeGreaterThan(probes.length);
+  expect(
+    probes
+      .filter((probe) => render(probe.base) === render(probe.variant))
+      .map((probe) => probe.path)
+      .sort(),
+  ).toEqual(
+    probes
+      .filter((probe) => probe.unrepresented.exchangeDisclosure !== undefined)
+      .map((probe) => probe.path)
+      .sort(),
+  );
 });

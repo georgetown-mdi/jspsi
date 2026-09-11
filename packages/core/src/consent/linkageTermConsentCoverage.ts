@@ -2,9 +2,9 @@
 // `LinkageTerms` fields an acceptor's consent turns on, and the per-field
 // variants that decide whether a surface represents each one at all. It
 // lives in core, behind the `./testing` subpath, because that judgment is
-// identical for the web consent summary and the CLI consent prompt, and
-// two copies of it would drift. Full rationale:
-// docs/notes/shared-consent-summary.md.
+// identical for the web consent summary, the CLI consent prompt, and the
+// CLI's two-config disclosure display, and a copy of it per surface would
+// drift. Full rationale: docs/notes/shared-consent-summary.md.
 //
 // The classification below is a table rather than the enumeration itself:
 // the field paths it is keyed by are DERIVED from the `LinkageTerms`
@@ -33,10 +33,15 @@ import type {
 /**
  * @internal
  *
- * The two surfaces an acceptor consents from: the web app's structured
- * invitation summary and the CLI accept command's prompt output.
+ * The surfaces a `LinkageTerms` document reaches a reader through: the two an
+ * acceptor consents from -- the web app's structured invitation summary and
+ * the CLI accept command's prompt output -- and the CLI's pre-run disclosure
+ * display, which states what a run authored from two parties' own
+ * configuration files sends and matches on. That reader wrote the terms rather
+ * than accepting them, so the display states a narrower set of them; which
+ * fields bear on the decision at all is the same judgment for all three.
  */
-type ConsentSurfaceName = "web" | "cli";
+type ConsentSurfaceName = "web" | "cli" | "exchangeDisclosure";
 
 /**
  * @internal
@@ -66,14 +71,19 @@ export interface ConsentRelevantTerm {
    */
   vary: (terms: LinkageTerms) => LinkageTerms;
   /**
-   * Fixed copy every surface MUST render for the variant document and MUST
-   * NOT render for the base -- for a field whose variant turns on a
-   * DISCLOSURE the acceptor is entitled to read in the same words on
-   * either surface, not merely a setting each surface may word for
-   * itself. Pinning the sentence here rather than in each surface's own
-   * test is what keeps a surface from dropping it: the pin is the probe
-   * both surfaces are measured with, so a surface that stops rendering it
-   * fails on the same string the other surface is held to.
+   * Fixed copy both ACCEPTANCE surfaces MUST render for the variant
+   * document and MUST NOT render for the base -- for a field whose
+   * variant turns on a DISCLOSURE the acceptor is entitled to read in the
+   * same words on either surface, not merely a setting each surface may
+   * word for itself. Pinning the sentence here rather than in each
+   * surface's own test is what keeps a surface from dropping it: the pin
+   * is the probe both surfaces are measured with, so a surface that stops
+   * rendering it fails on the same string the other surface is held to.
+   *
+   * The disclosure display is held to representation alone: it states
+   * terms its reader wrote rather than a partner's proposal, so the
+   * sentences it owes are worded for that seat and pinned by its own
+   * suite, against `SELF_AUTHORED_EXCHANGE_FACTS`.
    *
    * A list rather than one string, since what an acceptor is entitled to
    * read about one setting can be more than one sentence (e.g. the
@@ -102,12 +112,12 @@ export interface ConsentRelevantTerm {
   /**
    * Surfaces that do not render this field, each with why it is still
    * absent. Recorded rather than closed here: making a field visible
-   * changes what an acceptor sees before consenting, which is a
-   * partner-facing consent change and takes its own change and its own
-   * review. Recording it is what keeps "we chose not to show this" and
-   * "this surface does not show it yet" clear apart -- and the
-   * per-surface check pins this set exactly, so closing a gap without
-   * striking its entry fails too.
+   * changes what a reader is shown before the exchange runs, which on an
+   * acceptance surface is a partner-facing consent change and takes its
+   * own change and its own review. Recording it is what keeps "we chose
+   * not to show this" and "this surface does not show it yet" clear apart
+   * -- and the per-surface check pins this set exactly, so closing a gap
+   * without striking its entry fails too.
    */
   unrepresented?: Partial<Record<ConsentSurfaceName, string>>;
 }
@@ -144,12 +154,13 @@ interface ConsentProbeShape {
    */
   acceptorDeduplicate?: boolean;
   /**
-   * Copy every surface MUST render for this shape's variant and MUST NOT render
-   * for its base, exactly as {@link ConsentRelevantTerm.requiredVariantCopy}.
+   * Copy both acceptance surfaces MUST render for this shape's variant and MUST
+   * NOT render for its base, exactly as
+   * {@link ConsentRelevantTerm.requiredVariantCopy}.
    */
   requiredVariantCopy: ReadonlyArray<string>;
   /**
-   * Copy every surface MUST NOT render for this shape's variant: the sentence
+   * Copy those surfaces MUST NOT render for this shape's variant: the sentence
    * another shape of the same field owes, which this one's run does not make.
    * Without it a surface could render one sentence for every shape and satisfy
    * that shape's required copy while stating a disclosure the other shape's run
@@ -362,6 +373,45 @@ const BOTH_SIDED_PAIR_SENTENCE = describeDeduplicatePair({
 /**
  * @internal
  *
+ * The reasons the two-config disclosure display's recorded gaps below share.
+ * One wording each rather than a sentence per entry: what that display leaves
+ * out follows from how much of the terms it states at all rather than from the
+ * field, so a copy of the reason per entry would drift.
+ */
+const SELF_AUTHORED_DETAIL_BOUND =
+  "The display states what the run sends and matches on to the party that " +
+  "wrote these terms, so the detail an acceptance surface owes a reader of a " +
+  "partner's proposal stays there.";
+
+/** @internal */
+const SELF_AUTHORED_CONSTRAINT_GAP =
+  "The display names the fields each key matches on and not the constraints " +
+  "their values are committed to. " +
+  SELF_AUTHORED_DETAIL_BOUND;
+
+/** @internal */
+const SELF_AUTHORED_TRANSFORM_GAP =
+  "The display names the fields each key combines and not the steps applied " +
+  "to their values before they are matched. " +
+  SELF_AUTHORED_DETAIL_BOUND;
+
+/** @internal */
+const SELF_AUTHORED_RULE_SET_GAP =
+  "The display states the keys and fields the run matches on rather than the " +
+  "rule set they are cited to: the citation is this reader's own, and the " +
+  "verdict an acceptance surface renders on it answers a question about a " +
+  "partner's proposal. " +
+  SELF_AUTHORED_DETAIL_BOUND;
+
+/** @internal */
+const SELF_AUTHORED_AGREEMENT_GAP =
+  "The display states what this run discloses; the agreement its reader " +
+  "cited in their own file is cross-checked with the partner before any data " +
+  "moves rather than read back here.";
+
+/**
+ * @internal
+ *
  * Every field path the `LinkageTerms` declaration reaches, classified as
  * one an acceptor's consent turns on or one it does not. Keyed by the
  * paths derived from that declaration, with array and tuple indices
@@ -390,6 +440,13 @@ export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
     reason:
       "The party the acceptor is disclosing to -- the first thing consent turns " +
       "on.",
+    unrepresented: {
+      exchangeDisclosure:
+        "The holding party's own name for itself. On an invitation it names " +
+        "the party an acceptor discloses TO; in a document its reader wrote " +
+        "it is that reader's own label, recorded in their exchange record, " +
+        "and it names no disclosure they have to weigh.",
+    },
     vary: (terms) =>
       edited(terms, (draft) => {
         draft.identity = "Probe State Education Agency";
@@ -635,6 +692,7 @@ export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
     reason:
       "The character class the party commits its values to, which decides which " +
       "values are flagged as off-standard before matching.",
+    unrepresented: { exchangeDisclosure: SELF_AUTHORED_CONSTRAINT_GAP },
     vary: (terms) =>
       edited(terms, (draft) => {
         fieldOfType(draft, "first_name").constraints = {
@@ -648,6 +706,7 @@ export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
     reason:
       "Whether honorifics and suffixes are expected to have been removed, which " +
       "decides whether two spellings of the same name meet.",
+    unrepresented: { exchangeDisclosure: SELF_AUTHORED_CONSTRAINT_GAP },
     vary: (terms) =>
       edited(terms, (draft) => {
         fieldOfType(draft, "first_name").constraints = {
@@ -661,6 +720,7 @@ export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
     reason:
       "Values the party commits not to present for matching, so a record " +
       "carrying one is expected to go unmatched.",
+    unrepresented: { exchangeDisclosure: SELF_AUTHORED_CONSTRAINT_GAP },
     // The web summary reports this denylist by SIZE rather than by value, so the
     // variant adds an entry: changing one in place would leave the rendering
     // identical and read as an absent field.
@@ -677,6 +737,7 @@ export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
     reason:
       "Whether values are committed to be well-formed (a parseable date, an SSN " +
       "meeting SSA rules), which decides which records are expected to match.",
+    unrepresented: { exchangeDisclosure: SELF_AUTHORED_CONSTRAINT_GAP },
     vary: (terms) =>
       edited(terms, (draft) => {
         fieldOfType(draft, "date_of_birth").constraints = {
@@ -718,6 +779,14 @@ export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
       "Expands one value into several match candidates, so records that do not " +
       "agree exactly still match -- and under `psi` their identifiers are " +
       "disclosed.",
+    unrepresented: {
+      exchangeDisclosure:
+        "The display states the widening a key's candidate set makes -- " +
+        "several values per record, and records grouped with no value in " +
+        "common -- rather than the element declaration producing it, so one " +
+        "widening declaration in place of another leaves it unmoved. " +
+        SELF_AUTHORED_DETAIL_BOUND,
+    },
     vary: (terms) =>
       edited(terms, (draft) => {
         draft.linkageKeys[0].elements[2].generateFuzzyComparisons =
@@ -730,6 +799,7 @@ export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
       "Rewrites the value before it is hashed, so it decides which records meet " +
       "-- a truncation or a sound-alike recoding matches records the raw values " +
       "never would.",
+    unrepresented: { exchangeDisclosure: SELF_AUTHORED_TRANSFORM_GAP },
     vary: (terms) =>
       edited(terms, (draft) => {
         for (const transform of probeTransforms(draft))
@@ -741,6 +811,7 @@ export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
     reason:
       "Decides what a transform actually does: the same function under different " +
       "parameters matches a different set of records.",
+    unrepresented: { exchangeDisclosure: SELF_AUTHORED_TRANSFORM_GAP },
     vary: (terms) =>
       edited(terms, (draft) => {
         for (const transform of probeTransforms(draft))
@@ -765,6 +836,7 @@ export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
       "what an acceptor checks the exchange against an agreement or a " +
       "governance review by -- and what its own disclosure log records as the " +
       "substrate the match keyed on.",
+    unrepresented: { exchangeDisclosure: SELF_AUTHORED_RULE_SET_GAP },
     vary: (terms) =>
       edited(terms, (draft) => {
         if (draft.linkageRuleSet !== undefined)
@@ -777,6 +849,7 @@ export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
       "Pins which content the field set's name stands for. Two versions of one " +
       "name are two different sets of fields and constraints, so a citation " +
       "without the version identifies nothing an acceptor can rely on.",
+    unrepresented: { exchangeDisclosure: SELF_AUTHORED_RULE_SET_GAP },
     vary: (terms) =>
       edited(terms, (draft) => {
         if (draft.linkageRuleSet !== undefined)
@@ -790,6 +863,7 @@ export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
       "combinations of PII count as a match, and the set any validation on " +
       "record attaches to. It is the citation an acceptor carries into an " +
       "agreement and into its own disclosure log.",
+    unrepresented: { exchangeDisclosure: SELF_AUTHORED_RULE_SET_GAP },
     vary: (terms) =>
       edited(terms, (draft) => {
         if (draft.linkageRuleSet !== undefined)
@@ -802,6 +876,7 @@ export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
       "Pins which content the key set's name stands for. A key added, dropped, " +
       "or moved in the cascade is a new version, so the version is what makes " +
       "the citation identify the rules that ran rather than the name alone.",
+    unrepresented: { exchangeDisclosure: SELF_AUTHORED_RULE_SET_GAP },
     vary: (terms) =>
       edited(terms, (draft) => {
         if (draft.linkageRuleSet !== undefined)
@@ -813,6 +888,12 @@ export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
     reason:
       "The columns the inviter declares it will transmit for matched records -- " +
       "what the acceptor receives beyond the intersection itself.",
+    unrepresented: {
+      exchangeDisclosure:
+        "The display lists the columns this run will transmit, resolved from " +
+        "the reader's own input metadata, rather than the list declared here " +
+        "-- the same disclosure read from what leaves the machine.",
+    },
     vary: (terms) =>
       edited(terms, (draft) => {
         if (draft.payload?.send !== undefined)
@@ -831,6 +912,15 @@ export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
     reason:
       "The columns the inviter requests FROM the acceptor for matched records -- " +
       "an outbound disclosure the acceptor is being asked to make.",
+    unrepresented: {
+      exchangeDisclosure:
+        "The display states what this run sends, not the columns its reader " +
+        "asks their partner for. Where that request bears on a disclosure -- " +
+        "a declared empty one withholding the partner's half of the " +
+        "matched-pair table -- the display states the withholding on its own " +
+        "line, which turns on the request being empty rather than on any " +
+        "column name.",
+    },
     vary: (terms) =>
       edited(terms, (draft) => {
         if (draft.payload?.receive !== undefined)
@@ -849,6 +939,7 @@ export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
     reason:
       "Identifies the agreement that authorizes the disclosure, and is " +
       "cross-checked against the acceptor's own copy.",
+    unrepresented: { exchangeDisclosure: SELF_AUTHORED_AGREEMENT_GAP },
     vary: (terms) =>
       edited(terms, (draft) => {
         if (draft.legalAgreement !== undefined)
@@ -860,6 +951,7 @@ export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
     reason:
       "States the purpose the disclosure is made for, and is recorded as the " +
       "disclosure-log entry the exchange stands on.",
+    unrepresented: { exchangeDisclosure: SELF_AUTHORED_AGREEMENT_GAP },
     vary: (terms) =>
       edited(terms, (draft) => {
         if (draft.legalAgreement !== undefined)
@@ -872,6 +964,7 @@ export const LINKAGE_TERM_CONSENT_CLASSIFICATION: Record<
     reason:
       "The date past which the exchange is refused, cross-checked between the " +
       "parties before any data moves.",
+    unrepresented: { exchangeDisclosure: SELF_AUTHORED_AGREEMENT_GAP },
     vary: (terms) =>
       edited(terms, (draft) => {
         if (draft.legalAgreement !== undefined)
