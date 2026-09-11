@@ -18,15 +18,16 @@ export type TransformParamType = "text" | "integer" | "boolean" | "text-list";
  * function that declares it and keeps whatever the document wrote.
  *
  * Both schemas that admit steps check a declared param against this table --
- * `TransformStepSchema` in `linkageTermsSchema.ts` for a linkage key element's
- * transform and `StandardizationStepSchema` in `standardizationSchema.ts` for a
- * cleaning step -- so a wrong-typed param is refused where the document is
- * decoded, on the invitation path and the operator's own config path alike. The
- * factories in `standardization.ts` refuse a wrong type at compile as well,
- * which is what holds a caller that builds steps without a decode. Each reads
- * its params through a typed accessor that checks its own reading against this
- * table when the step is compiled, so an accessor and a row cannot part company
- * without the compile saying so.
+ * the `transformStepSchema(options)` factory in `linkageTermsSchema.ts` for a
+ * linkage key element's transform and `StandardizationStepSchema` in
+ * `standardizationSchema.ts` for a cleaning step -- so a wrong-typed param is
+ * refused where the document is decoded, on the invitation path and the
+ * operator's own config path alike. The factories in `standardization.ts`
+ * refuse a wrong type at compile as well, which is what holds a caller that
+ * builds steps without a decode. Each reads its params through a typed
+ * accessor that checks its own reading against this table when the step is
+ * compiled, so an accessor and a row cannot part company without the compile
+ * saying so.
  *
  * A function's entry lists the params the factory reads today. The
  * decode-refusal tests drive every row through a real document, reading the row

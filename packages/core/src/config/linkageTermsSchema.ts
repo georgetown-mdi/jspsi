@@ -734,9 +734,10 @@ export interface TransformStep {
 // STAGE rather than a per-step refine so they hold for every function and param
 // name at once, including a param no function reads and a function this build
 // does not implement. Which types a param a function DOES read may take, and
-// the magnitude bounds on those values, are the per-step refines on
-// TransformStepSchema below. See MAX_TRANSFORM_PARAM_LENGTH and
-// MAX_TRANSFORM_PARAM_ENTRIES.
+// the magnitude bounds on those values, are per-step refines below: the
+// bounds on TransformStepBoundsSchema, and the type check the
+// transformStepSchema(options) factory adds over it. See
+// MAX_TRANSFORM_PARAM_LENGTH and MAX_TRANSFORM_PARAM_ENTRIES.
 //
 // Each message is a fixed literal, naming no partner value: the offending step
 // and param are located by the issue path (linkageKeys[i].elements[j]
