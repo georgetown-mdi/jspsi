@@ -2810,6 +2810,32 @@ function floodedDeclaration(prefix: string): Array<{ name: string }> {
 }
 
 describe("displayInvitation: the declared terms it discloses (columns, citations, dedup, retention)", () => {
+  test("decode error escapes a hostile unrecognized endpoint key name end to end", async () => {
+    // A malicious inviter adds an endpoint key whose NAME has control/ANSI
+    // bytes; strictObject rejects it, echoing the name into the rejection
+    // decodeAndValidateInvitation raises. The bytes reach the operator through
+    // the renderer every CLI error sink takes, which escapes them ONCE -- the
+    // error's own message holds them raw, as its input.
+    const hostileKey = "\x1b[2J\x1b[31mFAKE";
+    const encoded = await encodeRaw({
+      ...sampleToken(FUTURE()),
+      connectionEndpoint: {
+        channel: "sftp",
+        host: "h",
+        [hostileKey]: 1,
+      },
+    });
+    const err = await decodeAndValidateInvitation(encoded).catch(
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(UsageError);
+    const rendered = sanitizeErrorForDisplay(err as UsageError);
+    expect(rendered).toContain(
+      `Remove unexpected field(s): ${sanitizeForDisplay(hostileKey)}`,
+    );
+    expect(rendered).not.toContain("\x1b");
+  });
+
   test("displayInvitation escapes a hostile inviter identity and key names", () => {
     const token: InvitationToken = {
       ...sampleToken(FUTURE()),

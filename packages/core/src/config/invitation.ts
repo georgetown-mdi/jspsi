@@ -9,6 +9,11 @@ import {
 } from "./linkageTermsSchema.js";
 import type { LinkageTerms } from "./linkageTermsSchema.js";
 import { camelizeKeys } from "../utils/camelizeKeys.js";
+import { redactPrivateKeyMaterial } from "../utils/sanitizeErrorForDisplay.js";
+import {
+  clipToRenderedCost,
+  DEFAULT_MAX_DISPLAY_LENGTH,
+} from "../utils/sanitizeForDisplay.js";
 import { SHARED_SECRET_REGEX } from "./connection.js";
 import { pathsResolveToSameDir } from "../utils/pathCompare.js";
 import { parseBoundedJson } from "../utils/boundedJson.js";
@@ -95,6 +100,17 @@ export interface FileDropEndpoint {
 export type ConnectionEndpoint =
   WebRTCEndpoint | SFTPEndpoint | FileDropEndpoint;
 
+// One rejected key name, fitted to what a single value may render to. A key
+// outside the allowlist takes any length the invitation admits, and it shares
+// one display budget with the guidance naming what to remove. Redacted before
+// the fit, never after: the fit appends a truncation marker, which a `BEGIN`
+// marker left dangling in the kept prefix would consume at the sink.
+const fittedEndpointKeyName = (name: string): string =>
+  clipToRenderedCost(
+    redactPrivateKeyMaterial(name),
+    DEFAULT_MAX_DISPLAY_LENGTH,
+  );
+
 // Custom error for the strict-object guard below: any field outside a channel's
 // locator allowlist is rejected rather than silently stripped. The message
 // leads with the allowlist (so a benign field like `username` is not
@@ -116,7 +132,7 @@ const endpointKeyError: z.core.$ZodErrorMap = (issue) => {
       "credential or server-identity material (such as a password, private " +
       "key, or host-key fingerprint) can ride along. Remove unexpected " +
       "field(s): " +
-      issue.keys.join(", ")
+      issue.keys.map(fittedEndpointKeyName).join(", ")
     );
   }
   // Returning undefined delegates to Zod's default error map (the documented

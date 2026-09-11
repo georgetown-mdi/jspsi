@@ -1,8 +1,27 @@
+import { redactPrivateKeyMaterial } from "./sanitizeErrorForDisplay";
 import {
+  clipToRenderedCost,
   COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
+  DEFAULT_MAX_DISPLAY_LENGTH,
   sanitizeForDisplay,
 } from "./sanitizeForDisplay";
 import type { Displayable } from "./sanitizeForDisplay";
+
+/**
+ * One Zod issue-path segment, fitted to what a single value may render to.
+ *
+ * A segment can be an object key the inviting party wrote -- Zod's
+ * `invalid_key` puts a rejected record key in the path verbatim -- and the path
+ * LEADS the description, so an unfitted segment spends the whole budget of the
+ * link that shows it and the refusal reason behind it is cut. Redacted before
+ * the fit, never after: the fit appends a truncation marker, which a `BEGIN`
+ * marker left dangling in the kept prefix would consume at the sink.
+ */
+const fittedPathSegment = (segment: PropertyKey): string =>
+  clipToRenderedCost(
+    redactPrivateKeyMaterial(String(segment)),
+    DEFAULT_MAX_DISPLAY_LENGTH,
+  );
 
 /**
  * Render an invitation decode/validation failure concisely, composed RAW for
@@ -23,6 +42,12 @@ import type { Displayable } from "./sanitizeForDisplay";
  * description WITHOUT composing an error takes {@link describeDecodeError}
  * instead, which escapes it once at that sink.
  *
+ * What it does own is the FIT: each path segment is bounded by
+ * {@link fittedPathSegment}, and the rejected key names in the
+ * unrecognized-endpoint-key message by `endpointKeyError`
+ * (`config/invitation.ts`), so no fragment the inviting party chose can spend
+ * the display budget the first-party reason beside it needs.
+ *
  * A caller that also redacts (`redactPrivateKeyMaterial`) does so where it
  * interpolates this, before the sink's fail-closed dangling rule can consume
  * the first-party text composed behind a planted marker.
@@ -36,7 +61,7 @@ export function rawDecodeErrorDescription(err: unknown): string {
       const first = issues[0];
       const at =
         Array.isArray(first.path) && first.path.length > 0
-          ? `${first.path.map((p) => String(p)).join(".")}: `
+          ? `${first.path.map(fittedPathSegment).join(".")}: `
           : "";
       const more = issues.length > 1 ? ` (and ${issues.length - 1} more)` : "";
       return `${at}${first.message ?? "schema validation failed"}${more}`;
