@@ -1,9 +1,12 @@
-import { redactPrivateKeyMaterial } from "./sanitizeErrorForDisplay";
 import {
+  redactAndSanitizeForDisplay,
+  redactPrivateKeyMaterial,
+} from "./sanitizeErrorForDisplay";
+import {
+  boundRawFragmentForFit,
   clipToRenderedCost,
   COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
   DEFAULT_MAX_DISPLAY_LENGTH,
-  sanitizeForDisplay,
 } from "./sanitizeForDisplay";
 import type { Displayable } from "./sanitizeForDisplay";
 
@@ -16,10 +19,17 @@ import type { Displayable } from "./sanitizeForDisplay";
  * link that shows it and the refusal reason behind it is cut. Redacted before
  * the fit, never after: the fit appends a truncation marker, which a `BEGIN`
  * marker left dangling in the kept prefix would consume at the sink.
+ *
+ * Cut to a raw length before either treatment: on the wire linkage-terms route
+ * the segment is a partner-chosen `transform.params` key bounded only by the
+ * transport's frame cap, and the fit measures the whole escaped form of what it
+ * is handed ({@link boundRawFragmentForFit}).
  */
 const fittedPathSegment = (segment: PropertyKey): string =>
   clipToRenderedCost(
-    redactPrivateKeyMaterial(String(segment)),
+    redactPrivateKeyMaterial(
+      boundRawFragmentForFit(String(segment), DEFAULT_MAX_DISPLAY_LENGTH),
+    ),
     DEFAULT_MAX_DISPLAY_LENGTH,
   );
 
@@ -87,9 +97,16 @@ export function rawDecodeErrorDescription(err: unknown): string {
  * per-value default: the description is a COMPOSITION -- first-party guidance
  * (the endpoint-locator rejection above all) around the fragments it names --
  * and the per-value budget would cut that guidance short.
+ *
+ * Redacts as well as escapes, the pairing every display sink takes
+ * ({@link redactAndSanitizeForDisplay}), applied here uniformly rather than on
+ * a reading of which of today's decode failures can hold a file-derived value.
+ * Each fragment the description names is redacted at its own fit, so the
+ * fail-closed dangling rule has no partner-planted marker left to consume the
+ * first-party text behind.
  */
 export function describeDecodeError(err: unknown): Displayable {
-  return sanitizeForDisplay(rawDecodeErrorDescription(err), {
+  return redactAndSanitizeForDisplay(rawDecodeErrorDescription(err), {
     maxLength: COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
   });
 }

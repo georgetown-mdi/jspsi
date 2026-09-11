@@ -2,6 +2,12 @@ import { z, ZodError } from "zod";
 import { describe, expect, test } from "vitest";
 
 import { describeDecodeError } from "../../src/utils/describeDecodeError";
+import {
+  boundRawFragmentForFit,
+  COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
+  DEFAULT_MAX_DISPLAY_LENGTH,
+  DISPLAY_TRUNCATION_MARKER,
+} from "../../src/utils/sanitizeForDisplay";
 
 describe("describeDecodeError", () => {
   test("collapses a real ZodError to a one-liner, not its raw issues blob", () => {
@@ -86,5 +92,65 @@ describe("describeDecodeError", () => {
   test("falls back to String() for a non-Error thrown value", () => {
     expect(describeDecodeError("plain string")).toBe("plain string");
     expect(describeDecodeError(42)).toBe("42");
+  });
+
+  // A record key the size the wire admits: on the terms-exchange route the
+  // path segment is a partner-chosen `transform.params` key, which Zod's
+  // `invalid_key` holds verbatim and nothing upstream bounds but the
+  // transport's frame cap.
+  const frameSizedKey = (units: number): string =>
+    String.fromCharCode(1).repeat(units);
+  const pathIssue = (segment: string): unknown => ({
+    issues: [
+      {
+        path: ["transform", "params", segment],
+        message: "Invalid key in record",
+      },
+    ],
+  });
+
+  test("describes a frame-sized path segment as its cut prefix does", () => {
+    // The cut the fit takes first is allowed to change nothing the operator
+    // reads: the description of the whole key is the description of its
+    // prefix, to the byte.
+    const key = frameSizedKey(2_000_000);
+    const described = describeDecodeError(pathIssue(key));
+    expect(described).toBe(
+      describeDecodeError(
+        pathIssue(boundRawFragmentForFit(key, DEFAULT_MAX_DISPLAY_LENGTH)),
+      ),
+    );
+    expect(described).toContain(DISPLAY_TRUNCATION_MARKER);
+    expect(described).toContain("Invalid key in record");
+  });
+
+  test("a frame-sized path segment costs the budget, not its own length", () => {
+    // The fit measures what a segment escapes to by materializing that escaped
+    // form, so an uncut segment costs time and memory linear in what the
+    // partner sent -- about 1.5 seconds and half a gigabyte at this size, where
+    // the cut holds both to the budget. The wall-clock bound is loose enough to
+    // pass under CI load and still far below the unbounded measure.
+    const key = frameSizedKey(10_000_000);
+    const started = Date.now();
+    const described = describeDecodeError(pathIssue(key));
+    expect(Date.now() - started).toBeLessThan(1000);
+    expect(described.length).toBeLessThanOrEqual(
+      COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH + DISPLAY_TRUNCATION_MARKER.length,
+    );
+  });
+
+  test("redacts private-key material a decode failure's message holds", () => {
+    // The sink pairs escaping with redaction, as every other display sink in
+    // core does, rather than on a reading of which of today's decode failures
+    // can hold a file-derived value.
+    const body = "k".repeat(200);
+    const out = describeDecodeError(
+      new Error(
+        `could not read the invitation: -----BEGIN RSA PRIVATE KEY-----\n${body}\n-----END RSA PRIVATE KEY-----`,
+      ),
+    );
+    expect(out).toContain("[redacted private key]");
+    expect(out).not.toContain("BEGIN");
+    expect(out).not.toContain(body.slice(0, 20));
   });
 });

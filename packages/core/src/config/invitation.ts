@@ -11,6 +11,7 @@ import type { LinkageTerms } from "./linkageTermsSchema.js";
 import { camelizeKeys } from "../utils/camelizeKeys.js";
 import { redactPrivateKeyMaterial } from "../utils/sanitizeErrorForDisplay.js";
 import {
+  boundRawFragmentForFit,
   clipToRenderedCost,
   DEFAULT_MAX_DISPLAY_LENGTH,
 } from "../utils/sanitizeForDisplay.js";
@@ -104,10 +105,14 @@ export type ConnectionEndpoint =
 // outside the allowlist takes any length the invitation admits, and it shares
 // one display budget with the guidance naming what to remove. Redacted before
 // the fit, never after: the fit appends a truncation marker, which a `BEGIN`
-// marker left dangling in the kept prefix would consume at the sink.
+// marker left dangling in the kept prefix would consume at the sink. Cut to a
+// raw length before either treatment, since the fit measures the whole escaped
+// form of what it is handed (boundRawFragmentForFit).
 const fittedEndpointKeyName = (name: string): string =>
   clipToRenderedCost(
-    redactPrivateKeyMaterial(name),
+    redactPrivateKeyMaterial(
+      boundRawFragmentForFit(name, DEFAULT_MAX_DISPLAY_LENGTH),
+    ),
     DEFAULT_MAX_DISPLAY_LENGTH,
   );
 
