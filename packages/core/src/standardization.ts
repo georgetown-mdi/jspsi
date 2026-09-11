@@ -7,6 +7,10 @@ import {
 } from "./errors.js";
 import { redactAndSanitizeForDisplay } from "./utils/sanitizeErrorForDisplay.js";
 import {
+  frozenLookupTable,
+  frozenLookupTableEntry,
+} from "./utils/frozenLookupTable.js";
+import {
   compileLinearRegex,
   coerceToPatternString,
   patternConformsToDialect,
@@ -788,7 +792,7 @@ function splitOnFactory(params: Params): StandardizingFn {
 // list. A pass-through step (null_if, filter_regex) returns the ORIGINAL
 // value; a deriving step (extract_regex, replace_regex, split_on,
 // parse_date) derives from the normalized value.
-const STANDARDIZING_FUNCTIONS: Record<string, StandardizingFnFactory> = {
+const STANDARDIZING_FUNCTIONS = frozenLookupTable({
   remove_non_ascii: noParamFactory(removeNonAscii),
   replace_separators_with_spaces: noParamFactory(replaceSeparatorsWithSpaces),
   squash_spaces: noParamFactory(squashSpaces),
@@ -808,7 +812,7 @@ const STANDARDIZING_FUNCTIONS: Record<string, StandardizingFnFactory> = {
   extract_regex: extractRegexFactory,
   filter_regex: filterRegexFactory,
   split_on: splitOnFactory,
-};
+} satisfies Record<string, StandardizingFnFactory>);
 
 // The functions above whose compiled step can return SEVERAL candidates for
 // ONE input value -- CAPABILITY, separate from FAN_OUT_FUNCTION_NAMES's
@@ -1055,11 +1059,16 @@ const regexPatternSchema = z
  * accepts the well-formed param shapes its factory accepts and rejects malformed
  * ones (e.g. `pad_left` rejects a non-positive `length` and a multi-character
  * `char`, exactly as its factory throws).
+ *
+ * Typed with a string index signature rather than over its own function names,
+ * which the sibling registries are: the web step editor and its tests read a
+ * descriptor by a name held in a variable, and a name-keyed type would refuse
+ * every one of those reads. The table itself carries no prototype, so a name
+ * reaching only `Object.prototype` misses whatever the type admits.
  */
-export const STANDARDIZATION_FUNCTION_DESCRIPTORS: Record<
-  string,
-  StandardizationFunctionDescriptor
-> = {
+export const STANDARDIZATION_FUNCTION_DESCRIPTORS: Readonly<
+  Record<string, StandardizationFunctionDescriptor>
+> = frozenLookupTable({
   remove_non_ascii: {
     name: "remove_non_ascii",
     label: "Remove non-ASCII",
@@ -1284,7 +1293,7 @@ export const STANDARDIZATION_FUNCTION_DESCRIPTORS: Record<
       default: z.string().optional(),
     }),
   },
-};
+} satisfies Record<string, StandardizationFunctionDescriptor>);
 
 // --- Step compilation --------------------------------------------------------
 
@@ -1322,13 +1331,14 @@ function compileStep(step: {
       default: declaredDefault?.normalize("NFC"),
     };
   }
-  // Own-property lookup: a bare index answers the names that reach only
-  // Object.prototype (`constructor`, `toString`) with an inherited member, which
-  // compiles to a non-callable step and throws at the first row instead of
-  // taking the refusal below.
-  const factory = Object.hasOwn(STANDARDIZING_FUNCTIONS, step.function)
-    ? STANDARDIZING_FUNCTIONS[step.function]
-    : undefined;
+  // The table's own read path: a name that reaches only Object.prototype
+  // (`constructor`, `toString`) answers undefined rather than an inherited
+  // member, which would compile to a non-callable step and throw at the first
+  // row instead of taking the refusal below.
+  const factory = frozenLookupTableEntry(
+    STANDARDIZING_FUNCTIONS,
+    step.function,
+  );
   // On the element-transform path the name is partner-authored free text -- the
   // wire schema types `function` as a bounded string, not as one of the names
   // this build knows -- so it is narrowed rather than echoed, as the magnitude
