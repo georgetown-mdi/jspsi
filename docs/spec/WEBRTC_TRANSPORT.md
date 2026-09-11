@@ -371,18 +371,20 @@ partner gathers. A `relay` policy with no `turn` entry and no `ice_provision` is
 rejected by the connection schema, since it could gather nothing to pair.
 
 The policy holds for a `turn` entry the transport keeps, and the connection
-schema accepts exactly the urls it does keep. The transport reads a turn url's
-`transport` parameter itself and refuses the whole entry over a value it does
-not support, continuing without it, which under `relay` leaves the run gathering
-the host candidates the policy exists to keep off the wire. So the schema
-accepts a url that leaves `transport` unset or sets it to lowercase `tcp`, and
-`udp` on a `turn:` url; every other value -- another protocol, an uppercase
-spelling, an empty one, or `udp` on a `turns:` url -- is refused at parse. A url
-setting the parameter more than once is held to the same rule at every
-occurrence, rather than resting on the transport reading the first. Which values
-the transport keeps is measured per form in
-`apps/cli/test/integration/webrtc/webrtcIceTransportPolicy.test.ts`, which the
-grammar in `packages/core/src/config/connection.ts` is drawn from.
+schema accepts no url the transport would drop, and refuses a few it would
+keep (a repeated `transport` parameter, whose first occurrence the transport
+reads) rather than rest on which occurrence is read. The transport reads a
+turn url's `transport` parameter itself and refuses the whole entry over
+a value it does not support, continuing without it, which under `relay`
+leaves the run gathering the host candidates the policy exists to keep
+off the wire. So the schema accepts a url that leaves `transport` unset or
+sets it to lowercase `tcp`, and `udp` on a `turn:` url; every other value --
+another protocol, an uppercase spelling, an empty one, or `udp` on a `turns:`
+url -- is refused at parse. A url setting the parameter more than once is held
+to the same rule at every occurrence, rather than resting on the transport
+reading the first. Which values the transport keeps is measured per form in
+`apps/cli/test/integration/webrtc/webrtcIceTransportPolicy.test.ts`, which
+the grammar in `packages/core/src/config/connection.ts` is drawn from.
 
 A rendezvous that ends with no data channel reports the candidate types this
 side gathered, the types the partner sent, and how many candidate pairs were
