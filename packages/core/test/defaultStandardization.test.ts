@@ -12,7 +12,7 @@ import {
   coerceToPatternString,
   patternConformsToDialect,
 } from "../src/utils/linearRegex";
-import { REGEX_STEP_PATTERN_PARAM } from "../src/config/transformRegexDialect";
+import { regexStepPatternParam } from "../src/config/transformRegexDialect";
 import type { ColumnMetadata } from "../src/config/metadata";
 import type { LinkageTerms } from "../src/config/linkageTermsSchema";
 
@@ -166,7 +166,7 @@ describe("getDefaultStandardization — structure", () => {
     const patterns: string[] = [];
     for (const t of transformations) {
       for (const step of t.steps ?? []) {
-        const paramKey = REGEX_STEP_PATTERN_PARAM[step.function];
+        const paramKey = regexStepPatternParam(step.function);
         if (paramKey === undefined) continue;
         const raw = step.params?.[paramKey];
         if (raw === undefined) continue;

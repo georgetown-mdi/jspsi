@@ -10,6 +10,10 @@ import {
   parseDateInputDropsEveryRecord,
 } from "../linkageSatisfiability.js";
 import { displayText } from "../utils/sanitizeForDisplay.js";
+import {
+  frozenLookupTable,
+  frozenLookupTableEntry,
+} from "../utils/frozenLookupTable.js";
 import { redactAndSanitizeForDisplay } from "../utils/sanitizeErrorForDisplay.js";
 import { redactAndDisplayPartyIdentity } from "../records/partyIdentityDisplay.js";
 
@@ -108,7 +112,7 @@ const FUZZY_COMPARISON_LABELS: Record<
  * {@link STANDARDIZATION_FUNCTION_NAMES} in both directions: a core function
  * with no entry here, and a stale entry for a function core dropped.
  */
-export const TRANSFORM_FUNCTION_GLOSSARY: Record<string, string> = {
+export const TRANSFORM_FUNCTION_GLOSSARY = frozenLookupTable({
   remove_non_ascii:
     "Deletes every character outside the ASCII set before matching -- an accented letter, emoji, or symbol is dropped entirely, not simplified.",
   replace_separators_with_spaces:
@@ -147,7 +151,7 @@ export const TRANSFORM_FUNCTION_GLOSSARY: Record<string, string> = {
   coalesce:
     "Substitutes a fallback value where an earlier rule left the value empty, " +
     "which can create matches that would not otherwise occur.",
-};
+});
 
 /**
  * The description a `coalesce` step earns where it cannot substitute anything
@@ -899,10 +903,10 @@ function summarizeTransform(
   };
   // A literal slice phrase leads in place of the function name where it is
   // faithful (substring on a name field); the glossary description is the
-  // fallback only when there is no literal. The lookup uses the RAW
-  // function name with `Object.hasOwn`, not a bare index, since a Record
-  // index signature would silently type an unmatched partner-controlled
-  // name as `string`. A coalesce that substitutes nothing here takes
+  // fallback only when there is no literal. The lookup reads the RAW
+  // function name through the table's own read path, so an unmatched
+  // partner-controlled name answers undefined rather than a description. A
+  // coalesce that substitutes nothing here takes
   // `COALESCE_WITHOUT_SUBSTITUTION_DESCRIPTION` instead of the glossary's,
   // so this row cannot assert a substitution the header's marker has
   // already declined to name.
@@ -910,8 +914,13 @@ function summarizeTransform(
   if (effect !== undefined) summary.effect = effect;
   else if (step.function === "coalesce" && !substitutesFallback)
     summary.description = COALESCE_WITHOUT_SUBSTITUTION_DESCRIPTION;
-  else if (Object.hasOwn(TRANSFORM_FUNCTION_GLOSSARY, step.function))
-    summary.description = TRANSFORM_FUNCTION_GLOSSARY[step.function];
+  else {
+    const glossed = frozenLookupTableEntry(
+      TRANSFORM_FUNCTION_GLOSSARY,
+      step.function,
+    );
+    if (glossed !== undefined) summary.description = glossed;
+  }
   return summary;
 }
 

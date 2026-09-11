@@ -1,4 +1,8 @@
 import type { LinkageTerms } from "./linkageTermsSchema.js";
+import {
+  frozenLookupTable,
+  frozenLookupTableEntry,
+} from "../utils/frozenLookupTable.js";
 import { patternConformsToDialect } from "../utils/linearRegex.js";
 
 // --- Transform-regex dialect conformance -------------------------------------
@@ -25,26 +29,24 @@ import { patternConformsToDialect } from "../utils/linearRegex.js";
  * `tier: "regex"`; a parity test pins the two together so neither can gain or
  * lose a member without the other.
  */
-export const REGEX_STEP_PATTERN_PARAM: Readonly<Record<string, string>> = {
+export const REGEX_STEP_PATTERN_PARAM = frozenLookupTable({
   replace_regex: "pattern",
   extract_regex: "pattern",
   filter_regex: "pattern",
   split_on: "delimiter",
-};
+});
 
 /**
  * The `params` key holding the raw pattern of a step naming `functionName`, or
- * `undefined` where the function has none. Read through this rather than by a
- * bare index: the function name is partner-authored free text, and the table is
- * a total `Record`, so an index answers a name reaching only `Object.prototype`
- * (`constructor`, `toString`) with an inherited member instead of `undefined`.
+ * `undefined` where the function has none. The read path for a name that is not
+ * a literal: the function name is partner-authored free text, and this answers
+ * a name reaching only `Object.prototype` (`constructor`, `toString`) with
+ * `undefined`.
  */
 export function regexStepPatternParam(
   functionName: string,
 ): string | undefined {
-  return Object.hasOwn(REGEX_STEP_PATTERN_PARAM, functionName)
-    ? REGEX_STEP_PATTERN_PARAM[functionName]
-    : undefined;
+  return frozenLookupTableEntry(REGEX_STEP_PATTERN_PARAM, functionName);
 }
 
 /**
@@ -100,7 +102,11 @@ export function linkageTermsHaveNonConformantTransformRegex(
 ): boolean {
   const totalBudgetMs = budget.totalBudgetMs ?? REGEX_DIALECT_TOTAL_BUDGET_MS;
   const maxPatternLength = budget.maxPatternLength ?? Infinity;
-  const startedAt = Date.now();
+  // performance.now() rather than the wall clock: a backward system-clock step
+  // during the walk (an NTP correction, a container resuming) makes the
+  // difference negative and leaves the remaining patterns unbounded, which is
+  // the fail-open direction for a bound on compile cost.
+  const startedAt = performance.now();
 
   for (const key of terms.linkageKeys) {
     for (const element of key.elements) {
@@ -116,7 +122,7 @@ export function linkageTermsHaveNonConformantTransformRegex(
         // declared, which throws out of a safe parse when it is not callable.
         if (typeof source !== "string") continue;
 
-        if (Date.now() - startedAt >= totalBudgetMs) return true;
+        if (performance.now() - startedAt >= totalBudgetMs) return true;
         // Reject an oversized source on length alone, before compiling: an
         // in-dialect source compiles in time super-linear in its length, and
         // the wall-clock budget above cannot interrupt one in-flight compile.

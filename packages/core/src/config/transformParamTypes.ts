@@ -1,3 +1,8 @@
+import {
+  frozenLookupTable,
+  frozenLookupTableEntry,
+} from "../utils/frozenLookupTable.js";
+
 /**
  * The declared type of one transform parameter: what a document must write for
  * the step function to read it.
@@ -33,39 +38,51 @@ export type TransformParamType = "text" | "integer" | "boolean" | "text-list";
  * decode-refusal tests drive every row through a real document, reading the row
  * list from {@link transformParamTypeRows} rather than from a copy of it.
  */
-const TRANSFORM_PARAM_TYPES: Record<
-  string,
-  Record<string, TransformParamType>
-> = {
-  substring: { start: "integer", length: "integer" },
-  parse_date: { inputFormat: "text", outputFormat: "text" },
-  pad_left: { length: "integer", char: "text" },
-  phonetic: { algorithm: "text" },
-  null_if: { value: "text", values: "text-list" },
-  replace_regex: { pattern: "text", replacement: "text" },
-  extract_regex: { pattern: "text" },
-  filter_regex: { pattern: "text" },
-  split_on: { delimiter: "text", includeOriginal: "boolean" },
-  coalesce: { default: "text" },
-};
+const TRANSFORM_PARAM_TYPES = frozenLookupTable({
+  substring: frozenLookupTable({
+    start: "integer",
+    length: "integer",
+  } as const),
+  parse_date: frozenLookupTable({
+    inputFormat: "text",
+    outputFormat: "text",
+  } as const),
+  pad_left: frozenLookupTable({ length: "integer", char: "text" } as const),
+  phonetic: frozenLookupTable({ algorithm: "text" } as const),
+  null_if: frozenLookupTable({ value: "text", values: "text-list" } as const),
+  replace_regex: frozenLookupTable({
+    pattern: "text",
+    replacement: "text",
+  } as const),
+  extract_regex: frozenLookupTable({ pattern: "text" } as const),
+  filter_regex: frozenLookupTable({ pattern: "text" } as const),
+  split_on: frozenLookupTable({
+    delimiter: "text",
+    includeOriginal: "boolean",
+  } as const),
+  coalesce: frozenLookupTable({ default: "text" } as const),
+} satisfies Record<string, Readonly<Record<string, TransformParamType>>>);
 
 /**
  * The type `functionName` reads `param` as, or undefined where the function
  * reads no such param -- which includes every function this build does not
  * implement.
  *
- * Own-property lookups (`Object.hasOwn`, not a bare index): a function name and
+ * Read through the table's own read path, at both levels: a function name and
  * a param name of a linkage-key element transform are partner-authored free
- * text, and a bare index answers `constructor` or `toString` with an inherited
- * `Object.prototype` member.
+ * text, and a name reaching only `Object.prototype` (`constructor`,
+ * `toString`) is answered `undefined`.
  */
 export function declaredTransformParamType(
   functionName: string,
   param: string,
 ): TransformParamType | undefined {
-  if (!Object.hasOwn(TRANSFORM_PARAM_TYPES, functionName)) return undefined;
-  const expectedTypes = TRANSFORM_PARAM_TYPES[functionName];
-  return Object.hasOwn(expectedTypes, param) ? expectedTypes[param] : undefined;
+  const expectedTypes = frozenLookupTableEntry(
+    TRANSFORM_PARAM_TYPES,
+    functionName,
+  );
+  if (expectedTypes === undefined) return undefined;
+  return frozenLookupTableEntry(expectedTypes, param);
 }
 
 /** One row of the declared-type table. */
@@ -240,10 +257,10 @@ function matchesDeclaredType(
  * whether the party reading these refusals wrote the document
  * ({@link TransformParamRefusalOptions}).
  *
- * Own-property lookups throughout (`Object.hasOwn`, not a bare index): the
- * function name and the param names of a linkage-key element transform are
- * partner-authored free text, and a bare index answers `constructor` or
- * `toString` with an inherited `Object.prototype` member.
+ * Own-property lookups throughout: the function name and the param names of a
+ * linkage-key element transform are partner-authored free text, and a name
+ * reaching only `Object.prototype` (`constructor`, `toString`) names no row
+ * and no declared param.
  */
 export function transformParamTypeRefusals(
   step: {
@@ -252,8 +269,11 @@ export function transformParamTypeRefusals(
   },
   options: TransformParamRefusalOptions = REFUSAL_TO_A_READER,
 ): TransformParamTypeRefusal[] {
-  if (!Object.hasOwn(TRANSFORM_PARAM_TYPES, step.function)) return [];
-  const expectedTypes = TRANSFORM_PARAM_TYPES[step.function];
+  const expectedTypes = frozenLookupTableEntry(
+    TRANSFORM_PARAM_TYPES,
+    step.function,
+  );
+  if (expectedTypes === undefined) return [];
   const params = step.params;
   if (params === null || typeof params !== "object") return [];
   const refusals: TransformParamTypeRefusal[] = [];

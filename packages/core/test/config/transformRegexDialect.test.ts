@@ -1,4 +1,4 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
 
 import {
   REGEX_STEP_PATTERN_PARAM,
@@ -108,6 +108,35 @@ describe("linkageTermsHaveNonConformantTransformRegex", () => {
         { totalBudgetMs: 0 },
       ),
     ).toBe(true);
+  });
+
+  test("measures its budget on the monotonic clock, not the system clock", () => {
+    const conformant = termsWith([
+      { function: "filter_regex", params: { pattern: "^\\d+$" } },
+      { function: "replace_regex", params: { pattern: "[^0-9]" } },
+    ]);
+    const systemClock = vi.spyOn(Date, "now");
+    try {
+      // A system clock stepping an hour forward between reads: a walk timed on
+      // it would spend the whole budget before reaching the first pattern and
+      // refuse terms it never checked.
+      let reading = Date.UTC(2026, 0, 1);
+      systemClock.mockImplementation(() => (reading += 3_600_000));
+      expect(linkageTermsHaveNonConformantTransformRegex(conformant)).toBe(
+        false,
+      );
+
+      // And an hour backward between reads, the fail-open direction: a walk
+      // timed on it sees a negative elapsed time, so no budget ever runs out.
+      systemClock.mockImplementation(() => (reading -= 3_600_000));
+      expect(
+        linkageTermsHaveNonConformantTransformRegex(conformant, {
+          totalBudgetMs: 0,
+        }),
+      ).toBe(true);
+    } finally {
+      systemClock.mockRestore();
+    }
   });
 
   test("rejects an oversized in-dialect source on length, before compiling it", () => {
