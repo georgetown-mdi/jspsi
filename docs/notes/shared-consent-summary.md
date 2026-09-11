@@ -59,6 +59,26 @@ where it was applied a second time. A sentence a surface authors for itself is a
 second account, and the check cannot see it; a sentence both surfaces read from
 one place has nothing to drift against.
 
+### The third surface, and what it is held to
+
+The CLI's pre-run disclosure display (`apps/cli/src/exchangeDisclosure.ts`)
+states the same terms to the party that WROTE them, off the same summarizer, so
+the probe set binds it too -- a field added to `LinkageTerms` or reclassified as
+consent-relevant cannot go silent there unnoticed.
+
+It is held to representation alone, and to its own copy:
+
+- The classification's pinned sentences are the two acceptance surfaces'
+  wording, for a reader weighing a partner's proposal. This seat words the same
+  disclosures for a party reading its own file, and its suite pins those
+  sentences against the facts core marks as this seat's own
+  (`SELF_AUTHORED_EXCHANGE_FACTS`).
+- Its recorded gaps are wider, and they are the display's scope rather than a
+  backlog: the per-element and per-constraint matching detail, the rule-set and
+  agreement citations, and the party name in the document are all things its
+  reader typed. What a run sends and what it matches on is what a reader who
+  authored the terms has left to learn.
+
 ## Enforced, or the partner's word
 
 An acceptor reading either surface meets two unlike kinds of fact. Some the
