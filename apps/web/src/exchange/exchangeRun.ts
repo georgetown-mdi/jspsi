@@ -159,10 +159,9 @@ export function runWithStage(
   };
 }
 
-/** Complete the run: the open visit closes, the terminal done stage is
- * entered as its own (already-closed) visit -- the lifecycle never emits a
- * "done" stage event, so the completion synthesizes it here and the status
- * label's live region announces the final "Done" -- and the finish instant is
+/** Complete the run on the lifecycle's result: the open visit closes, the
+ * terminal done stage is entered as its own already-closed visit so the status
+ * label's live region announces the final "Done", and the finish instant is
  * recorded for the completion header. */
 export function runWithCompletion(run: ExchangeRun, at: Date): ExchangeRun {
   return {

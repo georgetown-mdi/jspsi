@@ -143,9 +143,17 @@ describe("the timeline advances on stage events", () => {
     ]);
     expect(done.finishedAt).toEqual(at(47));
     expect(progressPercent(done)).toBe(100);
-    // The lifecycle never emits a "done" stage event, so completion must
-    // synthesize the final label the live region announces.
     expect(currentStageLabel(done)).toBe("Done");
+  });
+
+  test("the done stage id arriving as a stage event does not finish the run", () => {
+    // core's single-pass path emits the terminal stage id as an ordinary stage
+    // event, so the finish instant hangs on the result event alone.
+    const staged = runWithStage(runToWaiting(), DONE_STAGE_ID, at(44));
+    expect(staged.finishedAt).toBeUndefined();
+    const completed = runWithCompletion(staged, at(47));
+    expect(completed.finishedAt).toEqual(at(47));
+    expect(currentStageLabel(completed)).toBe("Done");
   });
 
   test("under single-pass, Link keys completes without ever being current", () => {

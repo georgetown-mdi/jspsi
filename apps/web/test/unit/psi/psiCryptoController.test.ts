@@ -24,9 +24,9 @@ import type {
 // createPsiCryptoWorkerHandle is the single definition of the browser host-side
 // worker wiring; production reaches it via createBrowserPsiEngineFactory and these
 // tests reach it through a fake, so neither re-implements a second copy that could
-// drift. A fake also reaches 'onmessageerror', which never fires for today's
-// cloneable payloads and so cannot be exercised by a real worker. The real worker +
-// WASM round-trip lives in test/browser/psiCryptoWorker.test.ts.
+// drift. A fake also emits 'onmessageerror' on demand, so that handler's coverage
+// lives here rather than in the real worker + WASM round-trip, which is in
+// test/browser/psiCryptoWorker.test.ts.
 
 // A stand-in for a dedicated Web Worker: records posted requests and terminate() calls,
 // and lets a test emit the worker's message/error/messageerror events on demand.
@@ -284,8 +284,9 @@ describe("createBufferingRequestRouter", () => {
 
   test("fails buffered and subsequent requests when the engine never loads", async () => {
     // The load-failure signal a real WASM-load failure would trigger: buffered and
-    // later requests are answered with the failure rather than left to hang. Only a
-    // fake dispatcher can drive this on demand (a real WASM load always succeeds here).
+    // later requests are answered with the failure rather than left to hang. A fake
+    // dispatcher rejects the load on demand, so the failure path is covered here
+    // rather than in the real-WASM round-trip (test/browser/psiCryptoWorker.test.ts).
     let rejectStart!: (error: unknown) => void;
     const startDispatcher = (): Promise<(request: PsiWorkerRequest) => void> =>
       new Promise((_resolve, reject) => {
