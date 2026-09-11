@@ -35,6 +35,7 @@ import { MAX_ENCODED_INVITATION_LENGTH } from "../../src/config/invitation";
 import { pipelineAlwaysDrops } from "../../src/linkageSatisfiability";
 import { describeDecodeError } from "../../src/utils/describeDecodeError";
 import { transformParamTypeRows } from "../../src/config/transformParamTypes";
+import { TRANSFORM_PARAM_COUNT_MESSAGE } from "../../src/config/transformParamDisplay";
 import {
   MAX_NODE_COUNT,
   NestingDepthExceededError,
@@ -2607,16 +2608,29 @@ const paramsTerms = (params: Record<string, unknown>) => ({
   ],
 });
 
-test("accepts a transform params record at exactly the maximum entry count", () => {
+// The entry-count gate short-circuits an over-count record before its keys are
+// read; the display cap is what an in-gate record of that width meets. Driven
+// at the gate's own boundary and one past it, so a record reaching the cap and
+// one stopped at the gate are told apart by the message each raises.
+const issueMessagesOf = (params: Record<string, unknown>): string[] => {
+  const result = safeParseLinkageTerms(paramsTerms(params));
+  expect(result.success).toBe(false);
+  return result.success ? [] : result.error.issues.map((i) => i.message);
+};
+
+test("a transform params record at the maximum entry count clears that gate", () => {
   const params: Record<string, unknown> = {};
   for (let i = 0; i < MAX_PARAMS_ENTRIES; i++) params[`k${i}`] = 1;
-  expect(() => parseLinkageTerms(paramsTerms(params))).not.toThrow();
+  expect(issueMessagesOf(params)).toEqual([TRANSFORM_PARAM_COUNT_MESSAGE]);
 });
 
 test("rejects a transform params record over the maximum entry count", () => {
   const params: Record<string, unknown> = {};
   for (let i = 0; i <= MAX_PARAMS_ENTRIES; i++) params[`k${i}`] = 1;
   expect(() => parseLinkageTerms(paramsTerms(params))).toThrow(ZodError);
+  expect(issueMessagesOf(params)).toEqual([
+    `transform params must not exceed ${MAX_PARAMS_ENTRIES} entries`,
+  ]);
 });
 
 test("a pathological-count transform params record fails cleanly, not with a RangeError", () => {

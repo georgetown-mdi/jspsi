@@ -1327,6 +1327,8 @@ A `split_on` step fails closed under a combination that matches one value per re
 | `function` | string | yes | Name of the function to apply (see Available functions below) |
 | `params` | object | no | Function-specific parameters |
 
+A step declares at most 16 parameters, which is also how many the invitation's consent summary states for a step, so what a reader sees is what the run applies rather than a count standing for the rest. Two further parameter shapes are refused where a document is read, each for that same reason: a value holding a private key block, which the summary shows as a redaction marker in place of the literal the step would apply, and a `null_if` step declaring both `value` and `values`, of which the run applies only the list. Every refusal fires on a partner's invitation and on your own configuration alike; see [CHANNEL_SECURITY.md](spec/CHANNEL_SECURITY.md#transform-parameter-declared-types).
+
 ### Unicode normalization
 
 Before the first step of any transformation runs, the input value is normalized to Unicode NFC (Normalization Form C). This is unconditional and applies to every field, including those given an identity (no-`steps`) transformation. Because the cleaned string becomes the PSI set element verbatim, two parties holding the same logical value in different normalization forms -- for example an accented name stored precomposed (NFC) on one side and decomposed (NFD) on the other, the common split between macOS filesystems and most databases -- would otherwise produce different bytes and silently fail to match. Author pipelines assuming their input is already NFC; `to_upper_case`, `to_lower_case`, and `remove_accents` therefore operate on a normalized input (though `to_upper_case` can itself re-emit non-NFC for a few code points, which the steps that match against an intermediate value compensate for; see the note below). NFC, not NFKC, is used: canonical equivalents are merged while visually-distinct compatibility characters (ligatures, full-width forms) are preserved.
@@ -1400,7 +1402,7 @@ A step the function cannot be built from at all is refused where the terms are m
 
 | Function | Description | Parameters |
 |----------|-------------|------------|
-| `null_if` | Produce `null` if the value matches | `value` (single string) or `values` (array of strings) |
+| `null_if` | Produce `null` if the value matches | `value` (single string) or `values` (array of strings), one or the other |
 | `filter_regex` | Produce `null` if the value does not match the pattern | `pattern` (required) |
 
 #### Recovery
