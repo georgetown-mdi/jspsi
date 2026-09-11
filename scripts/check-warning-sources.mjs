@@ -175,6 +175,7 @@ export function checkWarningSources({ root } = {}) {
   const results = REGISTRIES.map((registry) => checkRegistry(registry, read));
   const failures = results.flatMap((result) => result.failures);
   const [cli, relay] = results;
+  const [, relayRegistry] = REGISTRIES;
   const collisions =
     cli === undefined || relay === undefined
       ? []
@@ -184,8 +185,8 @@ export function checkWarningSources({ root } = {}) {
       "a synthesized relay source collides with a CLI one, so the field " +
         "cannot say which process raised the warning:",
       `  on both streams: ${collisions.join(", ")}`,
-      `  give each a value of its own in ${REGISTRIES[1].declaration} ` +
-        `(${REGISTRIES[1].module}) and its registry row.`,
+      `  give each a value of its own in ${relayRegistry.declaration} ` +
+        `(${relayRegistry.module}) and its registry row.`,
     );
   if (failures.length > 0) return { ok: false, message: failures.join("\n") };
   const counted = REGISTRIES.map(
