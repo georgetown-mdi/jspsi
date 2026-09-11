@@ -34,6 +34,7 @@ import {
   candidateSetIsImplementedForStrategy,
   COUNT_ONLY_SHAPE_REFUSALS,
 } from "./linkageTermsPolicy.js";
+import { frozenLookupTable } from "./utils/frozenLookupTable.js";
 import { redactPrivateKeyMaterial } from "./utils/sanitizeErrorForDisplay.js";
 import {
   applyStep,
@@ -1328,13 +1329,11 @@ export function substringRunDropsEveryParsedDate(
  * the declared-type table in `config/transformParamTypes.ts` has the same shape
  * of gap.
  */
-export const CONSENT_VERDICT_PARAM_NAMES: Readonly<
-  Record<string, ReadonlyArray<string>>
-> = {
-  parse_date: ["inputFormat", "outputFormat"],
-  substring: ["start", "length"],
-  coalesce: ["default"],
-};
+export const CONSENT_VERDICT_PARAM_NAMES = frozenLookupTable({
+  parse_date: ["inputFormat", "outputFormat"] as const,
+  substring: ["start", "length"] as const,
+  coalesce: ["default"] as const,
+} satisfies Record<string, ReadonlyArray<string>>);
 
 /**
  * Whether a transform/standardization pipeline produces NO value for every

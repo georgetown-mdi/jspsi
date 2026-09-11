@@ -9,8 +9,12 @@ import {
   transformParamTypeRefusals,
 } from "../src/config/transformParamTypes";
 import { safeParseLinkageTerms } from "../src/config/linkageTermsSchema";
-import { TRANSFORM_FUNCTION_GLOSSARY } from "../src/consent/invitationSummary";
+import {
+  summarizeInvitation,
+  TRANSFORM_FUNCTION_GLOSSARY,
+} from "../src/consent/invitationSummary";
 import { UnknownStandardizationFunctionError } from "../src/errors";
+import { CONSENT_VERDICT_PARAM_NAMES } from "../src/linkageSatisfiability";
 import {
   runPipeline,
   STANDARDIZATION_FUNCTION_DESCRIPTORS,
@@ -28,6 +32,7 @@ const PROTOTYPE_MEMBER_NAMES = [
 ];
 
 const exportedRegistries: Array<[string, object]> = [
+  ["CONSENT_VERDICT_PARAM_NAMES", CONSENT_VERDICT_PARAM_NAMES],
   ["REGEX_STEP_PATTERN_PARAM", REGEX_STEP_PATTERN_PARAM],
   [
     "STANDARDIZATION_FUNCTION_DESCRIPTORS",
@@ -38,6 +43,7 @@ const exportedRegistries: Array<[string, object]> = [
 
 const termsNamingFunction = (
   functionName: string,
+  params: Record<string, unknown> = { pattern: "^x$" },
 ): Record<string, unknown> => ({
   version: "1.0.0",
   identity: "Test Party",
@@ -52,7 +58,7 @@ const termsNamingFunction = (
       elements: [
         {
           field: "ssn",
-          transform: [{ function: functionName, params: { pattern: "^x$" } }],
+          transform: [{ function: functionName, params }],
         },
       ],
     },
@@ -118,5 +124,40 @@ describe("the transform registries a decoded document indexes", () => {
         UnknownStandardizationFunctionError,
       );
     }
+  });
+
+  test("lead the displayed params of a listed name, never of a prototype member", () => {
+    // CONSENT_VERDICT_PARAM_NAMES is read by a module-private ordering step, so
+    // the consent summary is where a partner-authored name reaches it: a listed
+    // function leads with the params a verdict reads, and a name resolving only
+    // on Object.prototype leads with nothing rather than with the inherited
+    // member a bare index would hand the ordering set.
+    const declared = {
+      unlistedParam: "x",
+      outputFormat: "YYYYMMDD",
+      inputFormat: "MM/DD/YYYY",
+    };
+    const displayedParams = (functionName: string): string[] => {
+      const decoded = safeParseLinkageTerms(
+        termsNamingFunction(functionName, declared),
+      );
+      expect(decoded.success, functionName).toBe(true);
+      if (!decoded.success) return [];
+      const summary = summarizeInvitation({ linkageTerms: decoded.data });
+      return summary.linkageKeys[0].elements[0].transforms[0].params.map(
+        String,
+      );
+    };
+    expect(displayedParams("parse_date")).toEqual([
+      "outputFormat: YYYYMMDD",
+      "inputFormat: MM/DD/YYYY",
+      "unlistedParam: x",
+    ]);
+    for (const name of PROTOTYPE_MEMBER_NAMES)
+      expect(displayedParams(name), name).toEqual([
+        "unlistedParam: x",
+        "outputFormat: YYYYMMDD",
+        "inputFormat: MM/DD/YYYY",
+      ]);
   });
 });

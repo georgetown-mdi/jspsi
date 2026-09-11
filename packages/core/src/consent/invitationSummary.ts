@@ -794,17 +794,15 @@ const MAX_DISPLAYED_PARAMS = 16;
  * enough entries ahead of it. Leading with the verdict-bearing rows fixes
  * that at the source.
  *
- * The lookup is guarded by `Object.hasOwn` rather than a bare index because
- * the function name is partner free text: an index signature would type a
- * name that only reaches `Object.prototype` (`constructor`, `toString`) as
- * a hit.
+ * The lookup goes through the table's own read path because the function name
+ * is partner free text: a name that only reaches `Object.prototype`
+ * (`constructor`, `toString`) answers undefined rather than an inherited
+ * member, which would lead the display with rows no verdict reads.
  */
 function orderedParamEntries(step: TransformStep): Array<[string, unknown]> {
   const entries = Object.entries(step.params ?? {});
-  const verdictBearing = new Set(
-    Object.hasOwn(CONSENT_VERDICT_PARAM_NAMES, step.function)
-      ? CONSENT_VERDICT_PARAM_NAMES[step.function]
-      : [],
+  const verdictBearing = new Set<string>(
+    frozenLookupTableEntry(CONSENT_VERDICT_PARAM_NAMES, step.function) ?? [],
   );
   return [
     ...entries.filter(([name]) => verdictBearing.has(name)),

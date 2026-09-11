@@ -1293,7 +1293,7 @@ export const STANDARDIZATION_FUNCTION_DESCRIPTORS: Readonly<
       default: z.string().optional(),
     }),
   },
-});
+} satisfies Record<string, StandardizationFunctionDescriptor>);
 
 // --- Step compilation --------------------------------------------------------
 
