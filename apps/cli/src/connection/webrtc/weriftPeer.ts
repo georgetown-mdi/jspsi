@@ -23,6 +23,7 @@ import type {
   BrokerLocation,
   BrokerMessage,
 } from "./brokerClient";
+import type { IceTransportPolicy } from "./iceDiagnostics";
 import type { RendezvousRole, WebRTCConnectionConfig } from "@psilink/core";
 import type {
   RTCDataChannel,
@@ -422,14 +423,6 @@ export function iceServersFromConnection(
   return servers;
 }
 
-/**
- * Candidate types ICE may use, taken from the connection schema so a widened
- * set of values reaches the transport rather than being retyped here.
- */
-export type IceTransportPolicy = NonNullable<
-  WebRTCConnectionConfig["iceTransportPolicy"]
->;
-
 /** The `RTCConfiguration` fields the peer connection is constructed with. */
 export interface WeriftPeerConfiguration {
   iceServers?: Array<RTCIceServer>;
@@ -599,6 +592,7 @@ export async function openWebRtcPeerSession(
     offerRetryIntervalMs,
     rendezvousTimeoutMs,
     channelOpenTimeoutMs,
+    iceTransportPolicy,
     signal,
   });
 
@@ -690,6 +684,8 @@ interface NegotiationOptions {
   offerRetryIntervalMs: number;
   rendezvousTimeoutMs: number;
   channelOpenTimeoutMs: number;
+  /** The policy the peer connection was built with; named in a failure. */
+  iceTransportPolicy?: IceTransportPolicy;
   signal?: AbortSignal;
 }
 
@@ -755,7 +751,11 @@ class Negotiation {
         "transport",
         report === undefined
           ? undefined
-          : { cause: chainDetailCauses(iceFailureDetails(report)) },
+          : {
+              cause: chainDetailCauses(
+                iceFailureDetails(report, this.options.iceTransportPolicy),
+              ),
+            },
       ),
     );
   }

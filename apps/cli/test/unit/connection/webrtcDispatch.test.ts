@@ -235,12 +235,26 @@ afterEach(() => {
 
 const BROKER_HOST = "peers.example.org";
 
-function webrtcConnection(role: "inviter" | "acceptor", host = BROKER_HOST) {
+/** The relay source a `relay` policy needs; the schema refuses it without one. */
+const RELAY_TURN = {
+  url: "turns:relay.example.org:443?transport=tcp",
+  username: "psilink",
+  credential: "placeholder-not-a-secret",
+};
+
+function webrtcConnection(
+  role: "inviter" | "acceptor",
+  host = BROKER_HOST,
+  iceTransportPolicy?: "all" | "relay",
+) {
   return {
     channel: "webrtc" as const,
     server: { host, port: 9000, secure: false },
     role,
     stun: ["stun:stun.example.org:3478"],
+    ...(iceTransportPolicy === undefined
+      ? {}
+      : { iceTransportPolicy, turn: [RELAY_TURN] }),
   };
 }
 
@@ -248,11 +262,12 @@ function webrtcConnection(role: "inviter" | "acceptor", host = BROKER_HOST) {
 function runParty(
   role: "inviter" | "acceptor",
   host = BROKER_HOST,
+  iceTransportPolicy?: "all" | "relay",
 ): Promise<unknown> {
   const keyFilePath = path.join(tmpDir, `${role}.key`);
   saveKeyFile(keyFilePath, { sharedSecret: SECRET });
   return runProtocol({
-    connection: webrtcConnection(role, host),
+    connection: webrtcConnection(role, host, iceTransportPolicy),
     auth: { sharedSecret: SECRET, keyFilePath },
     prepared: minimalPrepared,
     output: path.join(tmpDir, `${role}.csv`),
@@ -356,6 +371,40 @@ test("the rendezvous line names the authority dialed, not the configured text", 
     `${rendezvousLine} peers.example.org:9000`,
   ]);
 });
+
+const POLICY_LINES: Array<
+  [label: string, policy: "all" | "relay" | undefined, line: string]
+> = [
+  ["relay", "relay", "ice_transport_policy: relay (relay candidates only)"],
+  [
+    "all",
+    "all",
+    "ice_transport_policy: all (host, server-reflexive and relay candidates)",
+  ],
+  // An unconfigured run gathers under the transport's own default, which is
+  // the case an operator most needs stated: nothing in their configuration
+  // says what the run did.
+  [
+    "no policy",
+    undefined,
+    "ice_transport_policy: all by default (host, server-reflexive and relay candidates)",
+  ],
+];
+
+test.each(POLICY_LINES)(
+  "a run configured with %s states the policy it applied, once",
+  async (_label, policy, line) => {
+    await Promise.all([
+      runParty("inviter", BROKER_HOST, policy),
+      runParty("acceptor", BROKER_HOST, policy),
+    ]);
+    expect(
+      mockState.logLines.filter((emitted) =>
+        emitted.startsWith("ice_transport_policy:"),
+      ),
+    ).toEqual([line, line]);
+  },
+);
 
 test("a signal during the rendezvous closes the channel it opened", async () => {
   // The interrupt handler's cleanup runs while the dial is still in flight, so

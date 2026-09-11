@@ -386,11 +386,25 @@ reading the first. Which values the transport keeps is measured per form in
 `apps/cli/test/integration/webrtc/webrtcIceTransportPolicy.test.ts`, which
 the grammar in `packages/core/src/config/connection.ts` is drawn from.
 
+The connection schema's webrtc member is a strict object: a key it does not
+define is refused at parse, naming the key in the snake_case the document
+writes, rather than stripped. A dropped `ice_transport_policy` would leave a
+run that asked for relay-only candidates gathering under the default, with
+nothing stating that it had -- the reason `authentication` is strict as well
+(`packages/core/src/config/connection.ts`).
+
+Every run states the policy it applied as it opens the rendezvous: the
+configured value, or the transport's own default where the connection sets
+none.
+
 A rendezvous that ends with no data channel reports the candidate types this
 side gathered, the types the partner sent, and how many candidate pairs were
 tried, each on a labelled cause link of its own, so a relay that was never
-gathered is distinguishable from one that was and still found no path. What an
-operator does with that answer is in [CLI.md](../CLI.md#webrtc-exchanges).
+gathered is distinguishable from one that was and still found no path. Where
+the policy is `relay` and no relay candidate was gathered, the first link names
+the policy: that run had no direct path to fall back on, so the policy is part
+of the diagnosis rather than context the operator supplies. What an operator
+does with that answer is in [CLI.md](../CLI.md#webrtc-exchanges).
 
 `connection.provider_options` is inert on this channel: no transport on either
 side reads it, so no key in it reaches the PeerJS client, the peer connection,

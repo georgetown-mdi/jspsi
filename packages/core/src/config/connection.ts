@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { camelizeKeys } from "../utils/camelizeKeys.js";
+import { camelizeKeys, snakeizeKey } from "../utils/camelizeKeys.js";
 import { safeParseCamelized } from "./safeParseCamelized.js";
 import { randomBytes, toBase64Url } from "../utils/crypto.js";
 import { pathsResolveToSameDir } from "../utils/pathCompare.js";
@@ -920,28 +920,59 @@ export type ConnectionConfig =
 // annotations: z.discriminatedUnion requires a concrete ZodObject, and the
 // explicit annotation would widen the type to ZodType<T>, breaking it.
 // Type safety is enforced at the ConnectionConfigSchema level instead.
-const WebRTCConnectionConfigSchema = z.object({
-  channel: z.literal("webrtc"),
-  server: WebRTCServerSchema,
-  role: z.enum(["inviter", "acceptor"]).optional(),
-  stun: z
-    .array(
-      z
-        .string()
-        .trim()
-        .regex(
-          STUN_URI_PATTERN,
-          "a stun entry must name a host after stun: or stuns:, for " +
-            "example stun:stun.example.org:3478",
-        ),
-    )
-    .optional(),
-  turn: z.array(TurnServerSchema).optional(),
-  iceTransportPolicy: z.enum(["all", "relay"]).optional(),
-  iceProvision: IceProvisionSchema.optional(),
-  options: SharedOptionsSchema.optional(),
-  providerOptions: z.record(z.string(), z.unknown()).optional(),
-});
+
+/**
+ * Name the keys a webrtc connection does not define, in the snake_case the
+ * operator's document spells them.
+ *
+ * Validation runs on the camelized shape, so a Zod issue names the camelCase
+ * form of whatever the file held; {@link snakeizeKey} puts each back the way
+ * the document writes it, which is the spelling an operator can search for.
+ */
+function unknownWebRtcKeysMessage(keys: ReadonlyArray<string>): string {
+  const named = keys.map(snakeizeKey).join(", ");
+  return keys.length === 1
+    ? `a webrtc connection has no key ${named}; correct the spelling or remove it`
+    : `a webrtc connection has no keys ${named}; correct the spelling or remove them`;
+}
+
+/**
+ * `strictObject`, unlike the sibling channel members: `ice_transport_policy`
+ * decides which candidate types ICE may gather, so a misspelled or misplaced
+ * key must reject at parse rather than drop and leave the run on a policy the
+ * operator did not choose. {@link AuthenticationSchema} is strict for the same
+ * reason, and EXCHANGE_FILE.md records what both cost an older reader.
+ */
+const WebRTCConnectionConfigSchema = z.strictObject(
+  {
+    channel: z.literal("webrtc"),
+    server: WebRTCServerSchema,
+    role: z.enum(["inviter", "acceptor"]).optional(),
+    stun: z
+      .array(
+        z
+          .string()
+          .trim()
+          .regex(
+            STUN_URI_PATTERN,
+            "a stun entry must name a host after stun: or stuns:, for " +
+              "example stun:stun.example.org:3478",
+          ),
+      )
+      .optional(),
+    turn: z.array(TurnServerSchema).optional(),
+    iceTransportPolicy: z.enum(["all", "relay"]).optional(),
+    iceProvision: IceProvisionSchema.optional(),
+    options: SharedOptionsSchema.optional(),
+    providerOptions: z.record(z.string(), z.unknown()).optional(),
+  },
+  {
+    error: (issue) =>
+      issue.code === "unrecognized_keys"
+        ? unknownWebRtcKeysMessage(issue.keys)
+        : undefined,
+  },
+);
 
 const SFTPConnectionConfigSchema = z.object({
   channel: z.literal("sftp"),
