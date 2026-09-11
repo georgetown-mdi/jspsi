@@ -1,7 +1,7 @@
 ---
 title: "psilink Compliance"
 review_owner: "psilink maintainers"
-last_reviewed: "2026-09-10"
+last_reviewed: "2026-09-11"
 ---
 
 # psilink compliance
@@ -88,7 +88,7 @@ The table below maps psilink's design to relevant control families of [NIST SP 8
 | SC-28 | Protection of Information at Rest | The shared secret is the only persistent credential. It is stored with mode `0600` on Unix and a restricted ACL on Windows; see [SECURITY_DESIGN.md#key-file-security](SECURITY_DESIGN.md#key-file-security). psilink applies access control at rest rather than encryption: the key file, the signing identity, the exchange records and the result CSV are written unencrypted at those same owner-only permissions, so at-rest confidentiality is the deploying agency's storage or full-disk encryption. |
 | AU-12 | Audit Record Generation | psilink does not capture PII in log output; see [SECURITY_DESIGN.md#data-handling](SECURITY_DESIGN.md#data-handling). |
 | SI-2 | Flaw Remediation | Coordinated vulnerability disclosure with a 90-day fix target; CVE assignment for confirmed vulnerabilities; patch releases follow the process in [RELEASES.md](RELEASES.md). |
-| SI-7 | Software, Firmware, and Information Integrity | Release tags are signed with the maintainer's SSH key; container images are signed with Cosign and include a SLSA build provenance attestation over the same digest; a CycloneDX SBOM is attached to each GitHub Release. See [Release integrity](#release-integrity). |
+| SI-7 | Software, Firmware, and Information Integrity | Release tags are signed with the maintainer's SSH key; container images are signed with Cosign and include a SLSA build provenance attestation over the same digest; a CycloneDX SBOM covering the npm dependency tree is attached to each GitHub Release, each image's OS packages being listed separately in the attribution lists beside `NOTICE`. See [Release integrity](#release-integrity). |
 
 ### FedRAMP and StateRAMP
 
@@ -242,15 +242,15 @@ No collected set of state-law guidance documents is available yet; a deploying a
 
 ### Section 889
 
-psilink does not use covered telecommunications equipment or services as defined in Section 889 of the John S. McCain National Defense Authorization Act for Fiscal Year 2019. The project's runtime and build dependencies are listed in the CycloneDX Software Bill of Materials (SBOM) attached to each release; see [RELEASES.md#software-bill-of-materials-sbom](RELEASES.md#software-bill-of-materials-sbom). The SBOM allows downstream users to verify the absence of any specific covered vendor.
+psilink does not use covered telecommunications equipment or services as defined in Section 889 of the John S. McCain National Defense Authorization Act for Fiscal Year 2019. Verifying that against a published image takes two artifacts, one per layer. The CycloneDX Software Bill of Materials (SBOM) attached to each release covers the npm dependency tree, to the scope and residuals stated in [RELEASES.md#software-bill-of-materials-sbom](RELEASES.md#software-bill-of-materials-sbom). The OS layer is covered by the attribution lists beside [NOTICE](../NOTICE), one list per image and one row per package the image's own package manager records, regenerated from the built image and compared against the committed list in CI; see [CONTAINER_IMAGES.md#the-os-layer-attribution-lists](spec/CONTAINER_IMAGES.md#the-os-layer-attribution-lists). Read together, they let a downstream user verify the absence of a specific covered vendor from either layer. The Node.js runtime is in neither: both images install it as an upstream binary distribution rather than as an npm or OS package, so what identifies it is the version and digest each image pins, recorded in [CONTAINER_IMAGES.md](spec/CONTAINER_IMAGES.md).
 
 ### Dependency origins and licenses
 
-The redistributed third-party components and their upstreams are documented in the top-level [NOTICE](../NOTICE) file. Per-dependency licenses are listed in the CycloneDX SBOM attached to each release (see [RELEASES.md#software-bill-of-materials-sbom](RELEASES.md#software-bill-of-materials-sbom)); the dependency license-compatibility policy is in [CONTRIBUTING.md#dependency-policy](../CONTRIBUTING.md#dependency-policy).
+The vendored and redistributed components of this repository's own tree, and their upstreams, are documented in the top-level [NOTICE](../NOTICE) file. Per-dependency licenses for the npm tree are listed in the CycloneDX SBOM attached to each release (see [RELEASES.md#software-bill-of-materials-sbom](RELEASES.md#software-bill-of-materials-sbom)). Neither artifact reaches an OS package: each published image's OS layer is covered instead by the attribution list beside `NOTICE`, which records the license string each package's own manager declares rather than an audit of that package's contents (see [CONTAINER_IMAGES.md#the-os-layer-attribution-lists](spec/CONTAINER_IMAGES.md#the-os-layer-attribution-lists)). The dependency license-compatibility policy in [CONTRIBUTING.md#dependency-policy](../CONTRIBUTING.md#dependency-policy) scopes to the npm tree; the images' OS layers include packages whose declared licenses carry GPL-3.0 or LGPL-3.0 terms, as their base distributions ship them.
 
 ### Software Bill of Materials
 
-A CycloneDX SBOM is generated as part of the release checklist and attached to every GitHub Release. See [RELEASES.md#software-bill-of-materials-sbom](RELEASES.md#software-bill-of-materials-sbom).
+A CycloneDX SBOM covering the npm dependency tree is generated as part of the release checklist and attached to every GitHub Release; it reaches no OS package. See [RELEASES.md#software-bill-of-materials-sbom](RELEASES.md#software-bill-of-materials-sbom) for its scope and residuals, and [CONTAINER_IMAGES.md#the-os-layer-attribution-lists](spec/CONTAINER_IMAGES.md#the-os-layer-attribution-lists) for the lists that cover each image's OS layer.
 
 ### Release integrity
 
@@ -293,4 +293,4 @@ If a reviewer identifies a compliance-relevant gap that is not addressed here, p
 - [SECURITY.md](../SECURITY.md) - vulnerability reporting and response
 - [INCIDENT_RESPONSE.md](INCIDENT_RESPONSE.md) - the responder-side runbook behind that policy, and the dated tabletop exercise record
 - [PRIVACY.md](../PRIVACY.md) - the project's privacy posture, by deployment, and what supporting services can observe
-- [NOTICE](../NOTICE) - third-party component attributions
+- [NOTICE](../NOTICE) - attributions for vendored and redistributed components, with each image's OS packages listed beside it (see [CONTAINER_IMAGES.md](spec/CONTAINER_IMAGES.md#the-os-layer-attribution-lists))

@@ -332,7 +332,7 @@ behind. The measurement behind each is kept so the dead ends are not re-walked.
 
 ### The crossws peer conflict blocks the release SBOM
 
-`npm sbom` refuses to run unflagged, so release step 9 in [RELEASES.md](../RELEASES.md) runs it with `--legacy-peer-deps` to produce the CycloneDX BOM that records the release's dependency and license set. This is a known upstream-driven breakage; every local fix that would leave the tree itself changed was rejected, and the flag adopted instead disables validation for that one invocation rather than changing anything it resolves.
+`npm sbom` refuses to run unflagged, so release step 9 in [RELEASES.md](../RELEASES.md) runs it with `--legacy-peer-deps` to produce the CycloneDX BOM that records the release's npm dependency and license set. This is a known upstream-driven breakage; every local fix that would leave the tree itself changed was rejected, and the flag adopted instead disables validation for that one invocation rather than changing anything it resolves.
 
 ```
 npm error code ESBOMPROBLEMS
