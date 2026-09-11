@@ -8,7 +8,11 @@ import {
   redactAndSanitizeForDisplay,
   sanitizeErrorForDisplay,
 } from "@psilink/core";
-import type { ExchangeStageDefinition, ResolvedMatching } from "@psilink/core";
+import type {
+  EntityClusterSummary,
+  ExchangeStageDefinition,
+  ResolvedMatching,
+} from "@psilink/core";
 
 /**
  * The fixed file descriptor the opt-in machine-readable event stream is written
@@ -28,6 +32,20 @@ export const EVENT_STREAM_FD = 3;
  * docs/spec/CLI_EVENTS.md.
  */
 export const EVENT_STREAM_VERSION = 1;
+
+/**
+ * The most shape entries the `result` event's `entityClusters` field holds.
+ *
+ * That list is the one variable-length field of this stream, and a run whose
+ * clusters take thousands of distinct shapes would push the terminal event past
+ * a consumer's per-line bound -- the console relay's is 1 MiB
+ * (`apps/web/src/jobs/cliDriver.ts`) -- costing the run the outcome the event
+ * exists to report. A wider distribution drops the field rather than truncating
+ * the list, since a short list would misstate how many shapes the summary's own
+ * sentence leaves unnamed. Sized well above any distribution an operator reads
+ * and well below that bound.
+ */
+export const EVENT_RESULT_CLUSTER_SHAPES_MAX = 256;
 
 /**
  * The closed vocabulary of event `type` values. This party owns every one of
@@ -183,6 +201,23 @@ export interface ResultEvent extends EventBase {
    * text rides the field.
    */
   matching: ResolvedMatching;
+  /**
+   * How the entity closure grouped this party's result: the cluster count, how
+   * many records of each party stand in a cluster, and the distribution of the
+   * shapes those clusters take ({@link EntityClusterSummary}).
+   *
+   * Present on a `many-to-many` run this party holds the table of, absent under
+   * every other cardinality -- whose clusters follow from the table's own shape
+   * -- and absent where the distribution holds more shapes than
+   * {@link EVENT_RESULT_CLUSTER_SHAPES_MAX}.
+   *
+   * On the stream for the reason {@link matching} is: the human log states the
+   * same summary as a sentence at info level, which a supervisor reading fd 3
+   * alone -- or a console seat watching the run -- never reads. Every figure is
+   * one of this party's own counts over its own table, so no partner free text
+   * rides the field.
+   */
+  entityClusters?: EntityClusterSummary;
 }
 
 /** The failure terminal event. Exactly one terminal event fires per run. */
@@ -328,11 +363,16 @@ export function buildMetricsEvent(
  * `matching` is required rather than optional so no caller can emit a success
  * terminal without it: it is the only channel a consumer that reads fd 3 alone
  * has for what the agreed `deduplicate` pair resolved to.
+ *
+ * `entityClusters` is passed only for a run core composed a cluster summary
+ * for, and is omitted entirely otherwise and where the summary holds more
+ * shapes than {@link EVENT_RESULT_CLUSTER_SHAPES_MAX}.
  */
 export function buildResultEvent(
   resultWritten: boolean,
   matching: ResolvedMatching,
   count?: { intersectionCount: number; reportedByPartner: boolean },
+  entityClusters?: EntityClusterSummary,
 ): ResultEvent {
   return {
     v: EVENT_STREAM_VERSION,
@@ -356,6 +396,33 @@ export function buildResultEvent(
           countReportedByPartner: count.reportedByPartner,
         }
       : {}),
+    ...(entityClusters !== undefined &&
+    entityClusters.shapes.length <= EVENT_RESULT_CLUSTER_SHAPES_MAX
+      ? { entityClusters: copyClusterSummary(entityClusters) }
+      : {}),
+  };
+}
+
+/**
+ * Copy a cluster summary field by field, each figure through the same
+ * non-negative whole-number floor the metrics counters take. The copy is what
+ * keeps a caller's object from widening the emitted line past this stream's
+ * closed contract; the floor is a robustness floor, not a sanitizer, since
+ * every figure is one of this party's own counts.
+ */
+function copyClusterSummary(
+  summary: EntityClusterSummary,
+): EntityClusterSummary {
+  return {
+    clusterCount: toCount(summary.clusterCount),
+    localRows: toCount(summary.localRows),
+    partnerRows: toCount(summary.partnerRows),
+    shapes: summary.shapes.map((shape) => ({
+      localRows: toCount(shape.localRows),
+      partnerRows: toCount(shape.partnerRows),
+      distinctValues: toCount(shape.distinctValues),
+      clusters: toCount(shape.clusters),
+    })),
   };
 }
 
@@ -457,6 +524,7 @@ export interface EventStreamEmitter {
     resultWritten: boolean,
     matching: ResolvedMatching,
     count?: { intersectionCount: number; reportedByPartner: boolean },
+    entityClusters?: EntityClusterSummary,
   ): void;
   error(error: unknown, phase: ErrorPhase): void;
 }
@@ -481,8 +549,10 @@ function createEventStreamEmitter(): EventStreamEmitter {
       writer.emit(
         buildMetricsEvent(recordsProcessed, transportRetries, reconnects),
       ),
-    result: (resultWritten, matching, count) =>
-      writer.emit(buildResultEvent(resultWritten, matching, count)),
+    result: (resultWritten, matching, count, entityClusters) =>
+      writer.emit(
+        buildResultEvent(resultWritten, matching, count, entityClusters),
+      ),
     error: (error, phase) => writer.emit(buildErrorEvent(error, phase)),
   };
 }

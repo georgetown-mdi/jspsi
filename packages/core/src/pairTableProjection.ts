@@ -1,4 +1,5 @@
 import { MAX_RECORD_COUNT } from "./connection/frameSize.js";
+import { formatCount } from "./utils/formatCount.js";
 
 import type { ResolvedMatching } from "./linkageTermsPolicy.js";
 
@@ -167,14 +168,6 @@ export function projectPairTable(
     exceedsAdvisoryBound:
       projectedPairs > BigInt(PAIR_TABLE_ADVISORY_MAX_PAIRS),
   };
-}
-
-// An explicit locale, so the grouped digits are the same ASCII bytes on
-// every host and in every browser: the CLI's console sentinel fails a line
-// containing a byte outside printable ASCII, which a locale-default
-// separator (a non-breaking space in several) would put there.
-function formatCount(count: number | bigint): string {
-  return new Intl.NumberFormat("en-US").format(count);
 }
 
 /**

@@ -512,6 +512,11 @@ export {
   describeResolvedRunShape,
 } from "./pairTableProjection";
 export type { ResolvedRunShape } from "./pairTableProjection";
+export { describeEntityClusters } from "./entityClusterReport";
+export type {
+  EntityClusterShape,
+  EntityClusterSummary,
+} from "./psi/entityClosure";
 export {
   EXCHANGE_KEYS_VERSION,
   EXCHANGE_RECORD_OUTCOMES,

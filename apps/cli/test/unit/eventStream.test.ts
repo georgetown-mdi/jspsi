@@ -14,6 +14,7 @@ import {
 } from "@psilink/core";
 
 import {
+  EVENT_RESULT_CLUSTER_SHAPES_MAX,
   EVENT_STREAM_FD,
   EVENT_STREAM_VERSION,
   PERSISTENCE_LOSS_EXIT_CODE,
@@ -244,6 +245,113 @@ test("the result event states what the agreed deduplicate pair resolved to", () 
     expect(validateEvent(event)).toBe(true);
     expect(event.matching).toEqual(matching);
   }
+});
+
+// --- The terminal result event's entity-cluster summary ----------------------
+
+/** A two-cluster summary, the shape core composes for a `many-to-many` run. */
+const CLUSTER_SUMMARY = {
+  clusterCount: 2,
+  localRows: 3,
+  partnerRows: 3,
+  shapes: [
+    { localRows: 2, partnerRows: 2, distinctValues: 2, clusters: 1 },
+    { localRows: 1, partnerRows: 1, distinctValues: 1, clusters: 1 },
+  ],
+};
+
+/** A summary whose distribution holds `shapes` distinct entries, standing in
+ * for a run whose clusters take many different shapes. */
+function summaryOfWidth(shapes: number) {
+  return {
+    clusterCount: shapes,
+    localRows: shapes,
+    partnerRows: shapes,
+    shapes: Array.from({ length: shapes }, (_unused, index) => ({
+      localRows: index + 1,
+      partnerRows: 1,
+      distinctValues: 1,
+      clusters: 1,
+    })),
+  };
+}
+
+test("the result event has the cluster summary, and omits the field otherwise", () => {
+  // A many-to-many run is the one that composes a summary, and it is the only
+  // route a console seat or a supervisor reading fd 3 has to it: neither sees
+  // the info line the CLI states the same figures on.
+  const grouped = buildResultEvent(
+    true,
+    ONE_TO_ONE,
+    undefined,
+    CLUSTER_SUMMARY,
+  );
+  expect(validateEvent(grouped)).toBe(true);
+  expect(grouped.entityClusters).toEqual(CLUSTER_SUMMARY);
+
+  // Every other cardinality leaves core composing none, which the event omits
+  // entirely rather than stating as a null a consumer has to read past.
+  const ungrouped = buildResultEvent(true, ONE_TO_ONE);
+  expect("entityClusters" in ungrouped).toBe(false);
+  expect(JSON.parse(JSON.stringify(ungrouped))).toEqual({
+    v: EVENT_STREAM_VERSION,
+    type: "result",
+    resultWritten: true,
+    matching: ONE_TO_ONE,
+  });
+});
+
+test("the cluster summary is copied field by field and floored", () => {
+  // The copy is what keeps a caller's object from widening the emitted line
+  // past this stream's closed contract, and the floor is the one every numeric
+  // field of this stream takes.
+  const widened = buildResultEvent(true, ONE_TO_ONE, undefined, {
+    ...CLUSTER_SUMMARY,
+    clusterCount: -1,
+    shapes: [
+      {
+        localRows: 2.7,
+        partnerRows: 2,
+        distinctValues: 2,
+        clusters: 1,
+        extra: 9,
+      },
+    ],
+    extra: "not on the contract",
+  } as never);
+  expect(widened.entityClusters).toEqual({
+    clusterCount: 0,
+    localRows: 3,
+    partnerRows: 3,
+    shapes: [{ localRows: 2, partnerRows: 2, distinctValues: 2, clusters: 1 }],
+  });
+});
+
+test("a distribution wider than the cap drops the field, keeping the terminal event", () => {
+  // The shape list is the one variable-length field of this stream, so a
+  // distribution of any width would push the terminal event past a consumer's
+  // per-line bound, costing the run the outcome the event reports. The field
+  // drops instead, and every other field of the event still lands.
+  const atCap = buildResultEvent(
+    true,
+    ONE_TO_ONE,
+    undefined,
+    summaryOfWidth(EVENT_RESULT_CLUSTER_SHAPES_MAX),
+  );
+  expect(atCap.entityClusters?.shapes).toHaveLength(
+    EVENT_RESULT_CLUSTER_SHAPES_MAX,
+  );
+
+  const overCap = buildResultEvent(
+    true,
+    ONE_TO_ONE,
+    undefined,
+    summaryOfWidth(EVENT_RESULT_CLUSTER_SHAPES_MAX + 1),
+  );
+  expect(validateEvent(overCap)).toBe(true);
+  expect("entityClusters" in overCap).toBe(false);
+  expect(overCap.resultWritten).toBe(true);
+  expect(overCap.matching).toEqual(ONE_TO_ONE);
 });
 
 test("a malformed count is floored like every other numeric field", () => {

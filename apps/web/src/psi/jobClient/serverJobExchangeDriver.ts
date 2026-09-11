@@ -19,6 +19,15 @@ import { whenDiagnostic } from "@utils/diagnostics";
 
 import { ERROR_MESSAGE_CHAIN_FIELD } from "../relayErrorChain";
 
+import type {
+  EntityClusterShape,
+  EntityClusterSummary,
+  LinkageTerms,
+  Metadata,
+  OwnColumnSelection,
+  ResolvedMatching,
+  Standardization,
+} from "@psilink/core";
 import type { ExchangeDriver, ExchangeDriverEvents } from "../exchangeDriver";
 import type {
   ExchangeErrorCategory,
@@ -32,13 +41,6 @@ import type {
   JobZeroSetupIntent,
   JobZeroSetupLinkageStrategy,
 } from "@jobs/intentSchemas";
-import type {
-  LinkageTerms,
-  Metadata,
-  OwnColumnSelection,
-  ResolvedMatching,
-  Standardization,
-} from "@psilink/core";
 import type { RelayEvent, RelayEventType } from "@jobs/cliDriver";
 import type { JobCreateRefusalReason } from "@jobs/jobCreateRefusal";
 import type { ReceiptsIntentFields } from "../receiptsModel";
@@ -839,6 +841,93 @@ function resolvedMatchingOf(event: RelayEvent): ResolvedMatching | undefined {
     : undefined;
 }
 
+/** One count read off a relay frame, or undefined for anything outside the
+ * non-negative safe integers. Every figure of a cluster summary is one of the
+ * running party's own counts, so a value outside that range is a malformed
+ * frame rather than a figure to render. */
+function relayCount(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isSafeInteger(value) && value >= 0
+    ? value
+    : undefined;
+}
+
+/** One entry of a cluster summary's shape distribution, or undefined when any
+ * of its four figures is missing or out of range. */
+function entityClusterShapeOf(value: unknown): EntityClusterShape | undefined {
+  if (value === null || typeof value !== "object") return undefined;
+  const shape = value as Record<string, unknown>;
+  const localRows = relayCount(shape.localRows);
+  const partnerRows = relayCount(shape.partnerRows);
+  const distinctValues = relayCount(shape.distinctValues);
+  const clusters = relayCount(shape.clusters);
+  return localRows !== undefined &&
+    partnerRows !== undefined &&
+    distinctValues !== undefined &&
+    clusters !== undefined
+    ? { localRows, partnerRows, distinctValues, clusters }
+    : undefined;
+}
+
+/** Whether a shape distribution accounts for exactly the summary's own totals:
+ * the clusters of every shape sum to the cluster count, and the records each
+ * shape holds, once per cluster of that shape, sum to each party's total. Core
+ * composes the two halves from one pass over the same clusters
+ * (docs/spec/PROTOCOL.md, Choosing linkage keys under closure), so a frame
+ * whose halves disagree is malformed rather than a distribution to render. Each
+ * running total is compared as it grows, keeping it inside the safe integers
+ * the totals themselves are held to. */
+function clusterFiguresAgree(
+  clusterCount: number,
+  localRows: number,
+  partnerRows: number,
+  shapes: ReadonlyArray<EntityClusterShape>,
+): boolean {
+  let clusters = 0;
+  let local = 0;
+  let partner = 0;
+  for (const shape of shapes) {
+    clusters += shape.clusters;
+    local += shape.localRows * shape.clusters;
+    partner += shape.partnerRows * shape.clusters;
+    if (clusters > clusterCount || local > localRows || partner > partnerRows)
+      return false;
+  }
+  return (
+    clusters === clusterCount && local === localRows && partner === partnerRows
+  );
+}
+
+/** How the entity closure grouped this party's result, read off a `result`
+ * relay event, or undefined when the run reported no grouping -- every
+ * cardinality but `many-to-many` -- or when the frame holds a shape this build
+ * cannot read. The relay forwards the CLI's own fields verbatim
+ * (docs/spec/CLI_EVENTS.md, `result`), so each figure is checked here rather
+ * than assumed, and one bad entry leaves the panel stating no grouping rather
+ * than a distribution missing part of itself. */
+function entityClusterSummaryOf(
+  event: RelayEvent,
+): EntityClusterSummary | undefined {
+  const summary = event.entityClusters;
+  if (summary === null || typeof summary !== "object") return undefined;
+  const { clusterCount, localRows, partnerRows, shapes } = summary as Record<
+    string,
+    unknown
+  >;
+  if (!Array.isArray(shapes)) return undefined;
+  const read = shapes.map(entityClusterShapeOf);
+  const counts = [clusterCount, localRows, partnerRows].map(relayCount);
+  return counts.every((count) => count !== undefined) &&
+    read.every((shape) => shape !== undefined) &&
+    clusterFiguresAgree(counts[0], counts[1], counts[2], read)
+    ? {
+        clusterCount: counts[0],
+        localRows: counts[1],
+        partnerRows: counts[2],
+        shapes: read,
+      }
+    : undefined;
+}
+
 /** The base console {@link RunOutputs} for a `result` relay event, before the
  * record pair is attached. A server job writes its result on the console, so
  * `resultsUrl` points at the job's console result endpoint rather than a
@@ -848,7 +937,9 @@ function resolvedMatchingOf(event: RelayEvent): ResolvedMatching | undefined {
  * `resultWritten` is checked before the count (docs/spec/CLI_EVENTS.md,
  * `result`): a written result always wins, and only its `false` arm has a
  * count. A present count means a count-only outcome (no result file for
- * either party); its absence means withheld. `countReportedByPartner` caveats
+ * either party); its absence means withheld. The cluster summary rides the
+ * written arm alone: it is a reading of the table this party holds, and the
+ * other two arms hold none. `countReportedByPartner` caveats
  * the count only on a literal `true`; anything else -- omitted, or a
  * non-boolean -- is treated as this party's own count, per the contract. The
  * resolved matching rides all three outcomes, since the console seat states
@@ -856,7 +947,12 @@ function resolvedMatchingOf(event: RelayEvent): ResolvedMatching | undefined {
 function baseResultOutputs(event: RelayEvent, jobId: string): RunOutputs {
   const matching = resolvedMatchingOf(event);
   if (event.resultWritten !== false)
-    return { kind: "matched", resultsUrl: jobResultUrl(jobId), matching };
+    return {
+      kind: "matched",
+      resultsUrl: jobResultUrl(jobId),
+      matching,
+      entityClusters: entityClusterSummaryOf(event),
+    };
   const intersectionCount = countOnlyResultCount(event);
   return intersectionCount !== undefined
     ? {
