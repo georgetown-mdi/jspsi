@@ -168,6 +168,8 @@ export {
   sanitizeErrorForDisplay,
   sanitizeErrorChainLinks,
   joinErrorCauseChain,
+  keepFirstPartyLineBreaks,
+  renderedDisplayCostKeepingLineBreaks,
   redactPrivateKeyMaterial,
   redactAndSanitizeForDisplay,
   createPrivateKeyStreamRedactor,

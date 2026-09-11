@@ -5,6 +5,7 @@ import { afterEach, expect, test, vi } from "vitest";
 import {
   COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
   DISPLAY_TRUNCATION_MARKER,
+  keepFirstPartyLineBreaks,
   sanitizeErrorForDisplay,
   UsageError,
 } from "@psilink/core";
@@ -214,5 +215,41 @@ test.each(SINK_PROBES)(
     const delivered = await drive(partitionShapedError());
     expect(delivered).toHaveLength(1);
     expect(delivered[0]).toContain(RECOVERY_STEP);
+  },
+);
+
+// --- a refusal whose line breaks are its own ---------------------------------
+// The other shape a sink must deliver whole: a first-party block whose
+// structure IS the line break -- a conflict list under the step the operator
+// acts on -- marked the way its composition site marks it
+// (`reconcileConflictError` in src/config.ts).
+const BLOCK_LINES = [
+  "the configuration file disagrees with the invitation. Resolve the " +
+    "differences below, then retry with the same invitation. The differences:",
+  '  - algorithm: existing "psi-c" vs required "psi"',
+  '  - connection.server.host: existing "old-host" vs required "host"',
+];
+
+function lineBrokenError(): UsageError {
+  return keepFirstPartyLineBreaks(
+    new UsageError(BLOCK_LINES.join("\n")),
+    BLOCK_LINES,
+  );
+}
+
+test.each(SINK_PROBES)(
+  "$name delivers a first-party block on its own lines",
+  async ({ drive }) => {
+    const delivered = await drive(lineBrokenError());
+    // One delivery, which for the fd-3 probe is one NDJSON line: the breaks are
+    // inside a JSON string there, so they frame no second event.
+    expect(delivered).toHaveLength(1);
+    const lines = delivered[0].split("\n");
+    expect(lines).toHaveLength(BLOCK_LINES.length);
+    // A prefixing sink writes its `[ISO] [LEVEL] [CONTEXT]` on the first line
+    // and nothing on the continuations, so the first line is read by what it
+    // ends with and the rest by what they are.
+    expect(lines[0].endsWith(BLOCK_LINES[0])).toBe(true);
+    expect(lines.slice(1)).toEqual(BLOCK_LINES.slice(1));
   },
 );
