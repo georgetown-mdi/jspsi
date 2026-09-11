@@ -11,6 +11,7 @@ import {
   type MessageConnection,
 } from "../../src/connection/messageConnection";
 import { entityClusters } from "../../src/psi/entityClosure";
+import type { EntityClusterSummary } from "../../src/psi/entityClosure";
 import { matchedPairCount } from "../../src/exchange";
 import { buildOutputTable, preparePayload } from "../../src/payloadExchange";
 import type { Metadata } from "../../src/config/metadata";
@@ -89,6 +90,10 @@ function onMappedElementList(
 interface CascadeRun {
   starter: AssociationTable | Error;
   joiner: AssociationTable | Error;
+  // What each party's run reported through linkViaPSI's cluster callback, or
+  // undefined where it reported none.
+  starterClusters?: EntityClusterSummary;
+  joinerClusters?: EntityClusterSummary;
 }
 
 async function runCascade(
@@ -108,6 +113,8 @@ async function runCascade(
       (err: unknown) => err as Error,
     );
 
+  const reported: Partial<Record<"starter" | "joiner", EntityClusterSummary>> =
+    {};
   const starterRun = settle(
     linkViaPSI(
       { cardinality: "many-to-many" },
@@ -116,6 +123,8 @@ async function runCascade(
       starterKeys,
       fanOutFreeBounds(starterKeys.length, joinerKeys[0].length),
       -1,
+      undefined,
+      (summary) => (reported.starter = summary),
     ),
   );
   const joinerRun = settle(
@@ -126,6 +135,8 @@ async function runCascade(
       joinerKeys,
       fanOutFreeBounds(joinerKeys.length, starterKeys[0].length),
       -1,
+      undefined,
+      (summary) => (reported.joiner = summary),
     ),
   );
   // A party that aborts leaves the other parked on a frame it will never send, so
@@ -133,7 +144,12 @@ async function runCascade(
   const first = deviate?.party === "joiner" ? joinerRun : starterRun;
   await first;
   await starterConn.close();
-  return { starter: await starterRun, joiner: await joinerRun };
+  return {
+    starter: await starterRun,
+    joiner: await joinerRun,
+    starterClusters: reported.starter,
+    joinerClusters: reported.joiner,
+  };
 }
 
 function expectTables(run: CascadeRun): [AssociationTable, AssociationTable] {
@@ -414,6 +430,15 @@ test("a value m and n records hold writes m x n result rows and attests m x n", 
 
   const [cluster] = entityClusters(starter);
   expect(cluster).toStrictEqual({ localRows: [0, 1], partnerRows: [0, 1, 2] });
+
+  // One block, so the cluster the whole run produced formed on one value: the
+  // figure that separates a shared value from a chain.
+  expect(run.starterClusters).toStrictEqual({
+    clusterCount: 1,
+    localRows: 2,
+    partnerRows: 3,
+    shapes: [{ localRows: 2, partnerRows: 3, distinctValues: 1, clusters: 1 }],
+  });
 
   // Both parties derive one figure from the one table, which is why the record
   // holds the pair count rather than either party's matched-record count.
@@ -766,6 +791,22 @@ for (const party of ["starter", "joiner"] as const) {
       { localRows: [0, 1], partnerRows: [0, 1] },
       { localRows: [2], partnerRows: [2] },
     ]);
+
+    // The diagnostic over those clusters: the chained one formed on the two
+    // values the starter's candidate set reached, the one beside it on a single
+    // value. Both parties count the same two blocks against the chained
+    // cluster, each reading its own side as the first figure.
+    const chained = {
+      clusterCount: 2,
+      localRows: 3,
+      partnerRows: 3,
+      shapes: [
+        { localRows: 2, partnerRows: 2, distinctValues: 2, clusters: 1 },
+        { localRows: 1, partnerRows: 1, distinctValues: 1, clusters: 1 },
+      ],
+    };
+    expect(run.starterClusters).toStrictEqual(chained);
+    expect(run.joinerClusters).toStrictEqual(chained);
   });
 
   test(`a returned run naming a row the round did not pair with its entry is refused${under}`, async () => {
@@ -799,6 +840,48 @@ for (const party of ["starter", "joiner"] as const) {
         : // The starter states its grouping, so the joiner holds its entries to
           // the pairing both parties computed, position for position.
           /names positions other than the ones that round's accepted pairs rest on/,
+    );
+  });
+}
+
+// --- a row named in two key rounds ---------------------------------------------
+// Removal on a potential match takes a record matched in one round out of every
+// later round's candidate set (docs/spec/PROTOCOL.md, Removal on a potential
+// match), so no partner row stands in two rounds' runs. Each round's pairing is
+// read on its own above, which leaves this one a rule over the whole list.
+const twoRoundKeys: Keys = [
+  ["A", undefined],
+  [undefined, "B"],
+];
+
+test("two key rounds pair off a row each, and the run completes", async () => {
+  const run = await runCascade(twoRoundKeys, twoRoundKeys);
+  const [starter, joiner] = expectTables(run);
+  expect(pairsOf(starter, false)).toStrictEqual([
+    [0, 0],
+    [1, 1],
+  ]);
+  expectAgreement(starter, joiner);
+});
+
+for (const party of ["starter", "joiner"] as const) {
+  test(`a returned list naming one partner row in two key rounds is refused (deviating party: ${party})`, async () => {
+    // Round 1's entry comes back holding the row round 0's entry took. Every
+    // entry stays in range, the count is untouched, and each round on its own
+    // still hands its single accepted group a row -- what refuses it is the
+    // row standing in two rounds.
+    const run = await runCascade(twoRoundKeys, twoRoundKeys, {
+      party,
+      deviation: onMappedElementList(2, (list) => [
+        list[0],
+        { ...list[1], theirIndex: list[0].theirIndex },
+      ]),
+    });
+    const outcome = run[party];
+    expect(outcome).toBeInstanceOf(ConnectionError);
+    expect((outcome as ConnectionError).kind).toBe("protocol");
+    expect((outcome as Error).message).toMatch(
+      /names one partner row in two key rounds/,
     );
   });
 }

@@ -10,6 +10,11 @@ round's trajectory, and write the artifacts.
 You stay where you are. Every step below works by ref and by absolute path: do
 not `cd` into a branch's worktree, and do not check anything out.
 
+## First
+
+If `.claude/orchestration/ruleset.md` is not already in your context, read it
+before proceeding -- it holds the session rules this command's steps assume.
+
 ## Input
 
     /light-review [--target <ref> ...] [--role <name> --claims <path>] [doc-file ...]

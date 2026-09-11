@@ -33,7 +33,7 @@ psilink is organized as an npm workspaces monorepo. The workspaces and the suppo
 | `design/`        | Interface design records: [`design/web-redesign/`](design/web-redesign/README.md) is the linkage-bench mockup and rationale the web app implements. Not a build input |
 | `infra/`         | [Terraform](infra/aws_eb/README.md) for creating the web app's Elastic Beanstalk environment. A draft, and run by nothing here -- the deployment payload CI does use is `apps/web/deploy/aws_eb/`. Beside it, [the standing WebRTC relay's reference deployment](infra/relay/README.md), also run by nothing here |
 | `.github/`       | The workflows CI runs, the [pull-request template](.github/PULL_REQUEST_TEMPLATE.md), and the dependabot configuration |
-| `.claude/`       | The agent harness: role definitions, slash commands, tool hooks, the project-manager ruleset, and [the session scripts](.claude/scripts/README.md), governed by the conventions in [CLAUDE.md](CLAUDE.md) |
+| `.claude/`       | The agent harness: role definitions, slash commands, tool hooks, the project-manager and orchestration rulesets, and [the session scripts](.claude/scripts/README.md), governed by the conventions in [CLAUDE.md](CLAUDE.md) |
 | `.devcontainer/` | The [development container](.devcontainer/README.md) and its egress firewall |
 
 ## Prerequisites

@@ -576,7 +576,7 @@ jobs:
             -v "$PWD/support/fips-probe:/probe:ro" \
             -e PROBE_PREFIX=/tmp/probe-prefix \
             -e PROBE_TMP=/tmp/probe-tmp \
-            -e PROBE_OPENSSL_TAG=amzn2023-cert5021 \
+            -e PROBE_OPENSSL_TAG=amzn2023-cert5438 \
             --entrypoint sh ${{ matrix.tag }} -c '
               set -eu
               mkdir -p "$PROBE_PREFIX/lib/ossl-modules" "$PROBE_PREFIX/ssl" "$PROBE_TMP"

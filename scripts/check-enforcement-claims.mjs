@@ -1,12 +1,15 @@
 #!/usr/bin/env node
 // Agent-enforcement claim check, run by static_checks.yaml on every PR.
 //
-// CLAUDE.md tells agents a convention is "Enforced by `<hook>.mjs`". That is a
-// claim about what the harness does, and prose cannot assert it reliably: a hook
-// can be renamed, dropped from .claude/settings.json, or registered on a matcher
-// that never covers the tool the convention is about, and the sentence is still
-// treated as a guarantee. An agent that believes an ungated rule is gated stops
-// holding it itself. So the claim is encoded as a check.
+// The two rule ledgers -- CLAUDE.md, which every spawn receives, and
+// .claude/orchestration/ruleset.md, which an orchestrating session reads -- tell
+// agents a convention is "Enforced by `<hook>.mjs`". That is a claim about what
+// the harness does, and prose cannot assert it reliably: a hook can be renamed,
+// dropped from .claude/settings.json, or registered on a matcher that never
+// covers the tool the convention is about, and the sentence is still treated as
+// a guarantee. An agent that believes an ungated rule is gated stops holding it
+// itself. So the claim is encoded as a check, over both files: a rule keeps its
+// enforcement claim when it moves between them.
 //
 // A claim is accurate when the named hook exists in .claude/hooks/, is registered
 // in .claude/settings.json, and the claiming line names at least one tool the
@@ -24,19 +27,23 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const CLAUDE_MD = "CLAUDE.md";
+const ORCHESTRATION_LEDGER = ".claude/orchestration/ruleset.md";
 const SETTINGS = ".claude/settings.json";
 const HOOKS_DIR = ".claude/hooks";
 
+/** The rule ledgers whose enforcement prose this check holds. */
+export const RULE_LEDGERS = [CLAUDE_MD, ORCHESTRATION_LEDGER];
+
 /**
- * Enforcement claims in CLAUDE.md prose: each `Enforced by \`<file>.mjs\`` with
- * the line that holds it, so the tool-naming rule can read the surrounding
- * sentence.
+ * Enforcement claims in a rule ledger's prose: each `Enforced by \`<file>.mjs\``
+ * with the line that holds it, so the tool-naming rule can read the surrounding
+ * sentence, and the file it came from, so a violation names it.
  */
-export function enforcementClaims(source) {
+export function enforcementClaims(source, file = CLAUDE_MD) {
   const claims = [];
   source.split("\n").forEach((line, index) => {
     for (const match of line.matchAll(/[Ee]nforced by `([^`]+\.mjs)`/g)) {
-      claims.push({ hook: match[1], line, lineNumber: index + 1 });
+      claims.push({ hook: match[1], file, line, lineNumber: index + 1 });
     }
   });
   return claims;
@@ -73,7 +80,7 @@ export function hookInventory(entries) {
 
 /**
  * Every way a claim, a registration, or a hook script can be out of step, as
- * `{hook, problem}` pairs. Empty means CLAUDE.md's enforcement prose is true.
+ * `{hook, problem}` pairs. Empty means the ledgers' enforcement prose is true.
  */
 export function enforcementViolations({ claims, registrations, inventory }) {
   const violations = [];
@@ -82,11 +89,11 @@ export function enforcementViolations({ claims, registrations, inventory }) {
     inventory.tests.map((t) => t.replace(/\.test\.mjs$/, ".mjs")),
   );
 
-  for (const { hook, line, lineNumber } of claims) {
+  for (const { hook, file = CLAUDE_MD, line, lineNumber } of claims) {
     if (!scripts.has(hook)) {
       violations.push({
         hook,
-        problem: `${CLAUDE_MD}:${lineNumber} claims enforcement by \`${hook}\`, which is not a hook script in ${HOOKS_DIR}/ -- fix the name, or cite a CI check by its \`npm run\` name instead`,
+        problem: `${file}:${lineNumber} claims enforcement by \`${hook}\`, which is not a hook script in ${HOOKS_DIR}/ -- fix the name, or cite a CI check by its \`npm run\` name instead`,
       });
       continue;
     }
@@ -94,7 +101,7 @@ export function enforcementViolations({ claims, registrations, inventory }) {
     if (matched.length === 0) {
       violations.push({
         hook,
-        problem: `${CLAUDE_MD}:${lineNumber} claims enforcement by \`${hook}\`, but ${SETTINGS} does not register it, so it never runs`,
+        problem: `${file}:${lineNumber} claims enforcement by \`${hook}\`, but ${SETTINGS} does not register it, so it never runs`,
       });
       continue;
     }
@@ -102,7 +109,7 @@ export function enforcementViolations({ claims, registrations, inventory }) {
     if (!tools.some((tool) => tool === "*" || line.includes(tool))) {
       violations.push({
         hook,
-        problem: `${CLAUDE_MD}:${lineNumber} claims enforcement by \`${hook}\` without naming the tool it gates; ${SETTINGS} registers it on ${tools.join(", ")} only, so the line must say so rather than imply a general guarantee`,
+        problem: `${file}:${lineNumber} claims enforcement by \`${hook}\` without naming the tool it gates; ${SETTINGS} registers it on ${tools.join(", ")} only, so the line must say so rather than imply a general guarantee`,
       });
     }
   }
@@ -132,14 +139,19 @@ export function enforcementViolations({ claims, registrations, inventory }) {
 // functions without the process.exit.
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const root = resolve(dirname(fileURLToPath(import.meta.url)), "..");
-  const claims = enforcementClaims(
-    readFileSync(resolve(root, CLAUDE_MD), "utf8"),
-  );
-  if (claims.length === 0) {
-    console.error(
-      `${CLAUDE_MD}: no \`Enforced by \`<hook>.mjs\`\` claims matched -- the extraction pattern rotted; fix scripts/check-enforcement-claims.mjs`,
+  const claims = [];
+  for (const ledger of RULE_LEDGERS) {
+    const found = enforcementClaims(
+      readFileSync(resolve(root, ledger), "utf8"),
+      ledger,
     );
-    process.exit(1);
+    if (found.length === 0) {
+      console.error(
+        `${ledger}: no \`Enforced by \`<hook>.mjs\`\` claims matched -- the extraction pattern rotted; fix scripts/check-enforcement-claims.mjs`,
+      );
+      process.exit(1);
+    }
+    claims.push(...found);
   }
   const registrations = registeredHooks(
     JSON.parse(readFileSync(resolve(root, SETTINGS), "utf8")),
@@ -155,6 +167,6 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     process.exit(1);
   }
   console.log(
-    `Enforcement claim check passed: ${claims.length} claims in ${CLAUDE_MD} resolve to registered hooks, ${inventory.scripts.length} hooks carry a colocated test, ${registrations.length} registrations name a file that exists.`,
+    `Enforcement claim check passed: ${claims.length} claims across ${RULE_LEDGERS.join(" and ")} resolve to registered hooks, ${inventory.scripts.length} hooks carry a colocated test, ${registrations.length} registrations name a file that exists.`,
   );
 }

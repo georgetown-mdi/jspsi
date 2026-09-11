@@ -7,6 +7,11 @@ You are CONVENING a panel, not sitting on it. You do not answer the question
 yourself, and you do not tell the panelists anything you already believe about
 it -- the round's value is three answers formed without you.
 
+## First
+
+If `.claude/orchestration/ruleset.md` is not already in your context, read it
+before proceeding -- it holds the session rules this command's steps assume.
+
 ## Input
 
     /panel "<question>" [context-file ...]

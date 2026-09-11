@@ -10,6 +10,7 @@ import {
 import {
   DISCLOSED_AT_LABEL,
   DISCLOSURE_FACT_LABELS,
+  PARTIAL_DISCLOSURE_LABEL,
   disclosureAccountingCsv,
   disclosureAccountingFileName,
   disclosureEntries,
@@ -316,8 +317,106 @@ describe("a disclosure's facts", () => {
       await disclosureRecord({ outcome: "receipt-swap-terminated" }),
     );
     expect(factValues(terminated, "How the exchange ended")).toEqual([
-      "Disclosed, then stopped before a signed receipt was exchanged",
+      "Disclosed, then stopped before the run finished",
     ]);
+  });
+
+  test("name no step of the run a terminated record does not prove it reached", async () => {
+    // `receipt-swap-terminated` is written for every termination past this party's
+    // payload send, so wording naming the receipt swap would tell a reader the run
+    // reached a step it may never have started (docs/spec/EXCHANGE_RECORD.md, When
+    // a record is owed).
+    const terminated = disclosureFacts(
+      await disclosureRecord({ outcome: "receipt-swap-terminated" }),
+    );
+
+    expect(factValues(terminated, "How the exchange ended")[0]).not.toContain(
+      "receipt",
+    );
+  });
+
+  test("qualify a terminated run's entry with what it cannot attest", async () => {
+    // The entry must not read as a delivered disclosure: a record attests this
+    // party's own act of sending and never the partner's receipt of it. The
+    // qualification rides the outcome fact -- the one fact of such an entry that
+    // always holds a value -- so it survives into the exported CSV as well.
+    const terminated = disclosureFacts(
+      await disclosureRecord({ outcome: "receipt-swap-terminated" }),
+    );
+    const outcome = factNamed(terminated, "How the exchange ended");
+
+    expect(outcome.note).toContain("not confirmed");
+    expect(outcome.note).toContain("no result file");
+    expect(
+      factNamed(
+        disclosureFacts(await disclosureRecord()),
+        "How the exchange ended",
+      ).note,
+    ).toBeUndefined();
+  });
+
+  test("say of a terminated run's result what the same entry's result size does not deny", async () => {
+    // Core binds resultSize on a terminated record under the entitlement gate a
+    // completed one takes, so the entry reports the intersection the exchange had
+    // computed. What the run did not do is write a result file
+    // (docs/spec/EXCHANGE_RECORD.md), which is what the note states: a note
+    // denying a result outright would contradict the number beside it.
+    const terminated = disclosureFacts(
+      await disclosureRecord({
+        outcome: "receipt-swap-terminated",
+        resultSize: 3,
+      }),
+    );
+
+    expect(factValues(terminated, "Result size")).toEqual(["3"]);
+    expect(factNamed(terminated, "How the exchange ended").note).not.toContain(
+      "no result was produced",
+    );
+  });
+
+  test("name a terminated run's received columns as what arrived, not as what it accepted", async () => {
+    // A run stopped by the received-payload refusal commits the very column names
+    // it refused, so the label an operator reads beside them must not say the run
+    // received and kept them (docs/spec/EXCHANGE_RECORD.md, When a record is
+    // owed). The record itself is unchanged: the same names, under a label that
+    // states when they arrived.
+    const record = await disclosureRecord({
+      outcome: "receipt-swap-terminated",
+      partnerPayloadColumn: "ward",
+    });
+
+    const terminated = disclosureFacts(record);
+
+    expect(
+      record.governance.payloadReceived.map((column) => column.name),
+    ).toEqual(["ward"]);
+    expect(
+      factValues(terminated, "Columns that arrived before the run stopped"),
+    ).toEqual(["ward"]);
+    expect(
+      terminated.some((fact) => fact.label === "Columns you received"),
+    ).toBe(false);
+  });
+
+  test("keep a terminated run's facts in the columns the export names", async () => {
+    // The export's header is one row over every entry, so a relabelled fact must
+    // still be the same column in the same position: an entry whose facts had
+    // moved would export its values under another run's column headings.
+    const terminated = disclosureFacts(
+      await disclosureRecord({ outcome: "receipt-swap-terminated" }),
+    );
+    const completed = disclosureFacts(await disclosureRecord());
+
+    expect(terminated).toHaveLength(completed.length);
+    expect(
+      terminated.map((fact, index) =>
+        fact.label === completed[index].label ? fact.label : "relabelled",
+      ),
+    ).toEqual(
+      DISCLOSURE_FACT_LABELS.map((label) =>
+        label === "Columns you received" ? "relabelled" : label,
+      ),
+    );
   });
 
   test("state the labels the export's columns are named for", async () => {
@@ -332,7 +431,7 @@ describe("a disclosure's facts", () => {
 });
 
 describe("the accounting's entries", () => {
-  test("are one per completed run, newest first, keyed by the run's own instant", async () => {
+  test("are one per filed run, newest first, keyed by the run's own instant", async () => {
     const accounting = accountingOf(
       await disclosureRecord({ createdAt: "2026-07-01T09:00:00.000Z" }),
       await disclosureRecord({ createdAt: "2026-08-01T09:00:00.000Z" }),
@@ -375,6 +474,24 @@ describe("the accounting's entries", () => {
     expect(first.bindingNonce).not.toBe(second.bindingNonce);
     expect(first.bindingNonce).toBe(accounting.entries[1].bindingNonce);
     expect(second.bindingNonce).toBe(accounting.entries[0].bindingNonce);
+  });
+
+  test("mark a run that stopped after sending, so the list distinguishes it from a completed one", async () => {
+    // The list shows one collapsed line per entry, so an entry attesting an
+    // unconfirmed send has to state that where the operator reads the list rather
+    // than only inside the entry they may never open.
+    const accounting = accountingOf(
+      await disclosureRecord({ createdAt: "2026-07-01T09:00:00.000Z" }),
+      await disclosureRecord({
+        createdAt: "2026-08-01T09:00:00.000Z",
+        outcome: "receipt-swap-terminated",
+      }),
+    );
+
+    const entries = disclosureEntries(accounting);
+
+    expect(entries.map((entry) => entry.partial)).toEqual([true, false]);
+    expect(PARTIAL_DISCLOSURE_LABEL).not.toBe("");
   });
 });
 
@@ -419,6 +536,31 @@ describe("the exported accounting", () => {
     expect(row).toContain('"7"');
     expect(row).toContain('"3"');
     expect(row).toContain('"Program share drive, 3-year hold"');
+  });
+
+  test("states a stopped run's outcome and what it cannot attest in that run's row", async () => {
+    // The export is where a compliance reader meets the entry without the screen
+    // around it, so the row has to carry the same qualification the screen shows:
+    // a file asserting more than the screen did would read an unconfirmed send as
+    // a delivered one.
+    const accounting = accountingOf(
+      await disclosureRecord({ outcome: "receipt-swap-terminated" }),
+    );
+
+    const [header, row] = csvRows(disclosureAccountingCsv(accounting));
+    const cell =
+      splitCsvRow(row)[splitCsvRow(header).indexOf("How the exchange ended")];
+
+    expect(cell).toContain("Disclosed, then stopped before the run finished");
+    expect(cell).toContain("not confirmed");
+    // The header names one set of columns for every entry, so the received names
+    // sit under the standing heading and this note is where the file says what
+    // they are.
+    expect(splitCsvRow(header)).toContain("Columns you received");
+    expect(
+      splitCsvRow(row)[splitCsvRow(header).indexOf("Columns you received")],
+    ).toBe("clinic");
+    expect(cell).toContain("recorded as received");
   });
 
   test("has the rule-set citation and its caveat in the same row as the run's other governance fields", async () => {

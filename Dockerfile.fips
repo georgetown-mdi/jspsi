@@ -28,14 +28,14 @@ ARG NODE_VERSION=v26.7.0
 # reproducible rather than a function of the build date.
 ARG AL2023_RELEASEVER=2023.12.20260817
 
-# CMVP certificate 5021. The package and version pin which build is installed;
+# CMVP certificate 5438. The package and version pin which build is installed;
 # the module version string is what the module itself reports. Ten NVRs share
 # the openssl-fips-provider-latest package name with ten different modules, only
 # one of them certified, so a package name alone proves nothing. Both are
 # asserted against the built image below, and a mismatch fails the build.
 ARG FIPS_PROVIDER_PACKAGE=openssl-fips-provider-certified
-ARG FIPS_PROVIDER_VERSION=3.0.8-1.amzn2023.0.1
-ARG FIPS_MODULE_VERSION=3.0.8-d694bfa693b76001
+ARG FIPS_PROVIDER_VERSION=3.2.2-1.amzn2023
+ARG FIPS_MODULE_VERSION=3.2.2-799901ad7ab41d45
 
 # The multi-arch index digest, not a platform-specific manifest digest, so both
 # architectures resolve. The rootfs it names carries the release

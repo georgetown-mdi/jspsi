@@ -109,6 +109,10 @@ export function buildRunOutputs(
                 kind: "matched" as const,
                 resultsUrl: trackedUrl(new Blob([csv], { type: "text/csv" })),
                 matchedRecordCount: rows.length,
+                // How the closure grouped those pairs, carried through from
+                // the run rather than recomputed from the table: core hands
+                // one on a many-to-many run and none otherwise.
+                entityClusters: result.entityClusters,
               };
             })();
     // What the agreed deduplicate pair resolved to, taken from the result

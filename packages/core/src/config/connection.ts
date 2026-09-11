@@ -395,7 +395,10 @@ export const AuthenticationSchema: z.ZodType<Authentication> = z.strictObject({
  * established.
  */
 interface TurnServer {
-  /** TURN server URI (`turn:` or `turns:`). */
+  /**
+   * TURN server URI: `turn:` or `turns:` followed by a host, with `transport`
+   * either unset or `tcp`, and `udp` permitted on a `turn:` url.
+   */
   url: string;
   username: string;
   /** TURN credential; @-file recommended. */
@@ -407,8 +410,53 @@ interface TurnServer {
   credentialType?: "password" | "hmac-sha1";
 }
 
+// A TURN or STUN URI names its host directly after the scheme. An entry with
+// no host -- `turn:` left by an empty environment substitution, say -- reaches
+// the ICE layer as a server it cannot resolve and is dropped there: a
+// relay-only policy then gathers host candidates, and a stun list replaces the
+// built-in default with nothing. Both are refused here instead. Each pattern is
+// applied to the trimmed value, and the trimmed value is what the connection
+// holds, so the padding a quoted entry can carry decides nothing: a padded
+// `turn:relay.example.org:3478` names its host, and a padded `turn:` none.
+const TURN_URL_PATTERN = /^turns?:[^\s:?][^\s?]*(?:\?\S*)?$/;
+const STUN_URI_PATTERN = /^stuns?:[^\s:?][^\s?]*(?:\?\S*)?$/;
+
+// werift refuses a turn url whose `transport` parameter holds anything but
+// lowercase `tcp` or `udp`, and refuses `udp` on a `turns:` url, continuing
+// silently without that entry: under `ice_transport_policy: relay` the run then
+// gathers host candidates. Every occurrence is held to the rule, so a url
+// repeating the parameter is refused unless each value qualifies, rather than
+// resting on werift reading the first. Measured in
+// apps/cli/test/integration/webrtc/webrtcIceTransportPolicy.test.ts.
+function turnUrlTransportIsSupported(url: string): boolean {
+  const queryStart = url.indexOf("?");
+  if (queryStart === -1) return true;
+  const overTls = url.startsWith("turns:");
+  for (const parameter of url.slice(queryStart + 1).split("&")) {
+    const separator = parameter.indexOf("=");
+    const name = separator === -1 ? parameter : parameter.slice(0, separator);
+    if (name !== "transport") continue;
+    const value = separator === -1 ? "" : parameter.slice(separator + 1);
+    if (value !== "tcp" && !(value === "udp" && !overTls)) return false;
+  }
+  return true;
+}
+
 const TurnServerSchema: z.ZodType<TurnServer> = z.object({
-  url: z.string().regex(/^turns?:/, "TURN URL must begin with turn: or turns:"),
+  url: z
+    .string()
+    .trim()
+    .regex(
+      TURN_URL_PATTERN,
+      "a turn entry's url must name a host after turn: or turns:, for " +
+        "example turns:relay.example.org:443?transport=tcp",
+    )
+    .refine(turnUrlTransportIsSupported, {
+      message:
+        "a turn entry's url may leave transport unset or set it to lowercase " +
+        "tcp, and a turn: url may also set it to udp, for example " +
+        "turns:relay.example.org:443?transport=tcp",
+    }),
   username: z.string().min(1),
   credential: z.string().min(1),
   credentialType: z.enum(["password", "hmac-sha1"]).optional(),
@@ -778,11 +826,22 @@ export interface WebRTCConnectionConfig {
   role?: "inviter" | "acceptor";
   /**
    * STUN servers for ICE candidate gathering; each entry is a `stun:` or
-   * `stuns:` URI.
+   * `stuns:` URI followed by a host.
    */
   stun?: string[];
   /** TURN servers for relaying when no direct path can be found. */
   turn?: TurnServer[];
+  /**
+   * Which candidate types ICE may use. `all` permits host, server-reflexive
+   * and relay candidates; `relay` gathers relay candidates only, so every
+   * path the exchange can take runs through a configured TURN server and no
+   * host or server-reflexive address is offered to the partner. Omitting it
+   * leaves the transport's own default, which is `all`.
+   *
+   * `relay` needs a source of relay candidates, so it requires `turn` or
+   * `iceProvision`.
+   */
+  iceTransportPolicy?: "all" | "relay";
   /**
    * ICE credential API returning combined STUN + TURN servers.
    * Mutually exclusive with `stun` and `turn`.
@@ -867,10 +926,18 @@ const WebRTCConnectionConfigSchema = z.object({
   role: z.enum(["inviter", "acceptor"]).optional(),
   stun: z
     .array(
-      z.string().regex(/^stuns?:/, "STUN URI must begin with stun: or stuns:"),
+      z
+        .string()
+        .trim()
+        .regex(
+          STUN_URI_PATTERN,
+          "a stun entry must name a host after stun: or stuns:, for " +
+            "example stun:stun.example.org:3478",
+        ),
     )
     .optional(),
   turn: z.array(TurnServerSchema).optional(),
+  iceTransportPolicy: z.enum(["all", "relay"]).optional(),
   iceProvision: IceProvisionSchema.optional(),
   options: SharedOptionsSchema.optional(),
   providerOptions: z.record(z.string(), z.unknown()).optional(),
@@ -954,6 +1021,27 @@ export const ConnectionConfigSchema: z.ZodType<ConnectionConfig> = z
         (conn.stun !== undefined || conn.turn !== undefined)
       ),
     { message: "iceProvision is mutually exclusive with stun and turn" },
+  )
+  // A relay-only policy gathers nothing but relay candidates, so a connection
+  // that names no relay server can never form a candidate pair. Refusing it
+  // here answers at config time what would otherwise be a rendezvous that runs
+  // its whole budget and then reports that no relay candidate was gathered.
+  // An `iceProvision` endpoint also answers with relay servers, so it satisfies
+  // the policy here; the message names only `turn`, the one source an
+  // application dials today (the CLI refuses `iceProvision` outright).
+  .refine(
+    (conn) =>
+      !(
+        conn.channel === "webrtc" &&
+        conn.iceTransportPolicy === "relay" &&
+        (conn.turn === undefined || conn.turn.length === 0) &&
+        conn.iceProvision === undefined
+      ),
+    {
+      message:
+        "ice_transport_policy `relay` gathers relay candidates only, so it " +
+        "requires at least one turn entry",
+    },
   )
   // File-sync directory mode (filedrop and sftp). A directory is given either
   // as a single shared path or as a split inbound/outbound pair, never both and

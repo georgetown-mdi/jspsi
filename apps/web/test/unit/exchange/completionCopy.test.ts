@@ -18,6 +18,7 @@ import {
   UNKNOWN_RECORD_CONFIRM_TITLE,
   UNTAKEN_RECORD_CONFIRM_BODY,
   UNTAKEN_RECORD_CONFIRM_TITLE,
+  completionClusterReport,
   completionOutcome,
   untakenRecordConfirm,
 } from "@exchange/RunSurface";
@@ -27,6 +28,8 @@ import {
   RECEIPT_UNANSWERED_LEAD,
   RECEIPT_UNANSWERED_NOTICE,
 } from "@exchange/ReceiptDownload";
+
+import { describeEntityClusters } from "@psilink/core";
 
 import type { RunOutputs } from "@psi/runOutputs";
 
@@ -40,6 +43,41 @@ const counted = (intersectionCount: number): RunOutputs => ({
   kind: "counted",
   intersectionCount,
   countReportedByPartner: false,
+});
+
+const CLUSTERS = {
+  clusterCount: 2,
+  localRows: 3,
+  partnerRows: 3,
+  shapes: [
+    { localRows: 2, partnerRows: 2, distinctValues: 2, clusters: 1 },
+    { localRows: 1, partnerRows: 1, distinctValues: 1, clusters: 1 },
+  ],
+};
+
+describe("completionClusterReport", () => {
+  test("states core's own sentence for a run that grouped its result", () => {
+    const grouped: RunOutputs = {
+      kind: "matched",
+      resultsUrl: "blob:results",
+      matchedRecordCount: 5,
+      entityClusters: CLUSTERS,
+    };
+    expect(completionClusterReport(grouped)).toBe(
+      describeEntityClusters(CLUSTERS),
+    );
+  });
+
+  test("states nothing where the run reported no grouping", () => {
+    // A matched run under any cardinality but the both-sided one, the
+    // server-job path that reads no table, a count-only run and a withheld one
+    // all reach the panel with no summary, and it stays silent rather than
+    // standing in a figure.
+    expect(completionClusterReport(matched(5))).toBeUndefined();
+    expect(completionClusterReport(counted(12))).toBeUndefined();
+    expect(completionClusterReport({ kind: "withheld" })).toBeUndefined();
+    expect(completionClusterReport(undefined)).toBeUndefined();
+  });
 });
 
 describe("completionOutcome", () => {

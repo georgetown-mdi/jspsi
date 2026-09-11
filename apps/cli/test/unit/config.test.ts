@@ -31,6 +31,7 @@ import {
   diffLinkageTerms,
   formatReconcileDiffs,
   linkageTermsStandingOf,
+  reconcileConflictError,
   reconcileConflictMessage,
   reconcileDiffValue,
   loadConfigLinkageSource,
@@ -1499,7 +1500,9 @@ function cloneTerms(terms: LinkageTerms): LinkageTerms {
 // invitation, rendered the way the CLI's top-level handler renders a thrown
 // UsageError. Driven through the composer the command itself calls, with the
 // command's own first-party copy, so the tests that measure what survives that
-// boundary measure the shape an operator actually meets.
+// boundary measure the shape an operator actually meets. Its own line breaks
+// reach the operator as line breaks, so the block's lines are read out of the
+// rendered refusal by splitting on one.
 const ACCEPT_RECONCILE_SOURCES = {
   configPath: "./psilink.yaml",
   against: "the invitation",
@@ -1523,7 +1526,7 @@ function renderedAcceptReconcileError(
   } = ACCEPT_RECONCILE_SOURCES,
 ): string {
   return sanitizeErrorForDisplay(
-    new UsageError(reconcileConflictMessage({ ...sources, diffs: conflicts })),
+    reconcileConflictError({ ...sources, diffs: conflicts }),
   );
 }
 
@@ -1856,12 +1859,11 @@ test("diffLinkageTerms: a private-key marker in a citation cannot truncate the a
 
 // The two sides one field's conflict line renders, read out of the composed
 // refusal: what the operator is shown for that field once the fit has run. The
-// message is read AFTER the display boundary, which rewrites the line breaks the
-// block is built from to their visible escape, so its lines are separated by that
-// escape rather than by a control character.
+// message is read AFTER the display boundary, which keeps the line breaks the
+// block is built from, so its lines are the rendered text's own lines.
 function conflictValues(rendered: string, field: string): string[] {
   const prefix = `  - ${field}: existing `;
-  const line = rendered.split("\\x0a").find((l) => l.startsWith(prefix));
+  const line = rendered.split("\n").find((l) => l.startsWith(prefix));
   expect(line, field).toBeDefined();
   const sides = line!.slice(prefix.length).split(" vs required ");
   expect(sides, field).toHaveLength(2);
@@ -2279,7 +2281,7 @@ test("the reconcile refusal keeps its recovery step and names every field, at ev
     // notice explaining a field named without its values is shown exactly when
     // there is one, and a line that kept its values kept both of them, neither
     // cut back to a bare truncation marker.
-    const lines = rendered.split("\\x0a").filter((l) => l.startsWith("  - "));
+    const lines = rendered.split("\n").filter((l) => l.startsWith("  - "));
     expect(lines).toHaveLength(all.length);
     const namedAlone = lines.filter((l) => !l.includes(": existing "));
     expect(rendered.includes("too wide for the room")).toBe(
@@ -3078,10 +3080,8 @@ test("a fitted conflict line's runs are the runs the block composed, at every bu
     const rendered = refusalAtWidth(value);
     expect(rendered).toContain(DISPLAY_TRUNCATION_MARKER);
     expect(fragmentsBeforeCuts(rendered)).toEqual([]);
-    expect(blockSkeleton(rendered, "\\x0a")).not.toContain("<unterminated>");
-    expect(blockSkeleton(rendered, "\\x0a")).toBe(
-      blockSkeleton(benign, "\\x0a"),
-    );
+    expect(blockSkeleton(rendered, "\n")).not.toContain("<unterminated>");
+    expect(blockSkeleton(rendered, "\n")).toBe(blockSkeleton(benign, "\n"));
     expect(
       renderedDisplayCost(benign) - renderedDisplayCost(rendered),
     ).toBeLessThanOrEqual(MAX_UNDERSHOOT_PER_CUT * cutsIn(benign));
@@ -3584,6 +3584,66 @@ test("formatReconcileDiffs: renders each field with its existing and required va
   expect(rendered.split("\n")).toHaveLength(2);
 });
 
+test("reconcileConflictError: the operator meets the block on its own lines", () => {
+  // The whole refusal at the boundary the CLI renders it at: what the operator
+  // reads is the head with its recovery step, then one line per disagreeing
+  // field, rather than all of it run together on one physical line.
+  const rendered = renderedAcceptReconcileError([
+    {
+      field: "algorithm",
+      existing: reconcileDiffValue("psi-c"),
+      incoming: reconcileDiffValue("psi"),
+    },
+    {
+      field: "connection.server.host",
+      existing: reconcileDiffValue("old-host"),
+      incoming: reconcileDiffValue("host\nRESOLVED: nothing left to do."),
+    },
+  ]);
+  const lines = rendered.split("\n");
+  expect(lines).toHaveLength(3);
+  expect(lines[0]).toContain("then retry with the same invitation.");
+  expect(lines[1]).toBe('  - algorithm: existing "psi-c" vs required "psi"');
+  // The value's own line break opens no line: it is replaced where the value
+  // is composed, so the breaks the operator reads are the block's alone.
+  expect(lines[2]).toContain(controlCharacterMarker(0x0a));
+  expect(lines[2].startsWith("  - connection.server.host: ")).toBe(true);
+});
+
+test("reconcileConflictError: the fit spends a break at what a break renders as", () => {
+  // The block's breaks reach the operator as breaks, so the budget has to be
+  // fitted in the same unit: charging a break the four characters of the
+  // escape's `\x0a` leaves three per line of the cap unspendable, and what
+  // goes unspent is a field's values. Eight fields whose values are all too
+  // wide to show whole is where that difference is a field: fitted in the
+  // boundary's own unit this shape keeps six of the eight, fitted in the
+  // escape's it keeps five.
+  const all: ReconcileDiff[] = [
+    "version",
+    "algorithm",
+    "linkage_strategy",
+    "linkage_fields",
+    "linkage_keys",
+    "linkage_rule_set",
+    "legal_agreement",
+    "payload",
+  ].map((field, index) => ({
+    field,
+    existing: reconcileDiffValue(`/saved/${"s".repeat(60)}${index}`),
+    incoming: reconcileDiffValue(`/required/${"r".repeat(60)}${index}`),
+  }));
+
+  const rendered = renderedAcceptReconcileError(all);
+  expect(rendered.length).toBeLessThanOrEqual(
+    COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
+  );
+  const lines = rendered.split("\n").filter((l) => l.startsWith("  - "));
+  expect(lines).toHaveLength(all.length);
+  expect(
+    lines.filter((l) => l.includes(": existing ")).length,
+  ).toBeGreaterThanOrEqual(6);
+});
+
 test("formatReconcileDiffs: neutralizes partner-controlled values against terminal injection", () => {
   // The incoming side can be a partner-controlled string (a linkage key name, or
   // an inviter's split inbound_path/outbound_path from the connection endpoint),
@@ -3606,8 +3666,9 @@ test("formatReconcileDiffs: neutralizes partner-controlled values against termin
     ),
   );
   // Gone from the terminal, and gone in controlCharacterMarker's visible marker
-  // rather than in the escape's `\xHH` -- which is the form THIS block's own line
-  // breaks take once the refusal is escaped, and so a form no value may share.
+  // rather than in the escape's `\xHH`: a control character a value holds is
+  // shown as text, while the block's own line breaks reach the operator as line
+  // breaks, so no value can spell what the block builds its structure from.
   expect(rendered).not.toContain("\x1b");
   expect(rendered).not.toContain("\\x1b");
   expect(rendered).toContain(controlCharacterMarker(0x1b));

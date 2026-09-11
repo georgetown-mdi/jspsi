@@ -4,12 +4,12 @@ import type { Argv, Arguments } from "yargs";
 
 import {
   assertCountOnlyTransmitsNoColumn,
-  describeDecodeError,
   deriveAcceptedLinkageTerms,
   deriveOutboundPayloadConsent,
   disclosedColumnNames,
   getLogger,
   parseExchangeSpec,
+  rawDecodeErrorDescription,
   redactAndSanitizeForDisplay,
   UsageError,
 } from "@psilink/core";
@@ -30,7 +30,7 @@ import {
   persistExpectedPartnerDeduplicate,
   persistExpectedPayloadColumns,
   persistOutboundPayloadConsent,
-  reconcileConflictMessage,
+  reconcileConflictError,
   warnOnLinkageRuleSetCitationDrift,
   type ReconcileDiff,
 } from "../config";
@@ -810,7 +810,7 @@ function readExistingAcceptConfig(
     throw new UsageError(
       `a configuration file already exists at ${configPath} but could not be ` +
         `parsed to compare against ${against}: ` +
-        describeDecodeError(err) +
+        rawDecodeErrorDescription(err) +
         `. Fix or remove it, or pass --config-file to write elsewhere, then ` +
         `retry with ${retryWith}.`,
     );
@@ -890,9 +890,12 @@ function reconcileAcceptConfig(params: {
 
   const all: ReconcileDiff[] = [...conflicts, ...conn.conflicts];
   if (all.length > 0)
-    throw new UsageError(
-      reconcileConflictMessage({ configPath, against, retryWith, diffs: all }),
-    );
+    throw reconcileConflictError({
+      configPath,
+      against,
+      retryWith,
+      diffs: all,
+    });
 
   // A connection field that is "how you reach the same drop" (protocol, port,
   // credentials) may differ without aborting: it applies to this exchange only,

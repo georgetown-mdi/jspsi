@@ -7,6 +7,7 @@ import { IconAlertCircle } from "@tabler/icons-react";
 import {
   deriveAcceptedLinkageTerms,
   describeDecodeError,
+  displayText,
   getLogger,
   sanitizeErrorForDisplay,
 } from "@psilink/core";
@@ -139,6 +140,7 @@ import type {
 } from "./acceptorColumnsModel";
 import type {
   CSVRow,
+  Displayable,
   Metadata,
   SemanticType,
   Standardization,
@@ -217,10 +219,17 @@ interface AcceptorLaunched {
 }
 
 /** The async decode's outcome: pending while it runs, an error message on a bad
- * or expired invitation, or the validated invitation ready to review. */
+ * or expired invitation, or the validated invitation ready to review.
+ *
+ * The message is rendered straight into a React text node, which neutralizes
+ * HTML markup but not terminal-control, bidi-override or zero-width bytes, so
+ * this render is its display sink. Declaring it `Displayable` rather than
+ * `string` makes filling it from a raw partner-controlled description a compile
+ * error (`describeDecodeError` returns the brand; `rawDecodeErrorDescription`,
+ * which the CLI composes into an error for its own sink to escape, does not). */
 type DecodeState =
   | { status: "pending" }
-  | { status: "error"; message: string }
+  | { status: "error"; message: Displayable }
   | { status: "ready"; invitation: AcceptableInvitation };
 
 /** A titled inline error rendered beside a consent-step field when a submit slips
@@ -352,9 +361,7 @@ export function AcceptorScreen() {
     if (encoded === "") {
       setDecode({
         status: "error",
-        message:
-          "No invitation was found in this link. Paste the code into the " +
-          "accept form instead.",
+        message: displayText`No invitation was found in this link. Paste the code into the accept form instead.`,
       });
       return;
     }

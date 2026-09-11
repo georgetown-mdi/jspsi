@@ -19,9 +19,9 @@
 // there never becomes repository content.
 //
 // THE FORMAT RULES ARE NOT RESTATED HERE. The subject budget and the body wrap
-// live in ../scripts/format-squash-message.mjs, which the reminder names as the
-// step that places the file; block-nonconforming-squash-message.mjs refuses a
-// draft written past it. Prose here would be a second copy of two numbers.
+// come from ../scripts/format-squash-message.mjs, which the reminder names as
+// the step that places the file; block-nonconforming-squash-message.mjs refuses
+// a draft written past it. Prose here would be a second copy of two numbers.
 //
 // THE COUNT IS TAKEN OVER THE BRANCH THE PULL REQUEST IS OPENED FOR, not over
 // the event cwd's HEAD. The repo's by-ref review flow opens pull requests from

@@ -1134,15 +1134,15 @@ describe("Dockerfile.fips certificate pins", () => {
   };
 
   it("pins the certified provider NVR and the module version the certificate names", () => {
-    // Certificate 5021. The package and version decide which build is
+    // Certificate 5438. The package and version decide which build is
     // installed; the module version string is what the installed module reports
     // about itself, and it is the one of the two a package name cannot lie
     // about.
     expect(argDefault("FIPS_PROVIDER_PACKAGE")).toBe(
       "openssl-fips-provider-certified",
     );
-    expect(argDefault("FIPS_PROVIDER_VERSION")).toBe("3.0.8-1.amzn2023.0.1");
-    expect(argDefault("FIPS_MODULE_VERSION")).toBe("3.0.8-d694bfa693b76001");
+    expect(argDefault("FIPS_PROVIDER_VERSION")).toBe("3.2.2-1.amzn2023");
+    expect(argDefault("FIPS_MODULE_VERSION")).toBe("3.2.2-799901ad7ab41d45");
   });
 
   it("pins a release snapshot rather than tracking the moving repository", () => {

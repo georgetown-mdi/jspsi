@@ -28,6 +28,7 @@ import PSI from "@openmined/psi.js/psi_wasm_web";
 
 import {
   describeResolvedRunShape,
+  exchangeRecordFromFailure,
   getLogger,
   loadPsiBackend,
   runExchange,
@@ -122,11 +123,13 @@ export interface ManagedRunDriverConfig {
    * instead ({@link ./managedRun.ts}, `rerunFailureLastRun`). Absent, both flows
    * keep their default budget. */
   peerWaitTimeoutMs?: number;
-  /** A non-fatal, operator-relevant notice raised mid-run, from three sources: the
+  /** A non-fatal, operator-relevant notice raised mid-run, from four sources: the
    * deduplicating cardinality and the pair-table projection the agreed terms
    * resolved to ({@link describeResolvedRunShape}); the clean
    * close ending on an exit with no delivery signal ({@link CLOSE_OUTCOME_WARNINGS});
-   * and {@link DISCLOSURE_NOT_FILED_WARNING}. Optional: a caller with no notice
+   * and a disclosure that could not be filed, on the run that completed
+   * ({@link DISCLOSURE_NOT_FILED_WARNING}) or the run that stopped after sending
+   * ({@link STOPPED_DISCLOSURE_NOT_FILED_WARNING}). Optional: a caller with no notice
    * surface omits it and all are dropped. Never a terminal -- the run still settles
    * exactly once, and a notice from the teardown's close can arrive after it. */
   onWarning?: (message: string) => void;
@@ -149,7 +152,9 @@ export interface ManagedRunDriverConfig {
  * in progress elsewhere) and the storage tier reject before or without a
  * completed exchange; the caller classifies them through
  * {@link benignRerunOutcome}. A handshake or data-exchange failure propagates
- * unchanged for the caller's generic failure path.
+ * unchanged for the caller's generic failure path; a data-exchange failure past
+ * this party's payload send files its disclosure first
+ * ({@link fileTerminatedDisclosure}).
  */
 export function runManagedExchangeInBrowser(
   config: ManagedRunDriverConfig,
@@ -311,8 +316,8 @@ export function runManagedExchangeInBrowser(
           throw error;
         }
       },
-      // After the durable persist: run the PSI exchange, build the outputs, and
-      // tear down regardless of outcome.
+      // After the durable persist: run the PSI exchange, file the disclosure on
+      // either exit, build the outputs, and tear down regardless of outcome.
       dataExchange: async (carried) => {
         try {
           const result = await runExchange(
@@ -349,16 +354,19 @@ export function runManagedExchangeInBrowser(
               },
             },
           );
+          // The disclosure has happened, so its record is appended BEFORE the
+          // outputs are built and reported: nobody takes an unattended run's
+          // completion download, an attended run's tab can close on it, and a
+          // local step throwing past this point must not cost a completed run
+          // its entry. Awaited, unlike the teardown below: a local write of
+          // bounded duration, not a wait the partner's peer picks.
+          await appendDisclosure(record.id, result.audit, onWarning);
           const outputs = buildRunOutputs(result, carried.prepared, urls);
           builtOutputs = true;
-          // The disclosure has happened, so its record is appended to this
-          // exchange's accounting BEFORE the run reports its outputs: an
-          // unattended run has nobody to take the completion download, and an
-          // attended one can have its tab closed on the completion screen.
-          // Awaited, unlike the teardown below, because it is a local write of
-          // bounded duration rather than a wait the partner's peer controls.
-          await appendDisclosure(record.id, result.audit, onWarning);
           return outputs;
+        } catch (error) {
+          await fileTerminatedDisclosure(record.id, error, onWarning);
+          throw error;
         } finally {
           // Started, not awaited: the clean close inside it waits for the peer
           // to take the final frame, up to its ceiling. Awaiting it would
@@ -387,6 +395,13 @@ export function runManagedExchangeInBrowser(
 export const DISCLOSURE_NOT_FILED_WARNING =
   "This run's disclosure record could not be saved to this exchange's accounting of disclosures. Your results are complete. Download the record file below if you need to keep an account of this disclosure.";
 
+/** The notice a run that stopped after sending raises when its disclosure could
+ * not be filed. It offers no download: the run has no results surface, so nothing
+ * remains for the operator to take, and what is left to do is record the
+ * disclosure outside this browser. */
+export const STOPPED_DISCLOSURE_NOT_FILED_WARNING =
+  "This run sent your payload and then stopped, and its record could not be saved to this exchange's accounting of disclosures. Note this run's time and partner if you keep an account of disclosures.";
+
 /**
  * Append this run's self-attested exchange record to the exchange's accounting
  * of disclosures. Best-effort by design: the exchange has already happened, so a
@@ -409,6 +424,62 @@ async function appendDisclosure(
   } catch (error) {
     log.error("managed re-run: filing the disclosure record failed:", error);
     onWarning?.(DISCLOSURE_NOT_FILED_WARNING);
+  }
+}
+
+/**
+ * File the disclosure a run that FAILED had already made. The record-owed region
+ * opens at this party's payload send, so core hands the run's self-attested record
+ * back on the failure rather than discarding it, and the entry lands in the
+ * accounting on the same terms a completed run's does -- an operator cancelling a
+ * run, or a transport drop cutting one, does not undo the payload frames the
+ * transport already holds (docs/spec/EXCHANGE_RECORD.md, When a record is owed).
+ * The entry states which it is through the record's own `outcome`.
+ *
+ * A failure that carries no record files nothing, which covers all three ways one
+ * arrives: the run stopped before the region opened, so nothing was disclosed;
+ * core could not build the record for a disclosure that did occur, which it warns
+ * about on the operator log at the point of the loss; or the exchange completed
+ * and a local step past it threw, whose record the completed path has already
+ * filed.
+ *
+ * Best-effort, as the completed path's append is: the run is failing, so a failed
+ * append can neither undo the disclosure nor make the outcome worse, and the run
+ * still reports its own failure. A failed append does raise
+ * {@link STOPPED_DISCLOSURE_NOT_FILED_WARNING} beside that failure, since the
+ * accounting is what an unattended run leaves behind and nobody would otherwise
+ * learn it is missing a disclosure that happened. The loss also goes to the
+ * diagnostic log.
+ *
+ * Recovering the record is guarded too, so a throwing accessor -- an error whose
+ * own `cause` chain raises while core walks it -- cannot replace the run's
+ * failure. That throw takes the log alone and no notice: what it leaves unknown
+ * is whether a record was owed at all, which the notice would assert.
+ */
+async function fileTerminatedDisclosure(
+  id: string,
+  error: unknown,
+  onWarning: ((message: string) => void) | undefined,
+): Promise<void> {
+  let audit: BuiltExchangeRecord | undefined;
+  try {
+    audit = exchangeRecordFromFailure(error);
+  } catch (failure) {
+    log.error(
+      "managed re-run: reading a stopped run's disclosure record from its failure failed:",
+      failure,
+    );
+    return;
+  }
+  if (audit === undefined) return;
+  try {
+    await appendDisclosureRecordToStore(id, audit.record);
+  } catch (failure) {
+    log.error(
+      "managed re-run: filing a stopped run's disclosure record failed:",
+      failure,
+    );
+    onWarning?.(STOPPED_DISCLOSURE_NOT_FILED_WARNING);
   }
 }
 

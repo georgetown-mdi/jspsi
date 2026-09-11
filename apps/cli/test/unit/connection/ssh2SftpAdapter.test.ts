@@ -2534,8 +2534,19 @@ describe("out-of-band client event callbacks", () => {
     return (adapter as any).client.eventCallbacks;
   }
 
-  test("an out-of-band client error logs at error level with the message escaped", () => {
+  // Which of the two arms an error takes turns on whether the library is still
+  // holding an SFTP session, which it is when it hands over a live session's
+  // error and is not for one arriving behind a failed dial or a closed
+  // connection (measured; the integration suite drives both against the real
+  // stack in outOfOperationClientError.test.ts).
+  function holdSession(adapter: SSH2SFTPClientAdapter): void {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).client.sftp = {};
+  }
+
+  test("an out-of-band client error on a live session logs at error level with the message escaped", () => {
     const adapter = new SSH2SFTPClientAdapter();
+    holdSession(adapter);
     const error = vi.fn();
     const trace = vi.fn();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -2560,6 +2571,7 @@ describe("out-of-band client event callbacks", () => {
 
   test("a private-key block in an out-of-band client error is redacted", () => {
     const adapter = new SSH2SFTPClientAdapter();
+    holdSession(adapter);
     const error = vi.fn();
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     (adapter as any).log = { error, trace: vi.fn() };
@@ -2581,6 +2593,27 @@ describe("out-of-band client event callbacks", () => {
     expect(line).toContain("[redacted private key]");
     expect(line).not.toContain("SECRETKEYBYTES");
     expect(line).not.toContain("BEGIN OPENSSH");
+  });
+
+  test("an out-of-band client error with no session held logs at trace, still escaped", () => {
+    const adapter = new SSH2SFTPClientAdapter();
+    const error = vi.fn();
+    const trace = vi.fn();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (adapter as any).log = { error, trace };
+
+    // Nothing is holding a session, so the dial or the close this arrives
+    // behind has already told its own caller what happened. The message is
+    // still the server's, and a trace run puts it in an operator's --log-file,
+    // so it is escaped on this arm too.
+    eventCallbacks(adapter).error(new Error("read ECONNRESET\u202eFORGED"));
+
+    expect(error).not.toHaveBeenCalled();
+    expect(trace).toHaveBeenCalledTimes(1);
+    const line = trace.mock.calls[0][0] as string;
+    expect(line).toContain("read ECONNRESET");
+    expect(line).toContain("\\u202e");
+    expect(line).not.toContain("\u202e");
   });
 
   test("out-of-band end and close events log at trace level, not error", () => {

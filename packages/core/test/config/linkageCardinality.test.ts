@@ -842,6 +842,20 @@ test("an agreed both-sided pair runs end to end and groups both parties' rows", 
     { localRows: [2], partnerRows: [3] },
   ]);
 
+  // The diagnostic each party reads off that same table: a table of single
+  // blocks, so every cluster formed on exactly one matched value. Both parties
+  // state the same two shapes, each in its own (yours, partner's) frame.
+  expect(a.entityClusters).toStrictEqual({
+    clusterCount: 2,
+    localRows: 3,
+    partnerRows: 3,
+    shapes: [
+      { localRows: 2, partnerRows: 2, distinctValues: 1, clusters: 1 },
+      { localRows: 1, partnerRows: 1, distinctValues: 1, clusters: 1 },
+    ],
+  });
+  expect(b.entityClusters).toStrictEqual(a.entityClusters);
+
   // The result file is one row per PAIR, so a cluster of m of this party's
   // records and n of the partner's writes m x n rows -- 4 for the block, 1 for
   // the pair beside it, in this party's own row order.
@@ -1516,4 +1530,24 @@ test("deduplicate: false on both parties runs the exchange to completion", async
   // grouping is what the deduplicating runs above add, not matching at all.
   expect(fulfilled(initiator).associationTable).toStrictEqual([[3], [1]]);
   expect(fulfilled(responder).associationTable).toStrictEqual([[1], [3]]);
+});
+
+test("only the both-sided pair reports a cluster diagnostic", async () => {
+  // The cluster figures are the both-sided cardinality's own: every other pair
+  // leaves one side's records distinct, so its clusters follow from the table's
+  // shape and the run hands no summary at all.
+  for (const [local, partner] of [
+    [false, false],
+    [true, false],
+    [false, true],
+  ] as const) {
+    const [initiator, responder] = await runBothWithDeduplicate(
+      local,
+      partner,
+      "cascade",
+      { initiator: mutualRowsA, responder: mutualRowsB },
+    );
+    expect(fulfilled(initiator).entityClusters).toBeUndefined();
+    expect(fulfilled(responder).entityClusters).toBeUndefined();
+  }
 });

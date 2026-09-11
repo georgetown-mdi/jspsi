@@ -255,6 +255,7 @@ import {
   isPeerWaitTimeout,
   sanitizeErrorForDisplay,
   sanitizeForDisplay,
+  describeEntityClusters,
   describeResolvedMatching,
   describeResolvedRunShape,
   getDefaultLinkageTerms,
@@ -928,6 +929,175 @@ test("leaves the pre-round boundary silent on a one-to-one run", async () => {
   ]);
 
   expect(mockState.warnings).toStrictEqual([]);
+}, 20_000);
+
+// --- the post-run entity-cluster diagnostic ------------------------------------
+
+const CLUSTER_SUMMARY = {
+  clusterCount: 2,
+  localRows: 3,
+  partnerRows: 3,
+  shapes: [
+    { localRows: 2, partnerRows: 2, distinctValues: 2, clusters: 1 },
+    { localRows: 1, partnerRows: 1, distinctValues: 1, clusters: 1 },
+  ],
+};
+
+const MANY_TO_MANY_SHAPE: ResolvedRunShape = {
+  cardinality: "many-to-many",
+  localDeduplicate: true,
+  partnerDeduplicate: true,
+  localRecordCount: 3,
+  localDeclaredRecordCount: 3,
+  partnerRecordCount: 3,
+  localExpectsOutput: true,
+  partnerAssociationTableWithheld: false,
+};
+
+async function runBothParties(): Promise<void> {
+  await Promise.all(
+    ["test-a", "test-b"].map((loggerName) =>
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        output: undefined,
+        verbosity: -1,
+        loggerName,
+      }),
+    ),
+  );
+}
+
+test("states how the closure grouped the result a many-to-many run wrote", async () => {
+  // The figures are the run's own; what this pins is that the seat states them
+  // where the operator reads its result, in core's composition rather than one
+  // the CLI writes itself.
+  vi.mocked(runExchange).mockImplementation(
+    runExchangeConfirming(MANY_TO_MANY_SHAPE, {
+      associationTable: [[], []],
+      partnerPayload: {},
+      matching: STUB_MATCHING,
+      entityClusters: CLUSTER_SUMMARY,
+    }) as never,
+  );
+  await runBothParties();
+
+  expect(mockState.infos).toContain(describeEntityClusters(CLUSTER_SUMMARY));
+}, 20_000);
+
+test("says nothing about clusters on a run that reported none", async () => {
+  // Every cardinality but the both-sided one leaves core reporting no summary,
+  // and the seat reads that rather than the cardinality label.
+  vi.mocked(runExchange).mockImplementation(
+    runExchangeConfirming(MANY_TO_MANY_SHAPE) as never,
+  );
+  await runBothParties();
+
+  expect(
+    mockState.infos.filter((line) => line.includes("Entity clusters")),
+  ).toStrictEqual([]);
+}, 20_000);
+
+test("puts the cluster summary on the terminal event a many-to-many run emits", async () => {
+  // The console seat and a supervisor reading fd 3 see no info line, so the
+  // terminal event is their only route to the grouping. Absent it, the console
+  // can never state what the closure grouped the result into.
+  vi.mocked(runExchange).mockImplementation(
+    runExchangeConfirming(MANY_TO_MANY_SHAPE, {
+      associationTable: [[], []],
+      partnerPayload: {},
+      matching: STUB_MATCHING,
+      entityClusters: CLUSTER_SUMMARY,
+    }) as never,
+  );
+  mockFd3Open();
+  try {
+    await Promise.all([
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        output: undefined,
+        verbosity: -1,
+        loggerName: "test-a",
+        fileSyncRuntime: { eventStream: true },
+      }),
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        output: undefined,
+        verbosity: -1,
+        loggerName: "test-b",
+      }),
+    ]);
+  } finally {
+    vi.mocked(fs.fstatSync).mockRestore();
+  }
+
+  const lines = takeFd3Lines();
+  const terminal = lines[lines.length - 1];
+  expect(terminal.type).toBe("result");
+  expect(terminal.entityClusters).toEqual(CLUSTER_SUMMARY);
+}, 20_000);
+
+test("leaves the terminal event without the field on a run that grouped nothing", async () => {
+  // Core composes no summary under any other cardinality, and the seat reads
+  // that rather than the cardinality label: the field's absence is what a
+  // consumer keys on.
+  vi.mocked(runExchange).mockImplementation(
+    runExchangeConfirming(MANY_TO_MANY_SHAPE) as never,
+  );
+  mockFd3Open();
+  try {
+    await Promise.all([
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        output: undefined,
+        verbosity: -1,
+        loggerName: "test-a",
+        fileSyncRuntime: { eventStream: true },
+      }),
+      runProtocol({
+        connection: {
+          channel: "filedrop",
+          path: dropDir,
+          options: TWO_PARTY_OPTIONS,
+        },
+        auth: null,
+        prepared: minimalPrepared,
+        output: undefined,
+        verbosity: -1,
+        loggerName: "test-b",
+      }),
+    ]);
+  } finally {
+    vi.mocked(fs.fstatSync).mockRestore();
+  }
+
+  const lines = takeFd3Lines();
+  const terminal = lines[lines.length - 1];
+  expect(terminal.type).toBe("result");
+  expect("entityClusters" in terminal).toBe(false);
 }, 20_000);
 
 test("states the partner's deduplicate value and the resolved cardinality on every run", async () => {
@@ -4845,11 +5015,12 @@ test("an emitter passed instead of the flag receives every event, and no second 
   }
 
   // The whole run reported through the caller's object, terminal event included.
-  // A matched run passes no count, so the terminal call has the written flag,
-  // what the deduplicate pair resolved to, and an absent count (the builder
-  // omits the count fields entirely for it).
+  // A one-to-one matched run passes neither a count nor a cluster summary, so
+  // the terminal call has the written flag, what the deduplicate pair resolved
+  // to, and both optional arguments absent (the builder omits their fields
+  // entirely for it).
   expect(emitted.map((e) => e.event)).toEqual(["stages", "metrics", "result"]);
-  expect(emitted[2].args).toEqual([true, STUB_MATCHING, undefined]);
+  expect(emitted[2].args).toEqual([true, STUB_MATCHING, undefined, undefined]);
   // Nothing re-ran the preflight and nothing reached the descriptor: the
   // already-preflighted emitter was reused rather than re-opened.
   expect(fd3.preflightProbes).toBe(0);

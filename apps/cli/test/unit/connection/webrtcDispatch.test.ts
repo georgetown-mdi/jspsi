@@ -705,3 +705,35 @@ test("an unset peer_timeout_ms leaves all three transport defaults in place", ()
   expect(options.rendezvousTimeoutMs).toBeUndefined();
   expect(options.channelOpenTimeoutMs).toBeUndefined();
 });
+
+test("ice_transport_policy reaches the rendezvous", () => {
+  const { options } = webRtcDialFrom(
+    {
+      channel: "webrtc",
+      server: { host: "peers.example.org" },
+      role: "inviter",
+      turn: [
+        {
+          url: "turns:relay.example.org:443?transport=tcp",
+          username: "psilink",
+          credential: "placeholder-not-a-secret",
+        },
+      ],
+      iceTransportPolicy: "relay",
+    },
+    SECRET,
+  );
+  expect(options.iceTransportPolicy).toBe("relay");
+});
+
+test("an unset ice_transport_policy leaves the transport's own default", () => {
+  const { options } = webRtcDialFrom(
+    {
+      channel: "webrtc",
+      server: { host: "peers.example.org" },
+      role: "inviter",
+    },
+    SECRET,
+  );
+  expect(options).not.toHaveProperty("iceTransportPolicy");
+});

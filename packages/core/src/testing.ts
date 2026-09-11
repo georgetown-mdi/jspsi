@@ -153,14 +153,15 @@ export function minimalPreparedExchange(
 }
 
 /**
- * The smallest complete {@link ExchangeResult}: no association table or
- * intersection count, the built-in default linkage terms standing in for the
- * partner's, a one-to-one resolved matching (neither party deduplicating), a
- * receiver role, and an empty partner payload. `overrides`
- * replaces whichever fields a test's own assertions read. Stays out of the
- * main entry point for the same reason as {@link minimalPreparedExchange}: it
- * stands in for a real `runExchange` result in a test whose mocked
- * collaborators never reach past the fields `overrides` sets.
+ * The smallest complete {@link ExchangeResult}: no association table, no
+ * intersection count, no entity-cluster summary, the built-in default linkage
+ * terms standing in for the partner's, a one-to-one resolved matching (neither
+ * party deduplicating), a receiver role, and an empty partner payload.
+ * `overrides` replaces whichever fields a test's own assertions read. Stays out
+ * of the main entry point for the same reason as
+ * {@link minimalPreparedExchange}: it stands in for a real `runExchange` result
+ * in a test whose mocked collaborators never reach past the fields `overrides`
+ * sets.
  */
 export function minimalExchangeResult(
   overrides: Partial<ExchangeResult> = {},

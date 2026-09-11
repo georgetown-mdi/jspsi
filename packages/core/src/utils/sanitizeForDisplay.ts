@@ -356,6 +356,47 @@ export function renderedDisplayCost(fragment: string): number {
 }
 
 /**
+ * UTF-16 code units {@link boundRawFragmentForFit} keeps per character of the
+ * budget its fit is taken against.
+ *
+ * Two, not one, even though no code unit escapes to FEWER than one output
+ * character (printable ASCII is the floor, at one each): a fragment cut to
+ * exactly the budget in printable ASCII renders at exactly the budget, which
+ * {@link clipToRenderedCost} returns whole and unmarked, where the longer
+ * fragment it was cut from would have been clipped and marked. At twice the
+ * budget a cut fragment always renders past it, so the clip runs in both
+ * cases and keeps the same prefix -- at most the budget less the truncation
+ * marker, well inside the cut.
+ */
+export const RAW_FIT_CODE_UNITS_PER_BUDGET_CHARACTER = 2;
+
+/**
+ * `value` cut to the most UTF-16 code units a fit to `budget` can read, for a
+ * caller holding a fragment nothing upstream has bounded -- a wire-frame
+ * record key, bounded only by the transport's frame cap.
+ * {@link clipToRenderedCost} materializes the whole escaped form to measure
+ * it, so measuring such a fragment costs time and memory linear in what the
+ * partner sent; cutting first makes both linear in the budget, and
+ * {@link RAW_FIT_CODE_UNITS_PER_BUDGET_CHARACTER} keeps the fitted text
+ * identical to the uncut fragment's when the cut still renders past
+ * `budget` after redaction -- true of a private key alone, text ahead of
+ * one, and plain text of any length.
+ *
+ * Cut BEFORE redaction, which is itself before the clip: a cut landing inside
+ * a private-key block leaves a `BEGIN` marker whose `END` is gone, which
+ * redaction's fail-closed dangling rule takes along with everything after it,
+ * and a cut landing inside the marker itself keeps no key body at all -- the
+ * body follows the marker. A complete key block followed by more text falls
+ * outside that: redaction can shrink the cut fragment below `budget`, and
+ * the fit then shows less of the trailing text than the uncut fragment
+ * would, with no truncation marker to say so. No key material survives
+ * either way.
+ */
+export function boundRawFragmentForFit(value: string, budget: number): string {
+  return value.slice(0, RAW_FIT_CODE_UNITS_PER_BUDGET_CHARACTER * budget);
+}
+
+/**
  * Longest prefix of `value` whose {@link renderedDisplayCost} fits
  * `budget`, with {@link DISPLAY_TRUNCATION_MARKER} appended -- and paid for
  * out of that same budget -- when anything was dropped. This is how a
@@ -383,7 +424,8 @@ export function renderedDisplayCost(fragment: string): number {
  * The fit check materializes the escaped form to measure it, so this
  * bounds what a fragment RENDERS to, not what it costs to measure: a
  * caller holding a fragment nothing upstream has bounded is bounding a
- * display budget here, not a memory one.
+ * display budget here, not a memory one, and takes
+ * {@link boundRawFragmentForFit} for that.
  */
 export function clipToRenderedCost(value: string, budget: number): string {
   if (renderedDisplayCost(value) <= budget) return value;

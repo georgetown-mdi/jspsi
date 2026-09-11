@@ -378,6 +378,119 @@ describe("createServerJobExchangeDriver event mapping", () => {
     }
   });
 
+  test("the console seat carries the cluster summary through to its outputs", async () => {
+    // The CLI states the same figures on an info log line no relay event holds,
+    // so the terminal event is the only route to this seat: without the
+    // forward, the console's completion panel can never state the grouping the
+    // browser path already states.
+    const entityClusters = {
+      clusterCount: 2,
+      localRows: 3,
+      partnerRows: 3,
+      shapes: [
+        { localRows: 2, partnerRows: 2, distinctValues: 2, clusters: 1 },
+        { localRows: 1, partnerRows: 1, distinctValues: 1, clusters: 1 },
+      ],
+    };
+    const { client } = scriptedClient([{ ...result(true), entityClusters }]);
+    const events = driverEvents(new AbortController().signal);
+
+    await createServerJobExchangeDriver(driverConfig(), client).run(events);
+
+    const outputs = events.onResult.mock.calls[0][0] as RunOutputs;
+    expect(outputs.kind === "matched" && outputs.entityClusters).toEqual(
+      entityClusters,
+    );
+  });
+
+  test("a cluster summary the relay frame malforms leaves the panel stating none", async () => {
+    // The relay forwards the CLI's fields verbatim, so every figure is checked
+    // rather than assumed: a negative or fractional count, a missing shape
+    // figure, or a non-array distribution leaves the seat stating no grouping
+    // rather than a distribution missing part of itself.
+    for (const entityClusters of [
+      { clusterCount: -1, localRows: 1, partnerRows: 1, shapes: [] },
+      { clusterCount: 1, localRows: 1.5, partnerRows: 1, shapes: [] },
+      { clusterCount: 1, localRows: 1, partnerRows: 1 },
+      {
+        clusterCount: 1,
+        localRows: 1,
+        partnerRows: 1,
+        shapes: [{ localRows: 1, partnerRows: 1, clusters: 1 }],
+      },
+      { clusterCount: 1, localRows: 1, partnerRows: 1, shapes: "2 x 2" },
+      "two clusters",
+      null,
+    ]) {
+      const { client } = scriptedClient([{ ...result(true), entityClusters }]);
+      const events = driverEvents(new AbortController().signal);
+      await createServerJobExchangeDriver(driverConfig(), client).run(events);
+      const outputs = events.onResult.mock.calls[0][0] as RunOutputs;
+      expect(
+        outputs.kind === "matched" ? outputs.entityClusters : undefined,
+      ).toBeUndefined();
+    }
+  });
+
+  test("a cluster summary whose shapes miss its own counts is dropped", async () => {
+    // Core composes the counts and the distribution from one pass over the same
+    // clusters, so a frame whose halves disagree -- a positive cluster count
+    // with no shapes, shapes short of the count, records the totals do not
+    // reach -- is malformed, and the panel states no grouping rather than a
+    // total the shapes beside it contradict.
+    for (const entityClusters of [
+      { clusterCount: 3, localRows: 1, partnerRows: 1, shapes: [] },
+      {
+        clusterCount: 2,
+        localRows: 3,
+        partnerRows: 3,
+        shapes: [
+          { localRows: 2, partnerRows: 2, distinctValues: 2, clusters: 1 },
+        ],
+      },
+      {
+        clusterCount: 1,
+        localRows: 9,
+        partnerRows: 1,
+        shapes: [
+          { localRows: 1, partnerRows: 1, distinctValues: 1, clusters: 1 },
+        ],
+      },
+    ]) {
+      const { client } = scriptedClient([{ ...result(true), entityClusters }]);
+      const events = driverEvents(new AbortController().signal);
+      await createServerJobExchangeDriver(driverConfig(), client).run(events);
+      const outputs = events.onResult.mock.calls[0][0] as RunOutputs;
+      expect(
+        outputs.kind === "matched" ? outputs.entityClusters : undefined,
+      ).toBeUndefined();
+    }
+  });
+
+  test("a cluster summary whose shapes account for its counts is kept", async () => {
+    // A shape entry stands for every cluster of that shape, so the records it
+    // names count once per cluster: four 1 x 1 clusters and one 3 x 2 reach the
+    // 7 and 6 the summary states.
+    const entityClusters = {
+      clusterCount: 5,
+      localRows: 7,
+      partnerRows: 6,
+      shapes: [
+        { localRows: 3, partnerRows: 2, distinctValues: 2, clusters: 1 },
+        { localRows: 1, partnerRows: 1, distinctValues: 1, clusters: 4 },
+      ],
+    };
+    const { client } = scriptedClient([{ ...result(true), entityClusters }]);
+    const events = driverEvents(new AbortController().signal);
+
+    await createServerJobExchangeDriver(driverConfig(), client).run(events);
+
+    const outputs = events.onResult.mock.calls[0][0] as RunOutputs;
+    expect(outputs.kind === "matched" && outputs.entityClusters).toEqual(
+      entityClusters,
+    );
+  });
+
   test("a matching the relay frame malforms leaves the panel stating none", async () => {
     // The relay forwards the CLI's fields verbatim, so the shape is checked
     // rather than assumed: an unknown label, a non-boolean value, or a

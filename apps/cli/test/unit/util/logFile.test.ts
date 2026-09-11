@@ -7,6 +7,8 @@ import {
   type DiagnosticSink,
   getDiagnosticSink,
   getLogger,
+  keepFirstPartyLineBreaks,
+  sanitizeErrorForDisplay,
   setDiagnosticSink,
   UsageError,
 } from "@psilink/core";
@@ -60,6 +62,29 @@ test("configureLogFile: redirects loglevel output to the file with the standard 
     /\[INFO\] \[logfile-test-a\] hello from the file sink/,
   );
   expect(contents).toMatch(/\[WARN\] \[logfile-test-a\] a warning too/);
+});
+
+test("configureLogFile: a first-party block reaches the file on its own lines", () => {
+  // The unattended operator's copy of a refusal whose structure is the line
+  // break: what they read in the file is the block, not one run-together line
+  // with the breaks spelled out as escapes.
+  const logPath = path.join(tmpDir, "block.log");
+  const lines = [
+    "the configuration file disagrees with the invitation:",
+    '  - algorithm: existing "psi-c" vs required "psi"',
+  ];
+  const sink = configureLogFile(logPath);
+  logLibrary.setDefaultLevel(logLibrary.levels.ERROR);
+  getLogger("logfile-test-block").error(
+    sanitizeErrorForDisplay(
+      keepFirstPartyLineBreaks(new UsageError(lines.join("\n")), lines),
+    ),
+  );
+  sink.close();
+
+  const written = fs.readFileSync(logPath, "utf8").split("\n");
+  expect(written[0].endsWith(lines[0])).toBe(true);
+  expect(written[1]).toBe(lines[1]);
 });
 
 test("configureLogFile: opens in append mode, preserving existing content", () => {

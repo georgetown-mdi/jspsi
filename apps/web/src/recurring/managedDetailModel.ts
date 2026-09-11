@@ -240,11 +240,20 @@ const SUCCEEDED_DISCLOSURE =
 const NOTHING_DISCLOSED =
   "Nothing was disclosed -- the run stopped before any data was exchanged.";
 
-/** The disclosure line for a run that failed after the handshake, where the record
- * cannot prove whether data reached the partner. It asserts neither way and points
- * at the authoritative account -- the record file offered at run completion. */
-const OUTCOME_UNCERTAIN =
-  "The run did not complete. Whether any data reached your partner is not recorded here; the record file offered when a run completes is the authoritative account.";
+/**
+ * What neither the run bookkeeping nor the accounting can say about a run that
+ * could have sent: this browser records this party's own act of disclosure, never
+ * the partner's receipt of it. Shared by the run history and the accounting's
+ * empty state so both state that limit in the same words for the same run.
+ */
+export const DELIVERY_NOT_RECORDED =
+  "Whether any data reached your partner is not recorded here";
+
+/** The disclosure line for a run that failed after the handshake, where this
+ * bookkeeping cannot prove whether data reached the partner. It asserts neither
+ * way and points at the accounting of disclosures, where a run files its record
+ * once it has sent. */
+const OUTCOME_UNCERTAIN = `The run did not complete. ${DELIVERY_NOT_RECORDED}; check the accounting of disclosures below, where a run that sent its payload files its record.`;
 
 /**
  * Whether a failed run's bookkeeping proves it stopped before the data exchange
@@ -275,27 +284,32 @@ function disclosurePrecedesExchange(
 }
 
 /**
- * The disclosure line for a non-succeeded run, from the outcome and
- * `failureKind`: no handshake (`"missed"`, `"desynced"`) or a failure at or
- * before the persist ({@link disclosurePrecedesExchange}) means nothing was
- * disclosed; otherwise the line asserts neither way and points at the record
- * file offered at run completion.
+ * Whether a run the bookkeeping did not stamp `"succeeded"` leaves open that this
+ * party's payload was sent. A no-show and a rotation-desync both mean no handshake
+ * completed, so no data was exchanged; a `"failed"` outcome defers to the
+ * `failureKind`'s position in the run lifecycle
+ * ({@link disclosurePrecedesExchange}).
+ */
+function sendNotRuledOut(lastRun: ManagedExchangeLastRun): boolean {
+  if (lastRun.outcome === "missed" || lastRun.outcome === "desynced")
+    return false;
+  return !disclosurePrecedesExchange(lastRun.failureKind);
+}
+
+/**
+ * The disclosure line for a non-succeeded run: a run whose send is ruled out
+ * ({@link sendNotRuledOut}) disclosed nothing; otherwise the line asserts neither
+ * way and points at the accounting of disclosures.
  */
 function nonSucceededDisclosure(lastRun: ManagedExchangeLastRun): string {
-  // A no-show and a rotation-desync both mean no handshake completed, so no data was
-  // exchanged; a `"failed"` outcome defers to the failureKind's lifecycle position.
-  if (lastRun.outcome === "missed" || lastRun.outcome === "desynced")
-    return NOTHING_DISCLOSED;
-  return disclosurePrecedesExchange(lastRun.failureKind)
-    ? NOTHING_DISCLOSED
-    : OUTCOME_UNCERTAIN;
+  return sendNotRuledOut(lastRun) ? OUTCOME_UNCERTAIN : NOTHING_DISCLOSED;
 }
 
 /**
  * The run-history entries for the detail view, derived from the record's
  * `lastRun` bookkeeping: an empty list when no run has been recorded, otherwise
  * a single entry for the most recent run (see {@link nonSucceededDisclosure} for
- * the disclosure line). Every completed run's own disclosure is in the
+ * the disclosure line). Every run that disclosed has its own record in the
  * accounting of disclosures, not here.
  */
 export function runHistoryEntries(
@@ -318,21 +332,46 @@ export function runHistoryEntries(
 }
 
 /**
- * Whether the record's own bookkeeping records a run that COMPLETED -- the only
- * kind that files an entry in the accounting of disclosures (see
- * {@link runHistoryEntries}).
+ * Whether the record's own bookkeeping records a run that COMPLETED -- a run
+ * that certainly filed an entry in the accounting of disclosures.
  *
  * The accounting view reads this to keep its empty state accurate: an empty
  * accounting is not evidence nothing was disclosed, since a reset clears stored
  * entries without touching the record, and export/import moves the exchange
  * without its accounting.
  *
- * ONE-WAY: the record keeps only the most recent run (see
+ * ONE-WAY in two directions. The record keeps only the most recent run (see
  * docs/spec/MANAGED_EXCHANGE_RECORD.md, the `lastRun` row), so `false` means only
- * that the retained run is not a completed one.
+ * that the retained run is not a completed one. And a run that stopped after
+ * sending its payload files an entry as well, which the bookkeeping stamps
+ * `"failed"` and cannot tell from a run that stopped before sending -- so `false`
+ * is not a claim that no entry was filed either.
  */
 export function completedRunRecorded(
   record: Pick<ManagedExchangeRecord, "lastRun">,
 ): boolean {
   return record.lastRun?.outcome === "succeeded";
+}
+
+/**
+ * Whether the record's retained run leaves open that this party's payload was
+ * sent -- the condition behind the run history's own uncertain disclosure line
+ * ({@link sendNotRuledOut}), read by the accounting view so an empty accounting
+ * states that same limit instead of denying the send.
+ *
+ * A succeeded run answers `true`: it certainly sent. The accounting view reads
+ * {@link completedRunRecorded} first, so a completed run takes its own reading
+ * there and never this one.
+ *
+ * ONE-WAY, as {@link completedRunRecorded} is: the record keeps only the most
+ * recent run (see docs/spec/MANAGED_EXCHANGE_RECORD.md, the `lastRun` row), so
+ * `false` speaks for the retained run alone.
+ */
+export function lastRunMayHaveSentPayload(
+  record: Pick<ManagedExchangeRecord, "lastRun">,
+): boolean {
+  const { lastRun } = record;
+  if (lastRun === undefined) return false;
+  if (lastRun.outcome === "succeeded") return true;
+  return sendNotRuledOut(lastRun);
 }

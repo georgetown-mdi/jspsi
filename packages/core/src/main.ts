@@ -155,6 +155,7 @@ export {
   sanitizeForDisplay,
   displayText,
   renderedDisplayCost,
+  boundRawFragmentForFit,
   clipToRenderedCost,
   replaceControlCharactersForDisplay,
   trimPartialControlCharacterMarker,
@@ -168,6 +169,8 @@ export {
   sanitizeErrorForDisplay,
   sanitizeErrorChainLinks,
   joinErrorCauseChain,
+  keepFirstPartyLineBreaks,
+  renderedDisplayCostKeepingLineBreaks,
   redactPrivateKeyMaterial,
   redactAndSanitizeForDisplay,
   createPrivateKeyStreamRedactor,
@@ -188,7 +191,10 @@ export {
   ruleSetCitation,
 } from "./config/compatibilityMessage";
 export type { CompatibilityMessageFragment } from "./config/compatibilityMessage";
-export { describeDecodeError } from "./utils/describeDecodeError";
+export {
+  describeDecodeError,
+  rawDecodeErrorDescription,
+} from "./utils/describeDecodeError";
 
 export {
   safeParseStandardization,
@@ -514,6 +520,11 @@ export {
   describeResolvedRunShape,
 } from "./pairTableProjection";
 export type { ResolvedRunShape } from "./pairTableProjection";
+export { describeEntityClusters } from "./entityClusterReport";
+export type {
+  EntityClusterShape,
+  EntityClusterSummary,
+} from "./psi/entityClosure";
 export {
   EXCHANGE_KEYS_VERSION,
   EXCHANGE_RECORD_OUTCOMES,

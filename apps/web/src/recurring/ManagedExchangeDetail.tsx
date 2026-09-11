@@ -29,8 +29,19 @@ import {
 import styles from "@styles/app.module.css";
 
 import {
+  DELIVERY_NOT_RECORDED,
+  SIDE_LABELS,
+  completedRunRecorded,
+  connectionRows,
+  lastRunMayHaveSentPayload,
+  linkageTermsRows,
+  runHistoryEntries,
+  scheduleView,
+} from "./managedDetailModel";
+import {
   DISCLOSURE_EXPORT_MIME,
   DISCLOSURE_STORED_EXPORT_MIME,
+  PARTIAL_DISCLOSURE_LABEL,
   disclosureAccountingCsv,
   disclosureAccountingFileName,
   disclosureEntries,
@@ -50,14 +61,6 @@ import {
   scheduleEntryUnchanged,
   scheduleEntryUsable,
 } from "./scheduleEntryModel";
-import {
-  SIDE_LABELS,
-  completedRunRecorded,
-  connectionRows,
-  linkageTermsRows,
-  runHistoryEntries,
-  scheduleView,
-} from "./managedDetailModel";
 import { REPEATED_MISS_TITLE } from "./scheduleSurfacingModel";
 
 import type {
@@ -145,6 +148,7 @@ export function ManagedExchangeDetail({
       <DisclosureAccountingView
         read={accountingRead}
         completedRunOnRecord={completedRunRecorded(record)}
+        lastRunMayHaveSent={lastRunMayHaveSentPayload(record)}
         onReset={onResetAccounting}
         onRetryRead={onRetryAccountingRead}
       />
@@ -633,9 +637,11 @@ function RunSchedule({ record }: { record: ManagedExchangeRecord }) {
  * The run history: what the most recent run DID, whether or not it completed.
  * The record's own bookkeeping keeps only that one run (see
  * docs/spec/MANAGED_EXCHANGE_RECORD.md, the `lastRun` row), so this section is
- * scoped to it. Every completed run's disclosures are in the accounting below;
- * a run that failed before disclosing never enters it. A saved-but-never-run
- * exchange renders the plain empty state.
+ * scoped to it. Every run that sent this party's payload files its disclosure in
+ * the accounting below, whether or not it finished, and raises a notice when the
+ * filing fails ({@link ../psi/managed/managedRunDriver.ts}); a run that stopped
+ * before disclosing never enters it. A saved-but-never-run exchange renders the
+ * plain empty state.
  */
 function RunHistory({ record }: { record: ManagedExchangeRecord }) {
   const entries = runHistoryEntries(record);
@@ -649,8 +655,9 @@ function RunHistory({ record }: { record: ManagedExchangeRecord }) {
       ) : (
         <>
           <p className={`${styles.small} ${styles.sub}`}>
-            Only the most recent run&apos;s outcome is kept. Every completed
-            run&apos;s disclosure is in the accounting below.
+            Only the most recent run&apos;s outcome is kept. Every run that sent
+            your payload files its disclosure in the accounting below, whether
+            or not it finished, and warns you if it cannot.
           </p>
           {entries.map((entry) => (
             <div key={entry.at} className={styles.dlRow}>
@@ -680,11 +687,18 @@ function factRow(fact: DisclosureFact): ConfigRow {
 }
 
 /**
- * The accounting of disclosures: one entry per completed run, each read off
- * that run's own self-attested exchange record (see
+ * The accounting of disclosures: one entry per run that sent this party's
+ * payload, each read off that run's own self-attested exchange record (see
  * docs/spec/EXCHANGE_RECORD.md), plus the CSV a compliance reader is handed.
  * Entries are the records themselves, not a summary beside them, so this view
  * holds no facts of its own that could drift from the underlying record.
+ *
+ * A run that stopped after sending files an entry too, and the record's own
+ * outcome is what marks it: the collapsed row states it beside the instant, so
+ * an accounting drawn from the list does not take an unconfirmed send for a
+ * delivered one. Either kind of run raises a notice when its filing fails, which
+ * is what keeps the intro's own promise from overstating what is here
+ * ({@link ../psi/managed/managedRunDriver.ts}).
  *
  * A failed read renders as its own state, never as an empty accounting -- an
  * empty accounting is a claim ("nothing was disclosed") this view must not
@@ -716,6 +730,7 @@ function factRow(fact: DisclosureFact): ConfigRow {
 function DisclosureAccountingView({
   read,
   completedRunOnRecord,
+  lastRunMayHaveSent,
   onReset,
   onRetryRead,
 }: {
@@ -724,6 +739,10 @@ function DisclosureAccountingView({
    * which an empty accounting must reflect accurately (see
    * {@link EmptyAccountingNotice}). */
   completedRunOnRecord: boolean;
+  /** Whether the record's retained run leaves open that this party's payload was
+   * sent, which the empty accounting must not deny (see
+   * {@link EmptyAccountingNotice}). */
+  lastRunMayHaveSent: boolean;
   onReset: () => Promise<void>;
   onRetryRead: () => void;
 }) {
@@ -732,6 +751,7 @@ function DisclosureAccountingView({
   // recovery hands back as a file has no path into anything rendered here.
   const accounting = read?.kind === "accounting" ? read.accounting : undefined;
   const entries = accounting === undefined ? [] : disclosureEntries(accounting);
+  const partialCount = entries.filter((entry) => entry.partial).length;
   const exportCsv = () => {
     if (accounting === undefined) return;
     triggerBlobDownload(
@@ -744,12 +764,14 @@ function DisclosureAccountingView({
     <div className={styles.callout}>
       <h2 className={styles.eyebrow}>Accounting of disclosures</h2>
       <p className={styles.small}>
-        Every completed run files its own record here: who you disclosed to,
-        under which agreement and for what purpose, the categories of data that
-        moved each way, how many records you exposed, and -- when both sides
-        received the result -- its size. Each entry is that run&apos;s
-        self-attested record, built from what both sides already hold and
-        deliberately unsigned: an honest local account, not a signed or
+        Every run that sent your payload files its own record here, whether or
+        not it finished, and warns you if it cannot: who you disclosed to, under
+        which agreement and for what purpose, the categories of data that moved
+        each way, how many records you exposed, and -- when both sides received
+        the result -- its size. A run that stopped after sending is marked, and
+        states that delivery to your partner is not confirmed. Each entry is
+        that run&apos;s self-attested record, built from what both sides already
+        hold and deliberately unsigned: an honest local account, not a signed or
         non-repudiable receipt.
       </p>
       {read === undefined ? (
@@ -766,18 +788,29 @@ function DisclosureAccountingView({
       ) : read.kind === "unreadable" ? (
         <UnreadableAccountingRecovery stored={read.stored} onReset={onReset} />
       ) : entries.length === 0 ? (
-        <EmptyAccountingNotice completedRunOnRecord={completedRunOnRecord} />
+        <EmptyAccountingNotice
+          completedRunOnRecord={completedRunOnRecord}
+          lastRunMayHaveSent={lastRunMayHaveSent}
+        />
       ) : (
         <>
           <p className={`${styles.small} ${styles.sub}`}>
             {entries.length === 1
               ? "1 disclosure recorded in this browser."
               : `${entries.length} disclosures recorded in this browser.`}
+            {partialCount > 0 &&
+              (partialCount === 1
+                ? " 1 of them stopped before the run finished."
+                : ` ${partialCount} of them stopped before the run finished.`)}
           </p>
           {entries.map((entry) => (
             <DisclosureSection
               key={entry.bindingNonce}
-              label={entry.when}
+              label={
+                entry.partial
+                  ? `${entry.when} - ${PARTIAL_DISCLOSURE_LABEL}`
+                  : entry.when
+              }
               summary={entry.partner}
               open={openedNonce === entry.bindingNonce}
               onToggle={(open) =>
@@ -815,22 +848,34 @@ function DisclosureAccountingView({
  * The store was read and holds no accounting for this exchange, in the terms
  * the record beside it supports.
  *
- * An empty accounting is not by itself evidence that no run has completed: the
- * recovery reset destroys the entries while leaving the exchange -- run
- * history included -- standing, and the export/import artifact migrates the
- * runnable exchange without its accounting. Where the record remembers a
- * completed run, this states the emptiness as fact and names those two paths
- * to it, rather than reporting an absence of runs the record beside it
- * refutes. Where the record remembers no completed run, the plain empty state
- * stands.
+ * An empty accounting is not by itself evidence that no run has disclosed. The
+ * recovery reset destroys the entries while leaving the exchange -- run history
+ * included -- standing; the export/import artifact migrates the runnable
+ * exchange without its accounting; and a run that stopped after sending files
+ * its entry best-effort, so a failed filing leaves an entry missing whether or
+ * not anybody was there for the notice it raises (see
+ * docs/spec/MANAGED_EXCHANGE_RECORD.md, "When an entry is written"). So each of
+ * the three readings states what is recorded here, and none of them reports an
+ * absence of disclosures:
  *
- * Neither reading claims the exchange disclosed nothing: both speak for this
+ * - A record remembering a COMPLETED run: the emptiness is stated as fact
+ *   beside the run that refutes an absence of runs, naming the two paths to it.
+ * - A record whose retained run could have sent ({@link
+ *   ./managedDetailModel.ts}, `lastRunMayHaveSentPayload`): the same limit the
+ *   run history states for that run, in the same words, since an empty
+ *   accounting settles it no better than the run bookkeeping does.
+ * - Anything else -- no run, or one that provably stopped before sending: the
+ *   plain empty state.
+ *
+ * No reading claims the exchange disclosed nothing: all three speak for this
  * browser's copy, since the accounting does not travel with the exchange.
  */
 function EmptyAccountingNotice({
   completedRunOnRecord,
+  lastRunMayHaveSent,
 }: {
   completedRunOnRecord: boolean;
+  lastRunMayHaveSent: boolean;
 }) {
   if (completedRunOnRecord)
     return (
@@ -840,17 +885,30 @@ function EmptyAccountingNotice({
         everything this exchange has disclosed. Records filed here are destroyed
         by &quot;Start a fresh accounting&quot;, and an exchange restored from
         an export or backup file arrives without the accounting kept on the
-        device it came from. Each run this browser completes files its record
-        here.
+        device it came from. Each run that sends your payload files its record
+        here, whether or not it finishes.
+      </p>
+    );
+  if (lastRunMayHaveSent)
+    return (
+      <p className={styles.small}>
+        This browser&apos;s copy of the accounting is empty: no run of this
+        exchange has filed a disclosure here. The run history above records a
+        run that did not complete. {DELIVERY_NOT_RECORDED}, and an empty copy is
+        not a record that nothing was sent: a run that stops after sending files
+        its record here, but that filing can itself fail, and an exchange
+        imported from a backup file arrives without the accounting kept on the
+        device it came from.
       </p>
     );
   return (
     <p className={styles.small}>
-      No run of this exchange has completed in this browser, so this
-      browser&apos;s copy of the accounting is empty. That is not necessarily
-      the exchange&apos;s whole history: an exchange imported from a backup file
+      This browser&apos;s copy of the accounting is empty: no run of this
+      exchange has filed a disclosure here. That is not necessarily the
+      exchange&apos;s whole history: an exchange imported from a backup file
       arrives without the accounting kept on the device it came from. Each run
-      this browser completes will file its record here.
+      that sends your payload will file its record here, whether or not it
+      finishes.
     </p>
   );
 }

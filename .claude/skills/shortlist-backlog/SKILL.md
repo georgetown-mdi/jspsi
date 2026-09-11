@@ -11,6 +11,11 @@ expensive to carry in a long-lived session: whatever enters the calling
 context rides every subsequent call. This skill keeps the boards out of your
 context -- the subagent absorbs them and returns only a shortlist.
 
+## First
+
+If `.claude/orchestration/ruleset.md` is not already in your context, read it
+before proceeding -- it holds the session rules this skill's steps assume.
+
 ## What to do
 
 Spawn ONE read-only `general-purpose` agent with `model: "sonnet"` (every

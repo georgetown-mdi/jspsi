@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 
 import {
   sanitizeForDisplay,
+  boundRawFragmentForFit,
   clipToRenderedCost,
   controlCharacterMarker,
   renderedDisplayCost,
@@ -415,6 +416,84 @@ describe("a cut lands outside a control-character marker", () => {
     );
     expect(clipToRenderedCost(`${"b".repeat(10)}${"<0".repeat(40)}`, 60)).toBe(
       `${"b".repeat(10)}${"<0".repeat(17)}${DISPLAY_TRUNCATION_MARKER}`,
+    );
+  });
+});
+
+describe("boundRawFragmentForFit", () => {
+  // The three treatments in the order a composition site applies them: cut to a
+  // raw length, redact, then fit to the rendered budget.
+  const fitted = (raw: string): string =>
+    clipToRenderedCost(
+      redactPrivateKeyMaterial(raw),
+      DEFAULT_MAX_DISPLAY_LENGTH,
+    );
+  const cutAndFitted = (raw: string): string =>
+    fitted(boundRawFragmentForFit(raw, DEFAULT_MAX_DISPLAY_LENGTH));
+  const KEY_BODY = "k".repeat(2000);
+  const PRIVATE_KEY = `-----BEGIN RSA PRIVATE KEY-----\n${KEY_BODY}\n-----END RSA PRIVATE KEY-----`;
+
+  test("a cut fragment fits to the same text as the uncut one", () => {
+    // What the cut is allowed to change: nothing the operator reads. Said over
+    // the widths either side of the budget and of the cut itself, and over the
+    // code points that escape widest, since the cut is taken in UTF-16 code
+    // units while the fit is measured in output characters.
+    const cap = DEFAULT_MAX_DISPLAY_LENGTH;
+    const fragments: Record<string, string> = {
+      "under the budget": "a".repeat(cap - 1),
+      "at the budget": "a".repeat(cap),
+      "over the budget": "a".repeat(cap + 1),
+      "at the cut": "a".repeat(cap * 2),
+      "over the cut": "a".repeat(cap * 2 + 1),
+      "far over the cut": "a".repeat(cap * 40),
+      "control characters": String.fromCharCode(1).repeat(cap * 40),
+      "astral characters": String.fromCodePoint(0x1f600).repeat(cap * 40),
+      backslashes: "\\".repeat(cap * 40),
+      "lone surrogates": String.fromCharCode(0xd800).repeat(cap * 40),
+      "a private key": PRIVATE_KEY,
+      "text then a private key": "a".repeat(cap) + PRIVATE_KEY,
+    };
+    for (const [shape, fragment] of Object.entries(fragments))
+      expect(cutAndFitted(fragment), shape).toBe(fitted(fragment));
+  });
+
+  test("one budget's worth of code units would not do", () => {
+    // What holds the cut at two code units per budget character: a fragment cut
+    // to exactly the budget in printable ASCII renders at exactly the budget,
+    // which the fit returns whole and unmarked where the fragment it came from
+    // would have been clipped and marked.
+    const fragment = "a".repeat(DEFAULT_MAX_DISPLAY_LENGTH * 4);
+    expect(fitted(fragment.slice(0, DEFAULT_MAX_DISPLAY_LENGTH))).not.toBe(
+      fitted(fragment),
+    );
+    expect(cutAndFitted(fragment)).toBe(fitted(fragment));
+  });
+
+  test("a cut through a private-key block still redacts", () => {
+    // The cut runs before the redaction, so it can leave a BEGIN marker whose
+    // END is gone; the fail-closed dangling rule takes it and everything
+    // after it. A cut landing inside the marker itself leaves no complete
+    // marker for either rule to match, so redaction never fires there; a
+    // severed marker starts near twice the budget in code units, already
+    // past the one budget of rendered text the clip keeps, so the clip alone
+    // keeps the partial marker and the key body out of `shown`.
+    // Read at three lead widths, so the cut falls once past the marker, once
+    // inside the body, and once inside the marker itself.
+    for (const lead of [0, 200, 500]) {
+      const fragment = "a".repeat(lead) + PRIVATE_KEY;
+      const cut = boundRawFragmentForFit(fragment, DEFAULT_MAX_DISPLAY_LENGTH);
+      const shown = cutAndFitted(fragment);
+      expect(cut, `lead ${lead}`).not.toContain("-----END");
+      expect(redactPrivateKeyMaterial(cut), `lead ${lead}`).not.toContain(
+        KEY_BODY.slice(0, 20),
+      );
+      expect(shown, `lead ${lead}`).not.toContain("-----BEGIN");
+      expect(shown, `lead ${lead}`).not.toContain(KEY_BODY.slice(0, 20));
+    }
+    // Non-vacuous: a cut that kept the whole BEGIN marker puts the redaction in
+    // what the operator reads, rather than clipping it away unseen.
+    expect(cutAndFitted("a".repeat(200) + PRIVATE_KEY)).toContain(
+      "[redacted private key]",
     );
   });
 });

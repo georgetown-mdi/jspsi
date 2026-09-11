@@ -22,6 +22,7 @@ import {
   DEFAULT_LINKAGE_RULE_SET,
   DISPLAY_TRUNCATION_MARKER,
   isDrawnFromLinkageRuleSet,
+  keepFirstPartyLineBreaks,
   MAX_NESTING_DEPTH,
   NestingDepthExceededError,
   quoteTermsValue,
@@ -29,6 +30,7 @@ import {
   redactAndSanitizeForDisplay,
   redactPrivateKeyMaterial,
   renderedDisplayCost,
+  renderedDisplayCostKeepingLineBreaks,
   replaceControlCharactersForDisplay,
   ruleSetCitation,
   safeParseConnectionConfig,
@@ -1086,7 +1088,7 @@ const RECONCILE_NAMED_ONLY_NOTE =
  * The most the notices below a block can cost it, which is what the last layout
  * pass reserves so it cannot need more than it was given.
  */
-const RECONCILE_NOTICE_RESERVE_CEILING = renderedDisplayCost(
+const RECONCILE_NOTICE_RESERVE_CEILING = renderedDisplayCostKeepingLineBreaks(
   `\n${RECONCILE_NAMED_ONLY_NOTE}\n${RECONCILE_WITHHELD_NOTE}`,
 );
 
@@ -1097,8 +1099,12 @@ const RECONCILE_NOTICE_RESERVE_CEILING = renderedDisplayCost(
  *
  * Both sides of every line hold bytes somebody else chose, already redacted
  * and delimited by the producer that composed it ({@link reconcileDiffValue}).
- * They are interpolated RAW: the display boundary escapes the whole message
- * once where it is shown, including the block's own `\n` line breaks.
+ * They are interpolated RAW: the display boundary escapes each line of the
+ * block once where it is shown and keeps the breaks between them, since the
+ * refusal states those lines as its own
+ * ({@link reconcileConflictError}). So `budget` is spent in the units
+ * {@link renderedDisplayCostKeepingLineBreaks} measures -- a break costs one
+ * character, not the four of the escape's `\x0a`.
  *
  * The budget is shared out by NEED, not by count: every line is charged its
  * first-party skeleton, each side is measured at what it would actually
@@ -1126,12 +1132,12 @@ export function formatReconcileDiffs(
 
   const nameOnly = (d: ReconcileDiff): string =>
     `${RECONCILE_LINE_PREFIX}${d.field}`;
-  // Charged with the line break that follows it, which the display escape widens
-  // like any other control character rather than keeping its own width. Its
-  // field name is what a line costs even after its values are dropped, so it is
-  // taken off the top rather than shared out.
+  // Charged with the one character the line break that follows it renders as.
+  // Its field name is what a line costs even after its values are dropped, so
+  // it is taken off the top rather than shared out.
   const nameCost = diffs.reduce(
-    (total, d) => total + renderedDisplayCost(`${nameOnly(d)}\n`),
+    (total, d) =>
+      total + renderedDisplayCostKeepingLineBreaks(`${nameOnly(d)}\n`),
     0,
   );
   // What a line pays on top of its name for holding values at all.
@@ -1219,7 +1225,8 @@ export function formatReconcileDiffs(
     return {
       block: [...rendered, ...notices].join("\n"),
       noticeCost: notices.reduce(
-        (total, notice) => total + renderedDisplayCost(`\n${notice}`),
+        (total, notice) =>
+          total + renderedDisplayCostKeepingLineBreaks(`\n${notice}`),
         0,
       ),
     };
@@ -1242,7 +1249,32 @@ export function formatReconcileDiffs(
   // message is cut. This is the fallback under it: a wider first-party
   // skeleton or field-name list is bounded here rather than silently
   // spending the recovery step's room.
-  return fitToRenderedCostClosingRuns(attempt.block, budget);
+  return fitBlockToRenderedCostClosingRuns(attempt.block, budget);
+}
+
+/**
+ * Fit a whole block to `budget` in the units the display boundary charges it
+ * once its breaks are kept: each line takes what the lines before it left,
+ * fitted by {@link fitToRenderedCostClosingRuns} so a cut still closes its
+ * delimited run, and a line with no room left is dropped along with the rest.
+ * The fallback under {@link formatReconcileDiffs}'s own arithmetic, which the
+ * shapes reached today keep inside the bound without it.
+ */
+function fitBlockToRenderedCostClosingRuns(
+  block: string,
+  budget: number,
+): string {
+  if (renderedDisplayCostKeepingLineBreaks(block) <= budget) return block;
+  const fitted: string[] = [];
+  let spent = 0;
+  for (const line of block.split("\n")) {
+    const room = budget - spent;
+    if (room <= 0) break;
+    const kept = fitToRenderedCostClosingRuns(line, room);
+    fitted.push(kept);
+    spent += renderedDisplayCost(kept) + 1;
+  }
+  return fitted.join("\n");
 }
 
 /**
@@ -1263,6 +1295,12 @@ export function formatReconcileDiffs(
  * redact/replace/fit treatment as a chooser's value even though it is the
  * operator's own, so no later caller can assume a fragment is exempt from
  * that treatment because of its provenance.
+ *
+ * Its line breaks are structure, not spacing, so the refusal is raised
+ * through {@link reconcileConflictError} rather than from this text
+ * directly.
+ *
+ * @internal exported for testing; `reconcileConflictError` is the caller.
  */
 export function reconcileConflictMessage(params: {
   configPath: string;
@@ -1287,10 +1325,38 @@ export function reconcileConflictMessage(params: {
       diffs,
       Math.max(
         0,
-        COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH - renderedDisplayCost(head),
+        COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH -
+          renderedDisplayCostKeepingLineBreaks(head),
       ),
     )
   );
+}
+
+/**
+ * The refusal `psilink accept` raises for a configuration that disagrees with
+ * the invitation, as the error the command throws: the message of
+ * {@link reconcileConflictMessage}, marked so the display boundary shows the
+ * conflict list and the recovery step on the lines the block is built from
+ * ({@link keepFirstPartyLineBreaks}).
+ *
+ * Composing the message and marking it happen together here, so the one
+ * composition writing those breaks has no route to an operator that eats
+ * them.
+ *
+ * The lines are read back off the composed message, which is where that
+ * composition's structure is: every value on them is control-replaced and
+ * delimited where it was interpolated, so the breaks between them are the
+ * composition's own -- a property the tests over this file's rendered refusal
+ * hold rather than this sentence.
+ */
+export function reconcileConflictError(params: {
+  configPath: string;
+  against: string;
+  retryWith: string;
+  diffs: ReconcileDiff[];
+}): UsageError {
+  const message = reconcileConflictMessage(params);
+  return keepFirstPartyLineBreaks(new UsageError(message), message.split("\n"));
 }
 
 // --- Config writer -----------------------------------------------------------

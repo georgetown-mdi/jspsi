@@ -218,6 +218,18 @@ export const ALLOWLIST = [
       "the FIPS variant image's build fetches the official Node runtime tarball from here, because Amazon Linux 2023 packages no Node 26; what the build fetches, not a connection the running container makes, and the same class as the Alpine mirror the default image's one apk install reaches",
   },
   {
+    url: "turns:relay.example.org:443?transport=tcp",
+    match: "exact",
+    reason:
+      "the example form inside the connection schema's refusal of a host-less turn url; a reserved documentation domain shown to the operator, never dialed",
+  },
+  {
+    url: "stun:stun.example.org:3478",
+    match: "exact",
+    reason:
+      "the same example form in the refusal of a host-less stun entry, on the same basis",
+  },
+  {
     url: "https://github.com/georgetown-mdi/jspsi",
     match: "prefix",
     reason:

@@ -267,6 +267,10 @@ export interface WebRtcPeerOptions {
   sharedSecret: string;
   /** ICE servers, already resolved. Empty or absent selects werift's default. */
   iceServers?: Array<RTCIceServer>;
+  /**
+   * Candidate types ICE may use. Absent leaves werift's own default (`all`).
+   */
+  iceTransportPolicy?: IceTransportPolicy;
   offerRetryIntervalMs?: number;
   rendezvousTimeoutMs?: number;
   channelOpenTimeoutMs?: number;
@@ -275,9 +279,9 @@ export interface WebRtcPeerOptions {
    * Constructs the peer connection; injected so a unit test can assert the
    * configuration it is handed without standing up ICE.
    */
-  peerConnectionFactory?: (configuration: {
-    iceServers?: Array<RTCIceServer>;
-  }) => RTCPeerConnection;
+  peerConnectionFactory?: (
+    configuration: WeriftPeerConfiguration,
+  ) => RTCPeerConnection;
   /**
    * Constructs the broker socket; forwarded to {@link connectToBroker} so a
    * unit test can drive the whole negotiation -- which frame goes out when --
@@ -419,6 +423,20 @@ export function iceServersFromConnection(
 }
 
 /**
+ * Candidate types ICE may use, taken from the connection schema so a widened
+ * set of values reaches the transport rather than being retyped here.
+ */
+export type IceTransportPolicy = NonNullable<
+  WebRTCConnectionConfig["iceTransportPolicy"]
+>;
+
+/** The `RTCConfiguration` fields the peer connection is constructed with. */
+export interface WeriftPeerConfiguration {
+  iceServers?: Array<RTCIceServer>;
+  iceTransportPolicy?: IceTransportPolicy;
+}
+
+/**
  * The configuration object the peer connection is constructed with, and the
  * point the no-servers warning is emitted from.
  *
@@ -429,16 +447,24 @@ export function iceServersFromConnection(
  * yield `{}` with the warning, and a non-empty list is passed verbatim, which is
  * what makes it, and not the default, the list actually used. What werift falls
  * back to when it is given neither is measured by the integration suite.
+ *
+ * An absent `iceTransportPolicy` is likewise omitted rather than spelled out as
+ * `"all"`, so an unconfigured connection is constructed with the same object it
+ * always was and the library's own default decides. What werift does with each
+ * arm -- the value it reports back, and the candidates a relay-only policy
+ * gathers -- is driven in webrtcIceTransportPolicy.test.ts.
  */
 export function buildPeerConfiguration(
   iceServers: Array<RTCIceServer> | undefined,
+  iceTransportPolicy?: IceTransportPolicy,
   warn: (message: string) => void = (message) => log.warn(message),
-): { iceServers?: Array<RTCIceServer> } {
+): WeriftPeerConfiguration {
+  const policy = iceTransportPolicy === undefined ? {} : { iceTransportPolicy };
   if (iceServers === undefined || iceServers.length === 0) {
     warn(NO_ICE_SERVERS_WARNING);
-    return {};
+    return policy;
   }
-  return { iceServers };
+  return { iceServers, ...policy };
 }
 
 /**
@@ -453,9 +479,9 @@ export function buildPeerConfiguration(
  * this deferral: the `no-restricted-syntax` entry banning a value import (or
  * re-export) of werift across `apps/cli/src` (eslint.config.mjs).
  */
-async function defaultPeerConnection(configuration: {
-  iceServers?: Array<RTCIceServer>;
-}): Promise<RTCPeerConnection> {
+async function defaultPeerConnection(
+  configuration: WeriftPeerConfiguration,
+): Promise<RTCPeerConnection> {
   const werift = await import("werift");
   return new werift.RTCPeerConnection(configuration);
 }
@@ -530,6 +556,7 @@ export async function openWebRtcPeerSession(
     role,
     sharedSecret,
     iceServers,
+    iceTransportPolicy,
     offerRetryIntervalMs = DEFAULT_OFFER_RETRY_INTERVAL_MS,
     rendezvousTimeoutMs = DEFAULT_RENDEZVOUS_TIMEOUT_MS,
     channelOpenTimeoutMs = DEFAULT_CHANNEL_OPEN_TIMEOUT_MS,
@@ -545,7 +572,7 @@ export async function openWebRtcPeerSession(
   const localId = role === "inviter" ? inviterId : acceptorId;
   const remoteId = role === "inviter" ? acceptorId : inviterId;
 
-  const configuration = buildPeerConfiguration(iceServers);
+  const configuration = buildPeerConfiguration(iceServers, iceTransportPolicy);
   const peer =
     peerConnectionFactory === undefined
       ? await defaultPeerConnection(configuration)

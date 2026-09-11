@@ -1,6 +1,10 @@
 import { describe, expect, it } from "vitest";
 
-import { sanitizeForDisplay } from "@psilink/core";
+import {
+  keepFirstPartyLineBreaks,
+  sanitizeErrorForDisplay,
+  sanitizeForDisplay,
+} from "@psilink/core";
 
 import {
   ConsoleSentinel,
@@ -418,6 +422,43 @@ describe("ConsoleSentinel", () => {
 
     expect(sentinel.unescapedLines()).toEqual([]);
     expect(() => sentinel.assertClean()).not.toThrow();
+    sentinel.restore();
+  });
+
+  it("fails a first-party block whose kept line breaks reach a console sink", () => {
+    // The gate admits the `\ncaused by: ` join and no other line break, so a
+    // block that states its own lines through keepFirstPartyLineBreaks fails
+    // here. Admitting a bare LF is what admitting it would cost, and that is
+    // the byte a value would spoof a log line with; these blocks reach the
+    // operator on the stderr, --log-file and fd-3 sinks this does not gate.
+    const allowlist: ConsoleAllowEntry[] = [
+      {
+        id: "intended",
+        levels: ["error"],
+        match: /^the configuration file/,
+        reason: "intended diagnostic",
+      },
+    ];
+    const fake = fakeConsole();
+    const sentinel = new ConsoleSentinel(allowlist);
+    sentinel.install(fake);
+
+    const lines = [
+      "the configuration file disagrees with the invitation:",
+      "  - algorithm: existing psi-c vs required psi",
+    ];
+    fake.error(
+      sanitizeErrorForDisplay(
+        keepFirstPartyLineBreaks(new Error(lines.join("\n")), lines),
+      ),
+    );
+
+    // Allowlisted by text, and still failing: the break is what fails it.
+    expect(sentinel.violations()).toEqual([]);
+    expect(sentinel.unescapedLines()).toHaveLength(1);
+    expect(() => sentinel.assertClean()).toThrowError(
+      /without passing a display sink/,
+    );
     sentinel.restore();
   });
 

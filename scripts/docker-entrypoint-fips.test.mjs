@@ -36,7 +36,7 @@ const repoRoot = resolve(here, "..");
 const ENTRYPOINT = resolve(repoRoot, "docker-entrypoint-fips.sh");
 const PROBE = resolve(repoRoot, "support/fips-probe/image-engagement.mjs");
 
-const CERTIFIED_MODULE = "3.0.8-d694bfa693b76001";
+const CERTIFIED_MODULE = "3.2.2-799901ad7ab41d45";
 
 let workdir;
 

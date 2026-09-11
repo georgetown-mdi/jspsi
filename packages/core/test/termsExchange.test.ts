@@ -19,6 +19,7 @@ import {
   type MessageConnection,
 } from "../src/connection/messageConnection";
 import { sanitizeErrorForDisplay } from "../src/utils/sanitizeErrorForDisplay";
+import { sanitizeForDisplay } from "../src/utils/sanitizeForDisplay";
 import { recordingConnection } from "./utils/recordingConnection";
 
 // --- Test fixtures -----------------------------------------------------------
@@ -846,14 +847,17 @@ test("an incompatibility rejects both parties with a message identifying the cau
   ).toBe(true);
 });
 
-test("responder neutralizes partner bytes in a linkage-terms parse error", async () => {
-  // End-to-end guard for the source sanitization: the per-call-site pin lives
-  // in linkageTermsSchema.test.ts; this proves protocolSetup ROUTES the parse
-  // error through it. A partner whose terms fail to parse with a bidi override
-  // and an ANSI escape in the issue PATH must have those bytes neutralized in
-  // the rejection the responder relays, never exposed raw: reverting to a raw
-  // ZodError.message regresses this, leaking U+202E verbatim in the JSON dump.
-  const evilKey = "\x1b[31m\u202e" + "x".repeat(MAX_NAME_LENGTH);
+test("responder renders partner bytes in a linkage-terms parse error escaped once", async () => {
+  // End-to-end guard on the display boundary: a partner whose terms fail to
+  // parse with a bidi override, an ANSI escape and a literal backslash in the
+  // issue PATH reaches the operator with those bytes neutralized, and with the
+  // backslash count of ONE escape of what the partner sent. Asserted on the
+  // rendered chain rather than on `.message`, which holds the partner's bytes
+  // raw for the renderer to escape.
+  // The dangerous bytes lead the key, with padding past the length bound behind
+  // them, so what neutralizes them is the escape and not the display cap.
+  const evilBytes = "\x1b[31m\u202e\\";
+  const evilKey = evilBytes + "x".repeat(MAX_NAME_LENGTH);
   const [connA, connB] = makeConnections();
   const responder = exchangeTerms(connB, "responder", termsB, 200);
   await connA.send({
@@ -881,10 +885,11 @@ test("responder neutralizes partner bytes in a linkage-terms parse error", async
     },
     (e: unknown) => e as Error,
   );
-  expect(reason.message).toContain("failed to parse");
-  expect(reason.message).not.toContain("\u202e");
-  expect(reason.message).not.toContain("\x1b");
-  expect(reason.message).toContain("\\u202e");
+  const rendered = sanitizeErrorForDisplay(reason);
+  expect(rendered).toContain("failed to parse");
+  expect(rendered).toContain(`params.${sanitizeForDisplay(evilBytes)}`);
+  expect(rendered).not.toContain("\u202e");
+  expect(rendered).not.toContain("\x1b");
 });
 
 test("initiator: a pathological-count abortReasons fails cleanly, not with a RangeError", async () => {
