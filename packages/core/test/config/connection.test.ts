@@ -988,6 +988,72 @@ test("ice_transport_policy is accepted in snake_case", () => {
   ).toBe("relay");
 });
 
+// --- WebRTC: a key the member does not define --------------------------------
+
+test.each([
+  ["a misspelled ice_transport_policy", "ice_transport_polcy"],
+  ["a plural spelling", "ice_transport_policies"],
+  ["a camelCase misspelling", "iceTransportPolcy"],
+])("%s is refused, naming the key", (_label, key) => {
+  const result = safeParseConnectionConfig({
+    ...webrtcBase,
+    [key]: "relay",
+  });
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  const messages = result.error.issues.map((i) => i.message);
+  // Named as the document writes it: the parse runs on the camelized shape, so
+  // the spelling an operator can search their own file for is the snake_case
+  // one either camelCase or snake_case input folds to.
+  expect(
+    messages.some((m) => m.includes("a webrtc connection has no key")),
+  ).toBe(true);
+  expect(messages.some((m) => m.includes("ice_transport_pol"))).toBe(true);
+  expect(messages.some((m) => m.includes("correct the spelling"))).toBe(true);
+});
+
+test("several unknown keys are named together", () => {
+  const result = safeParseConnectionConfig({
+    ...webrtcBase,
+    ice_transport_polcy: "relay",
+    stunn: ["stun:stun.example.org:3478"],
+  });
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  const messages = result.error.issues.map((i) => i.message);
+  expect(
+    messages.some(
+      (m) =>
+        m.includes("a webrtc connection has no keys") &&
+        m.includes("ice_transport_polcy") &&
+        m.includes("stunn"),
+    ),
+  ).toBe(true);
+});
+
+test("a relay-only policy misspelled is refused rather than run as all", () => {
+  // The whole point of refusing the key: a dropped `ice_transport_policy`
+  // leaves a run that asked for relay-only gathering host candidates, with
+  // nothing to tell the operator it did.
+  const result = safeParseConnectionConfig({
+    ...webrtcBase,
+    turn: [
+      { url: "turns:turn.example.org:443", username: "u", credential: "c" },
+    ],
+    ice_transport_polcy: "relay",
+  });
+  expect(result.success).toBe(false);
+});
+
+test("a known key keeps parsing where an unknown one is refused", () => {
+  const result = safeParseConnectionConfig({
+    ...webrtcBase,
+    stun: ["stun:stun.example.org:3478"],
+    provider_options: { anything: 1 },
+  });
+  expect(result.success).toBe(true);
+});
+
 // --- WebRTC: the file-sync-only options are outside its union member ---------
 
 test("file-sync-only options do not survive a webrtc parse", () => {

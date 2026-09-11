@@ -1,5 +1,6 @@
 import { fittedCauseLink } from "../causeLink";
 
+import type { WebRTCConnectionConfig } from "@psilink/core";
 import type { RTCPeerConnection } from "werift";
 
 /**
@@ -27,6 +28,33 @@ import type { RTCPeerConnection } from "werift";
 
 /** Candidate type an entry with no readable one is counted under. */
 export const UNREPORTED_CANDIDATE_TYPE = "unreported";
+
+/**
+ * Candidate types ICE may use, taken from the connection schema so a widened
+ * set of values reaches the transport rather than being retyped here.
+ */
+export type IceTransportPolicy = NonNullable<
+  WebRTCConnectionConfig["iceTransportPolicy"]
+>;
+
+/**
+ * The policy a run applied, as one line for the operator: the configured
+ * value, or the transport's own where the connection sets none, which werift
+ * reports as `all` (measured in
+ * test/integration/webrtc/webrtcIceTransportPolicy.test.ts).
+ *
+ * Named as the configuration file writes it, so the line and the setting that
+ * produced it are spelled alike. First-party text over an enum, so it reaches
+ * a log sink unescaped.
+ */
+export function describeIceTransportPolicy(
+  policy: IceTransportPolicy | undefined,
+): string {
+  if (policy === "relay")
+    return "ice_transport_policy: relay (relay candidates only)";
+  const applied = policy === undefined ? "all by default" : "all";
+  return `ice_transport_policy: ${applied} (host, server-reflexive and relay candidates)`;
+}
 
 /** The candidate type that means a relay was reachable and gave an address. */
 const RELAY_CANDIDATE_TYPE = "relay";
@@ -200,16 +228,23 @@ export function describeSelectedCandidatePair(
  * the link rather than following the tally, so a long list of gathered types
  * cannot be what the fitting below clips it away for.
  *
+ * A relay-only run that gathered none had nothing else it could gather, so
+ * that clause names the policy: the same words without it point at a direct
+ * path as the remedy, which is the one remedy such a run does not have.
+ *
  * Each link is fitted at this composition site
  * ({@link ../causeLink.fittedCauseLink}), so the partner's candidate types can
  * only ever spend the budget of the link they sit alone on.
  */
 export function iceFailureDetails(
   report: IceCandidateReport,
+  iceTransportPolicy?: IceTransportPolicy,
 ): [string, ...string[]] {
   const relay = report.localRelayGathered
     ? "relay candidate gathered"
-    : "no relay candidate gathered";
+    : iceTransportPolicy === "relay"
+      ? "no relay candidate gathered under ice_transport_policy relay"
+      : "no relay candidate gathered";
   const pairs =
     report.pairCount === 0
       ? "none formed"

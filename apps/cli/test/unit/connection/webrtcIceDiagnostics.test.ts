@@ -8,6 +8,7 @@ import {
   ICE_STATS_TIMEOUT_MS,
   MAX_REPORTED_CANDIDATE_TYPES,
   UNREPORTED_CANDIDATE_TYPE,
+  describeIceTransportPolicy,
   describeSelectedCandidatePair,
   iceFailureDetails,
   readIceCandidateReport,
@@ -131,6 +132,61 @@ test("a failure with no relay gathered is distinguishable from one with", () => 
   );
   expect(withRelay[1]).toBe("remote candidates received: 1 (relay)");
   expect(withRelay[2]).toBe("candidate pairs: 2 tried, none succeeded");
+});
+
+test("each policy a connection can take has a line of its own", () => {
+  expect(describeIceTransportPolicy("relay")).toBe(
+    "ice_transport_policy: relay (relay candidates only)",
+  );
+  expect(describeIceTransportPolicy("all")).toBe(
+    "ice_transport_policy: all (host, server-reflexive and relay candidates)",
+  );
+  // An unset policy is the transport's default rather than a value the
+  // operator wrote, and the line says which of the two it is reporting.
+  expect(describeIceTransportPolicy(undefined)).toBe(
+    "ice_transport_policy: all by default (host, server-reflexive and relay candidates)",
+  );
+});
+
+test("a relay-only run that gathered no relay names the policy", () => {
+  // Under `relay` the run had no direct path to fall back on, so an empty
+  // tally has one reading and the clause states it.
+  const [local] = iceFailureDetails(
+    readIceCandidateReport(report([])),
+    "relay",
+  );
+  expect(local).toBe(
+    "local candidates gathered: no relay candidate gathered under " +
+      "ice_transport_policy relay; none",
+  );
+});
+
+test("the policy clause is confined to the failure it explains", () => {
+  const gathered = report([
+    localCandidate("L1", "relay"),
+    remoteCandidate("R1", "relay"),
+  ]);
+  // A relay-only run that DID gather one failed for the reason every other
+  // run's failure names, so it reports what they report.
+  expect(iceFailureDetails(readIceCandidateReport(gathered), "relay")[0]).toBe(
+    "local candidates gathered: relay candidate gathered; 1 (relay)",
+  );
+  // And a run on the default policy names no policy at all.
+  expect(
+    iceFailureDetails(
+      readIceCandidateReport(report([localCandidate("L1", "host")])),
+      "all",
+    )[0],
+  ).toBe("local candidates gathered: no relay candidate gathered; 1 (host)");
+});
+
+test("a long local candidate type cannot clip the policy clause away", () => {
+  const [local] = iceFailureDetails(
+    readIceCandidateReport(report([localCandidate("L1", "x".repeat(4000))])),
+    "relay",
+  );
+  expect(local).toContain("under ice_transport_policy relay");
+  expect(local.length).toBeLessThan(300);
 });
 
 test("a succeeded pair is counted where one exists", () => {

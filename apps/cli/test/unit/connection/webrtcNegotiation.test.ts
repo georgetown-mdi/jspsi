@@ -232,6 +232,7 @@ async function startRendezvous(options: {
   offerRetryIntervalMs?: number;
   rendezvousTimeoutMs?: number;
   channelOpenTimeoutMs?: number;
+  iceTransportPolicy?: "all" | "relay";
   signal?: AbortSignal;
   /**
    * Whether the broker confirms the registration with `OPEN`. A test of the
@@ -267,6 +268,7 @@ async function startRendezvous(options: {
     offerRetryIntervalMs: options.offerRetryIntervalMs ?? 60_000,
     rendezvousTimeoutMs: options.rendezvousTimeoutMs ?? 10_000,
     channelOpenTimeoutMs: options.channelOpenTimeoutMs ?? 10_000,
+    iceTransportPolicy: options.iceTransportPolicy,
     signal: options.signal,
     peerConnectionFactory: () => peer as unknown as RTCPeerConnection,
     socketFactory: () => socket as unknown as WebSocket,
@@ -991,6 +993,23 @@ test("a relay gathered that still found no path is reported apart", async () => 
   );
   expect(rendered).toContain("remote candidates received: 1 (host)");
   expect(rendered).toContain("candidate pairs: 1 tried, none succeeded");
+});
+
+test("a relay-only run's failure names the policy that shaped it", async () => {
+  // The run gathered nothing because the policy permitted nothing else, which
+  // is the one reading of an empty tally the operator can act on: the remedy
+  // is the relay or the policy, never a direct path.
+  const { peer, session } = await startRendezvous({
+    role: "acceptor",
+    iceTransportPolicy: "relay",
+  });
+  peer.stats = iceStats([]);
+  peer.failConnection();
+  const rendered = await renderedFailure(session);
+  expect(rendered).toContain(
+    "local candidates gathered: no relay candidate gathered under " +
+      "ice_transport_policy relay; none",
+  );
 });
 
 test("the channel-open ceiling reports the same diagnosis", async () => {

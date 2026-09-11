@@ -52,8 +52,9 @@ const payloadColumnNameList = (message: string): z.ZodType<string[]> =>
  * `expectedPayloadColumns`, and `expectedPartnerDeduplicate` are
  * enforcement records whose ABSENCE is a valid state, so a misspelled key
  * that `strip` discards would silently disable the control it names. The
- * nested blocks still strip -- see EXCHANGE_FILE.md ("Versioning and
- * compatibility policy").
+ * nested blocks still strip, `authentication` and the connection union's
+ * webrtc member excepted, which are strict for the same reason as the top
+ * level -- see EXCHANGE_FILE.md ("Versioning and compatibility policy").
  *
  * The refine below is the one cross-field rule: `includeOwnColumns` names
  * columns of a result file a count-only exchange never writes, so the two

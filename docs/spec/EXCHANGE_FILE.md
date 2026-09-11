@@ -117,8 +117,9 @@ sharply:
   governs the whole top level rather than being spot-checked key by key.
 - **An unknown field inside a spec block is silently stripped.** The blocks
   themselves (`linkage_terms`, `metadata`, `standardization`, `connection`) strip
-  unrecognized keys on parse. That property, not any one schema kind, is what this
-  case rests on: the blocks are built from different Zod constructs -- an object
+  unrecognized keys on parse, the `connection` union's webrtc member excepted
+  (below). That property, not any one schema kind, is what this case rests on:
+  the blocks are built from different Zod constructs -- an object
   for `linkage_terms`, an array for `metadata` and `standardization`, a
   discriminated union for `connection` -- and strip is the behavior they share. A
   newer web app that adds an optional field within one of them drops that field on
@@ -130,12 +131,18 @@ sharply:
   `z.enum`/`z.literal` the older schema rejects. `loadConfig` reports the
   `ZodError` as a load-time `UsageError` (CLI exit 64) naming the field. The
   exchange never starts.
-- **The `authentication` block is validated strictly.** Like the top level and
-  unlike the sibling spec blocks, `AuthenticationSchema` is a `z.strictObject`: an
-  unrecognized key there is rejected, not stripped, because it holds an operator
-  security policy (`token_max_age_days`) a typo must not silently disable. A
-  minted file never includes this block, so it matters only for an operator-edited
-  config.
+- **The `authentication` block and a webrtc `connection` are validated
+  strictly.** Like the top level and unlike the sibling spec blocks,
+  `AuthenticationSchema` and the `connection` union's webrtc member are
+  `z.strictObject`s: an unrecognized key is rejected, not stripped, because each
+  holds an operator control a typo must not silently disable --
+  `token_max_age_days`, which bounds token age, and `ice_transport_policy`,
+  which decides whether this party offers a partner any direct address. A newer
+  application that adds a webrtc connection field is therefore rejected by an
+  older CLI rather than narrowed, the trade the top level already makes. A
+  minted file never includes the `authentication` block, and a
+  locator-composed webrtc connection holds `server` alone, so both matter only
+  for an operator-edited config.
 
 The critical property across all four cases: an incompatibility is reported as
 a loud load-time validation error (or, for a stripped unknown field within a
