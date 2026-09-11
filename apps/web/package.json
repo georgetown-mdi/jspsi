@@ -26,8 +26,8 @@
     "record linkage"
   ],
   "dependencies": {
-    "@mantine/core": "^9.5.2",
-    "@mantine/dropzone": "^9.5.2",
+    "@mantine/core": "^9.6.0",
+    "@mantine/dropzone": "^9.6.0",
     "@mantine/hooks": "^9.5.0",
     "@openmined/psi.js": "file:../../lib/openmined-psi.js-2.0.6-seclink.3.tgz",
     "@psilink/core": "file:../../packages/core",
@@ -46,7 +46,7 @@
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "yaml": "^2.9.0",
-    "zod": "^4.0.17"
+    "zod": "^4.5.4"
   },
   "devDependencies": {
     "@psilink/testkit": "file:../../packages/testkit",
