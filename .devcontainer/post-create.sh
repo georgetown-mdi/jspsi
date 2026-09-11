@@ -83,6 +83,12 @@ CLAUDE_JSON="$CONFIG_DIR/.claude.json" WORKSPACE="/workspace" node -e '
   fs.writeFileSync(path, JSON.stringify(state, null, 2) + "\n");
 '
 
+# Docker Desktop's VirtioFS share briefly reports the workspace mount as
+# root-owned after a fresh attachment (restart, rebuild, sometimes
+# mid-session); re-add this host-local entry, which a rebuild loses.
+git config --global --get-all safe.directory | grep -qx '*' ||
+  git config --global --add safe.directory '*'
+
 # Wire git push (over HTTPS) and the gh CLI to a GitHub token when one is present.
 # devcontainer.json loads a repo-root .env into the container via docker
 # --env-file; `gh auth setup-git` then registers gh as git's credential helper, so
