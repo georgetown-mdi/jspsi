@@ -10,6 +10,10 @@
 // it over the terms actually agreed.
 
 import { UsageError } from "./errors.js";
+import {
+  candidateSetUnderStrategyMessage,
+  termsDeclareCandidateSet,
+} from "./fanOutFunctions.js";
 import { canonicalString, CanonicalEncodingError } from "./utils/canonical.js";
 import type {
   LinkageKey,
@@ -292,6 +296,35 @@ export function candidateSetIsImplementedForStrategy(
   strategy: LinkageStrategy,
 ): boolean {
   return CANDIDATE_SET_IMPLEMENTED_BY_STRATEGY[strategy];
+}
+
+/**
+ * The refusal a terms document earns for declaring a per-(record, key)
+ * candidate set under a combination that resolves none, or `undefined` where
+ * it declares no candidate set or the combination resolves one.
+ *
+ * Two combinations earn it: a `linkage_strategy` off the candidate-set
+ * allowlist ({@link candidateSetIsImplementedForStrategy}), and `psi-c`,
+ * whose count-only round counts matched values where the resolution pairs
+ * each record at most once (docs/spec/PROTOCOL.md, The combinations that stay
+ * unsupported). Both messages are fixed literals, for the reason
+ * {@link COUNT_ONLY_SHAPE_REFUSALS} gives.
+ *
+ * The single reading behind both boundaries that refuse it: the schema refine
+ * that ends the parse, and the terms half of `assertFanOutImplemented`
+ * (`linkageSatisfiability.ts`), which stays the boundary for a document built
+ * without a parse.
+ */
+export function termsCandidateSetRefusal(
+  terms: LinkageTerms,
+): string | undefined {
+  const countOnly = terms.algorithm === "psi-c";
+  if (!countOnly && candidateSetIsImplementedForStrategy(terms.linkageStrategy))
+    return undefined;
+  if (!termsDeclareCandidateSet(terms)) return undefined;
+  return countOnly
+    ? COUNT_ONLY_SHAPE_REFUSALS.candidateSet
+    : candidateSetUnderStrategyMessage();
 }
 
 /**

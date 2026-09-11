@@ -26,18 +26,15 @@ import type {
 import { inferMetadata } from "./config/metadata.js";
 import type { ColumnMetadata } from "./config/metadata.js";
 import { DEFAULT_DATE_OUTPUT_FORMAT } from "./keyElementWidth.js";
-import {
-  declaredFanOutFunction,
-  termsDeclareCandidateSet,
-} from "./fanOutFunctions.js";
+import { declaredFanOutFunction } from "./fanOutFunctions.js";
 import {
   candidateSetIsImplementedForStrategy,
   COUNT_ONLY_SHAPE_REFUSALS,
+  termsCandidateSetRefusal,
 } from "./linkageTermsPolicy.js";
 import { redactPrivateKeyMaterial } from "./utils/sanitizeErrorForDisplay.js";
 import {
   applyStep,
-  candidateSetUnderStrategyMessage,
   commitCompiledTransforms,
   compileSteps,
   fanOutDeclaredMessage,
@@ -158,7 +155,11 @@ export function assertStandardizationMatchesTerms(
  * It is the candidate-set sibling of `assertAlgorithmImplemented` and
  * `assertDeduplicateImplemented` in `exchange.ts`, and it runs at the three
  * points those use: when terms are authored or minted, at the local prepare
- * step, and at the agreed-terms run boundary.
+ * step, and at the agreed-terms run boundary. Its terms half reads terms
+ * alone, so every parse refuses that half first
+ * ({@link termsCandidateSetRefusal}, wired into `LinkageTermsSchema`); this
+ * assert is the boundary for a document built or mutated without a parse, and
+ * for the standardization half, which no parse of the terms holds.
  *
  * Both authoring surfaces a candidate set can reach are checked: a
  * standardization transformation feeds {@link StandardizedField}, and a
@@ -211,12 +212,8 @@ export function assertFanOutImplemented(
           : fanOutDeclaredMessage(declared),
       );
   }
-  if (termsDeclareCandidateSet(terms))
-    throw new UsageError(
-      countOnly
-        ? COUNT_ONLY_SHAPE_REFUSALS.candidateSet
-        : candidateSetUnderStrategyMessage(),
-    );
+  const termsRefusal = termsCandidateSetRefusal(terms);
+  if (termsRefusal !== undefined) throw new UsageError(termsRefusal);
 }
 
 /**
