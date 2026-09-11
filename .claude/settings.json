@@ -181,6 +181,10 @@
           },
           {
             "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/require-orchestration-ruleset-read.mjs\""
+          },
+          {
+            "type": "command",
             "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/require-review-contract.mjs\""
           }
         ]
@@ -207,6 +211,10 @@
           },
           {
             "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/require-orchestration-ruleset-read.mjs\""
+          },
+          {
+            "type": "command",
             "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/require-workflow-fable-approval.mjs\""
           }
         ]
@@ -222,7 +230,20 @@
           },
           {
             "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/record-orchestration-ruleset-read.mjs\""
+          },
+          {
+            "type": "command",
             "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/remind-squash-message.mjs\""
+          }
+        ]
+      },
+      {
+        "matcher": "Read",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node \"$CLAUDE_PROJECT_DIR/.claude/hooks/record-orchestration-ruleset-read.mjs\""
           }
         ]
       }
