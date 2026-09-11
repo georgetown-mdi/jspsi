@@ -177,10 +177,11 @@ export function parseRpmQueryOutput(text) {
  * Every row in the order and the shape a list holds them, or a failure naming
  * what cannot be written.
  *
- * Sorted by name and then version, compared by code unit so the order does not
- * turn on a locale. A package the manager records no license for fails here,
- * naming the package: an empty cell in an attribution list reads as a package
- * with no license rather than as a measurement that did not answer.
+ * Sorted by name, compared by code unit so the order does not turn on a
+ * locale; rows are unique by construction, so no tie-break is needed. A
+ * package the manager records no license for fails here, naming the
+ * package: an empty cell in an attribution list reads as a package with no
+ * license rather than as a measurement that did not answer.
  */
 export function normalizeRows(rows) {
   const normalized = [];
@@ -218,11 +219,7 @@ export function normalizeRows(rows) {
     seen.add(name);
     normalized.push({ name, version, license });
   }
-  normalized.sort((left, right) =>
-    left.name === right.name
-      ? compareByCodeUnit(left.version, right.version)
-      : compareByCodeUnit(left.name, right.name),
-  );
+  normalized.sort((left, right) => compareByCodeUnit(left.name, right.name));
   return normalized;
 }
 
