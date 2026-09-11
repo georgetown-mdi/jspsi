@@ -1,8 +1,8 @@
 import { randomUUID } from "node:crypto";
-import { existsSync, rmSync } from "node:fs";
+import { existsSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   markerPath,
@@ -16,6 +16,7 @@ import {
 const written = [];
 
 afterEach(() => {
+  vi.restoreAllMocks();
   while (written.length > 0) rmSync(written.pop(), { force: true });
 });
 
@@ -59,6 +60,16 @@ describe("recordRead and recordedReadAgeMs", () => {
     const age = recordedReadAgeMs(path);
     expect(age).toBeGreaterThanOrEqual(0);
     expect(age).toBeLessThan(READ_TTL_MS);
+  });
+
+  // A marker's mtime holds a sub-millisecond fraction that Date.now() does
+  // not, so a stat taken in the millisecond of the write can land behind it.
+  it("reads zero when the clock is behind the marker's mtime", () => {
+    const path = markerPath(randomUUID());
+    written.push(path);
+    expect(recordRead(path)).toBe(true);
+    vi.spyOn(Date, "now").mockReturnValue(statSync(path).mtimeMs - 1);
+    expect(recordedReadAgeMs(path)).toBe(0);
   });
 
   it("reads no age when nothing is recorded", () => {

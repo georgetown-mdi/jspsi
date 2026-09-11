@@ -36,8 +36,8 @@ export const RULESET_TAIL = RULESET_PATH.split("/").slice(-2).join("/");
  * How long a recorded read stands for. Long enough to cover an orchestration
  * session's working stretch, which hands off well inside it, and short enough
  * that a session resumed a day later reads the file again -- the re-read the
- * rule asks for after a context reset, which keeps the session id it was
- * recorded under.
+ * rule asks for after a context reset, which on this harness (measured
+ * 2026-09-11) keeps the session id it was recorded under.
  */
 export const READ_TTL_MS = 8 * 60 * 60 * 1000;
 
@@ -69,7 +69,10 @@ export function markerPath(sessionId) {
  */
 export function recordedReadAgeMs(path) {
   try {
-    return Date.now() - statSync(path).mtimeMs;
+    // mtimeMs holds a sub-millisecond fraction that Date.now() does not, so a
+    // stat inside the millisecond the marker was written in subtracts to a
+    // negative age; the clamp keeps the age at zero there.
+    return Math.max(0, Date.now() - statSync(path).mtimeMs);
   } catch {
     return null;
   }

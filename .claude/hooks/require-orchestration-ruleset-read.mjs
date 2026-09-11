@@ -24,15 +24,18 @@
 // <project>/<session-id>/subagents/agent-<agent-id>.jsonl, beside the session's
 // own <session-id>.jsonl, and a payload naming one of those is a spawned agent's
 // call whatever session id it came with. Gating it would demand of that agent
-// the read the ruleset's own text forbids it.
+// the read the ruleset's own text forbids it. A payload carrying no transcript
+// path passes for the same reason: without one the gate cannot tell a spawned
+// agent's call from a session's own, so only a call it can confirm is a
+// session's is refused.
 //
 // FAIL OPEN, the direction require-agent-model.mjs takes and the opposite of
 // require-clean-tree-for-review.mjs: what this gate holds is a reading
 // discipline, so a miss costs a session that reasons from memory, while a
 // refusal that fires wrongly stops every spawn in every session at once. So an
-// unreadable event, a payload naming no session, and any unexpected error allow
-// the call; only a readable Agent or Workflow call under a session with no fresh
-// record is refused.
+// unreadable event, a payload naming no session or no transcript, and any
+// unexpected error allow the call; only a readable Agent or Workflow call under
+// a session with no fresh record is refused.
 //
 // The marker path, the session key and the freshness window: lib/rulesetRead.mjs.
 // The read is recorded by record-orchestration-ruleset-read.mjs.
@@ -67,11 +70,14 @@ function block(reason) {
   process.exit(2);
 }
 
-function isSubagentCall(event) {
+// True only for a call the transcript path confirms is a session's own. A
+// payload carrying no path confirms nothing, so it answers false and passes; an
+// empty string names no transcript and counts as none, as it does in event.mjs.
+function isConfirmedSessionCall(event) {
   const transcript = event?.transcript_path;
-  if (typeof transcript !== "string") return false;
+  if (typeof transcript !== "string" || transcript.length === 0) return false;
   const path = transcript.replace(/\\/g, "/");
-  return (
+  return !(
     path.includes(SUBAGENT_TRANSCRIPT_DIR) ||
     basename(path).startsWith(SUBAGENT_TRANSCRIPT_PREFIX)
   );
@@ -88,7 +94,7 @@ function readInstruction() {
 function main() {
   const event = eventForTools("Agent", "Workflow");
   if (event === null) process.exit(0); // unreadable, or another tool
-  if (isSubagentCall(event)) process.exit(0);
+  if (!isConfirmedSessionCall(event)) process.exit(0);
 
   const path = markerPath(event.session_id);
   if (path === null) process.exit(0); // no session to key a read on

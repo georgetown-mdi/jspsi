@@ -23,6 +23,7 @@ const RULESET = fileURLToPath(
 
 const MARKER_SUBDIR = "psilink-orchestration-reads";
 const SESSION = "8f2b1c66-0000-4000-8000-0123456789ab";
+const SESSION_TRANSCRIPT = `/home/node/.claude/projects/-workspace/${SESSION}.jsonl`;
 const HOUR_MS = 60 * 60 * 1000;
 
 const dirs = [];
@@ -64,6 +65,7 @@ const spawn = (extra = {}) => ({
   tool_name: "Agent",
   tool_input: { subagent_type: "implementer", prompt: "x" },
   session_id: SESSION,
+  transcript_path: SESSION_TRANSCRIPT,
   ...extra,
 });
 
@@ -71,6 +73,7 @@ const workflow = (extra = {}) => ({
   tool_name: "Workflow",
   tool_input: { scriptPath: ".claude/scripts/light-review-workflow.mjs" },
   session_id: SESSION,
+  transcript_path: SESSION_TRANSCRIPT,
   ...extra,
 });
 
@@ -163,12 +166,21 @@ describe("require-orchestration-ruleset-read hook", () => {
   it("still gates a session whose transcript is the session's own", () => {
     const root = makeMarkerRoot();
     const { status } = runHook(
-      spawn({
-        transcript_path: `/home/node/.claude/projects/-workspace/${SESSION}.jsonl`,
-      }),
+      spawn({ transcript_path: SESSION_TRANSCRIPT }),
       root,
     );
     expect(status).toBe(2);
+  });
+
+  // Without a transcript path the gate cannot tell a session's call from a
+  // spawned agent's, so it lets the call through.
+  it("allows a call carrying no transcript path", () => {
+    const root = makeMarkerRoot();
+    for (const transcript_path of [undefined, "", 7]) {
+      const payload = spawn({ transcript_path });
+      if (transcript_path === undefined) delete payload.transcript_path;
+      expect(runHook(payload, root).status, String(transcript_path)).toBe(0);
+    }
   });
 
   // The two hooks derive one marker path from one session id; a divergence
