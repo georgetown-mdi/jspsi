@@ -798,6 +798,11 @@ image, so a re-measurement builds with `--no-cache` or it measures the cache.
 
 **The limits.**
 
+- Neither list holds the Node.js runtime or the npm bundled with it. The default
+  image's base installs both outside apk, and the FIPS variant unpacks them from
+  the `nodejs.org` tarball `ARG NODE_VERSION` names, so neither package manager
+  records either and no generated list names one. What holds each is the base
+  digest and that tarball's committed hash above; a pin is not an attribution.
 - The license field is the string the package manager declares, not an audit of
   the package's contents. Nothing here verifies that a package's files match
   what its own metadata states.
