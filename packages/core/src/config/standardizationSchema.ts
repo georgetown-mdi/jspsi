@@ -1,6 +1,8 @@
 import { z } from "zod";
 
 import { MAX_NAME_LENGTH } from "./linkageTermsSchema.js";
+import { safeParseCamelized } from "./safeParseCamelized.js";
+import { transformParamTypeRefusals } from "./transformParamTypes.js";
 
 // --- Standardizing step ------------------------------------------------------
 
@@ -14,10 +16,33 @@ export interface StandardizationStep {
   params?: Record<string, unknown>;
 }
 
-const StandardizationStepSchema: z.ZodType<StandardizationStep> = z.object({
-  function: z.string().min(1),
-  params: z.record(z.string(), z.unknown()).optional(),
-});
+const StandardizationStepSchema: z.ZodType<StandardizationStep> = z
+  .object({
+    function: z.string().min(1),
+    params: z.record(z.string(), z.unknown()).optional(),
+  })
+  // A param the step function reads takes the type that function reads it as,
+  // the same table the linkage-terms wire schema checks against
+  // (transformParamTypes.ts). A cleaning step is the operator's own, so the
+  // reading here is the one that catches the unquoted number or bare `null` a
+  // YAML document is easy to write: it refuses at decode, naming the param and
+  // the type it got, rather than running with something the operator did not
+  // write. A param left out is how a step takes the function's default.
+  .superRefine((step, ctx) => {
+    // The document this refuses is the operator's own, and the operator is who
+    // reads the refusal, so a text param's refusal names the remedy: quote the
+    // value, or leave the key out. The terms schema's identical check says the
+    // type alone, because an acceptor reading a refusal of a partner's
+    // invitation has no document to edit.
+    for (const refusal of transformParamTypeRefusals(step, {
+      readerCanEditTheDocument: true,
+    }))
+      ctx.addIssue({
+        code: "custom",
+        message: refusal.message,
+        path: refusal.path,
+      });
+  });
 
 // --- Standardizing transformation --------------------------------------------
 
@@ -77,3 +102,22 @@ export const StandardizationSchema: z.ZodType<Standardization> = z
     },
     { message: "each linkage field may appear as output at most once" },
   );
+
+/**
+ * Parse and validate a raw on-disk `standardization` block, converting its
+ * snake_case keys to camelCase first, as every other document read does.
+ *
+ * The block a document writes reaches the schema and the function library
+ * through this, so a step's `input_format` is the `inputFormat` both the
+ * declared-type check ({@link transformParamTypeRefusals}) and the factory that
+ * reads it look up -- the same normalization `ExchangeSpecSchema` applies to
+ * this block on the run path (`parseExchangeSpec`), so a config's steps behave
+ * the same whichever entry point reads them.
+ *
+ * Returns a Zod safe-parse result. Honors the "safe" contract for the
+ * `camelizeKeys` bounds too: a depth- or node-count-tripping input yields a
+ * `{ success: false }` result rather than throwing.
+ */
+export function safeParseStandardization(raw: unknown) {
+  return safeParseCamelized(StandardizationSchema, raw);
+}

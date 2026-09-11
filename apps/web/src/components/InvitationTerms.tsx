@@ -10,7 +10,6 @@ import {
   Text,
   Title,
   UnstyledButton,
-  VisuallyHidden,
 } from "@mantine/core";
 
 import { IconAlertCircle, IconChevronRight } from "@tabler/icons-react";
@@ -353,20 +352,6 @@ function MatchKeyDetails({ summary }: { summary: InvitationKeySummary }) {
                 {transform.params.map((param, pi) => (
                   <Text key={pi} size="xs" c="dimmed" pl="md">
                     {param}
-                  </Text>
-                ))}
-                {/* Runtime-coercion notes for params the function overrides (e.g.
-                    replacement: null runs as the empty string). Rendered as their
-                    own element with the fixed "runs as" copy as static JSX text
-                    between two core-derived values -- never folded into a
-                    partner-controlled param line -- so the note cannot be
-                    impersonated. The VisuallyHidden lead-in gives that same
-                    provenance to a screen reader, since the italic marking is not
-                    announced. */}
-                {transform.coercions?.map((coercion, ci) => (
-                  <Text key={ci} size="xs" c="dimmed" pl="md" fs="italic">
-                    <VisuallyHidden>Runtime note: </VisuallyHidden>
-                    {coercion.param} runs as {coercion.runsAs}
                   </Text>
                 ))}
               </Stack>
@@ -1270,10 +1255,10 @@ export function InvitationTerms({
                   {field.label}
                 </Text>
                 {/* The fixed system label as static JSX, then the raw class in
-                      its own bounded Text between core-derived chrome -- mirroring
-                      the coercion-note pattern -- so partner text cannot display as
-                      the label. field.allowedCharacters is present here (the filter
-                      above selects on it), sanitized once in summarizeInvitation. */}
+                      its own bounded Text between core-derived chrome, so partner
+                      text cannot display as the label. field.allowedCharacters is
+                      present here (the filter above selects on it), sanitized once
+                      in summarizeInvitation. */}
                 <Text size="sm">
                   Allowed characters (partner-supplied, unverified):
                 </Text>

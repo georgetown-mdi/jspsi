@@ -20,6 +20,7 @@ import {
   sanitizeErrorForDisplay,
   sanitizeForDisplay,
   snakeizeKeys,
+  StandardizedField,
   UsageError,
   validateCompatibility,
 } from "@psilink/core";
@@ -3780,6 +3781,99 @@ test("readConfigLinkageSource returns the source a config defines", () => {
       linkageTermsStanding: "held-alone",
     },
   });
+});
+
+// A config writes its params in snake_case and the function library reads them
+// in camelCase, so the block is camelized on the way in, as the `psilink
+// exchange` run path's own read of it (`parseExchangeSpec`) does. Without that
+// a declared `input_format` reaches no factory at all and the step runs as its
+// default: a date the operator wrote a day-first format for, read month-first.
+test("readConfigLinkageSource runs a snake_case standardization param as declared", () => {
+  const configPath = path.join(dir, "psilink.yaml");
+  fs.writeFileSync(
+    configPath,
+    [
+      "standardization:",
+      "  - output: dob",
+      "    input: DOB",
+      "    steps:",
+      "      - function: parse_date",
+      "        params:",
+      "          input_format: DD/MM/YYYY",
+      "          output_format: YYYY-MM-DD",
+      "  - output: last_name",
+      "    input: LN",
+      "    steps:",
+      "      - function: split_on",
+      "        params:",
+      "          delimiter: '-'",
+      "          include_original: true",
+      YAML.stringify({ linkage_terms: getDefaultLinkageTerms("Agency A") }),
+    ].join("\n"),
+  );
+  const result = readConfigLinkageSource(configPath);
+  if (result.status !== "loaded") throw new Error(result.status);
+  const stepsFor = (output: string) =>
+    result.source.standardization?.find((t) => t.output === output)?.steps ??
+    [];
+  // 5 March 1990 under the declared day-first format. Read as the parse_date
+  // default (MM/DD/YYYY) the same cell would render 1990-05-03.
+  expect(
+    new StandardizedField("dob", "DOB", stepsFor("dob"), []).evaluateRow({
+      DOB: "05/03/1990",
+    }),
+  ).toEqual(["1990-03-05"]);
+  // include_original keeps the unsplit value beside the parts; the default (and
+  // an include_original that reached no factory) drops it.
+  expect(
+    new StandardizedField("last_name", "LN", stepsFor("last_name"), [])
+      .evaluateRow({ LN: "SMITH-JONES" })
+      .sort(),
+  ).toEqual(["JONES", "SMITH", "SMITH-JONES"]);
+});
+
+// The other half of reading the param: a type the function cannot read is
+// refused where the config is decoded, naming the param and what it got, rather
+// than running as the default.
+test("readConfigLinkageSource refuses a snake_case param the config mistyped", () => {
+  const configPath = path.join(dir, "psilink.yaml");
+  fs.writeFileSync(
+    configPath,
+    [
+      "standardization:",
+      "  - output: dob",
+      "    input: DOB",
+      "    steps:",
+      "      - function: parse_date",
+      "        params:",
+      "          input_format: 007",
+      YAML.stringify({ linkage_terms: getDefaultLinkageTerms("Agency A") }),
+    ].join("\n"),
+  );
+  expect(() => readConfigLinkageSource(configPath)).toThrow(UsageError);
+  expect(() => readConfigLinkageSource(configPath)).toThrow(
+    `config file ${configPath} has invalid standardization: ` +
+      "0.steps.0.params: parse_date inputFormat must be text, not a number; " +
+      "quote the value, or omit the key to leave the param unset",
+  );
+});
+
+// The remedy follows the AUDIENCE, not the schema: this block is the operator's
+// own file, open to them, so the same declared-type refusal the partner-token
+// decode states bare names the remedy here. The bare wording is pinned on the
+// decode side (packages/core/test/config/linkageTermsSchema.test.ts).
+test("readConfigLinkageSource names the remedy for a mistyped linkage_terms param", () => {
+  const configPath = path.join(dir, "psilink.yaml");
+  const terms = structuredClone(getDefaultLinkageTerms("Agency A"));
+  terms.linkageKeys[0].elements[0].transform = [
+    { function: "pad_left", params: { length: 9, char: 0 } },
+  ];
+  fs.writeFileSync(configPath, YAML.stringify({ linkage_terms: terms }));
+  expect(() => readConfigLinkageSource(configPath)).toThrow(UsageError);
+  expect(() => readConfigLinkageSource(configPath)).toThrow(
+    "pad_left char must be text, not a number; quote the value, or omit " +
+      "the key to leave the param unset",
+  );
 });
 
 // The one connection fact the reader lifts out, for the invitation's retain

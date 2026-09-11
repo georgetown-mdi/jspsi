@@ -1,7 +1,6 @@
 import {
   dateFormatComponents,
   DEFAULT_DATE_OUTPUT_FORMAT,
-  describeTransformCoercions,
   FAN_OUT_FUNCTION_NAMES,
 } from "../standardization.js";
 import {
@@ -290,9 +289,17 @@ interface InvitationTransformSummary {
    * (a trailing "... N more" entry marks overflow). The cap keeps an
    * arbitrarily large partner-supplied `params` record from flooding the
    * screen, and the leading order keeps it off the rows a header marker
-   * rests on. Empty when the step declares no parameters. A parameter core
-   * coerces before applying is shown verbatim here; the executed value is
-   * named separately in {@link coercions}.
+   * rests on. Empty when the step declares no parameters. Every parameter is
+   * shown as declared: a step whose parameter the function cannot read as
+   * written is refused when the invitation is decoded, so what is displayed
+   * here means what runs, apart from what changes at compile: a literal a
+   * step injects or compares against normalizes to NFC (`replace_regex`,
+   * `null_if`, `pad_left`, `coalesce`), and a pattern or delimiter left
+   * absent compiles as the literal word `undefined`
+   * (docs/spec/CHANNEL_SECURITY.md, "Transform-parameter declared types").
+   * The displayed text itself is rendered through the display sanitizer,
+   * whose escape format and display cut are documented in
+   * docs/spec/CHANNEL_SECURITY.md, "Display sanitization escape format".
    */
   params: Array<Displayable>;
   /**
@@ -316,18 +323,6 @@ interface InvitationTransformSummary {
    * partner string.
    */
   effect?: Displayable;
-  /**
-   * Parameters this function coerces before applying, each naming the
-   * parameter and the value it actually runs as (e.g. `replacement` runs as
-   * the empty string for `replace_regex` `replacement: null`). Held apart
-   * from {@link params} and rendered as its own element, not folded into the
-   * param line, so partner text placed inside a param value cannot
-   * impersonate this note. Both fields are core-derived, not
-   * partner-controlled. Restricted to parameters whose {@link params} line is
-   * shown, so a note never references one the display cap hid. Absent when
-   * the step coerces no displayed parameter.
-   */
-  coercions?: Array<{ param: string; runsAs: string }>;
 }
 
 /**
@@ -467,8 +462,7 @@ interface InvitationFieldSummary {
    * "allowed-character pattern: X" phrase, so the renderer can bind this
    * partner-controlled value in its own bounded element and a partner cannot
    * place separator text inside the class to impersonate the surrounding
-   * label (the same pattern {@link InvitationTransformSummary.coercions}
-   * uses). The value is accepted on a transcription checksum and never
+   * label. The value is accepted on a transcription checksum and never
    * vetted (the evaluating check is advisory, core's
    * `withinAllowedCharacters`); the renderer's fixed label marks it
    * partner-supplied and unverified.
@@ -837,17 +831,6 @@ function describeParamValue(value: unknown): string {
 }
 
 /**
- * Render the value a coerced parameter actually executes as, from core's
- * coercion contract. The empty string is a real executed value (e.g.
- * `replace_regex` `replacement: null`), so name it rather than render a blank
- * that would read as "nothing shown".
- */
-function describeExecutedValue(value: unknown): string {
-  if (value === "") return "the empty string";
-  return describeParamValue(value);
-}
-
-/**
  * The literal slice phrase for a `substring` step on a name field, or
  * undefined when no faithful literal applies. `positionalSafe` gates both
  * the field kind and the pipeline position -- the caller passes true only
@@ -929,21 +912,6 @@ function summarizeTransform(
     summary.description = COALESCE_WITHOUT_SUBSTITUTION_DESCRIPTION;
   else if (Object.hasOwn(TRANSFORM_FUNCTION_GLOSSARY, step.function))
     summary.description = TRANSFORM_FUNCTION_GLOSSARY[step.function];
-  // Report each runtime-coerced param as its own note rather than folding it
-  // into the param line, so it cannot be impersonated by partner text in a
-  // param value. Its content is wholly core-derived: the param name is the
-  // function's own parameter and the executed value comes from core's
-  // coercion contract. Restricted to params whose `key: value` line is
-  // actually shown, so a note never references one collapsed into the
-  // "... N more" overflow.
-  const shownKeys = new Set(shown.map(([key]) => key));
-  const coercions = describeTransformCoercions(step)
-    .filter((c) => shownKeys.has(c.param))
-    .map((c) => ({
-      param: c.param,
-      runsAs: describeExecutedValue(c.executed),
-    }));
-  if (coercions.length > 0) summary.coercions = coercions;
   return summary;
 }
 

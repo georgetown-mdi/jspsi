@@ -1,8 +1,5 @@
 import type { LinkageTerms } from "./linkageTermsSchema.js";
-import {
-  coerceToPatternString,
-  patternConformsToDialect,
-} from "../utils/linearRegex.js";
+import { patternConformsToDialect } from "../utils/linearRegex.js";
 
 // --- Transform-regex dialect conformance -------------------------------------
 //
@@ -70,13 +67,13 @@ interface RegexDialectBudget {
    * {@link REGEX_DIALECT_TOTAL_BUDGET_MS}. */
   totalBudgetMs?: number;
   /**
-   * Upper bound on the coerced source length (coerceToPatternString) of any
-   * one pattern; a longer source is rejected on length alone, without
-   * compiling, since an in-dialect source can compile in time super-linear
-   * in its length (a ~150 KB pattern takes seconds) and the wall-clock
-   * budget above cannot interrupt mid-compile. The schema passes its own
-   * MAX_TRANSFORM_PATTERN_LENGTH here so both reject at the same threshold;
-   * omitted (unit tests only), every coerced source is compiled.
+   * Upper bound on the length of any one declared pattern; a longer source is
+   * rejected on length alone, without compiling, since an in-dialect source
+   * can compile in time super-linear in its length (a ~150 KB pattern takes
+   * seconds) and the wall-clock budget above cannot interrupt mid-compile.
+   * The schema passes its own MAX_TRANSFORM_PATTERN_LENGTH here so both
+   * reject at the same threshold; omitted (unit tests only), every source is
+   * compiled.
    */
   maxPatternLength?: number;
 }
@@ -85,11 +82,13 @@ interface RegexDialectBudget {
  * Whether any linkage-key transform in `terms` uses a raw-pattern step
  * whose pattern is outside the linear-time dialect, or the conformance
  * budget runs out before a pattern is checked (fail closed). Returns
- * `true` to reject. Checks the pattern the factory would compile, coerced
- * the same way ({@link coerceToPatternString}), so the verdict matches
- * what executes; a source longer than `budget.maxPatternLength` is
- * rejected on length alone, before compiling. An omitted pattern is
- * skipped (compiles to an in-dialect literal); `parse_date` is not
+ * `true` to reject. Checks the pattern the factory would compile -- the
+ * text a step declares, which is what a factory's text accessor admits --
+ * so the verdict matches what executes; a pattern longer than
+ * `budget.maxPatternLength` is rejected on length alone, before compiling.
+ * An omitted pattern is skipped (compiles to an in-dialect literal), as is
+ * one declared as any other type, which the declared-type check on the step
+ * schema refuses ({@link transformParamTypeRefusals}); `parse_date` is not
  * screened (its generated regex is always in-dialect).
  *
  * The caller's message names no partner-controlled value: the offending
@@ -108,13 +107,16 @@ export function linkageTermsHaveNonConformantTransformRegex(
       for (const step of element.transform ?? []) {
         const paramKey = regexStepPatternParam(step.function);
         if (paramKey === undefined) continue;
-        const raw = step.params?.[paramKey];
+        const source = step.params?.[paramKey];
         // An omitted pattern compiles to a degenerate, in-dialect literal at
-        // runtime, so there is nothing to reject (matches the factory).
-        if (raw === undefined) continue;
+        // runtime, so there is nothing to reject (matches the factory), and a
+        // pattern of another type is refused by the declared-type check on the
+        // step schema, which raises its own issue whatever this walk returns.
+        // Rendering one to a string here would run a `toString` the partner
+        // declared, which throws out of a safe parse when it is not callable.
+        if (typeof source !== "string") continue;
 
         if (Date.now() - startedAt >= totalBudgetMs) return true;
-        const source = coerceToPatternString(raw);
         // Reject an oversized source on length alone, before compiling: an
         // in-dialect source compiles in time super-linear in its length, and
         // the wall-clock budget above cannot interrupt one in-flight compile.

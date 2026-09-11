@@ -7,7 +7,6 @@ import {
   buildKeyStrings,
   FAN_OUT_FUNCTION_NAMES,
   FAN_OUT_CANDIDATES_PER_ELEMENT,
-  describeTransformCoercions,
   dateFormatComponents,
   StandardizedField,
   StandardizedDataset,
@@ -212,30 +211,33 @@ describe("runPipeline — string functions", () => {
     ).toBe("CDEFG");
   });
 
-  test("substring drops a non-integer length without string-concatenating", () => {
-    // The wire params are z.unknown(), so a partner can declare `length` as a
-    // non-number. An unguarded `startIdx + length` would then concatenate strings
-    // -- {start: 3, length: "5"} on "ABCDEFGHIJ" once sliced to "CDEFGHIJ" (from
-    // index 2 to "2" + "5" = "25") rather than the intended "CDEFG". The guard
-    // drops any non-integer bound to null instead.
+  test("substring refuses a non-integer length instead of string-concatenating", () => {
+    // A caller that builds steps without a decode can hand `length` a
+    // non-number. An unguarded `startIdx + length` would then concatenate
+    // strings -- {start: 3, length: "5"} on "ABCDEFGHIJ" once sliced to
+    // "CDEFGHIJ" (from index 2 to "2" + "5" = "25") rather than the intended
+    // "CDEFG". The bound is read through the declared-type accessor, which
+    // refuses any non-integer at compile, before a value is sliced.
     for (const length of ["5", 5.5, true, ["5"]]) {
       expect(
-        runPipeline("ABCDEFGHIJ", [
-          { function: "substring", params: { start: 3, length } },
-        ]),
+        () =>
+          runPipeline("ABCDEFGHIJ", [
+            { function: "substring", params: { start: 3, length } },
+          ]),
         JSON.stringify({ length }),
-      ).toBeNull();
+      ).toThrow("substring length must be a whole number");
     }
   });
 
-  test("substring drops a non-integer start without string-concatenating", () => {
+  test("substring refuses a non-integer start instead of string-concatenating", () => {
     for (const start of ["3", 3.5, true, ["3"]]) {
       expect(
-        runPipeline("ABCDEFGHIJ", [
-          { function: "substring", params: { start, length: 5 } },
-        ]),
+        () =>
+          runPipeline("ABCDEFGHIJ", [
+            { function: "substring", params: { start, length: 5 } },
+          ]),
         JSON.stringify({ start }),
-      ).toBeNull();
+      ).toThrow("substring start must be a whole number");
     }
   });
 
@@ -275,14 +277,15 @@ describe("runPipeline — string functions", () => {
     ).toBe("XXAB");
   });
 
-  test("pad_left with a non-string char does not throw and falls back to the default", () => {
+  test("pad_left refuses a non-text char rather than padding with the default", () => {
     for (const badChar of [42, [], {}, true, null]) {
-      const run = () =>
-        runPipeline("AB", [
-          { function: "pad_left", params: { length: 4, char: badChar } },
-        ]);
-      expect(run, JSON.stringify(badChar)).not.toThrow();
-      expect(run(), JSON.stringify(badChar)).toBe("00AB");
+      expect(
+        () =>
+          runPipeline("AB", [
+            { function: "pad_left", params: { length: 4, char: badChar } },
+          ]),
+        JSON.stringify(badChar),
+      ).toThrow(/pad_left char must be text/);
     }
   });
 
@@ -312,16 +315,21 @@ describe("runPipeline — string functions", () => {
     ).toThrow('pad_left: "length" must be a positive integer');
   });
 
-  test("pad_left throws when length is a non-integer", () => {
+  // A wrong TYPE is the declared-type accessor's refusal, naming the type the
+  // step wrote; the positive-integer check above keeps its own wording for a
+  // value that is a whole number and still unusable.
+  test("pad_left refuses a fractional length as a wrong type", () => {
     expect(() =>
       runPipeline("123", [{ function: "pad_left", params: { length: 1.5 } }]),
-    ).toThrow('pad_left: "length" must be a positive integer');
+    ).toThrow(
+      "pad_left length must be a whole number, not a fractional number",
+    );
   });
 
-  test("pad_left throws when length is not a number", () => {
+  test("pad_left refuses a length that is not a number", () => {
     expect(() =>
       runPipeline("123", [{ function: "pad_left", params: { length: "9" } }]),
-    ).toThrow('pad_left: "length" must be a positive integer');
+    ).toThrow("pad_left length must be a whole number, not text");
   });
 });
 
@@ -448,28 +456,30 @@ describe("runPipeline — parse_date", () => {
     ).toBeNull();
   });
 
-  test("a non-string output format does not throw and falls back to the default", () => {
+  test("a non-text output format is refused rather than defaulted", () => {
     for (const bad of [42, [], {}, true, null]) {
-      const badOutput = () =>
-        runPipeline("06/15/2021", [
-          {
-            function: "parse_date",
-            params: { inputFormat: "MM/DD/YYYY", outputFormat: bad },
-          },
-        ]);
-      expect(badOutput, JSON.stringify(bad)).not.toThrow();
-      expect(badOutput(), JSON.stringify(bad)).toBe("20210615");
+      expect(
+        () =>
+          runPipeline("06/15/2021", [
+            {
+              function: "parse_date",
+              params: { inputFormat: "MM/DD/YYYY", outputFormat: bad },
+            },
+          ]),
+        JSON.stringify(bad),
+      ).toThrow(/parse_date outputFormat must be text/);
     }
   });
 
-  test("a non-string input format drops the record without throwing", () => {
-    for (const bad of [42, ["MM"], {}, true]) {
-      const badInput = () =>
-        runPipeline("06/15/2021", [
-          { function: "parse_date", params: { inputFormat: bad } },
-        ]);
-      expect(badInput, JSON.stringify(bad)).not.toThrow();
-      expect(badInput(), JSON.stringify(bad)).toBeNull();
+  test("a non-text input format is refused rather than dropping the record", () => {
+    for (const bad of [42, ["MM"], {}, true, null]) {
+      expect(
+        () =>
+          runPipeline("06/15/2021", [
+            { function: "parse_date", params: { inputFormat: bad } },
+          ]),
+        JSON.stringify(bad),
+      ).toThrow(/parse_date inputFormat must be text/);
     }
   });
 
@@ -692,37 +702,30 @@ describe("runPipeline — null-producing functions", () => {
     ).toBe("987654321");
   });
 
-  test("null_if with a non-string value/values param does not throw and excludes nothing", () => {
-    const cases: Record<string, unknown>[] = [
-      { value: null },
-      { values: null },
-      { value: 42 },
-      { value: {} },
-      { values: [null] },
-      { values: [42] },
-      { values: 42 },
-      { values: "SMITH" },
+  test("null_if refuses a non-text value or values param", () => {
+    const cases: Array<[Record<string, unknown>, RegExp]> = [
+      [{ value: null }, /null_if value must be text/],
+      [{ value: 42 }, /null_if value must be text/],
+      [{ value: {} }, /null_if value must be text/],
+      [{ values: null }, /null_if values must be a list of text/],
+      [{ values: 42 }, /null_if values must be a list of text/],
+      [{ values: "SMITH" }, /null_if values must be a list of text/],
+      [{ values: [null] }, /null_if values must hold only text/],
+      [{ values: [42] }, /null_if values must hold only text/],
     ];
-    for (const params of cases) {
-      const run = () => runPipeline("SMITH", [{ function: "null_if", params }]);
-      expect(run, JSON.stringify(params)).not.toThrow();
-      expect(run(), JSON.stringify(params)).toBe("SMITH");
-    }
+    for (const [params, message] of cases)
+      expect(
+        () => runPipeline("SMITH", [{ function: "null_if", params }]),
+        JSON.stringify(params),
+      ).toThrow(message);
   });
 
-  test("null_if drops non-string entries but keeps string entries in a mixed array", () => {
-    // A mixed array excludes only its string members; the non-string entries are
-    // dropped rather than crashing normalization.
-    expect(
+  test("null_if refuses a mixed array rather than excluding only its text entries", () => {
+    expect(() =>
       runPipeline("SMITH", [
         { function: "null_if", params: { values: [42, "SMITH"] } },
       ]),
-    ).toBeNull();
-    expect(
-      runPipeline("JONES", [
-        { function: "null_if", params: { values: [42, "SMITH"] } },
-      ]),
-    ).toBe("JONES");
+    ).toThrow(/null_if values must hold only text/);
   });
 
   test("filter_regex passes through matching value", () => {
@@ -797,17 +800,18 @@ describe("runPipeline — null-producing functions", () => {
     );
   });
 
-  test("replace_regex with a non-string replacement does not throw and falls back to empty", () => {
+  test("replace_regex refuses a non-text replacement rather than emptying it", () => {
     for (const badReplacement of [42, [], {}, true, null]) {
-      const run = () =>
-        runPipeline("A1B2C3", [
-          {
-            function: "replace_regex",
-            params: { pattern: "\\d", replacement: badReplacement },
-          },
-        ]);
-      expect(run, JSON.stringify(badReplacement)).not.toThrow();
-      expect(run(), JSON.stringify(badReplacement)).toBe("ABC");
+      expect(
+        () =>
+          runPipeline("A1B2C3", [
+            {
+              function: "replace_regex",
+              params: { pattern: "\\d", replacement: badReplacement },
+            },
+          ]),
+        JSON.stringify(badReplacement),
+      ).toThrow(/replace_regex replacement must be text/);
     }
   });
 });
@@ -842,32 +846,36 @@ describe("runPipeline — coalesce", () => {
     ).toBe("UNKNOWN");
   });
 
-  test("coalesce with a non-string default does not throw and behaves as absent", () => {
-    const absent = runPipeline("", [
-      { function: "null_if", params: { value: "" } },
-      { function: "coalesce" },
-    ]);
-    for (const badDefault of [null, 42, [], {}, true]) {
-      const run = () =>
-        runPipeline("", [
-          { function: "null_if", params: { value: "" } },
-          { function: "coalesce", params: { default: badDefault } },
-        ]);
-      expect(run, JSON.stringify(badDefault)).not.toThrow();
-      expect(run(), JSON.stringify(badDefault)).toBeNull();
-      expect(run(), JSON.stringify(badDefault)).toBe(absent);
-    }
+  test("coalesce refuses a non-text default rather than behaving as absent", () => {
+    // An absent default is how a coalesce declares no substitution; a declared
+    // one the function cannot substitute stops the pipeline instead, so the two
+    // are never conflated at a run.
+    expect(
+      runPipeline("", [
+        { function: "null_if", params: { value: "" } },
+        { function: "coalesce" },
+      ]),
+    ).toBeNull();
+    for (const badDefault of [null, 42, [], {}, true])
+      expect(
+        () =>
+          runPipeline("", [
+            { function: "null_if", params: { value: "" } },
+            { function: "coalesce", params: { default: badDefault } },
+          ]),
+        JSON.stringify(badDefault),
+      ).toThrow(/coalesce default must be text/);
   });
 
-  test("coalesce with a non-string default passes a present value through", () => {
-    for (const badDefault of [null, 42, [], {}, true]) {
+  test("coalesce refuses a non-text default even where the value is present", () => {
+    for (const badDefault of [null, 42, [], {}, true])
       expect(
-        runPipeline("SMITH", [
-          { function: "coalesce", params: { default: badDefault } },
-        ]),
+        () =>
+          runPipeline("SMITH", [
+            { function: "coalesce", params: { default: badDefault } },
+          ]),
         JSON.stringify(badDefault),
-      ).toBe("SMITH");
-    }
+      ).toThrow(/coalesce default must be text/);
   });
 });
 
@@ -2052,37 +2060,9 @@ describe("buildKeyStrings", () => {
     expect(buildKeyStrings(keyWithNullTransform, dataset, 0)).toBeNull();
   });
 
-  test("element transform coalesce with a non-string default does not crash the key build", () => {
-    const keyWith = (params: Record<string, unknown> | undefined) => ({
-      name: "SSN+LN",
-      elements: [
-        {
-          field: "ssn",
-          transform: [{ function: "coalesce", ...(params ? { params } : {}) }],
-        },
-        { field: "last_name" },
-      ],
-    });
-    const dataset = makeDataset({ ssn: "000000000", last_name: "SMITH" });
-    const absent = buildKeyStrings(keyWith(undefined), dataset, 0);
-    for (const badDefault of [null, 42, [], {}, true]) {
-      const key = keyWith({ default: badDefault });
-      expect(
-        () => buildKeyStrings(key, dataset, 0),
-        JSON.stringify(badDefault),
-      ).not.toThrow();
-      expect(
-        buildKeyStrings(key, dataset, 0),
-        JSON.stringify(badDefault),
-      ).toEqual(absent);
-      expect(
-        buildKeyStrings(key, dataset, 0),
-        JSON.stringify(badDefault),
-      ).toEqual(new Set(["000000000SMITH"]));
-    }
-  });
-
-  test("element transform null_if / replace_regex / pad_left with non-string params do not crash the key build", () => {
+  test("an element transform refuses a non-text param rather than building a key from a fallback", () => {
+    // The key build is the last place such a step could reach; it refuses over
+    // the whole row rather than deriving keys the declared terms do not state.
     const dataset = makeDataset({ ssn: "123456789", last_name: "SMITH" });
     const key = (
       transform: Array<{ function: string; params?: Record<string, unknown> }>,
@@ -2091,52 +2071,50 @@ describe("buildKeyStrings", () => {
       elements: [{ field: "ssn", transform }, { field: "last_name" }],
     });
     const cases: Array<{
-      function: string;
-      params: Record<string, unknown>;
+      step: { function: string; params: Record<string, unknown> };
+      message: RegExp;
     }> = [
-      { function: "null_if", params: { values: [null] } },
-      { function: "null_if", params: { value: 42 } },
-      { function: "null_if", params: { values: 42 } },
       {
-        function: "replace_regex",
-        params: { pattern: "\\d", replacement: 42 },
+        step: { function: "coalesce", params: { default: 42 } },
+        message: /coalesce default must be text/,
       },
-      { function: "pad_left", params: { length: 9, char: 42 } },
+      {
+        step: { function: "null_if", params: { values: [null] } },
+        message: /null_if values must hold only text/,
+      },
+      {
+        step: { function: "null_if", params: { value: 42 } },
+        message: /null_if value must be text/,
+      },
+      {
+        step: { function: "null_if", params: { values: 42 } },
+        message: /null_if values must be a list of text/,
+      },
+      {
+        step: {
+          function: "replace_regex",
+          params: { pattern: "\\d", replacement: 42 },
+        },
+        message: /replace_regex replacement must be text/,
+      },
+      {
+        step: { function: "pad_left", params: { length: 9, char: 42 } },
+        message: /pad_left char must be text/,
+      },
     ];
-    for (const step of cases) {
-      const built = () => buildKeyStrings(key([step]), dataset, 0);
-      expect(built, JSON.stringify(step)).not.toThrow();
-      expect(built(), JSON.stringify(step)).not.toBeNull();
-    }
-    // null_if with non-string entries excludes nothing: the SSN survives.
+    for (const { step, message } of cases)
+      expect(
+        () => buildKeyStrings(key([step]), dataset, 0),
+        JSON.stringify(step),
+      ).toThrow(message);
+    // The same steps with the params written as text build their keys.
     expect(
       buildKeyStrings(
-        key([{ function: "null_if", params: { values: [null] } }]),
+        key([{ function: "pad_left", params: { length: 11, char: "0" } }]),
         dataset,
         0,
       ),
-    ).toEqual(new Set(["123456789SMITH"]));
-    // replace_regex non-string replacement falls back to empty: digits stripped.
-    expect(
-      buildKeyStrings(
-        key([
-          {
-            function: "replace_regex",
-            params: { pattern: "\\d", replacement: 42 },
-          },
-        ]),
-        dataset,
-        0,
-      ),
-    ).toEqual(new Set(["SMITH"]));
-    // pad_left non-string char falls back to "0": already 9 long, unchanged.
-    expect(
-      buildKeyStrings(
-        key([{ function: "pad_left", params: { length: 9, char: 42 } }]),
-        dataset,
-        0,
-      ),
-    ).toEqual(new Set(["123456789SMITH"]));
+    ).toEqual(new Set(["00123456789SMITH"]));
   });
 
   test("swap is applied when isReceiver is true", () => {
@@ -4202,115 +4180,158 @@ describe("resolveFieldColumns", () => {
   });
 });
 
-describe("describeTransformCoercions", () => {
-  // Each row is a param the descriptor claims a function coerces from a declared
-  // `null` to `executed`, plus the other params and an input needed to run the
-  // function. The behavior assertion below proves the claim against the real
-  // factory; keep this list in step with TRANSFORM_PARAM_FALLBACKS.
-  const coercingCases: Array<{
+describe("declared transform param types", () => {
+  // Each row is a param a function defaults when the step omits the key, with
+  // the value the reference documents as that default, the other params, and an
+  // input to run it on. Omitting the key must run as declaring that value (so
+  // the documented default is the real one), and declaring the key as a type the
+  // function cannot read must refuse rather than reach the same default.
+  const defaultedParams: Array<{
     fn: string;
     param: string;
-    executed: unknown;
+    documentedDefault: unknown;
+    wrongType: unknown;
     otherParams: Record<string, unknown>;
     input: string;
   }> = [
     {
       fn: "replace_regex",
       param: "replacement",
-      executed: "",
+      documentedDefault: "",
+      wrongType: 42,
       otherParams: { pattern: "x" },
       input: "axbx",
     },
     {
       fn: "parse_date",
       param: "inputFormat",
-      executed: "MM/DD/YYYY",
+      documentedDefault: "MM/DD/YYYY",
+      wrongType: 42,
       otherParams: {},
       input: "01/02/2020",
     },
     {
       fn: "parse_date",
       param: "outputFormat",
-      executed: "YYYYMMDD",
+      documentedDefault: "YYYYMMDD",
+      wrongType: 42,
       otherParams: { inputFormat: "MM/DD/YYYY" },
       input: "01/02/2020",
     },
     {
       fn: "pad_left",
       param: "char",
-      executed: "0",
+      documentedDefault: "0",
+      wrongType: 5,
       otherParams: { length: 5 },
       input: "12",
     },
     {
       fn: "phonetic",
       param: "algorithm",
-      executed: "soundex",
+      documentedDefault: "soundex",
+      wrongType: 42,
       otherParams: {},
       input: "Smith",
     },
     {
       fn: "split_on",
       param: "includeOriginal",
-      executed: false,
+      documentedDefault: false,
+      wrongType: "true",
       otherParams: { delimiter: "," },
       input: "a,b",
     },
   ];
 
-  test.each(coercingCases)(
-    "$fn declares the executed value for a coerced $param and matches the factory",
-    ({ fn, param, executed, otherParams, input }) => {
-      // The descriptor reports the coercion for a declared-null param ...
-      expect(
-        describeTransformCoercions({
+  test.each(defaultedParams)(
+    "$fn takes its documented default for an omitted $param",
+    ({ fn, param, documentedDefault, otherParams, input }) => {
+      const omitted = runPipeline(input, [
+        { function: fn, params: { ...otherParams } },
+      ]);
+      const declared = runPipeline(input, [
+        {
           function: fn,
-          params: { ...otherParams, [param]: null },
-        }),
-      ).toContainEqual({ param, executed });
-
-      // ... and that claim holds against the real factory: declaring the param
-      // null produces the same result as declaring it as the claimed executed
-      // value, so the descriptor cannot drift from what core runs.
-      const withNull = runPipeline(input, [
-        { function: fn, params: { ...otherParams, [param]: null } },
+          params: { ...otherParams, [param]: documentedDefault },
+        },
       ]);
-      const withExecuted = runPipeline(input, [
-        { function: fn, params: { ...otherParams, [param]: executed } },
-      ]);
-      expect(withNull).toEqual(withExecuted);
+      expect(omitted).toEqual(declared);
     },
   );
 
-  test("does not report a param declared with a real value", () => {
-    // A declared, non-null replacement is applied verbatim, so nothing is
-    // coerced -- the screen must show it as written, not as the empty-string
-    // default.
+  test.each(defaultedParams)(
+    "$fn refuses a $param declared as a type it cannot read",
+    ({ fn, param, wrongType, otherParams, input }) => {
+      expect(() =>
+        runPipeline(input, [
+          { function: fn, params: { ...otherParams, [param]: wrongType } },
+        ]),
+      ).toThrow(new RegExp(`${fn} ${param} must be`));
+    },
+  );
+
+  // The pattern params have no default to fall back to: unread through the
+  // accessor, an unquoted `007` renders into the compile source as the pattern
+  // `7` rather than being refused. Each is read through the same accessor as
+  // every other declared text param, one function at a time.
+  const patternParams: Array<{
+    fn: string;
+    param: string;
+    otherParams: Record<string, unknown>;
+  }> = [
+    { fn: "replace_regex", param: "pattern", otherParams: { replacement: "" } },
+    { fn: "extract_regex", param: "pattern", otherParams: {} },
+    { fn: "filter_regex", param: "pattern", otherParams: {} },
+    { fn: "split_on", param: "delimiter", otherParams: {} },
+  ];
+
+  test.each(patternParams)(
+    "$fn refuses a non-text $param rather than compiling a coerced one",
+    ({ fn, param, otherParams }) => {
+      for (const wrongType of [7, 1.5, true, null, [], {}])
+        expect(
+          () =>
+            runPipeline("a7b", [
+              { function: fn, params: { ...otherParams, [param]: wrongType } },
+            ]),
+          JSON.stringify(wrongType),
+        ).toThrow(new RegExp(`${fn} ${param} must be text`));
+    },
+  );
+
+  test.each(patternParams)(
+    "$fn compiles a $param declared as text",
+    ({ fn, param, otherParams }) => {
+      expect(() =>
+        runPipeline("a7b", [
+          { function: fn, params: { ...otherParams, [param]: "7" } },
+        ]),
+      ).not.toThrow();
+    },
+  );
+
+  test("a param declared as text is applied as written", () => {
     expect(
-      describeTransformCoercions({
-        function: "replace_regex",
-        params: { pattern: "x", replacement: "Y" },
-      }),
-    ).toEqual([]);
+      runPipeline("axbx", [
+        {
+          function: "replace_regex",
+          params: { pattern: "x", replacement: "Y" },
+        },
+      ]),
+    ).toBe("aYbY");
   });
 
-  test("does not report a param the function does not coerce", () => {
-    // `pattern` has no fallback (it is used as authored), so even a token
-    // that somehow declared it null is not annotated as coerced.
+  test("a param no function reads is left alone", () => {
+    // The type table covers the params a factory reads; an unrecognized param
+    // name and an unrecognized function keep whatever the document wrote.
     expect(
-      describeTransformCoercions({
-        function: "replace_regex",
-        params: { pattern: null },
-      }),
-    ).toEqual([]);
-  });
-
-  test("reports nothing for a function with no coerced params", () => {
-    expect(describeTransformCoercions({ function: "to_upper_case" })).toEqual(
-      [],
-    );
-    expect(
-      describeTransformCoercions({ function: "not_a_real_function" }),
-    ).toEqual([]);
+      runPipeline("smith", [
+        { function: "to_upper_case", params: { unread: 42 } },
+      ]),
+    ).toBe("SMITH");
+    expect(() =>
+      runPipeline("smith", [{ function: "not_a_real_function" }]),
+    ).toThrow(/unknown standardization function/);
   });
 });

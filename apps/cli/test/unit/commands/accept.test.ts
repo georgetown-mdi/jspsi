@@ -4587,33 +4587,24 @@ describe("displayInvitation: linkage-key detail, heading order, and the repeated
     expect(recognized).not.toContain(UNRECOGNIZED_TRANSFORM_NOTE);
   });
 
-  test("displayInvitation: a coerced transform parameter names the parameter and the value it runs as", () => {
-    // `replace_regex` with `replacement: null` executes as the empty string. The
-    // declared parameter is shown verbatim and the coercion is its own line, so
-    // partner text placed inside a parameter value cannot impersonate it; this pins
-    // the CLI's own rendering of that line, including which half is the parameter.
-    const log = getLogger("accept-display-coercion-test");
+  test("displayInvitation: a transform parameter is rendered as declared", () => {
+    // Every parameter line is the declared value: a token whose parameter the
+    // function cannot read as written does not decode, so the CLI has no
+    // executed-value line to render beside the declared one.
+    const log = getLogger("accept-display-param-test");
     log.setLevel("silent");
     const lines = renderDisplayInvitation(log, {
       ...sampleToken(FUTURE()),
       linkageTerms: probeTermsWithTransform([
         {
           function: "replace_regex",
-          params: { pattern: "-", replacement: null },
+          params: { pattern: "-", replacement: "" },
         },
       ]),
     }).split("\n");
 
-    const coercion = "            replacement runs as the empty string";
-    const param = "            - replacement: null";
-    expect(lines).toContain(param);
-    expect(lines).toContain(coercion);
-    // The parameter names itself first: a swapped interpolation would be treated as
-    // a parameter called "the empty string".
-    expect(lines).not.toContain(
-      "            the empty string runs as replacement",
-    );
-    expect(lines.indexOf(coercion)).toBeGreaterThan(lines.indexOf(param));
+    expect(lines).toContain("            - replacement: ");
+    expect(lines.some((line) => /runs as/.test(line))).toBe(false);
   });
 
   test("displayInvitation: names the fields matched on, once at the top and under each key", () => {

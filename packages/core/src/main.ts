@@ -196,7 +196,10 @@ export {
   rawDecodeErrorDescription,
 } from "./utils/describeDecodeError";
 
-export { StandardizationSchema } from "./config/standardizationSchema";
+export {
+  safeParseStandardization,
+  StandardizationSchema,
+} from "./config/standardizationSchema";
 export type {
   Standardization,
   StandardizationStep,
@@ -271,6 +274,7 @@ export {
   TEXT_DIRECTION_MESSAGE,
   referencedLinkageFieldNames,
   safeParseLinkageTerms,
+  safeParseLinkageTermsTheReaderWrote,
 } from "./config/linkageTermsSchema";
 export {
   deriveAcceptedLinkageTerms,

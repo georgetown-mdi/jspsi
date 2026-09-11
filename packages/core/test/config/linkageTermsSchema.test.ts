@@ -23,6 +23,7 @@ import {
   MAX_DATE_FORMAT_LENGTH,
   MAX_TRANSFORM_PATTERN_LENGTH,
   MAX_TRANSFORM_PARAM_LENGTH,
+  MAX_TRANSFORM_PARAM_ENTRIES,
   MAX_EXCLUDE_ENTRIES,
   MAX_TRANSFORM_STEPS,
   MAX_KEY_ELEMENTS,
@@ -30,8 +31,10 @@ import {
 } from "../../src/config/linkageTermsSchema";
 import type { LinkageKey } from "../../src/config/linkageTermsSchema";
 import { ExchangeSpecSchema } from "../../src/config/exchangeSpec";
+import { MAX_ENCODED_INVITATION_LENGTH } from "../../src/config/invitation";
 import { pipelineAlwaysDrops } from "../../src/linkageSatisfiability";
 import { describeDecodeError } from "../../src/utils/describeDecodeError";
+import { transformParamTypeRows } from "../../src/config/transformParamTypes";
 import {
   MAX_NODE_COUNT,
   NestingDepthExceededError,
@@ -856,22 +859,30 @@ test("a pad_left length at exactly the maximum parses; one over it is rejected",
   ).toBe(false);
 });
 
-test("a malformed pad_left length still validates, so the runtime factory check handles it", () => {
-  // The schema adds only the upper bound; a non-positive, non-integer, or
-  // non-numeric length is not pre-empted here -- padLeftFactory throws on it at
-  // key-build time and the exchange aborts through the existing error boundary,
-  // behavior unchanged by this hardening (the runtime throws are pinned in
-  // standardization.test.ts). None of these is an allocation risk: padStart is
+test("a pad_left length that is not a whole number is refused at validation", () => {
+  for (const length of [1.5, "9", true, null]) {
+    const result = safeParseLinkageTerms(padLeftTerms({ length }));
+    expect(result.success, JSON.stringify(length)).toBe(false);
+    if (result.success) continue;
+    expect(
+      result.error.issues.some((i) =>
+        /pad_left length must be a whole number/.test(i.message),
+      ),
+      JSON.stringify(length),
+    ).toBe(true);
+  }
+});
+
+test("a non-positive pad_left length validates, so the runtime factory check handles it", () => {
+  // The schema types the length and bounds it above; a negative or zero one is
+  // a whole number the factory throws on at key-build time, and the exchange
+  // aborts through the existing error boundary (the runtime throws are pinned
+  // in standardization.test.ts). Neither is an allocation risk: padStart is
   // never reached for them.
   expect(safeParseLinkageTerms(padLeftTerms({ length: -5 })).success).toBe(
     true,
   );
-  expect(safeParseLinkageTerms(padLeftTerms({ length: 1.5 })).success).toBe(
-    true,
-  );
-  expect(safeParseLinkageTerms(padLeftTerms({ length: "9" })).success).toBe(
-    true,
-  );
+  expect(safeParseLinkageTerms(padLeftTerms({ length: 0 })).success).toBe(true);
 });
 
 // --- parse_date format-string bound (partner-controlled per-row regex DoS) ----
@@ -995,12 +1006,17 @@ test("an empty parse_date outputFormat is rejected", () => {
   ).toBe(true);
 });
 
-test("a non-string parse_date format still validates, so the runtime factory handles it", () => {
-  // Only a string format drives the regex build / output allocation; the factory
-  // treats a non-string as an empty/absent format, so the length cap does not
-  // pre-empt it (behavior unchanged).
+test("a non-text parse_date format is refused at validation", () => {
+  // Only text drives the regex build and the per-row output, so a format
+  // declared as anything else is refused where the document is read rather
+  // than run as an empty or absent format.
+  const result = safeParseLinkageTerms(parseDateTerms({ inputFormat: 123 }));
+  expect(result.success).toBe(false);
+  if (result.success) return;
   expect(
-    safeParseLinkageTerms(parseDateTerms({ inputFormat: 123 })).success,
+    result.error.issues.some((i) =>
+      /parse_date inputFormat must be text/.test(i.message),
+    ),
   ).toBe(true);
 });
 
@@ -1035,8 +1051,9 @@ test("a non-integer substring start or length is rejected at validation", () => 
     if (result.success) continue;
     expect(
       result.error.issues.some((i) =>
-        /substring start and length must be integers/.test(i.message),
+        /substring (start|length) must be a whole number/.test(i.message),
       ),
+      JSON.stringify(params),
     ).toBe(true);
   }
 });
@@ -1140,35 +1157,66 @@ test("the pattern-length cap also covers split_on's delimiter param", () => {
   ).toBe(false);
 });
 
-test("a short non-string transform regex pattern still validates, so coercion handles it", () => {
-  // A scalar non-string coerces to a short literal (String(123) === "123"), which
-  // the gate and factory both compile, so the length cap does not pre-empt it.
-  expect(
-    safeParseLinkageTerms(
-      regexStepTerms("replace_regex", { pattern: 123, replacement: "" }),
-    ).success,
-  ).toBe(true);
-});
-
-test("an oversized NON-string pattern (array) is caught by the length cap", () => {
-  // The cap measures the COERCED source, not just string-typed values: an array
-  // renders via String(...) to its comma-joined elements, so a long array would
-  // otherwise slip an oversized compile source past the bound. coerceToPatternString
-  // here mirrors exactly what the refine and the factory compile.
-  const overlong = Array.from(
-    { length: MAX_TRANSFORM_PATTERN_LENGTH },
-    () => "a",
-  ); // String(...) === "a,a,a,..." -- ~2x over the cap
+test("a short non-text transform regex pattern is refused at validation", () => {
+  // A pattern is text, whatever it would coerce to: the operator who wrote an
+  // unquoted 123 meets the refusal rather than an exchange matching on the
+  // literal "123".
   const result = safeParseLinkageTerms(
-    regexStepTerms("replace_regex", { pattern: overlong, replacement: "" }),
+    regexStepTerms("replace_regex", { pattern: 123, replacement: "" }),
   );
   expect(result.success).toBe(false);
   if (result.success) return;
   expect(
     result.error.issues.some((i) =>
-      /transform regex pattern must not exceed/.test(i.message),
+      /replace_regex pattern must be text/.test(i.message),
     ),
   ).toBe(true);
+});
+
+// A pattern of a type other than text never reaches the length cap or the
+// dialect gate: both read the declared string, and the declared-type refusal
+// answers every other type. Rendering one to a string instead would run the
+// object's own `toString`, which a document can declare as a value that is not
+// callable -- a TypeError out of a parse contracted to return failure, so a
+// returned result is itself what these cases pin.
+describe("a transform pattern declared as something other than text", () => {
+  const cases: Array<[string, string, string, unknown]> = [
+    ["replace_regex", "pattern", "an object", { toString: "x" }],
+    ["split_on", "delimiter", "an object", { toString: "x" }],
+    // Long enough that String(...) would render it well over the cap.
+    [
+      "replace_regex",
+      "pattern",
+      "a list",
+      Array.from({ length: MAX_TRANSFORM_PATTERN_LENGTH }, () => "a"),
+    ],
+    [
+      "split_on",
+      "delimiter",
+      "a list",
+      Array.from({ length: MAX_TRANSFORM_PATTERN_LENGTH }, () => "a"),
+    ],
+  ];
+
+  test.each(cases)(
+    "%s %s declared as %s is refused by type, with no length issue",
+    (fn, param, label, value) => {
+      let result: ReturnType<typeof safeParseLinkageTerms> | undefined;
+      expect(() => {
+        result = safeParseLinkageTerms(regexStepTerms(fn, { [param]: value }));
+      }).not.toThrow();
+      expect(result?.success).toBe(false);
+      if (!result || result.success) return;
+      expect(result.error.issues.map((i) => i.message)).toContain(
+        `${fn} ${param} must be text, not ${label}`,
+      );
+      expect(
+        result.error.issues.some((i) =>
+          /transform regex pattern must not exceed/.test(i.message),
+        ),
+      ).toBe(false);
+    },
+  );
 });
 
 test("a transform regex outside the dialect is rejected by the gate", () => {
@@ -1330,6 +1378,114 @@ test("the content bound covers every string param, not only the measured amplifi
   }
 });
 
+test("a list-valued param at the entry-count bound parses; one over it is refused", () => {
+  const atBound = Array.from(
+    { length: MAX_TRANSFORM_PARAM_ENTRIES },
+    (_, i) => `value-${i}`,
+  );
+  expect(
+    safeParseLinkageTerms(transformStepTerms("null_if", { values: atBound }))
+      .success,
+  ).toBe(true);
+  const result = safeParseLinkageTerms(
+    transformStepTerms("null_if", { values: [...atBound, "one-more"] }),
+  );
+  expect(result.success).toBe(false);
+  if (result.success) return;
+  expect(
+    result.error.issues.some((i) =>
+      /transform param must not hold more than/.test(i.message),
+    ),
+  ).toBe(true);
+});
+
+test("the entry-count bound covers every list param, not only the one a function reads", () => {
+  // Uniform like the content bound above, and for the same reason: the count
+  // sits on the params record's value stage, so a param no per-function refine
+  // covers and a function this build does not implement are bounded too.
+  const overBound = Array.from(
+    { length: MAX_TRANSFORM_PARAM_ENTRIES + 1 },
+    () => "value",
+  );
+  const cases: Array<[string, Record<string, unknown>]> = [
+    ["null_if", { values: overBound }],
+    ["replace_regex", { pattern: "\\d", replacement: "", unread: overBound }],
+    ["not_a_standardization_function", { anything: overBound }],
+  ];
+  for (const [fn, params] of cases) {
+    const result = safeParseLinkageTerms(transformStepTerms(fn, params));
+    expect(result.success, fn).toBe(false);
+    if (result.success) continue;
+    expect(
+      result.error.issues.some((i) =>
+        /transform param must not hold more than/.test(i.message),
+      ),
+      fn,
+    ).toBe(true);
+  }
+});
+
+// The widest all-wrong list a token at the decode cap can hold. base64url
+// encodes 3 bytes as 4 characters, so the JSON body's budget is three quarters
+// of MAX_ENCODED_INVITATION_LENGTH; measured off the document rather than
+// assumed, so the case follows the cap if it moves.
+function wrongEntriesFittingAToken(): number {
+  let count = 0;
+  for (;;) {
+    const next = count + 1000;
+    const document = transformStepTerms("null_if", {
+      values: Array.from({ length: next }, () => 0),
+    });
+    if (
+      Math.ceil((JSON.stringify(document).length * 4) / 3) >
+      MAX_ENCODED_INVITATION_LENGTH
+    )
+      return count;
+    count = next;
+  }
+}
+
+test("a token-sized list of wrong entries is refused with a bounded issue count", () => {
+  // A safe parse contracts to RETURN failure. Zod accumulates one issue per
+  // addIssue and spreads that array up through each nested frame, so an issue
+  // per wrong entry costs heap in proportion to the list and overflows the call
+  // stack past roughly 130,000 issues -- a throw out of safeParse rather than a
+  // failure. The count of issues is bounded by the params the step declares
+  // instead: one for the entry count, one naming the first entry that is not
+  // text.
+  const count = wrongEntriesFittingAToken();
+  expect(count).toBeGreaterThan(MAX_TRANSFORM_PARAM_ENTRIES);
+  const document = transformStepTerms("null_if", {
+    values: Array.from({ length: count }, () => 0),
+  });
+  let result: ReturnType<typeof safeParseLinkageTerms> | undefined;
+  expect(() => {
+    result = safeParseLinkageTerms(document);
+  }).not.toThrow();
+  expect(result?.success).toBe(false);
+  if (!result || result.success) return;
+  expect(result.error.issues.map((i) => i.path.join("."))).toEqual([
+    "linkageKeys.0.elements.0.transform.0.params.values",
+    "linkageKeys.0.elements.0.transform.0.params.values.0",
+  ]);
+});
+
+test("a list far past the issue-spread threshold is refused rather than thrown", () => {
+  // Terms are re-parsed off the post-handshake wire as well, under a frame cap
+  // orders of magnitude above the token cap, so the property is pinned at a
+  // width no token could carry.
+  const document = transformStepTerms("null_if", {
+    values: Array.from({ length: 200_000 }, () => 0),
+  });
+  let result: ReturnType<typeof safeParseLinkageTerms> | undefined;
+  expect(() => {
+    result = safeParseLinkageTerms(document);
+  }).not.toThrow();
+  expect(result?.success).toBe(false);
+  if (!result || result.success) return;
+  expect(result.error.issues).toHaveLength(2);
+});
+
 test("parseLinkageTerms throws on an over-bound param (the initiator/joiner path)", () => {
   expect(() =>
     parseLinkageTerms(
@@ -1363,14 +1519,17 @@ test("a replacement holding substitution sequences parses at the bound", () => {
   ).toBe(substituting);
 });
 
-test("a non-string param value is untouched by the content bound", () => {
-  // Only a string param holds content the pipeline amplifies; a non-string is
-  // left to the factory's own coercion contract (a non-string `replacement` falls
-  // back to the empty string, pinned in standardization.test.ts), as a malformed
-  // pad_left length is.
+test("a param no function reads is untouched by the content bound", () => {
+  // Only a string param holds content the pipeline amplifies, and only a param
+  // a function reads has a declared type; a param outside both keeps whatever
+  // the document wrote.
   expect(
     safeParseLinkageTerms(
-      transformStepTerms("replace_regex", { pattern: "\\d", replacement: 42 }),
+      transformStepTerms("replace_regex", {
+        pattern: "\\d",
+        replacement: "",
+        unread: 42,
+      }),
     ).success,
   ).toBe(true);
 });
@@ -1378,9 +1537,8 @@ test("a non-string param value is untouched by the content bound", () => {
 test("the bound reaches a param VALUE, not a string nested in an array- or object-valued param", () => {
   // The stated reach, both halves of it, pinned as behavior rather than left to
   // prose. Nothing derives a per-row value from a nested string: null_if compares
-  // its `values` entries against the cell and emits the cell or null, and an array
-  // a regex factory would render into a compile source is bounded on the COERCED
-  // source by MAX_TRANSFORM_PATTERN_LENGTH (pinned above).
+  // its `values` entries against the cell and emits the cell or null, and a param
+  // no function reads is read by nothing at all.
   expect(
     safeParseLinkageTerms(
       transformStepTerms("null_if", { values: [overBoundValue] }),
@@ -1388,7 +1546,10 @@ test("the bound reaches a param VALUE, not a string nested in an array- or objec
   ).toBe(true);
   expect(
     safeParseLinkageTerms(
-      transformStepTerms("null_if", { value: { deep: overBoundValue } }),
+      transformStepTerms("replace_regex", {
+        pattern: "\\d",
+        unread: { deep: overBoundValue },
+      }),
     ).success,
   ).toBe(true);
 });
@@ -3465,4 +3626,298 @@ describe("linkageRuleSet", () => {
     expect(derived.linkageRuleSet).toStrictEqual(citation);
     expect(validateCompatibility(inviter, derived).errors).toEqual([]);
   });
+});
+
+// --- Declared transform param types ------------------------------------------
+// Every param a step function reads has a declared type, so a document that
+// writes another one is refused where it is decoded -- the same refusal for the
+// operator who wrote an unquoted YAML number and for a partner who crafted one,
+// and before either party runs anything.
+
+describe("declared transform param types", () => {
+  test("refuses a numeric replace_regex replacement, naming the param and the type", () => {
+    const result = safeParseLinkageTerms(
+      transformStepTerms("replace_regex", { pattern: "-", replacement: 42 }),
+    );
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    const issue = result.error.issues.find((i) =>
+      /replace_regex replacement must be text, not a number/.test(i.message),
+    );
+    expect(issue).toBeDefined();
+    // The path locates the offending value, so a message that names no partner
+    // content still points at the step that has to change.
+    expect(issue?.path).toEqual([
+      "linkageKeys",
+      0,
+      "elements",
+      0,
+      "transform",
+      0,
+      "params",
+      "replacement",
+    ]);
+  });
+
+  // Nothing of the declared value reaches the refusal: the message names its
+  // TYPE and the issue path locates it, so a value crafted to be read as a
+  // sentence -- a long string, a marker inside an object or a list -- is not
+  // repeated to whoever reads the refusal. Measured over the rendered relay,
+  // which is what an acceptor sees, and not over the message alone.
+  const MARKER = "unrepeatable-param-marker";
+  const longMarkerText = MARKER.padEnd(720, "x");
+  const paramPath = (param: string) => [
+    "linkageKeys",
+    0,
+    "elements",
+    0,
+    "transform",
+    0,
+    "params",
+    param,
+  ];
+
+  test.each([
+    {
+      name: "a long string in an integer param",
+      fn: "substring",
+      params: { start: longMarkerText, length: 3 },
+      param: "start",
+      message: "substring start must be a whole number, not text",
+    },
+    {
+      name: "a long string in a text param, refused for its neighbour",
+      fn: "replace_regex",
+      params: { pattern: longMarkerText, replacement: 42 },
+      param: "replacement",
+      message: "replace_regex replacement must be text, not a number",
+    },
+    {
+      name: "an object carrying a marker",
+      fn: "coalesce",
+      params: { default: { note: MARKER } },
+      param: "default",
+      message: "coalesce default must be text, not an object",
+    },
+    {
+      name: "an array carrying a marker",
+      fn: "coalesce",
+      params: { default: [MARKER] },
+      param: "default",
+      message: "coalesce default must be text, not a list",
+    },
+    {
+      name: "a NaN in an integer param",
+      fn: "substring",
+      params: { start: Number.NaN, length: 3 },
+      param: "start",
+      message:
+        "substring start must be a whole number, not a non-finite number",
+    },
+    {
+      name: "an infinity in an integer param",
+      fn: "substring",
+      params: { start: Number.POSITIVE_INFINITY, length: 3 },
+      param: "start",
+      message:
+        "substring start must be a whole number, not a non-finite number",
+    },
+  ])("$name is refused by type, echoing no part of it", (testCase) => {
+    const result = safeParseLinkageTerms(
+      transformStepTerms(testCase.fn, testCase.params),
+    );
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(
+      result.error.issues.map((issue) => [issue.path, issue.message]),
+    ).toContainEqual([paramPath(testCase.param), testCase.message]);
+    expect(describeDecodeError(result.error)).not.toContain(MARKER);
+  });
+
+  test("a long text param carrying a marker parses, so no refusal quotes it", () => {
+    // The other half of the measurement above: where the value is the type the
+    // function reads, it is accepted as declared rather than echoed into an
+    // issue at all.
+    const result = safeParseLinkageTerms(
+      transformStepTerms("replace_regex", {
+        pattern: longMarkerText,
+        replacement: "",
+      }),
+    );
+    expect(result.success).toBe(true);
+    if (!result.success) return;
+    expect(
+      result.data.linkageKeys[0].elements[0].transform?.[0].params?.pattern,
+    ).toBe(longMarkerText);
+  });
+
+  test("refuses a numeric pad_left char", () => {
+    const result = safeParseLinkageTerms(
+      transformStepTerms("pad_left", { length: 9, char: 5 }),
+    );
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(
+      result.error.issues.some((i) =>
+        /pad_left char must be text, not a number/.test(i.message),
+      ),
+    ).toBe(true);
+  });
+
+  test("a partner token's refusal states the type alone, naming no remedy", () => {
+    // The remedy a text param's refusal can name -- quote the value, or leave
+    // the key out -- addresses whoever wrote the document. The acceptor reading
+    // this one did not write it: the terms are the partner's, and
+    // describeDecodeError renders the message to them as it stands. The
+    // operator's own standardization block takes the remedy
+    // (standardizationSchema.test.ts).
+    const result = safeParseLinkageTerms(
+      transformStepTerms("coalesce", { default: 42 }),
+    );
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(result.error.issues.map((issue) => issue.message)).toContain(
+      "coalesce default must be text, not a number",
+    );
+    expect(describeDecodeError(result.error)).not.toContain("quote the value");
+  });
+
+  test("refuses a null coalesce default", () => {
+    const result = safeParseLinkageTerms(
+      transformStepTerms("coalesce", { default: null }),
+    );
+    expect(result.success).toBe(false);
+    if (result.success) return;
+    expect(
+      result.error.issues.some((i) =>
+        /coalesce default must be text, not null/.test(i.message),
+      ),
+    ).toBe(true);
+  });
+
+  // Every param the table types, driven through a real document: the declared
+  // type parses and each other type is refused, so no row of the table is
+  // enforced only in principle. The row list is read from the table itself
+  // rather than copied here, and the parity test below fails on a row with no
+  // case and a case with no row, so neither side drifts in silence.
+  const typedParamCases: Record<
+    string,
+    {
+      declared: unknown;
+      otherParams: Record<string, unknown>;
+      refusedTypes: unknown[];
+    }
+  > = {
+    "substring.start": {
+      declared: 1,
+      otherParams: { length: 3 },
+      refusedTypes: ["1", 1.5, true, null, [], {}],
+    },
+    "substring.length": {
+      declared: 3,
+      otherParams: { start: 1 },
+      refusedTypes: ["3", 3.5, true, null, [], {}],
+    },
+    "parse_date.inputFormat": {
+      declared: "MM/DD/YYYY",
+      otherParams: {},
+      refusedTypes: [42, true, null, [], {}],
+    },
+    "parse_date.outputFormat": {
+      declared: "YYYYMMDD",
+      otherParams: {},
+      refusedTypes: [42, true, null, [], {}],
+    },
+    "pad_left.length": {
+      declared: 9,
+      otherParams: {},
+      refusedTypes: ["9", 9.5, true, null, [], {}],
+    },
+    "pad_left.char": {
+      declared: "0",
+      otherParams: { length: 9 },
+      refusedTypes: [0, true, null, [], {}],
+    },
+    "phonetic.algorithm": {
+      declared: "soundex",
+      otherParams: {},
+      refusedTypes: [42, true, null, [], {}],
+    },
+    "null_if.value": {
+      declared: "N/A",
+      otherParams: {},
+      refusedTypes: [42, true, null, [], {}],
+    },
+    "null_if.values": {
+      declared: ["N/A"],
+      otherParams: {},
+      refusedTypes: [42, "N/A", true, null, {}, [42]],
+    },
+    "replace_regex.pattern": {
+      declared: "-",
+      otherParams: {},
+      refusedTypes: [42, true, null, {}],
+    },
+    "replace_regex.replacement": {
+      declared: "",
+      otherParams: { pattern: "-" },
+      refusedTypes: [42, true, null, [], {}],
+    },
+    "extract_regex.pattern": {
+      declared: "(.)",
+      otherParams: {},
+      refusedTypes: [42, true, null, {}],
+    },
+    "filter_regex.pattern": {
+      declared: ".",
+      otherParams: {},
+      refusedTypes: [42, true, null, {}],
+    },
+    "split_on.delimiter": {
+      declared: "-",
+      otherParams: {},
+      refusedTypes: [42, true, null, {}],
+    },
+    "split_on.includeOriginal": {
+      declared: true,
+      otherParams: { delimiter: "-" },
+      refusedTypes: [42, "true", null, [], {}],
+    },
+    "coalesce.default": {
+      declared: "UNKNOWN",
+      otherParams: {},
+      refusedTypes: [42, true, null, [], {}],
+    },
+  };
+
+  test("every row of the declared-type table has a case, and every case a row", () => {
+    expect(
+      transformParamTypeRows()
+        .map((row) => `${row.function}.${row.param}`)
+        .sort(),
+    ).toEqual(Object.keys(typedParamCases).sort());
+  });
+
+  test.each(transformParamTypeRows())(
+    "$function $param parses as declared and refuses every other type",
+    (row) => {
+      const fixture = typedParamCases[`${row.function}.${row.param}`];
+      expect(fixture).toBeDefined();
+      if (fixture === undefined) return;
+      const { declared, otherParams, refusedTypes } = fixture;
+      const fn = row.function;
+      expect(
+        safeParseLinkageTerms(
+          transformStepTerms(fn, { ...otherParams, [row.param]: declared }),
+        ).success,
+      ).toBe(true);
+      for (const refused of refusedTypes)
+        expect(
+          safeParseLinkageTerms(
+            transformStepTerms(fn, { ...otherParams, [row.param]: refused }),
+          ).success,
+          `${fn} ${row.param}: ${JSON.stringify(refused)}`,
+        ).toBe(false);
+    },
+  );
 });

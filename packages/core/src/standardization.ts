@@ -1,12 +1,22 @@
 import { z } from "zod";
 import { getLogger } from "./utils/logger.js";
-import { UnknownStandardizationFunctionError, UsageError } from "./errors.js";
+import {
+  InternalConsistencyError,
+  UnknownStandardizationFunctionError,
+  UsageError,
+} from "./errors.js";
 import { redactAndSanitizeForDisplay } from "./utils/sanitizeErrorForDisplay.js";
 import {
   compileLinearRegex,
   coerceToPatternString,
   patternConformsToDialect,
 } from "./utils/linearRegex.js";
+import {
+  declaredTransformParamType,
+  transformParamEntryTypeMessage,
+  transformParamTypeMessage,
+} from "./config/transformParamTypes.js";
+import type { TransformParamType } from "./config/transformParamTypes.js";
 import type {
   Standardization,
   StandardizationStep,
@@ -102,12 +112,122 @@ export type KeyCandidates = string | ReadonlySet<string> | undefined;
 
 /**
  * The parameter bag a standardizing function is constructed with. Values are
- * `unknown` because the terms schema types no per-function shape, so every
- * factory guards the bounds it reads.
+ * `unknown` because the record admits a param no function reads, so a factory
+ * reads each param it does read through the typed accessors below.
  *
  * @internal read by the satisfiability probes in `linkageSatisfiability.ts`.
  */
 export type Params = Record<string, unknown>;
+
+/**
+ * The value a step declares for `param`, or undefined where it declares none.
+ * Own-property lookup, not a bare index, so a name defined on a polluted
+ * `Object.prototype` is never read as a declared param.
+ */
+function declaredParam(params: Params, param: string): unknown {
+  return Object.hasOwn(params, param) ? params[param] : undefined;
+}
+
+/**
+ * Refuse an accessor that reads a param as a type the declared-type table does
+ * not declare for it. That table is what both decode paths check a document
+ * against, so an accessor reading the same param as another type would admit at
+ * compile what a decode refuses, or refuse what it admits, with the
+ * disagreement stated nowhere. Every factory reads each param it reads through
+ * an accessor when it is constructed, so a row that drifts from an accessor
+ * fails at the first compile of that step.
+ */
+function assertTableDeclaresType(
+  functionName: string,
+  param: string,
+  expected: TransformParamType,
+): void {
+  const declared = declaredTransformParamType(functionName, param);
+  if (declared === expected) return;
+  throw new InternalConsistencyError(
+    `${functionName} ${param} is read as ${expected}, but the declared-type ` +
+      `table ${declared === undefined ? "holds no row for it" : `declares it ${declared}`}`,
+  );
+}
+
+/**
+ * The text a step declares for `param`, or undefined where it declares none.
+ *
+ * A wrong type is refused rather than replaced with the function's default: the
+ * declared value is what the operator and the partner read on the consent
+ * surface and in the document, so a step that would run as something else stops
+ * the pipeline at compile, before the first row. Every decode path types these
+ * params already (`config/transformParamTypes.ts`), so this is what holds a
+ * caller that builds steps without one -- against the same table, which each
+ * accessor checks its own reading against ({@link assertTableDeclaresType}).
+ */
+function textParam(
+  functionName: string,
+  params: Params,
+  param: string,
+): string | undefined {
+  assertTableDeclaresType(functionName, param, "text");
+  const declared = declaredParam(params, param);
+  if (declared === undefined) return undefined;
+  if (typeof declared !== "string")
+    throw new UsageError(
+      transformParamTypeMessage(functionName, param, "text", declared),
+    );
+  return declared;
+}
+
+/** The true/false a step declares for `param`; see {@link textParam}. */
+function booleanParam(
+  functionName: string,
+  params: Params,
+  param: string,
+): boolean | undefined {
+  assertTableDeclaresType(functionName, param, "boolean");
+  const declared = declaredParam(params, param);
+  if (declared === undefined) return undefined;
+  if (typeof declared !== "boolean")
+    throw new UsageError(
+      transformParamTypeMessage(functionName, param, "boolean", declared),
+    );
+  return declared;
+}
+
+/** The whole number a step declares for `param`; see {@link textParam}. */
+function integerParam(
+  functionName: string,
+  params: Params,
+  param: string,
+): number | undefined {
+  assertTableDeclaresType(functionName, param, "integer");
+  const declared = declaredParam(params, param);
+  if (declared === undefined) return undefined;
+  if (typeof declared !== "number" || !Number.isInteger(declared))
+    throw new UsageError(
+      transformParamTypeMessage(functionName, param, "integer", declared),
+    );
+  return declared;
+}
+
+/** The list of text a step declares for `param`; see {@link textParam}. */
+function textListParam(
+  functionName: string,
+  params: Params,
+  param: string,
+): string[] | undefined {
+  assertTableDeclaresType(functionName, param, "text-list");
+  const declared = declaredParam(params, param);
+  if (declared === undefined) return undefined;
+  if (!Array.isArray(declared))
+    throw new UsageError(
+      transformParamTypeMessage(functionName, param, "text-list", declared),
+    );
+  for (const entry of declared)
+    if (typeof entry !== "string")
+      throw new UsageError(
+        transformParamEntryTypeMessage(functionName, param, entry),
+      );
+  return declared as string[];
+}
 
 // A compiled standardizing function: params are captured at construction time
 // via the factory, so per-row calls pay no param-parsing or regex-compilation
@@ -403,23 +523,11 @@ export function renderDateOutput(
 // string tokens YYYY / YY / MM / DD stay as written; delimiter characters are
 // literal. Params arrive as camelCase after camelizeKeys (e.g. inputFormat).
 function parseDateFactory(params: Params): StandardizingFn {
-  // The wire params are z.unknown(), so a partner can declare either format as
-  // a non-string. An absent input format falls back to the default; a present
-  // non-string is a dead key by design, realized as an empty format that
-  // tokenizes to an all-dropping pattern (a raw non-string would instead throw
-  // in parseDateFormat). Guard the output format by type too: a non-string
-  // reaches `.replaceAll` and throws, so it falls back to the absent default.
-  const rawInputFormat = params.inputFormat;
   const inputFormat =
-    rawInputFormat == null
-      ? "MM/DD/YYYY"
-      : typeof rawInputFormat === "string"
-        ? rawInputFormat
-        : "";
+    textParam("parse_date", params, "inputFormat") ?? "MM/DD/YYYY";
   const outputFormat =
-    typeof params.outputFormat === "string"
-      ? params.outputFormat
-      : DEFAULT_DATE_OUTPUT_FORMAT;
+    textParam("parse_date", params, "outputFormat") ??
+    DEFAULT_DATE_OUTPUT_FORMAT;
 
   const { source, order } = parseDateFormat(inputFormat);
   // Compile the anchored source under the linear-time engine, not `new RegExp`:
@@ -468,13 +576,13 @@ function parseDateFactory(params: Params): StandardizingFn {
 // it at runtime, and the terms-level breadth verdicts here read it against a
 // rendered layout without any data, so the two cannot drift.
 //
-// Guard both bounds by type, not just presence: the wire params are z.unknown()
-// and typed by no per-function shape, so a partner can declare either as a
-// non-integer (a string, float, or other JSON value). An unguarded non-number
-// `length` turns `startIndex + length` into string concatenation, silently
-// producing the wrong window rather than the intended one. A non-integer bound,
-// or the `start === 0` no-op, reads nothing instead -- the ignore path a
-// degenerate bound takes rather than crashing the partner-reachable key build.
+// The bounds arrive typed: a non-integer is refused where the document is
+// decoded (`config/transformParamTypes.ts`) and again by the accessor the
+// factory reads them through, which is what keeps an unguarded non-number
+// `length` from turning `startIndex + length` into string concatenation. What
+// remains here is the `start === 0` no-op and an absent bound, which read
+// nothing -- the ignore path a degenerate bound takes, refused one layer up by
+// the dead-pipeline grading.
 //
 // The two ends of the `String.prototype.slice` call this describes clamp by
 // different rules: a NEGATIVE `length` drives the end argument below zero, where
@@ -483,18 +591,11 @@ function parseDateFactory(params: Params): StandardizingFn {
 // `valueLength + length`. Both bounds are determinate only because the caller
 // supplies the length of the value being sliced.
 function substringWindow(
-  params: Params | undefined,
+  start: number | undefined,
+  length: number | undefined,
   valueLength: number,
 ): { start: number; end: number } | undefined {
-  const start = params?.start;
-  const length = params?.length;
-  if (
-    typeof start !== "number" ||
-    !Number.isInteger(start) ||
-    typeof length !== "number" ||
-    !Number.isInteger(length) ||
-    start === 0
-  )
+  if (start === undefined || length === undefined || start === 0)
     return undefined;
   // SQL SUBSTR convention: a positive start is 1-indexed; a negative one counts
   // back from the end and clamps at the front of the value.
@@ -510,13 +611,15 @@ function substringWindow(
 }
 
 function substringFactory(params: Params): StandardizingFn {
-  // substringWindow holds the whole convention -- bounds coercion, SQL SUBSTR
-  // indexing, and the clamps -- and needs the length of the value being sliced
-  // to fix either bound, so the window is resolved per value rather than
-  // hoisted out of the returned fn. A window that reads nothing is the drop
-  // this step takes for a degenerate bound.
+  const start = integerParam("substring", params, "start");
+  const length = integerParam("substring", params, "length");
+  // substringWindow holds the whole convention -- SQL SUBSTR indexing and the
+  // clamps -- and needs the length of the value being sliced to fix either
+  // bound, so the window is resolved per value rather than hoisted out of the
+  // returned fn. A window that reads nothing is the drop this step takes for a
+  // degenerate bound.
   return (s) => {
-    const window = substringWindow(params, s.length);
+    const window = substringWindow(start, length, s.length);
     if (window === undefined) return null;
     return s.slice(window.start, window.end);
   };
@@ -564,7 +667,7 @@ function soundex(s: string): string {
 }
 
 function phoneticFactory(params: Params): StandardizingFn {
-  const algorithm = (params.algorithm as string | undefined) ?? "soundex";
+  const algorithm = textParam("phonetic", params, "algorithm") ?? "soundex";
   if (algorithm === "soundex") {
     return (s) => {
       const result = soundex(s);
@@ -575,39 +678,26 @@ function phoneticFactory(params: Params): StandardizingFn {
 }
 
 function padLeftFactory(params: Params): StandardizingFn {
-  const length = params.length as number | undefined;
-  if (typeof length !== "number" || !Number.isInteger(length) || length <= 0)
+  const length = integerParam("pad_left", params, "length");
+  if (length === undefined || length <= 0)
     throw new Error(`pad_left: "length" must be a positive integer`);
   // Normalize before validating the length, not after: NFC can change the
   // code-unit count (a combining mark like U+0344 -> U+0308 U+0301 expands to
   // two), and padStart treats a multi-unit fill as a cycling pattern, so the
-  // one-character contract must hold on the normalized value. Guard `char` by
-  // type: the wire params are z.unknown(), and a non-string would throw on
-  // `.normalize`; it falls back to the "0" default instead.
-  const char = (typeof params.char === "string" ? params.char : "0").normalize(
-    "NFC",
-  );
+  // one-character contract must hold on the normalized value.
+  const char = (textParam("pad_left", params, "char") ?? "0").normalize("NFC");
   if (char.length !== 1)
     throw new Error(`pad_left: "char" must be exactly one character`);
   return (s) => s.padStart(length, char);
 }
 
 function nullIfFactory(params: Params): StandardizingFn {
-  // Build the exclusion set from string entries only. The wire params are
-  // z.unknown() and typed by no per-function shape, so a partner can declare
-  // `values` as a non-array or with non-string elements, or `value` as a
-  // non-string scalar; normalizing any of those below would throw. A non-string
-  // can never equal a string cell, so a non-array `values` and any non-string
-  // entry contribute no exclusion rather than crashing.
-  const rawValues =
-    params.values !== undefined
-      ? Array.isArray(params.values)
-        ? params.values
-        : []
-      : params.value !== undefined
-        ? [params.value]
-        : [];
-  const values = rawValues.filter((v): v is string => typeof v === "string");
+  // `values` first, then the single `value`: a step declaring both excludes
+  // the list.
+  const declaredValues = textListParam("null_if", params, "values");
+  const singleValue = textParam("null_if", params, "value");
+  const values =
+    declaredValues ?? (singleValue !== undefined ? [singleValue] : []);
   // NFC-normalize the exclusion values so one authored in a different form
   // (e.g. NFD from a YAML file written on macOS) still matches the runtime
   // value.
@@ -621,16 +711,15 @@ function nullIfFactory(params: Params): StandardizingFn {
 }
 
 function replaceRegexFactory(params: Params): StandardizingFn {
-  const pattern = coerceToPatternString(params.pattern);
+  const pattern = coerceToPatternString(
+    textParam("replace_regex", params, "pattern"),
+  );
   // NFC-normalize the replacement literal so it cannot inject a non-NFC byte
   // sequence into the key (the pattern itself is matched as authored; author
-  // it in NFC to match NFC runtime values). Guard by type: the wire params
-  // are z.unknown(), and a non-string `replacement` would throw on
-  // `.normalize`; it falls back to the empty replacement instead.
-  const replacement =
-    typeof params.replacement === "string"
-      ? params.replacement.normalize("NFC")
-      : "";
+  // it in NFC to match NFC runtime values).
+  const replacement = (
+    textParam("replace_regex", params, "replacement") ?? ""
+  ).normalize("NFC");
   const re = compileLinearRegex(pattern);
   // Normalize before matching (see the STANDARDIZING_FUNCTIONS contract) so an
   // authored-NFC pattern matches a value left non-NFC by an upstream case-fold;
@@ -640,7 +729,9 @@ function replaceRegexFactory(params: Params): StandardizingFn {
 }
 
 function extractRegexFactory(params: Params): StandardizingFn {
-  const pattern = coerceToPatternString(params.pattern);
+  const pattern = coerceToPatternString(
+    textParam("extract_regex", params, "pattern"),
+  );
   const re = compileLinearRegex(pattern);
   // Match AND slice on the NFC-normalized value (see the STANDARDIZING_FUNCTIONS
   // contract): an authored-NFC pattern must match a value left non-NFC by an
@@ -652,7 +743,9 @@ function extractRegexFactory(params: Params): StandardizingFn {
 }
 
 function filterRegexFactory(params: Params): StandardizingFn {
-  const pattern = coerceToPatternString(params.pattern);
+  const pattern = coerceToPatternString(
+    textParam("filter_regex", params, "pattern"),
+  );
   const re = compileLinearRegex(pattern);
   // NFC-normalize before testing (see the STANDARDIZING_FUNCTIONS contract) so
   // an authored-NFC pattern matches a value left non-NFC by an upstream
@@ -662,9 +755,11 @@ function filterRegexFactory(params: Params): StandardizingFn {
 }
 
 function splitOnFactory(params: Params): StandardizingFn {
-  const delimiter = coerceToPatternString(params.delimiter);
+  const delimiter = coerceToPatternString(
+    textParam("split_on", params, "delimiter"),
+  );
   const includeOriginal =
-    (params.includeOriginal as boolean | undefined) ?? false;
+    booleanParam("split_on", params, "includeOriginal") ?? false;
   const re = compileLinearRegex(delimiter);
   return (s) => {
     // Normalize before splitting (see the STANDARDIZING_FUNCTIONS contract) so
@@ -891,9 +986,10 @@ export interface StandardizationFunctionDescriptor {
    * snake_case an operator writes in YAML. A defaulted param's default is set
    * via Zod `.default(...)`, so a parse of omitted params yields the same value
    * the factory falls back to. These schemas describe well-formed editor output
-   * (a value, or an omitted default); they are NOT the partner-supplied wire
-   * params, which stay `z.unknown()`, count-bounded and string-length-bounded
-   * in `config/linkageTermsSchema.ts`. The drift test pins each schema against its
+   * (a value, or an omitted default); they are NOT the wire params, which the
+   * wire schema types only as far as the declared param types
+   * (`config/transformParamTypes.ts`), count bounds, and string-length bounds in
+   * `config/linkageTermsSchema.ts`. The drift test pins each schema against its
    * factory so a descriptor cannot disagree with the function it describes.
    *
    * Typed `ZodObject<ZodRawShape>` rather than a per-function shape because the
@@ -1044,13 +1140,13 @@ export const STANDARDIZATION_FUNCTION_DESCRIPTORS: Record<
     label: "Substring",
     blurb: "Keep a fixed slice of the value by start position and length.",
     tier: "standard",
-    // The factory drops a non-integer or 0 bound to an always-null fn, but leaves
-    // a negative length (which slices to empty) alone -- so the schema is
-    // stricter here, by design, rejecting hazard shapes (a fractional position,
-    // a non-positive length, a 0 start) at parse time with a message rather than
-    // silently dropping every row. 0 is rejected because the factory treats it as
-    // an always-null no-op; positions are 1-indexed, with a negative start
-    // counting from the end.
+    // The factory throws on a non-integer bound and drops every row for a 0
+    // start, but takes a negative length, which reads a window ending that many
+    // characters short of the end of the value. This schema is stricter than
+    // both, by design: it refuses the hazard shapes -- a fractional position, a
+    // non-positive length, a 0 start -- at parse time with a message, rather
+    // than leaving the operator a step that drops every row. Positions are
+    // 1-indexed, with a negative start counting from the end.
     params: z.object({
       start: z
         .number()
@@ -1190,82 +1286,6 @@ export const STANDARDIZATION_FUNCTION_DESCRIPTORS: Record<
   },
 };
 
-// --- Runtime-coercion contract -----------------------------------------------
-
-/**
- * Per-function table of parameters a standardization function replaces with a
- * fixed fallback when the declared value is nullish, keyed by the camelCase
- * param name (params arrive camelCased). Each factory reads its param as
- * `(params.x ?? <fallback>)`, so a declared `null` runs as <fallback> -- the
- * headline case being `replace_regex` `replacement: null`, which executes as the
- * empty string. These are the only param coercions that make a declared term
- * differ from the executed one in a way worth surfacing; NFC normalization of a
- * present value is excluded, as it does not change the human-readable value, and
- * a function or param absent here applies its declared value as written.
- *
- * Hand-listed but pinned to the real factory behavior by a test (a declared-null
- * run must equal a declared-fallback run), and kept beside
- * {@link STANDARDIZING_FUNCTIONS} so the two are edited together. The one drift
- * this table cannot catch structurally -- a newly added function that coerces a
- * param yet gets no entry here -- closes when a function's param resolution is
- * shared with this table directly rather than duplicated.
- */
-const TRANSFORM_PARAM_FALLBACKS: Record<string, Record<string, unknown>> = {
-  replace_regex: { replacement: "" },
-  parse_date: { inputFormat: "MM/DD/YYYY", outputFormat: "YYYYMMDD" },
-  pad_left: { char: "0" },
-  phonetic: { algorithm: "soundex" },
-  split_on: { includeOriginal: false },
-};
-
-/**
- * One parameter whose declared value a transform function replaces at match
- * time, paired with the value it actually uses.
- */
-interface TransformParamCoercion {
-  /** The camelCase parameter name. */
-  param: string;
-  /** The value the function applies in place of the declared (nullish) one. */
-  executed: unknown;
-}
-
-/**
- * The parameters of `step` whose DECLARED value the function coerces before
- * applying it -- today, the params a function defaults when they are declared
- * `null` (e.g. `replace_regex` `replacement: null` runs as the empty string).
- * Only params that are BOTH present on `step` AND coerced are returned, so a
- * caller can annotate exactly those and show every other declared param
- * verbatim; a param declared with a real value, an absent param, an
- * un-coerced param, and an unrecognized function name all yield nothing. Lets a
- * consent display state what executes off core's actual behavior, rather than a
- * web-side guess that could misstate a function it does not coerce.
- */
-export function describeTransformCoercions(
-  step: TransformStep,
-): TransformParamCoercion[] {
-  // Own-property lookup, as the per-param check below: the function name is
-  // partner-authored free text, and a bare index answers `constructor` or
-  // `toString` with an inherited Object.prototype member.
-  const fallbacks = Object.hasOwn(TRANSFORM_PARAM_FALLBACKS, step.function)
-    ? TRANSFORM_PARAM_FALLBACKS[step.function]
-    : undefined;
-  if (fallbacks === undefined) return [];
-  const params = step.params ?? {};
-  const coercions: TransformParamCoercion[] = [];
-  for (const [param, executed] of Object.entries(fallbacks)) {
-    // Only a declared, nullish param diverges: a declared real value is applied
-    // as written, and an absent param has no displayed term to annotate. Own-
-    // property check (Object.hasOwn, not `in`) so a name reachable only on the
-    // prototype chain is never read as a declared param -- keeping the reported
-    // coercion partner-independent even against a polluted Object.prototype.
-    if (!Object.hasOwn(params, param)) continue;
-    const declared = params[param];
-    if (declared === null || declared === undefined)
-      coercions.push({ param, executed });
-  }
-  return coercions;
-}
-
 // --- Step compilation --------------------------------------------------------
 
 /**
@@ -1296,19 +1316,10 @@ function compileStep(step: {
   if (step.function === "coalesce") {
     // NFC-normalize the literal default so coalesce cannot substitute a non-NFC
     // value into the key (it replaces the whole value, often as the last step).
-    // Guard by type, not just nullish: the wire params are z.unknown() and
-    // typed by no per-function shape, so a partner can declare `default` as any
-    // JSON value, and calling `.normalize` on a non-string (null, number,
-    // array, object) would throw while building the first row's key. Any
-    // non-string behaves as an absent default; it is not String()-coerced,
-    // which would mangle an array or object into a bogus substitution value.
-    const rawDefault = params.default;
+    const declaredDefault = textParam("coalesce", params, "default");
     return {
       kind: "coalesce",
-      default:
-        typeof rawDefault === "string"
-          ? rawDefault.normalize("NFC")
-          : undefined,
+      default: declaredDefault?.normalize("NFC"),
     };
   }
   // Own-property lookup: a bare index answers the names that reach only

@@ -458,11 +458,15 @@ describe("the canonical-encode gate (the byte form both parties hash)", () => {
   });
 
   test("the gate consults no descriptor for a key-element transform param", () => {
-    // The gate is the encoder's, not the authoring descriptors': a param value
-    // core tolerates at runtime (a `coalesce` default that is not text runs as a
-    // pass-through) encodes, so it keeps generating and is left to the notice
-    // that names it. A descriptor-shaped gate would refuse it instead.
-    const step = { function: "coalesce", params: { default: 7 } };
+    // The gate is the encoder's, not the authoring descriptors': a param the
+    // terms schema and the runtime both take -- an empty `replace_regex`
+    // pattern, which the editor's own control requires to be non-empty --
+    // encodes, so the draft keeps generating. A descriptor-shaped gate would
+    // refuse it instead.
+    const step = {
+      function: "replace_regex",
+      params: { pattern: "", replacement: "x" },
+    };
     // The assumption: the descriptors DO judge and reject this param, so what the
     // case measures is that the gate does not ask them -- not that there is
     // nothing here for them to say.
@@ -1125,30 +1129,27 @@ describe("the inert-coalesce notice (a declared default the run will not substit
     expect(inertCoalesceNotice(unreferenced, terms)).toBeUndefined();
   });
 
-  test("an imported key transform whose coalesce declares no text default is named", () => {
-    // The editor's own `default` control is a text input, so an absent or
-    // non-string default arrives only on an imported document, whose transform
-    // params are `z.unknown()`. Core runs both as a pass-through.
+  test("an imported key transform whose coalesce declares no default is named", () => {
+    // The editor's own `default` control is a text input, so a coalesce with no
+    // default at all arrives only on an imported document. Core runs it as a
+    // pass-through, which the notice names; a default declared as something
+    // other than text is refused at decode and reaches no draft.
     const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
-    for (const step of [
+    const imported = withFirstElementTransform(draft, [
+      nullIf,
       { function: "coalesce" },
-      { function: "coalesce", params: { default: 7 } },
-    ]) {
-      const imported = withFirstElementTransform(draft, [nullIf, step]);
-      const terms = buildAdvancedTerms(imported);
-      const element = terms.linkageKeys[0].elements[0];
-      const field = terms.linkageFields.find(
-        (candidate) => candidate.name === element.field,
-      );
-      if (field === undefined)
-        throw new Error("the element's field is not declared");
-      expect(inertCoalesceNotice(imported, terms)).toContain(
-        SEMANTIC_TYPE_LABELS[field.type],
-      );
-      expect(validateAdvancedInvite(imported, seed, now).canGenerate).toBe(
-        true,
-      );
-    }
+    ]);
+    const terms = buildAdvancedTerms(imported);
+    const element = terms.linkageKeys[0].elements[0];
+    const field = terms.linkageFields.find(
+      (candidate) => candidate.name === element.field,
+    );
+    if (field === undefined)
+      throw new Error("the element's field is not declared");
+    expect(inertCoalesceNotice(imported, terms)).toContain(
+      SEMANTIC_TYPE_LABELS[field.type],
+    );
+    expect(validateAdvancedInvite(imported, seed, now).canGenerate).toBe(true);
   });
 
   test("a key transform whose coalesce does substitute says nothing", () => {

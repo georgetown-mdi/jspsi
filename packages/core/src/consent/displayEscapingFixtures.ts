@@ -41,8 +41,7 @@ export const PRINTABLE_ASCII = /^[\x20-\x7e]*$/;
  * from: the `replace_regex` function name and its `pattern` / `replacement`
  * parameter names, and the `generateFuzzyComparisons` enum. Each must be exactly
  * what the standardization layer recognizes for the position it unlocks (the
- * glossary description, the runtime-coercion note, the fuzzy-comparison label)
- * to exist at all, and each of
+ * glossary description, the fuzzy-comparison label) to exist at all, and each of
  * those positions holds first-party copy keyed by that recognized value. Reaching
  * them is what the walk needs; the hostile bytes sit in the partner text beside
  * them (the pattern's value, the field and key names).
@@ -113,12 +112,11 @@ export const hostileTerms: LinkageTerms = {
               function: `mystery${BEL}fn`,
               params: { [`pat${RLO}tern`]: `${ESC}[31m` },
             },
-            // A recognized function declaring `replacement` as null, so the
-            // step holds both a glossary description and the runtime-coercion
-            // note describeTransformCoercions derives from that null.
+            // A recognized function, so the step holds a glossary description
+            // beside its partner-controlled param values.
             {
               function: "replace_regex",
-              params: { pattern: `[${BEL}]`, replacement: null },
+              params: { pattern: `[${BEL}]`, replacement: `${ESC}[32m` },
             },
           ],
         },
