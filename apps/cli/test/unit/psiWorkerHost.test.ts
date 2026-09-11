@@ -10,9 +10,8 @@ import { createWorkerThreadHandle } from "../../src/psiWorkerHost";
 // createWorkerThreadHandle is the single definition of the host-side worker wiring
 // (psiWorkerHost.ts). Production, the integration test, and these tests all wrap a
 // worker through it; a hand-rolled mirror once drifted from production unnoticed.
-// A fake also reaches paths a real worker cannot trigger on demand --
-// 'messageerror' never fires for today's cloneable payloads -- so only a fake
-// proves it routes rather than silently drops, hanging the pending call.
+// A fake also emits 'messageerror' on demand, so that handler is shown here to
+// route the failure rather than silently drop it, hanging the pending call.
 
 // A stand-in for a worker_threads Worker: records posted requests and terminate()
 // calls, and lets a test emit the worker's events on demand.
