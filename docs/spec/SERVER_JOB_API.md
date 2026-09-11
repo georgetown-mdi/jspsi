@@ -583,6 +583,22 @@ The `id` line holds the event's monotonic id (so a browser `EventSource` echoes 
 
 **Client reconnect.** A stream can still be cut -- a proxy restart, a network fault, a tab the browser suspended -- and the browser-side client treats a body that ends before its terminal event as a drop rather than a completed run. It re-opens the stream with `Last-Event-ID`, the id of the last frame it delivered, so the replay above resumes exactly where it stopped; the run itself is untouched, since re-attaching only reads. The retries are bounded: five attempts at 250, 500, 1000, 2000, and 4000 ms, with the budget reset whenever a connection advances the stream past the id the previous one reached, so a long run survives repeated drops while a server that answers but never progresses does not loop. Two failures are not retried: a fault on the first connect, which is reported immediately since nothing has been established to resume, and a `404` at any point, which is the confirmed "the console no longer has this exchange". When the budget is spent the client raises a stream-lost terminal that says the run may still be in progress and to reload to re-attach -- not a claim that the exchange failed.
 
+### Warning sources on the job stream
+
+Every `warning` event on this stream holds a `source` naming which notice raised it, so a supervisor decides whether to alert on the line without parsing `message`. Two sets share that field. A warning the CLI child raised keeps the `source` it wrote on fd 3, relayed unchanged (the closed set in [CLI_EVENTS.md](CLI_EVENTS.md#warning-sources)). A warning the relay composed itself takes one of the values below. The two sets are disjoint, so the field also says which process raised the warning. `RELAY_WARNING_SOURCES` in `apps/web/src/jobs/cliDriver.ts` is the same set in code, and `npm run check:warning-sources` fails when this table and that declaration disagree or when a value lands on both streams. A new synthesized notice claims its value here.
+
+`relayRendezvousPreflight` names what the preflight found on the operator's own mount before the child started. Every other value accompanies `degraded: true`, the mark of a relay degradation, where what the relay lost is part of the CLI's stream (see [Relay validation at the trust boundary](#relay-validation-at-the-trust-boundary)).
+
+| `source` | The notice it names |
+| -------- | ------------------- |
+| `relayRendezvousPreflight` | The filedrop rendezvous preflight at job start: a mount that is missing, is not a directory, is not writable, cannot be listed, is not empty, overlaps the data root or the work-input directory, or could not be resolved to a real path. One value for the whole preflight, whose notices name the leg and the condition in their text ([`JOB_RENDEZVOUS_DIR`](#environment-variables)). |
+| `relayStreamUnavailable` | fd 3 was not wired on the spawned child, so the relay has no event stream to read and the run's events are its exit alone. |
+| `relayStreamOversizedLine` | An fd-3 line grew past the reader's buffer cap; the partial line was discarded. |
+| `relayStreamReadError` | The fd-3 stream reported a read error. |
+| `relayUnparsableEvent` | An fd-3 line was not JSON the bounded parser accepts; the line was dropped. |
+| `relayUnknownEvent` | An fd-3 line parsed but fell outside the v1 vocabulary; the line was dropped. |
+| `relayProcessError` | The child could not be spawned, or died abnormally. The run is then classified as a failure (see [Exit-code reconciliation](#exit-code-reconciliation)). |
+
 ### Relay validation at the trust boundary
 
 The CLI is a separate workspace driven as a subprocess; the server does not import its event types. It re-validates every fd-3 line independently against the v1 vocabulary -- all seven event types [CLI_EVENTS.md](CLI_EVENTS.md#event-types) defines -- requiring `v === 1` and a known `type`. Every string field is re-sanitized -- recursively, through arrays and nested objects -- through the display escaper before the event is buffered or relayed, deliberate defense in depth at the trust-boundary crossing on top of the CLI's own construction-time sanitization. For fd-3 events, sanitization precedes serialization, so the `\n` that frames an SSE line is the writer's own terminator. Manager-composed events (the preflight warnings above, and the synthesized terminal's stderr cause link below) bypass that re-sanitization by design -- their text is composed raw for the console sink's single escape -- so for them the frame's integrity rests on `JSON.stringify` alone escaping every newline class inside the serialized string. That property is held by a check rather than by this sentence: `apps/web/test/unit/jobWarningFraming.unit.test.ts` puts a directory entry whose name holds an LF, a CR, and a complete forged `data:` event on a real rendezvous mount. It then drives the preflight warning it raises through the real manager, the real SSE route, and the real browser-side client, and fails unless every physical line the stream emitted is one the writer produced and the forged text is still inside one JSON string when a seat escapes it.
@@ -593,9 +609,12 @@ That depth bound governs the chain field and nothing else. Every other field is 
 
 Degradation is fail-safe, never a crash:
 
-- A non-JSON line, or one outside the known schema, is reported as a synthesized `warning` event with `degraded: true` and dropped -- the relay continues.
-- An oversized fd-3 line (the reader buffers up to 1,048,576 UTF-16 code units before discarding the partial line) is reported as a degradation warning and the partial buffer discarded.
-- fd 3 being unavailable, or a read error on it, is reported as a degradation warning.
+- A non-JSON line (`relayUnparsableEvent`), or one outside the known schema (`relayUnknownEvent`), is reported as a synthesized `warning` event with `degraded: true` and dropped -- the relay continues.
+- An oversized fd-3 line (the reader buffers up to 1,048,576 UTF-16 code units before discarding the partial line) is reported as a degradation warning under `relayStreamOversizedLine` and the partial buffer discarded.
+- fd 3 being unavailable (`relayStreamUnavailable`), or a read error on it (`relayStreamReadError`), is reported as a degradation warning.
+- A child that could not be spawned, or that died abnormally, is reported as a degradation warning under `relayProcessError` before the run is classified as a failure.
+
+Each of those values, and the preflight's own, is described in [Warning sources on the job stream](#warning-sources-on-the-job-stream).
 
 **Buffer cap.** The event buffer is capped at 10,000 entries (a runaway safety check; a real CLI stream is dozens of lines). On overflow the job is failed rather than dropping events silently: a synthesized `error` terminal is appended, the child is `SIGKILL`ed, and status becomes `failed`, so a supervisor never observes a truncated history.
 

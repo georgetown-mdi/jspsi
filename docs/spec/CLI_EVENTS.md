@@ -105,6 +105,8 @@ The closed set of `source` values. `WARNING_SOURCES` in `apps/cli/src/eventStrea
 | `terminatedRunRecord` | A terminated run's record of what it had already disclosed could not be written, or could not be built at all. |
 | `persistenceLoss` | A completed run's local write that did not reach disk ([Persistence loss](#persistence-loss)). The only value that stands beside a process exit code. |
 
+The console relay passes every value above through unchanged on its own job event stream, where the notices it composes itself take a disjoint set of values ([SERVER_JOB_API.md](SERVER_JOB_API.md#warning-sources-on-the-job-stream)).
+
 #### Persistence loss
 
 A persistence loss is a local write a completed run was asked to make and could not: the exchange itself succeeded, so it must not be re-run, and what is missing is on this party's own disk. Every one of them is reported on fd 3 as a `warning` under `source: "persistenceLoss"` -- a supervisor never has to parse stderr prose for this class -- and every one of them exits `EX_CANTCREAT` (73), while the terminal event stays `result` (see [Exit codes](../CLI.md#exit-codes)). The `source` value stands beside that exit code rather than replacing it: the code is what a bare supervisor reading exit status alone has, the field what one reading fd 3 alone has, and a single function in `apps/cli/src/eventStream.ts` sets both, so a loss cannot reach one channel and miss the other. The full set:

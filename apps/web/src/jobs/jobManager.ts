@@ -39,7 +39,9 @@ import {
   rendezvousHoldsDirectory,
   rendezvousStartupWarnings,
 } from "./jobRendezvous";
+
 import {
+  buildSynthesizedWarningEvent,
   resolveCliBinaryPath,
   spawnExchangeJob,
   spawnZeroSetupJob,
@@ -982,17 +984,18 @@ export class JobManager {
           workdir,
           sweepExchangeFiles,
         ))
-          this.appendEvent(record, { v: 1, type: "warning", message });
+          this.appendEvent(
+            record,
+            buildSynthesizedWarningEvent("relayRendezvousPreflight", message),
+          );
 
     const handlers: CliDriverHandlers = {
       onEvent: (event) => this.appendEvent(record, event),
-      onDegraded: (message) =>
-        this.appendEvent(record, {
-          v: 1,
-          type: "warning",
-          message,
-          degraded: true,
-        }),
+      onDegraded: (source, message) =>
+        this.appendEvent(
+          record,
+          buildSynthesizedWarningEvent(source, message, { degraded: true }),
+        ),
       onTerminal: (state, diagnostics) =>
         this.reconcileTerminal(record, state, diagnostics),
     };

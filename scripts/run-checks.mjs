@@ -161,7 +161,7 @@ export const CHECKS = [
   {
     script: "check:warning-sources",
     description:
-      "The fd-3 warning `source` values the CLI emits are the set docs/spec/CLI_EVENTS.md publishes to a supervisor's author.",
+      "The warning `source` values each stream emits are the set its spec publishes to a supervisor's author -- the CLI's in docs/spec/CLI_EVENTS.md, the console relay's synthesized notices in docs/spec/SERVER_JOB_API.md -- and no value is on both.",
   },
   {
     script: "check:vectors",
