@@ -30,6 +30,7 @@ import { composeManagedExchangeFile } from "@psi/managed/managedExchangeRecord";
 import { dispatchManagedCronExport } from "@psi/managed/managedExchangeExport";
 
 import { createAppMount, flushPendingUpdates } from "./renderApp";
+import { disclosureToggle, openDisclosure } from "./collapsePanels";
 import { captureDownloads } from "./captureDownloads";
 
 import type { DownloadCapture } from "./captureDownloads";
@@ -74,14 +75,17 @@ function newExchange(
 
 const app = createAppMount();
 
-const exportToggle = () =>
-  page.getByRole("button", { name: /run this from the command line/i });
+const EXPORT_PANEL = "Run this from the command line instead";
 
-/** Open the collapsed export panel on a freshly rendered run surface. */
+const exportToggle = () => disclosureToggle(EXPORT_PANEL);
+
+/** Open the collapsed export panel on a freshly rendered run surface, through
+ * the helper that waits out its open transition: the download button inside it
+ * is moving until that transition ends. */
 async function openExportPanel(): Promise<void> {
   await expect.element(exportToggle()).toBeInTheDocument();
   expect(exportToggle().element().getAttribute("aria-expanded")).toBe("false");
-  await exportToggle().click();
+  await openDisclosure(EXPORT_PANEL);
   expect(exportToggle().element().getAttribute("aria-expanded")).toBe("true");
 }
 

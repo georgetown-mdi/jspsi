@@ -29,6 +29,7 @@ import { composeManagedExchangeFile } from "@psi/managed/managedExchangeRecord";
 import { getManagedLocalState } from "@psi/managed/managedLocalState";
 import { managedExchangeLockName } from "@psi/managed/managedExchangeLock";
 
+import { disclosureToggle, openDisclosure } from "./collapsePanels";
 import { captureDownloads } from "./captureDownloads";
 import { createAppMount } from "./renderApp";
 
@@ -116,8 +117,9 @@ async function inputHandle(): Promise<FileSystemFileHandle> {
 
 const app = createAppMount();
 
-const exportToggle = () =>
-  page.getByRole("button", { name: /run this from the command line/i });
+const EXPORT_PANEL = "Run this from the command line instead";
+
+const exportToggle = () => disclosureToggle(EXPORT_PANEL);
 
 const downloadButton = () =>
   page.getByRole("button", { name: "Download psilink.yaml and .psilink.key" });
@@ -186,8 +188,10 @@ async function dispatchCommandLineExport(
 ): Promise<void> {
   const before = downloads.captured.length;
   await expect.element(exportToggle()).toBeInTheDocument();
+  // openDisclosure, not a bare click: the download button below is moving until
+  // the panel's open transition ends.
   if (exportToggle().element().getAttribute("aria-expanded") === "false")
-    await exportToggle().click();
+    await openDisclosure(EXPORT_PANEL);
   await downloadButton().click();
   await expect
     .element(page.getByText("Confirm the hand-off."))

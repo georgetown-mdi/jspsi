@@ -1,6 +1,6 @@
 import { expect } from "vitest";
 
-import { page } from "vitest/browser";
+import { page, userEvent } from "vitest/browser";
 
 /**
  * Reads of a Mantine Collapse disclosure that wait for its content to commit.
@@ -19,6 +19,14 @@ import { page } from "vitest/browser";
  * disclosure body that nested its own Suspense/Activity/lazy boundary would split
  * that commit and need a stricter, substring-specific gate.
  */
+
+// How long a wait here gives the deferred commit. It lands 50 to 200ms behind
+// the core on a machine under four times as many busy processes as cores, and
+// was measured past a second on one saturated by other work as well, so
+// `expect.poll`'s own 1s default is not a budget these waits can take. The
+// browser project bounds a case at 15s, so a wait that overruns this reports
+// which panel never committed instead of the case reporting a bare timeout.
+const DEFERRED_COMMIT_TIMEOUT_MS = 10_000;
 
 /** A disclosure's toggle button, located by the accessible name it holds. */
 export function disclosureToggle(name: string) {
@@ -50,15 +58,20 @@ function collapseFor(name: string): HTMLElement {
  */
 export async function readyPanel(name: string): Promise<HTMLElement> {
   await expect
-    .poll(() => {
-      // query(), not element(): a not-yet-present toggle is the expected transient
-      // (query returns null), while an unexpected fault -- e.g. a strict-mode
-      // multiple match -- still throws out of the poll rather than being swallowed.
-      const id = disclosureToggle(name).query()?.getAttribute("aria-controls");
-      const panel = id ? document.getElementById(id) : null;
-      // trim so a whitespace-only intermediate render is not treated as settled.
-      return panel?.textContent.trim() ?? "";
-    })
+    .poll(
+      () => {
+        // query(), not element(): a not-yet-present toggle is the expected transient
+        // (query returns null), while an unexpected fault -- e.g. a strict-mode
+        // multiple match -- still throws out of the poll rather than being swallowed.
+        const id = disclosureToggle(name)
+          .query()
+          ?.getAttribute("aria-controls");
+        const panel = id ? document.getElementById(id) : null;
+        // trim so a whitespace-only intermediate render is not treated as settled.
+        return panel?.textContent.trim() ?? "";
+      },
+      { timeout: DEFERRED_COMMIT_TIMEOUT_MS },
+    )
     .not.toBe("");
   // panelFor re-resolves the same node: the id lives on an always-mounted wrapper
   // the component never unmounts, so it cannot have been swapped since the poll.
@@ -72,6 +85,77 @@ export async function readyPanel(name: string): Promise<HTMLElement> {
 export async function readyCollapse(name: string): Promise<HTMLElement> {
   await readyPanel(name);
   return collapseFor(name);
+}
+
+/**
+ * Resolves once `container` holds a rendered screen and every disclosure on it
+ * holds its content.
+ *
+ * A render reaches the DOM in two commits: the always-visible core, and then
+ * each disclosure's content at deferred priority behind it. A whole-container
+ * read taken between them sees the screen without its disclosures -- a positive
+ * assertion racing the second commit, and a negative one passing on text that
+ * had not arrived. An empty container is the state before the first commit, so
+ * it does not read as a screen with nothing to wait for; a rendered screen that
+ * holds no disclosure resolves at the first read.
+ */
+export async function readyDisclosures(container: HTMLElement): Promise<void> {
+  await expect
+    .poll(
+      () => {
+        // trim so a whitespace-only intermediate render is not treated as settled.
+        if (container.textContent.trim() === "") return "";
+        const uncommitted = [
+          ...container.querySelectorAll("[aria-expanded][aria-controls]"),
+        ]
+          .filter((toggle) => {
+            const id = toggle.getAttribute("aria-controls");
+            const panel = id ? document.getElementById(id) : null;
+            return (panel?.textContent.trim() ?? "") === "";
+          })
+          .map((toggle) => toggle.textContent.trim());
+        return uncommitted.length === 0
+          ? "committed"
+          : `awaiting: ${uncommitted.join(", ")}`;
+      },
+      { timeout: DEFERRED_COMMIT_TIMEOUT_MS },
+    )
+    .toBe("committed");
+}
+
+/**
+ * Opens the disclosure named `name` and resolves once it has stopped growing:
+ * its content committed, and its panel showing that content whole.
+ *
+ * Mantine opens a disclosure as a height transition, so for its duration the
+ * panel and everything below it are moving. An interaction aimed inside one that
+ * is still opening is dispatched at a point its target may already have left,
+ * which lands the click on a neighbor and leaves the control untouched -- and
+ * the assertion that reads the control's effect then waits out its whole budget
+ * on a state nothing produced. The gap between aiming and dispatching widens
+ * under CPU contention, which is where that showed up.
+ *
+ * A panel whose visible height is its whole content's height is one the
+ * transition has finished with, under both endings Mantine gives it: the inline
+ * height cleared, or pinned to a content height re-measured at the end.
+ */
+export async function openDisclosure(name: string): Promise<HTMLElement> {
+  const panel = await readyPanel(name);
+  await userEvent.click(disclosureToggle(name));
+  const collapse = collapseFor(name);
+  await expect
+    .poll(
+      () => {
+        const shown = collapse.clientHeight;
+        const whole = collapse.scrollHeight;
+        return shown > 0 && shown === whole
+          ? "open"
+          : `opening: ${shown} of ${whole}px`;
+      },
+      { timeout: DEFERRED_COMMIT_TIMEOUT_MS },
+    )
+    .toBe("open");
+  return panel;
 }
 
 /**

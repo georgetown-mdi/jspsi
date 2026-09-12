@@ -45,6 +45,7 @@ import styles from "@styles/app.module.css";
 import { isolatedColumnName } from "@components/ColumnName";
 
 import { createAppMount } from "./renderApp";
+import { openDisclosure } from "./collapsePanels";
 import { visualOrderWithin } from "./visualOrder";
 
 import type {
@@ -2572,6 +2573,9 @@ describe("acceptor screen: run and completion", () => {
   });
 });
 
+/** The disclosure holding the terms this party authors beside the invitation's. */
+const OTHER_DETAILS = "Other details";
+
 describe("AcceptorScreen: this party's own deduplicate", () => {
   // The terms-review step, where this party's own side is authored beside what
   // the invitation declares for the inviting party's.
@@ -2581,7 +2585,7 @@ describe("AcceptorScreen: this party's own deduplicate", () => {
     await expect
       .element(page.getByText("Invitation from County Health Department"))
       .toBeInTheDocument();
-    await userEvent.click(page.getByRole("button", { name: "Other details" }));
+    await openDisclosure(OTHER_DETAILS);
   }
 
   const ownSide = () =>
@@ -2850,10 +2854,7 @@ describe("AcceptorScreen: this party's own deduplicate", () => {
     await expect.element(accept).toBeEnabled();
 
     window.history.back();
-    await expect
-      .element(page.getByRole("button", { name: "Other details" }))
-      .toBeInTheDocument();
-    await userEvent.click(page.getByRole("button", { name: "Other details" }));
+    await openDisclosure(OTHER_DETAILS);
     await expect.element(ownSide()).toBeInTheDocument();
     await userEvent.click(ownSide());
     window.history.forward();
@@ -2913,10 +2914,7 @@ describe("AcceptorScreen: this party's own deduplicate", () => {
     // Refuse the pair from the terms step, then return to this step the way
     // browser history does, around the terms step's own disabled Continue.
     window.history.back();
-    await expect
-      .element(page.getByRole("button", { name: "Other details" }))
-      .toBeInTheDocument();
-    await userEvent.click(page.getByRole("button", { name: "Other details" }));
+    await openDisclosure(OTHER_DETAILS);
     await userEvent.click(ownSide());
     window.history.forward();
     const accept = page.getByRole("button", { name: "Accept and continue" });
@@ -2975,7 +2973,7 @@ describe("AcceptorScreen: this party's own deduplicate", () => {
       .element(page.getByRole("heading", { level: 1 }))
       .toHaveTextContent("Consent & your file");
     window.history.back();
-    await userEvent.click(page.getByRole("button", { name: "Other details" }));
+    await openDisclosure(OTHER_DETAILS);
     await expect.element(ownSide()).toBeInTheDocument();
   }
 

@@ -15,6 +15,11 @@ import { ESLint } from "eslint";
 import { afterAll, describe, expect, it } from "vitest";
 
 import eslintConfig from "../eslint.config.mjs";
+import {
+  PROJECT_PARSER_OPTIONS,
+  typeAwareRuleNames,
+  withoutTypeAwareLayer,
+} from "./eslint-strip-type-aware-layer.mjs";
 
 // Coverage of the parse bans the repo-root eslint.config.mjs carries over
 // packages/peerjs-broker/src: untrusted JSON is decoded through @psilink/core's
@@ -34,13 +39,19 @@ import eslintConfig from "../eslint.config.mjs";
 //
 // The raw-error-at-sink ban is the broker's third, and its tree coverage sits
 // with that ban's other cases in eslint-display-sink-ban.test.mjs.
+//
+// One transform is applied to the config every case is linted through: the
+// type-aware layer is stripped off (withoutTypeAwareLayer), so what this file
+// reports rests on the text it hands in and nothing else, and no lint here waits
+// on a TypeScript program being built.
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..");
 
 const eslint = new ESLint({
   cwd: repoRoot,
-  overrideConfigFile: resolve(repoRoot, "eslint.config.mjs"),
+  overrideConfigFile: true,
+  baseConfig: withoutTypeAwareLayer(eslintConfig),
 });
 
 // A path inside the guarded tree. The bans are scoped by `files` pattern, so the
@@ -212,13 +223,30 @@ const PLANTED_CLEAN =
 
 let plantedRoot;
 
-// Loading the flat config and the typescript-eslint parser for the first time is
-// the expensive part of a lintText call, independent of which file or how much
-// text it is given; under cold process or CPU load that one-time cost alone can
-// outrun the default per-test timeout on a CI runner.
+// Loading the typescript-eslint parser for the first time is the expensive part
+// of a lintText call, independent of which file or how much text it is given;
+// under cold process or CPU load that one-time cost alone can outrun the default
+// per-test timeout on a CI runner.
 describe("the broker parse bans", { timeout: 60_000 }, () => {
   afterAll(() => {
     if (plantedRoot) rmSync(plantedRoot, { recursive: true, force: true });
+  });
+
+  it("lints every path here with no TypeScript program behind it", async () => {
+    for (const filePath of [BROKER_SRC, BROKER_FIRST_PARSE]) {
+      const config = await eslint.calculateConfigForFile(filePath);
+      const parserOptions = config.languageOptions?.parserOptions ?? {};
+      expect(
+        Object.keys(parserOptions).filter((option) =>
+          PROJECT_PARSER_OPTIONS.includes(option),
+        ),
+        `${filePath}: a TypeScript program is configured, so a type-aware rule can run -- and crash -- on ground this file does not test`,
+      ).toEqual([]);
+      expect(
+        typeAwareRuleNames(config.rules, (prefix) => config.plugins?.[prefix]),
+        `${filePath}: a type-aware rule survived the strip`,
+      ).toEqual([]);
+    }
   });
 
   it("lints the text it is handed, not the file on disk", async () => {
