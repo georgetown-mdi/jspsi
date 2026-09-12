@@ -1,7 +1,8 @@
-// What a run authored from two parties' own configuration files shows the
-// operator before it puts anything on the wire. The outbound-payload
-// confirmation covers the party that accepted an invitation; this covers the
-// party that wrote its own terms, which no consent record and no acceptance
+// What a run whose terms this party settled for itself shows the operator
+// before it puts anything on the wire -- terms written into a configuration
+// file, or inferred from the input file a zero-setup run was pointed at. The
+// outbound-payload confirmation covers the party that accepted an invitation;
+// this covers the party whose terms no consent record and no acceptance
 // display stands behind.
 
 import {
@@ -30,6 +31,7 @@ import type {
   InvitationRuleSetSummary,
   LinkageTerms,
   Metadata,
+  PreparedExchange,
   getLogger,
 } from "@psilink/core";
 
@@ -333,9 +335,7 @@ export function renderExchangeDisclosure(
 }
 
 /**
- * Show what this run will disclose and match on, before any credential, terms,
- * or data are sent, for an exchange whose configuration the operator wrote
- * themselves.
+ * The routing the display renders through, on every path that shows it.
  *
  * It asks nothing and refuses nothing: a run that is valid without it stays
  * valid, and every invocation renders the same lines whether or not a terminal
@@ -346,6 +346,23 @@ export function renderExchangeDisclosure(
  * same reason -- at `info` a run quieted to `warn` would print the surface and
  * keep no record of it -- leaving `error` and `silent` the levels that record
  * none of it, as they record no other line either.
+ */
+function disclosureSink(
+  log: ReturnType<typeof getLogger>,
+  logFile: string | undefined,
+): ConsentSurfaceSink {
+  return consentSurfaceSink({
+    log,
+    logFile,
+    toPromptStream: true,
+    level: "warn",
+  });
+}
+
+/**
+ * Show what this run will disclose and match on, before any credential, terms,
+ * or data are sent, for an exchange whose configuration the operator wrote
+ * themselves.
  *
  * A no-op for a configuration written by accepting an invitation, which holds
  * an outbound-payload consent record: that party read these facts when it
@@ -372,8 +389,38 @@ export function displayExchangeDisclosure(params: {
   const { spec, metadata, linkageTerms, logFile, log } = params;
   if (spec.outboundPayloadConsent !== undefined) return;
   renderExchangeDisclosure(
-    consentSurfaceSink({ log, logFile, toPromptStream: true, level: "warn" }),
+    disclosureSink(log, logFile),
     linkageTerms,
     metadata,
+  );
+}
+
+/**
+ * Show the same display for a zero-setup run, whose terms and metadata are
+ * inferred from the input file it was pointed at rather than read from a
+ * configuration. The lines are the ones above: an operator who settled these
+ * terms on a command line is owed the same account of what leaves the machine
+ * as one who wrote them into a file.
+ *
+ * Takes the prepared exchange itself, the pair handed to the run, so the
+ * display cannot state terms or columns other than the ones transmitted.
+ *
+ * There is no consent record to stand it down. A zero-setup run accepts no
+ * invitation and loads no configuration, so nothing before it showed the
+ * operator these facts.
+ */
+export function displayZeroSetupDisclosure(params: {
+  /** The exchange this run prepared -- the source of what it transmits and
+   * what it matches on. */
+  prepared: PreparedExchange;
+  /** The operator's `--log-file`, so the log keeps a copy of the surface. */
+  logFile: string | undefined;
+  log: ReturnType<typeof getLogger>;
+}): void {
+  const { prepared, logFile, log } = params;
+  renderExchangeDisclosure(
+    disclosureSink(log, logFile),
+    prepared.linkageTerms,
+    prepared.metadata,
   );
 }

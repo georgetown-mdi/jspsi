@@ -23,6 +23,7 @@ import {
   DEFAULT_CONFIG_PATH,
 } from "../config";
 import { openEventStream, reportPersistenceLoss } from "../eventStream";
+import { displayZeroSetupDisclosure } from "../exchangeDisclosure";
 import { detectFileConflicts, expandTilde } from "../fileUtils";
 import { DEFAULT_KEY_PATH } from "../keyFile";
 import { optionalIdentity } from "../partyIdentity";
@@ -50,7 +51,6 @@ import {
   loadInputRows,
   observedReceivedColumnsForSave,
   parseLinkageStrategyFlag,
-  singlePassDisclosureNotice,
   withDeduplicate,
   withLinkageStrategy,
 } from "../onlineBootstrap";
@@ -319,9 +319,8 @@ async function prepareDataset(
   // Apply the operator's --linkage-strategy and --deduplicate onto the terms
   // prepareForExchange authored (a no-op for cascade and for the closed
   // default), so both ride into the exchange and the --save spec; neither
-  // touches the standardization/dataset already built. Reports the disclosure
-  // tradeoff at selection like invite -- zero-setup never sources terms from a
-  // config, so the note always reflects what runs.
+  // touches the standardization/dataset already built. Both reach the display
+  // the handler shows before the run, which states each one's disclosure.
   prepared.linkageTerms = withDeduplicate(
     withLinkageStrategy(prepared.linkageTerms, linkageStrategy),
     deduplicate,
@@ -330,7 +329,6 @@ async function prepareDataset(
   // inferred terms, so the pair they leave is put back through the one that
   // reads them together rather than left unasserted.
   assertDeduplicateImplemented(prepared.linkageTerms);
-  if (linkageStrategy === "single-pass") log.info(singlePassDisclosureNotice());
   warnOnValueConstraints(prepared, log);
   return prepared;
 }
@@ -663,6 +661,12 @@ export async function handler(argv: Arguments): Promise<void> {
       // from this party's own filesystem, so it is settled here rather than
       // after the host-key step below has contacted the server.
       const credentials = readConnectionCredentials(connection);
+      // Show what this run discloses and matches on, all of it inferred from
+      // the input file above, before the host-key step below can contact the
+      // server. Placed after every check that reads this party's own files, so
+      // a run refused from its own input shows no account of an exchange it
+      // does not conduct.
+      displayZeroSetupDisclosure({ prepared, logFile, log });
       // Establish first-use SSH host-key trust on the ORIGINAL `connection`
       // (before the clone below), so the pin reaches both the live connect and,
       // under --save, the persisted config. A pinned connection is a no-op; an

@@ -160,6 +160,8 @@ psilink file:///mnt/sftp-share/drop input.csv output.csv
 
 Before running, users are warned about the limitations of the security model, namely that they must trust the server's administrator.
 
+The run then states what it will send and match on -- the columns it transmits for matched records, and the terms the inference settled -- before it contacts the server, whatever `--log-level` is set. See [What the run shows before it starts](#what-the-run-shows-before-it-starts), which covers the zero-setup run and the configured one alike.
+
 If `--save` is not specified, after running users are instructed how to use `psilink invite` and `psilink accept` to establish a recurring exchange. `--save` usage can be discussed during onboarding.
 
 If `--save` is specified, intent is advertised to the partner in-band at the start of the exchange; outcomes for each party are described in [Bootstrapping a shared secret](SECURITY_DESIGN.md#bootstrapping-a-shared-secret). The save happens after the exchange has completed and its result is written, so a save that cannot reach disk is reported as a lost local write (exit 73, and a `warning` on the event stream) rather than as a failed exchange -- see [Exit 73](#exit-73-the-exchange-completed-a-local-write-did-not).
@@ -459,7 +461,7 @@ Before any credential, terms, or data are sent, the `INPUT_FILE`'s columns are c
 
 ### What the run shows before it starts
 
-An exchange you authored yourself -- your own configuration and your partner's, settled between you out of band rather than through an invitation -- prints what it will disclose before any credential, terms, or data are sent:
+An exchange whose terms you settled for yourself prints what it will disclose before any credential, terms, or data are sent. Two runs do: one you authored -- your own configuration and your partner's, settled between you out of band rather than through an invitation -- and a [zero-setup exchange](#zero-setup-exchange), whose terms are inferred from the input file you point it at. Both print the same lines:
 
 - the columns you send your partner for matched records, resolved from your input file exactly as the exchange transmits them;
 - which of you receives the result;
@@ -472,6 +474,8 @@ An exchange you authored yourself -- your own configuration and your partner's, 
 It asks nothing and refuses nothing: a run that is valid without it stays valid. The lines print on standard error whether or not a terminal is attached and whatever `--log-level` you set, so a scheduled run shows them too. `--log-file` keeps a copy, recorded at `warn` so a run quieted to that level still has one; `error` and `silent` record none of it, as they record no other line either.
 
 Where your own terms leave neither party expecting a result, the display says so in place of what your partner would learn: that pair is refused at the terms exchange, so the run stops there.
+
+On a zero-setup run the display is the only statement of these facts you get, because nothing was written down for you to read: the terms and the transmitted columns are inferred from your input file as the run starts, and a column psilink recognizes as neither a linkage nor an identifier column is sent to your partner for matched records. Check the list against what you meant to send. A column that should not be there is removed from the input file, or kept out of the transmitted set by authoring a configuration ([`psilink init`](#initialization)) and running [`psilink exchange`](#recurring-exchange) against it instead.
 
 An exchange you accepted an invitation for prints none of this once acceptance has recorded the columns you send: accepting showed you the same facts, and [Confirming what you send](#confirming-what-you-send) below shows the columns again on any run whose set is not the one you confirmed. An acceptance whose partner is entitled to no result records no columns, because none are sent to it; those runs print the display like any other.
 

@@ -863,6 +863,128 @@ test("handler: a credential @path naming a missing file exits 64 with no host-ke
   }
 });
 
+// --- handler: the pre-run disclosure -----------------------------------------
+// A zero-setup run infers its terms and metadata from the input file it is
+// pointed at, so what it transmits is decided by that file rather than by
+// anything the operator wrote down. The display is their only account of it,
+// and it is owed to them before the run can reach the server.
+
+/** Drive a zero-setup run over `csv` on an sftp URL, at a log level that drops
+ * every ordinary diagnostic, and collect what reached the operator: everything
+ * the run wrote to stderr, and the part of it already written when the
+ * host-key step -- the first thing that contacts the server -- was entered. */
+async function zeroSetupRunOutput(
+  csv: string,
+  extraArgs: Record<string, unknown> = {},
+): Promise<{ stderr: string; atFirstContact: string; contacted: boolean }> {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zerodisclose-"));
+  const stderrChunks: string[] = [];
+  const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(((
+    chunk: string | Uint8Array,
+  ) => {
+    stderrChunks.push(String(chunk));
+    return true;
+  }) as never);
+  const exitSpy = captureProcessExit();
+  let atFirstContact = "";
+  let contacted = false;
+  try {
+    const input = path.join(dir, "input.csv");
+    fs.writeFileSync(input, csv);
+    vi.mocked(establishHostKeyTrust).mockImplementationOnce((async () => {
+      contacted = true;
+      atFirstContact = stderrChunks.join("");
+    }) as never);
+    vi.mocked(runProtocol).mockImplementationOnce((async (
+      ...callArgs: unknown[]
+    ) =>
+      driveCompletedExchange(callArgs, { partnerSaveIntent: false })) as never);
+
+    await handler({
+      _: ["sftp://userb@localhost:2222/drop", input],
+      $0: "psilink",
+      "config-file": path.join(dir, "psilink.yaml"),
+      "key-file": path.join(dir, ".psilink.key"),
+      identity: "Tester",
+      record: false,
+      "log-level": "silent",
+      ...extraArgs,
+    } as unknown as Arguments);
+    return { stderr: stderrChunks.join(""), atFirstContact, contacted };
+  } finally {
+    stderrSpy.mockRestore();
+    exitSpy.mockRestore();
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+}
+
+/** A CSV whose fourth column psilink recognizes as neither a linkage nor an
+ * identifier column, which is the set a zero-setup run transmits. */
+const CSV_WITH_TRANSMITTED_COLUMN =
+  "first_name,last_name,date_of_birth,diagnosis\nBob,Jones,1990-01-02,A\n";
+
+test("handler: the run states what it transmits and what it matches on", async () => {
+  const { stderr } = await zeroSetupRunOutput(CSV_WITH_TRANSMITTED_COLUMN);
+
+  expect(stderr).toContain(
+    "What this exchange sends and matches on. Nothing has been sent yet:",
+  );
+  // The column the inference marked as payload, which is the point of the
+  // display: an operator who did not mean to send `diagnosis` learns it here.
+  expect(stderr).toContain("columns you will send");
+  expect(stderr).toContain("- diagnosis");
+  expect(stderr).toContain("you will receive the result");
+  expect(stderr).toContain("your partner will receive the result");
+  expect(stderr).toContain("PSI algorithm");
+  expect(stderr).toContain(": psi");
+  expect(stderr).toContain("linkage strategy");
+  expect(stderr).toContain(": cascade");
+  expect(stderr).toContain("duplicate matches");
+  expect(stderr).toContain("matched on");
+  expect(stderr).toContain("linkage keys");
+  // The run was quieted to the level that drops every ordinary diagnostic, so
+  // the transport-trust warning the handler opens with is absent -- which is
+  // what makes the lines above a surface a raised --log-level cannot suppress
+  // rather than one that happened to print.
+  expect(stderr).not.toContain(
+    "this exchange relies on transport-layer authentication only",
+  );
+});
+
+test("handler: a run transmitting no column of its own says so", async () => {
+  // Every column here is one psilink recognizes and matches on, so the run
+  // sends its partner nothing beyond the fact of a match. The display states
+  // that rather than printing an empty list.
+  const { stderr } = await zeroSetupRunOutput(
+    "first_name,last_name,date_of_birth\nBob,Jones,1990-01-02\n",
+  );
+
+  expect(stderr).toContain("columns you will send");
+  expect(stderr).toContain("(none) -- only matched records");
+  expect(stderr).not.toContain("- diagnosis");
+});
+
+test("handler: the whole display reaches the operator before the server is contacted", async () => {
+  // The disclosure is worth nothing after the fact, and on an sftp URL the
+  // host-key step is what opens a socket first. So the display is read off
+  // stderr from inside that step: every line of it, down to the last, has to
+  // be there already.
+  const { atFirstContact, contacted } = await zeroSetupRunOutput(
+    CSV_WITH_TRANSMITTED_COLUMN,
+  );
+
+  // A display read from a step that never ran would be an empty string passing
+  // no assertion at all, so pin that this URL took the host-key path.
+  expect(contacted).toBe(true);
+  expect(atFirstContact).toContain(
+    "What this exchange sends and matches on. Nothing has been sent yet:",
+  );
+  expect(atFirstContact).toContain("- diagnosis");
+  // The keys are the last block the display renders, so their presence is what
+  // establishes that it finished rather than started.
+  expect(atFirstContact).toContain("linkage keys");
+});
+
 test("handler: the first-use pin reaches the connection the exchange dials", async () => {
   // The other half of reading the credential files early: the connection handed
   // to runProtocol is still cloned AFTER the host-key step, so the pin that step
@@ -986,48 +1108,18 @@ test("handler --save: the selected strategy flows into the saved config (single-
   }
 });
 
-test("handler: zero-setup shows the single-pass disclosure note at selection", async () => {
-  // The selection note is the ONLY single-pass disclosure surface for a
-  // zero-setup party (there is no accept-side consent prompt), so pin that it
-  // fires -- the config-content test above would still pass if the emission
-  // were deleted. It is a diagnostic (routed to stderr by
-  // configureStderrLogging), so spy on process.stderr.write and setLevel to
-  // info so the note emits regardless of a prior test's level.
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zeronote-"));
-  const stderrChunks: string[] = [];
-  const stderrSpy = vi.spyOn(process.stderr, "write").mockImplementation(((
-    chunk: string | Uint8Array,
-  ) => {
-    stderrChunks.push(String(chunk));
-    return true;
-  }) as typeof process.stderr.write);
-  const exitSpy = captureProcessExit();
-  getLogger("psilink").setLevel("info");
-  vi.mocked(runProtocol).mockImplementation((async (...callArgs: unknown[]) =>
-    driveCompletedExchange(callArgs, { partnerSaveIntent: false })) as never);
-  try {
-    const input = path.join(dir, "input.csv");
-    fs.writeFileSync(
-      input,
-      "first_name,last_name,date_of_birth\nBob,Jones,1990-01-02\n",
-    );
-    await handler({
-      _: ["sftp://userb@localhost:2222/drop", input],
-      $0: "psilink",
-      "linkage-strategy": "single-pass",
-      "config-file": path.join(dir, "psilink.yaml"),
-      "key-file": path.join(dir, ".psilink.key"),
-      identity: "Tester",
-      record: false,
-      "log-level": "info",
-    } as unknown as Arguments);
-    expect(stderrChunks.join("")).toContain("consented disclosure tradeoff");
-  } finally {
-    getLogger("psilink").setLevel("silent");
-    stderrSpy.mockRestore();
-    exitSpy.mockRestore();
-    fs.rmSync(dir, { recursive: true, force: true });
-  }
+test("handler: zero-setup states the single-pass disclosure tradeoff", async () => {
+  // A zero-setup party reads no accept-side consent prompt, so the pre-run
+  // display is where the tradeoff reaches them -- the config-content test above
+  // would still pass if it never did. Driven at the level that drops every
+  // ordinary diagnostic, since the display prints at all of them.
+  const { stderr } = await zeroSetupRunOutput(
+    "first_name,last_name,date_of_birth\nBob,Jones,1990-01-02\n",
+    { "linkage-strategy": "single-pass" },
+  );
+
+  expect(stderr).toContain(": single-pass");
+  expect(stderr).toContain("consented disclosure tradeoff");
 });
 
 // --- this party's own deduplicate --------------------------------------------
