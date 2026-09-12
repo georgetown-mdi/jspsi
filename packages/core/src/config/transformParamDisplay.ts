@@ -90,6 +90,24 @@ export const PRIVATE_KEY_PARAM_MESSAGE =
 /** Refusal message for a step declaring more parameters than are displayed. */
 export const TRANSFORM_PARAM_COUNT_MESSAGE = `a transform step must not declare more than ${MAX_DISPLAYED_PARAMS} params`;
 
+/**
+ * What the calling schema refuses on its own, so this grading does not scan a
+ * value that schema rejects anyway.
+ */
+export interface TransformParamDisplayOptions {
+  /**
+   * The length past which the caller refuses a STRING param, or `undefined`
+   * where it bounds none. The key-material scan below renders a parameter as
+   * its displayed line and runs the redaction over that copy, work linear in
+   * the value; a string the caller refuses for its length meets that refusal
+   * alone instead. The partner-controlled terms schema passes its
+   * `MAX_TRANSFORM_PARAM_LENGTH` (`linkageTermsSchema.ts`); the
+   * operator-local standardization schema bounds no param length and passes
+   * `undefined`.
+   */
+  refusesStringParamsPast: number | undefined;
+}
+
 /** One parameter shape a consent summary cannot state as the run applies it. */
 export interface TransformParamDisplayRefusal {
   /** Path to the offending value, relative to the step. */
@@ -113,15 +131,21 @@ export interface TransformParamDisplayRefusal {
  * stay bounded by {@link MAX_DISPLAYED_PARAMS} however many entries the
  * record holds -- the bound the safe-parse contract rests on
  * (docs/spec/CHANNEL_SECURITY.md, "Application-layer parsed-input bounds").
+ * A string value the caller already refuses for its length is skipped by the
+ * key-material scan for the same reason
+ * ({@link TransformParamDisplayOptions.refusesStringParamsPast}).
  *
  * Own-property lookups throughout: a step's function name and parameter names
  * are partner-authored free text, and a name reaching only `Object.prototype`
  * (`constructor`, `toString`) names no declared parameter.
  */
-export function transformParamDisplayRefusals(step: {
-  function: string;
-  params?: Record<string, unknown>;
-}): TransformParamDisplayRefusal[] {
+export function transformParamDisplayRefusals(
+  step: {
+    function: string;
+    params?: Record<string, unknown>;
+  },
+  options: TransformParamDisplayOptions,
+): TransformParamDisplayRefusal[] {
   const params = step.params;
   // The shape guard {@link declaredParamEntries} makes, repeated to narrow
   // `params` for the own-property lookups below, which throw on a null.
@@ -140,11 +164,21 @@ export function transformParamDisplayRefusals(step: {
       path: ["params"],
       message: NULL_IF_BOTH_VALUE_PARAMS_MESSAGE,
     });
-  for (const [param, value] of entries)
+  for (const [param, value] of entries) {
+    // Read as the caller's own length refine reads it: a string value, and
+    // only a string, is bounded there, so key material nested in a list entry
+    // is scanned however long that entry is.
+    if (
+      typeof value === "string" &&
+      options.refusesStringParamsPast !== undefined &&
+      value.length > options.refusesStringParamsPast
+    )
+      continue;
     if (holdsPrivateKeyMaterial(describedTransformParamEntry(param, value)))
       refusals.push({
         path: ["params", param],
         message: PRIVATE_KEY_PARAM_MESSAGE,
       });
+  }
   return refusals;
 }

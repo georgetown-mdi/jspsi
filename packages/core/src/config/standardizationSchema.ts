@@ -48,8 +48,11 @@ const StandardizationStepSchema: z.ZodType<StandardizationStep> = z
     // the same step, so a step moved between the two meets one answer rather
     // than two, and the `null_if` pair is a difference between document and
     // run on this side as well: the run applies the list alone whichever
-    // document declares both.
-    for (const refusal of transformParamDisplayRefusals(step))
+    // document declares both. This schema is operator-local and bounds no
+    // param length, so no value is passed over by the key-material scan.
+    for (const refusal of transformParamDisplayRefusals(step, {
+      refusesStringParamsPast: undefined,
+    }))
       ctx.addIssue({
         code: "custom",
         message: refusal.message,

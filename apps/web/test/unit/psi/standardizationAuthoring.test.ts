@@ -8,6 +8,7 @@ import {
   getDefaultStandardization,
   prepareForExchange,
   runPipeline,
+  safeParseStandardization,
   stepCanEmptyRealizedValue,
 } from "@psilink/core";
 
@@ -19,6 +20,7 @@ import {
   applyInputOverrides,
   applyStepOverrides,
   authorableFunctionNames,
+  declaresBothNullIfValues,
   describeParamFields,
   descriptorFor,
   expertFunctionNames,
@@ -470,6 +472,34 @@ describe("isStepValid (the launch gate's basis)", () => {
       isStepValid({ function: "filter_regex", params: { pattern: "^A" } }),
     ).toBe(true);
     expect(isStepValid({ function: "filter_regex" })).toBe(false);
+  });
+
+  test("a null_if declaring both value and values is invalid", () => {
+    // Each param is well-formed on its own, so only the pair is wrong: core
+    // refuses it where the document is decoded (the run applies the list and
+    // ignores the single value), and an editor grading each param alone would
+    // call the step valid and meet that refusal at launch.
+    const bothDeclared = {
+      function: "null_if",
+      params: { value: "UNKNOWN", values: ["UNKNOWN", "N/A"] },
+    };
+    expect(declaresBothNullIfValues(bothDeclared)).toBe(true);
+    expect(isStepValid(bothDeclared)).toBe(false);
+    expect(
+      safeParseStandardization([
+        { output: "ssn", input: "SSN", steps: [bothDeclared] },
+      ]).success,
+    ).toBe(false);
+  });
+
+  test.each([
+    ["the single value", { value: "UNKNOWN" }],
+    ["the list", { values: ["UNKNOWN", "N/A"] }],
+  ])("a null_if declaring %s alone is valid", (_name, params) => {
+    expect(declaresBothNullIfValues({ function: "null_if", params })).toBe(
+      false,
+    );
+    expect(isStepValid({ function: "null_if", params })).toBe(true);
   });
 
   test("a function core does not recognize is invalid", () => {

@@ -926,8 +926,11 @@ const transformStepSchema = (
     // A params shape the consent summary would state as something other than
     // what the run applies is refused here rather than displayed
     // (transformParamDisplay.ts), so an acceptor reads the declaration the
-    // exchange runs.
-    for (const refusal of transformParamDisplayRefusals(step))
+    // exchange runs. The length this schema refuses a string param past is
+    // passed so the key-material scan skips a value already refused for it.
+    for (const refusal of transformParamDisplayRefusals(step, {
+      refusesStringParamsPast: MAX_TRANSFORM_PARAM_LENGTH,
+    }))
       ctx.addIssue({
         code: "custom",
         message: refusal.message,

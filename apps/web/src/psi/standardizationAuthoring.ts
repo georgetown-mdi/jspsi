@@ -514,6 +514,32 @@ export function validateParamValue(
 }
 
 /**
+ * Whether a `null_if` step declares both of its optional params. Core refuses
+ * such a step where the document is decoded, because `nullIfFactory` applies
+ * the list alone while a consent summary states both, so a step editor that
+ * validated each param on its own would call the step valid and meet that
+ * refusal at launch. Read as core reads it: an own key holding anything but
+ * `undefined` is declared, an emptied text box or tag list included.
+ */
+export function declaresBothNullIfValues(step: StandardizationStep): boolean {
+  const params = step.params ?? {};
+  const declares = (param: string): boolean =>
+    Object.hasOwn(params, param) && params[param] !== undefined;
+  return step.function === "null_if" && declares("value") && declares("values");
+}
+
+/**
+ * What the step editor tells an author about a `null_if` declaring both of its
+ * params. The remedy is removal rather than clearing a box, because the param
+ * inputs write an emptied text box as `""` and an emptied tag list as `[]`,
+ * and each of those counts as declared.
+ */
+export const NULL_IF_BOTH_VALUES_REFUSAL =
+  "This step declares both a single value and a list of values. psilink " +
+  "accepts one or the other, not both. Remove this step and add it again " +
+  "with the one you want.";
+
+/**
  * Whether every parameter of `step` is well-formed for its function: each
  * required param present and each value matching the descriptor's declared type
  * (the same check {@link validateParamValue} drives the inline input errors
@@ -524,10 +550,16 @@ export function validateParamValue(
  * recognize is invalid for the same reason: the descriptor table is core's own
  * registry, so a name absent from it is one the pipeline compile throws on, and
  * its params are not editable here -- the remedy is to remove the step.
+ *
+ * The per-param check cannot reach the one shape that is a property of the PAIR
+ * ({@link declaresBothNullIfValues}), so that reading is asked separately: both
+ * params are well-formed on their own, and core refuses the step that declares
+ * them together.
  */
 export function isStepValid(step: StandardizationStep): boolean {
   const descriptor = descriptorFor(step.function);
   if (descriptor === undefined) return false;
+  if (declaresBothNullIfValues(step)) return false;
   return describeParamFields(descriptor).every((field) => {
     const value = step.params?.[field.key];
     const isEmpty =

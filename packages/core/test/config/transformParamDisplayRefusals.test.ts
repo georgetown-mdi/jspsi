@@ -2,6 +2,7 @@ import { describe, expect, test } from "vitest";
 
 import { summarizeInvitation } from "../../src/consent/invitationSummary";
 import {
+  MAX_TRANSFORM_PARAM_LENGTH,
   safeParseLinkageTerms,
   safeParseLinkageTermsTheReaderWrote,
 } from "../../src/config/linkageTermsSchema";
@@ -172,6 +173,63 @@ describe("a transform param holding private key material", () => {
       function: "coalesce",
       params: { default: "use the private key at /keys/id_ed25519" },
     });
+  });
+});
+
+describe("a string param longer than the terms schema admits", () => {
+  // The key-material scan renders a param as its displayed line and runs the
+  // redaction over that copy, work linear in the value. A string the calling
+  // schema already refuses for its length is passed over instead, so a
+  // partner's over-long value costs the length compare alone.
+  const LENGTH_MESSAGE = `a linkage key element transform param must not exceed ${MAX_TRANSFORM_PARAM_LENGTH} characters`;
+  const overBound = {
+    function: "coalesce",
+    params: {
+      default: FAKE_PRIVATE_KEY + "x".repeat(MAX_TRANSFORM_PARAM_LENGTH),
+    },
+  };
+
+  test("meets the length refusal alone where that bound is applied", () => {
+    const refusals = refusalsOf(overBound);
+    expect(refusals.partnerTerms).toEqual([LENGTH_MESSAGE]);
+    expect(refusals.ownTerms).toEqual([LENGTH_MESSAGE]);
+  });
+
+  test("is still scanned by the schema that bounds no param length", () => {
+    // The operator-local standardization schema refuses nothing for length, so
+    // passing the value over there would drop the refusal rather than spare a
+    // second one.
+    expect(refusalsOf(overBound).standardization).toEqual([
+      PRIVATE_KEY_PARAM_MESSAGE,
+    ]);
+  });
+
+  test("a value at the bound holding key material is refused everywhere", () => {
+    const atBound = {
+      function: "coalesce",
+      params: {
+        default: FAKE_PRIVATE_KEY.padEnd(MAX_TRANSFORM_PARAM_LENGTH, "x"),
+      },
+    };
+    expectRefusedEverywhere(atBound, PRIVATE_KEY_PARAM_MESSAGE);
+    expect(refusalsOf(atBound).partnerTerms).toEqual([
+      PRIVATE_KEY_PARAM_MESSAGE,
+    ]);
+  });
+
+  test("key material inside a longer list entry is refused everywhere", () => {
+    // The skip reads the length bound as the refine that applies it does: a
+    // string value of the record, never a string nested in a list, whose
+    // length no schema bounds.
+    expectRefusedEverywhere(
+      {
+        function: "null_if",
+        params: {
+          values: [FAKE_PRIVATE_KEY + "x".repeat(MAX_TRANSFORM_PARAM_LENGTH)],
+        },
+      },
+      PRIVATE_KEY_PARAM_MESSAGE,
+    );
   });
 });
 
