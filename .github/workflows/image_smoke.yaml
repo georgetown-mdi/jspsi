@@ -39,7 +39,7 @@ on:
       # lockfile, so the install policy the one states and the allowScripts map
       # the other carries are image build inputs on the same footing: a flag
       # interaction, an added registry, or a verdict change that only breaks the
-      # containerised install would otherwise surface first at a release tag.
+      # containerised install would otherwise appear first at a release tag.
       - ".npmrc"
       - "package.json"
       # The FIPS leg runs both harnesses out of this directory.

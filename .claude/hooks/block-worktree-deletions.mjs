@@ -73,8 +73,7 @@
 // rather than closed: closing them means a shell-syntax-aware parser, a larger
 // and more fragile thing than the accident this guards against. What it binds is
 // that accident, not a determined bypass; a command it allows is not thereby
-// endorsed. The two the test beside this file pins are the command
-// substitution and the runtime target; the rest are recorded here only.
+// endorsed.
 //   - Composition is not unwrapped: a subshell, a brace group, a command
 //     substitution, `bash -c "..."`, an alias, a shell function, and a lone `&`.
 //   - The command word is matched literally, by basename with quotes and

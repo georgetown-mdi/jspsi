@@ -391,7 +391,7 @@ export function publishSequenceViolations(source, file, published = {}) {
       const state = pushState(build.push);
       if (state === "unknown") {
         violations.push(
-          `${file}: ${where(build)} sets \`push: ${build.push}\`, which this check cannot read as pushed or held. Write a literal true or false, so whether the step publishes an image stays readable here.`,
+          `${file}: ${where(build)} sets \`push: ${build.push}\`, which this check cannot read as pushed or held. Write a literal true or false, so whether the step publishes an image stays clear here.`,
         );
         continue;
       }

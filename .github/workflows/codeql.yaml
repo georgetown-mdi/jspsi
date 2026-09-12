@@ -11,7 +11,7 @@ name: CodeQL
 #
 # Free here: code scanning with CodeQL is free on public repositories
 # (georgetown-mdi/jspsi is public), so this needs no GitHub Advanced Security
-# license. Findings surface as code-scanning alerts in the repository Security
+# license. Findings appear as code-scanning alerts in the repository Security
 # tab.
 #
 # A merge gate. Two check runs come out of this analysis and both belong on the
@@ -46,7 +46,7 @@ on:
   # Manual trigger for an on-demand full-tree scan (PR runs are diff-informed);
   # how a maintainer re-baselines a branch without waiting for the schedule.
   workflow_dispatch:
-  # On a PR, analyze the changes and surface new alerts on the PR itself.
+  # On a PR, analyze the changes and report new alerts on the PR itself.
   pull_request:
     branches: [main, staging]
   # On merge to a base branch, refresh that branch's alert baseline so alert
