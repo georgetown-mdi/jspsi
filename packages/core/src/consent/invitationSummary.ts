@@ -18,6 +18,7 @@ import { redactAndSanitizeForDisplay } from "../utils/sanitizeErrorForDisplay.js
 import { redactAndDisplayPartyIdentity } from "../records/partyIdentityDisplay.js";
 
 import {
+  declaredParamEntries,
   describedTransformParamEntry,
   MAX_DISPLAYED_PARAMS,
 } from "../config/transformParamDisplay.js";
@@ -788,13 +789,16 @@ function allowedCharactersClass(field: LinkageField): Displayable | undefined {
  * passed a decode, which is what refuses a record that wide
  * (`config/transformParamDisplay.ts`).
  *
+ * The entries are the ones the refusal counts ({@link declaredParamEntries}),
+ * so the count shown here and the count refused there are one expression.
+ *
  * The lookup goes through the table's own read path because the function name
  * is partner free text: a name that only reaches `Object.prototype`
  * (`constructor`, `toString`) answers undefined rather than an inherited
  * member, which would lead the display with rows no verdict reads.
  */
 function orderedParamEntries(step: TransformStep): Array<[string, unknown]> {
-  const entries = Object.entries(step.params ?? {});
+  const entries = declaredParamEntries(step.params);
   const verdictBearing = new Set<string>(
     frozenLookupTableEntry(CONSENT_VERDICT_PARAM_NAMES, step.function) ?? [],
   );

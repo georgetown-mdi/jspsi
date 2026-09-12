@@ -15,6 +15,29 @@ import { holdsPrivateKeyMaterial } from "../utils/sanitizeErrorForDisplay.js";
 export const MAX_DISPLAYED_PARAMS = 16;
 
 /**
+ * The parameters a step declares, in declaration order: the entries
+ * {@link transformParamDisplayRefusals} counts against
+ * {@link MAX_DISPLAYED_PARAMS} and the entries the consent summary orders,
+ * shows, and states the remainder of as a count (`orderedParamEntries`,
+ * `packages/core/src/consent/invitationSummary.ts`). One function for both,
+ * so the count refused and the count shown are one expression rather than two
+ * that have to be read against each other.
+ *
+ * An own key whose value is `undefined` is a declared parameter here, because
+ * the summary paints a row for it: a record schema keeps such a key, which an
+ * in-process caller can pass (no JSON or YAML document holds `undefined`).
+ * A `params` that is not a plain object declares none -- an array's indices
+ * name no parameter, and neither schema admits one.
+ */
+export function declaredParamEntries(
+  params: unknown,
+): Array<[string, unknown]> {
+  if (params === null || typeof params !== "object" || Array.isArray(params))
+    return [];
+  return Object.entries(params);
+}
+
+/**
  * Render a transform parameter value for display. Primitives become their
  * plain string form; anything structured is JSON-encoded (best effort). The
  * result is sanitized and length-bounded by the caller, so it need not be
@@ -100,14 +123,16 @@ export function transformParamDisplayRefusals(step: {
   params?: Record<string, unknown>;
 }): TransformParamDisplayRefusal[] {
   const params = step.params;
+  // The shape guard {@link declaredParamEntries} makes, repeated to narrow
+  // `params` for the own-property lookups below, which throw on a null.
   if (params === null || typeof params !== "object" || Array.isArray(params))
     return [];
-  const entries = Object.entries(params).filter(
-    ([, value]) => value !== undefined,
-  );
+  const entries = declaredParamEntries(params);
   if (entries.length > MAX_DISPLAYED_PARAMS)
     return [{ path: ["params"], message: TRANSFORM_PARAM_COUNT_MESSAGE }];
   const refusals: TransformParamDisplayRefusal[] = [];
+  // Declared as `nullIfFactory` reads it: `textParam` passes over an undefined
+  // value, so neither the refusal nor the run counts one.
   const declares = (param: string): boolean =>
     Object.hasOwn(params, param) && params[param] !== undefined;
   if (step.function === "null_if" && declares("value") && declares("values"))

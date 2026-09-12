@@ -217,3 +217,42 @@ describe("a step declaring more params than are displayed", () => {
     expect(displayed[displayed.length - 1]).toBe("... 1 more");
   });
 });
+
+describe("a param declared with an explicit undefined value", () => {
+  // No JSON or YAML document holds one, so this is the shape an in-process
+  // caller passes; the record schema keeps the key, and the summary paints a
+  // row for it. Both sides read one count (`declaredParamEntries`).
+  const stepDeclaring = (declared: number) => ({
+    function: "trim",
+    params: {
+      ...Object.fromEntries(
+        Array.from({ length: declared - 1 }, (_, i) => [
+          `p${i}`,
+          "partner_value",
+        ]),
+      ),
+      unset: undefined,
+    },
+  });
+
+  test("takes a displayed row of its own", () => {
+    expect(displayedParamsOf(stepDeclaring(1))).toEqual(["unset: "]);
+  });
+
+  test("counts toward the cap at the refusal as at the display", () => {
+    const atCap = stepDeclaring(MAX_DISPLAYED_PARAMS);
+    expectAcceptedEverywhere(atCap);
+    const displayed = displayedParamsOf(atCap);
+    expect(displayed).toHaveLength(MAX_DISPLAYED_PARAMS);
+    expect(displayed.some((line) => line.includes("more"))).toBe(false);
+  });
+
+  test("one param past the cap is refused rather than excluded", () => {
+    // What the refusal removes: a count line standing for params the run
+    // applies, which an unset key past the cap would otherwise reach.
+    const pastCap = stepDeclaring(MAX_DISPLAYED_PARAMS + 1);
+    expectRefusedEverywhere(pastCap, TRANSFORM_PARAM_COUNT_MESSAGE);
+    const displayed = displayedParamsOf(pastCap);
+    expect(displayed[displayed.length - 1]).toBe("... 1 more");
+  });
+});
