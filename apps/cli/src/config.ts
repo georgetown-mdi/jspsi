@@ -1,4 +1,5 @@
 import fs from "node:fs";
+import path from "node:path";
 
 import YAML from "yaml";
 import type {
@@ -10,6 +11,7 @@ import type {
   LinkageTerms,
   Metadata,
   OutboundPayloadConsent,
+  SigningConfig,
   Standardization,
 } from "@psilink/core";
 import {
@@ -25,6 +27,8 @@ import {
   keepFirstPartyLineBreaks,
   MAX_NESTING_DEPTH,
   NestingDepthExceededError,
+  OperatorConfigError,
+  partnerPinIsPresent,
   quoteTermsValue,
   quoteTermsValueList,
   redactAndSanitizeForDisplay,
@@ -1465,6 +1469,56 @@ export function persistHostKeyFingerprint(
 }
 
 /**
+ * The two remedies an operator has when the partner fingerprint a first
+ * authenticated contact adopts cannot be written into their configuration
+ * file. Shared by {@link assertPartnerFingerprintRecordable}, which refuses
+ * before the run connects, and by the write itself, so one instruction reaches
+ * the operator wherever the failure is caught.
+ */
+const PARTNER_FINGERPRINT_REMEDIES =
+  "record signing.partner_fingerprint in that file by hand, from the value " +
+  "the partner's 'psilink fingerprint' prints, or mount the configuration " +
+  "writable for the run that records the pin";
+
+/**
+ * Refuse a `certificate`-mode exchange that pins no partner fingerprint and
+ * cannot record the one its first authenticated contact will adopt, before the
+ * run opens a connection. The deployment shape this exists for is the
+ * read-only configuration mount (see docs/DEPLOYMENT.md): without the refusal
+ * the run connects, spends the SFTP credential, presents its terms and
+ * certificate, and then dies at the adoption write with nothing recorded.
+ *
+ * The pin is recorded by replacing the file in place, so both the directory
+ * and the file have to be writable by the user the run is; `W_OK` on each is
+ * what that replace needs, and neither answers the question alone. A run
+ * already holding a pin writes nothing and is not held to this.
+ *
+ * An {@link OperatorConfigError} (exit 64): the configuration and its
+ * permissions are the operator's own.
+ */
+export function assertPartnerFingerprintRecordable(
+  signing: SigningConfig | undefined,
+  configPath: string,
+): void {
+  if (signing?.mode !== "certificate") return;
+  if (partnerPinIsPresent(signing.partnerFingerprint)) return;
+  try {
+    fs.accessSync(path.dirname(configPath), fs.constants.W_OK);
+    fs.accessSync(configPath, fs.constants.W_OK);
+  } catch {
+    throw new OperatorConfigError(
+      "this exchange signs receipts (signing.mode: certificate) and pins no " +
+        "partner fingerprint, so its first authenticated contact records the " +
+        `certificate the partner presents into ${configPath} -- and that ` +
+        "file cannot be replaced: recording the pin rewrites it in place, " +
+        "which needs both the file and its directory writable by the user " +
+        "this run is. The run stopped before connecting. Either " +
+        `${PARTNER_FINGERPRINT_REMEDIES}.`,
+    );
+  }
+}
+
+/**
  * Write `signing.partner_fingerprint` into an existing `psilink.yaml`, used to
  * record the pin an exchange adopted on its first authenticated contact with a
  * partner. Like {@link persistHostKeyFingerprint}, this edits the file in place
@@ -1481,15 +1535,47 @@ export function persistHostKeyFingerprint(
  *
  * Throws if the file cannot be read or parsed, since the caller just loaded it
  * and a silent failure would leave the operator believing the pin was saved.
+ * A read or replace this party's own filesystem refuses -- a mount that turned
+ * read-only after {@link assertPartnerFingerprintRecordable} passed -- becomes
+ * an {@link OperatorConfigError} naming the adopted fingerprint and the same
+ * two remedies, since the run stops here and the value has to be on file
+ * before the next one.
  */
 export function persistPartnerFingerprint(
   configPath: string,
   fingerprint: string,
 ): void {
+  try {
+    writeFileOwnerOnly(
+      configPath,
+      partnerFingerprintRecorded(configPath, fingerprint),
+    );
+  } catch (err) {
+    // A UsageError (OperatorConfigError included) is already an operator-facing
+    // refusal the document edit composed; anything else is the read or the
+    // atomic replace, which reaches the operator only here.
+    if (err instanceof UsageError) throw err;
+    throw new OperatorConfigError(
+      "the partner's signing certificate was pinned on this first contact, " +
+        `but the fingerprint could not be recorded in ${configPath} ` +
+        `(${err instanceof Error ? err.message : String(err)}), so the run ` +
+        `stops here. The partner's fingerprint is ${fingerprint}; before the ` +
+        `next run, either ${PARTNER_FINGERPRINT_REMEDIES}.`,
+    );
+  }
+}
+
+/** The configuration text {@link persistPartnerFingerprint} writes back: the
+ * file at `configPath` with `signing.partner_fingerprint` set to
+ * `fingerprint`. */
+function partnerFingerprintRecorded(
+  configPath: string,
+  fingerprint: string,
+): string {
   // Parse, edit, and re-serialize through the sensitive-file chokepoint (see
   // persistHostKeyFingerprint), preserving the operator's comments and key
   // order on this surgical one-field write.
-  const serialized = editSensitiveYamlDocument(
+  return editSensitiveYamlDocument(
     fs.readFileSync(configPath, "utf8"),
     `config file ${configPath}`,
     (doc) => {
@@ -1532,7 +1618,6 @@ export function persistPartnerFingerprint(
       }
     },
   );
-  writeFileOwnerOnly(configPath, serialized);
 }
 
 /**

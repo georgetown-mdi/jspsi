@@ -348,7 +348,7 @@ export type {
   OwnColumnSelection,
 } from "./config/metadata";
 export type { OutboundPayloadConsent } from "./config/outboundPayloadConsent";
-export { FINGERPRINT_REGEX } from "./config/signing";
+export { FINGERPRINT_REGEX, partnerPinIsPresent } from "./config/signing";
 export type { SigningConfig } from "./config/signing";
 export {
   SIGNING_CERTIFICATE_VERSION,

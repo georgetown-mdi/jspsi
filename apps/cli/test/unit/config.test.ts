@@ -14,6 +14,7 @@ import {
   MAX_NESTING_DEPTH,
   NAME_SHAPE_MESSAGE,
   NestingDepthExceededError,
+  OperatorConfigError,
   parseExchangeSpec,
   quoteTermsValue,
   renderedDisplayCost,
@@ -27,6 +28,7 @@ import {
 import { controlCharacterMarker } from "@psilink/core/testing";
 import {
   applyConnectionOverrides,
+  assertPartnerFingerprintRecordable,
   assertRetainSweepGuard,
   diffLinkageTerms,
   formatReconcileDiffs,
@@ -1309,6 +1311,109 @@ test("persistPartnerFingerprint throws (not silently) on a malformed config", ()
   expect(() => persistPartnerFingerprint(configPath, PARTNER_FP_A)).toThrow(
     UsageError,
   );
+});
+
+test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+  "persistPartnerFingerprint names the fingerprint and the remedies when the write fails (skipped where a directory cannot be made read-only for its owner)",
+  () => {
+    // The pre-flight in the exchange command catches the read-only mount before
+    // the run connects; this is the mount that turned read-only after it passed.
+    // The adoption has already happened by then, so the refusal has to hand the
+    // operator the value to record and both ways to record it.
+    const readOnlyDir = path.join(dir, "readonly");
+    fs.mkdirSync(readOnlyDir);
+    const configPath = path.join(readOnlyDir, "psilink.yaml");
+    const original = certificateModeConfigSource();
+    fs.writeFileSync(configPath, original);
+    fs.chmodSync(readOnlyDir, 0o555);
+    let caught: unknown;
+    try {
+      persistPartnerFingerprint(configPath, PARTNER_FP_A);
+    } catch (err) {
+      caught = err;
+    } finally {
+      // Restore the mode so afterEach can remove the tmp dir.
+      fs.chmodSync(readOnlyDir, 0o755);
+    }
+    expect(caught).toBeInstanceOf(OperatorConfigError);
+    const message = (caught as Error).message;
+    expect(message).toContain(configPath);
+    expect(message).toContain(PARTNER_FP_A);
+    expect(message).toContain("signing.partner_fingerprint");
+    expect(message).toContain("psilink fingerprint");
+    expect(message).toContain("mount the configuration writable");
+    // The refusal leaves the file exactly as it stands: the atomic replace
+    // never reached the destination.
+    expect(fs.readFileSync(configPath, "utf8")).toBe(original);
+  },
+);
+
+// --- assertPartnerFingerprintRecordable --------------------------------------
+
+test("assertPartnerFingerprintRecordable passes every block that records no pin", () => {
+  // Only a certificate-mode block with no pin on file ever writes here, so
+  // every other shape is a no-op -- checked against a path that does not exist,
+  // which would fail the access probe if the guard read it at all.
+  const absent = path.join(dir, "no-such-dir", "psilink.yaml");
+  for (const signing of [
+    undefined,
+    { mode: "none" } as const,
+    { mode: "session-derived" } as const,
+    { mode: "certificate", partnerFingerprint: PARTNER_FP_A } as const,
+  ])
+    expect(() =>
+      assertPartnerFingerprintRecordable(signing, absent),
+    ).not.toThrow();
+});
+
+test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+  "assertPartnerFingerprintRecordable refuses an unwritable configuration (skipped where a directory cannot be made read-only for its owner)",
+  () => {
+    const readOnlyDir = path.join(dir, "readonly");
+    fs.mkdirSync(readOnlyDir);
+    const configPath = path.join(readOnlyDir, "psilink.yaml");
+    fs.writeFileSync(configPath, certificateModeConfigSource());
+    fs.chmodSync(readOnlyDir, 0o555);
+    let caught: unknown;
+    try {
+      assertPartnerFingerprintRecordable({ mode: "certificate" }, configPath);
+    } catch (err) {
+      caught = err;
+    } finally {
+      fs.chmodSync(readOnlyDir, 0o755);
+    }
+    expect(caught).toBeInstanceOf(OperatorConfigError);
+    expect((caught as Error).message).toContain(configPath);
+  },
+);
+
+test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+  "assertPartnerFingerprintRecordable refuses a read-only configuration file (skipped where a file cannot be made read-only for its owner)",
+  () => {
+    // The directory admits a new entry, but the atomic replace also needs the
+    // destination itself writable, so W_OK on the directory alone would pass a
+    // run that still cannot record its pin.
+    const configPath = path.join(dir, "psilink.yaml");
+    fs.writeFileSync(configPath, certificateModeConfigSource());
+    fs.chmodSync(configPath, 0o444);
+    let caught: unknown;
+    try {
+      assertPartnerFingerprintRecordable({ mode: "certificate" }, configPath);
+    } catch (err) {
+      caught = err;
+    } finally {
+      fs.chmodSync(configPath, 0o644);
+    }
+    expect(caught).toBeInstanceOf(OperatorConfigError);
+  },
+);
+
+test("assertPartnerFingerprintRecordable passes a writable configuration", () => {
+  const configPath = path.join(dir, "psilink.yaml");
+  fs.writeFileSync(configPath, certificateModeConfigSource());
+  expect(() =>
+    assertPartnerFingerprintRecordable({ mode: "certificate" }, configPath),
+  ).not.toThrow();
 });
 
 // --- persistDisclosedPayloadColumns ------------------------------------------

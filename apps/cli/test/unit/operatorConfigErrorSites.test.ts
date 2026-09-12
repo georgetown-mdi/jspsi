@@ -260,6 +260,32 @@ const RECORDED_SITES: readonly ConfigErrorSite[] = [
       "fixed prose; not even the configured path is quoted.",
   },
   {
+    file: "apps/cli/src/config.ts",
+    anchor: "assertPartnerFingerprintRecordable",
+    raises: "OperatorConfigError",
+    interpolates: ["configPath"],
+    provenance:
+      "`configPath` is the path the operator passed on their own command line " +
+      "(--config-file, else the default), reaching the guard from the exchange " +
+      "handler's own options. The remedy beside it is " +
+      "PARTNER_FINGERPRINT_REMEDIES, a module constant of fixed prose the scan " +
+      "resolves through, quoting no value at all.",
+  },
+  {
+    file: "apps/cli/src/config.ts",
+    anchor: "persistPartnerFingerprint",
+    raises: "OperatorConfigError",
+    interpolates: ["String(err)", "configPath", "err.message", "fingerprint"],
+    provenance:
+      "`configPath` is the operator's own path, as above. `fingerprint` is a " +
+      "digest THIS party computed over the presented certificate " +
+      "(computeCertificateFingerprint in resolvePartnerCertificateOrAbort), so " +
+      "it is a base64url hash rather than any byte the partner authored. `err` " +
+      "is the failure of this party's own read or atomic replace -- a Node " +
+      "filesystem error over that same local path -- and both spellings of it " +
+      "are recorded because the conditional's branches are followed.",
+  },
+  {
     file: "apps/cli/src/signingIdentityDivergence.ts",
     anchor: "assertIdentityMatchesAgreedTerms",
     raises: "OperatorConfigError",

@@ -386,7 +386,7 @@ Owner-only and the container's identity are one question here, not two: a `0600`
 - **Kubernetes**: use a `Secret` volume with `defaultMode: 0600`. Do not use a `ConfigMap` for the key file. Set the pod's `securityContext` so the projected file belongs to the identity the container runs as; a `0600` file the container's uid does not own is unreadable to it.
 - **CI runners**: write the token to a temporary file with `install -m 0600 /dev/stdin .psilink.key <<< "$TOKEN"` (bash) or `printf '%s' "$TOKEN" | install -m 0600 /dev/stdin .psilink.key` (POSIX sh) rather than `echo "$TOKEN" > .psilink.key`, which may leave a world-readable file depending on the runner's umask.
 
-**Separate read-only config from read-write secrets.** If the working directory (containing `psilink.yaml` and input data) is mounted read-only - for example to prevent the container from modifying source data - mount a separate read-write volume for the key file and use `--key-file` to redirect the CLI:
+**Separate read-only config from read-write secrets.** If the working directory (containing `psilink.yaml` and input data) is mounted read-only - for example to prevent the container from modifying source data - mount a separate read-write volume for the key file and use `--key-file` to redirect the CLI. One exception needs the config itself writable: under `signing.mode: certificate` a first contact with a partner you have not pinned records the fingerprint it adopts into `psilink.yaml` (see [CLI.md](CLI.md#pinning-the-partners-certificate)), so either set `signing.partner_fingerprint` before that run or mount the configuration writable for it - a run that can do neither is refused before it connects:
 
 ```sh
 # Docker

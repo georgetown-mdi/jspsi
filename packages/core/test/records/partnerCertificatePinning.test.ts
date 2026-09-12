@@ -138,6 +138,20 @@ function withTermsCertificate(
   };
 }
 
+/** The reasons on the single abort frame a refusing party sent the peer. The
+ * refusal is one-sided, so without that frame the peer waits out its
+ * inactivity budget. */
+function abortReasons(sent: Array<unknown>): unknown {
+  const frames = sent.filter(
+    (frame) =>
+      typeof frame === "object" &&
+      frame !== null &&
+      (frame as { decision?: unknown }).decision === "abort",
+  );
+  expect(frames).toHaveLength(1);
+  return (frames[0] as { abortReasons?: unknown }).abortReasons;
+}
+
 /** Frames that carry this party's own data, in either direction. */
 function disclosingFrames(sent: Array<unknown>): Array<unknown> {
   return sent.filter(
@@ -236,41 +250,69 @@ describe("a first authenticated contact adopts the partner's certificate", () =>
     expect(adopted).toEqual([]);
     expect(resInit.signedReceipt).toBeDefined();
   });
+});
 
-  test("a certificate that does not verify under its own key is not adopted", async () => {
-    // Adopting it would write a pin no later run could satisfy, so the first
-    // contact refuses instead: the signature is tampered with in flight while
-    // the body -- and so the fingerprint -- stays what the partner sent.
-    const tampered = {
-      ...identityB.certificate,
-      signature: identityA.certificate.signature,
-    };
-    const [connInitiator, rawResponder] = createMessagePipe();
-    const responder = runExchange(
-      withTermsCertificate(rawResponder, tampered),
-      "responder",
-      prepared("Responder Co", serverRows),
-      { psiLibrary, signingIdentity: identityB, sessionKey },
-    ).catch((reason: unknown) => reason);
-    const raised = await runExchange(
-      connInitiator,
-      "initiator",
-      prepared("Initiator Co", clientRows),
-      { psiLibrary, signingIdentity: identityA, sessionKey },
-    ).then(
-      () => {
-        throw new Error("expected the first contact to refuse");
-      },
-      (reason: unknown) => reason,
-    );
-    expect(raised).toBeInstanceOf(ReceiptVerificationError);
-    expect((raised as Error).message).toMatch(
-      /does not verify under its own key/,
-    );
-    await connInitiator.close();
-    await rawResponder.close();
-    await responder;
-  });
+describe("a certificate that does not verify under its own key is not adopted", () => {
+  // Adopting it would write a pin no later run could satisfy, so the first
+  // contact refuses instead: the signature is tampered with in flight while
+  // the body -- and so the fingerprint -- stays what the partner sent. Neither
+  // seat holds a pin, so both reach the self-signature check.
+  for (const refusingRole of ["initiator", "responder"] as const) {
+    test(`the refusing ${refusingRole} discloses nothing and aborts`, async () => {
+      const partnerRole: HandshakeRole =
+        refusingRole === "initiator" ? "responder" : "initiator";
+      const refusing = seat(refusingRole);
+      const partnerSeat = seat(partnerRole);
+      const tampered = {
+        ...partnerSeat.identity.certificate,
+        signature: refusing.identity.certificate.signature,
+      };
+      const adopted: Array<string> = [];
+      const [rawRefusing, rawPartner] = createMessagePipe();
+      const refusingSide = recording(rawRefusing);
+      const partner = runExchange(
+        withTermsCertificate(rawPartner, tampered),
+        partnerRole,
+        prepared(partnerSeat.name, partnerSeat.rows),
+        {
+          psiLibrary,
+          signingIdentity: partnerSeat.identity,
+          sessionKey,
+        },
+      ).catch((reason: unknown) => reason);
+      const raised = await runExchange(
+        refusingSide.conn,
+        refusingRole,
+        prepared(refusing.name, refusing.rows),
+        {
+          psiLibrary,
+          signingIdentity: refusing.identity,
+          sessionKey,
+          onPartnerCertificatePinned: (fingerprint) =>
+            adopted.push(fingerprint),
+        },
+      ).then(
+        () => {
+          throw new Error("expected the first contact to refuse");
+        },
+        (reason: unknown) => reason,
+      );
+
+      expect(raised).toBeInstanceOf(ReceiptVerificationError);
+      expect((raised as Error).message).toMatch(
+        /does not verify under its own key/,
+      );
+      expect(adopted).toEqual([]);
+      expect(disclosingFrames(refusingSide.sent)).toEqual([]);
+      expect(abortReasons(refusingSide.sent)).toEqual([
+        expect.stringMatching(/does not verify under its own key/),
+      ]);
+
+      await rawRefusing.close();
+      await rawPartner.close();
+      await partner;
+    });
+  }
 });
 
 describe("a certificate the wire format does not admit is refused at parse", () => {
@@ -286,7 +328,7 @@ describe("a certificate the wire format does not admit is refused at parse", () 
   };
 
   for (const refusingRole of ["initiator", "responder"] as const) {
-    test(`the refusing ${refusingRole} discloses nothing`, async () => {
+    test(`the refusing ${refusingRole} discloses nothing and aborts`, async () => {
       const partnerRole: HandshakeRole =
         refusingRole === "initiator" ? "responder" : "initiator";
       const [rawRefusing, rawPartner] = createMessagePipe();
@@ -324,6 +366,9 @@ describe("a certificate the wire format does not admit is refused at parse", () 
       expect(raised).toBeInstanceOf(ReceiptVerificationError);
       expect((raised as Error).message).toMatch(/this build cannot read/);
       expect(disclosingFrames(refusingSide.sent)).toEqual([]);
+      expect(abortReasons(refusingSide.sent)).toEqual([
+        expect.stringMatching(/the wire format does not admit/),
+      ]);
 
       await rawRefusing.close();
       await rawPartner.close();
@@ -334,7 +379,7 @@ describe("a certificate the wire format does not admit is refused at parse", () 
 
 describe("a partner presenting no certificate is refused on either seat", () => {
   for (const refusingRole of ["initiator", "responder"] as const) {
-    test(`the refusing ${refusingRole} discloses nothing`, async () => {
+    test(`the refusing ${refusingRole} discloses nothing and aborts`, async () => {
       const partnerRole: HandshakeRole =
         refusingRole === "initiator" ? "responder" : "initiator";
       const refusing = seat(refusingRole);
@@ -369,11 +414,84 @@ describe("a partner presenting no certificate is refused on either seat", () => 
         /partner is not signing receipts/,
       );
       expect(disclosingFrames(refusingSide.sent)).toEqual([]);
+      expect(abortReasons(refusingSide.sent)).toEqual([
+        expect.stringMatching(/presented no signing certificate/),
+      ]);
 
       await rawRefusing.close();
       await rawPartner.close();
       await partner;
     });
+  }
+});
+
+describe("a configured pin that is not a fingerprint is refused, never matched", () => {
+  // The schema keeps a malformed pin out of a config read from disk, but a
+  // SigningConfig assembled in code can still hold one, and the comparison
+  // fails closed on it rather than throwing (matchesPinnedFingerprint). What
+  // this holds is that the run then takes the DIVERGENCE arm: a pin nobody can
+  // match is never read as no pin at all, so a valid partner certificate is
+  // refused instead of being adopted over the operator's configured value.
+  const malformed = [
+    { label: "a value the base64url decode rejects", pin: "not a fingerprint" },
+    { label: "a value of the wrong length", pin: fingerprintB.slice(0, 20) },
+  ];
+
+  for (const { label, pin } of malformed) {
+    for (const refusingRole of ["initiator", "responder"] as const) {
+      test(`the refusing ${refusingRole} refuses ${label}`, async () => {
+        const partnerRole: HandshakeRole =
+          refusingRole === "initiator" ? "responder" : "initiator";
+        const refusing = seat(refusingRole);
+        const partnerSeat = seat(partnerRole);
+        const adopted: Array<string> = [];
+        const [rawRefusing, rawPartner] = createMessagePipe();
+        const refusingSide = recording(rawRefusing);
+        const partner = runExchange(
+          rawPartner,
+          partnerRole,
+          prepared(partnerSeat.name, partnerSeat.rows),
+          {
+            psiLibrary,
+            signingIdentity: partnerSeat.identity,
+            partnerFingerprint: partnerSeat.partnerFingerprint,
+            sessionKey,
+          },
+        ).catch((reason: unknown) => reason);
+        const raised = await runExchange(
+          refusingSide.conn,
+          refusingRole,
+          prepared(refusing.name, refusing.rows),
+          {
+            psiLibrary,
+            signingIdentity: refusing.identity,
+            partnerFingerprint: pin,
+            sessionKey,
+            onPartnerCertificatePinned: (fingerprint) =>
+              adopted.push(fingerprint),
+          },
+        ).then(
+          () => {
+            throw new Error("expected the malformed pin to refuse");
+          },
+          (reason: unknown) => reason,
+        );
+
+        expect(raised).toBeInstanceOf(ReceiptVerificationError);
+        expect((raised as Error).message).toMatch(
+          /is not the one pinned in signing\.partner_fingerprint/,
+        );
+        expect(adopted).toEqual([]);
+        expect(disclosingFrames(refusingSide.sent)).toEqual([]);
+        expect(abortReasons(refusingSide.sent)).toEqual([
+          expect.stringMatching(/is not the one its partner pinned/),
+        ]);
+
+        await rawRefusing.close();
+        await rawPartner.close();
+        await partner;
+      });
+    }
   }
 });
 

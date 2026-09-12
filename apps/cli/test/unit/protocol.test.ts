@@ -2524,20 +2524,19 @@ test(
   },
 );
 
-// --- Signed-receipt non-signing-partner warn gate via runProtocol ------------
+// --- Signed-receipt missing-receipt warn gate via runProtocol ---------------
 //
 // Pins the catch-block gate that decides whether to warn the operator that a
-// signed receipt was configured but the exchange did not complete the receipt
-// swap -- `signing !== null && !exchangeComplete && !isReceiptVerificationFailure
-// && !isLocalConfigRefusal` in runProtocol's catch. Runs a REAL two-party
-// handshake (only runExchange is mocked) with a signing config threaded
-// through, using the same awaitBothArmed/runAbortParty barrier pattern as the
-// abort-marker section above so both parties reach the same point
-// deterministically.
+// signed receipt was configured but none arrived -- `signing !== null &&
+// !exchangeComplete && !isReceiptVerificationFailure && !isLocalConfigRefusal`
+// in runProtocol's catch. Runs a REAL two-party handshake (only runExchange is
+// mocked) with a signing config threaded through, using the same
+// awaitBothArmed/runAbortParty barrier pattern as the abort-marker section
+// above so both parties reach the same point deterministically.
 
-const NON_SIGNING_PARTNER_WARNING =
-  "A signed receipt was configured for this exchange, but the exchange " +
-  "did not complete the receipt swap";
+const MISSING_RECEIPT_WARNING =
+  "A signed receipt was configured for this exchange, but no receipt " +
+  "reached this side before the peer timeout";
 
 function signingPersistFixture(
   receiptFile: string,
@@ -2653,7 +2652,7 @@ test("a first-contact pin is recorded and stated on both sinks, unattended", asy
   expect(stated).toContain("compare the fingerprint");
 }, 20_000);
 
-test("a completed signed run does not warn about a non-signing partner", async () => {
+test("a completed signed run does not warn about a missing receipt", async () => {
   const keyFileA = path.join(tmpDir, "a.key");
   const keyFileB = path.join(tmpDir, "b.key");
   saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
@@ -2667,7 +2666,7 @@ test("a completed signed run does not warn about a non-signing partner", async (
   expect(resultB.status).toBe("fulfilled");
 
   expect(
-    mockState.warnings.some((m) => m.includes(NON_SIGNING_PARTNER_WARNING)),
+    mockState.warnings.some((m) => m.includes(MISSING_RECEIPT_WARNING)),
   ).toBe(false);
 }, 20_000);
 
@@ -2740,13 +2739,12 @@ test("writes the dual-signed receipt when no audit record was built", async () =
 }, 20_000);
 
 test(
-  "a ReceiptVerificationError does not warn about a non-signing partner",
+  "a ReceiptVerificationError does not warn about a missing receipt",
   { timeout: BOTH_ARMED_HANG_BACKSTOP_MS + 5_000 },
   async () => {
     // A pin-mismatch/verification failure is its own hard security failure,
     // reported on its own path (a distinct error kind/message); the softer
-    // "partner may not be configured to sign" warning must not also fire and
-    // dilute it.
+    // missing-receipt advisory must not also fire and dilute it.
     const keyFileA = path.join(tmpDir, "a.key");
     const keyFileB = path.join(tmpDir, "b.key");
     saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
@@ -2766,7 +2764,7 @@ test(
     expect(mockState.runExchangeEntries).toBe(2);
 
     expect(
-      mockState.warnings.some((m) => m.includes(NON_SIGNING_PARTNER_WARNING)),
+      mockState.warnings.some((m) => m.includes(MISSING_RECEIPT_WARNING)),
     ).toBe(false);
   },
 );
@@ -2800,19 +2798,19 @@ test(
     expect(mockState.runExchangeEntries).toBe(2);
 
     expect(
-      mockState.warnings.some((m) => m.includes(NON_SIGNING_PARTNER_WARNING)),
+      mockState.warnings.some((m) => m.includes(MISSING_RECEIPT_WARNING)),
     ).toBe(false);
   },
 );
 
 test(
-  "an OperatorConfigError does not warn about a non-signing partner",
+  "an OperatorConfigError does not warn about a missing receipt",
   { timeout: BOTH_ARMED_HANG_BACKSTOP_MS + 5_000 },
   async () => {
     // A run stopped by this party's own certificate/terms divergence (the
     // swap gate's local certificate check) is a local configuration fault,
-    // not evidence the partner failed to configure signing; the advisory
-    // must not point the operator at the partner for a purely local refusal.
+    // not a receipt lost in transit; the advisory must not point the operator
+    // at the transport for a purely local refusal.
     const keyFileA = path.join(tmpDir, "a.key");
     const keyFileB = path.join(tmpDir, "b.key");
     saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
@@ -2832,13 +2830,13 @@ test(
     expect(mockState.runExchangeEntries).toBe(2);
 
     expect(
-      mockState.warnings.some((m) => m.includes(NON_SIGNING_PARTNER_WARNING)),
+      mockState.warnings.some((m) => m.includes(MISSING_RECEIPT_WARNING)),
     ).toBe(false);
   },
 );
 
 test(
-  "a non-receipt failure with signing configured warns about a non-signing partner",
+  "a non-receipt failure with signing configured warns the receipt is missing",
   { timeout: BOTH_ARMED_HANG_BACKSTOP_MS + 5_000 },
   async () => {
     const keyFileA = path.join(tmpDir, "a.key");
@@ -2860,7 +2858,7 @@ test(
     expect(mockState.runExchangeEntries).toBe(2);
 
     expect(
-      mockState.warnings.some((m) => m.includes(NON_SIGNING_PARTNER_WARNING)),
+      mockState.warnings.some((m) => m.includes(MISSING_RECEIPT_WARNING)),
     ).toBe(true);
   },
 );

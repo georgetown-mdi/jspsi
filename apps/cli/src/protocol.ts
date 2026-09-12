@@ -2289,27 +2289,25 @@ export async function runProtocol(
     const errIsPeerAbort = (e: unknown): boolean =>
       causeChainSome(e, (link) => link instanceof PeerAbortError);
 
-    // Non-signing-partner observability: this side configured a signed
-    // receipt but the exchange failed before runExchange returned
-    // (exchangeComplete false), not with a receipt verification error (a
-    // distinct security event already reported by that error's own
-    // kind/message), and not with this party's own local
-    // certificate/terms refusal (a config fault this party's operator
-    // caused, not the partner's absence of signing). The signed-receipt
-    // swap is the last step of runExchange, so a partner that ran without
-    // a signing identity sends no receipt frame and this side parks on
-    // that receive until the peer timeout -- a drop otherwise
-    // indistinguishable from a generic peer-silence. Report that context
-    // so the operator can check whether the partner was configured to
-    // sign at all, rather than chasing a transport fault.
+    // Missing-receipt observability: this side configured a signed receipt
+    // but the exchange failed before runExchange returned (exchangeComplete
+    // false), not with a receipt verification error (a distinct security
+    // event already reported by that error's own kind/message), and not with
+    // this party's own local certificate/terms refusal (a config fault this
+    // party's operator caused). A partner presenting no signing certificate,
+    // or one this build cannot read, is refused at the terms exchange as a
+    // receipt verification error, so what is left here is a run whose signed
+    // path had no complaint of its own: the swap is the last step of
+    // runExchange, and this side parks on that receive until the peer
+    // timeout, a drop otherwise indistinguishable from generic peer-silence.
     // Walks the `cause` chain for a ReceiptVerificationError, so a future wrap
     // of the security failure cannot downgrade it to this softer warn.
     const isReceiptVerificationFailure = (e: unknown): boolean =>
       causeChainSome(e, (link) => link instanceof ReceiptVerificationError);
     // Class-exact, not the UsageError superclass OperatorConfigError itself
     // extends: a different usage fault mid-exchange still warrants the
-    // partner-signing check, so only this exact class is excluded. Walks the
-    // `cause` chain for the same forward-compatibility reason as
+    // advisory, so only this exact class is excluded. Walks the `cause` chain
+    // for the same forward-compatibility reason as
     // isReceiptVerificationFailure above.
     const isLocalConfigRefusal = (e: unknown): boolean =>
       causeChainSome(e, (link) => link.constructor === OperatorConfigError);
@@ -2320,12 +2318,12 @@ export async function runProtocol(
       !isLocalConfigRefusal(err)
     )
       log.warn(
-        "A signed receipt was configured for this exchange, but the exchange " +
-          "did not complete the receipt swap. If the partner did not configure " +
-          "a signing identity, it sends no receipt and this side waits for one " +
-          "until the peer timeout. Confirm the partner is configured to sign " +
-          "(its signing block, certificate mode) before treating this as a " +
-          "transport failure.",
+        "A signed receipt was configured for this exchange, but no receipt " +
+          "reached this side before the peer timeout and the receipt swap " +
+          "did not complete. A partner that presents no signing certificate " +
+          "is refused earlier, at the authenticated setup step, so check the " +
+          "transport and the peer rather than the partner's signing " +
+          "configuration.",
       );
 
     // The disclosure a terminated run already made outlives the failure that

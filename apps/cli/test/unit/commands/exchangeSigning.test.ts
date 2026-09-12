@@ -228,7 +228,7 @@ test("the refusal names no path of its own beyond the illustrative one", async (
   expect(message).not.toContain(os.homedir());
 });
 
-test("certificate mode with no pin resolves (the run is refused before this boundary)", async () => {
+test("certificate mode with no pin resolves as a first contact", async () => {
   const identityPath = path.join(dir, "signing-identity.json");
   saveSigningIdentity(identityPath, identity, { exclusive: true });
   const config: SigningConfig = {
@@ -236,13 +236,14 @@ test("certificate mode with no pin resolves (the run is refused before this boun
     identityFile: identityPath,
   };
   const resolved = await resolveSigningPersist(config, "Party A", configPath());
-  // This resolver states no pin rule of its own: an unpinned certificate-mode
-  // config is refused by core's single gate (assertCertificateModePinsPartner,
-  // inside prepareForExchange), which the exchange handler reaches before it
-  // resolves signing at all -- exchange.test.ts drives that ordering. Restating
-  // the rule here would put two spellings of one refusal on the path.
+  // This resolver states no pin rule of its own: a block with no pin is a first
+  // authenticated contact, which adopts the certificate the partner presents at
+  // the terms exchange and records it into the configuration path carried here.
+  // The absent pin travels through verbatim, which is what leaves the adoption
+  // to the one place that can see the presented certificate.
   expect(resolved).not.toBeNull();
   expect(resolved!.partnerFingerprint).toBeUndefined();
+  expect(resolved!.configPath).toBe(configPath());
 });
 
 // --- divergence from the run's linkage_terms.identity ------------------------
