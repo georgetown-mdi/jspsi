@@ -160,7 +160,7 @@ psilink file:///mnt/sftp-share/drop input.csv output.csv
 
 Before running, users are warned about the limitations of the security model, namely that they must trust the server's administrator.
 
-The run then states what it will send and match on -- the columns it transmits for matched records, and the terms the inference settled -- before it contacts the server, and whatever `--log-level` is set. See [What the run shows before it starts](#what-the-run-shows-before-it-starts), which covers the zero-setup run and the configured one alike.
+The run then states what it will send and match on -- the columns it transmits for matched records, and the terms the inference settled -- before it contacts the server, whatever `--log-level` is set. See [What the run shows before it starts](#what-the-run-shows-before-it-starts), which covers the zero-setup run and the configured one alike.
 
 If `--save` is not specified, after running users are instructed how to use `psilink invite` and `psilink accept` to establish a recurring exchange. `--save` usage can be discussed during onboarding.
 
