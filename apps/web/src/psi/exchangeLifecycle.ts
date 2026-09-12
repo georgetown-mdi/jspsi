@@ -220,11 +220,11 @@ interface ReceivedExchangeOutputs extends ExchangeOutputsBase {
   /** The matched results (CSV), as an object URL the UI exposes as a download. */
   resultsUrl: string;
   /** How the entity closure grouped this result's pairs
-   * ({@link ExchangeResult.entityClusters}): present on a `many-to-many` run,
-   * absent under every other cardinality, whose clusters follow from the
-   * table's own shape. A server job holds the result on the console and reads
-   * no table here, so its summary is the one the CLI put on the `result` event
-   * (docs/spec/CLI_EVENTS.md). */
+   * ({@link ExchangeResult.entityClusters}): present on a `many-to-many` run this party holds
+   * the table and rounds for, absent under every other cardinality (whose clusters
+   * follow from the table's own shape) and on the `single-pass` SENDER, which holds
+   * neither. A server job holds the result on the console and reads no table here,
+   * so its summary comes from the CLI's `result` event (docs/spec/CLI_EVENTS.md). */
   entityClusters?: EntityClusterSummary;
 }
 
