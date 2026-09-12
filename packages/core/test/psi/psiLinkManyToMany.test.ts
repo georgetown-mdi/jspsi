@@ -1,6 +1,48 @@
-import { expect, test } from "vitest";
+import { expect, test, vi } from "vitest";
 
 import PSI from "@openmined/psi.js";
+
+// The closure check, counted and given round labels on demand. A run of the two
+// datasets below cannot produce a table the check refuses -- the replay derives
+// the table and the blocks from the same rounds -- so the one way to drive the
+// refusal through the strategy is to relabel the rounds on their way in.
+const closureCheck = vi.hoisted(() => ({
+  calls: 0,
+  relabelRounds: false,
+  returned: undefined as unknown,
+}));
+
+vi.mock("../../src/psi/entityClosure", async (importOriginal) => {
+  const original =
+    await importOriginal<typeof import("../../src/psi/entityClosure")>();
+  const counted: typeof original.assertRoundDiagonalClosure = (
+    id,
+    table,
+    roundOfPair,
+    blocks,
+  ) => {
+    closureCheck.calls += 1;
+    closureCheck.returned = original.assertRoundDiagonalClosure(
+      id,
+      table,
+      closureCheck.relabelRounds
+        ? roundOfPair.map((round, i) => (i === 0 ? round : round + 1))
+        : roundOfPair,
+      blocks,
+    );
+    return closureCheck.returned as EntityClusterSummary;
+  };
+  return { ...original, assertRoundDiagonalClosure: counted };
+});
+
+async function withRelabeledRounds<T>(run: () => Promise<T>): Promise<T> {
+  closureCheck.relabelRounds = true;
+  try {
+    return await run();
+  } finally {
+    closureCheck.relabelRounds = false;
+  }
+}
 
 import { PSIParticipant } from "../../src/psi/participant";
 import { linkViaPSI, linkViaSinglePassPSI } from "../../src/psi/link";
@@ -12,6 +54,7 @@ import {
 } from "../../src/connection/messageConnection";
 import { entityClusters } from "../../src/psi/entityClosure";
 import type { EntityClusterSummary } from "../../src/psi/entityClosure";
+import { InternalConsistencyError } from "../../src/errors";
 import { matchedPairCount } from "../../src/exchange";
 import { buildOutputTable, preparePayload } from "../../src/payloadExchange";
 import type { Metadata } from "../../src/config/metadata";
@@ -903,15 +946,28 @@ function replacingResolvedTable(replacement: AssociationTable): Deviation {
   return (frame) => (isAssociationTable(frame) ? replacement : frame);
 }
 
+interface SinglePassRun {
+  /** A deviation on the sender's inbound frames -- the starter plays it here. */
+  deviation?: Deviation;
+  /**
+   * Drive the receiver with no cluster callback, the way a caller outside
+   * runExchange reaches the strategy.
+   */
+  withoutClusterCallback?: boolean;
+  /** The party expected to settle first, which the pipe is closed on. */
+  settlesFirst?: "starter" | "joiner";
+}
+
 async function runSinglePass(
   starterKeys: Keys,
   joinerKeys: Keys,
-  deviation?: Deviation,
+  options: SinglePassRun = {},
 ): Promise<{
   starter: AssociationTable | Error;
   joiner: AssociationTable | Error;
   joinerClusters?: EntityClusterSummary;
 }> {
+  const { deviation, withoutClusterCallback, settlesFirst } = options;
   const [starterConn, joinerConn] = createMessagePipe();
   const settle = (
     run: Promise<AssociationTable>,
@@ -944,10 +1000,14 @@ async function runSinglePass(
       false,
       -1,
       undefined,
-      (summary) => (joinerClusters = summary),
+      withoutClusterCallback === true
+        ? undefined
+        : (summary) => (joinerClusters = summary),
     ),
   );
-  await starterRun;
+  // A party that aborts leaves the other parked on a frame it will never send,
+  // so close the pipe once the party under test has settled.
+  await (settlesFirst === "joiner" ? joinerRun : starterRun);
   await starterConn.close();
   return {
     starter: await starterRun,
@@ -990,11 +1050,9 @@ test("a resolved table at the derived bound is accepted", async () => {
     [0, 0, 0, 1, 1, 1, 2, 2, 2],
     [0, 1, 2, 0, 1, 2, 0, 1, 2],
   ];
-  const { starter } = await runSinglePass(
-    spStarterKeys,
-    spJoinerKeys,
-    replacingResolvedTable(wholeProduct),
-  );
+  const { starter } = await runSinglePass(spStarterKeys, spJoinerKeys, {
+    deviation: replacingResolvedTable(wholeProduct),
+  });
   expect(starter).toStrictEqual(wholeProduct);
 });
 
@@ -1002,14 +1060,12 @@ test("a resolved table one pair past the bound is refused", async () => {
   // One more than the product admits. The length is checked before any entry
   // is read, so the refusal names the bound rather than the repeated pair the
   // tenth entry must also be.
-  const { starter } = await runSinglePass(
-    spStarterKeys,
-    spJoinerKeys,
-    replacingResolvedTable([
+  const { starter } = await runSinglePass(spStarterKeys, spJoinerKeys, {
+    deviation: replacingResolvedTable([
       [0, 0, 0, 1, 1, 1, 2, 2, 2, 2],
       [0, 1, 2, 0, 1, 2, 0, 1, 2, 0],
     ]),
-  );
+  });
   expect(starter).toBeInstanceOf(ConnectionError);
   expect((starter as ConnectionError).kind).toBe("protocol");
   expect((starter as Error).message).toMatch(
@@ -1021,14 +1077,12 @@ test("a resolved table naming one pair twice is refused", async () => {
   // Within the bound, so the length check passes and what refuses it is the
   // pair rule: a pair named twice is one link every consumer of the table
   // counts and writes twice.
-  const { starter } = await runSinglePass(
-    spStarterKeys,
-    spJoinerKeys,
-    replacingResolvedTable([
+  const { starter } = await runSinglePass(spStarterKeys, spJoinerKeys, {
+    deviation: replacingResolvedTable([
       [0, 0, 1],
       [1, 1, 0],
     ]),
-  );
+  });
   expect(starter).toBeInstanceOf(ConnectionError);
   expect((starter as ConnectionError).kind).toBe("protocol");
   expect((starter as Error).message).toMatch(
@@ -1039,24 +1093,52 @@ test("a resolved table naming one pair twice is refused", async () => {
 test("a resolved table whose local half descends is refused", async () => {
   // Non-decreasing is what the repeating half keeps, and the result rows, the
   // payload rows and the re-supply path all read the table in that order.
-  const { starter } = await runSinglePass(
-    spStarterKeys,
-    spJoinerKeys,
-    replacingResolvedTable([
+  const { starter } = await runSinglePass(spStarterKeys, spJoinerKeys, {
+    deviation: replacingResolvedTable([
       [1, 0],
       [0, 0],
     ]),
-  );
+  });
   expect(starter).toBeInstanceOf(ConnectionError);
   expect((starter as Error).message).toMatch(/is not in ascending order/);
 });
 
 test("a resolved table naming a row neither party counted is refused", async () => {
-  const { starter } = await runSinglePass(
-    spStarterKeys,
-    spJoinerKeys,
-    replacingResolvedTable([[0], [3]]),
-  );
+  const { starter } = await runSinglePass(spStarterKeys, spJoinerKeys, {
+    deviation: replacingResolvedTable([[0], [3]]),
+  });
   expect(starter).toBeInstanceOf(ConnectionError);
   expect((starter as Error).message).toMatch(/has an index outside \[0, 3\)/);
+});
+
+// --- the receiver's closure check, with and without the cluster callback -------
+// The callback is optional and runExchange always supplies one, so the check
+// stands on its own: the differential vectors, the bench, and any other direct
+// caller drive the strategy without one and are entitled to the same refusal
+// (docs/spec/PROTOCOL.md, The `many-to-many` entity closure).
+
+test("a table the closure check refuses aborts the receiver with no callback", async () => {
+  closureCheck.calls = 0;
+  const { joiner } = await withRelabeledRounds(() =>
+    runSinglePass(spStarterKeys, spJoinerKeys, {
+      withoutClusterCallback: true,
+      settlesFirst: "joiner",
+    }),
+  );
+  expect(closureCheck.calls).toBe(1);
+  expect(joiner).toBeInstanceOf(InternalConsistencyError);
+  expect((joiner as Error).message).toMatch(
+    /joins pairs matched on two different linkage keys/,
+  );
+});
+
+test("the cluster callback is handed the summary the check returned", async () => {
+  closureCheck.calls = 0;
+  const { joiner, joinerClusters } = await runSinglePass(
+    spStarterKeys,
+    spJoinerKeys,
+  );
+  expect(joiner).not.toBeInstanceOf(Error);
+  expect(closureCheck.calls).toBe(1);
+  expect(joinerClusters).toBe(closureCheck.returned);
 });

@@ -2170,15 +2170,15 @@ export async function linkViaSinglePassPSI(
   // the exchanged association maps. The sender reads no round and no block, so
   // this is the one party that can take the check (docs/spec/PROTOCOL.md, The
   // `many-to-many` entity closure).
-  if (replay.closure !== undefined)
-    reportEntityClusters?.(
-      assertRoundDiagonalClosure(
-        participant.id,
-        result,
-        replay.closure.roundOfPair,
-        replay.closure.blocks,
-      ),
+  if (replay.closure !== undefined) {
+    const clusters = assertRoundDiagonalClosure(
+      participant.id,
+      result,
+      replay.closure.roundOfPair,
+      replay.closure.blocks,
     );
+    reportEntityClusters?.(clusters);
+  }
 
   // Collect the cascade's per-key reconstruction maps before returning.
   relieveTransientMemory();
