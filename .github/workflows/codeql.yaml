@@ -11,7 +11,7 @@ name: CodeQL
 #
 # Free here: code scanning with CodeQL is free on public repositories
 # (georgetown-mdi/jspsi is public), so this needs no GitHub Advanced Security
-# license. Findings surface as code-scanning alerts in the repository Security
+# license. Findings appear as code-scanning alerts in the repository Security
 # tab.
 #
 # A merge gate. Two check runs come out of this analysis and both belong on the
@@ -21,7 +21,7 @@ name: CodeQL
 # raises from the uploaded SARIF, which is the half that turns red when a pull
 # request introduces an alert. Neither is path-filtered, so neither can
 # path-skip into the permanently-pending state a required check falls into when
-# its workflow is skipped -- the footgun image_smoke.yaml documents. The
+# its workflow is skipped -- the hazard image_smoke.yaml documents. The
 # merge-gate identities check, run by the Repository checks step of
 # static_checks.yaml, holds that: this file carrying a path filter under
 # on.pull_request fails it.
@@ -36,7 +36,7 @@ name: CodeQL
 # so the gate turns on against an empty board rather than blocking unrelated
 # work. That false-positive rate on real pull requests is what the earlier
 # advisory posture was waiting on. If it rises, move back to advisory and record
-# why -- dismissing findings to keep the gate green is the dishonest exit.
+# why -- dismissing findings to keep the gate green is not the way out.
 #
 # JavaScript/TypeScript needs no build step (build-mode: none): CodeQL extracts
 # the sources directly, so unlike the build/test workflows this neither runs the
@@ -46,7 +46,7 @@ on:
   # Manual trigger for an on-demand full-tree scan (PR runs are diff-informed);
   # how a maintainer re-baselines a branch without waiting for the schedule.
   workflow_dispatch:
-  # On a PR, analyze the changes and surface new alerts on the PR itself.
+  # On a PR, analyze the changes and report new alerts on the PR itself.
   pull_request:
     branches: [main, staging]
   # On merge to a base branch, refresh that branch's alert baseline so alert

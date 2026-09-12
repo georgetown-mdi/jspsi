@@ -73,7 +73,7 @@ jobs:
         # Then a fresh install of just the vendored tarball inside it (mirrors the
         # production image) and the native-only known-answer check. --ignore-scripts
         # is safe: node-gyp-build resolves the prebuild at require time, not install.
-        # Install stderr is left un-suppressed so a failing install surfaces its log.
+        # Install stderr is left un-suppressed so a failing install shows its log.
         run: |
           # The runtime stage is the LAST `FROM` -- the image that actually ships and
           # loads the native addon (an earlier `FROM ... AS builder` only compiles TS
@@ -85,7 +85,7 @@ jobs:
           case "$base" in
             node:*-alpine | node:*-alpine@*) ;;
             *)
-              echo "Dockerfile runtime base '$base' is not a node:*-alpine image; this musl gate's premise is stale -- update or retire it." >&2
+              echo "Dockerfile runtime base '$base' is not a node:*-alpine image; this musl gate's assumption is stale -- update or retire it." >&2
               exit 1
               ;;
           esac

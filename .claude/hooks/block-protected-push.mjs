@@ -15,7 +15,7 @@
 // PreToolUse hooks run in every permission mode, including bypass, so the gate
 // holds there. Exit 0 allows the call; exit 2 blocks it and feeds stderr back to
 // Claude. Any unexpected failure here falls through to exit 0 (fail open) so a bug
-// in this hook can never wedge every Bash command -- branch protection backstops a
+// in this hook can never wedge every Bash command -- branch protection catches a
 // push this hook misses.
 
 import { commandOf, eventCwd, eventForTools } from "./lib/event.mjs";

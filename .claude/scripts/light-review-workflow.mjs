@@ -394,7 +394,7 @@ ${groundRules}
 
 ${docsClause}Review for: correctness bugs, logic errors, security issues, missing error handling at system boundaries, type-safety issues, API-contract violations, documentation-tier placement (spec-level detail -- a constant value, byte/wire layout, an HKDF info string or other algorithm step, or "would only need revisiting if..." rationale -- written into a docs/ overview doc rather than docs/spec/), excess prose (a comment that restates the adjacent code, narrates change history -- "now", "previously", "was moved" -- duplicates a JSDoc, or cites a board item id; name such findings "excess prose: ..."), and anything else that looks wrong.
 
-Do NOT flag missing comments or ask for more explanatory prose unless a genuinely non-obvious constraint is uncarried by the code, names, types, and tests -- this codebase treats prose as a last resort and a check, test, or rename as the preferred carrier.
+Do NOT flag missing comments or ask for more explanatory prose unless a non-obvious constraint is stated nowhere in the code, names, types, or tests -- this codebase treats prose as a last resort and a check, test, or rename as the preferred place for it.
 
 Separately from the findings, answer the shape question: is there a materially simpler shape for this branch's change -- a different factoring, an existing mechanism it should have reused, a smaller surface? Set simpler=true ONLY if you can name the shape in one sentence (put it in reason); otherwise simpler=false with a short reason. Do not force it.`;
 

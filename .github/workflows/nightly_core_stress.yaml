@@ -1,13 +1,13 @@
 name: Nightly Core Stress Tests
 
 # Scheduled nightly run of the core PSI stress tier -- packages/core's `stress`
-# vitest project (npm run test:stress -w packages/core). That tier is
-# deliberately excluded from `npm run test` and from every PR gate so the
-# merge-time path stays fast; the tests exercise the seclink fork's large-dataset
-# path -- e.g. Server#createSetupMessage past the ~125k spread-argument cliff that
-# once threw "Maximum call stack size exceeded" -- which is too heavy to run on
-# every push. A nightly schedule is where that coverage belongs, catching a
-# regression in the large-N path without slowing the PR gate.
+# vitest project (npm run test:stress -w packages/core). That tier is excluded
+# from `npm run test` and from every PR gate so the merge-time path stays fast;
+# the tests exercise the seclink fork's large-dataset path -- e.g.
+# Server#createSetupMessage past the ~125k spread-argument cliff that once threw
+# "Maximum call stack size exceeded" -- which is too heavy to run on every push.
+# A nightly schedule is where that coverage belongs, catching a regression in
+# the large-N path without slowing the PR gate.
 #
 # Runs only on `schedule` and manual `workflow_dispatch` -- never on push or
 # pull_request -- so the PR gate is unaffected. It invokes the whole `stress`

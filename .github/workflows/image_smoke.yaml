@@ -1,14 +1,14 @@
 name: Image Smoke
 
 # Smoke test for the container images this repository ships: the default CLI +
-# web-console appliance image and the FIPS variant (Dockerfile.fips), both of
-# which release.yaml builds, scans, signs, and publishes at a version tag. This
-# is the sole pre-merge check that either image actually builds and that both
-# of its roles run: the headless CLI and the `serve` web console.
+# web console image and the FIPS variant (Dockerfile.fips), both of which
+# release.yaml builds, scans, signs, and publishes at a version tag. This is
+# the sole pre-merge check that either image actually builds and that both of
+# its roles run: the headless CLI and the `serve` web console.
 #
 # It builds single-arch (native amd64, no QEMU) and loads each image into the
-# runner's Docker so it can run it -- deliberately faster and simpler than the
-# release job's multi-arch build+push, since nothing is published here.
+# runner's Docker so it can run it -- faster and simpler than the release job's
+# multi-arch build+push, since nothing is published here.
 #
 # A second job drives the restricted-egress recipe docs/DEPLOYMENT.md hands the
 # operator. It needs Docker and root on the same machine, which is what puts it
@@ -39,7 +39,7 @@ on:
       # lockfile, so the install policy the one states and the allowScripts map
       # the other carries are image build inputs on the same footing: a flag
       # interaction, an added registry, or a verdict change that only breaks the
-      # containerised install would otherwise surface first at a release tag.
+      # containerised install would otherwise appear first at a release tag.
       - ".npmrc"
       - "package.json"
       # The FIPS leg runs both harnesses out of this directory.
@@ -385,9 +385,9 @@ jobs:
           # to be non-empty on its own, so a run where only one half wrote
           # anything fails here rather than passing on the other's files.
           #
-          # The third mount, the shared drop directory, is deliberately outside
-          # the walk: it is the partner-visible transfer folder, and no
-          # confidentiality claim rests on the modes of what lands there.
+          # The third mount, the shared drop directory, is outside the walk: it
+          # is the partner-visible transfer folder, and no confidentiality claim
+          # rests on the modes of what lands there.
           #
           # Two names are skipped inside the two walked mounts. input.csv is the
           # file this step placed there itself. psilink.yaml is excluded because
@@ -432,11 +432,11 @@ jobs:
       # container by hand; there is no separate teardown step to rely on.
       #
       # JOB_DATA_ROOT turns the job API on, which is what makes this a smoke of
-      # the console appliance rather than of the web UI alone: enabling it puts
-      # the fail-closed credential-scratch setup in the startup path, and that
-      # setup writes under root-owned /run. The server is unprivileged on both
-      # images and refuses to boot there unless the image prepared the directory
-      # for it, so this step times out rather than answering when it did not.
+      # the console rather than of the web UI alone: enabling it puts the
+      # fail-closed credential-scratch setup in the startup path, and that setup
+      # writes under root-owned /run. The server is unprivileged on both images
+      # and refuses to boot there unless the image prepared the directory for
+      # it, so this step times out rather than answering when it did not.
       #
       # The data mount goes to uid 1000 for the same reason: it is the account
       # both images write as.
@@ -474,8 +474,8 @@ jobs:
           docker rm -f "$cid" >/dev/null 2>&1 || true
 
       # The Windows file-drop setup scripts run their SMB probe inside this
-      # image, so the smbclient the runtime stage installs is load-bearing for
-      # that setup path: the probe checks for it and stops before it reaches the
+      # image, so the smbclient the runtime stage installs is required for that
+      # setup path: the probe checks for it and stops before it reaches the
       # share when it is missing, so an image published without it strands that
       # setup entirely. `command -v` resolves it from PATH and needs no network
       # and no server. It is `apk add samba-client` on the default image and
@@ -564,16 +564,16 @@ jobs:
             --entrypoint node ${{ matrix.tag }} /app/fips-probe/image-engagement.mjs
 
       # The four-leg attribution, including the causal controls the step above
-      # deliberately does not run: the provider is broken (its config MAC
-      # corrupted, then its module truncated) and the same AES call re-run, so a
-      # success that never depended on the provider is caught. The harness wants
-      # a prefix laid out as $PREFIX/lib/ossl-modules/fips.so and
-      # $PREFIX/ssl/fipsmodule.cnf; Amazon Linux 2023 ships no fipsmodule.cnf
-      # and its `openssl fipsinstall` is disabled, so the stand-in carries only
-      # the section header and no module-mac line. The harness reports its own
-      # S4a break ineffective on that basis and grades on S4b instead, which is
-      # what it is designed to do. It exits 0 whatever it measures, so the
-      # verdict is read from PROBE_JSON rather than from the exit status.
+      # does not run: the provider is broken (its config MAC corrupted, then its
+      # module truncated) and the same AES call re-run, so a success that never
+      # depended on the provider is caught. The harness wants a prefix laid out
+      # as $PREFIX/lib/ossl-modules/fips.so and $PREFIX/ssl/fipsmodule.cnf;
+      # Amazon Linux 2023 ships no fipsmodule.cnf and its `openssl fipsinstall`
+      # is disabled, so the stand-in carries only the section header and no
+      # module-mac line. The harness reports its own S4a break ineffective on
+      # that basis and grades on S4b instead, which is what it is designed to
+      # do. It exits 0 whatever it measures, so the verdict is read from
+      # PROBE_JSON rather than from the exit status.
       - name: Attribute the engagement with causal controls
         if: matrix.fips == 'true'
         run: |
@@ -609,14 +609,14 @@ jobs:
       # polled rounds take 5m36s to the single pass's 40s, and both run the same
       # handshake, AEAD, key schedule and PSI code.
       #
-      # SFTP is deliberately not exercised: the variant cannot reach a server
-      # offering only curve25519 key exchange, which is a documented limitation
-      # rather than a regression (docs/notes/fips-variant-image.md).
+      # SFTP is not exercised: the variant cannot reach a server offering only
+      # curve25519 key exchange, which is a documented limitation rather than a
+      # regression (docs/notes/fips-variant-image.md).
       #
-      # No `--identity` on either party, deliberately: the quick path asks
-      # nothing and requires nothing, so this run is the standing check that it
-      # completes for a party that names itself none. The invite/accept step
-      # above passes one, because those legs do require it.
+      # No `--identity` on either party: the quick path asks nothing and
+      # requires nothing, so this run is the standing check that it completes
+      # for a party that names itself none. The invite/accept step above passes
+      # one, because those legs do require it.
       - name: Run a full exchange end-to-end in the image
         if: matrix.fips == 'true'
         run: |
@@ -844,11 +844,11 @@ jobs:
       #   - `severity` and `ignore-unfixed` are the threshold: HIGH and above,
       #     fixable only. A gate that fires on a vulnerability no bump can
       #     resolve is unactionable and gets switched off, so an unfixable
-      #     finding is deliberately invisible here.
+      #     finding is invisible here.
       #   - accepted exceptions are in .github/trivyignore.yaml, each id
       #     carrying the reason it was accepted and an expiry date. Trivy
       #     stops applying an entry on that date and the finding returns
-      #     here, which is the only thing that surfaces a stale
+      #     here, which is the only thing that reports a stale
       #     acceptance: an entry in force keeps this gate green whether
       #     or not the condition it was written for still holds.
       #
@@ -1298,10 +1298,10 @@ jobs:
   # the smoke job above reads an image built from the branch, and a base bump that
   # has not reached a release tag leaves the published image on the older packages.
   #
-  # Deliberately off the pull-request trigger, and therefore never a merge gate:
-  # the remedy for the commonest red here is a release, which is the maintainer's
-  # to cut and no reason to hold a merge. Both steps re-run against a moving world
-  # on the weekly schedule -- the subject changes with nothing in this repository
+  # Off the pull-request trigger by design, and therefore never a merge gate: the
+  # remedy for the commonest red here is a release, which is the maintainer's to
+  # cut and no reason to hold a merge. Both steps re-run against a moving world on
+  # the weekly schedule -- the subject changes with nothing in this repository
   # changing.
   published_image:
     name: Assert and scan the published image

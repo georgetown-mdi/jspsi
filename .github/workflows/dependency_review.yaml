@@ -13,11 +13,11 @@ name: Dependency Review
 #
 # Kept as its own workflow (rather than a job in static_checks.yaml) so it carries
 # a dedicated status-check name and stays focused on supply-chain review. That
-# name is a required status check on main and staging, so this workflow is
-# deliberately NOT path-filtered: a path-skipped required check reports nothing
-# and holds every pull request missing the filter permanently pending, the
-# footgun image_smoke.yaml documents. Running unfiltered costs near nothing -- on
-# a PR that changes no dependency the graph diff is empty and the check passes
+# name is a required status check on main and staging, so this workflow is NOT
+# path-filtered: a path-skipped required check reports nothing and holds every
+# pull request missing the filter permanently pending, the hazard
+# image_smoke.yaml documents. Running unfiltered costs near nothing -- on a PR
+# that changes no dependency the graph diff is empty and the check passes
 # near-instantly. The merge-gate identities check, run by the Repository checks
 # step of static_checks.yaml, holds that: this file carrying a path filter under
 # on.pull_request fails it.
@@ -40,7 +40,7 @@ concurrency:
 # Least privilege: the action reads the dependency graph and the repo, and writes
 # its findings to the Actions job summary -- neither needs more than read. Posting
 # the findings as a PR comment (comment-summary-in-pr) would require
-# pull-requests: write, so that is deliberately not enabled.
+# pull-requests: write, so that is not enabled.
 permissions:
   contents: read
 

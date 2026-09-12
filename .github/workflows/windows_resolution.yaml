@@ -23,7 +23,7 @@ name: Windows Path Resolution
 # both jobs report everything a reader needs as single-line annotations and
 # nothing as log-only. The test job emits one ::error per failed test, one
 # ::notice summarising the counts and the Pester version, and one ::notice per
-# rig premise, so an infrastructure failure is distinguishable from a script
+# rig assumption, so an infrastructure failure is distinguishable from a script
 # that resolves a path wrongly. Read a run through its annotations:
 #
 #   gh api repos/<owner>/<repo>/check-runs/<check-run-id>/annotations

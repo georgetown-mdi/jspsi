@@ -54,9 +54,9 @@
 // WHAT THIS CHECK DOES NOT COVER
 //
 //   - Narration written with none of the tells. "The parser accepts a bare
-//     number now" reads as narration to a reviewer and matches nothing here. The
-//     tells are the phrases that measured at an acceptable false-positive rate,
-//     not a model of the English of change; the reviewer still reads the comment.
+//     number now" is narration to a reviewer and matches nothing here. The tells
+//     are the phrases that measured at an acceptable false-positive rate, not a
+//     model of the English of change; the reviewer still reads the comment.
 //   - Documentation. CONTRIBUTING.md's rule holds in `docs/` too, and none of it
 //     is read here: Markdown has no comment syntax to scope a match to, so the
 //     same phrases over a document would report its legitimate history sections.

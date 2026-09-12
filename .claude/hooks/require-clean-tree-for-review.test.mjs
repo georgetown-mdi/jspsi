@@ -160,7 +160,7 @@ describe("require-clean-tree-for-review hook", () => {
   });
 
   it("blocks when the tree cannot be confirmed clean", () => {
-    // Every unconfirmable state fails CLOSED: nothing backstops a review that
+    // Every unconfirmable state fails CLOSED: nothing catches a review that
     // returns a false clean.
     const notARepo = track(mkdtempSync(join(tmpdir(), "clean-tree-bare-")));
     for (const event of [

@@ -28,7 +28,7 @@ name: Dependency Audit
 on:
   schedule:
     # 05:47 UTC Monday, matching the weekly Dependabot and CodeQL cadence -- an
-    # advisory published against the development tree surfaces alongside the
+    # advisory published against the development tree appears alongside the
     # update pull requests that might answer it. Off the hour and off the other
     # two workflows' minutes, per GitHub's guidance on top-of-hour scheduler
     # congestion. Two GitHub behaviors to know: a `schedule` trigger fires only
@@ -58,8 +58,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v7
-      # Deliberately not the ./.github/actions/setup prologue: `--package-lock-only`
-      # below resolves the audit from the committed lockfile alone, so this needs
+      # Not the ./.github/actions/setup prologue: `--package-lock-only` below
+      # resolves the audit from the committed lockfile alone, so this needs
       # neither `npm ci` nor the @psilink/core build. Nothing in the development
       # tree is installed or executed to produce a report about the development
       # tree.

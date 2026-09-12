@@ -171,7 +171,7 @@ jobs:
   # is accepted, whether a `put` resolves its local side against the child's
   # working directory, what status a read-only share actually answers with. Those
   # are settled here, by driving the real tool against a real server, and by
-  # mounting that same share through CIFS for the mount-semantics battery.
+  # mounting that same share through CIFS for the mount-semantics checks.
   #
   # The Samba account below is a throwaway created on the runner for this job. It
   # authenticates only to this runner's own loopback smbd, holds nothing, and is
@@ -256,7 +256,7 @@ jobs:
           echo "$verdict" | jq -e '.version == 1 and .mode == "probe" and .overall == "ok"'
           echo "$verdict" | jq -e '[.checks[] | select(.status != "ok")] | length == 0'
           # The probe removes every file it creates except the marker, which the
-          # mount battery is meant to find.
+          # mount checks are meant to find.
           grep -qx healthyrun /srv/psilink/dropbox/psilink-check.txt
           test "$(ls -A /srv/psilink/dropbox | wc -l)" = 1
 
@@ -391,7 +391,7 @@ jobs:
           echo "$verdict" | jq .
           echo "$verdict" | jq -e '.version == 1 and .mode == "mount" and .overall == "ok"'
           echo "$verdict" | jq -e '[.checks[] | select(.status != "ok")] | length == 0'
-          # The two halves agreed on the directory, and the mount battery owns the
+          # The two halves agreed on the directory, and the mount checks own the
           # marker's lifecycle, so it is consumed and nothing is left behind.
           test "$(ls -A /srv/psilink/dropbox | wc -l)" = 0
           docker volume rm psilink-doctor-volume

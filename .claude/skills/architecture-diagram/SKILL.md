@@ -9,7 +9,7 @@ Produce a component diagram a senior engineer can absorb in one look: the minimu
 
 ## Altitude rule
 
-One diagram, one altitude. Default altitude: the workspaces, their major components, the seams (interfaces core defines and apps implement), and the external/trust boundary. Name a library on a node only when it is correctness- or security-load-bearing (docs/spec/DEPENDENCY_PINS.md is the roster; @openmined/psi.js, @noble/curves, re2js, ssh2-sftp-client, PeerJS rank; yargs does not). No wire formats, no per-module detail -- that is docs/spec territory. Label everything exactly once: no text repeated between a lane title, a group header, a node, and an edge.
+One diagram, one altitude. Default altitude: the workspaces, their major components, the boundaries (interfaces core defines and apps implement), and the external/trust boundary. Name a library on a node only when it is correctness- or security-critical (docs/spec/DEPENDENCY_PINS.md is the roster; @openmined/psi.js, @noble/curves, re2js, ssh2-sftp-client, PeerJS rank; yargs does not). No wire formats, no per-module detail -- that is docs/spec territory. Label everything exactly once: no text repeated between a lane title, a group header, a node, and an edge.
 
 ## Phase 1: ground every element in code
 
@@ -25,7 +25,7 @@ Auto-layout (Mermaid/dagre) cannot hold a designed layout for this topology; the
 - Visual grammar (keep the legend able to physically show each distinction):
   - stroke color = lane (blue core, teal apps, amber external); edges stay a quiet neutral
   - solid arrow = call / data flow; both apps merge into a single trunk landing on the runExchange node
-  - dotted arrow = app implements a core seam
+  - dotted arrow = app implements a core interface
   - dotted line, no arrowhead = connection setup (signaling, NAT traversal), never the data path
   - double-headed = two-party channel; dashed border = external / across the trust boundary
 - Section eyebrows inside core (DATA PIPELINE / SECURE CHANNEL / DISCLOSURE) carry grouping; nodes carry a title plus a mono sub-label holding the identifier or library name.
@@ -35,7 +35,7 @@ Auto-layout (Mermaid/dagre) cannot hold a designed layout for this topology; the
 
 Run these as separate fresh-context reviews (subagents), not self-checks:
 
-1. Render and screenshot, then a design critique on the image: landing points, orphan stubs, legend/drawing mismatches, cramped rails, anything that reads as a rendering speck.
+1. Render and screenshot, then a design critique on the image: landing points, orphan stubs, legend/drawing mismatches, cramped rails, anything that looks like a rendering speck.
 2. A fresh-eyes engineer read-back: write down what the diagram alone claims, then verify each claim against code, then against docs/spec; report contradictions at this altitude only. Where a spec and the drawing disagree, flag it -- do not silently prefer either.
 3. Re-render after every geometry change; SVG edits that look right in source routinely collide in render.
 
