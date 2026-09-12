@@ -14,6 +14,7 @@ import { recordingConnection } from "../utils/recordingConnection";
 import type { LinkageTerms } from "../../src/config/linkageTermsSchema";
 import type { MessageConnection } from "../../src/connection/messageConnection";
 import type { PresentedHostKey } from "../../src/connection/fileSyncConnection";
+import type { SigningCertificate } from "../../src/records/signingIdentity";
 import type { TermsExchangeResult } from "../../src/protocolSetup";
 
 /**
@@ -42,6 +43,9 @@ interface PartyInputs {
   saveIntent?: boolean;
   hostKey?: PresentedHostKey;
   disclosesPayload?: boolean;
+  /** Index into the file's `signingCertificates`, absent for a party that will
+   * not sign and so presents none. */
+  certificate?: number;
 }
 
 interface ReadBack {
@@ -51,10 +55,16 @@ interface ReadBack {
   partnerDisclosesPayload: boolean | null;
   partnerHostKey: PresentedHostKey | null;
   partnerHostKeyMalformed: boolean;
+  partnerCertificate: SigningCertificate | null;
+  partnerCertificateMalformed: boolean;
 }
 
 interface EnvelopeVectors {
   protocolVersion: number;
+  /** The certificates the certificate-carrying scenario presents, fixed rather
+   * than generated: ECDSA signing is randomized, so a fresh one would move the
+   * file on every regeneration. */
+  signingCertificates: Array<SigningCertificate>;
   /** Every field each slot's schema admits, whether or not a frame sends it. */
   envelopeFields: Record<string, Array<string>>;
   linkageTerms: Record<LinkageTermsFixture, LinkageTerms>;
@@ -112,6 +122,8 @@ function readBack(result: TermsExchangeResult): ReadBack {
     partnerDisclosesPayload: result.partnerDisclosesPayload ?? null,
     partnerHostKey: result.partnerHostKey ?? null,
     partnerHostKeyMalformed: result.partnerHostKeyMalformed,
+    partnerCertificate: result.partnerCertificate ?? null,
+    partnerCertificateMalformed: result.partnerCertificateMalformed,
   };
 }
 
@@ -128,6 +140,9 @@ function drive(
     side.saveIntent,
     side.hostKey,
     side.disclosesPayload,
+    side.certificate === undefined
+      ? undefined
+      : vectors.signingCertificates[side.certificate],
   );
 }
 
@@ -218,11 +233,11 @@ describe("terms-exchange envelope vectors", () => {
 
   test("some pinned frame advertises no optional field at all", () => {
     // A party with nothing to advertise omits `save`, `disclosesPayload`,
-    // and `hostKey` rather than sending false or null (which a partner's
-    // schema would also accept). The frame comparison above is exact on
-    // keys, so a build that starts sending them fails there, but only
-    // while some pinned frame omits all three.
-    const optional = ["save", "disclosesPayload", "hostKey"];
+    // `hostKey`, and `certificate` rather than sending false or null (which a
+    // partner's schema would also accept). The frame comparison above is
+    // exact on keys, so a build that starts sending them fails there, but
+    // only while some pinned frame omits all four.
+    const optional = ["save", "disclosesPayload", "hostKey", "certificate"];
     const narrow = allFrames.filter(
       (frame) => !frame.fields.some((field) => optional.includes(field)),
     );

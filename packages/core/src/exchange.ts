@@ -101,9 +101,15 @@ import type { PSILibrary } from "@openmined/psi.js/implementation/psi.d.ts";
 import type { ExchangeSpec } from "./config/exchangeSpec.js";
 import type { PartnerPayload } from "./payloadExchange.js";
 import type { BuiltExchangeRecord } from "./records/exchangeRecord.js";
-import { certificateAuthorizesIdentity } from "./records/signingIdentity.js";
+import {
+  certificateAuthorizesIdentity,
+  computeCertificateFingerprint,
+  matchesPinnedFingerprint,
+  verifyCertificateSelfSignature,
+} from "./records/signingIdentity.js";
 import type {
   CertificateBody,
+  SigningCertificate,
   SigningIdentity,
 } from "./records/signingIdentity.js";
 import { partnerPinIsPresent } from "./config/signing.js";
@@ -171,6 +177,16 @@ export interface PreparedExchange {
    */
   includeOwnColumns?: OwnColumnSelection;
   dataset: StandardizedDataset;
+  /**
+   * This party's own `signing` block, taken from the exchange spec so the
+   * run boundary can hold the certificate-mode refusals the prepare step
+   * cannot settle -- whether the run will sign in band is decided by the
+   * signing identity and session key {@link runExchange} is given, which
+   * {@link prepareForExchange} never sees. Set by
+   * {@link prepareForExchange}; a {@link PreparedExchange} assembled without
+   * going through it leaves those refusals unheld.
+   */
+  signing?: SigningConfig;
   /**
    * The original parsed CSV rows, retained for payload extraction after
    * linkage. Held in memory from ingestion through the end of
@@ -502,32 +518,44 @@ export function assertSigningModeImplemented(
 }
 
 /**
- * Refuse a `certificate`-mode exchange that pins no partner fingerprint,
- * before it runs. The signature swap runs after payloads have crossed and
- * rejects unconditionally on an absent pin, so an unpinned run sends this
- * party's data and terminates with no result and no receipt, keeping at
- * most the self-attested record of that disclosure
+ * Refuse a `certificate`-mode exchange that pins no partner fingerprint and
+ * cannot establish one, before it runs. A run that signs in band presents and
+ * reads a certificate at the terms exchange, so a first authenticated contact
+ * pins there ({@link resolvePartnerCertificateOrAbort}) and needs no pin on
+ * file. A run that does not sign in band -- one holding no session key, and so
+ * no authenticated setup step to present a certificate on -- has no such
+ * route: it would reach a signature swap that rejects unconditionally on an
+ * absent pin, after this party's data had crossed, keeping at most the
+ * self-attested record of that disclosure
  * ({@link exchangeRecordFromFailure}). An {@link OperatorConfigError}:
  * `signing` is always this party's own config. Scoped to `certificate`
  * mode; `none` and an absent block need no pin.
+ *
+ * @param signsInBand Whether this run presents and reads a certificate at the
+ *   terms exchange, which is the signing identity and session key
+ *   {@link runExchange} holds.
  */
 export function assertCertificateModePinsPartner(
   signing: SigningConfig | undefined,
+  signsInBand: boolean,
 ): void {
   if (signing?.mode !== "certificate") return;
+  if (signsInBand) return;
   if (partnerPinIsPresent(signing.partnerFingerprint)) return;
   throw new OperatorConfigError(
     "this exchange signs receipts (signing.mode: certificate) but pins no " +
-      "partner fingerprint, so it cannot finish: the two sides swap signatures " +
-      "after the payloads have crossed, and the certificate the partner " +
-      "presents there is refused when nothing is on file to check it against. " +
-      "The run would stop having sent this party's data and having written no " +
-      "result and no receipt, keeping at most the exchange record of that " +
-      "disclosure -- and, where record writing is off, nothing at all. Obtain " +
-      "the partner's fingerprint out-of-band -- they " +
-      "produce it with 'psilink fingerprint' " +
-      '-- and set signing.partner_fingerprint, or set signing.mode to "none" ' +
-      "to run unsigned until you hold it.",
+      "partner fingerprint and cannot establish one on this run, so it " +
+      "cannot finish: the parties present their certificates to each other " +
+      "at the authenticated setup step, which this run does not reach, and " +
+      "the certificate the partner presents at the signature swap is refused " +
+      "when nothing is on file to check it against. The run would stop " +
+      "having sent this party's data and having written no result and no " +
+      "receipt, keeping at most the exchange record of that disclosure -- " +
+      "and, where record writing is off, nothing at all. Run this exchange " +
+      "over an authenticated connection, or obtain the partner's fingerprint " +
+      "out-of-band -- they produce it with 'psilink fingerprint' -- and set " +
+      'signing.partner_fingerprint, or set signing.mode to "none" to run ' +
+      "unsigned until you hold it.",
   );
 }
 
@@ -692,6 +720,153 @@ export async function assertReceiptBindingsOrAbort(
     throw err;
   }
   return namedParties;
+}
+
+// The abort reasons the terms-time partner-certificate refusals send. Fixed
+// literals, as every reason on this frame must be (see sendAbort), and each
+// reads correctly from either side: the frame is a disclosure to the partner
+// like any other, so none of them names a fingerprint, a certificate field, or
+// any other value.
+const PARTNER_CERTIFICATE_UNREADABLE_ABORT_REASON =
+  "a party presented a signing certificate the wire format does not admit";
+const PARTNER_CERTIFICATE_ABSENT_ABORT_REASON =
+  "a party signs receipts and its partner presented no signing certificate";
+const PARTNER_CERTIFICATE_UNVERIFIED_ABORT_REASON =
+  "a party presented a signing certificate that does not verify under its own " +
+  "key";
+const PARTNER_CERTIFICATE_DIVERGENT_ABORT_REASON =
+  "a party presented a signing certificate that is not the one its partner " +
+  "pinned";
+const PARTNER_CERTIFICATE_UNRECORDED_ABORT_REASON =
+  "a party could not record the fingerprint it pinned on this first contact";
+
+// The four refusals the terms-time pin resolution raises. Each is a fixed
+// literal holding no byte from the partner's frame, and each states that the
+// run stopped before any linkage key or payload row was sent -- which is what
+// the refusal buys over the same failure at the signature swap.
+const PARTNER_CERTIFICATE_UNREADABLE_MESSAGE =
+  "the partner presented a signing certificate this build cannot read, so " +
+  "this run cannot finish: the field was on the terms exchange but does not " +
+  "match the certificate format, leaving nothing to pin and nothing to check " +
+  "a receipt against. The run stopped before any linkage key or payload row " +
+  "was sent. Have the partner re-share an identity produced by " +
+  "'psilink fingerprint', or set signing.mode to \"none\" to run unsigned.";
+const PARTNER_CERTIFICATE_ABSENT_MESSAGE =
+  "the partner is not signing receipts, so this run cannot finish: this " +
+  "exchange signs receipts (signing.mode: certificate) and the partner " +
+  "presented no signing certificate, so no receipt can be produced. The run " +
+  "stopped before any linkage key or payload row was sent. Have the partner " +
+  'set signing.mode to "certificate" with a signing identity of their own, ' +
+  'or set signing.mode to "none" to run unsigned.';
+const PARTNER_CERTIFICATE_UNVERIFIED_MESSAGE =
+  "the partner's signing certificate does not verify under its own key, so " +
+  "this first contact pinned nothing and the run cannot finish: a " +
+  "certificate that is not internally consistent could never sign a receipt " +
+  "this exchange would accept. The run stopped before any linkage key or " +
+  "payload row was sent. Have the partner re-share an identity produced by " +
+  "'psilink fingerprint'.";
+const PARTNER_CERTIFICATE_DIVERGENT_MESSAGE =
+  "the partner's signing certificate is not the one pinned in " +
+  "signing.partner_fingerprint, so this run cannot finish: the pin is what " +
+  "makes a receipt attributable to the partner, and a certificate that does " +
+  "not match it is refused rather than trusted. The run stopped before any " +
+  "linkage key or payload row was sent, and the pin on file is unchanged. " +
+  "Confirm the partner's fingerprint out-of-band -- they produce it with " +
+  "'psilink fingerprint' -- and, where they regenerated their signing " +
+  "identity, replace signing.partner_fingerprint with the new value.";
+
+/**
+ * Inputs to {@link resolvePartnerCertificateOrAbort}: what the terms exchange
+ * read off the partner's envelope, this party's configured pin, and the
+ * callback that records a freshly adopted one.
+ */
+export interface PartnerCertificateResolution {
+  /** The partner's presented certificate, shape-validated by the bounded wire
+   * schema, or `undefined` when it presented none or presented a value that
+   * failed that parse. */
+  partnerCertificate: SigningCertificate | undefined;
+  /** Whether that value was present on the wire and failed the bounded parse. */
+  partnerCertificateMalformed: boolean;
+  /** The configured `signing.partner_fingerprint`, absent on a first contact. */
+  pinnedFingerprint: string | undefined;
+  /** Called with a freshly adopted fingerprint, at the moment of adoption and
+   * before the run goes on. A caller persists the value here rather than after
+   * the run, so a run that pins and then fails mid-round does not re-pin blind
+   * on the next attempt. A throw stops the run, having sent the partner an
+   * abort and disclosed no linkage key or payload row. */
+  onPartnerCertificatePinned?: (fingerprint: string) => void;
+}
+
+/**
+ * Resolve the partner certificate fingerprint this run verifies its receipt
+ * against, from the certificate the partner presented on the terms exchange.
+ * A configured pin governs when one is on file; otherwise this is the first
+ * authenticated contact and the presented certificate's fingerprint is adopted
+ * and handed to the caller to record. The resolved value is what the signature
+ * swap checks the presented certificate against, so one value governs both
+ * points.
+ *
+ * Four outcomes refuse, each sending the partner a best-effort abort first --
+ * the refusal is one-sided, so without the frame a peer deriving no refusal of
+ * its own waits out its peer-inactivity budget. A certificate the wire format
+ * does not admit, no certificate at all, a certificate that does not verify
+ * under its own key on a first contact, and a certificate diverging from the
+ * pin are each a {@link ReceiptVerificationError}: the disagreeing value is
+ * the partner's, not this party's config. All four fire at the terms exchange,
+ * before the bootstrap frame and before any linkage key or payload row moves.
+ *
+ * A fifth outcome ends the run without being a refusal of the partner: an
+ * `onPartnerCertificatePinned` that throws, which is a caller that could not
+ * record the adopted pin. It sends its own abort and propagates the caller's
+ * error unchanged.
+ *
+ * No path overwrites a pin on file: a divergence refuses, leaving the
+ * configured value untouched.
+ *
+ * @returns the fingerprint the signature swap verifies against.
+ * @throws {ReceiptVerificationError}
+ */
+export async function resolvePartnerCertificateOrAbort(
+  conn: MessageConnection,
+  resolution: PartnerCertificateResolution,
+): Promise<string> {
+  const { partnerCertificate, pinnedFingerprint } = resolution;
+  if (resolution.partnerCertificateMalformed) {
+    await sendAbort(conn, [PARTNER_CERTIFICATE_UNREADABLE_ABORT_REASON]);
+    throw new ReceiptVerificationError(PARTNER_CERTIFICATE_UNREADABLE_MESSAGE);
+  }
+  if (partnerCertificate === undefined) {
+    await sendAbort(conn, [PARTNER_CERTIFICATE_ABSENT_ABORT_REASON]);
+    throw new ReceiptVerificationError(PARTNER_CERTIFICATE_ABSENT_MESSAGE);
+  }
+  if (partnerPinIsPresent(pinnedFingerprint)) {
+    // Constant time over the decoded digest bytes, and a malformed configured
+    // pin fails it rather than matching (matchesPinnedFingerprint). The
+    // presented certificate's own self-signature is not checked here: the
+    // fingerprint covers the body alone, so the swap is where the signature
+    // beside that body is weighed.
+    if (await matchesPinnedFingerprint(partnerCertificate, pinnedFingerprint))
+      return pinnedFingerprint;
+    await sendAbort(conn, [PARTNER_CERTIFICATE_DIVERGENT_ABORT_REASON]);
+    throw new ReceiptVerificationError(PARTNER_CERTIFICATE_DIVERGENT_MESSAGE);
+  }
+  // First authenticated contact. The self-signature is checked before the
+  // fingerprint is adopted: a certificate that does not verify under its own
+  // key can never sign an acceptable receipt, and adopting its fingerprint
+  // would write a pin onto the operator's configuration that no later run
+  // could satisfy.
+  if (!(await verifyCertificateSelfSignature(partnerCertificate))) {
+    await sendAbort(conn, [PARTNER_CERTIFICATE_UNVERIFIED_ABORT_REASON]);
+    throw new ReceiptVerificationError(PARTNER_CERTIFICATE_UNVERIFIED_MESSAGE);
+  }
+  const adopted = await computeCertificateFingerprint(partnerCertificate);
+  try {
+    resolution.onPartnerCertificatePinned?.(adopted);
+  } catch (err) {
+    await sendAbort(conn, [PARTNER_CERTIFICATE_UNRECORDED_ABORT_REASON]);
+    throw err;
+  }
+  return adopted;
 }
 
 /**
@@ -873,12 +1048,6 @@ export function prepareForExchange(
   // completion and leave the operator the unsigned record they did not
   // ask for. See assertSigningModeImplemented.
   assertSigningModeImplemented(exchangeDataSpec.signing?.mode);
-
-  // Fail closed when certificate mode pins no partner: the signature swap
-  // runs after the payloads have crossed and rejects any certificate
-  // against an absent pin, terminating the run with no result and no
-  // receipt. See assertCertificateModePinsPartner.
-  assertCertificateModePinsPartner(exchangeDataSpec.signing);
 
   // Fail closed when certificate mode names no party: a certificate is
   // trusted by the identity its holder used in the agreed terms, so the
@@ -1063,6 +1232,10 @@ export function prepareForExchange(
     // explicitly; see PreparedExchange.expectedPayloadColumns and
     // PreparedExchange.expectedPartnerDeduplicate. (Both ride ExchangeDataSpec
     // only so the exchange command can read them off the parsed config.)
+    // Passed on so the run boundary can hold the certificate-mode refusals
+    // this step cannot settle: whether the run signs in band is decided by
+    // what runExchange is given, not by the config alone.
+    signing: exchangeDataSpec.signing,
     dataset,
     rawRows,
     rowCount: rawRows.length,
@@ -1504,12 +1677,28 @@ export interface RunExchangeOptions {
   signingIdentity?: SigningIdentity;
   /**
    * The pinned partner certificate fingerprint (`signing.partner_fingerprint`),
-   * consulted only when {@link signingIdentity} is present. The signing step
-   * verifies the partner's presented certificate against this pin BEFORE the
-   * signature; absent, the step fails closed (no partner certificate can be
-   * trusted). Field-shape-validated by the config schema.
+   * consulted only when {@link signingIdentity} is present. The terms exchange
+   * holds the certificate the partner presents there to this pin, and the
+   * signature swap verifies the presented certificate against the value that
+   * resolved to. Absent, the terms exchange adopts the partner's presented
+   * fingerprint as a first authenticated contact and reports it through
+   * {@link onPartnerCertificatePinned}. Field-shape-validated by the config
+   * schema.
    */
   partnerFingerprint?: string;
+  /**
+   * Called once, at the terms exchange, when this run adopts the partner's
+   * presented certificate fingerprint because {@link partnerFingerprint} names
+   * none -- a first authenticated contact. The argument is the adopted
+   * fingerprint, an unpadded base64url SHA-256 digest this party derived from
+   * the presented certificate, so it holds no partner-authored text. A caller
+   * records it here rather than after the run, so a run that pins and then
+   * fails mid-round does not re-pin blind on the next attempt; a throw stops
+   * the run before the bootstrap frame and before any linkage key or payload
+   * row moves. Not called when a pin was already on file, and not called on
+   * any run that does not sign in band.
+   */
+  onPartnerCertificatePinned?: (fingerprint: string) => void;
   /**
    * The 32-byte session key from the authenticated key exchange, needed to derive
    * the per-exchange replay binder that the signed receipt commits to. Present only
@@ -1594,6 +1783,14 @@ export async function runExchange(
   const willSignReceipt =
     signingIdentity !== undefined && sessionKey !== undefined;
 
+  // Fail closed when certificate mode pins no partner and this run cannot
+  // establish one: a run that signs in band pins at the terms exchange, while
+  // one that does not would reach a signature swap that rejects any
+  // certificate against an absent pin, after the payloads had crossed. Held
+  // here rather than at prepare time because only this boundary knows whether
+  // the run signs in band. See assertCertificateModePinsPartner.
+  assertCertificateModePinsPartner(prepared.signing, willSignReceipt);
+
   // Whether THIS party will disclose payload to a partner entitled to output:
   // true when its metadata transmits any column (isDisclosedToPartner, the single
   // source of truth preparePayload gathers on). Advertised on the terms exchange
@@ -1629,6 +1826,8 @@ export async function runExchange(
     partnerDisclosesPayload,
     partnerHostKey,
     partnerHostKeyMalformed,
+    partnerCertificate,
+    partnerCertificateMalformed,
   } = await exchangeTerms(
     conn,
     handshakeRole,
@@ -1637,6 +1836,10 @@ export async function runExchange(
     options.saveIntent,
     options.observedHostKey,
     localDisclosesPayload,
+    // Presented only by a run that will sign: the same predicate the signing
+    // step itself gates on, so a party holding no session key puts no
+    // certificate on the wire.
+    willSignReceipt ? signingIdentity.certificate : undefined,
   );
   for (const warning of warnings) onWarning(warning);
 
@@ -1678,13 +1881,24 @@ export async function runExchange(
   // frame, before any linkage key, and before any payload row moves. The
   // signature swap holds the same pair again at the point of use. See
   // assertReceiptBindingsOrAbort.
-  if (willSignReceipt)
+  // The partner's certificate is resolved against the pin at the same point,
+  // so the value the signature swap verifies against is settled before
+  // anything is disclosed. See resolvePartnerCertificateOrAbort.
+  let resolvedPartnerFingerprint: string | undefined;
+  if (willSignReceipt) {
     await assertReceiptBindingsOrAbort(
       conn,
       linkageTerms,
       partnerTerms,
       signingIdentity.certificate,
     );
+    resolvedPartnerFingerprint = await resolvePartnerCertificateOrAbort(conn, {
+      partnerCertificate,
+      partnerCertificateMalformed,
+      pinnedFingerprint: options.partnerFingerprint,
+      onPartnerCertificatePinned: options.onPartnerCertificatePinned,
+    });
+  }
 
   // Resolve the matching cardinality from both parties' agreed deduplicate
   // settings as the first step after the terms exchange: the resolution is
@@ -2135,7 +2349,10 @@ export async function runExchange(
       );
       signedReceipt = await exchangeSignedReceipt(conn, handshakeRole, {
         identity: signingIdentity,
-        pinnedFingerprint: options.partnerFingerprint,
+        // The value the terms exchange resolved -- the pin on file, or the
+        // fingerprint this run adopted there -- so one value governs the
+        // terms-time comparison and this one.
+        pinnedFingerprint: resolvedPartnerFingerprint,
         // The partner's agreed-terms identity (not the certificate's own), so the
         // pinned certificate must authorize the identity the partner used in the
         // agreed terms rather than a value it self-asserts in its certificate.

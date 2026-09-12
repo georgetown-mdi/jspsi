@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { vi, test, expect, beforeEach, afterEach } from "vitest";
+import YAML from "yaml";
 import type { PreparedExchange } from "@psilink/core";
 
 // Shared state readable inside the vi.mock factory despite ESM hoisting.
@@ -2538,10 +2539,14 @@ const NON_SIGNING_PARTNER_WARNING =
   "A signed receipt was configured for this exchange, but the exchange " +
   "did not complete the receipt swap";
 
-function signingPersistFixture(receiptFile: string): SigningPersist {
+function signingPersistFixture(
+  receiptFile: string,
+  configPath = path.join(tmpDir, "psilink.yaml"),
+): SigningPersist {
   return {
     identity: signingIdentityFixture,
     receiptOutput: { receiptFile },
+    configPath,
   };
 }
 
@@ -2551,6 +2556,7 @@ function runSigningParty(
   receiptFile: string,
   recordOutput?: RecordOutput,
   machineInterface: { eventStream?: boolean } = {},
+  configPath?: string,
 ): Promise<unknown> {
   return runProtocol({
     connection: {
@@ -2565,9 +2571,87 @@ function runSigningParty(
     loggerName: name,
     recordOutput,
     fileSyncRuntime: machineInterface,
-    signing: signingPersistFixture(receiptFile),
+    signing: signingPersistFixture(receiptFile, configPath),
   }) as unknown as Promise<unknown>;
 }
+
+const ADOPTED_FINGERPRINT = "WiJHb37O9YMHrcF0R6g0UXgzAjW60jWYVSTgqA326yg";
+
+test("a first-contact pin is recorded and stated on both sinks, unattended", async () => {
+  // The ruling puts no paste ceremony on the ordinary path, so the adoption
+  // runs with no terminal attached: nothing is asked, the value is written into
+  // the configuration the exchange was given, and the operator is told on
+  // stderr AND on the machine-readable warning stream -- the one a supervisor
+  // that discards stderr reads instead.
+  expect(process.stdin.isTTY).toBeFalsy();
+  const keyFileA = path.join(tmpDir, "a.key");
+  const keyFileB = path.join(tmpDir, "b.key");
+  saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
+  saveKeyFile(keyFileB, { sharedSecret: TOKEN_A });
+  const certificateModeConfig =
+    "# hand-authored\nsigning:\n  mode: certificate\n  identity_file: /run/id.json\n";
+  const configA = path.join(tmpDir, "psilink-a.yaml");
+  const configB = path.join(tmpDir, "psilink-b.yaml");
+  fs.writeFileSync(configA, certificateModeConfig);
+  fs.writeFileSync(configB, certificateModeConfig);
+
+  vi.mocked(runExchange).mockImplementation((async (
+    _conn: unknown,
+    _role: unknown,
+    _prepared: unknown,
+    options: {
+      onPartnerCertificatePinned?: (fingerprint: string) => void;
+    },
+  ) => {
+    options.onPartnerCertificatePinned?.(ADOPTED_FINGERPRINT);
+    return defaultRunExchange();
+  }) as never);
+
+  mockFd3Open();
+  try {
+    const [resultA, resultB] = await Promise.allSettled([
+      runSigningParty(
+        keyFileA,
+        "test-a",
+        path.join(tmpDir, "receipt-a.json"),
+        undefined,
+        { eventStream: true },
+        configA,
+      ),
+      runSigningParty(
+        keyFileB,
+        "test-b",
+        path.join(tmpDir, "receipt-b.json"),
+        undefined,
+        {},
+        configB,
+      ),
+    ]);
+    expect(resultA.status).toBe("fulfilled");
+    expect(resultB.status).toBe("fulfilled");
+  } finally {
+    vi.mocked(fs.fstatSync).mockRestore();
+  }
+
+  // Written into the configuration this exchange was given, comments intact.
+  const raw = fs.readFileSync(configA, "utf8");
+  expect(raw).toContain("# hand-authored");
+  expect(YAML.parse(raw).signing.partner_fingerprint).toBe(ADOPTED_FINGERPRINT);
+
+  const pinned = takeFd3Lines().filter(
+    (l) => l.source === "partnerCertificatePinned",
+  );
+  expect(pinned).toHaveLength(1);
+  expect(pinned[0].message).toContain(ADOPTED_FINGERPRINT);
+
+  // The stderr line names the value, the file it went into, and the
+  // out-of-band check. The two parties run concurrently, so it is found by the
+  // file it names rather than by its position in the log.
+  const stated = mockState.warnings.find((m) => m.includes(configA));
+  expect(stated).toBeDefined();
+  expect(stated).toContain(ADOPTED_FINGERPRINT);
+  expect(stated).toContain("compare the fingerprint");
+}, 20_000);
 
 test("a completed signed run does not warn about a non-signing partner", async () => {
   const keyFileA = path.join(tmpDir, "a.key");

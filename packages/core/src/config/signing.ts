@@ -108,11 +108,13 @@ export { SigningConfigSchema };
 
 /**
  * Whether a partner certificate fingerprint is pinned at all; its absence
- * is the one state in which no presented certificate can be trusted.
- * Shared by two refusals that must agree: the verification-time rejection
- * of a certificate against no pin (`assertPartnerCertificateTrusted`), and
- * the pre-exchange gate refusing such a run before any payload crosses
- * (`assertCertificateModePinsPartner`).
+ * is what the terms exchange treats as a first authenticated contact, and
+ * what leaves a certificate presented anywhere else untrustable. Shared by
+ * three readings that must agree: the verification-time rejection of a
+ * certificate against no pin (`assertPartnerCertificateTrusted`), the
+ * terms-time resolution deciding between a comparison and an adoption
+ * (`resolvePartnerCertificateOrAbort`), and the gate refusing a run that can
+ * neither pin nor establish one (`assertCertificateModePinsPartner`).
  *
  * An empty string counts as no pin alongside `undefined`: {@link
  * FINGERPRINT_REGEX} cannot produce one, so it arrives only from a

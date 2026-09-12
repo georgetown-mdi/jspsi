@@ -1465,6 +1465,77 @@ export function persistHostKeyFingerprint(
 }
 
 /**
+ * Write `signing.partner_fingerprint` into an existing `psilink.yaml`, used to
+ * record the pin an exchange adopted on its first authenticated contact with a
+ * partner. Like {@link persistHostKeyFingerprint}, this edits the file in place
+ * through the YAML document model so the operator's comments, key order, and
+ * formatting survive, and rewrites it with the same owner-only permissions
+ * {@link saveConfig} uses.
+ *
+ * Two refusals stand ahead of the write, both raised as a {@link UsageError}
+ * before anything reaches disk. A document whose `signing.mode` is not
+ * `certificate` is not one this pin belongs in. And a document that already
+ * pins a partner fingerprint is never rewritten: changing a pin is a
+ * deliberate act, as changing a host-key pin is, so a value already on file is
+ * left exactly as it stands.
+ *
+ * Throws if the file cannot be read or parsed, since the caller just loaded it
+ * and a silent failure would leave the operator believing the pin was saved.
+ */
+export function persistPartnerFingerprint(
+  configPath: string,
+  fingerprint: string,
+): void {
+  // Parse, edit, and re-serialize through the sensitive-file chokepoint (see
+  // persistHostKeyFingerprint), preserving the operator's comments and key
+  // order on this surgical one-field write.
+  const serialized = editSensitiveYamlDocument(
+    fs.readFileSync(configPath, "utf8"),
+    `config file ${configPath}`,
+    (doc) => {
+      // Read the mode off the parsed document (not a schema-loaded spec) and
+      // reject anything but certificate before the write. getIn does not
+      // resolve aliases, so an alias-spelled mode is treated as a non-string
+      // node and is rejected even when it would resolve to certificate -- the
+      // safe direction, and not a form a hand-authored config uses.
+      const mode = doc.getIn(["signing", "mode"]);
+      if (mode !== "certificate") {
+        const found =
+          typeof mode === "string" ? `"${mode}"` : "absent or non-scalar";
+        throw new UsageError(
+          `config file ${configPath} does not sign receipts with a ` +
+            `certificate (signing.mode is ${found}); a partner certificate ` +
+            `fingerprint must not be written to it.`,
+        );
+      }
+      const existing = doc.getIn(["signing", "partner_fingerprint"]);
+      if (existing !== undefined && existing !== null)
+        throw new UsageError(
+          `config file ${configPath} already pins a partner fingerprint; it ` +
+            `was left unchanged. Changing a pin is a deliberate act: confirm ` +
+            `the partner's fingerprint out-of-band and edit ` +
+            `signing.partner_fingerprint yourself.`,
+        );
+      // setIn creates the signing path node if absent; for a certificate-mode
+      // config loaded by the exchange command it already exists. A `signing`
+      // that is a scalar or sequence, not a mapping, makes setIn throw a YAML
+      // error, reported here as a UsageError rather than an opaque library
+      // stack trace.
+      try {
+        doc.setIn(["signing", "partner_fingerprint"], fingerprint);
+      } catch (err) {
+        throw new UsageError(
+          `config file ${configPath} could not be updated to record the ` +
+            `partner certificate fingerprint (${err instanceof Error ? err.message : String(err)}); ` +
+            `signing must be a mapping.`,
+        );
+      }
+    },
+  );
+  writeFileOwnerOnly(configPath, serialized);
+}
+
+/**
  * Write, overwrite, or remove the top-level `disclosed_payload_columns` in
  * an existing `psilink.yaml`: the SEND-side disclosure commitment (this
  * party's own column namespace) that a later recurring `psilink exchange`

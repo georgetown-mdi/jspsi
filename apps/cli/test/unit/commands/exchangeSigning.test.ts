@@ -20,6 +20,11 @@ import { saveSigningIdentity } from "../../../src/signingIdentityFile";
 
 let dir: string;
 
+/** The configuration file an exchange would have been given: the only file a
+ * freshly adopted partner fingerprint is written into, and unread by every
+ * refusal below. */
+const configPath = (): string => path.join(dir, "psilink.yaml");
+
 beforeEach(() => {
   dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-signing-test-"));
 });
@@ -41,7 +46,9 @@ const identity = await generateSigningIdentity("Party A", {
 });
 
 test("returns null when signing is absent (the unsigned path)", async () => {
-  await expect(resolveSigningPersist(undefined, "Party A")).resolves.toBeNull();
+  await expect(
+    resolveSigningPersist(undefined, "Party A", configPath()),
+  ).resolves.toBeNull();
 });
 
 test("returns null for the non-certificate modes", async () => {
@@ -49,8 +56,12 @@ test("returns null for the non-certificate modes", async () => {
   // below is certificate mode's alone.
   const none: SigningConfig = { mode: "none" };
   const session: SigningConfig = { mode: "session-derived" };
-  await expect(resolveSigningPersist(none, "Party A")).resolves.toBeNull();
-  await expect(resolveSigningPersist(session, "Party A")).resolves.toBeNull();
+  await expect(
+    resolveSigningPersist(none, "Party A", configPath()),
+  ).resolves.toBeNull();
+  await expect(
+    resolveSigningPersist(session, "Party A", configPath()),
+  ).resolves.toBeNull();
 });
 
 test("loads the identity and pin for certificate mode", async () => {
@@ -63,7 +74,7 @@ test("loads the identity and pin for certificate mode", async () => {
     partnerFingerprint: fingerprint,
     receiptOutput: path.join(dir, "receipt.json"),
   };
-  const resolved = await resolveSigningPersist(config, "Party A");
+  const resolved = await resolveSigningPersist(config, "Party A", configPath());
   expect(resolved).not.toBeNull();
   expect(resolved!.identity).toEqual(identity);
   expect(resolved!.partnerFingerprint).toBe(fingerprint);
@@ -77,12 +88,12 @@ test("certificate mode with no identity file at the named path is a usage error"
     mode: "certificate",
     identityFile: path.join(dir, "does-not-exist.json"),
   };
-  await expect(resolveSigningPersist(config, "Party A")).rejects.toThrow(
-    UsageError,
-  );
-  await expect(resolveSigningPersist(config, "Party A")).rejects.toThrow(
-    /no signing identity was found/,
-  );
+  await expect(
+    resolveSigningPersist(config, "Party A", configPath()),
+  ).rejects.toThrow(UsageError);
+  await expect(
+    resolveSigningPersist(config, "Party A", configPath()),
+  ).rejects.toThrow(/no signing identity was found/);
 });
 
 test("the not-found refusal names the configured path once", async () => {
@@ -90,6 +101,7 @@ test("the not-found refusal names the configured path once", async () => {
   const message = await resolveSigningPersist(
     { mode: "certificate", identityFile },
     "Party A",
+    configPath(),
   ).then(
     () => "",
     (err: unknown) => (err as Error).message,
@@ -116,6 +128,7 @@ test("a long configured path leaves the remedy inside the display cap", async ()
   const rendered = await resolveSigningPersist(
     { mode: "certificate", identityFile },
     "Party A",
+    configPath(),
   ).then(
     () => "",
     (err: unknown) => sanitizeErrorForDisplay(err),
@@ -145,6 +158,7 @@ test.skipIf(process.platform === "win32")(
       const resolved = await resolveSigningPersist(
         { mode: "certificate", identityFile: identityPath },
         "Party A",
+        configPath(),
       );
       expect(resolved).not.toBeNull();
       expect(resolved!.identity).toEqual(identity);
@@ -166,14 +180,18 @@ test.skipIf(process.platform === "win32")(
 
 test("certificate mode that names no identity file is refused, not defaulted", async () => {
   const config: SigningConfig = { mode: "certificate" };
-  await expect(resolveSigningPersist(config, "Party A")).rejects.toThrow(
-    OperatorConfigError,
-  );
+  await expect(
+    resolveSigningPersist(config, "Party A", configPath()),
+  ).rejects.toThrow(OperatorConfigError);
 });
 
 test("the refusal names both spellings, a mounted example, and the unsigned exit", async () => {
   const config: SigningConfig = { mode: "certificate" };
-  const rendered = await resolveSigningPersist(config, "Party A").then(
+  const rendered = await resolveSigningPersist(
+    config,
+    "Party A",
+    configPath(),
+  ).then(
     () => "",
     (err: unknown) => sanitizeErrorForDisplay(err),
   );
@@ -197,7 +215,11 @@ test("the refusal names no path of its own beyond the illustrative one", async (
   // directory -- would reinstate the default this refusal exists to remove, and
   // would send the operator to a path psilink does not read.
   const config: SigningConfig = { mode: "certificate" };
-  const message = await resolveSigningPersist(config, "Party A").then(
+  const message = await resolveSigningPersist(
+    config,
+    "Party A",
+    configPath(),
+  ).then(
     () => "",
     (err: unknown) => (err as Error).message,
   );
@@ -213,7 +235,7 @@ test("certificate mode with no pin resolves (the run is refused before this boun
     mode: "certificate",
     identityFile: identityPath,
   };
-  const resolved = await resolveSigningPersist(config, "Party A");
+  const resolved = await resolveSigningPersist(config, "Party A", configPath());
   // This resolver states no pin rule of its own: an unpinned certificate-mode
   // config is refused by core's single gate (assertCertificateModePinsPartner,
   // inside prepareForExchange), which the exchange handler reaches before it
@@ -244,6 +266,7 @@ test("refuses when the loaded identity diverges from the run's terms identity", 
   const rejection = resolveSigningPersist(
     config,
     "Party A, Agency A, a@agency-a.gov",
+    configPath(),
   );
   // An OperatorConfigError, as its certificate-mode siblings in core are: the
   // CLI classifies it as a configuration error (exit 64) and the message is
@@ -263,6 +286,7 @@ test("the refusal offers the local config edit before the regeneration remedy, w
   const message = await resolveSigningPersist(
     config,
     "Party A, Agency A, a@agency-a.gov",
+    configPath(),
   ).then(
     () => "",
     (err: unknown) => (err as Error).message,
@@ -315,7 +339,7 @@ const rewordedIdentity = await generateSigningIdentity(
 test("the refusal's fixed prose leaves the identity pair room inside the display cap", async () => {
   const config = certificateModeOver(path.join(dir, "signing-identity.json"));
   const terms = "Party A, Agency A, a@agency-a.gov";
-  const message = await resolveSigningPersist(config, terms).then(
+  const message = await resolveSigningPersist(config, terms, configPath()).then(
     () => "",
     (err: unknown) => (err as Error).message,
   );
@@ -337,6 +361,7 @@ test("a realistic identity pair reaches the operator un-truncated", async () => 
   const rendered = await resolveSigningPersist(
     config,
     REWORDED_TERMS_IDENTITY,
+    configPath(),
   ).then(
     () => "",
     (err: unknown) => sanitizeErrorForDisplay(err),
@@ -357,7 +382,11 @@ test("a control-character label reaches the operator escaped, once", async () =>
   const config = certificateModeOver(path.join(dir, "signing-identity.json"));
   const esc = String.fromCharCode(0x1b);
   const label = `Party ${esc}[31mA\nAgency A`;
-  const rendered = await resolveSigningPersist(config, label).then(
+  const rendered = await resolveSigningPersist(
+    config,
+    label,
+    configPath(),
+  ).then(
     () => "",
     (err: unknown) => sanitizeErrorForDisplay(err),
   );
@@ -387,7 +416,11 @@ test("a bound label the terms cannot state is refused with the re-key exit", asy
       path.join(dir, `signing-identity-${index}.json`),
       await generateSigningIdentity(label, { privateKey: fixedPrivateKey }),
     );
-    const rejection = resolveSigningPersist(config, "Agency A, a@agency-a.gov");
+    const rejection = resolveSigningPersist(
+      config,
+      "Agency A, a@agency-a.gov",
+      configPath(),
+    );
     await expect(rejection).rejects.toThrow(OperatorConfigError);
     const rendered = await rejection.then(
       () => "",
@@ -412,7 +445,7 @@ test("a bound label the terms cannot state is refused with the re-key exit", asy
 test("resolves when the loaded identity matches the run's terms identity", async () => {
   const config = certificateModeOver(path.join(dir, "signing-identity.json"));
   await expect(
-    resolveSigningPersist(config, "Party A"),
+    resolveSigningPersist(config, "Party A", configPath()),
   ).resolves.not.toBeNull();
 });
 
@@ -423,7 +456,9 @@ test("resolves when the run has no terms identity", async () => {
   // branch must not restate that refusal in a second spelling.
   const config = certificateModeOver(path.join(dir, "signing-identity.json"));
   await expect(
-    resolveSigningPersist(config, undefined),
+    resolveSigningPersist(config, undefined, configPath()),
   ).resolves.not.toBeNull();
-  await expect(resolveSigningPersist(config, "")).resolves.not.toBeNull();
+  await expect(
+    resolveSigningPersist(config, "", configPath()),
+  ).resolves.not.toBeNull();
 });

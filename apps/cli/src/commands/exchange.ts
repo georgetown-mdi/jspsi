@@ -875,9 +875,11 @@ function assertSigningIdentityNamed(signing: SigningConfig | undefined): void {
  * point by way of a prompt or a connection the refusal makes pointless.
  *
  * The pinned partner fingerprint is passed through verbatim, and this resolver
- * states no rule about its absence: a certificate-mode block with no pin is
- * refused by core's `assertCertificateModePinsPartner` inside
- * {@link prepareForExchange}, which the handler reaches before this call.
+ * states no rule about its absence: a block with no pin is a first
+ * authenticated contact, which adopts the certificate the partner presents at
+ * the terms exchange and records its fingerprint into `configPath` -- the
+ * configuration file this exchange was given, and the only file that pin is
+ * ever written into.
  *
  * `termsIdentity` is this run's `linkage_terms.identity` -- the identity the
  * partner verifies the loaded certificate against -- and a certificate bound to
@@ -896,6 +898,7 @@ function assertSigningIdentityNamed(signing: SigningConfig | undefined): void {
 export async function resolveSigningPersist(
   signing: SigningConfig | undefined,
   termsIdentity: string | undefined,
+  configPath: string,
 ): Promise<SigningPersist | null> {
   if (signing === undefined || signing.mode !== "certificate") return null;
   const identityPath = certificateModeIdentityPath(signing.identityFile);
@@ -916,6 +919,7 @@ export async function resolveSigningPersist(
     identity,
     partnerFingerprint: signing.partnerFingerprint,
     receiptOutput: resolveReceiptOutput(signing.receiptOutput),
+    configPath,
   };
 }
 
@@ -1081,6 +1085,7 @@ export async function handler(argv: Arguments): Promise<void> {
       signing = await resolveSigningPersist(
         exchangeDataSpec.signing,
         termsIdentity,
+        options.configFile,
       );
     } catch (err) {
       exitWithError(log, err, exitCodeForError(err));

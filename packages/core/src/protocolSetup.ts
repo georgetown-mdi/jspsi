@@ -21,6 +21,9 @@ import {
   parseOrProtocolError,
   type MessageConnection,
 } from "./connection/messageConnection";
+import { boundedWireCertificateSchema } from "./records/signingIdentity";
+
+import type { SigningCertificate } from "./records/signingIdentity";
 
 // --- Message schemas ---------------------------------------------------------
 
@@ -90,6 +93,42 @@ const hostKeyField = z
       : { value: undefined, malformed: true };
   });
 
+/**
+ * Classification of the partner's `certificate` advertisement after the
+ * bounded wire parse: `value` is the shape-validated certificate, present only
+ * when the field was on the wire and within bounds; `malformed` is `true` only
+ * when the field was present but failed that parse. An absent field and a
+ * well-formed value both report `malformed: false`, and `value` is `undefined`
+ * whenever `malformed` is `true`.
+ */
+interface CertificateAdvertisementParse {
+  value: SigningCertificate | undefined;
+  malformed: boolean;
+}
+
+// Unlike the fail-soft host-key advertisement above, a present-but-invalid
+// certificate is reported as malformed for the caller to refuse on: the value
+// is the trust anchor a receipt rests on. The bounded wire schema runs at this
+// parse, so every partner-controlled field is length-capped before any
+// fingerprint or signature work touches it (docs/spec/PROTOCOL.md, "Signing
+// identity and certificate pinning").
+const certificateField = z
+  .unknown()
+  .optional()
+  .transform((raw): CertificateAdvertisementParse => {
+    // An omitted field and an explicit `null` (JSON's representation of "no
+    // value") are both the benign "this party is not signing" case, not a
+    // malformed attempt to advertise a certificate -- a conforming party that
+    // will not sign omits the field entirely (see the send-side spread in
+    // exchangeTerms).
+    if (raw === undefined || raw === null)
+      return { value: undefined, malformed: false };
+    const parsed = boundedWireCertificateSchema.safeParse(raw);
+    return parsed.success
+      ? { value: parsed.data, malformed: false }
+      : { value: undefined, malformed: true };
+  });
+
 // Each party's declared record count, which rides the terms-exchange envelope
 // and feeds the role decision and every derived single-pass bound
 // (docs/spec/PROTOCOL.md, "The counts ride the terms exchange"). The
@@ -151,6 +190,7 @@ const termsMessage = z.object({
   save: z.boolean().optional(),
   disclosesPayload: z.boolean().optional(),
   hostKey: hostKeyField,
+  certificate: certificateField,
 });
 
 // Branded at the decode, so a reason reaches the operator only behind the
@@ -181,6 +221,7 @@ const termsWithDecisionMessage = z.object({
   save: z.boolean().optional(),
   disclosesPayload: z.boolean().optional(), // per-party payload-intent; see termsMessage
   hostKey: hostKeyField,
+  certificate: certificateField,
 });
 
 const decisionMessage = z.object({
@@ -294,6 +335,29 @@ export interface TermsExchangeResult {
    * CLI logs it at debug; see apps/cli/src/protocol.ts).
    */
   partnerHostKeyMalformed: boolean;
+  /**
+   * The self-signed certificate the partner presented for the receipt step,
+   * shape-validated against the bounded wire schema, or `undefined` when the
+   * partner presented none (it is not signing) or presented a value that
+   * failed that parse. The caller resolves the pin from it -- matching a
+   * configured `signing.partner_fingerprint`, or adopting the presented
+   * fingerprint on a first authenticated contact -- and refuses the run when a
+   * party that will sign gets no certificate. When the value was dropped as
+   * malformed, {@link partnerCertificateMalformed} is `true`, distinguishing
+   * that case from an absence.
+   */
+  partnerCertificate: SigningCertificate | undefined;
+  /**
+   * Whether the partner's certificate advertisement was present on the wire
+   * but failed the bounded wire parse, as distinct from being absent. `true`
+   * only for a present-but-rejected value; `false` both when the partner
+   * presented a well-formed certificate and when it presented none at all.
+   * {@link partnerCertificate} is `undefined` whenever this is `true`. Unlike
+   * the host-key advertisement's fail-soft twin this is not a diagnostic
+   * only: a run that will sign refuses on it, because the dropped value is
+   * the trust anchor the receipt rests on.
+   */
+  partnerCertificateMalformed: boolean;
 }
 
 /**
@@ -434,7 +498,12 @@ async function reconcileProtocolVersion(
  * The partner's host-key advertisement is fail-soft: a present-but-malformed
  * value is dropped (read as no host key) rather than aborting, and the drop is
  * reported via {@link TermsExchangeResult.partnerHostKeyMalformed} so a caller
- * can tell a non-conforming peer from one that observed no host key.
+ * can tell a non-conforming peer from one that observed no host key. The
+ * partner's certificate is not: a present-but-malformed value is dropped and
+ * reported via {@link TermsExchangeResult.partnerCertificateMalformed}, which
+ * a caller that will sign refuses on. `localCertificate` is passed only by a
+ * party that will sign a receipt on this run, so a party that will not sign
+ * puts no certificate on the wire.
  */
 export async function exchangeTerms(
   conn: MessageConnection,
@@ -444,6 +513,7 @@ export async function exchangeTerms(
   localSaveIntent?: boolean,
   localHostKey?: PresentedHostKey,
   localDisclosesPayload?: boolean,
+  localCertificate?: SigningCertificate,
 ): Promise<TermsExchangeResult> {
   // Spread into the outgoing terms frame only when this party is saving, so a
   // non-save exchange sends no `save` field at all.
@@ -463,6 +533,11 @@ export async function exchangeTerms(
     localDisclosesPayload !== undefined
       ? { disclosesPayload: localDisclosesPayload }
       : {};
+  // Likewise this party's own signing certificate: spread only when this run
+  // will sign a receipt, so an unsigned exchange -- and every path holding no
+  // session key -- sends no `certificate` field at all.
+  const certificateFieldSpread =
+    localCertificate !== undefined ? { certificate: localCertificate } : {};
 
   if (handshakeRole === "initiator") {
     await conn.send({
@@ -472,6 +547,7 @@ export async function exchangeTerms(
       ...saveField,
       ...disclosesPayloadField,
       ...hostKeyField,
+      ...certificateFieldSpread,
     });
 
     // Message 2: receive partner's terms + decision. Raw receive so the
@@ -548,6 +624,8 @@ export async function exchangeTerms(
       partnerDisclosesPayload: msg.disclosesPayload,
       partnerHostKey: msg.hostKey.value,
       partnerHostKeyMalformed: msg.hostKey.malformed,
+      partnerCertificate: msg.certificate.value,
+      partnerCertificateMalformed: msg.certificate.malformed,
     };
   } else {
     // Message 1: receive partner's terms. Raw receive + inline parse (rather
@@ -565,6 +643,8 @@ export async function exchangeTerms(
     let partnerDisclosesPayload: boolean | undefined;
     let partnerHostKey: PresentedHostKey | undefined;
     let partnerHostKeyMalformed = false;
+    let partnerCertificate: SigningCertificate | undefined;
+    let partnerCertificateMalformed = false;
     // Read the version from the lenient probe before the strict parse, so
     // the reconcile below runs on the peer's version even when
     // `termsMessage.parse` throws -- whether on the linkage terms (a
@@ -579,6 +659,8 @@ export async function exchangeTerms(
       partnerDisclosesPayload = parsed.disclosesPayload;
       partnerHostKey = parsed.hostKey.value;
       partnerHostKeyMalformed = parsed.hostKey.malformed;
+      partnerCertificate = parsed.certificate.value;
+      partnerCertificateMalformed = parsed.certificate.malformed;
       partnerTerms = parseLinkageTerms(parsed.linkageTerms);
     } catch (parseErr) {
       // The description holds the partner-controlled Zod issue path (the
@@ -617,6 +699,7 @@ export async function exchangeTerms(
       ...saveField,
       ...disclosesPayloadField,
       ...hostKeyField,
+      ...certificateFieldSpread,
     });
 
     const msg = await receiveParsed(conn, decisionMessage);
@@ -630,6 +713,8 @@ export async function exchangeTerms(
       partnerDisclosesPayload,
       partnerHostKey,
       partnerHostKeyMalformed,
+      partnerCertificate,
+      partnerCertificateMalformed,
     };
   }
 }

@@ -1787,13 +1787,12 @@ async function seedSigningIdentity(bound: string): Promise<string> {
   return identityFile;
 }
 
-test("handler: certificate mode with no partner pin exits 64 before runProtocol", async () => {
-  // The gate is core's alone (assertCertificateModePinsPartner, raised inside
-  // prepareForExchange), so this drives the REAL prepare rather than the
-  // top-of-file stub: what is pinned here is that the one call site is reached
-  // on the CLI's exchange path, ahead of the run that holds credentials, terms,
-  // and data, and that its remedy reaches the operator through the command's
-  // own error sink as a usage error (exit 64) rather than a transport failure.
+test("handler: certificate mode with no partner pin runs as a first contact", async () => {
+  // An authenticated exchange presents and reads a certificate at the terms
+  // exchange, so a config with no pin on file is a first authenticated contact
+  // rather than an unrunnable one: the handler prepares it and runs it, and the
+  // pin is adopted inside the run. This drives the REAL prepare rather than the
+  // top-of-file stub, so the prepare step's own certificate-mode refusals run.
   const core =
     await vi.importActual<typeof import("@psilink/core")>("@psilink/core");
   fs.writeFileSync(
@@ -1812,25 +1811,21 @@ test("handler: certificate mode with no partner pin exits 64 before runProtocol"
 
   vi.mocked(prepareForExchange).mockImplementationOnce(core.prepareForExchange);
   vi.mocked(runProtocol).mockReset();
-  const exitSpy = captureProcessExit();
-  try {
-    await expect(
-      handler({
-        _: [],
-        $0: "psilink",
-        input,
-        "config-file": configFile,
-        "key-file": keyFile,
-        "log-level": "silent",
-      } as unknown as Arguments),
-    ).rejects.toThrow("exit:64");
-    expect(vi.mocked(runProtocol)).not.toHaveBeenCalled();
-    const reported = mockState.errors.join("\n");
-    expect(reported).toContain("signing.partner_fingerprint");
-    expect(reported).toContain("psilink fingerprint");
-  } finally {
-    exitSpy.mockRestore();
-  }
+  await handler({
+    _: [],
+    $0: "psilink",
+    input,
+    "config-file": configFile,
+    "key-file": keyFile,
+    "log-level": "silent",
+    identity: "Test Party",
+  } as unknown as Arguments);
+  expect(vi.mocked(runProtocol)).toHaveBeenCalledTimes(1);
+  // The run is given the configuration file it was invoked with, which is the
+  // only file a freshly adopted pin is ever written into, and no pin of its own.
+  const [params] = vi.mocked(runProtocol).mock.calls[0];
+  expect(params.signing?.configPath).toBe(configFile);
+  expect(params.signing?.partnerFingerprint).toBeUndefined();
 });
 
 test("handler: certificate mode with an unnamed party exits 64 before runProtocol", async () => {

@@ -80,6 +80,7 @@ export type EventType =
 export const WARNING_SOURCES = [
   "termsExchange",
   "hostKeyDivergence",
+  "partnerCertificatePinned",
   "unnamedPartnerRecord",
   "resolvedCardinality",
   "pairTableAdvisory",

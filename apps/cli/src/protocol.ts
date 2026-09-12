@@ -47,6 +47,7 @@ import {
   brokerLocationFromConnection,
   iceServersFromConnection,
 } from "./connection/webrtc/weriftPeer";
+import { persistPartnerFingerprint } from "./config";
 import { buildRotatedKeyFile, saveKeyFile } from "./keyFile";
 import { preflightKeyFilePath } from "./keyFilePreflight";
 import { loadCliPsiBackend } from "./psiBackend";
@@ -192,6 +193,29 @@ export const UNNAMED_PARTNER_ACCOUNTING_NOTE =
   "who this exchange was with.";
 
 /**
+ * What the operator is told when a run adopts the partner's certificate on a
+ * first authenticated contact. It names the value pinned and the file it went
+ * into, says plainly what that pin is authenticated by, and asks for the
+ * out-of-band comparison that is the only thing which can strengthen it.
+ *
+ * The fingerprint is a digest this party derived from the presented
+ * certificate, so no partner-authored text reaches the line through it.
+ */
+function partnerCertificatePinnedNotice(
+  fingerprint: string,
+  configPath: string,
+): string {
+  return (
+    "Pinned the partner's signing certificate on this first contact: " +
+    `fingerprint ${fingerprint}, recorded as signing.partner_fingerprint in ` +
+    `${configPath}. This pin is authenticated by the channel the invitation ` +
+    "secret travelled and nothing else, so compare the fingerprint with the " +
+    "one your partner's 'psilink fingerprint' prints, over a channel you " +
+    "trust. Every later exchange refuses a certificate that does not match it."
+  );
+}
+
+/**
  * CLI-layer extension of {@link Authentication} that co-locates the path where
  * the rotated shared secret is persisted after each successful key exchange.
  * Passed to {@link runProtocol} on its own `auth` parameter, separate from the
@@ -219,9 +243,13 @@ export interface SigningPersist {
   /** This party's long-lived signing identity (private key + certificate). */
   identity: SigningIdentity;
   /** The pinned partner certificate fingerprint (`signing.partner_fingerprint`);
-   * absent means no partner certificate can be trusted and verification fails
-   * closed. */
+   * absent means this run is a first authenticated contact, which adopts the
+   * certificate the partner presents at the terms exchange and records its
+   * fingerprint into {@link configPath}. */
   partnerFingerprint?: string;
+  /** The configuration file this exchange was given, and the only file a
+   * freshly adopted partner fingerprint is written into. */
+  configPath: string;
   /** Where the dual-signed record is written (an explicit path, or `undefined`
    * for the default timestamped location). */
   receiptOutput: ReceiptOutput;
@@ -541,6 +569,29 @@ async function runExchangeStage(params: {
       signingIdentity: signing?.identity,
       partnerFingerprint: signing?.partnerFingerprint,
       sessionKey: signing !== null ? run.sessionKeyForReceipt : undefined,
+      // Record the adopted pin into the configuration this exchange was
+      // given, at the moment of adoption and before anything is disclosed, so
+      // a run that pins and then fails mid-round does not re-pin blind on the
+      // next attempt; a throw here stops the run rather than leaving the
+      // operator believing the pin was saved. The fingerprint is a digest
+      // this party derived, and still takes the display escape every other
+      // value on these sinks takes.
+      onPartnerCertificatePinned:
+        signing === null
+          ? undefined
+          : (fingerprint: string) => {
+              persistPartnerFingerprint(signing.configPath, fingerprint);
+              const message = partnerCertificatePinnedNotice(
+                fingerprint,
+                signing.configPath,
+              );
+              log.warn(
+                redactAndSanitizeForDisplay(message, {
+                  maxLength: WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
+                }),
+              );
+              emit((e) => e.warning("partnerCertificatePinned", message));
+            },
       // Advertise the observed SFTP host key for cross-party
       // reconciliation only when the exchange runs over the
       // authenticated, AEAD-wrapped channel (`secure` set): the value is
