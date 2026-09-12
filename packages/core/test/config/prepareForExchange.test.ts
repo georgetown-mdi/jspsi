@@ -768,56 +768,108 @@ describe("prepareForExchange: an unimplemented signing mode is refused", () => {
   });
 });
 
-// --- Certificate mode with no partner pin fails closed before connecting -----
+// --- Certificate mode with no partner pin and no way to get one -------------
 
-describe("prepareForExchange: certificate mode with no partner pin is refused", () => {
-  const prepareWithSigning = (signing?: SigningConfig) =>
-    prepareForExchange(
-      { linkageTerms: terms, metadata, signing },
-      "Tester",
-      rawRows,
-      columns,
+describe("runExchange: an unpinned certificate-mode run that cannot pin is refused", () => {
+  // The gate is held at the run boundary rather than at prepare time because
+  // only the run knows whether it signs in band: a run that does pins the
+  // partner's presented certificate at the terms exchange and needs nothing on
+  // file, while a run that does not would reach a signature swap that rejects
+  // any certificate against an absent pin, after the payloads had crossed.
+  // Every collaborator the run would touch throws when used, so the refusal is
+  // what the rejection can come from -- a connection frame or a PSI call would
+  // appear as its own error.
+  const refuseUse = (what: string) => (): never => {
+    throw new Error(`${what} was reached past the unpinned-run refusal`);
+  };
+  const runWithSigning = (signing?: SigningConfig) =>
+    runExchange(
+      {
+        send: refuseUse("the connection"),
+        receive: refuseUse("the connection"),
+        close: refuseUse("the connection"),
+      },
+      "initiator",
+      prepareForExchange(
+        { linkageTerms: terms, metadata, signing },
+        "Tester",
+        rawRows,
+        columns,
+      ),
+      {
+        psiLibrary: new Proxy({} as PSILibrary, {
+          get: refuseUse("the PSI library"),
+        }),
+      },
     );
 
-  test("an unpinned certificate-mode block is refused before connecting", () => {
-    // The signature swap runs after the payloads have crossed and rejects
-    // any certificate presented against an absent pin, so the run would
-    // disclose this party's data, then end with no result and no receipt --
-    // leaving only the record of that disclosure. It throws
-    // OperatorConfigError, like the unimplemented-mode sibling, because the
-    // signing block is always this party's own config (CLI exit 64).
-    expect(() => prepareWithSigning({ mode: "certificate" })).toThrow(
+  test("an unpinned block is refused before anything is sent", async () => {
+    // It throws OperatorConfigError, like the unimplemented-mode sibling,
+    // because the signing block is always this party's own config (CLI exit
+    // 64). The unusable connection is what holds "before anything is sent":
+    // any send would throw its own error instead.
+    await expect(runWithSigning({ mode: "certificate" })).rejects.toThrow(
       OperatorConfigError,
     );
-    expect(() => prepareWithSigning({ mode: "certificate" })).toThrow(
+    await expect(runWithSigning({ mode: "certificate" })).rejects.toThrow(
       /signing\.partner_fingerprint/,
     );
   });
 
-  test("an empty pin is refused as no pin at all", () => {
-    expect(() =>
-      prepareWithSigning({ mode: "certificate", partnerFingerprint: "" }),
-    ).toThrow(OperatorConfigError);
+  test("an empty pin is refused as no pin at all", async () => {
+    await expect(
+      runWithSigning({ mode: "certificate", partnerFingerprint: "" }),
+    ).rejects.toThrow(OperatorConfigError);
   });
 
-  test("mode: none and an absent block need no pin", () => {
-    expect(prepareWithSigning({ mode: "none" }).rowCount).toBe(1);
-    expect(prepareWithSigning(undefined).rowCount).toBe(1);
+  test("mode: none and an absent block reach the terms exchange", async () => {
+    await expect(runWithSigning({ mode: "none" })).rejects.toThrow(
+      /the connection was reached/,
+    );
+    await expect(runWithSigning(undefined)).rejects.toThrow(
+      /the connection was reached/,
+    );
+  });
+
+  test("the refusal is the OperatorConfigError class, not a bare UsageError", async () => {
+    // The exact class, not merely a member of its family: `name` is what each
+    // constructor sets, so a re-typing to a subclass fails here rather than
+    // passing on the base. It is what puts the message in front of the
+    // operator as an actionable configuration fault (CLI exit 64).
+    const thrown = await runWithSigning({ mode: "certificate" }).catch(
+      (err: unknown) => err,
+    );
+    expect(thrown).toBeInstanceOf(UsageError);
+    expect(thrown).toBeInstanceOf(OperatorConfigError);
+    expect((thrown as Error).name).toBe(OperatorConfigError.name);
+  });
+
+  test("prepare carries the signing block to the boundary that holds it", () => {
+    // The prepare step cannot settle whether the run signs in band, so it
+    // prepares an unpinned certificate-mode config and carries the block to
+    // the run boundary, which can.
+    const prepared = prepareForExchange(
+      { linkageTerms: terms, metadata, signing: { mode: "certificate" } },
+      "Tester",
+      rawRows,
+      columns,
+    );
+    expect(prepared.signing).toEqual({ mode: "certificate" });
   });
 });
 
 // --- assertCertificateModePinsPartner (the shared guard) ---------------------
 
 describe("assertCertificateModePinsPartner", () => {
-  test("refuses certificate mode with no pin", () => {
+  test("refuses certificate mode with no pin on a run that cannot pin", () => {
     expect(() =>
-      assertCertificateModePinsPartner({ mode: "certificate" }),
+      assertCertificateModePinsPartner({ mode: "certificate" }, false),
     ).toThrow(OperatorConfigError);
   });
 
   test("offers the exchange record as the most a refused run keeps", () => {
     const refuse = () =>
-      assertCertificateModePinsPartner({ mode: "certificate" });
+      assertCertificateModePinsPartner({ mode: "certificate" }, false);
     expect(refuse).toThrow(/at most the exchange record of that disclosure/);
     expect(refuse).toThrow(/where record writing is off, nothing at all/);
     expect(refuse).not.toThrow(/keeping only the exchange record/);
@@ -825,36 +877,49 @@ describe("assertCertificateModePinsPartner", () => {
 
   test("passes certificate mode with a pin", () => {
     expect(() =>
-      assertCertificateModePinsPartner({
-        mode: "certificate",
-        partnerFingerprint,
-      }),
+      assertCertificateModePinsPartner(
+        { mode: "certificate", partnerFingerprint },
+        false,
+      ),
+    ).not.toThrow();
+  });
+
+  test("passes an unpinned run that presents certificates in band", () => {
+    // A run that signs in band pins the partner's presented certificate at
+    // the terms exchange, so it needs no pin on file: an unpinned run of that
+    // shape is a first authenticated contact rather than an unrunnable one.
+    expect(() =>
+      assertCertificateModePinsPartner({ mode: "certificate" }, true),
     ).not.toThrow();
   });
 
   test("passes every mode that verifies no partner certificate", () => {
     expect(() =>
-      assertCertificateModePinsPartner({ mode: "none" }),
+      assertCertificateModePinsPartner({ mode: "none" }, false),
     ).not.toThrow();
     expect(() =>
-      assertCertificateModePinsPartner({ mode: "session-derived" }),
+      assertCertificateModePinsPartner({ mode: "session-derived" }, false),
     ).not.toThrow();
-    expect(() => assertCertificateModePinsPartner(undefined)).not.toThrow();
+    expect(() =>
+      assertCertificateModePinsPartner(undefined, false),
+    ).not.toThrow();
   });
 
   test("refuses exactly what the verification-time refusal refuses", async () => {
     // The gate exists to refuse, before any payload crosses, the runs the
-    // signature swap would refuse after one has. Both read partnerPinIsPresent,
-    // and this holds the two to the same answer over the pin values a config
-    // can hold -- a gate reading a narrower condition would admit a run that
-    // cannot finish.
+    // signature swap would refuse after one has -- on the paths that cannot
+    // pin in band. Both read partnerPinIsPresent, and this holds the two to
+    // the same answer over the pin values a config can hold.
     const { certificate } = await generateSigningIdentity("Partner");
     for (const pin of [undefined, ""]) {
       expect(() =>
-        assertCertificateModePinsPartner({
-          mode: "certificate",
-          ...(pin !== undefined ? { partnerFingerprint: pin } : {}),
-        }),
+        assertCertificateModePinsPartner(
+          {
+            mode: "certificate",
+            ...(pin !== undefined ? { partnerFingerprint: pin } : {}),
+          },
+          false,
+        ),
       ).toThrow(OperatorConfigError);
       await expect(
         assertPartnerCertificateTrusted(certificate, pin),
@@ -1132,13 +1197,6 @@ const refusalCases: Array<{
       metadata,
       signing: { mode: "session-derived" },
     },
-    errorClass: OperatorConfigError,
-    messageRendered: true,
-  },
-  {
-    what: "certificate mode pinning no partner fingerprint",
-    says: /pins no partner fingerprint/,
-    spec: { linkageTerms: terms, metadata, signing: { mode: "certificate" } },
     errorClass: OperatorConfigError,
     messageRendered: true,
   },

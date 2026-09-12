@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { camelizeKeys } from "../utils/camelizeKeys.js";
 import { partnerPinIsPresent } from "../config/signing.js";
+import { MAX_TEXT_LENGTH } from "../config/linkageTermsSchema.js";
 import { canonicalBytes } from "../utils/canonical.js";
 import {
   bytesEqual,
@@ -167,6 +168,48 @@ const SigningIdentitySchema: z.ZodType<SigningIdentity> = z.object({
   privateKey: P256PrivateJwkSchema,
   certificate: SigningCertificateSchema,
 });
+
+// Length cap for the base64url crypto values a certificate read off an
+// untrusted partner frame holds (a coordinate is a 32-byte value = 43 unpadded
+// base64url characters, a signature 64 bytes = 86), matching the record
+// format's own cap: 256 is far above any legitimate value yet refuses a
+// megabyte-scale hostile string. Length-capped, not length-locked -- the exact
+// byte length is re-checked after decoding, so it is not pinned here.
+const MAX_WIRE_BASE64URL_LENGTH = 256;
+
+const boundedBase64UrlSchema = z
+  .string()
+  .max(MAX_WIRE_BASE64URL_LENGTH)
+  .regex(/^[A-Za-z0-9_-]+$/, "must be an unpadded base64url string");
+
+/**
+ * A certificate parsed from an untrusted partner wire frame -- the terms
+ * exchange's `certificate` field and the receipt swap's frame -- with every
+ * partner-controlled field length-capped so an oversized frame is rejected at
+ * parse, before any fingerprint or signature work, rather than forcing
+ * proportional allocation. The bounds mirror the on-disk record format's caps
+ * (identity -> {@link MAX_TEXT_LENGTH}, every base64url field ->
+ * {@link MAX_WIRE_BASE64URL_LENGTH}); this is the wire safety check the shared
+ * {@link SigningCertificateSchema} (used for operator-trusted on-disk
+ * identities) leaves unbounded. Shape only -- it does NOT self-verify;
+ * {@link verifyCertificateSelfSignature} and
+ * {@link verifyPresentedCertificate} check the self-signature and the pin.
+ *
+ * @internal exported for the two wire frames that embed a certificate.
+ */
+export const boundedWireCertificateSchema: z.ZodType<SigningCertificate> =
+  z.object({
+    version: z.literal(SIGNING_CERTIFICATE_VERSION),
+    algorithm: SigningAlgorithmSchema,
+    identity: z.string().min(1).max(MAX_TEXT_LENGTH),
+    publicKey: z.object({
+      kty: z.literal("EC"),
+      crv: z.literal("P-256"),
+      x: boundedBase64UrlSchema,
+      y: boundedBase64UrlSchema,
+    }),
+    signature: boundedBase64UrlSchema,
+  });
 
 // --- Canonical inputs --------------------------------------------------------
 

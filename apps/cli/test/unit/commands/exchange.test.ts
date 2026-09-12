@@ -1787,13 +1787,15 @@ async function seedSigningIdentity(bound: string): Promise<string> {
   return identityFile;
 }
 
-test("handler: certificate mode with no partner pin exits 64 before runProtocol", async () => {
-  // The gate is core's alone (assertCertificateModePinsPartner, raised inside
-  // prepareForExchange), so this drives the REAL prepare rather than the
-  // top-of-file stub: what is pinned here is that the one call site is reached
-  // on the CLI's exchange path, ahead of the run that holds credentials, terms,
-  // and data, and that its remedy reaches the operator through the command's
-  // own error sink as a usage error (exit 64) rather than a transport failure.
+test("handler: certificate mode with no partner pin runs as a first contact", async () => {
+  // An authenticated exchange presents and reads a certificate at the terms
+  // exchange, so a config with no pin on file is a first authenticated contact
+  // rather than an unrunnable one: the handler prepares it and runs it, and the
+  // pin is adopted inside the run. This drives the REAL prepare rather than the
+  // top-of-file stub, so the prepare step's own certificate-mode refusals run.
+  // It is also the passing side of the writability pre-flight below: the
+  // configuration sits in a writable directory, so the run that will adopt a
+  // pin is handed the file it will record it into.
   const core =
     await vi.importActual<typeof import("@psilink/core")>("@psilink/core");
   fs.writeFileSync(
@@ -1812,26 +1814,126 @@ test("handler: certificate mode with no partner pin exits 64 before runProtocol"
 
   vi.mocked(prepareForExchange).mockImplementationOnce(core.prepareForExchange);
   vi.mocked(runProtocol).mockReset();
-  const exitSpy = captureProcessExit();
-  try {
-    await expect(
-      handler({
+  await handler({
+    _: [],
+    $0: "psilink",
+    input,
+    "config-file": configFile,
+    "key-file": keyFile,
+    "log-level": "silent",
+    identity: "Test Party",
+  } as unknown as Arguments);
+  expect(vi.mocked(runProtocol)).toHaveBeenCalledTimes(1);
+  // The run is given the configuration file it was invoked with, which is the
+  // only file a freshly adopted pin is ever written into, and no pin of its own.
+  const [params] = vi.mocked(runProtocol).mock.calls[0];
+  expect(params.signing?.configPath).toBe(configFile);
+  expect(params.signing?.partnerFingerprint).toBeUndefined();
+});
+
+test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+  "handler: a first contact into a read-only configuration file still runs (skipped where a file cannot be made read-only for its owner)",
+  async () => {
+    // The pin is recorded by renaming a new file over this one, which needs no
+    // write bit on the file itself, so a read-only configuration in a writable
+    // directory is a run that can pin and is let through.
+    const core =
+      await vi.importActual<typeof import("@psilink/core")>("@psilink/core");
+    fs.writeFileSync(
+      configFile,
+      YAML.stringify({
+        ...minimalSFTPConfig,
+        signing: {
+          mode: "certificate",
+          identityFile: await seedSigningIdentity("Test Party"),
+        },
+      }),
+    );
+    fs.chmodSync(configFile, 0o444);
+    saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
+    const input = path.join(dir, "in.csv");
+    fs.writeFileSync(input, "ssn\n123456789\n");
+
+    vi.mocked(prepareForExchange).mockImplementationOnce(
+      core.prepareForExchange,
+    );
+    vi.mocked(runProtocol).mockReset();
+    try {
+      await handler({
         _: [],
         $0: "psilink",
         input,
         "config-file": configFile,
         "key-file": keyFile,
         "log-level": "silent",
-      } as unknown as Arguments),
-    ).rejects.toThrow("exit:64");
-    expect(vi.mocked(runProtocol)).not.toHaveBeenCalled();
-    const reported = mockState.errors.join("\n");
-    expect(reported).toContain("signing.partner_fingerprint");
-    expect(reported).toContain("psilink fingerprint");
-  } finally {
-    exitSpy.mockRestore();
-  }
-});
+        identity: "Test Party",
+      } as unknown as Arguments);
+      expect(vi.mocked(runProtocol)).toHaveBeenCalledTimes(1);
+    } finally {
+      fs.chmodSync(configFile, 0o644);
+    }
+  },
+);
+
+test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+  "handler: a first contact into an unwritable configuration exits 64 before connecting (skipped where a directory cannot be made read-only for its owner)",
+  async () => {
+    // The deployment shape is the read-only configuration mount: without this
+    // refusal the run connects, spends the SFTP credential, presents its terms
+    // and certificate, and only then dies at the adoption write. Held ahead of
+    // the host-key probe, which is the first step to open a transport.
+    const core =
+      await vi.importActual<typeof import("@psilink/core")>("@psilink/core");
+    const readOnlyDir = path.join(dir, "readonly");
+    fs.mkdirSync(readOnlyDir);
+    const readOnlyConfig = path.join(readOnlyDir, "psilink.yaml");
+    fs.writeFileSync(
+      readOnlyConfig,
+      YAML.stringify({
+        ...minimalSFTPConfig,
+        signing: {
+          mode: "certificate",
+          identityFile: await seedSigningIdentity("Test Party"),
+        },
+      }),
+    );
+    fs.chmodSync(readOnlyDir, 0o555);
+    saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
+    const input = path.join(dir, "in.csv");
+    fs.writeFileSync(input, "ssn\n123456789\n");
+
+    vi.mocked(prepareForExchange).mockImplementationOnce(
+      core.prepareForExchange,
+    );
+    vi.mocked(runProtocol).mockReset();
+    vi.mocked(establishHostKeyTrust).mockClear();
+    const exitSpy = captureProcessExit();
+    try {
+      await expect(
+        handler({
+          _: [],
+          $0: "psilink",
+          input,
+          "config-file": readOnlyConfig,
+          "key-file": keyFile,
+          "log-level": "silent",
+          identity: "Test Party",
+        } as unknown as Arguments),
+      ).rejects.toThrow("exit:64");
+      expect(vi.mocked(establishHostKeyTrust)).not.toHaveBeenCalled();
+      expect(vi.mocked(runProtocol)).not.toHaveBeenCalled();
+      const reported = mockState.errors.join("\n");
+      expect(reported).toContain(readOnlyConfig);
+      expect(reported).toContain("signing.partner_fingerprint");
+      expect(reported).toContain("psilink fingerprint");
+      expect(reported).toContain("mount the configuration writable");
+    } finally {
+      exitSpy.mockRestore();
+      // Restore the mode so afterEach can remove the tmp dir.
+      fs.chmodSync(readOnlyDir, 0o755);
+    }
+  },
+);
 
 test("handler: certificate mode with an unnamed party exits 64 before runProtocol", async () => {
   // The sibling of the pin gate above: the refusal is core's alone

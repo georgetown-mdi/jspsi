@@ -14,6 +14,7 @@ import {
   MAX_NESTING_DEPTH,
   NAME_SHAPE_MESSAGE,
   NestingDepthExceededError,
+  OperatorConfigError,
   parseExchangeSpec,
   quoteTermsValue,
   renderedDisplayCost,
@@ -27,6 +28,7 @@ import {
 import { controlCharacterMarker } from "@psilink/core/testing";
 import {
   applyConnectionOverrides,
+  assertPartnerFingerprintRecordable,
   assertRetainSweepGuard,
   diffLinkageTerms,
   formatReconcileDiffs,
@@ -39,6 +41,7 @@ import {
   persistExpectedPartnerDeduplicate,
   persistExpectedPayloadColumns,
   persistHostKeyFingerprint,
+  persistPartnerFingerprint,
   persistOutboundPayloadConsent,
   readConfigLinkageSource,
   saveConfig,
@@ -1170,6 +1173,250 @@ test("saveConfig preserves WebRTC connection.role and prunes the authentication 
   expect(raw).not.toContain("shared_secret");
   expect(raw).not.toContain(token);
   expect(raw).not.toContain("expires");
+});
+
+// --- persistPartnerFingerprint -----------------------------------------------
+
+const PARTNER_FP_A = "WiJHb37O9YMHrcF0R6g0UXgzAjW60jWYVSTgqA326yg";
+const PARTNER_FP_B = "iWD-ZB69Oz6gOpaX_OoC7sD8ohIZj2lETC9qbl-IbPg";
+
+/** A certificate-mode config with the operator's own comments and fields. */
+function certificateModeConfigSource(pin?: string): string {
+  return [
+    "# hand-authored config",
+    "connection:",
+    "  channel: sftp",
+    "  server:",
+    "    host: sftp.example.org # the drop",
+    "    username: alice",
+    "signing:",
+    "  mode: certificate # signed receipts",
+    "  identity_file: /run/signing/psilink-signing-identity.json",
+    ...(pin === undefined ? [] : [`  partner_fingerprint: ${pin}`]),
+    "",
+  ].join("\n");
+}
+
+test("persistPartnerFingerprint records the pin and preserves comments and other fields", () => {
+  const configPath = path.join(dir, "psilink.yaml");
+  fs.writeFileSync(configPath, certificateModeConfigSource());
+  persistPartnerFingerprint(configPath, PARTNER_FP_A);
+  const raw = fs.readFileSync(configPath, "utf8");
+  expect(raw).toContain("partner_fingerprint");
+  expect(raw).toContain(PARTNER_FP_A);
+  // The in-place document edit keeps the operator's comments and other fields.
+  expect(raw).toContain("# hand-authored config");
+  expect(raw).toContain("mode: certificate # signed receipts");
+  expect(raw).toContain("host: sftp.example.org # the drop");
+  const parsed = YAML.parse(raw) as {
+    signing: { partner_fingerprint: string; identity_file: string };
+  };
+  expect(parsed.signing.partner_fingerprint).toBe(PARTNER_FP_A);
+  expect(parsed.signing.identity_file).toBe(
+    "/run/signing/psilink-signing-identity.json",
+  );
+});
+
+test.skipIf(process.platform === "win32")(
+  "persistPartnerFingerprint writes the config owner-read-only (0600)",
+  () => {
+    const configPath = path.join(dir, "psilink.yaml");
+    fs.writeFileSync(configPath, certificateModeConfigSource());
+    persistPartnerFingerprint(configPath, PARTNER_FP_A);
+    expect(fs.statSync(configPath).mode & 0o777).toBe(0o600);
+  },
+);
+
+test("persistPartnerFingerprint never overwrites a pin already on file", () => {
+  // Changing a pin is a deliberate act, as changing a host-key pin is: the
+  // partner's certificate is the anchor a receipt's attribution rests on, so a
+  // divergent value is refused and the operator's file is left byte for byte
+  // as it stands.
+  const configPath = path.join(dir, "psilink.yaml");
+  const original = certificateModeConfigSource(PARTNER_FP_A);
+  fs.writeFileSync(configPath, original);
+  expect(() => persistPartnerFingerprint(configPath, PARTNER_FP_B)).toThrow(
+    UsageError,
+  );
+  expect(fs.readFileSync(configPath, "utf8")).toBe(original);
+});
+
+test("persistPartnerFingerprint refuses a document that is not in certificate mode", () => {
+  // The pin belongs only in a config that signs receipts with a certificate:
+  // anywhere else it names a trust anchor nothing reads. Each fixture's file is
+  // left byte for byte intact, the refusal preceding any write.
+  const fixtures = [
+    {
+      source: "signing:\n  mode: none\n",
+      expectInMessage: '"none"',
+    },
+    {
+      source: "signing:\n  mode: session-derived\n",
+      expectInMessage: '"session-derived"',
+    },
+    {
+      // No signing block at all: reported generically, never echoing
+      // `undefined`.
+      source: "connection:\n  channel: sftp\n  server:\n    host: h\n",
+      expectInMessage: "absent or non-scalar",
+    },
+    {
+      // A mode that parses to a collection is not a string, so it takes the
+      // same generic branch rather than being echoed.
+      source: "signing:\n  mode:\n    - certificate\n",
+      expectInMessage: "absent or non-scalar",
+    },
+    {
+      // An alias-spelled mode reaches getIn as an Alias node rather than the
+      // string it resolves to, so it takes the generic branch too: refusing a
+      // config no hand-authored file writes, rather than reading a mode
+      // through a reference.
+      source: "defaults: &m certificate\nsigning:\n  mode: *m\n",
+      expectInMessage: "absent or non-scalar",
+    },
+  ];
+  for (const { source, expectInMessage } of fixtures) {
+    const configPath = path.join(dir, "psilink.yaml");
+    fs.writeFileSync(configPath, source);
+    let caught: unknown;
+    try {
+      persistPartnerFingerprint(configPath, PARTNER_FP_A);
+    } catch (err) {
+      caught = err;
+    }
+    expect(caught).toBeInstanceOf(UsageError);
+    expect((caught as Error).message).toContain(expectInMessage);
+    expect(fs.readFileSync(configPath, "utf8")).toBe(source);
+  }
+});
+
+test("persistPartnerFingerprint raises a UsageError when signing is not a mapping", () => {
+  // A document that PARSES but whose `signing` is a scalar makes YAML's setIn
+  // throw a raw library error; the function reports it as the actionable
+  // UsageError its contract promises, not an opaque stack trace. The mode guard
+  // reads through a scalar `signing` as absent, so the sequence form is what
+  // reaches setIn.
+  const configPath = path.join(dir, "psilink.yaml");
+  const original = "signing:\n  - mode: certificate\n";
+  fs.writeFileSync(configPath, original);
+  expect(() => persistPartnerFingerprint(configPath, PARTNER_FP_A)).toThrow(
+    UsageError,
+  );
+  expect(fs.readFileSync(configPath, "utf8")).toBe(original);
+});
+
+test("persistPartnerFingerprint throws (not silently) on a malformed config", () => {
+  const configPath = path.join(dir, "psilink.yaml");
+  fs.writeFileSync(configPath, "signing:\n  - a\n  b: c\n");
+  expect(() => persistPartnerFingerprint(configPath, PARTNER_FP_A)).toThrow(
+    UsageError,
+  );
+});
+
+test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+  "persistPartnerFingerprint names the fingerprint and the remedies when the write fails (skipped where a directory cannot be made read-only for its owner)",
+  () => {
+    // The pre-flight in the exchange command catches the read-only mount before
+    // the run connects; this is the mount that turned read-only after it passed.
+    // The adoption has already happened by then, so the refusal has to hand the
+    // operator the value to record and both ways to record it.
+    const readOnlyDir = path.join(dir, "readonly");
+    fs.mkdirSync(readOnlyDir);
+    const configPath = path.join(readOnlyDir, "psilink.yaml");
+    const original = certificateModeConfigSource();
+    fs.writeFileSync(configPath, original);
+    fs.chmodSync(readOnlyDir, 0o555);
+    let caught: unknown;
+    try {
+      persistPartnerFingerprint(configPath, PARTNER_FP_A);
+    } catch (err) {
+      caught = err;
+    } finally {
+      // Restore the mode so afterEach can remove the tmp dir.
+      fs.chmodSync(readOnlyDir, 0o755);
+    }
+    expect(caught).toBeInstanceOf(OperatorConfigError);
+    const message = (caught as Error).message;
+    expect(message).toContain(configPath);
+    expect(message).toContain(PARTNER_FP_A);
+    expect(message).toContain("signing.partner_fingerprint");
+    expect(message).toContain("psilink fingerprint");
+    expect(message).toContain("mount the configuration writable");
+    // The refusal leaves the file exactly as it stands: the atomic replace
+    // never reached the destination.
+    expect(fs.readFileSync(configPath, "utf8")).toBe(original);
+  },
+);
+
+// --- assertPartnerFingerprintRecordable --------------------------------------
+
+test("assertPartnerFingerprintRecordable passes every block that records no pin", () => {
+  // Only a certificate-mode block with no pin on file ever writes here, so
+  // every other shape is a no-op -- checked against a path that does not exist,
+  // which would fail the access probe if the guard read it at all.
+  const absent = path.join(dir, "no-such-dir", "psilink.yaml");
+  for (const signing of [
+    undefined,
+    { mode: "none" } as const,
+    { mode: "session-derived" } as const,
+    { mode: "certificate", partnerFingerprint: PARTNER_FP_A } as const,
+  ])
+    expect(() =>
+      assertPartnerFingerprintRecordable(signing, absent),
+    ).not.toThrow();
+});
+
+test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+  "assertPartnerFingerprintRecordable refuses an unwritable configuration (skipped where a directory cannot be made read-only for its owner)",
+  () => {
+    const readOnlyDir = path.join(dir, "readonly");
+    fs.mkdirSync(readOnlyDir);
+    const configPath = path.join(readOnlyDir, "psilink.yaml");
+    fs.writeFileSync(configPath, certificateModeConfigSource());
+    fs.chmodSync(readOnlyDir, 0o555);
+    let caught: unknown;
+    try {
+      assertPartnerFingerprintRecordable({ mode: "certificate" }, configPath);
+    } catch (err) {
+      caught = err;
+    } finally {
+      fs.chmodSync(readOnlyDir, 0o755);
+    }
+    expect(caught).toBeInstanceOf(OperatorConfigError);
+    expect((caught as Error).message).toContain(configPath);
+  },
+);
+
+test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+  "assertPartnerFingerprintRecordable passes a read-only configuration file in a writable directory, and the pin is recorded through it (skipped where a file cannot be made read-only for its owner)",
+  () => {
+    // The write renames a new file over the destination, and a rename needs no
+    // write bit on what it replaces, so the file's own mode decides nothing --
+    // refusing on it would cost the operator a run that could have pinned.
+    const configPath = path.join(dir, "psilink.yaml");
+    fs.writeFileSync(configPath, certificateModeConfigSource());
+    fs.chmodSync(configPath, 0o444);
+    try {
+      expect(() =>
+        assertPartnerFingerprintRecordable({ mode: "certificate" }, configPath),
+      ).not.toThrow();
+      persistPartnerFingerprint(configPath, PARTNER_FP_A);
+      const parsed = YAML.parse(fs.readFileSync(configPath, "utf8")) as {
+        signing: { partner_fingerprint: string };
+      };
+      expect(parsed.signing.partner_fingerprint).toBe(PARTNER_FP_A);
+    } finally {
+      fs.chmodSync(configPath, 0o644);
+    }
+  },
+);
+
+test("assertPartnerFingerprintRecordable passes a writable configuration", () => {
+  const configPath = path.join(dir, "psilink.yaml");
+  fs.writeFileSync(configPath, certificateModeConfigSource());
+  expect(() =>
+    assertPartnerFingerprintRecordable({ mode: "certificate" }, configPath),
+  ).not.toThrow();
 });
 
 // --- persistDisclosedPayloadColumns ------------------------------------------

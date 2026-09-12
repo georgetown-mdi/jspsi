@@ -1,5 +1,5 @@
 {
-  "description": "Known-answer vectors for the terms-exchange message envelope: the field set, field order, and values each frame slot puts on the wire, captured off a real exchangeTerms run rather than authored. Every piece of per-party, per-run role and bounds metadata rides this envelope beside `linkageTerms` -- the record count, the declared effective key count, the protocol version, the save intent, the payload-intent flag, and the observed host key -- and a partner reads each by name, so adding, renaming, dropping, or re-ordering one is a wire-format delta. `linkageTerms` is lifted out of each frame into the `linkageTerms` section below and named per frame by party; the consuming suite rebuilds the full frame from `fields`, `envelope`, and `carriesLinkageTerms`. The terms document's own content is versioned by the operator-authored `linkage_terms.version` rather than by PROTOCOL_VERSION, so what this file pins is the envelope around it. `envelopeFields` is every field each slot ADMITS, read off the schemas; the frames below are what each slot EMITS, and the consuming suite holds their union to it so a field added to a schema cannot ride the wire with no frame pinning it. Replayed by packages/core/test/connection/termsEnvelopeVectors.test.ts; regenerate with generate-terms-envelope-vectors.mjs in this directory.",
+  "description": "Known-answer vectors for the terms-exchange message envelope: the field set, field order, and values each frame slot puts on the wire, captured off a real exchangeTerms run rather than authored. Every piece of per-party, per-run role and bounds metadata rides this envelope beside `linkageTerms` -- the record count, the declared effective key count, the protocol version, the save intent, the payload-intent flag, the observed host key, and the signing certificate a party that will sign presents -- and a partner reads each by name, so adding, renaming, dropping, or re-ordering one is a wire-format delta. `linkageTerms` is lifted out of each frame into the `linkageTerms` section below and named per frame by party; the consuming suite rebuilds the full frame from `fields`, `envelope`, and `carriesLinkageTerms`. The terms document's own content is versioned by the operator-authored `linkage_terms.version` rather than by PROTOCOL_VERSION, so what this file pins is the envelope around it. `envelopeFields` is every field each slot ADMITS, read off the schemas; the frames below are what each slot EMITS, and the consuming suite holds their union to it so a field added to a schema cannot ride the wire with no frame pinning it. Replayed by packages/core/test/connection/termsEnvelopeVectors.test.ts; regenerate with generate-terms-envelope-vectors.mjs in this directory.",
   "protocolVersion": 1,
   "envelopeFields": {
     "message 1": [
@@ -8,7 +8,8 @@
       "protocolVersion",
       "save",
       "disclosesPayload",
-      "hostKey"
+      "hostKey",
+      "certificate"
     ],
     "message 2": [
       "linkageTerms",
@@ -18,7 +19,8 @@
       "protocolVersion",
       "save",
       "disclosesPayload",
-      "hostKey"
+      "hostKey",
+      "certificate"
     ],
     "message 3": ["decision", "abortReasons"]
   },
@@ -144,6 +146,32 @@
       ]
     }
   },
+  "signingCertificates": [
+    {
+      "version": "psilink-signing-cert/v2",
+      "algorithm": "ecdsa-p256-sha256",
+      "identity": "Jane Smith, Agency A\njsmith@agency-a.gov",
+      "publicKey": {
+        "kty": "EC",
+        "crv": "P-256",
+        "x": "UVw9brnjlrkE0_7Kf1T9zQzB6Ze_N13KUVrQpsO0A18",
+        "y": "RTa-OlDzGPv5pUdZAqIhUCvvDVfgjFOyzApW8X2fk1Q"
+      },
+      "signature": "CzgwEmZnlYhLunf5m3CK7WWpHiUlMeRW_hhdJmbaPiwbsuT0LPP0EJGcHskJMB7icXOXfuZ1DPlQlnkpqtVL4g"
+    },
+    {
+      "version": "psilink-signing-cert/v2",
+      "algorithm": "ecdsa-p256-sha256",
+      "identity": "Bureau of B, Office of Linkage",
+      "publicKey": {
+        "kty": "EC",
+        "crv": "P-256",
+        "x": "5pKTlv15sRif9vS_0z_gm1LC-UNDXcMPzDDjoyHyb8o",
+        "y": "FUvK4DqTAEjRiRWqkqaGqY1HxJ6Gv3Y2Fl32M0NJ5tg"
+      },
+      "signature": "8qShMY-wkwMJ5otOaB8ARTRs3Ikq9P7zvN0KkYkKtxwtsjImh7fR1ntjwgfXJ6QPNFQEBW9yqGJaPu97447J6w"
+    }
+  ],
   "scenarios": [
     {
       "name": "every-optional-field-advertised",
@@ -237,7 +265,9 @@
             "fingerprint": "SHA256:bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
             "keyType": "ecdsa-sha2-nistp256"
           },
-          "partnerHostKeyMalformed": false
+          "partnerHostKeyMalformed": false,
+          "partnerCertificate": null,
+          "partnerCertificateMalformed": false
         },
         "responder": {
           "partnerIdentity": "Party A",
@@ -248,7 +278,9 @@
             "fingerprint": "SHA256:aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
             "keyType": "ssh-ed25519"
           },
-          "partnerHostKeyMalformed": false
+          "partnerHostKeyMalformed": false,
+          "partnerCertificate": null,
+          "partnerCertificateMalformed": false
         }
       }
     },
@@ -307,7 +339,9 @@
           "partnerSaveIntent": false,
           "partnerDisclosesPayload": null,
           "partnerHostKey": null,
-          "partnerHostKeyMalformed": false
+          "partnerHostKeyMalformed": false,
+          "partnerCertificate": null,
+          "partnerCertificateMalformed": false
         },
         "responder": {
           "partnerIdentity": "Party A",
@@ -315,7 +349,140 @@
           "partnerSaveIntent": false,
           "partnerDisclosesPayload": null,
           "partnerHostKey": null,
-          "partnerHostKeyMalformed": false
+          "partnerHostKeyMalformed": false,
+          "partnerCertificate": null,
+          "partnerCertificateMalformed": false
+        }
+      }
+    },
+    {
+      "name": "both-parties-present-a-certificate",
+      "description": "Both parties will sign a receipt, so each presents its self-signed certificate on the terms envelope -- the field the first-contact pin is resolved from. Pins the certificate's own field set and order inside the envelope, which a partner decoder reads by name.",
+      "initiator": {
+        "terms": "partyA",
+        "recordCount": 100,
+        "disclosesPayload": true,
+        "certificate": 0
+      },
+      "responder": {
+        "terms": "partyB",
+        "recordCount": 250,
+        "disclosesPayload": true,
+        "certificate": 1
+      },
+      "frames": [
+        {
+          "sender": "initiator",
+          "slot": "message 1",
+          "fields": [
+            "linkageTerms",
+            "recordCount",
+            "protocolVersion",
+            "disclosesPayload",
+            "certificate"
+          ],
+          "envelope": {
+            "recordCount": 100,
+            "protocolVersion": 1,
+            "disclosesPayload": true,
+            "certificate": {
+              "version": "psilink-signing-cert/v2",
+              "algorithm": "ecdsa-p256-sha256",
+              "identity": "Jane Smith, Agency A\njsmith@agency-a.gov",
+              "publicKey": {
+                "kty": "EC",
+                "crv": "P-256",
+                "x": "UVw9brnjlrkE0_7Kf1T9zQzB6Ze_N13KUVrQpsO0A18",
+                "y": "RTa-OlDzGPv5pUdZAqIhUCvvDVfgjFOyzApW8X2fk1Q"
+              },
+              "signature": "CzgwEmZnlYhLunf5m3CK7WWpHiUlMeRW_hhdJmbaPiwbsuT0LPP0EJGcHskJMB7icXOXfuZ1DPlQlnkpqtVL4g"
+            }
+          },
+          "carriesLinkageTerms": "partyA"
+        },
+        {
+          "sender": "responder",
+          "slot": "message 2",
+          "fields": [
+            "linkageTerms",
+            "decision",
+            "recordCount",
+            "protocolVersion",
+            "disclosesPayload",
+            "certificate"
+          ],
+          "envelope": {
+            "decision": "proceed",
+            "recordCount": 250,
+            "protocolVersion": 1,
+            "disclosesPayload": true,
+            "certificate": {
+              "version": "psilink-signing-cert/v2",
+              "algorithm": "ecdsa-p256-sha256",
+              "identity": "Bureau of B, Office of Linkage",
+              "publicKey": {
+                "kty": "EC",
+                "crv": "P-256",
+                "x": "5pKTlv15sRif9vS_0z_gm1LC-UNDXcMPzDDjoyHyb8o",
+                "y": "FUvK4DqTAEjRiRWqkqaGqY1HxJ6Gv3Y2Fl32M0NJ5tg"
+              },
+              "signature": "8qShMY-wkwMJ5otOaB8ARTRs3Ikq9P7zvN0KkYkKtxwtsjImh7fR1ntjwgfXJ6QPNFQEBW9yqGJaPu97447J6w"
+            }
+          },
+          "carriesLinkageTerms": "partyB"
+        },
+        {
+          "sender": "initiator",
+          "slot": "message 3",
+          "fields": ["decision"],
+          "envelope": {
+            "decision": "proceed"
+          },
+          "carriesLinkageTerms": null
+        }
+      ],
+      "reads": {
+        "initiator": {
+          "partnerIdentity": "Party B",
+          "partnerRecordCount": 250,
+          "partnerSaveIntent": false,
+          "partnerDisclosesPayload": true,
+          "partnerHostKey": null,
+          "partnerHostKeyMalformed": false,
+          "partnerCertificate": {
+            "version": "psilink-signing-cert/v2",
+            "algorithm": "ecdsa-p256-sha256",
+            "identity": "Bureau of B, Office of Linkage",
+            "publicKey": {
+              "kty": "EC",
+              "crv": "P-256",
+              "x": "5pKTlv15sRif9vS_0z_gm1LC-UNDXcMPzDDjoyHyb8o",
+              "y": "FUvK4DqTAEjRiRWqkqaGqY1HxJ6Gv3Y2Fl32M0NJ5tg"
+            },
+            "signature": "8qShMY-wkwMJ5otOaB8ARTRs3Ikq9P7zvN0KkYkKtxwtsjImh7fR1ntjwgfXJ6QPNFQEBW9yqGJaPu97447J6w"
+          },
+          "partnerCertificateMalformed": false
+        },
+        "responder": {
+          "partnerIdentity": "Party A",
+          "partnerRecordCount": 100,
+          "partnerSaveIntent": false,
+          "partnerDisclosesPayload": true,
+          "partnerHostKey": null,
+          "partnerHostKeyMalformed": false,
+          "partnerCertificate": {
+            "version": "psilink-signing-cert/v2",
+            "algorithm": "ecdsa-p256-sha256",
+            "identity": "Jane Smith, Agency A\njsmith@agency-a.gov",
+            "publicKey": {
+              "kty": "EC",
+              "crv": "P-256",
+              "x": "UVw9brnjlrkE0_7Kf1T9zQzB6Ze_N13KUVrQpsO0A18",
+              "y": "RTa-OlDzGPv5pUdZAqIhUCvvDVfgjFOyzApW8X2fk1Q"
+            },
+            "signature": "CzgwEmZnlYhLunf5m3CK7WWpHiUlMeRW_hhdJmbaPiwbsuT0LPP0EJGcHskJMB7icXOXfuZ1DPlQlnkpqtVL4g"
+          },
+          "partnerCertificateMalformed": false
         }
       }
     },
@@ -374,7 +541,9 @@
           "partnerSaveIntent": false,
           "partnerDisclosesPayload": null,
           "partnerHostKey": null,
-          "partnerHostKeyMalformed": false
+          "partnerHostKeyMalformed": false,
+          "partnerCertificate": null,
+          "partnerCertificateMalformed": false
         },
         "responder": {
           "partnerIdentity": "Party A",
@@ -382,7 +551,9 @@
           "partnerSaveIntent": false,
           "partnerDisclosesPayload": null,
           "partnerHostKey": null,
-          "partnerHostKeyMalformed": false
+          "partnerHostKeyMalformed": false,
+          "partnerCertificate": null,
+          "partnerCertificateMalformed": false
         }
       }
     }

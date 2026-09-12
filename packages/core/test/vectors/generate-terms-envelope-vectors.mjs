@@ -10,8 +10,9 @@
 // Purpose: the terms exchange is the one round-trip both parties always perform,
 // and every piece of per-party, per-run role and bounds metadata rides its
 // envelope beside `linkageTerms` -- the record count, the declared effective key
-// count, the protocol version, the save intent, the payload-intent flag, and the
-// observed host key (docs/spec/PROTOCOL.md, The counts ride the terms exchange).
+// count, the protocol version, the save intent, the payload-intent flag, the
+// observed host key, and the signing certificate a party that will sign
+// presents (docs/spec/PROTOCOL.md, The counts ride the terms exchange).
 // A partner reads that envelope by field name, so adding, renaming, dropping, or
 // re-ordering one is a wire-format delta. Nothing pinned it: the suites around it
 // assert what a field MEANS, never the whole set a frame holds. This file is
@@ -36,6 +37,8 @@
 // operator-authored `linkage_terms.version`, a marker distinct from
 // PROTOCOL_VERSION (docs/spec/PROTOCOL.md, Protocol-version reconcile at the terms
 // exchange), so this file pins the ENVELOPE around it.
+
+import { readFileSync } from "node:fs";
 
 import {
   PROTOCOL_VERSION,
@@ -81,6 +84,20 @@ const linkageTerms = {
   partyB: partyBTerms,
   unnamedParty: unnamedPartyTerms,
 };
+
+// The two signing certificates the certificate scenario presents, read out of
+// signing-cert-vectors.json rather than generated here. ECDSA signing is
+// randomized, so a freshly generated certificate would give this file a new
+// signature on every regeneration and move the wire-format digest with it; the
+// checked-in certificates are fixed, and their signatures were produced by
+// openssl, so what rides the envelope here is a certificate an implementation
+// outside this codebase made. Their `identity` is the certificate's own and is
+// unrelated to the terms fixtures' `identity`: the terms exchange only shape-
+// parses this field, and the binding between the two is held at the receipt
+// step.
+const signingCertificates = JSON.parse(
+  readFileSync(new URL("./signing-cert-vectors.json", import.meta.url), "utf8"),
+).vectors.map((vector) => vector.certificate);
 
 // Fixtures for the two fail-soft advertisement fields. The fingerprints are the
 // canonical SHA256 shape at its real length; nothing here is a credential.
@@ -128,6 +145,26 @@ const scenarios = [
       "pins which fields are mandatory on each slot.",
     initiator: { terms: "partyA", recordCount: 7 },
     responder: { terms: "partyB", recordCount: 0 },
+  },
+  {
+    name: "both-parties-present-a-certificate",
+    description:
+      "Both parties will sign a receipt, so each presents its self-signed " +
+      "certificate on the terms envelope -- the field the first-contact pin " +
+      "is resolved from. Pins the certificate's own field set and order " +
+      "inside the envelope, which a partner decoder reads by name.",
+    initiator: {
+      terms: "partyA",
+      recordCount: 100,
+      disclosesPayload: true,
+      certificate: 0,
+    },
+    responder: {
+      terms: "partyB",
+      recordCount: 250,
+      disclosesPayload: true,
+      certificate: 1,
+    },
   },
   {
     name: "responder-carries-no-identity",
@@ -221,6 +258,8 @@ function readBack(result) {
     partnerDisclosesPayload: result.partnerDisclosesPayload ?? null,
     partnerHostKey: result.partnerHostKey ?? null,
     partnerHostKeyMalformed: result.partnerHostKeyMalformed,
+    partnerCertificate: result.partnerCertificate ?? null,
+    partnerCertificateMalformed: result.partnerCertificateMalformed,
   };
 }
 
@@ -243,6 +282,9 @@ async function runScenario(scenario) {
       side.saveIntent,
       side.hostKey,
       side.disclosesPayload,
+      side.certificate === undefined
+        ? undefined
+        : signingCertificates[side.certificate],
     );
 
   const [initiatorResult, responderResult] = await Promise.all([
@@ -321,8 +363,9 @@ const vectors = {
     "off a real exchangeTerms run rather than authored. Every piece of " +
     "per-party, per-run role and bounds metadata rides this envelope beside " +
     "`linkageTerms` -- the record count, the declared effective key count, the " +
-    "protocol version, the save intent, the payload-intent flag, and the " +
-    "observed host key -- and a partner reads each by name, so adding, " +
+    "protocol version, the save intent, the payload-intent flag, the " +
+    "observed host key, and the signing certificate a party that will sign " +
+    "presents -- and a partner reads each by name, so adding, " +
     "renaming, dropping, or re-ordering one is a wire-format delta. " +
     "`linkageTerms` is lifted out of each frame into the `linkageTerms` section " +
     "below and named per frame by party; the consuming suite rebuilds the full " +
@@ -343,6 +386,7 @@ const vectors = {
     "the party named by `carriesLinkageTerms`. A field absent from `fields` is " +
     "absent from the frame -- omitted, never sent as null.",
   linkageTerms,
+  signingCertificates,
   scenarios: [],
   abortFrames: [],
 };

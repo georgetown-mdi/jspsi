@@ -191,15 +191,21 @@ test("the negative path: no signing config leaves the record path unchanged", as
   expect(resResp.audit).toBeDefined();
 });
 
-test("one party without signing config skips the step (no half-signed exchange)", async () => {
-  // The responder has no signing identity, so IT skips the step. The initiator
-  // has one but its partner never sends a receipt frame; a real transport shows
-  // this as a peer-silence timeout. Here we assert the responder simply returns
-  // no signed receipt while the initiator parks -- close to release it,
-  // modeling the caller tearing down the terminated exchange.
-  const [connInitiator, connResponder] = createMessagePipe();
-  const initiator = runExchange(
-    connInitiator,
+test("a partner that signs nothing is refused at the terms exchange", async () => {
+  // The responder has no signing identity, so it presents no certificate on
+  // the terms envelope and can produce no receipt. The initiator, which will
+  // sign, refuses there -- before the bootstrap frame, any linkage key, and any
+  // payload row -- rather than running to a swap that could never complete.
+  const [rawInitiator, connResponder] = createMessagePipe();
+  const initiatorSide = recording(rawInitiator);
+  const responder = runExchange(
+    connResponder,
+    "responder",
+    prepared("Responder Co", both, serverRows),
+    { psiLibrary },
+  ).catch((reason: unknown) => reason);
+  const raised = await runExchange(
+    initiatorSide.conn,
     "initiator",
     prepared("Initiator Co", both, clientRows),
     {
@@ -208,17 +214,29 @@ test("one party without signing config skips the step (no half-signed exchange)"
       partnerFingerprint: fingerprintB,
       sessionKey,
     },
-  ).catch(() => undefined);
-  const responder = await runExchange(
-    connResponder,
-    "responder",
-    prepared("Responder Co", both, serverRows),
-    { psiLibrary },
+  ).then(
+    () => {
+      throw new Error("expected the signing party to refuse the terms");
+    },
+    (reason: unknown) => reason,
   );
-  expect(responder.signedReceipt).toBeUndefined();
-  await connInitiator.close();
+
+  expect(raised).toBeInstanceOf(ReceiptVerificationError);
+  expect((raised as Error).message).toMatch(/partner is not signing receipts/);
+  // Nothing of this party's data moved: the frames it sent are its own terms,
+  // the decision closing the terms exchange, and the abort that releases the
+  // partner.
+  expect(initiatorSide.sent.map(frameKind)).toEqual([
+    "terms",
+    "decision",
+    "abort",
+  ]);
+  expect(exchangeRecordFromFailure(raised)).toBeUndefined();
+  expect(exchangeRecordOwedButUnbuilt(raised)).toBe(false);
+
+  await rawInitiator.close();
   await connResponder.close();
-  await initiator;
+  await responder;
 });
 
 test("an unnamed party refuses at terms agreement rather than signing", async () => {
@@ -422,45 +440,80 @@ describe("a signing party refuses an unnamed partner before its own data moves",
   });
 });
 
-test("a fingerprint-pin mismatch terminates the exchange fail-closed", async () => {
-  // The responder pins the WRONG fingerprint for the initiator, so the initiator's
-  // presented certificate fails the pin BEFORE its signature is checked. The
-  // responder rejects with a ReceiptVerificationError; the initiator is released by
-  // a close (it parks on the responder's terminal frame that never comes).
-  const [connInitiator, connResponder] = createMessagePipe();
-  const initiator = runExchange(
-    connInitiator,
-    "initiator",
-    prepared("Initiator Co", both, clientRows),
-    {
-      psiLibrary,
-      signingIdentity: identityA,
-      partnerFingerprint: fingerprintB,
-      sessionKey,
-    },
-  ).catch(() => undefined);
-  const responderResult = await runExchange(
-    connResponder,
-    "responder",
-    prepared("Responder Co", both, serverRows),
-    {
-      psiLibrary,
-      signingIdentity: identityB,
-      // WRONG pin: fingerprintB instead of fingerprintA.
-      partnerFingerprint: fingerprintB,
-      sessionKey,
-    },
-  ).then(
-    () => {
-      throw new Error("expected the responder to reject on the pin mismatch");
-    },
-    (reason: unknown) => reason,
-  );
-  expect(responderResult).toBeInstanceOf(ReceiptVerificationError);
-  expect((responderResult as Error).message).toMatch(/not trusted/);
-  await connInitiator.close();
-  await connResponder.close();
-  await initiator;
+describe("a fingerprint-pin mismatch ends the run at the terms exchange", () => {
+  // The certificate rides the terms envelope, so a partner certificate that is
+  // not the pinned one is refused the moment the terms are agreed -- before the
+  // bootstrap frame, any linkage key, and any payload row. Driven from both
+  // handshake seats: the value compared is fixed the moment the partner's terms
+  // arrive, so neither role reaches the rounds.
+  for (const refusingRole of ["initiator", "responder"] as const) {
+    test(`the refusing ${refusingRole} discloses nothing`, async () => {
+      const [rawRefusing, rawPartner] = createMessagePipe();
+      const refusingSide = recording(rawRefusing);
+      const partnerRole =
+        refusingRole === "initiator" ? "responder" : "initiator";
+      const partner = runExchange(
+        rawPartner,
+        partnerRole,
+        prepared(
+          partnerRole === "initiator" ? "Initiator Co" : "Responder Co",
+          both,
+          partnerRole === "initiator" ? clientRows : serverRows,
+        ),
+        {
+          psiLibrary,
+          signingIdentity: partnerRole === "initiator" ? identityA : identityB,
+          partnerFingerprint:
+            partnerRole === "initiator" ? fingerprintB : fingerprintA,
+          sessionKey,
+        },
+      ).catch((reason: unknown) => reason);
+      const raised = await runExchange(
+        refusingSide.conn,
+        refusingRole,
+        prepared(
+          refusingRole === "initiator" ? "Initiator Co" : "Responder Co",
+          both,
+          refusingRole === "initiator" ? clientRows : serverRows,
+        ),
+        {
+          psiLibrary,
+          signingIdentity: refusingRole === "initiator" ? identityA : identityB,
+          // WRONG pin: this party's own fingerprint, never its partner's.
+          partnerFingerprint:
+            refusingRole === "initiator" ? fingerprintA : fingerprintB,
+          sessionKey,
+        },
+      ).then(
+        () => {
+          throw new Error("expected the mismatched pin to end the run");
+        },
+        (reason: unknown) => reason,
+      );
+
+      expect(raised).toBeInstanceOf(ReceiptVerificationError);
+      expect((raised as Error).message).toMatch(
+        /not the one pinned in signing\.partner_fingerprint/,
+      );
+      // The terms exchange's own frames went out and then the abort, and
+      // nothing else did -- no linkage key, no payload row, no receipt -- so
+      // there is no disclosure for a record to attest and none is reported
+      // lost. The initiator sends its terms and the bare proceed decision
+      // before the partner's terms are in hand; the responder's single frame
+      // holds both.
+      expect(refusingSide.sent.map(frameKind)).toEqual(
+        refusingRole === "initiator"
+          ? ["terms", "decision", "abort"]
+          : ["terms", "abort"],
+      );
+      expect(exchangeRecordFromFailure(raised)).toBeUndefined();
+      expect(exchangeRecordOwedButUnbuilt(raised)).toBe(false);
+
+      await rawRefusing.close();
+      await rawPartner.close();
+      await partner;
+    });
+  }
 });
 
 // --- A certificate bound away from its own agreed-terms identity -------------
@@ -982,6 +1035,48 @@ function withForgedPayload(
   };
 }
 
+/** Swap the certificate on this party's outbound receipt frame for `forged`,
+ * leaving every other message of the exchange untouched. The terms frame also
+ * carries a certificate, so the receipt frame is told apart by the signature
+ * beside it. */
+function withForgedReceiptCertificate(
+  conn: MessageConnection,
+  forged: unknown,
+): MessageConnection {
+  return {
+    send: (data) =>
+      conn.send(
+        typeof data === "object" &&
+          data !== null &&
+          "certificate" in data &&
+          "signature" in data
+          ? { ...data, certificate: forged }
+          : data,
+      ),
+    receive: (timeoutMs?: number) => conn.receive(timeoutMs),
+    close: () => conn.close(),
+  };
+}
+
+/** Drop this party's outbound receipt frame, leaving every other message of the
+ * exchange untouched: the partner waits on a terminal frame that never comes. */
+function withoutReceiptFrame(conn: MessageConnection): MessageConnection {
+  return {
+    send: async (data) => {
+      if (
+        typeof data === "object" &&
+        data !== null &&
+        "certificate" in data &&
+        "signature" in data
+      )
+        return;
+      await conn.send(data);
+    },
+    receive: (timeoutMs?: number) => conn.receive(timeoutMs),
+    close: () => conn.close(),
+  };
+}
+
 describe("a run terminated after its disclosure keeps the record of it", () => {
   // The durability point: the record is owed from the moment this party's own
   // payload crosses, because the disclosure it attests has happened from there
@@ -989,14 +1084,16 @@ describe("a run terminated after its disclosure keeps the record of it", () => {
   // received-payload check and the whole signed-receipt swap -- can fail without
   // taking the record with it (docs/spec/PROTOCOL.md, Self-attested record).
 
-  test("a fingerprint-pin mismatch leaves both sides holding a terminated record", async () => {
-    // The responder pins the WRONG fingerprint, so it refuses the initiator's
-    // certificate before checking any signature; the initiator, having sent its
+  test("a swapped certificate at the swap leaves both sides a terminated record", async () => {
+    // The certificate the initiator presented at the terms exchange matched the
+    // responder's pin, and the one on its receipt frame is another party's --
+    // the divergence the swap is still the enforcement point for. The responder
+    // refuses it before checking any signature; the initiator, having sent its
     // frame first, is left parked on a terminal frame that never arrives. Both
     // parties had already exchanged payloads, so both are owed a record.
-    const [connInitiator, connResponder] = createMessagePipe();
+    const [rawInitiator, connResponder] = createMessagePipe();
     const initiator = runExchange(
-      connInitiator,
+      withForgedReceiptCertificate(rawInitiator, identityB.certificate),
       "initiator",
       prepared("Initiator Co", both, clientRows),
       {
@@ -1018,18 +1115,18 @@ describe("a run terminated after its disclosure keeps the record of it", () => {
       {
         psiLibrary,
         signingIdentity: identityB,
-        // WRONG pin: fingerprintB instead of fingerprintA.
-        partnerFingerprint: fingerprintB,
+        partnerFingerprint: fingerprintA,
         sessionKey,
       },
     ).then(
       () => {
-        throw new Error("expected the responder to reject on the pin mismatch");
+        throw new Error("expected the responder to reject the swapped frame");
       },
       (reason: unknown) => reason,
     );
 
     expect(responderFailure).toBeInstanceOf(ReceiptVerificationError);
+    expect((responderFailure as Error).message).toMatch(/not trusted/);
     const responderKept = exchangeRecordFromFailure(responderFailure);
     expect(responderKept?.record.outcome).toBe("receipt-swap-terminated");
     // The disclosure is attested as fully as a completed run's is: the record
@@ -1045,7 +1142,7 @@ describe("a run terminated after its disclosure keeps the record of it", () => {
     // The record is in hand, so nothing was lost to a failed build.
     expect(exchangeRecordOwedButUnbuilt(responderFailure)).toBe(false);
 
-    await connInitiator.close();
+    await rawInitiator.close();
     await connResponder.close();
     const initiatorFailure = await initiator;
     const initiatorKept = exchangeRecordFromFailure(initiatorFailure);
@@ -1062,11 +1159,11 @@ describe("a run terminated after its disclosure keeps the record of it", () => {
   });
 
   test("a transport drop mid-swap leaves the signing party a terminated record", async () => {
-    // The partner conducts the same exchange without a signing identity, so it
-    // sends no receipt frame and returns; the connection then drops under the
-    // initiator while it waits for one. The failure is a transport fault rather
-    // than a security event, and the record survives it just the same.
-    const [connInitiator, connResponder] = createMessagePipe();
+    // The partner's terminal receipt frame never reaches the wire, so it
+    // completes while the initiator waits for one; the connection then drops
+    // under the initiator. The failure is a transport fault rather than a
+    // security event, and the record survives it just the same.
+    const [connInitiator, rawResponder] = createMessagePipe();
     const initiator = runExchange(
       connInitiator,
       "initiator",
@@ -1084,18 +1181,22 @@ describe("a run terminated after its disclosure keeps the record of it", () => {
       (reason: unknown) => reason,
     );
     const partner = await runExchange(
-      connResponder,
+      withoutReceiptFrame(rawResponder),
       "responder",
       prepared("Responder Co", both, serverRows),
-      { psiLibrary },
+      {
+        psiLibrary,
+        signingIdentity: identityB,
+        partnerFingerprint: fingerprintA,
+        sessionKey,
+      },
     );
-    // The non-signing partner completed: its own record says so, and it holds no
-    // receipt and no binder to pair one with.
+    // The partner completed: it verified the initiator's frame and its own
+    // record says so.
     expect(partner.audit!.record.outcome).toBe("completed");
-    expect(partner.audit!.record.receiptBinder).toBeUndefined();
-    expect(partner.signedReceipt).toBeUndefined();
+    expect(partner.signedReceipt).toBeDefined();
 
-    await connResponder.close();
+    await rawResponder.close();
     await connInitiator.close();
     const failure = await initiator;
     expect(failure).not.toBeInstanceOf(ReceiptVerificationError);
@@ -1435,9 +1536,9 @@ describe("a run terminated after its disclosure keeps the record of it", () => {
     // lost accounting entry. The responder's prepared exchange holds an empty
     // retention disposition, past what the schema allows, so
     // buildExchangeRecord rejects it and throws on this already-disclosed run.
-    const [connInitiator, connResponder] = createMessagePipe();
+    const [rawInitiator, connResponder] = createMessagePipe();
     const initiator = runExchange(
-      connInitiator,
+      withForgedReceiptCertificate(rawInitiator, identityB.certificate),
       "initiator",
       prepared("Initiator Co", both, clientRows),
       {
@@ -1462,14 +1563,12 @@ describe("a run terminated after its disclosure keeps the record of it", () => {
       {
         psiLibrary,
         signingIdentity: identityB,
-        // WRONG pin, as the mismatch case above: the swap terminates the run
-        // after the payloads have crossed.
-        partnerFingerprint: fingerprintB,
+        partnerFingerprint: fingerprintA,
         sessionKey,
       },
     ).then(
       () => {
-        throw new Error("expected the responder to reject on the pin mismatch");
+        throw new Error("expected the responder to reject the swapped frame");
       },
       (reason: unknown) => reason,
     );
@@ -1478,7 +1577,7 @@ describe("a run terminated after its disclosure keeps the record of it", () => {
     expect(exchangeRecordFromFailure(responderFailure)).toBeUndefined();
     expect(exchangeRecordOwedButUnbuilt(responderFailure)).toBe(true);
 
-    await connInitiator.close();
+    await rawInitiator.close();
     await connResponder.close();
     // The initiator's own build was unaffected: the loss is one party's.
     const initiatorFailure = await initiator;
@@ -1619,7 +1718,12 @@ describe("a partner payload holding a lone surrogate is refused at the wire sche
       withTaintedPayload(rawHostile),
       "initiator",
       preparedWithPayload("Initiator Co", payloadClient),
-      { psiLibrary },
+      {
+        psiLibrary,
+        signingIdentity: identityA,
+        partnerFingerprint: fingerprintB,
+        sessionKey,
+      },
     ).catch((reason: unknown) => reason);
     const raised = await runExchange(
       honestSide.conn,
@@ -1665,7 +1769,12 @@ describe("a partner payload holding a lone surrogate is refused at the wire sche
       withTaintedPayload(rawHostile),
       "responder",
       preparedWithPayload("Responder Co", payloadServer),
-      { psiLibrary },
+      {
+        psiLibrary,
+        signingIdentity: identityB,
+        partnerFingerprint: fingerprintA,
+        sessionKey,
+      },
     ).catch((reason: unknown) => reason);
     const raised = await runExchange(
       rawHonest,

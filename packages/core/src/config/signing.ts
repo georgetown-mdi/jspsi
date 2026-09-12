@@ -65,11 +65,12 @@ export interface SigningConfig {
   identityFile?: string;
   /**
    * The partner's pinned certificate fingerprint (unpadded base64url
-   * SHA-256), exchanged out-of-band at setup. A presented partner
-   * certificate is trusted only if its fingerprint matches this value; an
-   * absent value means no partner certificate can be trusted yet
-   * (verification is rejected with a clear error). Long-lived: valid until
-   * the partner regenerates its identity.
+   * SHA-256): set in advance from a value exchanged out of band, or recorded
+   * by the first authenticated contact from the certificate the partner
+   * presents there. A presented partner certificate is trusted only if its
+   * fingerprint matches this value; a later contact whose certificate
+   * differs is refused. Long-lived: valid until the partner regenerates its
+   * identity.
    */
   partnerFingerprint?: string;
   /**
@@ -108,11 +109,15 @@ export { SigningConfigSchema };
 
 /**
  * Whether a partner certificate fingerprint is pinned at all; its absence
- * is the one state in which no presented certificate can be trusted.
- * Shared by two refusals that must agree: the verification-time rejection
- * of a certificate against no pin (`assertPartnerCertificateTrusted`), and
- * the pre-exchange gate refusing such a run before any payload crosses
- * (`assertCertificateModePinsPartner`).
+ * is what the terms exchange treats as a first authenticated contact, and
+ * what leaves a certificate presented anywhere else untrustable. Shared by
+ * four readings that must agree: the verification-time rejection of a
+ * certificate against no pin (`assertPartnerCertificateTrusted`), the
+ * terms-time resolution deciding between a comparison and an adoption
+ * (`resolvePartnerCertificateOrAbort`), the gate refusing a run that can
+ * neither pin nor establish one (`assertCertificateModePinsPartner`), and the
+ * CLI pre-flight that holds a first contact to a configuration it can record
+ * the adopted pin into (`assertPartnerFingerprintRecordable`).
  *
  * An empty string counts as no pin alongside `undefined`: {@link
  * FINGERPRINT_REGEX} cannot produce one, so it arrives only from a

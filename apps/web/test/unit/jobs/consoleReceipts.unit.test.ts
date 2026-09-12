@@ -959,13 +959,13 @@ describe("the receipts card's model", () => {
     ).toEqual([]);
   });
 
-  test("an unpinned partner blocks the run, as the run itself would", () => {
-    // Core refuses this configuration before any connection is opened
-    // (assertCertificateModePinsPartner) and the console's job schema refuses
-    // the intent at create time, so the card reports it as a problem rather than
-    // an advisory: nothing about the partner or the network could make such a run
-    // finish, and warning-and-proceeding would spend the operator's disclosure on
-    // a run that ends with no result and no receipt on this side.
+  test("an unpinned partner blocks the run, as the job schema would", () => {
+    // The console's job schema refuses the intent at create time, so the card
+    // reports it as a problem rather than an advisory: a card that warned and
+    // proceeded would send the operator into a create request the server
+    // rejects. The requirement is the console's own, stricter than the spawned
+    // child, which pins the certificate its partner presents at the terms
+    // exchange.
     const unpinned = draft({
       mode: "certificate",
       ownFingerprint: OWN_FINGERPRINT,
@@ -1076,47 +1076,22 @@ describe("the receipts card's model", () => {
     ).toEqual([IDENTITY_SHARED_MOUNT_LIMIT_ADVISORY]);
   });
 
-  test("the unpinned problem names the whole consequence, not just the receipt", () => {
-    // Core refuses an absent pin inside the exchange, after the payloads have
-    // crossed, and the results and the receipt are written only once the exchange
-    // has returned -- so a run started that way would cost the operator their data
-    // disclosure and give them back only the record of it. That is why the card
-    // refuses it, and copy that named only the receipt would understate what is
-    // being refused.
-    expect(NO_PARTNER_PIN_PROBLEM).toMatch(/gone to your partner/);
-    expect(NO_PARTNER_PIN_PROBLEM).toMatch(/no results/);
-    expect(NO_PARTNER_PIN_PROBLEM).toMatch(/no receipt/);
-    // What it does keep is named too, so the copy neither overstates the loss nor
-    // leaves the operator to guess whether the disclosure was logged.
+  test("the unpinned problem names what an out-of-band fingerprint buys", () => {
+    // An exchange with no pin on file adopts the certificate its partner
+    // presents, so what is lost by not entering one is the anchor rather than
+    // the run: the pin would rest on the channel the invitation travelled.
+    // Copy that said the run would fail would be describing something that
+    // does not happen, and would teach the operator to expect a refusal.
+    expect(NO_PARTNER_PIN_PROBLEM).toMatch(/channel the invitation travelled/);
     expect(NO_PARTNER_PIN_PROBLEM).toMatch(
-      /the exchange record of what you had already disclosed/,
+      /attest to whoever sent that invitation/,
     );
-    // And it is placed where the operator can act on it, in both places it can be
-    // acted on: the console offers a terminated run's record on the run screen,
-    // and the file itself is in the run's folder in the mount. Copy that named
-    // only the folder would send an operator into the mount for a file the screen
-    // was already offering.
+    expect(NO_PARTNER_PIN_PROBLEM).toMatch(/ties a receipt to your partner/);
+    // The channel it asks for is named concretely, since "a channel you trust"
+    // alone leaves the one mistake that matters -- the invitation's own channel
+    // -- looking acceptable.
     expect(NO_PARTNER_PIN_PROBLEM).toMatch(
-      /the run screen offers it for download when the run stops/,
-    );
-    expect(NO_PARTNER_PIN_PROBLEM).toMatch(
-      /record\.json with that run's files in the mounted folder/,
-    );
-    // Placement is not permanence: the one control the failure surface leads with
-    // takes the record away, so the sentence that offers it also says so.
-    expect(NO_PARTNER_PIN_PROBLEM).toMatch(/Discarding the run removes it/);
-  });
-
-  test("the unpinned problem states the initiator's extra disclosure", () => {
-    // exchangeSignedReceipt has the initiator send its own {certificate,
-    // signature} frame before verifying the partner's, so "no results and no
-    // receipt" is not the whole cost on the side that sends first: the partner
-    // would hold this party's signed receipt when the run stopped. Which role this
-    // side takes is not decided while authoring, so the copy is conditional -- and
-    // it still says nothing about what the partner does with what it receives.
-    expect(NO_PARTNER_PIN_PROBLEM).toMatch(/sends its signature first/);
-    expect(NO_PARTNER_PIN_PROBLEM).toMatch(
-      /your partner would already have your signed receipt/,
+      /a phone call, not the same email as the invitation/,
     );
   });
 

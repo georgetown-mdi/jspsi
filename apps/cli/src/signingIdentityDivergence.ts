@@ -24,9 +24,8 @@ import type { CertificateBody } from "@psilink/core";
 // `psilink exchange` REFUSES: this party's own certificate against its own
 // agreed terms (assertLocalCertificateAuthorizesAgreedIdentity in
 // @psilink/core), refused here before any credential, terms, or data are
-// sent -- the disposition its sibling certificate-mode faults take
-// (assertCertificateModePinsPartner and assertCertificateModeNamesLocalParty
-// in @psilink/core).
+// sent -- the disposition its sibling certificate-mode fault takes
+// (assertCertificateModeNamesLocalParty in @psilink/core).
 // packages/core/test/records/signedReceiptEndToEnd.test.ts drives both role
 // assignments, backing this refusal's assumption with a check.
 //

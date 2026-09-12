@@ -47,6 +47,7 @@ import {
   brokerLocationFromConnection,
   iceServersFromConnection,
 } from "./connection/webrtc/weriftPeer";
+import { persistPartnerFingerprint } from "./config";
 import { buildRotatedKeyFile, saveKeyFile } from "./keyFile";
 import { preflightKeyFilePath } from "./keyFilePreflight";
 import { loadCliPsiBackend } from "./psiBackend";
@@ -192,6 +193,29 @@ export const UNNAMED_PARTNER_ACCOUNTING_NOTE =
   "who this exchange was with.";
 
 /**
+ * What the operator is told when a run adopts the partner's certificate on a
+ * first authenticated contact. It names the value pinned and the file it went
+ * into, says plainly what that pin is authenticated by, and asks for the
+ * out-of-band comparison that is the only thing which can strengthen it.
+ *
+ * The fingerprint is a digest this party derived from the presented
+ * certificate, so no partner-authored text reaches the line through it.
+ */
+function partnerCertificatePinnedNotice(
+  fingerprint: string,
+  configPath: string,
+): string {
+  return (
+    "Pinned the partner's signing certificate on this first contact: " +
+    `fingerprint ${fingerprint}, recorded as signing.partner_fingerprint in ` +
+    `${configPath}. This pin is authenticated by the channel the invitation ` +
+    "secret travelled and nothing else, so compare the fingerprint with the " +
+    "one your partner's 'psilink fingerprint' prints, over a channel you " +
+    "trust. Every later exchange refuses a certificate that does not match it."
+  );
+}
+
+/**
  * CLI-layer extension of {@link Authentication} that co-locates the path where
  * the rotated shared secret is persisted after each successful key exchange.
  * Passed to {@link runProtocol} on its own `auth` parameter, separate from the
@@ -219,9 +243,13 @@ export interface SigningPersist {
   /** This party's long-lived signing identity (private key + certificate). */
   identity: SigningIdentity;
   /** The pinned partner certificate fingerprint (`signing.partner_fingerprint`);
-   * absent means no partner certificate can be trusted and verification fails
-   * closed. */
+   * absent means this run is a first authenticated contact, which adopts the
+   * certificate the partner presents at the terms exchange and records its
+   * fingerprint into {@link configPath}. */
   partnerFingerprint?: string;
+  /** The configuration file this exchange was given, and the only file a
+   * freshly adopted partner fingerprint is written into. */
+  configPath: string;
   /** Where the dual-signed record is written (an explicit path, or `undefined`
    * for the default timestamped location). */
   receiptOutput: ReceiptOutput;
@@ -541,6 +569,29 @@ async function runExchangeStage(params: {
       signingIdentity: signing?.identity,
       partnerFingerprint: signing?.partnerFingerprint,
       sessionKey: signing !== null ? run.sessionKeyForReceipt : undefined,
+      // Record the adopted pin into the configuration this exchange was
+      // given, at the moment of adoption and before anything is disclosed, so
+      // a run that pins and then fails mid-round does not re-pin blind on the
+      // next attempt; a throw here stops the run rather than leaving the
+      // operator believing the pin was saved. The fingerprint is a digest
+      // this party derived, and still takes the display escape every other
+      // value on these sinks takes.
+      onPartnerCertificatePinned:
+        signing === null
+          ? undefined
+          : (fingerprint: string) => {
+              persistPartnerFingerprint(signing.configPath, fingerprint);
+              const message = partnerCertificatePinnedNotice(
+                fingerprint,
+                signing.configPath,
+              );
+              log.warn(
+                redactAndSanitizeForDisplay(message, {
+                  maxLength: WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
+                }),
+              );
+              emit((e) => e.warning("partnerCertificatePinned", message));
+            },
       // Advertise the observed SFTP host key for cross-party
       // reconciliation only when the exchange runs over the
       // authenticated, AEAD-wrapped channel (`secure` set): the value is
@@ -2238,27 +2289,25 @@ export async function runProtocol(
     const errIsPeerAbort = (e: unknown): boolean =>
       causeChainSome(e, (link) => link instanceof PeerAbortError);
 
-    // Non-signing-partner observability: this side configured a signed
-    // receipt but the exchange failed before runExchange returned
-    // (exchangeComplete false), not with a receipt verification error (a
-    // distinct security event already reported by that error's own
-    // kind/message), and not with this party's own local
-    // certificate/terms refusal (a config fault this party's operator
-    // caused, not the partner's absence of signing). The signed-receipt
-    // swap is the last step of runExchange, so a partner that ran without
-    // a signing identity sends no receipt frame and this side parks on
-    // that receive until the peer timeout -- a drop otherwise
-    // indistinguishable from a generic peer-silence. Report that context
-    // so the operator can check whether the partner was configured to
-    // sign at all, rather than chasing a transport fault.
+    // Missing-receipt observability: this side configured a signed receipt
+    // but the exchange failed before runExchange returned (exchangeComplete
+    // false), not with a receipt verification error (a distinct security
+    // event already reported by that error's own kind/message), and not with
+    // this party's own local certificate/terms refusal (a config fault this
+    // party's operator caused). A partner presenting no signing certificate,
+    // or one this build cannot read, is refused at the terms exchange as a
+    // receipt verification error, so what is left here is a run whose signed
+    // path had no complaint of its own: the swap is the last step of
+    // runExchange, and this side parks on that receive until the peer
+    // timeout, a drop otherwise indistinguishable from generic peer-silence.
     // Walks the `cause` chain for a ReceiptVerificationError, so a future wrap
     // of the security failure cannot downgrade it to this softer warn.
     const isReceiptVerificationFailure = (e: unknown): boolean =>
       causeChainSome(e, (link) => link instanceof ReceiptVerificationError);
     // Class-exact, not the UsageError superclass OperatorConfigError itself
     // extends: a different usage fault mid-exchange still warrants the
-    // partner-signing check, so only this exact class is excluded. Walks the
-    // `cause` chain for the same forward-compatibility reason as
+    // advisory, so only this exact class is excluded. Walks the `cause` chain
+    // for the same forward-compatibility reason as
     // isReceiptVerificationFailure above.
     const isLocalConfigRefusal = (e: unknown): boolean =>
       causeChainSome(e, (link) => link.constructor === OperatorConfigError);
@@ -2269,12 +2318,12 @@ export async function runProtocol(
       !isLocalConfigRefusal(err)
     )
       log.warn(
-        "A signed receipt was configured for this exchange, but the exchange " +
-          "did not complete the receipt swap. If the partner did not configure " +
-          "a signing identity, it sends no receipt and this side waits for one " +
-          "until the peer timeout. Confirm the partner is configured to sign " +
-          "(its signing block, certificate mode) before treating this as a " +
-          "transport failure.",
+        "A signed receipt was configured for this exchange, but no receipt " +
+          "reached this side before the peer timeout and the receipt swap " +
+          "did not complete. A partner that presents no signing certificate " +
+          "is refused earlier, at the authenticated setup step, so check the " +
+          "transport and the peer rather than the partner's signing " +
+          "configuration.",
       );
 
     // The disclosure a terminated run already made outlives the failure that

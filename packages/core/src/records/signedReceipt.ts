@@ -6,9 +6,8 @@ import {
   ConnectionError,
   receiveParsed,
 } from "../connection/messageConnection.js";
-import { MAX_TEXT_LENGTH } from "../config/linkageTermsSchema.js";
 import {
-  SIGNING_CERTIFICATE_VERSION,
+  boundedWireCertificateSchema,
   computeCertificateFingerprint,
   verifyPresentedCertificate,
 } from "./signingIdentity.js";
@@ -370,11 +369,13 @@ export interface DualSignedRecord {
 // (each MAC/hash is a 32-byte value = 43 unpadded base64url characters, a
 // signature 64 bytes = 86), matching the record format's
 // MAX_BASE64URL_LENGTH: 256 is far above any legitimate value yet refuses a
-// megabyte-scale hostile string. The certificate and signature travel on an
-// untrusted partner wire frame, so a ~512MB frame would otherwise pass the
-// shape schema before any fingerprint/signature work; the cap rejects it at
-// parse. Length-capped, not length-locked -- the exact byte length is
-// re-checked after decoding, so it is not pinned here.
+// megabyte-scale hostile string. The signature travels on an untrusted
+// partner wire frame, so a ~512MB frame would otherwise pass the shape schema
+// before any signature work; the cap rejects it at parse. Length-capped, not
+// length-locked -- the exact byte length is re-checked after decoding, so it
+// is not pinned here. The certificate beside it is bounded by
+// boundedWireCertificateSchema, shared with the terms exchange's own
+// certificate field (signingIdentity.ts).
 const MAX_BASE64URL_LENGTH = 256;
 
 // Unpadded base64url, alphabet only, length-capped; exact byte lengths are checked
@@ -384,28 +385,6 @@ const base64UrlSchema = z
   .string()
   .max(MAX_BASE64URL_LENGTH)
   .regex(/^[A-Za-z0-9_-]+$/, "must be an unpadded base64url string");
-
-// A certificate parsed from an untrusted partner wire frame, with every
-// partner-controlled field length-capped so an oversized frame is rejected
-// at parse -- before the fingerprint/signature work -- rather than forcing
-// proportional allocation. The bounds mirror the on-disk record format's
-// caps (identity -> MAX_TEXT_LENGTH, every base64url field ->
-// MAX_BASE64URL_LENGTH); this is the wire safety check the shared
-// SigningCertificateSchema (used for operator-trusted on-disk identities)
-// leaves unbounded. Shape only -- it does NOT self-verify;
-// verifyPresentedCertificate checks the self-signature and pin.
-const boundedWireCertificateSchema: z.ZodType<SigningCertificate> = z.object({
-  version: z.literal(SIGNING_CERTIFICATE_VERSION),
-  algorithm: z.literal("ecdsa-p256-sha256"),
-  identity: z.string().min(1).max(MAX_TEXT_LENGTH),
-  publicKey: z.object({
-    kty: z.literal("EC"),
-    crv: z.literal("P-256"),
-    x: base64UrlSchema,
-    y: base64UrlSchema,
-  }),
-  signature: base64UrlSchema,
-});
 
 const ReceiptContentSchema: z.ZodType<ReceiptContent> = z.object({
   termsHash: base64UrlSchema,
@@ -555,8 +534,9 @@ async function verifyPartnerReceipt(
  * locally-built receipt content. */
 export interface SignedReceiptExchangeInputs {
   identity: SigningIdentity;
-  /** The pinned partner certificate fingerprint (from signing.partner_fingerprint).
-   * Absent means no partner certificate can be trusted; verification fails closed. */
+  /** The partner fingerprint the terms exchange resolved: the configured pin,
+   * or the certificate adopted at first authenticated contact. A caller
+   * passing none has verification fail closed. */
   pinnedFingerprint: string | undefined;
   /** The identity the partner used in the AGREED TERMS (`partnerTerms.identity`).
    * The pinned certificate must authorize this exact identity, so the authorization

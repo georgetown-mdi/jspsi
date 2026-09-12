@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { vi, test, expect, beforeEach, afterEach } from "vitest";
+import YAML from "yaml";
 import type { PreparedExchange } from "@psilink/core";
 
 // Shared state readable inside the vi.mock factory despite ESM hoisting.
@@ -2523,25 +2524,28 @@ test(
   },
 );
 
-// --- Signed-receipt non-signing-partner warn gate via runProtocol ------------
+// --- Signed-receipt missing-receipt warn gate via runProtocol ---------------
 //
 // Pins the catch-block gate that decides whether to warn the operator that a
-// signed receipt was configured but the exchange did not complete the receipt
-// swap -- `signing !== null && !exchangeComplete && !isReceiptVerificationFailure
-// && !isLocalConfigRefusal` in runProtocol's catch. Runs a REAL two-party
-// handshake (only runExchange is mocked) with a signing config threaded
-// through, using the same awaitBothArmed/runAbortParty barrier pattern as the
-// abort-marker section above so both parties reach the same point
-// deterministically.
+// signed receipt was configured but none arrived -- `signing !== null &&
+// !exchangeComplete && !isReceiptVerificationFailure && !isLocalConfigRefusal`
+// in runProtocol's catch. Runs a REAL two-party handshake (only runExchange is
+// mocked) with a signing config threaded through, using the same
+// awaitBothArmed/runAbortParty barrier pattern as the abort-marker section
+// above so both parties reach the same point deterministically.
 
-const NON_SIGNING_PARTNER_WARNING =
-  "A signed receipt was configured for this exchange, but the exchange " +
-  "did not complete the receipt swap";
+const MISSING_RECEIPT_WARNING =
+  "A signed receipt was configured for this exchange, but no receipt " +
+  "reached this side before the peer timeout";
 
-function signingPersistFixture(receiptFile: string): SigningPersist {
+function signingPersistFixture(
+  receiptFile: string,
+  configPath = path.join(tmpDir, "psilink.yaml"),
+): SigningPersist {
   return {
     identity: signingIdentityFixture,
     receiptOutput: { receiptFile },
+    configPath,
   };
 }
 
@@ -2551,6 +2555,7 @@ function runSigningParty(
   receiptFile: string,
   recordOutput?: RecordOutput,
   machineInterface: { eventStream?: boolean } = {},
+  configPath?: string,
 ): Promise<unknown> {
   return runProtocol({
     connection: {
@@ -2565,11 +2570,89 @@ function runSigningParty(
     loggerName: name,
     recordOutput,
     fileSyncRuntime: machineInterface,
-    signing: signingPersistFixture(receiptFile),
+    signing: signingPersistFixture(receiptFile, configPath),
   }) as unknown as Promise<unknown>;
 }
 
-test("a completed signed run does not warn about a non-signing partner", async () => {
+const ADOPTED_FINGERPRINT = "WiJHb37O9YMHrcF0R6g0UXgzAjW60jWYVSTgqA326yg";
+
+test("a first-contact pin is recorded and stated on both sinks, unattended", async () => {
+  // The ruling puts no paste ceremony on the ordinary path, so the adoption
+  // runs with no terminal attached: nothing is asked, the value is written into
+  // the configuration the exchange was given, and the operator is told on
+  // stderr AND on the machine-readable warning stream -- the one a supervisor
+  // that discards stderr reads instead.
+  expect(process.stdin.isTTY).toBeFalsy();
+  const keyFileA = path.join(tmpDir, "a.key");
+  const keyFileB = path.join(tmpDir, "b.key");
+  saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
+  saveKeyFile(keyFileB, { sharedSecret: TOKEN_A });
+  const certificateModeConfig =
+    "# hand-authored\nsigning:\n  mode: certificate\n  identity_file: /run/id.json\n";
+  const configA = path.join(tmpDir, "psilink-a.yaml");
+  const configB = path.join(tmpDir, "psilink-b.yaml");
+  fs.writeFileSync(configA, certificateModeConfig);
+  fs.writeFileSync(configB, certificateModeConfig);
+
+  vi.mocked(runExchange).mockImplementation((async (
+    _conn: unknown,
+    _role: unknown,
+    _prepared: unknown,
+    options: {
+      onPartnerCertificatePinned?: (fingerprint: string) => void;
+    },
+  ) => {
+    options.onPartnerCertificatePinned?.(ADOPTED_FINGERPRINT);
+    return defaultRunExchange();
+  }) as never);
+
+  mockFd3Open();
+  try {
+    const [resultA, resultB] = await Promise.allSettled([
+      runSigningParty(
+        keyFileA,
+        "test-a",
+        path.join(tmpDir, "receipt-a.json"),
+        undefined,
+        { eventStream: true },
+        configA,
+      ),
+      runSigningParty(
+        keyFileB,
+        "test-b",
+        path.join(tmpDir, "receipt-b.json"),
+        undefined,
+        {},
+        configB,
+      ),
+    ]);
+    expect(resultA.status).toBe("fulfilled");
+    expect(resultB.status).toBe("fulfilled");
+  } finally {
+    vi.mocked(fs.fstatSync).mockRestore();
+  }
+
+  // Written into the configuration this exchange was given, comments intact.
+  const raw = fs.readFileSync(configA, "utf8");
+  expect(raw).toContain("# hand-authored");
+  expect(YAML.parse(raw).signing.partner_fingerprint).toBe(ADOPTED_FINGERPRINT);
+
+  const pinned = takeFd3Lines().filter(
+    (l) => l.source === "partnerCertificatePinned",
+  );
+  expect(pinned).toHaveLength(1);
+  expect(pinned[0].message).toContain(ADOPTED_FINGERPRINT);
+
+  // The stderr line names the value, the file it went into, and the
+  // out-of-band check. The two parties run concurrently, so it is found by the
+  // file it names rather than by its position in the log.
+  const stated = mockState.warnings.find((m) => m.includes(configA));
+  expect(stated).toBeDefined();
+  expect(stated).toContain(ADOPTED_FINGERPRINT);
+  expect(stated).toContain("compare the fingerprint");
+}, 20_000);
+
+test("a completed signed run does not warn about a missing receipt", async () => {
   const keyFileA = path.join(tmpDir, "a.key");
   const keyFileB = path.join(tmpDir, "b.key");
   saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
@@ -2583,7 +2666,7 @@ test("a completed signed run does not warn about a non-signing partner", async (
   expect(resultB.status).toBe("fulfilled");
 
   expect(
-    mockState.warnings.some((m) => m.includes(NON_SIGNING_PARTNER_WARNING)),
+    mockState.warnings.some((m) => m.includes(MISSING_RECEIPT_WARNING)),
   ).toBe(false);
 }, 20_000);
 
@@ -2656,13 +2739,12 @@ test("writes the dual-signed receipt when no audit record was built", async () =
 }, 20_000);
 
 test(
-  "a ReceiptVerificationError does not warn about a non-signing partner",
+  "a ReceiptVerificationError does not warn about a missing receipt",
   { timeout: BOTH_ARMED_HANG_BACKSTOP_MS + 5_000 },
   async () => {
     // A pin-mismatch/verification failure is its own hard security failure,
     // reported on its own path (a distinct error kind/message); the softer
-    // "partner may not be configured to sign" warning must not also fire and
-    // dilute it.
+    // missing-receipt advisory must not also fire and dilute it.
     const keyFileA = path.join(tmpDir, "a.key");
     const keyFileB = path.join(tmpDir, "b.key");
     saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
@@ -2682,7 +2764,7 @@ test(
     expect(mockState.runExchangeEntries).toBe(2);
 
     expect(
-      mockState.warnings.some((m) => m.includes(NON_SIGNING_PARTNER_WARNING)),
+      mockState.warnings.some((m) => m.includes(MISSING_RECEIPT_WARNING)),
     ).toBe(false);
   },
 );
@@ -2716,19 +2798,19 @@ test(
     expect(mockState.runExchangeEntries).toBe(2);
 
     expect(
-      mockState.warnings.some((m) => m.includes(NON_SIGNING_PARTNER_WARNING)),
+      mockState.warnings.some((m) => m.includes(MISSING_RECEIPT_WARNING)),
     ).toBe(false);
   },
 );
 
 test(
-  "an OperatorConfigError does not warn about a non-signing partner",
+  "an OperatorConfigError does not warn about a missing receipt",
   { timeout: BOTH_ARMED_HANG_BACKSTOP_MS + 5_000 },
   async () => {
     // A run stopped by this party's own certificate/terms divergence (the
     // swap gate's local certificate check) is a local configuration fault,
-    // not evidence the partner failed to configure signing; the advisory
-    // must not point the operator at the partner for a purely local refusal.
+    // not a receipt lost in transit; the advisory must not point the operator
+    // at the transport for a purely local refusal.
     const keyFileA = path.join(tmpDir, "a.key");
     const keyFileB = path.join(tmpDir, "b.key");
     saveKeyFile(keyFileA, { sharedSecret: TOKEN_A });
@@ -2748,13 +2830,13 @@ test(
     expect(mockState.runExchangeEntries).toBe(2);
 
     expect(
-      mockState.warnings.some((m) => m.includes(NON_SIGNING_PARTNER_WARNING)),
+      mockState.warnings.some((m) => m.includes(MISSING_RECEIPT_WARNING)),
     ).toBe(false);
   },
 );
 
 test(
-  "a non-receipt failure with signing configured warns about a non-signing partner",
+  "a non-receipt failure with signing configured warns the receipt is missing",
   { timeout: BOTH_ARMED_HANG_BACKSTOP_MS + 5_000 },
   async () => {
     const keyFileA = path.join(tmpDir, "a.key");
@@ -2776,7 +2858,7 @@ test(
     expect(mockState.runExchangeEntries).toBe(2);
 
     expect(
-      mockState.warnings.some((m) => m.includes(NON_SIGNING_PARTNER_WARNING)),
+      mockState.warnings.some((m) => m.includes(MISSING_RECEIPT_WARNING)),
     ).toBe(true);
   },
 );

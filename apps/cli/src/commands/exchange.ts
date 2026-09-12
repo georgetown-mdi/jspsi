@@ -20,6 +20,7 @@ import type {
 import {
   applyConnectionOverrides,
   announceRetainMode,
+  assertPartnerFingerprintRecordable,
   assertRetainSweepGuard,
   DEFAULT_CONFIG_PATH,
   linkageTermsStandingOf,
@@ -869,15 +870,18 @@ function assertSigningIdentityNamed(signing: SigningConfig | undefined): void {
  * location is resolved on their behalf. A `certificate`-mode block that names
  * none is refused here as well, in the one wording
  * {@link assertSigningIdentityNamed} uses -- an {@link OperatorConfigError}
- * joining the pre-flight family that refuses an unpinned partner and an unnamed
- * local party, and the same exit 64. The exchange handler raises it earlier
+ * joining the pre-flight family that refuses an unnamed local party and a
+ * first contact whose configuration cannot take the pin it would adopt, and
+ * the same exit 64. The exchange handler raises it earlier
  * still, from the parsed configuration alone, so an operator never reaches this
  * point by way of a prompt or a connection the refusal makes pointless.
  *
  * The pinned partner fingerprint is passed through verbatim, and this resolver
- * states no rule about its absence: a certificate-mode block with no pin is
- * refused by core's `assertCertificateModePinsPartner` inside
- * {@link prepareForExchange}, which the handler reaches before this call.
+ * states no rule about its absence: a block with no pin is a first
+ * authenticated contact, which adopts the certificate the partner presents at
+ * the terms exchange and records its fingerprint into `configPath` -- the
+ * configuration file this exchange was given, and the only file that pin is
+ * ever written into.
  *
  * `termsIdentity` is this run's `linkage_terms.identity` -- the identity the
  * partner verifies the loaded certificate against -- and a certificate bound to
@@ -896,6 +900,7 @@ function assertSigningIdentityNamed(signing: SigningConfig | undefined): void {
 export async function resolveSigningPersist(
   signing: SigningConfig | undefined,
   termsIdentity: string | undefined,
+  configPath: string,
 ): Promise<SigningPersist | null> {
   if (signing === undefined || signing.mode !== "certificate") return null;
   const identityPath = certificateModeIdentityPath(signing.identityFile);
@@ -916,6 +921,7 @@ export async function resolveSigningPersist(
     identity,
     partnerFingerprint: signing.partnerFingerprint,
     receiptOutput: resolveReceiptOutput(signing.receiptOutput),
+    configPath,
   };
 }
 
@@ -994,8 +1000,15 @@ export async function handler(argv: Arguments): Promise<void> {
     // transport to the server and writes an accepted pin into psilink.yaml.
     // Neither should happen on the way to telling an operator the run could
     // never have finished.
+
+    // Beside it, the first contact whose configuration file cannot take the pin
+    // it would record: same inputs, same point, same exit code.
     try {
       assertSigningIdentityNamed(exchangeDataSpec.signing);
+      assertPartnerFingerprintRecordable(
+        exchangeDataSpec.signing,
+        options.configFile,
+      );
     } catch (err) {
       exitWithError(log, err, 64);
     }
@@ -1081,6 +1094,7 @@ export async function handler(argv: Arguments): Promise<void> {
       signing = await resolveSigningPersist(
         exchangeDataSpec.signing,
         termsIdentity,
+        options.configFile,
       );
     } catch (err) {
       exitWithError(log, err, exitCodeForError(err));

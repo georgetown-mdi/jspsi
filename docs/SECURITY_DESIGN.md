@@ -1,7 +1,7 @@
 ---
 title: "psilink Security Design"
 review_owner: "psilink maintainers"
-last_reviewed: "2026-09-10"
+last_reviewed: "2026-09-11"
 ---
 
 # psilink security
@@ -407,7 +407,11 @@ A certificate-mode exchange configured with no `identity_file` is refused before
 
 ### Pinned self-signed trust model
 
-Trust in a partner's signing key is established by pinning its certificate fingerprint out of band, exactly as the parties exchange the invitation and shared secret, not by validating a certificate-authority chain. A self-signed certificate vouches only for possession of its own key, so the out-of-band fingerprint is the trust anchor: a partner certificate is trusted only if its self-signature verifies and its fingerprint matches the pinned `signing.partner_fingerprint`, and a receipt is accepted only if its asserted identity exactly matches the one the certificate binds. The fingerprint is a hash of a public certificate, so it is not secret; the out-of-band channel must be authentic but need not be confidential. This is the SSH-host-key / certificate-pinning model.
+Trust in a partner's signing key is established by pinning its certificate fingerprint, not by validating a certificate-authority chain. A self-signed certificate vouches only for possession of its own key, so the pinned fingerprint is the trust anchor: a partner certificate is trusted only if its self-signature verifies and its fingerprint matches the pinned `signing.partner_fingerprint`, and a receipt is accepted only if its asserted identity exactly matches the one the certificate binds. The fingerprint is a hash of a public certificate, so it is not secret; the channel it arrives over must be authentic but need not be confidential. This is the SSH-host-key / certificate-pinning model.
+
+**What the pin is anchored to depends on how it was obtained.** Both parties present their certificate to each other in band, during the authenticated setup step that opens every exchange, and a party holding no pin adopts the fingerprint presented there. On such a partnership the pin is authenticated by the channel the invitation and its shared secret travelled, and by nothing else: whoever could have substituted the invitation could have substituted the certificate that first contact pins, and every later exchange then verifies receipts against the substituted identity rather than the partner's. The exchange tells the operator the fingerprint it pinned and asks them to compare it with the partner out of band, but nothing enforces that comparison.
+
+Pinning the partner's fingerprint before the first run -- the partner prints it with `psilink fingerprint`, reads it to the operator over a channel they trust, and the operator writes it into `signing.partner_fingerprint` -- restores the out-of-band anchor. The first run then holds the presented certificate to that value and refuses a partnership that does not match it. This is the stronger posture and is the one to take where the receipt's non-repudiation matters to a third party. In both cases a later exchange whose partner certificate differs from the pin is a hard refusal, before any data crosses, and the pin on file is never overwritten by a run.
 
 This model was chosen for v1 over full X.509 and a certificate authority. The use case is bilateral and mutually coordinating, so the parties can exchange a fingerprint the same way they exchange a secret, which is exactly where pinning fits and where the large PKI surface (chain building, name constraints, revocation) would be cost without benefit. Representing the certificate as a small canonical-JSON document signed over its RFC 8785 bytes also reuses the project's single canonicalization primitive rather than adding an ASN.1/DER parser.
 
