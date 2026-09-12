@@ -249,10 +249,11 @@ export interface AcceptorDeduplicateRefusal {
  * It derives the accepting party's terms exactly as a launch does and hands the
  * pair to `resolveLinkageCardinality`, the same boundary the run resolves the
  * joint cardinality at, so the seat refuses exactly the pairs the run refuses
- * and no others. Today that is the agreed `(true, true)` pair under a strategy
- * pairing no `many-to-many` (`assertBothSidedDeduplicateImplemented`); the
- * derivation itself answers a `psi-c` invitation, whose count-only shape holds
- * neither party's `deduplicate` open. A `pair` refusal is the combination's,
+ * and no others. The pair it would refuse is the agreed `(true, true)` one
+ * under a strategy pairing no `many-to-many`
+ * (`assertBothSidedDeduplicateImplemented`), which neither shipped strategy is;
+ * the derivation itself answers a `psi-c` invitation, whose count-only shape
+ * holds neither party's `deduplicate` open. A `pair` refusal is the combination's,
  * not the setting's: its message names the strategy to change and the one-sided
  * pair to fall back to, and clearing either party's value runs.
  *

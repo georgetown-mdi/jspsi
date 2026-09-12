@@ -455,32 +455,21 @@ describe("the accepting party's own deduplicate at the seat", () => {
     },
   );
 
-  test("the both-sided pair under single-pass is refused at the seat", () => {
-    // Refused where the operator sets it, before the run and before any key or
-    // payload moves, rather than surfacing as a mid-run failure. The message is
-    // the run boundary's own, so it names the strategy to change and the
-    // one-sided pair to fall back to.
-    const singlePass: LinkageTerms = {
-      ...invitationTerms,
-      linkageStrategy: "single-pass",
-      deduplicate: true,
-    };
-    const refusal = acceptorDeduplicateRefusal(singlePass, true);
-    expect(refusal?.scope).toBe("pair");
-    expect(refusal?.message).toContain("cascade");
-    expect(refusal?.message).toContain(
-      "deduplicate to false on one of the two",
-    );
-    // One-sided under the same strategy runs, and so does the both-sided pair
-    // under the strategy that pairs it -- the combination is refused, not the
-    // setting.
-    expect(acceptorDeduplicateRefusal(singlePass, false)).toBeUndefined();
-    expect(
-      acceptorDeduplicateRefusal(
-        { ...singlePass, linkageStrategy: "cascade" },
-        true,
-      ),
-    ).toBeUndefined();
+  test("the both-sided pair is taken at the seat under either strategy", () => {
+    // Every strategy this build ships pairs the both-sided cardinality, so the
+    // seat takes the value the operator sets rather than refusing it. The seat
+    // reads the run's own boundary, so the day a strategy pairs none it refuses
+    // here without a second edit; that boundary's own refusal is driven where
+    // it lives (packages/core).
+    for (const linkageStrategy of ["cascade", "single-pass"] as const) {
+      const terms: LinkageTerms = {
+        ...invitationTerms,
+        linkageStrategy,
+        deduplicate: true,
+      };
+      expect(acceptorDeduplicateRefusal(terms, true)).toBeUndefined();
+      expect(acceptorDeduplicateRefusal(terms, false)).toBeUndefined();
+    }
   });
 
   test("a count-only invitation refuses this party's own deduplicate at the seat", () => {

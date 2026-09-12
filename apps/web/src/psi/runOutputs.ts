@@ -111,7 +111,9 @@ export function buildRunOutputs(
                 matchedRecordCount: rows.length,
                 // How the closure grouped those pairs, carried through from
                 // the run rather than recomputed from the table: core hands
-                // one on a many-to-many run and none otherwise.
+                // one to a party that ran the closure over a many-to-many
+                // table -- both parties under the cascade, the receiver alone
+                // under single-pass -- and none otherwise.
                 entityClusters: result.entityClusters,
               };
             })();

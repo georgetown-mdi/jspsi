@@ -1673,11 +1673,12 @@ async function writeExchangeOutputs(params: {
   }
 
   // How the entity closure grouped the pairs this party just wrote, stated
-  // after the result it describes. Core hands one on a many-to-many run this
-  // party holds the table of and none otherwise, so the cardinality is not
-  // re-read here. The sentence is core's own composition over integers it
-  // formats itself -- the same one the browser seat renders, so no two sinks
-  // drift -- and holds no partner-authored text.
+  // after the result it describes. Core hands one to a party that ran the
+  // closure over a many-to-many table -- both parties under the cascade, the
+  // receiver alone under single-pass -- and none otherwise, so the
+  // cardinality is not re-read here. The sentence is core's own composition
+  // over integers it formats itself -- the same one the browser seat renders,
+  // so no two sinks drift -- and holds no partner-authored text.
   if (entityClusters !== undefined)
     log.info(describeEntityClusters(entityClusters));
 

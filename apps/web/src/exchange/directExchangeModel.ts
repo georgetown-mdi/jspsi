@@ -140,9 +140,10 @@ export function directDeduplicateIntentFields(deduplicate: boolean): {
  * pair BOTH sides declaring the term resolves to, read from
  * `assertBothSidedDeduplicateImplemented`, which the screen's own title
  * names -- the notice is that refusal alone, not a totalizing one.
- * Today the pair refused is the agreed `(true, true)` one under
- * `single-pass`; core's own message names the strategy to move to and the
- * one-sided pair to fall back to.
+ * Both shipped linkage strategies pair the agreed `(true, true)` one, so
+ * nothing an operator can author here earns the notice; core's own message
+ * names the strategy to move to and the one-sided pair to fall back to for a
+ * strategy that pairs none.
  *
  * Returns that refusal rather than throwing it: the confirm screen reads this
  * in its render body, where a throw takes the whole route to its error

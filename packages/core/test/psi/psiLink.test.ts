@@ -162,12 +162,10 @@ test("a deduplicating cardinality leaves an unmatched duplicate group's table un
 });
 
 // many-to-many applies the "many" side's rules to both parties, so a matched value
-// stands for a group on each side and contributes the two groups' product. The cascade
-// pairs that; single-pass reconstruction holds the resolved table to a length taken
-// from the half that keeps its distinctness, and neither half does here, so it refuses
-// -- the one label at which the two strategies part company. psiLinkManyToMany.test.ts
-// holds the cascade's own behavior at length.
-test("many-to-many pairs in the cascade and is refused by single-pass", async () => {
+// stands for a group on each side and contributes the two groups' product. Both
+// strategies pair that, over the same rows; psiLinkManyToMany.test.ts holds each
+// strategy's behavior at length.
+test("many-to-many pairs in the cascade", async () => {
   const bothSided = [["E1", "E1"]];
   const [starterConn, joinerConn] = createMessagePipe();
   const [starter, joiner] = await Promise.all([
@@ -205,24 +203,6 @@ test("many-to-many pairs in the cascade and is refused by single-pass", async ()
     [0, 1, 0, 1],
   ]);
   expect(joiner).toStrictEqual(starter);
-
-  const [singlePassConn] = createMessagePipe();
-  await expect(
-    linkViaSinglePassPSI(
-      { cardinality: "many-to-many" },
-      new PSIParticipant(
-        "server",
-        psiLibrary,
-        { role: "starter", verbose: -1 },
-        UNBOUNDED_PSI_ELEMENTS,
-      ),
-      singlePassConn,
-      bothSided,
-      fanOutFreeBounds(bothSided.length, 2),
-      false,
-      -1,
-    ),
-  ).rejects.toThrow(/cardinality 'many-to-many' not yet implemented/);
 });
 
 // --- linkViaSinglePassPSI: parity with the cascade ----------------------------

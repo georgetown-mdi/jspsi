@@ -23,9 +23,9 @@ import {
 // the corpus could not tell the two apart.
 //
 // Driven only under `{localKeepsDuplicates: false, partnerKeepsDuplicates:
-// true}`; `{true, true}` is many-to-many, which single-pass refuses before a
-// round begins, so psiLinkManyToOne.test.ts, psiLink.test.ts, and
-// linkageCardinality.test.ts hold that combination instead. A row holding
+// true}`, the pair that makes the control answer no: under `{true, true}` both
+// sides keep their duplicates, which psiLinkManyToMany.test.ts and
+// strategyDifferentialVectors.test.ts hold instead. A row holding
 // one value twice sits in the corpus defensively, not as a reachable shape
 // (a partner's ragged cell is refused unless its indices strictly ascend,
 // singlePassFanOut.test.ts). The other half -- that the resolved table

@@ -766,10 +766,11 @@ describe("direct exchange confirm and run", () => {
     expect(intent.deduplicate).toBe(true);
   });
 
-  test("the both-sided single-pass pair is named at the step, and does not hold Run", async () => {
-    // The pair the run refuses if the partner declares the term too. This spine
-    // reads no partner declaration, so the combination is stated rather than
-    // gating a one-sided pair the run matches under either strategy.
+  test("no pair this step can author is named as one the run refuses", async () => {
+    // The step states the combination the run would refuse if the partner
+    // declared the term too. Every strategy this build ships pairs every
+    // cardinality a `deduplicate` pair resolves to, so there is nothing to
+    // state under either -- and Run is held by neither.
     stubJobApi({ sftp: CONFIGURED_SFTP });
     app.render(createElement(DirectExchangeScreen));
     await reachConfirm();
@@ -779,13 +780,11 @@ describe("direct exchange confirm and run", () => {
     );
 
     await page.getByRole("radio", { name: "Single-pass" }).click();
-    await expect
-      .element(
-        page.getByText("If your partner sets this too, the exchange stops"),
-      )
-      .toBeInTheDocument();
-    expect(app.container.textContent).toContain(
-      "Set linkage_strategy to cascade",
+    expect(app.container.textContent).not.toContain(
+      "If your partner sets this too, the exchange stops",
+    );
+    expect(app.container.textContent).not.toContain(
+      "does not match a many-to-many cardinality",
     );
 
     await trustAffirmation().click();

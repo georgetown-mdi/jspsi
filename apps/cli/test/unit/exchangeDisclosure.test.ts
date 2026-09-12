@@ -481,10 +481,18 @@ test("a candidate set beside this party's own grouping states what it groups", (
     "several values per record",
   );
 
-  // Silent where the pair is refused rather than run, and where these terms
-  // declare no side of it.
+  // Stated under either linkage strategy, both of which pair the grouping.
+  expect(
+    rendered({
+      ...swappedKeyTerms,
+      deduplicate: true,
+      linkageStrategy: "single-pass",
+    }).join("\n"),
+  ).toContain("records grouped with no value in common (enforced):");
+
+  // Silent where these terms declare no side of the pair, and where they
+  // declare no candidate set for it to group over.
   for (const terms of [
-    { ...swappedKeyTerms, deduplicate: true, linkageStrategy: "single-pass" },
     swappedKeyTerms,
     { ...localTerms, deduplicate: true },
   ] as const)

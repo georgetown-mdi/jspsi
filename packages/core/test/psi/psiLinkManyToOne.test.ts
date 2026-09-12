@@ -21,6 +21,7 @@ import {
 } from "../../src/connection/messageConnection";
 import type { AssociationTable } from "../../src/types";
 import { singlePassReplyByteCap } from "../../src/connection/frameSize";
+import { MANY_TO_MANY_IMPLEMENTED_BY_STRATEGY } from "../../src/linkageTermsPolicy";
 import { UNBOUNDED_PSI_ELEMENTS } from "../utils/psiElementBounds";
 import { fanOutFreeBounds } from "../utils/singlePassBounds";
 import { recordingConnection } from "../utils/recordingConnection";
@@ -695,8 +696,8 @@ for (const manySide of ["starter", "joiner"] as const) {
 // already ships: the index table names which of a party's records hold one value
 // whatever the cardinality, so the widening is two clauses of the receiver's local
 // replay. The strategies must therefore agree table for table, which is what the
-// equivalence block below drives; `many-to-many` is refused by single-pass alone
-// (psiLink.test.ts pins the divergence).
+// equivalence block below drives; the both-sided pair is held to the same
+// equality in strategyDifferentialVectors.test.ts.
 
 const singlePassStarterData = [["E1", "E1", "E2", "E3"]];
 const singlePassJoinerData = [["E1", "E2", "X"]];
@@ -746,26 +747,33 @@ test("single-pass runs one-to-one, dropping the value a group would have kept", 
   expect(joiner).toStrictEqual([[1], [2]]);
 });
 
-test("single-pass refuses many-to-many", async () => {
-  // Refused before any frame moves, so the unread other end of the pipe is not a
-  // partner this ever reaches -- and refused for this strategy's own reason:
-  // single-pass pins the resolved table's length to the half that keeps its
-  // distinctness, and a both-sided multiplicity leaves neither half distinct.
+test("single-pass reads the strategy's own both-sided verdict", async () => {
+  // The strategy's fail-closed half below the agreed-terms boundary: it reads
+  // the same table entry that boundary reads, so an entry driven to refuse the
+  // cardinality stops the run here too, for a direct caller that never passed
+  // the boundary. Refused before any frame moves, so the unread other end of the
+  // pipe is not a partner this ever reaches.
+  const shipped = MANY_TO_MANY_IMPLEMENTED_BY_STRATEGY["single-pass"];
+  MANY_TO_MANY_IMPLEMENTED_BY_STRATEGY["single-pass"] = false;
   const [conn] = createMessagePipe();
-  await expect(
-    linkViaSinglePassPSI(
-      { cardinality: "many-to-many" },
-      makeParticipant("starter"),
-      conn,
-      singlePassStarterData,
-      fanOutFreeBounds(
-        singlePassStarterData.length,
-        singlePassJoinerData[0].length,
+  try {
+    await expect(
+      linkViaSinglePassPSI(
+        { cardinality: "many-to-many" },
+        makeParticipant("starter"),
+        conn,
+        singlePassStarterData,
+        fanOutFreeBounds(
+          singlePassStarterData.length,
+          singlePassJoinerData[0].length,
+        ),
+        false,
+        -1,
       ),
-      false,
-      -1,
-    ),
-  ).rejects.toThrow("psi for cardinality 'many-to-many' not yet implemented");
+    ).rejects.toThrow("psi for cardinality 'many-to-many' not yet implemented");
+  } finally {
+    MANY_TO_MANY_IMPLEMENTED_BY_STRATEGY["single-pass"] = shipped;
+  }
 });
 
 // --- the two strategies agree, table for table --------------------------------

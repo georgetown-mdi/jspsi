@@ -1190,10 +1190,10 @@ test("handler: omitting --deduplicate leaves the closed default", async () => {
   }
 });
 
-test("handler: --deduplicate rides single-pass, which matches a one-sided pair", async () => {
-  // Only the agreed both-sided pair is refused under single-pass, and that pair
-  // takes the partner's declaration too -- so this party's own selection is
-  // applied here rather than refused at prepare time.
+test("handler: --deduplicate rides single-pass, which matches every pair", async () => {
+  // The strategy matches this party's own declaration whatever the partner
+  // declares beside it, so the selection is applied here rather than held for a
+  // pair only the terms exchange resolves.
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "psilink-zerodedupsp-"));
   const exitSpy = captureProcessExit();
   try {

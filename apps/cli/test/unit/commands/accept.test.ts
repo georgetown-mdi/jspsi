@@ -3581,7 +3581,7 @@ describe("displayInvitation: the declared terms it discloses (columns, citations
 
   test("displayInvitation: states what a splitting key pairs where the invitation declares duplicate matching", () => {
     // A splitting key beside an inviting party's own `deduplicate`: the pair an
-    // accepting party's own value completes runs on the cascade, and there a
+    // accepting party's own value completes runs under either strategy, and a
     // record matched on a candidate is paired with every partner record its
     // candidates reached rather than once. The prompt states that before the
     // acceptor sets its own side in its configuration file.
@@ -3594,9 +3594,8 @@ describe("displayInvitation: the declared terms it discloses (columns, citations
     });
     expect(rendered).toContain("several values per record (enforced):");
     expect(rendered).toContain(
-      "with both set -- which cascade linkage matches and single-pass " +
-        "refuses -- it is paired with every one of the other party's records " +
-        "any of its candidates reached",
+      "with both set it is paired with every one of the other party's " +
+        "records any of its candidates reached",
     );
     expect(rendered).not.toContain("paired at most once and is then left out");
   });
@@ -3626,11 +3625,12 @@ describe("displayInvitation: the declared terms it discloses (columns, citations
       CONSENT_FACTS.candidateSetChainsGrouping.note,
     );
 
-    // Silent where the pair the sentence states is refused rather than run,
-    // and where these terms declare no side of it at all.
-    expect(
-      deduplicating(splittingKeyToken(FUTURE(), "single-pass")),
-    ).not.toContain("records grouped with no value in common");
+    // Stated under either linkage strategy, both of which pair the grouping.
+    expect(deduplicating(splittingKeyToken(FUTURE(), "single-pass"))).toContain(
+      CONSENT_FACTS.candidateSetChainsGrouping.note,
+    );
+
+    // Silent where these terms declare no side of the pair at all.
     expect(renderDisplayInvitation(log, sampleToken(FUTURE()))).not.toContain(
       "records grouped with no value in common",
     );

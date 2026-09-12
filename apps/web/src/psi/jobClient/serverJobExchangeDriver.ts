@@ -897,13 +897,13 @@ function clusterFiguresAgree(
   );
 }
 
-/** How the entity closure grouped this party's result, read off a `result`
- * relay event, or undefined when the run reported no grouping -- every
- * cardinality but `many-to-many` -- or when the frame holds a shape this build
- * cannot read. The relay forwards the CLI's own fields verbatim
- * (docs/spec/CLI_EVENTS.md, `result`), so each figure is checked here rather
- * than assumed, and one bad entry leaves the panel stating no grouping rather
- * than a distribution missing part of itself. */
+/** How the entity closure grouped this party's result, read off a `result` relay
+ * event: undefined off every cardinality but `many-to-many`, off that cardinality's
+ * `single-pass` SENDER (which holds neither the rounds nor the blocks a cluster's
+ * value count is read from), and off a frame whose shape this build cannot read. The
+ * relay forwards the CLI's own fields verbatim (docs/spec/CLI_EVENTS.md, `result`),
+ * so each figure is checked here rather than assumed, and one bad entry leaves
+ * the panel stating no grouping rather than a distribution missing part of itself. */
 function entityClusterSummaryOf(
   event: RelayEvent,
 ): EntityClusterSummary | undefined {

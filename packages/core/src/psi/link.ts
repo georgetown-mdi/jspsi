@@ -50,6 +50,7 @@ import {
   assertPartnerIndexCount,
   assertPartnerIndices,
   assertPartnerIndexTable,
+  assertPartnerPairTable,
   partnerProtocolError,
   resolveRunGroupedReturn,
   type PartnerIndexGrouping,
@@ -386,17 +387,12 @@ function multiplicitySides(cardinality: LinkageCardinality): MultiplicitySides {
   }
 }
 
-// Which cardinalities the single-pass strategy resolves. This strategy hands
-// the whole resolved table to the sender, held to a length taken from the
-// half that keeps its distinctness (assertPartnerIndexTable,
-// utils/partnerIndices.ts); a both-sided multiplicity leaves neither half
-// distinct, so the pair is refused rather than paired. Exhaustive for the
+// Which cardinalities the single-pass strategy resolves. Exhaustive for the
 // same reason as above.
 //
 // The both-sided verdict is read from the strategy table the agreed-terms
-// refusal reads (config/linkageTermsSchema.ts) rather than restated here, so a
-// strategy entry that starts pairing the cardinality stops being refused at
-// both points at once.
+// refusal reads (linkageTermsPolicy.ts) rather than restated here, so the two
+// points cannot come to different verdicts about the pair.
 function singlePassResolves(cardinality: LinkageCardinality): boolean {
   switch (cardinality) {
     case "one-to-one":
@@ -1727,19 +1723,20 @@ export interface SinglePassSessionBounds extends SessionBounds {
  * VALUE, and the record-level pairing is resolved by the deterministic
  * sweep in {@link replaySinglePassCascade}.
  *
- * It matches the one-sided deduplicating cardinalities as well as
- * `one-to-one`, over the same frames: the index table already holds one
- * value per (key, record) for every party, so which side keeps a value
- * several of its records hold is a rule of the receiver's replay rather
- * than anything on the wire (docs/spec/PROTOCOL.md, The per-side rules).
- * `many-to-many` throws, where the cascade pairs it: this strategy hands
- * the sender a table held to a length taken from the half that keeps its
- * distinctness, and a both-sided multiplicity leaves neither half distinct
- * (see {@link singlePassResolves}). exchange.ts refuses an agreed
- * both-sided pair on this strategy before the run
- * (`assertBothSidedDeduplicateImplemented`), naming the strategy that
- * stands in the way; this is the strategy's own fail-closed half, which
- * holds for a direct caller too.
+ * It matches every deduplicating cardinality as well as `one-to-one`, over
+ * the same frames: the index table already holds each party's per-(key,
+ * record) candidates, so which side keeps a value several of its records
+ * hold is a rule of the receiver's replay rather than anything on the wire
+ * (docs/spec/PROTOCOL.md, The per-side rules). Under `many-to-many` both
+ * sides keep them, the receiver holds its own pairs to the round-diagonal
+ * closure over the round's blocks, and the sender -- which reads no round
+ * and no block -- holds the table it receives to a pair-count bound of its
+ * own rows times the partner's declared record count
+ * ({@link ./utils/partnerIndices.assertPartnerPairTable}), neither half
+ * keeping the distinctness that pins a length under every other
+ * cardinality. {@link singlePassResolves} stays the strategy's fail-closed
+ * half for a cardinality it does not resolve, holding for a direct caller
+ * below the agreed-terms boundary.
  *
  * @param bounds - The authenticated session state every derived bound
  *   reads; see {@link SinglePassSessionBounds}. Together they fix the
@@ -1755,6 +1752,11 @@ export interface SinglePassSessionBounds extends SessionBounds {
  *   lockstep. Defaults to `false`. When it withholds, the sender returns an
  *   empty table `[[], []]` -- it does not learn its matches, which is the
  *   blindness this realizes.
+ * @param reportEntityClusters - Optional callback handed the operator
+ *   diagnostic over the run's entity clusters, once the closure check has
+ *   passed. Invoked on the RECEIVER under `"many-to-many"` alone: every
+ *   other cardinality forms no blocks, and the sender holds neither the
+ *   rounds nor the blocks a cluster's value count is read from.
  */
 export async function linkViaSinglePassPSI(
   protocol: {
@@ -1767,6 +1769,7 @@ export async function linkViaSinglePassPSI(
   withholdSenderTable: boolean = false,
   verbosity: number = 0,
   setStage?: (id: string) => void,
+  reportEntityClusters?: (summary: EntityClusterSummary) => void,
 ): Promise<AssociationTable> {
   if (participant.config.role === "either")
     throw new Error("participants role is unresolved");
@@ -1974,15 +1977,16 @@ export async function linkViaSinglePassPSI(
     // of the AssociationTable contract (types.ts) that the cascade
     // produces structurally and the receiver sorts this table into.
     //
-    // Under a deduplicating cardinality one half repeats -- the "one"
-    // side's rows, several of the MANY side's linking to each -- so the
-    // distinctness that otherwise makes the local half STRICTLY ascending
-    // and caps the table's length is relaxed on exactly that half, leaving
-    // it non-decreasing with the length pinned by the many side's row
-    // count instead (docs/spec/PROTOCOL.md, Deriving one table from the
-    // exchanged association maps). Which half that is comes from this
-    // party's own resolved label, not the table; the other half -- one
-    // entry per record the many side matched -- is the anchor.
+    // Under a one-sided deduplicating cardinality one half repeats -- the
+    // "one" side's rows, several of the MANY side's linking to each -- so
+    // the distinctness that otherwise makes the local half STRICTLY
+    // ascending and caps the table's length is relaxed on exactly that
+    // half, leaving it non-decreasing with the length pinned by the many
+    // side's row count instead (docs/spec/PROTOCOL.md, Deriving one table
+    // from the exchanged association maps). Which half that is comes from
+    // this party's own resolved label, not the table; the other half -- one
+    // entry per record the many side matched -- is the anchor. Under a
+    // both-sided one neither half is distinct and the bound is passed in.
     const table = await receiveParsed(conn, associationTableMessage);
     const localHalf = {
       what: "the resolved association table's local half",
@@ -1995,7 +1999,22 @@ export async function linkViaSinglePassPSI(
       indices: table[1],
       exclusiveBound: partnerRecordCount,
     };
-    if (sides.partnerKeepsDuplicates)
+    if (sides.localKeepsDuplicates && sides.partnerKeepsDuplicates)
+      // Neither half keeps its distinctness, so neither can pin the other's
+      // length and the table is held to its own pair-count bound instead: this
+      // party's rows times the record count the partner declared on the terms
+      // exchange, the most pairs an honest run of these two datasets can hold
+      // (docs/spec/PROTOCOL.md, The both-sided table's bound under
+      // single-pass). Both factors are authenticated session state, and the
+      // over-ceiling gate above already bounded each by
+      // MAX_SINGLE_PASS_CELLS, which is what keeps the product exact.
+      assertPartnerPairTable(
+        participant.id,
+        localHalf,
+        partnerHalf,
+        numRecords * partnerRecordCount,
+      );
+    else if (sides.partnerKeepsDuplicates)
       assertPartnerIndexTable(participant.id, partnerHalf, {
         ...localHalf,
         repeats: true,
@@ -2135,7 +2154,7 @@ export async function linkViaSinglePassPSI(
   // the operator's real wait was the up-front encryption stages; describeExchange-
   // Stages omits the per-key stages for single-pass to match (cascade keeps them,
   // where each key is a genuine round trip).
-  const result = replaySinglePassCascade(
+  const replay = replaySinglePassCascade(
     columns.map(localKeyCells),
     senderCells,
     senderToReceiverDistinctValue,
@@ -2143,6 +2162,23 @@ export async function linkViaSinglePassPSI(
     numSenderRecords,
     sides,
   );
+  const result = replay.table;
+
+  // Under a both-sided multiplicity the replay's own pairs are held to the
+  // round-diagonal shape the entity closure rests on, over the blocks it built
+  // per matched value, exactly as the cascade holds the table it derives from
+  // the exchanged association maps. The sender reads no round and no block, so
+  // this is the one party that can take the check (docs/spec/PROTOCOL.md, The
+  // `many-to-many` entity closure).
+  if (replay.closure !== undefined) {
+    const clusters = assertRoundDiagonalClosure(
+      participant.id,
+      result,
+      replay.closure.roundOfPair,
+      replay.closure.blocks,
+    );
+    reportEntityClusters?.(clusters);
+  }
 
   // Collect the cascade's per-key reconstruction maps before returning.
   relieveTransientMemory();
@@ -2622,6 +2658,24 @@ class RoundValueOwners {
 }
 
 /**
+ * What one replay of the cascade produced: the matched table, and -- under
+ * `many-to-many` alone -- the round each pair was matched in together with the
+ * round's blocks, which the closure check reads
+ * ({@link ./entityClosure.assertRoundDiagonalClosure}).
+ *
+ * Every other cardinality leaves `closure` absent: a matched value stands for
+ * a group on one side at most, so a cluster is one record of the distinct side
+ * with the group facing it, which the table's own shape already gives.
+ */
+export interface SinglePassReplay {
+  readonly table: AssociationTable;
+  readonly closure?: {
+    readonly roundOfPair: Array<number>;
+    readonly blocks: Array<ClosureBlock>;
+  };
+}
+
+/**
  * Replay the cascade locally over both parties' index tables, applying the
  * record-level resolution rule (docs/spec/PROTOCOL.md, Record-level resolution).
  * For each linkage key in the agreed order:
@@ -2648,7 +2702,11 @@ class RoundValueOwners {
  * 2's acceptance clause binds the MANY side's record alone
  * (docs/spec/PROTOCOL.md, The per-side rules). Which side is which is read
  * from the receiver's label, reproducing what the cascade computes from
- * the two parties' mirror labels for the same exchange.
+ * the two parties' mirror labels for the same exchange. Where both sides
+ * keep them a matched value stands for a group on each side, the round's
+ * pairs fall into one block per matched value, and those blocks are
+ * returned beside the table for the closure check the cascade runs over its
+ * own (docs/spec/PROTOCOL.md, The `many-to-many` entity closure).
  *
  * On inputs where every cell holds at most one value and neither side
  * deduplicates this reduces to the single-valued cascade: each round's
@@ -2666,7 +2724,7 @@ export function replaySinglePassCascade(
   numReceiverRecords: number,
   numSenderRecords: number,
   sides: MultiplicitySides,
-): AssociationTable {
+): SinglePassReplay {
   const receiverKeepsDuplicates = sides.localKeepsDuplicates;
   const senderKeepsDuplicates = sides.partnerKeepsDuplicates;
   // A side is held to one accepted pair per round exactly when it is NOT the "one"
@@ -2702,6 +2760,19 @@ export function replaySinglePassCascade(
           else further.push(senderRow);
         };
   const receiverCandidates: Array<number> = [];
+  // Both sides keeping their duplicates is what stands a matched value for a
+  // group on each side, so the round's pairs fall into blocks and the table is
+  // held to the closure over them. Every other cardinality allocates nothing
+  // here and returns no closure.
+  const bothSided = receiverKeepsDuplicates && senderKeepsDuplicates;
+  const blocks: Array<ClosureBlock> | undefined = bothSided ? [] : undefined;
+  // The round each receiver record was accepted in. One round holds all of a
+  // record's pairs: a record standing in any of round j's candidate pairs
+  // leaves candidacy for every later round (docs/spec/PROTOCOL.md, Removal on
+  // a potential match), so the label per pair is read off its receiver row.
+  const roundOfReceiverRow = bothSided
+    ? new Int32Array(numReceiverRecords)
+    : undefined;
 
   for (let j = 0; j < receiverCells.length; ++j) {
     const receiverOwners = RoundValueOwners.forRound(
@@ -2727,6 +2798,15 @@ export function replaySinglePassCascade(
     // here, this strategy holding both parties' rows.
     const pairSenderRows: Array<number> = [];
     const pairReceiverRows: Array<number> = [];
+    // One block per value this round matched, keyed by the receiver's own value
+    // index: the pairing between the two parties' value indices is a bijection
+    // over the matched values, so either side's index names one block.
+    const blockOfValue = bothSided
+      ? new Map<
+          number,
+          { senderRows: Array<number>; receiverRows: ReadonlyArray<number> }
+        >()
+      : undefined;
 
     for (let senderRow = 0; senderRow < numSenderRecords; ++senderRow) {
       if (senderOut[senderRow]) continue;
@@ -2743,7 +2823,24 @@ export function replaySinglePassCascade(
           continue;
         const receiverValue = senderToReceiverDistinctValue.get(senderValue);
         if (receiverValue === undefined) continue;
+        const owned = receiverCandidates.length;
         receiverOwners.appendOwners(receiverValue, receiverCandidates);
+        // A value every one of its receiver rows has already left candidacy for
+        // owns nothing this round and forms no block.
+        if (blockOfValue === undefined || receiverCandidates.length === owned)
+          continue;
+        let block = blockOfValue.get(receiverValue);
+        if (block === undefined) {
+          block = {
+            senderRows: [],
+            receiverRows: receiverCandidates.slice(owned),
+          };
+          blockOfValue.set(receiverValue, block);
+        }
+        // A row holding one value twice -- a candidate producer whose set did
+        // not collapse its repeats -- stands in the block once.
+        if (block.senderRows[block.senderRows.length - 1] !== senderRow)
+          block.senderRows.push(senderRow);
       }
       if (receiverCandidates.length === 0) continue;
       receiverCandidates.sort((a, b) => a - b);
@@ -2758,11 +2855,17 @@ export function replaySinglePassCascade(
       pairReceiverRows,
       { senderAcceptsOnce, receiverAcceptsOnce },
     );
-    for (let p = 0; p < resolved.acceptedSenderRanks.length; ++p)
-      acceptPair(
-        resolved.acceptedReceiverRanks[p],
-        resolved.acceptedSenderRanks[p],
-      );
+    for (let p = 0; p < resolved.acceptedSenderRanks.length; ++p) {
+      const receiverRow = resolved.acceptedReceiverRanks[p];
+      acceptPair(receiverRow, resolved.acceptedSenderRanks[p]);
+      if (roundOfReceiverRow !== undefined) roundOfReceiverRow[receiverRow] = j;
+    }
+    if (blocks !== undefined && blockOfValue !== undefined)
+      for (const block of blockOfValue.values())
+        blocks.push({
+          localRows: block.receiverRows,
+          partnerRows: block.senderRows,
+        });
 
     for (const row of resolved.touchedReceiverRanks) receiverOut[row] = 1;
     for (const row of resolved.touchedSenderRanks) senderOut[row] = 1;
@@ -2773,18 +2876,24 @@ export function replaySinglePassCascade(
   // (receiver row, sender row) -- the local half ascending, strictly so wherever a
   // receiver record stands in one pair.
   const result: AssociationTable = [[], []];
+  const roundOfPair: Array<number> | undefined =
+    roundOfReceiverRow === undefined ? undefined : [];
   for (let row = 0; row < numReceiverRecords; ++row) {
     if (pairedWith[row] < 0) continue;
     result[0].push(row);
     result[1].push(pairedWith[row]);
+    roundOfPair?.push(roundOfReceiverRow![row]);
     const further = furtherSenderRows?.get(row);
     if (further === undefined) continue;
     for (const senderRow of further) {
       result[0].push(row);
       result[1].push(senderRow);
+      roundOfPair?.push(roundOfReceiverRow![row]);
     }
   }
-  return result;
+  return roundOfPair !== undefined && blocks !== undefined
+    ? { table: result, closure: { roundOfPair, blocks } }
+    : { table: result };
 }
 
 // Pack a flat array of value indices as a little-endian Int32 frame (the

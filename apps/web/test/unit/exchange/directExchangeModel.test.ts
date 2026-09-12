@@ -282,31 +282,20 @@ describe("the direct-exchange deduplicate control", () => {
     expect(directDeduplicateIntentFields(true)).toEqual({ deduplicate: true });
   });
 
-  test("the both-sided single-pass pair is named, with both values and what to change", () => {
-    // The pair the run refuses if the partner declares the term too. The message
-    // is core's own, read from the boundary the run resolves the cardinality at,
-    // so the screen names that combination and no other.
-    const notice = directBothSidedDeduplicateNotice(
-      previewInferredTerms(LINKABLE_COLUMNS, "x", "single-pass", true)
-        .linkageTerms,
-    );
-    expect(notice).toBeDefined();
-    expect(notice).toContain("both parties setting deduplicate to true");
-    expect(notice).toContain("many-to-many");
-    expect(notice).toContain("Set linkage_strategy to cascade");
-  });
-
   test("nothing is named for a pair the run matches", () => {
-    // Under cascade the both-sided pair runs, and with this party's own side off
-    // no pair the partner can declare is refused -- so neither states anything.
+    // Every strategy this build ships pairs every cardinality a `deduplicate`
+    // pair resolves to, so no combination the screen can author earns the
+    // notice -- with this party's own side set or cleared. The notice stays as
+    // the seat's reading of the run's own boundary, whose refusal wording is
+    // driven where that boundary lives (packages/core).
     const named = (strategy: LinkageStrategy, deduplicate: boolean) =>
       directBothSidedDeduplicateNotice(
         previewInferredTerms(LINKABLE_COLUMNS, "x", strategy, deduplicate)
           .linkageTerms,
       );
-    expect(named("cascade", true)).toBeUndefined();
-    expect(named("single-pass", false)).toBeUndefined();
-    expect(named("cascade", false)).toBeUndefined();
+    for (const strategy of ["cascade", "single-pass"] as const)
+      for (const deduplicate of [false, true])
+        expect(named(strategy, deduplicate)).toBeUndefined();
   });
 });
 

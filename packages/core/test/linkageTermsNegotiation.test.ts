@@ -1214,43 +1214,36 @@ test.each([
   },
 );
 
-test("the both-sided pair under single-pass is refused before matching begins", () => {
-  // The one combination this build refuses: both parties deduplicating under a
-  // strategy that pairs no many-to-many. The refusal is the COMBINATION's -- it
-  // names the strategy to change and the one-sided pair to fall back to -- not a
-  // statement that the accepting party may never set its own side.
-  const inviterTerms: LinkageTerms = {
-    ...inviterBase,
-    linkageStrategy: "single-pass",
-    deduplicate: true,
-  };
-  // The accept boundary is the first point the pair is knowable, so it refuses
-  // there as well as at the agreed-terms run boundary, which is what keeps the
-  // combination off the consent surfaces.
-  const atAccept = thrownFrom(() =>
-    deriveAcceptedLinkageTerms(inviterTerms, "Accepting Org", true),
-  );
-  expect(atAccept).toBeInstanceOf(UsageError);
-  expect(atAccept.message).toContain("cascade");
-  expect(atAccept.message).toContain("deduplicate to false on one of the two");
-  const acceptorTerms = deriveAcceptedLinkageTerms(
-    inviterTerms,
-    "Accepting Org",
-  );
-  const refusal = thrownFrom(() =>
-    resolveLinkageCardinality(
-      { ...acceptorTerms, deduplicate: true },
+test("a both-sided pair a strategy pairs is taken at both boundaries", () => {
+  // Both shipped strategies pair the cardinality, so the accept boundary takes
+  // the pair the accepting party's own `deduplicate` completes rather than
+  // refusing it, and the agreed-terms run boundary resolves the same pair to
+  // many-to-many. The boundary itself stays: it is where a strategy that paired
+  // none would be stopped, which is driven in linkageCardinality.test.ts.
+  for (const linkageStrategy of ["cascade", "single-pass"] as const) {
+    const inviterTerms: LinkageTerms = {
+      ...inviterBase,
+      linkageStrategy,
+      deduplicate: true,
+    };
+    expect(() =>
+      deriveAcceptedLinkageTerms(inviterTerms, "Accepting Org", true),
+    ).not.toThrow();
+    const acceptorTerms = deriveAcceptedLinkageTerms(
       inviterTerms,
-    ),
-  );
-  expect(refusal).toBeInstanceOf(UsageError);
-  expect(refusal.message).toContain("cascade");
-  expect(refusal.message).toContain("deduplicate to false on one of the two");
-  // Clearing this party's own side runs, so the refusal is not a bar on the
-  // setting itself.
-  expect(() =>
-    resolveLinkageCardinality(acceptorTerms, inviterTerms),
-  ).not.toThrow();
+      "Accepting Org",
+    );
+    expect(
+      resolveLinkageCardinality(
+        { ...acceptorTerms, deduplicate: true },
+        inviterTerms,
+      ).cardinality,
+    ).toBe("many-to-many");
+    // Clearing this party's own side is the one-sided pair, unchanged.
+    expect(
+      resolveLinkageCardinality(acceptorTerms, inviterTerms).cardinality,
+    ).toBe("one-to-many");
+  }
 });
 
 test("count-only terms refuse the accepting party's own deduplicate", () => {
