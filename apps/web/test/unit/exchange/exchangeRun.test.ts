@@ -148,12 +148,23 @@ describe("the timeline advances on stage events", () => {
 
   test("the done stage id arriving as a stage event does not finish the run", () => {
     // core's single-pass path emits the terminal stage id as an ordinary stage
-    // event, so the finish instant hangs on the result event alone.
-    const staged = runWithStage(runToWaiting(), DONE_STAGE_ID, at(44));
+    // event, with the payload exchange and the result still to come, so the
+    // label, the timeline, the progress bar and the finish instant all hang
+    // on the result event.
+    const running = runWithStage(
+      runToWaiting(),
+      CONFIRMING_PROTOCOL_STAGE_ID,
+      at(39),
+    );
+    const staged = runWithStage(running, DONE_STAGE_ID, at(44));
     expect(staged.finishedAt).toBeUndefined();
+    expect(currentStageLabel(staged)).toBe("Confirming protocol");
+    expect(states(staged)[4]).toBe("Done:pending");
+    expect(progressPercent(staged)).toBe(40);
     const completed = runWithCompletion(staged, at(47));
     expect(completed.finishedAt).toEqual(at(47));
     expect(currentStageLabel(completed)).toBe("Done");
+    expect(progressPercent(completed)).toBe(100);
   });
 
   test("under single-pass, Link keys completes without ever being current", () => {
@@ -209,6 +220,62 @@ describe("the visit history", () => {
   test("a re-emitted stage id does not duplicate a history row", () => {
     const waiting = runWithStage(initialRun(), WAITING_STAGE_ID, at(32));
     expect(runWithStage(waiting, WAITING_STAGE_ID, at(33))).toBe(waiting);
+  });
+
+  test("a single-pass run holds one done row, closed at completion", () => {
+    const seeded = runWithStages(
+      initialRun(),
+      stagesFor(preparedWith("single-pass", 3)),
+    );
+    const confirming = runWithStage(
+      runWithStage(seeded, WAITING_STAGE_ID, at(32)),
+      CONFIRMING_PROTOCOL_STAGE_ID,
+      at(39),
+    );
+    // The stage event core's single-pass path emits at the end of linkage.
+    expect(runWithStage(confirming, DONE_STAGE_ID, at(44))).toBe(confirming);
+    const completed = runWithCompletion(confirming, at(47));
+    expect(completed.visits).toEqual([
+      { id: BEFORE_START_STAGE_ID, label: "Before start", completedAt: at(32) },
+      {
+        id: WAITING_STAGE_ID,
+        label: "Waiting for your partner",
+        completedAt: at(39),
+      },
+      {
+        id: CONFIRMING_PROTOCOL_STAGE_ID,
+        label: "Confirming protocol",
+        completedAt: at(47),
+      },
+      { id: DONE_STAGE_ID, label: "Done", completedAt: at(47) },
+    ]);
+  });
+
+  test("a cascade run holds one done row, closed at completion", () => {
+    const seeded = runWithStages(
+      initialRun(),
+      stagesFor(preparedWith("cascade", 2)),
+    );
+    const linking = runWithStage(
+      runWithStage(
+        runWithStage(seeded, WAITING_STAGE_ID, at(32)),
+        CONFIRMING_PROTOCOL_STAGE_ID,
+        at(39),
+      ),
+      "stage 2 / 2",
+      at(43),
+    );
+    const completed = runWithCompletion(linking, at(47));
+    expect(completed.visits.map((visit) => visit.id)).toEqual([
+      BEFORE_START_STAGE_ID,
+      WAITING_STAGE_ID,
+      CONFIRMING_PROTOCOL_STAGE_ID,
+      "stage 2 / 2",
+      DONE_STAGE_ID,
+    ]);
+    expect(
+      completed.visits.every((visit) => visit.completedAt !== undefined),
+    ).toBe(true);
   });
 
   test("a stage id outside the tree is treated as mid-protocol with itself as label", () => {
