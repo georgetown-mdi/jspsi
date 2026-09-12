@@ -534,8 +534,9 @@ async function verifyPartnerReceipt(
  * locally-built receipt content. */
 export interface SignedReceiptExchangeInputs {
   identity: SigningIdentity;
-  /** The pinned partner certificate fingerprint (from signing.partner_fingerprint).
-   * Absent means no partner certificate can be trusted; verification fails closed. */
+  /** The partner fingerprint the terms exchange resolved: the configured pin,
+   * or the certificate adopted at first authenticated contact. A caller
+   * passing none has verification fail closed. */
   pinnedFingerprint: string | undefined;
   /** The identity the partner used in the AGREED TERMS (`partnerTerms.identity`).
    * The pinned certificate must authorize this exact identity, so the authorization

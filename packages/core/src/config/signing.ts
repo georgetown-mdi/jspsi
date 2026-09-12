@@ -65,11 +65,12 @@ export interface SigningConfig {
   identityFile?: string;
   /**
    * The partner's pinned certificate fingerprint (unpadded base64url
-   * SHA-256), exchanged out-of-band at setup. A presented partner
-   * certificate is trusted only if its fingerprint matches this value; an
-   * absent value means no partner certificate can be trusted yet
-   * (verification is rejected with a clear error). Long-lived: valid until
-   * the partner regenerates its identity.
+   * SHA-256): set in advance from a value exchanged out of band, or recorded
+   * by the first authenticated contact from the certificate the partner
+   * presents there. A presented partner certificate is trusted only if its
+   * fingerprint matches this value; a later contact whose certificate
+   * differs is refused. Long-lived: valid until the partner regenerates its
+   * identity.
    */
   partnerFingerprint?: string;
   /**
