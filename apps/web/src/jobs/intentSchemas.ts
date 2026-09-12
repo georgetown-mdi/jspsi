@@ -424,10 +424,11 @@ const jobSigningChoiceSchema: z.ZodType<JobSigningChoice> = z
       path: ["partnerFingerprint"],
     },
   )
-  // And the converse: certificate mode requires one, matching core's own
-  // pre-exchange gate (`assertCertificateModePinsPartner`). Without a pin,
-  // the spawned child's own refusal would come only after this party's
-  // payload has crossed; refusing at create time closes that. Authoring is
+  // And the converse: certificate mode requires one here, stricter than the
+  // spawned child, which pins the certificate its partner presents at the
+  // terms exchange. The console holds the operator to a fingerprint obtained
+  // out of band, the stronger of the two anchors a pin can have
+  // (docs/SECURITY_DESIGN.md, Pinned self-signed trust model). Authoring is
   // untouched, since a draft is not a job.
   .refine(
     (signing) =>
@@ -435,9 +436,9 @@ const jobSigningChoiceSchema: z.ZodType<JobSigningChoice> = z
       signing.partnerFingerprint !== undefined,
     {
       message:
-        "partnerFingerprint is required with signing mode 'certificate': an " +
-        "exchange that signs receipts cannot verify the partner's certificate " +
-        "without a pinned fingerprint, and is refused before it runs",
+        "partnerFingerprint is required with signing mode 'certificate': the " +
+        "console asks for the partner's fingerprint, obtained out of band, " +
+        "before it creates a job that signs receipts",
       path: ["partnerFingerprint"],
     },
   );

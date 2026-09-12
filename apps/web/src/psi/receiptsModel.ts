@@ -178,29 +178,22 @@ export const PARTNER_FINGERPRINT_PROBLEM =
 
 /**
  * The problem certificate mode reports with no partner fingerprint pinned. A
- * block, not an advisory, matching core's own refusal
- * (`assertCertificateModePinsPartner`) before any connection opens: no
- * partner or network state can make such a run finish. Authoring itself
- * stays open -- the remedy is to run unsigned now and switch once the
+ * block, not an advisory: the console holds the operator to a pin obtained
+ * out of band, which is the stronger of the two anchors a pin can have
+ * (docs/SECURITY_DESIGN.md, Pinned self-signed trust model). Authoring
+ * itself stays open -- the remedy is to run unsigned now and switch once the
  * partner's fingerprint arrives.
  */
 export const NO_PARTNER_PIN_PROBLEM =
-  "Enter your partner's fingerprint before signing receipts. The exchange " +
-  "refuses to start without one, because nothing would be on file to check the " +
-  "certificate your partner presents against. Ask them to run 'psilink " +
-  "fingerprint' and send you the value over a channel you trust -- a phone " +
-  "call, not the same email as the invitation. A run started without it would " +
-  "fail late rather than early: it goes all the way to the point where the two " +
-  "sides sign -- your data has already gone to your partner by then -- and " +
-  "stops there, leaving you no results and no receipt. What you are left with " +
-  "is the exchange record of what you had already disclosed: the run screen " +
-  "offers it for download when the run stops, and it is written as record.json " +
-  "with that run's files in the mounted folder. Discarding the run removes it. " +
-  "Which side sends its " +
-  "signature first is settled when the two sides meet, so on a run where this " +
-  "side sends first, your partner would already have your signed receipt. To " +
-  "exchange before their fingerprint arrives, choose 'No receipt' now and " +
-  "switch to a certificate signature once you hold it.";
+  "Enter your partner's fingerprint before signing receipts. Ask them to run " +
+  "'psilink fingerprint' and send you the value over a channel you trust -- a " +
+  "phone call, not the same email as the invitation. A fingerprint you got " +
+  "that way is what ties a receipt to your partner and to nobody else. " +
+  "Without one, the exchange pins whichever certificate reaches it over the " +
+  "channel the invitation travelled, so a receipt would attest to whoever " +
+  "sent that invitation rather than to the partner you believe you are " +
+  "exchanging with. To exchange before their fingerprint arrives, choose " +
+  "'No receipt' now and switch to a certificate signature once you hold it.";
 
 /**
  * Why the card withholds the fingerprint request while this exchange states
