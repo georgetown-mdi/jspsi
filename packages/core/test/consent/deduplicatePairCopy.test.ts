@@ -108,9 +108,8 @@ describe("the fan-out note's account of pairing", () => {
     const note = CONSENT_FACTS.fanOutCandidates.note!;
     expect(note).toContain("with neither set it is paired at most once");
     expect(note).toContain(
-      "with both set -- which cascade linkage matches and single-pass " +
-        "refuses -- it is paired with every one of the other party's records " +
-        "any of its candidates reached",
+      "with both set it is paired with every one of the other party's " +
+        "records any of its candidates reached",
     );
   });
 

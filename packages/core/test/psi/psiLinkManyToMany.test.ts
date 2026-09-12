@@ -3,7 +3,7 @@ import { expect, test } from "vitest";
 import PSI from "@openmined/psi.js";
 
 import { PSIParticipant } from "../../src/psi/participant";
-import { linkViaPSI } from "../../src/psi/link";
+import { linkViaPSI, linkViaSinglePassPSI } from "../../src/psi/link";
 import { fanOutFreeBounds } from "../utils/singlePassBounds";
 import {
   createMessagePipe,
@@ -885,3 +885,178 @@ for (const party of ["starter", "joiner"] as const) {
     );
   });
 }
+
+// --- the same cardinality under single-pass ------------------------------------
+// The receiver replays the whole cascade locally and hands the sender the
+// resolved table, so the sender holds neither a round nor a block to check it
+// against. What it holds instead is the pair-count bound its own row count and
+// the partner's declared record count give -- the most pairs an honest run of
+// the two datasets can produce (docs/spec/PROTOCOL.md, The both-sided table's
+// bound under single-pass).
+
+// The sender's inbound association-table frame, told apart from the client
+// request that precedes it (a binary frame) by its shape.
+const isAssociationTable = (frame: unknown): frame is AssociationTable =>
+  Array.isArray(frame) && frame.length === 2 && Array.isArray(frame[0]);
+
+function replacingResolvedTable(replacement: AssociationTable): Deviation {
+  return (frame) => (isAssociationTable(frame) ? replacement : frame);
+}
+
+async function runSinglePass(
+  starterKeys: Keys,
+  joinerKeys: Keys,
+  deviation?: Deviation,
+): Promise<{
+  starter: AssociationTable | Error;
+  joiner: AssociationTable | Error;
+  joinerClusters?: EntityClusterSummary;
+}> {
+  const [starterConn, joinerConn] = createMessagePipe();
+  const settle = (
+    run: Promise<AssociationTable>,
+  ): Promise<AssociationTable | Error> =>
+    run.then(
+      (table) => table,
+      (err: unknown) => err as Error,
+    );
+  let joinerClusters: EntityClusterSummary | undefined;
+  const starterRun = settle(
+    linkViaSinglePassPSI(
+      { cardinality: "many-to-many" },
+      makeParticipant("starter"),
+      deviation === undefined
+        ? starterConn
+        : deviatingInbound(starterConn, deviation),
+      starterKeys,
+      fanOutFreeBounds(starterKeys.length, joinerKeys[0].length),
+      false,
+      -1,
+    ),
+  );
+  const joinerRun = settle(
+    linkViaSinglePassPSI(
+      { cardinality: "many-to-many" },
+      makeParticipant("joiner"),
+      joinerConn,
+      joinerKeys,
+      fanOutFreeBounds(joinerKeys.length, starterKeys[0].length),
+      false,
+      -1,
+      undefined,
+      (summary) => (joinerClusters = summary),
+    ),
+  );
+  await starterRun;
+  await starterConn.close();
+  return {
+    starter: await starterRun,
+    joiner: await joinerRun,
+    joinerClusters,
+  };
+}
+
+// Three records a side, so an honest table holds four of the nine pairs the
+// bound admits and a deviation has room to reach the bound and pass it.
+const spStarterKeys: Keys = [["E1", "E1", "S"]];
+const spJoinerKeys: Keys = [["E1", "E1", "J"]];
+
+test("single-pass pairs the cardinality, both parties holding the one table", async () => {
+  const { starter, joiner, joinerClusters } = await runSinglePass(
+    spStarterKeys,
+    spJoinerKeys,
+  );
+  expect(starter).toStrictEqual([
+    [0, 0, 1, 1],
+    [0, 1, 0, 1],
+  ]);
+  expect(joiner).toStrictEqual(starter);
+  expectAgreement(starter as AssociationTable, joiner as AssociationTable);
+  // The receiver holds the rounds and their blocks, so the cluster diagnostic
+  // is composed there; the sender is handed the table alone.
+  expect(joinerClusters).toStrictEqual({
+    clusterCount: 1,
+    localRows: 2,
+    partnerRows: 2,
+    shapes: [{ localRows: 2, partnerRows: 2, distinctValues: 1, clusters: 1 }],
+  });
+});
+
+test("a resolved table at the derived bound is accepted", async () => {
+  // Every pair between the two datasets: three of this party's rows times the
+  // three the partner declared. The bound is what an honest run of two
+  // duplicate-rich datasets can actually reach, so it admits this.
+  const wholeProduct: AssociationTable = [
+    [0, 0, 0, 1, 1, 1, 2, 2, 2],
+    [0, 1, 2, 0, 1, 2, 0, 1, 2],
+  ];
+  const { starter } = await runSinglePass(
+    spStarterKeys,
+    spJoinerKeys,
+    replacingResolvedTable(wholeProduct),
+  );
+  expect(starter).toStrictEqual(wholeProduct);
+});
+
+test("a resolved table one pair past the bound is refused", async () => {
+  // One more than the product admits. The length is checked before any entry
+  // is read, so the refusal names the bound rather than the repeated pair the
+  // tenth entry must also be.
+  const { starter } = await runSinglePass(
+    spStarterKeys,
+    spJoinerKeys,
+    replacingResolvedTable([
+      [0, 0, 0, 1, 1, 1, 2, 2, 2, 2],
+      [0, 1, 2, 0, 1, 2, 0, 1, 2, 0],
+    ]),
+  );
+  expect(starter).toBeInstanceOf(ConnectionError);
+  expect((starter as ConnectionError).kind).toBe("protocol");
+  expect((starter as Error).message).toMatch(
+    /has 10 entries, more than the 9 pair\(s\) the two parties' record counts admit/,
+  );
+});
+
+test("a resolved table naming one pair twice is refused", async () => {
+  // Within the bound, so the length check passes and what refuses it is the
+  // pair rule: a pair named twice is one link every consumer of the table
+  // counts and writes twice.
+  const { starter } = await runSinglePass(
+    spStarterKeys,
+    spJoinerKeys,
+    replacingResolvedTable([
+      [0, 0, 1],
+      [1, 1, 0],
+    ]),
+  );
+  expect(starter).toBeInstanceOf(ConnectionError);
+  expect((starter as ConnectionError).kind).toBe("protocol");
+  expect((starter as Error).message).toMatch(
+    /names one row twice for one record of the other side/,
+  );
+});
+
+test("a resolved table whose local half descends is refused", async () => {
+  // Non-decreasing is what the repeating half keeps, and the result rows, the
+  // payload rows and the re-supply path all read the table in that order.
+  const { starter } = await runSinglePass(
+    spStarterKeys,
+    spJoinerKeys,
+    replacingResolvedTable([
+      [1, 0],
+      [0, 0],
+    ]),
+  );
+  expect(starter).toBeInstanceOf(ConnectionError);
+  expect((starter as Error).message).toMatch(/is not in ascending order/);
+});
+
+test("a resolved table naming a row neither party counted is refused", async () => {
+  const { starter } = await runSinglePass(
+    spStarterKeys,
+    spJoinerKeys,
+    replacingResolvedTable([[0], [3]]),
+  );
+  expect(starter).toBeInstanceOf(ConnectionError);
+  expect((starter as Error).message).toMatch(/has an index outside \[0, 3\)/);
+});

@@ -2613,92 +2613,30 @@ describe("AcceptorScreen: this party's own deduplicate", () => {
       .toBeInTheDocument();
   });
 
-  test("refuses the both-sided pair under single-pass at the seat, before the run", async () => {
-    // Refused where the operator sets it rather than mid-run: the alert states
-    // the run boundary's own message, and Continue is held with a reason beside
-    // it, since the control sits inside a disclosure the operator may close.
-    await reachReview({
-      ...acceptorTerms,
-      linkageStrategy: "single-pass",
-      deduplicate: true,
+  // Both shipped strategies pair the both-sided cardinality, so the seat takes
+  // the value rather than holding Continue on it, and nothing states a refusal
+  // beside the control. The seat reads the run's own boundary, so a strategy
+  // pairing none would stop here with no second edit.
+  for (const linkageStrategy of ["cascade", "single-pass"] as const)
+    test(`the both-sided pair continues under ${linkageStrategy}`, async () => {
+      await reachReview({
+        ...acceptorTerms,
+        linkageStrategy,
+        deduplicate: true,
+      });
+      const proceed = page.getByRole("button", {
+        name: "Continue: consent & your file",
+      });
+      await expect.element(proceed).toBeEnabled();
+      expect(app.container.textContent).not.toContain(
+        CONSENT_FACTS.acceptorDeduplicateRefused.note,
+      );
+      await userEvent.click(ownSide());
+      await expect.element(proceed).toBeEnabled();
+      expect(app.container.textContent).not.toContain(
+        "These two settings cannot run together",
+      );
     });
-    const proceed = page.getByRole("button", {
-      name: "Continue: consent & your file",
-    });
-    await expect.element(proceed).toBeEnabled();
-    await userEvent.click(ownSide());
-    await expect
-      .element(page.getByText("These two settings cannot run together"))
-      .toBeInTheDocument();
-    await expect.element(proceed).toBeDisabled();
-    await expect
-      .element(
-        page.getByText(
-          "Resolve the duplicate-matching settings in the terms above to continue.",
-        ),
-      )
-      .toBeInTheDocument();
-    // Clearing this party's own side runs again: the combination is refused,
-    // not the setting.
-    await userEvent.click(ownSide());
-    await expect.element(proceed).toBeEnabled();
-  });
-
-  // An invitation holding both halves of a pair its strategy does not run: it
-  // names single-pass, which pairs no both-sided cardinality, and the inviting
-  // party declares a deduplicate of its own. This party's own value is the only
-  // thing left to complete it.
-  const refusedPairTerms: LinkageTerms = {
-    ...acceptorTerms,
-    linkageStrategy: "single-pass",
-    deduplicate: true,
-  };
-
-  test("states what this party's own side would refuse before it is set", async () => {
-    await reachReview(refusedPairTerms);
-    // On screen while the control still stands at the closed default, so the
-    // operator meets the consequence rather than the accept action's refusal.
-    await expect
-      .element(page.getByText(CONSENT_FACTS.acceptorDeduplicateRefused.note))
-      .toBeInTheDocument();
-    const proceed = page.getByRole("button", {
-      name: "Continue: consent & your file",
-    });
-    await expect.element(proceed).toBeEnabled();
-    // And the refusal itself is unmoved: setting the value the sentence names
-    // still stops the accept.
-    await userEvent.click(ownSide());
-    await expect
-      .element(page.getByText("These two settings cannot run together"))
-      .toBeInTheDocument();
-    await expect.element(proceed).toBeDisabled();
-  });
-
-  test("says nothing of that refusal where the invitation declares no side of its own", async () => {
-    // The other half of the pair is the invitation's: the strategy alone
-    // leaves this party's value free, and the accept takes either value.
-    await reachReview({ ...refusedPairTerms, deduplicate: false });
-    await expect.element(ownSide()).toBeInTheDocument();
-    expect(app.container.textContent).not.toContain(
-      CONSENT_FACTS.acceptorDeduplicateRefused.note,
-    );
-    await userEvent.click(ownSide());
-    await expect
-      .element(
-        page.getByRole("button", { name: "Continue: consent & your file" }),
-      )
-      .toBeEnabled();
-  });
-
-  test("the both-sided pair under the cascade continues", async () => {
-    await reachReview({ ...acceptorTerms, deduplicate: true });
-    await userEvent.click(ownSide());
-    await expect
-      .element(
-        page.getByRole("button", { name: "Continue: consent & your file" }),
-      )
-      .toBeEnabled();
-  });
 
   test("states what the both-sided pair does with a key that splits its value", async () => {
     // The combination the cascade runs and this seat can reach: an invitation
@@ -2830,116 +2768,6 @@ describe("AcceptorScreen: this party's own deduplicate", () => {
         page.getByRole("button", { name: "Continue: consent & your file" }),
       )
       .toBeEnabled();
-  });
-
-  test("a refused pair holds the launch from a step browser Forward restores", async () => {
-    // Step position is restored straight from history, so Forward walks around
-    // the review step's disabled Continue. The later steps re-read the refusal
-    // rather than trusting the step they were reached from.
-    await reachReview({
-      ...acceptorTerms,
-      linkageStrategy: "single-pass",
-      deduplicate: true,
-    });
-    await userEvent.click(
-      page.getByRole("button", { name: "Continue: consent & your file" }),
-    );
-    await userEvent.click(
-      page.getByRole("checkbox", {
-        name: "I have reviewed the terms my partner proposed and I consent to this exchange",
-      }),
-    );
-    await userEvent.fill(page.getByLabelText("Your name"), "Sam Alvarez");
-    const accept = page.getByRole("button", { name: "Accept and continue" });
-    await expect.element(accept).toBeEnabled();
-
-    window.history.back();
-    await openDisclosure(OTHER_DETAILS);
-    await expect.element(ownSide()).toBeInTheDocument();
-    await userEvent.click(ownSide());
-    window.history.forward();
-    await expect
-      .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Consent & your file");
-    await expect.element(accept).toBeDisabled();
-    await expect
-      .element(
-        page.getByText(
-          "Go back to the terms and resolve the duplicate-matching settings to continue.",
-        ),
-      )
-      .toBeInTheDocument();
-  });
-
-  // The click handler React holds on a rendered element, the one route to an
-  // action React's own event dispatch makes unreachable: it drops a click
-  // handler while the element's disabled prop stands, so no event -- real or
-  // dispatched -- reaches an action behind a disabled button.
-  function reactClickHandler(element: Element): () => void {
-    const propsKey = Object.keys(element).find((name) =>
-      name.startsWith("__reactProps$"),
-    );
-    expect(propsKey, "React's props key on the rendered element").toBeDefined();
-    const props = (
-      element as unknown as Record<string, { onClick?: () => void }>
-    )[propsKey as string];
-    expect(props.onClick).toBeTypeOf("function");
-    return props.onClick as () => void;
-  }
-
-  test("the accept action refuses a refused pair, past its disabled button", async () => {
-    // The disabled state is not the refusal: the handler re-reads the pair, so
-    // an invocation that reaches it anyway -- what a scripted submit, or a
-    // later edit dropping the pair from the button's disabled state, would do
-    // -- commits no file and advances no step. Everything else the gate asks
-    // for is satisfied here, so the pair is the only thing holding the accept.
-    await reachReview({
-      ...acceptorTerms,
-      linkageStrategy: "single-pass",
-      deduplicate: true,
-    });
-    await userEvent.click(
-      page.getByRole("button", { name: "Continue: consent & your file" }),
-    );
-    await consentAndName();
-    const fileInput = document.querySelector('input[type="file"]');
-    await userEvent.upload(
-      page.elementLocator(fileInput as HTMLElement),
-      csvFile("first_name,last_name\nAlice,Smith\n"),
-    );
-    await expect
-      .element(page.getByText("cohort_intake.csv"))
-      .toBeInTheDocument();
-
-    // Refuse the pair from the terms step, then return to this step the way
-    // browser history does, around the terms step's own disabled Continue.
-    window.history.back();
-    await openDisclosure(OTHER_DETAILS);
-    await userEvent.click(ownSide());
-    window.history.forward();
-    const accept = page.getByRole("button", { name: "Accept and continue" });
-    await expect.element(accept).toBeDisabled();
-
-    // Straight to the action the disabled button holds.
-    reactClickHandler(accept.element())();
-
-    await expect
-      .element(
-        page.getByText(
-          "Go back to the terms and resolve the duplicate-matching settings to continue.",
-        ),
-      )
-      .toBeInTheDocument();
-    await expect
-      .element(page.getByRole("heading", { level: 1 }))
-      .toHaveTextContent("Consent & your file");
-    expect(
-      page.getByRole("heading", { name: "Confirm your columns" }).query(),
-    ).toBeNull();
-    // The parse is the first thing behind the gate, so an untouched loader is
-    // the accept committing nothing.
-    expect(csvLoadHarness.called).toBe(0);
-    expect(lifecycleHarness.calls).toHaveLength(0);
   });
 
   // The consent gate, from the review step through to the confirm-columns step

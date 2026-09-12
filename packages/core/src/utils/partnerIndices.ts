@@ -6,7 +6,8 @@
 // derived locally or from authenticated session state, never from the frame
 // under check; a two-half table range-checks the anchoring half first, so
 // the paired half's count is pinned to a locally held quantity rather than
-// chosen by the partner. The wire schemas upstream accept any FINITE
+// chosen by the partner, and a table with no distinct half at all is pinned
+// to a pair-count bound the caller derived. The wire schemas accept any FINITE
 // number, so integrality is checked here too: a fractional index addresses
 // nothing and is `undefined`.
 import { ConnectionError } from "../connection/messageConnection";
@@ -586,4 +587,99 @@ export function assertPartnerIndexTable(
     pairedHalf.exclusiveBound,
     { ascending: pairedHalf.ascending, repeats: pairedHalf.repeats },
   );
+}
+
+/** One half of a table neither half of which keeps its distinctness. */
+interface PartnerPairTableHalf {
+  /** Names the half, for the error message. */
+  readonly what: string;
+  /** The partner-supplied entries, in received order. */
+  readonly indices: ReadonlyArray<number>;
+  /** The count of slots this half addresses. See {@link assertPartnerIndices}. */
+  readonly exclusiveBound: number;
+}
+
+/**
+ * Requires both halves of a partner-supplied association table whose BOTH
+ * halves repeat to hold whole, in-range indices, to pair up entry for entry,
+ * and to name each pair once, within a bound on the table's pair count that
+ * this party derived for itself.
+ *
+ * The two-half form for a both-sided deduplicating cardinality, where each
+ * party's records may group the other's and neither half is distinct
+ * (docs/spec/PROTOCOL.md, Deriving one table from the exchanged association
+ * maps). {@link assertPartnerIndexTable} takes the distinct half's range check
+ * as the length bound; with no such half the bound is passed in, and it must be
+ * a product of counts this party holds -- its own row count and the record
+ * count the partner declared on the terms exchange -- rather than anything read
+ * off the frame under check.
+ *
+ * `ascendingHalf` is the half the table is ordered by, non-decreasing rather
+ * than strictly ascending since a row of that half stands in as many pairs as
+ * it has partners. Its equal runs are contiguous, which is what the
+ * pair-uniqueness rule reads: a pair named twice is one link counted twice by
+ * every consumer of the table.
+ *
+ * @param participantId - This party's participant id.
+ * @param ascendingHalf - The half whose order the table follows.
+ * @param pairedHalf - The half whose order within one run is the resolving
+ *   party's own and is not read here.
+ * @param maxPairs - The most pairs the two parties' record counts admit.
+ * @throws A `"protocol"` {@link ConnectionError} on a table longer than
+ *   `maxPairs`, on a bad entry in either half, on halves of unequal length, on
+ *   a descending pair in `ascendingHalf`, or on a repeated pair.
+ */
+export function assertPartnerPairTable(
+  participantId: string,
+  ascendingHalf: PartnerPairTableHalf,
+  pairedHalf: PartnerPairTableHalf,
+  maxPairs: number,
+): void {
+  if (!Number.isSafeInteger(maxPairs) || maxPairs < 0)
+    throw new Error(
+      `${ascendingHalf.what}: a pair-count bound is a whole number of pairs ` +
+        `this party's own counts give exactly, given ${maxPairs}`,
+    );
+  if (ascendingHalf.indices.length > maxPairs)
+    throw partnerProtocolError(
+      participantId,
+      `${ascendingHalf.what} has ${entryCount(ascendingHalf.indices.length)}, ` +
+        `more than the ${maxPairs} pair(s) the two parties' record counts ` +
+        "admit",
+    );
+  assertPartnerIndices(
+    participantId,
+    ascendingHalf.what,
+    ascendingHalf.indices,
+    ascendingHalf.exclusiveBound,
+    { ascending: true, repeats: true },
+  );
+  assertPartnerIndexCount(
+    participantId,
+    pairedHalf.what,
+    pairedHalf.indices.length,
+    ascendingHalf.indices.length,
+  );
+  assertPartnerIndices(
+    participantId,
+    pairedHalf.what,
+    pairedHalf.indices,
+    pairedHalf.exclusiveBound,
+    { repeats: true },
+  );
+  const partnersOfRun = new Set<number>();
+  let run = -1;
+  for (let entry = 0; entry < ascendingHalf.indices.length; ++entry) {
+    if (ascendingHalf.indices[entry] !== run) {
+      run = ascendingHalf.indices[entry];
+      partnersOfRun.clear();
+    }
+    if (partnersOfRun.has(pairedHalf.indices[entry]))
+      throw partnerProtocolError(
+        participantId,
+        `${pairedHalf.what} names one row twice for one record of the other ` +
+          "side",
+      );
+    partnersOfRun.add(pairedHalf.indices[entry]);
+  }
 }

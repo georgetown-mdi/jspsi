@@ -22,7 +22,6 @@ Work required before the 1.0 release.
 
 - SSH channel as a lower-latency alternative to SFTP polling
 - Parallelizing the commutative-encryption step
-- Many-to-many deduplication under `linkage_strategy: single-pass`. Both parties setting `deduplicate: true` runs under `cascade`, with transitive-closure resolution of the result's pairs into entity clusters; the same pair under `single-pass` is refused before the exchange begins: that strategy holds the resolved table to a bound that a both-sided multiplicity would remove
 
 ## Version 1.1
 

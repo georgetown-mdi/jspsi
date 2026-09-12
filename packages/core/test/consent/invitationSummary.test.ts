@@ -14,6 +14,7 @@ import {
 import {
   assertDeduplicateImplemented,
   DEDUPLICATE_IMPLEMENTED_BY_STRATEGY,
+  MANY_TO_MANY_IMPLEMENTED_BY_STRATEGY,
 } from "../../src/linkageTermsPolicy.js";
 import { resolveLinkageCardinality } from "../../src/exchange.js";
 import { termsDeclareCandidateSet } from "../../src/fanOutFunctions.js";
@@ -456,20 +457,31 @@ describe("the consent summary's refused-pair register", () => {
   test("states the refusal where the invitation holds both halves of the pair", () => {
     // The seat reads this before the operator sets the one value the
     // invitation does not hold, so the flag and the accept's own verdict on
-    // that value are driven together. The strategy is what stands in the way:
-    // single-pass pairs no both-sided cardinality at all, so the accept refuses
-    // the value there.
+    // that value are driven together. Both shipped strategies pair the
+    // both-sided cardinality, so the strategy that stands in the way is one
+    // driven to refuse it rather than one this build ships.
     const terms = {
       ...baseTerms,
       deduplicate: true,
       linkageStrategy: "single-pass" as const,
       linkageKeys: fanOutKeys,
     };
+    const shipped = MANY_TO_MANY_IMPLEMENTED_BY_STRATEGY["single-pass"];
+    MANY_TO_MANY_IMPLEMENTED_BY_STRATEGY["single-pass"] = false;
+    try {
+      expect(
+        summarizeInvitation({ linkageTerms: terms }).acceptorDeduplicateRefused,
+      ).toBe(true);
+      expect(acceptRefuses(terms, true)).toBe(true);
+      expect(acceptRefuses(terms, false)).toBe(false);
+    } finally {
+      MANY_TO_MANY_IMPLEMENTED_BY_STRATEGY["single-pass"] = shipped;
+    }
+    // With the shipped verdict the same invitation is one the accept takes.
     expect(
       summarizeInvitation({ linkageTerms: terms }).acceptorDeduplicateRefused,
-    ).toBe(true);
-    expect(acceptRefuses(terms, true)).toBe(true);
-    expect(acceptRefuses(terms, false)).toBe(false);
+    ).toBe(false);
+    expect(acceptRefuses(terms, true)).toBe(false);
   });
 
   test("withholds it where the inviting party declares no deduplicate", () => {
@@ -638,8 +650,32 @@ describe("the consent summary's chained-grouping register", () => {
   });
 
   test("withholds it where the pair the other side completes is refused", () => {
-    // Single-pass pairs no both-sided cardinality, so the grouping this states
-    // is one the exchange refuses rather than runs.
+    // A strategy pairing no both-sided cardinality makes the grouping this
+    // states one the exchange refuses rather than runs. Both shipped entries
+    // pair it, so the verdict is driven the other way to show the withhold.
+    const shipped = MANY_TO_MANY_IMPLEMENTED_BY_STRATEGY["single-pass"];
+    MANY_TO_MANY_IMPLEMENTED_BY_STRATEGY["single-pass"] = false;
+    try {
+      for (const [, linkageKeys] of candidateSetKeys)
+        expect(
+          summarizeInvitation({
+            linkageTerms: {
+              ...baseTerms,
+              deduplicate: true,
+              linkageStrategy: "single-pass",
+              linkageKeys,
+            },
+          }).candidateSetChainsGrouping,
+        ).toBe(false);
+    } finally {
+      MANY_TO_MANY_IMPLEMENTED_BY_STRATEGY["single-pass"] = shipped;
+    }
+  });
+
+  test("states it under single-pass, which pairs the both-sided cardinality", () => {
+    // The strategy decides how the grouping is resolved, not whether it
+    // happens: a deduplicating invitation whose key widens a round chains the
+    // same grouping under either strategy.
     for (const [, linkageKeys] of candidateSetKeys)
       expect(
         summarizeInvitation({
@@ -650,7 +686,7 @@ describe("the consent summary's chained-grouping register", () => {
             linkageKeys,
           },
         }).candidateSetChainsGrouping,
-      ).toBe(false);
+      ).toBe(true);
   });
 
   test("withholds it where the count-only algorithm refuses the candidate set", () => {

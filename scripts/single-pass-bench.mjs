@@ -52,6 +52,20 @@
 //     retained floor the transient peak sits above (the split that shows the peak
 //     is mostly collectable churn).
 //
+//   node scripts/single-pass-bench.mjs both-sided [--keys K] [--sizes N,N,...]
+//                                                [--group G] [--gc]
+//     The QUADRATIC case: both parties declare `deduplicate`, so the run resolves
+//     many-to-many and a value g of each party's rows hold contributes g * g
+//     pairs. Every row of both parties holds a key-0 value shared with the
+//     partner, in groups of G (default G = N, the whole dataset on one value),
+//     so the resolved table holds N * G pairs and at the default reaches
+//     N * N -- exactly the pair-count bound the sender holds the returned table
+//     to (own rows times the partner's declared record count). The later keys
+//     hold near-unique values, so D stays keys * rows and the masking workload
+//     is the sweep's. Prints the pair count beside each side's peak RSS and the
+//     receiver's post-replay wall-clock, which is where the closure check over
+//     the table's blocks lands.
+//
 // The masking ops require a shared PSI client key between the receiver's request
 // and its match step, so the two sides cannot run as independent processes that
 // each mint their own key; they must exchange live, which is why the sweep relays
@@ -124,6 +138,25 @@ function makeColumns(role, rows, keys, overlapRows) {
     const col = new Array(rows);
     for (let i = 0; i < rows; ++i) {
       col[i] = i < overlapRows ? `sh_${j}_${i}` : `${role}_${j}_${i}`;
+    }
+    cols.push(col);
+  }
+  return cols;
+}
+
+// The both-sided dataset: key 0 puts every row on a value shared with the
+// partner, in groups of `groupSize`, so each matched value stands for a group on
+// each side and contributes groupSize^2 pairs. The later keys hold near-unique
+// per-row values, which no round reaches (every row leaves candidacy in round 0)
+// but which keep the pooled distinct count at keys * rows, so the masking
+// workload matches the sweep's at the same size.
+function makeBothSidedColumns(role, rows, keys, groupSize) {
+  const cols = [];
+  for (let j = 0; j < keys; ++j) {
+    const col = new Array(rows);
+    for (let i = 0; i < rows; ++i) {
+      col[i] =
+        j === 0 ? `grp_${Math.floor(i / groupSize)}` : `${role}_${j}_${i}`;
     }
     cols.push(col);
   }
@@ -220,10 +253,17 @@ async function runRates(argv) {
 
 // --- mode: sweep (parent) ------------------------------------------------------
 
-function runChild(role, rows, keys, overlap, relayTo, onResult, gc) {
+function runChild(role, rows, keys, overlap, relayTo, onResult, gc, group) {
   const child = fork(
     HERE,
-    ["child", role, String(rows), String(keys), String(overlap)],
+    [
+      "child",
+      role,
+      String(rows),
+      String(keys),
+      String(overlap),
+      String(group ?? 0),
+    ],
     {
       serialization: "advanced",
       // --gc runs the child under --expose-gc, which is exactly what the shipped
@@ -245,7 +285,7 @@ function runChild(role, rows, keys, overlap, relayTo, onResult, gc) {
   return child;
 }
 
-async function runOneSize(rows, keys, overlap, gc) {
+async function runOneSize(rows, keys, overlap, gc, group) {
   let senderChild;
   let receiverChild;
   const results = {};
@@ -266,6 +306,7 @@ async function runOneSize(rows, keys, overlap, gc) {
         finishIfReady();
       },
       gc,
+      group,
     );
     receiverChild = runChild(
       "receiver",
@@ -278,6 +319,7 @@ async function runOneSize(rows, keys, overlap, gc) {
         finishIfReady();
       },
       gc,
+      group,
     );
     // Measure the relayed frame sizes from the parent (the sender->receiver reply
     // is the large one). Re-wrap the message handlers to also size the payload.
@@ -375,6 +417,67 @@ async function runSweep(argv) {
   );
 }
 
+// --- mode: both-sided ----------------------------------------------------------
+
+async function runBothSided(argv) {
+  let keys = 1;
+  // The ladder PROTOCOL.md's figures are read off: 0.25M to 9M pairs, which is
+  // where the slope separates from the floor.
+  let sizes = [500, 1000, 2000, 3000];
+  let group = 0;
+  let gc = false;
+  for (let i = 0; i < argv.length; ++i) {
+    if (argv[i] === "--keys") keys = Number(argv[++i]);
+    else if (argv[i] === "--group") group = Number(argv[++i]);
+    else if (argv[i] === "--gc") gc = true;
+    else if (argv[i] === "--sizes")
+      sizes = argv[++i].split(",").map((s) => Number(s.trim()));
+  }
+
+  console.log(
+    `Both-sided (many-to-many) sweep: keys=${keys}, equal-sized parties, ` +
+      `group=${group > 0 ? group : "rows (the whole dataset on one value)"}` +
+      `${gc ? ", GC forced at phase boundaries" : ""}.\n`,
+  );
+  console.log(
+    "   rows | group |      pairs | recv wall s | " +
+      "send RSS MB | recv RSS MB | bytes/pair",
+  );
+  console.log(
+    "  ------+-------+------------+-------------+" +
+      "-------------+-------------+-----------",
+  );
+
+  const rows = [];
+  for (const n of sizes) {
+    const g = group > 0 ? group : n;
+    const r = await runOneSize(n, keys, 1, gc, g);
+    const pairs = r.receiver.matches;
+    // Peak resident set over the pairs the run resolved: what one pair costs the
+    // heavier side, the figure a bound on the pair count converts to memory
+    // through.
+    const perPair = ((r.receiver.maxRSS * 1024) / pairs).toFixed(1);
+    console.log(
+      `  ${String(n).padStart(5)} | ${String(g).padStart(5)} | ` +
+        `${String(pairs).padStart(10)} | ` +
+        `${(r.receiver.wallMs / 1000).toFixed(1).padStart(11)} | ` +
+        `${mb(r.sender.maxRSS).padStart(11)} | ` +
+        `${mb(r.receiver.maxRSS).padStart(11)} | ` +
+        `${perPair.padStart(10)}`,
+    );
+    rows.push({
+      rows: n,
+      group: g,
+      pairs,
+      receiverWallMs: r.receiver.wallMs,
+      senderMaxRssMB: Number(mb(r.sender.maxRSS)),
+      receiverMaxRssMB: Number(mb(r.receiver.maxRSS)),
+      receiverRssBytesPerPair: Number(perPair),
+    });
+  }
+  console.log("\nJSON:\n" + JSON.stringify({ keys, gc, rows }, null, 2));
+}
+
 // --- mode: child ---------------------------------------------------------------
 
 function ipcConnection() {
@@ -405,15 +508,18 @@ function ipcConnection() {
   };
 }
 
-async function runChildRole(role, rows, keys, overlap) {
+async function runChildRole(role, rows, keys, overlap, groupSize) {
   installWasmHeapProbe();
   const { default: PSI } = await import("@openmined/psi.js");
   const { PSIParticipant, linkViaSinglePassPSI } =
     await import("@psilink/core");
   const lib = await PSI();
 
-  const overlapRows = Math.floor(rows * overlap);
-  const data = makeColumns(role, rows, keys, overlapRows);
+  const bothSided = groupSize > 0;
+  const overlapRows = bothSided ? rows : Math.floor(rows * overlap);
+  const data = bothSided
+    ? makeBothSidedColumns(role, rows, keys, groupSize)
+    : makeColumns(role, rows, keys, overlapRows);
   const psiRole = role === "sender" ? "starter" : "joiner";
   // Per-message element-count bounds (the required 4th constructor argument): the
   // symmetric sweep pools at most keys * rows distinct values per party, the
@@ -450,12 +556,20 @@ async function runChildRole(role, rows, keys, overlap) {
   const partnerRecordCount = rows;
   const withholdSenderTable = false;
   const verbosity = -1;
+  // The session bounds both parties derive identically from the agreed terms:
+  // width one per key (no fan-out in these datasets), the partner's declared
+  // record count, and this party's own fan-out factor of one.
+  const bounds = {
+    partnerRecordCount,
+    keyWidths: new Array(keys).fill(1),
+    localFanOutFactor: 1,
+  };
   const table = await linkViaSinglePassPSI(
-    { cardinality: "one-to-one" },
+    { cardinality: bothSided ? "many-to-many" : "one-to-one" },
     participant,
     conn,
     data,
-    partnerRecordCount,
+    bounds,
     withholdSenderTable,
     verbosity,
     setStage,
@@ -476,10 +590,16 @@ async function runChildRole(role, rows, keys, overlap) {
   // key 0 (values are near-unique within a party), so the match count must equal
   // the overlap exactly. A wrong count means the relayed exchange computed the
   // wrong result and the timing/memory numbers describe the wrong workload.
-  if (matches !== overlapRows) {
+  // Under the both-sided run each of the rows/groupSize shared values stands for
+  // a group of groupSize on each side and contributes its square, so the table
+  // holds rows * groupSize pairs -- rows^2, the sender's whole pair-count bound,
+  // at the default group size.
+  const expectedPairs = bothSided ? rows * groupSize : overlapRows;
+  if (matches !== expectedPairs) {
     throw new Error(
-      `${role}: correctness check failed -- ${matches} matches, ` +
-        `expected ${overlapRows} (rows=${rows} keys=${keys} overlap=${overlap})`,
+      `${role}: correctness check failed -- ${matches} pair(s), ` +
+        `expected ${expectedPairs} (rows=${rows} keys=${keys} ` +
+        `group=${groupSize} overlap=${overlap})`,
     );
   }
 
@@ -525,18 +645,28 @@ async function runChildRole(role, rows, keys, overlap) {
 
 const [mode, ...rest] = process.argv.slice(2);
 if (mode === "child") {
-  const [role, rows, keys, overlap] = rest;
-  await runChildRole(role, Number(rows), Number(keys), Number(overlap));
+  const [role, rows, keys, overlap, group] = rest;
+  await runChildRole(
+    role,
+    Number(rows),
+    Number(keys),
+    Number(overlap),
+    Number(group ?? 0),
+  );
 } else if (mode === "rates") {
   await runRates(rest);
 } else if (mode === "sweep") {
   await runSweep(rest);
+} else if (mode === "both-sided") {
+  await runBothSided(rest);
 } else {
   console.error(
     "usage:\n" +
       "  node scripts/single-pass-bench.mjs rates [D ...]\n" +
       "  node scripts/single-pass-bench.mjs sweep " +
-      "[--keys K] [--overlap F] [--sizes N,N,...]",
+      "[--keys K] [--overlap F] [--sizes N,N,...] [--gc]\n" +
+      "  node scripts/single-pass-bench.mjs both-sided " +
+      "[--keys K] [--sizes N,N,...] [--group G] [--gc]",
   );
   process.exit(2);
 }

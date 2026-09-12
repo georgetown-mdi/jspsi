@@ -522,9 +522,9 @@ export const CONSENT_FACTS = {
       "follows the two duplicate-matching settings: with neither set it is " +
       "paired at most once; with one party's set, a record of the party that " +
       "set it is paired at most once while a record of the other party may " +
-      "be paired with several; and with both set -- which cascade linkage " +
-      "matches and single-pass refuses -- it is paired with every one of the " +
-      "other party's records any of its candidates reached, and the records " +
+      "be paired with several; and with both set it is paired with every " +
+      "one of the other party's records any of its candidates reached, and " +
+      "the records " +
       "joined that way are disclosed to both parties as one group. Under " +
       "single-pass linkage the party that receives the other's key structure " +
       "also learns how many candidates each of the other's records produced " +

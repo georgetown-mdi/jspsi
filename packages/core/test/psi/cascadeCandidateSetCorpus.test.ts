@@ -72,9 +72,10 @@ interface Fixture {
   readonly joinerKeys: Array<Column>;
 }
 
-// `many-to-many` is left out: single-pass does not pair the both-sided
-// cardinality (MANY_TO_MANY_IMPLEMENTED_BY_STRATEGY, linkageTermsPolicy.ts),
-// so there is no second strategy to hold the cascade's table against.
+// `many-to-many` is left out: it takes obligations of its own rather than this
+// corpus's, the round-diagonal closure check over the table each strategy
+// resolves and differential vectors of its own (docs/spec/PROTOCOL.md, What the
+// cascade realization owes), which strategyDifferentialVectors.test.ts drives.
 const CARDINALITIES: ReadonlyArray<LinkageCardinality> = [
   "one-to-one",
   "many-to-one",

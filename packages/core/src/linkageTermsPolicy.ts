@@ -222,11 +222,9 @@ export function deduplicateIsImplementedForStrategy(
  * Both shipped strategies match one today, so this refuses nothing an
  * operator can configure currently; it stays as the boundary a strategy
  * answering `false` in {@link DEDUPLICATE_IMPLEMENTED_BY_STRATEGY} is
- * stopped at. The combination that IS refused today is the agreed
- * `(true, true)` pair under a strategy that pairs no both-sided
- * cardinality, which this guard cannot express since it reads one party's
- * document alone -- its own boundary is
- * {@link assertBothSidedDeduplicateImplemented}.
+ * stopped at. The agreed `(true, true)` pair takes a boundary of its own,
+ * {@link assertBothSidedDeduplicateImplemented}, which this guard cannot
+ * express since it reads one party's document alone.
  *
  * Applied where a document is authored or minted, where a received
  * invitation is accepted ({@link deriveAcceptedLinkageTerms}), and for both
@@ -329,16 +327,17 @@ export function termsCandidateSetRefusal(
 
 /**
  * Which linkage strategies pair the BOTH-sided deduplicating cardinality,
- * one entry per strategy. The cascade does, applying the "many" rule to
- * each party so a matched value contributes the two groups' product;
- * `single-pass` does not (docs/spec/PROTOCOL.md, Deduplicating
- * cardinalities: many-to-X matching).
+ * one entry per strategy. Both do, applying the "many" rule to each party so
+ * a matched value contributes the two groups' product: the cascade over the
+ * two parties' exchanged association maps, `single-pass` in the receiver's
+ * local replay over the index table it already ships, each holding the
+ * resolved table to the round-diagonal shape the entity closure rests on
+ * (docs/spec/PROTOCOL.md, Deduplicating cardinalities: many-to-X matching).
  *
  * Separate from {@link DEDUPLICATE_IMPLEMENTED_BY_STRATEGY}: that table asks
  * whether a strategy honors one party's `deduplicate: true` at all, this
  * asks whether it pairs the cardinality the agreed PAIR resolves to when
- * both parties declare it. Single-pass answers `true` to the first and
- * `false` to the second.
+ * both parties declare it.
  *
  * A total table over {@link LinkageStrategy}, typed `boolean`, for the same
  * reason as its sibling.
@@ -351,7 +350,7 @@ export const MANY_TO_MANY_IMPLEMENTED_BY_STRATEGY: Record<
   boolean
 > = {
   cascade: true,
-  "single-pass": false,
+  "single-pass": true,
 };
 
 /**
@@ -404,9 +403,12 @@ export function bothSidedDeduplicateRefused(
  * begins.
  *
  * The both-sided sibling of {@link assertDeduplicateImplemented}: a
- * per-party reading answers `true` for a single-pass party whose own
- * `deduplicate: true` is perfectly runnable one-sided, so only a check over
- * BOTH documents can refuse the combination the strategy will not pair.
+ * per-party reading answers `true` for a party whose own `deduplicate: true`
+ * is perfectly runnable one-sided, so only a check over BOTH documents can
+ * refuse the combination the strategy will not pair. Both shipped strategies
+ * pair it, so this refuses nothing an operator can configure currently; it
+ * stays as the boundary a strategy answering `false` in
+ * {@link MANY_TO_MANY_IMPLEMENTED_BY_STRATEGY} is stopped at.
  *
  * Called from `resolveLinkageCardinality` (`exchange.ts`) after the terms
  * exchange and before the first round. Symmetric in the pair -- it reads

@@ -27,6 +27,12 @@ import {
   mirrorCardinality,
   type Column,
 } from "../utils/candidateSetBounds";
+import { entityClusters } from "../../src/psi/entityClosure";
+
+// The closure step every reader of a both-sided table runs locally over it, so
+// a table asserted equal between the strategies is asserted equal in the
+// clusters its readers derive as well.
+const clustersOf = (table: AssociationTable) => entityClusters(table);
 
 // The differential conformance vectors docs/spec/PROTOCOL.md requires as a
 // MUST (What the cascade realization owes): fixed inputs run through BOTH
@@ -290,5 +296,87 @@ test("many-to-one, two accepted records of the many side sharing a position", as
   expect(joiner).toStrictEqual([
     [0, 1],
     [0, 1],
+  ]);
+});
+
+// The both-sided cardinality, where each party keeps the duplicates of its own
+// records and a matched value stands for a group on each side. The pair set is
+// the two groups' product, and the entity closure both strategies own is read
+// off the one table -- so an equality here is the closure agreeing cluster for
+// cluster as well as pair for pair.
+
+test("many-to-many, a value both sides hold twice", async () => {
+  const [starter, joiner] = await expectStrategiesAgree(
+    "many-to-many",
+    [["E1", "E1", "S"]],
+    [["E1", "E1", "J"]],
+  );
+  // Every one of the four pairs between the two groups, and nothing else.
+  expect(starter).toStrictEqual([
+    [0, 0, 1, 1],
+    [0, 1, 0, 1],
+  ]);
+  expect(joiner).toStrictEqual(starter);
+  expect(clustersOf(starter)).toStrictEqual([
+    { localRows: [0, 1], partnerRows: [0, 1] },
+  ]);
+});
+
+test("many-to-many, groups of different sizes contribute their product", async () => {
+  const [starter, joiner] = await expectStrategiesAgree(
+    "many-to-many",
+    [["E1", "E1", "E1"]],
+    [["E1", "E1"]],
+  );
+  expect(starter).toStrictEqual([
+    [0, 0, 1, 1, 2, 2],
+    [0, 1, 0, 1, 0, 1],
+  ]);
+  expect(joiner).toStrictEqual([
+    [0, 0, 0, 1, 1, 1],
+    [0, 1, 2, 0, 1, 2],
+  ]);
+});
+
+test("many-to-many, a candidate set joining two of a round's blocks", async () => {
+  // The shape the block-diagonal derivation does not reach on its own: one
+  // record's candidate set stands in two of the round's blocks, so the two
+  // blocks are one cluster. Both strategies reach the same cluster, which is
+  // what the closure is asserted on rather than the pair count alone.
+  const [starter, joiner] = await expectStrategiesAgree(
+    "many-to-many",
+    [[new Set(["E1", "E2"]), "E2", "S"]],
+    [["E1", "E1", "E2"]],
+  );
+  expect(clustersOf(starter)).toStrictEqual([
+    { localRows: [0, 1], partnerRows: [0, 1, 2] },
+  ]);
+  expect(clustersOf(joiner)).toStrictEqual([
+    { localRows: [0, 1, 2], partnerRows: [0, 1] },
+  ]);
+});
+
+test("many-to-many, a second key forms a block of its own", async () => {
+  // Multiplicity is within-round on both strategies: the records the first key
+  // paired leave candidacy, so the second key's block holds only what is left
+  // and no cluster spans the two rounds.
+  const [starter, joiner] = await expectStrategiesAgree(
+    "many-to-many",
+    [
+      ["E1", "E1", "S"],
+      ["L", "L", "L"],
+    ],
+    [
+      ["E1", "J", "J2"],
+      ["L", "L", "L"],
+    ],
+  );
+  expect(clustersOf(starter)).toStrictEqual([
+    { localRows: [0, 1], partnerRows: [0] },
+    { localRows: [2], partnerRows: [1, 2] },
+  ]);
+  expect(clustersOf(joiner)).toStrictEqual([
+    { localRows: [0], partnerRows: [0, 1] },
+    { localRows: [1, 2], partnerRows: [2] },
   ]);
 });

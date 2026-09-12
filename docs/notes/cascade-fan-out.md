@@ -79,10 +79,9 @@ than re-discovering it, and reproduces the resolution rule
 [PROTOCOL.md](../spec/PROTOCOL.md#fan-out-matching-multi-value-key-candidates)
 already fixes rather than inventing a second one.
 
-The refusals that remain are not the strategy's: a count-only exchange
-refuses a candidate set for reasons of its own, and a both-sided
-`deduplicate` refuses one only under `single-pass`, the cascade resolving it
-over the candidate sets
+The refusal that remains is not the strategy's: a count-only exchange
+refuses a candidate set for reasons of its own, while a both-sided
+`deduplicate` resolves one under either strategy
 ([The combinations that stay unsupported](../spec/PROTOCOL.md#the-combinations-that-stay-unsupported)).
 
 ## What the spec had to resolve

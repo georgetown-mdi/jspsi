@@ -15,12 +15,12 @@ import {
 } from "../utils/candidateSetBounds";
 
 // A candidate set under `many-to-many`, held against a reference built from the
-// two parties' incidences rather than against a second strategy: single-pass
-// pairs no both-sided cardinality, so the equivalence MUST that binds every
-// other shape has no referent here and none is manufactured
-// (docs/spec/PROTOCOL.md, What this resolution owes). What stands in its
-// place is the specification oracle below, and both parties are driven over
-// every fixture in both role assignments.
+// two parties' incidences: the oracle is correct by construction where
+// acceptance is total, so it says what the pair set MUST be rather than only
+// that two resolvers agree on it (docs/spec/PROTOCOL.md, What this resolution
+// owes). Both parties are driven over every fixture in both role assignments.
+// The equality between the two strategies over this cardinality is asserted
+// beside it, in strategyDifferentialVectors.test.ts.
 
 const psiLibrary = await PSI();
 

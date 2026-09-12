@@ -1169,10 +1169,13 @@ export interface ExchangeResult {
    * values each formed on (docs/spec/PROTOCOL.md, Choosing linkage keys under
    * closure).
    *
-   * Present exactly on a `many-to-many` run this party holds the table of. The
-   * key is absent under every other cardinality, whose clusters follow from
-   * the table's own shape, and under the same withholding gate the table takes
-   * -- a party that receives no table receives no summary of it either.
+   * Present on a `many-to-many` run this party holds the table of and the
+   * rounds behind it. The key is absent under every other cardinality, whose
+   * clusters follow from the table's own shape; under the same withholding
+   * gate the table takes -- a party that receives no table receives no summary
+   * of it either; and on the `single-pass` SENDER, which is handed the
+   * resolved table and holds neither the rounds nor the blocks a cluster's
+   * value count is read from.
    *
    * Every field is a count over this party's own table and its own rounds'
    * blocks. Nothing here names a record, a row index, or a linkage-key value,
@@ -1939,6 +1942,9 @@ export async function runExchange(
               withholdSenderTable,
               verbosity,
               onStage,
+              (summary) => {
+                entityClusters = summary;
+              },
             )
           : await linkViaPSI(
               { cardinality },

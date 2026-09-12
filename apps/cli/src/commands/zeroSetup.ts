@@ -154,8 +154,9 @@ export function builder(cmd: Argv): Argv {
         "own run, and neither side is read from the other. Setting it widens " +
         "what your partner discloses -- more of its records can match than in " +
         "a one-to-one run of the same two files. Both parties setting it " +
-        "under --linkage-strategy single-pass is refused before matching " +
-        "begins. See https://github.com/georgetown-mdi/jspsi/blob/main/docs/" +
+        "runs a many-to-many match under either linkage strategy, where each " +
+        "party's records may group the other's. " +
+        "See https://github.com/georgetown-mdi/jspsi/blob/main/docs/" +
         "EXCHANGE_REFERENCE.md (linkage_terms.deduplicate).",
     })
     .option("linkage-strategy", {
