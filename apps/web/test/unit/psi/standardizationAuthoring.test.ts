@@ -14,6 +14,7 @@ import {
 
 import {
   INERT_COALESCE_ADVICE,
+  NULL_IF_BOTH_VALUES_REFUSAL,
   OFFERED_EXPERT_FUNCTION_GROUPS,
   STANDARDIZATION_EXPERT_FUNCTION_GROUPS,
   STANDARDIZATION_FUNCTION_GROUPS,
@@ -490,6 +491,16 @@ describe("isStepValid (the launch gate's basis)", () => {
         { output: "ssn", input: "SSN", steps: [bothDeclared] },
       ]).success,
     ).toBe(false);
+  });
+
+  test("the refusal names both halves of the pair and the remedy", () => {
+    // The copy the step editor renders beside such a step: the remedy is
+    // removal, because an emptied text box is `""` and an emptied tag list is
+    // `[]`, each of which still declares the param.
+    expect(NULL_IF_BOTH_VALUES_REFUSAL).toContain(
+      "a single value and a list of values",
+    );
+    expect(NULL_IF_BOTH_VALUES_REFUSAL).toContain("Remove this step");
   });
 
   test.each([

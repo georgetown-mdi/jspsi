@@ -1,3 +1,5 @@
+import { constants } from "node:buffer";
+
 import { describe, expect, test } from "vitest";
 
 import { summarizeInvitation } from "../../src/consent/invitationSummary";
@@ -16,7 +18,13 @@ import {
   NULL_IF_BOTH_VALUE_PARAMS_MESSAGE,
   PRIVATE_KEY_PARAM_MESSAGE,
   TRANSFORM_PARAM_COUNT_MESSAGE,
+  describedTransformParamEntry,
+  transformParamDisplayRefusals,
 } from "../../src/config/transformParamDisplay";
+
+/** The engine's ceiling on one string's length, which a displayed line of a
+ * param at that width passes on the concatenation alone. */
+const MAX_STRING_LENGTH = constants.MAX_STRING_LENGTH;
 
 // An obviously fake key block, whose BEGIN and END markers are what the
 // display's redaction matches.
@@ -312,5 +320,62 @@ describe("a param declared with an explicit undefined value", () => {
     expectRefusedEverywhere(pastCap, TRANSFORM_PARAM_COUNT_MESSAGE);
     const displayed = displayedParamsOf(pastCap);
     expect(displayed[displayed.length - 1]).toBe("... 1 more");
+  });
+});
+
+describe("a param value the displayed line cannot hold", () => {
+  // The line overflows on the concatenation rather than on the render: a
+  // string value is rendered as it stands, so `param: value` is what passes
+  // the engine's string limit, and the RangeError it throws would escape
+  // safeParse. Only the schema that bounds no param length can reach this
+  // (`refusesStringParamsPast: undefined`); the terms schema refuses such a
+  // value for its length first.
+  //
+  // The value is built from shared pieces -- each doubling holds two
+  // references to one string -- so it costs no memory proportional to its
+  // length. Nothing reads its characters either: the guard refuses the line
+  // before the scan, and a length costs no walk.
+  const valueOfLength = (length: number): string => {
+    const pieces: string[] = [];
+    let piece = "x";
+    while (piece.length <= length) {
+      pieces.push(piece);
+      if (piece.length * 2 > MAX_STRING_LENGTH) break;
+      piece = piece + piece;
+    }
+    let built = "";
+    let remaining = length;
+    for (let i = pieces.length - 1; i >= 0; i--)
+      if (pieces[i].length <= remaining) {
+        built = built + pieces[i];
+        remaining -= pieces[i].length;
+      }
+    return built;
+  };
+
+  test("renders as an empty line rather than throwing", () => {
+    const value = valueOfLength(MAX_STRING_LENGTH - 2);
+    expect(describedTransformParamEntry("p", value).length).toBe(0);
+  });
+
+  test("is scanned for key material without raising", () => {
+    const step = {
+      function: "trim",
+      params: { p: valueOfLength(MAX_STRING_LENGTH - 2) },
+    };
+    expect(
+      transformParamDisplayRefusals(step, {
+        refusesStringParamsPast: undefined,
+      }),
+    ).toEqual([]);
+  });
+
+  test("a value whose line fits is rendered whole", () => {
+    // Not vacuous: the fallback above is the overflowing line's, not every
+    // long value's. One code unit shorter fills the limit exactly.
+    const value = valueOfLength(MAX_STRING_LENGTH - 3);
+    expect(describedTransformParamEntry("p", value).length).toBe(
+      MAX_STRING_LENGTH,
+    );
   });
 });

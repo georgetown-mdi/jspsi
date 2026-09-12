@@ -4,6 +4,7 @@ import {
   CanonicalEncodingError,
   DEDUPLICATE_IMPLEMENTED_BY_STRATEGY,
   FAN_OUT_FUNCTION_NAMES,
+  MAX_DISPLAYED_PARAMS,
   MAX_INVITATION_LIFETIME_SECONDS,
   MAX_NAME_LENGTH,
   StandardizedField,
@@ -565,6 +566,99 @@ describe("a transform params key the terms schema refuses", () => {
     expect(rendered).not.toContain("unrepeatable-key");
     expect(rendered).not.toContain("\ud800");
     expect(rendered).not.toContain("params");
+  });
+});
+
+describe("a transform params shape the consent summary cannot state", () => {
+  // Core refuses three params shapes where a document is decoded, because the
+  // summary an acceptor reads would state something other than what the run
+  // applies. All three are refused on the `linkageKeys` path, which the generic
+  // mapping answers with "Enable at least one linkage key." -- the one step this
+  // draft has already taken -- so each needs a message of its own. Each is keyed
+  // on core's own refusal message, which these cases drive through a real
+  // document rather than asserting the mapping table.
+  const now = new Date("2026-01-01T00:00:00Z");
+
+  // An obviously fake key with no END marker, which the redaction the refusal
+  // reads matches from its BEGIN marker to the end of the text.
+  const FAKE_PRIVATE_KEY =
+    "-----BEGIN OPENSSH PRIVATE KEY-----MIIBunrepeatable-secret";
+
+  /** The step's refusal message and the whole error set it renders, on a draft
+   * whose keys are all enabled and whose only fault is `step`. */
+  function refusalFor(step: TransformStep): {
+    keys: string | undefined;
+    rendered: string;
+  } {
+    const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    const imported = withFirstElementTransform(draft, [step]);
+    // The assumption this rests on: the schema is what refuses the document, so
+    // the mapping below is running on a real schema issue.
+    expect(safeParseLinkageTerms(buildAdvancedTerms(imported)).success).toBe(
+      false,
+    );
+
+    const result = validateAdvancedInvite(imported, seed, now);
+    expect(result.canGenerate).toBe(false);
+    expect(result.terms).toBeUndefined();
+    expect(result.errors.keys).not.toMatch(/Enable at least one linkage key/);
+    return {
+      keys: result.errors.keys,
+      rendered: Object.values(result.errors).join("\n"),
+    };
+  }
+
+  test("a null_if declaring both value and values names the pair", () => {
+    const { keys } = refusalFor({
+      function: "null_if",
+      params: { value: "UNKNOWN", values: ["UNKNOWN", "N/A"] },
+    });
+    expect(keys).toMatch(/a single value and a list of values/);
+  });
+
+  test("a param holding a private key names it and echoes none of it", () => {
+    const { keys, rendered } = refusalFor({
+      function: "null_if",
+      params: { value: FAKE_PRIVATE_KEY },
+    });
+    expect(keys).toMatch(/holding a private key/);
+    expect(rendered).not.toContain("unrepeatable-secret");
+    expect(rendered).not.toContain("BEGIN");
+  });
+
+  test("a step with more params than are displayed names the bound", () => {
+    const { keys } = refusalFor({
+      function: "trim_whitespace",
+      params: Object.fromEntries(
+        Array.from({ length: MAX_DISPLAYED_PARAMS + 1 }, (_unused, index) => [
+          `p${index}`,
+          1,
+        ]),
+      ),
+    });
+    expect(keys).toMatch(
+      new RegExp(`more than ${String(MAX_DISPLAYED_PARAMS)} parameters`),
+    );
+  });
+
+  test("a step at the displayed bound generates", () => {
+    // Not vacuous: the refusals above are these shapes', not every imported
+    // step's -- a step one param narrower clears all three.
+    const { draft, seed } = seedAdvancedInvite("Org", ALL_COLUMNS);
+    const imported = withFirstElementTransform(draft, [
+      {
+        function: "trim_whitespace",
+        params: Object.fromEntries(
+          Array.from({ length: MAX_DISPLAYED_PARAMS }, (_unused, index) => [
+            `p${index}`,
+            1,
+          ]),
+        ),
+      },
+    ]);
+    const result = validateAdvancedInvite(imported, seed, now);
+    expect(result.errors.keys).toBeUndefined();
+    expect(result.canGenerate).toBe(true);
   });
 });
 

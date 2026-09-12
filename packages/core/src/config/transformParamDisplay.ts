@@ -63,12 +63,23 @@ export function describeTransformParamValue(value: unknown): string {
  * The `key: value` line the consent summary renders one declared parameter
  * as, before the display sanitizer reads it. Shared with the summary so a
  * refusal below judges the same characters the sanitizer would.
+ *
+ * The concatenation is guarded like the encoding above: a rendered value
+ * within a few code units of the engine's string limit overflows on the
+ * concatenation itself, and that RangeError would escape safeParse, which
+ * converts a ZodError to a result but not an internal throw. Such a line
+ * renders empty, the fallback an unrenderable value takes.
  */
 export function describedTransformParamEntry(
   param: string,
   value: unknown,
 ): string {
-  return `${param}: ${describeTransformParamValue(value)}`;
+  const rendered = describeTransformParamValue(value);
+  try {
+    return `${param}: ${rendered}`;
+  } catch {
+    return "";
+  }
 }
 
 /**
