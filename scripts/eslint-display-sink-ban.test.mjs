@@ -3,6 +3,12 @@ import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { ESLint } from "eslint";
 import { beforeAll, describe, expect, it } from "vitest";
+import repoConfig from "../eslint.config.mjs";
+import {
+  PROJECT_PARSER_OPTIONS,
+  typeAwareRuleNames,
+  withoutTypeAwareLayer,
+} from "./eslint-strip-type-aware-layer.mjs";
 
 // Coverage of the display-sink ban in the repo-root eslint.config.mjs: no raw
 // error may be rendered at an operator-facing sink. Operator-facing escaping
@@ -15,14 +21,18 @@ import { beforeAll, describe, expect, it } from "vitest";
 //
 // Each case is linted through the real repo config against a path inside a
 // guarded tree, so the scope, the selectors, and the rule wiring are all
-// exercised as CI runs them rather than restated here.
+// exercised as CI runs them rather than restated here. One transform is
+// applied: the type-aware layer is stripped off (withoutTypeAwareLayer), so
+// what this file reports rests on the text it hands in and nothing else, and no
+// lint here waits on a TypeScript program being built.
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, "..");
 
 const eslint = new ESLint({
   cwd: repoRoot,
-  overrideConfigFile: resolve(repoRoot, "eslint.config.mjs"),
+  overrideConfigFile: true,
+  baseConfig: withoutTypeAwareLayer(repoConfig),
 });
 
 /**
@@ -49,12 +59,11 @@ const BROKER_FILE = resolve(
   "packages/peerjs-broker/src/banFixture.ts",
 );
 
-// Loading the flat config and the typescript-eslint parser for the first time
-// is the expensive part of a lintText call, independent of which file or how
-// much text it is given; under cold process/CPU load that one-time cost alone
-// can exceed vitest's 5s test default. A beforeAll absorbs it once, under its
-// own explicit budget, so no individual case pays for it inside the default
-// test timeout.
+// Loading the typescript-eslint parser for the first time is the expensive part
+// of a lintText call, independent of which file or how much text it is given;
+// under cold process/CPU load that one-time cost alone can exceed vitest's 5s
+// test default. A beforeAll absorbs it once, under its own explicit budget, so
+// no individual case pays for it inside the default test timeout.
 const LINTER_WARM_UP_TIMEOUT_MS = 30_000;
 
 // Reserved for the canary: a guarded path that exists on disk, parses, and is
@@ -158,6 +167,28 @@ describe("the display-sink raw-error ban", () => {
       result.messages.map((message) => message.message).join("; "),
       `${CORE_FILE_FIRST_PARSE}: the source on disk was linted instead, so a case asserting zero problems proves nothing about the text it handed in`,
     ).toMatch(/Parsing error/);
+  });
+
+  it("lints every path here with no TypeScript program behind it", async () => {
+    for (const filePath of [
+      CORE_FILE,
+      CLI_FILE,
+      BROKER_FILE,
+      CORE_FILE_FIRST_PARSE,
+    ]) {
+      const config = await eslint.calculateConfigForFile(filePath);
+      const parserOptions = config.languageOptions?.parserOptions ?? {};
+      expect(
+        Object.keys(parserOptions).filter((option) =>
+          PROJECT_PARSER_OPTIONS.includes(option),
+        ),
+        `${filePath}: a TypeScript program is configured, so a type-aware rule can run -- and crash -- on ground this file does not test`,
+      ).toEqual([]);
+      expect(
+        typeAwareRuleNames(config.rules, (prefix) => config.plugins?.[prefix]),
+        `${filePath}: a type-aware rule survived the strip`,
+      ).toEqual([]);
+    }
   });
 
   for (const [label, body] of BANNED) {

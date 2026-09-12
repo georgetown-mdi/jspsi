@@ -292,16 +292,30 @@ test("an interrupt is not made to wait for a stats collection", async () => {
   ).resolves.toBeUndefined();
 });
 
-test("a stats collection that never answers does not hold the process", async () => {
-  // Measured in a child process, since it is the process exiting that is under
-  // test: the ceiling's timer must not be what a finished run waits on.
-  const probe = fileURLToPath(
-    new URL("../../iceStatsExitProbe.ts", import.meta.url),
-  );
-  const { stdout } = await promisify(execFile)(
-    process.execPath,
-    ["--import=tsx", probe],
-    { cwd: fileURLToPath(new URL("../../..", import.meta.url)) },
-  );
-  expect(Number(stdout)).toBeLessThan(ICE_STATS_TIMEOUT_MS);
-});
+// Starting the child and transpiling what it imports is not what this case
+// asserts, and it is the part that grows with CPU contention: about 0.5s in a
+// run on an idle machine, and 6.4 to 7.6s on one saturated by other work, past
+// vitest's 5s default. The budget is about four times that loaded measurement,
+// so the case reports what the child measured rather than how loaded the
+// machine was.
+const EXIT_PROBE_TIMEOUT_MS = 30_000;
+
+test(
+  "a stats collection that never answers does not hold the process",
+  async () => {
+    // Measured in a child process, since it is the process exiting that is under
+    // test: the ceiling's timer must not be what a finished run waits on. What
+    // the child reports is wall-clock, and it stayed in the tens of
+    // milliseconds against the 2000ms ceiling at every load level above.
+    const probe = fileURLToPath(
+      new URL("../../iceStatsExitProbe.ts", import.meta.url),
+    );
+    const { stdout } = await promisify(execFile)(
+      process.execPath,
+      ["--import=tsx", probe],
+      { cwd: fileURLToPath(new URL("../../..", import.meta.url)) },
+    );
+    expect(Number(stdout)).toBeLessThan(ICE_STATS_TIMEOUT_MS);
+  },
+  EXIT_PROBE_TIMEOUT_MS,
+);

@@ -5,7 +5,12 @@ import { ESLint } from "eslint";
 import ts from "typescript";
 import { beforeAll, describe, expect, it } from "vitest";
 
-import { DISPLAYABLE_PRODUCERS } from "../eslint.config.mjs";
+import repoConfig, { DISPLAYABLE_PRODUCERS } from "../eslint.config.mjs";
+import {
+  PROJECT_PARSER_OPTIONS,
+  typeAwareRuleNames,
+  withoutTypeAwareLayer,
+} from "./eslint-strip-type-aware-layer.mjs";
 import { filesUnder, parseFile } from "./lib/typeScriptSources.mjs";
 
 // Coverage of the Displayable-as-error-text ban in the repo-root
@@ -20,7 +25,10 @@ import { filesUnder, parseFile } from "./lib/typeScriptSources.mjs";
 //
 // Each case is linted through the real repo config against a path inside a
 // guarded tree, so the scope, the selectors, and the rule wiring are all
-// exercised as CI runs them rather than restated here.
+// exercised as CI runs them rather than restated here. One transform is applied:
+// the type-aware layer is stripped off (withoutTypeAwareLayer), so what this
+// file reports rests on the text it hands in and nothing else, and no lint here
+// waits on a TypeScript program being built.
 //
 // The other half is the producer list the selectors name. A Displayable is a
 // brand the type system holds, so the rule can only name the calls that return
@@ -32,7 +40,8 @@ const repoRoot = resolve(here, "..");
 
 const eslint = new ESLint({
   cwd: repoRoot,
-  overrideConfigFile: resolve(repoRoot, "eslint.config.mjs"),
+  overrideConfigFile: true,
+  baseConfig: withoutTypeAwareLayer(repoConfig),
 });
 
 /**
@@ -67,12 +76,11 @@ const BROKER_FILE = resolve(
   "packages/peerjs-broker/src/banFixture.ts",
 );
 
-// Loading the flat config and the typescript-eslint parser for the first time
-// is the expensive part of a lintText call, independent of which file or how
-// much text it is given; under cold process/CPU load that one-time cost alone
-// can exceed vitest's 5s test default. A beforeAll absorbs it once, under its
-// own explicit budget, so no individual case pays for it inside the default
-// test timeout.
+// Loading the typescript-eslint parser for the first time is the expensive part
+// of a lintText call, independent of which file or how much text it is given;
+// under cold process/CPU load that one-time cost alone can exceed vitest's 5s
+// test default. A beforeAll absorbs it once, under its own explicit budget, so
+// no individual case pays for it inside the default test timeout.
 const LINTER_WARM_UP_TIMEOUT_MS = 30_000;
 
 // Reserved for the canary: a guarded path that exists on disk, parses, and is
@@ -189,6 +197,30 @@ describe("the Displayable-as-error-text ban", () => {
   beforeAll(async () => {
     await banHits(CORE_TEST_FILE, fixture("throw new Error(`at ${name}`);"));
   }, LINTER_WARM_UP_TIMEOUT_MS);
+
+  it("lints every path here with no TypeScript program behind it", async () => {
+    for (const filePath of [
+      CORE_TEST_FILE,
+      CORE_SRC_FILE,
+      CLI_SRC_FILE,
+      CLI_TEST_FILE,
+      BROKER_FILE,
+      CORE_FILE_FIRST_PARSE,
+    ]) {
+      const config = await eslint.calculateConfigForFile(filePath);
+      const parserOptions = config.languageOptions?.parserOptions ?? {};
+      expect(
+        Object.keys(parserOptions).filter((option) =>
+          PROJECT_PARSER_OPTIONS.includes(option),
+        ),
+        `${filePath}: a TypeScript program is configured, so a type-aware rule can run -- and crash -- on ground this file does not test`,
+      ).toEqual([]);
+      expect(
+        typeAwareRuleNames(config.rules, (prefix) => config.plugins?.[prefix]),
+        `${filePath}: a type-aware rule survived the strip`,
+      ).toEqual([]);
+    }
+  });
 
   it("lints the text it is handed, not the file on disk", async () => {
     expect(
@@ -344,6 +376,12 @@ function exportedDisplayableProducers(file) {
     .map(([name]) => name);
 }
 
+// Parsing every governed source costs about 0.7s on an idle machine, and rose to
+// 10.9s under a full scripts-project run on a container already saturated by
+// other work, which outran vitest's 10s hook default. The budget below is about
+// five times that loaded measurement.
+const PRODUCER_SCAN_TIMEOUT_MS = 60_000;
+
 describe("the producers the ban names", () => {
   /** Each exported producer the governed sources declare, to the file it is in. */
   const found = new Map();
@@ -355,7 +393,7 @@ describe("the producers the ban names", () => {
       ))
         for (const name of exportedDisplayableProducers(file))
           found.set(name, file);
-  });
+  }, PRODUCER_SCAN_TIMEOUT_MS);
 
   it("holds every exported Displayable producer in the governed sources", () => {
     expect(
