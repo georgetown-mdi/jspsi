@@ -42,14 +42,14 @@ jobs:
         # The same derivation native_alpine.yaml makes, for the same reason: the
         # runtime stage is the LAST `FROM`, a digest-pinned ref is kept whole so
         # the exact shipped artifact is measured, and a base that has left
-        # node:*-alpine invalidates the premise -- a provider measured beside a
+        # node:*-alpine invalidates the assumption -- a provider measured beside a
         # different Node and libc says nothing about what ships.
         run: |
           base=$(grep -iE '^FROM[[:space:]]' Dockerfile | tail -1 | awk '{print $2}' || true)
           case "$base" in
             node:*-alpine | node:*-alpine@*) ;;
             *)
-              echo "Dockerfile runtime base '$base' is not a node:*-alpine image; this probe's premise is stale -- update or retire it." >&2
+              echo "Dockerfile runtime base '$base' is not a node:*-alpine image; this probe's assumption is stale -- update or retire it." >&2
               exit 1
               ;;
           esac

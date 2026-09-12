@@ -11,19 +11,19 @@ on:
   # check, configure branch protection so a path-skipped run does not block an
   # unrelated PR -- a skipped required check otherwise stays pending.
   #
-  # Note: this PR filter deliberately diverges from the push filter in
-  # eb_deploy.yaml on test sources -- it uses the broad apps/web/** and
-  # packages/core/** globs so a test-only PR (deleting or weakening assertions,
-  # or changing vitest config) still runs the full suite, including the core
-  # tests this gate runs via `npm run -w packages/core test`. The deploy filter
-  # stays scoped to deploy-affecting sources only and omits the test/** trees.
-  # The two filters cannot share a single list because of this intentional
-  # difference. packages/core/** matches the sibling cli_build_and_test.yaml,
-  # and packages/peerjs-broker/** is here because the web app consumes the
-  # signaling broker from that workspace and bundles it into the deployed
-  # server. packages/testkit/** is here for the same reason the test trees are:
-  # the web unit suite is driven by fixtures that workspace holds, so a change
-  # confined to them would otherwise weaken this gate without re-running it.
+  # Note: this PR filter diverges from the push filter in eb_deploy.yaml on test
+  # sources -- it uses the broad apps/web/** and packages/core/** globs so a
+  # test-only PR (deleting or weakening assertions, or changing vitest config)
+  # still runs the full suite, including the core tests this gate runs via `npm
+  # run -w packages/core test`. The deploy filter stays scoped to
+  # deploy-affecting sources only and omits the test/** trees. The two filters
+  # cannot share a single list because of this intentional difference.
+  # packages/core/** matches the sibling cli_build_and_test.yaml, and
+  # packages/peerjs-broker/** is here because the web app consumes the signaling
+  # broker from that workspace and bundles it into the deployed server.
+  # packages/testkit/** is here for the same reason the test trees are: the web
+  # unit suite is driven by fixtures that workspace holds, so a change confined
+  # to them would otherwise weaken this gate without re-running it.
   pull_request:
     branches: [main, staging]
     paths:
@@ -52,7 +52,7 @@ on:
 # NOT keyed on github.workflow: in a workflow_call invocation the github context
 # is the caller's, so github.workflow resolves to eb_deploy.yaml's name and this
 # block would share eb_deploy.yaml's concurrency group, self-cancelling the
-# deploy on a single push (a GitHub Actions reusable-workflow footgun). A literal
+# deploy on a single push (a GitHub Actions reusable-workflow hazard). A literal
 # prefix keeps this group independent of any caller. The || github.run_id
 # fallback gives the deploy leg's reused build a unique group (head_ref is empty
 # off pull_request), so cancel-in-progress is inert there and never cancels a
@@ -94,13 +94,13 @@ jobs:
       - name: Build server
         run: npm run -w apps/web build
       # eb_deploy.yaml's push filter is narrower than the trees it names, on the
-      # premise that what it leaves out is in no deployed import graph. This
-      # holds that premise against a real build: every repository source the
+      # assumption that what it leaves out is in no deployed import graph. This
+      # holds that assumption against a real build: every repository source the
       # deployed server reads has to match a filter that redeploys it, or an
       # edit to it ships nothing and production goes stale with nothing red.
       # Here rather than in the repo-wide static checks because that gate is
-      # deliberately unfiltered and this needs a web build, while this workflow
-      # is already scoped to the trees that can break the premise and has the
+      # unfiltered and this needs a web build, while this workflow is already
+      # scoped to the trees that can break the assumption and has the
       # dependencies installed. It runs its own instrumented build (the recorder
       # in apps/web/vite.config.ts adds no hook that can change a chunk), and
       # runs before the tests so the artifact packaged below is the build whose
@@ -133,9 +133,9 @@ jobs:
       # this pair rather than of the shared setup. It stands up no server and no
       # browser: its whole world is a temporary file-drop directory.
       #
-      # It runs here AND on the CLI workflow's own leg, deliberately: the drift it
-      # exists to catch can land on either runtime, and each workflow's path
-      # filter sees only its own.
+      # It runs here AND on the CLI workflow's own leg: the drift it exists to
+      # catch can land on either runtime, and each workflow's path filter sees
+      # only its own.
       - name: Build the CLI for the cross-runtime suite
         run: npm run build -w apps/cli
       - name: CLI/web cross-runtime interop

@@ -3,7 +3,7 @@
 # release, eb_build_and_test) each run this before their app-specific build and
 # test steps, so the Node version and install/cache strategy live in one place.
 #
-# Checkout is deliberately NOT part of this action: a local action referenced as
+# Checkout is NOT part of this action: a local action referenced as
 # ./.github/actions/setup only exists on the runner after actions/checkout has
 # run, so each workflow keeps its own checkout step before calling this.
 #
@@ -108,11 +108,11 @@ runs:
       #     a re-vendor a new key.
       #
       # The core build key adds what rollup reads to produce dist/: the sources,
-      # its config, and the tsconfig chain. packages/core/package.json is already
-      # in the install key, and the toolchain is the installed tree that key
-      # covers. packages/core/test is deliberately absent -- a type error there
-      # is a warning the build exits 0 on (driven against this rollup config), so
-      # it changes neither dist/ nor the build's failure surface, and `npm run
+      # its config, and the tsconfig chain. packages/core/package.json is
+      # already in the install key, and the toolchain is the installed tree that
+      # key covers. packages/core/test is absent -- a type error there is a
+      # warning the build exits 0 on (driven against this rollup config), so it
+      # changes neither dist/ nor the build's failure surface, and `npm run
       # typecheck` is what holds it.
       env:
         RUNNER_OS: ${{ runner.os }}

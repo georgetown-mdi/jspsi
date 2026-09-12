@@ -40,7 +40,7 @@ covers how to run the interactive session.
   Apply approved edits with `node .claude/scripts/edit-issue.mjs` per the
   ruleset. `node .claude/scripts/lint-issues.mjs <project> <itemId>...` flags
   reference hazards (dead item IDs, opaque node IDs, stale line anchors) worth
-  surfacing.
+  raising.
 - **Epic scoping.** Break a large goal into a set of well-formed tasks. Lay out
   the proposed breakdown and dependencies first, get agreement, then draft each
   task with the ruleset template and file the approved ones, cross-referencing

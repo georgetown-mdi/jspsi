@@ -75,7 +75,7 @@ export function keyFieldViolations({ fieldSet, keySet }) {
       if (field === undefined) {
         violations.push({
           kind: "outside",
-          message: `Key "${key.name}" of ${keySet.name} matches on \`${element.field}\`, which ${fieldSet.name} does not declare. A zero-setup party derives its terms from its own file, so a built-in key over a field outside the guaranteed minimum strands whoever does not carry it. Build the key from the declared fields, or take the decision to widen ${fieldSet.name} deliberately (${NOTE_SECTION}).`,
+          message: `Key "${key.name}" of ${keySet.name} matches on \`${element.field}\`, which ${fieldSet.name} does not declare. A zero-setup party derives its terms from its own file, so a built-in key over a field outside the guaranteed minimum strands whoever does not carry it. Build the key from the declared fields, or take the decision to widen ${fieldSet.name} (${NOTE_SECTION}).`,
         });
       } else if (field.type !== field.name) {
         violations.push({

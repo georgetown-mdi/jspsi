@@ -81,7 +81,7 @@ export function pinViolations(workflowReferences, actionReferences) {
     .filter((reference) => !isPinned(reference))
     .map(
       ({ file, name }) =>
-        `${name} in ${file} names no ref -- an unpinned remote reference fixes no version, so nothing here determines which code the step runs and no release or advisory has an occurrence to surface on. Write it as owner/action@ref.`,
+        `${name} in ${file} names no ref -- an unpinned remote reference fixes no version, so nothing here determines which code the step runs and no release or advisory has an occurrence to be reported against. Write it as owner/action@ref.`,
     );
   const workflowsByName = byName(workflowReferences.filter(isPinned));
 
@@ -89,7 +89,7 @@ export function pinViolations(workflowReferences, actionReferences) {
     const workflow = workflowsByName.get(name);
     if (!workflow) {
       violations.push(
-        `${name} is pinned only under ${ACTION_DIR}: ${describeRefs(composite)} -- no workflow under ${WORKFLOW_DIR} uses it, and the github-actions Dependabot block is configured against ${WORKFLOW_DIR}, so this pin has no occurrence there for a release or advisory to surface on. Mirror it into a workflow that legitimately uses the action, or extend Dependabot coverage to ${ACTION_DIR} deliberately.`,
+        `${name} is pinned only under ${ACTION_DIR}: ${describeRefs(composite)} -- no workflow under ${WORKFLOW_DIR} uses it, and the github-actions Dependabot block is configured against ${WORKFLOW_DIR}, so this pin has no occurrence there for a release or advisory to be reported against. Mirror it into a workflow that legitimately uses the action, or extend Dependabot coverage to ${ACTION_DIR}.`,
       );
       continue;
     }

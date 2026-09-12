@@ -24,13 +24,13 @@
 //      derived from it; titleBudget()'s fallback for an unnumbered pull request
 //      serves a direct call with no number, not reachable through this CLI.
 //
-// The limits are deliberate. This is a mechanical SAFETY CHECK for the tells that a
-// checklist was left unresolved or resolved dishonestly by shape; whether a
-// stated reason is true stays a review call, the same philosophy as
-// check-contributing-scope.mjs, and an author who edits the sha without
-// re-reading the diff passes rule 6, which reads a string and not a review.
-// Only the first `## Checklist` section is read, so a line in a second one is
-// not.
+// These limits are by design. This is a mechanical SAFETY CHECK for the tells
+// that a checklist was left unresolved, or resolved with a clause that answers
+// nothing; whether a stated reason is true stays a review call, the same
+// philosophy as check-contributing-scope.mjs, and an author who edits the sha
+// without re-reading the diff passes rule 6, which reads a string and not a
+// review. Only the first `## Checklist` section is read, so a line in a second
+// one is not.
 //
 // Rule 7's own limit: CONTRIBUTING.md lets a pull request holding a single
 // commit skip a hand-written squash message, since GitHub takes that commit's

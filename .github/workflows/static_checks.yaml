@@ -108,7 +108,7 @@ jobs:
       # than anything about the branch under test, and which reddened ten open
       # pull requests at once when it last happened. An advisory finding is never
       # retried -- see the script's header for how the two are told apart, and
-      # its test for the drive against the real npm that settles it. It answers
+      # its test for the drive against the real npm that decides it. It answers
       # `found 0 vulnerabilities` against the committed lockfile, so it gates on
       # any finding at all: no `--audit-level`, because relaxing the threshold to
       # clear one accepted finding is a standing acceptance of every future

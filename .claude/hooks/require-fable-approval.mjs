@@ -89,7 +89,7 @@ function main() {
     const agentsDir = join(projectDir, ".claude", "agents");
     if (pinnedModelFor(agentsDir, subagentType) === "fable") ask(ASK_REASON);
   } catch {
-    process.exit(0); // fail open; require-agent-model backstops unverifiable pins
+    process.exit(0); // fail open; require-agent-model catches unverifiable pins
   }
   process.exit(0);
 }

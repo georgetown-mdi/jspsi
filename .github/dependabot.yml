@@ -9,7 +9,7 @@ updates:
       day: monday
     open-pull-requests-limit: 10
     # Supply-chain hardening: never adopt a freshly published release. The
-    # cooldown holds a new version until the ecosystem has had time to surface a
+    # cooldown holds a new version until the ecosystem has had time to expose a
     # compromised release (hijacked maintainer token, malicious postinstall)
     # before we ingest it, trading a few days of patch latency for not being the
     # first to pull. It delays routine version bumps only.
@@ -96,10 +96,10 @@ updates:
       # ecosystems; the semver-*-days keys are supported for npm only.
       default-days: 7
     ignore:
-      # The default image's node base is deliberately NOT here: its digest-only
-      # bumps are the mechanical class this block exists for, and the freeze
-      # test in scripts/dockerfile-freeze.test.mjs is what forces the mirrored
-      # literal to be reconciled on the same pull request.
+      # The default image's node base is NOT here: its digest-only bumps are the
+      # mechanical class this block exists for, and the freeze test in
+      # scripts/dockerfile-freeze.test.mjs is what forces the mirrored literal
+      # to be reconciled on the same pull request.
       #
       # The FIPS variant's Amazon Linux base is the opposite case, because a
       # move of it is not a one-line digest edit. Dockerfile.fips's FROM digest,
@@ -123,7 +123,7 @@ updates:
   # names the locally built tag -- so a bump here is the one-line digest edit
   # this ecosystem exists for. It ships no code and runs in no workflow, but a
   # coturn advisory reaches a deployment that was stood up from it, and a pull
-  # request is what surfaces one.
+  # request is what reports one.
   - package-ecosystem: docker
     directory: "/infra/relay"
     target-branch: "staging"
@@ -143,7 +143,7 @@ updates:
   # A pin that also appears in a composite action under .github/actions is not
   # relied upon to be tracked there. Coverage reaches it through the workflow
   # occurrence instead: scripts/check-action-pin-drift.mjs holds every composite
-  # pin identical to a workflow pin, so a release or advisory surfacing on the
+  # pin identical to a workflow pin, so a release or advisory reported on the
   # workflow pin covers the composite occurrence too, and the bump answering it
   # cannot land on the workflow and leave the composite stale.
   - package-ecosystem: github-actions
@@ -172,7 +172,7 @@ updates:
       # of freezing under an ignore that suppresses its every update.
       #
       # An org whose actions are not floating-major pinned must stay off this
-      # list for its bumps to surface -- sigstore is absent because
+      # list for its bumps to be reported -- sigstore is absent because
       # cosign-installer publishes no floating major tag, so it stays
       # exact-pinned (@v4.1.2) and its patch bumps are legitimate, reviewable
       # updates to the release-signing tool.

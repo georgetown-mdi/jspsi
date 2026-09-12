@@ -386,7 +386,7 @@ export function assess(manifest, lock) {
       lines: [
         `Every ${PACKAGE} range the committed lockfile declares admits ${PACKAGE}@${target}, the version it installs, so the override overrules nothing.`,
         DROP_IT,
-        `What that rests on is the lockfile's declarations, not npm's resolution without the override -- regenerating and auditing is what settles the removal.`,
+        `What that rests on is the lockfile's declarations, not npm's resolution without the override -- regenerating and auditing is what confirms the removal.`,
       ],
     };
   }

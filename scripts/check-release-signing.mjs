@@ -391,7 +391,7 @@ export function publishSequenceViolations(source, file, published = {}) {
       const state = pushState(build.push);
       if (state === "unknown") {
         violations.push(
-          `${file}: ${where(build)} sets \`push: ${build.push}\`, which this check cannot read as pushed or held. Write a literal true or false, so whether the step publishes an image stays legible here.`,
+          `${file}: ${where(build)} sets \`push: ${build.push}\`, which this check cannot read as pushed or held. Write a literal true or false, so whether the step publishes an image stays readable here.`,
         );
         continue;
       }
@@ -566,7 +566,7 @@ export function couplingViolations({
   const translated = refPatternForTagFilter(filters[0]);
   if (translated.problem !== undefined) {
     violations.push(
-      `${workflowPath} triggers on tags matching \`${filters[0]}\`, which this check cannot compare against the published identity: ${translated.problem}. Compare the two by hand and narrow the filter, or widen this check deliberately.`,
+      `${workflowPath} triggers on tags matching \`${filters[0]}\`, which this check cannot compare against the published identity: ${translated.problem}. Compare the two by hand and narrow the filter, or widen this check.`,
     );
     return violations;
   }

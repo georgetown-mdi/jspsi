@@ -68,18 +68,19 @@
 // Manifest reading: the root package.json plus every package.json its
 // `workspaces` globs reach. A declaration is a key of `dependencies`,
 // `devDependencies`, `optionalDependencies`, or `peerDependencies`, matched by
-// its exact name -- `@types/ssh2` is a package of its own, reaches no internal,
-// and has no checklist. Exact means a bare `major.minor.patch`, optionally
-// including a prerelease or build suffix, and nothing else: a specifier that
-// pins by another route (a `file:` tarball, a git commit, an `npm:` alias)
-// fails here too, because whether such a route pins is a judgment per
-// dependency rather than a pattern, and a checklist for one wants this rule
-// widened deliberately. The third rule compares those specifiers as text over
-// every declaration found, so two fields of one manifest disagreeing fails it
-// exactly as two manifests do. The workspace set is expanded from those globs
-// here rather than asked of npm; the test holds that expansion to the set npm
-// itself recorded in package-lock.json, so a glob form read differently
-// reddens there instead of silently shrinking the sweep.
+// its exact name -- `@types/ssh2` is a package of its own, reaches no
+// internal, and has no checklist. Exact means a bare `major.minor.patch`,
+// optionally including a prerelease or build suffix, and nothing else: a
+// specifier that pins by another route (a `file:` tarball, a git commit, an
+// `npm:` alias) fails here too, because whether such a route pins is a
+// judgment per dependency rather than a pattern, and a checklist for one wants
+// this rule widened by an explicit decision. The third rule compares those
+// specifiers as text over every declaration found, so two fields of one
+// manifest disagreeing fails it exactly as two manifests do. The workspace set
+// is expanded from those globs here rather than asked of npm; the test holds
+// that expansion to the set npm itself recorded in package-lock.json, so a
+// glob form read differently reddens there instead of silently shrinking the
+// sweep.
 //
 // What this check does not cover:
 //   - Which group a package lands in. Whether a bump belongs in a reviewed
@@ -351,13 +352,13 @@ export function exactnessViolations(packages, declarations) {
     .filter((name) => !declarations.some((entry) => entry.name === name))
     .map(
       (name) =>
-        `${PINS_DOC} carries an "Upgrading ..." checklist for ${name}, but no manifest in this workspace declares it, so no version of it is pinned here for the checklist's premises to rest on. Either the dependency is gone and the checklist goes with it, or its heading misspells the package name.`,
+        `${PINS_DOC} carries an "Upgrading ..." checklist for ${name}, but no manifest in this workspace declares it, so no version of it is pinned here for the checklist's assumptions to rest on. Either the dependency is gone and the checklist goes with it, or its heading misspells the package name.`,
     );
   const inexact = declarations
     .filter(({ specifier }) => !EXACT_VERSION.test(specifier))
     .map(
       ({ path, field, name, specifier }) =>
-        `${path} (${field}) declares ${name} as ${JSON.stringify(specifier)}, which is not a bare major.minor.patch version. ${PINS_DOC} carries an "Upgrading ..." checklist for ${name}, whose premises were read off one version's internals; a specifier admitting another lets that one install without the checklist being worked through. Pin the exact version, or retire the checklist if those internals are no longer load-bearing.`,
+        `${path} (${field}) declares ${name} as ${JSON.stringify(specifier)}, which is not a bare major.minor.patch version. ${PINS_DOC} carries an "Upgrading ..." checklist for ${name}, whose assumptions were read off one version's internals; a specifier admitting another lets that one install without the checklist being worked through. Pin the exact version, or retire the checklist if those internals are no longer critical.`,
     );
   return [...undeclared, ...inexact];
 }
@@ -379,7 +380,7 @@ export function versionAgreementViolations(packages, declarations) {
       )
       .join(", ");
     return [
-      `This workspace declares ${name} at ${versions.size} different versions: ${listing}. ${PINS_DOC} carries an "Upgrading ..." checklist for ${name}, whose premises were read off one version's internals; a manifest naming another installs internals the checklist was never worked through against. Declare one version everywhere, or retire the checklist if those internals are no longer load-bearing.`,
+      `This workspace declares ${name} at ${versions.size} different versions: ${listing}. ${PINS_DOC} carries an "Upgrading ..." checklist for ${name}, whose assumptions were read off one version's internals; a manifest naming another installs internals the checklist was never worked through against. Declare one version everywhere, or retire the checklist if those internals are no longer critical.`,
     ];
   });
 }

@@ -9,71 +9,57 @@
 // lives in its own worktree under .claude/worktrees/ and every writing spawn is
 // pointed at that tree by absolute path. A write that lands in the primary
 // checkout instead is therefore always a mistake -- it puts the edit on whatever
-// branch the primary checkout happens to hold (staging, typically), off the
-// branch under review, where no round will ever see it and no PR will include it.
+// branch that checkout happens to hold (staging, typically), off the branch under
+// review, where no round will ever see it and no PR will include it. The sibling
+// case is the same loss by a different route: the file tools take a literal
+// absolute path, every unmodified tracked file is byte-identical across the
+// trees, so reusing a path read from context succeeds, reads back correctly, and
+// shows up only as an unexplained diff on somebody else's branch.
 //
-// THE SIBLING CASE. The file tools take a literal absolute path and are not
-// rooted to the session's directory, so a session working in one worktree writes
-// into another simply by reusing a path it read from context -- and every
-// unmodified tracked file is byte-identical across the trees, so the write
-// succeeds, reads back correctly, and shows up only as an unexplained diff on
-// somebody else's branch. That is refused for the same reason the main checkout
-// is: the bytes land on a branch nobody meant to change.
+// The two rules differ in scope. The main-worktree refusal is path-scoped: it
+// fires whoever writes and from wherever, since no session writes that content.
+// The sibling refusal binds only a session already working inside a linked
+// worktree, because pointing a spawn at a tree by absolute path from the primary
+// checkout is the dispatch shape the by-ref model is built on. A session
+// directory that cannot be placed in a worktree leaves the sibling rule silent.
 //
-// WHERE THE SESSION IS, and why it matters for exactly one of the two rules. The
-// main-worktree refusal is path-scoped: it fires whoever writes and from
-// wherever, since no session writes that content. The sibling refusal cannot be,
-// because pointing a spawn at a tree by absolute path from the primary checkout
-// is the dispatch shape the by-ref model is built on. So the sibling rule binds
-// only a session already working inside a linked worktree, where a write into a
-// DIFFERENT linked worktree has no legitimate reading. A session directory that
-// cannot be placed in a worktree at all leaves the sibling rule silent, like
-// every other unanswerable state here.
+// WHAT PASSES is decided by IGNORED-ness, not tracked-ness: the only legitimate
+// writes to a checkout the session is not working in are to paths git ignores --
+// scratch/, briefs, round artifacts -- plus anything outside the repository,
+// which is not this hook's business. A brand-new source file created in the
+// primary checkout lands on whatever branch it holds exactly as an edit to a
+// tracked one does, and `git check-ignore` answers for both, asked of the
+// worktree that owns the path. A gitignored local a worktree holds as a symlink
+// into another tree resolves to its target's checkout before either rule runs.
 //
-// WHAT PASSES, and why the test is IGNORED-ness rather than tracked-ness. Under
-// the by-ref model the main session writes no branch content at all, so the only
-// legitimate writes to this checkout are to paths git ignores -- scratch/,
-// briefs, round artifacts -- plus anything outside the repository entirely
-// (memory files, /tmp), which is not this hook's business. Everything else there
-// is a mistake whether the file exists yet or not: a brand-new source file
-// created in the primary checkout lands on whatever branch it holds exactly as
-// an edit to a tracked one does, and `git check-ignore` is the one question that
-// answers for both. The same question decides the sibling case, asked of the
-// worktree that owns the path: an ignored file is not that branch's content
-// either. It also passes the gitignored locals a worktree may hold as symlinks
-// into another tree, which resolve to their target's checkout before either rule
-// looks at them.
-//
-// FAIL OPEN, by design, and opposite to require-clean-tree-for-review.mjs:
-// this guard shapes where work is written, and nothing about correctness or
-// disclosure rides on it, while a bug here that failed closed would wedge every
-// edit in every tree. So the refusal fires only where the path is positively
-// determined to be non-ignored content of the main worktree; every unanswerable
-// state (no git, a path git will not resolve, a check-ignore that errors rather
-// than answering, an unreadable event) allows.
+// FAIL OPEN, by design, and opposite to require-clean-tree-for-review.mjs: this
+// guard shapes where work is written, nothing about correctness or disclosure
+// rides on it, and a bug here that failed closed would wedge every edit in every
+// tree. The refusal fires only where the path is positively determined to be
+// non-ignored content of a checkout the session is not working in; every
+// unanswerable state allows.
 //
 // THE BY-DESIGN OVERRIDE, the idiom block-model-drop-sendmessage.mjs sets with
-// its [accept-model-drop] marker: a maintainer-directed edit of a checkout the
-// session is not working in stays possible by creating the sentinel file named in
-// OVERRIDE_SENTINEL below IN THAT CHECKOUT, which lifts this hook for it until
-// the file is deleted. Edit and Write have no free-text field a marker could
-// ride in, so the opt-in is a file rather than a phrase. Like that marker
-// it is self-applicable -- what it buys is that the override is named, visible in
-// the tree, and reversible, not that it cannot be forged.
+// its [accept-model-drop] marker: a maintainer-directed edit of such a checkout
+// stays possible by creating the sentinel file named in OVERRIDE_SENTINEL below
+// IN THAT CHECKOUT, which lifts this hook for it until the file is deleted. Edit
+// and Write have no free-text field a marker could ride in, so the opt-in is a
+// file rather than a phrase, and like that marker it is self-applicable: what it
+// buys is an override that is named, visible in the tree, and reversible, not
+// one that cannot be forged.
 //
 // STATED LIMITS.
 //   - Only file_path (Edit, Write) and notebook_path (NotebookEdit) are read. A
-//     tool that names its target under some other key is not seen, and neither
-//     is a write made through Bash, which this hook does not gate at all.
+//     tool naming its target under another key is not seen, and neither is a
+//     write made through Bash, which this hook does not gate at all.
 //   - Ignored-ness is asked of git at the time of the call, and a tracked file
-//     is reported as not ignored whatever the exclude patterns say (the check
-//     consults the index). A path whose answer changes between this check and
-//     the write is answered as git sees it now.
-//   - The session's tree is read from the event's cwd, which is where the harness
-//     says the session is working, not where any one command ran. A cwd that
-//     silently reverted out of an entered worktree therefore is treated as the
-//     tree it reverted to, so the sibling rule follows the cwd rather than the
-//     intent; warn-worktree-revert.mjs is what reports that revert.
+//     is reported as not ignored whatever the exclude patterns say, since the
+//     check consults the index. A path whose answer changes between the check
+//     and the write is answered as git sees it now.
+//   - The session's tree is read from the event's cwd, where the harness says
+//     the session is working, not where any one command ran. A cwd that silently
+//     reverted out of an entered worktree is treated as the tree it reverted to;
+//     warn-worktree-revert.mjs is what reports that revert.
 //
 // Exit 0 allows the call; exit 2 blocks it and feeds stderr back to Claude.
 
@@ -100,7 +86,7 @@ function blockMainWorktreeWrite(target, mainRoot) {
       "under .claude/worktrees/<tree>/ instead, and scope every command to it " +
       "(`cd <tree> && ...` or `git -C <tree> ...`). A file written here would land on whatever " +
       "branch the primary checkout holds, off the branch under review, where no review round " +
-      "and no pull request will carry it. For a deliberate, maintainer-directed edit of this " +
+      "and no pull request will include it. For a deliberate, maintainer-directed edit of this " +
       `checkout, create '${OVERRIDE_SENTINEL}' in it and delete it when you are done.\n`,
   );
   process.exit(2);
