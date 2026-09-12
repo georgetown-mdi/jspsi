@@ -8,17 +8,20 @@ import {
   getDefaultStandardization,
   prepareForExchange,
   runPipeline,
+  safeParseStandardization,
   stepCanEmptyRealizedValue,
 } from "@psilink/core";
 
 import {
   INERT_COALESCE_ADVICE,
+  NULL_IF_BOTH_VALUES_REFUSAL,
   OFFERED_EXPERT_FUNCTION_GROUPS,
   STANDARDIZATION_EXPERT_FUNCTION_GROUPS,
   STANDARDIZATION_FUNCTION_GROUPS,
   applyInputOverrides,
   applyStepOverrides,
   authorableFunctionNames,
+  declaresBothNullIfValues,
   describeParamFields,
   descriptorFor,
   expertFunctionNames,
@@ -470,6 +473,44 @@ describe("isStepValid (the launch gate's basis)", () => {
       isStepValid({ function: "filter_regex", params: { pattern: "^A" } }),
     ).toBe(true);
     expect(isStepValid({ function: "filter_regex" })).toBe(false);
+  });
+
+  test("a null_if declaring both value and values is invalid", () => {
+    // Each param is well-formed on its own, so only the pair is wrong: core
+    // refuses it where the document is decoded (the run applies the list and
+    // ignores the single value), and an editor grading each param alone would
+    // call the step valid and meet that refusal at launch.
+    const bothDeclared = {
+      function: "null_if",
+      params: { value: "UNKNOWN", values: ["UNKNOWN", "N/A"] },
+    };
+    expect(declaresBothNullIfValues(bothDeclared)).toBe(true);
+    expect(isStepValid(bothDeclared)).toBe(false);
+    expect(
+      safeParseStandardization([
+        { output: "ssn", input: "SSN", steps: [bothDeclared] },
+      ]).success,
+    ).toBe(false);
+  });
+
+  test("the refusal names both halves of the pair and the remedy", () => {
+    // The copy the step editor renders beside such a step: the remedy is
+    // removal, because an emptied text box is `""` and an emptied tag list is
+    // `[]`, each of which still declares the param.
+    expect(NULL_IF_BOTH_VALUES_REFUSAL).toContain(
+      "a single value and a list of values",
+    );
+    expect(NULL_IF_BOTH_VALUES_REFUSAL).toContain("Remove this step");
+  });
+
+  test.each([
+    ["the single value", { value: "UNKNOWN" }],
+    ["the list", { values: ["UNKNOWN", "N/A"] }],
+  ])("a null_if declaring %s alone is valid", (_name, params) => {
+    expect(declaresBothNullIfValues({ function: "null_if", params })).toBe(
+      false,
+    );
+    expect(isStepValid({ function: "null_if", params })).toBe(true);
   });
 
   test("a function core does not recognize is invalid", () => {

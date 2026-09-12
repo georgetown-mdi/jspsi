@@ -17,6 +17,11 @@ import {
 import { redactAndSanitizeForDisplay } from "../utils/sanitizeErrorForDisplay.js";
 import { redactAndDisplayPartyIdentity } from "../records/partyIdentityDisplay.js";
 
+import {
+  declaredParamEntries,
+  describedTransformParamEntry,
+  MAX_DISPLAYED_PARAMS,
+} from "../config/transformParamDisplay.js";
 import { endpointRequiresRetainedFiles } from "../config/invitation.js";
 import type { InvitationToken } from "../config/invitation.js";
 import { checkLinkageRuleSetCitation } from "../defaults/builtInLinkageTerms.js";
@@ -295,7 +300,9 @@ interface InvitationTransformSummary {
    * screen, and the leading order keeps it off the rows a header marker
    * rests on. Empty when the step declares no parameters. Every parameter is
    * shown as declared: a step whose parameter the function cannot read as
-   * written is refused when the invitation is decoded, so what is displayed
+   * written, and one whose parameters this view would state as something
+   * other than what the run applies (`config/transformParamDisplay.ts`), are
+   * both refused when the invitation is decoded, so what is displayed
    * here means what runs, apart from what changes at compile: a literal a
    * step injects or compares against normalizes to NFC (`replace_regex`,
    * `null_if`, `pad_left`, `coalesce`), and a pattern or delimiter left
@@ -767,20 +774,6 @@ function allowedCharactersClass(field: LinkageField): Displayable | undefined {
 }
 
 /**
- * Upper bound on the number of transform parameters shown per step. A real
- * function takes a handful; the cap (with an overflow marker) keeps an
- * arbitrarily large partner-supplied `params` record from flooding the
- * screen -- the schema bounds the entry count only well above any real
- * parameter list, and bounds no value's content.
- *
- * Applied AFTER the verdict-bearing params lead
- * ({@link orderedParamEntries}), so it can only ever drop a row no consent
- * verdict reads. Sized far above the widest of those leading sets, so a
- * step's whole verdict-bearing set is shown whatever else it declares.
- */
-const MAX_DISPLAYED_PARAMS = 16;
-
-/**
  * A step's declared params in the order they are displayed: the ones a
  * consent verdict reads ({@link CONSENT_VERDICT_PARAM_NAMES}) first, then
  * the rest in declaration order.
@@ -792,7 +785,12 @@ const MAX_DISPLAYED_PARAMS = 16;
  * compensating detail row -- a `parse_date`'s `outputFormat` above all --
  * past {@link MAX_DISPLAYED_PARAMS} into the overflow marker by declaring
  * enough entries ahead of it. Leading with the verdict-bearing rows fixes
- * that at the source.
+ * that at the source, and holds for a summary built from terms that never
+ * passed a decode, which is what refuses a record that wide
+ * (`config/transformParamDisplay.ts`).
+ *
+ * The entries are the ones the refusal counts ({@link declaredParamEntries}),
+ * so the count shown here and the count refused there are one expression.
  *
  * The lookup goes through the table's own read path because the function name
  * is partner free text: a name that only reaches `Object.prototype`
@@ -800,7 +798,7 @@ const MAX_DISPLAYED_PARAMS = 16;
  * member, which would lead the display with rows no verdict reads.
  */
 function orderedParamEntries(step: TransformStep): Array<[string, unknown]> {
-  const entries = Object.entries(step.params ?? {});
+  const entries = declaredParamEntries(step.params);
   const verdictBearing = new Set<string>(
     frozenLookupTableEntry(CONSENT_VERDICT_PARAM_NAMES, step.function) ?? [],
   );
@@ -808,28 +806,6 @@ function orderedParamEntries(step: TransformStep): Array<[string, unknown]> {
     ...entries.filter(([name]) => verdictBearing.has(name)),
     ...entries.filter(([name]) => !verdictBearing.has(name)),
   ];
-}
-
-/**
- * Render a transform parameter value for display. Primitives become their
- * plain string form; anything structured is JSON-encoded (best effort). The
- * result is sanitized and length-bounded by the caller, so it need not be
- * safe on its own.
- */
-function describeParamValue(value: unknown): string {
-  if (typeof value === "string") return value;
-  if (typeof value === "number" || typeof value === "boolean")
-    return String(value);
-  if (value === null) return "null";
-  if (value === undefined) return "";
-  try {
-    // A value past the checks above is an object/array from a JSON-parsed
-    // params record, so JSON.stringify yields a string (and throws only on the
-    // unreachable circular/bigint cases, caught below).
-    return JSON.stringify(value);
-  } catch {
-    return "";
-  }
 }
 
 /**
@@ -891,7 +867,9 @@ function summarizeTransform(
   const entries = orderedParamEntries(step);
   const shown = entries.slice(0, MAX_DISPLAYED_PARAMS);
   const params = shown.map((entry) =>
-    redactAndSanitizeForDisplay(`${entry[0]}: ${describeParamValue(entry[1])}`),
+    redactAndSanitizeForDisplay(
+      describedTransformParamEntry(entry[0], entry[1]),
+    ),
   );
   if (entries.length > MAX_DISPLAYED_PARAMS)
     params.push(displayText`... ${entries.length - MAX_DISPLAYED_PARAMS} more`);

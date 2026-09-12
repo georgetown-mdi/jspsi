@@ -207,3 +207,50 @@ describe("StepListEditor: an unrecognized function marks the step", () => {
     expect(page.getByRole("alert").elements()).toHaveLength(1);
   });
 });
+
+// A `null_if` declaring both of its params is the one step fault that is a
+// property of the PAIR: each input is well-formed on its own, so nothing marks
+// either of them, while core refuses the step where the document is decoded.
+// The host's gate points at the highlighted step, which this alert is.
+describe("StepListEditor: a null_if declaring both params marks the step", () => {
+  test("the step says which pair it declares and what to do", async () => {
+    app.render(
+      createElement(StepListEditor, {
+        steps: [
+          {
+            function: "null_if",
+            params: { value: "UNKNOWN", values: ["UNKNOWN", "N/A"] },
+          },
+        ],
+        onStepsChange: () => {},
+        addStepLabel: "Add a transform",
+      }),
+    );
+
+    const alert = page.getByTestId("null-if-both-values-alert");
+    await expect.element(alert).toBeInTheDocument();
+    await expect
+      .element(alert)
+      .toHaveTextContent(
+        /both a single value and a list of values.*Remove this step/,
+      );
+  });
+
+  test("a null_if declaring one of them is not marked", async () => {
+    // Not vacuous: the mark is the pair's, not every null_if's.
+    app.render(
+      createElement(StepListEditor, {
+        steps: [{ function: "null_if", params: { value: "UNKNOWN" } }],
+        onStepsChange: () => {},
+        addStepLabel: "Add a transform",
+      }),
+    );
+
+    await expect
+      .element(page.getByRole("button", { name: "Add a transform" }))
+      .toBeInTheDocument();
+    expect(
+      page.getByTestId("null-if-both-values-alert").elements(),
+    ).toHaveLength(0);
+  });
+});

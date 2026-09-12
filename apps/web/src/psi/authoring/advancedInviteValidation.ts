@@ -2,11 +2,15 @@ import {
   CanonicalEncodingError,
   FAN_OUT_FUNCTION_NAMES,
   INVITATION_LIFETIME_SECONDS,
+  MAX_DISPLAYED_PARAMS,
   MAX_INVITATION_LIFETIME_SECONDS,
   MAX_NAME_LENGTH,
   NAME_SHAPE_PATTERN,
+  NULL_IF_BOTH_VALUE_PARAMS_MESSAGE,
+  PRIVATE_KEY_PARAM_MESSAGE,
   TEXT_CONTROL_CHAR_MESSAGE,
   TEXT_DIRECTION_MESSAGE,
+  TRANSFORM_PARAM_COUNT_MESSAGE,
   UsageError,
   assertDeduplicateImplemented,
   canonicalString,
@@ -164,10 +168,10 @@ const SWAP_TRANSFORM_MISMATCH_MESSAGE =
  * document, a `params` record key included. */
 type ParamNameRefusal = "too-long" | "control-character" | "lone-surrogate";
 
-/** The one remedy every refused parameter name takes. Renaming is not offered as
- * a way out: this editor's own step controls write the parameter names their
- * functions take, so such a name arrives only on an imported document, whose
- * parameters the operator does not edit one by one. */
+/** The one remedy every refused parameter takes, its name or its value alike.
+ * Renaming is not offered as a way out: this editor's own step controls write the
+ * parameter names their functions take, so such a parameter arrives only on an
+ * imported document, whose parameters the operator does not edit one by one. */
 const REFUSED_PARAM_NAME_REMEDY =
   "Open that key and remove that step, or turn the key off.";
 
@@ -191,6 +195,34 @@ const REFUSED_PARAM_NAME_MESSAGES: Record<ParamNameRefusal, string> = {
   "lone-surrogate":
     "A linkage key's transform names a parameter with an incomplete character " +
     "in it, which these terms cannot carry. " +
+    REFUSED_PARAM_NAME_REMEDY,
+};
+
+/** What each params shape the terms schema refuses for the consent summary asks
+ * the operator to change, keyed by core's own refusal message. All three land on
+ * the `linkageKeys` path, which the generic mapping collapses to "Enable at least
+ * one linkage key." on a draft whose keys are all enabled, so each needs words of
+ * its own. Every remedy is {@link REFUSED_PARAM_NAME_REMEDY}: these shapes arrive
+ * on an imported document, whose parameters the operator does not edit one by one.
+ *
+ * Keyed on the schema's message literals, the way {@link refusedCharacterMessage}
+ * reads its two, so the editor and the schema cannot come to disagree about which
+ * rule fired -- and the editor walks no params of its own, so it does not repeat
+ * the scan the schema skips for a value it refuses for its length already. None
+ * names the key, the step, or the parameter, the same reason
+ * {@link UNSUPPLYABLE_KEY_MESSAGE} names no field. */
+const REFUSED_PARAMS_SHAPE_MESSAGES: Record<string, string> = {
+  [NULL_IF_BOTH_VALUE_PARAMS_MESSAGE]:
+    "A linkage key's transform has a step declaring both a single value and a " +
+    "list of values. psilink accepts one or the other, not both. " +
+    REFUSED_PARAM_NAME_REMEDY,
+  [PRIVATE_KEY_PARAM_MESSAGE]:
+    "A linkage key's transform has a parameter holding a private key, which " +
+    "these terms cannot include. " +
+    REFUSED_PARAM_NAME_REMEDY,
+  [TRANSFORM_PARAM_COUNT_MESSAGE]:
+    `A linkage key's transform has a step with more than ${String(MAX_DISPLAYED_PARAMS)} ` +
+    "parameters, which these terms cannot state. " +
     REFUSED_PARAM_NAME_REMEDY,
 };
 
@@ -471,12 +503,14 @@ export function validateAdvancedInvite(
   const parsed = safeParseLinkageTerms(terms);
   if (!parsed.success) {
     // Each control touched by a schema issue gets its control-specific message:
-    // the one its class of fault earns where the issue names a refused character
-    // class (refusedCharacterMessage), and the control's generic message
-    // otherwise, since the rest of the schema's issues are technical and name a
-    // value no editor may echo. Keeps the first message per control: the keys
-    // control sets its accurate message up front so it wins over the generic
-    // schema mapping, and stacking several messages on one input is noise. The
+    // the one its class of fault earns where the issue names a params shape the
+    // consent summary cannot state (refusedParamsShapeMessage) or a refused
+    // character class (refusedCharacterMessage), and the control's generic
+    // message otherwise, since the rest of the schema's issues are technical and
+    // name a value no editor may echo. Keeps the first message per control: the
+    // keys control sets its accurate message up front so it wins over the
+    // generic schema mapping, and stacking several messages on one input is
+    // noise. The
     // payload control is the exception -- a schema payload error (e.g. an
     // over-long sent column name) is a second, distinct obstacle from the
     // direction-conflict message that may already occupy it, so both are shown
@@ -493,6 +527,7 @@ export function validateAdvancedInvite(
       const existing = errors[field];
       if (existing === undefined) {
         errors[field] =
+          refusedParamsShapeMessage(field, issueMessages) ??
           refusedCharacterMessage(field, issueMessages) ??
           messageForField(field);
       } else if (field === "payload") {
@@ -758,6 +793,23 @@ function refusedCharacterMessage(
   if (words === undefined) return undefined;
   if (issueMessages.has(TEXT_CONTROL_CHAR_MESSAGE)) return words.control;
   if (issueMessages.has(TEXT_DIRECTION_MESSAGE)) return words.direction;
+  return undefined;
+}
+
+/** The message for the key list when its schema issues include one of the params
+ * shapes {@link REFUSED_PARAMS_SHAPE_MESSAGES} words, or undefined for any other
+ * control or a set of issues holding none. A step breaking several takes the
+ * first of them listed there: each remedy removes the step, so the operator acts
+ * on the same row whichever fired. */
+function refusedParamsShapeMessage(
+  field: AdvancedField,
+  issueMessages: ReadonlySet<string>,
+): string | undefined {
+  if (field !== "keys") return undefined;
+  for (const [refusal, message] of Object.entries(
+    REFUSED_PARAMS_SHAPE_MESSAGES,
+  ))
+    if (issueMessages.has(refusal)) return message;
   return undefined;
 }
 

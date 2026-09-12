@@ -2,6 +2,7 @@ import { z } from "zod";
 
 import { MAX_NAME_LENGTH } from "./linkageTermsSchema.js";
 import { safeParseCamelized } from "./safeParseCamelized.js";
+import { transformParamDisplayRefusals } from "./transformParamDisplay.js";
 import { transformParamTypeRefusals } from "./transformParamTypes.js";
 
 // --- Standardizing step ------------------------------------------------------
@@ -36,6 +37,21 @@ const StandardizationStepSchema: z.ZodType<StandardizationStep> = z
     // invitation has no document to edit.
     for (const refusal of transformParamTypeRefusals(step, {
       readerCanEditTheDocument: true,
+    }))
+      ctx.addIssue({
+        code: "custom",
+        message: refusal.message,
+        path: refusal.path,
+      });
+    // The shapes a consent summary cannot state as they run are refused here
+    // as on the terms schema (transformParamDisplay.ts). Both schemas admit
+    // the same step, so a step moved between the two meets one answer rather
+    // than two, and the `null_if` pair is a difference between document and
+    // run on this side as well: the run applies the list alone whichever
+    // document declares both. This schema is operator-local and bounds no
+    // param length, so no value is passed over by the key-material scan.
+    for (const refusal of transformParamDisplayRefusals(step, {
+      refusesStringParamsPast: undefined,
     }))
       ctx.addIssue({
         code: "custom",

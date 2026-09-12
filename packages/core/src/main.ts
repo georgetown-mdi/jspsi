@@ -277,6 +277,12 @@ export {
   safeParseLinkageTermsTheReaderWrote,
 } from "./config/linkageTermsSchema";
 export {
+  MAX_DISPLAYED_PARAMS,
+  NULL_IF_BOTH_VALUE_PARAMS_MESSAGE,
+  PRIVATE_KEY_PARAM_MESSAGE,
+  TRANSFORM_PARAM_COUNT_MESSAGE,
+} from "./config/transformParamDisplay";
+export {
   deriveAcceptedLinkageTerms,
   validateCompatibility,
 } from "./linkageTermsNegotiation";

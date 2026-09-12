@@ -29,8 +29,10 @@ import { sanitizeForDisplay } from "@psilink/core";
 
 import {
   INERT_COALESCE_ADVICE,
+  NULL_IF_BOTH_VALUES_REFUSAL,
   OFFERED_EXPERT_FUNCTION_GROUPS,
   STANDARDIZATION_FUNCTION_GROUPS,
+  declaresBothNullIfValues,
   describeParamFields,
   descriptorFor,
   functionDisplay,
@@ -250,6 +252,21 @@ function StepRow({
                 psilink does not recognize this step&apos;s function, so its
                 settings cannot be checked or edited. Remove the step.
               </Text>
+            </Alert>
+          )}
+          {/* Neither input can be wrong on its own, so the pair is stated
+              here: each param validates alone, while core refuses the step
+              declaring both where the document is decoded. */}
+          {declaresBothNullIfValues(step) && (
+            <Alert
+              role="alert"
+              color="red"
+              variant="light"
+              p="xs"
+              icon={<IconAlertTriangle size={16} aria-hidden />}
+              data-testid="null-if-both-values-alert"
+            >
+              <Text size="xs">{NULL_IF_BOTH_VALUES_REFUSAL}</Text>
             </Alert>
           )}
           {editableDescriptor !== undefined

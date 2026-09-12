@@ -13,6 +13,7 @@ import {
 } from "./transformRegexDialect.js";
 import { transformParamTypeRefusals } from "./transformParamTypes.js";
 import type { TransformParamRefusalOptions } from "./transformParamTypes.js";
+import { transformParamDisplayRefusals } from "./transformParamDisplay.js";
 import { exceedsOwnKeyCount } from "../utils/objectKeyCount.js";
 import { loneSurrogateIndex } from "../utils/wellFormedString.js";
 import { BIDI_CONTROL_PATTERN } from "../utils/nameControls.js";
@@ -917,6 +918,19 @@ const transformStepSchema = (
 ): z.ZodType<TransformStep> =>
   TransformStepBoundsSchema.superRefine((step, ctx) => {
     for (const refusal of transformParamTypeRefusals(step, options))
+      ctx.addIssue({
+        code: "custom",
+        message: refusal.message,
+        path: refusal.path,
+      });
+    // A params shape the consent summary would state as something other than
+    // what the run applies is refused here rather than displayed
+    // (transformParamDisplay.ts), so an acceptor reads the declaration the
+    // exchange runs. The length this schema refuses a string param past is
+    // passed so the key-material scan skips a value already refused for it.
+    for (const refusal of transformParamDisplayRefusals(step, {
+      refusesStringParamsPast: MAX_TRANSFORM_PARAM_LENGTH,
+    }))
       ctx.addIssue({
         code: "custom",
         message: refusal.message,

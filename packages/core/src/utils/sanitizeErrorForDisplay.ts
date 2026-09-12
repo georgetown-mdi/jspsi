@@ -152,6 +152,20 @@ export function redactPrivateKeyMaterial(text: string): string {
 }
 
 /**
+ * Whether {@link redactPrivateKeyMaterial} would replace anything in `text`,
+ * for a caller that refuses such a value rather than showing the marker in
+ * its place -- the transform-param refusals on both config schemas
+ * (`packages/core/src/config/transformParamDisplay.ts`).
+ *
+ * It runs the redaction and compares, so the two cannot answer differently:
+ * a marker shape either module recognized alone would put a refusal and a
+ * rendering out of step.
+ */
+export function holdsPrivateKeyMaterial(text: string): boolean {
+  return redactPrivateKeyMaterial(text) !== text;
+}
+
+/**
  * One BEGIN or END marker, un-anchored and non-global, for the incremental
  * scan in {@link createPrivateKeyStreamRedactor}. The same shapes
  * {@link PRIVATE_KEY_BLOCK} matches, split apart because a streaming scan
