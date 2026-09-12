@@ -143,13 +143,16 @@ function closedVisits(visits: Array<StageVisit>, at: Date): Array<StageVisit> {
 
 /** Advance to a stage: the open visit closes at `at` and the new stage's visit
  * opens. A repeat of the current stage is a no-op, so a re-emitted stage id
- * cannot duplicate a history row. */
+ * cannot duplicate a history row. The terminal done stage belongs to
+ * {@link runWithCompletion} alone: single-pass linkage emits `done` as its last
+ * stage event with the payload exchange and the result still to come, so the
+ * run holds its open stage until the result lands. */
 export function runWithStage(
   run: ExchangeRun,
   stageId: string,
   at: Date,
 ): ExchangeRun {
-  if (stageId === run.stageId) return run;
+  if (stageId === run.stageId || stageId === DONE_STAGE_ID) return run;
   const label =
     run.stages.find((stage) => stage.id === stageId)?.label ?? stageId;
   return {
