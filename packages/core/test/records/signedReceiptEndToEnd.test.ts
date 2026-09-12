@@ -495,12 +495,17 @@ describe("a fingerprint-pin mismatch ends the run at the terms exchange", () => 
       expect((raised as Error).message).toMatch(
         /not the one pinned in signing\.partner_fingerprint/,
       );
-      // No payload and no receipt frame went out, so there is no disclosure for
-      // a record to attest and none is reported lost.
-      const kinds = refusingSide.sent.map(frameKind);
-      expect(kinds).not.toContain("payload");
-      expect(kinds).not.toContain("receipt");
-      expect(kinds).toContain("abort");
+      // The terms exchange's own frames went out and then the abort, and
+      // nothing else did -- no linkage key, no payload row, no receipt -- so
+      // there is no disclosure for a record to attest and none is reported
+      // lost. The initiator sends its terms and the bare proceed decision
+      // before the partner's terms are in hand; the responder's single frame
+      // holds both.
+      expect(refusingSide.sent.map(frameKind)).toEqual(
+        refusingRole === "initiator"
+          ? ["terms", "decision", "abort"]
+          : ["terms", "abort"],
+      );
       expect(exchangeRecordFromFailure(raised)).toBeUndefined();
       expect(exchangeRecordOwedButUnbuilt(raised)).toBe(false);
 

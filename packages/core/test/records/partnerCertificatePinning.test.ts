@@ -73,6 +73,8 @@ const identityB = await generateSigningIdentity("Responder Co", {
     d: "yM3S19zh5uvw9fr_BAkOExgdIicsMTY7QEVKT1RZXmM",
   },
 });
+// A valid signing identity bound to a party neither seat agrees terms under.
+const identityElsewhere = await generateSigningIdentity("Elsewhere Co");
 const fingerprintA = await computeCertificateFingerprint(identityA.certificate);
 const fingerprintB = await computeCertificateFingerprint(identityB.certificate);
 const sessionKey = new Uint8Array(32).fill(11) as Uint8Array<ArrayBuffer>;
@@ -113,12 +115,20 @@ function recording(conn: MessageConnection): {
   };
 }
 
-/** The terms frames a party sends: message 1 and message 2 both hold terms. */
+/** Whether a frame is a terms envelope: message 1 and message 2 both hold
+ * terms. */
+function isTermsFrame(frame: unknown): frame is Record<string, unknown> {
+  return typeof frame === "object" && frame !== null && "linkageTerms" in frame;
+}
+
+/** Whether a frame is a decision frame, the bare proceed or the abort. */
+function isDecisionFrame(frame: unknown): frame is { decision: unknown } {
+  return typeof frame === "object" && frame !== null && "decision" in frame;
+}
+
+/** The terms frames a party sends. */
 function termsFrames(sent: Array<unknown>): Array<Record<string, unknown>> {
-  return sent.filter(
-    (frame): frame is Record<string, unknown> =>
-      typeof frame === "object" && frame !== null && "linkageTerms" in frame,
-  );
+  return sent.filter(isTermsFrame);
 }
 
 /** Rewrite the `certificate` on this party's outbound terms frame. */
@@ -143,28 +153,37 @@ function withTermsCertificate(
  * inactivity budget. */
 function abortReasons(sent: Array<unknown>): unknown {
   const frames = sent.filter(
-    (frame) =>
-      typeof frame === "object" &&
-      frame !== null &&
-      (frame as { decision?: unknown }).decision === "abort",
+    (frame) => isDecisionFrame(frame) && frame.decision === "abort",
   );
   expect(frames).toHaveLength(1);
   return (frames[0] as { abortReasons?: unknown }).abortReasons;
 }
 
-/** Frames that carry this party's own data, in either direction. */
+/** Every frame outside the three a refusing party legitimately sends: its terms
+ * envelope, the bare proceed decision, and the abort. Classified by exclusion
+ * because a linkage-round frame is a raw `Uint8Array` (psi/participant.ts,
+ * psi/link.ts), which a list of disclosing object shapes matches none of --
+ * and that leak is what these assertions exist to catch. */
 function disclosingFrames(sent: Array<unknown>): Array<unknown> {
   return sent.filter(
-    (frame) =>
-      typeof frame === "object" &&
-      frame !== null &&
-      ("hasData" in frame ||
-        "sharedSecret" in frame ||
-        "setup" in frame ||
-        "reply" in frame ||
-        "signature" in frame),
+    (frame) => !isTermsFrame(frame) && !isDecisionFrame(frame),
   );
 }
+
+test("the disclosure helper counts every frame past a refusal's own", () => {
+  // What the assertions below rest on. A linkage-round frame is a raw
+  // Uint8Array, so a helper that recognized disclosing shapes by their object
+  // fields would return an empty list for a leaked linkage key.
+  const linkageKey = new Uint8Array([1, 2, 3]);
+  expect(
+    disclosingFrames([
+      { linkageTerms: firstNameTerms, certificate: identityA.certificate },
+      { decision: "proceed" },
+      { decision: "abort", abortReasons: ["a party presented no certificate"] },
+      linkageKey,
+    ]),
+  ).toEqual([linkageKey]);
+});
 
 describe("a first authenticated contact adopts the partner's certificate", () => {
   test("both sides pin, report the value, and sign against it", async () => {
@@ -306,6 +325,68 @@ describe("a certificate that does not verify under its own key is not adopted", 
       expect(disclosingFrames(refusingSide.sent)).toEqual([]);
       expect(abortReasons(refusingSide.sent)).toEqual([
         expect.stringMatching(/does not verify under its own key/),
+      ]);
+
+      await rawRefusing.close();
+      await rawPartner.close();
+      await partner;
+    });
+  }
+});
+
+describe("a certificate bound away from the partner's agreed terms is not adopted", () => {
+  // The swap authorizes the presented certificate against the identity the
+  // partner agreed terms under, so a fingerprint adopted from a certificate
+  // bound to any other name is a pin every later run refuses. The partner here
+  // presents a valid self-signed certificate for a party it is not: the
+  // self-signature check passes and the binding check is what refuses.
+  for (const refusingRole of ["initiator", "responder"] as const) {
+    test(`the refusing ${refusingRole} discloses nothing and aborts`, async () => {
+      const partnerRole: HandshakeRole =
+        refusingRole === "initiator" ? "responder" : "initiator";
+      const refusing = seat(refusingRole);
+      const partnerSeat = seat(partnerRole);
+      const adopted: Array<string> = [];
+      const [rawRefusing, rawPartner] = createMessagePipe();
+      const refusingSide = recording(rawRefusing);
+      const partner = runExchange(
+        withTermsCertificate(rawPartner, identityElsewhere.certificate),
+        partnerRole,
+        prepared(partnerSeat.name, partnerSeat.rows),
+        {
+          psiLibrary,
+          signingIdentity: partnerSeat.identity,
+          sessionKey,
+        },
+      ).catch((reason: unknown) => reason);
+      const raised = await runExchange(
+        refusingSide.conn,
+        refusingRole,
+        prepared(refusing.name, refusing.rows),
+        {
+          psiLibrary,
+          signingIdentity: refusing.identity,
+          sessionKey,
+          onPartnerCertificatePinned: (fingerprint) =>
+            adopted.push(fingerprint),
+        },
+      ).then(
+        () => {
+          throw new Error("expected the first contact to refuse");
+        },
+        (reason: unknown) => reason,
+      );
+
+      expect(raised).toBeInstanceOf(ReceiptVerificationError);
+      expect((raised as Error).message).toMatch(
+        /does not authorize the identity its holder agreed terms under/,
+      );
+      expect(adopted).toEqual([]);
+      expect(disclosingFrames(refusingSide.sent)).toEqual([]);
+      expect(abortReasons(refusingSide.sent)).toEqual([
+        expect.stringMatching(
+          /does not authorize the identity its holder agreed terms under/,
+        ),
       ]);
 
       await rawRefusing.close();

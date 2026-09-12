@@ -1488,10 +1488,11 @@ const PARTNER_FINGERPRINT_REMEDIES =
  * the run connects, spends the SFTP credential, presents its terms and
  * certificate, and then dies at the adoption write with nothing recorded.
  *
- * The pin is recorded by replacing the file in place, so both the directory
- * and the file have to be writable by the user the run is; `W_OK` on each is
- * what that replace needs, and neither answers the question alone. A run
- * already holding a pin writes nothing and is not held to this.
+ * The pin is recorded by writing a new file in the configuration's directory
+ * and renaming it over the old one ({@link writeFileOwnerOnly}), so it is that
+ * directory the run needs `W_OK` on; the configuration file's own mode does
+ * not decide whether the rename lands. A run already holding a pin writes
+ * nothing and is not held to this.
  *
  * An {@link OperatorConfigError} (exit 64): the configuration and its
  * permissions are the operator's own.
@@ -1504,16 +1505,15 @@ export function assertPartnerFingerprintRecordable(
   if (partnerPinIsPresent(signing.partnerFingerprint)) return;
   try {
     fs.accessSync(path.dirname(configPath), fs.constants.W_OK);
-    fs.accessSync(configPath, fs.constants.W_OK);
   } catch {
     throw new OperatorConfigError(
       "this exchange signs receipts (signing.mode: certificate) and pins no " +
         "partner fingerprint, so its first authenticated contact records the " +
         `certificate the partner presents into ${configPath} -- and that ` +
-        "file cannot be replaced: recording the pin rewrites it in place, " +
-        "which needs both the file and its directory writable by the user " +
-        "this run is. The run stopped before connecting. Either " +
-        `${PARTNER_FINGERPRINT_REMEDIES}.`,
+        "file cannot be replaced: recording the pin writes a new file in the " +
+        "directory holding it and renames that over the old one, which needs " +
+        "the directory writable by the user this run is. The run stopped " +
+        `before connecting. Either ${PARTNER_FINGERPRINT_REMEDIES}.`,
     );
   }
 }

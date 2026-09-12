@@ -1832,6 +1832,50 @@ test("handler: certificate mode with no partner pin runs as a first contact", as
 });
 
 test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
+  "handler: a first contact into a read-only configuration file still runs (skipped where a file cannot be made read-only for its owner)",
+  async () => {
+    // The pin is recorded by renaming a new file over this one, which needs no
+    // write bit on the file itself, so a read-only configuration in a writable
+    // directory is a run that can pin and is let through.
+    const core =
+      await vi.importActual<typeof import("@psilink/core")>("@psilink/core");
+    fs.writeFileSync(
+      configFile,
+      YAML.stringify({
+        ...minimalSFTPConfig,
+        signing: {
+          mode: "certificate",
+          identityFile: await seedSigningIdentity("Test Party"),
+        },
+      }),
+    );
+    fs.chmodSync(configFile, 0o444);
+    saveKeyFile(keyFile, { sharedSecret: TOKEN_A });
+    const input = path.join(dir, "in.csv");
+    fs.writeFileSync(input, "ssn\n123456789\n");
+
+    vi.mocked(prepareForExchange).mockImplementationOnce(
+      core.prepareForExchange,
+    );
+    vi.mocked(runProtocol).mockReset();
+    try {
+      await handler({
+        _: [],
+        $0: "psilink",
+        input,
+        "config-file": configFile,
+        "key-file": keyFile,
+        "log-level": "silent",
+        identity: "Test Party",
+      } as unknown as Arguments);
+      expect(vi.mocked(runProtocol)).toHaveBeenCalledTimes(1);
+    } finally {
+      fs.chmodSync(configFile, 0o644);
+    }
+  },
+);
+
+test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
   "handler: a first contact into an unwritable configuration exits 64 before connecting (skipped where a directory cannot be made read-only for its owner)",
   async () => {
     // The deployment shape is the read-only configuration mount: without this

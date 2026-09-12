@@ -737,10 +737,13 @@ const PARTNER_CERTIFICATE_UNVERIFIED_ABORT_REASON =
 const PARTNER_CERTIFICATE_DIVERGENT_ABORT_REASON =
   "a party presented a signing certificate that is not the one its partner " +
   "pinned";
+const PARTNER_CERTIFICATE_UNAUTHORIZED_IDENTITY_ABORT_REASON =
+  "a party presented a signing certificate that does not authorize the " +
+  "identity its holder agreed terms under";
 const PARTNER_CERTIFICATE_UNRECORDED_ABORT_REASON =
   "a party could not record the fingerprint it pinned on this first contact";
 
-// The four refusals the terms-time pin resolution raises. Each is a fixed
+// The five refusals the terms-time pin resolution raises. Each is a fixed
 // literal holding no byte from the partner's frame, and each states that the
 // run stopped before any linkage key or payload row was sent -- which is what
 // the refusal buys over the same failure at the signature swap.
@@ -765,6 +768,14 @@ const PARTNER_CERTIFICATE_UNVERIFIED_MESSAGE =
   "this exchange would accept. The run stopped before any linkage key or " +
   "payload row was sent. Have the partner re-share an identity produced by " +
   "'psilink fingerprint'.";
+const PARTNER_CERTIFICATE_UNAUTHORIZED_IDENTITY_MESSAGE =
+  "the partner's signing certificate does not authorize the identity its " +
+  "holder agreed terms under, so this first contact pinned nothing and the " +
+  "run cannot finish: a certificate bound to a different party than the " +
+  "agreed terms name could never sign a receipt this exchange would accept. " +
+  "The run stopped before any linkage key or payload row was sent. Have the " +
+  "partner present the certificate bound to the identity they agree terms " +
+  "under, or agree terms under the identity their certificate names.";
 const PARTNER_CERTIFICATE_DIVERGENT_MESSAGE =
   "the partner's signing certificate is not the one pinned in " +
   "signing.partner_fingerprint, so this run cannot finish: the pin is what " +
@@ -789,6 +800,11 @@ export interface PartnerCertificateResolution {
   partnerCertificateMalformed: boolean;
   /** The configured `signing.partner_fingerprint`, absent on a first contact. */
   pinnedFingerprint: string | undefined;
+  /** The identity the partner agreed terms under, which a certificate adopted
+   * on a first contact has to authorize: the swap verifies the presented
+   * certificate against this same name, so a fingerprint pinned against any
+   * other one names a party whose receipts this exchange refuses. */
+  partnerAgreedIdentity: string;
   /** Called with a freshly adopted fingerprint, at the moment of adoption and
    * before the run goes on. A caller persists the value here rather than after
    * the run, so a run that pins and then fails mid-round does not re-pin blind
@@ -806,16 +822,17 @@ export interface PartnerCertificateResolution {
  * swap checks the presented certificate against, so one value governs both
  * points.
  *
- * Four outcomes refuse, each sending the partner a best-effort abort first --
+ * Five outcomes refuse, each sending the partner a best-effort abort first --
  * the refusal is one-sided, so without the frame a peer deriving no refusal of
  * its own waits out its peer-inactivity budget. A certificate the wire format
- * does not admit, no certificate at all, a certificate that does not verify
- * under its own key on a first contact, and a certificate diverging from the
- * pin are each a {@link ReceiptVerificationError}: the disagreeing value is
- * the partner's, not this party's config. All four fire at the terms exchange,
+ * does not admit, no certificate at all, a certificate that on a first contact
+ * either does not verify under its own key or does not authorize the identity
+ * the partner agreed terms under, and a certificate diverging from the pin are
+ * each a {@link ReceiptVerificationError}: the disagreeing value is the
+ * partner's, not this party's config. All five fire at the terms exchange,
  * before the bootstrap frame and before any linkage key or payload row moves.
  *
- * A fifth outcome ends the run without being a refusal of the partner: an
+ * A sixth outcome ends the run without being a refusal of the partner: an
  * `onPartnerCertificatePinned` that throws, which is a caller that could not
  * record the adopted pin. It sends its own abort and propagates the caller's
  * error unchanged.
@@ -858,6 +875,23 @@ export async function resolvePartnerCertificateOrAbort(
   if (!(await verifyCertificateSelfSignature(partnerCertificate))) {
     await sendAbort(conn, [PARTNER_CERTIFICATE_UNVERIFIED_ABORT_REASON]);
     throw new ReceiptVerificationError(PARTNER_CERTIFICATE_UNVERIFIED_MESSAGE);
+  }
+  // The certificate also has to name the party that agreed these terms: the
+  // swap authorizes it against that same name, so adopting the fingerprint of
+  // a certificate bound elsewhere would write a pin every later run refuses --
+  // this one included, after its keys, payload and receipt had gone out.
+  if (
+    !certificateAuthorizesIdentity(
+      partnerCertificate,
+      resolution.partnerAgreedIdentity,
+    )
+  ) {
+    await sendAbort(conn, [
+      PARTNER_CERTIFICATE_UNAUTHORIZED_IDENTITY_ABORT_REASON,
+    ]);
+    throw new ReceiptVerificationError(
+      PARTNER_CERTIFICATE_UNAUTHORIZED_IDENTITY_MESSAGE,
+    );
   }
   const adopted = await computeCertificateFingerprint(partnerCertificate);
   try {
@@ -1886,7 +1920,7 @@ export async function runExchange(
   // anything is disclosed. See resolvePartnerCertificateOrAbort.
   let resolvedPartnerFingerprint: string | undefined;
   if (willSignReceipt) {
-    await assertReceiptBindingsOrAbort(
+    const namedParties = await assertReceiptBindingsOrAbort(
       conn,
       linkageTerms,
       partnerTerms,
@@ -1896,6 +1930,7 @@ export async function runExchange(
       partnerCertificate,
       partnerCertificateMalformed,
       pinnedFingerprint: options.partnerFingerprint,
+      partnerAgreedIdentity: namedParties.partner,
       onPartnerCertificatePinned: options.onPartnerCertificatePinned,
     });
   }

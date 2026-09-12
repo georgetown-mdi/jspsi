@@ -1388,23 +1388,26 @@ test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
 );
 
 test.skipIf(process.platform === "win32" || process.getuid?.() === 0)(
-  "assertPartnerFingerprintRecordable refuses a read-only configuration file (skipped where a file cannot be made read-only for its owner)",
+  "assertPartnerFingerprintRecordable passes a read-only configuration file in a writable directory, and the pin is recorded through it (skipped where a file cannot be made read-only for its owner)",
   () => {
-    // The directory admits a new entry, but the atomic replace also needs the
-    // destination itself writable, so W_OK on the directory alone would pass a
-    // run that still cannot record its pin.
+    // The write renames a new file over the destination, and a rename needs no
+    // write bit on what it replaces, so the file's own mode decides nothing --
+    // refusing on it would cost the operator a run that could have pinned.
     const configPath = path.join(dir, "psilink.yaml");
     fs.writeFileSync(configPath, certificateModeConfigSource());
     fs.chmodSync(configPath, 0o444);
-    let caught: unknown;
     try {
-      assertPartnerFingerprintRecordable({ mode: "certificate" }, configPath);
-    } catch (err) {
-      caught = err;
+      expect(() =>
+        assertPartnerFingerprintRecordable({ mode: "certificate" }, configPath),
+      ).not.toThrow();
+      persistPartnerFingerprint(configPath, PARTNER_FP_A);
+      const parsed = YAML.parse(fs.readFileSync(configPath, "utf8")) as {
+        signing: { partner_fingerprint: string };
+      };
+      expect(parsed.signing.partner_fingerprint).toBe(PARTNER_FP_A);
     } finally {
       fs.chmodSync(configPath, 0o644);
     }
-    expect(caught).toBeInstanceOf(OperatorConfigError);
   },
 );
 
