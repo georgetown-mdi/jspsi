@@ -3,8 +3,9 @@ import fs from "node:fs";
 import { afterEach, expect, test } from "vitest";
 
 import {
-  DEFAULT_MAX_DISPLAY_LENGTH,
   DISPLAY_TRUNCATION_MARKER,
+  PARTNER_LABELLED_VALUE_BUDGET,
+  replaceControlCharactersForDisplay,
   sanitizeForDisplay,
 } from "@psilink/core";
 
@@ -29,8 +30,14 @@ import type { RelayEvent } from "@jobs/cliDriver";
 // The stderr tail a synthesized terminal names is the child's own bytes, so it
 // crosses RAW on a cause link of its own and the seat that renders the chain is
 // the one altitude that escapes it. What that costs the operator is measured
-// here rather than at the manager: one escape, not two, and one value's budget
-// of the alert, whatever the child wrote.
+// here rather than at the manager: one escape, not two, and one labelled
+// value's budget of the alert, whatever the child wrote.
+//
+// The tail reaches the manager branded (`PartnerOriginText`), so the link it
+// rides is built by the one elimination and carries that composition's
+// treatments: a control character the child wrote arrives as the replacement's
+// `<hh>` marker rather than as the escape's `\xhh` token, which is what keeps
+// the child from spelling the renderer's own framing.
 
 const roots: Array<string> = [];
 const managers: Array<JobManager> = [];
@@ -137,19 +144,21 @@ test("a hostile stderr tail reaches the operator's alert escaped exactly once", 
   const terminal = events[events.length - 1];
   // The manager holds the child's bytes as they were written: escaping here as
   // well is what a second pass at the seat would be measured against.
+  // Control characters are the one treatment applied before the tail crosses:
+  // replacement, not escaping, so the seat's single pass still has nothing to
+  // rewrite twice.
+  const treated = replaceControlCharactersForDisplay(HOSTILE_TAIL);
   expect(terminal[ERROR_MESSAGE_CHAIN_FIELD]).toEqual([
     terminal.message,
-    `the CLI last wrote on stderr: ${HOSTILE_TAIL}`,
+    `the CLI last wrote on stderr: ${treated}`,
   ]);
 
   const alert = await alertAtSeat(events);
   // One pass, read off the escape itself rather than restated: a second pass
   // doubles every backslash the first one wrote, so the two renderings differ
   // and only one of them can be present.
-  expect(alert).toContain(sanitizeForDisplay(HOSTILE_TAIL));
-  expect(alert).not.toContain(
-    sanitizeForDisplay(sanitizeForDisplay(HOSTILE_TAIL)),
-  );
+  expect(alert).toContain(sanitizeForDisplay(treated));
+  expect(alert).not.toContain(sanitizeForDisplay(sanitizeForDisplay(treated)));
   // The only raw control character left in the alert is the renderer's own
   // framing between links, which the seat lays out as a line break.
   for (const link of alert.split("\ncaused by: "))
@@ -173,7 +182,7 @@ test("a flooding stderr tail delivers its END within one value's budget", async 
   // The marker sits at the FRONT of the tail, where the cut was taken.
   const link = alert.slice(alert.indexOf("the CLI last wrote on stderr: "));
   expect(link).toContain(`stderr: ${DISPLAY_TRUNCATION_MARKER}Z`);
-  expect(link.length).toBeLessThanOrEqual(DEFAULT_MAX_DISPLAY_LENGTH);
+  expect(link.length).toBeLessThanOrEqual(PARTNER_LABELLED_VALUE_BUDGET);
 });
 
 test("a stream-broke terminal keeps the child's bytes out of its retryable alert", async () => {
@@ -191,13 +200,20 @@ test("a stream-broke terminal keeps the child's bytes out of its retryable alert
   expect(alert).toContain("temporary");
 });
 
-test("the CLI's own cause framing arrives as the chain's links, each escaped once", async () => {
+test("the child cannot open a cause link of the console's own chain", async () => {
   // A rendered psilink chain is what the CLI writes to stderr, framing and all,
-  // so the seat's split reads that framing as the links it is: the tail's own
-  // bytes still take exactly one escape inside each link they land on.
+  // and the relay cannot tell that framing from a partner fragment inside it
+  // spelling the same bytes. So the tail opens no link of its own: its line
+  // break is replaced where the link is composed, and the whole tail arrives
+  // inside the ONE link the console labelled, escaped exactly once.
   const tail = "config load failed\ncaused by: bad\\value at \u001b[2J line 3";
   const events = await eventsFromRun(tail, PERSISTENCE_LOSS_EXIT);
   const alert = await alertAtSeat(events);
-  expect(alert).toContain(sanitizeForDisplay("bad\\value at \u001b[2J line 3"));
-  expect(alert).toContain("the CLI last wrote on stderr: config load failed");
+  const links = alert.split("\ncaused by: ");
+  expect(links).toHaveLength(2);
+  expect(links[1]).toBe(
+    `the CLI last wrote on stderr: ${sanitizeForDisplay(
+      replaceControlCharactersForDisplay(tail),
+    )}`,
+  );
 });

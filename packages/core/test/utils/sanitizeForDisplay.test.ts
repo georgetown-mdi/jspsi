@@ -4,10 +4,12 @@ import {
   sanitizeForDisplay,
   boundRawFragmentForFit,
   clipToRenderedCost,
+  clipToRenderedCostKeepingEnd,
   controlCharacterMarker,
   renderedDisplayCost,
   replaceControlCharactersForDisplay,
   trimPartialControlCharacterMarker,
+  trimPartialControlCharacterMarkerAtStart,
   DISPLAY_TRUNCATION_MARKER,
   DEFAULT_MAX_DISPLAY_LENGTH,
 } from "../../src/utils/sanitizeForDisplay";
@@ -345,6 +347,34 @@ describe("a cut lands outside a control-character marker", () => {
     expect(sawCut).toBe(true);
   });
 
+  test("at no width does the end window open on a fragment of a marker", () => {
+    // The mirror of the sweep above, on the routine that keeps a value's END:
+    // the cut falls at the FRONT of what it kept, so what it may not leave is a
+    // proper SUFFIX of the marker rather than a proper prefix.
+    const suffixes = Array.from(
+      { length: MARKER.length - 1 },
+      (_unused, index) => MARKER.slice(index + 1),
+    );
+    let sawWholeMarker = false;
+    let sawCut = false;
+    for (let width = 0; width <= treated.length + 4; width += 1) {
+      const clipped = clipToRenderedCostKeepingEnd(treated, width);
+      const kept = clipped.startsWith(DISPLAY_TRUNCATION_MARKER)
+        ? clipped.slice(DISPLAY_TRUNCATION_MARKER.length)
+        : clipped;
+      for (const suffix of suffixes)
+        expect(kept.startsWith(suffix), `budget ${width}`).toBe(false);
+      // What it kept is a SUFFIX of the value, whatever the back-off moved.
+      expect(treated.endsWith(kept), `budget ${width}`).toBe(true);
+      sawWholeMarker ||= clipped.includes(MARKER);
+      sawCut ||= clipped.startsWith(DISPLAY_TRUNCATION_MARKER);
+    }
+    // Non-vacuous: the sweep covered widths that cut the value and widths that
+    // held the whole marker.
+    expect(sawWholeMarker).toBe(true);
+    expect(sawCut).toBe(true);
+  });
+
   test("a value spelling a marker in its own bytes is backed off over too", () => {
     // The marker's shape is an open class: nothing in a treated string
     // tells a marker from a value that spelled one character by character,
@@ -378,6 +408,28 @@ describe("a cut lands outside a control-character marker", () => {
           ).toBe(lead);
       }
     expect(trimPartialControlCharacterMarker("abc<0<0<0")).toBe("abc<0<0");
+  });
+
+  test("the back-off is one marker wide at the start too, whatever it lands beside", () => {
+    // The mirror of the back-off above: no proper suffix of a marker holds the
+    // marker's opening `<`, so one back-off removes the split marker's suffix
+    // and cannot expose a second one behind it. Read over the emitter's whole
+    // domain, at every cut inside a marker, and ahead of tails opening on a
+    // whole marker and on marker SHAPES the tail spells in its own bytes.
+    for (const tail of [TAIL, `${MARKER}${TAIL}`, `0a>${TAIL}`, `a>${TAIL}`])
+      for (const character of CONTROL_CHARACTERS) {
+        const marker = controlCharacterMarker(character.codePointAt(0)!);
+        for (let offset = 1; offset < marker.length; offset += 1)
+          expect(
+            trimPartialControlCharacterMarkerAtStart(
+              marker.slice(offset) + tail,
+            ),
+            `${JSON.stringify(tail)} cut at ${offset} of ${marker}`,
+          ).toBe(tail);
+      }
+    expect(trimPartialControlCharacterMarkerAtStart("0a>0a>0a>abc")).toBe(
+      "0a>0a>abc",
+    );
   });
 
   test("a value that spells the shape end to end keeps all but a cut's three", () => {

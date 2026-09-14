@@ -158,8 +158,10 @@ export {
   renderedDisplayCost,
   boundRawFragmentForFit,
   clipToRenderedCost,
+  clipToRenderedCostKeepingEnd,
   replaceControlCharactersForDisplay,
   trimPartialControlCharacterMarker,
+  trimPartialControlCharacterMarkerAtStart,
   DISPLAY_TRUNCATION_MARKER,
   DEFAULT_MAX_DISPLAY_LENGTH,
   COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
@@ -179,6 +181,22 @@ export {
   MAX_ERROR_CAUSE_DEPTH,
 } from "./utils/sanitizeErrorForDisplay";
 export type { PrivateKeyStreamRedactor } from "./utils/sanitizeErrorForDisplay";
+// The partner-origin brand and its ONE elimination. A consumer outside core
+// brands at its own decode chokepoint -- the read that takes bytes off a stream
+// somebody else fills -- and has no other way to put those bytes in a message.
+export {
+  partnerOriginText,
+  partnerOriginTextList,
+  errorWithPartnerCauseLinks,
+  MAX_PARTNER_VALUES_SHOWN,
+  PARTNER_LABELLED_VALUE_BUDGET,
+} from "./utils/partnerOriginText";
+export type {
+  PartnerOriginText,
+  PartnerOriginTextList,
+  PartnerCauseLinkOptions,
+  PartnerValueWindow,
+} from "./utils/partnerOriginText";
 // The delimiting grammar for a linkage-terms value named in an operator-facing
 // diagnostic. Exported because the CLI's reconcile refusal and citation-drift
 // warning and both consent surfaces name the same class of partner-chosen
