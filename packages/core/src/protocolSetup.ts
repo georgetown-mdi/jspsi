@@ -404,6 +404,27 @@ export async function sendAbort(
   }
 }
 
+/**
+ * Whether a raw received frame is one of the abort decisions
+ * {@link sendAbort} emits. Read off the `decision` discriminant alone, which
+ * is what both terms-exchange slots key on and the only field either form of
+ * the frame is required to hold: the reasons beside it are partner-written
+ * text, and a reader that states nothing but "the partner aborted" has no use
+ * for them.
+ *
+ * For a boundary past the terms exchange, where an abort can arrive in place
+ * of the frame the round awaited (`receivePsiBinaryFrame`,
+ * `packages/core/src/psi/psiBinaryFrame.ts`). The terms exchange itself parses
+ * the whole envelope instead, because it reads the rest of the frame.
+ */
+export function isPartnerAbortFrame(frame: unknown): boolean {
+  return (
+    typeof frame === "object" &&
+    frame !== null &&
+    (frame as { decision?: unknown }).decision === "abort"
+  );
+}
+
 // The lenient probe that extracts ONLY `protocolVersion` from a raw terms
 // frame, read before the strict envelope parse; docs/spec/PROTOCOL.md
 // ("Protocol-version reconcile at the terms exchange") states the ordering

@@ -63,6 +63,7 @@ import {
   manyToManyIsImplementedForStrategy,
 } from "../linkageTermsPolicy";
 import { InternalConsistencyError, UsageError } from "../errors";
+import { receivePsiBinaryFrame } from "./psiBinaryFrame";
 import { receiveCountReport, sendCountReport } from "../protocolSetup";
 
 import { getLoggerForVerbosity } from "../utils/logger";
@@ -1904,7 +1905,11 @@ export async function linkViaSinglePassPSI(
     const { setup, permutation } =
       await participant.createServerSetup(distinctValues);
 
-    const request = (await conn.receive()) as Uint8Array;
+    const request = await receivePsiBinaryFrame(
+      conn,
+      participant.id,
+      "request",
+    );
     // Collect the setup-masking transients before the re-encryption masking.
     relieveTransientMemory();
     stage("doubly-encrypting partner's data");
@@ -2046,7 +2051,11 @@ export async function linkViaSinglePassPSI(
   conn.setInboundFrameCap?.(replyCap);
   let replyFrame: Uint8Array;
   try {
-    replyFrame = (await conn.receive()) as Uint8Array;
+    replyFrame = await receivePsiBinaryFrame(
+      conn,
+      participant.id,
+      "single-pass reply",
+    );
   } finally {
     conn.setInboundFrameCap?.(undefined);
   }

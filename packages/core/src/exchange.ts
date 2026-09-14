@@ -1898,13 +1898,10 @@ export async function runExchange(
     // declaration -- so without it the partner would wait out its full
     // peer-inactivity budget (a full poll budget on a file channel) for rounds
     // this party never runs. The reason is a fixed literal about values the
-    // partner itself declared, so the frame discloses nothing new. What the
-    // partner sees from that arrival is not a refusal at all: the frame reaches
-    // its PSI binary boundary still awaiting its next round, so that run ends
-    // with the PSI library's own "Type not convertible to a Uint8Array" error,
-    // with no psilink framing or cause attached -- fast-fail without diagnosis.
-    // Classifying that decode failure is follow-on work, not a property this
-    // branch claims.
+    // partner itself declared, so the frame discloses nothing new. The partner
+    // reads the frame at its PSI binary boundary, where it is classified as a
+    // peer abort rather than decoded as binary (receivePsiBinaryFrame), so that
+    // run ends naming the termination rather than on a library decode message.
     await sendAbort(conn, [
       "partner presented a deduplicate its invitation did not declare",
     ]);

@@ -13,6 +13,7 @@ import {
   createMessagePipe,
   type MessageConnection,
 } from "../src/connection/messageConnection";
+import { PeerAbortError } from "../src/errors";
 
 import type { BuiltExchangeRecord } from "../src/records/exchangeRecord";
 import type {
@@ -646,6 +647,13 @@ test("a one-sided divergence refusal aborts the party still waiting", async () =
   // returns and the test fails by timing out.
   expect(receiver.status).toBe("rejected");
   expect(receiverInbound).toContainEqual(PAYLOAD_DISCLOSURE_ABORT_FRAME);
+  // The receiver reads that frame parked at its PSI binary boundary, which
+  // classifies it: the run ends naming the partner's termination rather than
+  // on a decode message, and holds none of the reason the refusing side has.
+  const receiverReason = (receiver as PromiseRejectedResult).reason as Error;
+  expect(receiverReason).toBeInstanceOf(PeerAbortError);
+  expect(receiverReason.message).toMatch(/Contact your partner/);
+  expect(receiverReason.message).not.toContain("payload disclosure");
   // Neither the association table (the only Array-shaped frame) nor a payload
   // frame moved in either direction before the refusal.
   for (const inbound of [helperInbound, receiverInbound]) {
