@@ -16,6 +16,11 @@ import {
 } from "./intentArgv";
 
 import {
+  PARTNER_CERTIFICATE_PINNED_SOURCE,
+  partnerCertificatePinnedNotice,
+  recordedPartnerFingerprint,
+} from "./partnerPinNotice";
+import {
   composeConfigDocument,
   composeKeyFileDocument,
   composeSftpConfigDocument,
@@ -1215,7 +1220,10 @@ export class JobManager {
       this.failOnOverflow(record);
       return;
     }
-    const entry: BufferedEvent = { id: record.events.length + 1, event };
+    const entry: BufferedEvent = {
+      id: record.events.length + 1,
+      event: rewrittenPartnerPinNotice(record, event),
+    };
     record.events.push(entry);
     this.notifyListeners(record, entry);
     if (event.type === "result" || event.type === "error")
@@ -1648,6 +1656,37 @@ function workdirArtifactPath(workdir: string, name: string): string {
   if (artifactPath === null)
     throw new Error(`the job ${name} did not resolve inside the workdir`);
   return artifactPath;
+}
+
+/**
+ * Replace the CLI's first-contact pin notice with the console's own, which
+ * states the recorded fingerprint and names no file.
+ *
+ * The CLI's wording names the configuration file it wrote the pin into, a path
+ * inside this container: every other console surface holds paths back, and a
+ * relayed warning is no exception. The value is read out of that same
+ * configuration rather than out of the sentence
+ * ({@link recordedPartnerFingerprint}).
+ *
+ * Every other event passes through untouched.
+ */
+function rewrittenPartnerPinNotice(
+  record: JobRecord,
+  event: RelayEvent,
+): RelayEvent {
+  if (
+    event.type !== "warning" ||
+    event.source !== PARTNER_CERTIFICATE_PINNED_SOURCE
+  )
+    return event;
+  return {
+    ...event,
+    message: partnerCertificatePinnedNotice(
+      recordedPartnerFingerprint(
+        workdirArtifactPath(record.workdir, JOB_FILE_NAMES.config),
+      ),
+    ),
+  };
 }
 
 /** The live view of an in-memory record, mirroring what the routes report. */

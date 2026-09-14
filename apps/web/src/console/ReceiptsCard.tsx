@@ -23,6 +23,7 @@ import {
   IDENTITY_REGENERATION_NOTICE,
   RETENTION_NOTE_NOTICE,
   fingerprintRequestProblem,
+  partnerPinStatement,
   receiptsAdvisories,
   receiptsProblems,
   receiptsSummary,
@@ -210,6 +211,7 @@ export function ReceiptsCard({
   );
   const notices = advisories.filter((advisory) => advisory.severity === "info");
   const requestProblem = fingerprintRequestProblem(identity);
+  const pinStatement = partnerPinStatement(draft);
   const set = <TField extends keyof ReceiptsDraft>(
     field: TField,
     value: ReceiptsDraft[TField],
@@ -388,15 +390,22 @@ export function ReceiptsCard({
               )}
             </Stack>
 
-            <TextInput
-              label="Your partner's fingerprint"
-              description="Paste the 43-character value your partner sends you. Their certificate is trusted only if it matches."
-              placeholder="43 characters"
-              value={draft.partnerFingerprint}
-              onChange={(event) =>
-                set("partnerFingerprint", event.currentTarget.value)
-              }
-            />
+            <Stack gap={4}>
+              <TextInput
+                label="Your partner's fingerprint"
+                description="Paste the 43-character value your partner sends you. Their certificate is trusted only if it matches."
+                placeholder="43 characters"
+                value={draft.partnerFingerprint}
+                onChange={(event) =>
+                  set("partnerFingerprint", event.currentTarget.value)
+                }
+              />
+              {pinStatement !== undefined && (
+                <Text size="sm" c="dimmed">
+                  {pinStatement}
+                </Text>
+              )}
+            </Stack>
 
             <Alert
               color="gray"

@@ -165,10 +165,19 @@ The failure **terminal event**. Emitted exactly once, for an organic (non-signal
 | ----- | ---- | ------- |
 | `category` | string | One of `exchange`, `output`, `security`, `config` (see [Error categories](#error-categories)). |
 | `message` | string | Display-safe error text, the same rendering stderr receives (see [Sanitization](#sanitization)). |
+| `recoveryHint` | optional boolean | Present as `true` only, absent otherwise (see [The self-explaining marker](#the-self-explaining-marker)). |
 
 ```json
 {"v":1,"type":"error","category":"security","message":"key exchange authentication failed"}
 ```
+
+### The self-explaining marker
+
+`recoveryHint: true` states that `message` names the cause and the next step, so a consumer showing fixed copy for the category beside it MUST show the message instead and MUST NOT add an advisory of its own. The field is absent where the CLI makes no such claim; a consumer reads its absence as no claim, never as a denial.
+
+The value is read off core's `psilinkRecoveryHintEmitted` tag, whose two-state convention is that an error holds it exactly when it holds its own next step (`packages/core/src/errors.ts`). The tag is walked over the `cause` chain, so a wrap of a tagged failure keeps the claim its message still states. It is the same tag the CLI's own stderr path reads to suppress its generic advisory, so the two sinks never disagree about which failures explain themselves.
+
+This is what lets a consumer tell the refusals of the terms-time certificate pin apart from an ordinary `security` failure (a wrong secret, a tampered handshake) without matching on message text: the five pin refusals carry the marker and each names what to do, while the handshake failures, whose messages are non-oracular by design, do not.
 
 ## Error categories
 

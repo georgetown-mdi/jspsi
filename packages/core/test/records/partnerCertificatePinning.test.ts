@@ -2,7 +2,11 @@ import { describe, expect, test } from "vitest";
 
 import PSI from "@openmined/psi.js";
 
-import { prepareForExchange, runExchange } from "../../src/exchange";
+import {
+  prepareForExchange,
+  resolvePartnerCertificateOrAbort,
+  runExchange,
+} from "../../src/exchange";
 import { createMessagePipe } from "../../src/connection/messageConnection";
 import { ReceiptVerificationError } from "../../src/records/signedReceipt";
 import {
@@ -615,5 +619,102 @@ describe("a run that does not sign in band presents no certificate", () => {
 
   test("a run with neither sends none", async () => {
     await noCertificate({});
+  });
+});
+
+describe("every terms-time pin refusal states its own next step", () => {
+  // Each of the five is raised with core's `psilinkRecoveryHintEmitted` tag,
+  // whose two-state convention is that an error holds it exactly when its
+  // message holds the step to take. What the tag buys is a display layer
+  // showing the refusal instead of fixed copy for its category -- the CLI's
+  // stderr advisory, and the console seat's failed-partner-check alert, both
+  // of which would misname a certificate that does not match the pin.
+  const tampered = {
+    ...identityB.certificate,
+    signature: identityA.certificate.signature,
+  };
+  const refusals: Array<{
+    label: string;
+    resolution: Parameters<typeof resolvePartnerCertificateOrAbort>[1];
+  }> = [
+    {
+      label: "a certificate the wire schema rejects",
+      resolution: {
+        partnerCertificate: undefined,
+        partnerCertificateMalformed: true,
+        pinnedFingerprint: undefined,
+        partnerAgreedIdentity: "Responder Co",
+      },
+    },
+    {
+      label: "a partner presenting none",
+      resolution: {
+        partnerCertificate: undefined,
+        partnerCertificateMalformed: false,
+        pinnedFingerprint: undefined,
+        partnerAgreedIdentity: "Responder Co",
+      },
+    },
+    {
+      label: "a certificate diverging from the pin",
+      resolution: {
+        partnerCertificate: identityB.certificate,
+        partnerCertificateMalformed: false,
+        pinnedFingerprint: fingerprintA,
+        partnerAgreedIdentity: "Responder Co",
+      },
+    },
+    {
+      label: "a certificate that does not verify under its own key",
+      resolution: {
+        partnerCertificate: tampered,
+        partnerCertificateMalformed: false,
+        pinnedFingerprint: undefined,
+        partnerAgreedIdentity: "Responder Co",
+      },
+    },
+    {
+      label: "a certificate bound to another party",
+      resolution: {
+        partnerCertificate: identityB.certificate,
+        partnerCertificateMalformed: false,
+        pinnedFingerprint: undefined,
+        partnerAgreedIdentity: "Someone Else",
+      },
+    },
+  ];
+
+  test.each(refusals)("$label is raised tagged", async ({ resolution }) => {
+    const [conn] = createMessagePipe();
+    const raised = await resolvePartnerCertificateOrAbort(
+      conn,
+      resolution,
+    ).then(
+      () => {
+        throw new Error("expected the resolution to refuse");
+      },
+      (reason: unknown) => reason,
+    );
+    expect(raised).toBeInstanceOf(ReceiptVerificationError);
+    expect(
+      (raised as { psilinkRecoveryHintEmitted?: unknown })
+        .psilinkRecoveryHintEmitted,
+    ).toBe(true);
+    // The claim the tag makes: the message names what to do, not only what
+    // went wrong. Every one of the five ends in an instruction.
+    expect((raised as Error).message).toMatch(
+      /Have the partner |Confirm the partner's fingerprint|agree terms under/,
+    );
+  });
+
+  test("an adopted first contact raises nothing to tag", async () => {
+    const [conn] = createMessagePipe();
+    const adopted = await resolvePartnerCertificateOrAbort(conn, {
+      partnerCertificate: identityB.certificate,
+      partnerCertificateMalformed: false,
+      pinnedFingerprint: undefined,
+      partnerAgreedIdentity: "Responder Co",
+    });
+    expect(adopted).toBe(fingerprintB);
   });
 });

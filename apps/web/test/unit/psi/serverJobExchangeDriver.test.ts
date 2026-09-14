@@ -8,6 +8,8 @@ import { ProcessState } from "@psilink/core";
 
 import {
   JobApiRequestError,
+  RelayedSelfExplainingError,
+  RelayedTerminalError,
   createFetchJobApiClient,
   createServerJobExchangeDriver,
   createServerJobReattachDriver,
@@ -538,6 +540,54 @@ describe("createServerJobExchangeDriver event mapping", () => {
     expect((failure.error as Error).message).toBe(
       "key exchange authentication failed",
     );
+  });
+
+  test("a refusal marked as stating its own step arrives as one", async () => {
+    // The seat picks its copy off the class, so the marker has to survive the
+    // relay rather than being read again from the raw event at the alert.
+    const { client } = scriptedClient([
+      {
+        ...errorEvent("security", "the partner's certificate is not the pin"),
+        recoveryHint: true,
+      },
+    ]);
+    const driver = createServerJobExchangeDriver(driverConfig(), client);
+    const events = driverEvents(new AbortController().signal);
+
+    await driver.run(events);
+
+    const failure = events.onError.mock.calls[0][0] as {
+      category: string;
+      error: unknown;
+    };
+    expect(failure.category).toBe("security");
+    expect(failure.error).toBeInstanceOf(RelayedSelfExplainingError);
+  });
+
+  test("only the literal marker counts, so a forged shape claims nothing", async () => {
+    // The field is an assurance a consumer acts on, so anything but the boolean
+    // the CLI emits takes the class that shows fixed copy.
+    for (const forged of ["true", 1, {}, null]) {
+      const { client } = scriptedClient([
+        { ...errorEvent("security", "unverifiable"), recoveryHint: forged },
+      ]);
+      const events = driverEvents(new AbortController().signal);
+      await createServerJobExchangeDriver(driverConfig(), client).run(events);
+      const failure = events.onError.mock.calls[0][0] as { error: unknown };
+      expect(failure.error).toBeInstanceOf(RelayedTerminalError);
+      expect(failure.error).not.toBeInstanceOf(RelayedSelfExplainingError);
+    }
+  });
+
+  test("an unmarked error stays the class that shows fixed copy", async () => {
+    const { client } = scriptedClient([
+      errorEvent("security", "key exchange authentication failed"),
+    ]);
+    const events = driverEvents(new AbortController().signal);
+    await createServerJobExchangeDriver(driverConfig(), client).run(events);
+    const failure = events.onError.mock.calls[0][0] as { error: unknown };
+    expect(failure.error).toBeInstanceOf(RelayedTerminalError);
+    expect(failure.error).not.toBeInstanceOf(RelayedSelfExplainingError);
   });
 
   test("a non-security error category also passes through unchanged", async () => {

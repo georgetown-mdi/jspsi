@@ -747,6 +747,10 @@ const PARTNER_CERTIFICATE_UNRECORDED_ABORT_REASON =
 // literal holding no byte from the partner's frame, and each states that the
 // run stopped before any linkage key or payload row was sent -- which is what
 // the refusal buys over the same failure at the signature swap.
+//
+// Each also names its own next step, so each is raised through
+// {@link partnerCertificateRefusal}, which tags the instance
+// `psilinkRecoveryHintEmitted`.
 const PARTNER_CERTIFICATE_UNREADABLE_MESSAGE =
   "the partner presented a signing certificate this build cannot read, so " +
   "this run cannot finish: the field was on the terms exchange but does not " +
@@ -785,6 +789,25 @@ const PARTNER_CERTIFICATE_DIVERGENT_MESSAGE =
   "Confirm the partner's fingerprint out-of-band -- they produce it with " +
   "'psilink fingerprint' -- and, where they regenerated their signing " +
   "identity, replace signing.partner_fingerprint with the new value.";
+
+/**
+ * One of the five terms-time pin refusals, tagged `psilinkRecoveryHintEmitted`
+ * per instance on the convention `TransportPublishIndeterminateError`
+ * (`./errors.ts`) states: an error is tagged exactly when it holds its own next
+ * step, and each of these messages ends in one. The tag suppresses the CLI's
+ * generic advisory and lets a display layer show the message instead of fixed
+ * copy -- which is what keeps a divergent pin from being reported as an
+ * ordinary failed partner check.
+ *
+ * The tag is per instance rather than on {@link ReceiptVerificationError}: the
+ * receipt step raises that class for a signature that does not verify too, and
+ * that message prescribes no step of its own.
+ */
+function partnerCertificateRefusal(message: string): ReceiptVerificationError {
+  return Object.assign(new ReceiptVerificationError(message), {
+    psilinkRecoveryHintEmitted: true,
+  });
+}
 
 /**
  * Inputs to {@link resolvePartnerCertificateOrAbort}: what the terms exchange
@@ -850,11 +873,11 @@ export async function resolvePartnerCertificateOrAbort(
   const { partnerCertificate, pinnedFingerprint } = resolution;
   if (resolution.partnerCertificateMalformed) {
     await sendAbort(conn, [PARTNER_CERTIFICATE_UNREADABLE_ABORT_REASON]);
-    throw new ReceiptVerificationError(PARTNER_CERTIFICATE_UNREADABLE_MESSAGE);
+    throw partnerCertificateRefusal(PARTNER_CERTIFICATE_UNREADABLE_MESSAGE);
   }
   if (partnerCertificate === undefined) {
     await sendAbort(conn, [PARTNER_CERTIFICATE_ABSENT_ABORT_REASON]);
-    throw new ReceiptVerificationError(PARTNER_CERTIFICATE_ABSENT_MESSAGE);
+    throw partnerCertificateRefusal(PARTNER_CERTIFICATE_ABSENT_MESSAGE);
   }
   if (partnerPinIsPresent(pinnedFingerprint)) {
     // Constant time over the decoded digest bytes, and a malformed configured
@@ -865,7 +888,7 @@ export async function resolvePartnerCertificateOrAbort(
     if (await matchesPinnedFingerprint(partnerCertificate, pinnedFingerprint))
       return pinnedFingerprint;
     await sendAbort(conn, [PARTNER_CERTIFICATE_DIVERGENT_ABORT_REASON]);
-    throw new ReceiptVerificationError(PARTNER_CERTIFICATE_DIVERGENT_MESSAGE);
+    throw partnerCertificateRefusal(PARTNER_CERTIFICATE_DIVERGENT_MESSAGE);
   }
   // First authenticated contact. The self-signature is checked before the
   // fingerprint is adopted: a certificate that does not verify under its own
@@ -874,7 +897,7 @@ export async function resolvePartnerCertificateOrAbort(
   // could satisfy.
   if (!(await verifyCertificateSelfSignature(partnerCertificate))) {
     await sendAbort(conn, [PARTNER_CERTIFICATE_UNVERIFIED_ABORT_REASON]);
-    throw new ReceiptVerificationError(PARTNER_CERTIFICATE_UNVERIFIED_MESSAGE);
+    throw partnerCertificateRefusal(PARTNER_CERTIFICATE_UNVERIFIED_MESSAGE);
   }
   // The certificate also has to name the party that agreed these terms: the
   // swap authorizes it against that same name, so adopting the fingerprint of
@@ -889,7 +912,7 @@ export async function resolvePartnerCertificateOrAbort(
     await sendAbort(conn, [
       PARTNER_CERTIFICATE_UNAUTHORIZED_IDENTITY_ABORT_REASON,
     ]);
-    throw new ReceiptVerificationError(
+    throw partnerCertificateRefusal(
       PARTNER_CERTIFICATE_UNAUTHORIZED_IDENTITY_MESSAGE,
     );
   }

@@ -19,6 +19,10 @@
 //   STUB_STDOUT       Text written to stdout before exit.
 //   STUB_OUTPUT_FILE  When set, the output positional (last argv) is written
 //                     with this content (so the result route has a file).
+//   STUB_PARTNER_PIN  When set, signing.partner_fingerprint is written into the
+//                     document named by --config-file before the fd-3 events,
+//                     as the real first-contact adoption does (it persists the
+//                     pin and only then emits its warning).
 //   STUB_RECORD_JSON  When set, the record file named by --record-file is written
 //                     with this content, and its paired .keys.json alongside it
 //                     (so the record/keys routes have files). The keys path is
@@ -60,6 +64,8 @@
 //                     decides whose ./psilink.yaml the real CLI would resolve.
 
 import fs from "node:fs";
+
+import YAML from "yaml";
 
 // The default probe line emitted when STUB_PROBE_STDOUT is unset (an all-A
 // canonical fingerprint), so the probe route's round-trip is deterministic even
@@ -172,6 +178,21 @@ function runExchangeStub() {
     fs.writeFileSync(outputPath, process.env.STUB_OUTPUT_FILE);
   }
 
+  // The real CLI persists an adopted pin into its configuration file and only
+  // then emits the warning naming it, so the stub writes before its fd-3 events
+  // too: a relay that reads the value back must find it already on file.
+  if (process.env.STUB_PARTNER_PIN !== undefined) {
+    const configPath = separatedFlagValue(process.argv, "--config-file");
+    if (configPath !== undefined) {
+      const document = YAML.parseDocument(fs.readFileSync(configPath, "utf8"));
+      document.setIn(
+        ["signing", "partner_fingerprint"],
+        process.env.STUB_PARTNER_PIN,
+      );
+      fs.writeFileSync(configPath, document.toString());
+    }
+  }
+
   if (process.env.STUB_RECORD_JSON !== undefined) {
     const recordPath = recordFilePath(process.argv);
     if (recordPath !== undefined) {
@@ -235,11 +256,16 @@ function writeFd3(line) {
 // shape so a flag-shaped value cannot be misparsed); the real CLI's yargs accepts
 // both, so the stub resolves both.
 function recordFilePath(argv) {
-  const flagIndex = argv.indexOf("--record-file");
+  return separatedFlagValue(argv, "--record-file");
+}
+
+/** The value of a flag the exchange argv passes as two tokens, tolerating the
+ * `--flag=value` spelling as well. The exchange driver uses the separated form
+ * for every flag it passes; `flagValue` above answers the fingerprint and probe
+ * subcommands, which use the joined one. */
+function separatedFlagValue(argv, flag) {
+  const flagIndex = argv.indexOf(flag);
   if (flagIndex !== -1 && flagIndex + 1 < argv.length)
     return argv[flagIndex + 1];
-  const eqToken = argv.find((token) => token.startsWith("--record-file="));
-  return eqToken === undefined
-    ? undefined
-    : eqToken.slice("--record-file=".length);
+  return flagValue(argv, flag);
 }

@@ -446,6 +446,33 @@ test("classifies a security-kind ConnectionError as security in any phase", () =
   expect(buildErrorEvent(err, "run").category).toBe("security");
 });
 
+test("marks a terminal error that states its own next step", () => {
+  // Two security failures the exit code cannot tell apart: a wrong secret,
+  // whose message is non-oracular by design, and a refusal naming what to do.
+  // The marker is what lets a supervisor show the second and keep its fixed
+  // copy for the first.
+  const nonOracular = new ConnectionError("wrong secret", "security");
+  expect(buildErrorEvent(nonOracular, "run").recoveryHint).toBeUndefined();
+  const selfExplaining = Object.assign(
+    new ConnectionError(
+      "the partner's certificate is not the pinned one; " +
+        "confirm the fingerprint out-of-band",
+      "security",
+    ),
+    { psilinkRecoveryHintEmitted: true },
+  );
+  expect(buildErrorEvent(selfExplaining, "run").recoveryHint).toBe(true);
+});
+
+test("the marker survives a wrap, since the wrapped message still states it", () => {
+  const wrapped = new Error("the exchange stopped", {
+    cause: Object.assign(new Error("re-share an identity"), {
+      psilinkRecoveryHintEmitted: true,
+    }),
+  });
+  expect(buildErrorEvent(wrapped, "run").recoveryHint).toBe(true);
+});
+
 test("classifies an output-phase failure as output", () => {
   // The output phase is decided by where the failure landed, not the error type:
   // even a plain transport-looking error in the output stage is `output`.

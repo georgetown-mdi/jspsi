@@ -375,8 +375,14 @@ export const jobSigningIdentityLocationSchema: z.ZodType<JobSigningIdentityLocat
  * {@link FINGERPRINT_REGEX} admits exactly a canonical 43-character unpadded
  * base64url SHA-256 digest, so the value cannot hold a separator, a path, or
  * a flag-shaped token. It is a public digest of a public certificate, not a
- * credential, and is required under `certificate` (see
- * {@link jobSigningChoiceSchema}).
+ * credential, and is admissible only under `certificate` (see
+ * {@link jobSigningChoiceSchema}). Optional there: an absent pin is the first
+ * authenticated contact the spawned child adopts a certificate on. The console
+ * does not hold the operator to an out-of-band value they may not have yet --
+ * a pin obtained that way is the stronger anchor (docs/SECURITY_DESIGN.md,
+ * Pinned self-signed trust model), so the card warns and guides toward it, in
+ * the console's posture toward the operator's own choices (CLAUDE.md,
+ * Applications).
  */
 export interface JobSigningChoice {
   mode: JobSigningMode;
@@ -423,24 +429,6 @@ const jobSigningChoiceSchema: z.ZodType<JobSigningChoice> = z
         "partnerFingerprint is only admissible with signing mode 'certificate'",
       path: ["partnerFingerprint"],
     },
-  )
-  // And the converse: certificate mode requires one here, stricter than the
-  // spawned child, which pins the certificate its partner presents at the
-  // terms exchange. The console holds the operator to a fingerprint obtained
-  // out of band, the stronger of the two anchors a pin can have
-  // (docs/SECURITY_DESIGN.md, Pinned self-signed trust model). Authoring is
-  // untouched, since a draft is not a job.
-  .refine(
-    (signing) =>
-      signing.mode !== "certificate" ||
-      signing.partnerFingerprint !== undefined,
-    {
-      message:
-        "partnerFingerprint is required with signing mode 'certificate': the " +
-        "console asks for the partner's fingerprint, obtained out of band, " +
-        "before it creates a job that signs receipts",
-      path: ["partnerFingerprint"],
-    },
   );
 
 /**
@@ -470,13 +458,14 @@ export interface JobSigningPaths {
  * intent that states no choice at all, compose the absent block the CLI
  * already treats as "sign nothing".
  *
- * Both throws below guard an impossible state on a schema-validated intent
- * rather than a live branch: `jobSigningChoiceSchema`'s refine requires a
- * certificate intent to hold `partnerFingerprint`, so composing one without
- * it means a caller reached this function with a hand-built intent that
- * bypassed the schema. Throwing turns that into a loud failure at compose
- * time rather than a config the CLI child would refuse later with a bare
- * exit 64.
+ * An absent `partnerFingerprint` composes a block without the key, which is
+ * what makes the run a first authenticated contact: the child adopts the
+ * certificate its partner presents and records the value into this same
+ * document. The throw below guards an impossible state on a schema-validated
+ * intent rather than a live branch -- a caller that reached this function with
+ * a hand-built intent bypassing the schema -- and turns it into a loud failure
+ * at compose time rather than a config the CLI child would refuse later with a
+ * bare exit 64.
  */
 export function composedSigning(
   intent: JobExchangeIntent,
@@ -488,15 +477,12 @@ export function composedSigning(
       "certificate-mode signing reached config composition with no identity " +
         "path resolved",
     );
-  if (intent.signing.partnerFingerprint === undefined)
-    throw new Error(
-      "certificate-mode signing reached config composition with no partner " +
-        "fingerprint pinned",
-    );
   return {
     mode: "certificate",
     identityFile: paths.identityFile,
-    partnerFingerprint: intent.signing.partnerFingerprint,
+    ...(intent.signing.partnerFingerprint !== undefined
+      ? { partnerFingerprint: intent.signing.partnerFingerprint }
+      : {}),
     ...(paths.receiptOutput !== undefined
       ? { receiptOutput: paths.receiptOutput }
       : {}),

@@ -177,23 +177,42 @@ export const PARTNER_FINGERPRINT_PROBLEM =
   "fingerprint' prints. Copy it whole, from a channel you trust.";
 
 /**
- * The problem certificate mode reports with no partner fingerprint pinned. A
- * block, not an advisory: the console holds the operator to a pin obtained
- * out of band, which is the stronger of the two anchors a pin can have
- * (docs/SECURITY_DESIGN.md, Pinned self-signed trust model). Authoring
- * itself stays open -- the remedy is to run unsigned now and switch once the
- * partner's fingerprint arrives.
+ * What certificate mode says with no partner fingerprint pinned: a warning,
+ * not a block. Such a run is a first authenticated contact, which pins the
+ * certificate the partner presents and reports the value -- a run the command
+ * line accepts, so the console warns and guides toward the stronger anchor
+ * rather than refusing the operator's own choice (CLAUDE.md, Applications).
+ *
+ * The two anchors a pin can have, and what each is authenticated by:
+ * docs/SECURITY_DESIGN.md, Pinned self-signed trust model.
  */
-export const NO_PARTNER_PIN_PROBLEM =
-  "Enter your partner's fingerprint before signing receipts. Ask them to run " +
-  "'psilink fingerprint' and send you the value over a channel you trust -- a " +
-  "phone call, not the same email as the invitation. A fingerprint you got " +
-  "that way is what ties a receipt to your partner and to nobody else. " +
-  "Without one, the exchange pins whichever certificate reaches it over the " +
-  "channel the invitation travelled, so a receipt would attest to whoever " +
-  "sent that invitation rather than to the partner you believe you are " +
-  "exchanging with. To exchange before their fingerprint arrives, choose " +
-  "'No receipt' now and switch to a certificate signature once you hold it.";
+export const FIRST_CONTACT_PIN_ADVISORY =
+  "Nothing is pinned for your partner yet, so this exchange pins whichever " +
+  "certificate reaches it over the channel the invitation travelled, and " +
+  "reports the fingerprint when it does. Its receipt then attests to whoever " +
+  "sent that invitation. To tie the receipt to your partner and to nobody " +
+  "else, ask them to run 'psilink fingerprint' and send you the value over a " +
+  "channel you trust -- a phone call, not the same email as the invitation " +
+  "-- and enter it above before you run.";
+
+/**
+ * What the card states about the pin this exchange holds: the fingerprint
+ * itself where the operator entered one, and the first-contact state plainly
+ * where they did not. Shown under certificate mode only, where a pin decides
+ * anything.
+ *
+ * The value is echoed through the display escape like every other operator-
+ * authored value the card shows; a value that is not a canonical digest is
+ * reported by {@link PARTNER_FINGERPRINT_PROBLEM} beside this line.
+ */
+export function partnerPinStatement(draft: ReceiptsDraft): string | undefined {
+  if (draft.mode !== "certificate") return undefined;
+  const pin = draft.partnerFingerprint.trim();
+  return pin === ""
+    ? "No partner fingerprint pinned yet. The first exchange pins the " +
+        "certificate your partner presents."
+    : `Pinned for your partner: ${sanitizeForDisplay(pin)}`;
+}
 
 /**
  * Why the card withholds the fingerprint request while this exchange states
@@ -297,8 +316,6 @@ export function receiptsProblems(
   if (draft.mode === "certificate" && identity.trim() === "")
     problems.push(UNNAMED_PARTY_PROBLEM);
   const pin = draft.partnerFingerprint.trim();
-  if (draft.mode === "certificate" && pin === "")
-    problems.push(NO_PARTNER_PIN_PROBLEM);
   if (
     draft.mode === "certificate" &&
     pin !== "" &&
@@ -535,6 +552,16 @@ export function receiptsAdvisories(
   rendezvous: JobRendezvousConfig | undefined,
 ): Array<ReceiptsAdvisory> {
   if (draft.mode !== "certificate") return [];
+  // First in the group, and a warning rather than an info: it is the one line
+  // here about what this run's receipt is worth, and the operator can still act
+  // on it before starting. Raised on the blank field alone -- a value that is
+  // not a canonical digest is a problem, not this, and a draft holding a pin
+  // raises nothing here, since what the card states there is the pin itself
+  // ({@link partnerPinStatement}).
+  const firstContact: Array<ReceiptsAdvisory> =
+    draft.partnerFingerprint.trim() === ""
+      ? [{ message: FIRST_CONTACT_PIN_ADVISORY, severity: "warning" }]
+      : [];
   const separatelyMounted =
     rendezvous?.configured === true && rendezvous.sharesDataRoot === false;
   // A picked location takes the key this run loads out of the mounted working
@@ -547,6 +574,7 @@ export function receiptsAdvisories(
   // location picked, rather than as a line inside the notice.
   if (draft.identityLocation !== undefined)
     return [
+      ...firstContact,
       ...(separatelyMounted
         ? []
         : [
@@ -568,6 +596,7 @@ export function receiptsAdvisories(
     rendezvous.sharesDataRoot === true &&
     rendezvous.sharesDataRootUncertain === false;
   return [
+    ...firstContact,
     ...(separatelyMounted
       ? []
       : [

@@ -5,6 +5,7 @@ import {
   OperatorConfigError,
   UsageError,
   WARNING_MESSAGE_MAX_DISPLAY_LENGTH,
+  causeChainSome,
   redactAndSanitizeForDisplay,
   sanitizeErrorForDisplay,
 } from "@psilink/core";
@@ -255,6 +256,15 @@ export interface ErrorEvent extends EventBase {
   category: ExchangeErrorCategory;
   /** Display-safe error text ({@link sanitizeErrorForDisplay}). */
   message: string;
+  /**
+   * Present and `true` when {@link message} holds its own next step, read off
+   * core's `psilinkRecoveryHintEmitted` tag ({@link errorStatesItsOwnNextStep}).
+   * A supervisor showing fixed copy for this category shows the message
+   * instead, and adds no advisory of its own; absent, it has no such
+   * assurance. Omitted rather than emitted `false`, so the field is the
+   * assurance and nothing else.
+   */
+  recoveryHint?: true;
 }
 
 export type StreamEvent =
@@ -465,6 +475,23 @@ function copyClusterSummary(
   };
 }
 
+/**
+ * Whether a failure holds core's `psilinkRecoveryHintEmitted` tag anywhere in
+ * its cause chain. The chain is walked for the reason the stderr path walks it
+ * (`apps/cli/src/protocol.ts`): a wrap of a tagged failure still states the
+ * next step the tag promises.
+ *
+ * @internal exported for testing
+ */
+export function errorStatesItsOwnNextStep(error: unknown): boolean {
+  return causeChainSome(
+    error,
+    (link) =>
+      (link as { psilinkRecoveryHintEmitted?: unknown })
+        .psilinkRecoveryHintEmitted === true,
+  );
+}
+
 /** Build the classified failure terminal event. */
 export function buildErrorEvent(error: unknown, phase: ErrorPhase): ErrorEvent {
   return {
@@ -475,6 +502,9 @@ export function buildErrorEvent(error: unknown, phase: ErrorPhase): ErrorEvent {
     // cause chain, so route it through the display-boundary sanitizer that
     // stderr uses; the category and version fields are this party's own vocabulary.
     message: sanitizeErrorForDisplay(error),
+    ...(errorStatesItsOwnNextStep(error)
+      ? { recoveryHint: true as const }
+      : {}),
   };
 }
 
