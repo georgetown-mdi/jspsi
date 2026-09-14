@@ -56,8 +56,8 @@ export function createPsiEngine(
 // provoked with today's cloneable payloads.
 interface WorkerThreadLike {
   on(event: "message", listener: (value: PsiWorkerResponse) => void): void;
-  on(event: "error", listener: (error: unknown) => void): void;
-  on(event: "messageerror", listener: (error: unknown) => void): void;
+  on(event: "error", listener: (error: Error) => void): void;
+  on(event: "messageerror", listener: (error: Error) => void): void;
   on(event: "exit", listener: (code: number) => void): void;
   postMessage(value: PsiWorkerRequest): void;
   terminate(): unknown;

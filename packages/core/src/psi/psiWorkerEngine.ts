@@ -91,13 +91,15 @@ export type PsiWorkerResponse =
  * `onError` reports the worker's own death -- an exit code, an uncaught worker
  * error, a reply that failed structured-clone delivery. Its message becomes the
  * top line the operator is shown, so an implementation composes it from fixed
- * literals and local values only, never from a value the partner chose.
+ * literals and local values only, never from a value the partner chose. It takes
+ * an `Error` rather than `unknown`, so a received string or object cannot be
+ * handed over as a fault and stand as that top line on its own.
  */
 export interface PsiWorkerHandle {
   postMessage(request: PsiWorkerRequest): void;
   setHandlers(handlers: {
     onMessage: (response: PsiWorkerResponse) => void;
-    onError: (error: unknown) => void;
+    onError: (error: Error) => void;
   }): void;
   terminate(): void;
 }
@@ -159,9 +161,15 @@ export class WorkerPsiEngine implements PsiEngine {
     else entry.reject(rebuildWorkerFailure(response));
   }
 
+  // Both call sites hand over an Error -- the handle's onError is typed for one
+  // -- so the coercion is a safety check for a JavaScript caller that ignores
+  // the type. It keeps the original as `cause` rather than letting String()
+  // stand alone, which reduces most non-Error values to "[object Object]".
   private failAll(error: unknown): void {
     const err = localWorkerFault(
-      error instanceof Error ? error : new Error(String(error)),
+      error instanceof Error
+        ? error
+        : new Error(String(error), { cause: error }),
     );
     this.terminalError ??= err;
     for (const entry of this.pending.values()) entry.reject(err);
