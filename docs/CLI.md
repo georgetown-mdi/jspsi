@@ -586,6 +586,8 @@ A crashed or mismatched prior run can leave protocol files in an `sftp`/`filedro
 
 ## Signing identity and the agreed terms
 
+Setting a partnership up to sign for the first time is a sequence of its own, from provisioning the identity to checking the receipt: [From a zero-setup exchange to signed receipts](#from-a-zero-setup-exchange-to-signed-receipts). This section and the ones it points at are the reference behind each step.
+
 Under `signing.mode: certificate` the run loads this party's signing identity from the path `signing.identity_file` names, before any credential, terms, or data are sent. A configuration that names none is refused earlier still, from the configuration alone -- before the run prepares your input or reaches the server -- and exits 64: psilink chooses no location for a signing identity, since it is a long-lived credential whose custody is yours (see [Where the signing identity lives](#where-the-signing-identity-lives)). Set `signing.identity_file` -- `/run/signing/psilink-signing-identity.json` is the usual shape, created there by `psilink fingerprint --identity-file` -- or run `signing.mode: none` unsigned. A path that is set but holds no identity file exits 64 too, naming that path.
 
 A partner verifies a receipt against the identity in the agreed terms rather than the one the certificate holds, so an identity bound to anything other than the run's `linkage_terms.identity` -- or the `--identity` that replaces it for that run -- signs receipts the partner rejects. That configuration is refused where the identity is loaded: the run exits 64, naming both values and the two ways to reconcile them, before anything is sent. Reconcile them with [`psilink fingerprint --force --identity`](#signing-identity-fingerprint) naming the terms identity -- which changes the fingerprint your partner has pinned, so it needs a coordinated re-pin -- or by editing `linkage_terms.identity` to the bound value. A bound label longer than the terms' length bound is not covered by that guidance and keeps the older remedy; no current psilink build can bind such a label, so it is a stated limit rather than a path.
@@ -881,6 +883,98 @@ Each value anchors at most one certificate, so pinning the same fingerprint twic
 An unanchored certificate is still checked -- its self-signature, its signature over the receipt content, and the identity it authorizes -- but only against itself and the identities you supplied, and whoever assembled the record can satisfy all three with a certificate they minted. So a run that anchors one slot says that party signed this exchange and says nothing about who the other signer is. The command reports that as `INCOMPLETE` and names the slot: `Nothing outside the record anchors the initiator's certificate`, with a line saying what would anchor it. That is short of verified rather than a failure, so the run still exits 0.
 
 With nothing anchoring either certificate -- the third-party-auditor case -- the command still checks both signatures and both identity bindings and reports `certificate fingerprint trust not established (no pinned value supplied)`, again `INCOMPLETE` rather than a failure. This is the trust model, not a gap: a dual-signed record is self-consistent by construction, so verifying its signatures alone proves only that the holders of the two certificates in it signed the content, which anyone can arrange with two certificates of their own. Ask your partner for their `psilink fingerprint` value over a trusted channel and pass it to anchor their slot.
+
+## From a zero-setup exchange to signed receipts
+
+A zero-setup run with `--save` leaves a `psilink.yaml` and a `.psilink.key` that [`psilink exchange`](#recurring-exchange) runs from, and nothing else: the saved configuration holds no `signing` block, so every run writes an unsigned [exchange record](spec/EXCHANGE_RECORD.md) and no receipt. The steps below turn that partnership into one that produces certificate-backed receipts.
+
+Two things hold across the whole sequence:
+
+- **Both parties do it.** A receipt is dual-signed, so a partner still running unsigned presents no certificate at the setup step and the run stops there -- nothing disclosed, no result, no receipt, and the exit code of a failed exchange (69) -- naming what to ask them for. Agree the change with your partner before either side makes it.
+- **`psilink exchange` is what signs.** The receipt is bound to the session key the authenticated key exchange produces, and the zero-setup form has neither that nor a configuration it reads, so signing starts at the recurring command the save set you up for.
+
+### Name this party
+
+`certificate` mode signs under the name in the agreed terms, so the configuration has to hold one. A zero-setup run given `--identity` saved that label into `linkage_terms.identity`; one that ran unnamed saved none. Set it before going further, and tell your partner the value -- it is what they see in the terms and what your certificate is checked against:
+
+```yaml
+linkage_terms:
+  identity: "Agency A, a@agency-a.gov"
+```
+
+### Create the signing identity
+
+The identity is a long-lived P-256 private key and its self-signed certificate, reused with every partner, so it belongs where your other credentials live rather than in the exchange's directory (see [Where the signing identity lives](#where-the-signing-identity-lives)). [`psilink fingerprint`](#signing-identity-fingerprint) creates it, at the path you name:
+
+```sh
+psilink fingerprint \
+  --identity-file /run/signing/psilink-signing-identity.json \
+  --identity "Agency A, a@agency-a.gov"
+```
+
+- **`--identity` is the label from the step above, exactly.** A certificate bound to any other string signs receipts your partner rejects, and an exchange under that pair is refused before it runs (see [Signing identity and the agreed terms](#signing-identity-and-the-agreed-terms)).
+- **The command announces what it did**, reporting the action, the path, and the bound identity on stderr. The 43-character fingerprint goes to stdout alone, so `FP=$(psilink fingerprint --identity-file /run/signing/psilink-signing-identity.json)` captures the value and nothing else.
+- **Its directory has to be writable for this one run.** Nothing afterwards writes there, so mount it read-only from then on (see [Mounting the signing identity](DEPLOYMENT.md#mounting-the-signing-identity)).
+- **Run it once.** A second identity has a second fingerprint, and every partner has to re-pin before your receipts verify again.
+
+### Reference the identity from the configuration
+
+Add the block to the `psilink.yaml` the save wrote:
+
+```yaml
+signing:
+  mode: certificate
+  identity_file: /run/signing/psilink-signing-identity.json
+```
+
+Certificate mode naming no `identity_file`, or naming a path that holds no identity file, is refused from the configuration alone -- exit 64, before the run prepares your input or reaches the server.
+
+Leave `signing.partner_fingerprint` out to let the first contact record it, or write it in yourself from a value your partner read to you over a channel you trust. Which you choose is the subject of [What the setup step authenticates](#what-the-setup-step-authenticates) below.
+
+### Run the first signed exchange
+
+```sh
+psilink exchange input.csv results.csv
+```
+
+Both parties present their signing certificate during the authenticated setup step that opens the exchange, before the first linkage key or payload row crosses. With no `signing.partner_fingerprint` on file, your side pins the certificate it was presented, records the fingerprint in the `psilink.yaml` this command was given, and states four things: the value, the file it went into, what the pin is authenticated by, and the comparison to make. That line also rides the [machine-readable event stream](#machine-readable-event-stream) under `partnerCertificatePinned`, so a scheduled run that discards stderr still reports it.
+
+Nothing is asked interactively, and no fingerprint is exchanged by hand. What is pinned, what is refused, and the certificate outcomes that end the run are in [Pinning the partner's certificate](#pinning-the-partners-certificate).
+
+**Recording the pin needs the directory holding the configuration writable.** The write puts a new file in that directory and renames it over the old one, which a read-only configuration mount does not permit: such a run exits 64 before it connects, naming the file and the two ways round it -- record `signing.partner_fingerprint` by hand, or mount the configuration writable for the run that records the pin.
+
+#### What the setup step authenticates
+
+The certificate arrives inside the authenticated exchange, so the pin is authenticated by the channel the shared secret travelled and by nothing else. Whoever could have substituted that secret could have substituted the certificate pinned here, and every later exchange then verifies receipts against the substituted identity rather than your partner's.
+
+On a partnership bootstrapped with `--save` that channel is the zero-setup exchange itself: the secret crossed under the transport's protection alone -- the SFTP server, or the access controls on the shared directory -- so the pin rests on the same trust in whoever administers that server or share (see [Bootstrapping a shared secret](SECURITY_DESIGN.md#bootstrapping-a-shared-secret)). On a partnership established by [`psilink invite`](#offline-invitation) and [`psilink accept`](#offline-acceptance) it is the out-of-band channel the invitation was forwarded over.
+
+Either of two actions anchors the pin outside that channel, and one is enough:
+
+- **Compare the printed fingerprint with your partner**, over a channel you trust, before you rely on the receipts. Their value is what `psilink fingerprint` prints on their side.
+- **Pin it before the first run.** Ask for their value first and write it into `signing.partner_fingerprint`; the first exchange then holds the presented certificate to it rather than adopting one. This is the stronger posture, and the one to take where a third party is meant to rely on the receipt (see [SECURITY_DESIGN.md](SECURITY_DESIGN.md#pinned-self-signed-trust-model)).
+
+### Every run after it
+
+The pin is on file, so a later exchange verifies the presented certificate against it and reports nothing: a match is the ordinary case and prints no line. What the run writes is the exchange record, its verification keys, and the dual-signed receipt, each named as it is written.
+
+A partner presenting a different certificate ends the run before any linkage key or payload row is sent, with no result and no receipt, and leaves `signing.partner_fingerprint` exactly as it stands. A partner who regenerated their signing identity is the usual cause; re-pinning is an edit you make after confirming the new value with them out of band.
+
+### Check a receipt
+
+Keep the input file and the result file the run was given: the record commits to them rather than holding them, and verification re-supplies them from your own copies.
+
+```sh
+psilink verify-receipt psilink-record-<stamp>.json input.csv results.csv \
+  --signed-record psilink-receipt-<stamp>.json \
+  --config-file psilink.yaml
+```
+
+- **`--config-file` anchors both certificates** for a party to the exchange: your own slot from the `signing.identity_file` it names, your partner's from the `signing.partner_fingerprint` it holds. Neither value is copied by hand.
+- **Naming the exchange record as `RECORD` and the receipt to `--signed-record`** is what pairs the receipt to this one run; a receipt verified on its own says which parties signed but not which exchange (see [Pairing the receipt to one run](#pairing-the-receipt-to-one-run)).
+- **A `SIGNED RECEIPT VERIFIED` verdict also needs the agreed-terms hash re-derived**, which takes your partner's terms on `--partner-terms`. Those are not retained by default, so keep a copy where a verified verdict matters; without them the run reports `SIGNED RECEIPT INCOMPLETE` at exit 0 with the terms hash as the one thing not checked.
+
+[Verifying a receipt](#verifying-a-receipt) covers every line of the verdict, and [A verified verdict needs both certificates anchored](#a-verified-verdict-needs-both-certificates-anchored) the case of an auditor who was party to no exchange.
 
 ## Recovery
 
