@@ -252,15 +252,22 @@ describe("a transform param name holding private key material", () => {
 
   test("is refused though the schema passes over the value for its length", () => {
     // The name is scanned apart from the displayed line, so the skip that
-    // spares an over-long VALUE its rendered copy cannot take the name with it.
+    // spares an over-long VALUE its rendered copy cannot take the name with it:
+    // the schema's own length refusal on the value and the name's key-material
+    // refusal both fire on the same document.
+    const LENGTH_MESSAGE = `a linkage key element transform param must not exceed ${MAX_TRANSFORM_PARAM_LENGTH} characters`;
     const refusals = refusalsOf({
       function: "coalesce",
       params: {
         [FAKE_KEY_IN_A_NAME]: "x".repeat(MAX_TRANSFORM_PARAM_LENGTH + 1),
       },
     });
-    expect(refusals.partnerTerms).toContain(PRIVATE_KEY_PARAM_NAME_MESSAGE);
-    expect(refusals.ownTerms).toContain(PRIVATE_KEY_PARAM_NAME_MESSAGE);
+    expect(refusals.partnerTerms).toEqual(
+      expect.arrayContaining([LENGTH_MESSAGE, PRIVATE_KEY_PARAM_NAME_MESSAGE]),
+    );
+    expect(refusals.ownTerms).toEqual(
+      expect.arrayContaining([LENGTH_MESSAGE, PRIVATE_KEY_PARAM_NAME_MESSAGE]),
+    );
   });
 
   test("raises the name refusal alone where the value holds a key too", () => {
