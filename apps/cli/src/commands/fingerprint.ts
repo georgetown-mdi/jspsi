@@ -10,6 +10,8 @@ import {
   holdsPrivateKeyMaterial,
   MAX_TEXT_LENGTH,
   PRIVATE_KEY_IDENTITY_MESSAGE,
+  reasonTermsCannotStateIdentity,
+  redactAndDisplayPartyIdentity,
   sanitizeErrorForDisplay,
   serializeCertificate,
   TEXT_CONTROL_CHAR_MESSAGE,
@@ -281,12 +283,24 @@ export async function resolveSigningIdentity(
     if (
       input.identityArg !== undefined &&
       input.identityArg !== existing.certificate.identity
-    )
-      input.log.warn(
-        `--identity is ignored: the existing identity is bound to ` +
-          `"${existing.certificate.identity}". Use --force to regenerate ` +
-          "(this invalidates any fingerprint your partner has pinned).",
+    ) {
+      // The bound label is never written out raw. One the linkage terms cannot
+      // state is named by its class alone -- it may hold a private key -- and
+      // any other reaches this log sink under the redaction and single escape
+      // pass every party identity takes (CONTRIBUTING.md, Operator-facing
+      // escaping).
+      const unstatable = reasonTermsCannotStateIdentity(
+        existing.certificate.identity,
       );
+      input.log.warn(
+        "--identity is ignored: the existing identity is bound to " +
+          (unstatable === undefined
+            ? `"${redactAndDisplayPartyIdentity(existing.certificate.identity)}"`
+            : `a label the linkage terms cannot state -- ${unstatable}`) +
+          ". Use --force to regenerate (this invalidates any fingerprint your " +
+          "partner has pinned).",
+      );
+    }
     warnIfDivergent(existing);
     return { identity: existing, action: "Loaded" };
   }

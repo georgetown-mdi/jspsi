@@ -7,6 +7,7 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 import {
   COMPOSED_MESSAGE_MAX_DISPLAY_LENGTH,
   DISPLAY_TRUNCATION_MARKER,
+  MAX_TEXT_LENGTH,
   OperatorConfigError,
   UsageError,
   generateSigningIdentity,
@@ -404,7 +405,7 @@ test("a control-character label reaches the operator escaped, once", async () =>
 // character or private key material, and `psilink fingerprint` refuses to bind
 // a new one, so a file written before that check is how one still reaches this
 // boundary. Its holder cannot author linkage_terms.identity to match it -- the
-// terms refuse the same three rules -- so the remedy the divergence refusal
+// terms refuse every one of these rules -- so the remedy the divergence refusal
 // offers first is one they cannot perform, and this refusal names the exit that
 // exists instead.
 
@@ -419,6 +420,7 @@ test("a bound label the terms cannot state is refused with the re-key exit", asy
     `Records ${esc}[31mUnit`,
     "Records \u202eUnit",
     `Records Unit ${FAKE_KEY_IN_A_LABEL}`,
+    `Records Unit ${"o".repeat(MAX_TEXT_LENGTH)}`,
   ].entries()) {
     const config = certificateModeOver(
       path.join(dir, `signing-identity-${index}.json`),

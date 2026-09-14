@@ -92,6 +92,54 @@ test("ignores --identity when an identity already exists, and warns", async () =
   expect(warn).toHaveBeenCalledOnce();
 });
 
+test("the ignored --identity warning names an unstatable label by class", async () => {
+  // A bound label the terms cannot state may hold a private key, so this
+  // warning names the class it is refused under and quotes none of it -- the
+  // discipline the binding check in this command keeps.
+  const idPath = path.join(dir, "id.json");
+  idFile.saveSigningIdentity(
+    idPath,
+    await generateSigningIdentity(`Records Unit ${FAKE_KEY_IN_A_LABEL}`),
+  );
+  const warn = vi.fn();
+  await resolveSigningIdentity({
+    identityPath: idPath,
+    identityArg: "Someone Else",
+    force: false,
+    log: { warn },
+  });
+  expect(warn).toHaveBeenCalledOnce();
+  const message = warn.mock.calls[0]?.[0] as string;
+  expect(message).toContain("--identity is ignored");
+  expect(message).toContain("the linkage terms cannot state");
+  expect(message).toContain("private key material");
+  expect(message).toContain("Use --force to regenerate");
+  expect(message).not.toContain("Records");
+  expect(message).not.toContain("MIIBytes");
+  expect(message).not.toContain("BEGIN OPENSSH PRIVATE KEY");
+  expect(message).not.toContain("[redacted private key]");
+});
+
+test("the ignored --identity warning escapes a statable label it names", async () => {
+  const idPath = path.join(dir, "id.json");
+  idFile.saveSigningIdentity(
+    idPath,
+    await generateSigningIdentity("Santé Publique"),
+  );
+  const warn = vi.fn();
+  await resolveSigningIdentity({
+    identityPath: idPath,
+    identityArg: "Someone Else",
+    force: false,
+    log: { warn },
+  });
+  const message = warn.mock.calls[0]?.[0] as string;
+  expect(message).toContain('"Sant\\xe9 Publique"');
+  // Escaped once: a second pass would double the backslash the first wrote.
+  expect(message).not.toContain("\\\\xe9");
+  expect(/[^\t\x20-\x7e]/.test(message)).toBe(false);
+});
+
 test("--force regenerates a new key with a new fingerprint", async () => {
   const idPath = path.join(dir, "id.json");
   const first = await resolveSigningIdentity({
@@ -664,7 +712,7 @@ test("a bound label the terms cannot state warns with the re-key exit", async ()
   // A new binding holding any of these is refused outright by the binding check
   // above, but the certificate schema admits one already bound, so a loaded file
   // is how such a label reaches this sink. Its holder cannot author
-  // linkage_terms.identity to match it -- the terms refuse the same three
+  // linkage_terms.identity to match it -- the terms refuse every one of these
   // rules -- so the warning names the exit that exists, a re-key, and quotes no
   // part of the label.
   const esc = String.fromCharCode(0x1b);
@@ -672,6 +720,7 @@ test("a bound label the terms cannot state warns with the re-key exit", async ()
     `Records ${esc}[31mUnit`,
     "Records \u202eUnit",
     `Records Unit ${FAKE_KEY_IN_A_LABEL}`,
+    `Records Unit ${"o".repeat(MAX_TEXT_LENGTH)}`,
   ].entries()) {
     const idPath = path.join(dir, `id-${index}.json`);
     const warn = vi.fn();

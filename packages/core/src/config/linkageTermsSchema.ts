@@ -97,7 +97,8 @@ export const MAX_TEXT_LENGTH = 1024;
  * {@link PRIVATE_KEY_IDENTITY_MESSAGE} is outside that parity -- it is a rule
  * about a value rather than a character class -- and both label boundaries
  * refuse it beside these two classes, so a bound label is one a terms document
- * can state on all three rules ({@link reasonTermsCannotStateIdentity}).
+ * can state on all three rules (three of the rules
+ * {@link reasonTermsCannotStateIdentity} asks).
  */
 export const TEXT_CONTROL_CHAR_PATTERN = /[\u0000-\u001f\u007f-\u009f]/;
 
@@ -172,15 +173,28 @@ export const PRIVATE_KEY_IDENTITY_MESSAGE =
  * (`assertLocalCertificateAuthorizesAgreedIdentity`, exchange.ts), which read
  * this one answer so they cannot come to disagree about which labels have one.
  *
- * It asks the three CONTENT rules the `identity` field above holds a value to:
- * the control characters {@link TEXT_CONTROL_CHAR_PATTERN}, the nine
- * text-direction characters `BIDI_CONTROL_PATTERN`, and private key material
- * ({@link holdsPrivateKeyMaterial}). The first two share a clause, since an
- * operator's remedy for either is the same re-key.
+ * It asks every rule this document holds the `identity` field to. Three are
+ * the field's own CONTENT rules: the control characters
+ * {@link TEXT_CONTROL_CHAR_PATTERN}, the nine text-direction characters
+ * `BIDI_CONTROL_PATTERN`, and private key material
+ * ({@link holdsPrivateKeyMaterial}); the first two share a clause, since an
+ * operator's remedy for either is the same re-key. Two more are the field's
+ * {@link MAX_TEXT_LENGTH} cap and the well-formed UTF-16 rule the whole
+ * document holds ({@link LONE_SURROGATE_MESSAGE}), neither of which the
+ * on-disk certificate schema bounds a bound label by
+ * (records/signingIdentity.ts): an over-long label answered statable would
+ * send its holder to a config edit the document then refuses, while a
+ * lone-surrogate one is answered for
+ * agreement with the schema rather than for a run that meets it -- canonical
+ * encoding refuses that label before any disposition compares it
+ * (test/records/signedReceiptEndToEnd.test.ts). The non-empty floor is the one
+ * `identity` rule left out, since that schema holds a bound label to it too.
  *
- * The clause names the class and never any part of the label: with a control
- * or text-direction character the label IS the offending text, and with key
- * material quoting it back would put a private key on the screen.
+ * The clause names the class and never any part of the label: with a control,
+ * text-direction, or surrogate code unit the label IS the offending text, with
+ * key material quoting it back would put a private key on the screen, and
+ * echoing an over-long label would spend the message on the value whose length
+ * is the complaint.
  */
 export function reasonTermsCannotStateIdentity(
   identity: string,
@@ -191,6 +205,10 @@ export function reasonTermsCannotStateIdentity(
   )
     return "it holds a control or text-direction character";
   if (holdsPrivateKeyMaterial(identity)) return "it holds private key material";
+  if (loneSurrogateIndex(identity) >= 0)
+    return "it holds an unpaired UTF-16 surrogate";
+  if (identity.length > MAX_TEXT_LENGTH)
+    return `it is longer than ${MAX_TEXT_LENGTH} characters`;
   return undefined;
 }
 

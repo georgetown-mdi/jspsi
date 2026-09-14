@@ -2295,10 +2295,12 @@ test("the identity private-key refusal names the field by path, not the value", 
 // --- The labels a terms document cannot state --------------------------------
 // The one answer both certificate-divergence dispositions read -- core's
 // exchange refusal and the CLI's warning -- about the label a signing
-// certificate is bound to. It must agree with the schema above on every content
-// rule: a label it admitted that the schema refuses would send the holder to
-// the reconcile remedy the schema then refuses, and one it refused that the
-// schema admits would deny a holder the reconcile that works.
+// certificate is bound to. It must agree with the schema above on every rule
+// that schema holds `identity` to -- its own content rules, its length cap, and
+// the document-wide well-formedness rule alike: a label it admitted that the
+// schema refuses would send the holder to the reconcile remedy the schema then
+// refuses, and one it refused that the schema admits would deny a holder the
+// reconcile that works.
 
 test.each([
   ["a control character", `Agency${NUL}A`],
@@ -2308,6 +2310,8 @@ test.each([
     "a key block with no END marker",
     "Agency A -----BEGIN RSA PRIVATE KEY-----",
   ],
+  ["an unpaired UTF-16 surrogate", "Agency\ud800A"],
+  ["more characters than the field admits", "A".repeat(MAX_TEXT_LENGTH + 1)],
 ])("no terms document states a label holding %s", (_class, label) => {
   expect(reasonTermsCannotStateIdentity(label)).toBeTypeOf("string");
   expect(
@@ -2320,6 +2324,8 @@ test.each([
   ["a right-to-left name", "וכולה A"],
   ["a direction mark", `Agency${LRM}A`],
   ["a mention of a private key", "Agency A, private key holder"],
+  ["a paired surrogate", "Agency 🏢 A"],
+  ["exactly the characters the field admits", "A".repeat(MAX_TEXT_LENGTH)],
 ])("a terms document states a label holding %s", (_class, label) => {
   expect(reasonTermsCannotStateIdentity(label)).toBeUndefined();
   expect(
@@ -2328,9 +2334,16 @@ test.each([
 });
 
 test("the reason names the class and no part of the label", () => {
-  for (const label of [`Agency${RLO}A`, `Agency A ${FAKE_KEY_IN_A_LABEL}`]) {
+  for (const label of [
+    `Agency${RLO}A`,
+    `Agency A ${FAKE_KEY_IN_A_LABEL}`,
+    "Agency\ud800A",
+    "A".repeat(MAX_TEXT_LENGTH + 1),
+  ]) {
     const reason = reasonTermsCannotStateIdentity(label) ?? "";
     expect(reason.length).toBeGreaterThan(0);
+    // Short enough that no clause can be echoing a label of any length.
+    expect(reason.length).toBeLessThan(80);
     expect(reason).not.toContain("Agency");
     expect(reason).not.toContain("MIIBytes");
     expect(reason).not.toContain("PRIVATE KEY");

@@ -792,6 +792,7 @@ test.each([
     "Initiator Co -----BEGIN OPENSSH PRIVATE KEY----- MIIBytes " +
       "-----END OPENSSH PRIVATE KEY-----",
   ],
+  ["more characters than the terms admit", `Initiator ${"o".repeat(1024)}`],
 ])(
   "a certificate bound to a label holding %s names the re-key exit and no part of the label",
   (_class, boundLabel) => {
@@ -827,6 +828,22 @@ test.each([
     expect(message).not.toContain("[redacted private key]");
   },
 );
+
+test("a lone-surrogate label reaches no disposition of a divergence", async () => {
+  // reasonTermsCannotStateIdentity answers this label class so that it agrees
+  // with the terms schema on every rule, not because a run can meet one here:
+  // a certificate body is canonically encoded both to be signed and to be
+  // compared, and a lone surrogate has no UTF-8 form, so binding refuses the
+  // label and the comparison each disposition opens with refuses it too.
+  const boundLabel = "Initiator\ud800Co";
+  await expect(generateSigningIdentity(boundLabel)).rejects.toThrow();
+  expect(() =>
+    certificateAuthorizesIdentity(
+      { ...identityA.certificate, identity: boundLabel },
+      "Initiator Co",
+    ),
+  ).toThrow();
+});
 
 // --- Pairing a receipt to one run --------------------------------------------
 
