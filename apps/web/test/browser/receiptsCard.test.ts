@@ -16,6 +16,7 @@ import {
 import { ReceiptsCard } from "@console/ReceiptsCard";
 
 import { createAppMount, flushPendingUpdates } from "./renderApp";
+import { openDisclosure } from "./collapsePanels";
 
 import type { JobRendezvousConfig } from "@psi/jobClient/workInputClient";
 import type { ReactElement } from "react";
@@ -197,6 +198,10 @@ afterEach(async () => {
   vi.unstubAllGlobals();
 });
 
+/** The card's own disclosure, matched on its label: the toggle's accessible name
+ * carries the collapsed summary after it, which varies with the draft. */
+const RECEIPTS_CARD = /Receipts and record keeping/;
+
 const modeSelect = () => page.getByLabelText("What this exchange produces");
 
 const retentionNote = () =>
@@ -228,11 +233,11 @@ async function pickIdentityLocation(name: string): Promise<void> {
 async function renderCard(identity: string = IDENTITY): Promise<void> {
   app.render(createElement(ReceiptsHarness, { identity }));
   // The card starts collapsed, as it does on both screens, so the test opens it
-  // the way an operator does. The toggle's accessible name holds the collapsed
-  // summary, so match on the label rather than the whole name.
-  await page
-    .getByRole("button", { name: /Receipts and record keeping/ })
-    .click();
+  // the way an operator does, and waits out the open transition before anything
+  // reaches inside: a control clicked while the panel is still growing can be
+  // dispatched at a point it has already left, which lands the click on a
+  // neighbor and leaves the control untouched.
+  await openDisclosure(RECEIPTS_CARD);
   await expect.element(modeSelect()).toBeInTheDocument();
 }
 
