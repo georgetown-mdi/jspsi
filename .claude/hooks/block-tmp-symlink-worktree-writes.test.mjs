@@ -169,6 +169,20 @@ describe("block-tmp-symlink-worktree-writes hook", () => {
     expect(verdict(`echo x > ${intoTree}`, repo).stderr).toContain(tree);
   });
 
+  it("blocks a write target that resolves exactly to a worktree root", () => {
+    const { scratch, tree, repo } = scene();
+    const intoTreeRoot = join(scratch, "into-tree");
+    expectBlocked([`cp report.md ${intoTreeRoot}`], repo);
+    expect(verdict(`cp report.md ${intoTreeRoot}`, repo).stderr).toContain(
+      tree,
+    );
+  });
+
+  it("allows a write target that resolves to a plain non-repo directory", () => {
+    const { scratch, repo } = scene();
+    expectAllowed([`cp report.md ${join(scratch, "into-tmp")}`], repo);
+  });
+
   it("blocks a file the write would create, not only one that exists", () => {
     const { scratch, repo } = scene();
     expectBlocked(

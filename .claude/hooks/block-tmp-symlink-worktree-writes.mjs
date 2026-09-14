@@ -58,6 +58,7 @@
 // unexpected failure here falls through to exit 0 (fail open) so a bug in this
 // hook can never wedge every Bash command.
 
+import { statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { basename, join, relative, resolve } from "node:path";
 
@@ -260,11 +261,32 @@ function unredirected(path, root) {
   return join(canonicalPath(root), relative(root, path));
 }
 
+// Whether `path` exists on disk and is itself a directory. False for anything
+// that does not exist, the way a fail-open guard must -- a `statSync` failure
+// here means "ask the parent instead", not "block".
+function isExistingDirectory(path) {
+  try {
+    return statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
 // The worktree a path lies in, or null when it lies in none and when git will
 // not answer at all: no git, a path outside every repository, a directory that
 // is gone. Every unanswerable state allows, the way a fail-open guard must.
+//
+// A path that is itself an existing directory is asked about from itself, not
+// from its parent: a write target that resolves exactly to a worktree root is a
+// directory, and its parent can sit outside every repository (the main
+// worktree's own parent) or inside a different, enclosing one (a linked
+// worktree's parent, the main worktree) -- either way the wrong answer. Every
+// other path -- a file, or one nothing below it has created yet -- still asks
+// from the nearest existing ancestor, since the path itself cannot be asked.
 function worktreeOf(path) {
-  const directory = nearestExistingDirectory(path);
+  const directory = isExistingDirectory(path)
+    ? path
+    : nearestExistingDirectory(path);
   if (directory === null) return null;
   const records = worktreeRecords(directory);
   if (records === null) return null;
