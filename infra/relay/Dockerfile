@@ -14,4 +14,4 @@
 # from a pinned coturn source tag -- a builder stage fetching that tag's release
 # tarball under a committed checksum and configuring it against the distribution
 # OpenSSL -- rather than floating onto another publisher's image.
-FROM coturn/coturn:4.17.2@sha256:aa68aab64a3b929d57fc2924c98ea447bf996cf8dade2508e7b71eaf23f1f14e
+FROM coturn/coturn:4.18.0@sha256:bbefd3e1fdfdc0d58770fe01b581fd8b00d9f3a5580d00acb77cf719a6bc78e3
